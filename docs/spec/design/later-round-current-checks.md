@@ -51,6 +51,24 @@ finalizer.ts`) in the same transaction locks the stock ledger and refuses a dish
      Audit and event, the Order's disposition fence and the tenant/Store scope are unchanged: they
      were already fenced in the write transaction and stay there.
 
+## A round sent again (idempotency)
+
+A round already written is never checked again. The written round emptied the table's Cart and
+moved its version on, so a fresh current check of the same checkout refuses it (the Cart version
+moved on), although it is only a retry. Two real cases send it again: a guest's reply lost after
+the round committed, and a pay-first later round whose payment start (payment clock or Provider)
+failed after the round was written; refused, the first could not be recovered and the second sat
+written and unpaid until the System cancelled it.
+
+The guest path finds the submission already recorded before any write (the history reader, in
+`apps/api/src/customer-additional-dining-session-submission.ts`) and replays it through the runtime's
+`submitRecorded`: the same write transaction (disposition fence, guest access, saved tip choice,
+the batch store's own record lookup) without `prepareCurrent`. The batch store answers `Existing`
+from the record and never calls `finalize`, so `validateCurrent` is not reached. The runtime refuses
+anything but `Existing` on that path (the transaction rolls back), so a replay can never write a
+round that skipped the pre-check. A staff round's retry is answered earlier by the staff round's
+own retry lookup.
+
 ## A dish that sells out between the pre-check and the write
 
 It is never ordered. The write transaction is READ COMMITTED and takes its instant (`now()`) inside
@@ -90,8 +108,15 @@ transaction are the same reads.
   stock land inside the round's write transaction before its own checks; both refused, no batch,
   no stock held, and no read-only snapshot opened by that write. With Catalog's re-check switched
   off the sold-out dish was ordered (the re-check is what catches it).
+- `staff-round-speed` acceptance, "a guest's later round sent again is answered from its record":
+  a second phone's later round at a pay-first table is prepared again with the same checkout and
+  tip choice through the pilot's guest composition, on a pool of one connection. Failed before
+  (`CHECKOUT_CART_VERSION_CONFLICT` from the pre-check); passes after: the same preparation, no
+  second batch record, batch, Audit or event.
 - Unit: `tooling/environment/pilot-additional-submission.test.mjs`,
-  `apps/api/src/customer-additional-dining-submission-runtime.test.ts`.
+  `apps/api/src/customer-additional-dining-submission-runtime.test.ts` (a recorded replay skips
+  the pre-check; a replay that finds no record rolls back),
+  `apps/api/src/customer-additional-dining-session-submission.test.ts`.
 
 ## Not changed here
 

@@ -620,3 +620,142 @@ it("a dish sold out or run out between a later round's pre-check and its write i
     }
   });
 });
+
+/**
+ * WP-2423 review of the later-round pre-check (docs/spec/design/later-round-current-checks.md): a
+ * guest's later round already written is sent again (the reply was lost, or the payment start after
+ * it failed). The retry is answered from the record: the same round, no second batch, no second
+ * stock hold. The round's current check must not run again for it: the written round already
+ * emptied the Cart and moved its version on, so a fresh check refuses what is only a replay (it did
+ * before this fix: the retry failed, and a pay-first round could never get its payment started).
+ * Through the pilot's own guest composition (the guest's "Continue to payment" at a pay-first table,
+ * not the staff retry lookup), on a pool of one connection.
+ */
+it("a guest's later round sent again is answered from its record: the same round, nothing written twice", async () => {
+  await withIsolatedDatabase({ caseId: "wp2423_round_replay" }, async (context) => {
+    const admin = new Client(context.clientConfig);
+    await admin.connect();
+    vi.stubEnv("NODE_ENV", "development");
+    const api = await createPilotApiRole(admin, context, "wp2423_rrp");
+    let store = null;
+    try {
+      store = await prepareRealStaffRoundStore({
+        admin,
+        context,
+        api,
+        paymentTiming: "PayFirst",
+        apiPool: { max: 1, acquireBudgetMs: 5000 },
+      });
+      const { soup, tableReference, reference, now } = store;
+      const server = await store.staff(id(0x750), [
+        "ordering.order.create_staff",
+        "dining.operate",
+        "dining.session.close",
+      ]);
+      const as = { sessionCookie: server.sessionCookie, csrf: server.csrf };
+      let pipeline = null;
+      await store.counterFor(server, { decorateStaffRoundPipeline: (real) => (pipeline = real) });
+      const table = await pipeline.openTable(as, { tableReference });
+      assert.equal(table.status, "Opened");
+      // A phone joins the table (this test's guest pipeline saves checkout details once a phone).
+      const phone = async () => {
+        const entered = await pipeline.enter({ tableReference, requestedAt: now() });
+        assert.equal(entered.status, "Established");
+        const issued = await pipeline.openTable(as, { tableReference });
+        const joined = await pipeline.join(entered.credentials, {
+          joinCredential: issued.joinCredential,
+          operationReference: reference(),
+        });
+        return (
+          await pipeline.bind(entered.credentials, {
+            operationReference: reference(),
+            admissionReference: joined.admissionReference,
+          })
+        ).credentials;
+      };
+      // One round from a guest's phone, up to its checkout.
+      const checkoutOfOneSoup = async (guest) => {
+        const cart = await pipeline.selectCart(guest, {
+          operationReference: reference(),
+          requestedAt: now(),
+        });
+        const added = await pipeline.addItem(guest, {
+          operationReference: reference(),
+          cartReference: cart.cartReference,
+          expectedCartVersion: cart.cartVersion,
+          sellableReference: soup.skuReference,
+          quantity: 1,
+          optionSelections: [],
+          customerNote: null,
+          requestedAt: now(),
+        });
+        assert.equal(added.status, "Applied");
+        const current = await pipeline.selectCart(guest, {
+          operationReference: reference(),
+          requestedAt: now(),
+        });
+        const quoted = await pipeline.quote(guest, {
+          operationReference: reference(),
+          cartReference: current.cartReference,
+          cartVersion: current.cartVersion,
+          requestedAt: now(),
+        });
+        assert.equal(quoted.status, "Quoted");
+        await pipeline.saveDetails(guest, {
+          operationReference: reference(),
+          detailsReference: reference(),
+          cartReference: current.cartReference,
+          cartVersion: current.cartVersion,
+          quoteReference: quoted.quoteReference,
+        });
+        const checkout = await pipeline.startCheckout(guest, {
+          createOperationReference: reference(),
+          cartReference: current.cartReference,
+          cartVersion: current.cartVersion,
+          quoteReference: quoted.quoteReference,
+        });
+        assert.equal(checkout.status, "Started");
+        return {
+          checkoutSessionReference: checkout.checkoutSessionReference,
+          selectionReference: reference(),
+          tip: { amountMinor: 0n, currencyCode: "CAD" },
+          recordedAfterOutage: false,
+        };
+      };
+      // "Continue to payment" (a pay-first table): each round is written unpaid and its payment
+      // prepared; the first phone's opens the table's Order, the second phone's is a later round.
+      const opener = await phone();
+      await pipeline.preparePayment(opener, await checkoutOfOneSoup(opener));
+      const guest = await phone();
+      const later = await checkoutOfOneSoup(guest);
+      const sent = await pipeline.preparePayment(guest, later);
+      const written = async () =>
+        (
+          await admin.query(
+            `SELECT (SELECT count(*)::int FROM rms_ordering.additional_dining_batch_record) AS rounds,
+               (SELECT count(*)::int FROM rms_ordering.order_batch) AS batches,
+               (SELECT count(*)::int FROM platform_audit.audit_record
+                  WHERE action_code='ORDERING_ADDITIONAL_BATCH_SUBMIT') AS audits,
+               (SELECT count(*)::int FROM platform_eventing.outbox_event) AS events`,
+          )
+        ).rows[0];
+      const after = await written();
+      assert.equal(after.rounds, 1);
+      assert.equal(after.batches, 2);
+      // Sent again, with the same checkout and choice: the same round, answered from its record.
+      // (The preparation's own reference names this answer, not a record: each answer has its own.)
+      const again = await pipeline.preparePayment(guest, later);
+      const facts = (value) => ({ ...value, preparationReference: null });
+      assert.deepEqual(facts(again), facts(sent));
+      assert.deepEqual(await written(), after, "a replayed round wrote again");
+    } finally {
+      vi.unstubAllEnvs();
+      if (store !== null) await store.close();
+      for (const name of [api, api + "_w"]) {
+        await admin.query("DROP OWNED BY " + name).catch(() => undefined);
+        await admin.query("DROP ROLE " + name).catch(() => undefined);
+      }
+      await admin.end();
+    }
+  });
+});

@@ -191,6 +191,28 @@ it("a refused pre-check starts no write transaction", async () => {
   expect(f.events).toEqual([]);
   expect(mocks.append).not.toHaveBeenCalled();
 });
+/**
+ * WP-2423 review: a retry of a round already recorded (lost reply, failed payment start) is
+ * answered from the record; the pre-check would refuse it, as the committed round moved the Cart on.
+ */
+it("a recorded round's replay skips the pre-check and is answered from the record", async () => {
+  const f = setup(async () => {
+    throw new Error("synthetic refusal");
+  });
+  mocks.append.mockImplementation(async () => {
+    f.events.push("append");
+    return { status: "Existing", snapshot: f.input.snapshot };
+  });
+  expect((await f.runtime.submitRecorded(f.input)).status).toBe("Existing");
+  expect(f.events).toEqual(["begin", "authorize", "append", "authorize", "commit"]);
+});
+it("a replay that finds no record rolls back instead of writing unchecked", async () => {
+  const f = setup(async () => {
+    throw new Error("synthetic refusal");
+  });
+  await expect(f.runtime.submitRecorded(f.input)).rejects.toThrow();
+  expect(f.events).toEqual(["begin", "authorize", "append", "authorize", "rollback"]);
+});
 it("rolls back when final authorization is revoked", async () => {
   const f = setup();
   mocks.authorize.mockResolvedValueOnce(true).mockResolvedValueOnce(false);

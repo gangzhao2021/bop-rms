@@ -8,7 +8,7 @@ import { diningOrderCapacityLinkFromHistory } from "./customer-dining-checkout-c
 import { createCustomerAdditionalDiningSessionSubmission } from "./customer-additional-dining-session-submission.js";
 
 const mocks = vi.hoisted(() => ({
-  submit: vi.fn(),
+  submitRecorded: vi.fn(),
   submitCheckout: vi.fn(),
   source: vi.fn(),
   read: vi.fn(),
@@ -33,7 +33,7 @@ vi.mock("@rms/dining", async (original) => ({
 
 vi.mock("./customer-additional-dining-submission-runtime.js", () => ({
   createCustomerAdditionalDiningSubmissionRuntime: () => ({
-    submit: mocks.submit,
+    submitRecorded: mocks.submitRecorded,
     submitCheckout: mocks.submitCheckout,
   }),
 }));
@@ -126,7 +126,7 @@ async function fixture() {
     storeReference: r.order.storeReference,
   };
 
-  mocks.submit.mockReset().mockResolvedValue({ status: "Existing", snapshot: order });
+  mocks.submitRecorded.mockReset().mockResolvedValue({ status: "Existing", snapshot: order });
   mocks.submitCheckout.mockReset().mockResolvedValue({ status: "Created", snapshot: order });
   mocks.source.mockReset().mockResolvedValue({ cart: {}, lines: [] });
   const nextItemReference = vi.fn(() => id(970));
@@ -162,7 +162,7 @@ it("replays original history without current source reads, commitment reads or i
   const result = await f.service.create(f.input);
   expect(result.status).toBe("AlreadyCreated");
   expect(result.record).toEqual(f.order);
-  expect(mocks.submit).toHaveBeenCalledWith(expect.objectContaining({ snapshot: f.order }));
+  expect(mocks.submitRecorded).toHaveBeenCalledWith(expect.objectContaining({ snapshot: f.order }));
   expect(mocks.source).not.toHaveBeenCalled();
   expect(mocks.clock).not.toHaveBeenCalled();
   expect(f.nextItemReference).not.toHaveBeenCalled();
@@ -186,7 +186,7 @@ it("loads actual-source composition before constructing a fresh checkout submiss
       }),
     }),
   );
-  expect(mocks.submit).not.toHaveBeenCalled();
+  expect(mocks.submitRecorded).not.toHaveBeenCalled();
 });
 it("rejects a fresh commitment for another operation before reading sources or submitting", async () => {
   const f = await fixture();

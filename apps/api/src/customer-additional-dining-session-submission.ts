@@ -99,7 +99,8 @@ export function createCustomerAdditionalDiningSessionSubmission(options: {
           String(link.paymentOperationReference) !== session.paymentOperationReference
         )
           throw new CheckoutSessionServiceError("INTENT_CONFLICT");
-        result = await runtime.submit({
+        // Already recorded: a replay, answered from the record (AlreadyCreated), not checked again.
+        result = await runtime.submitRecorded({
           sessionCredential: accessInput.sessionCredential,
           csrfCredential: accessInput.csrfCredential,
           snapshot,
