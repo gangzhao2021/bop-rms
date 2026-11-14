@@ -9,8 +9,10 @@ import type { CoreTelemetry } from "@bop-rms/observability";
 import type { Request, RequestHandler } from "express";
 import { v7 as uuidV7 } from "uuid";
 import {
+  entryArrivedAtHeader,
   readAnswerMarginMs,
   requestReadAnswerWithinMs,
+  statedEntryArrival,
   requestShedFor,
   sendReadAnswerBusy,
   withRequestAcquireBudget,
@@ -241,6 +243,8 @@ export function createRequestCorrelationMiddleware({
         // WP-2423 (reads-under-burst): and its whole answer, not only its database work.
         busyAnswerMarginMs: readAnswerMarginMs,
         answerBusy: () => sendReadAnswerBusy(response, request.originalUrl ?? request.url),
+        // WP-2423 (rush-connection-hold): from when the guest reached the entry, as it states it.
+        arrivedAt: statedEntryArrival(request.headers[entryArrivedAtHeader]),
       },
     );
   };

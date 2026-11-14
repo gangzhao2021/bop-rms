@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   createStaffRequestCompletionLog,
   entryReadTiming,
+  logEntryGuestBusyAnswer,
   noteEntryConnections,
   requestArrivedAt,
+  withEntryArrival,
 } from "./pilot-entry-timing.mjs";
 
 /**
@@ -110,5 +112,48 @@ describe("the entry's answer time and its staff completion line", () => {
       },
     ]);
     expect(lines.every((line) => Number.isInteger(line.longestStallMs))).toBe(true);
+  });
+});
+
+describe("WP-2423 (rush-connection-hold) the entry and the API count a guest read from one instant", () => {
+  it("states the connection's arrival to the API and never passes on one the guest sent", () => {
+    expect(
+      withEntryArrival(
+        { host: "x", "X-Bop-Entry-Arrived-At": "1", "x-bop-entry-arrived-at": "2" },
+        1_763_080_205_000,
+      ),
+    ).toEqual({ host: "x", "x-bop-entry-arrived-at": "1763080205000" });
+    expect(withEntryArrival({ host: "x", "x-bop-entry-arrived-at": "2" }, undefined)).toEqual({
+      host: "x",
+    });
+  });
+
+  it("logs each guest read it answered busy itself as a wait, with the API route it was for", () => {
+    const lines = [];
+    for (const url of ["/bff/customer/cart?locale=zh-Hans", "/api/v1/public/stores/s1/menu", "/x"])
+      logEntryGuestBusyAnswer(
+        { originalUrl: url },
+        {
+          write: (line) => lines.push(JSON.parse(line)),
+          now: () => 1_763_080_219_000,
+          arrivedAt: () => 1_763_080_205_000,
+        },
+      );
+    expect(lines.map(({ route }) => route)).toEqual([
+      "/bff/customer/cart",
+      "/api/v1/public/stores/:store_public_id/menu",
+      "unmatched",
+    ]);
+    expect(lines[0]).toEqual({
+      level: 40,
+      time: "2025-11-14T00:30:19.000Z",
+      event: "entry_request_answered_busy",
+      route: "/bff/customer/cart",
+      statusCode: 503,
+      resultCode: "HTTP_RETRY_LATER",
+      durationMs: 14_000,
+    });
+    // Never the path's own references.
+    expect(JSON.stringify(lines)).not.toContain("s1");
   });
 });

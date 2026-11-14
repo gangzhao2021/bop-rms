@@ -11,6 +11,7 @@ import {
   type RequestCorrelationContext,
 } from "./request-correlation.js";
 import { customerFailureCode, withFailureCause } from "./customer-failure-diagnostic.js";
+import { entryArrivedAtHeader } from "./request-acquire-budget.js";
 
 const ids = {
   requestA: "018f1f48-7b5d-7a01-8a1b-123456789abc",
@@ -368,5 +369,43 @@ describe("WP-2423 guest-table-open-and-busy-reads: a read's whole work time", ()
       "GET /bff/customer/cart": 12_000,
       "POST /merchant/reports/export": null,
     });
+  });
+});
+
+describe("WP-2423 (rush-connection-hold): the API counts a guest read from its arrival at the entry", () => {
+  it("answers 12 s from when the entry says the guest arrived (at most 5 s back), so it is busy before the entry", async () => {
+    const store = () =>
+      (
+        globalThis as Record<
+          symbol,
+          { getStore(): { answerBy?: number; startedAt: number } | undefined }
+        >
+      )[Symbol.for("bop.database.request-acquire-budget")]?.getStore();
+    const app = express();
+    app.use(createRequestCorrelationMiddleware());
+    const seen: (number | null)[] = [];
+    app.get("/bff/customer/cart", (_request, response) => {
+      const budget = store();
+      seen.push(budget?.answerBy === undefined ? null : budget.answerBy - Date.now());
+      response.sendStatus(204);
+    });
+    const base = await listen(app);
+    for (const stated of [
+      String(Date.now() - 3_000),
+      String(Date.now() - 60_000),
+      String(Date.now() + 60_000),
+      "not-a-time",
+    ])
+      await fetch(`${base}/bff/customer/cart`, {
+        headers: { [entryArrivedAtHeader]: stated },
+      });
+    const [three, long, future, unreadable] = seen as number[];
+    expect(three).toBeGreaterThan(8_500);
+    expect(three).toBeLessThanOrEqual(9_000);
+    // Never more than 5 s back; a future or unreadable time is the API's own arrival.
+    expect(long).toBeGreaterThan(6_500);
+    expect(long).toBeLessThanOrEqual(7_000);
+    expect(future).toBeGreaterThan(11_500);
+    expect(unreadable).toBeGreaterThan(11_500);
   });
 });

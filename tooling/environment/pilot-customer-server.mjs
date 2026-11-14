@@ -24,14 +24,17 @@ import {
 } from "../../apps/api/dist/merchant-store-routing.js";
 import { staffContentLocaleMiddleware } from "../../apps/api/dist/staff-content-locale.js";
 import {
+  isStaffRequestPath,
   sendReadAnswerBusy,
   withRequestAcquireBudget,
 } from "../../apps/api/dist/request-acquire-budget.js";
 import {
   createStaffRequestCompletionLog,
   entryReadTiming,
+  logEntryGuestBusyAnswer,
   noteEntryConnections,
   requestArrivedAt,
+  withEntryArrival,
 } from "./pilot-entry-timing.mjs";
 import { createPilotProductImages } from "../../apps/api/dist/product-image-route.js";
 import { CustomerPaymentIntentHandler } from "../../apps/api/dist/customer-payment-intent.js";
@@ -286,6 +289,8 @@ export async function startInternalCustomerServer({
       answerBusy: () => {
         sendReadAnswerBusy(res, req.originalUrl ?? req.url);
         res.emit(readAnsweredBusy);
+        // Staff reads write their own completion line (createStaffRequestCompletionLog).
+        if (!isStaffRequestPath(req.originalUrl ?? req.url)) logEntryGuestBusyAnswer(req);
       },
     }),
   );
@@ -572,9 +577,12 @@ export async function startInternalCustomerServer({
           port,
           path: req.url,
           method: req.method,
-          headers: withClientAddress(
-            { ...req.headers, host, connection: "close" },
-            entryListener?.clientAddress(req) ?? null,
+          headers: withEntryArrival(
+            withClientAddress(
+              { ...req.headers, host, connection: "close" },
+              entryListener?.clientAddress(req) ?? null,
+            ),
+            requestArrivedAt(req),
           ),
         },
         (response) => {

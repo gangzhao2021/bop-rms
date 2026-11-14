@@ -11,8 +11,10 @@
 // route and the longest stall of the process since the previous line.
 import console from "node:console";
 import { monitorEventLoopDelay } from "node:perf_hooks";
+import { apiRouteTemplates } from "../../apps/api/dist/http-route-templates.js";
 import {
   entryArrivalCountMaxMs,
+  entryArrivedAtHeader,
   entryStaffReadAnswerWithinMs,
   isStaffRequestPath,
   readAnswerMarginMs,
@@ -150,4 +152,68 @@ export function createStaffRequestCompletionLog({
     response.once("close", complete);
     next();
   };
+}
+
+/**
+ * WP-2423 (rush-connection-hold, v15 2026-11-14): the guest request on its way to the Store's API
+ * says when its connection reached this entry (`entryArrivedAtHeader`), so the API counts the
+ * read's answer time from the same instant and answers busy a second before this entry would. A
+ * value the guest sent is never passed on.
+ */
+export function withEntryArrival(headers, arrivedAt) {
+  const next = Object.fromEntries(
+    Object.entries(headers).filter(([name]) => name.toLowerCase() !== entryArrivedAtHeader),
+  );
+  return Number.isSafeInteger(arrivedAt)
+    ? { ...next, [entryArrivedAtHeader]: String(arrivedAt) }
+    : next;
+}
+
+const guestRoutes = apiRouteTemplates
+  .filter((template) => template.startsWith("/bff/") || template.startsWith("/api/"))
+  .map((template) => ({
+    template,
+    pattern: new RegExp(
+      "^" +
+        template
+          .split("/")
+          .map((part) =>
+            part.startsWith(":") ? "[^/]+" : part.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"),
+          )
+          .join("/") +
+        "$",
+      "u",
+    ),
+  }));
+/** The API route template a guest request's path matches (never the path itself). */
+export function guestRouteTemplate(url) {
+  const path = String(url ?? "").split(/[?#]/u, 1)[0] ?? "";
+  return guestRoutes.find((route) => route.pattern.test(path))?.template ?? "unmatched";
+}
+/**
+ * WP-2423 (rush-connection-hold): one line for each guest read this entry itself answered busy at
+ * its time (the Store's API had not answered by then), with the API route it was for, so the busy
+ * answers guests saw can be counted by route beside api.log. A wait, not a fault: level 40.
+ */
+export function logEntryGuestBusyAnswer(
+  request,
+  { write = (line) => console.log(line), now = Date.now, arrivedAt = requestArrivedAt } = {},
+) {
+  try {
+    const at = now();
+    const arrived = arrivedAt(request, at) ?? at;
+    write(
+      JSON.stringify({
+        level: 40,
+        time: new Date(at).toISOString(),
+        event: "entry_request_answered_busy",
+        route: guestRouteTemplate(request.originalUrl ?? request.url),
+        statusCode: 503,
+        resultCode: "HTTP_RETRY_LATER",
+        durationMs: Math.max(0, at - arrived),
+      }),
+    );
+  } catch {
+    // Observability never changes an answer.
+  }
 }

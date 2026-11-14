@@ -91,6 +91,22 @@ export const readAnswerMarginMs = 1_000;
 export const entryStaffReadShortfallMs = 2_000;
 /** A connection's time before its first request counts only up to this (a preconnect may idle). */
 export const entryArrivalCountMaxMs = 5_000;
+/**
+ * WP-2423 (rush-connection-hold, v15 2026-11-14): when the guest's connection reached the HTTPS
+ * entry, as the entry states it to the Store's API (milliseconds since the epoch). In every rush
+ * wave the entry answered guests busy at about 11.2 s after the API received the read (the entry
+ * counts from the connection's arrival), while the API went on and logged the read 200 at 14 s:
+ * the busy answers guests saw were missing from api.log. The API now counts its answer time from
+ * the same instant, so it answers busy (and logs it, with its route) a second before the entry.
+ * A stated time can only shorten a read's answer time, and by at most `entryArrivalCountMaxMs`.
+ */
+export const entryArrivedAtHeader = "x-bop-entry-arrived-at";
+/** The arrival the entry stated for this request, if it is a plausible past instant. */
+export function statedEntryArrival(value: unknown, now = Date.now()): number | undefined {
+  if (typeof value !== "string" || !/^\d{13}$/u.test(value)) return undefined;
+  const at = Number(value);
+  return at <= now ? Math.max(at, now - entryArrivalCountMaxMs) : undefined;
+}
 /** The staff (merchant BFF) answer time of a read at the entry; undefined for a command. */
 export function entryStaffReadAnswerWithinMs(
   method: string | undefined,
@@ -235,7 +251,7 @@ export function withRequestAcquireBudget<T>(
      * WP-2423 (rush-reads-and-orders-changes): when the request's connection arrived, if earlier
      * than now (its handshake and its wait in a busy process count against its answer time).
      */
-    readonly arrivedAt?: number;
+    readonly arrivedAt?: number | undefined;
   } = {},
 ): T {
   if (requestBudgets().getStore() !== undefined) return work();
