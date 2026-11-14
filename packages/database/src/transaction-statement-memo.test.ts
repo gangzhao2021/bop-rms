@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   createTransactionStatementMemo,
+  snapshotModeRead,
+  snapshotStableRead,
   stableReadMarker,
   stableReadStatement,
 } from "./transaction-statement-memo.js";
@@ -281,5 +283,50 @@ describe("WP-2423 M35 stable reads (DEC-STAFF-ROUND-SPEED)", () => {
     const memo = createTransactionStatementMemo();
     memo.observe(readSql, [{ a: 1 }], result("x"), true);
     expect(memo.answer(readSql, [{ a: 1 }], true)).toBeNull();
+  });
+});
+
+// WP-2423 (logs-and-transaction-time): which reads of a read-only snapshot answer the same again.
+describe("snapshotStableRead", () => {
+  it.each([
+    ["SELECT a FROM rms_catalog.sku WHERE sku_id=$1", true],
+    [
+      "SELECT jsonb_build_object('a', a) FROM rms_catalog.sku s JOIN rms_catalog.menu m ON true",
+      true,
+    ],
+    ["SELECT clock_timestamp()", false],
+    ["SELECT random() AS r", false],
+    ["SELECT current_setting('statement_timeout')", false],
+    ["SELECT count(*) FROM pg_stat_activity", false],
+    ["SELECT rms_ordering.next_number($1)", false],
+    ["SELECT a FROM t FOR SHARE", false],
+    ["SELECT set_config('bop.store_id',$1,true)", false],
+    ["INSERT INTO t VALUES ($1)", false],
+    ["SELECT 1; RESET ALL", false],
+  ])("%s → %s", (sql, stable) => {
+    expect(snapshotStableRead(sql, ["x"])).toBe(stable);
+  });
+  it("keeps an owner's marked read stable", () => {
+    expect(snapshotStableRead("SELECT a FROM t FOR SHARE", [], true)).toBe(true);
+  });
+  it("knows a read of the transaction's own mode only", () => {
+    expect(
+      snapshotModeRead(
+        "SELECT current_setting('transaction_isolation') AS isolation, current_setting('transaction_read_only') AS read_only",
+        [],
+      ),
+    ).toBe(true);
+    expect(snapshotModeRead("SELECT current_setting('transaction_isolation') isolation", [])).toBe(
+      true,
+    );
+    expect(
+      snapshotModeRead(
+        "SELECT current_setting('bop.store_id',true) store,current_setting('transaction_isolation') isolation",
+        [],
+      ),
+    ).toBe(false);
+    expect(snapshotModeRead("SELECT current_setting('transaction_isolation') AS i", ["x"])).toBe(
+      false,
+    );
   });
 });

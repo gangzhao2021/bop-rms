@@ -384,3 +384,53 @@ export function createTransactionStatementMemo(
       ),
   });
 }
+
+/**
+ * WP-2423 (logs-and-transaction-time, v15 2026-11-14): under a burst the API's transactions stayed
+ * open up to 6.1 s while no statement waited more than 270 ms: a guest cart read's menu check sent
+ * 79 statements in one read-only snapshot for two dishes (each one a turn of the busy process
+ * with the snapshot open), and 41 of them repeated, with the same values and scope, a read
+ * already answered in it (the menu's coherence checks, each dish's facts and stock records, once
+ * per owner that asks). A REPEATABLE READ, READ ONLY snapshot changes no row, so a plain read
+ * repeated in it under the same scope settings answers the same rows: it may be answered from its
+ * first answer, as an owner's marked stable read is. Never a read whose answer changes by itself
+ * (the running clock, a random value) or reads the session or the server's own state (a setting
+ * another statement may change, a system view or function); never in a transaction that can write.
+ */
+const changesByItself =
+  /\b(?:clock_timestamp|statement_timestamp|timeofday|random|gen_random_uuid|uuid_generate_\w+|current_setting|version|inet_\w+)\s*\(|\bpg_[a-z_]+/iu;
+/** Whether a statement of a read-only REPEATABLE READ snapshot answers the same when repeated. */
+export function snapshotStableRead(
+  sql: string,
+  values: readonly unknown[],
+  marked = false,
+): boolean {
+  if (marked) return true;
+  return (
+    typeof sql === "string" &&
+    Array.isArray(values) &&
+    statementKind(sql, values) === "Read" &&
+    !changesByItself.test(sql)
+  );
+}
+/**
+ * A read of the transaction's own isolation and read-only mode only (an owner's "am I in a coherent
+ * read-only snapshot?" check): fixed for the transaction, whatever its scope settings.
+ */
+const transactionMode =
+  /^SELECT\s+current_setting\('transaction_(?:isolation|read_only)'\)(?:\s+AS)?\s+[a-z_]+(?:\s*,\s*current_setting\('transaction_(?:isolation|read_only)'\)(?:\s+AS)?\s+[a-z_]+)*\s*;?$/iu;
+export function snapshotModeRead(sql: string, values: readonly unknown[]): boolean {
+  return (
+    typeof sql === "string" &&
+    Array.isArray(values) &&
+    values.length === 0 &&
+    transactionMode.test(sql.trim())
+  );
+}
+/** An answer given again, with its rows deep-copied: no caller shares parsed rows with another. */
+export function deepCopiedAnswer(result: object): object {
+  return Object.freeze({
+    ...result,
+    rows: structuredClone((result as { rows?: unknown }).rows),
+  });
+}

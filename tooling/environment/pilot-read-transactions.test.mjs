@@ -147,9 +147,8 @@ it("WP-2423 (rush-connection-hold): a read inside an open snapshot runs in it, o
     "SELECT outer_value",
     "SAVEPOINT bop_read_1",
     "SELECT nested_value",
-    "RELEASE SAVEPOINT bop_read_1",
-    "SAVEPOINT bop_read_2",
-    "ROLLBACK TO SAVEPOINT bop_read_2",
+    // logs-and-transaction-time: not released (COMMIT ends it); the failed read sent nothing,
+    // so it took no savepoint and has nothing to roll back.
     "SELECT after_value",
     "COMMIT",
   ]);
@@ -176,4 +175,90 @@ it("WP-2423 (rush-connection-hold): a read past its answer time sends nothing mo
     { answerWithinMs: 1 },
   );
   expect(f.connection.query.mock.calls.map(([sql]) => sql)).not.toContain("SELECT late");
+});
+
+// WP-2423 (logs-and-transaction-time, v15 2026-11-14): under a burst a cart read's snapshot stayed
+// open for seconds: 79 statements for two dishes, 41 of them repeats of a read already answered in
+// it, and a savepoint taken and released around every nested read, even one that sent nothing.
+it("logs-and-transaction-time: a plain read repeated in the snapshot under the same scope is answered from its first answer", async () => {
+  const f = fixture();
+  const read = "SELECT jsonb_build_object('v', v) AS row FROM rms_catalog.sku WHERE sku_id=$1";
+  let served = 0;
+  f.connection.query.mockImplementation(async (sql) =>
+    sql === read || sql === "SELECT clock_timestamp() AS at"
+      ? { rows: [{ row: { v: (served += 1) } }], rowCount: 1 }
+      : { rows: [], rowCount: 0 },
+  );
+  await f.run(async (tx) => {
+    const first = await tx.query(read, ["s"]);
+    const again = await tx.query(read, ["s"]);
+    expect(again.rows).toEqual([{ row: { v: 1 } }]);
+    // A copy: changing one answer never changes the next.
+    again.rows[0].row.v = 99;
+    expect((await tx.query(read, ["s"])).rows).toEqual([{ row: { v: 1 } }]);
+    expect(first.rows).toEqual([{ row: { v: 1 } }]);
+    // Another value, or another scope, is another read.
+    await tx.query(read, ["t"]);
+    await tx.query("SELECT set_config('bop.store_id',$1,true)", [""]);
+    await tx.query(read, ["s"]);
+    // The running clock always reaches the database.
+    await tx.query("SELECT clock_timestamp() AS at", []);
+    await tx.query("SELECT clock_timestamp() AS at", []);
+  });
+  expect(f.connection.query.mock.calls.map(([sql, values]) => [sql, values?.[0]])).toEqual([
+    [begin, undefined],
+    [
+      "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+      f.scope.brandReference,
+    ],
+    [read, "s"],
+    [read, "t"],
+    ["SELECT set_config('bop.store_id',$1,true)", ""],
+    [read, "s"],
+    ["SELECT clock_timestamp() AS at", undefined],
+    ["SELECT clock_timestamp() AS at", undefined],
+    ["COMMIT", undefined],
+  ]);
+});
+
+it("logs-and-transaction-time: the snapshot's own mode is read once whatever the scope, and a nested read that sent a statement and failed is rolled back", async () => {
+  const connection = {
+    query: vi.fn(async (sql) =>
+      sql.startsWith("SELECT current_setting")
+        ? { rows: [{ isolation: "repeatable read", read_only: "on" }], rowCount: 1 }
+        : sql === "SELECT broken"
+          ? Promise.reject(new Error("private-detail"))
+          : { rows: [], rowCount: 0 },
+    ),
+    release: vi.fn(),
+  };
+  const scope = { brandReference: "synthetic-brand", storeReference: "synthetic-store" };
+  const reads = createInternalReadTransactions({
+    database: { acquire: async () => connection },
+    scope,
+  });
+  const mode =
+    "SELECT current_setting('transaction_isolation') AS isolation, current_setting('transaction_read_only') AS read_only";
+  await reads.run(async (tx) => {
+    await tx.query(mode, []);
+    await tx.query("SELECT set_config('bop.store_id',$1,true)", [""]);
+    expect((await tx.query(mode, [])).rows).toEqual([
+      { isolation: "repeatable read", read_only: "on" },
+    ]);
+    await expect(reads.run(async (nested) => nested.query("SELECT broken", []))).rejects.toThrow(
+      /^INTERNAL_INVENTORY_READ_UNAVAILABLE$/,
+    );
+    await tx.query("SELECT after", []);
+  });
+  expect(connection.query.mock.calls.map(([sql]) => sql)).toEqual([
+    begin,
+    "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+    mode,
+    "SAVEPOINT bop_read_1",
+    "SELECT set_config('bop.store_id',$1,true)",
+    "SELECT broken",
+    "ROLLBACK TO SAVEPOINT bop_read_1",
+    "SELECT after",
+    "COMMIT",
+  ]);
 });

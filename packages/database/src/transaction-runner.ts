@@ -9,6 +9,9 @@ import {
 } from "./tenant-context.js";
 import {
   createTransactionStatementMemo,
+  deepCopiedAnswer as deepCopy,
+  snapshotModeRead,
+  snapshotStableRead,
   stableReadStatement,
   stableReadLocksRows,
   statementKind,
@@ -508,6 +511,8 @@ function transactionState(
   // The scope settings withTenantContextTransaction installed before this callback; repeats
   // of them, and of locks this transaction already holds, are answered without a round trip.
   const memo = createTransactionStatementMemo(scopeSettings(fixedScope));
+  /** A read-only snapshot's isolation and read-only answers, by statement (snapshotModeRead). */
+  const snapshotModes = new Map<string, object>();
   // WP-2423 M35 (third step, request-check-memo): until the transaction's first statement that
   // may write or lock (`fenced`), an owner's stable read may be answered from this request's
   // earlier check (`borrowed`); before that statement each borrowed read is sent again for real.
@@ -580,21 +585,30 @@ function transactionState(
       // transaction's earlier identical read; the marker itself is not sent.
       const marked = stableReadStatement(sql);
       let statement = marked.sql;
+      let stable = marked.stable;
+      let modeRead = false;
       if (mode === "Snapshot") {
         const planned = snapshotReadStatement(statement);
         if (planned.kind === "Answer") return planned.result;
         statement = planned.sql;
+        // WP-2423 (logs-and-transaction-time): a plain read repeated in this read-only snapshot
+        // under the same scope answers as it did (see snapshotStableRead), as does its mode.
+        stable = snapshotStableRead(statement, values, marked.stable);
+        modeRead = snapshotModeRead(statement, values);
+        const known = modeRead ? snapshotModes.get(statement.trim()) : undefined;
+        if (known !== undefined) return deepCopy(known);
       }
+      const implicit = stable && !marked.stable;
       let settings: { readonly sql: string; readonly values: readonly string[] } | null = null;
       let kind: ReturnType<typeof statementKind> | null = null;
       let recordAs: string | null = null;
       // A stable row-locking read sent for real is a fence too (see below).
       let locksRows = false;
       if (pending === 0) {
-        const planned = memo.plan(statement, values, marked.stable);
-        if (planned.kind === "Answer") return planned.result;
+        const planned = memo.plan(statement, values, stable);
+        if (planned.kind === "Answer") return implicit ? deepCopy(planned.result) : planned.result;
         settings = planned.settings;
-        kind = statementKind(statement, values, marked.stable);
+        kind = statementKind(statement, values, stable);
         if (kind === "Write" && writesRefused) {
           // runTogether: another runner's scope already wrote in this one transaction.
           failed = true;
@@ -663,7 +677,8 @@ function transactionState(
           memo.observe(settings.sql, settings.values);
         }
         const result = await client.query(statement, [...values]);
-        memo.observe(statement, values, result, marked.stable);
+        memo.observe(statement, values, result, stable);
+        if (modeRead) snapshotModes.set(statement.trim(), deepCopy(result as object));
         if (recordAs !== null && writes === 0) checks?.record(recordAs, statement, result);
         return result;
       } catch (error) {

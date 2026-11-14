@@ -931,3 +931,62 @@ describe("WP-2423 (rush-connection-hold)", () => {
     });
   });
 });
+
+// WP-2423 (logs-and-transaction-time, v15 2026-11-14): a read-only snapshot answered a plain read
+// it had already sent, under the same scope and values, from that first answer; an ordinary
+// transaction (which may write) still sends every read its owner did not mark.
+describe("logs-and-transaction-time snapshot repeats", () => {
+  const read = "SELECT jsonb_build_object('v', v) AS row FROM rms_ordering.cart WHERE cart_id=$1";
+  const mode = "SELECT current_setting('transaction_isolation') AS isolation";
+  const counted = () => {
+    const f = fixture();
+    let served = 0;
+    f.query.mockImplementation(async (sql: string) =>
+      sql === read
+        ? { rows: [{ row: { v: (served += 1) } }] }
+        : sql === mode
+          ? { rows: [{ isolation: "repeatable read" }] }
+          : { rows: [] },
+    );
+    return f;
+  };
+  it("answers a repeated plain read and the snapshot's own mode once, with copies", async () => {
+    const f = counted();
+    await f.runner.runSnapshot(async (transaction) => {
+      const first = (await transaction.query(read, ["c"])) as { rows: { row: { v: number } }[] };
+      const again = (await transaction.query(read, ["c"])) as { rows: { row: { v: number } }[] };
+      expect(again.rows).toEqual([{ row: { v: 1 } }]);
+      again.rows[0]!.row.v = 99;
+      expect(first.rows).toEqual([{ row: { v: 1 } }]);
+      await transaction.query(read, ["d"]);
+      await transaction.query(mode, []);
+      await transaction.query("SELECT set_config('bop.store_id',$1,true)", [
+        "018f3f7a-8b1c-7a11-8d01-000000000042",
+      ]);
+      expect(await transaction.query(mode, [])).toMatchObject({
+        rows: [{ isolation: "repeatable read" }],
+      });
+      await transaction.query("SELECT clock_timestamp()", []);
+      await transaction.query("SELECT clock_timestamp()", []);
+    });
+    expect(f.query.mock.calls.filter(([sql]) => sql === read).map(([, values]) => values)).toEqual([
+      ["c"],
+      ["d"],
+    ]);
+    expect(f.query.mock.calls.filter(([sql]) => sql === mode)).toHaveLength(1);
+    expect(f.query.mock.calls.filter(([sql]) => sql === "SELECT clock_timestamp()")).toHaveLength(
+      2,
+    );
+  });
+  it("still sends every unmarked read of an ordinary transaction", async () => {
+    const f = counted();
+    await f.runner.run(async (transaction) => {
+      await transaction.query(read, ["c"]);
+      await transaction.query(read, ["c"]);
+      await transaction.query(mode, []);
+      await transaction.query(mode, []);
+    });
+    expect(f.query.mock.calls.filter(([sql]) => sql === read)).toHaveLength(2);
+    expect(f.query.mock.calls.filter(([sql]) => sql === mode)).toHaveLength(2);
+  });
+});

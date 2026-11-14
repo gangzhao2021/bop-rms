@@ -1,6 +1,9 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
   createTransactionStatementMemo,
+  deepCopiedAnswer as copied,
+  snapshotModeRead,
+  snapshotStableRead,
   stableReadStatement,
 } from "../../packages/database/dist/transaction-statement-memo.js";
 import { tenantContextScopeStatement } from "../../packages/database/dist/tenant-context.js";
@@ -43,16 +46,27 @@ export function createInternalReadTransactions(resources) {
   const nested = (open, work) => {
     const turn = open.turn.then(async () => {
       const name = "bop_read_" + (open.savepoints += 1);
-      await open.own("SAVEPOINT " + name);
+      // WP-2423 (logs-and-transaction-time): the savepoint is taken only once the nested read
+      // sends a statement (one answered wholly from this snapshot's memo sends none), and it is
+      // not released: COMMIT ends it with the snapshot, and nothing in a read-only snapshot needs
+      // it gone sooner. Each was two more turns of a busy process with the snapshot open.
+      let taken = false;
+      open.beforeSend = async () => {
+        open.beforeSend = null;
+        await open.own("SAVEPOINT " + name);
+        taken = true;
+      };
       try {
-        const result = await work({ query: open.query });
-        await open.own("RELEASE SAVEPOINT " + name);
-        return result;
+        return await work({ query: open.query });
       } catch {
         // Its own failure only: the snapshot goes on as it was before the nested read.
-        await open.own("ROLLBACK TO SAVEPOINT " + name).catch(() => (open.broken = true));
+        if (taken)
+          await open.own("ROLLBACK TO SAVEPOINT " + name).catch(() => (open.broken = true));
+        else if (open.beforeSend === null) open.broken = true;
         open.forget();
         throw unavailable();
+      } finally {
+        open.beforeSend = null;
       }
     });
     open.turn = turn.catch(() => undefined);
@@ -79,6 +93,8 @@ export function createInternalReadTransactions(resources) {
         savepoints: 0,
         turn: Promise.resolve(),
         own: (sql) => connection.query(sql),
+        /** A nested read's savepoint, taken before the first statement it sends. */
+        beforeSend: null,
         query: null,
         forget: () => undefined,
       };
@@ -104,6 +120,8 @@ export function createInternalReadTransactions(resources) {
           "bop.store_id": resources.scope.storeReference,
         });
         let pending = 0;
+        /** This snapshot's isolation and read-only answers, by statement (see snapshotModeRead). */
+        const modes = new Map();
         const query = async (sql, values) => {
           // WP-2423 (rush-connection-hold): a read past its answer time sends nothing more: it
           // answers "busy, try again" while the phone still listens (as the runner's reads do).
@@ -113,20 +131,26 @@ export function createInternalReadTransactions(resources) {
             throw unavailable();
           }
           const marked = stableReadStatement(sql);
+          const modeRead = snapshotModeRead(marked.sql, values ?? []);
+          const knownMode = modeRead ? modes.get(marked.sql.trim()) : undefined;
+          if (knownMode !== undefined) return copied(knownMode);
+          const stable = snapshotStableRead(marked.sql, values ?? [], marked.stable);
           let settings = null;
           if (pending === 0) {
-            const planned = memo.plan(marked.sql, values, marked.stable);
-            if (planned.kind === "Answer") return planned.result;
+            const planned = memo.plan(marked.sql, values ?? [], stable);
+            if (planned.kind === "Answer") return stable ? copied(planned.result) : planned.result;
             settings = planned.settings;
           }
           pending += 1;
           try {
+            if (state.beforeSend !== null) await state.beforeSend();
             if (settings !== null) {
               await connection.query(settings.sql, [...settings.values]);
               memo.observe(settings.sql, settings.values);
             }
-            const result = await connection.query(marked.sql, [...values]);
-            memo.observe(marked.sql, values, result, marked.stable);
+            const result = await connection.query(marked.sql, [...(values ?? [])]);
+            memo.observe(marked.sql, values ?? [], result, stable);
+            if (modeRead) modes.set(marked.sql.trim(), copied(result));
             return result;
           } catch (error) {
             memo.forget();
