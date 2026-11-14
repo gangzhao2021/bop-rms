@@ -9,6 +9,13 @@ import {
   noteTenantDatabaseAnswered,
   watchTenantConnectionPool,
 } from "../../packages/database/dist/connection-acquire.js";
+import {
+  beginConnectionHold,
+  endConnectionHold,
+  holdsConnectionOf,
+  newConnectionHold,
+  runHoldingConnection,
+} from "../../packages/database/dist/connection-hold.js";
 import { isPilotRuntime } from "./pilot-environment.mjs";
 import {
   isPilotEntryProcess,
@@ -64,11 +71,30 @@ export async function acquirePilotConnection(pool, policy = {}) {
   try {
     return await acquireTenantConnection(pool, {
       budgetMs: pilotAcquireBudgetMs(),
+      // WP-2423 (rush-connection-hold): work holding one of this pool's connections never waits
+      // for a second one (connection-hold).
+      ...(holdsConnectionOf(pool) ? { holding: true } : {}),
       ...policy,
     });
   } catch {
     throw new Error("LOCAL_DATABASE_UNAVAILABLE");
   }
+}
+/**
+ * WP-2423 (rush-connection-hold): runs `work` as holding one of `pool`'s connections (a connection
+ * taken with `acquirePilotConnection` and kept until `work` ends), so nothing it starts waits for a
+ * second connection of the same pool.
+ */
+export function holdingPilotConnection(pool, work) {
+  const hold = newConnectionHold();
+  beginConnectionHold(hold, pool);
+  return runHoldingConnection(hold, async () => {
+    try {
+      return await work();
+    } finally {
+      endConnectionHold(hold);
+    }
+  });
 }
 /** How often an entry's heartbeat asks the database (`startPilotDatabaseHeartbeat`). */
 export const pilotDatabaseHeartbeatMs = 1000;
@@ -269,6 +295,7 @@ export async function createApplicationDatabase(
     transactions: (scope) =>
       createTenantTransactionRunner(pool, scope, { acquireBudgetMs: pilotAcquireBudgetMs() }),
     acquire: () => acquirePilotConnection(pool),
+    hold: (work) => holdingPilotConnection(pool, work),
     async probe() {
       if (closing) return "not_ready";
       try {

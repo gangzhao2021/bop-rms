@@ -1,8 +1,9 @@
 import { EventEmitter } from "node:events";
 import { setImmediate } from "node:timers";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import {
   acquirePilotConnection,
+  holdingPilotConnection,
   guardPilotPoolConnections,
   pilotAcquireBudgetMs,
   pilotDatabaseHeartbeatMs,
@@ -230,4 +231,25 @@ it("WP-2423 (rush-logging-and-entry): a guest read whose wait ran out with no po
     shed: false,
     faulted: true,
   });
+});
+
+it("WP-2423 (rush-connection-hold): work holding one of the pool's connections is told busy at once when none is free, never queued", async () => {
+  const pool = {
+    connect: vi.fn(async () => ({ release: vi.fn() })),
+    options: { max: 2 },
+    waitingCount: 5,
+    idleCount: 0,
+    totalCount: 2,
+  };
+  const started = Date.now();
+  await holdingPilotConnection(pool, async () => {
+    await expect(acquirePilotConnection(pool, { budgetMs: 10_000 })).rejects.toThrow(
+      /^LOCAL_DATABASE_UNAVAILABLE$/,
+    );
+  });
+  expect(pool.connect).not.toHaveBeenCalled();
+  expect(Date.now() - started).toBeLessThan(500);
+  // Not holding: the same full pool is waited for as before (its own attempt).
+  await expect(acquirePilotConnection(pool, { budgetMs: 2000 })).resolves.toBeDefined();
+  expect(pool.connect).toHaveBeenCalledTimes(1);
 });
