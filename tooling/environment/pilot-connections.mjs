@@ -7,6 +7,7 @@ import { createTenantTransactionRunner } from "../../packages/database/dist/tran
 import {
   acquireTenantConnection,
   noteTenantDatabaseAnswered,
+  tenantConnectionAnsweringWindowMs,
   watchTenantConnectionPool,
 } from "../../packages/database/dist/connection-acquire.js";
 import {
@@ -136,6 +137,7 @@ export function startPilotDatabaseHeartbeat(
 ) {
   let client = null;
   let answered = 0;
+  let answeredAt = null;
   let stopped = false;
   let timer;
   const end = (target) => {
@@ -170,6 +172,7 @@ export function startPilotDatabaseHeartbeat(
       await client.query("SELECT 1");
       if (stopped) return;
       noteTenantDatabaseAnswered(pool);
+      answeredAt = Date.now();
       answered += 1;
       if (answered >= reopenEveryBeats) drop();
     } catch {
@@ -181,11 +184,62 @@ export function startPilotDatabaseHeartbeat(
   };
   timer = schedule(() => void beat(), 0);
   return Object.freeze({
+    /** WP-2423 (rush-connection-hold): whether the database answered within the last `ms`. */
+    answeredWithin(ms, now = Date.now()) {
+      return answeredAt !== null && now - answeredAt <= ms;
+    },
     stop() {
       stopped = true;
       cancel(timer);
       drop();
     },
+  });
+}
+/**
+ * WP-2423 (rush-connection-hold): a connection of `pool` can be had at once (nobody waits for one,
+ * and one is idle or may still be opened). In a rush none can: the process is serving in turn.
+ */
+export function pilotPoolHasFreeConnection(pool) {
+  try {
+    if (pool.waitingCount > 0) return false;
+    return pool.idleCount > 0 || pool.totalCount < pool.options.max;
+  } catch {
+    return false;
+  }
+}
+/**
+ * WP-2423 (rush-connection-hold): readiness says whether this process serves, never how busy it
+ * is. In every rush wave the probe queued on the pool its requests held and answered 503
+ * HTTP_SERVER_ERROR after 1 s. With no connection free at once, an entry's heartbeat (its own
+ * connection) answers for the database, with the role's limit as last read; `load` says "busy".
+ */
+export function createPilotDatabaseReadiness({ pool, service, heartbeat, closing }) {
+  /** The role's connection limit as last read ("ready": enough for this process). */
+  let roleLimit = null;
+  return Object.freeze({
+    async probe() {
+      if (closing()) return "not_ready";
+      const beat = heartbeat();
+      if (beat !== null && !pilotPoolHasFreeConnection(pool))
+        return roleLimit === "ready" && beat.answeredWithin(tenantConnectionAnsweringWindowMs)
+          ? "ready"
+          : "not_ready";
+      try {
+        const result = await pool.query(
+          "SELECT 1 AS connected, rolconnlimit AS limit FROM pg_catalog.pg_roles WHERE rolname = current_user",
+        );
+        const row = result.rows[0];
+        roleLimit =
+          row?.connected === 1 &&
+          (row.limit === -1 || (service === "api" ? row.limit >= pilotApiRoleMinimumLimit : true))
+            ? "ready"
+            : "not_ready";
+        return roleLimit;
+      } catch {
+        return "not_ready";
+      }
+    },
+    load: () => (pilotPoolHasFreeConnection(pool) ? "normal" : "busy"),
   });
 }
 /** This role's usable connections, read from the database itself; null when it can't be read. */
@@ -291,26 +345,18 @@ export async function createApplicationDatabase(
   if (process.env.PILOT_CLOCK_FROM_DATABASE === "1")
     await alignProcessClockToDatabase((sql) => pool.query(sql));
   let closing;
+  const readiness = createPilotDatabaseReadiness({
+    pool,
+    service,
+    heartbeat: () => sharedPools.get(service + ":" + database)?.heartbeat ?? null,
+    closing: () => closing !== undefined,
+  });
   return Object.freeze({
     transactions: (scope) =>
       createTenantTransactionRunner(pool, scope, { acquireBudgetMs: pilotAcquireBudgetMs() }),
     acquire: () => acquirePilotConnection(pool),
     hold: (work) => holdingPilotConnection(pool, work),
-    async probe() {
-      if (closing) return "not_ready";
-      try {
-        const result = await pool.query(
-          "SELECT 1 AS connected, rolconnlimit AS limit FROM pg_catalog.pg_roles WHERE rolname = current_user",
-        );
-        const row = result.rows[0];
-        return row?.connected === 1 &&
-          (row.limit === -1 || (service === "api" ? row.limit >= pilotApiRoleMinimumLimit : true))
-          ? "ready"
-          : "not_ready";
-      } catch {
-        return "not_ready";
-      }
-    },
+    ...readiness,
     close() {
       // The last user of the process's pool ends it.
       closing ??= (async () => {

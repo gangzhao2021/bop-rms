@@ -3,6 +3,7 @@ import { setImmediate } from "node:timers";
 import { expect, it, vi } from "vitest";
 import {
   acquirePilotConnection,
+  createPilotDatabaseReadiness,
   holdingPilotConnection,
   guardPilotPoolConnections,
   pilotAcquireBudgetMs,
@@ -252,4 +253,33 @@ it("WP-2423 (rush-connection-hold): work holding one of the pool's connections i
   // Not holding: the same full pool is waited for as before (its own attempt).
   await expect(acquirePilotConnection(pool, { budgetMs: 2000 })).resolves.toBeDefined();
   expect(pool.connect).toHaveBeenCalledTimes(1);
+});
+
+it("WP-2423 (rush-connection-hold): readiness never queues behind requests: a busy pool is ready while the heartbeat is answered, and says busy", async () => {
+  const pool = {
+    options: { max: 2 },
+    waitingCount: 0,
+    idleCount: 1,
+    totalCount: 2,
+    query: vi.fn(async () => ({ rows: [{ connected: 1, limit: -1 }] })),
+  };
+  let answered = true;
+  const readiness = createPilotDatabaseReadiness({
+    pool,
+    service: "api",
+    heartbeat: () => ({ answeredWithin: () => answered }),
+    closing: () => false,
+  });
+  // Quiet: the pool itself answers (and the role's limit is read).
+  expect(await readiness.probe()).toBe("ready");
+  expect(readiness.load()).toBe("normal");
+  expect(pool.query).toHaveBeenCalledTimes(1);
+  // A rush: every connection out, requests waiting. Nothing is queued for readiness.
+  Object.assign(pool, { waitingCount: 40, idleCount: 0 });
+  expect(await readiness.probe()).toBe("ready");
+  expect(readiness.load()).toBe("busy");
+  expect(pool.query).toHaveBeenCalledTimes(1);
+  // The database itself stopped answering: not ready.
+  answered = false;
+  expect(await readiness.probe()).toBe("not_ready");
 });

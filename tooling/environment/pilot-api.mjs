@@ -230,7 +230,11 @@ export async function createRuntime(
       uuidV7Factory: resources.credentials.reference,
       runtime: {
         port,
-        healthReadiness: new HealthReadinessController({ databaseProbe: resources.database.probe }),
+        healthReadiness: new HealthReadinessController({
+          databaseProbe: resources.database.probe,
+          // WP-2423 (rush-connection-hold): a rush reads as serving, busy; never as not ready.
+          ...(resources.database.load === undefined ? {} : { loadProbe: resources.database.load }),
+        }),
       },
     });
     let closing;
