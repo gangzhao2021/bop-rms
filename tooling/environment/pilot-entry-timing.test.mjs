@@ -157,3 +157,21 @@ describe("WP-2423 (rush-connection-hold) the entry and the API count a guest rea
     expect(JSON.stringify(lines)).not.toContain("s1");
   });
 });
+
+// WP-2423 (logs-and-transaction-time, v15 2026-11-14): a staff screen that closed its dialog
+// stopped its request; the entry logged it as a 200 in 1 ms though nothing was answered.
+it("logs a staff request whose screen left before its answer as the client closing (499)", () => {
+  const lines = [];
+  const log = createStaffRequestCompletionLog({ write: (line) => lines.push(JSON.parse(line)) });
+  const response = Object.assign(new EventEmitter(), {
+    statusCode: 200,
+    headersSent: false,
+    writableFinished: false,
+    end: () => undefined,
+  });
+  log({ route: undefined }, response, () => undefined);
+  response.emit("close");
+  expect(
+    lines.map(({ level, statusCode, resultCode }) => ({ level, statusCode, resultCode })),
+  ).toEqual([{ level: 30, statusCode: 499, resultCode: "HTTP_CLIENT_CLOSED" }]);
+});

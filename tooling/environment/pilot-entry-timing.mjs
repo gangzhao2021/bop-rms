@@ -100,12 +100,16 @@ export function createStaffRequestCompletionLog({
     const arrived = arrivedAt(request, reached) ?? reached;
     let rushed = false;
     let done = false;
-    const complete = () => {
+    // WP-2423 (logs-and-transaction-time): a screen that left before its answer was written
+    // (`left`: the connection closed first) is logged as the client closing (499), never as the
+    // 200 it was not sent.
+    const complete = (left = false) => {
       if (done) return;
       done = true;
-      const status = response.statusCode;
-      const result =
-        status === 503 && rushed
+      const status = left && !response.headersSent ? 499 : response.statusCode;
+      const result = left
+        ? "HTTP_CLIENT_CLOSED"
+        : status === 503 && rushed
           ? "HTTP_RETRY_LATER"
           : status >= 500
             ? "HTTP_SERVER_ERROR"
@@ -148,8 +152,8 @@ export function createStaffRequestCompletionLog({
       response.once(answeredBusyEvent, () => {
         rushed = true;
       });
-    response.once("finish", complete);
-    response.once("close", complete);
+    response.once("finish", () => complete(false));
+    response.once("close", () => complete(response.writableFinished !== true));
     next();
   };
 }

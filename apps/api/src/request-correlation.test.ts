@@ -409,3 +409,46 @@ describe("WP-2423 (rush-connection-hold): the API counts a guest read from its a
     expect(unreadable).toBeGreaterThan(11_500);
   });
 });
+
+// WP-2423 (logs-and-transaction-time, v15 2026-11-14): a phone that stopped a cart read it no
+// longer needed was logged "200 HTTP_SUCCESS" in 15 ms, beside the read's own "couldn't answer"
+// line: it was never answered. A client that left first is logged as closing (499).
+describe("logs-and-transaction-time: a client that left before its answer", () => {
+  it("is logged as the client closing, never as the 200 it was not sent", async () => {
+    const entries: { statusCode: number; resultCode: string; route: string }[] = [];
+    const app = express();
+    app.use(
+      createRequestCorrelationMiddleware({
+        logger: { info: (entry) => entries.push(entry as (typeof entries)[number]) },
+        routeTemplates: ["/bff/customer/cart"],
+      }),
+    );
+    let reached!: () => void;
+    const atRoute = new Promise<void>((resolve) => (reached = resolve));
+    app.get("/bff/customer/cart", (_request, response) => {
+      reached();
+      // The read is still working when the phone goes away.
+      setTimeout(() => {
+        if (!response.destroyed) response.status(200).json({ cart: null });
+      }, 200);
+    });
+    app.get("/answered", (_request, response) => {
+      response.status(200).json({ ok: true });
+    });
+    const base = await listen(app);
+    const stop = new AbortController();
+    const left = fetch(base + "/bff/customer/cart", { signal: stop.signal }).catch(() => null);
+    await atRoute;
+    stop.abort();
+    await left;
+    await expect.poll(() => entries.length).toBe(1);
+    await fetch(base + "/answered");
+    await expect.poll(() => entries.length).toBe(2);
+    expect(
+      entries.map(({ statusCode, resultCode, route }) => ({ statusCode, resultCode, route })),
+    ).toEqual([
+      { statusCode: 499, resultCode: "HTTP_CLIENT_CLOSED", route: "/bff/customer/cart" },
+      { statusCode: 200, resultCode: "HTTP_SUCCESS", route: "unmatched" },
+    ]);
+  });
+});

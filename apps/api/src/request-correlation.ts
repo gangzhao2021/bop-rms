@@ -48,7 +48,11 @@ export interface RequestCompletionLogger {
     readonly event: "http_request_completed";
     readonly requestId: string;
     readonly resultCode:
-      "HTTP_CLIENT_ERROR" | "HTTP_RETRY_LATER" | "HTTP_SERVER_ERROR" | "HTTP_SUCCESS";
+      | "HTTP_CLIENT_CLOSED"
+      | "HTTP_CLIENT_ERROR"
+      | "HTTP_RETRY_LATER"
+      | "HTTP_SERVER_ERROR"
+      | "HTTP_SUCCESS";
     readonly statusCode: number;
     /**
      * WP-2423 (rush-logging-and-entry): the route template the request matched (or `unmatched`),
@@ -182,19 +186,26 @@ export function createRequestCorrelationMiddleware({
     response.setHeader("X-Correlation-ID", correlation.correlationId);
 
     let completed = false;
-    const complete = () => {
+    const complete = (closedFirst: boolean) => {
       if (completed) return;
       completed = true;
-      response.off("finish", complete);
-      response.off("close", complete);
+      response.off("finish", finished);
+      response.off("close", closed);
       const durationMs = durationBetween(startedAt, nowMilliseconds());
+      // WP-2423 (logs-and-transaction-time, v15 2026-11-14): a client that left before its answer
+      // was written (a phone that stopped a cart read it no longer needed) was logged as a 200,
+      // so the read's own "couldn't answer" line beside it looked like a fault behind a success.
+      // It is logged as the client closing (499, as web servers write it) with no answer sent.
+      const left = closedFirst && response.writableFinished !== true;
       // WP-2423 (reads-under-burst): a 503 the rush itself caused (no connection in time, the
       // read's answer time spent) is a wait the client sits out, like a route's own Retry-After.
-      const completionResult =
-        response.statusCode === 503 &&
-        (localRequest[requestRetryLaterKey] === true || requestShedFor(response))
+      const completionResult = left
+        ? ("HTTP_CLIENT_CLOSED" as const)
+        : response.statusCode === 503 &&
+            (localRequest[requestRetryLaterKey] === true || requestShedFor(response))
           ? ("HTTP_RETRY_LATER" as const)
           : resultCode(response.statusCode);
+      const statusCode = left && !response.headersSent ? 499 : response.statusCode;
       const route = routeTemplate(request, registeredRoutes);
       telemetryOperation?.complete({
         durationMs,
@@ -217,7 +228,7 @@ export function createRequestCorrelationMiddleware({
           requestId,
           resultCode: completionResult,
           route,
-          statusCode: response.statusCode,
+          statusCode,
           trustedContext: correlation,
           ...(failureCode === undefined ? {} : { error: { code: failureCode, value: undefined } }),
         });
@@ -225,8 +236,10 @@ export function createRequestCorrelationMiddleware({
         // Request and business completion never depend on observability.
       }
     };
-    response.once("finish", complete);
-    response.once("close", complete);
+    const finished = () => complete(false);
+    const closed = () => complete(true);
+    response.once("finish", finished);
+    response.once("close", closed);
     // WP-2423 (outage-reads-and-retry): one connection waiting budget for the whole request.
     withRequestAcquireBudget(
       () => {
