@@ -13,6 +13,11 @@ export function languageName(locale: string): string {
   }
 }
 
+/** b18: the language alone ("English", 英语), never the browser's region form ("加拿大英语"). */
+export function plainLanguageName(locale: string): string {
+  return languageName(locale.split("-")[0] ?? locale);
+}
+
 /** Receipt fields a digital receipt layout prints, in the words a customer reads on it. */
 export const receiptFieldLabels: Readonly<Record<string, string>> = Object.freeze({
   Issuer: t("Business name"),

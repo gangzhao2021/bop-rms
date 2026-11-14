@@ -54,7 +54,7 @@ import {
   type StoreSetupPendingJournal,
 } from "./store-setup-pending-journal.js";
 import { serviceOperationReference, type ServiceMode } from "./service-control-client.js";
-import { languageName } from "./staff-text.js";
+import { plainLanguageName } from "./staff-text.js";
 import { timeZoneChoices, timeZoneLabel } from "./time-zone-names.js";
 const StoreFirstOpeningPanel = lazyPage(
   () => import("./StoreFirstOpeningPanel.js"),
@@ -343,6 +343,7 @@ export function StoreSetupHeader({
   refreshDisabled,
   onRefresh,
   firstStore = false,
+  draft = true,
 }: {
   readonly ownerOnly: boolean;
   readonly displayName: string | null;
@@ -350,6 +351,11 @@ export function StoreSetupHeader({
   readonly onRefresh: () => void;
   /** WP-2423 item 14: on a first Store's one page there is no draft to talk about here. */
   readonly firstStore?: boolean;
+  /**
+   * b18 (Owner 2026-11-14): only the place that keeps a draft talks about drafts and reloading it;
+   * every other place saves straight to what customers and staff see.
+   */
+  readonly draft?: boolean;
 }) {
   return (
     <header className="screen-heading">
@@ -362,16 +368,124 @@ export function StoreSetupHeader({
               "Only the Owner can change Store setup. You can see the details customers and receipts use below.",
             )}
           </p>
-        ) : firstStore ? null : (
-          <p>{t("Saving a draft does not change the live Store.")}</p>
-        )}
+        ) : null}
       </div>
-      {ownerOnly || firstStore ? null : (
+      {ownerOnly || firstStore || !draft ? null : (
         <button type="button" disabled={refreshDisabled} onClick={onRefresh}>
-          {t("Refresh saved setup")}
+          {t("Reload the saved draft")}
         </button>
       )}
     </header>
+  );
+}
+/**
+ * b18 (Owner 2026-11-14 "先改吧，太多了我记不住"): an open Store's setup is a few places, each doing
+ * one thing and saying whether a change is live at once or a draft that needs approval. The
+ * address keeps working with the anchors other pages already link to (#kitchen-setup, …).
+ */
+export type StoreSetupPlace = "profile" | "receipts" | "kitchen" | "access" | "changes";
+export const storeSetupPlaces: readonly StoreSetupPlace[] = [
+  "profile",
+  "receipts",
+  "kitchen",
+  "access",
+  "changes",
+];
+const placeAnchors: Readonly<Record<string, StoreSetupPlace>> = {
+  "#store-public-profile": "profile",
+  "#receipts-and-privacy": "receipts",
+  "#kitchen-setup": "kitchen",
+  "#support-access": "access",
+  "#sole-operator": "access",
+  "#store-setup-changes": "changes",
+};
+/** The place an address asks for: `?section=` first, then an anchor other pages link to. */
+export function storeSetupPlaceOf(search: string, hash: string): StoreSetupPlace | null {
+  const asked = new URLSearchParams(search).get("section");
+  if (asked !== null && (storeSetupPlaces as readonly string[]).includes(asked))
+    return asked as StoreSetupPlace;
+  return placeAnchors[hash] ?? null;
+}
+export const storeSetupPlaceHref = (storeReference: string, place: StoreSetupPlace) =>
+  "/app/organization/stores/" +
+  storeReference +
+  "/setup" +
+  (place === "profile" ? "" : "?section=" + place);
+/** Each place's name, and one line on what it holds and when a change there takes effect. */
+export function storeSetupPlaceText(place: StoreSetupPlace): {
+  readonly name: string;
+  readonly lead: string;
+} {
+  switch (place) {
+    case "profile":
+      return {
+        name: t("Store details"),
+        lead: t(
+          "The name, address and phone customers see. A change is live as soon as you save it.",
+        ),
+      };
+    case "receipts":
+      return {
+        name: t("Receipts and tax numbers"),
+        lead: t(
+          "The business name and tax numbers printed on receipts, and your privacy notice. A change is live as soon as you save it, for receipts issued from then on.",
+        ),
+      };
+    case "kitchen":
+      return {
+        name: t("Kitchen setup"),
+        lead: t(
+          "Whether every dish reaches this Store's Kitchen screen. A change is live at once, for orders confirmed from then on.",
+        ),
+      };
+    case "access":
+      return {
+        name: t("Permissions and safety"),
+        lead: t(
+          "Who besides you may change things: platform support, and approving your own changes when you run the business alone. Each change is live at once and is recorded.",
+        ),
+      };
+    case "changes":
+      return {
+        name: t("Settings that need approval"),
+        lead: t(
+          "Time zone, opening hours, service, fees, payment and receipt layout. A change here is saved as a draft first; it takes effect only after it is submitted, approved and published in the last step.",
+        ),
+      };
+  }
+}
+/** One section of an open Store's setup, in the place it belongs to. */
+export interface StoreSetupPanel {
+  readonly place: Exclude<StoreSetupPlace, "changes">;
+  readonly key: string;
+  /** The section, told how to say "this person doesn't see me" (then its place is not offered). */
+  readonly render: (onHidden: () => void) => ReactNode;
+}
+/** The places an open Store's setup offers, as text links (no boxes, the selected one marked). */
+function StoreSetupPlaces({
+  storeReference,
+  places,
+  selected,
+}: {
+  readonly storeReference: string;
+  readonly places: readonly StoreSetupPlace[];
+  readonly selected: StoreSetupPlace;
+}) {
+  return (
+    <nav className="store-setup-places" aria-label={t("Store setup sections")}>
+      <ul>
+        {places.map((place) => (
+          <li key={place}>
+            <Link
+              to={storeSetupPlaceHref(storeReference, place)}
+              aria-current={place === selected ? "page" : undefined}
+            >
+              {storeSetupPlaceText(place).name}
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </nav>
   );
 }
 /**
@@ -428,6 +542,7 @@ export function StoreSetupDraftPage({
   taxClassificationsHref,
   fetcher,
   staffRoles,
+  panels,
 }: {
   readonly storeReference: string;
   readonly csrf: string;
@@ -444,8 +559,14 @@ export function StoreSetupDraftPage({
    * folded), for people who may change roles.
    */
   readonly staffRoles?: ReactNode;
+  /**
+   * b18: the Store's own sections (name and contact, receipts, kitchen, permissions), each in its
+   * place. On a first Store they all sit folded under the one page, as before.
+   */
+  readonly panels?: readonly StoreSetupPanel[];
 }) {
   const { id } = useParams(),
+    { search, hash } = useLocation(),
     client = useMemo(() => injected ?? createStoreSetupClient(), [injected]),
     feeClient = useMemo(() => createStoreSetupClient(), []);
   const [workspace, setWorkspace] = useState<StoreSetupWorkspace | null>(null),
@@ -836,6 +957,42 @@ export function StoreSetupDraftPage({
       )}
     </>
   );
+  // b18: which places this person is offered. A section that says it is not for them drops out;
+  // a place none of whose sections are for them is not offered. The draft place is not offered to
+  // someone the setup read refuses (a Store Manager); a read that failed says so there.
+  const [hiddenPanels, setHiddenPanels] = useState<ReadonlySet<string>>(() => new Set());
+  const hidePanel = useCallback(
+    (key: string) => setHiddenPanels((old) => (old.has(key) ? old : new Set([...old, key]))),
+    [],
+  );
+  const hiders = useMemo(
+    () => new Map((panels ?? []).map((panel) => [panel.key, () => hidePanel(panel.key)])),
+    [panels, hidePanel],
+  );
+  const offered = storeSetupPlaces.filter((place) =>
+    place === "changes"
+      ? !ownerOnly
+      : (panels ?? []).some((panel) => panel.place === place && !hiddenPanels.has(panel.key)),
+  );
+  const asked = storeSetupPlaceOf(search, hash);
+  // An address for a place this person is not offered shows the first one they are.
+  const place: StoreSetupPlace =
+    asked !== null && offered.includes(asked) ? asked : (offered[0] ?? "profile");
+  const placeText = storeSetupPlaceText(place);
+  const renderedPanels = (only: StoreSetupPlace | null) =>
+    (panels ?? []).map((panel) => (
+      <div
+        key={panel.key}
+        className="store-setup-place__panel"
+        hidden={only !== null && panel.place !== only}
+      >
+        <Suspense fallback={only === panel.place ? <p role="status">{t("Loading…")}</p> : null}>
+          {panel.render(hiders.get(panel.key) ?? (() => undefined))}
+        </Suspense>
+      </div>
+    ));
+  const established = id === storeReference && !firstStore && !deciding;
+  const draftPlace = !established || place === "changes";
   return (
     <AppFrame
       className="store-setup-draft-page"
@@ -850,6 +1007,7 @@ export function StoreSetupDraftPage({
         refreshDisabled={busy || !online || id !== storeReference}
         onRefresh={() => void refresh()}
         firstStore={firstStore}
+        draft={draftPlace}
       />
       {publishedNote === null ? null : (
         <p role="status" className="store-opening__published">
@@ -866,23 +1024,44 @@ export function StoreSetupDraftPage({
           <p>{t("Choose this Store in the workspace before opening its setup.")}</p>
         </StatePanel>
       )}
-      {id === storeReference && !firstStore && !deciding && (opening !== "Loading" || setupAnswered)
-        ? children
-        : null}
+      {established && (opening !== "Loading" || setupAnswered) ? (
+        <>
+          <StoreSetupPlaces storeReference={storeReference} places={offered} selected={place} />
+          {/* The selected link names the place; one line says when a change here takes effect. */}
+          <div
+            className="store-setup-place"
+            id={place === "changes" ? "store-setup-changes" : undefined}
+          >
+            <p className="store-setup-place__lead">{placeText.lead}</p>
+            {place === "changes" ? (
+              <p className="store-setup-place__lead">
+                {t("The name, address and phone customers see are in")}{" "}
+                <Link to={storeSetupPlaceHref(storeReference, "profile")}>
+                  {t("Store details")}
+                </Link>
+                {t(", where a change is live as soon as you save it.")}
+              </p>
+            ) : null}
+          </div>
+          {children}
+          {renderedPanels(place === "changes" ? "changes" : place)}
+        </>
+      ) : null}
       {!online && (
         <p role="status">
           {t("Offline. Your local edits are retained. Reconnect and refresh before saving.")}
         </p>
       )}
-      {firstStore ? null : stepsStatus}
+      {firstStore || !draftPlace ? null : stepsStatus}
       {deciding ? <p role="status">{t("Loading…")}</p> : null}
-      {workspace && !deciding && (
+      {workspace && !deciding && (firstStore || place === "changes") && (
         <FirstStoreFold
           active={firstStore}
           status={stepsStatus}
           sections={
             <StoreProfilePublishedContext.Provider value={profilePublished}>
               {children}
+              {renderedPanels(null)}
             </StoreProfilePublishedContext.Provider>
           }
           panel={
@@ -925,7 +1104,7 @@ export function StoreSetupDraftPage({
                 <dt>{t("Store")}</dt>
                 <dd>{workspace.store.displayName}</dd>
                 <dt>{t("Language")}</dt>
-                <dd>{languageName(workspace.store.locale)}</dd>
+                <dd>{plainLanguageName(workspace.store.locale)}</dd>
                 <dt>{t("Currency")}</dt>
                 <dd>
                   {workspace.store.currencyCode === "CAD"
@@ -936,9 +1115,7 @@ export function StoreSetupDraftPage({
                 <dd>{timeZoneLabel(workspace.store.timeZone)}</dd>
                 <dt>{t("Saved draft")}</dt>
                 <dd>
-                  {workspace.setup.snapshot
-                    ? t("Revision {revision}", { revision: workspace.setup.snapshot.revision })
-                    : t("No draft saved yet")}
+                  {workspace.setup.snapshot ? t("A draft is saved") : t("No draft saved yet")}
                 </dd>
               </dl>
             )}
@@ -1484,18 +1661,17 @@ export function StoreSetupDraftPage({
               disabled={disabled}
               onClick={() => void save()}
             >
-              {t("Save setup draft")}
+              {t("Save as draft")}
             </button>
             <button type="button" disabled={disabled || !dirty} onClick={() => void refresh(true)}>
-              {t("Discard local edits")}
+              {t("Discard unsaved changes")}
             </button>
           </footer>
         </FirstStoreFold>
       )}
-      {id === storeReference &&
-      !deciding &&
-      (opening !== "Loading" || setupAnswered) &&
-      staffRoles !== undefined ? (
+      {/* b18: the store-type question ("What kind of store is this?") is an opening question:
+          asked on a first Store only. An open Store's owner finds the same starter roles on Roles. */}
+      {id === storeReference && firstStore && staffRoles !== undefined ? (
         <Suspense fallback={null}>{staffRoles}</Suspense>
       ) : null}
     </AppFrame>
@@ -2901,7 +3077,7 @@ export function StoreSetupLiveSettings({
           content.paymentConfigurationReference.state !== "Configured") && (
           <li>
             {t(
-              "Address, contact details and payment settings: the ones the Store runs with today were set when it was installed and cannot be carried over. Enter them in step 2 (address), step 7 (contact) and step 5 (payment), save each, choose “Use saved”, then save the setup draft. They can be the same as the name and contact shown to customers above.",
+              "Address, contact details and payment settings: the ones the Store runs with today were set when it was installed and cannot be carried over. Enter them in step 2 (address), step 7 (contact) and step 5 (payment), save each, choose “Use saved”, then save the setup draft. They can be the same as the name and contact customers see in Store details.",
             )}
           </li>
         )}

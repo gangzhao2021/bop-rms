@@ -15,7 +15,14 @@ import { SourceTime } from "./StoreTime.js";
  * screen per Store, dishes divided by kitchen sections). A dish the line can't take is named here
  * before an order strands. A change applies to orders confirmed from then on.
  */
-export function StoreKitchenSetupPanel({ csrf }: { readonly csrf: string }) {
+export function StoreKitchenSetupPanel({
+  csrf,
+  onHidden,
+}: {
+  readonly csrf: string;
+  /** b18: told when this person isn't shown the kitchen setup. */
+  readonly onHidden?: () => void;
+}) {
   const client = useMemo(() => createStoreKitchenSetupClient({ csrf }), [csrf]);
   const [view, setView] = useState<StoreKitchenSetupView | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "denied" | "unavailable">("loading");
@@ -72,6 +79,9 @@ export function StoreKitchenSetupPanel({ csrf }: { readonly csrf: string }) {
       setBusy(false);
     }
   };
+  useEffect(() => {
+    if (state === "denied") onHidden?.();
+  }, [state, onHidden]);
   if (state === "denied") return null;
   return (
     <section

@@ -67,9 +67,12 @@ export function SoleOperatorSection({
   onChanged,
   verifiedUntil,
   onVerified,
+  onHidden,
 }: {
   readonly csrf: string;
   readonly fetcher?: typeof fetch | undefined;
+  /** b18: told when this person isn't shown the setting (only the Brand Owner is). */
+  readonly onHidden?: (() => void) | undefined;
   /** The signed-in member's verification, shared with the rest of the page. */
   readonly verifiedUntil: string | null;
   readonly onVerified: (validUntil: string) => void;
@@ -85,6 +88,8 @@ export function SoleOperatorSection({
   const [message, setMessage] = useState<{ tone: "status" | "alert"; text: string } | null>(null);
   // A PIN sign-in was refused: show the "Verify it's you" step; the retry keeps the same change.
   const [fullSignIn, setFullSignIn] = useState(false);
+  // b18: the newest changes show; "Show all" lists every change this read returned.
+  const [allChanges, setAllChanges] = useState(false);
   // One identity per intended change: a retry after an unknown result is recorded once.
   const operation = useRef(serviceOperationReference());
   const reload = useCallback(() => setRefresh((value) => value + 1), []);
@@ -113,6 +118,9 @@ export function SoleOperatorSection({
     return () => controller.abort();
     // onVerified only shares a newer verification; the read follows refresh alone.
   }, [refresh]);
+  useEffect(() => {
+    if (status === "Hidden") onHidden?.();
+  }, [status, onHidden]);
   if (status === "Hidden" || status === "Loading") return null;
   if (status === "Unavailable" || view === null)
     return (
@@ -125,7 +133,8 @@ export function SoleOperatorSection({
     );
   const target = view.state === "On" ? "Off" : "On";
   const shownChanges = 5;
-  const earlierChanges = soleOperatorEarlierChangeCount(view, shownChanges);
+  const listed = allChanges ? view.history.length : shownChanges;
+  const earlierChanges = soleOperatorEarlierChangeCount(view, listed);
   const verified = verifiedUntil !== null && Date.parse(verifiedUntil) > Date.now();
   const submit = async () => {
     if (busy || reason === "" || !verified) return;
@@ -194,7 +203,6 @@ export function SoleOperatorSection({
           <dt>{t("Sole operator")}</dt>
           <dd>
             <strong>{systemText(view.state)}</strong>
-            {view.version > 0 ? t(" · setting change {version}", { version: view.version }) : ""}
           </dd>
         </div>
         <div>
@@ -207,12 +215,22 @@ export function SoleOperatorSection({
         <section aria-labelledby="sole-operator-history-heading" className="sole-operator-history">
           <h3 id="sole-operator-history-heading">{t("Recent changes")}</h3>
           <ol>
-            {view.history.slice(0, shownChanges).map((entry) => (
-              <li key={entry.version}>
-                {t("Change")} {entry.version}: {soleOperatorChangeText(entry)}
-              </li>
+            {view.history.slice(0, listed).map((entry) => (
+              <li key={entry.version}>{soleOperatorChangeText(entry)}</li>
             ))}
           </ol>
+          {view.history.length > shownChanges ? (
+            <button
+              type="button"
+              className="sole-operator-history__toggle"
+              aria-expanded={allChanges}
+              onClick={() => setAllChanges((value) => !value)}
+            >
+              {allChanges
+                ? t("Show fewer")
+                : t("Show {count} more", { count: view.history.length - shownChanges })}
+            </button>
+          ) : null}
           {earlierChanges > 0 ? (
             <p>
               {earlierChanges === 1
@@ -278,9 +296,11 @@ export function SoleOperatorSection({
 export function StoreSoleOperatorPanel({
   csrf,
   fetcher,
+  onHidden,
 }: {
   readonly csrf: string;
   readonly fetcher?: typeof fetch | undefined;
+  readonly onHidden?: () => void;
 }) {
   const [verifiedUntil, setVerifiedUntil] = useState<string | null>(null);
   return (
@@ -289,6 +309,7 @@ export function StoreSoleOperatorPanel({
       fetcher={fetcher}
       verifiedUntil={verifiedUntil}
       onVerified={setVerifiedUntil}
+      onHidden={onHidden}
     />
   );
 }

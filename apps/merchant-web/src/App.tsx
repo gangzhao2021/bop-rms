@@ -64,6 +64,7 @@ import type { MerchantDemoClients } from "./merchant-demo.js";
 import type { MerchantBrandWorkspaceClient } from "./merchant-brand-workspace.js";
 import { FULL_SIGN_IN_REQUIRED, needsFullSignIn } from "./full-sign-in.js";
 import { lazyModule, lazyPage, PageChunkBoundary, WithModule } from "./route-chunks.js";
+import type { StoreSetupPanel } from "./StoreSetupDraftPage.js";
 import {
   createMerchantWorkspaceClient,
   MerchantOrganizationNotActive,
@@ -98,6 +99,50 @@ const StorePublicProfilePanel = lazyPage(
   () => import("./StorePublicProfilePanel.js"),
   "StorePublicProfilePanel",
 );
+/**
+ * b18 (Owner 2026-11-14 "先改吧，太多了我记不住"): the Store's own sections, each in the place of
+ * Store setup it belongs to. Each keeps its owner, its commands and who may see it.
+ */
+function storeSetupPanels(csrf: string, approvals: boolean): readonly StoreSetupPanel[] {
+  return [
+    // WP-2423 DEC-STORE-CUSTOMER-NAME: the name, address and phone customers see.
+    {
+      place: "profile",
+      key: "profile",
+      render: (onHidden) => <StorePublicProfilePanel csrf={csrf} onHidden={onHidden} />,
+    },
+    // WP-2423 Q15/Q16: receipt registrations and the privacy notice link.
+    {
+      place: "receipts",
+      key: "receipts",
+      render: (onHidden) => <StoreReceiptPrivacyPanel csrf={csrf} onHidden={onHidden} />,
+    },
+    // WP-2423 item 11: guests can't order until the kitchen is set up.
+    {
+      place: "kitchen",
+      key: "kitchen",
+      render: (onHidden) => <StoreKitchenSetupPanel csrf={csrf} onHidden={onHidden} />,
+    },
+    // WP-2423 取舍 15: the Owner's say over platform support, and the log.
+    {
+      place: "access",
+      key: "support",
+      render: (onHidden) => <StoreSupportAccessPanel csrf={csrf} onHidden={onHidden} />,
+    },
+    // Owner 2026-10-25: moved here from Approvals; only for those who see Approvals.
+    ...(approvals
+      ? [
+          {
+            place: "access" as const,
+            key: "sole-operator",
+            render: (onHidden: () => void) => (
+              <StoreSoleOperatorPanel csrf={csrf} onHidden={onHidden} />
+            ),
+          },
+        ]
+      : []),
+  ];
+}
 const RefundPaymentPage = lazyPage(() => import("./RefundPaymentPage.js"), "RefundPaymentPage");
 const DiningSessionWorkspace = lazyPage(
   () => import("./DiningSessionWorkspace.js"),
@@ -1051,22 +1096,12 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                     )
                       ? { staffRoles: <StoreStarterRolesPanel csrf={state.csrf} /> }
                       : {})}
-                  >
-                    {/* WP-2423 DEC-STORE-CUSTOMER-NAME: the name, address and phone customers see. */}
-                    <StorePublicProfilePanel csrf={state.csrf} />
-                    {/* WP-2423 item 11: guests can't order until the kitchen is set up. */}
-                    <StoreKitchenSetupPanel csrf={state.csrf} />
-                    {/* WP-2423 取舍 15: the Owner's say over platform support, and the log. */}
-                    <StoreSupportAccessPanel csrf={state.csrf} />
-                    {/* WP-2423 Q15/Q16: receipt registrations and the privacy notice link. */}
-                    <StoreReceiptPrivacyPanel csrf={state.csrf} />
-                    {/* Owner 2026-10-25: moved here from Approvals; hidden for other roles. */}
-                    {state.workspace.navigation.some(
-                      (item) => item.screenId === "APPROVAL-INBOX",
-                    ) ? (
-                      <StoreSoleOperatorPanel csrf={state.csrf} />
-                    ) : null}
-                  </StoreSetupDraftPage>
+                    /* b18 (Owner 2026-11-14): each section in its own place of Store setup. */
+                    panels={storeSetupPanels(
+                      state.csrf,
+                      state.workspace.navigation.some((item) => item.screenId === "APPROVAL-INBOX"),
+                    )}
+                  />
                 ) : (
                   <StatePanel heading={t("Store setup unavailable")} status>
                     <p>{t("A current merchant session and selected Store are required.")}</p>

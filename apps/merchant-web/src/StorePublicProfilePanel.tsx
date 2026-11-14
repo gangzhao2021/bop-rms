@@ -56,6 +56,25 @@ export function languageName(locale: string): string {
   }
 }
 
+/**
+ * b18 (Owner 2026-11-14): the field says which language the name is in, plainly (店名（英文）),
+ * not the browser's long region name ("加拿大英语").
+ */
+export function storeNameLabel(locale: string): string {
+  const primary = locale.split("-")[0]?.toLowerCase() ?? locale;
+  if (primary === "en") return t("Store name customers see (English)");
+  if (primary === "zh") return t("Store name customers see (Chinese)");
+  if (primary === "fr") return t("Store name customers see (French)");
+  return t("Store name customers see ({locale})", { locale: languageName(primary) });
+}
+/** An example name in the field's own language: an English name is never shown a Chinese one. */
+export function storeNameExample(locale: string): string {
+  const primary = locale.split("-")[0]?.toLowerCase() ?? locale;
+  if (primary === "zh") return t("For example “枫叶面馆 国王街店”.");
+  if (primary === "fr") return t("For example “Maison des nouilles Érable – rue King”.");
+  return t("For example “Maple Noodle House – King Street”.");
+}
+
 function fieldsOf(view: StorePublicProfileView): StorePublicProfileFields {
   const current = view.current;
   const names: Record<string, string> = {};
@@ -117,9 +136,12 @@ export function storePublicProfileFieldErrors(
 export function StorePublicProfilePanel({
   csrf,
   client: injected,
+  onHidden,
 }: {
   readonly csrf: string;
   readonly client?: ReturnType<typeof createStorePublicProfileClient>;
+  /** b18: told when this person isn't shown these details, so Store setup doesn't offer the place. */
+  readonly onHidden?: () => void;
 }) {
   const client = useMemo(
     () => injected ?? createStorePublicProfileClient({ csrf }),
@@ -151,6 +173,9 @@ export function StorePublicProfilePanel({
   useEffect(() => {
     void load();
   }, [load]);
+  useEffect(() => {
+    if (status === "Hidden") onHidden?.();
+  }, [status, onHidden]);
   if (status === "Hidden") return null;
   if (status === "Loading")
     return (
@@ -214,7 +239,7 @@ export function StorePublicProfilePanel({
       setMessage({
         tone: "status",
         text: t(
-          "Published. Customers see these details the next time a page opens or refreshes, and receipts issued from now on use this name. Receipts already issued keep the name they were issued with.",
+          "Saved and live. Customers see these details the next time a page opens or refreshes, and receipts issued from now on use this name. Receipts already issued keep the name they were issued with.",
         ),
       });
       await load();
@@ -229,7 +254,7 @@ export function StorePublicProfilePanel({
             ? t("Check the highlighted details and try again.")
             : code === "Conflict"
               ? t(
-                  "Someone published new details since you opened this page. They have been reloaded — check them and publish again.",
+                  "Someone saved new details since you opened this page. They have been reloaded — check them and save again.",
                 )
               : code === "NoChange"
                 ? t("Nothing changed — customers already see these details.")
@@ -310,7 +335,7 @@ export function StorePublicProfilePanel({
       </p>
       {view.current !== null ? (
         <p className="receipt-privacy__hint">
-          {t("Last published")} <SourceTime instant={view.current.publishedAt} />
+          {t("Live since")} <SourceTime instant={view.current.publishedAt} />
         </p>
       ) : (
         <p role="note">
@@ -328,12 +353,10 @@ export function StorePublicProfilePanel({
         {view.locales.map((locale) =>
           input(
             "name-" + locale,
-            view.locales.length > 1
-              ? t("Store name customers see ({locale})", { locale: languageName(locale) })
-              : t("Store name customers see"),
+            view.locales.length > 1 ? storeNameLabel(locale) : t("Store name customers see"),
             fields.names[locale] ?? "",
             (next) => update({ names: { ...fields.names, [locale]: next } }),
-            { hint: t("For example “Maple Noodle House – King Street”.") },
+            { hint: storeNameExample(locale) },
           ),
         )}
         {fields.addressLines.map((line, index) =>
@@ -405,7 +428,7 @@ export function StorePublicProfilePanel({
         {view.canChange ? (
           <div className="card-actions">
             <button type="submit" data-variant="primary" disabled={busy}>
-              {busy ? t("Publishing…") : t("Publish name and contact details")}
+              {busy ? t("Saving…") : t("Save and make live")}
             </button>
           </div>
         ) : null}

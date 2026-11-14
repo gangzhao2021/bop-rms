@@ -11,6 +11,10 @@ import { MemoryRouter } from "react-router";
 import {
   StoreSetupDraftPage,
   StoreSetupHeader,
+  storeSetupPlaceHref,
+  storeSetupPlaceOf,
+  storeSetupPlaces,
+  storeSetupPlaceText,
   storeSetupOwnerOnly,
   StoreSetupFeeContextEditor,
   validateStoreSetupFeeSelections,
@@ -369,9 +373,41 @@ it("the ordinary route shell offers refresh without fake Store facts", () => {
       <StoreSetupDraftPage storeReference={id(3)} csrf={csrf} />
     </MemoryRouter>,
   );
-  expect(html).toContain("Refresh saved setup");
-  expect(html).toContain("Saving a draft does not change the live Store");
+  // b18: before anything is read the page is a draft page (a first Store, or the approval place).
+  expect(html).toContain("Reload the saved draft");
+  expect(html).not.toContain("Saving a draft does not change the live Store");
   expect(html).not.toContain("Synthetic store");
+});
+it("b18: an open Store's setup is a few places, each saying when a change takes effect", () => {
+  expect(storeSetupPlaceOf("?section=receipts", "")).toBe("receipts");
+  expect(storeSetupPlaceOf("", "#kitchen-setup")).toBe("kitchen");
+  expect(storeSetupPlaceOf("", "#support-access")).toBe("access");
+  expect(storeSetupPlaceOf("", "#sole-operator")).toBe("access");
+  expect(storeSetupPlaceOf("", "#store-public-profile")).toBe("profile");
+  expect(storeSetupPlaceOf("?section=unknown", "")).toBeNull();
+  expect(storeSetupPlaceOf("?section=changes", "#kitchen-setup")).toBe("changes");
+  expect(storeSetupPlaceHref(id(3), "profile")).toBe(`/app/organization/stores/${id(3)}/setup`);
+  expect(storeSetupPlaceHref(id(3), "access")).toBe(
+    `/app/organization/stores/${id(3)}/setup?section=access`,
+  );
+  for (const place of storeSetupPlaces) {
+    const { name, lead } = storeSetupPlaceText(place);
+    expect(name).not.toBe("");
+    // Every place says plainly whether a change is live at once or a draft that needs approval.
+    expect(lead).toMatch(place === "changes" ? /draft first.*approved/u : /live/u);
+    expect(findInternalText([name, lead])).toEqual([]);
+  }
+  // Only the draft place talks about drafts.
+  const live = renderToStaticMarkup(
+    <StoreSetupHeader
+      ownerOnly={false}
+      displayName="Synthetic store"
+      refreshDisabled={false}
+      onRefresh={() => undefined}
+      draft={false}
+    />,
+  );
+  expect(live).not.toContain("draft");
 });
 it("a Store Manager refused the setup read sees the page read-only, not a permission error (v15)", async () => {
   // The real client turns the server's 403 on the setup read into Denied.
@@ -399,7 +435,7 @@ it("a Store Manager refused the setup read sees the page read-only, not a permis
     />,
   );
   expect(html).toContain("Only the Owner can change Store setup.");
-  expect(html).not.toContain("Refresh saved setup");
+  expect(html).not.toContain("Reload the saved draft");
   expect(html).not.toContain("Saving a draft");
   expect(html).not.toContain("does not allow");
   expect(findInternalText([staticText(html)])).toEqual([]);
@@ -411,7 +447,7 @@ it("a Store Manager refused the setup read sees the page read-only, not a permis
       onRefresh={() => undefined}
     />,
   );
-  expect(owner).toContain("Refresh saved setup");
+  expect(owner).toContain("Reload the saved draft");
   expect(owner).not.toContain("Only the Owner");
 });
 it("normal save reacquires exact current root and reserves before its first write, then refreshes before cleanup", async () => {

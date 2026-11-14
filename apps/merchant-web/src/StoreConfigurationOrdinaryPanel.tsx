@@ -820,7 +820,7 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
               {t(". It can no longer be approved or published. {value}", {
                 value: setupOutdated
                   ? t(
-                      "To create a new configuration, save the setup again (Save setup draft, it then builds on the latest configuration), then create it.",
+                      "To create a new configuration, save the setup again (Save as draft, it then builds on the latest configuration), then create it.",
                     )
                   : t("Create a new configuration from the saved setup."),
               })}

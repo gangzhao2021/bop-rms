@@ -24,12 +24,111 @@ function logText(entry: StoreSupportLogEntry): string {
   return t("Tried something that was refused; nothing changed");
 }
 
+/** How many of the newest records show before "Show all". */
+export const supportLogShown = 5;
+
+/**
+ * b18 (Owner 2026-11-14): the log leads with what support changed or tried, the lines that matter;
+ * the many "looked" lines are counted, and every record the Store's log returned is one click away
+ * ("Show all"). Collapsed only on screen: nothing is left out or removed.
+ */
+export function supportLogSummary(log: readonly StoreSupportLogEntry[]) {
+  const acted = log.filter((entry) => entry.kind !== "Viewed");
+  const looked = log.filter((entry) => entry.kind === "Viewed");
+  return { acted, looks: looked.length, lastLook: looked[0]?.occurredAt ?? null };
+}
+
+function SupportLogTable({ log }: { readonly log: readonly StoreSupportLogEntry[] }) {
+  return (
+    <table className="support-access__log">
+      <thead>
+        <tr>
+          <th scope="col">{t("When")}</th>
+          <th scope="col">{t("Who")}</th>
+          <th scope="col">{t("What")}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {log.map((entry, index) => (
+          <tr key={entry.occurredAt + index}>
+            <td data-label={t("When")}>
+              <SourceTime instant={entry.occurredAt} />
+            </td>
+            <td data-label={t("Who")}>{entry.supportName}</td>
+            <td data-label={t("What")}>{logText(entry)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function SupportAccessLog({ log }: { readonly log: readonly StoreSupportLogEntry[] }) {
+  const [all, setAll] = useState(false);
+  if (log.length === 0)
+    return (
+      <>
+        <h4>{t("Support access log")}</h4>
+        <p>{t("Platform support hasn't opened your Store yet.")}</p>
+      </>
+    );
+  const { acted, looks, lastLook } = supportLogSummary(log);
+  return (
+    <>
+      <h4>{t("What support changed or tried")}</h4>
+      {acted.length === 0 ? (
+        <p>{t("Platform support hasn't changed or tried to change anything.")}</p>
+      ) : (
+        <SupportLogTable log={acted.slice(0, supportLogShown)} />
+      )}
+      {looks === 0 ? null : (
+        <p>
+          {looks === 1
+            ? t("Support looked at your Store once, last")
+            : t("Support looked at your Store {looks} times, last", { looks })}{" "}
+          {lastLook === null ? null : <SourceTime instant={lastLook} />}
+        </p>
+      )}
+      <h4>{t("Support access log")}</h4>
+      {all ? (
+        <>
+          <SupportLogTable log={log} />
+          <button type="button" className="support-access__toggle" onClick={() => setAll(false)}>
+            {t("Show fewer")}
+          </button>
+        </>
+      ) : (
+        <>
+          <SupportLogTable log={log.slice(0, supportLogShown)} />
+          {log.length > supportLogShown ? (
+            <button
+              type="button"
+              className="support-access__toggle"
+              aria-expanded={false}
+              onClick={() => setAll(true)}
+            >
+              {t("Show all {count} records", { count: log.length })}
+            </button>
+          ) : null}
+        </>
+      )}
+    </>
+  );
+}
+
 /**
  * WP-2423 取舍 15 (Owner 2026-10-28): Store setup → "Platform support", the Owner's own. Support may
  * look without asking; here the Owner says whether they may also change settings, for how long, and
  * reads everything they did. Off is the default. The Owner can do everything without support.
  */
-export function StoreSupportAccessPanel({ csrf }: { readonly csrf: string }) {
+export function StoreSupportAccessPanel({
+  csrf,
+  onHidden,
+}: {
+  readonly csrf: string;
+  /** b18: told when this person isn't shown platform support. */
+  readonly onHidden?: () => void;
+}) {
   const [view, setView] = useState<StoreSupportAccessView | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "hidden" | "unavailable">("loading");
   const [message, setMessage] = useState<string | null>(null);
@@ -49,6 +148,9 @@ export function StoreSupportAccessPanel({ csrf }: { readonly csrf: string }) {
   useEffect(() => {
     void load();
   }, [load]);
+  useEffect(() => {
+    if (state === "hidden") onHidden?.();
+  }, [state, onHidden]);
   if (state === "hidden" || state === "loading") return null;
   const change = async (mode: StoreSupportMode, hours: 1 | 4 | 24 | null, done: string) => {
     if (view === null || busy) return;
@@ -140,31 +242,7 @@ export function StoreSupportAccessPanel({ csrf }: { readonly csrf: string }) {
               "Whatever you allow here, support can never take payment, refund, comp, discount or void, or change staff, roles or payment accounts. Those stay yours, and you can do everything here without support.",
             )}
           </p>
-          <h4>{t("Support access log")}</h4>
-          {view.log.length === 0 ? (
-            <p>{t("Platform support hasn't opened your Store yet.")}</p>
-          ) : (
-            <table className="support-access__log">
-              <thead>
-                <tr>
-                  <th scope="col">{t("When")}</th>
-                  <th scope="col">{t("Who")}</th>
-                  <th scope="col">{t("What")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {view.log.map((entry, index) => (
-                  <tr key={entry.occurredAt + index}>
-                    <td data-label={t("When")}>
-                      <SourceTime instant={entry.occurredAt} />
-                    </td>
-                    <td data-label={t("Who")}>{entry.supportName}</td>
-                    <td data-label={t("What")}>{logText(entry)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+          <SupportAccessLog log={view.log} />
         </>
       )}
       {message === null ? null : <p role="status">{message}</p>}

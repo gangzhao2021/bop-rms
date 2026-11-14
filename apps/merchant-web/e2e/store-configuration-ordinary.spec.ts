@@ -1068,7 +1068,7 @@ test("someone else's open configuration is shown, cannot be replaced and can be 
   await expect(panel(page)).toContainText("Version 1 was declined by you");
   // The saved setup was made before that version: it must be saved again first (said plainly).
   await expect(panel(page)).toContainText(
-    "To create a new configuration, save the setup again (Save setup draft, it then builds on the latest configuration), then create it.",
+    "To create a new configuration, save the setup again (Save as draft, it then builds on the latest configuration), then create it.",
   );
   await expect(panel(page)).not.toContainText("changed after this setup was saved");
   await expect(

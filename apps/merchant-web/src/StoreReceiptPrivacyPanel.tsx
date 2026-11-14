@@ -98,9 +98,12 @@ export function receiptPrivacyFieldErrors(fields: Fields): Partial<Record<keyof 
 export function StoreReceiptPrivacyPanel({
   csrf,
   client: injected,
+  onHidden,
 }: {
   readonly csrf: string;
   readonly client?: ReturnType<typeof createStoreReceiptProfileClient>;
+  /** b18: told when this person isn't shown these details. */
+  readonly onHidden?: () => void;
 }) {
   const client = useMemo(
     () => injected ?? createStoreReceiptProfileClient({ csrf }),
@@ -131,6 +134,9 @@ export function StoreReceiptPrivacyPanel({
   useEffect(() => {
     void load();
   }, [load]);
+  useEffect(() => {
+    if (status === "Hidden") onHidden?.();
+  }, [status, onHidden]);
   if (status === "Hidden") return null;
   if (status === "Loading")
     return (
@@ -193,7 +199,7 @@ export function StoreReceiptPrivacyPanel({
       setMessage({
         tone: "status",
         text: t(
-          "Saved. Receipts issued from now on show these details; receipts already issued are not changed.",
+          "Saved and live. Receipts issued from now on show these details; receipts already issued are not changed.",
         ),
       });
       await load();
@@ -284,7 +290,7 @@ export function StoreReceiptPrivacyPanel({
       <ReceiptSetupNotice gaps={view.gaps} />
       {view.recordedAt !== null ? (
         <p className="receipt-privacy__hint">
-          {t("Last saved")} <SourceTime instant={view.recordedAt} />
+          {t("Live since")} <SourceTime instant={view.recordedAt} />
         </p>
       ) : null}
       {!view.canChange ? <p role="note">{t("Only the Owner can change these details.")}</p> : null}
@@ -328,7 +334,7 @@ export function StoreReceiptPrivacyPanel({
         {view.canChange ? (
           <div className="card-actions">
             <button type="submit" data-variant="primary" disabled={busy}>
-              {busy ? t("Saving…") : t("Save receipt and privacy details")}
+              {busy ? t("Saving…") : t("Save and make live")}
             </button>
           </div>
         ) : null}

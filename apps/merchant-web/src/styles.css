@@ -10467,3 +10467,194 @@ tr[data-drop-target="true"] {
 .workspace-reconnect__retry p {
   color: var(--bop-color-text-muted);
 }
+
+/* b18 (Owner 2026-11-14): an open Store's setup in a few places. The places are text links in the
+   accent colour, the selected one marked by weight and a line under it; each place's sections
+   follow the v3 rules (white, no boxes, single bottom-line fields, accent text buttons, one solid
+   button for the step that saves). */
+.store-setup-places {
+  margin-block: var(--bop-space-6) var(--bop-space-2);
+}
+.store-setup-places ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--bop-space-6);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.store-setup-places a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  border-bottom: 3px solid transparent;
+  color: var(--bop-color-accent);
+  font-size: 16px;
+  font-weight: 400;
+  text-decoration: none;
+}
+.store-setup-places a[aria-current="page"] {
+  border-bottom-color: var(--bop-color-accent);
+  font-weight: 600;
+}
+.store-setup-places a:focus-visible {
+  outline: 3px solid var(--bop-color-focus);
+  outline-offset: 2px;
+}
+.store-setup-place {
+  margin-block: var(--bop-space-2) var(--bop-space-6);
+  max-width: 44rem;
+}
+.store-setup-place__lead {
+  margin: 0 0 var(--bop-space-2);
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.store-setup-place__lead a {
+  color: var(--bop-color-accent);
+}
+.store-setup-place__panel > :is(section, div) {
+  margin-block: 0 var(--bop-space-8);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+.store-setup-place__panel :is(h2, h3) {
+  margin: 0 0 var(--bop-space-2);
+  font-size: 20px;
+  font-weight: 600;
+}
+.store-setup-place__panel h4 {
+  margin: var(--bop-space-6) 0 var(--bop-space-2);
+  font-size: 16px;
+  font-weight: 600;
+}
+.store-setup-place__panel p {
+  font-size: 14px;
+}
+.store-setup-draft-page .store-setup-place__panel input:not([type="checkbox"], [type="radio"]),
+.store-setup-draft-page .store-setup-place__panel select {
+  width: 100%;
+  min-height: 44px;
+  padding: var(--bop-space-2) 0;
+  border: 0;
+  border-bottom: 1px solid var(--bop-color-border-control);
+  border-radius: 0;
+  background: var(--bop-color-surface-default);
+}
+.store-setup-draft-page
+  .store-setup-place__panel
+  input:not([type="checkbox"], [type="radio"]):focus,
+.store-setup-draft-page .store-setup-place__panel select:focus {
+  border-bottom-color: var(--bop-color-text-default);
+}
+.store-setup-draft-page .store-setup-place__panel input[aria-invalid="true"] {
+  border-bottom-color: var(--bop-color-danger-mark);
+}
+.store-setup-draft-page .store-setup-place__panel button {
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: var(--bop-color-accent);
+  background: none;
+}
+.store-setup-draft-page .store-setup-place__panel button[data-variant="primary"] {
+  padding: 0 var(--bop-space-5);
+  border-radius: var(--bop-radius-control);
+  color: var(--bop-color-on-primary);
+  background: var(--bop-color-accent);
+  font-weight: 600;
+}
+.store-setup-place__panel .card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--bop-space-2) var(--bop-space-6);
+}
+.store-setup-place__panel p,
+.store-setup-place__panel .card-actions,
+.store-setup-place__panel dl {
+  max-width: 48rem;
+}
+.store-setup-place__panel .sole-operator-history h3 {
+  margin-top: var(--bop-space-6);
+  font-size: 16px;
+}
+.store-setup-place__panel .support-access__log {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.store-setup-place__panel .support-access__log :is(th, td) {
+  padding: var(--bop-space-2) var(--bop-space-4) var(--bop-space-2) 0;
+  border: 0;
+  text-align: start;
+  vertical-align: top;
+}
+.store-setup-place__panel .support-access__log th {
+  color: var(--bop-color-text-muted);
+  font-weight: 400;
+}
+.store-setup-place__panel .support-access__log tbody tr + tr td {
+  border-top: 1px solid var(--bop-color-row-divider);
+}
+.store-setup-place__panel .sole-operator-history ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 14px;
+}
+.store-setup-place__panel .sole-operator-history li {
+  padding-block: var(--bop-space-2);
+}
+.store-setup-place__panel .sole-operator-history li + li {
+  border-top: 1px solid var(--bop-color-row-divider);
+}
+@media (max-width: 640px) {
+  .store-setup-places ul {
+    gap: 0 var(--bop-space-4);
+  }
+  .store-setup-draft-page .store-setup-place__panel button[data-variant="primary"] {
+    width: 100%;
+  }
+}
+/* b18: the steps of "Settings that need approval" follow the same v3 rules: the steps are accent
+   text (the current one marked), the step that saves is the one solid button, the rest are text. */
+.store-setup-draft-page .store-setup-steps ol {
+  gap: 0 var(--bop-space-4);
+}
+.store-setup-draft-page .store-setup-steps button,
+.store-setup-draft-page .store-setup-actions button,
+.store-setup-draft-page .screen-heading button {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: var(--bop-color-accent);
+  background: none;
+  font-weight: 400;
+  text-decoration: none;
+}
+.store-setup-draft-page .store-setup-steps button[aria-current="step"] {
+  border: 0;
+  border-bottom: 3px solid var(--bop-color-accent);
+  background: none;
+  font-weight: 600;
+  text-decoration: none;
+}
+.store-setup-draft-page .store-setup-actions {
+  gap: var(--bop-space-2) var(--bop-space-6);
+}
+.store-setup-draft-page .store-setup-actions button.store-setup-save {
+  padding: 0 var(--bop-space-5);
+  border-radius: var(--bop-radius-control);
+  color: var(--bop-color-on-primary);
+  background: var(--bop-color-accent);
+  font-weight: 600;
+}
+.store-setup-draft-page .store-setup-step-content {
+  padding-inline: 0;
+  border: 0;
+}

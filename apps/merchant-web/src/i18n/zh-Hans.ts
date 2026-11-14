@@ -401,7 +401,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "A code changed since this page loaded. The list is refreshed; print again.":
     "此页面加载后有桌台二维码已变更。列表已刷新；请重新打印。",
   "A configuration cannot be created yet: the saved setup still has {value} not set: {setupMissing}. Set {value2}, save the setup draft, then create the configuration.":
-    "暂时无法创建配置：已保存的设置中还有{value}未设置：{setupMissing}。请设置{value2}，保存设置草稿，然后创建配置。",
+    "暂时无法创建配置：已保存的设置中还有{value}未设置：{setupMissing}。请设置{value2}，存为草稿，然后创建配置。",
   "A current merchant session and Store are required.": "需要当前有效的商户登录和门店。",
   "A current merchant session and selected Store are required.":
     "需要当前有效的商户登录并已选择门店。",
@@ -807,8 +807,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Address line 1": "地址第 1 行",
   "Address line 2 (optional)": "地址第 2 行（可选）",
   "Address line 3 (optional)": "地址第 3 行（可选）",
-  "Address, contact details and payment settings: the ones the Store runs with today were set when it was installed and cannot be carried over. Enter them in step 2 (address), step 7 (contact) and step 5 (payment), save each, choose “Use saved”, then save the setup draft. They can be the same as the name and contact shown to customers above.":
-    '地址、联系方式和付款设置：门店目前使用的是安装时设置的，无法沿用。请在第 2 步（地址）、第 7 步（联系方式）和第 5 步（付款）中填写，分别保存，选择"使用已保存的"，然后保存设置草稿。它们可以与上方向顾客显示的名称和联系方式相同。',
+  "Address, contact details and payment settings: the ones the Store runs with today were set when it was installed and cannot be carried over. Enter them in step 2 (address), step 7 (contact) and step 5 (payment), save each, choose “Use saved”, then save the setup draft. They can be the same as the name and contact customers see in Store details.":
+    '地址、联系方式和付款设置：门店目前使用的是安装时设置的，无法沿用。请在第 2 步（地址）、第 7 步（联系方式）和第 5 步（付款）中填写，分别保存，选择"使用已保存的"，然后存为草稿。它们可以与「门店资料」里顾客看到的名称和联系方式相同。',
   "Adjust or void a posted goods receipt": "调整或作废已过账的收货单",
   "After you verify, choose Recover original payment save. If it shows the save did not go through, save again — your choices are kept.":
     '验证后，请选择"恢复原来的付款保存"。如果显示保存未成功，请再次保存 — 你的选择会保留。',
@@ -1360,7 +1360,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Choose up to 31 days, ending no later than today's business day.":
     "最多选择 31 天，结束日不能晚于今天的营业日。",
   "Choose whether this store uses a service charge, a delivery fee and tips, and which orders each one applies to. Saving the setup draft keeps these choices. It does not set fee amounts or tax rates, and customers are not charged anything new until the store settings are approved and published.":
-    "选择本店是否收取服务费、配送费和小费，以及各自适用于哪些订单。保存设置草稿会保留这些选择。它不设置费用金额或税率，在门店设置经批准并发布之前，不会向顾客收取任何新费用。",
+    "选择本店是否收取服务费、配送费和小费，以及各自适用于哪些订单。存为草稿会保留这些选择。它不设置费用金额或税率，在门店设置经批准并发布之前，不会向顾客收取任何新费用。",
   "Choose who collected it": "选择是谁取的",
   "Choose why": "选择原因",
   "Choose why first. The name and phone on the order then show here.":
@@ -1455,7 +1455,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Configuration request unavailable.": "暂时无法提交配置请求。",
   "Configuration response unavailable.": "暂时无法读取配置结果。",
   "Configuration saved. Choose it below, then save the setup draft to keep that selection.":
-    "配置已保存。请在下方选择它，然后保存设置草稿以保留所选。",
+    "配置已保存。请在下方选择它，然后存为草稿以保留所选。",
   "Configuration sent for approval.": "配置已提交审批。",
   "Configuration unavailable": "配置暂不可用",
   "Configuration unavailable. Check your access and retry.": "配置暂不可用。请检查你的权限后重试。",
@@ -1884,7 +1884,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Food-safety review recorded.": "已记录食品安全审核。",
   "For a business run by one owner with no one else who can approve. When it is on and you are the only person who can approve, you may approve your own changes: refunds that need approval (over $100, from an earlier business day or more than 24 hours after payment), new prices (price books and option prices), menus, recipes (including option recipes) and the allergen list, staff roles (giving someone a role), and the Store’s configuration (Store setup, opening hours and the receipt template) before you publish it. You still confirm with your authenticator code, every approval is recorded as approved by you alone, and the day-end settlement shows your own refund approvals for your review.":
     "适用于由一位店主经营、没有其他人可以批准的店。开启后，如果你是唯一可以批准的人，可以批准自己的更改：需要批准的退款（超过 $100、来自较早营业日或付款超过 24 小时）、新价格（价目表和选项价格）、菜单、配方（包括选项配方）和过敏原清单、员工角色（给员工分配角色），以及发布前的门店配置（门店设置、营业时间和收据模板）。你仍需用验证器验证码确认，每次批准都会记录为由你单独批准，日结会显示你自己批准的退款供你核对。",
-  "For example “Maple Noodle House – King Street”.": '例如"枫叶面馆 – King Street"。',
+  "For example “Maple Noodle House – King Street”.": '例如"Maple Noodle House – King Street"。',
   "For security, this screen signs out after {value} minutes without use.":
     "为了安全，此屏幕在 {value} 分钟无人使用后会退出登录。",
   "For someone who no longer works here: ends all their roles at this Store (and their Brand roles), ends their Store assignment and signs them out now. History stays on record.":
@@ -2194,7 +2194,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Keep the photo description to {altText} characters.": "照片描述请不超过 {altText} 个字符。",
   "Keep the receipt template in use today": "保留目前使用的收据模板",
   "Keep the template the Store issues receipts with today, or choose a saved template and check its currently effective version for this store language. Save the setup draft separately to keep the selection.":
-    "保留门店目前开收据所用的模板，或选择一个已保存的模板，并检查它在本店语言下当前生效的版本。请另外保存设置草稿以保留所选。",
+    "保留门店目前开收据所用的模板，或选择一个已保存的模板，并检查它在本店语言下当前生效的版本。请另外存为草稿以保留所选。",
   "Keep {value}": "保留{value}",
   "Kept for the history of products and fees that used them; they can’t be chosen.":
     "为使用过它们的商品和费用保留记录；不能被选择。",
@@ -3047,7 +3047,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Payment configuration changed. Refresh and review before saving.":
     "付款配置已变更。保存前请刷新并核对。",
   "Payment configuration saved. Choose it below, then save the setup draft to keep that selection.":
-    "付款配置已保存。请在下方选择它，然后保存设置草稿以保留所选。",
+    "付款配置已保存。请在下方选择它，然后存为草稿以保留所选。",
   "Payment failed · being cancelled automatically": "付款失败 · 正在自动取消",
   "Payment failed · don't prepare": "付款失败 · 不要制作",
   "Payment failed · will be cancelled automatically at {at}": "付款失败 · 将于 {at} 自动取消",
@@ -3771,7 +3771,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "请输入向顾客销售的商家名称（最多 200 个字符）。",
   "Receipts cannot be issued at this store until these details are saved, even if every number stays empty.":
     "保存这些信息之前，本店无法开具收据；即使所有号码都留空也需要保存。",
-  "Save setup draft": "保存设置草稿",
+  "Save setup draft": "存为草稿",
   "Save template draft": "保存模板草稿",
   "Save the changed template fields before submitting for review.":
     "提交审核前请先保存已更改的模板字段。",
@@ -3858,7 +3858,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Selected saved template": "所选的已保存模板",
   "Selected table details": "所选桌台详情",
   "Selection changed locally. Save the setup draft to keep it.":
-    "已在本地更改所选。请保存设置草稿以保留它。",
+    "已在本地更改所选。请存为草稿以保留它。",
   Selling: "在售",
   "Selling started.": "已开始售卖。",
   "Semi-finished (prepared in store)": "半成品（店内制备）",
@@ -4270,8 +4270,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Store mistake": "门店失误",
   "Store name and address": "门店名称和地址",
   "Store name and contact details are unavailable": "门店名称和联系方式暂不可用",
-  "Store name customers see": "顾客看到的门店名称",
-  "Store name customers see ({locale})": "顾客看到的门店名称（{locale}）",
+  "Store name customers see": "店名",
+  "Store name customers see ({locale})": "店名（{locale}）",
   "Store overview": "门店概览",
   "Store payment rules": "门店付款规则",
   "Store service controls": "门店服务控制",
@@ -4892,7 +4892,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "There isn't enough left to make {name} with the rest of this order (other items use the same ingredients). Remove {name2} or change the other items, then send again. Nothing was sent or charged.":
     "结合此订单的其他商品，剩余数量不足以制作{name}（其他商品使用相同配料）。请移除{name2}或更改其他商品，再重新发送。未发送任何内容，也未收费。",
   "These are not changed in Store setup. They come from the Store as it runs today; save the setup draft after using them.":
-    "这些不在门店设置中更改。它们来自门店目前的运行状态；使用后请保存设置草稿。",
+    "这些不在门店设置中更改。它们来自门店目前的运行状态；使用后请存为草稿。",
   "These are the last items of this round: the whole round is cancelled and its remaining payment of {refund} is refunded{tip}.":
     "这是这一轮的最后几项：整轮会被取消，剩余付款 {refund} 会被退回{tip}。",
   "These are the last items: the whole order is cancelled and the remaining payment of {refund} is refunded{tip}.":
@@ -5160,10 +5160,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "To charge": "应收",
   "To create a custom role, open a role and duplicate it, then adjust its permissions.":
     "要创建自定义角色，请打开一个角色并复制，然后调整其权限。",
-  "To create a new configuration, save the setup again (Save setup draft, it then builds on the latest configuration), then create it.":
-    "要创建新配置，请再次保存设置（保存设置草稿，它会基于最新配置），然后创建。",
+  "To create a new configuration, save the setup again (Save as draft, it then builds on the latest configuration), then create it.":
+    "要创建新配置，请再次保存设置（存为草稿，它会基于最新配置），然后创建。",
   "To keep the hours the Store opens with today, choose “Use the live Store’s opening hours” and save the setup draft before sending or publishing it.":
-    '要保留门店目前的营业时间，请选择"使用当前门店的营业时间"，并在提交或发布前保存设置草稿。',
+    '要保留门店目前的营业时间，请选择"使用当前门店的营业时间"，并在提交或发布前存为草稿。',
   Today: "今天",
   "Today hours": "今天的营业时间",
   "Today so far": "今天截至目前",
@@ -7527,13 +7527,13 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Guests can't order at this Store until its kitchen is set up: an order here would be paid and never reach a kitchen.":
     "本店厨房设置好之前，顾客无法下单：否则订单付了款，却到不了厨房。",
   "One kitchen line takes every dish and shows them on this Store's Kitchen screen. You can divide dishes by kitchen section afterwards.":
-    "一条厨房线接收所有菜品，并显示在本店的后厨屏上。之后可以按档口分菜。",
-  "Set up one kitchen line for all dishes": "设置一条接收所有菜品的厨房线",
+    "所有菜都送到本店的后厨屏。之后可以按档口分菜。",
+  "Set up one kitchen line for all dishes": "让所有菜都送到后厨",
   "The kitchen is set up. New orders go to it from now on.":
     "厨房已设置好。从现在起新订单都会进厨房。",
   "Ask the Owner or Store Manager to set this up.": "请店主或店长来设置。",
   "Ask the Owner or Store Manager to fix this.": "请店主或店长来处理。",
-  "One kitchen line takes this Store's dishes, since": "一条厨房线接收本店菜品，开始于",
+  "One kitchen line takes this Store's dishes, since": "本店的菜都送到后厨，开始于",
   "Every dish with a recipe can reach the kitchen.": "所有有配方的菜品都能进厨房。",
   "These dishes can't reach the kitchen: their recipes need something this kitchen isn't set up for. An order for one would be paid and not reach the kitchen.":
     "这些菜进不了厨房：配方需要的条件这个厨房没有设置。点这些菜的订单付了款也到不了厨房。",
@@ -7610,7 +7610,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Getting ready to open": "开店清单",
   "Guests can order once these are done.": "完成这些，客人就能下单。",
   "Store name and address guests see": "客人看到的店名和地址",
-  "Kitchen line": "厨房线",
+  "Kitchen line": "后厨",
   "Store setup published: hours, tax and payment": "发布门店设置：营业时间、税和付款",
   "Allergen list approved": "批准过敏原清单",
   "Menu listed": "上架菜单",
@@ -7623,7 +7623,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Waiting for BOP support to set your tax rates.": "在等 BOP 支持设置您的税率。",
   "your store's details": "门店信息",
   "your receipt details": "收据信息",
-  "the kitchen line": "后厨线",
+  "the kitchen line": "后厨",
   tips: "小费",
   "your hours and order types": "营业时间和点餐方式",
   "approving on your own": "自行批准",
@@ -9814,4 +9814,50 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "last read: {amount} to pay": "上次读到：待付 {amount}",
   "The bill changed after it was split: it is now {amount} for the whole table. Split it again before taking payments.":
     "分单以后账单有变化：现在整桌是 {amount}。请重新分单再收款。",
+  // b18 (Owner 2026-11-14): Store setup in a few places, one save model.
+  "Reload the saved draft": "重新读取已存的草稿",
+  "Store details": "门店资料",
+  "The name, address and phone customers see. A change is live as soon as you save it.":
+    "顾客看到的店名、地址和电话。保存后立即生效。",
+  "Receipts and tax numbers": "收据与税号",
+  "The business name and tax numbers printed on receipts, and your privacy notice. A change is live as soon as you save it, for receipts issued from then on.":
+    "收据上印的商家名称和税号，以及你的隐私声明。保存后立即生效，用于之后开出的收据。",
+  "Kitchen setup": "后厨",
+  "Whether every dish reaches this Store's Kitchen screen. A change is live at once, for orders confirmed from then on.":
+    "每道菜是否都能送到本店的后厨屏。修改立即生效，用于之后确认的订单。",
+  "Permissions and safety": "权限与安全",
+  "Who besides you may change things: platform support, and approving your own changes when you run the business alone. Each change is live at once and is recorded.":
+    "除了你，谁还能改动门店：平台支持；以及你一个人经营时，自己批准自己的修改。每项更改立即生效，并会留下记录。",
+  "Settings that need approval": "需审批的设置",
+  "Time zone, opening hours, service, fees, payment and receipt layout. A change here is saved as a draft first; it takes effect only after it is submitted, approved and published in the last step.":
+    "时区、营业时间、服务方式、费用、付款和收据样式。这里的修改先存为草稿，在最后一步提交审批并发布后才生效。",
+  "Store setup sections": "门店设置分区",
+  "The name, address and phone customers see are in": "顾客看到的店名、地址和电话在",
+  ", where a change is live as soon as you save it.": "里修改，保存后立即生效。",
+  "A draft is saved": "已存草稿",
+  "Save as draft": "存为草稿",
+  "Discard unsaved changes": "放弃未保存的修改",
+  "What support changed or tried": "平台支持改过或试图改的",
+  "Platform support hasn't changed or tried to change anything.":
+    "平台支持没有改过、也没有试图改任何东西。",
+  "Support looked at your Store once, last": "平台支持查看过你的门店 1 次，最近一次在",
+  "Support looked at your Store {looks} times, last":
+    "平台支持查看过你的门店 {looks} 次，最近一次在",
+  "Show fewer": "收起",
+  "Show all {count} records": "显示全部 {count} 条记录",
+  "Show {count} more": "再显示 {count} 条",
+  "Store name customers see (English)": "店名（英文）",
+  "Store name customers see (Chinese)": "店名（中文）",
+  "Store name customers see (French)": "店名（法文）",
+  "For example “枫叶面馆 国王街店”.": "例如“枫叶面馆 国王街店”。",
+  "For example “Maison des nouilles Érable – rue King”.":
+    "例如“Maison des nouilles Érable – rue King”。",
+  "Save and make live": "保存并生效",
+  "Saved and live. Customers see these details the next time a page opens or refreshes, and receipts issued from now on use this name. Receipts already issued keep the name they were issued with.":
+    "已保存并生效。顾客下次打开或刷新页面时会看到这些信息，从现在起开出的收据使用这个名称。已开出的收据保留开出时的名称。",
+  "Someone saved new details since you opened this page. They have been reloaded — check them and save again.":
+    "你打开此页面后有人保存了新的信息。已重新加载，请核对后再保存。",
+  "Live since": "生效于",
+  "Saved and live. Receipts issued from now on show these details; receipts already issued are not changed.":
+    "已保存并生效。从现在起开出的收据会显示这些信息；已开出的收据不会更改。",
 });
