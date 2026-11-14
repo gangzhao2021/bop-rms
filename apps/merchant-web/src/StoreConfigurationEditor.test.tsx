@@ -100,7 +100,8 @@ it("shows real Setup provenance and fee states without Tenant identity or invent
   expect(html).toContain('aria-label="Recorded fee configuration"');
   expect(html).toContain("Draft, not yet sent for approval");
   expect(html).toContain("do not change the live Store");
-  expect(html).toContain(`saved Store setup draft ${basis.sourceRevision}`);
+  expect(html).toContain("These settings come from the saved Store setup draft.");
+  expect(html).not.toContain(`draft ${basis.sourceRevision}`);
   expect(html).not.toContain(id(31));
   expect(html).not.toContain(basis.sourceSnapshotDigest);
   expect(html).toContain("Service charge");
@@ -152,10 +153,10 @@ it("edits hours of a configuration from Store setup while fees stay in Store set
     </MemoryRouter>,
   );
   expect(html).not.toContain('disabled=""');
-  expect(html).toContain("These hours are also the hours in Store setup.");
+  expect(html).toContain("Opening hours are changed here.");
   expect(html).toContain("Change them in");
-  expect(html).toContain(`href="/app/organization/stores/${id(3)}/setup"`);
-  expect(html).toContain("Edit in Store Setup");
+  expect(html).toContain(`href="/app/organization/stores/${id(3)}/setup?section=changes"`);
+  expect(html).toContain("Change them in Settings that need approval");
   expect(html).toContain('</fieldset><button type="button">Validate saved draft</button>');
   expect(findInternalText([staticText(html)])).toEqual([]);
   const legacy = renderToStaticMarkup(

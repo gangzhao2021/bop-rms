@@ -363,8 +363,29 @@ it("review names the saved time zone in plain words, not its identifier", () => 
       }}
     />,
   );
-  expect(html).toContain("Timezone: Eastern Time (Toronto, Ottawa and Montréal)");
+  expect(html).toContain("Time zone: Eastern Time (Toronto, Ottawa and Montréal)");
   expect(html).not.toContain("America/Toronto");
+  expect(findInternalText([staticText(html)])).toEqual([]);
+});
+it("b18 review: an open Store's review names only its approval steps and where the rest is set", () => {
+  const html = renderToStaticMarkup(
+    <StoreSetupDraftReview content={createUnconfiguredStoreSetupContent()} layout="Open" />,
+  );
+  // Opening hours are changed in Hours & ordering; address and phone come from Store details.
+  expect(html).toContain("Weekly hours: set it in Hours &amp; ordering");
+  expect(html).toContain("Order limits: set it in step 2, Services");
+  expect(html).toContain("Payment settings: set it in step 3, Fees, tax and payment");
+  expect(html).toContain("Contact details: set it in step 4, Review and publish");
+  for (const opening of [
+    "Identity",
+    "Capacity",
+    "Contacts",
+    "step 5",
+    "step 6",
+    "step 7",
+    "step 8",
+  ])
+    expect(html).not.toContain(opening);
   expect(findInternalText([staticText(html)])).toEqual([]);
 });
 it("the ordinary route shell offers refresh without fake Store facts", () => {
@@ -440,14 +461,12 @@ it("a Store Manager refused the setup read sees the page read-only, not a permis
   expect(html).not.toContain("does not allow");
   expect(findInternalText([staticText(html)])).toEqual([]);
   const owner = renderToStaticMarkup(
-    <StoreSetupHeader
-      ownerOnly={false}
-      displayName="Synthetic store"
-      refreshDisabled={false}
-      onRefresh={() => undefined}
-    />,
+    <StoreSetupHeader ownerOnly={false} displayName="Synthetic store" />,
   );
-  expect(owner).toContain("Reload the saved draft");
+  // b18 review (v3): the title row ends with the language switch, as on Orders; reloading the
+  // draft sits with the draft.
+  expect(owner).toContain("workspace-page__language");
+  expect(owner).not.toContain("Reload the saved draft");
   expect(owner).not.toContain("Only the Owner");
 });
 it("normal save reacquires exact current root and reserves before its first write, then refreshes before cleanup", async () => {

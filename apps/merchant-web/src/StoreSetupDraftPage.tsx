@@ -7,7 +7,13 @@ import { FULL_SIGN_IN_REQUIRED_TEXT } from "./full-sign-in.js";
 import { ReceiptTemplateStoreSelection } from "./ReceiptTemplateStoreSelection.js";
 import { ReceiptTemplateArtifactEditor } from "./ReceiptTemplateArtifactEditor.js";
 import { ReceiptTemplateDraftEditor } from "./ReceiptTemplateDraftEditor.js";
-import { storeSetupMissingItems } from "./store-setup-missing.js";
+import {
+  storeSetupMissingItems,
+  storeSetupWhere,
+  type StoreSetupFieldPlace,
+  type StoreSetupLayout,
+} from "./store-setup-missing.js";
+import { createStorePublicProfileClient } from "./store-public-profile-client.js";
 import {
   createStorePaymentConfigurationClient,
   parseStorePaymentConfigurationContent,
@@ -55,6 +61,7 @@ import {
 } from "./store-setup-pending-journal.js";
 import { serviceOperationReference, type ServiceMode } from "./service-control-client.js";
 import { plainLanguageName } from "./staff-text.js";
+import { LanguageSwitch } from "./i18n/LanguageSwitch.js";
 import { timeZoneChoices, timeZoneLabel } from "./time-zone-names.js";
 const StoreFirstOpeningPanel = lazyPage(
   () => import("./StoreFirstOpeningPanel.js"),
@@ -72,6 +79,19 @@ const steps = [
   t("Contacts"),
   t("Review"),
 ] as const;
+/**
+ * b18 (Owner 2026-11-14 "opening wizard only while a store is being opened"): an open Store's
+ * "Settings that need approval" shows only the steps whose settings need approval there. Identity
+ * is read-only, opening hours are changed in Hours & ordering, the name, address and phone in Store
+ * details, and order limits are asked with the services. Indices are the eight steps above.
+ */
+const openStoreSteps = [1, 2, 4, 7] as const;
+const openStoreStepNames: Readonly<Record<number, string>> = {
+  1: t("Time zone and business day"),
+  2: t("Services"),
+  4: t("Fees, tax and payment"),
+  7: t("Review and publish"),
+};
 const days = [
   t("Monday"),
   t("Tuesday"),
@@ -306,7 +326,7 @@ const messages: Record<StoreSetupClientError["code"], string> = {
     "This Store has no receipt template in use yet, so nothing was created. In step 5, choose or create this Store's receipt template and save the setup, then create the configuration again.",
   ),
   StorePhoneRequired: t(
-    "This setup offers pickup, and pickup guests call the store about allergies or their order, so it was not sent. Add the store's phone number under Name and contact shown to customers, or take pickup out of the service modes in step 3, then send it again.",
+    "This setup offers pickup, and pickup guests call the store about allergies or their order, so it was not sent. Add the store's phone number in Store details, or take pickup out of the services this setup offers, then send it again.",
   ),
 };
 const root = (view: StoreSetupWorkspace) => ({
@@ -340,21 +360,13 @@ export function storeSetupOwnerOnly(
 export function StoreSetupHeader({
   ownerOnly,
   displayName,
-  refreshDisabled,
-  onRefresh,
-  firstStore = false,
-  draft = true,
 }: {
   readonly ownerOnly: boolean;
   readonly displayName: string | null;
-  readonly refreshDisabled: boolean;
-  readonly onRefresh: () => void;
-  /** WP-2423 item 14: on a first Store's one page there is no draft to talk about here. */
+  /** Kept for callers; the draft's own controls are in the draft place (b18). */
+  readonly refreshDisabled?: boolean;
+  readonly onRefresh?: () => void;
   readonly firstStore?: boolean;
-  /**
-   * b18 (Owner 2026-11-14): only the place that keeps a draft talks about drafts and reloading it;
-   * every other place saves straight to what customers and staff see.
-   */
   readonly draft?: boolean;
 }) {
   return (
@@ -370,12 +382,29 @@ export function StoreSetupHeader({
           </p>
         ) : null}
       </div>
-      {ownerOnly || firstStore || !draft ? null : (
-        <button type="button" disabled={refreshDisabled} onClick={onRefresh}>
-          {t("Reload the saved draft")}
-        </button>
-      )}
+      {/* Owner 2026-10-26 (v3): the language switch ends the title row, as on Orders. The draft's
+          "Reload the saved draft" sits with the draft, not in this corner (b18 review). */}
+      <LanguageSwitch className="workspace-page__language" />
     </header>
+  );
+}
+/**
+ * b18: reading the saved draft again belongs to the place that keeps a draft. It keeps unsaved
+ * edits and says so if someone else saved in between.
+ */
+export function StoreSetupReloadDraft({
+  disabled,
+  onReload,
+}: {
+  readonly disabled: boolean;
+  readonly onReload: () => void;
+}) {
+  return (
+    <p className="store-setup-reload">
+      <button type="button" disabled={disabled} onClick={onReload}>
+        {t("Reload the saved draft")}
+      </button>
+    </p>
   );
 }
 /**
@@ -449,7 +478,7 @@ export function storeSetupPlaceText(place: StoreSetupPlace): {
       return {
         name: t("Settings that need approval"),
         lead: t(
-          "Time zone, opening hours, service, fees, payment and receipt layout. A change here is saved as a draft first; it takes effect only after it is submitted, approved and published in the last step.",
+          "Time zone, services, fees, tax, payment and receipt layout. A change here is saved as a draft first; it takes effect only after it is submitted, approved and published in the last step.",
         ),
       };
   }
@@ -858,21 +887,6 @@ export function StoreSetupDraftPage({
   } catch {
     /* Review shows a safe validation state; local raw input remains. */
   }
-  // WP-2423 (v15): step 5 offers the receipt template the live Store issues receipts with; read
-  // the live configuration once when it is needed (step 8 reads it again with its panel).
-  const liveScope = workspace ? JSON.stringify(workspace.scope) : null;
-  useEffect(() => {
-    if (liveScope === null || workspace === null || step !== 4 || live !== null) return;
-    const c = new AbortController();
-    void createStoreConfigurationOrdinaryClient()
-      .load(workspace.scope, { signal: c.signal })
-      .then((read) => {
-        if (!c.signal.aborted)
-          setLive((old) => old ?? { current: read.current, observedAt: read.observedAt });
-      })
-      .catch(() => undefined);
-    return () => c.abort();
-  }, [liveScope, step, live === null]);
   const ownerOnly = storeSetupOwnerOnly(error, workspace, id === storeReference);
   // WP-2423 item 14 (DEC-STORE-FIRST-OPENING): a Store whose setup has not been published gets one
   // page and one action, and only once a read has said so. A read that fails shows the page as it
@@ -936,6 +950,67 @@ export function StoreSetupDraftPage({
   // Until the read has said which page this is, neither is drawn: one would only be swapped for the
   // other, and a first Store's sections, put there and then folded, would each load twice.
   const deciding = workspace !== null && id === storeReference && opening === "Loading";
+  // b18: an open Store (setup published, or a read that could not say) shows the approval steps
+  // only; a Store being opened walks all eight.
+  const openLayout = workspace !== null && id === storeReference && !firstStore && !deciding;
+  const shownSteps: readonly number[] = openLayout ? openStoreSteps : steps.map((_, i) => i);
+  const activeStep = shownSteps.includes(step) ? step : (shownSteps[0] ?? 0);
+  const stepName = (i: number) => (openLayout ? openStoreStepNames[i] : steps[i]) ?? "";
+  const layout = openLayout ? "Open" : "Opening";
+  const addressMissing = content.addressReference.state !== "Configured",
+    contactMissing = content.contactReference.state !== "Configured";
+  // An open Store whose saved setup has no address or contact yet: fill them in from Store details.
+  const [profileSuggestion, setProfileSuggestion] = useState<{
+    readonly address: Partial<StoreSetupReferenceFields>;
+    readonly contact: Partial<StoreSetupReferenceFields>;
+  } | null>(null);
+  const wantsProfile = openLayout && activeStep === 7 && (addressMissing || contactMissing);
+  useEffect(() => {
+    if (!wantsProfile || profileSuggestion !== null) return;
+    let stopped = false;
+    void createStorePublicProfileClient({ csrf, ...(fetcher === undefined ? {} : { fetcher }) })
+      .load()
+      .then((view) => {
+        if (stopped || view.current === null) return;
+        const current = view.current;
+        const name =
+          current.names.find((entry) => entry.locale === current.defaultLocale)?.storeDisplayName ??
+          current.names[0]?.storeDisplayName ??
+          "";
+        setProfileSuggestion({
+          address: {
+            countryCode: current.address.countryCode,
+            regionCode: current.address.regionCode,
+            locality: current.address.locality,
+            postalCode: current.address.postalCode,
+            line1: current.address.addressLines[0] ?? "",
+            line2: current.address.addressLines[1] ?? "",
+            line3: current.address.addressLines[2] ?? "",
+          },
+          contact: { contactName: name, businessPhone: current.businessPhone ?? "" },
+        });
+      })
+      // Not read: the fields stay empty and the Owner types them, as before.
+      .catch(() => undefined);
+    return () => {
+      stopped = true;
+    };
+  }, [wantsProfile, profileSuggestion === null, csrf, fetcher]);
+  // WP-2423 (v15): step 5 offers the receipt template the live Store issues receipts with; read
+  // the live configuration once when it is needed (step 8 reads it again with its panel).
+  const liveScope = workspace ? JSON.stringify(workspace.scope) : null;
+  useEffect(() => {
+    if (liveScope === null || workspace === null || activeStep !== 4 || live !== null) return;
+    const c = new AbortController();
+    void createStoreConfigurationOrdinaryClient()
+      .load(workspace.scope, { signal: c.signal })
+      .then((read) => {
+        if (!c.signal.aborted)
+          setLive((old) => old ?? { current: read.current, observedAt: read.observedAt });
+      })
+      .catch(() => undefined);
+    return () => c.abort();
+  }, [liveScope, activeStep, live === null]);
   // On a first Store these are about the steps under the fold (a save pending, a read that failed);
   // the one page says what concerns it. Above it they would read as something being wrong with it.
   const stepsStatus = (
@@ -993,6 +1068,48 @@ export function StoreSetupDraftPage({
     ));
   const established = id === storeReference && !firstStore && !deciding;
   const draftPlace = !established || place === "changes";
+  // Order limits: their own step while a Store is opened, asked with the services once it is open.
+  const orderLimits = (
+    <>
+      <label>
+        {t("Order limits")}
+        <select
+          disabled={
+            disabled ||
+            (content.capacityConfigurationReference.state === "Configured" &&
+              content.capacityConfigurationReference.value !== null)
+          }
+          value={
+            content.capacityConfigurationReference.state === "Unconfigured"
+              ? "unconfigured"
+              : content.capacityConfigurationReference.value === null
+                ? "none"
+                : "saved"
+          }
+          onChange={(e) =>
+            changeContent({
+              capacityConfigurationReference:
+                e.currentTarget.value === "none"
+                  ? { state: "Configured", value: null }
+                  : { state: "Unconfigured" },
+            })
+          }
+        >
+          <option value="unconfigured">{t("Not decided yet")}</option>
+          <option value="none">{t("No order limits")}</option>
+          {content.capacityConfigurationReference.state === "Configured" &&
+            content.capacityConfigurationReference.value !== null && (
+              <option value="saved">{t("Limits saved earlier")}</option>
+            )}
+        </select>
+      </label>
+      <p>
+        {t(
+          "Choose “No order limits” when the Store accepts every order it receives; staff pause ordering from Hours & ordering when the kitchen is busy.",
+        )}
+      </p>
+    </>
+  );
   return (
     <AppFrame
       className="store-setup-draft-page"
@@ -1001,14 +1118,7 @@ export function StoreSetupDraftPage({
         ownerOnly ? t("The Store's details") : t("Save unfinished settings and continue later")
       }
     >
-      <StoreSetupHeader
-        ownerOnly={ownerOnly}
-        displayName={workspace?.store.displayName ?? null}
-        refreshDisabled={busy || !online || id !== storeReference}
-        onRefresh={() => void refresh()}
-        firstStore={firstStore}
-        draft={draftPlace}
-      />
+      <StoreSetupHeader ownerOnly={ownerOnly} displayName={workspace?.store.displayName ?? null} />
       {publishedNote === null ? null : (
         <p role="status" className="store-opening__published">
           {publishedNote.text}{" "}
@@ -1035,7 +1145,11 @@ export function StoreSetupDraftPage({
             <p className="store-setup-place__lead">{placeText.lead}</p>
             {place === "changes" ? (
               <p className="store-setup-place__lead">
-                {t("The name, address and phone customers see are in")}{" "}
+                {t("Opening hours and holidays are changed in")}{" "}
+                <Link to={"/app/organization/stores/" + storeReference + "/service"}>
+                  {t("Hours & ordering")}
+                </Link>
+                {t("; the name, address and phone customers see in")}{" "}
                 <Link to={storeSetupPlaceHref(storeReference, "profile")}>
                   {t("Store details")}
                 </Link>
@@ -1046,6 +1160,12 @@ export function StoreSetupDraftPage({
           {children}
           {renderedPanels(place === "changes" ? "changes" : place)}
         </>
+      ) : null}
+      {draftPlace && !ownerOnly && !firstStore ? (
+        <StoreSetupReloadDraft
+          disabled={busy || !online || id !== storeReference}
+          onReload={() => void refresh()}
+        />
       ) : null}
       {!online && (
         <p role="status">
@@ -1079,17 +1199,17 @@ export function StoreSetupDraftPage({
         >
           <nav className="store-setup-steps" aria-label={t("Setup steps")}>
             <ol>
-              {steps.map((name, i) => (
-                <li key={name}>
+              {shownSteps.map((i, shown) => (
+                <li key={i}>
                   <button
                     type="button"
-                    aria-current={step === i ? "step" : undefined}
+                    aria-current={activeStep === i ? "step" : undefined}
                     onClick={() => {
                       setStep(i);
                       heading.current?.focus();
                     }}
                   >
-                    {i + 1}. {name}
+                    {shown + 1}. {stepName(i)}
                   </button>
                 </li>
               ))}
@@ -1097,9 +1217,9 @@ export function StoreSetupDraftPage({
           </nav>
           <section className="store-setup-step-content" aria-labelledby="setup-step-heading">
             <h3 id="setup-step-heading" ref={heading} tabIndex={-1}>
-              {steps[step]}
+              {stepName(activeStep)}
             </h3>
-            {step === 0 && (
+            {activeStep === 0 && (
               <dl>
                 <dt>{t("Store")}</dt>
                 <dd>{workspace.store.displayName}</dd>
@@ -1119,11 +1239,21 @@ export function StoreSetupDraftPage({
                 </dd>
               </dl>
             )}
-            {step === 1 && (
+            {activeStep === 1 && (
               <>
-                <h4>{t("Address")}</h4>
-                <SavedReference value={content.addressReference} />
-                <p>{t("Save an address below, then choose it for this draft.")}</p>
+                {openLayout ? (
+                  <p>
+                    {t("The Store runs on {zone} today.", {
+                      zone: timeZoneLabel(workspace.store.timeZone),
+                    })}
+                  </p>
+                ) : (
+                  <>
+                    <h4>{t("Address")}</h4>
+                    <SavedReference value={content.addressReference} />
+                    <p>{t("Save an address below, then choose it for this draft.")}</p>
+                  </>
+                )}
                 <label>
                   {t("Draft timezone")}
                   <select
@@ -1158,12 +1288,16 @@ export function StoreSetupDraftPage({
                     onChange={(e) => changeInputs({ businessStart: e.currentTarget.value })}
                   />
                 </label>
-                <p>
-                  {t("Choose draft values explicitly. Current Store values are shown in Identity.")}
-                </p>
+                {openLayout ? null : (
+                  <p>
+                    {t(
+                      "Choose draft values explicitly. Current Store values are shown in Identity.",
+                    )}
+                  </p>
+                )}
               </>
             )}
-            {step === 2 && (
+            {activeStep === 2 && (
               <>
                 <label>
                   {t("Use service settings from")}
@@ -1213,9 +1347,27 @@ export function StoreSetupDraftPage({
                     ? t("Service modes are not configured.")
                     : t("Selected modes are draft settings until validated and published.")}
                 </p>
+                {openLayout ? (
+                  <>
+                    <p>
+                      {t(
+                        "These are the services this Store is set up for. To stop or restart pickup for a while, use",
+                      )}{" "}
+                      <Link to={"/app/organization/stores/" + storeReference + "/capabilities"}>
+                        {t("Store features")}
+                      </Link>{" "}
+                      {t("or pause ordering in")}{" "}
+                      <Link to={"/app/organization/stores/" + storeReference + "/service"}>
+                        {t("Hours & ordering")}
+                      </Link>
+                      {t("; that is live at once and needs no approval.")}
+                    </p>
+                    {orderLimits}
+                  </>
+                ) : null}
               </>
             )}
-            {step === 3 && (
+            {activeStep === 3 && (
               <>
                 <p>
                   {t(
@@ -1434,7 +1586,7 @@ export function StoreSetupDraftPage({
                 )}
               </>
             )}
-            {step === 4 && (
+            {activeStep === 4 && (
               <>
                 <StoreSetupFeeContextEditor
                   key={`fees:${JSON.stringify(workspace.scope)}:${csrf}`}
@@ -1454,48 +1606,8 @@ export function StoreSetupDraftPage({
                 <p>{t("Tax rates and tax names are set in Tax review.")}</p>
               </>
             )}
-            {step === 5 && (
-              <>
-                <label>
-                  {t("Order limits")}
-                  <select
-                    disabled={
-                      disabled ||
-                      (content.capacityConfigurationReference.state === "Configured" &&
-                        content.capacityConfigurationReference.value !== null)
-                    }
-                    value={
-                      content.capacityConfigurationReference.state === "Unconfigured"
-                        ? "unconfigured"
-                        : content.capacityConfigurationReference.value === null
-                          ? "none"
-                          : "saved"
-                    }
-                    onChange={(e) =>
-                      changeContent({
-                        capacityConfigurationReference:
-                          e.currentTarget.value === "none"
-                            ? { state: "Configured", value: null }
-                            : { state: "Unconfigured" },
-                      })
-                    }
-                  >
-                    <option value="unconfigured">{t("Not decided yet")}</option>
-                    <option value="none">{t("No order limits")}</option>
-                    {content.capacityConfigurationReference.state === "Configured" &&
-                      content.capacityConfigurationReference.value !== null && (
-                        <option value="saved">{t("Limits saved earlier")}</option>
-                      )}
-                  </select>
-                </label>
-                <p>
-                  {t(
-                    "Choose “No order limits” when the Store accepts every order it receives; staff pause ordering from Hours & ordering when the kitchen is busy.",
-                  )}
-                </p>
-              </>
-            )}
-            {step === 6 && (
+            {activeStep === 5 && orderLimits}
+            {activeStep === 6 && (
               <>
                 <h4>{t("Contact configuration")}</h4>
                 <SavedReference value={content.contactReference} />
@@ -1509,7 +1621,7 @@ export function StoreSetupDraftPage({
               csrf={csrf}
               value={content.receiptReference}
               liveTemplateReference={live?.current?.receiptReference ?? null}
-              hidden={step !== 4}
+              hidden={activeStep !== 4}
               disabled={busy || !ready || !online || !!pending}
               onSelect={(templateReference) => {
                 setContent((v) =>
@@ -1529,7 +1641,7 @@ export function StoreSetupDraftPage({
               key={`receipt-artifacts:${JSON.stringify(workspace.scope)}:${csrf}`}
               scope={workspace.scope}
               csrf={csrf}
-              hidden={step !== 4}
+              hidden={activeStep !== 4}
               disabled={busy || !online || !!pending}
             />
             <ReceiptTemplateDraftEditor
@@ -1537,14 +1649,14 @@ export function StoreSetupDraftPage({
               scope={workspace.scope}
               csrf={csrf}
               defaultLocale={workspace.store.locale}
-              hidden={step !== 4}
+              hidden={activeStep !== 4}
               disabled={busy || !online || !!pending}
             />
             <StorePaymentConfigurationEditor
               key={`payment:${JSON.stringify(workspace.scope)}:${csrf}`}
               scope={workspace.scope}
               csrf={csrf}
-              hidden={step !== 4}
+              hidden={activeStep !== 4}
               disabled={busy || !online || !!pending}
               onSelect={(reference) => {
                 setContent((v) =>
@@ -1557,12 +1669,23 @@ export function StoreSetupDraftPage({
                 setError(null);
               }}
             />
+            {openLayout && activeStep === 7 && (addressMissing || contactMissing) ? (
+              <section aria-labelledby="setup-still-needed">
+                <h4 id="setup-still-needed">{t("Still needed")}</h4>
+                <p>
+                  {t(
+                    "These settings also carry the Store's address and phone. They are filled in from Store details: check them, save, choose “Use saved”, then save as draft.",
+                  )}
+                </p>
+              </section>
+            ) : null}
             <StoreSetupReferenceEditor
               key={`address:${JSON.stringify(workspace.scope)}:${csrf}`}
               scope={workspace.scope}
               csrf={csrf}
               kind="Address"
-              hidden={step !== 1}
+              hidden={openLayout ? !(activeStep === 7 && addressMissing) : activeStep !== 1}
+              suggested={openLayout ? (profileSuggestion?.address ?? null) : null}
               disabled={busy || !online || !!pending}
               onSelect={(reference) => {
                 setContent((v) =>
@@ -1580,7 +1703,8 @@ export function StoreSetupDraftPage({
               scope={workspace.scope}
               csrf={csrf}
               kind="Contact"
-              hidden={step !== 6}
+              hidden={openLayout ? !(activeStep === 7 && contactMissing) : activeStep !== 6}
+              suggested={openLayout ? (profileSuggestion?.contact ?? null) : null}
               disabled={busy || !online || !!pending}
               onSelect={(reference) => {
                 setContent((v) =>
@@ -1593,10 +1717,11 @@ export function StoreSetupDraftPage({
                 setError(null);
               }}
             />
-            {step === 7 && (
+            {activeStep === 7 && (
               <>
-                <StoreSetupDraftReview content={parsed} />
+                <StoreSetupDraftReview content={parsed} layout={layout} />
                 <StoreSetupLiveSettings
+                  layout={layout}
                   content={parsed ?? content}
                   live={live}
                   disabled={disabled}
@@ -1624,6 +1749,7 @@ export function StoreSetupDraftPage({
                 />
                 <StoreConfigurationOrdinaryPanel
                   key={JSON.stringify(workspace.scope)}
+                  setupLayout={layout}
                   scope={workspace.scope}
                   csrf={csrf}
                   saved={workspace.setup.snapshot}
@@ -1637,9 +1763,9 @@ export function StoreSetupDraftPage({
           <footer className="store-setup-actions">
             <button
               type="button"
-              disabled={step === 0}
+              disabled={activeStep === shownSteps[0]}
               onClick={() => {
-                setStep((v) => v - 1);
+                setStep(shownSteps[shownSteps.indexOf(activeStep) - 1] ?? activeStep);
                 heading.current?.focus();
               }}
             >
@@ -1647,9 +1773,9 @@ export function StoreSetupDraftPage({
             </button>
             <button
               type="button"
-              disabled={step === 7}
+              disabled={activeStep === 7}
               onClick={() => {
-                setStep((v) => v + 1);
+                setStep(shownSteps[shownSteps.indexOf(activeStep) + 1] ?? activeStep);
                 heading.current?.focus();
               }}
             >
@@ -1678,25 +1804,30 @@ export function StoreSetupDraftPage({
   );
 }
 /** WP-2423: what is still missing says where to set it (step names as on screen). */
-const notSet = (step: number) =>
-  t("Not set yet (step {step}, {name})", { step, name: steps[step - 1] ?? "" });
-function storeReview(content: StoreSetupContent): readonly (readonly [string, string])[] {
+const notSetIn = (where: string) => t("Not set yet ({where})", { where });
+function storeReview(
+  content: StoreSetupContent,
+  layout: StoreSetupLayout,
+): readonly (readonly [string, string])[] {
+  const notSet = (field: StoreSetupFieldPlace) => notSetIn(storeSetupWhere(layout, field));
   return [
     [
-      "Timezone",
-      content.timeZone.state === "Configured" ? timeZoneLabel(content.timeZone.value) : notSet(2),
+      t("Time zone"),
+      content.timeZone.state === "Configured"
+        ? timeZoneLabel(content.timeZone.value)
+        : notSet("timeZone"),
     ],
     [
       t("Business day start"),
       content.businessDayStartLocalTime.state === "Configured"
         ? content.businessDayStartLocalTime.value
-        : notSet(2),
+        : notSet("timeZone"),
     ],
     [
       t("Service modes"),
       content.enabledServiceModes.state === "Configured"
         ? content.enabledServiceModes.value.map(serviceModeText).join(", ")
-        : notSet(3),
+        : notSet("serviceModes"),
     ],
     [
       t("Weekly hours"),
@@ -1705,22 +1836,22 @@ function storeReview(content: StoreSetupContent): readonly (readonly [string, st
             t("Open {open} {value} a week", { open: open, value: open === 1 ? "day" : "days" }))(
             content.weeklySchedule.value.filter((day) => day.intervals.length > 0).length,
           )
-        : notSet(4),
+        : notSet("hours"),
     ],
     [
-      "Address",
-      content.addressReference.state === "Configured" ? t("Already configured") : notSet(2),
+      t("Address"),
+      content.addressReference.state === "Configured" ? t("Already configured") : notSet("address"),
     ],
     [
-      "Fees",
+      t("Fees"),
       content.feeContexts?.state === "Configured"
         ? content.feeContexts.value
             .map(
               (v) =>
-                `${feeLabel(v.chargeType)}: ${v.state === "Enabled" ? "On" : v.state === "Disabled" ? t("Off") : t("Not set")}`,
+                `${feeLabel(v.chargeType)}: ${v.state === "Enabled" ? t("On") : v.state === "Disabled" ? t("Off") : t("Not set")}`,
             )
             .join(", ")
-        : notSet(5),
+        : notSet("payment"),
     ],
     [
       t("Tax settings"),
@@ -1729,33 +1860,39 @@ function storeReview(content: StoreSetupContent): readonly (readonly [string, st
         : t("Not set yet (use the live Store's settings below)"),
     ],
     [
-      "Payment",
+      t("Payment"),
       content.paymentConfigurationReference.state === "Configured"
         ? t("Already configured")
-        : notSet(5),
+        : notSet("payment"),
     ],
     [
-      "Receipt",
-      content.receiptReference.state === "Configured" ? t("Already configured") : notSet(5),
+      t("Receipt template"),
+      content.receiptReference.state === "Configured" ? t("Already configured") : notSet("payment"),
     ],
     [
-      "Capacity",
+      t("Order limits"),
       content.capacityConfigurationReference.state === "Unconfigured"
-        ? notSet(6)
+        ? notSet("capacity")
         : content.capacityConfigurationReference.value === null
           ? t("No order limits")
           : t("Already configured"),
     ],
     [
-      "Contacts",
-      content.contactReference.state === "Configured" ? t("Already configured") : notSet(7),
+      t("Contact details"),
+      content.contactReference.state === "Configured" ? t("Already configured") : notSet("contact"),
     ],
   ];
 }
 
-export function StoreSetupDraftReview({ content }: { readonly content: StoreSetupContent | null }) {
+export function StoreSetupDraftReview({
+  content,
+  layout = "Opening",
+}: {
+  readonly content: StoreSetupContent | null;
+  readonly layout?: StoreSetupLayout;
+}) {
   // WP-2423 (v15): the count is exactly the list of what is not set, each with where to set it.
-  const missing = content ? storeSetupMissingItems(content) : null;
+  const missing = content ? storeSetupMissingItems(content, layout) : null;
   return (
     <>
       <p>
@@ -1783,7 +1920,7 @@ export function StoreSetupDraftReview({ content }: { readonly content: StoreSetu
       )}
       {content && (
         <ul>
-          {storeReview(content).map(([label, value]) => (
+          {storeReview(content, layout).map(([label, value]) => (
             <li key={label}>
               {label}: {value}
             </li>
@@ -1799,12 +1936,26 @@ export function StoreSetupDraftReview({ content }: { readonly content: StoreSetu
 
 /** Independent reference originals survive wizard-step changes; selecting a saved
  * version only updates the local setup draft, whose own save remains explicit. */
+/** The fields of an address or contact saved for Store setup. */
+export interface StoreSetupReferenceFields {
+  readonly countryCode: string;
+  readonly regionCode: string;
+  readonly locality: string;
+  readonly postalCode: string;
+  readonly line1: string;
+  readonly line2: string;
+  readonly line3: string;
+  readonly contactName: string;
+  readonly businessPhone: string;
+  readonly website: string;
+}
 export function StoreSetupReferenceEditor({
   scope,
   csrf,
   kind,
   hidden = false,
   disabled = false,
+  suggested,
   onSelect,
   client: injected,
   journalFactory = createStoreSetupReferencePendingJournal,
@@ -1814,6 +1965,11 @@ export function StoreSetupReferenceEditor({
   readonly kind: StoreSetupReferenceKind;
   readonly hidden?: boolean;
   readonly disabled?: boolean;
+  /**
+   * b18: what to fill in while nothing is saved yet (an open Store's name, address and phone from
+   * Store details), so the Owner checks and saves rather than typing it again.
+   */
+  readonly suggested?: Partial<StoreSetupReferenceFields> | null;
   readonly onSelect: (reference: string) => void;
   readonly client?: ReturnType<typeof createStoreSetupReferenceClient>;
   readonly journalFactory?: (
@@ -1828,7 +1984,7 @@ export function StoreSetupReferenceEditor({
     [ready, setReady] = useState(false),
     [error, setError] = useState<StoreSetupClientError["code"] | null>(null),
     [notice, setNotice] = useState("");
-  const [fields, setFields] = useState({
+  const [fields, setFields] = useState<StoreSetupReferenceFields>({
     countryCode: "",
     regionCode: "",
     locality: "",
@@ -1846,6 +2002,12 @@ export function StoreSetupReferenceEditor({
     running = useRef(false),
     journal = useRef<StoreSetupReferencePendingJournal | null>(null);
   const selected = view ? (kind === "Address" ? view.address : view.contact) : null;
+  // b18: nothing saved yet and nothing typed: start from what Store details already holds.
+  const suggestedKey = suggested ? JSON.stringify(suggested) : null;
+  useEffect(() => {
+    if (!ready || view === null || selected || dirty.current || !suggested) return;
+    setFields((old) => ({ ...old, ...suggested }));
+  }, [ready, view === null, !selected, suggestedKey]);
   const apply = (v: StoreSetupReferencesCurrent) => {
     setView(v);
     const s = kind === "Address" ? v.address : v.contact;
@@ -3001,7 +3163,9 @@ export function StoreSetupLiveSettings({
   live,
   disabled,
   onUse,
+  layout = "Opening",
 }: {
+  readonly layout?: StoreSetupLayout;
   readonly content: StoreSetupContent;
   readonly live: StoreSetupLiveConfiguration | null;
   readonly disabled: boolean;
@@ -3075,9 +3239,13 @@ export function StoreSetupLiveSettings({
           content.contactReference.state !== "Configured" ||
           content.paymentConfigurationReference.state !== "Configured") && (
           <li>
-            {t(
-              "Address, contact details and payment settings: the ones the Store runs with today were set when it was installed and cannot be carried over. Enter them in step 2 (address), step 7 (contact) and step 5 (payment), save each, choose “Use saved”, then save the setup draft. They can be the same as the name and contact customers see in Store details.",
-            )}
+            {layout === "Open"
+              ? t(
+                  "Address, contact details and payment settings: the ones the Store runs with today were set when it was installed and cannot be carried over. The address and phone are filled in from Store details under “Still needed” above, payment is in step 3; save each, choose “Use saved”, then save as draft.",
+                )
+              : t(
+                  "Address, contact details and payment settings: the ones the Store runs with today were set when it was installed and cannot be carried over. Enter them in step 2 (address), step 7 (contact) and step 5 (payment), save each, choose “Use saved”, then save the setup draft. They can be the same as the name and contact customers see in Store details.",
+                )}
           </li>
         )}
         <li>

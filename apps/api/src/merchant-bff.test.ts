@@ -7933,6 +7933,11 @@ it("WP-2423 Q19: the Brand Owner reads and changes the sole-operator setting", a
   expect([ok.status, ok.headers.get("cache-control")]).toEqual([200, "no-store"]);
   expect(await ok.json()).toEqual(view);
   expect(readView).toHaveBeenLastCalledWith({ sessionCookie });
+  // b18: the earlier changes of the record, a page at a time; nothing else in the address.
+  expect((await get({}, "?before=27")).status).toBe(200);
+  expect(readView).toHaveBeenLastCalledWith({ sessionCookie, historyBefore: 27 });
+  for (const bad of ["?before=0", "?before=x", "?before=1&brand=x", "?before=-3"])
+    expect((await get({}, bad)).status).toBe(403);
   readView.mockRejectedValueOnce(new MerchantSoleOperatorError("Denied"));
   const notOwner = await get();
   expect([notOwner.status, await notOwner.json()]).toEqual([

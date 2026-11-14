@@ -2222,6 +2222,12 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                         (item) => item.screenId === "CAT-AVAILABILITY",
                       )?.href
                     }
+                    /* b18 review: Store setup's kitchen place, for people who see Store setup. */
+                    setupHref={((href) =>
+                      href === undefined ? undefined : href + "?section=kitchen")(
+                      state.workspace.navigation.find((item) => item.screenId === "STORE-SETUP")
+                        ?.href,
+                    )}
                     workspaceFrame={workspaceFrame}
                     knownOperator={knownKitchenOperator}
                     onKnownOperator={onKnownKitchenOperator}

@@ -89,11 +89,22 @@ export function createPostgresSoleOperatorSettingSource(options: {
 }) {
   return async (
     tx: SoleOperatorSettingTransaction,
-    value: BrandQuery & { readonly observedAt: string; readonly historyLimit?: number },
+    value: BrandQuery & {
+      readonly observedAt: string;
+      readonly historyLimit?: number;
+      /**
+       * b18 (Owner 2026-11-14 "show all must reach every record"): history older than this
+       * version, for reading the record page by page. The current setting is still the latest.
+       */
+      readonly historyBefore?: number;
+    },
   ) => {
     const query = parseBrandQuery(value);
     const limit = value.historyLimit ?? 1;
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50)
+      return fail("SOLE_OPERATOR_INPUT_INVALID");
+    const before = value.historyBefore;
+    if (before !== undefined && (!Number.isSafeInteger(before) || before < 1))
       return fail("SOLE_OPERATOR_INPUT_INVALID");
     const authorize = async () => {
       if ((await options.authorize(tx, query)) !== true) fail("SOLE_OPERATOR_DENIED");
@@ -105,16 +116,33 @@ export function createPostgresSoleOperatorSettingSource(options: {
         "SELECT " +
           selectColumns +
           " FROM bop_tenant.brand_sole_operator_setting WHERE brand_id=$1 AND recorded_at<=$2 ORDER BY brand_sole_operator_setting.version DESC LIMIT $3",
-        [query.brandReference, query.observedAt, limit],
+        [query.brandReference, query.observedAt, before === undefined ? limit : 1],
       ),
       limit,
     );
-    const history = Object.freeze(rows.map((row) => parseRecord(row, query)));
-    for (let i = 1; i < history.length; i++)
-      if (history[i]?.version !== (history[i - 1]?.version ?? 0) - 1)
+    const newest = Object.freeze(rows.map((row) => parseRecord(row, query)));
+    for (let i = 1; i < newest.length; i++)
+      if (newest[i]?.version !== (newest[i - 1]?.version ?? 0) - 1)
         fail("SOLE_OPERATOR_UNAVAILABLE");
+    const latest = newest[0] ?? null;
+    let history = newest;
+    if (before !== undefined) {
+      // An earlier page: versions run 1..latest without gaps, so it starts right below `before`.
+      const older = resultRows(
+        await tx.query(
+          "SELECT " +
+            selectColumns +
+            " FROM bop_tenant.brand_sole_operator_setting WHERE brand_id=$1 AND recorded_at<=$2 AND version<$3 ORDER BY brand_sole_operator_setting.version DESC LIMIT $4",
+          [query.brandReference, query.observedAt, before, limit],
+        ),
+        limit,
+      );
+      history = Object.freeze(older.map((row) => parseRecord(row, query)));
+      for (let i = 0; i < history.length; i++)
+        if (history[i]?.version !== Math.min(before, (latest?.version ?? 0) + 1) - 1 - i)
+          fail("SOLE_OPERATOR_UNAVAILABLE");
+    }
     await authorize();
-    const latest = history[0] ?? null;
     return Object.freeze({
       state: latest?.state ?? null,
       version: latest?.version ?? 0,

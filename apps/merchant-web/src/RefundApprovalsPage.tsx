@@ -1194,7 +1194,11 @@ export function RefundApprovalsPage({
       {/* Owner 2026-10-25: the sole-operator setting lives with the Store's settings. */}
       <p className="approvals-sole-link">
         {t("Sole operator (approving your own refunds) is set in")}{" "}
-        <Link to={"/app/organization/stores/" + storeReference + "/setup"}>{t("Store setup")}</Link>
+        <Link
+          to={"/app/organization/stores/" + storeReference + "/setup?section=access#sole-operator"}
+        >
+          {t("Store setup, Permissions and safety")}
+        </Link>
         .
       </p>
     </WorkspacePage>

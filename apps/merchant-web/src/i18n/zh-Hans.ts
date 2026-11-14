@@ -8363,17 +8363,17 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Setup step": "设置步骤",
   "The store has a phone number for pickup guests, or does not offer pickup.":
     "门店有供自取客人联系的电话，或不提供自取。",
-  "This setup offers pickup, and pickup guests call the store about allergies or their order. Add the store's phone number under Name and contact shown to customers, or take pickup out of the service modes in step 3.":
-    "这份设置提供自取，自取客人要打电话问门店过敏或订单的事。请在“向顾客显示的名称和联系方式”里添加门店电话，或在第 3 步的服务方式里去掉自取。",
-  "This setup offers pickup, and pickup guests call the store about allergies or their order, so it was not sent. Add the store's phone number under Name and contact shown to customers, or take pickup out of the service modes in step 3, then send it again.":
-    "这份设置提供自取，自取客人要打电话问门店过敏或订单的事，所以没有送审。请在“向顾客显示的名称和联系方式”里添加门店电话，或在第 3 步的服务方式里去掉自取，然后再送审。",
+  "This setup offers pickup, and pickup guests call the store about allergies or their order. Add the store's phone number in Store details, or take pickup out of the services this setup offers.":
+    "这份设置提供自取，自取客人要打电话问门店过敏或订单的事。请在“门店资料”里添加门店电话，或在这份设置的服务方式里去掉自取。",
+  "This setup offers pickup, and pickup guests call the store about allergies or their order, so it was not sent. Add the store's phone number in Store details, or take pickup out of the services this setup offers, then send it again.":
+    "这份设置提供自取，自取客人要打电话问门店过敏或订单的事，所以没有送审。请在“门店资料”里添加门店电话，或在这份设置的服务方式里去掉自取，然后再送审。",
   "Pickup guests call the store about allergies or their order, so pickup needs the store's phone number. Enter it above, or untick Pickup, then press the button again.":
     "自取客人要打电话问门店过敏或订单的事，所以提供自取需要门店电话。请在上面填写电话，或取消勾选“自取”，然后再按一次按钮。",
   "Phone number (needed while the store takes pickup orders)": "电话号码（门店接自取订单时必填）",
   "Pickup guests call this number about allergies or their order. Add a phone number, or turn pickup off in Store features first.":
     "自取客人会打这个电话说过敏或订单的事。请填写电话号码，或先在门店功能里关闭自取。",
-  "Pickup guests need a phone number to reach the store. Add it under Name and contact shown to customers in Store setup, then turn pickup on.":
-    "自取客人需要电话才能联系门店。请先在门店设置的“向顾客显示的名称和联系方式”里添加电话，再打开自取。",
+  "Pickup guests need a phone number to reach the store. Add it in Store setup, Store details, then turn pickup on.":
+    "自取客人需要电话才能联系门店。请先在门店设置的“门店资料”里添加电话，再打开自取。",
   "This payment belongs to another store. Switch to that store to refund it.":
     "这笔付款不属于当前门店，请切换到下单的门店再退款。",
   "Your role can't refund payments. Ask the owner or a manager.":
@@ -9829,10 +9829,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Who besides you may change things: platform support, and approving your own changes when you run the business alone. Each change is live at once and is recorded.":
     "除了你，谁还能改动门店：平台支持；以及你一个人经营时，自己批准自己的修改。每项更改立即生效，并会留下记录。",
   "Settings that need approval": "需审批的设置",
-  "Time zone, opening hours, service, fees, payment and receipt layout. A change here is saved as a draft first; it takes effect only after it is submitted, approved and published in the last step.":
-    "时区、营业时间、服务方式、费用、付款和收据样式。这里的修改先存为草稿，在最后一步提交审批并发布后才生效。",
+  "Time zone, services, fees, tax, payment and receipt layout. A change here is saved as a draft first; it takes effect only after it is submitted, approved and published in the last step.":
+    "时区、服务方式、费用、税务、付款和收据样式。这里的修改先存为草稿，在最后一步提交审批并发布后才生效。",
   "Store setup sections": "门店设置分区",
-  "The name, address and phone customers see are in": "顾客看到的店名、地址和电话在",
   ", where a change is live as soon as you save it.": "里修改，保存后立即生效。",
   "A draft is saved": "已存草稿",
   "Save as draft": "存为草稿",
@@ -9845,7 +9844,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "平台支持查看过你的门店 {looks} 次，最近一次在",
   "Show fewer": "收起",
   "Show all {count} records": "显示全部 {count} 条记录",
-  "Show {count} more": "再显示 {count} 条",
   "Store name customers see (English)": "店名（英文）",
   "Store name customers see (Chinese)": "店名（中文）",
   "Store name customers see (French)": "店名（法文）",
@@ -9862,4 +9860,41 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "已保存并生效。从现在起开出的收据会显示这些信息；已开出的收据不会更改。",
   "Saved. It is checked when the setup is submitted for approval.":
     "已保存。提交审批时会一并检查。",
+  // b18 review: an open Store's approval steps, whole-log answers and the links that follow.
+  "Time zone and business day": "时区和营业日",
+  Services: "服务方式",
+  "Fees, tax and payment": "费用、税务和付款",
+  "Review and publish": "核对并发布",
+  "step 4, Review and publish, under “Still needed”": "第 4 步“核对并发布”里的“还需要”",
+  "step 4: Use the live Store’s settings": "第 4 步：使用门店当前的设置",
+  "Not set yet ({where})": "还没有设置（{where}）",
+  "The Store runs on {zone} today.": "门店现在使用{zone}。",
+  "These are the services this Store is set up for. To stop or restart pickup for a while, use":
+    "这些是本店设置提供的服务。要暂时停止或恢复自取，请用",
+  "or pause ordering in": "或在",
+  "; that is live at once and needs no approval.": "里暂停点单；这些立即生效，不需要审批。",
+  "Still needed": "还需要",
+  "These settings also carry the Store's address and phone. They are filled in from Store details: check them, save, choose “Use saved”, then save as draft.":
+    "这份设置也要带上门店的地址和电话，已按“门店资料”填好：请核对、保存，选“使用已保存的”，再存为草稿。",
+  "Address, contact details and payment settings: the ones the Store runs with today were set when it was installed and cannot be carried over. The address and phone are filled in from Store details under “Still needed” above, payment is in step 3; save each, choose “Use saved”, then save as draft.":
+    "地址、联系方式和付款设置：门店现在用的是安装时设好的，不能直接带过来。地址和电话已在上面“还需要”里按“门店资料”填好，付款在第 3 步；逐项保存，选“使用已保存的”，再存为草稿。",
+  "Opening hours and holidays are changed in": "营业时间和节假日在",
+  "; the name, address and phone customers see in": "里修改；顾客看到的店名、地址和电话在",
+  "These settings come from the saved Store setup draft.": "这些设置来自已存的门店设置草稿。",
+  "Change them in Settings that need approval": "到“需审批的设置”里修改",
+  "Opening hours are changed here. Saving them changes nothing else in Store setup; its other settings that need approval are under Settings that need approval.":
+    "营业时间在这里修改。保存不会改动门店设置里的其他内容；其他需要审批的设置在“需审批的设置”里。",
+  "Store setup, Permissions and safety": "门店设置的“权限与安全”",
+  "Created from the saved setup draft. {value2} Once approved, you can publish it to the live Store.":
+    "由已存的设置草稿生成。{value2}批准后即可发布到门店。",
+  "Kitchen setup in Store setup": "门店设置里的后厨",
+  "The newest {shown} of {count} are listed here; every one is in the access log below.":
+    "这里列出 {count} 条中最新的 {shown} 条；每一条都在下面的访问记录里。",
+  "Showing {shown} of {total} records.": "已显示 {total} 条中的 {shown} 条。",
+  "The earlier records could not be read. Try again.": "没能读取更早的记录，请再试一次。",
+  "Show earlier records": "显示更早的记录",
+  "Showing {shown} of {count} changes.": "已显示 {count} 项更改中的 {shown} 项。",
+  "The earlier changes could not be read. Try again.": "没能读取更早的更改，请再试一次。",
+  "Show earlier changes": "显示更早的更改",
+  "Show all {count} changes": "显示全部 {count} 项更改",
 });

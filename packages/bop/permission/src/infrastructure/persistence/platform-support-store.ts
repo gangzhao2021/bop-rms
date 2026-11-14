@@ -164,34 +164,144 @@ export async function recordStoreSupportAccess(
   );
 }
 
+/** One record of the Store's support log, as the Owner reads it. */
+export interface StoreSupportAccessEntry {
+  readonly occurredAt: string;
+  readonly supportName: string;
+  readonly kind: StoreSupportAccessKind;
+  readonly subjectCode: string;
+}
+/**
+ * Where the next page of the log starts: records at or before `before` (an instant to the
+ * microsecond), after skipping the `skip` records at exactly that instant already shown. The log
+ * is append-only, so a page once read stays the same.
+ */
+export interface StoreSupportAccessCursor {
+  readonly before: string;
+  readonly skip: number;
+}
+const logCursorText = (value: unknown) => {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/u.test(value))
+    throw new Error("PLATFORM_SUPPORT_UNAVAILABLE");
+  return value;
+};
+/** A cursor as it came back from the Owner's screen; null when it is not one. */
+export function parseStoreSupportAccessCursor(before: unknown, skip: unknown) {
+  if (
+    typeof before !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/u.test(before) ||
+    !Number.isFinite(Date.parse(before)) ||
+    typeof skip !== "number" ||
+    !Number.isSafeInteger(skip) ||
+    skip < 0 ||
+    skip > 100_000
+  )
+    return null;
+  return Object.freeze({ before, skip }) as StoreSupportAccessCursor;
+}
+const entryOf = (row: Record<string, unknown>): StoreSupportAccessEntry =>
+  Object.freeze({
+    occurredAt: instant(row.occurred_at),
+    supportName: typeof row.support_name === "string" ? row.support_name : "Platform support",
+    kind: row.kind as StoreSupportAccessKind,
+    subjectCode: String(row.subject_code),
+  });
+const logColumns = `l.occurred_at,l.kind,l.subject_code,
+       to_char(l.occurred_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_at,
+       (SELECT p.display_name FROM bop_permission.platform_support_person p
+         WHERE p.actor_id=l.support_actor_id ORDER BY p.version DESC LIMIT 1) AS support_name`;
+
 /** The Store's log, newest first, with who it was by the name support works under. */
 export async function listStoreSupportAccess(
   tx: PlatformSupportTransaction,
   scope: StoreSupportScope,
   limit = 100,
-): Promise<
-  readonly {
-    readonly occurredAt: string;
-    readonly supportName: string;
-    readonly kind: StoreSupportAccessKind;
-    readonly subjectCode: string;
-  }[]
-> {
+): Promise<readonly StoreSupportAccessEntry[]> {
+  return (await pageStoreSupportAccess(tx, scope, { limit, after: null })).entries;
+}
+
+/**
+ * b18 (Owner 2026-11-14: "show all" must reach every record): one page of the Store's log, newest
+ * first, and where the next page starts (null once the oldest record is on this page).
+ */
+export async function pageStoreSupportAccess(
+  tx: PlatformSupportTransaction,
+  scope: StoreSupportScope,
+  input: { readonly limit: number; readonly after: StoreSupportAccessCursor | null },
+): Promise<{
+  readonly entries: readonly StoreSupportAccessEntry[];
+  readonly next: StoreSupportAccessCursor | null;
+}> {
+  if (!Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > 200)
+    throw new Error("PLATFORM_SUPPORT_INPUT_INVALID");
   await scoped(tx, scope);
   const { rows } = await tx.query(
-    `SELECT l.occurred_at,l.kind,l.subject_code,
-       (SELECT p.display_name FROM bop_permission.platform_support_person p
-         WHERE p.actor_id=l.support_actor_id ORDER BY p.version DESC LIMIT 1) AS support_name
+    `SELECT ${logColumns}
      FROM bop_permission.store_support_access_log l
-     WHERE l.brand_id=$1 AND l.store_id=$2 ORDER BY l.occurred_at DESC,l.log_id DESC LIMIT $3`,
-    [scope.brandReference, scope.storeReference, limit],
+     WHERE l.brand_id=$1 AND l.store_id=$2 AND ($3::timestamptz IS NULL OR l.occurred_at<=$3::timestamptz)
+     ORDER BY l.occurred_at DESC,l.log_id DESC OFFSET $4 LIMIT $5`,
+    [
+      scope.brandReference,
+      scope.storeReference,
+      input.after?.before ?? null,
+      input.after?.skip ?? 0,
+      input.limit + 1,
+    ],
   );
-  return rows.map((row) =>
-    Object.freeze({
-      occurredAt: instant(row.occurred_at),
-      supportName: typeof row.support_name === "string" ? row.support_name : "Platform support",
-      kind: row.kind as StoreSupportAccessKind,
-      subjectCode: String(row.subject_code),
-    }),
+  const shown = rows.slice(0, input.limit);
+  const entries = Object.freeze(shown.map(entryOf));
+  if (rows.length <= input.limit || shown.length === 0)
+    return Object.freeze({ entries, next: null });
+  const last = logCursorText(shown[shown.length - 1]?.cursor_at);
+  // Records at exactly the last instant shown so far: on this page, and on the pages before it.
+  const atLast =
+    shown.filter((row) => row.cursor_at === last).length +
+    (input.after !== null && input.after.before === last ? input.after.skip : 0);
+  return Object.freeze({ entries, next: Object.freeze({ before: last, skip: atLast }) });
+}
+
+/**
+ * b18: what the Owner is told about the whole log, never only the page read: how many records it
+ * holds, how many were looks and the last one, and every change or refused attempt (newest first,
+ * up to `actedLimit`, with how many there are in all).
+ */
+export async function summarizeStoreSupportAccess(
+  tx: PlatformSupportTransaction,
+  scope: StoreSupportScope,
+  actedLimit = 50,
+): Promise<{
+  readonly total: number;
+  readonly looks: number;
+  readonly lastLookAt: string | null;
+  readonly actedCount: number;
+  readonly acted: readonly StoreSupportAccessEntry[];
+}> {
+  await scoped(tx, scope);
+  const { rows: counts } = await tx.query(
+    `SELECT count(*)::int AS total,
+       count(*) FILTER (WHERE kind='Viewed')::int AS looks,
+       max(occurred_at) FILTER (WHERE kind='Viewed') AS last_look
+     FROM bop_permission.store_support_access_log WHERE brand_id=$1 AND store_id=$2`,
+    [scope.brandReference, scope.storeReference],
   );
+  const count = counts[0] ?? {};
+  const total = Number(count.total ?? 0),
+    looks = Number(count.looks ?? 0);
+  if (!Number.isSafeInteger(total) || !Number.isSafeInteger(looks) || looks > total)
+    throw new Error("PLATFORM_SUPPORT_UNAVAILABLE");
+  const { rows } = await tx.query(
+    `SELECT ${logColumns}
+     FROM bop_permission.store_support_access_log l
+     WHERE l.brand_id=$1 AND l.store_id=$2 AND l.kind<>'Viewed'
+     ORDER BY l.occurred_at DESC,l.log_id DESC LIMIT $3`,
+    [scope.brandReference, scope.storeReference, actedLimit],
+  );
+  return Object.freeze({
+    total,
+    looks,
+    lastLookAt:
+      count.last_look === null || count.last_look === undefined ? null : instant(count.last_look),
+    actedCount: total - looks,
+    acted: Object.freeze(rows.map(entryOf)),
+  });
 }

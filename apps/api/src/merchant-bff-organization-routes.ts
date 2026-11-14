@@ -189,11 +189,17 @@ export function installMerchantOrganizationRoutes(
   // WP-2423 Q19 (DEC-SOLE-OPERATOR-APPROVAL): the Brand Owner's sole-operator setting.
   router.get("/organization/sole-operator", safeRead(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant");
+    // b18: `?before=<change number>` reads the earlier changes of the record, newest first.
+    const keys = Object.keys(request.query);
+    const before = request.query.before;
+    const historyBefore =
+      typeof before === "string" && /^[1-9][0-9]{0,8}$/u.test(before) ? Number(before) : null;
     if (
       request.method !== "GET" ||
       request.body !== undefined ||
       sessionCookie === null ||
-      Object.keys(request.query).length !== 0 ||
+      keys.some((key) => key !== "before") ||
+      (keys.length === 1 && historyBefore === null) ||
       rawHeaderValues(request, "origin").length > 1 ||
       rawHeaderValues(request, "sec-fetch-site").length !== 1
     ) {
@@ -205,7 +211,9 @@ export function installMerchantOrganizationRoutes(
       return;
     }
     const port = options.soleOperator;
-    void retryTransactionConflict(() => port.read({ sessionCookie }))
+    void retryTransactionConflict(() =>
+      port.read({ sessionCookie, ...(historyBefore === null ? {} : { historyBefore }) }),
+    )
       .then((view) => response.set("Cache-Control", NO_STORE).json(view))
       .catch((error: unknown) => {
         // WP-2423: staff who are not the Brand Owner get "nothing to show", not a refusal.

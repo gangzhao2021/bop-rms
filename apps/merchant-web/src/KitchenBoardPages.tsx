@@ -1887,6 +1887,7 @@ export function KitchenBoardScreen({
   stale,
   checkedAt,
   soldOutHref,
+  setupHref,
   remakes,
   earlierDays,
   headerStatus,
@@ -1965,6 +1966,11 @@ export function KitchenBoardScreen({
   readonly stale?: StaleRead | undefined;
   /** WP-2423 Q17: where the cook marks an item sold out for today, when the role may. */
   readonly soldOutHref?: string | undefined;
+  /**
+   * b18 review (Owner 2026-11-14 "后厨 with the kitchen pages"): Store setup's kitchen place, for
+   * people who may open Store setup. A link only: the setup itself never sits on the cooks' board.
+   */
+  readonly setupHref?: string | undefined;
 }) {
   // WP-2423 follow-up: ages follow the clock and each poll, not only changes to the work.
   const clockAt = useKitchenClock(view.projectedAt, checkedAt);
@@ -2669,6 +2675,11 @@ export function KitchenBoardScreen({
             {soldOutHref ? (
               <Link className="kitchen-sold-out-link" to={soldOutHref}>
                 {t("Mark an item sold out")}
+              </Link>
+            ) : null}
+            {setupHref ? (
+              <Link className="kitchen-sold-out-link" to={setupHref}>
+                {t("Kitchen setup in Store setup")}
               </Link>
             ) : null}
             <button ref={refreshButtonRef} disabled={!onRefresh} onClick={onRefresh}>
@@ -3492,6 +3503,8 @@ interface KitchenPageProps {
   readonly navigation?: ReactNode;
   /** WP-2423 Q17: the Item availability page, when the role may mark items sold out. */
   readonly soldOutHref?: string | undefined;
+  /** b18 review: Store setup's kitchen place, for people who may open Store setup. */
+  readonly setupHref?: string | undefined;
   /** The app's workspace frame, used once the board says this is a counter or office sign-in. */
   readonly workspaceFrame?: KitchenWorkspaceFrame | undefined;
   /** Who the board last said was using it in this sign-in (kept by the app between pages). */
@@ -3800,6 +3813,8 @@ function KitchenBoardContent(
       checkedAt={state.loadedAt}
       // The kitchen display offers marking an item sold out in its own navigation (Q17).
       soldOutHref={kitchenDisplay ? undefined : props.soldOutHref}
+      // Not on the kitchen display: it is a cooks' screen, never an Owner's settings entry.
+      setupHref={kitchenDisplay ? undefined : props.setupHref}
       earlierDays={
         props.csrf
           ? {

@@ -180,7 +180,7 @@ export function StorePublicProfilePanel({
   if (status === "Loading")
     return (
       <section id="store-public-profile" className="receipt-privacy" aria-busy="true">
-        <h3>{t("Name and contact shown to customers")}</h3>
+        <h3>{t("Store details")}</h3>
         <p role="status">{t("Loading the store name and contact details…")}</p>
       </section>
     );
@@ -191,7 +191,7 @@ export function StorePublicProfilePanel({
         className="receipt-privacy"
         aria-labelledby="store-public-profile-heading"
       >
-        <h3 id="store-public-profile-heading">{t("Name and contact shown to customers")}</h3>
+        <h3 id="store-public-profile-heading">{t("Store details")}</h3>
         <StatePanel
           heading={t("The store name and contact details could not be loaded")}
           tone="error"
@@ -327,7 +327,7 @@ export function StorePublicProfilePanel({
       className="receipt-privacy"
       aria-labelledby="store-public-profile-heading"
     >
-      <h3 id="store-public-profile-heading">{t("Name and contact shown to customers")}</h3>
+      <h3 id="store-public-profile-heading">{t("Store details")}</h3>
       <p>
         {t(
           "Customers see this name on the menu, their order page, the pickup screen and their receipt, and use the address and phone to reach the store. Receipts already issued keep the name they were issued with.",

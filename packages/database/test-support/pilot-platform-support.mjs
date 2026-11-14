@@ -498,6 +498,64 @@ export async function exercisePilotPlatformSupport(context) {
     routes,
   );
 
+  // b18 (Owner 2026-11-14 "show all must reach every record"): with far more looks than one page
+  // (and than the old read's 100), what the Owner is told covers the whole log — the changes and
+  // refused attempts older than every look are still listed and counted — and the pages, read as
+  // the restricted role, reach every record exactly once. Three looks share one instant.
+  const later = Date.now() + minutes(5);
+  for (let n = 0; n < 130; n++)
+    await admin.query(
+      "INSERT INTO bop_permission.store_support_access_log (log_id,brand_id,store_id,support_actor_id,kind,subject_code,occurred_at) VALUES ($1,$2,$3,$4,'Viewed','MerchantOverview',$5)",
+      [
+        id(0x9d000 + n),
+        brand,
+        store,
+        supportActor,
+        new Date(later + Math.max(0, n - 2) * 1000).toISOString(),
+      ],
+    );
+  const total = Number(
+    (
+      await admin.query(
+        "SELECT count(*) n FROM bop_permission.store_support_access_log WHERE brand_id=$1 AND store_id=$2",
+        [brand, store],
+      )
+    ).rows[0].n,
+  );
+  await listen(
+    session,
+    async (send) => {
+      const read = await send("store/support-access");
+      assert.equal(read.status, 200, JSON.stringify(read.body));
+      assert.equal(read.body.summary.total, total);
+      assert.equal(read.body.summary.looks, await logRows("Viewed"));
+      assert.equal(
+        read.body.summary.actedCount,
+        (await logRows("Changed")) + (await logRows("Refused")),
+      );
+      assert.ok(read.body.summary.acted.some((entry) => entry.kind === "Changed"));
+      assert.ok(read.body.log.every((entry) => entry.kind === "Viewed"));
+      assert.equal(read.body.log.length, 50);
+      const seen = [...read.body.log];
+      let next = read.body.logNext;
+      while (next !== null) {
+        const page = await send(
+          "store/support-access?before=" + encodeURIComponent(next.before) + "&skip=" + next.skip,
+        );
+        assert.equal(page.status, 200, JSON.stringify(page.body));
+        seen.push(...page.body.log);
+        next = page.body.logNext;
+      }
+      assert.equal(seen.length, total);
+      for (const kind of ["Viewed", "Changed", "Refused"])
+        assert.equal(seen.filter((entry) => entry.kind === kind).length, await logRows(kind));
+      // Anything else in the address is refused, not read.
+      assert.equal((await send("store/support-access?before=x&skip=0")).status, 403);
+      assert.equal((await send("store/support-access?brand=x")).status, 403);
+    },
+    routes,
+  );
+
   // The record can't be rewritten, and another Store's scope sees none of it (restricted role).
   await assert.rejects(
     admin.query("UPDATE bop_permission.store_support_access_log SET kind='Viewed'"),

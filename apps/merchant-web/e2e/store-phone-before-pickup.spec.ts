@@ -158,7 +158,7 @@ test("@production turning pickup on without the store's phone is refused and say
     await save.click();
     const refusal = page.getByRole("alert");
     await expect(refusal).toContainText(
-      "Pickup guests need a phone number to reach the store. Add it under Name and contact shown to customers in Store setup, then turn pickup on.",
+      "Pickup guests need a phone number to reach the store. Add it in Store setup, Store details, then turn pickup on.",
     );
     // v15 batch 8: the refusal is right under the Save that was tapped, in view without
     // scrolling, and the box shows pickup still off (nothing was saved), with the way to the phone.

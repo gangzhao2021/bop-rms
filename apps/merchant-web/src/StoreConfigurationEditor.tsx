@@ -1045,14 +1045,12 @@ export function StoreConfigurationFeeBasisView({
         </p>
       ) : (
         <>
-          <p>
-            {t(
-              "These settings come from saved Store setup draft {sourceRevision}. Change them in Store setup.",
-              { sourceRevision: basis.sourceRevision },
-            )}
-          </p>
-          <Link to={`/app/organization/stores/${configuration.storeReference}/setup`}>
-            {t("Edit in Store Setup")}
+          {/* b18: no revision numbers; the link opens the place where these settings are changed. */}
+          <p>{t("These settings come from the saved Store setup draft.")}</p>
+          <Link
+            to={`/app/organization/stores/${configuration.storeReference}/setup?section=changes`}
+          >
+            {t("Change them in Settings that need approval")}
           </Link>
           <ul>
             {basis.feeContexts.map((entry) => (
@@ -1109,7 +1107,7 @@ export function StoreConfigurationEditingBoundary({
       {configuration.setupBasis !== undefined && (
         <p>
           {t(
-            "These hours are also the hours in Store setup. Saving them changes nothing else there.",
+            "Opening hours are changed here. Saving them changes nothing else in Store setup; its other settings that need approval are under Settings that need approval.",
           )}
         </p>
       )}

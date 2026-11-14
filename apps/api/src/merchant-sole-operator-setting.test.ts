@@ -120,6 +120,19 @@ function setup() {
   };
 }
 beforeEach(() => vi.resetAllMocks());
+it("b18: the read pages the record's earlier changes (show all reaches every change)", async () => {
+  const f = setup();
+  const reads: unknown[] = [];
+  doubles.settingSource.mockImplementation(() => async (_tx: object, query: unknown) => {
+    reads.push(query);
+    return { state: "On", version: 36, history: [] };
+  });
+  await f.soleOperator.read({ sessionCookie: "synthetic-cookie" });
+  await f.soleOperator.read({ sessionCookie: "synthetic-cookie", historyBefore: 27 });
+  expect(reads[0]).toMatchObject({ historyLimit: 10 });
+  expect(reads[0]).not.toHaveProperty("historyBefore");
+  expect(reads[1]).toMatchObject({ historyLimit: 20, historyBefore: 27 });
+});
 it("WP-2423: the read resolves the Owner in full once at the start and once before the reply", async () => {
   const f = setup();
   const result = await f.soleOperator.read({ sessionCookie: "synthetic-cookie" });

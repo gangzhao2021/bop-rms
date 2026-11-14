@@ -90,7 +90,7 @@ export function StoreKitchenSetupPanel({
       className="kitchen-setup"
       aria-labelledby="kitchen-setup-heading"
     >
-      <h3 id="kitchen-setup-heading">{t("Kitchen")}</h3>
+      <h3 id="kitchen-setup-heading">{t("Kitchen setup")}</h3>
       {state === "loading" ? <p role="status">{t("Loading the kitchen…")}</p> : null}
       {state === "unavailable" ? (
         <div role="status">

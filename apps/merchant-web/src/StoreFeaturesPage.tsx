@@ -437,7 +437,7 @@ export function StoreFeaturesPage({
               ? t("Only the owner changes store features.")
               : error instanceof StoreFeaturesClientError && error.code === "PhoneRequired"
                 ? t(
-                    "Pickup guests need a phone number to reach the store. Add it under Name and contact shown to customers in Store setup, then turn pickup on.",
+                    "Pickup guests need a phone number to reach the store. Add it in Store setup, Store details, then turn pickup on.",
                   )
                 : t("Not saved. Check the connection and try again."),
         });

@@ -4,7 +4,9 @@ import {
   storeSupportClient,
   StoreSupportClientError,
   type StoreSupportAccessView,
+  type StoreSupportLogCursor,
   type StoreSupportLogEntry,
+  type StoreSupportLogSummary,
   type StoreSupportMode,
 } from "./store-support-client.js";
 import { SourceTime } from "./StoreTime.js";
@@ -29,13 +31,18 @@ export const supportLogShown = 5;
 
 /**
  * b18 (Owner 2026-11-14): the log leads with what support changed or tried, the lines that matter;
- * the many "looked" lines are counted, and every record the Store's log returned is one click away
- * ("Show all"). Collapsed only on screen: nothing is left out or removed.
+ * the many "looked" lines are counted, and every record of the Store's log is reachable ("Show
+ * all", then page by page). What is said about the log is read from all of it on the server, never
+ * from the records on screen. Collapsed only on screen: nothing is left out or removed.
  */
-export function supportLogSummary(log: readonly StoreSupportLogEntry[]) {
-  const acted = log.filter((entry) => entry.kind !== "Viewed");
-  const looked = log.filter((entry) => entry.kind === "Viewed");
-  return { acted, looks: looked.length, lastLook: looked[0]?.occurredAt ?? null };
+export function supportLogSummary(summary: StoreSupportLogSummary) {
+  return {
+    acted: summary.acted,
+    actedCount: summary.actedCount,
+    looks: summary.looks,
+    lastLook: summary.lastLookAt,
+    total: summary.total,
+  };
 }
 
 function SupportLogTable({ log }: { readonly log: readonly StoreSupportLogEntry[] }) {
@@ -63,23 +70,55 @@ function SupportLogTable({ log }: { readonly log: readonly StoreSupportLogEntry[
   );
 }
 
-function SupportAccessLog({ log }: { readonly log: readonly StoreSupportLogEntry[] }) {
+export function SupportAccessLog({ view }: { readonly view: StoreSupportAccessView }) {
   const [all, setAll] = useState(false);
-  if (log.length === 0)
+  // Pages read after the first, in order; reset when the Store's log is read again.
+  const [more, setMore] = useState<{
+    readonly log: readonly StoreSupportLogEntry[];
+    readonly next: StoreSupportLogCursor | null;
+  }>({ log: [], next: view.logNext });
+  const [reading, setReading] = useState<"idle" | "reading" | "failed">("idle");
+  useEffect(() => {
+    setMore({ log: [], next: view.logNext });
+    setReading("idle");
+  }, [view]);
+  const { acted, actedCount, looks, lastLook, total } = supportLogSummary(view.summary);
+  if (total === 0)
     return (
       <>
         <h4>{t("Support access log")}</h4>
         <p>{t("Platform support hasn't opened your Store yet.")}</p>
       </>
     );
-  const { acted, looks, lastLook } = supportLogSummary(log);
+  const loaded = [...view.log, ...more.log];
+  const readMore = async () => {
+    if (more.next === null || reading === "reading") return;
+    setReading("reading");
+    try {
+      const page = await storeSupportClient.accessLogPage(more.next);
+      setMore((old) => ({ log: [...old.log, ...page.log], next: page.logNext }));
+      setReading("idle");
+    } catch {
+      setReading("failed");
+    }
+  };
   return (
     <>
       <h4>{t("What support changed or tried")}</h4>
-      {acted.length === 0 ? (
+      {actedCount === 0 ? (
         <p>{t("Platform support hasn't changed or tried to change anything.")}</p>
       ) : (
-        <SupportLogTable log={acted.slice(0, supportLogShown)} />
+        <>
+          <SupportLogTable log={acted} />
+          {actedCount > acted.length ? (
+            <p>
+              {t(
+                "The newest {shown} of {count} are listed here; every one is in the access log below.",
+                { shown: acted.length, count: actedCount },
+              )}
+            </p>
+          ) : null}
+        </>
       )}
       {looks === 0 ? null : (
         <p>
@@ -92,22 +131,40 @@ function SupportAccessLog({ log }: { readonly log: readonly StoreSupportLogEntry
       <h4>{t("Support access log")}</h4>
       {all ? (
         <>
-          <SupportLogTable log={log} />
-          <button type="button" className="support-access__toggle" onClick={() => setAll(false)}>
-            {t("Show fewer")}
-          </button>
+          <SupportLogTable log={loaded} />
+          {loaded.length < total ? (
+            <p>{t("Showing {shown} of {total} records.", { shown: loaded.length, total })}</p>
+          ) : null}
+          {reading === "failed" ? (
+            <p role="status">{t("The earlier records could not be read. Try again.")}</p>
+          ) : null}
+          <p className="card-actions">
+            {more.next !== null ? (
+              <button
+                type="button"
+                className="support-access__toggle"
+                disabled={reading === "reading"}
+                onClick={() => void readMore()}
+              >
+                {reading === "reading" ? t("Loading…") : t("Show earlier records")}
+              </button>
+            ) : null}
+            <button type="button" className="support-access__toggle" onClick={() => setAll(false)}>
+              {t("Show fewer")}
+            </button>
+          </p>
         </>
       ) : (
         <>
-          <SupportLogTable log={log.slice(0, supportLogShown)} />
-          {log.length > supportLogShown ? (
+          <SupportLogTable log={loaded.slice(0, supportLogShown)} />
+          {total > supportLogShown ? (
             <button
               type="button"
               className="support-access__toggle"
               aria-expanded={false}
               onClick={() => setAll(true)}
             >
-              {t("Show all {count} records", { count: log.length })}
+              {t("Show all {count} records", { count: total })}
             </button>
           ) : null}
         </>
@@ -135,7 +192,10 @@ export function StoreSupportAccessPanel({
   const [busy, setBusy] = useState(false);
   const load = useCallback(async () => {
     try {
-      setView(await storeSupportClient.access());
+      const read = await storeSupportClient.access();
+      // b18: what the page says about the log comes from the whole log; without it, say nothing.
+      if (typeof read.summary?.total !== "number") throw new Error("summary missing");
+      setView(read);
       setState("ready");
     } catch (error) {
       setState(
@@ -242,7 +302,7 @@ export function StoreSupportAccessPanel({
               "Whatever you allow here, support can never take payment, refund, comp, discount or void, or change staff, roles or payment accounts. Those stay yours, and you can do everything here without support.",
             )}
           </p>
-          <SupportAccessLog log={view.log} />
+          <SupportAccessLog view={view} />
         </>
       )}
       {message === null ? null : <p role="status">{message}</p>}

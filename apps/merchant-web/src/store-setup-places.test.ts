@@ -1,29 +1,44 @@
 import { afterEach, expect, it } from "vitest";
 import { setLanguageForTest } from "./i18n/i18n.js";
-import { supportLogShown, supportLogSummary } from "./StoreSupportAccessPanel.js";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { SupportAccessLog, supportLogShown, supportLogSummary } from "./StoreSupportAccessPanel.js";
 import { storeNameExample, storeNameLabel } from "./StorePublicProfilePanel.js";
 import { plainLanguageName } from "./staff-text.js";
 
 afterEach(() => setLanguageForTest("en"));
 
-it("b18: the support log leads with what support changed or tried, and counts the looks", () => {
+it("b18: what the support log says comes from the whole log, not the records on screen", () => {
   const entry = (kind: string, minute: number) => ({
-    occurredAt: new Date(Date.UTC(2026, 10, 14, 18, 60 - minute)).toISOString(),
+    occurredAt: new Date(Date.UTC(2026, 10, 14, 18, 0) - minute * 60_000).toISOString(),
     supportName: "Support",
     kind: kind as "Viewed" | "Changed" | "Refused",
-    subjectCode: "MerchantOverview",
+    subjectCode: kind === "Changed" ? "KitchenLine" : "MerchantOverview",
   });
-  const log = [
-    entry("Viewed", 1),
-    entry("Changed", 2),
-    entry("Viewed", 3),
-    entry("Refused", 4),
-    entry("Viewed", 5),
-  ];
-  const summary = supportLogSummary(log);
-  expect(summary.acted.map((value) => value.kind)).toEqual(["Changed", "Refused"]);
-  expect(summary.looks).toBe(3);
-  expect(summary.lastLook).toBe(log[0]?.occurredAt);
+  // The first page is all looks; the one change is older than every one of them (b18 review).
+  const log = Array.from({ length: 50 }, (_, n) => entry("Viewed", n));
+  const changed = entry("Changed", 500);
+  const view = {
+    version: 1,
+    mode: "Off" as const,
+    allowedUntil: null,
+    log,
+    logNext: { before: "2026-11-14T17:10:00.000000Z", skip: 1 },
+    summary: {
+      total: 160,
+      looks: 159,
+      lastLookAt: log[0]?.occurredAt ?? null,
+      actedCount: 1,
+      acted: [changed],
+    },
+  };
+  const summary = supportLogSummary(view.summary);
+  expect(summary).toMatchObject({ actedCount: 1, looks: 159, total: 160 });
+  const html = renderToStaticMarkup(createElement(SupportAccessLog, { view }));
+  expect(html).toContain("Set up your kitchen");
+  expect(html).not.toContain("hasn&#x27;t changed or tried");
+  expect(html).toContain("Support looked at your Store 159 times");
+  expect(html).toContain("Show all 160 records");
   expect(supportLogShown).toBe(5);
 });
 

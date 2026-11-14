@@ -18,7 +18,11 @@ import {
   type StoreConfigurationPublicationCheckCode,
   type StoreConfigurationPublicationChecks,
 } from "./store-configuration-pending-journal.js";
-import { storeSetupMissingItems, storeSetupMissingText } from "./store-setup-missing.js";
+import {
+  storeSetupMissingItems,
+  storeSetupMissingText,
+  type StoreSetupLayout,
+} from "./store-setup-missing.js";
 import {
   storeConfigurationDeclineReasonText,
   withdrawStoreConfiguration,
@@ -129,7 +133,7 @@ const checkText: Record<StoreConfigurationPublicationCheckCode, { pass: string; 
   StorePhone: {
     pass: t("The store has a phone number for pickup guests, or does not offer pickup."),
     fail: t(
-      "This setup offers pickup, and pickup guests call the store about allergies or their order. Add the store's phone number under Name and contact shown to customers, or take pickup out of the service modes in step 3.",
+      "This setup offers pickup, and pickup guests call the store about allergies or their order. Add the store's phone number in Store details, or take pickup out of the services this setup offers.",
     ),
   },
 };
@@ -189,6 +193,8 @@ export interface StoreConfigurationOrdinaryPanelProps {
   readonly journalFactory?: (scope: StoreSetupScope) => StoreConfigurationPendingJournal;
   /** WP-2423 (2026-10-16 v15): Store setup's saved hours changed (restored after a withdrawal). */
   readonly onSetupChanged?: () => void;
+  /** b18: which steps Store setup shows (an open Store's approval steps, or a Store being opened). */
+  readonly setupLayout?: StoreSetupLayout;
 }
 const denied = () => {
   throw new StoreSetupClientError("ScopeChanged");
@@ -344,7 +350,7 @@ const messages: Record<StoreSetupClientError["code"], string> = {
     "This Store has no receipt template in use yet, so nothing was created. In step 5, choose or create this Store's receipt template and save the setup, then create the configuration again.",
   ),
   StorePhoneRequired: t(
-    "This setup offers pickup, and pickup guests call the store about allergies or their order, so it was not sent. Add the store's phone number under Name and contact shown to customers, or take pickup out of the service modes in step 3, then send it again.",
+    "This setup offers pickup, and pickup guests call the store about allergies or their order, so it was not sent. Add the store's phone number in Store details, or take pickup out of the services this setup offers, then send it again.",
   ),
 };
 /** WP-2423 (v15 D6): the latest configuration was created from exactly this saved setup (its
@@ -699,7 +705,10 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
     openByAnother = openLatest && latest.authoredByReference !== props.scope.actorReference,
     openYours = openLatest && latest.authoredByReference === props.scope.actorReference,
     // WP-2423 (v15): what the saved setup still lacks, named with where to set it.
-    setupMissing = props.saved === null ? [] : storeSetupMissingItems(props.saved.content),
+    setupMissing =
+      props.saved === null
+        ? []
+        : storeSetupMissingItems(props.saved.content, props.setupLayout ?? "Opening"),
     setupIncomplete = setupMissing.length > 0,
     // The setup builds on the configuration that was latest when it was saved.
     setupOutdated =
@@ -960,13 +969,10 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
                 csrf={props.csrf}
                 summary={
                   <p>
+                    {/* b18: no version or revision numbers on the page. */}
                     {t(
-                      "Version {configurationVersion}, created from saved setup{value}. {value2} Once approved, you can publish it to the live Store.",
+                      "Created from the saved setup draft. {value2} Once approved, you can publish it to the live Store.",
                       {
-                        configurationVersion: latest.configurationVersion,
-                        value: latest.setupBasis
-                          ? ` revision ${latest.setupBasis.sourceRevision}`
-                          : "",
                         value2: ready
                           ? t("Every check above has passed.")
                           : t("Some checks above still need attention."),

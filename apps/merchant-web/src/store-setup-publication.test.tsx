@@ -63,7 +63,7 @@ describe("WP-2423 DEC-STORE-SETUP-PUBLICATION Store setup publication screens", 
     );
     expect(html).toContain("1 check needs attention");
     expect(html).toContain(
-      "Needs attention: This setup offers pickup, and pickup guests call the store about allergies or their order. Add the store&#x27;s phone number under Name and contact shown to customers, or take pickup out of the service modes in step 3.",
+      "Needs attention: This setup offers pickup, and pickup guests call the store about allergies or their order. Add the store&#x27;s phone number in Store details, or take pickup out of the services this setup offers.",
     );
     expect(
       renderToStaticMarkup(<StoreConfigurationPublicationChecklist checks={checks([])} />),

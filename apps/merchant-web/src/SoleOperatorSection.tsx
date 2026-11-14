@@ -8,7 +8,6 @@ import { serviceOperationReference } from "./service-control-client.js";
 import {
   createSoleOperatorClient,
   SoleOperatorClientError,
-  soleOperatorEarlierChangeCount,
   soleOperatorReasonLabel,
   soleOperatorReasons,
   type SoleOperatorReason,
@@ -88,8 +87,11 @@ export function SoleOperatorSection({
   const [message, setMessage] = useState<{ tone: "status" | "alert"; text: string } | null>(null);
   // A PIN sign-in was refused: show the "Verify it's you" step; the retry keeps the same change.
   const [fullSignIn, setFullSignIn] = useState(false);
-  // b18: the newest changes show; "Show all" lists every change this read returned.
+  // b18: the newest changes show; "Show all" lists them, and earlier ones are read page by page
+  // until the record's first change ("show all must reach every record").
   const [allChanges, setAllChanges] = useState(false);
+  const [earlier, setEarlier] = useState<SoleOperatorView["history"]>([]);
+  const [readingEarlier, setReadingEarlier] = useState<"idle" | "reading" | "failed">("idle");
   // One identity per intended change: a retry after an unknown result is recorded once.
   const operation = useRef(serviceOperationReference());
   const reload = useCallback(() => setRefresh((value) => value + 1), []);
@@ -104,6 +106,8 @@ export function SoleOperatorSection({
           return;
         }
         setView(value);
+        setEarlier([]);
+        setReadingEarlier("idle");
         if (value.verifiedUntil !== null) onVerified(value.verifiedUntil);
         setStatus("Ready");
       })
@@ -133,8 +137,24 @@ export function SoleOperatorSection({
     );
   const target = view.state === "On" ? "Off" : "On";
   const shownChanges = 5;
-  const listed = allChanges ? view.history.length : shownChanges;
-  const earlierChanges = soleOperatorEarlierChangeCount(view, listed);
+  const loadedChanges = [...view.history, ...earlier];
+  const listedChanges = allChanges ? loadedChanges : view.history.slice(0, shownChanges);
+  const oldestLoaded = loadedChanges.at(-1)?.version ?? 1;
+  const readEarlier = async () => {
+    if (readingEarlier === "reading" || oldestLoaded <= 1) return;
+    setReadingEarlier("reading");
+    try {
+      const page = await client.current.read(undefined, oldestLoaded);
+      if (page === null) throw new SoleOperatorClientError("Denied");
+      setEarlier((old) => [
+        ...old,
+        ...page.history.filter((entry) => entry.version < oldestLoaded),
+      ]);
+      setReadingEarlier("idle");
+    } catch {
+      setReadingEarlier("failed");
+    }
+  };
   const verified = verifiedUntil !== null && Date.parse(verifiedUntil) > Date.now();
   const submit = async () => {
     if (busy || reason === "" || !verified) return;
@@ -215,35 +235,51 @@ export function SoleOperatorSection({
         <section aria-labelledby="sole-operator-history-heading" className="sole-operator-history">
           <h3 id="sole-operator-history-heading">{t("Recent changes")}</h3>
           <ol>
-            {view.history.slice(0, listed).map((entry) => (
+            {listedChanges.map((entry) => (
               <li key={entry.version}>{soleOperatorChangeText(entry)}</li>
             ))}
           </ol>
-          {view.history.length > shownChanges ? (
-            <button
-              type="button"
-              className="sole-operator-history__toggle"
-              aria-expanded={allChanges}
-              onClick={() => setAllChanges((value) => !value)}
-            >
-              {allChanges
-                ? t("Show fewer")
-                : t("Show {count} more", { count: view.history.length - shownChanges })}
-            </button>
-          ) : null}
-          {earlierChanges > 0 ? (
+          {allChanges && listedChanges.length < view.changeCount ? (
             <p>
-              {earlierChanges === 1
-                ? t("1 earlier change is kept in the record.")
-                : t("{earlierChanges} earlier changes are kept in the record.", {
-                    earlierChanges: earlierChanges,
-                  })}
+              {t("Showing {shown} of {count} changes.", {
+                shown: listedChanges.length,
+                count: view.changeCount,
+              })}
+            </p>
+          ) : null}
+          {readingEarlier === "failed" ? (
+            <p role="status">{t("The earlier changes could not be read. Try again.")}</p>
+          ) : null}
+          {view.changeCount > shownChanges ? (
+            <p className="card-actions">
+              {allChanges && oldestLoaded > 1 ? (
+                <button
+                  type="button"
+                  className="sole-operator-history__toggle"
+                  disabled={readingEarlier === "reading"}
+                  onClick={() => void readEarlier()}
+                >
+                  {readingEarlier === "reading" ? t("Loading…") : t("Show earlier changes")}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="sole-operator-history__toggle"
+                aria-expanded={allChanges}
+                onClick={() => setAllChanges((value) => !value)}
+              >
+                {allChanges
+                  ? t("Show fewer")
+                  : t("Show all {count} changes", { count: view.changeCount })}
+              </button>
             </p>
           ) : null}
         </section>
       ) : null}
-      {/* Not a form: the verification dialog holds its own form and must not nest in one. */}
-      <div className="card-actions">
+      {/* Not a form: the verification dialog holds its own form and must not nest in one.
+          b18 review (v3): one action at a time, on one line under the reason — "Verify to turn it
+          on" until the authenticator code is confirmed, then the one solid button that does it. */}
+      <div className="sole-operator__change">
         <label htmlFor="sole-operator-reason">
           {t("Reason for turning it {value}", { value: target === "On" ? t("on") : t("off") })}
         </label>
@@ -261,27 +297,31 @@ export function SoleOperatorSection({
             </option>
           ))}
         </select>
-        <StepUpVerification
-          purpose="SoleOperatorSetting"
-          csrf={csrf}
-          verifiedUntil={verifiedUntil}
-          onVerified={onVerified}
-          loadServerStatus={false}
-          label={t("Verify to turn it {value}", { value: target === "On" ? t("on") : t("off") })}
-          fetcher={fetcher}
-        />
-        <button
-          type="button"
-          onClick={() => void submit()}
-          data-variant={target === "On" ? "primary" : undefined}
-          disabled={busy || reason === "" || !verified}
-        >
-          {busy
-            ? t("Saving…")
-            : target === "On"
-              ? t("Turn on sole operator")
-              : t("Turn off sole operator")}
-        </button>
+        <div className="sole-operator__action">
+          <StepUpVerification
+            purpose="SoleOperatorSetting"
+            csrf={csrf}
+            verifiedUntil={verifiedUntil}
+            onVerified={onVerified}
+            loadServerStatus={false}
+            label={t("Verify to turn it {value}", { value: target === "On" ? t("on") : t("off") })}
+            fetcher={fetcher}
+          />
+          {verified ? (
+            <button
+              type="button"
+              onClick={() => void submit()}
+              data-variant="primary"
+              disabled={busy || reason === ""}
+            >
+              {busy
+                ? t("Saving…")
+                : target === "On"
+                  ? t("Turn on sole operator")
+                  : t("Turn off sole operator")}
+            </button>
+          ) : null}
+        </div>
       </div>
       {fullSignIn ? <FullSignInPrompt csrf={csrf} fetcher={fetcher} /> : null}
       {message ? <p role={message.tone === "alert" ? "alert" : "status"}>{message.text}</p> : null}

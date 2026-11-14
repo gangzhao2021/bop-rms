@@ -7,13 +7,17 @@ import {
 } from "@bop/tenant";
 import {
   changeStoreSupportPermission,
-  listStoreSupportAccess,
+  pageStoreSupportAccess,
+  summarizeStoreSupportAccess,
+  type StoreSupportAccessCursor,
+  parseStoreSupportAccessCursor,
   readActivePlatformSupportPerson,
   readStoreSupportPermission,
   recordStoreSupportAccess,
   StoreSupportPermissionError,
   type StoreSupportPermission,
 } from "@bop/permission";
+export { parseStoreSupportAccessCursor };
 import { listBrandMenus } from "@rms/catalog";
 import { readStoreKitchenLine } from "@rms/kitchen";
 import { createPostgresMerchantOrderIndex, loadMerchantOrderListSummaries } from "@rms/ordering";
@@ -567,8 +571,19 @@ export function createMerchantStoreSupportAccess(options: {
       version: permission.version,
       mode: permission.changesAllowed ? permission.mode : "Off",
       allowedUntil: permission.changesAllowed ? permission.allowedUntil : null,
-      log: await listStoreSupportAccess(tx as never, scope),
+      // b18 (Owner 2026-11-14): the newest page of the log and where the next starts, and what is
+      // said about the whole log (counts, every change or refused attempt) read from all of it.
+      ...(await logPage(tx, scope, null)),
+      summary: await summarizeStoreSupportAccess(tx as never, scope),
     });
+  };
+  const logPage = async (
+    tx: unknown,
+    scope: { brandReference: string; storeReference: string },
+    after: StoreSupportAccessCursor | null,
+  ) => {
+    const page = await pageStoreSupportAccess(tx as never, scope, { limit: 50, after });
+    return { log: page.entries, logNext: page.next };
   };
   const run = <T>(
     sessionCookie: unknown,
@@ -606,6 +621,16 @@ export function createMerchantStoreSupportAccess(options: {
     async read(input: { sessionCookie: unknown }) {
       try {
         return await run(input.sessionCookie, undefined, (tx, scope) => view(tx, scope));
+      } catch (error) {
+        return mapped(error);
+      }
+    },
+    /** b18: a later page of the log, from where the last page said the next one starts. */
+    async readLog(input: { sessionCookie: unknown; after: StoreSupportAccessCursor }) {
+      try {
+        return await run(input.sessionCookie, undefined, (tx, scope) =>
+          logPage(tx, scope, input.after),
+        );
       } catch (error) {
         return mapped(error);
       }

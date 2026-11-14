@@ -198,15 +198,17 @@ test("@production a sole operator turns it on and approves their own refund afte
     /^Turned off by you · Someone else can now approve · /u,
     /^Turned on by you · I run this business on my own · /u,
   ]);
+  // b18 review (v3): one action at a time — verify first; the solid button comes after.
   const turnOn = section.getByRole("button", { name: "Turn on sole operator" });
-  await expect(turnOn).toBeDisabled();
+  await expect(turnOn).toHaveCount(0);
   await section.getByLabel("Reason for turning it on").selectOption("OWNER_RUNS_STORE_ALONE");
-  await expect(turnOn).toBeDisabled();
+  await expect(turnOn).toHaveCount(0);
   await section.getByRole("button", { name: "Verify to turn it on" }).click();
   const dialog = page.getByRole("dialog", { name: "Confirm it is you" });
   await dialog.getByLabel("Six-digit code").fill("123456");
   await dialog.getByRole("button", { name: "Verify" }).click();
   await expect(dialog).toBeHidden();
+  await expect(turnOn).toBeEnabled();
   expect(JSON.parse(stepUps[0] ?? "{}")).toEqual({
     purpose: "SoleOperatorSetting",
     code: "123456",
@@ -326,5 +328,6 @@ test("@production sole operator not in effect names the other approver", async (
   await expect(section).toContainText(
     "On, but not in effect: Mia also holds refund approval at this store, so a second person is required.",
   );
-  await expect(section.getByRole("button", { name: "Turn off sole operator" })).toBeDisabled();
+  await expect(section.getByRole("button", { name: "Turn off sole operator" })).toHaveCount(0);
+  await expect(section.getByRole("button", { name: "Verify to turn it off" })).toBeVisible();
 });

@@ -156,7 +156,8 @@ export function createMerchantSoleOperator(options: {
       latestStepUpAt,
     });
   }
-  const read = async (input: { sessionCookie: unknown }) =>
+  /** b18: `historyBefore` reads the record's earlier changes, a page at a time (newest first). */
+  const read = async (input: { sessionCookie: unknown; historyBefore?: number }) =>
     // A read: the session is the one the cookie names (no CSRF on GET). Resolved once (it was
     // resolved twice, the second time against its own Session reference).
     options.persistence.transactions.run((transaction) =>
@@ -172,7 +173,8 @@ export function createMerchantSoleOperator(options: {
           tenantReference: scope.tenantReference,
           brandReference: scope.brandReference,
           observedAt,
-          historyLimit: 10,
+          historyLimit: input.historyBefore === undefined ? 10 : 20,
+          ...(input.historyBefore === undefined ? {} : { historyBefore: input.historyBefore }),
         });
         const configuration = await options.resolveConfiguration(
           tx,

@@ -60,11 +60,29 @@ export interface StoreSupportLogEntry {
   readonly kind: "Viewed" | "Changed" | "Refused";
   readonly subjectCode: string;
 }
-export interface StoreSupportAccessView {
+/** Where the next page of the log starts, as the last page said (b18). */
+export interface StoreSupportLogCursor {
+  readonly before: string;
+  readonly skip: number;
+}
+export interface StoreSupportLogPage {
+  readonly log: readonly StoreSupportLogEntry[];
+  readonly logNext: StoreSupportLogCursor | null;
+}
+/** b18: what the whole log holds, read from all of it (never only the page shown). */
+export interface StoreSupportLogSummary {
+  readonly total: number;
+  readonly looks: number;
+  readonly lastLookAt: string | null;
+  readonly actedCount: number;
+  /** Changes and refused attempts, newest first (up to 50; `actedCount` is how many in all). */
+  readonly acted: readonly StoreSupportLogEntry[];
+}
+export interface StoreSupportAccessView extends StoreSupportLogPage {
   readonly version: number;
   readonly mode: StoreSupportMode;
   readonly allowedUntil: string | null;
-  readonly log: readonly StoreSupportLogEntry[];
+  readonly summary: StoreSupportLogSummary;
 }
 export type StoreSupportErrorCode =
   "Denied" | "OwnerOnly" | "NotAllowedByOwner" | "Invalid" | "Changed" | "Unavailable";
@@ -143,6 +161,15 @@ export const storeSupportClient = Object.freeze({
       reason,
     }),
   access: () => send<StoreSupportAccessView>("/merchant/store/support-access", null),
+  /** b18: the next page of the log, from where the last page said it starts. */
+  accessLogPage: (after: StoreSupportLogCursor) =>
+    send<StoreSupportLogPage>(
+      "/merchant/store/support-access?before=" +
+        encodeURIComponent(after.before) +
+        "&skip=" +
+        String(after.skip),
+      null,
+    ),
   changeAccess: (
     csrf: string,
     expectedVersion: number,

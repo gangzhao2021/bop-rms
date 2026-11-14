@@ -298,7 +298,7 @@ test("@production WP-2423 Q4: hours of a configuration from Store setup are save
   await page.goto("/app/organization/stores/" + store + "/service");
   const editor = page.getByRole("region", { name: "Operating hours draft" });
   await editor.getByRole("button", { name: "Edit operating hours" }).click();
-  await expect(editor.getByText("These hours are also the hours in Store setup.")).toBeVisible();
+  await expect(editor.getByText("Opening hours are changed here.", { exact: false })).toBeVisible();
   await expect(editor.getByText("Fees in the published settings")).toBeVisible();
   await editor.getByRole("button", { name: "Add dated exception" }).click();
   const exception = editor.getByRole("group", { name: "Exception 1", exact: true });

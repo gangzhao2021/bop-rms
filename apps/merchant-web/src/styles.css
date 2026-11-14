@@ -10628,7 +10628,7 @@ tr[data-drop-target="true"] {
 }
 .store-setup-draft-page .store-setup-steps button,
 .store-setup-draft-page .store-setup-actions button,
-.store-setup-draft-page .screen-heading button {
+.store-setup-draft-page .store-setup-reload button {
   padding: 0;
   border: 0;
   border-radius: 0;
@@ -10657,4 +10657,41 @@ tr[data-drop-target="true"] {
 .store-setup-draft-page .store-setup-step-content {
   padding-inline: 0;
   border: 0;
+}
+
+/* b18 review (v3): Store setup's title row ends with the language switch, as on Orders. */
+.workspace-layout .workspace-content .store-setup-draft-page .screen-heading .language-switch {
+  align-self: flex-start;
+  margin-inline-start: auto;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
+}
+.store-setup-draft-page .store-setup-reload {
+  margin: 0 0 var(--bop-space-4);
+}
+.store-setup-draft-page .store-setup-reload button {
+  min-height: 44px;
+}
+/* b18 review (v3): sole operator's change is a reason field, then one action on its own line. */
+.sole-operator__change {
+  display: grid;
+  gap: var(--bop-space-2);
+  max-width: 48rem;
+  margin-top: var(--bop-space-6);
+}
+.sole-operator__action {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--bop-space-2) var(--bop-space-6);
+}
+.sole-operator__action .step-up-verification {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--bop-space-2) var(--bop-space-6);
+}
+.sole-operator__action .step-up-verification p {
+  margin: 0;
 }

@@ -180,13 +180,13 @@ export function parseSoleOperatorView(value: unknown): SoleOperatorView {
 }
 
 export function createSoleOperatorClient(fetcher: typeof fetch = fetch) {
-  const request = async (init: RequestInit, signal?: AbortSignal) => {
+  const request = async (init: RequestInit, signal?: AbortSignal, query = "") => {
     const controller = new AbortController(),
       abort = () => controller.abort();
     signal?.addEventListener("abort", abort, { once: true });
     const timer = setTimeout(abort, 20_000);
     try {
-      return await fetcher("/merchant/organization/sole-operator", {
+      return await fetcher("/merchant/organization/sole-operator" + query, {
         ...init,
         credentials: "same-origin",
         redirect: "error",
@@ -200,12 +200,14 @@ export function createSoleOperatorClient(fetcher: typeof fetch = fetch) {
   };
   return Object.freeze({
     /** Null: the signed-in member is not the Brand Owner, so there is nothing to show them. */
-    async read(signal?: AbortSignal): Promise<SoleOperatorView | null> {
+    async read(signal?: AbortSignal, historyBefore?: number): Promise<SoleOperatorView | null> {
       let response: Response;
       try {
         response = await request(
           { method: "GET", headers: { Accept: "application/json" } },
           signal,
+          // b18: the record's changes older than this one, a page at a time.
+          historyBefore === undefined ? "" : "?before=" + String(historyBefore),
         );
       } catch {
         throw new SoleOperatorClientError("Unavailable");

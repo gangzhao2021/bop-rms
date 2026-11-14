@@ -141,7 +141,7 @@ export function StoreReceiptPrivacyPanel({
   if (status === "Loading")
     return (
       <section id="receipts-and-privacy" className="receipt-privacy" aria-busy="true">
-        <h3>{t("Receipts and privacy")}</h3>
+        <h3>{t("Receipts and tax numbers")}</h3>
         <p role="status">{t("Loading receipt and privacy details…")}</p>
       </section>
     );
@@ -152,7 +152,7 @@ export function StoreReceiptPrivacyPanel({
         className="receipt-privacy"
         aria-labelledby="receipt-privacy-heading"
       >
-        <h3 id="receipt-privacy-heading">{t("Receipts and privacy")}</h3>
+        <h3 id="receipt-privacy-heading">{t("Receipts and tax numbers")}</h3>
         <StatePanel
           heading={t("Receipt and privacy details could not be loaded")}
           tone="error"
@@ -274,7 +274,7 @@ export function StoreReceiptPrivacyPanel({
       className="receipt-privacy"
       aria-labelledby="receipt-privacy-heading"
     >
-      <h3 id="receipt-privacy-heading">{t("Receipts and privacy")}</h3>
+      <h3 id="receipt-privacy-heading">{t("Receipts and tax numbers")}</h3>
       <p>
         {t(
           "Customer receipts show your business name, the store address, each tax with its rate, and the registration numbers below. Customers see your privacy notice link where they enter their contact details and on their receipt. Enter only your own registered numbers and notice; leave a number empty if the business is not registered for that tax.",

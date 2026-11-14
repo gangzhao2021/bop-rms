@@ -30,7 +30,10 @@ import { retryTransactionConflict } from "./transaction-conflict-retry.js";
 import { MerchantStoreReceiptProfileError } from "./merchant-store-receipt-profile.js";
 import { MerchantKitchenSetupError } from "./merchant-kitchen-setup.js";
 import { MerchantMemberPointsError } from "./merchant-member-points.js";
-import { MerchantStoreSupportError } from "./merchant-store-support.js";
+import {
+  MerchantStoreSupportError,
+  parseStoreSupportAccessCursor,
+} from "./merchant-store-support.js";
 import { MerchantStorePublicProfileError } from "./merchant-store-public-profile.js";
 import type { MerchantBffRouterOptions } from "./merchant-bff-contract.js";
 import { MerchantStoreFeaturesError } from "./merchant-store-features.js";
@@ -871,6 +874,24 @@ export function installMerchantStoreSetupRoutes(
     const sessionCookie = cookie(request, "__Host-bop-merchant");
     if (sessionCookie === null || !options.storeSupportAccess) {
       denied(response);
+      return;
+    }
+    // b18: `?before=<instant>&skip=<n>` reads the next page of the log (as the last page said).
+    const keys = Object.keys(request.query);
+    if (keys.length > 0) {
+      const skip = request.query.skip;
+      const after =
+        keys.length === 2 && typeof skip === "string" && /^(0|[1-9][0-9]{0,5})$/u.test(skip)
+          ? parseStoreSupportAccessCursor(request.query.before, Number(skip))
+          : null;
+      if (after === null) {
+        denied(response);
+        return;
+      }
+      void options.storeSupportAccess
+        .readLog({ sessionCookie, after })
+        .then((page) => response.set("Cache-Control", NO_STORE).json(page))
+        .catch((error: unknown) => supportFailure(response, error));
       return;
     }
     void options.storeSupportAccess

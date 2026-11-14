@@ -886,7 +886,7 @@ test("M109: a setup offering pickup can't be sent until the store has a phone, a
     await reloadReview(page);
     await expect(checks).toContainText("1 check needs attention");
     await expect(checks).toContainText(
-      "Needs attention: This setup offers pickup, and pickup guests call the store about allergies or their order. Add the store's phone number under Name and contact shown to customers, or take pickup out of the service modes in step 3.",
+      "Needs attention: This setup offers pickup, and pickup guests call the store about allergies or their order. Add the store's phone number in Store details, or take pickup out of the services this setup offers.",
     );
     await expect(
       panel(page).getByRole("button", { name: "Submit configuration for review" }),
