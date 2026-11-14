@@ -4,8 +4,10 @@ import type { RequestHandler, Response } from "express";
 import { customerFailureCode } from "./customer-failure-diagnostic.js";
 import { markRequestFailure, markRequestRetryLater } from "./request-correlation.js";
 import { customerDisplayLocale } from "./customer-display-locale.js";
+import { logGuestFailure } from "./guest-failure-log.js";
 import {
   DiningOrderStillProcessingError,
+  DiningSessionReadBusyError,
   DiningTableMovedError,
   type CustomerDiningSessionView,
   type CustomerBillView,
@@ -238,6 +240,23 @@ export class CustomerDiningSessionHandler {
           markRequestRetryLater(request);
           protect(response);
           response.setHeader("Retry-After", "2");
+          response.status(503).json({
+            schemaVersion: 1,
+            error: {
+              code: "dining_session_order_processing",
+              messageKey: "customer.dining.session.order_processing",
+            },
+          });
+          return;
+        }
+        // v15 b17: the table changed while it was read (a round being written, the kitchen or
+        // the status view catching up, the database busy): still being processed, never an
+        // error. The page keeps what it shows and reads again; one warning line says what.
+        if (error instanceof DiningSessionReadBusyError) {
+          markRequestRetryLater(request);
+          logGuestFailure("CUSTOMER_DINING_SESSION_READ_BUSY", error, undefined, 40);
+          protect(response);
+          response.setHeader("Retry-After", "5");
           response.status(503).json({
             schemaVersion: 1,
             error: {

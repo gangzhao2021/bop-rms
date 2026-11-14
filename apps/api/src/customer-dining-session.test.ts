@@ -6,6 +6,7 @@ import { createApp } from "./app.js";
 import { CustomerDiningSessionHandler } from "./customer-dining-session.js";
 import {
   DiningOrderStillProcessingError,
+  DiningSessionReadBusyError,
   type CustomerDiningSessionView,
 } from "./customer-dining-session-read.js";
 
@@ -305,6 +306,40 @@ it("v15 2026-10-27: a table whose first round's order is still being prepared wa
   expect(((await response.json()) as { error: { code: string } }).error.code).toBe(
     "dining_session_order_processing",
   );
+});
+
+// v15 b17: the table changed while it was read (a staff round being written): still processing,
+// with a 5-second wait, one warning line naming what disagreed, never a server error.
+it("v15 b17: a table read busy with a round being written answers still processing, Retry-After 5", async () => {
+  const f = await setup();
+  const lines: string[] = [];
+  const write = vi
+    .spyOn(process.stderr, "write")
+    .mockImplementation((line: string | Uint8Array) => {
+      lines.push(String(line));
+      return true;
+    });
+  try {
+    f.read.mockRejectedValue(
+      new DiningSessionReadBusyError(new Error("ORDER_PROGRESS_CHANGED_WHILE_READING")),
+    );
+    const response = await f.send();
+    expect(response.status).toBe(503);
+    expect(response.headers.get("retry-after")).toBe("5");
+    expect(((await response.json()) as { error: { code: string } }).error.code).toBe(
+      "dining_session_order_processing",
+    );
+  } finally {
+    write.mockRestore();
+  }
+  const warning = lines
+    .filter((line) => line.includes("CUSTOMER_DINING_SESSION_READ_BUSY"))
+    .map((line) => JSON.parse(line) as Record<string, unknown>)[0];
+  expect(warning).toMatchObject({
+    level: 40,
+    code: "DINING_SESSION_READ_BUSY",
+    causes: ["ORDER_PROGRESS_CHANGED_WHILE_READING"],
+  });
 });
 
 it("DEC-DINE-IN-PAY-LATER: a paid table's summary carries its tip and cash rounding", async () => {

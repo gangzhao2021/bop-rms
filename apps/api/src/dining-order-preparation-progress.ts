@@ -44,7 +44,10 @@ export function createDiningOrderPreparationProgress(
       const progress = new Map<string, "Queued" | "InProgress" | "Ready">();
       const kitchenCancelled = new Set<string>();
       for (const batch of work?.batches ?? []) {
-        if (batch.updatedAt > input.observedAt) throw new Error("ORDER_PROGRESS_UNAVAILABLE");
+        // v15 b17: the kitchen moved this round on after the read began: a change made meanwhile,
+        // not a contradiction (the reader says so apart, so a page reads again shortly).
+        if (batch.updatedAt > input.observedAt)
+          throw new Error("ORDER_PROGRESS_CHANGED_WHILE_READING");
         for (const item of batch.items) {
           const member = membership.get(item.orderItemReference);
           if (

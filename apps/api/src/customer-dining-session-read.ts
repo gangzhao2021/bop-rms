@@ -54,6 +54,7 @@ import {
 } from "@rms/payment";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
 import { withFailureCause } from "./customer-failure-diagnostic.js";
+import { isDatabaseContention } from "./merchant-failure.js";
 import type { createCustomerOrderStatusRead } from "./customer-order-status-read.js";
 import { createDiningOrderDeliveryProgress } from "./dining-order-delivery-progress.js";
 import { readItemCancellationRefundStatus } from "./merchant-order-item-staff-cancellation.js";
@@ -395,6 +396,22 @@ export class DiningOrderStillProcessingError extends Error {
     this.name = "DiningOrderStillProcessingError";
   }
 }
+/**
+ * v15 b17: the table changed while this read was under way (a round being written, the kitchen
+ * moving it on, its status view catching up, or the database busy with it), so its parts did not
+ * agree. Nothing is wrong with the table: the page keeps what it shows and reads again shortly.
+ * `cause` keeps what disagreed, as a safe code, for the one warning line.
+ */
+export class DiningSessionReadBusyError extends Error {
+  readonly code = "DINING_SESSION_READ_BUSY";
+  constructor(cause: unknown) {
+    super("the table changed while it was read", { cause });
+    this.name = "DiningSessionReadBusyError";
+  }
+}
+/** The kitchen moved a round on after this read began (dining-order-preparation-progress). */
+const progressChangedWhileReading = (error: unknown) =>
+  error instanceof Error && error.message === "ORDER_PROGRESS_CHANGED_WHILE_READING";
 const denied = (): never => {
   throw new OrderStatusProjectionError("ORDER_STATUS_PERMISSION_DENIED");
 };
@@ -1081,7 +1098,11 @@ function postgresDependencies(
               ),
           )
         )
-          return unavailable();
+          // v15 b17: the status view and the table's dishes disagree, but not by whole rounds: the
+          // view is catching up with a change made while this was read. Read again shortly.
+          throw new DiningSessionReadBusyError(
+            new OrderStatusProjectionError("ORDER_STATUS_DEPENDENCY_UNAVAILABLE"),
+          );
         const authorship = own
           ? await listDiningOrderBatchAuthorship(transaction, scope, {
               orderReference,
@@ -1758,6 +1779,11 @@ export function createCustomerDiningSessionRead(
         }
         if (error instanceof OrderStatusProjectionError) throw error;
         if (error instanceof DiningOrderStillProcessingError) throw error;
+        if (error instanceof DiningSessionReadBusyError) throw error;
+        // v15 b17: a change made while this was read, or the database busy with a round being
+        // written: the table is fine, the page reads again shortly.
+        if (progressChangedWhileReading(error) || isDatabaseContention(error))
+          throw new DiningSessionReadBusyError(error);
         if (error instanceof GuestSessionError && !isGuestSessionOutage(error))
           throw new OrderStatusProjectionError("ORDER_STATUS_PERMISSION_DENIED");
         throw withFailureCause(

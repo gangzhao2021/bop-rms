@@ -187,3 +187,41 @@ it.each([false, true])(
     }
   },
 );
+
+// v15 b17: the kitchen moved a round on after the read began (a change made meanwhile) is said
+// apart from a contradiction, so the guest's table page reads again instead of failing.
+it("a kitchen change after the read began is a change made meanwhile, not a contradiction", async () => {
+  const scope = { brandReference: id(1), storeReference: id(2) },
+    at = "2026-09-20T00:00:00.000Z";
+  mock.order.mockResolvedValue({
+    ...scope,
+    orderReference: id(3),
+    orderVersion: 2,
+    items: [
+      { orderItemReference: id(4), orderBatchReference: id(5), orderedQuantity: 1, acceptance: {} },
+    ],
+  });
+  mock.kitchen.mockResolvedValue({
+    batches: [
+      {
+        orderBatchReference: id(5),
+        updatedAt: "2026-09-20T00:00:00.100Z",
+        items: [{ orderItemReference: id(4), status: "InProgress" }],
+      },
+    ],
+  });
+  await expect(
+    createDiningOrderPreparationProgress({
+      ...scope,
+      authorize: async () => true,
+      authorizeKitchen: async () => true,
+    }).load({
+      ...scope,
+      orderReference: id(3),
+      diningSessionReference: id(6),
+      guestSessionReference: id(7),
+      observedAt: at,
+      transaction: { query: vi.fn() },
+    }),
+  ).rejects.toThrow(/^ORDER_PROGRESS_CHANGED_WHILE_READING$/u);
+});

@@ -737,6 +737,28 @@ describe("WP-2423 Q8 createCustomerDiningSessionRead authorization", () => {
     });
   });
 
+  // v15 b17: a staff round being written while the guest's table page reads: the kitchen moved
+  // a round on meanwhile, or the database was busy with it. The table is fine: busy, read again.
+  it.each([
+    ["the kitchen moved a round on meanwhile", new Error("ORDER_PROGRESS_CHANGED_WHILE_READING")],
+    [
+      "no database connection in time",
+      Object.assign(new Error("busy"), { code: "TENANT_DATABASE_ACQUIRE_FAILED" }),
+    ],
+  ])("v15 b17: %s is busy, never unavailable", async (_name, cause) => {
+    const busy = setup(
+      () => guest(),
+      () => {
+        throw cause;
+      },
+    );
+    await expect(busy.read.read(credentials)).rejects.toMatchObject({
+      name: "DiningSessionReadBusyError",
+      code: "DINING_SESSION_READ_BUSY",
+      cause,
+    });
+  });
+
   it("rejects malformed credentials and maps owner failures to unavailable", async () => {
     const { read } = setup(() => guest());
     await expect(read.read({ ...credentials, extra: true })).rejects.toMatchObject({
