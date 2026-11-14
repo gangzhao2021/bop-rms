@@ -13,6 +13,12 @@ import {
 } from "./order-item-snapshot.js";
 import { createOrderNumberAllocation, type OrderNumberAllocation } from "./order-number.js";
 import { parseOrderAggregate, type OrderAggregate } from "./order.js";
+import {
+  CheckoutValidationError,
+  checkoutValidationErrorCodes,
+  type CheckoutLineRefusal,
+  type CheckoutValidationErrorCode,
+} from "./checkout-validation.js";
 
 export interface OrderCreationRecord<V extends 1 | 2 = 1> {
   readonly submissionReference: OrderingReference;
@@ -77,6 +83,43 @@ export class OrderCreationError extends Error {
     this.code = code;
     this.placedOrder = options?.placedOrder ?? null;
   }
+}
+
+/**
+ * v15 b17: an Order creation or checkout refusal raised by another copy of this package (the
+ * pilot composes some owner stores from sources beside the built ones), recognized by its name and
+ * a known code and raised again as this copy's own class, so a refusal keeps its meaning across
+ * that boundary instead of reading as an outage. Null for anything else (this copy's own errors
+ * included: the caller keeps those as they are).
+ */
+export function foreignOrderingRefusal(
+  error: unknown,
+): OrderCreationError | CheckoutValidationError | null {
+  if (error === null || typeof error !== "object") return null;
+  if (error instanceof OrderCreationError || error instanceof CheckoutValidationError) return null;
+  const { name, code, placedOrder, line } = error as {
+    name?: unknown;
+    code?: unknown;
+    placedOrder?: unknown;
+    line?: unknown;
+  };
+  if (
+    name === "OrderCreationError" &&
+    (orderCreationErrorCodes as readonly unknown[]).includes(code)
+  )
+    return new OrderCreationError(code as OrderCreationErrorCode, {
+      cause: error,
+      placedOrder: (placedOrder ?? null) as PlacedOrderReference | null,
+    });
+  if (
+    name === "CheckoutValidationError" &&
+    (checkoutValidationErrorCodes as readonly unknown[]).includes(code)
+  )
+    return new CheckoutValidationError(
+      code as CheckoutValidationErrorCode,
+      (line ?? null) as CheckoutLineRefusal | null,
+    );
+  return null;
 }
 
 function invalid(): never {

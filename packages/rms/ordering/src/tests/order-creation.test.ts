@@ -7,9 +7,13 @@ import { validateOrderSubmissionWriteFence } from "../application/order-submissi
 import { createOrderCreationService } from "../application/order-creation-service.js";
 import type { OrderCreationPorts } from "../application/ports/order-creation-ports.js";
 import { parseCartAggregate } from "../domain/cart.js";
-import { parseCheckoutValidationEvidence } from "../domain/checkout-validation.js";
+import {
+  CheckoutValidationError,
+  parseCheckoutValidationEvidence,
+} from "../domain/checkout-validation.js";
 import {
   OrderCreationError,
+  foreignOrderingRefusal,
   parseOrderCreationRecord,
   type OrderCreationRecord,
 } from "../domain/order-creation.js";
@@ -1229,4 +1233,38 @@ describe("WP-2353 original result composition", () => {
       );
     },
   );
+});
+
+// v15 b17: the pilot composes some owner stores from sources beside the built package, so a
+// refusal can come from a second copy of these classes; it keeps its meaning (never an outage).
+describe("foreignOrderingRefusal", () => {
+  it("raises another copy's refusal again as this copy's own, with its code and details", () => {
+    const stock = foreignOrderingRefusal(
+      Object.assign(new Error("order creation is unavailable"), {
+        name: "OrderCreationError",
+        code: "ORDER_CREATE_STOCK_SHORT",
+      }),
+    );
+    expect(stock).toBeInstanceOf(OrderCreationError);
+    expect(stock).toMatchObject({ code: "ORDER_CREATE_STOCK_SHORT" });
+    const menu = foreignOrderingRefusal(
+      Object.assign(new Error("checkout is unavailable"), {
+        name: "CheckoutValidationError",
+        code: "CHECKOUT_REQUOTE_REQUIRED",
+        line: null,
+      }),
+    );
+    expect(menu).toBeInstanceOf(CheckoutValidationError);
+    expect(menu).toMatchObject({ code: "CHECKOUT_REQUOTE_REQUIRED" });
+  });
+  it("leaves this copy's own errors, unknown codes and anything else alone", () => {
+    expect(foreignOrderingRefusal(new OrderCreationError("ORDER_CREATE_STOCK_SHORT"))).toBeNull();
+    expect(
+      foreignOrderingRefusal(
+        Object.assign(new Error("x"), { name: "OrderCreationError", code: "SOMETHING_ELSE" }),
+      ),
+    ).toBeNull();
+    expect(foreignOrderingRefusal(new Error("ORDER_CREATE_STOCK_SHORT"))).toBeNull();
+    expect(foreignOrderingRefusal(null)).toBeNull();
+  });
 });

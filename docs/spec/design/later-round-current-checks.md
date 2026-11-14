@@ -118,8 +118,23 @@ transaction are the same reads.
   the pre-check; a replay that finds no record rolls back),
   `apps/api/src/customer-additional-dining-session-submission.test.ts`.
 
-## Not changed here
+## The opening round (v15 b17)
 
 The opening round (the table's first Order, `CapacityLinkedOrderCreation`) validates before its
-write and fences stock in the write, but does not re-check a sold-out mark made in between:
-listed in WP-2423 as open.
+write and fenced only stock in the write, so a staff sold-out mark made in between (with stock
+left) was ordered. Since b17 the write runs the same Catalog re-check on its own connection
+(`tooling/environment/pilot-order.mjs`, before the stock reservation in the Inventory finalizer):
+the menu release and every dish's and chosen choice's sale state the checkout check read
+(`checkoutValidationEvidence.catalogLines`) must still be in effect. Off sale since: refused as a
+dish that ran out (`ORDER_CREATE_STOCK_SHORT`; staff "can't be sold now", the guest "a dish ran
+out"); a new listing: the cart prices again (`CHECKOUT_REQUOTE_REQUIRED`). The Order write passes
+both refusals on, also when raised by the pilot's other copy of the Ordering package (recognized
+by name and code, `foreignOrderingRefusal`), so they never read as an outage. Pickup orders are
+not changed (no table, no staff round).
+
+- `staff-round-speed` acceptance, "a dish marked sold out between an opening round's check and its
+  write is refused, never ordered": the mark lands inside the opening round's write before its
+  checks; refused, no Order, no stock held, and the next opening round is placed. Failed before
+  (the round was placed with the sold-out dish).
+- Cost: the opening round of two dishes ran 2,699 statements before and 2,703 after (budget
+  2,750).

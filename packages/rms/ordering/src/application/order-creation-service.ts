@@ -29,6 +29,7 @@ import {
 } from "../domain/checkout-validation.js";
 import {
   OrderCreationError,
+  foreignOrderingRefusal,
   parseOrderCreationRecord,
   parseConfiguredOrderCreationRecord,
   type CreateOrderResult,
@@ -96,6 +97,9 @@ function version(value: unknown): number {
 
 function dependency(error: unknown): never {
   if (error instanceof CheckoutValidationError || error instanceof OrderCreationError) throw error;
+  // v15 b17: a refusal from the pilot's other copy of an owner store keeps its meaning.
+  const foreign = foreignOrderingRefusal(error);
+  if (foreign !== null) throw foreign;
   if (
     (error instanceof OrderError && error.code === "ORDER_VALIDATION_EXPIRED") ||
     (error instanceof OrderItemSnapshotError &&

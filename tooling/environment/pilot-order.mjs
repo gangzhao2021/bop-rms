@@ -1,7 +1,12 @@
 import { createHash } from "node:crypto";
 import { createInternalExpiryCutoff } from "./pilot-expiry-cutoff.mjs";
 import { GuestSessionService, readClosedRecord } from "../../packages/bop/identity/src/index.ts";
-import { createPostgresInventoryFinalizedOrderCreationRepository } from "../../packages/rms/ordering/src/index.ts";
+import {
+  CheckoutValidationError,
+  OrderCreationError,
+  createPostgresInventoryFinalizedOrderCreationRepository,
+} from "../../packages/rms/ordering/src/index.ts";
+import { confirmCatalogSaleStillCurrent } from "../../packages/rms/catalog/src/index.ts";
 import { createCustomerConfiguredDiningOrderSubmissionComposition } from "../../apps/api/dist/customer-dining-order-submission-composition.js";
 import { createCustomerConfiguredPickupOrderSubmissionComposition } from "../../apps/api/dist/customer-pickup-order-submission-composition.js";
 import { createCustomerCheckoutSessionAuthorization } from "../../apps/api/dist/customer-checkout-session-authorization.js";
@@ -113,7 +118,42 @@ export async function createInternalOrder(
         retentionPolicyVersion: 1,
       },
     };
-    const inventory = createCustomerSubmissionInventoryFinalizer(inventoryOptions);
+    const stock = createCustomerSubmissionInventoryFinalizer(inventoryOptions);
+    // v15 b17 (docs/spec/design/later-round-current-checks.md, the opening round): the table's
+    // first round checks its dishes (menu, availability, choices, stock) before its write; the
+    // write then confirms on its own connection, as later rounds do, that the menu release and
+    // every dish's and chosen choice's sale state the check read are still in effect, so a staff
+    // sold-out mark made in between is never ordered. Stock is fenced by the reservation next.
+    const inventory =
+      orderType !== "DineIn"
+        ? stock
+        : {
+            finalize: async (write) => {
+              const standing = await confirmCatalogSaleStillCurrent(write.transaction, {
+                brandReference: scope.brandReference,
+                storeReference: scope.storeReference,
+                menuReference: catalogOptions.catalogScope.menuReference,
+                channelCode: catalogOptions.catalogScope.channelCode,
+                orderTypeCode: "DINE_IN",
+                observedAt: write.observedAt,
+                menuVersionReferences: write.checkoutValidationEvidence.catalogLines.map(
+                  (line) => line.menuVersionReference,
+                ),
+                sellableReferences: write.checkoutValidationEvidence.catalogLines.map(
+                  (line) => line.sellableReference,
+                ),
+                optionReferences: write.cart.items.flatMap((item) =>
+                  item.optionSelections.map((option) => option.optionReference),
+                ),
+              });
+              // A new listing since the check: the cart prices again ("the menu changed").
+              if (standing === "MenuChanged")
+                throw new CheckoutValidationError("CHECKOUT_REQUOTE_REQUIRED");
+              // Marked sold out (or no longer offered) since the check: as a dish that ran out.
+              if (standing !== "Current") throw new OrderCreationError("ORDER_CREATE_STOCK_SHORT");
+              return stock.finalize(write);
+            },
+          };
     return {
       inventoryOptions,
       policies,

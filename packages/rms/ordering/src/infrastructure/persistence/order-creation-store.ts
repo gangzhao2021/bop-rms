@@ -31,6 +31,7 @@ import { assertCartLifecycleActive } from "../../domain/cart-lifecycle.js";
 import { createOrderNumberAllocation } from "../../domain/order-number.js";
 import {
   OrderCreationError,
+  foreignOrderingRefusal,
   parseOrderCreationRecord,
   parseConfiguredOrderCreationRecord,
   type OrderCreationRecord,
@@ -44,6 +45,7 @@ import {
   encodeConfiguredOrderItemSnapshot,
 } from "../../domain/order-item-snapshot-codec.js";
 import {
+  CheckoutValidationError,
   parseCheckoutValidationEvidence,
   parseConfiguredCheckoutValidationEvidence,
   type CheckoutValidationEvidence,
@@ -245,6 +247,23 @@ export interface OrderSubmissionInventoryFinalizer<V extends 1 | 2 = 1> {
       observedAt: string;
     }>,
   ): Promise<void>;
+}
+
+/**
+ * WP-2423 / v15 b17: the refusals an Order write ends with, nothing written (the transaction rolled
+ * back): too little stock for the reservation, a dish or choice the write's Catalog re-check found
+ * off sale (both ORDER_CREATE_STOCK_SHORT), or a new menu listing since the checkout check
+ * (CHECKOUT_REQUOTE_REQUIRED). This copy's own errors or another copy's (by name and code).
+ */
+function writeRefusal(error: unknown): OrderCreationError | CheckoutValidationError | null {
+  const own =
+    error instanceof OrderCreationError || error instanceof CheckoutValidationError
+      ? error
+      : foreignOrderingRefusal(error);
+  if (own instanceof OrderCreationError && own.code === "ORDER_CREATE_STOCK_SHORT") return own;
+  if (own instanceof CheckoutValidationError && own.code === "CHECKOUT_REQUOTE_REQUIRED")
+    return own;
+  return null;
 }
 
 export function createPostgresOrderCreationStore<V extends 1 | 2 = 1>(
@@ -864,8 +883,11 @@ export function createPostgresOrderCreationStore<V extends 1 | 2 = 1>(
         if (error instanceof OrderCreationError && error.code === "ORDER_CREATE_ALREADY_ORDERED")
           throw error;
         // WP-2423: the Inventory finalizer found too little stock; the transaction rolled back.
-        if (error instanceof OrderCreationError && error.code === "ORDER_CREATE_STOCK_SHORT")
-          throw error;
+        // v15 b17: so did the write's Catalog re-check (a dish or choice marked sold out since
+        // the checkout check answers the same; a new menu listing prices the cart again), also
+        // when raised by the pilot's other copy of this package.
+        const refused = writeRefusal(error);
+        if (refused !== null) throw refused;
         return fail(error);
       }
     },
@@ -1161,6 +1183,8 @@ export function createPostgresCurrentCheckoutOrderCreationRepository<V extends 1
         ).commit(input);
       } catch (error) {
         if (error instanceof OrderCreationError) throw error;
+        const refused = writeRefusal(error);
+        if (refused !== null) throw refused;
         return fail();
       }
     },

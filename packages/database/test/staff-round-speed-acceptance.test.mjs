@@ -29,6 +29,14 @@ const counting = { on: false, count: 0 };
  * that write transaction ends (the step's own statements are not counted).
  */
 const beforeWrite = { step: null, fired: false, writer: null, snapshots: 0 };
+/**
+ * v15 b17: a test's step run once inside a table's opening round's Order write transaction, before
+ * its own checks: right before the write takes its submission lock (its first statement after the
+ * Store scope), so after the round's checkout check of its dishes and before the write's Catalog
+ * re-check and stock reservation. READ COMMITTED: what the step commits is a staff member's mark
+ * made in that moment.
+ */
+const openingWrite = { step: null, fired: false };
 const fenced = new WeakMap();
 const clientQuery = pg.Client.prototype.query;
 pg.Client.prototype.query = function (config, ...rest) {
@@ -48,6 +56,18 @@ pg.Client.prototype.query = function (config, ...rest) {
     if (text.includes("transaction_isolation")) beforeWrite.snapshots += 1;
     if (this === beforeWrite.writer && /^\s*(COMMIT|ROLLBACK)\b/u.test(text))
       beforeWrite.writer = null;
+  }
+  if (
+    openingWrite.step !== null &&
+    !openingWrite.fired &&
+    typeof text === "string" &&
+    text.startsWith("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))") &&
+    String(values?.[0] ?? "").startsWith("ordering.submission:")
+  ) {
+    openingWrite.fired = true;
+    const step = openingWrite.step;
+    openingWrite.step = null;
+    return step().then(() => clientQuery.call(this, config, ...rest));
   }
   if (
     beforeWrite.step !== null &&
@@ -611,6 +631,94 @@ it("a dish sold out or run out between a later round's pre-check and its write i
     } finally {
       vi.unstubAllEnvs();
       beforeWrite.step = null;
+      if (store !== null) await store.close();
+      for (const name of [api, api + "_w"]) {
+        await admin.query("DROP OWNED BY " + name).catch(() => undefined);
+        await admin.query("DROP ROLE " + name).catch(() => undefined);
+      }
+      await admin.end();
+    }
+  });
+});
+
+/**
+ * v15 b17 (docs/spec/design/later-round-current-checks.md, the opening round): a table's opening
+ * round (its first Order, CapacityLinkedOrderCreation) checks its dishes before its write; a staff
+ * sold-out mark made between that check and the write was only fenced by the stock reservation, so
+ * a dish marked sold out with stock left was ordered. The write now re-checks Catalog on its own
+ * connection, as later rounds do since batch 16: refused as a dish that can't be sold now, no Order,
+ * no stock held, the table not left open; back in stock, the same table's opening round is placed.
+ */
+it("a dish marked sold out between an opening round's check and its write is refused, never ordered", async () => {
+  await withIsolatedDatabase({ caseId: "wp2423_round_orace" }, async (context) => {
+    const admin = new Client(context.clientConfig);
+    await admin.connect();
+    vi.stubEnv("NODE_ENV", "development");
+    const api = await createPilotApiRole(admin, context, "wp2423_rsq");
+    let store = null;
+    try {
+      store = await prepareRealStaffRoundStore({ admin, context, api, paymentTiming: "PayFirst" });
+      const { soup, tableReference, reference } = store;
+      const server = await store.staff(id(0x750), [
+        "ordering.order.create_staff",
+        "dining.operate",
+        "dining.session.close",
+      ]);
+      const counter = await store.counterFor(server);
+      const as = { sessionCookie: server.sessionCookie, csrf: server.csrf };
+      const round = () =>
+        counter.staffDiningRound({
+          ...as,
+          command: {
+            operationReference: reference(),
+            tableReference,
+            tip: { kind: "None" },
+            recordedAfterOutage: false,
+            lines: [
+              {
+                sellableReference: soup.skuReference,
+                quantity: 1,
+                optionSelections: [],
+                note: null,
+              },
+            ],
+          },
+        });
+      const orders = async () =>
+        (
+          await admin.query(
+            "SELECT count(*)::int AS n FROM rms_ordering.order_header WHERE store_id=$1",
+            [store.ownerScope.storeReference],
+          )
+        ).rows[0].n;
+      const reserved = async () =>
+        (
+          await admin.query(
+            "SELECT reserved::numeric::text AS reserved FROM rms_inventory.stock_balance WHERE account_id=$1",
+            [store.stock.accountReference],
+          )
+        ).rows[0].reserved;
+      const heldBefore = await reserved();
+      // The kitchen marks the soup sold out after the opening round's check found it on sale.
+      openingWrite.fired = false;
+      openingWrite.step = () => store.owner.markSoldOut(soup.skuReference);
+      try {
+        await assert.rejects(round(), { code: "STAFF_ROUND_ITEM_UNAVAILABLE" });
+        assert.equal(openingWrite.fired, true, "the mark landed inside the opening round's write");
+      } finally {
+        openingWrite.step = null;
+        openingWrite.fired = false;
+      }
+      assert.equal(await orders(), 0, "a sold-out dish was ordered");
+      assert.equal(await reserved(), heldBefore, "the refused round held stock");
+      // Back in stock: the table's opening round is placed as usual.
+      await store.owner.markBackInStock(soup.skuReference);
+      const placed = await round();
+      assert.equal(placed.status, "Placed");
+      assert.equal(await orders(), 1);
+    } finally {
+      vi.unstubAllEnvs();
+      openingWrite.step = null;
       if (store !== null) await store.close();
       for (const name of [api, api + "_w"]) {
         await admin.query("DROP OWNED BY " + name).catch(() => undefined);
