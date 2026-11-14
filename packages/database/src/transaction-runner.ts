@@ -25,6 +25,14 @@ import {
   noteRequestShed,
   requestAnswerTimeLeftMs,
 } from "./request-acquire-budget.js";
+import {
+  beginConnectionHold,
+  endConnectionHold,
+  holdsConnectionOf,
+  newConnectionHold,
+  runHoldingConnection,
+  type ConnectionHold,
+} from "./connection-hold.js";
 
 const retryableSqlStates: ReadonlySet<string> = new Set(["55P03", "40001", "40P01"]);
 function sqlState(error: unknown): string {
@@ -130,8 +138,14 @@ export function createTenantTransactionRunner(
     throw new TenantContextDatabaseError("TENANT_DATABASE_SCOPE_INVALID");
   // b12 review: count the clients it hands out from now on, to tell the rush from a fault.
   watchTenantConnectionPool(pool);
+  // WP-2423 (rush-connection-hold): work that already holds a connection of this pool never waits
+  // for a second one (see connection-hold).
   const connections = Object.freeze({
-    connect: () => acquireTenantConnection(pool, { budgetMs }),
+    connect: () =>
+      acquireTenantConnection(pool, {
+        budgetMs,
+        ...(holdsConnectionOf(pool) ? { holding: true } : {}),
+      }),
   }) as Pick<Pool, "connect">;
   const run = <T>(
     mode: "ReadWrite" | "Snapshot",
@@ -143,26 +157,37 @@ export function createTenantTransactionRunner(
   const runNow = <T>(
     mode: "ReadWrite" | "Snapshot",
     action: (transaction: DatabaseTransaction) => Promise<T>,
-  ): Promise<T> =>
-    withTenantContextTransaction(
+  ): Promise<T> => {
+    let opened: TransactionState | null = null;
+    return withTenantContextTransaction(
       connections,
       fixedScope,
-      async (client) => {
-        const state = transactionState(client, mode, fixedScope);
-        try {
-          const value = await action(state.transaction);
-          await state.beforeCommit();
-          return state.settle(value);
-        } catch (error) {
-          return state.report(error);
-        } finally {
-          state.close();
-        }
+      (client) => {
+        // The action holds this transaction's connection until it ends.
+        const hold = newConnectionHold();
+        beginConnectionHold(hold, pool);
+        return runHoldingConnection(hold, async () => {
+          const state = transactionState(client, mode, fixedScope);
+          opened = state;
+          try {
+            const value = await action(state.transaction);
+            await state.beforeCommit();
+            return state.settle(value);
+          } catch (error) {
+            return state.report(error);
+          } finally {
+            state.close();
+            endConnectionHold(hold);
+          }
+        });
       },
       mode,
       // The three limits go with BEGIN (one round trip; a parameterless simple query).
       transactionLimits,
+      undefined,
+      { mayHaveWritten: () => (opened as TransactionState | null)?.mayHaveWritten() ?? true },
     );
+  };
   /**
    * WP-2423 M35 (third step): inside one request's verified checks a transaction begins only when
    * its first statement must reach the database; a check answered in full from the request's
@@ -192,11 +217,15 @@ export function createTenantTransactionRunner(
     action: (transaction: DatabaseTransaction) => Promise<T>,
     attempt: { changed: boolean },
   ): Promise<T> => {
-    const opening = openWhenNeeded(connections, fixedScope);
+    // Held from its first statement that reaches the database until it ends (connection-hold).
+    const hold = newConnectionHold();
+    const opening = openWhenNeeded(connections, fixedScope, pool, hold, () =>
+      state.mayHaveWritten(),
+    );
     const state = transactionState(opening.client, "ReadWrite", fixedScope, checks);
     let value: T;
     try {
-      value = await action(state.transaction);
+      value = await runHoldingConnection(hold, () => action(state.transaction));
       await state.beforeCommit();
       value = state.settle(value);
     } catch (error) {
@@ -234,7 +263,9 @@ export function createTenantTransactionRunner(
   };
   /** As openShared, begun only with its first statement that must reach the database. */
   const openSharedWhenNeeded = (shared: TogetherSlot, checks: RequestCheckMemo): Promise<void> => {
-    const opening = openWhenNeeded(connections, fixedScope);
+    const opening = openWhenNeeded(connections, fixedScope, pool, shared.hold, () =>
+      state.mayHaveWritten(),
+    );
     const state = transactionState(opening.client, "ReadWrite", fixedScope, checks);
     shared.state = state;
     shared.finished = (async () => {
@@ -270,6 +301,8 @@ export function createTenantTransactionRunner(
           const state = transactionState(client, "ReadWrite", fixedScope);
           shared.state = state;
           begun = true;
+          // The call's work holds this connection from now until the call ends.
+          beginConnectionHold(shared.hold, pool);
           opened();
           try {
             await shared.done;
@@ -280,10 +313,13 @@ export function createTenantTransactionRunner(
             return state.report(error);
           } finally {
             state.close();
+            endConnectionHold(shared.hold);
           }
         },
         "ReadWrite",
         transactionLimits,
+        undefined,
+        { mayHaveWritten: () => shared.state?.mayHaveWritten() ?? true },
       ).catch((error: unknown) => {
         if (!begun) failedToOpen(error);
         throw error;
@@ -303,6 +339,11 @@ interface TransactionState {
   useScope(scope: TenantDatabaseScope): void;
   /** How many statements that may write this transaction has sent. */
   writes(): number;
+  /**
+   * WP-2423 (rush-connection-hold): whether a statement sent may have written: one classified as
+   * a write, or one sent while another ran (not classified). A read that only locked rows did not.
+   */
+  mayHaveWritten(): boolean;
   /**
    * True when a read answered from this request's earlier check came back different at the
    * write fence: the transaction failed before it wrote or locked anything.
@@ -374,6 +415,9 @@ const foldedSettingsResult = (settings: readonly (readonly [string, string])[]) 
 function openWhenNeeded(
   connections: Pick<Pool, "connect">,
   scope: TenantDatabaseScope,
+  pool: object,
+  hold: ConnectionHold,
+  mayHaveWritten: () => boolean,
 ): {
   readonly client: { query(sql: string, values?: unknown[]): Promise<unknown> };
   finish(failure?: { readonly error: unknown }): Promise<void>;
@@ -394,12 +438,18 @@ function openWhenNeeded(
           scope,
           async (client) => {
             started = true;
+            beginConnectionHold(hold, pool);
             opened(client);
-            await done;
+            try {
+              await done;
+            } finally {
+              endConnectionHold(hold);
+            }
           },
           "ReadWrite",
           transactionLimits,
           settings,
+          { mayHaveWritten },
         ).catch((error: unknown) => {
           if (!started) failedToOpen(error);
           throw error;
@@ -463,6 +513,8 @@ function transactionState(
   // earlier check (`borrowed`); before that statement each borrowed read is sent again for real.
   let fenced = mode !== "ReadWrite" || checks === undefined;
   let writes = 0;
+  // A statement sent while another was in flight is not classified: it may have written.
+  let unclassified = false;
   let writesRefused = false;
   let openFailure: unknown = null;
   // A borrowed read came back different at the write fence (nothing written or locked yet).
@@ -579,6 +631,7 @@ function transactionState(
         noteRequestShed();
         throw new TenantContextDatabaseError("TENANT_DATABASE_TRANSACTION_FAILED", answerTimeSpent);
       }
+      if (kind === null) unclassified = true;
       const narrowedMs =
         answerLeft !== undefined && answerLeft < statementLimit - statementLimitStepMs
           ? Math.max(statementLimitFloorMs, Math.floor(answerLeft))
@@ -658,6 +711,7 @@ function transactionState(
     transaction,
     useScope: (scope) => memo.useScope(scopeSettings(scope)),
     writes: () => writes,
+    mayHaveWritten: () => writes > 0 || unclassified,
     checkChanged: () => checkChanged,
     borrowedWithoutFence: () =>
       fenced ? [] : borrowed.map((read) => ({ sql: read.sql, values: read.values })),
@@ -733,6 +787,8 @@ function transactionState(
  */
 interface TogetherSlot {
   pool: object | null;
+  /** The call's one connection, held from its transaction's start until the call ends. */
+  readonly hold: ConnectionHold;
   state: TransactionState | null;
   /**
    * v15 hotfix review: the runner scope whose run wrote, and the scope that run wrote last.
@@ -804,6 +860,7 @@ async function runTogetherOnce<T>(
   let finish: (failure?: { readonly error: unknown }) => void = () => undefined;
   const slot: TogetherSlot = {
     pool: null,
+    hold: newConnectionHold(),
     state: null,
     writer: null,
     beforeCommit() {
@@ -843,25 +900,27 @@ async function runTogetherOnce<T>(
   };
   slot.done.catch(() => undefined);
   if (attempt !== undefined) attempt.slot = slot;
-  return together.run(slot, async () => {
-    let failure: { readonly error: unknown } | undefined;
-    let value: T | undefined;
-    try {
-      value = await work();
-    } catch (error) {
-      failure = { error };
-    }
-    slot.closed = true;
-    finish(failure);
-    if (slot.finished !== null) {
+  return runHoldingConnection(slot.hold, () =>
+    together.run(slot, async () => {
+      let failure: { readonly error: unknown } | undefined;
+      let value: T | undefined;
       try {
-        await slot.finished;
+        value = await work();
       } catch (error) {
-        // The work's own failure is the answer; a commit failure only when the work succeeded.
-        if (failure === undefined) throw error;
+        failure = { error };
       }
-    }
-    if (failure !== undefined) throw failure.error;
-    return value as T;
-  });
+      slot.closed = true;
+      finish(failure);
+      if (slot.finished !== null) {
+        try {
+          await slot.finished;
+        } catch (error) {
+          // The work's own failure is the answer; a commit failure only when the work succeeded.
+          if (failure === undefined) throw error;
+        }
+      }
+      if (failure !== undefined) throw failure.error;
+      return value as T;
+    }),
+  );
 }

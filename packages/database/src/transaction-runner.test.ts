@@ -7,6 +7,10 @@ import {
   type DatabaseTransaction,
 } from "./transaction-runner.js";
 import { currentRequestChecks, withVerifiedChecks } from "./request-check-memo.js";
+import {
+  remainingRequestAcquireBudgetMs,
+  runWithRequestAcquireBudget,
+} from "./connection-acquire.js";
 
 const scope = { brandId: "018f3f7a-8b1c-7a11-8d01-000000000041" };
 // WP-2423 item 4 and M35: BEGIN, the three limits and the (validated) scope in one round trip.
@@ -876,5 +880,54 @@ describe("WP-2423 (rush-reads-and-orders-changes review): a real refusal stays a
     // A conflict to run again, too many connections and a statement cut: not faults.
     for (const code of ["40001", "40P01", "55P03", "53300", "57014"])
       expect(await outcome(code), code).toBe(false);
+  });
+});
+
+describe("WP-2423 (rush-connection-hold)", () => {
+  it("a transaction opened inside another of the same pool never waits in a full pool's queue", async () => {
+    const f = fixture();
+    const full = {
+      ...f.pool,
+      options: { ...f.pool.options, max: 1 },
+      waitingCount: 3,
+      idleCount: 0,
+      totalCount: 1,
+    } as Parameters<typeof createTenantTransactionRunner>[0];
+    const runner = createTenantTransactionRunner(full, scope, { acquireBudgetMs: 10_000 });
+    const started = Date.now();
+    const inner = await runner
+      .run(async (outer) => {
+        await outer.query("SELECT 1", []);
+        return runner.run(async (nested) => nested.query("SELECT 2", [])).catch((e: unknown) => e);
+      })
+      .catch((e: unknown) => e);
+    expect(inner).toMatchObject({ code: "TENANT_DATABASE_ACQUIRE_FAILED" });
+    expect(f.connect).toHaveBeenCalledTimes(1);
+    expect(Date.now() - started).toBeLessThan(500);
+    // Once the outer transaction gave its connection back, the next one waits as any request.
+    await runner.run(async (t) => t.query("SELECT 3", []));
+    expect(f.connect).toHaveBeenCalledTimes(2);
+  });
+
+  it("a transaction that only locked rows does not mark the request as written; one that wrote does", async () => {
+    const f = fixture();
+    f.query.mockImplementation(async (sql: string) =>
+      sql.startsWith("SELECT pg_current_xact_id_if_assigned()")
+        ? { rows: [{ wrote: true }] }
+        : { rows: [] },
+    );
+    const probes = () =>
+      f.query.mock.calls.filter(([sql]) =>
+        sql.startsWith("SELECT pg_current_xact_id_if_assigned()"),
+      ).length;
+    await runWithRequestAcquireBudget(10_000, async () => {
+      // A row lock takes a transaction id too: the database's answer alone read it as a write.
+      await f.runner.run(async (t) => t.query("SELECT * FROM s.t WHERE id=$1 FOR SHARE", ["x"]));
+      expect(remainingRequestAcquireBudgetMs()).toBeDefined();
+      expect(probes()).toBe(0);
+      await f.runner.run(async (t) => t.query("INSERT INTO s.t (id) VALUES ($1)", ["x"]));
+      expect(probes()).toBe(1);
+      expect(remainingRequestAcquireBudgetMs()).toBeUndefined();
+    });
   });
 });

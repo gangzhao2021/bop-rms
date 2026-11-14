@@ -27,6 +27,13 @@ export interface TenantConnectionAcquirePolicy {
   readonly now?: () => number;
   readonly sleep?: (ms: number) => Promise<void>;
   readonly random?: () => number;
+  /**
+   * WP-2423 (rush-connection-hold): the work asking already holds a connection of this pool (an
+   * open transaction, see connection-hold). It never waits in the pool's queue: a connection free
+   * at this moment is taken, otherwise it is answered "busy, try again" at once, so the connection
+   * it holds is given back within a moment instead of when its whole budget ran out.
+   */
+  readonly holding?: boolean;
 }
 
 /** First pause before a retry; each further pause doubles up to the cap, with jitter 0.5–1.5×. */
@@ -34,6 +41,11 @@ export const tenantConnectionRetryBaseMs = 50;
 export const tenantConnectionRetryCapMs = 800;
 /** No retry is started with less than this left of the budget: it could not finish in time. */
 export const tenantConnectionRetryMinimumMs = 100;
+/**
+ * WP-2423 (rush-connection-hold): the longest work holding a connection waits for a second one
+ * that was free when it asked (one attempt, never a queue: a new connection's handshake).
+ */
+export const tenantConnectionHoldingWaitMs = 1000;
 /** The longest acquire budget a request may be given (the clients' own 15 s answer limit). */
 export const tenantConnectionAcquireBudgetMaxMs = 15_000;
 
@@ -239,6 +251,38 @@ function isRushAttemptFailure(error: unknown, full: boolean, answering: boolean)
 
 const outOfTime = Symbol("out of time");
 
+/**
+ * WP-2423 (rush-connection-hold): a connection can be had at once: nobody waits in the pool's
+ * queue and one is idle or may still be opened. A pool that does not say (a test double) is taken
+ * as free; its one attempt is still bounded by the request's budget.
+ */
+function connectionFreeNow(pool: WatchedPool): boolean {
+  try {
+    const counts = pool as {
+      readonly waitingCount?: unknown;
+      readonly idleCount?: unknown;
+      readonly totalCount?: unknown;
+    };
+    const max = (pool.options as { readonly max?: unknown } | undefined)?.max;
+    if (typeof counts.waitingCount === "number" && counts.waitingCount > 0) return false;
+    if (typeof counts.idleCount === "number" && counts.idleCount > 0) return true;
+    if (typeof counts.totalCount === "number" && typeof max === "number")
+      return counts.totalCount < max;
+    return true;
+  } catch {
+    return false;
+  }
+}
+/** The answer to work that holds a connection and would have to wait for another: the rush. */
+function heldWaitRefused(): TenantContextDatabaseError {
+  const refused = new TenantContextDatabaseError(
+    "TENANT_DATABASE_ACQUIRE_FAILED",
+    Object.freeze({ sqlState: "08006", constraint: null, table: null, closed: false }),
+  );
+  Object.defineProperty(refused, rushCause, { value: true });
+  return refused;
+}
+
 export {
   endRequestAcquireBudget,
   noteRequestFault,
@@ -287,12 +331,18 @@ export async function acquireTenantConnection(
     (request === undefined
       ? budget
       : Math.min(budget, request.remainingMs, answerLeft ?? Number.POSITIVE_INFINITY));
+  const load = watchPoolLoad(pool, now);
   try {
+    // WP-2423 (rush-connection-hold): work holding a connection of this pool takes a second one
+    // only when one is free at once; it never queues behind work waiting for what it holds.
+    if (policy.holding === true && !connectionFreeNow(pool)) throw heldWaitRefused();
     return await acquireUntil(
       pool,
-      watchPoolLoad(pool, now),
-      deadline,
-      retries,
+      load,
+      policy.holding === true
+        ? Math.min(deadline, startedAt + tenantConnectionHoldingWaitMs)
+        : deadline,
+      policy.holding === true ? 0 : retries,
       now,
       sleep,
       random,

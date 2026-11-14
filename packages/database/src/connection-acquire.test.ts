@@ -622,3 +622,65 @@ describe("WP-2423 reads-under-burst (b12 review): a cut read is not starved for 
     }
   });
 });
+
+describe("WP-2423 (rush-connection-hold) work holding a connection never waits for a second", () => {
+  /** The request budget's own record (shared store), to read whether the rush turned it away. */
+  const budgetRecord = () =>
+    (globalThis as unknown as Record<symbol, { getStore(): { shed?: boolean } | undefined }>)[
+      Symbol.for("bop.database.request-acquire-budget")
+    ]?.getStore();
+  const pool = (counts: { waiting: number; idle: number; total: number }) => ({
+    connect: vi.fn(async () => client()),
+    options: { max: 3 },
+    waitingCount: counts.waiting,
+    idleCount: counts.idle,
+    totalCount: counts.total,
+  });
+
+  it("answers busy at once, as the rush, when no connection is free and others wait", async () => {
+    const full = pool({ waiting: 4, idle: 0, total: 3 });
+    const started = Date.now();
+    await runWithRequestAcquireBudget(10_000, async () => {
+      await expect(
+        acquireTenantConnection(full, { budgetMs: 10_000, holding: true }),
+      ).rejects.toMatchObject({ code: "TENANT_DATABASE_ACQUIRE_FAILED" });
+      expect(budgetRecord()?.shed).toBe(true);
+    });
+    expect(full.connect).not.toHaveBeenCalled();
+    expect(Date.now() - started).toBeLessThan(500);
+  });
+
+  it("takes a connection that is free at once, in one attempt", async () => {
+    for (const counts of [
+      { waiting: 0, idle: 1, total: 3 },
+      { waiting: 0, idle: 0, total: 2 },
+    ]) {
+      const free = pool(counts);
+      await expect(
+        acquireTenantConnection(free, { budgetMs: 10_000, holding: true }),
+      ).resolves.toBeDefined();
+      expect(free.connect).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it("a held wait that does not come at once is given up within a second, not the budget", async () => {
+    const c = clock();
+    const stuck = {
+      connect: vi.fn<() => Promise<PoolClient>>().mockRejectedValue(poolTimeout()),
+      options: { max: 3 },
+      waitingCount: 0,
+      idleCount: 1,
+      totalCount: 3,
+    };
+    await expect(
+      acquireTenantConnection(stuck, {
+        budgetMs: 10_000,
+        holding: true,
+        now: c.now,
+        sleep: c.sleep,
+      }),
+    ).rejects.toMatchObject({ code: "TENANT_DATABASE_ACQUIRE_FAILED" });
+    expect(stuck.connect).toHaveBeenCalledTimes(1);
+    expect(c.pauses).toEqual([]);
+  });
+});

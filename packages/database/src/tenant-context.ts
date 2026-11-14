@@ -225,6 +225,12 @@ export async function withTenantContextTransaction<T>(
    * `tenantContextScopeSettingsStatement`).
    */
   scopeSettings?: readonly (readonly [string, string])[],
+  /**
+   * WP-2423 (rush-connection-hold): whether the callback sent a statement that may write. A row
+   * lock (FOR SHARE, FOR UPDATE) also takes a transaction id, so the database's own answer alone
+   * reads every locking check as a write. Omitted: the database's answer alone decides.
+   */
+  options: { readonly mayHaveWritten?: () => boolean } = {},
 ): Promise<T> {
   const scope = readScope(scopeInput);
   if (setup !== undefined && (typeof setup !== "string" || !transactionSetup.test(setup)))
@@ -283,7 +289,9 @@ export async function withTenantContextTransaction<T>(
     // the request's later transactions are never cut short after some of its changes committed.
     // A probe that fails fails the transaction, as any statement does: never a silent ROLLBACK.
     const wrote =
-      mode !== "Snapshot" && requestAcquireBudgetWatchesWrites()
+      mode !== "Snapshot" &&
+      requestAcquireBudgetWatchesWrites() &&
+      options.mayHaveWritten?.() !== false
         ? (
             await client.query<{ wrote: boolean }>(
               "SELECT pg_current_xact_id_if_assigned() IS NOT NULL AS wrote",
