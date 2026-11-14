@@ -1091,6 +1091,66 @@ describe("staff dine-in round command — WP-2423 Q7 slice 2", () => {
     expect(f.onUnexpected).not.toHaveBeenCalled();
   });
 
+  // v15 b17: a later round's pre-check (before its write) refuses a dish sold out a moment ago
+  // with the checkout's own CHECKOUT_ITEM_UNAVAILABLE, naming its cart line: staff are told that
+  // dish can't be sold now, the round's items come back out, and nothing is logged as unexpected.
+  it.each([
+    ["pay-later", true],
+    ["pay-first", false],
+  ] as const)(
+    "v15 b17: a dish the %s submission's pre-check finds off sale is named as can't be sold now",
+    async (_kind, isPayLater) => {
+      const f = setup(
+        undefined,
+        isPayLater ? { sessions: new Set([id(31)]), confirmed: [] as string[] } : null,
+      );
+      f.pipeline.addItem.mockResolvedValue({
+        status: "Applied",
+        cartVersion: 4,
+        lines: [{ cartItemReference: id(40), quantity: 2 }],
+      } as never);
+      const refusal = Object.assign(new Error("checkout is unavailable"), {
+        name: "CheckoutValidationError",
+        code: "CHECKOUT_ITEM_UNAVAILABLE",
+        line: { cartItemReference: id(40), available: null, sharedStock: false },
+      });
+      (isPayLater ? f.pipeline.submitPayLater : f.pipeline.preparePayment).mockRejectedValueOnce(
+        refusal,
+      );
+      const removeItems = vi.fn(async () => "Removed" as const);
+      Object.assign(f.pipeline, { removeItems });
+      await expect(f.send()).rejects.toMatchObject({
+        code: "STAFF_ROUND_ITEM_UNAVAILABLE",
+        lineIndex: 0,
+      });
+      expect(removeItems).toHaveBeenCalledTimes(1);
+      expect(f.onUnexpected).not.toHaveBeenCalled();
+    },
+  );
+
+  it("v15 b17: stock the pre-check finds short names the dish and how many are left", async () => {
+    const f = setup();
+    f.pipeline.addItem.mockResolvedValue({
+      status: "Applied",
+      cartVersion: 4,
+      lines: [{ cartItemReference: id(40), quantity: 2 }],
+    } as never);
+    f.pipeline.preparePayment.mockRejectedValueOnce(
+      Object.assign(new Error("checkout is unavailable"), {
+        name: "CheckoutValidationError",
+        code: "CHECKOUT_STOCK_SHORT",
+        line: { cartItemReference: id(40), available: 1, sharedStock: false },
+      }),
+    );
+    Object.assign(f.pipeline, { removeItems: vi.fn(async () => "Removed" as const) });
+    await expect(f.send()).rejects.toMatchObject({
+      code: "STAFF_ROUND_STOCK_SHORT",
+      lineIndex: 0,
+      available: 1,
+    });
+    expect(f.onUnexpected).not.toHaveBeenCalled();
+  });
+
   it("WP-2423: an owner listing mid-round asks staff to send again, the round's items taken back", async () => {
     const atCheckout = setup();
     atCheckout.pipeline.addItem.mockResolvedValue({

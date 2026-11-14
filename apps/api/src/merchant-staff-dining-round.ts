@@ -1721,6 +1721,63 @@ export function createMerchantStaffDiningRound(options: {
           );
         }
         if (checkout.status !== "Started") return fail("STAFF_ROUND_STORE_NOT_TAKING_ORDERS");
+        /**
+         * WP-2423: stock ran out, a dish came off sale, or an owner listed, between checkout and
+         * submission; the submission's checks refused it (v15 b17: also the later round's
+         * pre-check, which answers the checkout's own CHECKOUT_ITEM_UNAVAILABLE or
+         * CHECKOUT_STOCK_SHORT, naming the dish). Nothing was ordered or charged and the round's
+         * items come back out of the table's Cart; staff are told which dish can't be sold now.
+         * Anything else is not a refusal and goes on as before.
+         */
+        const refusedAtSubmission = async (error: unknown): Promise<never> => {
+          const { code, line } = (error ?? {}) as { code?: unknown; line?: unknown };
+          const checked = code === "CHECKOUT_ITEM_UNAVAILABLE" || code === "CHECKOUT_STOCK_SHORT";
+          if (
+            code !== "ORDER_CREATE_STOCK_SHORT" &&
+            code !== "CHECKOUT_REQUOTE_REQUIRED" &&
+            !checked
+          )
+            throw error;
+          const removed = await withdraw();
+          const refused = (checked ? line : null) as {
+            readonly cartItemReference?: unknown;
+            readonly available?: unknown;
+            readonly sharedStock?: unknown;
+          } | null;
+          const reference =
+            typeof refused?.cartItemReference === "string" ? refused.cartItemReference : null;
+          const available = typeof refused?.available === "number" ? refused.available : null;
+          const sharedStock = refused?.sharedStock === true;
+          const own = reference === null ? -1 : cartLines.indexOf(reference);
+          const lineIndex = own < 0 ? null : own;
+          const refusal =
+            // One of the guests' lines: staff see the table's cart again with it marked.
+            lineIndex === null && reference !== null && guestLines.has(reference)
+              ? await guestLineRefusal(
+                  removed,
+                  reference,
+                  code === "CHECKOUT_STOCK_SHORT"
+                    ? { standing: "Short", available: available ?? 0 }
+                    : { standing: "Unavailable" },
+                  () => new StaffDiningRoundError("STAFF_ROUND_ITEM_UNAVAILABLE"),
+                )
+              : unlessLeftAtTable(removed, () =>
+                  code === "CHECKOUT_REQUOTE_REQUIRED"
+                    ? new StaffDiningRoundError("STAFF_ROUND_NOT_PRICED")
+                    : code === "CHECKOUT_STOCK_SHORT" && available !== null && available > 0
+                      ? new StaffDiningRoundError("STAFF_ROUND_STOCK_SHORT", lineIndex, [], {
+                          available,
+                          sharedStock,
+                        })
+                      : new StaffDiningRoundError("STAFF_ROUND_ITEM_UNAVAILABLE", lineIndex, [], {
+                          available: null,
+                          sharedStock: code === "CHECKOUT_STOCK_SHORT" && sharedStock,
+                        }),
+                );
+          return keepingCause((): never => {
+            throw refusal;
+          })(error);
+        };
         const submitPayLater = options.pipeline.submitPayLater;
         const payLaterRound = options.payLater;
         const payLater =
@@ -1738,21 +1795,7 @@ export function createMerchantStaffDiningRound(options: {
               recordedAfterOutage: command.recordedAfterOutage,
             });
           } catch (error) {
-            const code = (error as { code?: unknown } | null)?.code;
-            if (code !== "ORDER_CREATE_STOCK_SHORT" && code !== "CHECKOUT_REQUOTE_REQUIRED")
-              throw error;
-            const removed = await withdraw();
-            return keepingCause(() => {
-              throw unlessLeftAtTable(
-                removed,
-                () =>
-                  new StaffDiningRoundError(
-                    code === "ORDER_CREATE_STOCK_SHORT"
-                      ? "STAFF_ROUND_ITEM_UNAVAILABLE"
-                      : "STAFF_ROUND_NOT_PRICED",
-                  ),
-              );
-            })(error);
+            return await refusedAtSubmission(error);
           }
           return await finished("Placed", entry.record);
         }
@@ -1765,24 +1808,7 @@ export function createMerchantStaffDiningRound(options: {
             recordedAfterOutage: command.recordedAfterOutage,
           });
         } catch (error) {
-          // WP-2423: stock ran out, or an owner listed, between checkout and submission; the
-          // submission rolled back, so nothing was ordered or charged and the round's items come
-          // back out of the table's Cart.
-          const code = (error as { code?: unknown } | null)?.code;
-          if (code !== "ORDER_CREATE_STOCK_SHORT" && code !== "CHECKOUT_REQUOTE_REQUIRED")
-            throw error;
-          const removed = await withdraw();
-          return keepingCause(() => {
-            throw unlessLeftAtTable(
-              removed,
-              () =>
-                new StaffDiningRoundError(
-                  code === "ORDER_CREATE_STOCK_SHORT"
-                    ? "STAFF_ROUND_ITEM_UNAVAILABLE"
-                    : "STAFF_ROUND_NOT_PRICED",
-                ),
-            );
-          })(error);
+          return await refusedAtSubmission(error);
         }
         // The round was submitted with another tip: the same command reads back what it holds.
         if (preparation.tip.amountMinor !== tip) return fail("STAFF_ROUND_IN_PROGRESS");
