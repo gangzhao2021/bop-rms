@@ -956,7 +956,7 @@ describe("logs-and-transaction-time snapshot repeats", () => {
       const first = (await transaction.query(read, ["c"])) as { rows: { row: { v: number } }[] };
       const again = (await transaction.query(read, ["c"])) as { rows: { row: { v: number } }[] };
       expect(again.rows).toEqual([{ row: { v: 1 } }]);
-      again.rows[0]!.row.v = 99;
+      for (const row of again.rows) row.row.v = 99;
       expect(first.rows).toEqual([{ row: { v: 1 } }]);
       await transaction.query(read, ["d"]);
       await transaction.query(mode, []);
