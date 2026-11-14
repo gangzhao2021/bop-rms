@@ -1,4 +1,4 @@
-import { t } from "../i18n/i18n.js";
+import { t, wordGap } from "../i18n/i18n.js";
 import { SessionPaymentResultPage } from "./SessionPaymentResultPage.js";
 import { SessionPaymentPage } from "./SessionPaymentPage.js";
 import { useEffect, useState, useSyncExternalStore } from "react";
@@ -94,7 +94,9 @@ function LegacyPaymentPage({
         <section role="alert">
           <h2>{t("Payment failed")}</h2>
           <p>
-            {t("Safe reason:")} {state.safeReasonCode}
+            {t("Safe reason:")}
+            {wordGap()}
+            {state.safeReasonCode}
           </p>
           <p>{t("No Order confirmation is assumed.")}</p>
         </section>

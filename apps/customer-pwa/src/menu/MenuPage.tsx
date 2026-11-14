@@ -2041,7 +2041,10 @@ function ChoiceAllergens({
   const may = allergens.filter((item) => item.classification !== "Contains");
   return (
     <p className="configure-allergens" aria-live="polite">
-      <span>{t("With your choices:")} </span>
+      <span>
+        {t("With your choices:")}
+        {wordGap()}
+      </span>
       {allergens.length === 0
         ? t("no allergens listed. Ask staff if you have an allergy.")
         : [

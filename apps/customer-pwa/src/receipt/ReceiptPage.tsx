@@ -1,4 +1,4 @@
-import { t, useReloadOnLanguageChange } from "../i18n/i18n.js";
+import { t, useReloadOnLanguageChange, wordGap } from "../i18n/i18n.js";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { Link, useParams } from "react-router";
 import {
@@ -227,7 +227,9 @@ function ReceiptVersion({ record }: { readonly record: ReceiptRecordView }) {
       </p>
       {receiptVersionReason(record) ? (
         <p>
-          {t("Reason:")} {receiptVersionReason(record)}
+          {t("Reason:")}
+          {wordGap()}
+          {receiptVersionReason(record)}
         </p>
       ) : null}
       <ul className="receipt-page__lines">

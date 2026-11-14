@@ -1,4 +1,4 @@
-import { t } from "../i18n/i18n.js";
+import { t, wordGap } from "../i18n/i18n.js";
 import { orderStatusText } from "../journey/messages.js";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { Link } from "react-router";
@@ -277,7 +277,9 @@ export function SessionPaymentResultPage({
             <>
               {result.total ? (
                 <p>
-                  {t("Paid:")} <strong>{formatCartMoney(result.total)}</strong>
+                  {t("Paid:")}
+                  {wordGap()}
+                  <strong>{formatCartMoney(result.total)}</strong>
                 </p>
               ) : null}
               {result.orderReference ? (
