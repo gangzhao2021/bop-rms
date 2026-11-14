@@ -196,6 +196,31 @@ describe("WP-2423 Q8 dining session client", () => {
     expect(request).not.toHaveBeenCalled();
   });
 
+  // v15 b17 review: "still processing" carries the server's Retry-After, so phones read again
+  // when the server asks (5 s in a burst), within 1 to 30 seconds, and 2 s when it does not say.
+  it.each([
+    ["5", 5],
+    ["2", 2],
+    [null, 2],
+    ["0", 2],
+    ["abc", 2],
+    ["600", 30],
+  ])("v15 b17 review: still processing with Retry-After %s waits %d s", async (header, wait) => {
+    setCustomerCsrfCredential("c".repeat(43));
+    const request = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ error: { code: "dining_session_order_processing" } }), {
+          status: 503,
+          headers: header === null ? {} : { "retry-after": header },
+        }),
+    );
+    const client = createHttpDiningSessionClient(request as unknown as typeof fetch);
+    await expect(client.load()).rejects.toMatchObject({
+      code: "processing",
+      retryAfterSeconds: wait,
+    });
+  });
+
   it("sends only the CSRF header to the fixed route and maps refusals to not joined", async () => {
     setCustomerCsrfCredential("c".repeat(43));
     const request = vi.fn(async () => new Response(JSON.stringify(payload()), { status: 200 }));

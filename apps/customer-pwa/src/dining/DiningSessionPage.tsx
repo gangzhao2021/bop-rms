@@ -795,6 +795,8 @@ export function DiningSessionPage({
   // v15 2026-10-27: right after the first round the order is prepared within seconds; the page
   // waits and reads again (a bounded number of times) instead of saying "join your table".
   const processingRetries = useRef(0);
+  // v15 b17 review: the wait the server asked for before that next read (Retry-After).
+  const processingWaitMs = useRef(2000);
   const lastView = useRef(false);
   const [retryTick, setRetryTick] = useState(0);
   const load = useCallback(async () => {
@@ -824,6 +826,7 @@ export function DiningSessionPage({
         processingRetries.current < 15
       ) {
         processingRetries.current += 1;
+        processingWaitMs.current = error.retryAfterSeconds * 1000;
         setRetryTick((value) => value + 1);
         return;
       }
@@ -874,7 +877,7 @@ export function DiningSessionPage({
   }, [load]);
   useEffect(() => {
     if (retryTick === 0) return;
-    const timer = window.setTimeout(() => void load(), 2000);
+    const timer = window.setTimeout(() => void load(), processingWaitMs.current);
     return () => window.clearTimeout(timer);
   }, [retryTick, load]);
   // Owner 2026-10-23: item names come from the Store in the chosen language.

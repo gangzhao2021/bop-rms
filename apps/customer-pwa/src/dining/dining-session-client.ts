@@ -203,6 +203,8 @@ export class DiningSessionClientError extends Error {
     readonly tableLabel: string | null = null,
     /** WP-2423 item 8 ⑨: staff merged the party into the party at `tableLabel`. */
     readonly merged = false,
+    /** v15 b17 review: "processing": how long the server asked to wait before reading again. */
+    readonly retryAfterSeconds = 2,
   ) {
     super("dining session is " + code);
     this.name = "DiningSessionClientError";
@@ -670,8 +672,17 @@ export function createHttpDiningSessionClient(
       const body = (await response.json().catch(() => null)) as {
         error?: { code?: unknown };
       } | null;
-      if (body?.error?.code === "dining_session_order_processing")
-        throw new DiningSessionClientError("processing");
+      if (body?.error?.code === "dining_session_order_processing") {
+        // v15 b17 review: read again when the server asks (2 s after a first round, 5 s while a
+        // table changes under a burst), within 1 to 30 seconds; 2 s when it does not say.
+        const seconds = Number(response.headers.get("retry-after"));
+        throw new DiningSessionClientError(
+          "processing",
+          null,
+          false,
+          Number.isSafeInteger(seconds) && seconds > 0 ? Math.min(seconds, 30) : 2,
+        );
+      }
     }
     if (response.status !== 200) throw new DiningSessionClientError("unavailable");
     let payload: unknown;
