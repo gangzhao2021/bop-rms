@@ -7,6 +7,10 @@ import { join } from "node:path";
 import pg from "pg";
 import { createTenantTransactionRunner } from "../src/index.ts";
 import {
+  acquirePilotConnection,
+  holdingPilotConnection,
+} from "../../../tooling/environment/pilot-connections.mjs";
+import {
   createAllergenRegistryVersion,
   recordIngredientAllergenDeclaration,
   staffAllergenDeclarationSource,
@@ -93,6 +97,11 @@ export async function prepareRealStaffRoundStore({
   paymentTiming = "PayLater",
   /** 1 and up: another merchant in the same database, with its own synthetic identities. */
   merchant = 0,
+  /**
+   * WP-2423 (rush-connection-hold): the API pool as the pilot's entry sizes it (`max`, the pool's
+   * own wait per attempt, the request's acquire budget); by default a roomy pool for staff rounds.
+   */
+  apiPool = {},
 }) {
   const id = idsOf(merchant);
   const fixtureIds = (n) => (0x01a80000 + merchant * 0x100 + n).toString(16).padStart(8, "0");
@@ -139,10 +148,13 @@ export async function prepareRealStaffRoundStore({
     }
   };
   // One restricted transaction as the pilot's API (its connection pool, its runner).
+  const apiApplicationName = "wp2423_rsr_api" + merchant;
   const pool = new Pool({
     ...context.clientConfig,
-    max: 8,
-    connectionTimeoutMillis: 5000,
+    // Its connections are told apart in pg_stat_activity by this name.
+    application_name: apiApplicationName,
+    max: apiPool.max ?? 8,
+    connectionTimeoutMillis: apiPool.connectionTimeoutMillis ?? 5000,
     query_timeout: 10_000,
     statement_timeout: 8000,
     lock_timeout: 5000,
@@ -152,15 +164,42 @@ export async function prepareRealStaffRoundStore({
     await alignProcessClockToDatabase((sql) => pool.query(sql));
   const restrictedPool = {
     options: pool.options,
+    // The pool's public face, as the pilot's real pool shows it (a rush is a pool at its limit).
+    on: (event, listener) => pool.on(event, listener),
+    get totalCount() {
+      return pool.totalCount;
+    },
+    get idleCount() {
+      return pool.idleCount;
+    },
+    get waitingCount() {
+      return pool.waitingCount;
+    },
     async connect() {
       const client = await pool.connect();
-      await client.query("SET ROLE " + api);
+      try {
+        await client.query("SET ROLE " + api);
+      } catch (error) {
+        client.release(true);
+        throw error;
+      }
       return client;
     },
   };
   const applicationDatabase = {
-    transactions: (selected) => createTenantTransactionRunner(restrictedPool, selected),
-    acquire: () => restrictedPool.connect(),
+    transactions: (selected) =>
+      createTenantTransactionRunner(
+        restrictedPool,
+        selected,
+        apiPool.acquireBudgetMs === undefined ? {} : { acquireBudgetMs: apiPool.acquireBudgetMs },
+      ),
+    // As the pilot's own `acquire` (pilot-connections acquirePilotConnection) when the test sizes
+    // the pool like the pilot's: short pool waits with jitter until the request's budget is spent.
+    acquire: () =>
+      apiPool.acquireBudgetMs === undefined
+        ? restrictedPool.connect()
+        : acquirePilotConnection(restrictedPool, { budgetMs: apiPool.acquireBudgetMs }),
+    hold: (work) => holdingPilotConnection(restrictedPool, work),
     close: () => pool.end(),
   };
   const restricted = applicationDatabase.transactions({
@@ -498,6 +537,9 @@ export async function prepareRealStaffRoundStore({
     restricted,
     persistenceOf,
     counterFor,
+    apiApplicationName,
+    /** The pilot's customer runtime dependencies for this staff member (pilot-api createRuntime). */
+    customerDependenciesFor: customerFor,
     /** The pilot's configured customer entry for this staff member's composition (guest ports). */
     customerEntryFor: (who) => customerFor(who).createInternalCustomerEntry(resources),
     /**
