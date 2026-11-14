@@ -1,0 +1,223 @@
+import { createContext, useEffect, useMemo, useState } from "react";
+import { createRefundApprovalClient } from "./refund-approval-client.js";
+import { useStaffSessionLive } from "./staff-session-reads.js";
+import { createDiningSessionClient } from "./dining-session-client.js";
+import { createStaffPageClient, StaffPageError } from "./staff-administration-pages.js";
+import {
+  createRoleAdministrationPageClient,
+  RoleAdministrationPageError,
+} from "./role-administration-pages.js";
+
+/** WP-2423 Q35: how often the waiting refund approvals are read while a page is visible. */
+export const APPROVALS_WAITING_REFRESH_MS = 60_000;
+
+/** What the approver still has to do: approve, or send a refund already approved. */
+export interface ApprovalsWaiting {
+  readonly awaiting: number;
+  readonly approvedNotSent: number;
+  /** WP-2423 M14/M16: recorded, needing no approval, and not sent (a cashier's request). */
+  readonly notSent: number;
+}
+
+/**
+ * `canSend`: the reader sends refunds. Only what the reader can act on is counted: a request to
+ * approve only when this reader may approve that one (`canApprove`), and an approved or cashier's
+ * request only when this reader sends refunds. A cashier's request waits for a manager or the
+ * owner, so it is never counted as something a cashier has to do (v15 batch 5: Home told a cashier
+ * it was "waiting for you to send", and later "1 to approve" though a cashier can't approve).
+ */
+export function summarizeApprovalsWaiting(
+  entries: readonly {
+    readonly state: "AwaitingApproval" | "Approved" | "NotSent";
+    readonly canApprove: boolean;
+  }[],
+  canSend = true,
+): ApprovalsWaiting {
+  return {
+    awaiting: entries.filter((entry) => entry.state === "AwaitingApproval" && entry.canApprove)
+      .length,
+    approvedNotSent: canSend ? entries.filter((entry) => entry.state === "Approved").length : 0,
+    notSent: canSend ? entries.filter((entry) => entry.state === "NotSent").length : 0,
+  };
+}
+
+/**
+ * WP-2423 Q35: refunds at the selected Store waiting for an approver, read while the page is
+ * visible and the sign-in is live, so a manager away from the counter sees them on any page.
+ * `null` until read, when not permitted, or when the read fails (nothing is guessed).
+ */
+export function useApprovalsWaiting(
+  enabled: boolean,
+  fetcher?: typeof fetch,
+): ApprovalsWaiting | null {
+  const client = useMemo(() => createRefundApprovalClient(fetcher), [fetcher]);
+  const live = useStaffSessionLive();
+  const [waiting, setWaiting] = useState<ApprovalsWaiting | null>(null);
+  useEffect(() => {
+    if (!enabled || !live || typeof window === "undefined") {
+      setWaiting(null);
+      return;
+    }
+    let controller: AbortController | null = null;
+    const read = () => {
+      controller?.abort();
+      const current = new AbortController();
+      controller = current;
+      client
+        .approvals(current.signal)
+        .then((view) => {
+          if (!current.signal.aborted)
+            setWaiting(summarizeApprovalsWaiting(view.entries, view.canSend));
+        })
+        .catch(() => {
+          if (!current.signal.aborted) setWaiting(null);
+        });
+    };
+    read();
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") read();
+    }, APPROVALS_WAITING_REFRESH_MS);
+    return () => {
+      window.clearInterval(timer);
+      controller?.abort();
+    };
+  }, [client, enabled, live]);
+  return waiting;
+}
+
+/**
+ * WP-2423 M07: how many staff role requests wait for the signed-in person. `null` until read or
+ * when not permitted; "Unavailable" when the read failed, so the count is never silently short.
+ */
+export type StaffRolesWaiting = number | "Unavailable" | null;
+
+/**
+ * WP-2423 M07: the Approvals badge counts refunds to approve or send plus staff roles waiting for
+ * the signed-in person. A read that failed adds nothing; nothing is guessed.
+ */
+export function approvalsBadgeCount(
+  approvals: ApprovalsWaiting | null,
+  staffRoles: StaffRolesWaiting,
+): number {
+  return (
+    (approvals === null ? 0 : approvals.awaiting + approvals.approvedNotSent + approvals.notSent) +
+    (typeof staffRoles === "number" ? staffRoles : 0)
+  );
+}
+
+/**
+ * WP-2423 role presets: staff role requests plus role changes. A failed read makes the whole count
+ * "Unavailable" (never silently short); reads not permitted add nothing.
+ */
+export function combineRolesWaiting(parts: readonly StaffRolesWaiting[]): StaffRolesWaiting {
+  if (parts.includes("Unavailable")) return "Unavailable";
+  const numbers = parts.filter((part): part is number => typeof part === "number");
+  return numbers.length === 0 ? null : numbers.reduce((sum, part) => sum + part, 0);
+}
+
+/**
+ * WP-2423 M07: how many staff role requests and role changes wait for the signed-in person (to
+ * decide, approve alone or turn on), read with the refunds. See `StaffRolesWaiting`.
+ */
+export function useStaffRolesWaiting(
+  csrf: string | null,
+  enabled: boolean,
+  fetcher?: typeof fetch,
+): StaffRolesWaiting {
+  const live = useStaffSessionLive();
+  const [waiting, setWaiting] = useState<StaffRolesWaiting>(null);
+  useEffect(() => {
+    if (!enabled || csrf === null || !live || typeof window === "undefined") {
+      setWaiting(null);
+      return;
+    }
+    const client = createStaffPageClient(csrf, fetcher ?? fetch);
+    const roles = createRoleAdministrationPageClient(csrf, fetcher ?? fetch);
+    let current = true;
+    const read = () => {
+      // WP-2423 role presets: staff role requests and role changes waiting for this person.
+      void Promise.all([
+        client.roleRequests().then(
+          (requests): StaffRolesWaiting => requests.length,
+          (error: unknown): StaffRolesWaiting =>
+            error instanceof StaffPageError && error.code === "PermissionDenied"
+              ? null
+              : "Unavailable",
+        ),
+        roles.waiting().then(
+          (changes): StaffRolesWaiting => changes.length,
+          (error: unknown): StaffRolesWaiting =>
+            error instanceof RoleAdministrationPageError && error.code === "PermissionDenied"
+              ? null
+              : "Unavailable",
+        ),
+      ]).then((parts) => {
+        if (current) setWaiting(combineRolesWaiting(parts));
+      });
+    };
+    read();
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") read();
+    }, APPROVALS_WAITING_REFRESH_MS);
+    return () => {
+      current = false;
+      window.clearInterval(timer);
+    };
+  }, [csrf, enabled, live, fetcher]);
+  return waiting;
+}
+
+/**
+ * WP-2423 Q28: how often the guests waiting for staff are counted while a page is visible.
+ * merchant-outage-recovery M174: every 5 s (a snapshot read that never waits for a command), so a
+ * guest's call reaches an open Tables page within seconds; the Tables page rereads when it moves.
+ */
+export const STAFF_CALLS_WAITING_REFRESH_MS = 5_000;
+
+/** M174: the count above, for the page in the frame (Tables rereads when it changes). */
+export const StaffCallsWaitingContext = createContext<number | null>(null);
+
+/**
+ * WP-2423 Q28 DEC-DINING-STAFF-CALL: how many guests at the selected Store asked staff to come to
+ * their table and wait, counted on every page for staff with the Tables page. `null` until read,
+ * when not permitted, or when the read fails.
+ */
+export function useStaffCallsWaiting(csrf: string | null, enabled: boolean): number | null {
+  const live = useStaffSessionLive();
+  const [waiting, setWaiting] = useState<number | null>(null);
+  useEffect(() => {
+    if (!enabled || csrf === null || !live || typeof window === "undefined") {
+      setWaiting(null);
+      return;
+    }
+    const client = createDiningSessionClient();
+    let controller: AbortController | null = null;
+    const read = () => {
+      controller?.abort();
+      const current = new AbortController();
+      controller = current;
+      client
+        .staffCallCount(csrf, current.signal)
+        .then((open) => {
+          if (!current.signal.aborted) setWaiting(open);
+        })
+        .catch(() => {
+          if (!current.signal.aborted) setWaiting(null);
+        });
+    };
+    read();
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") read();
+    }, STAFF_CALLS_WAITING_REFRESH_MS);
+    const visible = () => {
+      if (document.visibilityState === "visible") read();
+    };
+    document.addEventListener("visibilitychange", visible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", visible);
+      controller?.abort();
+    };
+  }, [csrf, enabled, live]);
+  return waiting;
+}

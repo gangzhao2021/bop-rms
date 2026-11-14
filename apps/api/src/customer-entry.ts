@@ -1,4 +1,11 @@
-import type { GuestRawCredential, GuestSessionCookieDescriptor } from "@bop/identity";
+import { trustedClientAddress } from "./client-address.js";
+import { customerFailureCode } from "./customer-failure-diagnostic.js";
+import { markRequestFailure } from "./request-correlation.js";
+import {
+  serializeGuestSessionCookie,
+  type GuestRawCredential,
+  type GuestSessionCookieDescriptor,
+} from "@bop/identity";
 import type { RequestHandler, Response } from "express";
 
 const compactSegmentPattern = /^[A-Za-z0-9_-]+$/u;
@@ -21,7 +28,52 @@ export interface CustomerEntryPortInput {
   readonly operationReference: string;
   readonly qrToken: string;
   readonly requestedAt: string;
+  /**
+   * WP-2423 DEC-DINING-GUEST-TABLE-START: what the guest tapped after a first scan answered with a
+   * choice: start this free table, join the people here, or start after them. Absent: a scan.
+   */
+  readonly intent?: CustomerEntryIntent;
+  /**
+   * M104/M105: the guest credentials this phone sent (its current visit's cookie, then the earlier
+   * visits it keeps), so a rescan goes on with a visit instead of replacing it. Never logged.
+   */
+  readonly presentedCredentials?: readonly CustomerEntryPresentedCredential[];
+  /**
+   * WP-2423 shared-table-checkout (b): the table this browser's own Guest Session is already
+   * seated at, read before the entry (a current dining-bound session only). A scan of that same
+   * table code answers AlreadyAtTable instead of starting a second visit for the same phone.
+   */
+  readonly presentedTable?: CustomerEntryPresentedTable;
+  /**
+   * Identity says this browser's own Guest Session is seated at this table, but Dining could not
+   * be read to confirm it (an outage): nobody can say whether this phone is already there.
+   */
+  readonly presentedTableUnconfirmed?: CustomerEntryPresentedTable;
 }
+export interface CustomerEntryPresentedCredential {
+  readonly source: "Current" | "Earlier";
+  readonly credential: string;
+}
+export interface CustomerEntryPresentedTable {
+  readonly publicStoreReference: string;
+  readonly publicTableReference: string;
+  readonly qrReference: string;
+  readonly qrRevocationVersion: number;
+}
+/**
+ * WP-2423 shared-table-checkout (b): this phone's own current Guest Session is already at the
+ * scanned table (same Store, table and code version, its participant still at the table). No
+ * Session, cookie or participant is created; the app opens the menu.
+ */
+export interface CustomerEntryAlreadyAtTable {
+  readonly status: "AlreadyAtTable";
+  readonly brandDisplayName: string;
+  readonly storeDisplayName: string;
+  readonly publicStoreReference: string;
+  readonly publicTableReference: string;
+  readonly locale: string;
+}
+export type CustomerEntryIntent = "Start" | "Join" | "NewParty";
 
 export interface CustomerEntryEstablished {
   readonly status: "Established";
@@ -34,13 +86,115 @@ export interface CustomerEntryEstablished {
   readonly availableServiceModes: readonly ("DineIn" | "Pickup" | "Delivery")[];
   readonly locale: string;
   readonly contextExpiresAt: string;
+  /**
+   * Coordinator 2026-10-30: at a table, whether a party is seated there now (staff seat guests
+   * before they can join and order, or the guest is starting it); absent for pickup or when it
+   * can't be read.
+   */
+  readonly tableOpen?: boolean;
   readonly sessionCredential: GuestRawCredential;
   readonly csrfCredential: GuestRawCredential;
   readonly cookie: GuestSessionCookieDescriptor;
+  /** M104/M105: this phone's existing visit goes on (no new visit was started). */
+  readonly resumed?: true;
+  /**
+   * M104/M105: the earlier visits this phone keeps after this answer (absent: unchanged), so a
+   * visit replaced here, at this Store or another, can be gone back to, and its receipts read.
+   */
+  readonly earlierCredentials?: readonly string[];
+  /** The visit this phone had at this Store has ended; whether its receipts can still be read. */
+  readonly previousVisit?: "Ended" | "EndedReceiptsKept";
+}
+
+/** WP-2423 Q4: the Store is closed or not taking this service now; no Session is issued. */
+export interface CustomerEntryNotAccepting {
+  readonly status: "NotAccepting";
+  readonly storeDisplayName: string;
+  readonly operatingState: "Closed" | "TemporarilyClosed" | "Open";
+  readonly todayHours: readonly {
+    readonly startLocalTime: string;
+    readonly endLocalTime: string;
+    readonly endsNextDay: boolean;
+  }[];
+  /** WP-2423 item 8 ③ (decision 16): today's holiday, special hours or closure, when it is one. */
+  readonly todayKind: "Holiday" | "TemporaryClosure" | "Override" | null;
+  /** The Store's next opening within 7 days (its local date and time), when one is published. */
+  readonly nextOpening: { readonly localDate: string; readonly startLocalTime: string } | null;
+  /** The Store's local date now, so "tomorrow" can be said. */
+  readonly localDate: string | null;
+  /** WP-2423 item 11: not a closing time; this Store isn't ready to take orders yet. */
+  readonly notReadyForOrders?: true;
+  /** WP-2423 item 13 ②: the platform paused this merchant's new guests (no hours to wait for). */
+  readonly newGuestsPaused?: true;
+  /**
+   * M116: closed for the night or paused for a while, the guest can still look at the menu (no
+   * Session, no cart): the public context the read-only menu needs.
+   */
+  readonly browse?: CustomerEntryBrowseContext;
+}
+
+/** M116: what the read-only menu of a Store not taking orders now needs; no Session. */
+export interface CustomerEntryBrowseContext {
+  readonly brandDisplayName: string;
+  readonly publicStoreReference: string;
+  readonly locale: string;
+  readonly channel: "DineIn" | "Pickup";
+}
+
+/**
+ * WP-2423 item 8 ⑦ 1b: a pickup code at a Store that turned pickup off (it takes dine-in orders
+ * only); no Session is issued.
+ */
+export interface CustomerEntryServiceNotOffered {
+  readonly status: "ServiceNotOffered";
+  readonly storeDisplayName: string;
+}
+
+/**
+ * Coordinator 2026-10-30: no party is seated at the scanned table (free, or waiting for cleaning).
+ * Nobody can join or order there until staff seat a party, so no Session is issued (a browser's
+ * earlier visit, e.g. a guest whose table was just settled, keeps its receipt); the public context
+ * lets the guest look at the menu.
+ */
+export interface CustomerEntryTableNotOpen {
+  readonly status: "TableNotOpen";
+  readonly brandDisplayName: string;
+  readonly storeDisplayName: string;
+  readonly publicStoreReference: string;
+  readonly locale: string;
+  /**
+   * WP-2423 (guest-table-open-and-busy-reads): the scanned table's printed name, so a guest holding
+   * another table's card sees which table it is for and staff can put it right.
+   */
+  readonly tableLabel?: string;
+}
+
+/**
+ * WP-2423 DEC-DINING-GUEST-TABLE-START: a scan at a Store where guests start tables, answered with
+ * no Session (an earlier visit on this browser keeps its receipt): this free table can be started,
+ * it is waiting for cleaning, or this phone is asked if it is with the guests already here.
+ */
+export type CustomerEntryTableOffer = Omit<CustomerEntryTableNotOpen, "status"> &
+  (
+    | { readonly status: "TableMayStart" }
+    | { readonly status: "TableBeingCleaned" }
+    | { readonly status: "TableAskNewParty" }
+  );
+
+/** WP-2423 Q11: a genuine table code that staff replaced or turned off; no Session is issued. */
+export interface CustomerEntryQrRetired {
+  readonly status: "QrRetired";
+  readonly reason: "Replaced" | "TurnedOff";
 }
 
 export type CustomerEntryPortResult =
   | CustomerEntryEstablished
+  | CustomerEntryNotAccepting
+  | CustomerEntryServiceNotOffered
+  | CustomerEntryTableNotOpen
+  | CustomerEntryTableOffer
+  | CustomerEntryQrRetired
+  | CustomerEntryAlreadyAtTable
   | { readonly status: "InvalidRequest" }
   | { readonly status: "EntryUnavailable" };
 
@@ -48,16 +202,88 @@ export interface CustomerEntryPort {
   establish(input: Readonly<CustomerEntryPortInput>): Promise<CustomerEntryPortResult>;
 }
 
+export interface CustomerEntryRequestAdmission {
+  consume(
+    input: Readonly<{ remoteAddress: string | null; requestedAt: string; codeValid?: boolean }>,
+  ): Promise<
+    | { readonly status: "Allowed" }
+    | { readonly status: "RateLimited"; readonly retryAfterSeconds: number }
+    | { readonly status: "Unavailable" }
+  >;
+}
+
 export interface CustomerEntryHandlerOptions {
+  readonly requestAdmission?: CustomerEntryRequestAdmission;
+  /** WP-2423: a code's signature, checked first so a made-up code can't spend the Store's budget. */
+  readonly codeCheck?: (qrToken: string) => Promise<boolean>;
   readonly allowedOrigin: string;
   readonly now?: () => string;
   readonly port: CustomerEntryPort;
   readonly uuidV7Factory: () => string;
+  /**
+   * WP-2423 shared-table-checkout (b): the table the presented Guest cookie is currently seated
+   * at (a current dining-bound Session whose participant is still at the table), null when the
+   * owners answered it is not seated there, or `unconfirmed` when Dining could not be read to
+   * confirm a seat Identity holds. An unconfirmed seat at that same table is answered as a
+   * store-busy retry, never as a join (a duplicate participant) or a scan pause refusal. A read that
+   * throws is treated as null: the scan goes on as an ordinary entry.
+   */
+  readonly presentedTable?: (
+    sessionCredential: string,
+    observedAt: string,
+  ) => Promise<
+    CustomerEntryPresentedTable | null | { readonly unconfirmed: CustomerEntryPresentedTable }
+  >;
+  /**
+   * WP-2423 shared-table-checkout (b), lost cookie: with no seated cookie, the page's continuity
+   * token finds the phone's earlier seat (same answers as `presentedTable`); when the entry then
+   * answers AlreadyAtTable, `readmit` makes this browser that same phone again (a new cookie for
+   * the same participant). A readmission refused (the seat changed, the token was used) is null,
+   * an ordinary entry; either call rejects when it can't be answered, and the entry is a 503 retry.
+   */
+  readonly continuity?: {
+    table(
+      token: string,
+      observedAt: string,
+    ): Promise<
+      CustomerEntryPresentedTable | null | { readonly unconfirmed: CustomerEntryPresentedTable }
+    >;
+    readmit(
+      token: string,
+      operationReference: string,
+      observedAt: string,
+    ): Promise<{ readonly sessionCredential: string; readonly continuityToken: string } | null>;
+  };
 }
 
-type ErrorCode = "entry_request_invalid" | "entry_unavailable" | "entry_service_unavailable";
+const guestCookieName = "__Host-bop-guest";
+const guestCredentialPattern = /^[A-Za-z0-9_-]{43}$/u;
+/** The browser's own Guest credential, when exactly one well-formed one is presented. */
+export function presentedGuestCredential(header: unknown): string | null {
+  if (typeof header !== "string" || header.length > 8192) return null;
+  const values = header
+    .split(";")
+    .map((part) => part.trim())
+    .filter((part) => part.startsWith(guestCookieName + "="))
+    .map((part) => part.slice(guestCookieName.length + 1));
+  const [value] = values;
+  return values.length === 1 && value !== undefined && guestCredentialPattern.test(value)
+    ? value
+    : null;
+}
+
+type ErrorCode =
+  | "entry_request_invalid"
+  | "entry_unavailable"
+  | "entry_service_unavailable"
+  | "entry_rate_limited";
 
 const errorContracts = Object.freeze({
+  entry_rate_limited: Object.freeze({
+    messageKey: "customer.entry.rate_limited",
+    recovery: Object.freeze({ action: "RetryOrAskStaff", storeSelection: "Hidden" }),
+    status: 429,
+  }),
   entry_request_invalid: Object.freeze({
     messageKey: "customer.entry.request_invalid",
     recovery: Object.freeze({ action: "Rescan", storeSelection: "Hidden" }),
@@ -132,17 +358,132 @@ function validCompactFraming(value: string): boolean {
   return bytes.length === 64 && bytes.toString("base64url") === signature;
 }
 
-function parseBody(value: unknown): string {
-  const body = closedRecord(value, ["qrToken"]);
+/**
+ * M02 (v15 07b7a1b7): the code a guest scanned that started no visit yet (a table not open, a
+ * closed Store), so a reload or "I've been seated" asks the same Store about the same table instead
+ * of losing where the guest is. It is the code the guest already holds: never in the address bar,
+ * Web Storage or script, and sent only to this route.
+ */
+export const scanCookieName = "__Secure-bop-scan";
+const scanCookieAttributes = `Path=${entryRoute}; Secure; HttpOnly; SameSite=Strict`;
+export const scanCookieMaxAgeSeconds = 1800;
+/** Exported so the installation's Store routing sets exactly this cookie during an outage. */
+export const rememberScan = (qrToken: string) =>
+  `${scanCookieName}=${qrToken}; Max-Age=${scanCookieMaxAgeSeconds}; ${scanCookieAttributes}`;
+export const forgetScan = `${scanCookieName}=; Max-Age=0; ${scanCookieAttributes}`;
+
+/** The one well-formed scan cookie this browser sent, or null. */
+export function scannedCode(header: unknown): string | null {
+  if (typeof header !== "string" || header.length > 8192) return null;
+  const values = header
+    .split(";")
+    .map((part) => part.trim())
+    .filter((part) => part.startsWith(scanCookieName + "="))
+    .map((part) => part.slice(scanCookieName.length + 1));
+  const [value] = values;
+  return values.length === 1 &&
+    value !== undefined &&
+    value.length <= 2048 &&
+    validCompactFraming(value)
+    ? value
+    : null;
+}
+
+/**
+ * M104/M105: the earlier visits this phone keeps (a visit at another Store, or one replaced here
+ * whose receipts can still be read), so scanning that Store's code again goes back to it. Only the
+ * entry writes it and only the entry and the receipt read it; never logged.
+ */
+export const earlierVisitsCookieName = "__Host-bop-visits";
+const earlierVisitLimit = 2;
+const earlierVisitsAttributes = "Path=/; Secure; HttpOnly; SameSite=Strict";
+export function serializeEarlierVisits(credentials: readonly string[]): string {
+  if (credentials.length === 0)
+    return `${earlierVisitsCookieName}=; Max-Age=0; ${earlierVisitsAttributes}`;
+  return `${earlierVisitsCookieName}=${credentials
+    .map((credential) => parseGuestRawCredential(credential))
+    .join(".")}; Max-Age=86400; ${earlierVisitsAttributes}`;
+}
+/** The one well-formed value of the exactly named cookie, or null. */
+function exactCookie(header: unknown, name: string): string | null {
+  if (typeof header !== "string" || header.length > 8192) return null;
+  const values = header
+    .split(";")
+    .map((part) => part.trim())
+    .filter((part) => part.startsWith(name + "="))
+    .map((part) => part.slice(name.length + 1));
+  return values.length === 1 && values[0] !== undefined ? values[0] : null;
+}
+/** The guest credentials this phone sent: its current visit's, then the earlier visits it keeps. */
+export function presentedGuestCredentials(header: unknown): CustomerEntryPresentedCredential[] {
+  const presented: CustomerEntryPresentedCredential[] = [];
+  const current = exactCookie(header, "__Host-bop-guest");
+  if (current !== null && rawCredentialPattern.test(current))
+    presented.push({ source: "Current", credential: current });
+  const earlier = exactCookie(header, earlierVisitsCookieName);
+  if (earlier !== null)
+    for (const credential of earlier.split(".").slice(0, earlierVisitLimit))
+      if (
+        rawCredentialPattern.test(credential) &&
+        !presented.some((visit) => visit.credential === credential)
+      )
+        presented.push({ source: "Earlier", credential });
+  return presented;
+}
+
+type EntryBody = (
+  | { readonly qrToken: string; readonly intent: CustomerEntryIntent | undefined }
+  | { readonly resume: true; readonly intent: CustomerEntryIntent | undefined }
+) & {
+  /** WP-2423 shared-table-checkout (b): the page's continuity token (lost cookie). */
+  readonly continuity?: string;
+};
+const continuityPattern = /^[A-Za-z0-9_-]{43}$/u;
+function parseContinuity(value: unknown): { readonly continuity?: string } {
+  if (value === undefined) return {};
+  if (typeof value !== "string" || !continuityPattern.test(value))
+    throw new TypeError("invalid entry request");
+  return { continuity: value };
+}
+
+function parseIntent(value: unknown): CustomerEntryIntent | undefined {
+  if (value !== undefined && value !== "Start" && value !== "Join" && value !== "NewParty")
+    throw new TypeError("invalid entry request");
+  return value as CustomerEntryIntent | undefined;
+}
+
+function parseBody(value: unknown): EntryBody {
+  const withIntent = value !== null && typeof value === "object" && Object.hasOwn(value, "intent");
+  const extra = [
+    ...(withIntent ? ["intent"] : []),
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "continuity")
+      ? ["continuity"]
+      : []),
+  ];
+  // M02: `{resume:true}`: the code is this browser's scan cookie, not the body.
+  if (value !== null && typeof value === "object" && Object.hasOwn(value, "resume")) {
+    const body = closedRecord(value, ["resume", ...extra]);
+    if (body.resume !== true) throw new TypeError("invalid entry request");
+    return { resume: true, intent: parseIntent(body.intent), ...parseContinuity(body.continuity) };
+  }
+  const body = closedRecord(value, ["qrToken", ...extra]);
   if (
     typeof body.qrToken !== "string" ||
     body.qrToken.length < 1 ||
     body.qrToken.length > 2048 ||
-    !validCompactFraming(body.qrToken)
+    !validCompactFraming(body.qrToken) ||
+    (body.intent !== undefined &&
+      body.intent !== "Start" &&
+      body.intent !== "Join" &&
+      body.intent !== "NewParty")
   ) {
     throw new TypeError("invalid entry request");
   }
-  return body.qrToken;
+  return {
+    qrToken: body.qrToken,
+    intent: body.intent as CustomerEntryIntent | undefined,
+    ...parseContinuity(body.continuity),
+  };
 }
 
 function parseOrigin(value: string): string {
@@ -213,10 +554,40 @@ function parseEstablished(
     "availableServiceModes",
     "locale",
     "contextExpiresAt",
+    ...(Object.hasOwn(value as object, "tableOpen") ? ["tableOpen"] : []),
     "sessionCredential",
     "csrfCredential",
     "cookie",
+    ...(["resumed", "earlierCredentials", "previousVisit"] as const).filter((key) =>
+      Object.hasOwn(value as object, key),
+    ),
   ]);
+  if (result.resumed !== undefined && (result.resumed !== true || result.channel !== "Pickup"))
+    throw new TypeError("only a pickup visit resumes");
+  if (
+    result.previousVisit !== undefined &&
+    (result.resumed !== undefined ||
+      (result.previousVisit !== "Ended" && result.previousVisit !== "EndedReceiptsKept"))
+  )
+    throw new TypeError("invalid previous visit");
+  const earlierCredentials =
+    result.earlierCredentials === undefined
+      ? undefined
+      : (() => {
+          if (
+            !Array.isArray(result.earlierCredentials) ||
+            result.earlierCredentials.length > earlierVisitLimit
+          )
+            throw new TypeError("invalid earlier visits");
+          return Object.freeze(
+            result.earlierCredentials.map((credential) => parseGuestRawCredential(credential)),
+          );
+        })();
+  if (
+    result.tableOpen !== undefined &&
+    (typeof result.tableOpen !== "boolean" || result.channel !== "DineIn")
+  )
+    throw new TypeError("table state only at a table");
   if (
     result.status !== "Established" ||
     (result.channel !== "DineIn" && result.channel !== "Pickup") ||
@@ -260,7 +631,9 @@ function parseEstablished(
   );
   if (
     new Set(availableServiceModes).size !== availableServiceModes.length ||
-    (result.operatingState === "Open") !== availableServiceModes.includes(result.channel) ||
+    // A resumed visit goes on whatever the Store takes from new guests now.
+    (result.resumed !== true &&
+      (result.operatingState === "Open") !== availableServiceModes.includes(result.channel)) ||
     (result.operatingState !== "Open" && availableServiceModes.length !== 0)
   ) {
     throw new TypeError("operating state and service modes conflict");
@@ -279,9 +652,15 @@ function parseEstablished(
     availableServiceModes,
     locale: result.locale,
     contextExpiresAt,
+    ...(result.tableOpen === undefined ? {} : { tableOpen: result.tableOpen as boolean }),
     sessionCredential: parseGuestRawCredential(result.sessionCredential),
     csrfCredential: parseGuestRawCredential(result.csrfCredential),
     cookie: parseCookie(result.cookie),
+    ...(result.resumed === true ? { resumed: true as const } : {}),
+    ...(earlierCredentials === undefined ? {} : { earlierCredentials }),
+    ...(result.previousVisit === undefined
+      ? {}
+      : { previousVisit: result.previousVisit as "Ended" | "EndedReceiptsKept" }),
   });
 }
 
@@ -291,6 +670,12 @@ function parsePortResult(
 ):
   | { readonly status: "InvalidRequest" }
   | { readonly status: "EntryUnavailable" }
+  | CustomerEntryQrRetired
+  | CustomerEntryNotAccepting
+  | CustomerEntryServiceNotOffered
+  | CustomerEntryTableNotOpen
+  | CustomerEntryTableOffer
+  | CustomerEntryAlreadyAtTable
   | CustomerEntryEstablished {
   const statusRecord =
     typeof value === "object" && value !== null
@@ -307,11 +692,194 @@ function parsePortResult(
   if (status === "Established") {
     return Object.freeze({ status, ...parseEstablished(value, requestedAt) });
   }
+  if (status === "QrRetired") {
+    const raw = closedRecord(value, ["status", "reason"]);
+    if (raw.reason !== "Replaced" && raw.reason !== "TurnedOff")
+      throw new TypeError("invalid retired result");
+    return Object.freeze({ status: "QrRetired", reason: raw.reason });
+  }
+  if (status === "AlreadyAtTable") {
+    const raw = closedRecord(value, [
+      "status",
+      "brandDisplayName",
+      "storeDisplayName",
+      "publicStoreReference",
+      "publicTableReference",
+      "locale",
+    ]);
+    const label = (text: unknown) =>
+      typeof text === "string" &&
+      /^[^\p{Cc}\p{Cf}<>{}[\]`*_#]{1,120}$/u.test(text) &&
+      text === text.trim()
+        ? text
+        : (() => {
+            throw new TypeError("invalid already-at-table result");
+          })();
+    if (typeof raw.locale !== "string" || !localePattern.test(raw.locale))
+      throw new TypeError("invalid already-at-table result");
+    return Object.freeze({
+      status,
+      brandDisplayName: label(raw.brandDisplayName),
+      storeDisplayName: label(raw.storeDisplayName),
+      publicStoreReference: parseUuidV7(raw.publicStoreReference),
+      publicTableReference: parseUuidV7(raw.publicTableReference),
+      locale: raw.locale,
+    });
+  }
+  if (
+    status === "TableNotOpen" ||
+    status === "TableMayStart" ||
+    status === "TableBeingCleaned" ||
+    status === "TableAskNewParty"
+  ) {
+    const raw = closedRecord(value, [
+      "status",
+      "brandDisplayName",
+      "storeDisplayName",
+      "publicStoreReference",
+      "locale",
+      ...(status === "TableNotOpen" && Object.hasOwn(value as object, "tableLabel")
+        ? ["tableLabel"]
+        : []),
+    ]);
+    const label = (text: unknown) =>
+      typeof text === "string" &&
+      /^[^\p{Cc}\p{Cf}<>{}[\]`*_#]{1,120}$/u.test(text) &&
+      text === text.trim()
+        ? text
+        : (() => {
+            throw new TypeError("invalid table-not-open result");
+          })();
+    if (typeof raw.locale !== "string" || !localePattern.test(raw.locale))
+      throw new TypeError("invalid table-not-open result");
+    return Object.freeze({
+      status,
+      brandDisplayName: label(raw.brandDisplayName),
+      storeDisplayName: label(raw.storeDisplayName),
+      publicStoreReference: parseUuidV7(raw.publicStoreReference),
+      locale: raw.locale,
+      ...(raw.tableLabel === undefined ? {} : { tableLabel: label(raw.tableLabel) }),
+    });
+  }
+  if (status === "ServiceNotOffered") {
+    const raw = closedRecord(value, ["status", "storeDisplayName"]);
+    if (
+      typeof raw.storeDisplayName !== "string" ||
+      !/^[^\p{Cc}\p{Cf}<>]{1,120}$/u.test(raw.storeDisplayName)
+    )
+      throw new TypeError("invalid service-not-offered result");
+    return Object.freeze({ status: "ServiceNotOffered", storeDisplayName: raw.storeDisplayName });
+  }
+  if (status === "NotAccepting") {
+    const raw = closedRecord(value, [
+      "status",
+      "storeDisplayName",
+      "operatingState",
+      "todayHours",
+      "todayKind",
+      "nextOpening",
+      "localDate",
+      ...(Object.hasOwn(value as object, "notReadyForOrders") ? ["notReadyForOrders"] : []),
+      ...(Object.hasOwn(value as object, "newGuestsPaused") ? ["newGuestsPaused"] : []),
+      ...(Object.hasOwn(value as object, "browse") ? ["browse"] : []),
+    ]);
+    if (
+      (raw.notReadyForOrders !== undefined && raw.notReadyForOrders !== true) ||
+      (raw.newGuestsPaused !== undefined && raw.newGuestsPaused !== true) ||
+      // M116: a menu to look at only when there is a closing time or a pause to wait out.
+      (raw.browse !== undefined && (raw.notReadyForOrders === true || raw.newGuestsPaused === true))
+    )
+      throw new TypeError("invalid not-accepting result");
+    let browse: CustomerEntryBrowseContext | undefined;
+    if (raw.browse !== undefined) {
+      const context = closedRecord(raw.browse, [
+        "brandDisplayName",
+        "publicStoreReference",
+        "locale",
+        "channel",
+      ]);
+      if (
+        typeof context.brandDisplayName !== "string" ||
+        !/^[^\p{Cc}\p{Cf}<>{}[\]`*_#]{1,120}$/u.test(context.brandDisplayName) ||
+        context.brandDisplayName !== context.brandDisplayName.trim() ||
+        typeof context.locale !== "string" ||
+        !localePattern.test(context.locale) ||
+        (context.channel !== "DineIn" && context.channel !== "Pickup")
+      )
+        throw new TypeError("invalid not-accepting result");
+      browse = Object.freeze({
+        brandDisplayName: context.brandDisplayName,
+        publicStoreReference: parseUuidV7(context.publicStoreReference),
+        locale: context.locale,
+        channel: context.channel,
+      });
+    }
+    const time = /^([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$/u;
+    if (
+      typeof raw.storeDisplayName !== "string" ||
+      !/^[^\p{Cc}\p{Cf}<>]{1,120}$/u.test(raw.storeDisplayName) ||
+      !["Closed", "TemporarilyClosed", "Open"].includes(String(raw.operatingState)) ||
+      !Array.isArray(raw.todayHours) ||
+      raw.todayHours.length > 12
+    )
+      throw new TypeError("invalid not-accepting result");
+    const todayHours = raw.todayHours.map((value: unknown) => {
+      const interval = closedRecord(value, ["startLocalTime", "endLocalTime", "endsNextDay"]);
+      if (
+        typeof interval.startLocalTime !== "string" ||
+        !time.test(interval.startLocalTime) ||
+        typeof interval.endLocalTime !== "string" ||
+        !time.test(interval.endLocalTime) ||
+        typeof interval.endsNextDay !== "boolean"
+      )
+        throw new TypeError("invalid hours");
+      return Object.freeze({
+        startLocalTime: interval.startLocalTime,
+        endLocalTime: interval.endLocalTime,
+        endsNextDay: interval.endsNextDay,
+      });
+    });
+    const date = /^\d{4}-\d{2}-\d{2}$/u;
+    if (
+      (raw.todayKind !== null &&
+        !["Holiday", "TemporaryClosure", "Override"].includes(String(raw.todayKind))) ||
+      (raw.localDate !== null && (typeof raw.localDate !== "string" || !date.test(raw.localDate)))
+    )
+      throw new TypeError("invalid not-accepting result");
+    let nextOpening: CustomerEntryNotAccepting["nextOpening"] = null;
+    if (raw.nextOpening !== null) {
+      const next = closedRecord(raw.nextOpening, ["localDate", "startLocalTime"]);
+      if (
+        typeof next.localDate !== "string" ||
+        !date.test(next.localDate) ||
+        typeof next.startLocalTime !== "string" ||
+        !time.test(next.startLocalTime)
+      )
+        throw new TypeError("invalid next opening");
+      nextOpening = Object.freeze({
+        localDate: next.localDate,
+        startLocalTime: next.startLocalTime,
+      });
+    }
+    return Object.freeze({
+      status: "NotAccepting",
+      storeDisplayName: raw.storeDisplayName,
+      operatingState: raw.operatingState as CustomerEntryNotAccepting["operatingState"],
+      todayHours: Object.freeze(todayHours),
+      todayKind: raw.todayKind as CustomerEntryNotAccepting["todayKind"],
+      nextOpening,
+      localDate: raw.localDate as string | null,
+      ...(raw.notReadyForOrders === true ? { notReadyForOrders: true as const } : {}),
+      ...(raw.newGuestsPaused === true ? { newGuestsPaused: true as const } : {}),
+      ...(browse === undefined ? {} : { browse }),
+    });
+  }
   throw new TypeError("unknown Customer-entry result");
 }
 
+/** WP-2423 Q10: persistent for the Session's absolute lifetime so a browser restart keeps the order. */
 function serializeCookie(credential: GuestRawCredential): string {
-  return `${expectedGuestSessionCookie.name}=${credential}; Path=/; Secure; HttpOnly; SameSite=Lax`;
+  return serializeGuestSessionCookie(credential);
 }
 
 export const unavailableCustomerEntryHandler: RequestHandler = (_request, response) => {
@@ -329,17 +897,29 @@ export class CustomerEntryHandler {
   readonly #now: () => string;
   readonly #port: CustomerEntryPort;
   readonly #uuidV7Factory: () => string;
+  readonly #requestAdmission: CustomerEntryRequestAdmission | undefined;
+  readonly #codeCheck: ((qrToken: string) => Promise<boolean>) | undefined;
+  readonly #presentedTable: CustomerEntryHandlerOptions["presentedTable"];
+  readonly #continuity: CustomerEntryHandlerOptions["continuity"];
 
   constructor({
     allowedOrigin,
     now = () => new Date().toISOString(),
     port,
     uuidV7Factory,
+    requestAdmission,
+    codeCheck,
+    presentedTable,
+    continuity,
   }: CustomerEntryHandlerOptions) {
     this.#allowedOrigin = parseOrigin(allowedOrigin);
     this.#now = now;
     this.#port = port;
     this.#uuidV7Factory = uuidV7Factory;
+    this.#requestAdmission = requestAdmission;
+    this.#codeCheck = codeCheck;
+    this.#presentedTable = presentedTable;
+    this.#continuity = continuity;
   }
 
   handler(): RequestHandler {
@@ -357,31 +937,137 @@ export class CustomerEntryHandler {
       }
 
       let qrToken: string;
+      let intent: CustomerEntryIntent | undefined;
+      let continuityToken: string | undefined;
+      const remembered = scannedCode(request.get("cookie"));
       try {
-        qrToken = parseBody(request.body);
+        const body = parseBody(request.body);
+        intent = body.intent;
+        continuityToken = body.continuity;
+        if ("resume" in body) {
+          // Nothing scanned here that is still waiting: the app asks the guest to scan.
+          if (remembered === null) {
+            response.status(404).json({
+              schemaVersion: 1,
+              code: "entry_scan_missing",
+              messageKey: "customer.entry.scan_missing",
+              recovery: { action: "Rescan", storeSelection: "Hidden" },
+            });
+            return;
+          }
+          qrToken = remembered;
+        } else qrToken = body.qrToken;
       } catch {
         sendError(response, "entry_request_invalid");
         return;
       }
+      // An answer that starts no visit remembers the code; a visit or a retired code forgets it.
+      const remember = () => response.setHeader("Set-Cookie", rememberScan(qrToken));
+      const forget = () => {
+        if (remembered !== null) response.append("Set-Cookie", forgetScan);
+      };
 
       try {
         const requestedAt = parseCanonicalInstant(this.#now());
+        // A check that can't answer leaves the code to the full entry check below.
+        const codeValid = await this.#codeCheck?.(qrToken).catch(() => undefined);
+        const admission = await this.#requestAdmission?.consume(
+          Object.freeze({
+            remoteAddress: trustedClientAddress(request),
+            requestedAt,
+            ...(codeValid === undefined ? {} : { codeValid }),
+          }),
+        );
+        if (admission?.status === "RateLimited") {
+          const decision = closedRecord(admission, ["status", "retryAfterSeconds"]);
+          if (
+            !Number.isSafeInteger(decision.retryAfterSeconds) ||
+            Number(decision.retryAfterSeconds) < 1 ||
+            Number(decision.retryAfterSeconds) > 86400
+          )
+            throw new TypeError("admission unavailable");
+          response.setHeader("Retry-After", String(decision.retryAfterSeconds));
+          sendError(response, "entry_rate_limited");
+          return;
+        }
+        if (admission?.status !== "Allowed") {
+          sendError(response, "entry_service_unavailable");
+          return;
+        }
+        closedRecord(admission, ["status"]);
+        // A made-up code goes no further: the same answer as any unusable code, no database.
+        if (codeValid === false) {
+          sendError(response, "entry_unavailable");
+          return;
+        }
         const entryRequestReference = parseUuidV7(this.#uuidV7Factory());
         const operationReference = parseUuidV7(this.#uuidV7Factory());
         if (entryRequestReference === operationReference) {
           throw new TypeError("fresh references must differ");
         }
-        const result = parsePortResult(
-          await this.#port.establish(
+        const presented = presentedGuestCredentials(request.get("cookie"));
+        // WP-2423 shared-table-checkout (b): the table this browser is already seated at, if any.
+        const presentedCredential = presentedGuestCredential(request.get("cookie"));
+        let presentedTable =
+          presentedCredential === null || this.#presentedTable === undefined
+            ? null
+            : await this.#presentedTable(presentedCredential, requestedAt).catch(() => null);
+        // WP-2423 shared-table-checkout (b): no seated cookie, but the page kept its continuity
+        // token: the seat that token's phone holds, answered exactly like a presented cookie.
+        const continuity = this.#continuity;
+        const viaContinuity =
+          presentedTable === null &&
+          intent === undefined &&
+          continuityToken !== undefined &&
+          continuity !== undefined;
+        // A token lookup that can't be answered (Identity or Dining down) is the entry's 503 retry
+        // below, never a new seat: joining as a new phone would lose the guest's own dishes.
+        if (viaContinuity)
+          presentedTable = await continuity.table(continuityToken as string, requestedAt);
+        const establish = (seat: typeof presentedTable) =>
+          this.#port.establish(
             Object.freeze({
               entryRequestReference,
               operationReference,
               qrToken,
               requestedAt,
+              ...(intent === undefined ? {} : { intent }),
+              ...(presented.length === 0 ? {} : { presentedCredentials: Object.freeze(presented) }),
+              ...(seat === null
+                ? {}
+                : "unconfirmed" in seat
+                  ? { presentedTableUnconfirmed: seat.unconfirmed }
+                  : { presentedTable: seat }),
             }),
-          ),
-          requestedAt,
-        );
+          );
+        let result = parsePortResult(await establish(presentedTable), requestedAt);
+        if (viaContinuity && result.status === "AlreadyAtTable") {
+          // The same phone at the same seat: one transaction rotates its old session into this
+          // browser's new cookie. If that can't be done (the seat changed meanwhile), the scan is
+          // an ordinary entry. A readmission that can't be made for an outage is the 503 retry.
+          const readmitted = await continuity.readmit(
+            continuityToken as string,
+            operationReference,
+            requestedAt,
+          );
+          if (readmitted !== null) {
+            forget();
+            response.append("Set-Cookie", serializeCookie(readmitted.sessionCredential as never));
+            response.status(200).json({
+              schemaVersion: 2,
+              status: "AlreadyAtTable",
+              brandDisplayName: result.brandDisplayName,
+              storeDisplayName: result.storeDisplayName,
+              publicStoreReference: result.publicStoreReference,
+              publicTableReference: result.publicTableReference,
+              channel: "DineIn",
+              locale: result.locale,
+              continuityToken: readmitted.continuityToken,
+            });
+            return;
+          }
+          result = parsePortResult(await establish(null), requestedAt);
+        }
         if (result.status === "InvalidRequest") {
           sendError(response, "entry_request_invalid");
           return;
@@ -390,10 +1076,149 @@ export class CustomerEntryHandler {
           sendError(response, "entry_unavailable");
           return;
         }
-        response.setHeader("Set-Cookie", serializeCookie(result.sessionCredential));
-        response.status(201).json({
+        // WP-2423 Q11: a replaced or turned-off table code; the customer asks staff for help.
+        if (result.status === "QrRetired") {
+          forget();
+          response.status(410).json({
+            schemaVersion: 1,
+            code: "entry_qr_retired",
+            messageKey:
+              result.reason === "Replaced"
+                ? "customer.entry.qr_replaced"
+                : "customer.entry.qr_turned_off",
+            recovery: { action: "AskStaff", storeSelection: "Hidden" },
+          });
+          return;
+        }
+        // Coordinator 2026-10-30: no party is seated at this table; no visit is started.
+        if (result.status === "TableNotOpen") {
+          remember();
+          response.status(409).json({
+            schemaVersion: 1,
+            code: "entry_table_not_open",
+            messageKey: "customer.entry.table_not_open",
+            recovery: { action: "AskStaff", storeSelection: "Hidden" },
+            store: {
+              brandDisplayName: result.brandDisplayName,
+              storeDisplayName: result.storeDisplayName,
+              publicStoreReference: result.publicStoreReference,
+              locale: result.locale,
+            },
+            // The table's printed name, so a card on the wrong table shows (never an id).
+            ...("tableLabel" in result && result.tableLabel !== undefined
+              ? { table: { label: result.tableLabel } }
+              : {}),
+          });
+          return;
+        }
+        // WP-2423 DEC-DINING-GUEST-TABLE-START: a choice for the guest; no visit is started yet.
+        if (
+          result.status === "TableMayStart" ||
+          result.status === "TableBeingCleaned" ||
+          result.status === "TableAskNewParty"
+        ) {
+          const offer = {
+            TableMayStart: [
+              "entry_table_may_start",
+              "customer.entry.table_may_start",
+              "StartTable",
+            ],
+            TableBeingCleaned: [
+              "entry_table_being_cleaned",
+              "customer.entry.table_being_cleaned",
+              "AskStaff",
+            ],
+            TableAskNewParty: [
+              "entry_table_ask_new_party",
+              "customer.entry.table_ask_new_party",
+              "AnswerNewParty",
+            ],
+          }[result.status];
+          remember();
+          response.status(409).json({
+            schemaVersion: 1,
+            code: offer[0],
+            messageKey: offer[1],
+            recovery: { action: offer[2], storeSelection: "Hidden" },
+            store: {
+              brandDisplayName: result.brandDisplayName,
+              storeDisplayName: result.storeDisplayName,
+              publicStoreReference: result.publicStoreReference,
+              locale: result.locale,
+            },
+          });
+          return;
+        }
+        // WP-2423 shared-table-checkout (b): this phone is already at this table. No new visit,
+        // no cookie: the app opens the menu with "You're already at this table."
+        if (result.status === "AlreadyAtTable") {
+          forget();
+          response.status(200).json({
+            schemaVersion: 2,
+            status: "AlreadyAtTable",
+            brandDisplayName: result.brandDisplayName,
+            storeDisplayName: result.storeDisplayName,
+            publicStoreReference: result.publicStoreReference,
+            publicTableReference: result.publicTableReference,
+            channel: "DineIn",
+            locale: result.locale,
+          });
+          return;
+        }
+        // WP-2423 item 8 ⑦ 1b: this Store takes no pickup orders (dine-in only).
+        if (result.status === "ServiceNotOffered") {
+          remember();
+          response.status(409).json({
+            schemaVersion: 1,
+            code: "entry_service_not_offered",
+            messageKey: "customer.entry.pickup_not_offered",
+            recovery: { action: "AskStaff", storeSelection: "Hidden" },
+            store: { storeDisplayName: result.storeDisplayName },
+          });
+          return;
+        }
+        // WP-2423 Q4: tell the customer the Store is not taking orders, and today's hours.
+        if (result.status === "NotAccepting") {
+          remember();
+          response.status(409).json({
+            schemaVersion: 1,
+            code: "entry_not_accepting",
+            messageKey: "customer.entry.not_accepting",
+            recovery: { action: "TryLaterOrAskStaff", storeSelection: "Hidden" },
+            store: {
+              storeDisplayName: result.storeDisplayName,
+              operatingState: result.operatingState,
+              todayHours: result.todayHours,
+              todayKind: result.todayKind,
+              nextOpening: result.nextOpening,
+              localDate: result.localDate,
+              ...(result.notReadyForOrders === true ? { notReadyForOrders: true } : {}),
+              ...(result.newGuestsPaused === true ? { newGuestsPaused: true } : {}),
+              // M116: the menu can be looked at (read-only, no Session, no cart).
+              ...(result.browse === undefined ? {} : { browse: result.browse }),
+            },
+          });
+          return;
+        }
+        const current = presented.find((visit) => visit.source === "Current")?.credential;
+        const earlier = presented
+          .filter((visit) => visit.source === "Earlier")
+          .map((visit) => visit.credential);
+        // The visit's cookie only when it changed (a resumed current visit keeps its own), the
+        // earlier visits only when they changed, and forgetting the waiting scan.
+        if (result.sessionCredential !== current)
+          response.append("Set-Cookie", serializeCookie(result.sessionCredential));
+        if (
+          result.earlierCredentials !== undefined &&
+          result.earlierCredentials.join(".") !== earlier.join(".")
+        )
+          response.append("Set-Cookie", serializeEarlierVisits(result.earlierCredentials));
+        forget();
+        response.status(result.resumed === true ? 200 : 201).json({
           schemaVersion: 2,
           status: "Established",
+          ...(result.resumed === true ? { resumed: true } : {}),
+          ...(result.previousVisit === undefined ? {} : { previousVisit: result.previousVisit }),
           brandDisplayName: result.brandDisplayName,
           storeDisplayName: result.storeDisplayName,
           publicStoreReference: result.publicStoreReference,
@@ -403,9 +1228,12 @@ export class CustomerEntryHandler {
           availableServiceModes: result.availableServiceModes,
           locale: result.locale,
           contextExpiresAt: result.contextExpiresAt,
+          ...(result.tableOpen === undefined ? {} : { tableOpen: result.tableOpen }),
           csrfToken: result.csrfCredential,
         });
-      } catch {
+      } catch (error) {
+        // Only the safe failure code (and SQLSTATE) reaches the request log: no token, no reference.
+        markRequestFailure(request, customerFailureCode(error));
         sendError(response, "entry_service_unavailable");
       }
     };

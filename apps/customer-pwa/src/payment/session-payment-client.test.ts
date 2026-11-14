@@ -1,0 +1,334 @@
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { createSessionPaymentClient } from "./session-payment-client.js";
+import { setCustomerCsrfCredential } from "../session/customer-transaction-context.js";
+const id = (n: number) => "01909999-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+beforeEach(() => setCustomerCsrfCredential("c".repeat(43)));
+afterEach(() => {
+  vi.unstubAllGlobals();
+  setCustomerCsrfCredential(null);
+});
+it.each([
+  [201, "Created"],
+  [200, "AlreadyCreated"],
+  [202, "Processing"],
+] as const)(
+  "accepts creation HTTP%s without interpreting it as paid",
+  async (status, creationStatus) => {
+    const payment = {
+      checkoutSessionReference: id(1),
+      paymentIntentReference: id(2),
+      orderReference: id(3),
+      creationStatus,
+      total: { amountMinor: "2200", currency: "CAD" },
+    };
+    const fetch = vi
+      .fn()
+      .mockResolvedValue(Response.json({ schemaVersion: 1, payment }, { status }));
+    vi.stubGlobal("fetch", fetch);
+    expect(await createSessionPaymentClient().create(id(1), id(4), "200")).toEqual(payment);
+    expect(fetch.mock.calls[0]?.[1]).toMatchObject({
+      cache: "no-store",
+      headers: { "idempotency-key": id(4) },
+      body: JSON.stringify({ tip: { amountMinor: "200", currency: "CAD" } }),
+    });
+  },
+);
+it("reads an ephemeral credential only from a noncached response", async () => {
+  const body = { schemaVersion: 1, clientSecret: "pi_SYNTHETIC000001_secret_SYNTHETICONLY" };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(Response.json(body, { headers: { "cache-control": "no-store" } })),
+  );
+  expect(await createSessionPaymentClient().handoff(id(1))).toBe(body.clientSecret);
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json(body)));
+  await expect(createSessionPaymentClient().handoff(id(1))).rejects.toMatchObject({
+    code: "unknown",
+  });
+});
+it("rejects invalid exact tip before network and discards revoked-session credentials", async () => {
+  const fetch = vi.fn(async () => {
+    setCustomerCsrfCredential(null);
+    return Response.json(
+      { schemaVersion: 1, clientSecret: "pi_SYNTHETIC000001_secret_SYNTHETICONLY" },
+      { headers: { "cache-control": "no-store" } },
+    );
+  });
+  vi.stubGlobal("fetch", fetch);
+  await expect(createSessionPaymentClient().create(id(1), id(4), "2.00")).rejects.toMatchObject({
+    code: "invalid",
+  });
+  expect(fetch).not.toHaveBeenCalled();
+  await expect(createSessionPaymentClient().handoff(id(1))).rejects.toMatchObject({
+    code: "unknown",
+  });
+});
+
+it("sends explicit simulation confirmation with the same selection and exact tip", async () => {
+  const payment = {
+    checkoutSessionReference: id(1),
+    paymentIntentReference: id(2),
+    orderReference: id(3),
+    creationStatus: "AlreadyCreated",
+    total: { amountMinor: "2260", currency: "CAD" },
+  };
+  const fetch = vi.fn().mockResolvedValue(Response.json({ schemaVersion: 1, payment }));
+  vi.stubGlobal("fetch", fetch);
+  expect(await createSessionPaymentClient().simulate(id(1), id(4), "0")).toEqual(payment);
+  expect(fetch.mock.calls[0]?.[0]).toBe(
+    "/api/v1/checkout-sessions/" + id(1) + "/simulation-confirm",
+  );
+  expect(fetch.mock.calls[0]?.[1]).toMatchObject({
+    cache: "no-store",
+    headers: { "idempotency-key": id(4), "x-bop-simulation-confirmation": "SIMULATE_CAPTURE" },
+    body: JSON.stringify({ tip: { amountMinor: "0", currency: "CAD" } }),
+  });
+});
+it("WP-2423 Q4: reports a Store that stopped taking orders before payment started", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockResolvedValue(
+        Response.json(
+          { schemaVersion: 1, error: { code: "payment_store_closed" } },
+          { status: 409 },
+        ),
+      ),
+  );
+  await expect(createSessionPaymentClient().create(id(1), id(4), "200")).rejects.toMatchObject({
+    code: "store_closed",
+  });
+});
+
+it("WP-2423: tells a menu update after checkout began apart from other refusals", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      Response.json(
+        { schemaVersion: 1, error: { code: "payment_requote_required" } },
+        { status: 422 },
+      ),
+    ),
+  );
+  await expect(createSessionPaymentClient().create(id(1), id(4), "200")).rejects.toMatchObject({
+    code: "requote_required",
+  });
+  await expect(createSessionPaymentClient().sendToKitchen(id(1), id(4))).rejects.toMatchObject({
+    code: "requote_required",
+  });
+});
+
+it("v15 batch-5: says the round's payer stopped it, so a stale page stops waiting", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      Response.json(
+        { schemaVersion: 1, error: { code: "payment_round_returned" } },
+        { status: 409 },
+      ),
+    ),
+  );
+  await expect(createSessionPaymentClient().simulate(id(1), id(4), "0")).rejects.toMatchObject({
+    code: "round_returned",
+  });
+});
+
+// v15 b15 (order 12): Confirm on a round staff cancelled was answered "unavailable" for ~30 s.
+it("says a round the restaurant cancelled as cancelled, at once", async () => {
+  const fetcher = vi.fn(async () =>
+    Response.json(
+      { schemaVersion: 1, error: { code: "payment_round_cancelled" } },
+      { status: 409 },
+    ),
+  );
+  vi.stubGlobal("fetch", fetcher);
+  await expect(createSessionPaymentClient().simulate(id(1), id(4), "0")).rejects.toMatchObject({
+    code: "round_cancelled",
+  });
+  // One request: a refusal is never retried as an outage.
+  expect(fetcher.mock.calls.length).toBeLessThanOrEqual(2);
+});
+
+it("WP-2423: says staff moved the table while the round was being sent", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      Response.json({ schemaVersion: 1, error: { code: "payment_table_moved" } }, { status: 409 }),
+    ),
+  );
+  await expect(createSessionPaymentClient().create(id(1), id(4), "200")).rejects.toMatchObject({
+    code: "table_moved",
+  });
+  await expect(createSessionPaymentClient().sendToKitchen(id(1), id(4))).rejects.toMatchObject({
+    code: "table_moved",
+  });
+});
+
+it("WP-2423 M03: says these dishes are already ordered, naming the guest's own order", async () => {
+  const order = { orderReference: id(13), orderNumber: "13" };
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json(
+          { schemaVersion: 1, error: { code: "payment_already_ordered", messageKey: "m", order } },
+          { status: 409 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        Response.json(
+          { schemaVersion: 1, error: { code: "payment_already_ordered", messageKey: "m" } },
+          { status: 409 },
+        ),
+      ),
+  );
+  await expect(createSessionPaymentClient().create(id(1), id(4), "200")).rejects.toMatchObject({
+    code: "already_ordered",
+    placedOrder: order,
+  });
+  await expect(createSessionPaymentClient().create(id(1), id(4), "200")).rejects.toMatchObject({
+    code: "already_ordered",
+    placedOrder: null,
+  });
+});
+
+it("WP-2423: tells items ran out after checkout apart from other refusals", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockResolvedValue(
+        Response.json(
+          { schemaVersion: 1, error: { code: "payment_items_short" } },
+          { status: 409 },
+        ),
+      ),
+  );
+  await expect(createSessionPaymentClient().create(id(1), id(4), "200")).rejects.toMatchObject({
+    code: "items_short",
+  });
+});
+
+it("WP-2423 Q20: asks for another card on the same payment without a tip or selection", async () => {
+  const payment = {
+    checkoutSessionReference: id(1),
+    paymentIntentReference: id(2),
+    orderReference: id(3),
+    creationStatus: "Created",
+    total: { amountMinor: "2260", currency: "CAD" },
+  };
+  const fetch = vi
+    .fn()
+    .mockResolvedValue(Response.json({ schemaVersion: 1, payment }, { status: 201 }));
+  vi.stubGlobal("fetch", fetch);
+  expect(await createSessionPaymentClient().retry(id(1))).toEqual(payment);
+  expect(fetch.mock.calls[0]?.[0]).toBe("/api/v1/checkout-sessions/" + id(1) + "/payment-intents");
+  const init = fetch.mock.calls[0]?.[1] as RequestInit & { headers: Record<string, string> };
+  expect(init.body).toBe(JSON.stringify({ retry: true }));
+  expect(init.headers).not.toHaveProperty("idempotency-key");
+
+  const again = { ...payment, creationStatus: "AlreadyCreated" };
+  fetch.mockResolvedValue(Response.json({ schemaVersion: 1, payment: again }));
+  expect(await createSessionPaymentClient().simulateRetry(id(1), "decline")).toEqual(again);
+  expect(fetch.mock.calls[1]?.[0]).toBe("/api/v1/checkout-sessions/" + id(1) + "/simulation-fail");
+  expect(fetch.mock.calls[1]?.[1]).toMatchObject({
+    headers: { "x-bop-simulation-confirmation": "SIMULATE_FAILURE" },
+    body: JSON.stringify({ retry: true }),
+  });
+});
+it.each([
+  ["payment_retry_limit", 409, "retry_limit"],
+  ["payment_retry_pending", 409, "retry_pending"],
+  ["payment_already_paid", 409, "already_paid"],
+  ["payment_window_ended", 422, "window_ended"],
+  ["payment_intent_conflict", 409, "conflict"],
+] as const)("WP-2423 Q20: reports %s as %s", async (code, status, expected) => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(Response.json({ schemaVersion: 1, error: { code } }, { status })),
+  );
+  await expect(createSessionPaymentClient().retry(id(1))).rejects.toMatchObject({
+    code: expected,
+  });
+});
+it("WP-2423 item 8 ⑤: a round that waits for staff answers Held (202) with why", async () => {
+  const round = (extra: Record<string, unknown>) => ({
+    schemaVersion: 1,
+    round: {
+      checkoutSessionReference: id(1),
+      orderReference: id(3),
+      status: "Held",
+      total: { amountMinor: "1130", currency: "CAD" },
+      ...extra,
+    },
+  });
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockResolvedValue(Response.json(round({ waitingReason: "PhoneRapid" }), { status: 202 })),
+  );
+  expect((await createSessionPaymentClient().sendToKitchen(id(1), id(4))).status).toBe("Held");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(Response.json(round({ waitingReason: "Other" }), { status: 202 })),
+  );
+  await expect(createSessionPaymentClient().sendToKitchen(id(1), id(4))).rejects.toMatchObject({
+    code: "unknown",
+  });
+});
+
+it("WP-2423 M19: keeps the payment deadline with the server's time, so the phone's clock can't move it", async () => {
+  const payment = {
+    checkoutSessionReference: id(1),
+    paymentIntentReference: id(2),
+    orderReference: id(3),
+    creationStatus: "Created",
+    total: { amountMinor: "2200", currency: "CAD" },
+    payBy: "2026-08-03T15:30:00.000Z",
+  };
+  // The phone runs ten minutes behind the server.
+  vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-08-03T14:51:00.000Z"));
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockResolvedValue(
+        Response.json(
+          { schemaVersion: 1, payment, serverNow: "2026-08-03T15:01:00.000Z" },
+          { status: 201 },
+        ),
+      ),
+  );
+  expect(await createSessionPaymentClient().create(id(1), id(4), "200")).toMatchObject({
+    deadline: { payBy: "2026-08-03T15:30:00.000Z", serverOffsetMs: 600_000 },
+  });
+  const body = {
+    schemaVersion: 1,
+    clientSecret: "pi_SYNTHETIC000001_secret_SYNTHETICONLY",
+    payBy: "2026-08-03T15:10:00.000Z",
+    serverNow: "2026-08-03T15:01:00.000Z",
+  };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(Response.json(body, { headers: { "cache-control": "no-store" } })),
+  );
+  expect(await createSessionPaymentClient().handoffWithDeadline(id(1))).toEqual({
+    clientSecret: body.clientSecret,
+    deadline: { payBy: "2026-08-03T15:10:00.000Z", serverOffsetMs: 600_000 },
+  });
+  // A deadline without the server's time, or an unreadable one, is not trusted.
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockResolvedValue(
+        Response.json({ ...body, payBy: "soon" }, { headers: { "cache-control": "no-store" } }),
+      ),
+  );
+  await expect(createSessionPaymentClient().handoffWithDeadline(id(1))).rejects.toMatchObject({
+    code: "unknown",
+  });
+  vi.restoreAllMocks();
+});

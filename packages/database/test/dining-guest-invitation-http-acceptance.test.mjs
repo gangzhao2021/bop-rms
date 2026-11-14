@@ -1,0 +1,113 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { URL } from "node:url";
+import pg from "pg";
+import { it } from "vitest";
+import { prepareCurrentEntryProfile } from "../test-support/current-entry-profile.mjs";
+import { exercisePersistentProfileEntry } from "../test-support/persistent-profile-entry.mjs";
+import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
+import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
+
+// WP-2423 DEC-DINING-GUEST-INVITATION (v15 8c4480dd H1): the real path. A guest enters by the
+// table QR, joins with the staff code and binds over HTTP; the Host then reads and issues through
+// the pilot's own invitation composition served by createLocalCustomerRuntime, as the restricted
+// NOBYPASSRLS role with the rendered pilot api grants. Before the fix every read returned 404.
+it("lets the joined Host make a code over the composed API that seats the next guest once", async () => {
+  await withIsolatedDatabase({ caseId: "wp2423_invite_http" }, async (env) => {
+    const client = new pg.Client(env.clientConfig);
+    await client.connect();
+    const role = "wp2423ih_" + env.runId;
+    try {
+      const worker = "wp2423ihw_" + env.runId;
+      for (const name of [role, worker])
+        await client.query(
+          "CREATE ROLE " + name + " NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE",
+        );
+      // The rendered pilot ACL: a read the entry gains (e.g. a merchant's paused new guests) is
+      // refused here as on v15 until the pilot ACL holds it. Known gap (WP-2423): the shared entry
+      // helpers (current-entry-profile.mjs, persistent-profile-entry.mjs) still add setup grants to
+      // this role beyond the pilot ACL (UPDATE on profile versions/timing and audit rows, UPDATE and
+      // DELETE on guest admissions), so a rewrite of that history would not be caught here.
+      const root = new URL("../../../docs/spec/", import.meta.url);
+      const matrices = await Promise.all(
+        ["pilot-acl-matrix.json", "pilot-acl-additions.json"].map(async (file) =>
+          JSON.parse(await readFile(new URL(file, root), "utf8")),
+        ),
+      );
+      await client.query(renderPilotAclSql(matrices, { api: role, worker }));
+      // Independent reads may run concurrently; never share transaction context.
+      const run = async (work) => {
+        const connection = new pg.Client({
+          ...env.clientConfig,
+          connectionTimeoutMillis: 2000,
+          query_timeout: 5000,
+        });
+        await connection.connect();
+        try {
+          await connection.query("BEGIN");
+          await connection.query("SET LOCAL ROLE " + role);
+          await connection.query("SET LOCAL statement_timeout='5s'");
+          await connection.query("SET LOCAL lock_timeout='5s'");
+          const result = await work({
+            query: (sql, values) => connection.query(sql, [...values]),
+          });
+          await connection.query("COMMIT");
+          return result;
+        } catch (error) {
+          await connection.query("ROLLBACK");
+          throw error;
+        } finally {
+          await connection.end();
+        }
+      };
+
+      let activeWorkerConnections = 0;
+      const acquire = async () => {
+        const connection = new pg.Client({
+          ...env.clientConfig,
+          connectionTimeoutMillis: 2000,
+          query_timeout: 5000,
+        });
+        await connection.connect();
+        try {
+          await connection.query("SET ROLE " + role);
+          await connection.query("SET statement_timeout='5s'");
+          await connection.query("SET lock_timeout='5s'");
+        } catch (error) {
+          await connection.end();
+          throw error;
+        }
+        activeWorkerConnections++;
+        let released = false;
+        return {
+          query: (sql, values) => connection.query(sql, [...values]),
+          release: async () => {
+            if (released) return;
+            released = true;
+            try {
+              await connection.end();
+            } finally {
+              activeWorkerConnections--;
+            }
+          },
+        };
+      };
+      const at = new Date(Date.now() - 1000).toISOString();
+      const publicOptions = await prepareCurrentEntryProfile({ admin: client, role, run, at });
+      const journey = await exercisePersistentProfileEntry({
+        admin: client,
+        role,
+        run,
+        publicOptions,
+        at,
+        currentClock: true,
+        acquire,
+        diningInvitation: true,
+      });
+      await journey.close();
+      assert.equal(activeWorkerConnections, 0);
+    } finally {
+      await client.end();
+    }
+  });
+});

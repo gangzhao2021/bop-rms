@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { it } from "vitest";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
+import { proveProductEditorAllergenRegistry } from "../test-support/product-editor-allergen-registry.mjs";
 
 const { Client } = pg;
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -84,6 +85,17 @@ async function prove(context) {
       (await admin.query(`SELECT * FROM rms_catalog.allergen_source_evidence`)).rowCount,
       1,
     );
+    await proveProductEditorAllergenRegistry({
+      client: admin,
+      clientConfig: context.clientConfig,
+      role,
+      brand: id(2),
+      registry: id(6),
+      allergen: id(8),
+      actor: id(3),
+      at,
+      digest,
+    });
     await admin.query(`RESET ROLE`);
   } finally {
     await admin.query("RESET ROLE").catch(() => undefined);

@@ -1,0 +1,781 @@
+import { t } from "./i18n/i18n.js";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { DiningOrderCloseAction } from "./DiningOrderCloseAction.js";
+import { DiningSessionCloseAction } from "./DiningSessionCloseAction.js";
+import { readyToServe, serveReadySummary } from "./dining-serve-ready.js";
+import {
+  createDiningProgressClient,
+  DiningProgressError,
+  servableQuantity,
+  type DiningProgress,
+} from "./dining-progress-client.js";
+import { createDiningServeClient, DiningServeClientError } from "./dining-serve-client.js";
+import {
+  createDiningServeReadyClient,
+  DINING_SERVE_READY_MAX_LINES,
+  DiningServeReadyClientError,
+} from "./dining-serve-ready-client.js";
+import { serviceOperationReference } from "./service-control-client.js";
+import { ComboPartClientError, markComboPartServed } from "./combo-part-client.js";
+import { chaseDish, DiningChaseClientError } from "./dining-chase-client.js";
+import { SourceTime } from "./StoreTime.js";
+import type { ComboPartView } from "./combo-parts.js";
+
+/**
+ * Orders v3 (Owner 2026-10-26, "订单这里看到多轮接单，但是看不到每一轮的明细"; "查看上桌进度展开以后无法合上"):
+ * a table's order reads round by round — each round's dishes, when it was sent, its kitchen or
+ * serving state and its amount — and serving progress is always there, under each round. There is
+ * no "View serving progress" switch: the progress is read with the order and again whenever the
+ * page's own refresh brings a newer order. Serving is not money, so it asks no confirmation: "Served"
+ * beside a dish, "All served" on a round (Owner 2026-10-26, DEC-DINE-IN-PAY-LATER step 2).
+ */
+type Item = DiningProgress["items"][number];
+
+export interface DiningRoundsProgress {
+  readonly view: DiningProgress | null;
+  /** Unreadable (no permission, or the read failed): rounds show without serving state. */
+  readonly unavailable: "PermissionDenied" | "Unavailable" | null;
+  readonly busy: boolean;
+  readonly serveItem: (item: Item) => void;
+  readonly serveRound: (sequence: number) => void;
+  /** WP-2423 item 8 ⑥ part 4: one dish of a combo served; the last one serves the combo. */
+  readonly serveComboPart: (item: Item, part: ComboPartView) => void;
+  /** WP-2423 item 8 ⑦: chase a dish still being made (when the Store turned chasing on). */
+  readonly chaseItem: (item: Item) => void;
+  /** The item or round whose last step's answer was lost; its button retries the same request. */
+  readonly retrying: ReadonlySet<string>;
+}
+
+export const DiningRoundsContext = createContext<DiningRoundsProgress | null>(null);
+export const useDiningRounds = () => useContext(DiningRoundsContext);
+/**
+ * WP-2423 M04: the round numbers staff accepted that are still on their way to the kitchen (the
+ * order's rounds say so, see CurrentOrderLines). Their accepted dishes read "Sending to the
+ * kitchen…", never "Sent", until the kitchen has them.
+ */
+export const KitchenSendingContext = createContext<ReadonlySet<number>>(new Set());
+/**
+ * v15 batch-5: what an unpaid round's dishes wait for, by round number — a round staff entered
+ * waits for its card-machine payment, a guest's for the guest to pay — so a dish not yet paid for
+ * never reads "Waiting for staff". Rounds not listed wait for staff (paid, to be accepted).
+ */
+export const RoundPaymentWaitContext = createContext<ReadonlyMap<number, "CardMachine" | "Guest">>(
+  new Map(),
+);
+/** The words for a dish not yet accepted, by what its round waits for. */
+export function submittedText(wait: "CardMachine" | "Guest" | undefined): string {
+  return wait === "CardMachine"
+    ? t("Waiting for card-machine payment")
+    : wait === "Guest"
+      ? t("Waiting for the guest to pay")
+      : t("Waiting for staff");
+}
+
+/** Dish states in staff words (the same words as the kitchen's and the guest's). */
+export const diningItemPhaseText: Readonly<Record<string, string>> = {
+  Submitted: t("Waiting for staff"),
+  Accepted: t("Sent to the kitchen"),
+  InProgress: t("Being made"),
+  Ready: t("Ready to serve"),
+  Fulfilled: t("Served"),
+  Rejected: t("Not accepted"),
+  Cancelled: t("Cancelled"),
+};
+
+/**
+ * A combo's dish has no state of its own until the kitchen is done with it; until then it reads as
+ * its combo, in the same words as the line above it and the kitchen's. Submitted comes before done:
+ * a dish the kitchen does not prepare reads done from the moment its round is accepted, not before.
+ */
+export function comboPartStateText(
+  item: Pick<Item, "phase" | "remakingQuantity">,
+  part: Pick<ComboPartView, "done" | "served">,
+  servable: number,
+  wait?: "CardMachine" | "Guest",
+): string {
+  if (part.served || item.phase === "Fulfilled") return t("Served");
+  if (item.phase === "Cancelled" || item.phase === "Rejected")
+    return diningItemPhaseText[item.phase] ?? t("Checking");
+  if (item.phase === "Submitted") return submittedText(wait);
+  if ((item.remakingQuantity ?? 0) > 0 && servable === 0) return t("Being remade");
+  if (part.done || item.phase === "Ready") return t("Ready to serve");
+  return diningItemPhaseText[item.phase] ?? t("Checking");
+}
+
+/** Whether a combo's dish can be handed over on its own now. */
+export function comboPartServable(
+  item: Pick<Item, "phase" | "remakingQuantity">,
+  part: Pick<ComboPartView, "done" | "served">,
+): boolean {
+  return (
+    part.done &&
+    !part.served &&
+    item.phase !== "Fulfilled" &&
+    item.phase !== "Submitted" &&
+    item.phase !== "Cancelled" &&
+    item.phase !== "Rejected" &&
+    (item.remakingQuantity ?? 0) === 0
+  );
+}
+
+/** A round's dishes served so far, of all it ordered (cancelled dishes leave the count). */
+export function roundServedCount(
+  items: readonly Item[],
+  sequence: number,
+): { readonly served: number; readonly ordered: number } | null {
+  const round = items.filter(
+    (item) =>
+      item.batchSequence === sequence && item.phase !== "Cancelled" && item.phase !== "Rejected",
+  );
+  if (round.length === 0) return null;
+  return {
+    served: round.reduce((sum, item) => sum + item.deliveredQuantity, 0),
+    ordered: round.reduce((sum, item) => sum + item.orderedQuantity, 0),
+  };
+}
+
+/** Where a round as a whole is, from its dishes: the least advanced open dish names it. */
+export function roundStateText(
+  items: readonly Item[],
+  sequence: number,
+  sending = false,
+  wait?: "CardMachine" | "Guest",
+): string | null {
+  const open = items.filter(
+    (item) =>
+      item.batchSequence === sequence && item.phase !== "Cancelled" && item.phase !== "Rejected",
+  );
+  if (open.length === 0) return null;
+  if (open.every((item) => item.phase === "Fulfilled")) return t("All served");
+  const ready = open.filter((item) => item.phase === "Ready" && servableQuantity(item) > 0).length;
+  for (const phase of ["Submitted", "Accepted", "InProgress"] as const)
+    if (open.some((item) => item.phase === phase)) {
+      const text =
+        phase === "Accepted" && sending
+          ? t("Sending to the kitchen…")
+          : phase === "Submitted"
+            ? submittedText(wait)
+            : (diningItemPhaseText[phase] ?? null);
+      return ready > 0 && text !== null
+        ? t("{text} · {count} ready to serve", { text, count: ready })
+        : text;
+    }
+  return ready > 0 ? t("{count} ready to serve", { count: ready }) : null;
+}
+
+/**
+ * v15 b13: what the server just confirmed as served, shown at once (v15 b12 live: under load the
+ * round kept "Ready to serve · Served 0/1" for 5–10 s after Mark served answered, which invites a
+ * second tap). The reread that follows replaces it with the server's own progress.
+ */
+export function servedNow(
+  view: DiningProgress,
+  served: readonly { readonly orderItemReference: string; readonly quantity: number }[],
+): DiningProgress {
+  const by = new Map(served.map((line) => [line.orderItemReference, line.quantity]));
+  let changed = false;
+  const items = view.items.map((item) => {
+    const quantity = Math.min(by.get(item.orderItemReference) ?? 0, item.remainingQuantity);
+    if (quantity <= 0) return item;
+    changed = true;
+    const remainingQuantity = item.remainingQuantity - quantity;
+    return Object.freeze({
+      ...item,
+      deliveredQuantity: item.deliveredQuantity + quantity,
+      remainingQuantity,
+      phase: remainingQuantity === 0 ? "Fulfilled" : item.phase,
+    });
+  });
+  return changed ? Object.freeze({ ...view, items: Object.freeze(items) }) : view;
+}
+
+/**
+ * b13: a reread that is older than a serve the server already confirmed (its progress catches up
+ * within seconds) keeps the confirmed serve shown, for up to `CONFIRMED_SERVE_MS`; then, or once
+ * the reread has it, the server's own progress stands alone.
+ */
+export const CONFIRMED_SERVE_MS = 30_000;
+export function withConfirmedServes(
+  view: DiningProgress,
+  confirmed: Map<string, { readonly delivered: number; readonly until: number }>,
+  now: number,
+): DiningProgress {
+  const behind: { orderItemReference: string; quantity: number }[] = [];
+  for (const [reference, entry] of confirmed) {
+    const item = view.items.find((value) => value.orderItemReference === reference);
+    if (item === undefined || now > entry.until || item.deliveredQuantity >= entry.delivered)
+      confirmed.delete(reference);
+    else
+      behind.push({
+        orderItemReference: reference,
+        quantity: entry.delivered - item.deliveredQuantity,
+      });
+  }
+  return servedNow(view, behind);
+}
+
+/**
+ * Reads the order's serving progress with the order (and again when `refreshKey` changes, which
+ * the page's own refresh does), and serves dishes and rounds in one tap. Children render the rounds
+ * (`CurrentOrderLines` with rounds); the table's close steps follow them, as before.
+ */
+export function DiningRoundsProvider({
+  orderReference,
+  csrf,
+  refreshKey,
+  locked = false,
+  onBusy,
+  onChanged,
+  fetcher,
+  children,
+  closeActions = true,
+}: {
+  /** The order's and table's close steps after the rounds (the Tables page has its own). */
+  readonly closeActions?: boolean;
+  readonly orderReference: string;
+  readonly csrf: string;
+  /** Changes when the page has read a newer order (its observed time or version). */
+  readonly refreshKey: string;
+  readonly locked?: boolean;
+  readonly onBusy?: ((busy: boolean) => void) | undefined;
+  /** A dish or round was served, or the order or table closed: the page rereads the order. */
+  readonly onChanged?: (() => void) | undefined;
+  readonly fetcher?: typeof fetch | undefined;
+  readonly children: ReactNode;
+}) {
+  const [view, setView] = useState<DiningProgress | null>(null);
+  const [unavailable, setUnavailable] = useState<DiningRoundsProgress["unavailable"]>(null);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState<ReadonlySet<string>>(new Set());
+  const reading = useRef<AbortController | null>(null);
+  const lifetime = useRef<AbortController | null>(null);
+  // A lost answer is retried with the very same request, so nothing is served twice.
+  const pending = useRef(
+    new Map<string, { execute: (csrf: string, signal?: AbortSignal) => Promise<unknown> }>(),
+  );
+  const busyRef = useRef(false);
+  // b13: serves the server confirmed, kept shown until the progress read has them.
+  const confirmedServes = useRef(
+    new Map<string, { readonly delivered: number; readonly until: number }>(),
+  );
+  const onBusyRef = useRef(onBusy);
+  onBusyRef.current = onBusy;
+  useEffect(() => {
+    const controller = new AbortController();
+    lifetime.current = controller;
+    return () => {
+      controller.abort();
+      reading.current?.abort();
+      // A command still in flight when the order is closed never reports back: release the
+      // page's pause on its background reread.
+      if (busyRef.current) onBusyRef.current?.(false);
+    };
+  }, []);
+  const load = async () => {
+    reading.current?.abort();
+    const controller = new AbortController();
+    reading.current = controller;
+    try {
+      const next = await createDiningProgressClient(fetcher).load(
+        orderReference,
+        csrf,
+        controller.signal,
+      );
+      if (!controller.signal.aborted) {
+        setView(withConfirmedServes(next, confirmedServes.current, Date.now()));
+        setUnavailable(null);
+      }
+    } catch (error) {
+      if (!controller.signal.aborted)
+        setUnavailable(
+          error instanceof DiningProgressError && error.code === "PermissionDenied"
+            ? "PermissionDenied"
+            : "Unavailable",
+        );
+    }
+  };
+  useEffect(() => {
+    void load();
+    // The progress follows the page's order reads; a new read of the same order rereads it.
+  }, [orderReference, csrf, refreshKey]);
+  const markBusy = (value: boolean) => {
+    busyRef.current = value;
+    setBusy(value);
+    onBusy?.(value);
+  };
+  const changed = () => {
+    void load();
+    onChanged?.();
+  };
+  const run = async (
+    key: string,
+    prepare: () => { execute: (csrf: string, signal?: AbortSignal) => Promise<unknown> },
+    done: (result: unknown) => string | null,
+    refused: (error: unknown) => string,
+    /** b13: what the confirmed answer served, shown before the reread. */
+    served?: (result: unknown) => readonly { orderItemReference: string; quantity: number }[],
+  ) => {
+    const controller = lifetime.current;
+    if (busyRef.current || controller === null || controller.signal.aborted) return;
+    const operation = pending.current.get(key) ?? prepare();
+    pending.current.set(key, operation);
+    markBusy(true);
+    setNotice(null);
+    try {
+      const result = await operation.execute(csrf, controller.signal);
+      if (controller.signal.aborted) return;
+      pending.current.delete(key);
+      setRetrying((current) => without(current, key));
+      setNotice(done(result));
+      if (served !== undefined && view !== null) {
+        const lines = served(result);
+        for (const line of lines) {
+          const item = view.items.find(
+            (value) => value.orderItemReference === line.orderItemReference,
+          );
+          if (item !== undefined)
+            confirmedServes.current.set(line.orderItemReference, {
+              delivered: item.deliveredQuantity + Math.min(line.quantity, item.remainingQuantity),
+              until: Date.now() + CONFIRMED_SERVE_MS,
+            });
+        }
+        setView((current) => (current === null ? current : servedNow(current, lines)));
+      }
+      markBusy(false);
+      changed();
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      const lost =
+        (error instanceof DiningServeClientError ||
+          error instanceof DiningServeReadyClientError ||
+          error instanceof DiningChaseClientError) &&
+        error.code === "OutcomeUnknown";
+      if (lost) setRetrying((current) => new Set(current).add(key));
+      else {
+        pending.current.delete(key);
+        setRetrying((current) => without(current, key));
+      }
+      setNotice(
+        lost
+          ? t(
+              "We could not confirm it was recorded. Tap it again: the same request is sent, so nothing is served twice.",
+            )
+          : refused(error),
+      );
+      markBusy(false);
+      // M147: a refusal (served on another screen, changed) rereads this list and the page around
+      // it (the table's close section, the order's status), so nothing stale stays on screen.
+      if (!lost) changed();
+    }
+  };
+  const refusedServe = (error: unknown) =>
+    error instanceof DiningServeClientError && error.code === "Conflict"
+      ? // M147: another screen served it first, or it changed; the list is read again.
+        t("Already served on another screen, or the dish changed. Updated, check it again.")
+      : (error instanceof DiningServeClientError || error instanceof DiningServeReadyClientError) &&
+          error.code === "PermissionDenied"
+        ? t("Nothing was marked served. Your access may have changed.")
+        : t("Nothing was marked served. This table has changed; check it and try again.");
+  const progress: DiningRoundsProgress = {
+    view,
+    unavailable,
+    busy: busy || locked,
+    retrying,
+    serveItem: (item) => {
+      if (view === null) return;
+      void run(
+        "item:" + item.orderItemReference,
+        () =>
+          createDiningServeClient(fetcher).prepare({
+            operationReference: serviceOperationReference(),
+            orderReference: view.orderReference,
+            orderItemReference: item.orderItemReference,
+            quantity: servableQuantity(item),
+            expectedOrderVersion: view.orderVersion,
+            expectedItemServiceVersion: item.itemServiceVersion,
+            expectedSessionVersion: view.sessionVersion,
+            expectedTableAssignmentVersion: view.tableAssignmentVersion,
+          }),
+        () => null,
+        refusedServe,
+        () => [{ orderItemReference: item.orderItemReference, quantity: servableQuantity(item) }],
+      );
+    },
+    serveComboPart: (item, part) => {
+      if (view === null) return;
+      const orderReference = view.orderReference;
+      void run(
+        "part:" + item.orderItemReference + ":" + part.optionReference,
+        () => ({
+          execute: (token: string) =>
+            markComboPartServed(
+              token,
+              {
+                orderReference,
+                orderItemReference: item.orderItemReference,
+                optionReference: part.optionReference,
+              },
+              fetcher,
+            ),
+        }),
+        (allServed) => {
+          // The last dish served: the combo is served with the existing command.
+          if (allServed === true && item.phase === "Ready" && servableQuantity(item) > 0)
+            window.setTimeout(() => progress.serveItem(item), 0);
+          return null;
+        },
+        (error) =>
+          error instanceof ComboPartClientError && error.code === "NotReady"
+            ? t("That dish is not done in the kitchen yet.")
+            : refusedServe(error),
+      );
+    },
+    chaseItem: (item) => {
+      void run(
+        "chase:" + item.orderItemReference,
+        () => {
+          const operationReference = serviceOperationReference();
+          return {
+            execute: (token: string) =>
+              chaseDish(
+                token,
+                { orderItemReference: item.orderItemReference, operationReference },
+                fetcher,
+              ),
+          };
+        },
+        () => t("The kitchen was told to hurry {displayName}.", { displayName: item.displayName }),
+        (error) =>
+          error instanceof DiningChaseClientError && error.code === "TooSoon"
+            ? t("This round was chased a moment ago. You can chase it again at {time}.", {
+                time: new Date(error.retryAt ?? Date.now()).toLocaleTimeString([], {
+                  hour: "numeric",
+                  minute: "2-digit",
+                }),
+              })
+            : error instanceof DiningChaseClientError && error.code === "NotBeingMade"
+              ? t("The kitchen is no longer making that dish. Check whether it is ready to serve.")
+              : error instanceof DiningChaseClientError && error.code === "NotOffered"
+                ? t("Chasing a dish is turned off for this store.")
+                : error instanceof DiningChaseClientError && error.code === "PermissionDenied"
+                  ? t("The kitchen was not told. Your access may have changed.")
+                  : t("The kitchen was not told. Try again."),
+      );
+    },
+    serveRound: (sequence) => {
+      if (view === null) return;
+      const lines = readyToServe(view, sequence).slice(0, DINING_SERVE_READY_MAX_LINES);
+      if (lines.length === 0) return;
+      void run(
+        "round:" + sequence,
+        () =>
+          createDiningServeReadyClient(fetcher).prepare({
+            operationReference: serviceOperationReference(),
+            orderReference: view.orderReference,
+            expectedOrderVersion: view.orderVersion,
+            expectedSessionVersion: view.sessionVersion,
+            expectedTableAssignmentVersion: view.tableAssignmentVersion,
+            lines: lines.map((item) => ({
+              orderItemReference: item.orderItemReference,
+              quantity: servableQuantity(item),
+              expectedItemServiceVersion: item.itemServiceVersion,
+            })),
+          }),
+        (result) => serveReadySummary(result as Parameters<typeof serveReadySummary>[0]),
+        refusedServe,
+        (result) => {
+          const outcomes = new Map(
+            (result as Parameters<typeof serveReadySummary>[0]).lines.map((line) => [
+              line.orderItemReference,
+              line.outcome,
+            ]),
+          );
+          return lines
+            .filter((item) => outcomes.get(item.orderItemReference) === "Served")
+            .map((item) => ({
+              orderItemReference: item.orderItemReference,
+              quantity: servableQuantity(item),
+            }));
+        },
+      );
+    },
+  };
+  return (
+    <DiningRoundsContext.Provider value={progress}>
+      {children}
+      <p role="status" className="dining-rounds__status">
+        {notice ??
+          (unavailable === "PermissionDenied"
+            ? t("Your current permissions do not allow serving progress.")
+            : unavailable === "Unavailable"
+              ? t("Serving progress could not be read. It is read again with the order.")
+              : null)}
+      </p>
+      {view?.closureStatus === "Closed" ? (
+        <p className="dining-rounds__table" role="note">
+          {t("Order closed. Serving history is read-only.")}
+        </p>
+      ) : null}
+      {view === null || view.sessionPhase === "Active" ? null : (
+        // The table is checking out (dishes still served, no new rounds), or closed.
+        <p className="dining-rounds__table" role="status">
+          {/* v15 b12: the Closing phase is checkout (结账中); 关台 is only the close itself. */}
+          {view.sessionPhase === "Closing" ? t("Checking out") : t("Table closed")}
+        </p>
+      )}
+      {view === null || !closeActions ? null : (
+        <>
+          <DiningOrderCloseAction
+            key={view.orderReference + ":" + view.currentOrderVersion + ":" + view.closureVersion}
+            view={view}
+            csrf={csrf}
+            locked={busy || locked}
+            onBusy={markBusy}
+            onClosed={changed}
+          />
+          <DiningSessionCloseAction
+            key={view.diningSessionReference + ":" + view.sessionVersion}
+            view={view}
+            csrf={csrf}
+            locked={busy || locked}
+            onBusy={markBusy}
+            onClosed={changed}
+          />
+        </>
+      )}
+    </DiningRoundsContext.Provider>
+  );
+}
+
+function without(set: ReadonlySet<string>, key: string): ReadonlySet<string> {
+  if (!set.has(key)) return set;
+  const next = new Set(set);
+  next.delete(key);
+  return next;
+}
+
+/** A dish's serving state and its one-tap "Served", inside a round. */
+export function DiningRoundItemState({
+  orderItemReference,
+  cancellationShown = false,
+}: {
+  readonly orderItemReference: string;
+  /** The dish's line already says how it was cancelled (its status is not said twice). */
+  readonly cancellationShown?: boolean;
+}) {
+  const rounds = useDiningRounds();
+  const sending = useContext(KitchenSendingContext);
+  const waits = useContext(RoundPaymentWaitContext);
+  const item = rounds?.view?.items.find((entry) => entry.orderItemReference === orderItemReference);
+  if (rounds === null || rounds.view === null || item === undefined) return null;
+  // A cancelled dish has nothing to serve, chase or remake: its line's own words are enough.
+  if (cancellationShown && item.phase === "Cancelled") return null;
+  // A table checking out (Closing) still gets its last dishes served before it closes.
+  const open =
+    (rounds.view.sessionPhase === "Active" || rounds.view.sessionPhase === "Closing") &&
+    rounds.view.closureStatus === "Open";
+  const servable = servableQuantity(item);
+  const remaking = (item.remakingQuantity ?? 0) > 0;
+  const key = "item:" + item.orderItemReference;
+  return (
+    <span className="dining-round-item" data-phase={item.phase}>
+      <span className="dining-round-item__state">
+        {item.phase === "Ready" && remaking && servable === 0
+          ? t("Being remade")
+          : item.phase === "Accepted" && sending.has(item.batchSequence)
+            ? t("Sending to the kitchen…")
+            : item.phase === "Submitted"
+              ? submittedText(waits.get(item.batchSequence))
+              : (diningItemPhaseText[item.phase] ?? t("Checking"))}
+        {item.deliveredQuantity > 0 && item.remainingQuantity > 0
+          ? t(" · {served} of {ordered} served", {
+              served: item.deliveredQuantity,
+              ordered: item.orderedQuantity,
+            })
+          : ""}
+      </span>
+      {remaking ? (
+        // WP-2423 (2026-10-18): never serve or promise a dish the kitchen is making again.
+        <span className="dining-progress-remaking" role="note">
+          {t("Remaking — don't serve it until the kitchen marks the remake done.")}
+        </span>
+      ) : null}
+      {item.chase !== undefined ? (
+        // WP-2423 item 8 ⑦: how often this dish was chased with the kitchen.
+        <span className="dining-round-item__chased">
+          {item.chase.count === 1
+            ? t("Chased once")
+            : t("Chased {count} times", { count: item.chase.count })}{" "}
+          · <SourceTime instant={item.chase.lastChasedAt} withDate={false} />
+        </span>
+      ) : null}
+      {/* Not at Submitted: no kitchen work exists yet, so there is nothing to hurry. It is accepted
+          on Orders first (correcting DEC-STORE-FEATURES, which listed it as chaseable). */}
+      {open &&
+      rounds.view.chaseDish &&
+      (item.phase === "Accepted" || item.phase === "InProgress") ? (
+        <button
+          type="button"
+          className="dining-round-item__chase"
+          disabled={rounds.busy && !rounds.retrying.has("chase:" + item.orderItemReference)}
+          aria-label={t("Chase {displayName} with the kitchen", { displayName: item.displayName })}
+          onClick={() => rounds.chaseItem(item)}
+        >
+          {rounds.retrying.has("chase:" + item.orderItemReference) ? t("Try again") : t("Chase")}
+        </button>
+      ) : null}
+      {item.comboParts !== undefined ? (
+        <ul className="dining-round-item__combo" aria-label={t("Dishes in this combo")}>
+          {item.comboParts.map((part) => {
+            const label = part.nameZh || part.name;
+            const partKey = "part:" + item.orderItemReference + ":" + part.optionReference;
+            return (
+              <li key={part.optionReference}>
+                <span lang={part.nameZh ? "zh-Hans" : "en"}>{label}</span>
+                <span className="dining-round-item__state">
+                  {comboPartStateText(item, part, servable, waits.get(item.batchSequence))}
+                </span>
+                {open && comboPartServable(item, part) ? (
+                  <button
+                    type="button"
+                    className="dining-round-item__serve"
+                    disabled={rounds.busy && !rounds.retrying.has(partKey)}
+                    aria-label={t("Mark {displayName} served", { displayName: label })}
+                    onClick={() => rounds.serveComboPart(item, part)}
+                  >
+                    {rounds.retrying.has(partKey) ? t("Try again") : t("Mark served")}
+                  </button>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+      {open &&
+      item.phase === "Ready" &&
+      servable > 0 &&
+      // A combo is served dish by dish (its last dish serves it). A ticket closed as made leaves a
+      // dish with no done fact: the whole line is offered then, never a dead end.
+      (item.comboParts === undefined ||
+        item.comboParts.every((part) => part.served) ||
+        item.comboParts.some((part) => !part.done)) ? (
+        <button
+          type="button"
+          className="dining-round-item__serve"
+          disabled={rounds.busy && !rounds.retrying.has(key)}
+          aria-label={t("Mark {quantity} × {displayName} served", {
+            quantity: servable,
+            displayName: item.displayName,
+          })}
+          onClick={() => rounds.serveItem(item)}
+        >
+          {rounds.retrying.has(key) ? t("Try again") : t("Mark served")}
+        </button>
+      ) : null}
+    </span>
+  );
+}
+
+/** A round's "served x of y" and state for its header; null until the progress is read. */
+export function DiningRoundSummary({ sequence }: { readonly sequence: number }) {
+  const rounds = useDiningRounds();
+  const sending = useContext(KitchenSendingContext);
+  const waits = useContext(RoundPaymentWaitContext);
+  if (rounds?.view == null) return null;
+  const count = roundServedCount(rounds.view.items, sequence);
+  const state = roundStateText(
+    rounds.view.items,
+    sequence,
+    sending.has(sequence),
+    waits.get(sequence),
+  );
+  return (
+    <span className="dining-round__progress">
+      {count === null
+        ? null
+        : t("Served {served}/{ordered}", { served: count.served, ordered: count.ordered })}
+      {state !== null && state !== t("All served") ? (
+        <span className="dining-round__state">{state}</span>
+      ) : null}
+    </span>
+  );
+}
+
+/** "All served" for a round: every dish of it the kitchen has ready, in one tap. */
+export function DiningRoundServeAll({ sequence }: { readonly sequence: number }) {
+  const rounds = useDiningRounds();
+  if (rounds?.view == null) return null;
+  const ready = readyToServe(rounds.view, sequence);
+  if (ready.length < 2) return null;
+  const open = rounds.view.items.filter(
+    (item) =>
+      item.batchSequence === sequence &&
+      item.phase !== "Cancelled" &&
+      item.phase !== "Rejected" &&
+      item.phase !== "Fulfilled",
+  );
+  const key = "round:" + sequence;
+  return (
+    <button
+      type="button"
+      className="dining-round__serve-all"
+      disabled={rounds.busy && !rounds.retrying.has(key)}
+      onClick={() => rounds.serveRound(sequence)}
+    >
+      {rounds.retrying.has(key)
+        ? t("Try again")
+        : ready.length === open.length
+          ? t("All served")
+          : t("Serve the {count} ready", { count: ready.length })}
+    </button>
+  );
+}
+
+/**
+ * A round's dishes from the serving progress alone, for when the order's items could not be read:
+ * staff can still see and serve what the kitchen made.
+ */
+export function DiningRoundProgressItems({ sequence }: { readonly sequence: number }) {
+  const rounds = useDiningRounds();
+  if (rounds?.view == null) return null;
+  const items = rounds.view.items.filter((item) => item.batchSequence === sequence);
+  if (items.length === 0) return null;
+  return (
+    <>
+      <DiningRoundSummary sequence={sequence} />
+      <ul>
+        {items.map((item) => (
+          <li key={item.orderItemReference}>
+            <span className="order-line-quantity">{item.orderedQuantity} ×</span>
+            <span className="order-line-name">
+              <span className="order-line-title">{item.displayName}</span>
+              {(item.details?.options.length ?? 0) > 0 ? (
+                <span className="order-line-options">
+                  {(item.details?.options ?? [])
+                    .map((option) =>
+                      option.quantity > 1 ? `${option.name} × ${option.quantity}` : option.name,
+                    )
+                    .join(" · ")}
+                </span>
+              ) : null}
+              {item.details?.ageCheck ? (
+                <span className="order-line-note">
+                  {t("Alcohol: check ID if the guest looks under 19")}
+                </span>
+              ) : null}
+              {item.details?.customerNote ? (
+                <span className="order-line-note">
+                  {t("Note: {customerNote}", { customerNote: item.details.customerNote })}
+                </span>
+              ) : null}
+            </span>
+            <span />
+            <DiningRoundItemState orderItemReference={item.orderItemReference} />
+          </li>
+        ))}
+      </ul>
+      <DiningRoundServeAll sequence={sequence} />
+    </>
+  );
+}

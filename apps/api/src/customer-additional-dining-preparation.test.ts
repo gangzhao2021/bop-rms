@@ -1,0 +1,146 @@
+import { expect, it } from "vitest";
+import {
+  createCustomerAdditionalDiningPreparation,
+  createPersistentAdditionalDiningPreparation,
+} from "./customer-additional-dining-preparation.js";
+import { submissionFixture, id } from "../test-support/dining-order-submission-fixture.js";
+function setup() {
+  const f = submissionFixture();
+  let next = 400,
+    orderAllocations = 0;
+  const current = {
+    brandReference: id(2),
+    storeReference: id(3),
+    diningSessionReference: id(4),
+    orderReference: id(300),
+    orderVersion: 3,
+  };
+  const options = {
+    preparation: {
+      ...f.options,
+      submissions: { loadSubmission: f.loadSubmission },
+      references: {
+        generate: (purpose: string) => {
+          if (purpose === "Order") orderAllocations++;
+          return id(next++);
+        },
+      },
+    },
+    currentOrder: { resolve: async () => current as typeof current | null },
+  };
+  const input = { ...f.submissionInput, orderReference: id(300), expectedOrderVersion: 3 };
+  return {
+    ...f,
+    options,
+    input,
+    current,
+    allocations: () => orderAllocations,
+    service: () => createCustomerAdditionalDiningPreparation(options),
+  };
+}
+it("prepares a new commitment for the existing Order without allocating another Order", async () => {
+  const f = setup(),
+    result = await f.service().prepareForOrdering(f.input);
+  expect(result.record.orderReference).toBe(id(300));
+  expect(result.expectedOrderVersion).toBe(3);
+  expect(f.allocations()).toBe(0);
+  expect((await f.service().prepareForOrdering(f.input)).record).toEqual(result.record);
+  expect(f.writes()).toBe(1);
+});
+it.each(["orderReference", "storeReference", "diningSessionReference"] as const)(
+  "rejects foreign %s before persistence",
+  async (field) => {
+    const f = setup();
+    f.current[field] = id(999);
+    await expect(f.service().prepareForOrdering(f.input)).rejects.toBeDefined();
+    expect(f.writes()).toBe(0);
+  },
+);
+it("rejects stale expected Order version before persistence", async () => {
+  const f = setup();
+  f.current.orderVersion = 4;
+  await expect(f.service().prepareForOrdering(f.input)).rejects.toBeDefined();
+  expect(f.writes()).toBe(0);
+});
+it("rejects unavailable current eligibility", async () => {
+  const f = setup();
+  f.options.currentOrder.resolve = async () => null;
+  await expect(f.service().prepareForOrdering(f.input)).rejects.toBeDefined();
+  expect(f.writes()).toBe(0);
+});
+it("reauthorizes existing preparation after identity revocation", async () => {
+  const f = setup();
+  await f.service().prepareForOrdering(f.input);
+  f.revoke();
+  await expect(f.service().prepareForOrdering(f.input)).rejects.toBeDefined();
+  expect(f.writes()).toBe(1);
+});
+
+it("prepares for an ordinary (non-Host) seated participant (DEC-DINING-ANY-PARTICIPANT-SUBMIT)", async () => {
+  const f = setup();
+  const read = f.options.preparation.dining.current.readCurrent;
+  f.options.preparation.dining.current.readCurrent = async (request) => {
+    const result = await read(request);
+    return result === null
+      ? null
+      : { ...result, session: { ...result.session, hostParticipantReference: null } };
+  };
+  const result = await f.service().prepareForOrdering(f.input);
+  expect(result.record.orderReference).toBe(id(300));
+  expect(f.writes()).toBe(1);
+});
+
+it.each([
+  ["a participant who has left the table", { status: "Left" }],
+  ["a Closing Session", { phase: "Closing" }],
+] as const)("rejects %s before querying Order eligibility", async (_name, change) => {
+  const f = setup();
+  const read = f.options.preparation.dining.current.readCurrent;
+  let orderReads = 0;
+  f.options.currentOrder.resolve = async () => {
+    orderReads++;
+    return f.current;
+  };
+  f.options.preparation.dining.current.readCurrent = async (request) => {
+    const result = await read(request);
+    if (result === null) return null;
+    return "status" in change
+      ? {
+          ...result,
+          participant: {
+            ...result.participant,
+            status: "Left",
+            leftAt: result.table.observedAt,
+          },
+        }
+      : { ...result, session: { ...result.session, phase: "Closing" } };
+  };
+  await expect(f.service().prepareForOrdering(f.input)).rejects.toBeDefined();
+  expect(orderReads).toBe(0);
+  expect(f.writes()).toBe(0);
+});
+
+it("reruns the current Order read after a deadlock with a concurrent Order disposition (v15 2026-10-13)", async () => {
+  const f = setup();
+  let runs = 0;
+  const service = createPersistentAdditionalDiningPreparation({
+    preparation: f.options.preparation,
+    authorizeOrder: async () => true,
+    // Test-only stand-in for the owner read: the first attempt is chosen as the deadlock victim
+    // (nothing committed); the rerun observes the current Order.
+    transactions: {
+      run: (async () => {
+        runs += 1;
+        if (runs === 1)
+          throw Object.assign(new Error("synthetic deadlock"), {
+            code: "TENANT_DATABASE_TRANSACTION_CONFLICT",
+          });
+        return f.current;
+      }) as never,
+    },
+  });
+  const result = await service.prepareForOrdering(f.input);
+  expect(result.record.orderReference).toBe(id(300));
+  expect(runs).toBe(3);
+  expect(f.writes()).toBe(1);
+});

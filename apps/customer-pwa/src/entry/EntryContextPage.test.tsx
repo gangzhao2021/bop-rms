@@ -1,7 +1,13 @@
 import { renderToStaticMarkup } from "react-dom/server";
+import { MemoryRouter } from "react-router";
 import { describe, expect, it, vi } from "vitest";
-import { EntryContextView } from "./EntryContextPage.js";
+import { CurrentOrderView, EntryContextView, currentOrderPayment } from "./EntryContextPage.js";
+import { formatClockTime } from "../journey/format.js";
 import type { CustomerEntryEstablishedContext, CustomerEntryScreenState } from "./types.js";
+import { setSettledTable } from "../session/customer-transaction-context.js";
+import { zhHans as zh } from "../i18n/zh-Hans.js";
+import { formatStoreLocalTime } from "../journey/format.js";
+import type { StoreProfile, StoreProfileLoader } from "../store/store-profile-client.js";
 
 const context: CustomerEntryEstablishedContext = Object.freeze({
   brandDisplayName: "BOP Test Kitchen",
@@ -18,21 +24,187 @@ const context: CustomerEntryEstablishedContext = Object.freeze({
 
 function render(state: CustomerEntryScreenState): string {
   return renderToStaticMarkup(
-    <EntryContextView onContinue={vi.fn()} onRetry={vi.fn()} state={state} />,
+    <MemoryRouter>
+      <EntryContextView onContinue={vi.fn()} onRetry={vi.fn()} state={state} />
+    </MemoryRouter>,
   );
 }
 
+describe("WP-2423 (rush-logging-and-entry): a new phone opening the store's link in a rush", () => {
+  const view = (busy: boolean, onRetryNow = vi.fn()) =>
+    renderToStaticMarkup(
+      <MemoryRouter>
+        <EntryContextView
+          onContinue={vi.fn()}
+          onRetry={vi.fn()}
+          state={{ kind: "Loading" }}
+          busy={busy}
+          onRetryNow={onRetryNow}
+        />
+      </MemoryRouter>,
+    );
+  it("is never told to scan a code while the page checks the one it was opened with", () => {
+    const html = view(false);
+    expect(html).toContain("Checking this location");
+    expect(html).not.toContain("Scan the location QR code");
+  });
+  it("is told the store is busy, that nothing was ordered, with Try again, never to scan", () => {
+    const html = view(true);
+    expect(html).toContain("The store’s system is busy");
+    expect(html).toContain(
+      "Nothing has been ordered. This page asks again by itself in a few seconds.",
+    );
+    expect(html).toContain('class="entry-action" type="button">Try again</button>');
+    expect(html).not.toContain("Scan the location QR code");
+    expect(html).not.toContain("Checking this location");
+    expect(zh["Nothing has been ordered. This page asks again by itself in a few seconds."]).toBe(
+      "还没有下单。几秒后本页会自动再试。",
+    );
+  });
+  it("a page opened with no code still asks the guest to scan one", () => {
+    const html = render({ kind: "Missing" });
+    expect(html).toContain("Scan the location QR code to begin");
+  });
+});
+
+describe("DEC-DINING-GUEST-TABLE-START: a table guests start themselves", () => {
+  const table = {
+    publicStoreReference: context.publicStoreReference,
+    channel: "DineIn" as const,
+    locale: "en-CA",
+    brandDisplayName: context.brandDisplayName,
+    storeDisplayName: context.storeDisplayName,
+  };
+  it.each(["TableMayStart", "TableBeingCleaned", "TableAskNewParty"] as const)(
+    "%s names the Store, and doesn't tell the guest to scan what they just scanned",
+    (kind) => {
+      const html = render({ kind, context: table });
+      expect(html).toContain("Harbour Test Store");
+      expect(html).not.toContain("Scan the location QR code to begin");
+      expect(html).not.toContain("Start your order");
+    },
+  );
+  it("a table nobody opened at a Store without guest starts reads as it did", () => {
+    const html = render({ kind: "TableNotOpen", context: table });
+    expect(html).toContain("Scan the location QR code to begin");
+  });
+  it("the question makes the answer that ends a table the quieter one", () => {
+    const html = render({ kind: "TableAskNewParty", context: table });
+    expect(html).toContain('class="entry-action" type="button">Yes, join them');
+    expect(html).toContain('class="entry-secondary-action" type="button">No, we just sat down');
+    expect(html).not.toContain("receipt");
+  });
+  it("a guest whose visit ended sees the receipt first, and what either answer does to it", () => {
+    setSettledTable({ tableLabel: "DEMO-03", csrfToken: "C".repeat(43) });
+    try {
+      const asked = render({ kind: "TableAskNewParty", context: table });
+      expect(asked).toContain("Thank you for dining with us.");
+      expect(asked).toContain("Loading receipt");
+      expect(asked).toContain("After you answer, this receipt won’t open on this phone.");
+      expect(asked.indexOf("Loading receipt")).toBeLessThan(asked.indexOf("Yes, join them"));
+      const start = render({ kind: "TableMayStart", context: table });
+      expect(start).toContain("After you start, this receipt won’t open on this phone.");
+    } finally {
+      setSettledTable(null);
+    }
+  });
+});
+
+describe("WP-2423 guest-table-open-and-busy-reads: which table a not-open code is for", () => {
+  const table = {
+    publicStoreReference: context.publicStoreReference,
+    channel: "DineIn" as const,
+    locale: "en-CA",
+    brandDisplayName: context.brandDisplayName,
+    storeDisplayName: context.storeDisplayName,
+  };
+  it("names the table on the card, and what to do when it isn't the guest's own", () => {
+    const html = render({ kind: "TableNotOpen", context: table, tableLabel: "3" });
+    expect(html).toContain(`Table 3 at ${context.storeDisplayName} isn’t open yet`);
+    expect(html).toContain(
+      "Not sitting at table 3? Tell staff, so they can give you the code for your table.",
+    );
+    // A table the owner named is said as written, never "Table Patio".
+    const named = render({ kind: "TableNotOpen", context: table, tableLabel: "PH 1 (TEST)" });
+    expect(named).toContain(`PH 1 (TEST) at ${context.storeDisplayName} isn’t open yet`);
+    expect(named).not.toContain("Table PH 1");
+  });
+  it("has the Chinese wording for both lines", () => {
+    expect(zh["Table {table} at {storeDisplayName} isn’t open yet"]).toBe(
+      "{storeDisplayName} 的桌号 {table} 还没开台",
+    );
+    expect(
+      zh["Not sitting at table {table}? Tell staff, so they can give you the code for your table."],
+    ).toBe("您坐的不是桌号 {table}？请告诉店员，换成您这桌的二维码。");
+  });
+});
+
 describe("CUST-ENTRY-CONTEXT", () => {
+  it("a table no party is seated at says so, keeps the menu, and starts no visit", () => {
+    const notOpen: CustomerEntryScreenState = {
+      kind: "TableNotOpen",
+      context: {
+        publicStoreReference: context.publicStoreReference,
+        channel: "DineIn",
+        locale: "en-CA",
+        brandDisplayName: context.brandDisplayName,
+        storeDisplayName: context.storeDisplayName,
+      },
+    };
+    const html = render(notOpen);
+    // WP-2423 live minor 27: the guest is told which restaurant's table it is.
+    expect(html).toContain(`This table at ${context.storeDisplayName} isn’t open yet`);
+    expect(html).toContain(
+      "Ask staff to seat you. This page continues by itself once the table is open.",
+    );
+    expect(html).toContain("Look at the menu first");
+    expect(html).not.toContain("Ready to order");
+    expect(html).not.toContain("is confirmed for dine-in");
+    expect(html).not.toContain("Join this table");
+    expect(html).not.toContain(context.publicStoreReference);
+    // A guest whose own visit ended with a settled table (still on this browser) is thanked.
+    setSettledTable({ tableLabel: "DEMO-03", csrfToken: "C".repeat(43) });
+    try {
+      const settled = render(notOpen);
+      expect(settled).toContain("Thank you for dining with us.");
+      expect(settled).toContain("Your meal at table DEMO-03 has ended.");
+      expect(settled).toContain("Loading receipt");
+      expect(settled).toContain("New party? Ask staff to seat you, then scan again.");
+      expect(settled).not.toContain("isn’t open yet");
+    } finally {
+      setSettledTable(null);
+    }
+  });
+
   it("shows the safe public context and never renders credentials or public references", () => {
     const html = render({ kind: "Established", context });
     expect(html).toContain("BOP Test Kitchen");
     expect(html).toContain("Harbour Test Store");
-    expect(html).toContain("Your table is confirmed for dine-in");
-    expect(html).toContain("Dine in, Pickup");
+    expect(html).toContain("Welcome to");
+    // The service is in the sentence above; open status and hours are said once, in the store card.
+    expect(html).not.toContain("Available service");
+    expect(html).not.toContain("Open for ordering");
     expect(html).toContain("Continue to menu");
     expect(html).not.toContain(context.publicStoreReference);
     expect(html).not.toContain(String(context.publicTableReference));
     expect(html).not.toContain(context.csrfToken);
+    // WP-2423: the entry context's own expiry is not the Store's last-order time; don't show it.
+    expect(html).not.toContain("Order by");
+    expect(html).not.toContain(context.contextExpiresAt);
+  });
+
+  it.each([
+    { ...context, channel: "Pickup" as const, publicTableReference: null },
+    { ...context, publicTableReference: null },
+    { ...context, operatingState: "Closed" as const },
+    { ...context, availableServiceModes: ["Pickup"] as const },
+  ])("does not offer table admission outside eligible entry context", (next) => {
+    expect(render({ kind: "Established", context: next })).not.toContain(
+      "dining-admission-heading",
+    );
+  });
+  it("shows unavailable admission honestly for eligible context without runtime", () => {
+    expect(render({ kind: "Established", context })).toContain("Table joining is unavailable");
   });
 
   it("uses explicit non-colour status and blocks continuation when closed", () => {
@@ -40,8 +212,9 @@ describe("CUST-ENTRY-CONTEXT", () => {
       kind: "Established",
       context: { ...context, operatingState: "Closed", availableServiceModes: [] },
     });
-    expect(html).toContain("Not accepting orders");
+    // Said once, in words (never colour alone); open hours live in the store card.
     expect(html).toContain("This location is not accepting orders");
+    expect(html).not.toContain("Location status");
     expect(html).not.toContain("Continue to menu");
   });
 
@@ -58,10 +231,592 @@ describe("CUST-ENTRY-CONTEXT", () => {
     expect(html).toContain(recovery);
   });
 
-  it("always supplies accessibility and allergen assistance", () => {
-    const html = render({ kind: "Loading" });
+  it("keeps service failure bounded and explicitly retryable", () => {
+    const html = render({ kind: "ServiceUnavailable" });
+    expect(html).toContain("Try again");
+    expect(html).toContain('role="alert"');
+    expect(html).not.toContain("synthetic entry failure");
+  });
+
+  it.each([
+    { kind: "Missing" },
+    { kind: "Offline" },
+    { kind: "ServiceUnavailable" },
+    { kind: "Established", context },
+  ] as const)("supplies accessibility and allergen assistance once $kind is known", (state) => {
+    const html = render(state);
     expect(html).toContain("accessible ordering option");
     expect(html).toContain("allergies");
     expect(html).toContain('aria-live="polite"');
+  });
+
+  it("keeps the assistance out from under the brief loading notice so it never jumps", () => {
+    const html = render({ kind: "Loading" });
+    expect(html).toContain('aria-busy="true"');
+    expect(html).not.toContain("entry-help");
+  });
+});
+
+it("shows a rate-limit wait without enabling retry or revealing context", () => {
+  const html = render({ kind: "RateLimited", retryAfterSeconds: 5 });
+  expect(html).toContain("Please wait before trying again");
+  expect(html).toContain("Try again in 5 seconds.");
+  expect(html).toContain('disabled=""');
+  expect(html).toContain('aria-live="off"');
+  expect(html).not.toContain("Continue to menu");
+  expect(html).not.toContain(context.csrfToken);
+});
+
+describe("WP-2423 Q4 not accepting orders", () => {
+  it("WP-2423 item 11: a Store not ready yet says so in plain words, with no hours to mislead", () => {
+    const text = render({
+      kind: "NotAccepting",
+      storeDisplayName: "Synthetic Store",
+      paused: false,
+      todayHours: [{ start: "11:00:00", end: "21:30:00", endsNextDay: false }],
+      todayKind: null,
+      nextOpening: { localDate: "2026-12-23", startLocalTime: "11:00:00" },
+      localDate: "2026-12-22",
+      notReady: true,
+    });
+    expect(text).toContain("Synthetic Store isn’t taking orders yet");
+    expect(text).toContain("This store is still getting ready.");
+    expect(text).not.toContain("Today’s hours");
+    expect(text).not.toContain("closed");
+    expect(text.toLowerCase()).not.toContain("kitchen");
+  });
+  it("WP-2423 item 13 ②: a paused merchant says it takes no new orders, asks for staff, no hours", () => {
+    const text = render({
+      kind: "NotAccepting",
+      storeDisplayName: "Synthetic Store",
+      paused: false,
+      todayHours: [{ start: "11:00:00", end: "21:30:00", endsNextDay: false }],
+      todayKind: null,
+      nextOpening: null,
+      localDate: "2026-12-22",
+      newGuestsPaused: true,
+    });
+    expect(text).toContain("Synthetic Store isn’t taking new orders right now");
+    expect(text).toContain("Please ask a staff member for help.");
+    expect(text).not.toContain("Today’s hours");
+    expect(text).not.toContain("closed");
+    expect(text.toLowerCase()).not.toContain("platform");
+  });
+  it("names the store, says why and gives today's hours instead of a dead link", () => {
+    const closed = render({
+      kind: "NotAccepting",
+      storeDisplayName: "Synthetic Store",
+      paused: false,
+      todayHours: [{ start: "11:00:00", end: "21:30:00", endsNextDay: false }],
+      todayKind: null,
+      nextOpening: { localDate: "2026-12-23", startLocalTime: "11:00:00" },
+      localDate: "2026-12-22",
+    });
+    expect(closed).toContain("Synthetic Store isn’t taking orders right now");
+    expect(closed).toContain("The store is closed now.");
+    // WP-2423 M122: written like every other time on the guest's pages (Chinese: 24-hour).
+    expect(closed).toContain("Today’s hours: 11:00 a.m.–9:30 p.m.");
+    expect(formatStoreLocalTime("21:30:00", "zh-CN")).toBe("21:30");
+    expect(closed).not.toContain("can’t be used");
+    // Decision 16: when the Store opens next.
+    expect(closed).toContain("Opens tomorrow at 11:00 a.m.");
+    const paused = render({
+      kind: "NotAccepting",
+      storeDisplayName: "Synthetic Store",
+      paused: true,
+      todayHours: [],
+      todayKind: null,
+      nextOpening: null,
+      localDate: null,
+    });
+    expect(paused).toContain("Online ordering is paused for a short while.");
+    expect(paused).toContain("Closed today.");
+  });
+  it("WP-2423 item 8 ③ decision 16: a holiday says so once and gives the next opening", () => {
+    const holiday = render({
+      kind: "NotAccepting",
+      storeDisplayName: "Synthetic Store",
+      paused: false,
+      todayHours: [],
+      todayKind: "Holiday",
+      nextOpening: { localDate: "2026-12-26", startLocalTime: "11:00:00" },
+      localDate: "2026-12-25",
+    });
+    expect(holiday).toContain("The store is closed today for a holiday.");
+    expect(holiday).toContain("Opens tomorrow at 11:00 a.m.");
+    expect(holiday).not.toContain("Closed today.");
+    const later = render({
+      kind: "NotAccepting",
+      storeDisplayName: "Synthetic Store",
+      paused: false,
+      todayHours: [],
+      todayKind: "TemporaryClosure",
+      nextOpening: { localDate: "2026-12-29", startLocalTime: "17:00:00" },
+      localDate: "2026-12-25",
+    });
+    expect(later).toContain("The store is closed today.");
+    expect(later).toContain("Opens Tuesday, Dec 29 at 5:00 p.m.");
+  });
+});
+
+describe("M116: a closed Store gives a menu to look at, never a dead end", () => {
+  const closed = {
+    kind: "NotAccepting" as const,
+    storeDisplayName: "Synthetic Store",
+    paused: false,
+    todayHours: [],
+    todayKind: null,
+    nextOpening: { localDate: "2026-12-23", startLocalTime: "11:00:00" },
+    localDate: "2026-12-22",
+  };
+  const browse = {
+    publicStoreReference: context.publicStoreReference,
+    channel: "Pickup" as const,
+    locale: "en-CA",
+    brandDisplayName: context.brandDisplayName,
+    storeDisplayName: "Synthetic Store",
+  };
+  it("offers the menu first and Check again second, under the Store's name, with no Cart link", () => {
+    const html = render({ ...closed, browse });
+    expect(html).toContain('class="entry-action" type="button">Look at the menu first');
+    expect(html).toContain('class="entry-secondary-action" type="button">Check again');
+    expect(html).not.toContain(">Try again<");
+    expect(html).toContain("BOP Test Kitchen · Pickup");
+    expect(html).not.toContain("Scan the location QR code to begin");
+    expect(html).not.toContain('href="/cart"');
+    expect(html).toContain('href="/menu"');
+  });
+  it("with no menu to show (an older answer) it keeps Try again, and still no Cart link", () => {
+    const html = render(closed);
+    expect(html).toContain(">Try again<");
+    expect(html).not.toContain("Look at the menu first");
+    expect(html).not.toContain('href="/cart"');
+  });
+  it("has every new word in Simplified Chinese", () => {
+    for (const key of [
+      "Check again",
+      "Look at the menu first",
+      "Closed now",
+      "Ordering is paused for a short while",
+      "You can look at the menu. You can order once the store opens.",
+      "You can look at the menu. You can order once ordering starts again.",
+    ])
+      expect(zh[key], key).toBeTruthy();
+  });
+});
+
+describe("M105 B.3: an order at another Store stays on this phone", () => {
+  const harbour = {
+    publicStoreReference: "018f2a1b-7c3d-7a4e-8b5c-1234567890ff",
+    storeDisplayName: "Harbour Store",
+  };
+  const pickup = { ...context, channel: "Pickup" as const, publicTableReference: null };
+  const at = (keptElsewhere: typeof harbour | null) =>
+    renderToStaticMarkup(
+      <MemoryRouter>
+        <EntryContextView
+          onContinue={vi.fn()}
+          state={{ kind: "Established", context: pickup }}
+          keptElsewhere={keptElsewhere}
+        />
+      </MemoryRouter>,
+    );
+  it("says how to go back to it, without blocking this Store's order", () => {
+    const html = at(harbour);
+    expect(html).toContain(
+      "Your order at Harbour Store is kept on this phone. Scan Harbour Store’s pickup QR code again to go back to it.",
+    );
+    expect(html).toContain("Continue to menu");
+  });
+  it("a table code, even at the same Store, names the pickup order kept on this phone", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <EntryContextView
+          onContinue={vi.fn()}
+          state={{ kind: "Established", context }}
+          keptElsewhere={{ ...harbour, publicStoreReference: context.publicStoreReference }}
+        />
+      </MemoryRouter>,
+    );
+    expect(html).toContain("Your order at Harbour Store is kept on this phone.");
+  });
+  it("says nothing at the same Store, or with no order elsewhere", () => {
+    expect(at({ ...harbour, publicStoreReference: pickup.publicStoreReference })).not.toContain(
+      "is kept on this phone",
+    );
+    expect(at(null)).not.toContain("is kept on this phone");
+  });
+});
+
+describe("WP-2423 Q11 replaced table code", () => {
+  it("tells the guest in plain words to ask staff, with no retry or internal code", () => {
+    const replaced = render({ kind: "TableCodeRetired", replaced: true });
+    expect(replaced).toContain("This table QR code was replaced. Please ask a staff member.");
+    expect(replaced).not.toContain("Try again");
+    expect(replaced).not.toMatch(/qr_|entry_|410/u);
+    const off = render({ kind: "TableCodeRetired", replaced: false });
+    expect(off).toContain("This table QR code is no longer in use. Please ask a staff member.");
+  });
+});
+
+describe("WP-2423 Q10 continue the order in progress", () => {
+  const order = Object.freeze({
+    orderReference: "018f2a1b-7c3d-7a4e-8b5c-1234567890ac",
+    orderNumber: "12",
+    orderType: "Pickup" as const,
+  });
+  const view = (props: Parameters<typeof CurrentOrderView>[0]) =>
+    renderToStaticMarkup(
+      <MemoryRouter>
+        <CurrentOrderView {...props} />
+      </MemoryRouter>,
+    );
+  it("offers the pickup order first, and ordering more keeps it on this phone (M104)", () => {
+    const html = view({
+      order,
+      onStartNew: vi.fn(),
+      store: { storeName: "Harbour Test Store", serviceMode: "Pickup" },
+    });
+    expect(html).toContain("Your order 12");
+    expect(html).toContain("Harbour Test Store");
+    expect(html).not.toContain("Scan the location QR code to begin");
+    expect(html).toContain(`href="/orders/${order.orderReference}"`);
+    expect(html).toContain("View order 12");
+    expect(html).toContain("Order more");
+    // Said as it works: this Store's pickup code scanned again comes back to this visit.
+    expect(html).toContain("Scan this store’s pickup code again to come back to it.");
+    expect(html).not.toContain("closes this order");
+    expect(html).not.toContain("24 hours");
+    expect(html).not.toContain("Your table");
+  });
+  it("M104 B.2: lists every order of this visit with its status and receipt, newest first", () => {
+    const earlier = {
+      ...order,
+      orderReference: "018f2a1b-7c3d-7a4e-8b5c-1234567890ad",
+      orderNumber: "11",
+    };
+    const html = view({ order: { ...order, earlier: [earlier] }, onStartNew: vi.fn() });
+    expect(html).toContain("Orders on this phone");
+    expect(html.indexOf("Order 12")).toBeLessThan(html.indexOf("Order 11"));
+    expect(html).toContain(`href="/orders/${earlier.orderReference}/receipt"`);
+    expect(html).toContain(`href="/orders/${order.orderReference}/receipt"`);
+    // One order: no list (the order itself is the page).
+    expect(view({ order, onStartNew: vi.fn() })).not.toContain("Orders on this phone");
+    expect(zh["Orders on this phone"]).toBe("这部手机上的订单");
+  });
+  it("links a dine-in guest to the table and asks for a QR scan when no code was scanned", () => {
+    const html = view({ order: { ...order, orderType: "DineIn" } });
+    expect(html).toContain('href="/dine-in/session"');
+    expect(html).toContain("scan the QR code at your table or at the counter");
+    // No "start a new order" action in the page (the header only carries the language switch).
+    expect(html.split("<main")[1]).not.toContain("<button");
+  });
+  it("tells a dine-in guest starting a new order that this one closes here, and to open it first", () => {
+    const html = view({ order: { ...order, orderType: "DineIn" }, onStartNew: vi.fn() });
+    expect(html).toContain("Start a new order");
+    expect(html).toContain(
+      "Starting a new order here closes this order on this phone. The store still has it. To keep the receipt, open the order first.",
+    );
+    expect(html).toContain(`href="/orders/${order.orderReference}"`);
+  });
+});
+
+describe("WP-2423 M18: an unpaid pickup on the entry page", () => {
+  const order = Object.freeze({
+    orderReference: "018f2a1b-7c3d-7a4e-8b5c-1234567890ac",
+    orderNumber: "12",
+    orderType: "Pickup" as const,
+  });
+  const view = (props: Parameters<typeof CurrentOrderView>[0]) =>
+    renderToStaticMarkup(
+      <MemoryRouter>
+        <CurrentOrderView {...props} />
+      </MemoryRouter>,
+    );
+  it("says it isn't paid, until when, and leads to finishing the payment", () => {
+    const html = view({
+      order,
+      onStartNew: vi.fn(),
+      payment: { kind: "due", payBy: "2026-08-11T14:10:00.000Z" },
+    });
+    expect(html).toContain(
+      `Not paid yet. Pay by ${formatClockTime("2026-08-11T14:10:00.000Z")}, or it is cancelled`,
+    );
+    expect(html).toMatch(/class="entry-action" href="\/orders\/[^"]+"[^>]*>Finish paying</u);
+    expect(html).not.toContain("Check its status and your pickup code");
+  });
+  it("says an order cancelled for not being paid wasn't charged, and starting again comes first", () => {
+    const html = view({ order, onStartNew: vi.fn(), payment: { kind: "cancelledUnpaid" } });
+    expect(html).toContain("cancelled because it wasn’t paid in time. You weren’t charged.");
+    expect(html).toContain('class="entry-action" type="button"');
+  });
+  it("reads the order's payment from its status: due, cancelled unpaid, or nothing to say", () => {
+    const status = (sources: object) => ({
+      order: { orderType: "Pickup", canonicalPhase: "Submitted", batches: [] },
+      sources: { checkedAt: "2026-08-11T14:00:00.000Z", kitchen: null, payments: [], ...sources },
+    });
+    const due = [
+      { orderBatchReference: "x", payBy: "2026-08-11T14:10:00.000Z", lastAttempt: "Open" },
+    ];
+    expect(currentOrderPayment(status({ paymentsDue: due }))).toEqual({
+      kind: "due",
+      payBy: "2026-08-11T14:10:00.000Z",
+    });
+    expect(
+      currentOrderPayment(
+        status({ unpaidCancellation: { cancelledAt: "2026-08-11T14:10:00.000Z" } }),
+      ),
+    ).toEqual({ kind: "cancelledUnpaid" });
+    expect(currentOrderPayment(status({}))).toBeNull();
+    // The order received but not yet projected: nothing claimed.
+    expect(currentOrderPayment({ status: "received" })).toBeNull();
+  });
+});
+
+describe("WP-2423 item 8 ⑤ one primary action", () => {
+  it("at a table, joining comes first and the menu is there to look at; one filled button", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <EntryContextView
+          onContinue={vi.fn()}
+          onRetry={vi.fn()}
+          state={{ kind: "Established", context }}
+          diningAdmission={{
+            journey: {} as never,
+            generateOperationReference: () => "",
+          }}
+        />
+      </MemoryRouter>,
+    );
+    expect(html).toContain("Join this table</button>");
+    expect(html).toContain("Look at the menu first");
+    expect(html.match(/class="entry-action"/gu)).toHaveLength(1);
+  });
+});
+
+// M02 (v15 07b7a1b7): a reload, a home-screen launch or the same code again stays at this phone's
+// own visit: the same Store and table, with the cart, and nothing new started.
+describe("M02 resumed visit", () => {
+  const resumed = {
+    publicStoreReference: context.publicStoreReference,
+    locale: "en-CA",
+    brandDisplayName: "Lane Brand",
+    storeDisplayName: "Lane Dessert",
+  };
+  it("pickup says the same Store is selected and continues ordering", () => {
+    const html = render({
+      kind: "Resumed",
+      context: { ...resumed, channel: "Pickup", publicTableReference: null, joined: false },
+    });
+    expect(html).toContain("Ready to order");
+    expect(html).toContain("Pickup from Lane Dessert is selected.");
+    expect(html).toContain('class="entry-action" type="button">Continue ordering');
+    expect(html).not.toContain("DEMO");
+    expect(html).not.toContain(context.publicStoreReference);
+  });
+  it("a joined table welcomes the guest back with one action", () => {
+    const html = render({
+      kind: "Resumed",
+      context: {
+        ...resumed,
+        channel: "DineIn",
+        publicTableReference: context.publicTableReference,
+        joined: true,
+      },
+    });
+    expect(html).toContain("Welcome to Lane Dessert");
+    expect(html).toContain("Continue ordering");
+    expect(html).not.toContain("Join this table");
+    expect(html).not.toContain(String(context.publicTableReference));
+  });
+  it("a table this phone hasn't joined yet offers the same join as a fresh scan", () => {
+    const html = render({
+      kind: "Resumed",
+      context: {
+        ...resumed,
+        channel: "DineIn",
+        publicTableReference: context.publicTableReference,
+        joined: false,
+      },
+    });
+    expect(html).toContain("Welcome to Lane Dessert");
+    expect(html).not.toContain("Continue ordering");
+    expect(html).toContain("Continue to menu");
+  });
+  it("in Chinese", () => {
+    expect(zh["Continue ordering"]).toBe("继续点单");
+    expect(zh["We’ve been seated"]).toBe("我们已入座");
+    expect(zh["Ask staff to seat you. This page continues by itself once the table is open."]).toBe(
+      "请让店员带位，开台后这里会自动继续。",
+    );
+  });
+  it("a table not open yet offers 'We've been seated' while it waits, not after a settled visit", () => {
+    const notOpen: CustomerEntryScreenState = {
+      kind: "TableNotOpen",
+      context: { ...resumed, channel: "DineIn" },
+    };
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <EntryContextView onContinue={vi.fn()} onSeated={vi.fn()} state={notOpen} />
+      </MemoryRouter>,
+    );
+    expect(html).toContain("We’ve been seated");
+    setSettledTable({ tableLabel: "DEMO-03", csrfToken: "C".repeat(43) });
+    try {
+      const settled = renderToStaticMarkup(
+        <MemoryRouter>
+          <EntryContextView onContinue={vi.fn()} onSeated={vi.fn()} state={notOpen} />
+        </MemoryRouter>,
+      );
+      expect(settled).not.toContain("We’ve been seated");
+    } finally {
+      setSettledTable(null);
+    }
+  });
+});
+
+describe("M104/M105: a rescan says what happened to the visit on this phone", () => {
+  const pickupContext = {
+    brandDisplayName: "BOP Test Kitchen",
+    storeDisplayName: "Harbour Test Store",
+    publicStoreReference: "018f2a1b-7c3d-7a4e-8b5c-1234567890ab",
+    publicTableReference: null,
+    channel: "Pickup" as const,
+    operatingState: "Open" as const,
+    availableServiceModes: ["Pickup" as const],
+    locale: "en-CA",
+    contextExpiresAt: "2026-08-11T20:00:00.000Z",
+    csrfToken: "A".repeat(43),
+  };
+  const render = (context: object) =>
+    renderToStaticMarkup(
+      <MemoryRouter>
+        <EntryContextView
+          onContinue={vi.fn()}
+          onRetry={vi.fn()}
+          state={{ kind: "Established", context: context as never }}
+        />
+      </MemoryRouter>,
+    );
+  it("says an ended earlier cart by its reason, and never that nothing was ordered", () => {
+    const kept = render({ ...pickupContext, previousVisit: "EndedReceiptsKept" });
+    expect(kept).toContain("Your earlier cart here has ended");
+    // Nothing promised the guest can't reach: no list of earlier orders exists on this phone.
+    expect(kept).toContain("The store still has the orders you placed");
+    expect(kept).not.toContain("stay on this phone");
+    const ended = render({ ...pickupContext, previousVisit: "Ended" });
+    expect(ended).toContain("Your earlier cart here has ended");
+    for (const html of [kept, ended]) {
+      expect(html).not.toMatch(/nothing was ordered|\b4 hours|wasn.t used/iu);
+    }
+  });
+  it("lets a resumed visit go on while the Store takes no new orders", () => {
+    const html = render({
+      ...pickupContext,
+      resumed: true,
+      operatingState: "Closed",
+      availableServiceModes: [],
+    });
+    expect(html).toContain("Your cart and orders are still here");
+    expect(html).toContain(">Continue<");
+    expect(html).not.toContain("This location is not accepting orders");
+  });
+});
+
+describe("M109: a pickup guest's help names the store, not a staff member beside them", () => {
+  it("says to call or ask at the counter at a pickup entry, and keeps staff at a table", () => {
+    const at = (channel: "Pickup" | "DineIn") =>
+      renderToStaticMarkup(
+        <MemoryRouter>
+          <EntryContextView
+            onContinue={vi.fn()}
+            onRetry={vi.fn()}
+            state={{
+              kind: "Established",
+              context: {
+                brandDisplayName: "BOP Test Kitchen",
+                storeDisplayName: "Harbour Test Store",
+                publicStoreReference: "018f2a1b-7c3d-7a4e-8b5c-1234567890ab",
+                publicTableReference:
+                  channel === "DineIn" ? "018f2a1b-7c3d-7a4e-9b5c-1234567890ab" : null,
+                channel,
+                operatingState: "Open",
+                availableServiceModes: [channel],
+                locale: "en-CA",
+                contextExpiresAt: "2026-08-11T20:00:00.000Z",
+                csrfToken: "A".repeat(43),
+              },
+            }}
+          />
+        </MemoryRouter>,
+      );
+    expect(at("Pickup")).toContain("ask at the counter before you order");
+    expect(at("Pickup")).not.toContain("Tell staff about allergies");
+    expect(at("DineIn")).toContain("Tell staff about allergies before ordering");
+  });
+  it("says 'call them' only where the store card shows a number to call", () => {
+    const profile = (phone: string | null): StoreProfile => ({
+      storeDisplayName: "Test Merchant 2",
+      timeZone: "America/Toronto",
+      address: {
+        addressLines: ["1 Test St"],
+        locality: "Toronto",
+        regionCode: "ON",
+        postalCode: "M5V 1A1",
+        countryCode: "CA",
+      },
+      phone,
+      hours: null,
+    });
+    const loader = (value: StoreProfile | null): StoreProfileLoader =>
+      Object.assign(async () => value, { last: () => value });
+    const at = (load: StoreProfileLoader | null) =>
+      renderToStaticMarkup(
+        <MemoryRouter>
+          <EntryContextView
+            onContinue={vi.fn()}
+            storeProfile={load}
+            state={{
+              kind: "Established",
+              context: { ...context, channel: "Pickup", publicTableReference: null },
+            }}
+          />
+        </MemoryRouter>,
+      );
+    const withPhone = at(loader(profile("+14165550100")));
+    expect(withPhone).toContain("Call");
+    expect(withPhone).toContain("call them or ask at the counter before you order");
+    // Test Merchant 2 publishes no phone: no number on the card, so no "call them" either.
+    for (const html of [at(loader(profile(null))), at(loader(null)), at(null)]) {
+      expect(html).not.toContain("call them");
+      expect(html).toContain(
+        "To tell the store about an allergy, ask at the counter before you order. The QR code does not record allergy or health information.",
+      );
+    }
+    expect(
+      zh[
+        "To tell the store about an allergy, ask at the counter before you order. The QR code does not record allergy or health information."
+      ],
+    ).toBe("如有过敏，请在下单前到柜台告诉店员。二维码不会记录过敏或健康信息。");
+  });
+});
+
+describe("WP-2423 shared-table-checkout (b): already at this table", () => {
+  const resumed = {
+    publicStoreReference: context.publicStoreReference,
+    channel: "DineIn" as const,
+    locale: "en-CA",
+    brandDisplayName: context.brandDisplayName,
+    storeDisplayName: context.storeDisplayName,
+    publicTableReference: context.publicTableReference,
+    joined: true,
+    alreadyAtTable: true as const,
+  };
+  it("says the phone is already at this table and continues ordering; no join is offered", () => {
+    const html = render({ kind: "Resumed", context: resumed });
+    expect(html).toContain("You’re already at this table.");
+    expect(html).toContain("Continue ordering");
+    expect(html).not.toContain("Join this table");
+    expect(zh["You’re already at this table."]).toBe("你已在这一桌。");
   });
 });

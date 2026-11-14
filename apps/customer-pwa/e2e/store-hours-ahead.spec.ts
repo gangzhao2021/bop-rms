@@ -1,0 +1,207 @@
+import { expect, test, type Page } from "@playwright/test";
+import { expectNoInternalText } from "./internal-text-guard";
+import { routeStorefrontReads, syntheticStoreProfile } from "./storefront-reads";
+
+// WP-2423: every page with a Store context reads the Store's identity (and the menu for
+// cart lines not yet priced); spec routes registered later still answer first.
+test.beforeEach(({ context }) => routeStorefrontReads(context));
+
+/**
+ * WP-2423 item 8 ③ (Owner decision 16): the menu ends with the Store — open until when, the
+ * kitchen's last orders, today's hours, the holidays and special hours in the next 7 days, the
+ * address and the phone a tap away — and a guest who scans while the Store is closed for a
+ * holiday is told so and when it opens next. Synthetic HTTP answers, no live Store authority.
+ */
+const id = (n: number) => "018f8a20-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+
+async function enterOpen(page: Page) {
+  await page.route("**/bff/customer/entry", (route) =>
+    route.fulfill({
+      status: 201,
+      headers: { "cache-control": "no-store" },
+      json: {
+        schemaVersion: 2,
+        status: "Established",
+        brandDisplayName: "Synthetic Brand",
+        storeDisplayName: "Synthetic Store",
+        publicStoreReference: id(6),
+        publicTableReference: null,
+        channel: "Pickup",
+        operatingState: "Open",
+        availableServiceModes: ["Pickup"],
+        locale: "en-CA",
+        contextExpiresAt: new Date(Date.now() + 600_000).toISOString(),
+        csrfToken: "h".repeat(43),
+      },
+    }),
+  );
+}
+
+test.describe("@production the Store's hours ahead", () => {
+  test.use({ serviceWorkers: "block" });
+
+  test("the menu ends with the Store's hours, this week's holidays, address and phone", async ({
+    page,
+  }) => {
+    await enterOpen(page);
+    await page.goto("/#qr=aaa.bbb.ccc");
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Synthetic Store", exact: true }),
+    ).toBeVisible();
+    await page.evaluate(() => {
+      history.pushState(null, "", "/menu");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    const strip = page.getByRole("region", { name: "Store hours and address" });
+    await expect(strip).toContainText("Open now · until 10:00 p.m.");
+    await expect(strip).toContainText("Last orders 9:30 p.m.");
+    await expect(strip.getByRole("link", { name: "Holidays this week" })).toHaveAttribute(
+      "href",
+      "#store-info",
+    );
+    const info = page.getByRole("region", { name: "Synthetic Store" }).last();
+    await expect(info).toContainText("Today 7:00 a.m.–10:00 p.m.");
+    await expect(info).toContainText("Holidays and special hours this week");
+    await expect(info).toContainText("Thursday, Dec 24 Special hours · 11:00 a.m.–4:00 p.m.");
+    await expect(info).toContainText("Friday, Dec 25 Holiday · closed");
+    await expect(info.getByRole("link", { name: /^Call / })).toHaveAttribute(
+      "href",
+      "tel:+15555550100",
+    );
+    await expectNoInternalText(page);
+    for (const width of [1440, 1024, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      await info.screenshot({ path: `test-results/store-info-${width}.png` });
+    }
+    // In Chinese.
+    await page.getByRole("button", { name: "切换到中文" }).click();
+    await expect(page.getByRole("region", { name: "营业时间和地址" })).toContainText(
+      "厨房 21:30 停止接单",
+    );
+    await expect(info).toContainText("未来 7 天的节假日和特殊营业时间");
+    await expect(info).toContainText("节假日 · 不营业");
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({ path: "test-results/store-info-zh-390.png", fullPage: true });
+  });
+
+  test("after last orders the menu says the kitchen stopped and a pickup order can’t be placed from the phone", async ({
+    page,
+  }) => {
+    // Follow-up (v15 2026-10-28): the checkout and payment gates refuse guests after this time.
+    await page.route("**/api/v1/customer/store", (route) =>
+      route.fulfill({
+        status: 200,
+        headers: { "cache-control": "private, max-age=30" },
+        json: {
+          ...syntheticStoreProfile,
+          store: {
+            ...syntheticStoreProfile.store,
+            hours: { ...syntheticStoreProfile.store.hours, ordersStopped: true },
+          },
+        },
+      }),
+    );
+    await enterOpen(page);
+    await page.goto("/#qr=aaa.bbb.ccc");
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Synthetic Store", exact: true }),
+    ).toBeVisible();
+    await page.evaluate(() => {
+      history.pushState(null, "", "/menu");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    // WP-2423 store-service-controls (v15 M30/M34): once orders stopped the notice is an alert,
+    // and a pickup guest (no staff member beside them) is told they can't order from the phone.
+    const notice = page.getByRole("alert", { name: "Last orders" });
+    await expect(notice).toContainText("The kitchen stopped taking orders at 9:30 p.m.");
+    await expect(notice).toContainText("You can’t place a pickup order from your phone now.");
+    await expect(page.getByRole("region", { name: "Store hours and address" })).toContainText(
+      "Kitchen stopped taking orders at 9:30 p.m.",
+    );
+    await expectNoInternalText(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({ path: "test-results/orders-stopped-390.png" });
+  });
+
+  test("a paused pickup says until when in sentences that end with one period", async ({
+    page,
+  }) => {
+    // WP-2423 store-service-controls (v15 M30 live check): "until 8:08 a.m.." read twice.
+    await page.route("**/api/v1/customer/store", (route) =>
+      route.fulfill({
+        status: 200,
+        headers: { "cache-control": "private, max-age=30" },
+        json: {
+          ...syntheticStoreProfile,
+          store: {
+            ...syntheticStoreProfile.store,
+            hours: {
+              ...syntheticStoreProfile.store.hours,
+              status: "Paused",
+              pausedUntil: "08:08:00",
+            },
+          },
+        },
+      }),
+    );
+    await enterOpen(page);
+    await page.goto("/#qr=aaa.bbb.ccc");
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Synthetic Store", exact: true }),
+    ).toBeVisible();
+    await page.evaluate(() => {
+      history.pushState(null, "", "/menu");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    const notice = page.getByRole("alert", { name: "Last orders" });
+    await expect(notice).toHaveText(
+      "Online pickup ordering is paused until 8:08 a.m. You can order at the counter, or come back after 8:08 a.m.",
+    );
+    for (const width of [1440, 1024, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      await expect(notice).toBeVisible();
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+    }
+    await expectNoInternalText(page);
+    await page.screenshot({ path: "test-results/pickup-paused-390.png" });
+  });
+
+  test("a guest who scans on a holiday is told so and when the Store opens next", async ({
+    page,
+  }) => {
+    await page.route("**/bff/customer/entry", (route) =>
+      route.fulfill({
+        status: 409,
+        headers: { "cache-control": "no-store" },
+        json: {
+          schemaVersion: 1,
+          code: "entry_not_accepting",
+          messageKey: "customer.entry.not_accepting",
+          recovery: { action: "TryLaterOrAskStaff", storeSelection: "Hidden" },
+          store: {
+            storeDisplayName: "Synthetic Store",
+            operatingState: "Closed",
+            todayHours: [],
+            todayKind: "Holiday",
+            nextOpening: { localDate: "2026-12-26", startLocalTime: "11:00:00" },
+            localDate: "2026-12-25",
+          },
+        },
+      }),
+    );
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/#qr=aaa.bbb.ccc");
+    const alert = page.getByRole("alert");
+    await expect(alert).toContainText("Synthetic Store isn’t taking orders right now");
+    await expect(alert).toContainText("The store is closed today for a holiday.");
+    await expect(alert).toContainText("Opens tomorrow at 11:00 a.m.");
+    await expect(alert).not.toContainText("Closed today.");
+    await expectNoInternalText(page);
+    await page.screenshot({ path: "test-results/entry-holiday-390.png", fullPage: true });
+  });
+});

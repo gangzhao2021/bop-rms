@@ -2,6 +2,7 @@ import {
   consumeEventInTransaction,
   type ConsumerOutcome,
   type ConsumerRegistry,
+  type ConsumerRegistration,
   type ConsumerTransaction,
   ConsumerTransactionRollback,
   type DomainEventEnvelope,
@@ -51,7 +52,30 @@ export class ConsumerDeliveryWorker {
   constructor(
     private readonly dependencies: {
       readonly database: ConsumerDeliveryPort;
+      /** Trusted owner service entry; must authorize before Inbox duplicate recovery. */
+      readonly consume?: (
+        transaction: ConsumerTransaction,
+        registration: ConsumerRegistration,
+        envelope: DomainEventEnvelope,
+      ) => Promise<ConsumerOutcome>;
       readonly failureRecorder?: ConsumerFailureRecorder;
+      /**
+       * v15 2026-11-01: told of every delivery that did not succeed — the consumer, the event type,
+       * the outcome's fixed code and the error thrown (if any) — so the deployment logs it; a
+       * failing consumer is never silent. Reporting never changes the outcome.
+       */
+      readonly onFailure?: (failure: {
+        readonly consumerName: string;
+        readonly eventType: string;
+        readonly eventId: string;
+        readonly errorCode: string;
+        readonly error: unknown;
+      }) => void;
+      /** A delivery that succeeded (processed, or already processed before). */
+      readonly onDelivered?: (delivery: {
+        readonly consumerName: string;
+        readonly eventId: string;
+      }) => void;
       readonly nowMs?: () => number;
       readonly registry: ConsumerRegistry;
       readonly telemetry?: ConsumerDeliveryTelemetry;
@@ -108,9 +132,11 @@ export class ConsumerDeliveryWorker {
     try {
       const outcome = await this.dependencies.database.transaction(
         { brandId: envelope.tenantId, ...(envelope.storeId ? { storeId: envelope.storeId } : {}) },
-        async (transaction) =>
-          await consumeEventInTransaction(transaction, resolved.registration, envelope),
+        async (transaction) => await this.consume(transaction, resolved.registration, envelope),
       );
+      if ("errorCode" in outcome)
+        this.reportFailure(resolved.registration, envelope.eventId, outcome.errorCode, null);
+      else this.reportDelivered(resolved.registration, envelope.eventId, outcome);
       this.record(consumerAlias, eventAlias, outcome, startedAt);
       return outcome;
     } catch (error) {
@@ -131,8 +157,7 @@ export class ConsumerDeliveryWorker {
               brandId: envelope.tenantId,
               ...(envelope.storeId ? { storeId: envelope.storeId } : {}),
             },
-            async (transaction) =>
-              await consumeEventInTransaction(transaction, resolved.registration, envelope),
+            async (transaction) => await this.consume(transaction, resolved.registration, envelope),
           );
         } catch {
           outcome = {
@@ -141,6 +166,9 @@ export class ConsumerDeliveryWorker {
           };
         }
       }
+      if ("errorCode" in outcome)
+        this.reportFailure(resolved.registration, envelope.eventId, outcome.errorCode, error);
+      else this.reportDelivered(resolved.registration, envelope.eventId, outcome);
       if ("errorCode" in outcome && this.dependencies.failureRecorder)
         await this.recordDeferredFailure({
           attemptNumber,
@@ -156,6 +184,48 @@ export class ConsumerDeliveryWorker {
       this.record(consumerAlias, eventAlias, outcome, startedAt);
       return outcome;
     }
+  }
+
+  private reportFailure(
+    registration: ConsumerRegistration,
+    eventId: string,
+    errorCode: string,
+    error: unknown,
+  ) {
+    try {
+      this.dependencies.onFailure?.({
+        consumerName: registration.consumerName,
+        eventType: registration.eventType,
+        eventId,
+        errorCode,
+        error,
+      });
+    } catch {
+      // Reporting never changes the outcome.
+    }
+  }
+
+  private reportDelivered(
+    registration: ConsumerRegistration,
+    eventId: string,
+    outcome: ConsumerOutcome,
+  ) {
+    if (outcome.status !== "processed" && outcome.status !== "duplicate_completed") return;
+    try {
+      this.dependencies.onDelivered?.({ consumerName: registration.consumerName, eventId });
+    } catch {
+      // Reporting never changes the outcome.
+    }
+  }
+
+  private consume(
+    transaction: ConsumerTransaction,
+    registration: ConsumerRegistration,
+    envelope: DomainEventEnvelope,
+  ): Promise<ConsumerOutcome> {
+    return this.dependencies.consume
+      ? this.dependencies.consume(transaction, registration, envelope)
+      : consumeEventInTransaction(transaction, registration, envelope);
   }
 
   private get nowMs(): () => number {

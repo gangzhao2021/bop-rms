@@ -44,6 +44,45 @@ const registration = (
 });
 
 describe("consumer registry", () => {
+  it("routes distinct event types under one consumer identity", () => {
+    const first = registration();
+    const second = {
+      ...first,
+      eventType: "SyntheticFailed",
+      handler: vi.fn(async () => undefined),
+    };
+    const registry = new ConsumerRegistry([first, second]);
+    expect(registry.resolve(first.consumerName, envelope)).toEqual({ registration: first });
+    expect(
+      registry.resolve(first.consumerName, { ...envelope, eventType: second.eventType }),
+    ).toEqual({ registration: second });
+    expect(
+      registry.resolve(first.consumerName, { ...envelope, eventType: "Unregistered" }),
+    ).toEqual({ errorCode: "EVENT_TYPE_UNSUPPORTED" });
+    expect(() => new ConsumerRegistry([first, second, second])).toThrow(
+      InvalidConsumerRegistryError,
+    );
+  });
+  it.each([
+    { ownerModule: "@rms/ordering" },
+    { tenantScope: "brand" },
+    { ordering: "aggregate" },
+    { replaySafe: false },
+  ])("rejects inconsistent identity across event types: %j", (replacement) => {
+    const first = registration();
+    expect(
+      () =>
+        new ConsumerRegistry([
+          first,
+          {
+            ...first,
+            eventType: "SyntheticFailed",
+            ...replacement,
+          } as ConsumerRegistration,
+        ]),
+    ).toThrow(InvalidConsumerRegistryError);
+  });
+
   it("fails closed for duplicate and unsupported declarations", () => {
     const item = registration();
     expect(() => new ConsumerRegistry([item, item])).toThrow(InvalidConsumerRegistryError);

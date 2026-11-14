@@ -3,11 +3,13 @@ import {
   createStockCount,
   decideStockCount,
   executeStockCountCommand,
+  explainStockCountVariance,
   markStockCountPosted,
   parseInventoryDecimal,
   parseInventoryInstant,
   parseInventoryReference,
   queryStockCounts,
+  refreshStockCountLines,
   saveStockCountLine,
   startStockCount,
   submitStockCount,
@@ -130,7 +132,7 @@ function postCommand(): StockCountCommand {
     brandReference: id(2),
     actorReference: id(4),
     purpose: "StockCountManagement",
-    permission: "inventory.count.post",
+    permission: "inventory.count.approve",
     operationReference: id(61),
     occurredAt: at(14),
     action: "Post",
@@ -262,10 +264,83 @@ describe("Stock Count aggregate", () => {
     expect(counted.lines[0]).toMatchObject({ countedQuantity: "12.500000", variance: "2.5" });
   });
 
-  it("requires every line and a controlled reason for non-zero variance", () => {
-    expect(() => submittedCount(null)).toThrowError(
-      expect.objectContaining({ code: "STOCK_COUNT_INCOMPLETE" }),
-    );
+  it("lets a blind counter submit and requires the reviewer's reason before approval", () => {
+    const submitted = submittedCount(null);
+    expect(submitted.status).toBe("Submitted");
+    expect(() =>
+      decideStockCount(submitted, {
+        decision: "Approve",
+        reasonCode: "VARIANCE_APPROVED",
+        expectedVersion: 4,
+        actorReference: id(4),
+        occurredAt: at(13),
+      }),
+    ).toThrowError(expect.objectContaining({ code: "STOCK_COUNT_INCOMPLETE" }));
+    // The submitter never explains their own variance under segregation.
+    expect(() =>
+      explainStockCountVariance(submitted, {
+        lineReference: id(20),
+        varianceReasonCode: "THEFT",
+        expectedVersion: 4,
+        actorReference: id(3),
+        occurredAt: at(13),
+      }),
+    ).toThrowError(expect.objectContaining({ code: "STOCK_COUNT_SEGREGATION_REQUIRED" }));
+    const explained = explainStockCountVariance(submitted, {
+      lineReference: id(20),
+      varianceReasonCode: "UNRECORDED_RECEIPT",
+      expectedVersion: 4,
+      actorReference: id(4),
+      occurredAt: at(13),
+    });
+    expect(explained.lines[0]?.varianceReasonCode).toBe("UNRECORDED_RECEIPT");
+    expect(
+      decideStockCount(explained, {
+        decision: "Approve",
+        reasonCode: "VARIANCE_APPROVED",
+        expectedVersion: 5,
+        actorReference: id(4),
+        occurredAt: at(14),
+      }).status,
+    ).toBe("Approved");
+  });
+
+  it("refreshes moved lines for recounting while keeping other counts", () => {
+    const started = startStockCount(assignedCount(), 1, id(3), at(10));
+    const counted = saveStockCountLine(started, {
+      lineReference: id(20),
+      countedQuantity: "9",
+      unitCode: "KG",
+      varianceReasonCode: null,
+      expectedVersion: 2,
+      actorReference: id(3),
+      occurredAt: at(11),
+    });
+    const refreshed = refreshStockCountLines(counted, {
+      lines: new Map([
+        [id(20), { expectedQuantity: parseInventoryDecimal("8.5"), balanceVersion: 9 }],
+      ]),
+      expectedVersion: 3,
+      actorReference: id(3),
+      occurredAt: at(12),
+    });
+    expect(refreshed.lines[0]).toMatchObject({
+      expectedQuantity: "8.5",
+      balanceVersion: 9,
+      countedQuantity: null,
+      variance: null,
+      recountNumber: 1,
+    });
+    expect(() =>
+      refreshStockCountLines(counted, {
+        lines: new Map([
+          [id(99), { expectedQuantity: parseInventoryDecimal("1"), balanceVersion: 9 }],
+        ]),
+        expectedVersion: 3,
+        actorReference: id(3),
+        occurredAt: at(12),
+      }),
+    ).toThrowError(expect.objectContaining({ code: "STOCK_COUNT_INVALID" }));
   });
 
   it("enforces submitter/approver segregation and supports rejected recount", () => {

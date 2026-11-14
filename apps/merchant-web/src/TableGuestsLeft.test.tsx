@@ -1,0 +1,439 @@
+import { expect, it, vi } from "vitest";
+import {
+  guestsLeftRoundText,
+  kitchenMayHaveStartedRound,
+  closeOutButtonText,
+  closeOutSummaryText,
+  nothingRefundedText,
+} from "./TableGuestsLeft.js";
+import { setLanguageForTest } from "./i18n/i18n.js";
+import { kitchenMayHaveStartedText } from "./kitchen-cancel-warning.js";
+import {
+  createTableClosePlanClient,
+  parseTableClosePlan,
+  resolvesOnConfirm,
+  type TableCloseRound,
+} from "./dining-table-close-plan-client.js";
+
+const id = (n: number) => "01a4d500-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+const csrf = "A".repeat(43);
+const round = (overrides: Partial<TableCloseRound>): TableCloseRound => ({
+  orderBatchReference: id(20),
+  sequence: 4,
+  state: "PaidNotSent",
+  openItemCount: 2,
+  startedItemCount: 0,
+  readyItemCount: 0,
+  cancellableItemReferences: [],
+  refund: { method: "Online", amountMinor: "1130" },
+  cancelsAt: null,
+  kitchenReceivedAt: null,
+  ...overrides,
+});
+const wire = {
+  orderReference: id(3),
+  diningSessionReference: id(2),
+  orderVersion: 19,
+  observedAt: "2026-10-15T19:00:00.000Z",
+  rounds: [
+    {
+      orderBatchReference: id(20),
+      sequence: 4,
+      state: "PaidNotSent",
+      openItemCount: 1,
+      startedItemCount: 0,
+      readyItemCount: 0,
+      cancellableItemReferences: [],
+      refund: { method: "Online", amountMinor: "1130" },
+      cancelsAt: null,
+      kitchenReceivedAt: null,
+    },
+    {
+      orderBatchReference: id(21),
+      sequence: 1,
+      state: "AlreadyRefunded",
+      openItemCount: 1,
+      startedItemCount: 0,
+      readyItemCount: 0,
+      cancellableItemReferences: [],
+      refund: { method: "Online", amountMinor: "0" },
+      cancelsAt: null,
+      kitchenReceivedAt: null,
+    },
+  ],
+  totals: { onlineMinor: "1130", cardMachineMinor: "0" },
+  closeBlockers: [],
+};
+
+it("DEC-TABLE-CLOSE-GUESTS-LEFT: words each round for staff, with amounts and no internal codes", () => {
+  const now = Date.parse("2026-10-15T19:00:00.000Z");
+  const texts = [
+    guestsLeftRoundText(round({}), "America/Toronto", now),
+    guestsLeftRoundText(
+      round({ refund: { method: "CardMachine", amountMinor: "593" } }),
+      "America/Toronto",
+      now,
+    ),
+    guestsLeftRoundText(round({ state: "AlreadyRefunded" }), "America/Toronto", now),
+    guestsLeftRoundText(
+      round({ state: "NotPaid", refund: null, cancelsAt: "2026-10-15T19:20:00.000Z" }),
+      "America/Toronto",
+      now,
+    ),
+    guestsLeftRoundText(
+      round({
+        state: "PartlyStarted",
+        refund: null,
+        startedItemCount: 1,
+        cancellableItemReferences: [id(30)],
+      }),
+      "America/Toronto",
+      now,
+      "450",
+    ),
+    guestsLeftRoundText(round({ state: "BeingMade", refund: null }), "America/Toronto", now),
+    guestsLeftRoundText(
+      round({
+        state: "RefundOnCardMachine",
+        refund: { method: "CardMachine", amountMinor: "593" },
+      }),
+      "America/Toronto",
+      now,
+    ),
+  ];
+  expect(texts[0]).toBe(
+    "Round 4: paid $11.30 online but never sent to the kitchen. It will be cancelled and the guest refunded.",
+  );
+  expect(texts[1]).toContain("refund it on the card machine");
+  expect(texts[2]).toContain("already refunded in full");
+  expect(texts[3]).toContain("It will be cancelled now (otherwise automatically at 15:20)");
+  // v15 batch 8: in Chinese the time reads as Chinese, with no English "at".
+  setLanguageForTest("zh-Hans");
+  try {
+    const unpaidZh = guestsLeftRoundText(
+      round({ state: "NotPaid", refund: null, cancelsAt: "2026-10-15T19:20:00.000Z" }),
+      "America/Toronto",
+      now,
+    );
+    expect(unpaidZh).toBe(
+      "第 4 轮：未付款，没有收取任何费用。现在会被取消（否则会在 15:20 自动取消）；不会退款。",
+    );
+    expect(unpaidZh).not.toMatch(/[A-Za-z]{2,}/u);
+  } finally {
+    setLanguageForTest("en");
+  }
+  // WP-2423 abandoned payment: a payment started and never finished is cancelled too.
+  expect(
+    guestsLeftRoundText(
+      round({ state: "PaymentInProgress", refund: null, cancelsAt: "2026-10-15T19:20:00.000Z" }),
+      "America/Toronto",
+      now,
+    ),
+  ).toContain("started paying online but hasn't finished. It will be cancelled now");
+  expect(texts[4]).toContain("$4.50 refunded");
+  expect(texts[5]).toContain("mark them served");
+  expect(texts.join(" ")).not.toContain("CAD");
+  expect(texts[6]).toContain("Refund $5.93 on the card machine");
+  // v15 DEMO-02 round 16: accepted, refunded in full on the card machine item by item already.
+  const refunded = guestsLeftRoundText(
+    round({
+      state: "NotStarted",
+      openItemCount: 1,
+      refund: { method: "CardMachine", amountMinor: "0" },
+    }),
+    "America/Toronto",
+    now,
+  );
+  expect(refunded).toBe(
+    "Round 4: 1 item not marked started in the kitchen, already refunded in full. It will be cancelled; nothing is left to refund.",
+  );
+  texts.push(refunded);
+  for (const text of texts) expect(text).not.toMatch(/[0-9a-f]{8}-|GUEST_LEFT|PaidNotSent|Batch/u);
+});
+
+it("DEC-TABLE-CLOSE-GUESTS-LEFT: parses the plan strictly and resolves rounds with the existing cancellations", async () => {
+  const plan = parseTableClosePlan(wire, { order: id(3), session: id(2) });
+  expect(plan.rounds.map(resolvesOnConfirm)).toEqual([true, true]);
+  expect(() => parseTableClosePlan(wire, { order: id(9), session: id(2) })).toThrow();
+  expect(() =>
+    parseTableClosePlan(
+      { ...wire, rounds: [{ ...wire.rounds[0], refund: null }] },
+      { order: id(3), session: id(2) },
+    ),
+  ).toThrow();
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ status: "Cancelled" }), { status: 200 }))
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "order_version_conflict" }), { status: 409 }),
+    )
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "full_sign_in_required" }), { status: 403 }),
+    )
+    .mockRejectedValueOnce(new Error("offline"));
+  const client = createTableClosePlanClient(fetcher);
+  const first = plan.rounds[0] as TableCloseRound;
+  expect(await client.resolve(plan, first, id(40), csrf)).toBe("Done");
+  expect(fetcher.mock.calls[0]?.[0]).toBe("/merchant/orders/cancel");
+  expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toEqual({
+    orderReference: id(3),
+    orderBatchReference: id(20),
+    expectedOrderVersion: 19,
+    operationReference: id(40),
+    reasonCode: "GUEST_LEFT",
+  });
+  expect(await client.resolve(plan, first, id(41), csrf)).toBe("Changed");
+  expect(await client.resolve(plan, first, id(42), csrf)).toBe("FullSignInRequired");
+  expect(await client.resolve(plan, first, id(42), csrf)).toBe("Unknown");
+  // Lines not started of a round partly made go through the item cancellation.
+  const items = vi.fn<typeof fetch>().mockResolvedValue(new Response("{}", { status: 200 }));
+  await createTableClosePlanClient(items).resolve(
+    plan,
+    round({ state: "PartlyStarted", refund: null, cancellableItemReferences: [id(30)] }),
+    id(43),
+    csrf,
+  );
+  expect(items.mock.calls[0]?.[0]).toBe("/merchant/orders/cancel-items");
+  expect(JSON.parse(String(items.mock.calls[0]?.[1]?.body))).toMatchObject({
+    orderItemReferences: [id(30)],
+    reasonCode: "GUEST_LEFT",
+  });
+});
+
+it("WP-2423 B759: the plan carries the close evaluation's reasons, strictly", () => {
+  const expected = { order: id(3), session: id(2) };
+  expect(
+    parseTableClosePlan({ ...wire, closeBlockers: ["REFUND_PENDING"] }, expected).closeBlockers,
+  ).toEqual(["REFUND_PENDING"]);
+  const missing: Record<string, unknown> = { ...wire };
+  delete missing.closeBlockers;
+  expect(() => parseTableClosePlan(missing, expected)).toThrow();
+  expect(() => parseTableClosePlan({ ...wire, closeBlockers: ["not a code"] }, expected)).toThrow();
+});
+
+it("WP-2423: started items are worded by kitchen readiness (ready to serve vs being made)", () => {
+  const now = Date.parse("2026-10-15T19:00:00.000Z");
+  const text = (overrides: Partial<TableCloseRound>, preview: string | null = null) =>
+    guestsLeftRoundText(round({ refund: null, ...overrides }), "America/Toronto", now, preview);
+  // v15: the kitchen marked the only open item ready; it is not "being made" any more.
+  expect(
+    text({ state: "BeingMade", openItemCount: 1, startedItemCount: 1, readyItemCount: 1 }),
+  ).toBe("Round 4: 1 item ready to serve. Serve them, or mark them served on the Orders page.");
+  expect(
+    text({ state: "BeingMade", openItemCount: 3, startedItemCount: 3, readyItemCount: 1 }),
+  ).toContain("2 items being made and 1 ready to serve.");
+  expect(
+    text({ state: "BeingMade", openItemCount: 2, startedItemCount: 2, readyItemCount: 0 }),
+  ).toContain("2 items already being made.");
+  // Paid on the card machine with an item not started yet.
+  expect(
+    text({ state: "BeingMade", openItemCount: 3, startedItemCount: 1, readyItemCount: 1 }),
+  ).toContain("2 items being made or paid on the card machine and 1 ready to serve.");
+  expect(
+    text(
+      {
+        state: "PartlyStarted",
+        openItemCount: 2,
+        startedItemCount: 1,
+        readyItemCount: 1,
+        cancellableItemReferences: [id(30)],
+      },
+      "450",
+    ),
+  ).toBe(
+    "Round 4: 1 item not marked started will be cancelled and $4.50 refunded. 1 item ready to serve: serve them, or mark them served on the Orders page.",
+  );
+});
+
+it("WP-2423: a plan claiming more ready items than started is refused", () => {
+  const value = { ...wire, rounds: wire.rounds.map((round) => ({ ...round, readyItemCount: 1 })) };
+  expect(() => parseTableClosePlan(value, { order: id(3), session: id(2) })).toThrow();
+});
+
+it("v15 2026-10-28 (b): a table that pays at the end says to serve its dishes, never to cancel and refund them", () => {
+  const now = Date.parse("2026-10-28T01:00:00.000Z");
+  for (const state of ["OnTableBill", "PaidWithTable"] as const) {
+    expect(
+      parseTableClosePlan(
+        {
+          ...wire,
+          rounds: [{ ...wire.rounds[0], state, refund: null }],
+        },
+        { order: id(3), session: id(2) },
+      ).rounds[0]?.state,
+    ).toBe(state);
+    expect(resolvesOnConfirm(round({ state, refund: null }))).toBe(false);
+  }
+  expect(
+    guestsLeftRoundText(round({ state: "OnTableBill", refund: null, sequence: 1 }), undefined, now),
+  ).toContain("Serve them when they're ready");
+  expect(
+    guestsLeftRoundText(
+      round({ state: "PaidWithTable", refund: null, sequence: 1 }),
+      undefined,
+      now,
+    ),
+  ).toContain("paid with the table, 2 items not served yet");
+});
+
+it("v15 2026-11-06: a reply from an older server without kitchenReceivedAt still reads, strictly", () => {
+  const expected = { order: id(3), session: id(2) };
+  const [first, second] = wire.rounds as unknown as [Record<string, unknown>, unknown];
+  const older = Object.fromEntries(
+    Object.entries(first).filter(([key]) => key !== "kitchenReceivedAt"),
+  );
+  const plan = parseTableClosePlan({ ...wire, rounds: [older, second] }, expected);
+  expect(plan.rounds.map((r) => r.kitchenReceivedAt)).toEqual([null, null]);
+  expect(
+    parseTableClosePlan(
+      { ...wire, rounds: [{ ...first, kitchenReceivedAt: "2026-10-15T18:55:00.000Z" }] },
+      expected,
+    ).rounds.map((r) => r.kitchenReceivedAt),
+  ).toEqual(["2026-10-15T18:55:00.000Z"]);
+  expect(() =>
+    parseTableClosePlan({ ...wire, rounds: [{ ...first, kitchenReceivedAt: "bad" }] }, expected),
+  ).toThrow();
+  expect(() =>
+    parseTableClosePlan({ ...wire, rounds: [{ ...older, unexpected: 1 }] }, expected),
+  ).toThrow();
+});
+
+it("v15 2026-11-06: the kitchen note names the round the kitchen has had a while, not the first one", () => {
+  const now = Date.parse("2026-10-15T19:00:00.000Z");
+  const fresh = round({
+    orderBatchReference: id(40),
+    state: "NotStarted",
+    kitchenReceivedAt: "2026-10-15T18:59:00.000Z",
+  });
+  const waiting = round({
+    orderBatchReference: id(41),
+    state: "NotStarted",
+    kitchenReceivedAt: "2026-10-15T18:55:00.000Z",
+  });
+  const found = kitchenMayHaveStartedRound([fresh, waiting], now);
+  expect(found?.orderBatchReference).toBe(id(41));
+  expect(kitchenMayHaveStartedText(found?.kitchenReceivedAt, now)).toContain("5 min ago");
+  expect(kitchenMayHaveStartedRound([fresh, round({ state: "NotStarted" })], now)).toBeUndefined();
+  expect(
+    kitchenMayHaveStartedRound([round({ ...waiting, state: "BeingMade", refund: null })], now),
+  ).toBeUndefined();
+});
+
+it("v15 2026-11-06 (Fireside Table 5): a round waiting for staff OK is never 'cancelled automatically'; closing cancels it with the held-round Cancel", async () => {
+  const now = Date.parse("2026-10-15T19:00:00.000Z");
+  const waiting = round({ state: "WaitingForStaff", refund: null, cancelsAt: null });
+  const text = guestsLeftRoundText(waiting, "America/Toronto", now);
+  expect(text).toBe(
+    "Round 4: waiting for your OK, never sent to the kitchen, nothing paid. It will be cancelled now; nothing is refunded.",
+  );
+  expect(text).not.toContain("automatically");
+  expect(resolvesOnConfirm(waiting)).toBe(true);
+  const plan = parseTableClosePlan(
+    {
+      ...wire,
+      rounds: [{ ...wire.rounds[0], state: "WaitingForStaff", refund: null }],
+      totals: { onlineMinor: "0", cardMachineMinor: "0" },
+    },
+    { order: id(3), session: id(2) },
+  );
+  expect(plan.rounds[0]?.state).toBe("WaitingForStaff");
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ status: "Cancelled" }), { status: 200 }))
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "held_round_not_waiting" }), { status: 409 }),
+    );
+  const client = createTableClosePlanClient(fetcher);
+  expect(await client.resolve(plan, plan.rounds[0] as TableCloseRound, id(44), csrf)).toBe("Done");
+  expect(fetcher.mock.calls[0]?.[0]).toBe("/merchant/dining/held-round");
+  expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toEqual({
+    action: "Cancel",
+    orderReference: id(3),
+    orderBatchReference: id(20),
+    operationReference: id(44),
+  });
+  // Staff decided it meanwhile: the plan is read again.
+  expect(await client.resolve(plan, plan.rounds[0] as TableCloseRound, id(45), csrf)).toBe(
+    "Changed",
+  );
+});
+
+it("WP-2423 live minor 21: closing out rounds that took no money says so, and never claims no money for an unfinished payment", () => {
+  const notPaid = round({ state: "NotPaid", refund: null });
+  const paying = round({ state: "PaymentInProgress", refund: null });
+  const refunded = round({
+    state: "AlreadyRefunded",
+    refund: { method: "Online", amountMinor: "0" },
+  });
+  expect(nothingRefundedText([notPaid])).toBe("refunds nothing: no money was taken");
+  expect(nothingRefundedText([paying])).toBe("refunds nothing: no payment has finished");
+  expect(nothingRefundedText([notPaid, paying])).toBe("refunds nothing: no payment has finished");
+  expect(nothingRefundedText([notPaid, refunded])).toBe(
+    "refunds nothing more: the unpaid rounds took no money, and what was paid has already been refunded",
+  );
+  expect(nothingRefundedText([paying, refunded])).toBe(
+    "refunds nothing more: no payment has finished for the unpaid rounds, and what was paid has already been refunded",
+  );
+  expect(nothingRefundedText([refunded])).toBe(
+    "refunds nothing more: what was paid has already been refunded",
+  );
+  for (const text of [nothingRefundedText([paying]), nothingRefundedText([paying, refunded])])
+    expect(text).not.toMatch(/no money was taken|took no money/u);
+  setLanguageForTest("zh-Hans");
+  try {
+    expect(nothingRefundedText([notPaid])).toBe("不退款：没有收过钱");
+    expect(nothingRefundedText([paying])).toBe("不退款：还没有完成的付款");
+  } finally {
+    setLanguageForTest("en");
+  }
+});
+
+it("WP-2423 M123: the close-out button says refund only when a round took money", () => {
+  const unpaid = round({ state: "NotPaid", refund: null });
+  const paid = round({ state: "PaidNotSent" });
+  expect(closeOutButtonText([unpaid])).toBe("Cancel the round");
+  expect(closeOutButtonText([unpaid, unpaid])).toBe("Cancel 2 rounds");
+  expect(closeOutButtonText([paid])).toBe("Cancel the round and refund");
+  expect(closeOutButtonText([unpaid, paid])).toBe("Cancel 2 rounds and refund");
+  setLanguageForTest("zh-Hans");
+  expect(closeOutButtonText([unpaid])).toBe("取消这一轮");
+  expect(closeOutButtonText([unpaid, unpaid])).toBe("取消 2 轮");
+  setLanguageForTest("en");
+});
+
+it("WP-2423 M123 (v15 live check): the close-out summary is whole sentences, in Chinese too", () => {
+  const paid = round({ state: "PaidNotSent" });
+  const unpaid = round({ state: "NotPaid", refund: null });
+  const none = { online: null, unknownPartly: false, machine: null };
+  expect(closeOutSummaryText([paid], { ...none, online: "$28.25" })).toBe(
+    "Closing out this round refunds $28.25 to the guest online. The reason recorded is “Guests left”.",
+  );
+  expect(closeOutSummaryText([paid, paid], { ...none, online: "$11.30", machine: "$5.93" })).toBe(
+    "Closing out these 2 rounds refunds $11.30 to the guest online and $5.93 to refund on the card machine. The reason recorded is “Guests left”.",
+  );
+  expect(closeOutSummaryText([paid], { ...none, machine: "$5.93" })).toBe(
+    "Closing out this round leaves $5.93 to refund on the card machine. The reason recorded is “Guests left”.",
+  );
+  expect(closeOutSummaryText([unpaid], none)).toBe(
+    "Closing out this round refunds nothing: no money was taken. The reason recorded is “Guests left”.",
+  );
+  setLanguageForTest("zh-Hans");
+  try {
+    expect(closeOutSummaryText([paid], { ...none, online: "$28.25" })).toBe(
+      "结束这一轮将在线向顾客退款 $28.25。记录的原因为“顾客已离开”。",
+    );
+    expect(closeOutSummaryText([paid, paid], { ...none, machine: "$5.93" })).toBe(
+      "结束这 2 轮后，还需在刷卡机上退款 $5.93。记录的原因为“顾客已离开”。",
+    );
+    expect(closeOutSummaryText([unpaid], none)).toBe(
+      "结束这一轮不退款：没有收过钱。记录的原因为“顾客已离开”。",
+    );
+    for (const text of [
+      closeOutSummaryText([paid], { ...none, online: "$1.00", unknownPartly: true }),
+      closeOutSummaryText([unpaid], none),
+    ])
+      expect(text).not.toMatch(/[A-Za-z]{2,}/u);
+  } finally {
+    setLanguageForTest("en");
+  }
+});

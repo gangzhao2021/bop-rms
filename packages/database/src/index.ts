@@ -40,7 +40,36 @@ export {
   type TenantDatabaseScope,
 } from "./tenant-context.ts";
 export {
+  acquireTenantConnection,
+  isTransientConnectionAcquireFailure,
+  noteTenantDatabaseAnswered,
+  remainingRequestAcquireBudgetMs,
+  requestAnswerTimeLeftMs,
+  requestReadAnswerMs,
+  runWithRequestAcquireBudget,
+  tenantConnectionAcquireBudgetMaxMs,
+  tenantConnectionRetryBaseMs,
+  tenantConnectionRetryCapMs,
+  tenantConnectionRetryMinimumMs,
+  type TenantConnectionAcquirePolicy,
+} from "./connection-acquire.ts";
+export {
   createTenantTransactionRunner,
+  isRetryableTransactionConflict,
+  runTogether,
   type DatabaseTransaction,
   type DatabaseTransactionRunner,
 } from "./transaction-runner.ts";
+export { withVerifiedChecks } from "./request-check-memo.ts";
+export {
+  snapshotReadBegin,
+  snapshotReadStatement,
+  type SnapshotReadStatement,
+} from "./snapshot-read.ts";
+
+export {
+  createAbuseBudgetConsumer,
+  AbuseBudgetUnavailableError,
+  type AbuseBucketClass,
+  type AbuseBudgetResult,
+} from "./abuse-budget.ts";

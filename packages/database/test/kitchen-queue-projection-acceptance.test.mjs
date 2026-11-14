@@ -1,3 +1,19 @@
+import { createHash } from "node:crypto";
+import {
+  createPostgresKitchenQueueProjectionStore,
+  computeKitchenQueueSourceEventBindingDigest,
+  computeKitchenQueueSnapshotDigest,
+} from "../../rms/kitchen/src/index.ts";
+import {
+  generationColumns,
+  rowColumns,
+  generationValue,
+  rowValue,
+} from "../../rms/kitchen/src/infrastructure/persistence/kitchen-queue-queries.ts";
+import {
+  createKitchenQueueProjectionService,
+  createPostgresKitchenQueueQueries,
+} from "../../rms/kitchen/src/index.ts";
 import assert from "node:assert/strict";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -205,18 +221,25 @@ async function prove(context) {
   await client.connect();
   await contender.connect();
   try {
-    const migrationCount = await client.query(
-      "SELECT count(*)::integer AS count FROM platform_core.migration_history",
+    const queueProjectionMigration = await client.query(
+      "SELECT migration_id,relative_path FROM platform_core.migration_history WHERE migration_id=$1",
+      ["1500_002_create_kitchen_work_queue_projection"],
     );
-    assert.equal(migrationCount.rows[0].count, 49);
+    assert.deepEqual(queueProjectionMigration.rows, [
+      {
+        migration_id: "1500_002_create_kitchen_work_queue_projection",
+        relative_path:
+          "migrations/1500-rms-kitchen/1500_002_create_kitchen_work_queue_projection.sql",
+      },
+    ]);
 
     const inventory = await client.query(
       `SELECT table_name FROM information_schema.tables
        WHERE table_schema='rms_kitchen' AND table_type='BASE TABLE'
        ORDER BY table_name`,
     );
+    const tableNames = new Set(inventory.rows.map((row) => row.table_name));
     assert.deepEqual(
-      inventory.rows.map((row) => row.table_name),
       [
         "kitchen_action_record",
         "kitchen_order_item_ready_result",
@@ -225,7 +248,8 @@ async function prove(context) {
         "kitchen_work_lifecycle_operation",
         "kitchen_work_queue_projection",
         "kitchen_work_queue_projection_generation",
-      ],
+      ].filter((tableName) => !tableNames.has(tableName)),
+      [],
     );
 
     const generationColumns = await client.query(
@@ -832,4 +856,546 @@ async function prove(context) {
 
 it("enforces the complete Store-scoped Kitchen queue generation projection", async () => {
   await withIsolatedDatabase({ caseId: "kitchen_queue", root }, prove);
+}, 180_000);
+
+it("reads current-schema Kitchen queue through the owner adapter", async () => {
+  await withIsolatedDatabase({ caseId: "wp2402_queue", root }, async (context) => {
+    const client = new Client(context.clientConfig);
+    const role = "bop_wp2402_queue_" + context.runId;
+    await client.connect();
+    let roleCreated = false;
+    try {
+      const source = await seedSource(client);
+      await client.query(
+        "CREATE ROLE " + role + " NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT",
+      );
+      roleCreated = true;
+      await client.query("GRANT USAGE ON SCHEMA rms_kitchen,platform_helpers TO " + role);
+      await client.query(
+        "GRANT EXECUTE ON FUNCTION platform_helpers.current_brand_id(),platform_helpers.current_store_id() TO " +
+          role,
+      );
+      await client.query(
+        "GRANT SELECT ON rms_kitchen.kitchen_work_queue_projection_generation,rms_kitchen.kitchen_work_queue_projection TO " +
+          role,
+      );
+      let allowed = true;
+      const queries = createPostgresKitchenQueueQueries({
+        brandReference: id(1),
+        storeReference: id(2),
+        authorize: async () => allowed,
+      });
+      const query = {
+        actorReference: id(99),
+        brandReference: id(1),
+        storeReference: id(2),
+        observedAt: projectedAt,
+        filters: {
+          orderReference: null,
+          ticketReference: null,
+          workItemReference: null,
+          stationReference: null,
+          status: null,
+        },
+        cursor: null,
+        limit: 1,
+      };
+      const read = async (work, store = id(2)) => {
+        await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+        try {
+          await setLockScope(client, id(1), store);
+          await client.query("SET LOCAL ROLE " + role);
+          const value = await work({ query: (sql, values) => client.query(sql, [...values]) });
+          await client.query("COMMIT");
+          return value;
+        } catch (error) {
+          await client.query("ROLLBACK");
+          throw error;
+        }
+      };
+      assert.deepEqual(await read((transaction) => queries.list({ transaction, query })), {
+        status: "NoActive",
+      });
+      await client.query(
+        "GRANT INSERT,UPDATE ON rms_kitchen.kitchen_work_queue_projection_generation TO " + role,
+      );
+      await client.query("GRANT INSERT ON rms_kitchen.kitchen_work_queue_projection TO " + role);
+      await client.query("GRANT EXECUTE ON FUNCTION platform_helpers.is_uuid_v7(uuid) TO " + role);
+      const hash = (value) => "sha256:" + createHash("sha256").update(value).digest("hex");
+      const databaseGeneration = generation({
+        generation_status: "Active",
+        ticket_count: 1,
+        work_item_count: 1,
+        initialized_empty: false,
+      });
+      const databaseRow = queueRow(source, databaseGeneration);
+      const mappedRow = Object.fromEntries(
+        Object.entries(rowColumns).map(([key, column]) => [key, databaseRow[column]]),
+      );
+      mappedRow.ticketAggregateVersion = String(mappedRow.ticketAggregateVersion);
+      mappedRow.workItemVersion = String(mappedRow.workItemVersion);
+      mappedRow.localizedDisplayNames = JSON.parse(mappedRow.localizedDisplayNames);
+      mappedRow.selectedOptions = JSON.parse(mappedRow.selectedOptions);
+      const originalRows = [rowValue(mappedRow)];
+      const makeBundle = (reference) => {
+        const rows = originalRows.map((row) => ({
+          ...row,
+          projectionGenerationReference: reference,
+        }));
+        const gen = generationValue(
+          Object.fromEntries(
+            Object.entries(generationColumns).map(([key, column]) => [
+              key,
+              databaseGeneration[column],
+            ]),
+          ),
+        );
+        return {
+          generation: {
+            ...gen,
+            projectionGenerationReference: reference,
+            sourceEventBindingDigest: computeKitchenQueueSourceEventBindingDigest(rows, hash),
+            queueSnapshotDigest: computeKitchenQueueSnapshotDigest(
+              { brandReference: id(1), storeReference: id(2), rows, snapshotBindingVersion: 2 },
+              hash,
+            ),
+          },
+          rows,
+        };
+      };
+      let currentSource = true;
+      const store = createPostgresKitchenQueueProjectionStore({
+        brandReference: id(1),
+        storeReference: id(2),
+        maxRows: 100,
+        sha256: hash,
+        authorize: async () => allowed,
+        validateCurrentSource: async () => currentSource,
+      });
+      const failures = [];
+      const write = async (work) =>
+        withScope(client, role, id(1), id(2), () =>
+          work({
+            query: async (sql, values) => {
+              try {
+                return await client.query(sql, [...values]);
+              } catch (error) {
+                failures.push({
+                  code: /^[0-9A-Z]{5}$/.test(error.code) ? error.code : "UNKNOWN",
+                  table: error.table ?? "unknown",
+                  constraint: error.constraint ?? "unknown",
+                });
+                throw error;
+              }
+            },
+          }).catch((error) => {
+            assert.fail(JSON.stringify({ code: error.code, failures }));
+          }),
+        );
+      const first = makeBundle(id(100));
+      const firstResult = await write((transaction) =>
+        store.replaceActive({ transaction, ...first, expectedActiveGenerationReference: null }),
+      );
+      assert.equal(firstResult.status, "Activated");
+      assert.deepEqual(
+        await write((transaction) =>
+          store.replaceActive({ transaction, ...first, expectedActiveGenerationReference: null }),
+        ),
+        firstResult,
+      );
+      const second = makeBundle(id(200));
+      assert.deepEqual(
+        await write((transaction) =>
+          store.replaceActive({ transaction, ...second, expectedActiveGenerationReference: null }),
+        ),
+        { status: "Conflict" },
+      );
+      currentSource = false;
+      await assert.rejects(
+        write((transaction) =>
+          store.replaceActive({
+            transaction,
+            ...second,
+            expectedActiveGenerationReference: id(100),
+          }),
+        ),
+      );
+      currentSource = true;
+      // Force a row-write failure after generation insert; savepoint must remove the partial generation.
+      await write(async (transaction) => {
+        await assert.rejects(
+          store.replaceActive({
+            transaction: {
+              query: (sql, values) => {
+                if (sql.startsWith("INSERT INTO rms_kitchen.kitchen_work_queue_projection ("))
+                  throw new Error("synthetic row-write failure");
+                return transaction.query(sql, values);
+              },
+            },
+            ...second,
+            expectedActiveGenerationReference: id(100),
+          }),
+        );
+        const active = await store.loadActive({
+          transaction,
+          brandReference: id(1),
+          storeReference: id(2),
+        });
+        assert.equal(active.generation.projectionGenerationReference, id(100));
+        const absent = await transaction.query(
+          "SELECT count(*)::int AS count FROM rms_kitchen.kitchen_work_queue_projection_generation WHERE projection_generation_id=$1",
+          [id(200)],
+        );
+        assert.equal(absent.rows[0].count, 0);
+      });
+      assert.equal(
+        (
+          await write((transaction) =>
+            store.replaceActive({
+              transaction,
+              ...second,
+              expectedActiveGenerationReference: id(100),
+            }),
+          )
+        ).status,
+        "Activated",
+      );
+      const history = await client.query(
+        "SELECT generation_status FROM rms_kitchen.kitchen_work_queue_projection_generation WHERE brand_id=$1 AND store_id=$2 ORDER BY projection_generation_id",
+        [id(1), id(2)],
+      );
+      assert.deepEqual(
+        history.rows.map((row) => row.generation_status),
+        ["Retired", "Active"],
+      );
+      const rebuilt = makeBundle(id(300));
+      rebuilt.generation = {
+        ...rebuilt.generation,
+        rebuildReference: id(301),
+        rebuildRequestDigest: hash("synthetic-rebuild-request"),
+        rebuildRequestedAt: asOf,
+        expectedPriorGenerationReference: id(200),
+        lastRebuiltAt: projectedAt,
+      };
+      assert.equal(
+        (
+          await write((transaction) =>
+            store.replaceActive({
+              transaction,
+              ...rebuilt,
+              expectedActiveGenerationReference: id(200),
+            }),
+          )
+        ).status,
+        "Activated",
+      );
+      const lookup = {
+        brandReference: id(1),
+        storeReference: id(2),
+        rebuildReference: id(301),
+        rebuildRequestDigest: rebuilt.generation.rebuildRequestDigest,
+      };
+      assert.deepEqual(
+        await read((transaction) => store.loadByRebuildReference({ transaction, ...lookup })),
+        { status: "Found", ...rebuilt },
+      );
+      assert.deepEqual(
+        await read((transaction) =>
+          store.loadByRebuildReference({
+            transaction,
+            ...lookup,
+            rebuildRequestDigest: hash("different-request"),
+          }),
+        ),
+        { status: "Conflict" },
+      );
+      assert.deepEqual(
+        await read((transaction) =>
+          store.loadByRebuildReference({ transaction, ...lookup, rebuildReference: id(302) }),
+        ),
+        { status: "NotFound" },
+      );
+      const page = await read((transaction) => queries.list({ transaction, query }));
+      assert.equal(page.status, "Found");
+      assert.equal(page.returnedCount, 1);
+      assert.equal(page.hasMore, false);
+      assert.equal(page.rows[0].workItemReference, source.kitchenWorkItemId);
+      assert.equal(page.rows[0].ticketAggregateVersion, 1n);
+      assert.equal(page.rows[0].workItemCreatedAt, asOf);
+      const detailQuery = {
+        actorReference: id(99),
+        brandReference: id(1),
+        storeReference: id(2),
+        observedAt: projectedAt,
+        workItemReference: source.kitchenWorkItemId,
+      };
+      const detail = await read((transaction) => queries.get({ transaction, query: detailQuery }));
+      assert.deepEqual(detail.row, page.rows[0]);
+      const filtered = await read((transaction) =>
+        queries.list({
+          transaction,
+          query: { ...query, filters: { ...query.filters, status: "Completed" } },
+        }),
+      );
+      assert.equal(filtered.returnedCount, 0);
+      const byOrder = await read((transaction) =>
+        queries.list({
+          transaction,
+          query: { ...query, filters: { ...query.filters, orderReference: source.orderId } },
+        }),
+      );
+      assert.equal(byOrder.status, "Found");
+      assert.equal(byOrder.returnedCount, 1);
+      assert.equal(byOrder.rows[0].orderReference, source.orderId);
+      const byTicket = await read((transaction) =>
+        queries.list({
+          transaction,
+          query: {
+            ...query,
+            filters: { ...query.filters, ticketReference: source.kitchenTicketId },
+          },
+        }),
+      );
+      assert.equal(byTicket.status, "Found");
+      assert.equal(byTicket.returnedCount, 1);
+      assert.equal(byTicket.rows[0].ticketReference, source.kitchenTicketId);
+      const missingReference = await read((transaction) =>
+        queries.list({
+          transaction,
+          query: { ...query, filters: { ...query.filters, ticketReference: id(999) } },
+        }),
+      );
+      assert.equal(missingReference.status, "Found");
+      assert.equal(missingReference.returnedCount, 0);
+      assert.deepEqual(missingReference.rows, []);
+      // WP-2423: a later page continues the generation its cursor came from after a kitchen step
+      // superseded it (one consistent board); the successor's projection time is reported.
+      const continuation = {
+        ...query,
+        cursor: {
+          projectionGenerationReference: id(200),
+          afterCreatedAt: "2000-01-01T00:00:00.000Z",
+          afterWorkItemReference: id(1),
+          filterSortDigest: hash("synthetic-filter"),
+        },
+      };
+      const continued = await read((transaction) =>
+        queries.list({ transaction, query: continuation }),
+      );
+      assert.equal(continued.status, "Continued");
+      assert.equal(continued.generation.projectionGenerationReference, id(200));
+      assert.equal(continued.generation.generationStatus, "Retired");
+      assert.equal(continued.supersededAt, rebuilt.generation.projectedAt);
+      assert.equal(continued.returnedCount, 1);
+      assert.equal(continued.rows[0].projectionGenerationReference, id(200));
+      assert.equal(continued.rows[0].workItemReference, source.kitchenWorkItemId);
+      // An unknown generation is read against the active one (the service answers Conflict).
+      const unknown = await read((transaction) =>
+        queries.list({
+          transaction,
+          query: {
+            ...continuation,
+            cursor: { ...continuation.cursor, projectionGenerationReference: id(999) },
+          },
+        }),
+      );
+      assert.equal(unknown.status, "Found");
+      assert.equal(unknown.generation.projectionGenerationReference, id(300));
+      const hidden = await read((transaction) => queries.list({ transaction, query }), id(3));
+      assert.deepEqual(hidden, { status: "NoActive" });
+      allowed = false;
+      await assert.rejects(
+        read((transaction) => queries.list({ transaction, query })),
+        { code: "KITCHEN_QUEUE_PERMISSION_DENIED" },
+      );
+    } finally {
+      await client.query("ROLLBACK").catch(() => undefined);
+      await client.query("RESET ROLE").catch(() => undefined);
+      if (roleCreated) {
+        await client.query("DROP OWNED BY " + role);
+        await client.query("DROP ROLE " + role);
+      }
+      await client.end();
+    }
+  });
+}, 180_000);
+
+it("reads a board over one page as one snapshot when a kitchen step lands between page reads", async () => {
+  // WP-2423 (v15 2026-10-16): every kitchen step publishes a new queue generation, so a board of
+  // more than 50 items read page by page got a 409 on page 2 whenever a step landed in between.
+  // Under the restricted read role, through the real Kitchen query service and owner adapter: the
+  // later page continues the generation the first page came from while that is recent, and only
+  // a cursor superseded over a minute ago is a Conflict (the board reads from its first page).
+  await withIsolatedDatabase({ caseId: "wp2423_queue_pages", root }, async (context) => {
+    const client = new Client(context.clientConfig);
+    const role = "bop_wp2423_pages_" + context.runId;
+    await client.connect();
+    let roleCreated = false;
+    try {
+      const source = await seedSource(client);
+      const items = [source.kitchenWorkItemId];
+      for (let index = 2; index <= 60; index++) {
+        const workItem = id(1000 + index);
+        items.push(workItem);
+        await client.query(
+          `INSERT INTO rms_kitchen.kitchen_work_item (
+             kitchen_work_item_id,brand_id,store_id,kitchen_ticket_id,order_id,order_batch_id,
+             order_item_id,source_evidence_id,work_plan_id,source_item_ordinal,split_ordinal,
+             version,status,required_quantity,completed_quantity,product_id,product_version_id,
+             sku_id,menu_version_id,localized_display_names_json,selected_options_json,
+             source_line_digest,station_id,routing_rule_id,routing_rule_version,routing_rule_digest,
+             preparation_id,preparation_version,preparation_digest,preparation_instructions_json,
+             execution_snapshot_digest,created_by_actor_type,updated_by_actor_type,created_at,updated_at
+           ) SELECT $1,brand_id,store_id,kitchen_ticket_id,order_id,order_batch_id,$2,
+             source_evidence_id,work_plan_id,$3,split_ordinal,version,status,required_quantity,
+             completed_quantity,product_id,product_version_id,sku_id,menu_version_id,
+             localized_display_names_json,selected_options_json,source_line_digest,station_id,
+             routing_rule_id,routing_rule_version,routing_rule_digest,preparation_id,
+             preparation_version,preparation_digest,preparation_instructions_json,
+             execution_snapshot_digest,created_by_actor_type,updated_by_actor_type,created_at,updated_at
+           FROM rms_kitchen.kitchen_work_item WHERE kitchen_work_item_id=$4`,
+          [workItem, id(2000 + index), index, source.kitchenWorkItemId],
+        );
+      }
+      const publish = async (generationRow, status) => {
+        await insertRow(client, "kitchen_work_queue_projection_generation", generationRow);
+        for (const [index, workItem] of items.entries())
+          await insertRow(
+            client,
+            "kitchen_work_queue_projection",
+            queueRow(source, generationRow, {
+              kitchen_work_item_id: workItem,
+              order_item_id: index === 0 ? source.orderItemId : id(2001 + index),
+              source_item_ordinal: index + 1,
+              status: status(index),
+              accepted_at: status(index) === "Queued" ? null : generationRow.as_of_utc,
+            }),
+          );
+      };
+      const counts = { ticket_count: 1, work_item_count: 60, initialized_empty: false };
+      await publish(generation({ ...counts, projection_generation_id: id(100) }), () => "Queued");
+      await client.query(
+        "CREATE ROLE " + role + " NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT",
+      );
+      roleCreated = true;
+      await client.query("GRANT USAGE ON SCHEMA rms_kitchen,platform_helpers TO " + role);
+      await client.query(
+        "GRANT EXECUTE ON FUNCTION platform_helpers.current_brand_id(),platform_helpers.current_store_id() TO " +
+          role,
+      );
+      await client.query(
+        "GRANT SELECT ON rms_kitchen.kitchen_work_queue_projection_generation,rms_kitchen.kitchen_work_queue_projection TO " +
+          role,
+      );
+      const hash = (value) => "sha256:" + createHash("sha256").update(value).digest("hex");
+      const unavailable = async () => {
+        throw new Error("not used by a queue read");
+      };
+      const read = async (observedAt, cursor) => {
+        const authority = {
+          actorReference: id(99),
+          brandReference: id(1),
+          storeReference: id(2),
+          observedAt,
+        };
+        await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+        try {
+          await setLockScope(client, id(1), id(2));
+          await client.query("SET LOCAL ROLE " + role);
+          const tx = { query: (sql, values) => client.query(sql, [...values]) };
+          const service = createKitchenQueueProjectionService({
+            authorization: { authorize: async () => true },
+            trustedContext: { resolveQueryAuthority: async () => authority },
+            transactions: { withTransaction: (work) => work(tx) },
+            tenantContext: { install: async () => undefined },
+            queries: createPostgresKitchenQueueQueries({
+              brandReference: id(1),
+              storeReference: id(2),
+              authorize: async () => true,
+            }),
+            locks: { acquireStoreProjection: unavailable },
+            checkpoints: {
+              compareIncremental: unavailable,
+              compareRebuild: unavailable,
+              compareLifecycleIncremental: unavailable,
+            },
+            sources: {
+              loadIncremental: unavailable,
+              loadRebuild: unavailable,
+              loadLifecycleIncremental: unavailable,
+            },
+            projections: {
+              loadActive: unavailable,
+              loadByRebuildReference: unavailable,
+              replaceActive: unavailable,
+            },
+            references: { nextGenerationReference: unavailable },
+            clock: { now: () => observedAt },
+            digests: { sha256: hash },
+          });
+          const result = await service.list({
+            ...authority,
+            filters: {
+              orderReference: null,
+              ticketReference: null,
+              workItemReference: null,
+              stationReference: null,
+              status: null,
+            },
+            cursor,
+            limit: 50,
+          });
+          await client.query("COMMIT");
+          return result;
+        } catch (error) {
+          await client.query("ROLLBACK");
+          throw error;
+        }
+      };
+      const first = await read("2026-08-09T14:00:20.000Z", null);
+      assert.equal(first.projectionGenerationReference, id(100));
+      assert.equal(first.items.length, 50);
+      assert.notEqual(first.nextCursor, null);
+      // A cook starts the first item: the step retires generation 100 and activates 200.
+      await client.query("BEGIN");
+      await client.query(
+        "UPDATE rms_kitchen.kitchen_work_queue_projection_generation SET generation_status='Retired' WHERE projection_generation_id=$1",
+        [id(100)],
+      );
+      await publish(
+        generation({
+          ...counts,
+          projection_generation_id: id(200),
+          source_checkpoint_reference: id(201),
+          as_of_utc: "2026-08-09T14:00:29.000Z",
+          projected_at: "2026-08-09T14:00:30.000Z",
+        }),
+        (index) => (index === 0 ? "In Progress" : "Queued"),
+      );
+      await client.query("COMMIT");
+      const second = await read("2026-08-09T14:00:31.000Z", first.nextCursor);
+      assert.equal(second.projectionGenerationReference, id(100));
+      assert.equal(second.items.length, 10);
+      assert.equal(second.nextCursor, null);
+      assert.deepEqual(
+        [...first.items, ...second.items].map((item) => item.workItemReference),
+        [...items].sort(),
+      );
+      // The next poll reads the current generation from its first page.
+      const fresh = await read("2026-08-09T14:00:32.000Z", null);
+      assert.equal(fresh.projectionGenerationReference, id(200));
+      // A page cursor of a generation superseded over a minute ago is a Conflict.
+      await assert.rejects(read("2026-08-09T14:01:31.000Z", first.nextCursor), {
+        code: "KITCHEN_QUEUE_VERSION_CONFLICT",
+      });
+    } finally {
+      await client.query("ROLLBACK").catch(() => undefined);
+      await client.query("RESET ROLE").catch(() => undefined);
+      if (roleCreated) {
+        await client.query("DROP OWNED BY " + role);
+        await client.query("DROP ROLE " + role);
+      }
+      await client.end();
+    }
+  });
 }, 180_000);

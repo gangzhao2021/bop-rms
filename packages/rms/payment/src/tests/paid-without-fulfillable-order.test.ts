@@ -281,7 +281,7 @@ interface ServiceHarnessOptions {
     | "BeforeInteracClaim"
     | "InteracDigest";
   readonly recordOutcomeTamper?:
-    "providerKey" | "amount" | "actionDigest" | "sourceSnapshot" | "claimedAt";
+    "providerKey" | "amount" | "actionDigest" | "sourceSnapshot" | "claimedAt" | "claimDisposition";
   readonly recordOutcomeThrows?: boolean;
   readonly duplicateRefundTamper?: boolean;
   readonly releaseThrows?: boolean;
@@ -531,21 +531,27 @@ function serviceHarness(options: ServiceHarnessOptions = {}) {
           phase: input.nextPhase,
         };
         const tampered: PaymentCompensationActionReceipt =
-          options.recordOutcomeTamper === "providerKey"
-            ? { ...updated, providerIdempotencyKey: `WP1310:${"f".repeat(64)}` as never }
-            : options.recordOutcomeTamper === "amount"
-              ? {
-                  ...updated,
-                  amount: { amountMinor: 1_999n, currencyCode: "CAD" as never },
-                }
-              : options.recordOutcomeTamper === "actionDigest"
-                ? { ...updated, actionDigest: digest("changed-action") as never }
-                : options.recordOutcomeTamper === "sourceSnapshot"
-                  ? { ...updated, sourceSnapshotDigest: digest("changed-source") as never }
-                  : options.recordOutcomeTamper === "claimedAt"
-                    ? { ...updated, claimedAt: "2026-08-08T15:59:30.000Z" as never }
-                    : updated;
-        if (options.recordOutcomeTamper === undefined) action = updated;
+          options.recordOutcomeTamper === "claimDisposition"
+            ? { ...updated, claimDisposition: "Claimed" }
+            : options.recordOutcomeTamper === "providerKey"
+              ? { ...updated, providerIdempotencyKey: `WP1310:${"f".repeat(64)}` as never }
+              : options.recordOutcomeTamper === "amount"
+                ? {
+                    ...updated,
+                    amount: { amountMinor: 1_999n, currencyCode: "CAD" as never },
+                  }
+                : options.recordOutcomeTamper === "actionDigest"
+                  ? { ...updated, actionDigest: digest("changed-action") as never }
+                  : options.recordOutcomeTamper === "sourceSnapshot"
+                    ? { ...updated, sourceSnapshotDigest: digest("changed-source") as never }
+                    : options.recordOutcomeTamper === "claimedAt"
+                      ? { ...updated, claimedAt: "2026-08-08T15:59:30.000Z" as never }
+                      : updated;
+        if (
+          options.recordOutcomeTamper === undefined ||
+          options.recordOutcomeTamper === "claimDisposition"
+        )
+          action = tampered;
         return tampered;
       },
     },
@@ -938,6 +944,7 @@ describe("WP-1310 paid-without-fulfillable public contracts", () => {
           severity,
           status: "Open",
           openedAt: now,
+          refundedAt: null,
         },
         { brandReference: refs.brand, storeReference: refs.store },
       );
@@ -947,6 +954,75 @@ describe("WP-1310 paid-without-fulfillable public contracts", () => {
       expect(projected).not.toHaveProperty("actorReference");
     },
   );
+
+  it("closes a reconciliation exception once its unmatched capture is refunded in full", () => {
+    const input = {
+      exceptionReference: refs.compensationCase,
+      brandReference: refs.brand,
+      storeReference: refs.store,
+      candidateReference: refs.source,
+      reason: "AmountMismatch",
+      severity: "Error",
+      status: "Open",
+      openedAt: now,
+    };
+    const scope = { brandReference: refs.brand, storeReference: refs.store };
+    const refundedAt = new Date(Date.parse(now) + 60_000).toISOString();
+    expect(
+      createPaymentReconciliationExceptionSource({ ...input, refundedAt }, scope),
+    ).toMatchObject({
+      kind: "ReconciliationAmountMismatch",
+      state: "Closed",
+      refundDisposition: "ProviderConfirmed",
+      operationsDisposition: "Reconciled",
+      closedAt: refundedAt,
+      updatedAt: refundedAt,
+    });
+    expect(() =>
+      createPaymentReconciliationExceptionSource(
+        { ...input, refundedAt: new Date(Date.parse(now) - 1000).toISOString() },
+        scope,
+      ),
+    ).toThrow();
+    expect(() =>
+      createPaymentReconciliationExceptionSource({ ...input } as never, scope),
+    ).toThrow();
+  });
+
+  it("WP-2423: closes a business day's difference that a later matching re-check resolved", () => {
+    const input = {
+      exceptionReference: refs.compensationCase,
+      brandReference: refs.brand,
+      storeReference: refs.store,
+      candidateReference: refs.source,
+      reason: "RefundMismatch",
+      severity: "Error",
+      status: "Open",
+      openedAt: now,
+      refundedAt: null,
+    };
+    const scope = { brandReference: refs.brand, storeReference: refs.store };
+    const resolvedAt = new Date(Date.parse(now) + 60_000).toISOString();
+    expect(
+      createPaymentReconciliationExceptionSource({ ...input, resolvedAt }, scope),
+    ).toMatchObject({
+      kind: "ReconciliationRefundMismatch",
+      state: "Closed",
+      refundDisposition: "NotApplicable",
+      operationsDisposition: "Reconciled",
+      closedAt: resolvedAt,
+      updatedAt: resolvedAt,
+    });
+    expect(
+      createPaymentReconciliationExceptionSource({ ...input, resolvedAt: null }, scope),
+    ).toMatchObject({ state: "Open", operationsDisposition: "NotApplicable" });
+    // Never resolved before it opened, and never both refunded and re-checked.
+    for (const bad of [
+      { ...input, resolvedAt: new Date(Date.parse(now) - 1000).toISOString() },
+      { ...input, refundedAt: resolvedAt, resolvedAt },
+    ])
+      expect(() => createPaymentReconciliationExceptionSource(bad, scope)).toThrow();
+  });
 
   it("maps a watchdog receipt without exposing its evidence digest", () => {
     const projected = createPaymentTerminalWatchdogExceptionSource(
@@ -1233,6 +1309,17 @@ describe("WP-1310 paid-without-fulfillable compensation service", () => {
     expect(value.counts.interacAuthorization).toBe(0);
     expect(value.counts.interacClaim).toBe(0);
     expect(value.counts.refund).toBe(0);
+  });
+
+  it("re-evaluates an unchanged open case without appending another case version", async () => {
+    const value = serviceHarness({ method: "TerminalInterac", interacEvidence: null });
+    const first = await value.service.execute(disposition());
+    expect(first.status).toBe("InPersonActionRequired");
+    const reconciles = value.calls.filter((call) => call === "case.reconcile").length;
+    value.state.setClock("2026-08-08T16:00:10.000Z");
+    const second = await value.service.execute(disposition());
+    expect(second).toEqual(first);
+    expect(value.calls.filter((call) => call === "case.reconcile")).toHaveLength(reconciles);
   });
 
   it("claims fresh authorized Interac evidence but never calls the generic refund port", async () => {
@@ -1549,5 +1636,112 @@ describe("WP-1310 paid-without-fulfillable compensation service", () => {
       expect((error as Error).message).not.toContain(refs.order);
       expect((error as Error).message).not.toContain("Provider");
     }
+  });
+
+  describe("WP-2423 Q6 step 2a: compensation after other owners' refunds", () => {
+    const cad = (amountMinor: bigint) => ({ amountMinor, currencyCode: "CAD" });
+
+    it("refunds and records only the remainder, verified from the action on replay", async () => {
+      // Captured 2000, an item Cancellation refund of 1500 already Provider-confirmed.
+      const value = serviceHarness({
+        sourceOverrides: { confirmedRefundedAmount: cad(1_500n) },
+        retrievePlan: [1_500n],
+      });
+      const first = await value.service.execute(disposition());
+      expect(first.status).toBe("AwaitingOperationsReconciliation");
+      expect(value.refundAmounts).toEqual([500n]);
+      expect(value.state.action?.amount.amountMinor).toBe(500n);
+      expect(value.state.refundComposition?.fact.amount.amountMinor).toBe(500n);
+      expect(value.state.refundComposition?.event.payload.amountMinor).toBe("500");
+      // The current source now counts the compensation's own confirmed refund too; the replay
+      // must still verify 500 from the durable action, not recompute captured - confirmed = 0.
+      value.state.setSource(
+        value.state.makeSource({ confirmedRefundedAmount: cad(2_000n), sourceVersion: 5 }),
+      );
+      expect((await value.service.execute(disposition())).status).toBe(
+        "AwaitingOperationsReconciliation",
+      );
+      value.state.setOperations(true);
+      expect((await value.service.execute(disposition())).status).toBe("Closed");
+      expect(value.counts.refund).toBe(1);
+    });
+
+    it("records the action amount when the full Provider refund is only seen on a later run", async () => {
+      const value = serviceHarness({
+        sourceOverrides: { confirmedRefundedAmount: cad(1_500n) },
+        retrievePlan: [1_500n, "Failure", 2_000n],
+        refundBehaviors: ["ThrowAfterEffect"],
+      });
+      expect((await value.service.execute(disposition())).status).toBe(
+        "AwaitingProviderConfirmation",
+      );
+      // The claimed action is now a pending compensation-owned refund in the source.
+      value.state.setSource(
+        value.state.makeSource({
+          confirmedRefundedAmount: cad(1_500n),
+          pendingRefundClaimedAmount: cad(500n),
+          sourceVersion: 5,
+        }),
+      );
+      expect((await value.service.execute(disposition())).status).toBe(
+        "AwaitingOperationsReconciliation",
+      );
+      expect(value.counts.refund).toBe(1);
+      expect(value.state.refundComposition?.fact.amount.amountMinor).toBe(500n);
+    });
+
+    it("waits while another owner's refund is pending instead of refunding it too", async () => {
+      const value = serviceHarness({
+        sourceOverrides: {
+          confirmedRefundedAmount: cad(1_000n),
+          pendingRefundClaimedAmount: cad(500n),
+        },
+        retrievePlan: [1_000n, 1_500n],
+      });
+      expect((await value.service.execute(disposition())).status).toBe("ReconciliationRequired");
+      expect(value.counts.refund).toBe(0);
+      expect(value.state.action).toBeNull();
+      expect(value.state.refundComposition).toBeNull();
+      // Once that refund is confirmed, only what remains is claimed and refunded.
+      value.state.setSource(
+        value.state.makeSource({ confirmedRefundedAmount: cad(1_500n), sourceVersion: 5 }),
+      );
+      expect((await value.service.execute(disposition())).status).toBe(
+        "AwaitingOperationsReconciliation",
+      );
+      expect(value.refundAmounts).toEqual([500n]);
+      expect(value.state.refundComposition?.fact.amount.amountMinor).toBe(500n);
+    });
+
+    it("does not claim another owner's refund that completed the capture without an action", async () => {
+      const value = serviceHarness({
+        sourceOverrides: {
+          confirmedRefundedAmount: cad(1_500n),
+          pendingRefundClaimedAmount: cad(500n),
+        },
+        retrievePlan: [2_000n],
+      });
+      expect((await value.service.execute(disposition())).status).toBe("ReconciliationRequired");
+      expect(value.counts.refund).toBe(0);
+      expect(value.state.refundComposition).toBeNull();
+    });
+
+    it("rejects a recorded refund whose amount differs from the durable action amount", async () => {
+      const value = serviceHarness({
+        sourceOverrides: { confirmedRefundedAmount: cad(1_500n) },
+        retrievePlan: [1_500n],
+      });
+      await value.service.execute(disposition());
+      const recorded = value.state.refundComposition;
+      if (recorded === null) throw new Error("expected synthetic refund composition");
+      const fact = { ...recorded.fact, amount: cad(2_000n) } as typeof recorded.fact;
+      value.state.setRefundComposition({
+        fact,
+        event: createPaymentRefundedEnvelope({ fact }),
+      });
+      await expect(compensationCode(value.service.execute(disposition()))).resolves.toBe(
+        "PAYMENT_COMPENSATION_OPERATION_CONFLICT",
+      );
+    });
   });
 });

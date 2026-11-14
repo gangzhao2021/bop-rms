@@ -24,6 +24,62 @@ const envelope = {
 } satisfies DomainEventEnvelope;
 
 describe("ConsumerDeliveryWorker", () => {
+  it("reauthorizes through the owner service on commit reconciliation without generic fallback", async () => {
+    const query = vi.fn(async () => {
+      throw new Error("generic Inbox must not run");
+    });
+    const tx = { query };
+    let authorized = true;
+    const consume = vi.fn(async (transaction, registration, event) => {
+      expect(transaction).toBe(tx);
+      expect(registration.consumerName).toBe("synthetic.projector:v1");
+      expect(event).toBe(envelope);
+      if (!authorized) throw new Error("revoked");
+      return { status: "processed" as const };
+    });
+    const database = {
+      transaction: vi.fn(async (_scope, work) => {
+        const result = await work(tx);
+        authorized = false;
+        if (result.status === "processed")
+          throw new ConsumerDeliveryPersistenceError("COMMIT_OUTCOME_UNKNOWN");
+        return result;
+      }),
+    };
+    const worker = new ConsumerDeliveryWorker({
+      database,
+      consume,
+      registry: new ConsumerRegistry([
+        {
+          consumerName: "synthetic.projector:v1",
+          consumerVersion: 1,
+          eventType: "SyntheticChanged",
+          schemaVersions: [1],
+          ownerModule: "@bop/eventing",
+          tenantScope: "brand",
+          ordering: "none",
+          sideEffect: "synthetic-effect",
+          replaySafe: true,
+          handler: vi.fn(async () => {
+            throw new Error("handler bypass");
+          }),
+        },
+      ]),
+    });
+    await expect(worker.deliver("synthetic.projector:v1", envelope)).resolves.toEqual({
+      status: "retry_required",
+      errorCode: "COMMIT_OUTCOME_UNKNOWN",
+    });
+    expect(consume).toHaveBeenCalledTimes(2);
+    expect(query).not.toHaveBeenCalled();
+    await expect(worker.deliver("synthetic.projector:v1", envelope)).resolves.toEqual({
+      status: "retry_required",
+      errorCode: "CONSUMER_TEMPORARY_FAILURE",
+    });
+    expect(consume).toHaveBeenCalledTimes(3);
+    expect(query).not.toHaveBeenCalled();
+  });
+
   it("rejects unknown consumers before starting a transaction", async () => {
     const transaction = vi.fn();
     const recordFailure = vi.fn();
@@ -216,5 +272,57 @@ describe("ConsumerDeliveryWorker", () => {
       },
     ]);
     expect(JSON.stringify(records)).not.toContain("secret-canary");
+  });
+
+  it("v15 2026-11-01: tells the deployment of every failed delivery, and of the later success", async () => {
+    let fail = true;
+    const thrown = Object.assign(new Error("KITCHEN_ROUTING_UNAVAILABLE"), { code: "X" });
+    const failures: unknown[] = [];
+    const delivered: unknown[] = [];
+    const worker = new ConsumerDeliveryWorker({
+      database: { transaction: vi.fn(async (_scope, work) => work({ query: vi.fn() })) },
+      consume: vi.fn(async () => {
+        if (fail) throw thrown;
+        return { status: "processed" as const };
+      }),
+      onFailure: (failure) => failures.push(failure),
+      onDelivered: (delivery) => delivered.push(delivery),
+      registry: new ConsumerRegistry([
+        {
+          consumerName: "kitchen.confirmed-order:v1",
+          consumerVersion: 1,
+          eventType: "SyntheticChanged",
+          schemaVersions: [1],
+          ownerModule: "@bop/eventing",
+          tenantScope: "brand",
+          ordering: "none",
+          sideEffect: "synthetic-effect",
+          replaySafe: true,
+          handler: vi.fn(async () => undefined),
+        },
+      ]),
+    });
+    await expect(worker.deliver("kitchen.confirmed-order:v1", envelope)).resolves.toEqual({
+      status: "retry_required",
+      errorCode: "CONSUMER_TEMPORARY_FAILURE",
+    });
+    expect(failures).toEqual([
+      {
+        consumerName: "kitchen.confirmed-order:v1",
+        eventType: "SyntheticChanged",
+        eventId: envelope.eventId,
+        errorCode: "CONSUMER_TEMPORARY_FAILURE",
+        error: thrown,
+      },
+    ]);
+    expect(delivered).toEqual([]);
+    fail = false;
+    await expect(worker.deliver("kitchen.confirmed-order:v1", envelope)).resolves.toEqual({
+      status: "processed",
+    });
+    expect(delivered).toEqual([
+      { consumerName: "kitchen.confirmed-order:v1", eventId: envelope.eventId },
+    ]);
+    expect(failures).toHaveLength(1);
   });
 });

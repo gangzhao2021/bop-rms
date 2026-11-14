@@ -1,0 +1,259 @@
+/** Merchant BFF routes: kitchen board, work, rework, stale tickets and release. Registered by createMerchantBffRouter (merchant-bff.ts). */
+import express, { type Router } from "express";
+import {
+  cookie,
+  denied,
+  exactHeader,
+  failed,
+  NO_STORE,
+  noteFailure,
+  sameOriginMutation,
+} from "./merchant-bff-http.js";
+import {
+  KitchenQueueProjectionError,
+  KitchenReworkError,
+  KitchenStaleTicketError,
+  KitchenWorkLifecycleError,
+} from "@rms/kitchen";
+import type { MerchantBffRouterOptions } from "./merchant-bff-contract.js";
+
+export function installMerchantKitchenRoutes(
+  router: Router,
+  options: MerchantBffRouterOptions,
+): void {
+  router.post("/kitchen/query", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.kitchenQuery) {
+      response.status(503).json({ error: "kitchen_queue_unavailable" });
+      return;
+    }
+    void options
+      .kitchenQuery({ sessionCookie, csrf, query: request.body })
+      .then((result) => response.json(result))
+      .catch((error: unknown) => {
+        noteFailure(response, error);
+        if (!(error instanceof KitchenQueueProjectionError)) {
+          failed(response, error);
+          return;
+        }
+        const status = {
+          KITCHEN_QUEUE_INPUT_INVALID: 400,
+          KITCHEN_QUEUE_PERMISSION_DENIED: 403,
+          KITCHEN_QUEUE_NOT_FOUND: 404,
+          KITCHEN_QUEUE_VERSION_CONFLICT: 409,
+          KITCHEN_QUEUE_DEPENDENCY_UNAVAILABLE: 503,
+        }[error.code];
+        response.status(status).json({ error: error.code });
+      });
+  });
+
+  router.post("/kitchen/work", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.kitchenCommand) {
+      response.status(503).json({ error: "kitchen_work_unavailable" });
+      return;
+    }
+    void options
+      .kitchenCommand({ sessionCookie, csrf, command: request.body })
+      .then((result) => response.json(result))
+      .catch((error: unknown) => {
+        noteFailure(response, error);
+        if (!(error instanceof KitchenWorkLifecycleError)) {
+          failed(response, error);
+          return;
+        }
+        const status = {
+          KITCHEN_WORK_INPUT_INVALID: 400,
+          KITCHEN_WORK_PERMISSION_DENIED: 403,
+          KITCHEN_WORK_NOT_FOUND: 404,
+          KITCHEN_WORK_VERSION_CONFLICT: 409,
+          KITCHEN_WORK_PRECONDITION_FAILED: 422,
+          KITCHEN_WORK_DEPENDENCY_UNAVAILABLE: 503,
+        }[error.code];
+        response.status(status).json({ error: error.code });
+      });
+  });
+
+  // DEC-KITCHEN-ONE-TAP: one tap on the board. Same session, CSRF and failure mapping as /kitchen/work.
+  router.post("/kitchen/step", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.kitchenStep) {
+      response.status(503).json({ error: "kitchen_step_unavailable" });
+      return;
+    }
+    void options
+      .kitchenStep({ sessionCookie, csrf, body: request.body })
+      .then((result) => response.set("Cache-Control", NO_STORE).json(result))
+      .catch((error: unknown) => {
+        noteFailure(response, error);
+        if (!(error instanceof KitchenWorkLifecycleError)) {
+          failed(response, error);
+          return;
+        }
+        const status = {
+          KITCHEN_WORK_INPUT_INVALID: 400,
+          KITCHEN_WORK_PERMISSION_DENIED: 403,
+          KITCHEN_WORK_NOT_FOUND: 404,
+          KITCHEN_WORK_VERSION_CONFLICT: 409,
+          KITCHEN_WORK_PRECONDITION_FAILED: 422,
+          KITCHEN_WORK_DEPENDENCY_UNAVAILABLE: 503,
+        }[error.code];
+        response.status(status).set("Cache-Control", NO_STORE).json({ error: error.code });
+      });
+  });
+
+  // WP-2423 Q26 (Handoff Section 26.6): Kitchen remakes. Errors carry a code only.
+  const kitchenReworkFailure = (response: express.Response, error: unknown) => {
+    noteFailure(response, error);
+    if (!(error instanceof KitchenReworkError)) {
+      failed(response, error);
+      return;
+    }
+    const status = {
+      KITCHEN_REWORK_INPUT_INVALID: 400,
+      KITCHEN_REWORK_PERMISSION_DENIED: 403,
+      KITCHEN_REWORK_NOT_FOUND: 404,
+      KITCHEN_REWORK_CONFLICT: 409,
+      KITCHEN_REWORK_PRECONDITION_FAILED: 422,
+      KITCHEN_REWORK_WINDOW_CLOSED: 422,
+      KITCHEN_REWORK_UNAVAILABLE: 503,
+    }[error.code];
+    response.status(status).json({ error: error.code });
+  };
+  router.post("/kitchen/rework/query", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    const body = request.body as Record<string, unknown> | undefined;
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0 ||
+      body === undefined ||
+      Object.keys(body).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.kitchenRework) {
+      response.status(503).json({ error: "kitchen_rework_unavailable" });
+      return;
+    }
+    void options.kitchenRework
+      .query({ sessionCookie, csrf })
+      .then((result) => response.json(result))
+      .catch((error: unknown) => kitchenReworkFailure(response, error));
+  });
+  router.post("/kitchen/rework/command", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.kitchenRework) {
+      response.status(503).json({ error: "kitchen_rework_unavailable" });
+      return;
+    }
+    void options.kitchenRework
+      .command({ sessionCookie, csrf, command: request.body })
+      .then((result) => response.json(result))
+      .catch((error: unknown) => kitchenReworkFailure(response, error));
+  });
+
+  // DEC-KITCHEN-STALE-TICKETS: close an earlier business day's kitchen ticket. Errors carry a code only.
+  router.post("/kitchen/stale-ticket/close", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.kitchenStaleClose) {
+      response.status(503).json({ error: "kitchen_stale_close_unavailable" });
+      return;
+    }
+    void options
+      .kitchenStaleClose({ sessionCookie, csrf, command: request.body })
+      .then((result) => response.json(result))
+      .catch((error: unknown) => {
+        noteFailure(response, error);
+        if (!(error instanceof KitchenStaleTicketError)) {
+          failed(response, error);
+          return;
+        }
+        const status = {
+          KITCHEN_STALE_TICKET_INPUT_INVALID: 400,
+          KITCHEN_STALE_TICKET_PERMISSION_DENIED: 403,
+          KITCHEN_STALE_TICKET_NOT_FOUND: 404,
+          KITCHEN_STALE_TICKET_CONFLICT: 409,
+          KITCHEN_STALE_TICKET_NOT_EARLIER_DAY: 422,
+          KITCHEN_STALE_TICKET_NOTHING_OPEN: 422,
+          KITCHEN_STALE_TICKET_UNAVAILABLE: 503,
+        }[error.code];
+        response.status(status).json({ error: error.code });
+      });
+  });
+
+  router.post("/kitchen/release", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.kitchenRelease) {
+      response.status(503).json({ error: "kitchen_release_unavailable" });
+      return;
+    }
+    void options
+      .kitchenRelease({ sessionCookie, csrf })
+      .then(() => response.status(204).end())
+      .catch((error: unknown) => failed(response, error));
+  });
+}

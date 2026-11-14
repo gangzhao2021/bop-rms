@@ -1,0 +1,218 @@
+import { describe, expect, it } from "vitest";
+import {
+  describeStoreBusinessDayClosing,
+  describeStoreUpcomingHours,
+} from "../domain/describe-store-upcoming-hours.js";
+
+const period = (start: string, end: string, cutoffMinutes = 0, endsNextDay = false) => ({
+  startLocalTime: start,
+  endLocalTime: end,
+  endsNextDay,
+  orderCutoffSeconds: cutoffMinutes * 60,
+});
+// Synthetic store: lunch and dinner Tuesday to Sunday, closed Mondays; last orders 30 min early.
+const weeklySchedule = [1, 2, 3, 4, 5, 6, 7].map((isoWeekday) => ({
+  isoWeekday,
+  intervals:
+    isoWeekday === 1
+      ? []
+      : [period("11:00:00", "14:30:00", 30), period("17:00:00", "22:00:00", 30)],
+}));
+const exceptions = [
+  {
+    localDate: "2026-12-24",
+    kind: "Override" as const,
+    intervals: [period("11:00:00", "16:00:00")],
+  },
+  { localDate: "2026-12-25", kind: "Holiday" as const, intervals: [] },
+  { localDate: "2027-01-10", kind: "TemporaryClosure" as const, intervals: [] },
+];
+const at = (localDate: string, localTime: string) =>
+  describeStoreUpcomingHours({ localDate, localTime, weeklySchedule, exceptions, days: 7 });
+
+describe("WP-2423 item 8 ③ decision 16: the Store's hours ahead", () => {
+  it("gives last orders in the current period and the next opening today", () => {
+    // 2026-12-22 is a Tuesday.
+    expect(at("2026-12-22", "21:10:00")).toMatchObject({
+      todayKind: null,
+      lastOrdersAt: "21:30:00",
+      nextOpening: { localDate: "2026-12-23", startLocalTime: "11:00:00" },
+    });
+    expect(at("2026-12-22", "15:00:00")).toMatchObject({
+      lastOrdersAt: null,
+      nextOpening: { localDate: "2026-12-22", startLocalTime: "17:00:00" },
+    });
+  });
+  it("lists holidays and special hours in the next 7 days, and none beyond", () => {
+    const result = at("2026-12-22", "12:00:00");
+    expect(result.upcoming.map((day) => [day.localDate, day.kind, day.intervals.length])).toEqual([
+      ["2026-12-24", "Override", 1],
+      ["2026-12-25", "Holiday", 0],
+    ]);
+  });
+  it("on a holiday says so and opens next on the first published day after it", () => {
+    const result = at("2026-12-25", "12:00:00");
+    expect(result.todayKind).toBe("Holiday");
+    expect(result.lastOrdersAt).toBeNull();
+    // Saturday 26th opens at 11:00 as usual.
+    expect(result.nextOpening).toEqual({ localDate: "2026-12-26", startLocalTime: "11:00:00" });
+  });
+  it("skips a closed Monday, and has no next opening when nothing is published", () => {
+    // 2026-12-28 is a Monday.
+    expect(at("2026-12-28", "10:00:00").nextOpening).toEqual({
+      localDate: "2026-12-29",
+      startLocalTime: "11:00:00",
+    });
+    const closed = describeStoreUpcomingHours({
+      localDate: "2026-12-22",
+      localTime: "12:00:00",
+      weeklySchedule: weeklySchedule.map((day) => ({ ...day, intervals: [] })),
+      exceptions: [],
+      days: 7,
+    });
+    expect(closed.nextOpening).toBeNull();
+  });
+  it("reads last orders from an overnight period carried over from yesterday", () => {
+    const late = describeStoreUpcomingHours({
+      localDate: "2026-12-23",
+      localTime: "00:40:00",
+      weeklySchedule: weeklySchedule.map((day) => ({
+        ...day,
+        intervals: [period("18:00:00", "02:00:00", 45, true)],
+      })),
+      exceptions: [],
+      days: 7,
+    });
+    expect(late.lastOrdersAt).toBe("01:15:00");
+    expect(late.nextOpening).toEqual({ localDate: "2026-12-23", startLocalTime: "18:00:00" });
+  });
+  it("follow-up: says when last orders have passed, across midnight too", () => {
+    expect(at("2026-12-22", "21:29:59")).toMatchObject({
+      pastLastOrders: false,
+      lastOrders: { localDate: "2026-12-22", localTime: "21:30:00" },
+    });
+    expect(at("2026-12-22", "21:30:00").pastLastOrders).toBe(true);
+    expect(at("2026-12-22", "21:59:00").pastLastOrders).toBe(true);
+    // Between periods, and in a period without a cut-off, nothing has passed.
+    expect(at("2026-12-22", "15:00:00").pastLastOrders).toBe(false);
+    expect(at("2026-12-24", "15:00:00")).toMatchObject({ pastLastOrders: false, lastOrders: null });
+    const overnight = (localDate: string, localTime: string) =>
+      describeStoreUpcomingHours({
+        localDate,
+        localTime,
+        weeklySchedule: weeklySchedule.map((day) => ({
+          ...day,
+          intervals: [period("18:00:00", "02:00:00", 45, true)],
+        })),
+        exceptions: [],
+        days: 7,
+      });
+    expect(overnight("2026-12-22", "23:30:00")).toMatchObject({
+      pastLastOrders: false,
+      lastOrders: { localDate: "2026-12-23", localTime: "01:15:00" },
+    });
+    expect(overnight("2026-12-23", "01:20:00")).toMatchObject({
+      pastLastOrders: true,
+      lastOrders: { localDate: "2026-12-23", localTime: "01:15:00" },
+    });
+  });
+});
+
+describe("WP-2423 DEC-CLOSING-SUMMARY: when the Store closes on a business day", () => {
+  const closing = (
+    businessDate: string,
+    schedule: readonly { isoWeekday: number; intervals: ReturnType<typeof period>[] }[],
+    dated: Parameters<typeof describeStoreBusinessDayClosing>[0]["exceptions"] = [],
+  ) =>
+    describeStoreBusinessDayClosing({ businessDate, weeklySchedule: schedule, exceptions: dated });
+  // 2026-12-22 is a Tuesday (2).
+  it("gives a lunch-only Store's closing at the end of lunch", () => {
+    expect(
+      closing("2026-12-22", [{ isoWeekday: 2, intervals: [period("11:00:00", "14:30:00")] }]),
+    ).toEqual({ kind: "Closes", localDate: "2026-12-22", localTime: "14:30:00" });
+  });
+  it("gives the day's last period when there is a break, in any order", () => {
+    expect(
+      closing("2026-12-22", [
+        {
+          isoWeekday: 2,
+          intervals: [period("17:00:00", "22:00:00"), period("11:00:00", "14:00:00")],
+        },
+      ]),
+    ).toEqual({ kind: "Closes", localDate: "2026-12-22", localTime: "22:00:00" });
+  });
+  it("gives the next date for a period that runs past midnight", () => {
+    expect(
+      closing("2026-12-22", [
+        {
+          isoWeekday: 2,
+          intervals: [{ ...period("18:00:00", "01:30:00"), endsNextDay: true }],
+        },
+      ]),
+    ).toEqual({ kind: "Closes", localDate: "2026-12-23", localTime: "01:30:00" });
+  });
+  it("says closed on a day off and on a holiday, and a dated exception replaces the weekday", () => {
+    const tuesday = [{ isoWeekday: 2, intervals: [period("11:00:00", "22:00:00")] }];
+    expect(closing("2026-12-23", tuesday)).toEqual({ kind: "ClosedToday" });
+    expect(
+      closing("2026-12-22", tuesday, [{ localDate: "2026-12-22", kind: "Holiday", intervals: [] }]),
+    ).toEqual({ kind: "ClosedToday" });
+    expect(
+      closing("2026-12-22", tuesday, [
+        { localDate: "2026-12-22", kind: "Override", intervals: [period("11:00:00", "16:00:00")] },
+      ]),
+    ).toEqual({ kind: "Closes", localDate: "2026-12-22", localTime: "16:00:00" });
+  });
+  it("says nothing is published rather than closed when no hours exist", () => {
+    expect(closing("2026-12-22", [])).toEqual({ kind: "NoPublishedHours" });
+    expect(closing("2026-12-22", [{ isoWeekday: 2, intervals: [] }])).toEqual({
+      kind: "NoPublishedHours",
+    });
+  });
+});
+
+describe("M117: an overnight period after midnight", () => {
+  const late = [1, 2, 3, 4, 5, 6, 7].map((isoWeekday) => ({
+    isoWeekday,
+    intervals: [period("11:00:00", "02:00:00", 0, true)],
+  }));
+  it("names the period begun yesterday as the current one, past midnight", () => {
+    for (const localTime of ["00:00:14", "00:30:00", "01:59:59"])
+      expect(
+        describeStoreUpcomingHours({
+          localDate: "2026-12-23",
+          localTime,
+          weeklySchedule: late,
+          exceptions: [],
+          days: 7,
+        }).currentPeriod,
+      ).toEqual({
+        startLocalDate: "2026-12-22",
+        startLocalTime: "11:00:00",
+        endLocalTime: "02:00:00",
+        endsNextDay: true,
+      });
+  });
+  it("uses the night's own hours when last night was an exception", () => {
+    const result = describeStoreUpcomingHours({
+      localDate: "2026-12-25",
+      localTime: "00:30:00",
+      weeklySchedule: late,
+      exceptions: [
+        {
+          localDate: "2026-12-24",
+          kind: "Override" as const,
+          intervals: [period("17:00:00", "01:00:00", 0, true)],
+        },
+      ],
+      days: 7,
+    });
+    expect(result.currentPeriod).toMatchObject({
+      startLocalDate: "2026-12-24",
+      endLocalTime: "01:00:00",
+    });
+  });
+  it("is null between periods", () => {
+    expect(at("2026-12-22", "15:00:00").currentPeriod).toBeNull();
+  });
+});

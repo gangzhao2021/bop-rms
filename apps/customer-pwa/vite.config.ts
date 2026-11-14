@@ -4,6 +4,7 @@ import { defineConfig } from "vite";
 import { loadEnv } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 import { shouldUseLocalCustomerDemoEntry } from "./src/customer-demo-entry.js";
+import { customerContentSecurityPolicy } from "./scripts/content-security-policy.mjs";
 
 export default defineConfig(({ command, mode }) => {
   const candidate = loadEnv(mode, ".", "BOP_").BOP_DEPLOYMENT_ID ?? "local-dev";
@@ -17,7 +18,23 @@ export default defineConfig(({ command, mode }) => {
     ["development", "test"].includes(process.env.NODE_ENV ?? "development");
   if (!/^[a-z0-9][a-z0-9-]{0,62}$/u.test(candidate))
     throw new Error("BOP_DEPLOYMENT_ID must be a safe deployment label");
+  const apiOrigin = command === "serve" ? process.env.BOP_LOCAL_API_ORIGIN : undefined;
+  if (apiOrigin !== undefined && !/^http:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}$/u.test(apiOrigin))
+    throw new Error("Local API origin must be an explicit loopback HTTP endpoint");
+  if (apiOrigin !== undefined && Number(new URL(apiOrigin).port) > 65535)
+    throw new Error("Local API port is invalid");
   return {
+    ...(apiOrigin === undefined
+      ? {}
+      : {
+          server: {
+            proxy: {
+              "/api": { target: apiOrigin, changeOrigin: false },
+              "/bff": { target: apiOrigin, changeOrigin: false },
+              "/merchant": { target: apiOrigin, changeOrigin: false },
+            },
+          },
+        }),
     define: { __BOP_DEPLOYMENT_ID__: JSON.stringify(candidate) },
     plugins: [
       {
@@ -37,12 +54,14 @@ export default defineConfig(({ command, mode }) => {
         registerType: "prompt",
         manifest: false,
         injectManifest: {
-          globPatterns: ["**/*.{js,css,woff2,html,webmanifest}"],
+          globPatterns: ["**/*.{js,css,woff2,html,webmanifest,png,svg}"],
           globIgnores: ["**/*.map"],
         },
         devOptions: { enabled: false },
       }),
     ],
     build: { target: "es2024" },
+    // M106: the production-build proof serves pages under the customer policy the pilot sends.
+    preview: { headers: { "Content-Security-Policy": customerContentSecurityPolicy } },
   };
 });

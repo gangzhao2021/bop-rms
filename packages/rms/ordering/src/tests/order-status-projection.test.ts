@@ -4,7 +4,15 @@ import {
   createOrderStatusProjector,
   createOrderStatusQueryService,
 } from "../application/order-status-projection-service.js";
-import type { OrderStatusProjection } from "../domain/order-status-projection.js";
+import {
+  orderStatusMaximumRounds,
+  parseOrderStatusSourceSnapshot,
+  type OrderStatusProjection,
+} from "../domain/order-status-projection.js";
+import {
+  decodeOrderStatusSnapshot,
+  encodeOrderStatusSnapshot,
+} from "../application/order-status-snapshot-codec.js";
 
 const id = (n: number) => `018f6300-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const at = "2026-08-03T14:00:00.000Z";
@@ -341,5 +349,100 @@ describe("Order status projection", () => {
     await expect(
       malformedProjection.getCustomer({ orderReference: refs.order, observedAt: at }),
     ).rejects.toMatchObject({ code: "ORDER_STATUS_DEPENDENCY_UNAVAILABLE" });
+  });
+
+  it("WP-2423 Q8: lets any current participant read the table's dine-in Order, nothing else", async () => {
+    const projected = await createOrderStatusProjector({
+      references: { generateGeneration: () => refs.generation, now: () => at },
+      source: {
+        loadExact: async () => source({ orderType: "DineIn", guestSessionReference: id(50) }),
+      },
+      projections: { load: async () => null, replace: async (projection) => projection },
+    }).project(refs.order);
+    const participant = guest({
+      channel: "DineIn",
+      publicTableReference: id(22) as never,
+      diningState: "DiningBound",
+      diningSessionReference: id(23) as never,
+      diningParticipantReference: id(24) as never,
+    });
+    const service = (session: GuestSession | null, loaded = projected) =>
+      createOrderStatusQueryService({
+        authorization: {
+          authorizeCustomer: async () => ({ guestSession: session ?? guest() }),
+          ...(session === null
+            ? {}
+            : { authorizeDiningParticipant: async () => ({ guestSession: session }) }),
+          authorizeMerchant: async () => null,
+        },
+        projections: { load: async () => loaded, list: async () => [] },
+      });
+    // Another guest at the table (not the Order's first guest) reads the shared view.
+    const result = await service(participant).getDiningParticipant({
+      orderReference: refs.order,
+      observedAt: at,
+    });
+    expect(result.order).toMatchObject({ orderType: "DineIn", orderNumber: "42" });
+    expect(result.order).not.toHaveProperty("guestSessionReference");
+    // The ordinary customer read still refuses that guest.
+    await expect(
+      service(participant).getCustomer({ orderReference: refs.order, observedAt: at }),
+    ).rejects.toMatchObject({ code: "ORDER_STATUS_PERMISSION_DENIED" });
+    for (const refused of [
+      null,
+      guest(),
+      {
+        ...participant,
+        diningState: "ContextOnly",
+        diningSessionReference: null,
+        diningParticipantReference: null,
+      } as GuestSession,
+      { ...participant, storeReference: id(60) } as GuestSession,
+    ])
+      await expect(
+        service(refused).getDiningParticipant({ orderReference: refs.order, observedAt: at }),
+      ).rejects.toMatchObject({ code: "ORDER_STATUS_PERMISSION_DENIED" });
+    const pickup = await createOrderStatusProjector({
+      references: { generateGeneration: () => refs.generation, now: () => at },
+      source: { loadExact: async () => source() },
+      projections: { load: async () => null, replace: async (projection) => projection },
+    }).project(refs.order);
+    await expect(
+      service(participant, pickup).getDiningParticipant({
+        orderReference: refs.order,
+        observedAt: at,
+      }),
+    ).rejects.toMatchObject({ code: "ORDER_STATUS_PERMISSION_DENIED" });
+  });
+
+  it("v15 b13: holds every round of a long dine-in table, as many as the Order holds", () => {
+    // DEMO Store 2's tables reached 28 and 47 rounds; the status once stopped at 20.
+    const rounds = (count: number) =>
+      Array.from({ length: count }, (_, index) => ({
+        orderBatchReference: id(0x1000 + index),
+        submittedAt: new Date(Date.parse(at) + index * 60_000).toISOString(),
+        items: [
+          {
+            orderItemReference: id(0x2000 + index),
+            displayName: "Synthetic item",
+            quantity: 1,
+            lineTotal: { amountMinor: 735n, currencyCode: "CAD" },
+          },
+        ],
+      }));
+    for (const count of [21, 47]) {
+      const snapshot = source({ orderType: "DineIn", batches: rounds(count) });
+      expect(parseOrderStatusSourceSnapshot(snapshot).batches).toHaveLength(count);
+      // As the projection store saves and reads it back.
+      expect(decodeOrderStatusSnapshot(encodeOrderStatusSnapshot(snapshot)).batches).toHaveLength(
+        count,
+      );
+    }
+    expect(orderStatusMaximumRounds).toBe(10_000);
+    expect(() =>
+      parseOrderStatusSourceSnapshot(
+        source({ orderType: "DineIn", batches: rounds(orderStatusMaximumRounds + 1) }),
+      ),
+    ).toThrow();
   });
 });

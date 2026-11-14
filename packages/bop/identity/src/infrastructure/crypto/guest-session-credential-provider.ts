@@ -41,6 +41,15 @@ export function createGuestSessionCredentialProvider(
     generateCredential() {
       return parseGuestRawCredential(randomBytes(32).toString("base64url"));
     },
+    deriveForegroundCsrf(sessionCredential: GuestRawCredential) {
+      return parseGuestRawCredential(
+        createHmac("sha256", key)
+          .update(`${domainPrefix}:foreground-csrf`, "utf8")
+          .update(Buffer.from([0]))
+          .update(parseGuestRawCredential(sessionCredential), "utf8")
+          .digest("base64url"),
+      );
+    },
     generateSessionReference() {
       return parseGuestSessionReference(uuidV7());
     },

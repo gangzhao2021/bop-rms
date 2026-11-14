@@ -1,0 +1,243 @@
+/* Exceptions (Owner 2026-11-03 "重新做"): built on the Orders page. The page carries `orders-page`, so
+   its header, status tabs, filter sheet, rows and side panel are the Orders ones; this file holds
+   only what a case differs in: no amount column, and the actions inside its panel. */
+
+/* A case has no amount: number, what is wrong, status. */
+.orders-page.order-exception-page .order-row__summary {
+  grid-template-columns: 7.5rem minmax(0, 1fr) minmax(10rem, 18rem);
+  grid-template-areas: "num what status";
+}
+.orders-page.order-exception-page .order-row__number {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.orders-page.order-exception-page .order-row {
+  grid-template-columns: minmax(0, 1fr) 7rem;
+}
+.orders-page.order-exception-page .order-exception__next,
+.orders-page.order-exception-page .order-workbench-next button.order-exception__next {
+  min-height: 44px;
+  padding: 0 var(--bop-space-2);
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.orders-page.order-exception-page .order-exception__next:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.orders-page.order-exception-page .order-row[data-status="Resolved"] .order-workbench-type {
+  color: var(--bop-color-text-muted);
+}
+.orders-page.order-exception-page .order-exception__open-for {
+  font-variant-numeric: tabular-nums;
+}
+.orders-page.order-exception-page .order-exception__due {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.orders-page.order-exception-page .order-exception__due[data-overdue="true"] {
+  color: var(--bop-color-danger);
+}
+
+/* The toolbar sits under a notice with room to breathe. */
+.orders-page.order-exception-page .order-workbench-main > .bop-state-card {
+  margin-bottom: var(--bop-space-5);
+}
+
+/* The panel. */
+.orders-page.order-exception-page .order-panel[hidden] {
+  display: none;
+}
+.orders-page.order-exception-page .order-panel > .order-panel__close {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 1;
+  margin: 0;
+}
+.orders-page.order-exception-page .order-exception__detail .order-panel__status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--bop-space-1) var(--bop-space-3);
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+/* Tablets: the sheet has its own padding, and the × keeps inside it. */
+@media (min-width: 48.0625rem) and (max-width: 79.99rem) {
+  .orders-page.order-exception-page .order-panel > .order-panel__close {
+    top: var(--bop-space-4);
+    right: var(--bop-space-4);
+  }
+}
+@media (max-width: 48rem) {
+  .orders-page.order-exception-page .order-panel {
+    position: relative;
+  }
+}
+.orders-page.order-exception-page .order-exception__head {
+  display: grid;
+  gap: var(--bop-space-2);
+  padding-inline-end: 44px;
+}
+.orders-page.order-exception-page .order-exception__head h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.orders-page.order-exception-page .order-exception__head .order-panel__meta {
+  margin: 0;
+  font-size: 14px;
+}
+.orders-page.order-exception-page .order-exception__head .order-panel__meta[data-overdue="true"] {
+  color: var(--bop-color-danger);
+}
+.orders-page.order-exception-page .order-exception__detail .order-panel__facts {
+  font-size: 14px;
+}
+.orders-page.order-exception-page .order-exception__detail .order-panel__facts dt {
+  color: var(--bop-color-text-muted);
+}
+.orders-page.order-exception-page .order-exception__detail .order-panel__facts dd {
+  color: var(--bop-color-text-default);
+  font-variant-numeric: tabular-nums;
+}
+.orders-page.order-exception-page .order-exception__detail p {
+  margin: 0;
+  font-size: 14px;
+}
+.orders-page.order-exception-page .order-exception__detail p[role="status"]:empty {
+  display: none;
+}
+.orders-page.order-exception-page .order-exception__differences {
+  margin: 0;
+  padding-inline-start: 1.25em;
+  font-size: 14px;
+}
+.orders-page.order-exception-page .order-exception__detail a {
+  color: var(--bop-color-accent);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+/* The case's actions: words in the accent, one filled button for the step that is due, and refunds
+   in red words behind their confirmation. */
+.orders-page.order-exception-page .order-exception__detail section {
+  display: grid;
+  justify-items: start;
+  gap: var(--bop-space-3);
+  min-width: 0;
+}
+.orders-page.order-exception-page .order-exception__detail section dl {
+  margin: 0;
+}
+.orders-page.order-exception-page .order-exception__detail button {
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: start;
+  cursor: pointer;
+}
+.orders-page.order-exception-page .order-exception__detail button:disabled {
+  color: var(--bop-color-text-muted);
+  cursor: default;
+}
+.orders-page.order-exception-page .order-exception__detail button.order-exception__primary {
+  width: 100%;
+  min-height: 48px;
+  padding: 0 var(--bop-space-4);
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-primary);
+  text-align: center;
+}
+.orders-page.order-exception-page
+  .order-exception__detail
+  button.order-exception__primary:disabled {
+  background: var(--bop-color-surface-placeholder);
+  color: var(--bop-color-text-muted);
+}
+.orders-page.order-exception-page
+  .order-exception__detail
+  button.order-exception__refund:not(:disabled) {
+  color: var(--bop-color-danger);
+}
+.orders-page.order-exception-page .order-exception__detail label {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--bop-space-2);
+  font-size: 14px;
+  line-height: 1.4;
+}
+.orders-page.order-exception-page .order-exception__detail input[type="checkbox"] {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--bop-color-accent);
+}
+.orders-page.order-exception-page .order-exception__detail select {
+  width: 100%;
+}
+
+.orders-page.order-exception-page .order-exception__older {
+  display: grid;
+  justify-items: start;
+  gap: var(--bop-space-2);
+  padding: 0 12px;
+}
+.orders-page.order-exception-page .order-exception__older button {
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.orders-page.order-exception-page .order-exception__older button:disabled {
+  color: var(--bop-color-text-muted);
+}
+.orders-page.order-exception-page .order-exception__older p {
+  margin: 0;
+  font-size: 14px;
+}
+
+/* Narrow lists: status under what. */
+@container order-list (max-width: 800px) {
+  .orders-page.order-exception-page .order-row__summary {
+    grid-template-columns: 6.5rem minmax(0, 1fr);
+    grid-template-areas:
+      "num what"
+      "num status";
+  }
+}
+/* Phones: the number and its action on one line, then what is wrong and the status. Orders' phone
+   rule lays these out directly on the row. */
+@container order-list (max-width: 512px) {
+  .orders-page.order-exception-page .order-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "num next"
+      "what what"
+      "status status";
+    row-gap: var(--bop-space-1);
+  }
+  .orders-page.order-exception-page .order-workbench-next {
+    align-self: center;
+    padding: 0;
+  }
+}

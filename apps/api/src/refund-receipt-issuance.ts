@@ -1,0 +1,297 @@
+import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
+import type { ConsumerTransaction } from "@bop/eventing";
+import {
+  createPostgresDigitalReceiptStore,
+  createPostgresReceiptOrderSource,
+  createRefundReceiptSnapshot,
+  parseDigitalReceiptRecord,
+  parseOrderingReference,
+  parseOrderingInstant,
+  DigitalReceiptError,
+  type ReceiptOrderSnapshot,
+  type RefundReceiptItemization,
+} from "@rms/ordering";
+import {
+  createPostgresOrdinaryRefundRequestContextSource,
+  createPostgresOrdinaryRefundRequestStatusSource,
+  createPostgresPaymentReceiptCoverageSource,
+} from "@rms/payment";
+import { v7 as uuidV7 } from "uuid";
+import type { createOriginalReceiptIssuance } from "./original-receipt-issuance.js";
+import { receiptChargedOrder } from "./receipt-charged-order.js";
+type Original = Parameters<typeof createOriginalReceiptIssuance>[0];
+type Request = Parameters<ReturnType<typeof createOriginalReceiptIssuance>>[1];
+const encode = (value: unknown) =>
+  canonicalizeRfc8785(
+    JSON.parse(
+      JSON.stringify(value, (_key, item: unknown) =>
+        typeof item === "bigint" ? item.toString() : item,
+      ),
+    ),
+  );
+
+/** Internal system issuance, not a customer write. The caller retains all owner
+ * locks until commit. Reads actual coverage even on a visible-state no-op. */
+export function createRefundReceiptIssuance(options: {
+  scope: Parameters<typeof createPostgresPaymentReceiptCoverageSource>[0]["scope"];
+  authorize: Original["authorize"];
+  authorizeSources: Original["sources"]["authorize"];
+  authorizeOrder: Parameters<typeof createPostgresReceiptOrderSource>[0]["authorize"];
+  identities(): { recordReference: string; operationReference: string };
+  audit: Original["audit"];
+}) {
+  const scope = {
+    brandReference: String(parseOrderingReference(options.scope.brandReference)),
+    storeReference: String(parseOrderingReference(options.scope.storeReference)),
+  };
+  const orderSource = createPostgresReceiptOrderSource({
+    ...scope,
+    authorize: options.authorizeOrder,
+  });
+  return async (transaction: ConsumerTransaction, value: Request) => {
+    if (
+      !value ||
+      Object.getPrototypeOf(value) !== Object.prototype ||
+      Reflect.ownKeys(value).length !== 3 ||
+      ["orderReference", "observedAt", "freshAfter"].some((key) => {
+        const descriptor = Object.getOwnPropertyDescriptor(value, key);
+        return !descriptor || !("value" in descriptor);
+      })
+    )
+      throw new DigitalReceiptError("DIGITAL_RECEIPT_INPUT_INVALID");
+    const request = {
+      orderReference: String(parseOrderingReference(value.orderReference)),
+      observedAt: String(parseOrderingInstant(value.observedAt)),
+      freshAfter: String(parseOrderingInstant(value.freshAfter)),
+    };
+    if (request.freshAfter > request.observedAt)
+      throw new DigitalReceiptError("DIGITAL_RECEIPT_INPUT_INVALID");
+    let prepared: { encoded: string; sourceDigest: string } | undefined;
+    const store = createPostgresDigitalReceiptStore({
+      ...scope,
+      authorize: (tx, access) => options.authorize(tx, { ...scope, ...request, ...access }),
+      validateSources: async (_tx, record, digest) =>
+        prepared !== undefined &&
+        prepared.sourceDigest === digest &&
+        prepared.encoded === encode(record) &&
+        (await options.authorizeSources(_tx, {
+          ...scope,
+          ...request,
+          receiptReference: record.snapshot.receiptReference,
+        })) === true,
+    });
+    return store.issueRefund({
+      transaction,
+      orderReference: request.orderReference,
+      create: async (chain) => {
+        const previous = chain.records.at(-1);
+        if (!previous) throw new DigitalReceiptError("DIGITAL_RECEIPT_CHAIN_CONFLICT");
+        const sourceRequest = {
+          ...scope,
+          ...request,
+          receiptReference: previous.snapshot.receiptReference,
+        };
+        const authorize = async () => {
+          if ((await options.authorizeSources(transaction, sourceRequest)) !== true)
+            throw new DigitalReceiptError("DIGITAL_RECEIPT_PERMISSION_DENIED");
+          return true;
+        };
+        await authorize();
+        // WP-2423 Q5: only rounds charged by now are on the receipt.
+        const order = await receiptChargedOrder(
+          transaction,
+          options.scope,
+          await orderSource(transaction, request),
+          request.observedAt,
+        );
+        const financial = await createPostgresPaymentReceiptCoverageSource({
+          scope: options.scope,
+          authorize,
+        }).resolve(transaction, {
+          ...request,
+          expectedBatches: order.batches.map((batch) => ({
+            orderBatchReference: batch.orderBatchReference,
+            orderAllocationMinor: order.items
+              .map((item) => item.snapshot)
+              .filter((item) => item.orderBatchReference === batch.orderBatchReference)
+              .reduce((sum, item) => sum + item.pricing.total.amountMinor, 0n),
+          })),
+        });
+        // WP-2423 (v15 3cd0f8dd M4): what each confirmed refund returned, so the version says it.
+        const itemization = await readRefundItemization(transaction, {
+          scope: options.scope,
+          orderReference: request.orderReference,
+          observedAt: request.observedAt,
+          order,
+          batches: financial.batches,
+          authorize,
+        });
+        const snapshot = createRefundReceiptSnapshot(previous, financial, itemization);
+        await authorize();
+        if (snapshot === null) return null;
+        const identities = options.identities();
+        const record = parseDigitalReceiptRecord({
+          recordReference: identities.recordReference,
+          version: previous.version + 1,
+          kind: "Refund",
+          recordedAt: request.observedAt,
+          previousRecordReference: previous.recordReference,
+          reasonCode: "PAYMENT_REFUND_STATUS_CHANGED",
+          snapshot,
+        });
+        const sourceDigest =
+          "sha256:" +
+          sha256Hex(
+            encode(
+              itemization === undefined
+                ? { previous, order, financial, record }
+                : { previous, order, financial, itemization, record },
+            ),
+          );
+        prepared = { encoded: encode(record), sourceDigest };
+        return {
+          record,
+          sourceDigest,
+          operationReference: identities.operationReference,
+          audit: await options.audit(record, identities.operationReference),
+        };
+      },
+    });
+  };
+}
+
+/**
+ * WP-2423 (v15 3cd0f8dd M4): the confirmed refunds of the Order's charged rounds split into what
+ * each returned, from the Payment owner's refund requests (customer-requested refunds and item
+ * cancellations, online or on the card machine) and each round's captured and refunded amounts.
+ * Read under the Order's refund fence the coverage read already holds. When anything can't be read
+ * the refund version states the refunded amount only (undefined), as before.
+ */
+async function readRefundItemization(
+  transaction: ConsumerTransaction,
+  input: {
+    scope: Parameters<typeof createPostgresPaymentReceiptCoverageSource>[0]["scope"];
+    orderReference: string;
+    observedAt: string;
+    order: ReceiptOrderSnapshot;
+    batches: readonly {
+      orderBatchReference: string;
+      paymentIntentReference: string;
+      captured: { amountMinor: bigint };
+      refunded: { amountMinor: bigint };
+      tip: { amountMinor: bigint };
+    }[];
+    authorize(): Promise<boolean>;
+  },
+): Promise<RefundReceiptItemization | undefined> {
+  const scope = {
+    tenantReference: input.scope.tenantReference,
+    brandReference: input.scope.brandReference,
+    storeReference: input.scope.storeReference,
+  };
+  const allowed = async () => (await input.authorize()) === true;
+  await transaction.query("SAVEPOINT refund_receipt_itemization", []);
+  try {
+    const context = await createPostgresOrdinaryRefundRequestContextSource({
+      scope,
+      fence: "OrderOnly",
+      authorize: allowed,
+    })(transaction, {
+      orderReference: input.orderReference,
+      operationReference: uuidV7(),
+      observedAt: input.observedAt,
+    });
+    const status = createPostgresOrdinaryRefundRequestStatusSource({
+      scope,
+      providerAccountReference: input.scope.providerAccountReference,
+      environment: input.scope.environment,
+      authorize: allowed,
+    });
+    const itemized: RefundReceiptItemization["itemized"][number][] = [];
+    for (const request of context.history) {
+      if (context.declines.has(request.requestReference)) continue;
+      const current = await status(transaction, {
+        orderReference: input.orderReference,
+        operationReference: request.operationReference,
+        observedAt: input.observedAt,
+      });
+      const payments = [];
+      for (const payment of request.payments) {
+        const state = current.payments.find(
+          (entry) =>
+            entry.paymentIntentReference === payment.paymentIntentReference &&
+            entry.paymentAttemptReference === payment.paymentAttemptReference,
+        );
+        if (state?.state !== "Confirmed") continue;
+        const round = input.batches.find(
+          (batch) => batch.paymentIntentReference === payment.paymentIntentReference,
+        );
+        if (round === undefined) throw new Error("REFUND_ITEMIZATION_ROUND_UNKNOWN");
+        payments.push({
+          orderBatchReference: round.orderBatchReference,
+          items: payment.items.map((item) => ({
+            orderItemReference: item.orderItemReference,
+            quantity: item.refundUnitOrdinals.length,
+            netMinor: item.components.netAmountMinor,
+            taxMinor: item.components.taxAmountMinor,
+            tipMinor: item.components.tipAmountMinor,
+            otherMinor:
+              item.components.serviceChargeAmountMinor +
+              item.components.serviceChargeTaxAmountMinor,
+          })),
+        });
+      }
+      if (payments.length > 0)
+        itemized.push({
+          refundReference: request.requestReference,
+          kind: request.claim === undefined ? "Refund" : "ItemCancellation",
+          payments,
+        });
+    }
+    await transaction.query("RELEASE SAVEPOINT refund_receipt_itemization", []);
+    return {
+      itemized,
+      rounds: input.batches.map((batch) => ({
+        orderBatchReference: batch.orderBatchReference,
+        capturedMinor: batch.captured.amountMinor,
+        refundedMinor: batch.refunded.amountMinor,
+        tipMinor: batch.tip.amountMinor,
+        lineReferences: input.order.items
+          .filter((item) => item.snapshot.orderBatchReference === batch.orderBatchReference)
+          .map((item) => String(item.snapshot.orderItemReference)),
+      })),
+    };
+  } catch {
+    await transaction.query("ROLLBACK TO SAVEPOINT refund_receipt_itemization", []);
+    await transaction.query("RELEASE SAVEPOINT refund_receipt_itemization", []);
+    if ((await input.authorize()) !== true)
+      throw new DigitalReceiptError("DIGITAL_RECEIPT_PERMISSION_DENIED");
+    return undefined;
+  }
+}
+
+/**
+ * WP-2423 item 4: whether the Order has a digital receipt a refund version can follow. Counter
+ * orders paid on the Store's card machine have none (the machine prints its own slip).
+ */
+export async function hasDigitalReceipt(
+  transaction: ConsumerTransaction,
+  options: {
+    brandReference: string;
+    storeReference: string;
+    orderReference: string;
+    authorize(transaction: ConsumerTransaction): Promise<boolean>;
+  },
+): Promise<boolean> {
+  const chain = await createPostgresDigitalReceiptStore({
+    brandReference: options.brandReference,
+    storeReference: options.storeReference,
+    authorize: async (tx, access) =>
+      access.action === "Read" &&
+      String(access.orderReference) === options.orderReference &&
+      (await options.authorize(tx)),
+    validateSources: async () => false,
+  }).load({ transaction, orderReference: options.orderReference });
+  const latest = chain?.records.at(-1);
+  return latest !== undefined && latest.kind !== "Void";
+}

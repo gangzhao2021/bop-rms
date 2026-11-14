@@ -13,24 +13,64 @@ export interface CustomerMenuQueryInput {
 }
 
 export interface CustomerMenuOptionRuleDto {
+  readonly semanticsVersion?: 2;
+  /** The option set's name ("Milk"); null for menus published before names were included. */
+  readonly name: string | null;
+  readonly activationOptionReferences?: readonly CatalogReference[];
   readonly bindingReference: CatalogReference;
   readonly optionSetVersionReference: CatalogReference;
   readonly minimumSelections: number;
   readonly maximumSelections: number;
   readonly enabledOptionReferences: readonly CatalogReference[];
   readonly defaultOptionReferences: readonly CatalogReference[];
+  /**
+   * WP-2423 item 8 ⑥ part 4: a combo part — guests start with nothing chosen and must choose
+   * (whatever the defaults underneath); absent otherwise.
+   */
+  readonly comboPart?: true;
   readonly options: readonly {
     readonly optionReference: CatalogReference;
     readonly name: string;
     readonly maximumQuantity: number;
     readonly conflictOptionReferences: readonly CatalogReference[];
+    /** The choice the dish is configured to start with (published); see `offeredNow`. */
     readonly selectedByDefault: boolean;
-    readonly incrementalPrice: {
-      readonly status: "Unavailable";
-      readonly amount: null;
-      readonly currency: null;
-      readonly reason: "PRICING_NOT_INTEGRATED";
-    };
+    readonly defaultQuantity?: number;
+    /**
+     * WP-2423 (cart-unsellable-dishes): present (false) only when the Store does not offer this
+     * choice right now (staff unticked it under Option sets). It cannot be chosen and a client
+     * never starts with it, even when it is the configured default; absent: offered.
+     */
+    readonly offeredNow?: false;
+    /** WP-2423 (M22, M24): not offered now because it is sold out at the Store today. */
+    readonly soldOut?: true;
+    /** What one of this option adds now at the Store (0 is "no charge"); the Quote decides. */
+    readonly incrementalPrice:
+      | {
+          readonly status: "Available";
+          readonly amount: string;
+          readonly currency: string;
+          readonly reason: null;
+        }
+      | {
+          readonly status: "Unavailable";
+          readonly amount: null;
+          readonly currency: null;
+          readonly reason: "PRICING_NOT_INTEGRATED" | "PRICE_NOT_SET";
+        };
+  }[];
+}
+
+export interface CustomerMenuPhotoDto {
+  readonly altText: string;
+  /** Aspect ratio of the photo. */
+  readonly width: number;
+  readonly height: number;
+  readonly renditions: readonly {
+    readonly url: string;
+    readonly contentType: "image/jpeg" | "image/webp";
+    readonly width: number;
+    readonly height: number;
   }[];
 }
 
@@ -40,8 +80,15 @@ export interface CustomerMenuSellableDto {
   readonly name: string;
   readonly presentationRole: "Standard" | "Featured" | "Promotional" | "Sponsored";
   readonly pinned: boolean;
-  readonly availability: "Available";
+  /** WP-2423 8.6: SoldOut while the Store has marked the item sold out (ordering is refused). */
+  readonly availability: "Available" | "SoldOut";
+  /** WP-2423 DEC-ALCOHOL: the dish contains alcohol; OutsideHours can't be ordered right now. */
+  readonly alcohol?: "OnSale" | "LastCall" | "OutsideHours";
   readonly optionRules: readonly CustomerMenuOptionRuleDto[];
+  /** WP-2423: the published description in the customer's language (menu language otherwise). */
+  readonly description: string | null;
+  /** WP-2423: the published photo; renditions are content-addressed public image paths. */
+  readonly photo: CustomerMenuPhotoDto | null;
   readonly allergenDisclosure: {
     readonly registryVersionReference: CatalogReference;
     readonly items: readonly {
@@ -52,13 +99,51 @@ export interface CustomerMenuSellableDto {
     }[];
     readonly allergenFreeClaim: false;
     readonly assistanceCode: "ALLERGEN_ASSISTANCE_REQUIRED";
+    /**
+     * WP-2423 ⑪: allergens for each reviewed set of chosen options (`sets` entries are
+     * `[outcome, ...optionIndexes]`, names as in `items`); absent for older menus.
+     */
+    readonly byChoice?: {
+      readonly options: readonly CatalogReference[];
+      readonly outcomes: readonly (readonly {
+        readonly code: CatalogCode;
+        readonly classification: "Contains" | "CrossContactPossible";
+      }[])[];
+      readonly sets: readonly (readonly number[])[];
+    };
+    /**
+     * WP-2423 item 12: what each dish of a combo part declares by itself (names as in `items`).
+     * A dish missing here says nothing; absent for older menus and for items that aren't combos.
+     */
+    readonly byOption?: Readonly<
+      Record<
+        string,
+        readonly {
+          readonly code: CatalogCode;
+          readonly classification: "Contains" | "CrossContactPossible";
+        }[]
+      >
+    >;
+    /**
+     * WP-2423 (M77, M167): a recipe changed what the dish contains since the menu was listed;
+     * `items` (and `byChoice`) already include what it adds. Guests are told to ask staff.
+     */
+    readonly justUpdated?: true;
   };
-  readonly displayPrice: {
-    readonly status: "Unavailable";
-    readonly amount: null;
-    readonly currency: null;
-    readonly reason: "PRICING_NOT_INTEGRATED";
-  };
+  /** The Store's current base price before options and tax; the final Quote stays authoritative. */
+  readonly displayPrice:
+    | {
+        readonly status: "Available";
+        readonly amount: string;
+        readonly currency: string;
+        readonly reason: null;
+      }
+    | {
+        readonly status: "Unavailable";
+        readonly amount: null;
+        readonly currency: null;
+        readonly reason: "PRICING_NOT_INTEGRATED" | "PRICE_NOT_SET";
+      };
   readonly taxDisplayContext: {
     readonly status: "Unavailable";
     readonly taxInclusive: null;

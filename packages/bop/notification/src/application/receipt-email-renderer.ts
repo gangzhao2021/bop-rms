@@ -14,6 +14,7 @@ export interface ReceiptEmailInput {
     readonly amountMinor: bigint;
     readonly currencyCode: "CAD";
   }[];
+  readonly adjustments?: Readonly<{ discountMinor: bigint; feeMinor: bigint }>;
   readonly subtotalMinor: bigint;
   readonly taxMinor: bigint;
   readonly tipMinor: bigint;
@@ -49,6 +50,8 @@ const copy = {
     quantity: "Quantity",
     amount: "Amount",
     subtotal: "Subtotal",
+    discount: "Discount",
+    fee: "Fees",
     tax: "Tax",
     tip: "Tip",
     total: "Total",
@@ -63,6 +66,8 @@ const copy = {
     quantity: "Quantité",
     amount: "Montant",
     subtotal: "Sous-total",
+    discount: "Remise",
+    fee: "Frais",
     tax: "Taxe",
     tip: "Pourboire",
     total: "Total",
@@ -113,7 +118,7 @@ function text(value: unknown, maximum: number): string {
 }
 
 function money(value: unknown): bigint {
-  if (typeof value !== "bigint" || value < 0n || value > 999_999_999_999_99n) return fail();
+  if (typeof value !== "bigint" || value < 0n || value > 9_223_372_036_854_775_807n) return fail();
   return value;
 }
 
@@ -126,6 +131,8 @@ function formatMoney(amountMinor: bigint, locale: ReceiptEmailLocale): string {
 }
 
 function parse(input: unknown): ReceiptEmailInput {
+  const hasAdjustments =
+    input !== null && typeof input === "object" && Object.hasOwn(input, "adjustments");
   const raw = exact(input, [
     "locale",
     "storeDisplayName",
@@ -137,6 +144,7 @@ function parse(input: unknown): ReceiptEmailInput {
     "tipMinor",
     "totalMinor",
     "currencyCode",
+    ...(hasAdjustments ? ["adjustments"] : []),
   ]);
   if ((raw.locale !== "en-CA" && raw.locale !== "fr-CA") || raw.currencyCode !== "CAD")
     return fail();
@@ -164,12 +172,27 @@ function parse(input: unknown): ReceiptEmailInput {
       });
     }),
   );
+  const adjustmentRaw = hasAdjustments
+    ? exact(raw.adjustments, ["discountMinor", "feeMinor"])
+    : null;
+  const adjustments = adjustmentRaw
+    ? Object.freeze({
+        discountMinor: money(adjustmentRaw.discountMinor),
+        feeMinor: money(adjustmentRaw.feeMinor),
+      })
+    : undefined;
   const subtotalMinor = money(raw.subtotalMinor);
   const taxMinor = money(raw.taxMinor);
   const tipMinor = money(raw.tipMinor);
   const totalMinor = money(raw.totalMinor);
   if (
-    subtotalMinor + taxMinor + tipMinor !== totalMinor ||
+    (adjustments?.discountMinor ?? 0n) > subtotalMinor ||
+    subtotalMinor -
+      (adjustments?.discountMinor ?? 0n) +
+      (adjustments?.feeMinor ?? 0n) +
+      taxMinor +
+      tipMinor !==
+      totalMinor ||
     lines.reduce((sum, line) => sum + line.amountMinor, 0n) !== subtotalMinor
   )
     return fail();
@@ -179,6 +202,7 @@ function parse(input: unknown): ReceiptEmailInput {
     orderNumber: text(raw.orderNumber, 64),
     issuedAt: raw.issuedAt,
     lines,
+    ...(adjustments ? { adjustments } : {}),
     subtotalMinor,
     taxMinor,
     tipMinor,
@@ -219,6 +243,12 @@ export function renderReceiptEmail(value: unknown): RenderedReceiptEmail {
     ...lineText,
     "",
     `${labels.subtotal}: ${formatMoney(input.subtotalMinor, input.locale)}`,
+    ...(input.adjustments
+      ? [
+          `${labels.discount}: -${formatMoney(input.adjustments.discountMinor, input.locale)}`,
+          `${labels.fee}: ${formatMoney(input.adjustments.feeMinor, input.locale)}`,
+        ]
+      : []),
     `${labels.tax}: ${formatMoney(input.taxMinor, input.locale)}`,
     `${labels.tip}: ${formatMoney(input.tipMinor, input.locale)}`,
     `${labels.total}: ${formatMoney(input.totalMinor, input.locale)}`,
@@ -273,6 +303,15 @@ export function renderReceiptEmail(value: unknown): RenderedReceiptEmail {
             "tfoot",
             null,
             row(labels.subtotal, formatMoney(input.subtotalMinor, input.locale)),
+            ...(input.adjustments
+              ? [
+                  row(
+                    labels.discount,
+                    `-${formatMoney(input.adjustments.discountMinor, input.locale)}`,
+                  ),
+                  row(labels.fee, formatMoney(input.adjustments.feeMinor, input.locale)),
+                ]
+              : []),
             row(labels.tax, formatMoney(input.taxMinor, input.locale)),
             row(labels.tip, formatMoney(input.tipMinor, input.locale)),
             row(labels.total, formatMoney(input.totalMinor, input.locale)),

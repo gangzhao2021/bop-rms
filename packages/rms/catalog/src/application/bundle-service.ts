@@ -75,6 +75,10 @@ function hasMoney(aggregate: BundleAggregate): boolean {
     )
   );
 }
+/**
+ * WP-2423 item 8 ⑥ part 4 (DEC-PERM-CATALOG step 4, the Bundle back office connected): a combo is
+ * edited by whoever edits products, and its price is approved by whoever approves price books.
+ */
 async function authorize(
   ports: BundlePorts,
   action: BundleOperationAction,
@@ -94,14 +98,14 @@ async function authorize(
     const pricingApproved =
       !moneyBearing ||
       (evidence.pricingApproval?.effect === "Allow" &&
-        evidence.pricingApproval.action === "pricing.bundle.approve" &&
+        evidence.pricingApproval.action === "pricing.price_book.approve" &&
         evidence.pricingApproval.scopeKind === "Brand");
     if (
       context.scopeKind !== "Brand" ||
       actor === null ||
       evidence.permission.effect !== "Allow" ||
       evidence.permission.scopeKind !== "Brand" ||
-      evidence.permission.action !== "catalog.bundle.manage" ||
+      evidence.permission.action !== "catalog.product.update" ||
       !pricingApproved ||
       audit.brandId !== String(context.brand.brandReference) ||
       audit.storeId !== undefined ||
@@ -286,9 +290,14 @@ export function createBundleService(ports: BundlePorts) {
         requestedAt,
         false,
       );
+      // WP-2423 item 8 ⑥ part 4: a published Bundle is revised by a new draft version (versions
+      // are written once); what was published stays on record and sells until the next publish.
       if (
-        current.lifecycle !== "Draft" ||
+        (current.lifecycle !== "Draft" && current.lifecycle !== "Published") ||
+        (current.lifecycle === "Published" &&
+          candidate.currentVersion.versionReference === current.currentVersion.versionReference) ||
         candidate.lifecycle !== "Draft" ||
+        candidate.currentVersion.status !== "Draft" ||
         candidate.brandReference !== auth.brand ||
         candidate.internalCode !== current.internalCode ||
         candidate.createdAt !== current.createdAt ||

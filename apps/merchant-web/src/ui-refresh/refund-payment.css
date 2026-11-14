@@ -1,0 +1,570 @@
+/*
+ * Payment and refund (v3, 2026-11-04). White, no boxes; list rows are parted by a hairline, areas
+ * by space. Type 28/20/16/14 at 600/400, one accent, one solid button per view (the step to take
+ * now); everything else is accent text. Built from the Orders page's rows.
+ */
+.workspace-page.refund-page {
+  max-width: 60rem;
+}
+.refund-page .workspace-page__back a {
+  color: var(--bop-color-accent);
+  font-size: 14px;
+}
+.refund-page h1 {
+  font-size: 28px;
+  font-weight: 600;
+}
+.refund-page h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+.refund-page h3,
+.refund-page h4,
+.refund-page legend {
+  margin: 0;
+  padding: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.refund-page p {
+  margin: 0;
+  max-width: 44rem;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.refund-page a:not([class]) {
+  color: var(--bop-color-accent);
+  font-weight: 400;
+  text-decoration: none;
+}
+.refund-page a:not([class]):hover {
+  text-decoration: underline;
+}
+
+/* The two kinds of button. */
+.refund-page .refund-primary {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 20px;
+  border: 0;
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-accent-fill);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+.refund-page .refund-primary:disabled {
+  background: var(--bop-color-surface-placeholder);
+  color: var(--bop-color-text-muted);
+  cursor: not-allowed;
+}
+.refund-page .refund-text {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 400;
+  text-align: start;
+  text-decoration: none;
+  cursor: pointer;
+}
+.refund-page .refund-text:hover:not(:disabled) {
+  text-decoration: underline;
+}
+.refund-page .refund-text:disabled {
+  color: var(--bop-color-text-muted);
+  cursor: not-allowed;
+}
+.refund-page :is(button, a, input, select, textarea):focus-visible {
+  outline: 2px solid var(--bop-color-focus);
+  outline-offset: 2px;
+}
+
+/* The summary: one calm row, label over value. */
+.refund-summary dl {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) repeat(3, minmax(0, 1fr));
+  gap: 16px 32px;
+  margin: 0;
+}
+.refund-summary dl > div {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  min-width: 0;
+}
+.refund-summary dt {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
+}
+.refund-summary dd {
+  margin: 0;
+  color: var(--bop-color-text-default);
+  font-size: 16px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.refund-page p.refund-summary__note {
+  margin-top: 16px;
+  color: var(--bop-color-text-muted);
+}
+.refund-page .refund-summary__foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0 16px;
+  min-height: 44px;
+  margin: 4px 0 32px;
+}
+.refund-summary__foot p {
+  color: var(--bop-color-text-muted);
+}
+.refund-page .refund-start {
+  margin: 0 0 32px;
+}
+
+/* Section heading with its small refresh on the right. */
+.refund-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0 16px;
+  min-height: 44px;
+  margin-bottom: 8px;
+}
+
+/* Recorded requests: amount and state on one line, why and when under them. */
+.refund-requests {
+  margin-bottom: 32px;
+}
+.refund-page .refund-requests > h2 {
+  margin-bottom: 8px;
+}
+.refund-requests > ol,
+.refund-requests > ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.refund-page .card-machine-refunds-to-record li {
+  padding: 0;
+  border: 0;
+  background: none;
+  border-radius: 0;
+}
+.refund-page .refund-requests .refund-request {
+  padding: 12px 0;
+}
+.refund-page .refund-requests .refund-request + .refund-request {
+  border-top: 1px solid var(--bop-color-row-divider, #e5e5e5);
+}
+.refund-requests > ol > .refund-request:first-child,
+.refund-requests > ul > .refund-request:first-child {
+  padding-top: 0;
+}
+.refund-request__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 16px;
+}
+/* The refresh keeps its 44px target without pushing the two lines apart. */
+.refund-page .refund-request__refresh {
+  margin-block: -10px;
+}
+.refund-request__amount {
+  font-size: 16px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.refund-request__state {
+  flex: 1 1 12rem;
+  min-width: 0;
+  color: var(--bop-color-text-default);
+  font-size: 14px;
+}
+.refund-request__state::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-inline-end: 8px;
+  border-radius: 50%;
+  background: var(--bop-color-accent);
+  vertical-align: 0.1em;
+}
+.refund-request__state[data-tone="attention"]::before {
+  background: var(--bop-color-danger-mark);
+}
+.refund-request__state[data-tone="done"]::before {
+  background: var(--bop-color-success-mark);
+}
+.refund-request__state[data-tone="quiet"]::before {
+  background: var(--bop-color-text-muted);
+}
+.refund-page p.refund-request__meta,
+.refund-page p.refund-request__muted {
+  color: var(--bop-color-text-muted);
+}
+.refund-page p.refund-request__note {
+  margin-top: 8px;
+}
+.refund-request__details {
+  margin-top: 8px;
+}
+.refund-request__details ul {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+.refund-request__details li {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Fields, the card-machine record form and the send confirmation share one look. */
+.refund-page .card-machine-request-refund {
+  margin-top: 8px;
+  max-width: 28rem;
+}
+.card-machine-request-refund form {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}
+.refund-page .card-machine-request-refund label {
+  width: 100%;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 400;
+}
+.refund-page .card-machine-request-refund input:not([type="checkbox"]) {
+  width: 100%;
+  font-size: 16px;
+}
+.refund-page .card-machine-request-refund label:has(> input[type="checkbox"]) {
+  min-height: 44px;
+}
+.refund-page .field-hint {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.refund-page .refund-send {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}
+.refund-page .refund-confirm {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-height: 44px;
+  margin: 0;
+  padding: 10px 0;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.5;
+}
+.refund-page .refund-confirm input {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin: 2px 0 0;
+  accent-color: var(--bop-color-accent);
+}
+
+/* The form: dishes one per row, the stepper lined up on the right. */
+.refund-page .refund-form {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.refund-form legend {
+  float: inline-start;
+  line-height: 44px;
+}
+.refund-form__quick {
+  display: flex;
+  justify-content: flex-end;
+  gap: 24px;
+  min-height: 44px;
+}
+.refund-page p.refund-form__hint {
+  clear: both;
+  margin: 0 0 8px;
+  color: var(--bop-color-text-muted);
+}
+.refund-lines {
+  clear: both;
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+}
+.refund-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  min-height: 56px;
+  padding: 6px 0;
+}
+.refund-line + .refund-line {
+  border-top: 1px solid var(--bop-color-row-divider, #e5e5e5);
+}
+.refund-page .refund-line__label {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  margin: 0;
+  font-weight: 400;
+}
+.refund-line__name {
+  font-size: 16px;
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+.refund-line__meta {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.refund-stepper {
+  display: grid;
+  grid-template-columns: 44px 3rem 44px;
+  align-items: center;
+}
+.refund-page .refund-stepper button {
+  display: flex;
+  width: 44px;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font: inherit;
+  font-size: 20px;
+  font-weight: 400;
+  cursor: pointer;
+}
+.refund-page .refund-stepper button:disabled {
+  color: var(--bop-color-border-control);
+  cursor: not-allowed;
+}
+.refund-page .refund-stepper input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid var(--bop-color-border-control);
+  border-radius: 0;
+  background: none;
+  color: var(--bop-color-text-default);
+  font: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  appearance: textfield;
+}
+.refund-page .refund-stepper input::-webkit-inner-spin-button,
+.refund-page .refund-stepper input::-webkit-outer-spin-button {
+  margin: 0;
+  appearance: none;
+}
+.refund-page .refund-form:disabled .refund-stepper input {
+  color: var(--bop-color-text-muted);
+}
+.refund-form__field {
+  display: grid;
+  gap: 4px;
+  max-width: 28rem;
+  margin-bottom: 16px;
+}
+.refund-page .refund-form__field label {
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
+}
+.refund-page .refund-form__field :is(select, textarea) {
+  width: 100%;
+  font-size: 16px;
+}
+
+/* A request that needs doing comes first: the solid button is its, not the review's. */
+.refund-page .refund-wizard:has(.refund-requests .refund-primary) .refund-review {
+  min-height: 44px;
+  padding: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font-weight: 400;
+}
+.refund-page .refund-wizard:has(.refund-requests .refund-primary) .refund-review:disabled {
+  color: var(--bop-color-text-muted);
+}
+
+/* While a new refund is under review, its record button is the solid one. */
+.refund-page
+  .refund-wizard:has(.refund-review-panel)
+  .refund-requests
+  .refund-primary:not(:disabled) {
+  width: auto;
+  padding: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font-weight: 400;
+}
+
+/* The review: what will be refunded, its total, then the money guard and the one action. */
+.refund-page .refund-review-panel {
+  display: grid;
+  gap: 16px;
+  justify-items: start;
+  max-width: 28rem;
+  margin-top: 24px;
+}
+.refund-page .refund-amounts {
+  display: grid;
+  width: 100%;
+  gap: 0;
+  margin: 0;
+}
+.refund-amounts > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 0;
+}
+.refund-amounts > div + div {
+  border-top: 1px solid var(--bop-color-row-divider, #e5e5e5);
+}
+.refund-page .refund-amounts dt {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
+}
+.refund-page .refund-amounts dd {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+.refund-page .refund-amounts__total dt {
+  color: var(--bop-color-text-default);
+  font-size: 16px;
+  font-weight: 600;
+}
+.refund-page .refund-amounts__total dd {
+  font-size: 20px;
+  font-weight: 600;
+}
+.refund-page .refund-escalation {
+  display: grid;
+  width: 100%;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+}
+.refund-page .refund-escalation h4 {
+  margin: 0;
+}
+.refund-page .refund-escalation ul {
+  margin: 0;
+  padding-inline-start: 18px;
+  font-size: 14px;
+}
+
+/* Status and what follows it. */
+.refund-page .refund-status {
+  margin: 16px 0 8px;
+}
+.refund-page .refund-status:empty {
+  display: none;
+}
+.refund-page .refund-status:focus {
+  outline: none;
+}
+.refund-page .refund-another {
+  display: flex;
+}
+.refund-page .refund-blocked {
+  margin-top: 8px;
+}
+
+@media (max-width: 767px) {
+  .refund-summary dl {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+  }
+  .refund-summary dl > div:first-child {
+    grid-column: 1 / -1;
+  }
+  .refund-page .refund-primary {
+    width: 100%;
+  }
+  .refund-page .refund-wizard:has(.refund-requests .refund-primary) .refund-review {
+    width: auto;
+  }
+  .refund-page .refund-review-panel,
+  .refund-page .refund-send,
+  .card-machine-request-refund form {
+    justify-items: stretch;
+  }
+  .refund-line {
+    gap: 8px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .refund-page * {
+    transition: none;
+  }
+}
+
+/* WP-2423 M10: "Stop making it too" on its own row under a refunded dish; words, no box. */
+.refund-page .refund-line__stop,
+.refund-line__stop {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-height: 44px;
+  margin: 0;
+  font-weight: 400;
+}
+.refund-line__stop input {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+}
+.refund-line__stop .refund-line__meta {
+  flex-basis: 100%;
+  padding-left: 28px;
+}
+.refund-line > .refund-line__meta {
+  grid-column: 1 / -1;
+}

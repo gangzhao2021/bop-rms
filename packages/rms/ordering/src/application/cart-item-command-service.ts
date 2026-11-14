@@ -2,6 +2,8 @@ import { validateAuditRecord, type AppendAuditRecordInput } from "@bop/audit";
 import { assertGuestSessionUsable, createGuestSession, type GuestSession } from "@bop/identity";
 import {
   CartError,
+  CartSelectionRejectedError,
+  cartItemUnavailableReason,
   parseCartAggregate,
   parseCartItem,
   parseCatalogSelectionEvidence,
@@ -14,6 +16,7 @@ import {
   type CatalogSelectionEvidence,
   type OrderingInstant,
   type OrderingReference,
+  isGuestCartChannel,
 } from "../domain/cart.js";
 import { advanceCartLifecycle, assertCartLifecycleActive } from "../domain/cart-lifecycle.js";
 import type {
@@ -133,7 +136,7 @@ function authorizeSession(
       sessionBrandReference !== cart.brandReference ||
       sessionStoreReference !== cart.storeReference ||
       session.channel !== cart.orderType ||
-      !["Qr", "Web"].includes(cart.sourceChannel) ||
+      !isGuestCartChannel(cart.orderType, cart.sourceChannel) ||
       (cart.orderType === "Pickup" &&
         (sessionReference !== cart.createdByActorReference ||
           session.diningState !== "ContextOnly" ||
@@ -158,14 +161,21 @@ async function context(
   operationReference: OrderingReference,
   at: OrderingInstant,
 ) {
-  const cart = await ports.repository.load(cartReference).catch(failure);
-  if (cart === null) throw new CartError("CART_UNAVAILABLE");
-  const aggregate = parseCartAggregate(cart);
   const evidence = await ports.authorization
     .authorize({ action, cartReference, operationReference, observedAt: at })
     .catch(failure);
   if (evidence === null) throw new CartError("CART_PERMISSION_DENIED");
-  const session = authorizeSession(evidence.guestSession, aggregate, at);
+  let usableSession: GuestSession;
+  try {
+    usableSession = assertGuestSessionUsable(createGuestSession(evidence.guestSession), at);
+  } catch {
+    throw new CartError("CART_PERMISSION_DENIED");
+  }
+  const cart = await ports.repository.load(cartReference).catch(failure);
+  if (cart === null) throw new CartError("CART_UNAVAILABLE");
+  const aggregate = parseCartAggregate(cart);
+  if (aggregate.cartReference !== cartReference) throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
+  const session = authorizeSession(usableSession, aggregate, at);
   return Object.freeze({ aggregate, session, audit: audit(evidence.audit, action, aggregate, at) });
 }
 
@@ -174,7 +184,7 @@ async function replay(
   input: {
     action: CartItemOperationAction;
     operationReference: OrderingReference;
-    intent: ReturnType<typeof parseOrderingHash>;
+    intentAt: (at: OrderingInstant) => ReturnType<typeof parseOrderingHash>;
     cartReference: OrderingReference;
     guestSessionReference: OrderingReference;
     requestedAt: OrderingInstant;
@@ -184,12 +194,16 @@ async function replay(
   if (prior === null) return null;
   try {
     const result = parseCartAggregate(prior.result);
+    // Preserve stored digest encoding; only the original observation belongs to that record.
     if (
       prior.action !== input.action ||
       prior.operationReference !== input.operationReference ||
       prior.cartReference !== input.cartReference ||
       prior.guestSessionReference !== input.guestSessionReference ||
-      !ports.references.equals(prior.operationIntentHash, input.intent) ||
+      !ports.references.equals(
+        prior.operationIntentHash,
+        input.intentAt(parseOrderingInstant(prior.occurredAt)),
+      ) ||
       Date.parse(input.requestedAt) >= Date.parse(parseOrderingInstant(prior.expiresAt))
     )
       throw new CartError("CART_IDEMPOTENCY_CONFLICT");
@@ -208,6 +222,7 @@ function verify(
   saved: CartItemOperationRecord,
   expected: CartItemOperationRecord,
   ports: CartItemCommandPorts,
+  intentAt: (at: OrderingInstant) => ReturnType<typeof parseOrderingHash>,
 ) {
   try {
     const result = parseCartAggregate(saved.result);
@@ -216,9 +231,17 @@ function verify(
       saved.operationReference !== expected.operationReference ||
       saved.guestSessionReference !== expected.guestSessionReference ||
       saved.cartReference !== expected.cartReference ||
-      saved.cartItemReference !== expected.cartItemReference ||
-      !ports.references.equals(saved.operationIntentHash, expected.operationIntentHash) ||
+      (expected.action !== "Add" && saved.cartItemReference !== expected.cartItemReference) ||
+      (expected.action === "Add" &&
+        result.items.find((item) => item.cartItemReference === saved.cartItemReference)
+          ?.addedByActorReference !== expected.guestSessionReference) ||
+      !ports.references.equals(
+        saved.operationIntentHash,
+        intentAt(parseOrderingInstant(saved.occurredAt)),
+      ) ||
       result.cartReference !== expected.result.cartReference ||
+      result.brandReference !== expected.result.brandReference ||
+      result.storeReference !== expected.result.storeReference ||
       result.aggregateVersion !== expected.result.aggregateVersion
     )
       throw new Error("bad result");
@@ -273,27 +296,73 @@ function sameSelections(
   );
 }
 
-async function catalogEvidence(
-  ports: CartItemCommandPorts,
+/**
+ * What Catalog says about one cart line now: its evidence when it can still be sold as selected,
+ * CART_SELECTION_INVALID when not. The one check for a line added, changed or carried over a new
+ * menu version.
+ */
+export async function validatedCatalogEvidence(
+  catalog: CartItemCommandPorts["catalog"],
   cart: CartAggregate,
   sellableReference: OrderingReference,
   optionSelections: readonly CartOptionSelection[],
   observedAt: OrderingInstant,
+  quantity: number,
+  guestSessionReference: OrderingReference,
 ): Promise<CatalogSelectionEvidence> {
   let result;
+  const selection = {
+    brandReference: cart.brandReference as never,
+    storeReference: cart.storeReference as never,
+    sourceChannel: cart.sourceChannel,
+    orderType: cart.orderType,
+    sellableReference: sellableReference as never,
+    optionSelections: optionSelections as never,
+    observedAt: observedAt as never,
+  };
+  /**
+   * WP-2423 (cart-unsellable-dishes): why this one dish can't be had as chosen, from a stable
+   * Catalog standing only; null when there is none (or no standing source) so the caller keeps
+   * its own answer.
+   */
+  const standing = async (): Promise<"NotAvailable" | "SoldOut" | "OptionsChanged" | null> => {
+    if (catalog.explainMany === undefined) return null;
+    try {
+      const found = await catalog.explainMany([selection]);
+      if (!Array.isArray(found) || found.length !== 1) return null;
+      // WP-2423 (M154): the guest is told it is sold out, not only "can't be ordered".
+      if (found[0] === "SoldOut") return "SoldOut";
+      const reason = cartItemUnavailableReason(found[0]);
+      return reason === null
+        ? null
+        : reason === "OptionsChanged"
+          ? "OptionsChanged"
+          : "NotAvailable";
+    } catch {
+      return null;
+    }
+  };
   try {
-    result = await ports.catalog.validateSelection({
-      brandReference: cart.brandReference as never,
-      storeReference: cart.storeReference as never,
-      sourceChannel: cart.sourceChannel,
-      orderType: cart.orderType,
-      sellableReference: sellableReference as never,
-      optionSelections: optionSelections as never,
-      observedAt: observedAt as never,
-    });
+    result = await catalog.validateSelection(
+      selection,
+      Object.freeze({
+        diningSessionReference: cart.diningSessionReference,
+        cartReference: cart.cartReference,
+        cartVersion: cart.aggregateVersion,
+        guestSessionReference,
+        quantity,
+      }),
+    );
   } catch {
+    // A stable reason (the dish's setup broke, it was hidden) names it; an outage stays retry.
+    const reason = await standing();
+    if (reason !== null)
+      throw new CartSelectionRejectedError(
+        reason === "OptionsChanged" ? "OptionNotOffered" : reason,
+      );
     throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
   }
+  let rejectedReason: string | null = null;
   try {
     const status = Object.getOwnPropertyDescriptor(result, "status");
     if (status === undefined || !Object.hasOwn(status, "value")) throw new Error("bad result");
@@ -309,6 +378,7 @@ async function catalogEvidence(
         ].includes(String(rejected.reason))
       )
         throw new Error("bad result");
+      rejectedReason = String(rejected.reason);
       throw new CartError("CART_SELECTION_INVALID");
     }
     const accepted = exact(result, [
@@ -350,7 +420,20 @@ async function catalogEvidence(
     if (evidence === null || evidence.validatedAt !== observedAt) throw new Error("bad result");
     return evidence;
   } catch (error) {
-    if (error instanceof CartError && error.code === "CART_SELECTION_INVALID") throw error;
+    if (error instanceof CartError && error.code === "CART_SELECTION_INVALID") {
+      // WP-2423 (cart-unsellable-dishes): say which kind of refusal it is.
+      if (rejectedReason === "OPTION_NOT_ENABLED")
+        throw new CartSelectionRejectedError("OptionNotOffered");
+      if (rejectedReason === "SELLABLE_UNAVAILABLE" || rejectedReason === "RULE_UNSATISFIED") {
+        const reason = await standing();
+        if (reason === "NotAvailable") throw new CartSelectionRejectedError("NotAvailable");
+        if (reason === "SoldOut") throw new CartSelectionRejectedError("SoldOut");
+        // WP-2423 (M154): the dish is sold but its choice rules changed under the guest.
+        if (reason === "OptionsChanged" && rejectedReason === "RULE_UNSATISFIED")
+          throw new CartSelectionRejectedError("ChoicesChanged");
+      }
+      throw new CartSelectionRejectedError("Other");
+    }
     throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
   }
 }
@@ -368,12 +451,99 @@ function canMutateItem(
     : item.addedByActorReference === parseOrderingReference(session.sessionReference);
 }
 
+/**
+ * WP-2423 (guest-cart-503): at a table, a line another phone added may be removed by anyone at the
+ * table once a stable Catalog fact says it can't be sold now (sold out, off the menu, options no
+ * longer fit). Checked inside the command at its own instant; a listing in progress, a Catalog
+ * failure or no Catalog answer keeps the remove refused. Only Remove: any other edit stays the
+ * adder's. The remove is the ordinary attributed operation (the remover's Guest Session, its own
+ * Audit record and the next Cart version), so history stays append-only.
+ */
+async function removableAsUnsellable(
+  ports: CartItemCommandPorts,
+  cart: CartAggregate,
+  item: CartAggregate["items"][number],
+  at: OrderingInstant,
+): Promise<boolean> {
+  const explain = ports.catalog.explainMany;
+  if (cart.orderType !== "DineIn" || explain === undefined) return false;
+  try {
+    const standings = await explain([
+      {
+        brandReference: cart.brandReference as never,
+        storeReference: cart.storeReference as never,
+        sourceChannel: cart.sourceChannel,
+        orderType: cart.orderType,
+        sellableReference: item.sellableReference as never,
+        optionSelections: item.optionSelections as never,
+        observedAt: at as never,
+      },
+    ]);
+    return (
+      Array.isArray(standings) &&
+      standings.length === 1 &&
+      cartItemUnavailableReason(standings[0]) !== null
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * WP-2423 (same-table-ordering): a table line whose adder can no longer act at this table (staff
+ * removed the phone, the table QR was replaced, its session ended) may be removed by anyone at the
+ * table, so nobody has to pay for a dish no one can take out. Checked inside the command at its own
+ * instant, with the full binding check. Update stays the adder's.
+ *
+ * - `Removable`: an owner records the adder `Gone`.
+ * - `AtTable`: the adder is back (or never left); the view the guest saw is stale.
+ * - `Unknown`: no answer could be had (an outage, a failure, a malformed answer). Never read as
+ *   "no permission": the guest is told to try again.
+ * - `NotApplicable`: not a table line with a recorded adder, or no standing source.
+ */
+export async function adderGoneStanding(
+  ports: Pick<CartItemCommandPorts, "adders">,
+  cart: CartAggregate,
+  item: CartAggregate["items"][number],
+  at: OrderingInstant,
+): Promise<"Removable" | "AtTable" | "Unknown" | "NotApplicable"> {
+  const adders = ports.adders;
+  const participant = item.addedByParticipantReference;
+  if (
+    cart.orderType !== "DineIn" ||
+    adders === undefined ||
+    participant === null ||
+    cart.diningSessionReference === null
+  )
+    return "NotApplicable";
+  try {
+    const standings = await adders.standing(
+      Object.freeze({
+        diningSessionReference: String(cart.diningSessionReference),
+        participantReferences: Object.freeze([String(participant)]),
+        observedAt: at,
+      }),
+    );
+    if (
+      !Array.isArray(standings) ||
+      standings.length !== 1 ||
+      standings[0]?.participantReference !== String(participant)
+    )
+      return "Unknown";
+    const standing = standings[0]?.standing;
+    return standing === "Gone" ? "Removable" : standing === "AtTable" ? "AtTable" : "Unknown";
+  } catch {
+    return "Unknown";
+  }
+}
+
 async function commit(
   ports: CartItemCommandPorts,
   input: {
     action: CartItemOperationAction;
     operationReference: OrderingReference;
     intent: ReturnType<typeof parseOrderingHash>;
+    intentAt: (at: OrderingInstant) => ReturnType<typeof parseOrderingHash>;
     cartItemReference: OrderingReference;
     aggregate: CartAggregate;
     session: GuestSession;
@@ -396,10 +566,11 @@ async function commit(
   const saved = await ports.repository
     .commit({ record, expectedAggregateVersion: input.expectedVersion, audit: input.audit })
     .catch(failure);
+  const aggregate = verify(saved, record, ports, input.intentAt);
   return Object.freeze({
     status: "Applied" as const,
-    cartItemReference: input.cartItemReference,
-    aggregate: verify(saved, record, ports),
+    cartItemReference: saved.cartItemReference,
+    aggregate,
   });
 }
 
@@ -424,21 +595,23 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
       const quantity = itemQuantity(raw.quantity);
       const optionSelections = selections(raw.optionSelections);
       const customerNote = parseCustomerNote(raw.customerNote);
-      const intent = intentHash(ports, "Add", {
-        cartReference,
-        expectedAggregateVersion: expectedVersion,
-        sellableReference,
-        quantity,
-        optionSelections,
-        customerNote,
-        operationReference,
-        requestedAt,
-      });
+      const intentAt = (at: OrderingInstant) =>
+        intentHash(ports, "Add", {
+          cartReference,
+          expectedAggregateVersion: expectedVersion,
+          sellableReference,
+          quantity,
+          optionSelections,
+          customerNote,
+          operationReference,
+          requestedAt: at,
+        });
+      const intent = intentAt(requestedAt);
       const current = await context(ports, "Add", cartReference, operationReference, requestedAt);
       const prior = await replay(ports, {
         action: "Add",
         operationReference,
-        intent,
+        intentAt,
         cartReference,
         guestSessionReference: parseOrderingReference(current.session.sessionReference),
         requestedAt,
@@ -448,12 +621,14 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
         throw new CartError("CART_VERSION_CONFLICT");
       assertCartLifecycleActive(current.aggregate.lifecycle, requestedAt);
       if (current.aggregate.items.length >= 100) throw new CartError("CART_ITEM_LIMIT_REACHED");
-      const selectionEvidence = await catalogEvidence(
-        ports,
+      const selectionEvidence = await validatedCatalogEvidence(
+        ports.catalog,
         current.aggregate,
         sellableReference,
         optionSelections,
         requestedAt,
+        quantity,
+        parseOrderingReference(current.session.sessionReference),
       );
       const cartItemReference = parseOrderingReference(ports.references.generate("CartItem"));
       const item = parseCartItem({
@@ -482,6 +657,7 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
         action: "Add",
         operationReference,
         intent,
+        intentAt,
         cartItemReference,
         aggregate,
         session: current.session,
@@ -510,16 +686,18 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
       const quantity = itemQuantity(raw.quantity);
       const optionSelections = selections(raw.optionSelections);
       const customerNote = parseCustomerNote(raw.customerNote);
-      const intent = intentHash(ports, "Update", {
-        cartReference,
-        cartItemReference,
-        expectedAggregateVersion: expectedVersion,
-        quantity,
-        optionSelections,
-        customerNote,
-        operationReference,
-        requestedAt,
-      });
+      const intentAt = (at: OrderingInstant) =>
+        intentHash(ports, "Update", {
+          cartReference,
+          cartItemReference,
+          expectedAggregateVersion: expectedVersion,
+          quantity,
+          optionSelections,
+          customerNote,
+          operationReference,
+          requestedAt: at,
+        });
+      const intent = intentAt(requestedAt);
       const current = await context(
         ports,
         "Update",
@@ -530,7 +708,7 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
       const prior = await replay(ports, {
         action: "Update",
         operationReference,
-        intent,
+        intentAt,
         cartReference,
         guestSessionReference: parseOrderingReference(current.session.sessionReference),
         requestedAt,
@@ -543,20 +721,33 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
         (candidate) => candidate.cartItemReference === cartItemReference,
       );
       if (item === undefined) throw new CartError("CART_ITEM_NOT_FOUND");
-      if (!canMutateItem(item, current.aggregate, current.session))
-        throw new CartError("CART_PERMISSION_DENIED");
-      const selectionEvidence = await catalogEvidence(
-        ports,
+      const ownLine = canMutateItem(item, current.aggregate, current.session);
+      if (!ownLine) {
+        // WP-2423 M36: a line whose phone has left the table is the table's: anyone at the table
+        // may change it, as they may remove it (the same three-valued Identity check). The line
+        // keeps its adder; the operation and audit name the editor. A pickup cart has no
+        // participants, so it never reaches this path.
+        const adder = await adderGoneStanding(ports, current.aggregate, item, requestedAt);
+        if (adder === "AtTable") throw new CartError("CART_VERSION_CONFLICT");
+        if (adder === "Unknown") throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
+        if (adder !== "Removable") throw new CartError("CART_PERMISSION_DENIED");
+      }
+      const selectionEvidence = await validatedCatalogEvidence(
+        ports.catalog,
         current.aggregate,
         item.sellableReference,
         optionSelections,
         requestedAt,
+        quantity,
+        parseOrderingReference(current.session.sessionReference),
       );
       const replacement = parseCartItem({
         ...item,
         quantity,
         optionSelections,
-        customerNote,
+        // M36: another phone never sees the left guest's note (it may say "no peanuts"), so its
+        // change keeps the note as it is instead of clearing it.
+        customerNote: ownLine ? customerNote : item.customerNote,
         catalogSelectionEvidence: selectionEvidence,
       });
       const aggregate = parseCartAggregate({
@@ -572,6 +763,7 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
         action: "Update",
         operationReference,
         intent,
+        intentAt,
         cartItemReference,
         aggregate,
         session: current.session,
@@ -594,13 +786,15 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
       const operationReference = parseOrderingReference(raw.operationReference);
       const requestedAt = parseOrderingInstant(raw.requestedAt);
       const expectedVersion = version(raw.expectedAggregateVersion);
-      const intent = intentHash(ports, "Remove", {
-        cartReference,
-        cartItemReference,
-        expectedAggregateVersion: expectedVersion,
-        operationReference,
-        requestedAt,
-      });
+      const intentAt = (at: OrderingInstant) =>
+        intentHash(ports, "Remove", {
+          cartReference,
+          cartItemReference,
+          expectedAggregateVersion: expectedVersion,
+          operationReference,
+          requestedAt: at,
+        });
+      const intent = intentAt(requestedAt);
       const current = await context(
         ports,
         "Remove",
@@ -611,7 +805,7 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
       const prior = await replay(ports, {
         action: "Remove",
         operationReference,
-        intent,
+        intentAt,
         cartReference,
         guestSessionReference: parseOrderingReference(current.session.sessionReference),
         requestedAt,
@@ -624,8 +818,17 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
         (candidate) => candidate.cartItemReference === cartItemReference,
       );
       if (item === undefined) throw new CartError("CART_ITEM_NOT_FOUND");
-      if (!canMutateItem(item, current.aggregate, current.session))
-        throw new CartError("CART_PERMISSION_DENIED");
+      if (
+        !canMutateItem(item, current.aggregate, current.session) &&
+        !(await removableAsUnsellable(ports, current.aggregate, item, requestedAt))
+      ) {
+        const adder = await adderGoneStanding(ports, current.aggregate, item, requestedAt);
+        // The adder is back at the table: the guest's view is stale, so its phone reads again.
+        if (adder === "AtTable") throw new CartError("CART_VERSION_CONFLICT");
+        // Could not be checked: try again later, never "your session expired".
+        if (adder === "Unknown") throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
+        if (adder !== "Removable") throw new CartError("CART_PERMISSION_DENIED");
+      }
       const aggregate = parseCartAggregate({
         ...current.aggregate,
         aggregateVersion: expectedVersion + 1,
@@ -639,6 +842,7 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
         action: "Remove",
         operationReference,
         intent,
+        intentAt,
         cartItemReference,
         aggregate,
         session: current.session,

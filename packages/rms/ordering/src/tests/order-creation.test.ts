@@ -3,6 +3,7 @@ import type { GuestSession } from "@bop/identity";
 import { resolveStoreBusinessDate } from "@rms/store";
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
+import { validateOrderSubmissionWriteFence } from "../application/order-submission-write-fence.js";
 import { createOrderCreationService } from "../application/order-creation-service.js";
 import type { OrderCreationPorts } from "../application/ports/order-creation-ports.js";
 import { parseCartAggregate } from "../domain/cart.js";
@@ -293,6 +294,7 @@ function ports(
     Event: [refs.event],
   };
   const implementation: OrderCreationPorts = {
+    clock: { now: () => at },
     authorization: {
       async authorize() {
         calls.push("authorize");
@@ -356,7 +358,7 @@ function ports(
             businessDateResolution: input.businessDateResolution,
           }),
         });
-        return stored;
+        return { status: "Created", record: stored } as const;
       },
     },
   };
@@ -415,6 +417,7 @@ describe("WP-1224 Create Order application API", () => {
       "source",
       "business-date",
       "audit",
+      "authorize",
       "commit",
     ]);
   });
@@ -428,7 +431,7 @@ describe("WP-1224 Create Order application API", () => {
     );
     expect(result.status).toBe("AlreadyCreated");
     expect(result.record.order.orderReference).toBe(refs.order);
-    expect(replay.calls).toEqual(["authorize", "resolve"]);
+    expect(replay.calls).toEqual(["authorize", "resolve", "authorize"]);
     expect(replay.committedEvent()).toBeNull();
   });
 
@@ -442,7 +445,7 @@ describe("WP-1224 Create Order application API", () => {
       ),
       "ORDER_CREATE_IDEMPOTENCY_CONFLICT",
     );
-    expect(conflict.calls).toEqual(["authorize", "resolve"]);
+    expect(conflict.calls).toEqual(["authorize", "resolve", "authorize"]);
   });
 
   it("fails closed before lookup or snapshot reads when authorization is denied", async () => {
@@ -487,4 +490,743 @@ describe("WP-1224 Create Order application API", () => {
       "order creation is unavailable",
     );
   });
+});
+
+describe("WP-2345 exact submission evidence", () => {
+  it.each([{ cartReference: id(90) }, { expectedCartVersion: 6 }, { quoteReference: id(90) }])(
+    "rejects Checkout evidence for another requested tuple %j",
+    async (patch) => {
+      const fixture = ports();
+      await expectCode(
+        createOrderCreationService(fixture.implementation).create(command(patch)),
+        "ORDER_CREATE_DEPENDENCY_UNAVAILABLE",
+      );
+      expect(fixture.calls).toEqual(["authorize", "resolve", "checkout"]);
+    },
+  );
+  it("rejects a different validation operation before loading source facts", async () => {
+    const fixture = ports({ checkoutOverride: evidence({ validationReference: id(90) }) });
+    await expectCode(
+      createOrderCreationService(fixture.implementation).create(command()),
+      "ORDER_CREATE_DEPENDENCY_UNAVAILABLE",
+    );
+    expect(fixture.calls).toEqual(["authorize", "resolve", "checkout"]);
+  });
+  it.each(["item name", "creator", "business configuration"])(
+    "does not accept substituted saved %s",
+    async (kind) => {
+      const fixture = ports();
+      const commit = fixture.implementation.repository.commit;
+      fixture.implementation.repository.commit = async (input) => {
+        const original = (await commit(input)).record;
+        const item = original.items[0];
+        if (item === undefined) throw new Error("fixture");
+        if (kind === "item name")
+          return {
+            status: "Created",
+            record: {
+              ...original,
+              items: [
+                {
+                  ...item,
+                  catalog: {
+                    ...item.catalog,
+                    localizedNames: { "en-CA": "Different synthetic item" },
+                  },
+                },
+              ],
+            },
+          } as never;
+        if (kind === "creator")
+          return {
+            status: "Created",
+            record: {
+              ...original,
+              order: { ...original.order, createdByActorReference: id(90) },
+            },
+          } as never;
+        return {
+          status: "Created" as const,
+          record: {
+            ...original,
+            orderNumberAllocation: createOrderNumberAllocation({
+              orderReference: original.order.orderReference,
+              allocatedAt: original.createdAt,
+              sequence: original.orderNumberAllocation.sequence,
+              businessDateResolution: {
+                ...original.orderNumberAllocation.businessDateResolution,
+                configurationVersion: 2,
+              },
+            }),
+          },
+        };
+      };
+      await expectCode(
+        createOrderCreationService(fixture.implementation).create(command()),
+        "ORDER_CREATE_DEPENDENCY_UNAVAILABLE",
+      );
+      expect(fixture.calls.filter((value) => value === "commit")).toHaveLength(1);
+    },
+  );
+  it.each([
+    ["brandReference", id(90)],
+    ["storeReference", id(90)],
+    ["businessDate", "2026-08-01"],
+    ["orderNumber", "999"],
+  ])("rejects contradictory number allocation %s", async (field, value) => {
+    const fixture = ports();
+    const result = await createOrderCreationService(fixture.implementation).create(command());
+    expect(() =>
+      parseOrderCreationRecord({
+        ...result.record,
+        orderNumberAllocation: {
+          ...result.record.orderNumberAllocation,
+          [field]: value,
+        },
+      }),
+    ).toThrow(OrderCreationError);
+  });
+  it.each(["sparse", "accessor", "decorated"])(
+    "rejects %s snapshot arrays without executing code",
+    async (kind) => {
+      const fixture = ports();
+      const result = await createOrderCreationService(fixture.implementation).create(command());
+      const item = result.record.items[0];
+      let executed = 0;
+      const items: unknown[] = kind === "sparse" ? new Array(1) : [item];
+      if (kind === "accessor")
+        Object.defineProperty(items, "0", {
+          enumerable: true,
+          get() {
+            executed++;
+            return item;
+          },
+        });
+      if (kind === "decorated") Object.assign(items, { unexpected: true });
+      expect(() => parseOrderCreationRecord({ ...result.record, items })).toThrow(
+        OrderCreationError,
+      );
+      expect(executed).toBe(0);
+    },
+  );
+});
+
+describe("WP-2346 current-time submission fences", () => {
+  it.each(["checkout", "source", "business-date", "audit", "reauthorize"])(
+    "blocks evidence expiry across %s wait",
+    async (stage) => {
+      const f = ports();
+      let now = at;
+      f.implementation.clock.now = () => now;
+      const expire = () => {
+        now = "2026-08-02T18:05:00.000Z";
+      };
+      if (stage === "checkout") {
+        const original = f.implementation.checkout.validate;
+        f.implementation.checkout.validate = async (value) => {
+          const result = await original(value);
+          expire();
+          return result;
+        };
+      }
+      if (stage === "source") {
+        const original = f.implementation.source.load;
+        f.implementation.source.load = async (value) => {
+          const result = await original(value);
+          expire();
+          return result;
+        };
+      }
+      if (stage === "business-date") {
+        const original = f.implementation.businessDate.resolve;
+        f.implementation.businessDate.resolve = async (value) => {
+          const result = await original(value);
+          expire();
+          return result;
+        };
+      }
+      if (stage === "audit") {
+        const original = f.implementation.audit.create;
+        f.implementation.audit.create = async (value) => {
+          const result = await original(value);
+          expire();
+          return result;
+        };
+      }
+      if (stage === "reauthorize") {
+        let calls = 0;
+        const original = f.implementation.authorization.authorize;
+        f.implementation.authorization.authorize = async (value) => {
+          const result = await original(value);
+          if (++calls === 2) expire();
+          return result;
+        };
+      }
+      await expectCode(
+        createOrderCreationService(f.implementation).create(command()),
+        "ORDER_CREATE_VALIDATION_EXPIRED",
+      );
+      expect(f.calls).not.toContain("commit");
+    },
+  );
+  it.each(["authorization", "lookup"])("blocks Guest expiry across %s wait", async (stage) => {
+    const f = ports();
+    let now = at;
+    f.implementation.clock.now = () => now;
+    f.implementation.authorization.authorize = async () => {
+      if (stage === "authorization") now = "2026-08-02T18:01:01.000Z";
+      return { guestSession: guest({ idleExpiresAt: "2026-08-02T18:01:01.000Z" as never }) };
+    };
+    if (stage === "lookup")
+      f.implementation.repository.resolveSubmission = async () => {
+        now = "2026-08-02T18:01:01.000Z";
+        return null;
+      };
+    await expectCode(
+      createOrderCreationService(f.implementation).create(command()),
+      "ORDER_CREATE_PERMISSION_DENIED",
+    );
+    expect(f.calls).not.toContain("checkout");
+  });
+  it.each(["revoked", "version", "session", "store"])(
+    "denies %s authority at final commit gate",
+    async (kind) => {
+      const f = ports();
+      let count = 0;
+      f.implementation.authorization.authorize = async () => {
+        if (++count === 1) return { guestSession: guest() };
+        if (kind === "revoked") return null;
+        return {
+          guestSession: guest(
+            kind === "version"
+              ? { version: 2 }
+              : kind === "session"
+                ? { sessionReference: id(99) as GuestSession["sessionReference"] }
+                : { storeReference: id(99) as GuestSession["storeReference"] },
+          ),
+        };
+      };
+      await expectCode(
+        createOrderCreationService(f.implementation).create(command()),
+        "ORDER_CREATE_PERMISSION_DENIED",
+      );
+      expect(f.calls).not.toContain("commit");
+    },
+  );
+  it("checks the Cart deadline again after Audit", async () => {
+    const f = ports();
+    let now = at;
+    f.implementation.clock.now = () => now;
+    const source = f.implementation.source.load;
+    f.implementation.source.load = async (value) => {
+      const loaded = await source(value);
+      const original = cart();
+      return {
+        ...loaded,
+        cart: {
+          ...original,
+          lifecycle: { ...original.lifecycle, idleExpiresAt: "2026-08-02T18:01:01.000Z" },
+        },
+      };
+    };
+    const audit = f.implementation.audit.create;
+    f.implementation.audit.create = async (value) => {
+      const result = await audit(value);
+      now = "2026-08-02T18:01:01.000Z";
+      return result;
+    };
+    await expectCode(
+      createOrderCreationService(f.implementation).create(command()),
+      "ORDER_CREATE_VALIDATION_EXPIRED",
+    );
+    expect(f.calls).not.toContain("commit");
+  });
+  it.each(["malformed", "backward", "throw"])(
+    "fails closed on %s clock after Audit",
+    async (kind) => {
+      const f = ports();
+      let late = false;
+      f.implementation.clock.now = () => {
+        if (!late) return at;
+        if (kind === "throw") throw new Error("private clock");
+        return kind === "backward" ? "2026-08-02T18:00:59.999Z" : "invalid";
+      };
+      const original = f.implementation.audit.create;
+      f.implementation.audit.create = async (value) => {
+        const result = await original(value);
+        late = true;
+        return result;
+      };
+      await expectCode(
+        createOrderCreationService(f.implementation).create(command()),
+        "ORDER_CREATE_DEPENDENCY_UNAVAILABLE",
+      );
+      expect(f.calls).not.toContain("commit");
+    },
+  );
+  it("rejects future request time for new work", async () => {
+    const f = ports();
+    await expectCode(
+      createOrderCreationService(f.implementation).create(
+        command({ requestedAt: "2026-08-02T18:02:00.000Z" }),
+      ),
+      "ORDER_CREATE_INPUT_INVALID",
+    );
+    expect(f.calls).toEqual(["authorize", "resolve"]);
+  });
+  it("accepts the last valid millisecond without changing submission timestamps", async () => {
+    const f = ports();
+    f.implementation.clock.now = () => "2026-08-02T18:04:59.999Z";
+    const result = await createOrderCreationService(f.implementation).create(command());
+    expect(result.status).toBe("Created");
+    expect(result.record.createdAt).toBe(at);
+  });
+  it("recovers original submission after Checkout expiry with current authorization", async () => {
+    const first = ports();
+    await createOrderCreationService(first.implementation).create(command());
+    const f = ports({ prior: first.stored() });
+    f.implementation.clock.now = () => "2026-08-02T18:06:00.000Z";
+    const result = await createOrderCreationService(f.implementation).create(
+      command({ requestedAt: "2026-08-02T18:06:00.000Z" }),
+    );
+    expect(result.status).toBe("AlreadyCreated");
+    expect(result.record.createdAt).toBe(at);
+    expect(f.calls).toEqual(["authorize", "resolve", "authorize"]);
+  });
+  it("refuses replay when authority is revoked during lookup", async () => {
+    const first = ports();
+    await createOrderCreationService(first.implementation).create(command());
+    const f = ports({ prior: first.stored() });
+    let count = 0;
+    f.implementation.authorization.authorize = async () =>
+      ++count === 1 ? { guestSession: guest() } : null;
+    await expectCode(
+      createOrderCreationService(f.implementation).create(command()),
+      "ORDER_CREATE_PERMISSION_DENIED",
+    );
+  });
+  it("retains a verified durable result when the commit response arrives after expiry", async () => {
+    const f = ports();
+    let now = at;
+    f.implementation.clock.now = () => now;
+    const commit = f.implementation.repository.commit;
+    f.implementation.repository.commit = async (value) => {
+      const result = await commit(value);
+      now = "2026-08-02T18:06:00.000Z";
+      return result;
+    };
+    expect((await createOrderCreationService(f.implementation).create(command())).status).toBe(
+      "Created",
+    );
+    expect(f.calls.filter((value) => value === "commit")).toHaveLength(1);
+  });
+});
+
+describe("WP-2346 authorization context fence", () => {
+  it.each(["public store", "QR revision"])(
+    "rejects changed %s without a second commit",
+    async (kind) => {
+      const f = ports();
+      let calls = 0;
+      f.implementation.authorization.authorize = async () => ({
+        guestSession:
+          ++calls === 1
+            ? guest()
+            : guest(
+                kind === "public store"
+                  ? { publicStoreReference: id(99) as GuestSession["publicStoreReference"] }
+                  : { qrRevocationVersion: 2 },
+              ),
+      });
+      await expectCode(
+        createOrderCreationService(f.implementation).create(command()),
+        "ORDER_CREATE_PERMISSION_DENIED",
+      );
+      expect(f.calls).not.toContain("commit");
+    },
+  );
+  it("supplies the latest server instant to final authorization", async () => {
+    const f = ports();
+    let now = at;
+    const observed: string[] = [];
+    f.implementation.clock.now = () => now;
+    f.implementation.authorization.authorize = async (value) => {
+      observed.push(value.observedAt);
+      return { guestSession: guest() };
+    };
+    const audit = f.implementation.audit.create;
+    f.implementation.audit.create = async (value) => {
+      const result = await audit(value);
+      now = "2026-08-02T18:02:00.000Z";
+      return result;
+    };
+    expect((await createOrderCreationService(f.implementation).create(command())).status).toBe(
+      "Created",
+    );
+    expect(observed).toEqual([at, "2026-08-02T18:02:00.000Z"]);
+  });
+});
+
+describe("WP-2349 stored Order consistency", () => {
+  async function record() {
+    return (await createOrderCreationService(ports().implementation).create(command())).record;
+  }
+  async function pair() {
+    const original = await record();
+    const first = original.items[0];
+    if (!first) throw new Error("fixture");
+    const second = {
+      ...first,
+      orderItemReference: id(90),
+      cartItemReference: id(91),
+      pricing: { ...first.pricing, lineReference: id(91) },
+    };
+    return {
+      ...original,
+      items: [first, second],
+      order: {
+        ...original.order,
+        batches: [
+          {
+            ...original.order.batches[0],
+            items: [
+              ...original.order.batches[0].items,
+              {
+                orderItemReference: second.orderItemReference,
+                orderBatchReference: second.orderBatchReference,
+                cartItemReference: second.cartItemReference,
+              },
+            ],
+          },
+        ],
+      },
+    };
+  }
+  it("retains complete ordered multi-line history without querying current sources", async () => {
+    const original = await pair();
+    expect(parseOrderCreationRecord(original)).toEqual(original);
+  });
+  it.each(["brand", "store", "quote"])("rejects a foreign snapshot %s", async (kind) => {
+    const original = await record();
+    const item = original.items[0];
+    if (!item) throw new Error("fixture");
+    const changed =
+      kind === "quote"
+        ? { ...item, pricing: { ...item.pricing, quoteReference: id(90) } }
+        : { ...item, catalog: { ...item.catalog, [kind + "Reference"]: id(90) } };
+    expect(() => parseOrderCreationRecord({ ...original, items: [changed] })).toThrow(
+      OrderCreationError,
+    );
+  });
+  it.each(["duplicate", "reversed", "quote digest"])(
+    "rejects inconsistent %s lines",
+    async (kind) => {
+      const original = await pair();
+      const [first, second] = original.items;
+      if (!first || !second) throw new Error("fixture");
+      const items =
+        kind === "duplicate"
+          ? [first, first]
+          : kind === "reversed"
+            ? [second, first]
+            : [first, { ...second, pricing: { ...second.pricing, quoteInputDigest: digest("f") } }];
+      expect(() => parseOrderCreationRecord({ ...original, items })).toThrow(OrderCreationError);
+    },
+  );
+  it.each(["batch", "identity"])("rejects executable and malformed %s arrays", async (level) => {
+    const original = await record();
+    for (const kind of ["sparse", "accessor", "decorated", "map", "subclass"]) {
+      let executed = 0;
+      const entry =
+        level === "batch" ? original.order.batches[0] : original.order.batches[0].items[0];
+      const values: unknown[] = kind === "sparse" ? new Array(1) : [entry];
+      if (kind === "accessor")
+        Object.defineProperty(values, "0", {
+          enumerable: true,
+          get() {
+            executed++;
+            return entry;
+          },
+        });
+      if (kind === "decorated") Object.assign(values, { extra: true });
+      if (kind === "map")
+        Object.assign(values, {
+          map() {
+            executed++;
+            return [entry];
+          },
+        });
+      if (kind === "subclass") Object.setPrototypeOf(values, Object.create(Array.prototype));
+      const order = {
+        ...original.order,
+        batches:
+          level === "batch"
+            ? values
+            : [
+                {
+                  ...original.order.batches[0],
+                  items: values,
+                },
+              ],
+      };
+      expect(() => parseOrderCreationRecord({ ...original, order })).toThrow(OrderCreationError);
+      expect(executed).toBe(0);
+    }
+  });
+  it.each(["orderType", "sourceChannel"])("rejects executable %s coercion", async (field) => {
+    const original = await record();
+    let executed = 0;
+    const value = {
+      toString() {
+        executed++;
+        return original.order[field as "orderType" | "sourceChannel"];
+      },
+    };
+    expect(() =>
+      parseOrderCreationRecord({ ...original, order: { ...original.order, [field]: value } }),
+    ).toThrow(OrderCreationError);
+    expect(executed).toBe(0);
+  });
+});
+
+describe("WP-2351 transaction write evidence handoff", () => {
+  it("blocks expiry reached during Event preparation before entering the repository", async () => {
+    const f = ports();
+    let now = at;
+    f.implementation.clock.now = () => now;
+    const generate = f.implementation.references.generate;
+    f.implementation.references.generate = (purpose) => {
+      if (purpose === "Event") now = evidence().validUntil;
+      return generate(purpose);
+    };
+    await expectCode(
+      createOrderCreationService(f.implementation).create(command()),
+      "ORDER_CREATE_VALIDATION_EXPIRED",
+    );
+    expect(f.calls).not.toContain("commit");
+  });
+
+  async function pending() {
+    const f = ports();
+    const commit = f.implementation.repository.commit;
+    let captured: Parameters<OrderCreationPorts["repository"]["commit"]>[0] | undefined;
+    f.implementation.repository.commit = async (input) => {
+      captured = input;
+      return commit(input);
+    };
+    await createOrderCreationService(f.implementation).create(command());
+    if (captured === undefined) throw new Error("fixture");
+    return captured;
+  }
+  it("passes original parsed Checkout evidence to the owner commit port", async () => {
+    const input = await pending();
+    expect(input.checkoutValidationEvidence).toEqual(evidence());
+    expect(Object.isFrozen(input.checkoutValidationEvidence)).toBe(true);
+    const fence = validateOrderSubmissionWriteFence({ ...input, observedAt: at });
+    expect(fence.checkoutValidationEvidence).toEqual(evidence());
+    expect(fence.validUntil).toBe(evidence().validUntil);
+    expect(Object.isFrozen(fence)).toBe(true);
+  });
+  it("allows only observations strictly before the original expiry", async () => {
+    const input = await pending();
+    const expiry = input.checkoutValidationEvidence.validUntil;
+    expect(
+      validateOrderSubmissionWriteFence({
+        ...input,
+        observedAt: new Date(Date.parse(expiry) - 1).toISOString(),
+      }).validUntil,
+    ).toBe(expiry);
+    for (const observedAt of [expiry, new Date(Date.parse(expiry) + 1).toISOString()])
+      expect(() => validateOrderSubmissionWriteFence({ ...input, observedAt })).toThrow(
+        expect.objectContaining({ code: "ORDER_CREATE_VALIDATION_EXPIRED" }),
+      );
+  });
+  it.each(["invalid", "2026-08-02T18:00:59.999Z"])(
+    "rejects malformed/backward observation %s",
+    async (observedAt) => {
+      const input = await pending();
+      expect(() => validateOrderSubmissionWriteFence({ ...input, observedAt })).toThrow(
+        expect.objectContaining({ code: "ORDER_CREATE_DEPENDENCY_UNAVAILABLE" }),
+      );
+    },
+  );
+  it.each([
+    "validationReference",
+    "guestSessionReference",
+    "cartReference",
+    "cartVersion",
+    "quoteReference",
+    "quoteInputDigest",
+    "brandReference",
+    "storeReference",
+    "orderType",
+    "sourceChannel",
+  ])("rejects incompatible Checkout %s", async (field) => {
+    const input = await pending();
+    const patch =
+      field === "cartVersion"
+        ? 6
+        : field === "quoteInputDigest"
+          ? digest("f")
+          : field === "orderType"
+            ? "DineIn"
+            : field === "sourceChannel"
+              ? "Pos"
+              : id(90);
+    expect(() =>
+      validateOrderSubmissionWriteFence({
+        ...input,
+        observedAt: at,
+        checkoutValidationEvidence: {
+          ...input.checkoutValidationEvidence,
+          [field]: patch,
+        } as never,
+      }),
+    ).toThrow(expect.objectContaining({ code: "ORDER_CREATE_DEPENDENCY_UNAVAILABLE" }));
+  });
+  it.each([
+    "cartItemReference",
+    "sellableReference",
+    "productVersionReference",
+    "menuVersionReference",
+  ])("rejects mismatched line %s", async (field) => {
+    const input = await pending();
+    expect(() =>
+      validateOrderSubmissionWriteFence({
+        ...input,
+        observedAt: at,
+        checkoutValidationEvidence: {
+          ...input.checkoutValidationEvidence,
+          catalogLines: input.checkoutValidationEvidence.catalogLines.map((line) => ({
+            ...line,
+            [field]: id(90),
+          })),
+        } as never,
+      }),
+    ).toThrow(expect.objectContaining({ code: "ORDER_CREATE_DEPENDENCY_UNAVAILABLE" }));
+  });
+});
+
+describe("WP-2353 original result composition", () => {
+  async function original() {
+    return (await createOrderCreationService(ports().implementation).create(command())).record;
+  }
+  it("accepts a raced Existing result with different generated candidate IDs", async () => {
+    const saved = await original(),
+      f = ports();
+    const generate = f.implementation.references.generate;
+    const replacements = { Order: id(90), OrderBatch: id(91), OrderItem: id(92), Event: id(93) };
+    f.implementation.references.generate = (purpose) =>
+      purpose === "CheckoutValidation" ? generate(purpose) : replacements[purpose];
+    f.implementation.repository.commit = async () => ({ status: "Existing", record: saved });
+    const result = await createOrderCreationService(f.implementation).create(command());
+    expect(result).toEqual({ status: "AlreadyCreated", record: saved });
+    expect(f.calls.filter((x) => x === "authorize")).toHaveLength(3);
+  });
+  it("does not renew Checkout evidence to recover an Existing result", async () => {
+    const saved = await original(),
+      f = ports();
+    let now = at;
+    f.implementation.clock.now = () => now;
+    f.implementation.repository.commit = async () => {
+      now = evidence().validUntil;
+      return { status: "Existing", record: saved };
+    };
+    expect(await createOrderCreationService(f.implementation).create(command())).toEqual({
+      status: "AlreadyCreated",
+      record: saved,
+    });
+  });
+  it("reauthorizes current Guest before returning a raced original", async () => {
+    const saved = await original(),
+      f = ports();
+    let authorizations = 0;
+    f.implementation.authorization.authorize = async () =>
+      ++authorizations === 3 ? null : { guestSession: guest() };
+    f.implementation.repository.commit = async () => ({ status: "Existing", record: saved });
+    await expectCode(
+      createOrderCreationService(f.implementation).create(command()),
+      "ORDER_CREATE_PERMISSION_DENIED",
+    );
+  });
+  it.each(["unknown status", "extra", "getter"])(
+    "rejects malformed commit result %s",
+    async (kind) => {
+      const saved = await original(),
+        f = ports();
+      let executed = 0;
+      const result = { status: "Existing", record: saved };
+      if (kind === "unknown status") result.status = "Unknown";
+      if (kind === "extra") Object.assign(result, { extra: true });
+      if (kind === "getter")
+        Object.defineProperty(result, "record", {
+          enumerable: true,
+          get() {
+            executed++;
+            return saved;
+          },
+        });
+      f.implementation.repository.commit = async () => result as never;
+      await expectCode(
+        createOrderCreationService(f.implementation).create(command()),
+        "ORDER_CREATE_DEPENDENCY_UNAVAILABLE",
+      );
+      expect(executed).toBe(0);
+    },
+  );
+  it.each(["brand", "store", "cart", "version", "quote"])(
+    "rejects internally valid but foreign replay %s in both lookup and commit",
+    async (field) => {
+      const saved = await original();
+      const key = field + "Reference";
+      const order = { ...saved.order, batches: [{ ...saved.order.batches[0] }] };
+      let items = saved.items;
+      let allocation = saved.orderNumberAllocation;
+      if (field === "brand" || field === "store") {
+        Object.assign(order, { [key]: id(90) });
+        items = saved.items.map((item) => ({
+          ...item,
+          catalog: { ...item.catalog, [key]: id(90) },
+        }));
+        allocation = createOrderNumberAllocation({
+          orderReference: saved.order.orderReference,
+          allocatedAt: saved.createdAt,
+          sequence: allocation.sequence,
+          businessDateResolution: { ...allocation.businessDateResolution, [key]: id(90) },
+        });
+      } else {
+        const batch = order.batches[0];
+        if (!batch) throw new Error("fixture");
+        if (field === "cart") Object.assign(batch, { sourceCartReference: id(90) });
+        if (field === "version") Object.assign(batch, { sourceCartVersion: 6 });
+        if (field === "quote") {
+          Object.assign(batch, { quoteReference: id(90) });
+          items = items.map((item) => ({
+            ...item,
+            pricing: { ...item.pricing, quoteReference: id(90) as never },
+          }));
+        }
+      }
+      const foreign = parseOrderCreationRecord({
+        ...saved,
+        order,
+        items,
+        orderNumberAllocation: allocation,
+      });
+      const lookup = ports({ prior: foreign });
+      await expectCode(
+        createOrderCreationService(lookup.implementation).create(command()),
+        "ORDER_CREATE_IDEMPOTENCY_CONFLICT",
+      );
+      const commit = ports();
+      commit.implementation.repository.commit = async () => ({
+        status: "Existing",
+        record: foreign,
+      });
+      await expectCode(
+        createOrderCreationService(commit.implementation).create(command()),
+        "ORDER_CREATE_IDEMPOTENCY_CONFLICT",
+      );
+    },
+  );
 });

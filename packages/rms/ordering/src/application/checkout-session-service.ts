@@ -1,0 +1,323 @@
+import {
+  parseCheckoutSessionAllocation,
+  type CheckoutSessionAllocation,
+} from "../domain/checkout-session-allocation.js";
+import { readClosedRecord } from "@bop/identity";
+import { parseOrderingInstant, parseOrderingReference } from "../domain/cart.js";
+import { parseCheckoutSession, type CheckoutSession } from "../domain/checkout-session.js";
+import {
+  CheckoutValidationError,
+  type CheckoutLineRefusal,
+  type CheckoutValidationErrorCode,
+} from "../domain/checkout-validation.js";
+import type { PlacedOrderReference } from "../domain/order-creation.js";
+
+export interface CheckoutSessionRequest {
+  readonly createOperationReference: string;
+  readonly cartReference: string;
+  readonly cartVersion: number;
+  readonly quoteReference: string;
+  readonly quoteVersion: 1 | 2;
+}
+export interface CheckoutSessionAuthority {
+  readonly guestSessionReference: string;
+  readonly brandReference: string;
+  readonly storeReference: string;
+  readonly checkedAt: string;
+  readonly validUntil: string;
+  readonly audit: unknown;
+}
+export interface CheckoutSessionPorts {
+  readonly now: () => string;
+  readonly nextReference: () => string;
+  readonly authorize: (
+    request: CheckoutSessionRequest,
+    observedAt: string,
+  ) => Promise<CheckoutSessionAuthority | null>;
+  readonly validate: (
+    request: CheckoutSessionRequest,
+    allocation: CheckoutSessionAllocation,
+  ) => Promise<unknown>;
+  /**
+   * WP-2423 M03: the Order already made from this Cart version (or from a line the Cart still
+   * holds); `placedOrder` is set only when it is the requesting guest's own. Null when none.
+   */
+  readonly ordered?: (
+    request: CheckoutSessionRequest,
+    authority: CheckoutSessionAuthority,
+  ) => Promise<{ readonly placedOrder: PlacedOrderReference | null } | null>;
+  readonly repository: {
+    allocate(
+      candidate: CheckoutSessionAllocation,
+      authority: CheckoutSessionAuthority,
+    ): Promise<unknown>;
+    resolveOperation(
+      request: CheckoutSessionRequest,
+      authority: CheckoutSessionAuthority,
+    ): Promise<unknown | null>;
+    /** Atomic operation uniqueness, current Cart/Quote/access fences and Audit with session.
+     * A competing winner returns its original record; never replace IDs or renew validation. */
+    create(
+      session: CheckoutSession,
+      authority: CheckoutSessionAuthority,
+    ): Promise<Readonly<{ status: "Created" | "AlreadyCreated"; session: unknown }>>;
+  };
+}
+export class CheckoutSessionServiceError extends Error {
+  constructor(
+    readonly code:
+      | "INPUT_INVALID"
+      | "PERMISSION_DENIED"
+      | "INTENT_CONFLICT"
+      | "DEPENDENCY_UNAVAILABLE"
+      /** WP-2423 Q4: the Store is not taking this kind of order now (closed or paused). */
+      | "STORE_CLOSED"
+      /** DEC-DINING-ANY-PARTICIPANT-SUBMIT: another guest at the table is checking out this Cart
+       * version until heldUntil; nothing was created. */
+      | "CHECKOUT_IN_PROGRESS"
+      /** WP-2423: an item in the Cart can't be sold now (`line` names it when known). */
+      | "ITEM_UNAVAILABLE"
+      /** WP-2423: the Store's stock can't make the Cart as it stands; `line` says which item and
+       * how many of it can still be made. Nothing was created or charged. */
+      | "ITEM_SHORT"
+      /** WP-2423: the menu moved on after this Cart was priced (an owner listed): the guest's
+       * screen prices it again and sends. Nothing was created. */
+      | "REQUOTE_REQUIRED"
+      /** WP-2423 M03: these dishes are already in an Order (`placedOrder` names the guest's
+       * own); nothing was created and nothing will be charged again. */
+      | "ALREADY_ORDERED"
+      /** WP-2423 (checkout-session-outage): this hour's online pickup orders are full (the
+       * Store's pickup capacity); nothing was created or charged. A place may free up. */
+      | "PICKUP_FULL",
+    readonly heldUntil: string | null = null,
+    readonly line: CheckoutLineRefusal | null = null,
+    readonly placedOrder: PlacedOrderReference | null = null,
+  ) {
+    super("checkout session is unavailable");
+    this.name = "CheckoutSessionServiceError";
+  }
+}
+
+/**
+ * WP-2423: the checkout refusal the guest (or staff member) is told for a validation refusal about
+ * the Cart's items; null for anything else.
+ */
+export function checkoutItemRefusal(error: unknown): CheckoutSessionServiceError | null {
+  if (!(error instanceof CheckoutValidationError)) return null;
+  if (error.code === "CHECKOUT_STOCK_SHORT" && error.line !== null)
+    return new CheckoutSessionServiceError("ITEM_SHORT", null, error.line);
+  if (error.code === "CHECKOUT_ITEM_UNAVAILABLE")
+    return new CheckoutSessionServiceError("ITEM_UNAVAILABLE", null, error.line);
+  if (error.code === "CHECKOUT_REQUOTE_REQUIRED")
+    return new CheckoutSessionServiceError("REQUOTE_REQUIRED");
+  return null;
+}
+/**
+ * WP-2423 item 6: the Cart or its Quote moved on after this request was made (another guest's change
+ * or Quote, prices that ran out, a Cart that ended). Nothing was created and asking again can't change
+ * that: a fixed answer, not an outage for a guest to wait out.
+ */
+const cartMovedOnCodes: ReadonlySet<CheckoutValidationErrorCode> = new Set([
+  "CHECKOUT_CART_VERSION_CONFLICT",
+  "CHECKOUT_CART_EMPTY",
+  "CHECKOUT_CART_NOT_ACTIVE",
+  "CHECKOUT_QUOTE_MISSING",
+  "CHECKOUT_QUOTE_EXPIRED",
+  "CHECKOUT_REQUOTE_REQUIRED",
+]);
+function cartMovedOn(error: unknown): boolean {
+  // By name as well: the pilot's entry and this build can load Ordering as two copies.
+  return (
+    (error instanceof CheckoutValidationError ||
+      (error instanceof Error && error.name === "CheckoutValidationError")) &&
+    cartMovedOnCodes.has((error as CheckoutValidationError).code)
+  );
+}
+const fail = (code: CheckoutSessionServiceError["code"]): never => {
+  throw new CheckoutSessionServiceError(code);
+};
+/**
+ * WP-2423 (checkout-session-outage): an unexpected failure keeps what caused it (never shown,
+ * never enumerated), so the API can log its code; the guest still gets the plain answer.
+ */
+const unavailableBecause = (cause: unknown): never => {
+  const error = new CheckoutSessionServiceError("DEPENDENCY_UNAVAILABLE");
+  if (cause !== null && typeof cause === "object")
+    Object.defineProperty(error, "cause", { value: cause, enumerable: false });
+  throw error;
+};
+function request(value: unknown): CheckoutSessionRequest {
+  try {
+    const raw = readClosedRecord(value, [
+      "createOperationReference",
+      "cartReference",
+      "cartVersion",
+      "quoteReference",
+      "quoteVersion",
+    ]);
+    if (
+      !Number.isSafeInteger(raw.cartVersion) ||
+      Number(raw.cartVersion) < 1 ||
+      Number(raw.cartVersion) > 2147483647 ||
+      ![1, 2].includes(Number(raw.quoteVersion)) ||
+      typeof raw.quoteVersion !== "number"
+    )
+      return fail("INPUT_INVALID");
+    return Object.freeze({
+      createOperationReference: parseOrderingReference(raw.createOperationReference),
+      cartReference: parseOrderingReference(raw.cartReference),
+      cartVersion: Number(raw.cartVersion),
+      quoteReference: parseOrderingReference(raw.quoteReference),
+      quoteVersion: raw.quoteVersion as 1 | 2,
+    });
+  } catch {
+    return fail("INPUT_INVALID");
+  }
+}
+export function createCheckoutSessionService(ports: CheckoutSessionPorts) {
+  return Object.freeze({
+    async create(value: unknown) {
+      const input = request(value);
+      let orderedAuthority: CheckoutSessionAuthority | undefined;
+      const refuseOrdered = async (authority: CheckoutSessionAuthority) => {
+        if (ports.ordered === undefined) return;
+        const found = await ports.ordered(input, authority);
+        if (found !== null)
+          throw new CheckoutSessionServiceError("ALREADY_ORDERED", null, null, found.placedOrder);
+      };
+      try {
+        let last: string | undefined;
+        const now = () => {
+          const at = parseOrderingInstant(ports.now());
+          if (last !== undefined && at < last) return fail("DEPENDENCY_UNAVAILABLE");
+          last = at;
+          return at;
+        };
+        let original: CheckoutSessionAuthority | undefined;
+        const authorize = async () => {
+          const at = now();
+          const found = await ports.authorize(input, at);
+          if (!found) return fail("PERMISSION_DENIED");
+          const authority = Object.freeze({
+            guestSessionReference: parseOrderingReference(found.guestSessionReference),
+            brandReference: parseOrderingReference(found.brandReference),
+            storeReference: parseOrderingReference(found.storeReference),
+            checkedAt: parseOrderingInstant(found.checkedAt),
+            validUntil: parseOrderingInstant(found.validUntil),
+            audit: found.audit,
+          });
+          if (
+            authority.checkedAt !== at ||
+            authority.validUntil <= now() ||
+            (original &&
+              (original.guestSessionReference !== authority.guestSessionReference ||
+                original.brandReference !== authority.brandReference ||
+                original.storeReference !== authority.storeReference))
+          )
+            return fail("PERMISSION_DENIED");
+          original ??= authority;
+          return authority;
+        };
+        const bound = (value: unknown, authority: CheckoutSessionAuthority) => {
+          const session = parseCheckoutSession(value),
+            evidence = session.validation;
+          if (
+            evidence.guestSessionReference !== authority.guestSessionReference ||
+            evidence.brandReference !== authority.brandReference ||
+            evidence.storeReference !== authority.storeReference
+          )
+            return fail("PERMISSION_DENIED");
+          if (
+            session.createOperationReference !== input.createOperationReference ||
+            evidence.cartReference !== input.cartReference ||
+            evidence.cartVersion !== input.cartVersion ||
+            evidence.quoteReference !== input.quoteReference ||
+            evidence.quoteVersion !== input.quoteVersion
+          )
+            return fail("INTENT_CONFLICT");
+          if (session.createdAt > now()) return fail("DEPENDENCY_UNAVAILABLE");
+          return session;
+        };
+        const initial = await authorize();
+        const existing = await ports.repository.resolveOperation(input, initial);
+        if (existing !== null) {
+          const session = bound(existing, await authorize());
+          return Object.freeze({ status: "AlreadyCreated" as const, session });
+        }
+        orderedAuthority = initial;
+        await refuseOrdered(initial);
+        const proposed = parseCheckoutSessionAllocation({
+          ...input,
+          brandReference: initial.brandReference,
+          storeReference: initial.storeReference,
+          guestSessionReference: initial.guestSessionReference,
+          checkoutSessionReference: ports.nextReference(),
+          submissionReference: ports.nextReference(),
+          paymentOperationReference: ports.nextReference(),
+          allocatedAt: now(),
+        });
+        const allocation = parseCheckoutSessionAllocation(
+          await ports.repository.allocate(proposed, initial),
+        );
+        for (const field of [
+          "brandReference",
+          "storeReference",
+          "guestSessionReference",
+          "createOperationReference",
+          "cartReference",
+          "cartVersion",
+          "quoteReference",
+          "quoteVersion",
+        ] as const)
+          if (allocation[field] !== proposed[field]) return fail("INTENT_CONFLICT");
+        if (allocation.allocatedAt > now()) return fail("DEPENDENCY_UNAVAILABLE");
+        const validation = await ports.validate(input, allocation);
+        const authority = await authorize();
+        const candidate = bound(
+          {
+            schemaVersion: 1,
+            checkoutSessionReference: allocation.checkoutSessionReference,
+            createOperationReference: input.createOperationReference,
+            submissionReference: allocation.submissionReference,
+            paymentOperationReference: allocation.paymentOperationReference,
+            validation,
+            createdAt: now(),
+          },
+          authority,
+        );
+        const result = await ports.repository.create(candidate, authority);
+        if (result.status !== "Created" && result.status !== "AlreadyCreated")
+          return fail("DEPENDENCY_UNAVAILABLE");
+        const session = bound(result.session, await authorize());
+        if (
+          session.checkoutSessionReference !== allocation.checkoutSessionReference ||
+          session.submissionReference !== allocation.submissionReference ||
+          session.paymentOperationReference !== allocation.paymentOperationReference
+        )
+          return fail("DEPENDENCY_UNAVAILABLE");
+        if (result.status === "Created" && JSON.stringify(session) !== JSON.stringify(candidate))
+          return fail("DEPENDENCY_UNAVAILABLE");
+        return Object.freeze({ status: result.status, session });
+      } catch (error) {
+        // WP-2423 M03: the Cart moved on because its dishes were ordered meanwhile (another tab
+        // or a stale page): say so, instead of a conflict the guest can't act on.
+        const movedOn =
+          (error instanceof CheckoutSessionServiceError && error.code === "INTENT_CONFLICT") ||
+          (!(error instanceof CheckoutSessionServiceError) && cartMovedOn(error));
+        if (movedOn && orderedAuthority !== undefined) {
+          try {
+            await refuseOrdered(orderedAuthority);
+          } catch (ordered) {
+            if (ordered instanceof CheckoutSessionServiceError) throw ordered;
+            return unavailableBecause(ordered);
+          }
+        }
+        if (error instanceof CheckoutSessionServiceError) throw error;
+        const refusal = checkoutItemRefusal(error);
+        if (refusal !== null) throw refusal;
+        if (cartMovedOn(error)) return fail("INTENT_CONFLICT");
+        return unavailableBecause(error);
+      }
+    },
+  });
+}

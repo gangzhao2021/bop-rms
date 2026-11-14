@@ -1,0 +1,59 @@
+import {
+  createDiningCartParticipationQuery,
+  createPostgresDiningCartParticipationStore,
+} from "../../packages/rms/dining/src/index.ts";
+import { createCustomerDiningCheckoutHold } from "../../apps/api/dist/customer-checkout-hold.js";
+import { runTogether } from "../../packages/database/dist/transaction-runner.js";
+export function createInternalDiningCart(resources, items, { createCart }) {
+  const scope = {
+    tenantReference: resources.publicProfile.binding.tenantReference,
+    ...resources.scope,
+  };
+  const { catalogCartItems: source } = items,
+    base = createCart(resources).cartBinding.ordering;
+  return {
+    catalogDiningCart: {
+      participation: createDiningCartParticipationQuery({
+        scope: resources.scope,
+        repository: createPostgresDiningCartParticipationStore(resources.transactions, scope),
+        now: resources.now,
+      }),
+      // WP-2423 M35 (DEC-STAFF-ROUND-SPEED): each guest check (Guest Session, its place at the
+      // table, the Guest Session again) runs in one transaction: same reads, same order.
+      together: runTogether,
+      // DEC-DINING-ANY-PARTICIPANT-SUBMIT: edits and quotes wait while another guest pays.
+      checkoutHold: createCustomerDiningCheckoutHold(resources.transactions, scope),
+      selectionTransactions: resources.transactions,
+      selection: {
+        sourceChannel: "Qr",
+        policy: base.policy,
+        generateReference: resources.credentials.reference,
+        audit: (record) => ({
+          auditId: resources.credentials.reference(),
+          brandId: resources.scope.brandReference,
+          storeId: resources.scope.storeReference,
+          actor: { type: "System" },
+          actionCode: "ORDERING_DINING_CART_" + record.action.toUpperCase(),
+          targetType: "OrderingCart",
+          targetId: record.cartReference,
+          reasonCode: "AUTHORIZED_CART_SELECTION",
+          correlationId: record.operationReference,
+          occurredAt: record.occurredAt,
+          sourceChannel: "CUSTOMER_PWA",
+          dataClassification: "Restricted",
+          retentionPolicyCode: "AUDIT_DEFAULT",
+          retentionPolicyVersion: 1,
+        }),
+      },
+      items: {
+        writeTransactions: source.writeTransactions,
+        references: source.references,
+        audit: source.audit,
+      },
+      catalogTransactions: source.catalogTransactions,
+      catalogScope: { ...source.catalogScope, orderTypeCode: "DINE_IN" },
+      catalogSafety: source.catalogSafety,
+      selectedInventory: source.selectedInventory,
+    },
+  };
+}

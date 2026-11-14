@@ -22,13 +22,13 @@ const moduleManifestInput = {
   publishedEvents: [],
   ownedDatabase: {
     schema: "bop_membership",
-    tables: ["membership", "store_assignment"],
+    tables: ["membership", "store_assignment", "member_profile_version"],
   },
   ownedJobs: [],
   featureFlags: [],
   killSwitches: [],
   piiClassification: {
-    classes: ["indirect_identifier", "sensitive_personal"],
+    classes: ["indirect_identifier", "personal", "sensitive_personal"],
     handling: {
       logs: "prohibited",
       urls: "prohibited",

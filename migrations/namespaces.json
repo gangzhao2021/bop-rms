@@ -7,6 +7,7 @@
     { "namespace": "0300", "directory": "0300-bop-governance" },
     { "namespace": "0400", "directory": "0400-bop-operations" },
     { "namespace": "1000", "directory": "1000-rms-store" },
+    { "namespace": "1001", "directory": "1001-rms-dining" },
     { "namespace": "1100", "directory": "1100-rms-catalog" },
     { "namespace": "1101", "directory": "1101-rms-catalog-category-menu" },
     { "namespace": "1102", "directory": "1102-rms-catalog-option-set" },
@@ -22,6 +23,8 @@
     { "namespace": "1500", "directory": "1500-rms-kitchen" },
     { "namespace": "1600", "directory": "1600-rms-device" },
     { "namespace": "1700", "directory": "1700-rms-fulfillment" },
-    { "namespace": "1800", "directory": "1800-rms-reporting" }
+    { "namespace": "1800", "directory": "1800-rms-reporting" },
+    { "namespace": "1900", "directory": "1900-rms-inventory" },
+    { "namespace": "2000", "directory": "2000-release-001" }
   ]
 }

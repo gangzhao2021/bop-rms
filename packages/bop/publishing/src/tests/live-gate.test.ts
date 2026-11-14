@@ -1,5 +1,5 @@
 import { createBrand, createStore, createTenantContext } from "@bop/tenant";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   createLiveGateRecord,
   evaluateLiveGate,
@@ -45,11 +45,11 @@ function gate(overrides: Record<string, unknown> = {}) {
     ...overrides,
   });
 }
-function context() {
+function context(actorReference = id("01")) {
   const actor = {
     actorType: "User",
     accountKind: "Workforce",
-    actorReference: id("01"),
+    actorReference,
     status: "Active",
     authenticationMethod: "Oidc",
     verificationLevel: "SingleFactor",
@@ -128,7 +128,7 @@ describe("WP-2194 Live Gate", () => {
     const commits: unknown[] = [];
     await executeLiveGateMutation(
       {
-        tenantContext: context(),
+        tenantContext: context(id("04")),
         operation: "Approve",
         expectedVersion: current.version,
         idempotencyKey: "wp2194.approve.0001",
@@ -153,5 +153,116 @@ describe("WP-2194 Live Gate", () => {
       },
     );
     expect(commits).toHaveLength(1);
+  });
+  it.each(["another approver", "replaced submitter"])(
+    "rejects an approval with %s before authorization or commit",
+    async (scenario) => {
+      const accepted = {
+        ...missing,
+        status: "Accepted",
+        evidenceReference: id("15"),
+        evidenceVersion: 1,
+        validUntil: "2026-09-15T12:00:00.000Z",
+        blockingReasonCode: null,
+      } as const;
+      const current = gate({
+        state: "InReview",
+        submittedByReference: id("01"),
+        requirements: [accepted],
+      });
+      const next = gate({
+        version: 2,
+        state: "Approved",
+        submittedByReference: scenario === "replaced submitter" ? id("05") : id("01"),
+        approvedByReference: id("04"),
+        decisionEvidenceReference: id("14"),
+        lastReviewedAt: at,
+        requirements: [accepted],
+      });
+      const authorize = vi.fn();
+      const commit = vi.fn();
+      await expect(
+        executeLiveGateMutation(
+          {
+            tenantContext: context(scenario === "another approver" ? id("01") : id("04")),
+            operation: "Approve",
+            expectedVersion: current.version,
+            idempotencyKey: "wp2194.approve.0002",
+            current,
+            next,
+            auditId: parsePublishingReference(id("16")),
+            correlationId: parsePublishingReference(id("17")),
+            sourceChannel: parsePublishingCode("MERCHANT_WEB"),
+          },
+          { authorization: { authorize }, unitOfWork: { commit } },
+        ),
+      ).rejects.toMatchObject({ code: "LIVE_GATE_MUTATION_INVALID" });
+      expect(authorize).not.toHaveBeenCalled();
+      expect(commit).not.toHaveBeenCalled();
+    },
+  );
+  it("rejects a review submitted under another actor's identity", async () => {
+    const current = gate();
+    const next = gate({ version: 2, state: "InReview", submittedByReference: id("04") });
+    const authorize = vi.fn();
+    const commit = vi.fn();
+    await expect(
+      executeLiveGateMutation(
+        {
+          tenantContext: context(),
+          operation: "RequestReview",
+          expectedVersion: current.version,
+          idempotencyKey: "wp2194.submit.0001",
+          current,
+          next,
+          auditId: parsePublishingReference(id("16")),
+          correlationId: parsePublishingReference(id("17")),
+          sourceChannel: parsePublishingCode("MERCHANT_WEB"),
+        },
+        { authorization: { authorize }, unitOfWork: { commit } },
+      ),
+    ).rejects.toMatchObject({ code: "LIVE_GATE_MUTATION_INVALID" });
+    expect(authorize).not.toHaveBeenCalled();
+    expect(commit).not.toHaveBeenCalled();
+  });
+  it("submits the review as the actual current actor", async () => {
+    const current = gate();
+    const next = gate({ version: 2, state: "InReview", submittedByReference: id("01") });
+    const commit = vi.fn(async (input: unknown) => {
+      void input;
+    });
+    await expect(
+      executeLiveGateMutation(
+        {
+          tenantContext: context(),
+          operation: "RequestReview",
+          expectedVersion: current.version,
+          idempotencyKey: "wp2194.submit.0002",
+          current,
+          next,
+          auditId: parsePublishingReference(id("16")),
+          correlationId: parsePublishingReference(id("17")),
+          sourceChannel: parsePublishingCode("MERCHANT_WEB"),
+        },
+        {
+          authorization: {
+            authorize: async (request) =>
+              Object.freeze({
+                effect: "Allow",
+                action: request.action,
+                scopeKind: "Store",
+                reason: "EXPLICIT_ALLOW",
+                source: "ExplicitAllow",
+              }) as never,
+          },
+          unitOfWork: { commit },
+        },
+      ),
+    ).resolves.toEqual(next);
+    expect(commit).toHaveBeenCalledTimes(1);
+    expect(commit.mock.calls[0]?.[0]).toMatchObject({
+      audit: { actor: { reference: id("01") } },
+      next: { submittedByReference: id("01") },
+    });
   });
 });

@@ -1,0 +1,768 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+// Only the merchant session lookup and the two owner-record readers are doubles; the command's
+// own sequencing, idempotency and error mapping are the real code.
+const state = vi.hoisted(() => ({
+  entries: new Map<string, Record<string, unknown>>(),
+  orders: new Map<string, Record<string, unknown>>(),
+  // The full caller resolution (Session, selection, membership, permission policy).
+  allowed: { fn: async (): Promise<boolean> => true, calls: 0 },
+  // What the owner callbacks answered during and after each run.
+  guards: [] as (() => Promise<boolean>)[],
+  during: [] as boolean[],
+  rolledBack: 0,
+  // WP-2423 item 8 ⑦: whether the Store uses counter ordering (Store features).
+  counterOrder: true,
+  // WP-2423 item 8 ⑦ (Owner decision 11): the Store's tip choices.
+  tips: { enabled: true, tierPercents: [10, 15, 18] as readonly number[] },
+  // DEC-PAPER-SEND-IDEMPOTENT: whether the placed order still waits for its payment, its card
+  // machine (or paper) payment record, and its number as Ordering holds it.
+  waitsForPayment: true,
+  paid: null as Record<string, unknown> | null,
+  placed: { orderNumber: "12", orderVersion: 1 } as {
+    orderNumber: string;
+    orderVersion: number;
+  } | null,
+}));
+vi.mock("@rms/payment", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@rms/payment")>()),
+  createPostgresCardMachinePaymentStore: (owner: {
+    authorize(tx: unknown, value: { orderReference: string }): Promise<boolean>;
+  }) => ({
+    loadByBatch: async (_tx: unknown, orderReference: string) => {
+      state.during.push(await owner.authorize({}, { orderReference }));
+      return state.paid;
+    },
+  }),
+}));
+vi.mock("./merchant-store-features.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./merchant-store-features.js")>()),
+  readStoreFeatures: async () => ({ counterOrder: state.counterOrder }),
+  readStoreTipChoices: async () => state.tips,
+}));
+vi.mock("./merchant-store-scope.js", () => ({
+  createMerchantStoreScope: () => async () => ({
+    selected: { tenantReference: "0198a7c0-0000-7000-8000-000000000001" },
+    context: { brand: { brandReference: "0198a7c0-0000-7000-8000-000000000002" } },
+    store: { storeReference: "0198a7c0-0000-7000-8000-000000000003" },
+    actorReference: "0198a7c0-0000-7000-8000-000000000004",
+    allowed: async () => {
+      state.allowed.calls++;
+      return state.allowed.fn();
+    },
+  }),
+}));
+vi.mock("./counter-payment-preparation.js", () => ({
+  readCounterOrderPlaced: async (_tx: unknown, owner: { authorize(): Promise<boolean> }) => {
+    state.during.push(await owner.authorize());
+    return state.placed;
+  },
+  readCounterPaymentPreparation: async (_tx: unknown, owner: { authorize(): Promise<boolean> }) => {
+    state.guards.push(owner.authorize);
+    state.during.push(await owner.authorize());
+    if (!state.waitsForPayment) return null;
+    return {
+      preparation: {
+        orderAllocation: { amountMinor: 1130n },
+        tip: { amountMinor: 150n },
+        total: { amountMinor: 1280n },
+        capacityExpiresAt: "2026-10-13T18:30:00.000Z",
+      },
+      orderNumber: "12",
+      orderVersion: 1,
+      paymentOperationReference: "0198a7c0-0000-7000-8000-000000000099",
+    };
+  },
+}));
+vi.mock("@rms/ordering", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@rms/ordering")>();
+  return {
+    ...actual,
+    createPostgresCounterOrderEntryStore: (owner: { authorize(): Promise<boolean> }) => ({
+      loadByOperation: async (_tx: unknown, operation: string) => {
+        state.guards.push(owner.authorize);
+        state.during.push(await owner.authorize());
+        return state.entries.get(operation) ?? null;
+      },
+      record: async (_tx: unknown, value: Record<string, unknown>) => {
+        state.during.push(await owner.authorize());
+        const key = String(value.operationReference);
+        const prior = state.entries.get(key);
+        if (prior) return { status: "AlreadyRecorded", record: prior };
+        state.entries.set(key, value);
+        return { status: "Created", record: value };
+      },
+      loadOrder: async (_tx: unknown, cart: string) => state.orders.get(cart) ?? null,
+    }),
+  };
+});
+
+const { createMerchantCounterOrder } = await import("./merchant-counter-order.js");
+
+const id = (n: number) => `0198a7c0-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
+const guest = { sessionCredential: "a".repeat(43), csrfCredential: "b".repeat(43) };
+
+function setup(clock = { at: "2026-10-13T18:00:00.000Z" }) {
+  let sequence = 0x100;
+  const calls: string[] = [];
+  const pipeline = {
+    takesOrder: vi.fn(async (input: { recordedAfterOutage: boolean }) => {
+      calls.push("takesOrder");
+      return typeof input.recordedAfterOutage === "boolean";
+    }),
+    open: vi.fn(async () => {
+      calls.push("open");
+      return { status: "Established" as const, credentials: guest };
+    }),
+    bindCart: vi.fn(async () => {
+      calls.push("bindCart");
+      return {
+        credentials: guest,
+        guestSessionReference: id(5),
+        cartReference: id(6),
+        cartVersion: 1,
+      };
+    }),
+    addItem: vi.fn(async () => {
+      calls.push("addItem");
+      return { status: "Applied" as const, cartVersion: 2 };
+    }),
+    quote: vi.fn(async () => {
+      calls.push("quote");
+      return {
+        status: "Quoted" as const,
+        quoteReference: id(7),
+        subtotalMinor: 1000n,
+        totalMinor: 1130n,
+      };
+    }),
+    saveDetails: vi.fn(async () => {
+      calls.push("saveDetails");
+    }),
+    startCheckout: vi.fn(async () => {
+      calls.push("startCheckout");
+      return { status: "Started" as const, checkoutSessionReference: id(8) };
+    }),
+    preparePayment: vi.fn(async (_c: unknown, input: { tip: { amountMinor: bigint } }) => {
+      calls.push("preparePayment");
+      state.orders.set(id(6), {
+        orderReference: id(20),
+        orderBatchReference: id(21),
+        submissionReference: id(22),
+      });
+      return { tip: { amountMinor: input.tip.amountMinor } } as never;
+    }),
+  };
+  const onUnexpected = vi.fn();
+  const command = createMerchantCounterOrder({
+    persistence: {
+      transactions: {
+        run: async (work: (tx: unknown) => Promise<unknown>) => {
+          try {
+            return await work({});
+          } catch (error) {
+            state.rolledBack++;
+            throw error;
+          }
+        },
+      },
+      now: () => clock.at,
+    } as never,
+    authentication: { authorize: async () => ({ sessionReference: id(9) }) } as never,
+    pipeline,
+    nextReference: () => id(++sequence),
+    onUnexpected,
+  });
+  const send = (overrides: Record<string, unknown> = {}) =>
+    command({
+      sessionCookie: "cookie",
+      csrf: "csrf",
+      command: {
+        operationReference: id(1),
+        lines: [{ sellableReference: id(2), quantity: 1, optionSelections: [] }],
+        tip: { kind: "Percent", percent: 15 },
+        recordedAfterOutage: false,
+        ...overrides,
+      },
+    });
+  return { pipeline, calls, onUnexpected, send, clock };
+}
+
+describe("counter order command — WP-2423 Q7", () => {
+  beforeEach(() => {
+    state.entries.clear();
+    state.orders.clear();
+    state.allowed = { fn: async () => true, calls: 0 };
+    state.guards = [];
+    state.during = [];
+    state.rolledBack = 0;
+    state.counterOrder = true;
+    state.tips = { enabled: true, tierPercents: [10, 15, 18] };
+    state.waitsForPayment = true;
+    state.paid = null;
+    state.placed = { orderNumber: "12", orderVersion: 1 };
+  });
+
+  it("WP-2423 item 8 ⑦: takes only a tip the Store offers; with tips off only no tip, and a retry returns its order", async () => {
+    const { pipeline, send } = setup();
+    state.tips = { enabled: true, tierPercents: [12, 18, 22] };
+    await expect(send()).rejects.toMatchObject({ code: "COUNTER_ORDER_TIP_CHOICES_CHANGED" });
+    expect(await send({ tip: { kind: "Percent", percent: 12 } })).toMatchObject({
+      status: "Placed",
+    });
+    state.tips = { enabled: false, tierPercents: [12, 18, 22] };
+    // The order already placed is returned as it was.
+    expect(await send({ tip: { kind: "Percent", percent: 12 } })).toMatchObject({
+      status: "AlreadyPlaced",
+    });
+    for (const tip of [
+      { kind: "Percent", percent: 12 },
+      { kind: "Amount", amountMinor: "200" },
+    ])
+      await expect(send({ operationReference: id(32), tip })).rejects.toMatchObject({
+        code: "COUNTER_ORDER_TIPS_OFF",
+      });
+    // Nothing was started for the refused orders.
+    expect(pipeline.open).toHaveBeenCalledTimes(1);
+    expect(
+      await send({ operationReference: id(33), tip: { kind: "Amount", amountMinor: "0" } }),
+    ).toMatchObject({ status: "Placed" });
+  });
+
+  it("WP-2423 M53: a counter line carries the guest's note for the kitchen; a bad note places nothing", async () => {
+    const { pipeline, send } = setup();
+    expect(
+      await send({
+        lines: [
+          {
+            sellableReference: id(2),
+            quantity: 1,
+            optionSelections: [],
+            customerNote: "  No green onion  ",
+          },
+          { sellableReference: id(3), quantity: 1, optionSelections: [] },
+        ],
+      }),
+    ).toMatchObject({ status: "Placed" });
+    const added = (
+      vi.mocked(pipeline.addItem).mock.calls as unknown as [unknown, { customerNote?: unknown }][]
+    ).map((call) => call[1].customerNote);
+    expect(added).toEqual(["No green onion", null]);
+    for (const customerNote of ["", "x".repeat(501), "bell\u0007", 7])
+      await expect(
+        send({
+          operationReference: id(34),
+          lines: [{ sellableReference: id(2), quantity: 1, optionSelections: [], customerNote }],
+        }),
+      ).rejects.toMatchObject({ code: "COUNTER_ORDER_INPUT_INVALID" });
+    expect(pipeline.open).toHaveBeenCalledTimes(1);
+  });
+
+  it("WP-2423 item 8 ⑦: takes no new order while counter ordering is turned off; a retry still returns its order", async () => {
+    const { pipeline, send } = setup();
+    expect(await send()).toMatchObject({ status: "Placed" });
+    state.counterOrder = false;
+    // The same send again returns the order it placed.
+    expect(await send()).toMatchObject({ status: "AlreadyPlaced", orderReference: id(20) });
+    await expect(send({ operationReference: id(31) })).rejects.toMatchObject({
+      code: "COUNTER_ORDER_TURNED_OFF",
+    });
+    expect(pipeline.open).toHaveBeenCalledTimes(1);
+  });
+
+  it("saves the pickup checkout details before checkout, as every pickup Order needs", async () => {
+    const { calls, send, pipeline } = setup();
+    const placed = await send();
+    expect(placed).toMatchObject({ status: "Placed", totalMinor: "1280", orderNumber: "12" });
+    expect(calls).toEqual([
+      "takesOrder",
+      "open",
+      "bindCart",
+      "addItem",
+      "quote",
+      "saveDetails",
+      "startCheckout",
+      "preparePayment",
+    ]);
+    expect(pipeline.saveDetails).toHaveBeenCalledWith(
+      guest,
+      expect.objectContaining({ cartReference: id(6), cartVersion: 2, quoteReference: id(7) }),
+    );
+    expect(pipeline.preparePayment).toHaveBeenCalledWith(
+      guest,
+      expect.objectContaining({ recordedAfterOutage: false }),
+    );
+    expect(await send()).toMatchObject({ status: "AlreadyPlaced", orderReference: id(20) });
+    expect(pipeline.open).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks the counter rule (not the online pause) before opening a guest", async () => {
+    const { pipeline, send } = setup();
+    pipeline.takesOrder.mockResolvedValueOnce(false);
+    await expect(send()).rejects.toMatchObject({ code: "COUNTER_ORDER_STORE_NOT_TAKING_ORDERS" });
+    expect(pipeline.open).not.toHaveBeenCalled();
+    await send({ operationReference: id(30), recordedAfterOutage: true });
+    expect(pipeline.takesOrder).toHaveBeenLastCalledWith({ recordedAfterOutage: true });
+  });
+
+  it("WP-2423 item 13 ②: refuses a new walk-up order while new guests are paused, not a paper one", async () => {
+    const { pipeline, send } = setup();
+    const paused = vi.fn(async () => true);
+    Object.assign(pipeline, { newGuestsPaused: paused });
+    await expect(send()).rejects.toMatchObject({ code: "COUNTER_ORDER_NEW_GUESTS_PAUSED" });
+    expect(pipeline.open).not.toHaveBeenCalled();
+    // A paper order taken before (entered after an outage) is recorded as usual.
+    expect(await send({ operationReference: id(35), recordedAfterOutage: true })).toMatchObject({
+      status: "Placed",
+    });
+    paused.mockResolvedValue(false);
+    expect(await send({ operationReference: id(36) })).toMatchObject({ status: "Placed" });
+  });
+
+  it("tells staff an unfinished send is still running, then lets them start over", async () => {
+    const clock = { at: "2026-10-13T18:00:00.000Z" };
+    const { pipeline, send, onUnexpected } = setup(clock);
+    const failure = Object.assign(new Error("ORDER_CREATE_UNAVAILABLE"), {
+      code: "ORDER_CREATE_UNAVAILABLE",
+    });
+    pipeline.preparePayment.mockRejectedValueOnce(failure);
+    // DEC-PAPER-SEND-IDEMPOTENT: the order may exist once it was submitted, so staff send the
+    // same order again (never a new one that could be a second sale).
+    await expect(send()).rejects.toMatchObject({ code: "COUNTER_ORDER_IN_PROGRESS" });
+    // The original error reaches the log hook.
+    expect(onUnexpected).toHaveBeenCalledWith(failure);
+    await expect(send()).rejects.toMatchObject({ code: "COUNTER_ORDER_IN_PROGRESS" });
+    clock.at = "2026-10-13T18:02:01.000Z";
+    await expect(send()).rejects.toMatchObject({ code: "COUNTER_ORDER_NOT_FINISHED" });
+    // A new send is a new order; the failed attempt opened no second guest on retry.
+    expect(pipeline.open).toHaveBeenCalledTimes(1);
+    expect(await send({ operationReference: id(31) })).toMatchObject({ status: "Placed" });
+  });
+
+  // DEC-PAPER-SEND-IDEMPOTENT (v15 batch-9 L5): a paper order is paid with its send. When the
+  // answer is lost, the same send finds the order paid; it is returned with its number and the
+  // amounts its payment record holds, never "didn't go through" (which led to a second sale).
+  it("returns a paid order to the same send, with its number and amounts, at any time", async () => {
+    const clock = { at: "2026-10-13T18:00:00.000Z" };
+    const { pipeline, send } = setup(clock);
+    const first = await send({ recordedAfterOutage: true, tip: { kind: "None" } });
+    expect(first).toMatchObject({ status: "Placed", orderNumber: "12", totalMinor: "1280" });
+    state.waitsForPayment = false;
+    state.paid = {
+      preparation: {
+        orderAllocation: { amountMinor: 1130n },
+        tip: { amountMinor: 0n },
+        total: { amountMinor: 1130n },
+        capacityExpiresAt: "2026-10-13T18:30:00.000Z",
+      },
+    };
+    state.placed = { orderNumber: "12", orderVersion: 2 };
+    const expected = {
+      status: "AlreadyPlaced",
+      orderReference: id(20),
+      orderBatchReference: id(21),
+      orderNumber: "12",
+      orderVersion: 2,
+      orderMinor: "1130",
+      tipMinor: "0",
+      totalMinor: "1130",
+      payBy: "2026-10-13T18:30:00.000Z",
+      recordedAfterOutage: true,
+      // Read back as paid, so the page never asks staff to charge it.
+      paid: true,
+    };
+    expect(await send({ recordedAfterOutage: true, tip: { kind: "None" } })).toEqual(expected);
+    clock.at = "2026-10-13T21:00:00.000Z";
+    expect(await send({ recordedAfterOutage: true, tip: { kind: "None" } })).toEqual(expected);
+    // Nothing new was placed for either retry.
+    expect(pipeline.open).toHaveBeenCalledTimes(1);
+    expect(pipeline.preparePayment).toHaveBeenCalledTimes(1);
+  });
+
+  // A live counter order charged from Orders while the counter page's answer was lost: the same
+  // send reads it back as paid (never "Charge" with a pay-by in the past, a second card charge).
+  it("reads a live counter order charged meanwhile back as paid", async () => {
+    const clock = { at: "2026-10-13T18:00:00.000Z" };
+    const { send } = setup(clock);
+    const first = await send();
+    expect(first.paid).toBeUndefined();
+    // While it waits for its payment it is not paid.
+    expect((await send()).paid).toBeUndefined();
+    // Paid, though its window still reads open (not yet accepted): read as paid.
+    state.paid = {
+      preparation: {
+        orderAllocation: { amountMinor: 1130n },
+        tip: { amountMinor: 150n },
+        total: { amountMinor: 1280n },
+        capacityExpiresAt: "2026-10-13T18:30:00.000Z",
+      },
+    };
+    expect(await send()).toMatchObject({ status: "AlreadyPlaced", totalMinor: "1280", paid: true });
+    state.waitsForPayment = false;
+    state.paid = {
+      preparation: {
+        orderAllocation: { amountMinor: 1130n },
+        tip: { amountMinor: 150n },
+        total: { amountMinor: 1280n },
+        capacityExpiresAt: "2026-10-13T18:30:00.000Z",
+      },
+    };
+    clock.at = "2026-10-13T19:00:00.000Z";
+    expect(await send()).toMatchObject({
+      status: "AlreadyPlaced",
+      recordedAfterOutage: false,
+      totalMinor: "1280",
+      paid: true,
+    });
+  });
+
+  it("names an order that no longer waits for payment and was not paid, instead of placing it again", async () => {
+    const clock = { at: "2026-10-13T18:00:00.000Z" };
+    const { pipeline, send } = setup(clock);
+    await send({ recordedAfterOutage: true, tip: { kind: "None" } });
+    // Its time to record the payment ended (a paper order is kept for re-entry), or it closed.
+    state.waitsForPayment = false;
+    await expect(send({ recordedAfterOutage: true, tip: { kind: "None" } })).rejects.toMatchObject({
+      code: "COUNTER_ORDER_IN_PROGRESS",
+    });
+    clock.at = "2026-10-13T18:40:00.000Z";
+    await expect(send({ recordedAfterOutage: true, tip: { kind: "None" } })).rejects.toMatchObject({
+      code: "COUNTER_ORDER_ALREADY_ORDERED",
+      orderNumber: "12",
+    });
+    expect(pipeline.preparePayment).toHaveBeenCalledTimes(1);
+  });
+
+  it("names the order the first send placed when the same send comes back with other dishes", async () => {
+    const clock = { at: "2026-10-13T18:00:00.000Z" };
+    const { pipeline, send } = setup(clock);
+    await send({ recordedAfterOutage: true, tip: { kind: "None" } });
+    const changed = {
+      recordedAfterOutage: true,
+      tip: { kind: "None" },
+      lines: [{ sellableReference: id(2), quantity: 2, optionSelections: [] }],
+    };
+    await expect(send(changed)).rejects.toMatchObject({
+      code: "COUNTER_ORDER_ALREADY_ORDERED",
+      orderNumber: "12",
+    });
+    // Paid already: the same answer.
+    state.waitsForPayment = false;
+    state.paid = {
+      preparation: {
+        orderAllocation: { amountMinor: 1130n },
+        tip: { amountMinor: 0n },
+        total: { amountMinor: 1130n },
+        capacityExpiresAt: "2026-10-13T18:30:00.000Z",
+      },
+    };
+    await expect(send(changed)).rejects.toMatchObject({
+      code: "COUNTER_ORDER_ALREADY_ORDERED",
+      orderNumber: "12",
+    });
+    expect(pipeline.preparePayment).toHaveBeenCalledTimes(1);
+    // A first send that placed nothing: wait while it may run, then the changed order is new.
+    pipeline.bindCart.mockResolvedValueOnce({
+      credentials: guest,
+      guestSessionReference: id(42),
+      cartReference: id(41),
+      cartVersion: 1,
+    });
+    pipeline.startCheckout.mockRejectedValueOnce(
+      Object.assign(new Error("boom"), { code: "DEPENDENCY_UNAVAILABLE" }),
+    );
+    await expect(send({ operationReference: id(40) })).rejects.toMatchObject({
+      code: "COUNTER_ORDER_UNAVAILABLE",
+    });
+    const other = { operationReference: id(40), tip: { kind: "None" } };
+    await expect(send(other)).rejects.toMatchObject({ code: "COUNTER_ORDER_IN_PROGRESS" });
+    clock.at = "2026-10-13T18:03:00.000Z";
+    await expect(send(other)).rejects.toMatchObject({ code: "COUNTER_ORDER_NOT_FINISHED" });
+  });
+
+  // WP-2423: a checkout that fails because the pickup time schedule ran out is told to staff as
+  // that, not "try again"; with pickup times present (or unknown) the failure stays unexpected.
+  it("names a run-out pickup time schedule instead of a generic failure", async () => {
+    const { pipeline, send, onUnexpected } = setup();
+    const failure = Object.assign(new Error("DEPENDENCY_UNAVAILABLE"), {
+      code: "DEPENDENCY_UNAVAILABLE",
+    });
+    const covered = vi.fn(async () => false);
+    Object.assign(pipeline, { pickupTimesNow: covered });
+    pipeline.startCheckout.mockRejectedValueOnce(failure);
+    await expect(send()).rejects.toMatchObject({ code: "COUNTER_ORDER_NO_PICKUP_TIMES" });
+    expect(onUnexpected).not.toHaveBeenCalled();
+    covered.mockResolvedValueOnce(true);
+    pipeline.startCheckout.mockRejectedValueOnce(failure);
+    await expect(send({ operationReference: id(32) })).rejects.toMatchObject({
+      code: "COUNTER_ORDER_UNAVAILABLE",
+    });
+    covered.mockRejectedValueOnce(new Error("read failed"));
+    pipeline.startCheckout.mockRejectedValueOnce(failure);
+    await expect(send({ operationReference: id(33) })).rejects.toMatchObject({
+      code: "COUNTER_ORDER_UNAVAILABLE",
+    });
+    expect(onUnexpected).toHaveBeenCalledTimes(2);
+    // Business refusals never ask.
+    pipeline.takesOrder.mockResolvedValueOnce(false);
+    await expect(send({ operationReference: id(34) })).rejects.toMatchObject({
+      code: "COUNTER_ORDER_STORE_NOT_TAKING_ORDERS",
+    });
+    expect(covered).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not log business refusals", async () => {
+    const { pipeline, send, onUnexpected } = setup();
+    pipeline.addItem.mockResolvedValueOnce({ status: "NotAvailable" } as never);
+    await expect(send()).rejects.toMatchObject({
+      code: "COUNTER_ORDER_ITEM_UNAVAILABLE",
+      lineIndex: 0,
+    });
+    expect(onUnexpected).not.toHaveBeenCalled();
+  });
+
+  it("WP-2423 (staff-round-soldout): a line the quote can't sell is named, never a system failure", async () => {
+    const twoLines = {
+      lines: [
+        { sellableReference: id(2), quantity: 1, optionSelections: [] },
+        { sellableReference: id(3), quantity: 1, optionSelections: [] },
+      ],
+    };
+    const linesAfter = (count: number) =>
+      Array.from({ length: count }, (_, at) => ({ cartItemReference: id(40 + at), quantity: 1 }));
+    for (const [reason, optionsChanged] of [
+      ["Unavailable", false],
+      ["OptionsChanged", true],
+    ] as const) {
+      state.entries.clear();
+      const { pipeline, send, onUnexpected } = setup();
+      pipeline.addItem
+        .mockResolvedValueOnce({ status: "Applied", cartVersion: 2, lines: linesAfter(1) } as never)
+        .mockResolvedValueOnce({
+          status: "Applied",
+          cartVersion: 3,
+          lines: linesAfter(2),
+        } as never);
+      pipeline.quote.mockResolvedValueOnce({
+        status: "ItemUnavailable",
+        cartItemReference: id(41),
+        reason,
+      } as never);
+      await expect(send(twoLines)).rejects.toMatchObject({
+        code: "COUNTER_ORDER_ITEM_UNAVAILABLE",
+        lineIndex: 1,
+        optionsChanged,
+      });
+      expect(pipeline.startCheckout).not.toHaveBeenCalled();
+      expect(onUnexpected).not.toHaveBeenCalled();
+    }
+  });
+
+  describe("v15 run: an item with too little stock", () => {
+    const stockOf = (left: number) =>
+      vi.fn(async (_c: unknown, input: { quantity: number }) => input.quantity <= left);
+    const twoLines = {
+      lines: [
+        { sellableReference: id(2), quantity: 1, optionSelections: [] },
+        { sellableReference: id(3), quantity: 1, optionSelections: [] },
+        { sellableReference: id(2), quantity: 1, optionSelections: [] },
+      ],
+    };
+
+    it("names the item and how many are left when the same item on several lines is short", async () => {
+      const { pipeline, send, onUnexpected } = setup();
+      const canSell = stockOf(1);
+      Object.assign(pipeline, { canSell });
+      await expect(send(twoLines)).rejects.toMatchObject({
+        code: "COUNTER_ORDER_STOCK_SHORT",
+        lineIndex: 0,
+        available: 1,
+      });
+      // Checked as the walk-up guest against its Cart, for both lines together.
+      expect(canSell).toHaveBeenCalledWith(
+        guest,
+        expect.objectContaining({
+          cartReference: id(6),
+          cartVersion: 2,
+          sellableReference: id(2),
+          quantity: 2,
+        }),
+      );
+      // Nothing was priced, checked out or charged; it is a business answer, not an outage.
+      expect(pipeline.quote).not.toHaveBeenCalled();
+      expect(pipeline.startCheckout).not.toHaveBeenCalled();
+      expect(onUnexpected).not.toHaveBeenCalled();
+    });
+
+    it("finds how many are left when a line's own quantity is refused", async () => {
+      const { pipeline, send } = setup();
+      Object.assign(pipeline, { canSell: stockOf(3) });
+      pipeline.addItem.mockResolvedValueOnce({ status: "NotAvailable" } as never);
+      await expect(
+        send({ lines: [{ sellableReference: id(2), quantity: 7, optionSelections: [] }] }),
+      ).rejects.toMatchObject({ code: "COUNTER_ORDER_STOCK_SHORT", lineIndex: 0, available: 3 });
+    });
+
+    it("keeps the sold-out answer when none can be sold, and places a covered order", async () => {
+      const { pipeline, send } = setup();
+      Object.assign(pipeline, { canSell: stockOf(0) });
+      pipeline.addItem.mockResolvedValueOnce({ status: "NotAvailable" } as never);
+      await expect(send()).rejects.toMatchObject({
+        code: "COUNTER_ORDER_ITEM_UNAVAILABLE",
+        lineIndex: 0,
+      });
+      Object.assign(pipeline, { canSell: stockOf(2) });
+      expect(await send({ ...twoLines, operationReference: id(32) })).toMatchObject({
+        status: "Placed",
+      });
+    });
+
+    it("WP-2423: names a drink short only because another drink uses the same milk (checkout's answer)", async () => {
+      const { pipeline, send, onUnexpected } = setup();
+      let lines: { cartItemReference: string; quantity: number }[] = [];
+      pipeline.addItem.mockImplementation((async (_c: unknown, input: { quantity: number }) => {
+        lines = [...lines, { cartItemReference: id(40 + lines.length), quantity: input.quantity }];
+        return { status: "Applied" as const, cartVersion: 2 + lines.length, lines };
+      }) as never);
+      pipeline.startCheckout.mockResolvedValueOnce({
+        status: "ItemShort",
+        cartItemReference: id(41),
+        available: 1,
+        sharedStock: true,
+      } as never);
+      await expect(
+        send({
+          lines: [
+            { sellableReference: id(2), quantity: 2, optionSelections: [] },
+            { sellableReference: id(3), quantity: 2, optionSelections: [] },
+          ],
+        }),
+      ).rejects.toMatchObject({
+        code: "COUNTER_ORDER_STOCK_SHORT",
+        lineIndex: 1,
+        available: 1,
+        sharedStock: true,
+      });
+      expect(pipeline.preparePayment).not.toHaveBeenCalled();
+      expect(onUnexpected).not.toHaveBeenCalled();
+    });
+
+    it("WP-2423: nothing left beside the rest, or stock gone at submission, is 'can't be sold' (not an outage)", async () => {
+      const { pipeline, send, onUnexpected } = setup();
+      pipeline.addItem.mockResolvedValue({
+        status: "Applied",
+        cartVersion: 3,
+        lines: [{ cartItemReference: id(40), quantity: 1 }],
+      } as never);
+      pipeline.startCheckout.mockResolvedValueOnce({
+        status: "ItemShort",
+        cartItemReference: id(40),
+        available: 0,
+        sharedStock: false,
+      } as never);
+      await expect(send()).rejects.toMatchObject({
+        code: "COUNTER_ORDER_ITEM_UNAVAILABLE",
+        lineIndex: 0,
+      });
+      pipeline.preparePayment.mockRejectedValueOnce(
+        Object.assign(new Error("order creation is unavailable"), {
+          code: "ORDER_CREATE_STOCK_SHORT",
+        }),
+      );
+      await expect(send({ operationReference: id(33) })).rejects.toMatchObject({
+        code: "COUNTER_ORDER_ITEM_UNAVAILABLE",
+        lineIndex: null,
+      });
+      expect(onUnexpected).not.toHaveBeenCalled();
+    });
+
+    it("WP-2423 M03: dishes already in an Order are refused with its number (nothing new charged)", async () => {
+      const { pipeline, send, onUnexpected } = setup();
+      pipeline.addItem.mockResolvedValue({
+        status: "Applied",
+        cartVersion: 3,
+        lines: [{ cartItemReference: id(40), quantity: 1 }],
+      } as never);
+      pipeline.preparePayment.mockRejectedValueOnce(
+        Object.assign(new Error("order creation is unavailable"), {
+          code: "ORDER_CREATE_ALREADY_ORDERED",
+          placedOrder: { orderReference: id(70), orderNumber: "13" },
+        }),
+      );
+      await expect(send()).rejects.toMatchObject({
+        code: "COUNTER_ORDER_ALREADY_ORDERED",
+        orderNumber: "13",
+      });
+      pipeline.startCheckout.mockRejectedValueOnce(
+        Object.assign(new Error("checkout session is unavailable"), {
+          code: "ALREADY_ORDERED",
+          placedOrder: null,
+        }),
+      );
+      await expect(send({ operationReference: id(34) })).rejects.toMatchObject({
+        code: "COUNTER_ORDER_ALREADY_ORDERED",
+        orderNumber: null,
+      });
+      expect(onUnexpected).not.toHaveBeenCalled();
+    });
+
+    it("WP-2423: an owner listing mid-order asks staff to send again (nothing placed or charged)", async () => {
+      const { pipeline, send, onUnexpected } = setup();
+      pipeline.addItem.mockResolvedValue({
+        status: "Applied",
+        cartVersion: 3,
+        lines: [{ cartItemReference: id(40), quantity: 1 }],
+      } as never);
+      pipeline.startCheckout.mockResolvedValueOnce({ status: "RequoteRequired" } as never);
+      await expect(send()).rejects.toMatchObject({ code: "COUNTER_ORDER_NOT_PRICED" });
+      expect(pipeline.preparePayment).not.toHaveBeenCalled();
+      pipeline.preparePayment.mockRejectedValueOnce(
+        Object.assign(new Error("checkout validation failed"), {
+          code: "CHECKOUT_REQUOTE_REQUIRED",
+        }),
+      );
+      await expect(send({ operationReference: id(33) })).rejects.toMatchObject({
+        code: "COUNTER_ORDER_NOT_PRICED",
+      });
+      expect(onUnexpected).not.toHaveBeenCalled();
+    });
+
+    it("never hides the refusal when the stock cannot be read", async () => {
+      const { pipeline, send } = setup();
+      Object.assign(pipeline, {
+        canSell: vi.fn(async () => {
+          throw new Error("INVENTORY_UNAVAILABLE");
+        }),
+      });
+      pipeline.addItem.mockResolvedValueOnce({ status: "NotAvailable" } as never);
+      await expect(send()).rejects.toMatchObject({
+        code: "COUNTER_ORDER_ITEM_UNAVAILABLE",
+        lineIndex: 0,
+      });
+    });
+  });
+
+  it("WP-2423: each counter transaction resolves the caller twice; owner callbacks take its guard", async () => {
+    const { send } = setup();
+    expect(await send()).toMatchObject({ status: "Placed" });
+    // Three transactions (earlier send, entry, finished order), each resolved at its start and
+    // re-checked before it commits; the owner reads and writes in between cost no resolution.
+    expect(state.allowed.calls).toBe(6);
+    expect(state.during.length).toBeGreaterThanOrEqual(3);
+    expect(state.during.every((answer) => answer)).toBe(true);
+    // The guard ends with its run.
+    for (const guard of state.guards) expect(await guard()).toBe(false);
+  });
+
+  it("WP-2423: a permission withdrawn during a counter transaction refuses it before commit", async () => {
+    const { send, pipeline } = setup();
+    let call = 0;
+    // Allowed at the start of the entry transaction, withdrawn before it commits.
+    state.allowed.fn = async () => ++call !== 4;
+    await expect(send()).rejects.toMatchObject({ code: "COUNTER_ORDER_PERMISSION_DENIED" });
+    expect(state.allowed.calls).toBe(4);
+    // Thrown inside the transaction callback, so the counter entry does not commit.
+    expect(state.rolledBack).toBe(1);
+    expect(pipeline.addItem).not.toHaveBeenCalled();
+  });
+});

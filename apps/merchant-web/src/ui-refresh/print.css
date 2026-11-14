@@ -1,0 +1,75 @@
+/* M50 (WP-2423): only a region printed through printRegion() hides the rest of the page. Any other
+   print (Today's summary, the browser's own Print) prints the page as it is shown. */
+[data-print-only] {
+  display: none;
+}
+@media print {
+  /* v15 batch 7: everything that neither holds nor is inside the printed region is taken out of
+     the layout (not only made invisible), so the region starts at the top of the first page and
+     no blank pages follow it. */
+  body[data-printing]
+    *:not([data-print-root]):not(:has([data-print-root])):not([data-print-root] *) {
+    display: none !important;
+  }
+  /* The region's own containers (a sticky, scrolled side panel; a grid column) must not place or
+     clip it: printed, they are plain blocks that let it flow from the top of the page. */
+  body[data-printing] :has([data-print-root]) {
+    display: block !important;
+    position: static !important;
+    overflow: visible !important;
+    inset: auto !important;
+    height: auto !important;
+    max-height: none !important;
+    min-height: 0 !important;
+    width: auto !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    transform: none !important;
+    box-shadow: none !important;
+    background: none !important;
+  }
+  body[data-printing] [data-print-root] {
+    position: static !important;
+    width: 100%;
+    max-width: none;
+    margin: 0;
+  }
+  body[data-printing] [data-print-root] [data-print-only] {
+    display: revert;
+  }
+  body[data-printing] [data-print-root] button,
+  body[data-printing] [data-print-root] [data-print-hide] {
+    display: none !important;
+  }
+}
+/* v15 batch 7 (M50): the printed paid bill — the Store, the table and when, then every dish. */
+@media print {
+  body[data-printing] .table-receipt__head {
+    text-align: center;
+    margin: 0 0 12px;
+  }
+  body[data-printing] .table-receipt__head p {
+    margin: 0;
+  }
+  body[data-printing] .table-receipt__store {
+    font-weight: 600;
+    font-size: 1.15em;
+  }
+  body[data-printing] .table-receipt__dishes {
+    list-style: none;
+    margin: 0 0 12px;
+    padding: 0;
+  }
+  body[data-printing] .table-receipt__dishes li {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 0 12px;
+  }
+  body[data-printing] .table-receipt__reduction {
+    flex-basis: 100%;
+    padding-left: 1em;
+  }
+}

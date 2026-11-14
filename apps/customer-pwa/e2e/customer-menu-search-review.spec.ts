@@ -1,0 +1,79 @@
+import { expect, test } from "@playwright/test";
+import { routeStorefrontReads } from "./storefront-reads";
+
+// WP-2423: every page with a Store context reads the Store's identity (and the menu for
+// cart lines not yet priced); spec routes registered later still answer first.
+test.beforeEach(({ context }) => routeStorefrontReads(context));
+
+test("CUST-MENU-SEARCH follows the Make search hierarchy @demo", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
+
+  await page.goto("/");
+  await page
+    .getByRole("navigation", { name: "Preview routes" })
+    .getByRole("link", {
+      name: "Menu",
+      exact: true,
+    })
+    .click();
+  await page
+    .getByRole("navigation", { name: "Menu" })
+    .getByRole("link", {
+      name: "Search menu",
+      exact: true,
+    })
+    .click();
+
+  const main = page.getByRole("main");
+  await expect(main.getByLabel("Menu section")).toBeEnabled();
+  await expect(main.getByText("Dietary tags are not provided by this menu.")).toBeVisible();
+  await page.getByLabel("Search the menu").fill("iced");
+  await main.getByLabel("Menu section").selectOption({ label: "Training favourites" });
+  await main.getByRole("button", { name: "Search", exact: true }).click();
+  await expect(main.getByRole("heading", { name: "Search results" })).toBeVisible();
+  await expect(main.getByText("Matched term · iced")).toBeVisible();
+  await expect(main.getByRole("heading", { name: "Synthetic iced tea" })).toBeVisible();
+  await expect(main.locator(".menu-result-section")).toContainText("Training favourites");
+  await expect(main.getByText("Priced at checkout")).toBeVisible();
+  await expect(main.getByRole("link", { name: "View Synthetic iced tea" })).toBeVisible();
+  await expect(main).not.toContainText("Synthetic mushroom rice bowl");
+
+  for (const viewport of [
+    { width: 1440, height: 900 },
+    { width: 390, height: 844 },
+    { width: 320, height: 800 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await expect(main.getByRole("heading", { name: "Search results" })).toBeVisible();
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+        ),
+      )
+      .toBe(true);
+    await page.screenshot({
+      path: `test-results/customer-menu-search-${viewport.width}.png`,
+      fullPage: true,
+    });
+  }
+
+  // Guests search by what is in the dish, not only its name: the published description matches.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.getByLabel("Search the menu").fill("carrot");
+  await main.getByRole("button", { name: "Search", exact: true }).click();
+  await expect(main.getByText("Matched term · carrot")).toBeVisible();
+  await expect(main.getByRole("heading", { name: "Synthetic mushroom rice bowl" })).toBeVisible();
+  await expect(main.getByText(/roasted mushrooms, pickled carrot/u)).toBeVisible();
+  await expect(main).not.toContainText("Synthetic iced tea");
+
+  await main.getByRole("button", { name: "Clear", exact: true }).click();
+  await expect(main.getByRole("heading", { name: "Search this menu" })).toBeVisible();
+  await expect(main.getByLabel("Search the menu")).toHaveValue("");
+  await expect(main.getByLabel("Menu section")).toHaveValue("");
+  expect(errors).toEqual([]);
+});

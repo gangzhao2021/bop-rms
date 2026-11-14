@@ -1,0 +1,360 @@
+import { appendAuditRecordInTransaction, validateAuditRecord } from "@bop/audit";
+import type { ConsumerTransaction } from "@bop/eventing";
+import {
+  parseOrderAcceptanceRecord,
+  OrderAcceptanceRecordError,
+  type OrderAcceptanceRecord,
+} from "../../application/order-acceptance-record.js";
+import { parseOrderingReference } from "../../domain/cart.js";
+
+const columns = {
+  acceptanceReference: "acceptance_id",
+  operationReference: "operation_id",
+  brandReference: "brand_id",
+  storeReference: "store_id",
+  orderReference: "order_id",
+  orderBatchReference: "order_batch_id",
+  expectedOrderVersion: "expected_order_version",
+  acceptedOrderVersion: "accepted_order_version",
+  actorType: "actor_type",
+  actorReference: "actor_id",
+  purposeCode: "purpose_code",
+  permissionCode: "permission_code",
+  reasonCode: "reason_code",
+  workflowVersionReference: "workflow_version_id",
+  transitionReference: "transition_id",
+  sourceDigest: "source_digest",
+  acceptedAt: "accepted_at",
+} as const;
+const keys = Object.keys(columns) as (keyof typeof columns)[];
+const selection = keys.map((key) => columns[key] + ' AS "' + key + '"').join(",");
+function fail(conflict = false): never {
+  throw new OrderAcceptanceRecordError(
+    conflict ? "ORDER_ACCEPTANCE_RECORD_CONFLICT" : "ORDER_ACCEPTANCE_RECORD_UNAVAILABLE",
+  );
+}
+
+async function lockOrder(
+  transaction: ConsumerTransaction,
+  brand: string,
+  store: string,
+  order: string,
+) {
+  await transaction.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+    "OrderingOrderDisposition:" + brand + ":" + store + ":" + order,
+  ]);
+}
+
+/** Historical owner fact only. Caller retains this transaction while evaluating current eligibility. */
+export function createPostgresOrderAcceptanceReader(options: {
+  brandReference: string;
+  storeReference: string;
+  authorize(
+    transaction: ConsumerTransaction,
+    scope: Readonly<{
+      brandReference: string;
+      storeReference: string;
+      orderReference: string;
+      orderBatchReference: string;
+    }>,
+  ): Promise<boolean>;
+}) {
+  const brand = parseOrderingReference(options.brandReference);
+  const store = parseOrderingReference(options.storeReference);
+  return Object.freeze({
+    async loadByBatch(input: {
+      transaction: ConsumerTransaction;
+      orderReference: string;
+      orderBatchReference: string;
+    }): Promise<OrderAcceptanceRecord | null> {
+      const order = parseOrderingReference(input.orderReference);
+      const batch = parseOrderingReference(input.orderBatchReference);
+      const tx = input.transaction;
+      await tx.query(
+        "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+        [brand, store],
+      );
+      if (
+        (await options.authorize(
+          tx,
+          Object.freeze({
+            brandReference: brand,
+            storeReference: store,
+            orderReference: order,
+            orderBatchReference: batch,
+          }),
+        )) !== true
+      )
+        return fail();
+      await lockOrder(tx, brand, store, order);
+      const result = await tx.query(
+        "SELECT " +
+          selection +
+          " FROM rms_ordering.order_acceptance_record " +
+          "WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 AND order_batch_id=$4 LIMIT 2",
+        [brand, store, order, batch],
+      );
+      if (result.rows.length === 0) return null;
+      if (result.rows.length !== 1) return fail(true);
+      const row = result.rows[0];
+      const record = parseOrderAcceptanceRecord({
+        ...row,
+        acceptedAt:
+          row?.acceptedAt instanceof Date ? row.acceptedAt.toISOString() : row?.acceptedAt,
+      });
+      if (
+        record.brandReference !== brand ||
+        record.storeReference !== store ||
+        record.orderReference !== order ||
+        record.orderBatchReference !== batch
+      )
+        return fail(true);
+      return record;
+    },
+    /**
+     * WP-2423 M35: every Batch's acceptance of one Order in one read (authorized once, under the
+     * same Order lock), so a reader of a table's rounds costs the same however many rounds the
+     * table already has. The same records and checks as `loadByBatch`, one per Batch at most.
+     */
+    async loadByOrder(input: {
+      transaction: ConsumerTransaction;
+      orderReference: string;
+      orderBatchReferences: readonly string[];
+    }): Promise<ReadonlyMap<string, OrderAcceptanceRecord>> {
+      const order = parseOrderingReference(input.orderReference);
+      const wanted = input.orderBatchReferences.map((value) => parseOrderingReference(value));
+      if (new Set(wanted).size !== wanted.length) return fail();
+      const found = new Map<string, OrderAcceptanceRecord>();
+      if (wanted.length === 0) return found;
+      const tx = input.transaction;
+      await tx.query(
+        "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+        [brand, store],
+      );
+      for (const batch of wanted)
+        if (
+          (await options.authorize(
+            tx,
+            Object.freeze({
+              brandReference: brand,
+              storeReference: store,
+              orderReference: order,
+              orderBatchReference: batch,
+            }),
+          )) !== true
+        )
+          return fail();
+      await lockOrder(tx, brand, store, order);
+      const result = await tx.query(
+        "SELECT " +
+          selection +
+          " FROM rms_ordering.order_acceptance_record " +
+          "WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 AND order_batch_id=ANY($4::uuid[]) " +
+          "ORDER BY order_batch_id,acceptance_id LIMIT 10001",
+        [brand, store, order, wanted],
+      );
+      if (result.rows.length > wanted.length) return fail(true);
+      for (const row of result.rows) {
+        const record = parseOrderAcceptanceRecord({
+          ...row,
+          acceptedAt:
+            row?.acceptedAt instanceof Date ? row.acceptedAt.toISOString() : row?.acceptedAt,
+        });
+        if (
+          record.brandReference !== brand ||
+          record.storeReference !== store ||
+          record.orderReference !== order ||
+          !wanted.includes(record.orderBatchReference) ||
+          found.has(record.orderBatchReference)
+        )
+          return fail(true);
+        found.set(record.orderBatchReference, record);
+      }
+      return found;
+    },
+  });
+}
+
+/** Caller owns commit/rollback. Every owner gate must retain its fences through that commit. */
+export function createPostgresOrderAcceptanceStore(options: {
+  brandReference: string;
+  storeReference: string;
+  authorize(transaction: ConsumerTransaction, record: OrderAcceptanceRecord): Promise<boolean>;
+  validateCurrentSource(
+    transaction: ConsumerTransaction,
+    record: OrderAcceptanceRecord,
+  ): Promise<boolean>;
+  audit(record: OrderAcceptanceRecord): Promise<unknown>;
+}) {
+  const brand = parseOrderingReference(options.brandReference);
+  const store = parseOrderingReference(options.storeReference);
+  return Object.freeze({
+    async commit(input: { transaction: ConsumerTransaction; record: unknown }) {
+      const record = parseOrderAcceptanceRecord(input.record);
+      if (record.brandReference !== brand || record.storeReference !== store) return fail();
+      const tx = input.transaction;
+      await tx.query(
+        "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+        [brand, store],
+      );
+      if ((await options.authorize(tx, record)) !== true) return fail();
+      await lockOrder(tx, brand, store, record.orderReference);
+      await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+        "OrderingAcceptanceOperation:" + brand + ":" + store + ":" + record.operationReference,
+      ]);
+      const prior = await tx.query(
+        "SELECT " +
+          selection +
+          " FROM rms_ordering.order_acceptance_record WHERE brand_id=$1 AND store_id=$2 AND operation_id=$3",
+        [brand, store, record.operationReference],
+      );
+      if (prior.rows.length > 1) return fail();
+      if (prior.rows.length === 1) {
+        const row = prior.rows[0];
+        const original = parseOrderAcceptanceRecord({
+          ...row,
+          acceptedAt:
+            row?.acceptedAt instanceof Date ? row.acceptedAt.toISOString() : row?.acceptedAt,
+        });
+        for (const key of keys) {
+          if (
+            key !== "acceptanceReference" &&
+            key !== "acceptedAt" &&
+            original[key] !== record[key]
+          )
+            return fail(true);
+        }
+        return Object.freeze({ status: "AlreadyCommitted" as const, record: original });
+      }
+      const terminated = await tx.query(
+        "SELECT termination_id FROM rms_ordering.order_termination_record WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 LIMIT 1",
+        [brand, store, record.orderReference],
+      );
+      if (terminated.rows.length !== 0) return fail(true);
+      const batch = await tx.query(
+        "SELECT submitted_at FROM rms_ordering.order_batch WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 AND order_batch_id=$4 FOR SHARE",
+        [brand, store, record.orderReference, record.orderBatchReference],
+      );
+      if (batch.rows.length !== 1) return fail(true);
+      const submitted = batch.rows[0]?.submitted_at;
+      const submittedAt = submitted instanceof Date ? submitted.toISOString() : submitted;
+      if (
+        typeof submittedAt !== "string" ||
+        !Number.isFinite(Date.parse(submittedAt)) ||
+        Date.parse(record.acceptedAt) < Date.parse(submittedAt)
+      )
+        return fail(true);
+      const accepted = await tx.query(
+        "SELECT acceptance_id FROM rms_ordering.order_acceptance_record WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 AND order_batch_id=$4",
+        [brand, store, record.orderReference, record.orderBatchReference],
+      );
+      if (accepted.rows.length !== 0) return fail(true);
+      if ((await options.validateCurrentSource(tx, record)) !== true) return fail();
+      const audit = validateAuditRecord(await options.audit(record));
+      if (
+        audit.brandId !== brand ||
+        audit.storeId !== store ||
+        audit.actor.type !== record.actorType ||
+        (audit.actor.type === "User" && audit.actor.reference !== record.actorReference) ||
+        audit.actionCode !== "ORDER_ACCEPTED" ||
+        audit.targetType !== "Order" ||
+        audit.targetId !== record.orderReference ||
+        audit.correlationId !== record.operationReference ||
+        audit.reasonCode !== record.reasonCode ||
+        audit.occurredAt !== record.acceptedAt ||
+        audit.beforeSummary !== undefined ||
+        JSON.stringify(audit.afterSummary) !== JSON.stringify({ phase: "Accepted" }) ||
+        audit.dataClassification !== "Restricted"
+      )
+        return fail(true);
+      if ((await options.authorize(tx, record)) !== true) return fail();
+      await tx.query("SAVEPOINT ordering_acceptance_revision", []);
+      try {
+        const result = await tx.query(
+          "INSERT INTO rms_ordering.order_acceptance_record (" +
+            keys.map((key) => columns[key]).join(",") +
+            ") VALUES (" +
+            keys.map((_, index) => "$" + (index + 1)).join(",") +
+            ")",
+          keys.map((key) => record[key]),
+        );
+        if (result.rowCount !== 1) return fail(true);
+        await appendAuditRecordInTransaction(tx, audit);
+        const revision = await tx.query(
+          "INSERT INTO rms_ordering.order_revision (revision_id,brand_id,store_id,order_id,kind,version,expected_version,previous_revision_id,initial_submission_id,occurred_at) " +
+            "SELECT $4::uuid,$1::uuid,$2::uuid,$3::uuid,'Acceptance',$5::integer,$6::integer,r.revision_id,NULL,$7::timestamptz FROM rms_ordering.order_revision r " +
+            "WHERE r.brand_id=$1::uuid AND r.store_id=$2::uuid AND r.order_id=$3::uuid AND r.version=$6::integer AND r.occurred_at<=$7::timestamptz",
+          [
+            brand,
+            store,
+            record.orderReference,
+            record.acceptanceReference,
+            record.acceptedOrderVersion,
+            record.expectedOrderVersion,
+            record.acceptedAt,
+          ],
+        );
+        if (revision.rowCount !== 1) return fail(true);
+        await tx.query("RELEASE SAVEPOINT ordering_acceptance_revision", []);
+      } catch {
+        await tx.query("ROLLBACK TO SAVEPOINT ordering_acceptance_revision", []);
+        await tx.query("RELEASE SAVEPOINT ordering_acceptance_revision", []);
+        return fail(true);
+      }
+      return Object.freeze({ status: "Created" as const, record });
+    },
+  });
+}
+
+/**
+ * v15 M44: why each of these Orders ended without being made, in words staff read on an exception
+ * ("Rejected · sold out · refunded"), from the Order's own termination record. Absent: the Order
+ * was not terminated. No actor, guest or staff identity leaves Ordering here.
+ */
+export type OrderTerminationCause =
+  | { readonly kind: "StoreRejected"; readonly reasonCode: string }
+  | { readonly kind: "NotAcceptedInTime" }
+  | { readonly kind: "PaymentWindowExpired" }
+  | { readonly kind: "StaffCancelled"; readonly reasonCode: string }
+  | { readonly kind: "GuestCancelled" }
+  | { readonly kind: "Other" };
+export async function listOrderTerminationCauses(
+  transaction: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  orderReferences: readonly string[],
+): Promise<ReadonlyMap<string, OrderTerminationCause>> {
+  if (orderReferences.length === 0) return new Map();
+  if (orderReferences.length > 200) return fail();
+  const brand = String(parseOrderingReference(scope.brandReference)),
+    store = String(parseOrderingReference(scope.storeReference));
+  await transaction.query(
+    "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+    [brand, store],
+  );
+  const rows = (
+    await transaction.query(
+      "SELECT t.order_id::text AS order_ref,t.phase,t.actor_type,t.purpose_code,t.reason_code," +
+        "EXISTS (SELECT 1 FROM rms_ordering.order_cancellation_request_version r WHERE r.brand_id=t.brand_id AND r.store_id=t.store_id AND r.execution_id=t.termination_id AND r.requested_by_actor_type='GuestSession') AS by_guest " +
+        "FROM rms_ordering.order_termination_record t WHERE t.brand_id=$1 AND t.store_id=$2 AND t.order_id=ANY($3::uuid[])",
+      [brand, store, orderReferences.map((value) => String(parseOrderingReference(value)))],
+    )
+  ).rows as readonly Record<string, unknown>[];
+  const causes = new Map<string, OrderTerminationCause>();
+  for (const row of rows) {
+    const reasonCode = String(row.reason_code);
+    const cause: OrderTerminationCause =
+      row.phase === "Rejected"
+        ? { kind: "StoreRejected", reasonCode }
+        : reasonCode === "ACCEPTANCE_WINDOW_EXPIRED"
+          ? { kind: "NotAcceptedInTime" }
+          : reasonCode === "PAYMENT_WINDOW_EXPIRED"
+            ? { kind: "PaymentWindowExpired" }
+            : row.actor_type === "User" && row.purpose_code === "StaffOrderCancellation"
+              ? { kind: "StaffCancelled", reasonCode }
+              : row.by_guest === true
+                ? { kind: "GuestCancelled" }
+                : { kind: "Other" };
+    causes.set(String(parseOrderingReference(row.order_ref)), Object.freeze(cause));
+  }
+  return causes;
+}

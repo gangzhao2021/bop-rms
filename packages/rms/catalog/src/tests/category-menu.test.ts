@@ -76,6 +76,7 @@ function fixture(
 ) {
   let category: CategoryAggregate | null = null;
   let menu: MenuAggregate | null = null;
+  let released: MenuAggregate | null = null;
   const categoryOperations = new Map<string, CategoryOperationRecord>();
   const menuOperations = new Map<string, MenuOperationRecord>();
   let generatedPlacement = 0;
@@ -182,6 +183,9 @@ function fixture(
       async load(reference) {
         return menu?.menuReference === reference ? menu : null;
       },
+      async loadLatestRelease(reference) {
+        return released?.menuReference === reference ? released : null;
+      },
       async codeAvailable() {
         return true;
       },
@@ -202,7 +206,14 @@ function fixture(
       },
     },
   };
-  return { service: createCategoryMenuService(ports), category: () => category, menu: () => menu };
+  return {
+    service: createCategoryMenuService(ports),
+    category: () => category,
+    menu: () => menu,
+    release: (value: MenuAggregate | null) => {
+      released = value;
+    },
+  };
 }
 function categoryInput() {
   return {
@@ -433,5 +444,35 @@ describe("Category and Draft Menu structure", () => {
         requestedAt: at,
       }),
     ).rejects.toMatchObject({ code: "CATALOG_INPUT_INVALID" });
+  });
+
+  it("discards an open draft back to the latest released version (WP-2423, v15 2026-10-16)", async () => {
+    const state = fixture();
+    const current = parseMenuAggregate((await state.service.createMenu(menuInput())).aggregate);
+    const discard = (operationReference: string, expectedAggregateVersion = 1) =>
+      state.service.discardMenuDraft({
+        menuReference: current.menuReference,
+        expectedAggregateVersion,
+        operationReference,
+        requestedAt: at,
+      });
+    // Never published: nothing to go back to.
+    await expect(discard(id(60))).rejects.toMatchObject({ code: "CATALOG_LIFECYCLE_CONFLICT" });
+    // The current version is itself the latest release: there is no draft to discard.
+    state.release(current);
+    await expect(discard(id(61))).rejects.toMatchObject({ code: "CATALOG_LIFECYCLE_CONFLICT" });
+    const releasedVersion = parseMenuAggregate({
+      ...current,
+      draft: { ...current.draft, versionReference: id(62) },
+    });
+    state.release(releasedVersion);
+    await expect(discard(id(63), 2)).rejects.toMatchObject({ code: "CATALOG_VERSION_CONFLICT" });
+    const result = await discard(id(64));
+    expect(result.status).toBe("Applied");
+    expect(result.aggregate.aggregateVersion).toBe(2);
+    expect(result.aggregate.draft).toEqual(releasedVersion.draft);
+    expect(state.menu()?.draft.versionReference).toBe(id(62));
+    // A retry of the same operation returns its recorded result.
+    await expect(discard(id(64))).resolves.toMatchObject({ status: "AlreadyApplied" });
   });
 });

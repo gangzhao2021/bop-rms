@@ -44,6 +44,8 @@ to make an emergency action easier.
 | Evidence owner | Preserves safe append-only access/action/revocation references                        | Cannot edit provider logs       |
 | Reviewer       | Reconciles actions, revocation and follow-up                                          | Must not be the sole operator   |
 
+Approver 2 is mandatory for the cases in the table; other cases require an explicit source-policy applicability review, not omission by default. Operator and Approver 1 remain distinct, and a required second approver is distinct under the governing policy. This does not equate two participating Actors with two approvers.
+
 The Pilot requirement for two distinct trained active Actors applies even when one shareholder holds
 multiple ordinary Roles. A role label is not evidence that two people participated.
 

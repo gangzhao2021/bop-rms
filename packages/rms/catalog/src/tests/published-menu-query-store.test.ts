@@ -7,9 +7,12 @@ import {
 
 const id = (n: number) => `018f7300-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const scope = { brandReference: id(2), storeReference: id(20) };
-const input = scope as Parameters<
-  ReturnType<typeof createPostgresPublishedMenuQueryStore>["loadCandidates"]
->[0];
+const input = {
+  ...scope,
+  channelCode: "DINE_IN",
+  orderTypeCode: "TABLE_SERVICE",
+  requestedAt: "2026-08-02T16:00:00.000Z",
+} as Parameters<ReturnType<typeof createPostgresPublishedMenuQueryStore>["loadCandidates"]>[0];
 const at = "2026-08-02T16:00:00.000Z";
 function projection(): PublishedMenuProjection {
   return {
@@ -39,9 +42,25 @@ function projection(): PublishedMenuProjection {
     },
   };
 }
-function fixture(result: unknown = { rows: [{ projection: projection() }] }) {
-  const query = vi.fn<(sql: string, values: readonly unknown[]) => Promise<unknown>>(
-    async () => result,
+function fixture(
+  result: unknown = { rows: [{ projection: projection() }] },
+  release: unknown = {
+    ...scope,
+    menuReference: id(1),
+    menuVersionReference: id(4),
+    releaseReference: id(8),
+    snapshotDigest: "sha256:" + "a".repeat(64),
+    lifecycleVersion: 4,
+    channelCode: input.channelCode,
+    orderTypeCode: input.orderTypeCode,
+    observedAt: at,
+    releasedAt: at,
+    effectiveFrom: at,
+    effectiveUntil: null,
+  },
+) {
+  const query = vi.fn<(sql: string, values: readonly unknown[]) => Promise<unknown>>(async (sql) =>
+    sql.includes("END AS release") ? { rows: [{ release }] } : result,
   );
   const run = vi.fn(async () => undefined);
   const runner: PublishedMenuQueryTransactionRunner = {
@@ -61,11 +80,49 @@ describe("PostgreSQL Published Menu query store", () => {
     expect(Object.isFrozen(found)).toBe(true);
     expect(Object.isFrozen(found[0]?.snapshot)).toBe(true);
     expect(f.run).toHaveBeenCalledOnce();
-    expect(f.query).toHaveBeenCalledTimes(2);
+    expect(f.query).toHaveBeenCalledTimes(4);
     expect(f.query.mock.calls.map((call) => call[1])).toEqual([
       [scope.brandReference, ""],
       [scope.brandReference, scope.storeReference],
+      [scope.brandReference, ""],
+      [
+        scope.brandReference,
+        scope.storeReference,
+        id(1),
+        input.channelCode,
+        input.orderTypeCode,
+        at,
+      ],
     ]);
+  });
+  it("omits archived releases and fails closed on a different current snapshot", async () => {
+    expect(await fixture(undefined, null).store.loadCandidates(input)).toEqual([]);
+    for (const field of [
+      "menuVersionReference",
+      "releaseReference",
+      "snapshotDigest",
+      "effectiveFrom",
+      "effectiveUntil",
+    ] as const) {
+      const snapshot = projection();
+      const changed = {
+        ...snapshot,
+        snapshot: {
+          ...snapshot.snapshot,
+          [field]:
+            field === "snapshotDigest"
+              ? "sha256:" + "b".repeat(64)
+              : field === "effectiveFrom"
+                ? "2026-08-02T15:00:00.000Z"
+                : field === "effectiveUntil"
+                  ? "2026-08-03T16:00:00.000Z"
+                  : id(90),
+        },
+      };
+      await expect(
+        fixture({ rows: [{ projection: changed }] }).store.loadCandidates(input),
+      ).rejects.toMatchObject({ code: "CATALOG_DEPENDENCY_UNAVAILABLE" });
+    }
   });
   it("preserves absence and all freshness states for the existing query policy", async () => {
     expect(await fixture({ rows: [] }).store.loadCandidates(input)).toEqual([]);
@@ -85,6 +142,9 @@ describe("PostgreSQL Published Menu query store", () => {
       null,
       {},
       { ...input, brandReference: id(99) },
+      { ...input, requestedAt: "invalid" },
+      { ...input, channelCode: "" },
+      { ...input, orderTypeCode: "" },
       { ...input, storeReference: id(99) },
     ])
       await expect(f.store.loadCandidates(request as typeof input)).rejects.toMatchObject({
@@ -133,5 +193,59 @@ describe("PostgreSQL Published Menu query store", () => {
       expect(error).not.toHaveProperty("cause");
       expect(JSON.stringify(error)).not.toContain("synthetic");
     }
+  });
+});
+
+describe("historical published Menu candidates", () => {
+  const request = { ...input, menuVersionReference: id(4) as never };
+  it("reads exact version generations with the same scoped read-only runner", async () => {
+    const f = fixture();
+    expect(await f.store.loadVersionCandidates(request)).toEqual([projection()]);
+    expect(f.query.mock.calls.map((call) => call[1])).toEqual([
+      [scope.brandReference, ""],
+      [scope.brandReference, scope.storeReference, id(4)],
+    ]);
+    const sql = f.query.mock.calls[1]?.[0] ?? "";
+    expect(sql).toContain("g.generation_status IN ('Active', 'Retired')");
+    expect(sql).toContain("p.menu_version_id = $3");
+    expect(sql).not.toContain("published_menu_projection_checkpoint");
+    expect(sql).not.toMatch(/\b(?:INSERT|UPDATE|DELETE)\b/u);
+  });
+  it("preserves absence and distinct generations", async () => {
+    expect(await fixture({ rows: [] }).store.loadVersionCandidates(request)).toEqual([]);
+    const next = { ...projection(), generationReference: id(90) as never };
+    expect(
+      await fixture({
+        rows: [{ projection: projection() }, { projection: next }],
+      }).store.loadVersionCandidates(request),
+    ).toEqual([projection(), next]);
+  });
+  it.each([
+    null,
+    {},
+    { ...request, storeReference: id(99) },
+    { ...request, menuVersionReference: "invalid" },
+  ])("denies invalid scope/input before the transaction: %j", async (value) => {
+    const f = fixture();
+    await expect(f.store.loadVersionCandidates(value as typeof request)).rejects.toMatchObject({
+      code: "CATALOG_DEPENDENCY_UNAVAILABLE",
+    });
+    expect(f.run).not.toHaveBeenCalled();
+  });
+  it("denies substituted version, generation duplication and source integrity failures", async () => {
+    const p = projection();
+    for (const rows of [
+      [{ projection: { ...p, snapshot: { ...p.snapshot, menuVersionReference: id(99) } } }],
+      [{ projection: { ...p, sourceCheckpoint: id(99) } }],
+      [{ projection: { ...p, snapshot: { ...p.snapshot, storeReferences: [] } } }],
+      [{ projection: p }, { projection: p }],
+      [null],
+    ])
+      await expect(fixture({ rows }).store.loadVersionCandidates(request)).rejects.toMatchObject({
+        code: "CATALOG_DEPENDENCY_UNAVAILABLE",
+      });
+    await expect(fixture(null).store.loadVersionCandidates(request)).rejects.toMatchObject({
+      code: "CATALOG_DEPENDENCY_UNAVAILABLE",
+    });
   });
 });

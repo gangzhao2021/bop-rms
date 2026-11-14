@@ -1,0 +1,729 @@
+/* WP-2423 merchant UI refresh (2026-10-21, redone 2026-11-03): counter-order. Loaded after styles.css so it refines the shared baseline. */
+/* Counter order (OPS-ORDER-ENTRY), benchmarked on counter POS screens: the menu always on the left
+   as a quick list (search and categories stay at the top), the order always on the right with its
+   total and Send order always in view; choices open over the menu so the order never moves. Plain
+   text rows with hairlines, per the v3 rules: no boxes, one accent, 28/20/16/14 at 600/400. On a
+   phone the order stacks under the menu and a bottom bar keeps it one tap away. */
+
+.counter-order .counter-order__layout {
+  grid-template-columns: minmax(0, 1fr) minmax(20rem, 24rem);
+  /* The menu spans both rows: its extra height goes under the charge, not between the two. */
+  grid-template-rows: auto 1fr;
+  gap: 32px;
+}
+/* Once sent, the order is settled: what is left to do is the charge. */
+.counter-order__layout:has(.counter-order__charge) .counter-order__tip,
+.counter-order__layout:has(.counter-order__charge) .counter-order__paper {
+  display: none;
+}
+.counter-order__hidden-heading {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.counter-order .counter-order__primary {
+  border: 0;
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-primary);
+  font-weight: 600;
+}
+.counter-order .counter-order__primary:hover:not(:disabled) {
+  background: var(--bop-color-accent);
+}
+.counter-order .counter-order__primary:disabled {
+  background: var(--bop-color-surface-raised);
+  color: var(--bop-color-text-muted);
+}
+
+/* ---- Menu: search and categories stay at the top ------------------------------------------ */
+.counter-order__menu-bar {
+  position: sticky;
+  top: var(--bop-pinned-top, 0px);
+  z-index: 5;
+  display: grid;
+  gap: 4px;
+  background: var(--bop-color-surface-canvas);
+}
+.counter-order__search input {
+  width: 100%;
+  min-height: 44px;
+  font-size: 16px;
+}
+.counter-order__categories {
+  display: flex;
+  gap: 24px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.counter-order__categories button {
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--bop-color-text-default);
+  font: inherit;
+  font-size: 14px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.counter-order__categories button:hover,
+.counter-order__categories button[aria-current="true"] {
+  color: var(--bop-color-accent);
+}
+.counter-order__categories button[aria-current="true"] {
+  font-weight: 600;
+}
+.counter-order__section {
+  scroll-margin-top: calc(var(--bop-pinned-top, 0px) + 6.5rem);
+}
+.counter-order .counter-order__menu h3 {
+  margin: 24px 0 4px;
+  color: var(--bop-color-text-default);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.counter-order__menu-empty {
+  margin: 24px 0 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+
+/* Dish rows, two columns where there is room: the whole row is the button. The first row has no
+   line above it (the list clips it), the last no line below. */
+.counter-order .counter-order__items {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(17rem, 100%), 1fr));
+  column-gap: 32px;
+  overflow: hidden;
+}
+.counter-order .counter-order__items li {
+  display: block;
+  margin-top: -1px;
+  padding: 0;
+  border: 0;
+  border-top: 1px solid var(--bop-color-row-divider);
+}
+.counter-order__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  min-height: 52px;
+  padding: 8px 0;
+  border: 0;
+  background: none;
+  color: var(--bop-color-text-default);
+  font: inherit;
+  font-size: 16px;
+  text-align: start;
+  cursor: pointer;
+}
+.counter-order__item:hover:not(:disabled) .counter-order__item-name,
+.counter-order__item:active:not(:disabled) .counter-order__item-name {
+  color: var(--bop-color-accent);
+}
+.counter-order__item:focus-visible,
+.counter-order .counter-order__sizes > button:focus-visible {
+  outline: 2px solid var(--bop-color-focus);
+  outline-offset: -2px;
+}
+.counter-order .counter-order__item-name {
+  overflow-wrap: anywhere;
+}
+.counter-order .counter-order__item-price {
+  flex: none;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.counter-order__in-order {
+  color: var(--bop-color-accent);
+  font-weight: 600;
+}
+.counter-order__item:disabled {
+  cursor: not-allowed;
+}
+/* Sold out: struck name and "Sold out" said in the price slot (never colour only). */
+.counter-order .counter-order__items li[data-available="false"] .counter-order__item-name {
+  color: var(--bop-color-text-muted);
+  text-decoration: line-through;
+}
+.counter-order .counter-order__items li[data-available="false"] .counter-order__item-price {
+  color: var(--bop-color-text-default);
+}
+
+/* Owner 2026-10-26: one row per drink; its sizes are the buttons, each with its price. */
+.counter-order .counter-order__items li.counter-order__family {
+  grid-column: 1 / -1;
+  padding: 12px 0 4px;
+}
+.counter-order .counter-order__family > .counter-order__item-name {
+  font-size: 16px;
+}
+.counter-order .counter-order__sizes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: 0 24px;
+}
+.counter-order .counter-order__sizes > button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font: inherit;
+  font-size: 14px;
+  text-align: start;
+  cursor: pointer;
+}
+.counter-order .counter-order__sizes > button:disabled {
+  color: var(--bop-color-text-muted);
+  cursor: not-allowed;
+}
+.counter-order .counter-order__sizes > button[data-available="false"] > span:first-child {
+  text-decoration: line-through;
+}
+
+/* ---- Order: its total and Send order stay in view; the lines scroll ----------------------- */
+.counter-order .counter-order__ticket {
+  gap: 16px;
+  padding: 0;
+  border: 0;
+}
+.counter-order__layout:not(:has(.counter-order__charge)) .counter-order__ticket {
+  position: sticky;
+  top: calc(var(--bop-pinned-top, 0px) + 16px);
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 2 * 16px - var(--bop-pinned-top, 0px));
+  /* b12: a long foot (paper payment, a slip question, a refusal) never pushes Send or an answer
+     below the window: the order panel scrolls on its own, and its lines keep one row in view. */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.counter-order__layout:not(:has(.counter-order__charge))
+  .counter-order__ticket
+  .counter-order__lines {
+  min-height: 4.5rem;
+}
+.counter-order__ticket-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+.counter-order .counter-order__ticket-header h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+.counter-order__ticket-header h2:focus-visible {
+  outline: 2px solid var(--bop-color-focus);
+  outline-offset: 4px;
+}
+.counter-order__count {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.counter-order__empty p {
+  margin: 0;
+  font-size: 14px;
+}
+.counter-order__empty .counter-order__empty-title {
+  font-size: 16px;
+}
+.counter-order .counter-order__lines {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* Name and price, with the quantity buttons under them; lines between, none outside. */
+.counter-order .counter-order__lines li {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0 16px;
+  align-items: start;
+  padding: 12px 0 0;
+  border: 0;
+}
+.counter-order .counter-order__lines li + li {
+  border-top: 1px solid var(--bop-color-row-divider);
+}
+.counter-order .counter-order__lines li:first-child {
+  padding-top: 0;
+}
+.counter-order__line-name {
+  font-size: 16px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.counter-order__line-name .bop-muted {
+  font-size: 14px;
+}
+.counter-order__line-price {
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+  white-space: nowrap;
+}
+.counter-order__line-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.counter-order__line-actions button {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  text-align: end;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+.counter-order__line-actions .counter-order__step {
+  font-size: 20px;
+  line-height: 1;
+}
+.counter-order__line-actions .counter-order__step:first-child {
+  margin-inline-start: -14px;
+}
+.counter-order__line-actions .counter-order__change {
+  margin-inline-start: auto;
+}
+.counter-order__line-actions .counter-order__step + .counter-order__remove {
+  margin-inline-start: auto;
+}
+.counter-order__line-actions button:disabled {
+  color: var(--bop-color-text-muted);
+  cursor: not-allowed;
+}
+
+.counter-order__ticket-foot {
+  display: grid;
+  flex: none;
+  gap: 12px;
+}
+.counter-order__totals {
+  display: grid;
+  gap: 4px;
+}
+.counter-order__subtotal {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.counter-order .counter-order__estimate {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+
+/* Tip: one row of plain choices; the chosen one in the accent. */
+.counter-order .counter-order__tip {
+  grid-template-columns: repeat(5, auto);
+  justify-content: space-between;
+  gap: 0;
+}
+.counter-order .counter-order__tip legend {
+  margin-bottom: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
+}
+.counter-order .counter-order__tip > label {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 8px;
+  border-radius: var(--bop-radius-control);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.counter-order .counter-order__tip > label > input[type="radio"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+}
+.counter-order .counter-order__tip > label:has(> input:checked) {
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-primary);
+  font-weight: 600;
+}
+.counter-order .counter-order__tip > label:has(> input:focus-visible) {
+  outline: 2px solid var(--bop-color-focus);
+  outline-offset: 2px;
+}
+.counter-order .counter-order__tip:disabled > label {
+  color: var(--bop-color-text-muted);
+  cursor: not-allowed;
+}
+.counter-order .counter-order__tip:disabled > label:has(> input:checked) {
+  background: var(--bop-color-text-muted);
+  color: var(--bop-color-on-primary);
+}
+.counter-order .counter-order__tip > label.counter-order__custom-tip {
+  grid-column: 1 / -1;
+  display: grid;
+  justify-content: stretch;
+  gap: 4px;
+  min-height: 0;
+  padding: 0;
+  font-size: 14px;
+  cursor: default;
+}
+.counter-order__custom-tip input {
+  min-height: 44px;
+  font-variant-numeric: tabular-nums;
+}
+
+.counter-order .counter-order__paper > label {
+  min-height: 44px;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.counter-order .counter-order__paper > label:has(> input[type="datetime-local"]) {
+  display: grid;
+  gap: 4px;
+}
+.counter-order .counter-order__paper input[type="datetime-local"] {
+  min-height: 44px;
+}
+.counter-order__ticket [role="alert"] {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.counter-order .counter-order__send {
+  display: block;
+}
+.counter-order .counter-order__send .counter-order__primary {
+  width: 100%;
+  min-height: 52px;
+  font-size: 16px;
+}
+
+/* ---- Choices: over the menu, so the order stays put --------------------------------------- */
+.counter-order__choose {
+  width: min(28rem, calc(100% - 32px));
+  max-height: 85vh;
+  margin: auto;
+  padding: 24px;
+  overflow-y: auto;
+  border: 0;
+  border-radius: 12px;
+  background: var(--bop-color-surface-default);
+  color: var(--bop-color-text-default);
+}
+.counter-order__choose::backdrop {
+  background: rgb(0 0 0 / 30%);
+}
+.counter-order__choose form {
+  display: grid;
+  gap: 16px;
+}
+.counter-order__choose h3 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+.counter-order__choose h3:focus-visible {
+  outline: none;
+}
+.counter-order__choose fieldset {
+  display: grid;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.counter-order__choose legend {
+  margin-bottom: 4px;
+  padding: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.counter-order__choose fieldset > label {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  margin: 0;
+  padding: 0;
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.counter-order__choose fieldset > label + label {
+  border-top: 1px solid var(--bop-color-row-divider);
+}
+.counter-order__choose fieldset input {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  min-height: 0;
+  margin: 0;
+  accent-color: var(--bop-color-accent);
+}
+.counter-order__option-price {
+  margin-inline-start: auto;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.counter-order__choose .counter-order__quantity {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 16px;
+}
+.counter-order__choose .counter-order__quantity input {
+  width: 5rem;
+  min-height: 44px;
+  text-align: end;
+}
+.counter-order__choose .counter-order__note {
+  display: grid;
+  gap: 4px;
+  font-size: 14px;
+}
+.counter-order__choose-actions {
+  display: grid;
+  gap: 4px;
+}
+.counter-order__choose-actions .counter-order__primary {
+  min-height: 52px;
+  font-size: 16px;
+}
+.counter-order__choose-actions button:not(.counter-order__primary) {
+  min-height: 44px;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+/* ---- Charge ----------------------------------------------------------------------------- */
+.counter-order .counter-order__charge h2 {
+  font-size: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.counter-order .counter-order__charge .counter-order__primary {
+  width: 100%;
+  min-height: 52px;
+  font-size: 16px;
+}
+.counter-order .counter-order__charge .card-actions {
+  display: flex;
+}
+.workspace-page .store-card.counter-order__charge dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+.workspace-page .store-card.counter-order__charge dl dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+.workspace-page .store-card.counter-order__charge dl div:last-child {
+  font-size: 16px;
+}
+
+/* ---- Sent, not paid yet (WP-2423 v15 751dd768) ------------------------------------------ */
+.counter-order .counter-order__awaiting {
+  margin-bottom: var(--bop-space-4);
+}
+.counter-order .counter-order__awaiting h2 {
+  font-size: 16px;
+  font-weight: 600;
+}
+.counter-order .counter-order__awaiting-list {
+  display: grid;
+  gap: var(--bop-space-3);
+  margin: var(--bop-space-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.counter-order .counter-order__awaiting-list > li {
+  display: grid;
+  gap: var(--bop-space-2);
+  padding-top: var(--bop-space-3);
+  border-top: 1px solid var(--bop-color-border-default);
+}
+.counter-order .counter-order__awaiting-list p {
+  margin: 0;
+}
+.counter-order .counter-order__awaiting-paid {
+  margin: 0 0 var(--bop-space-4);
+}
+
+/* Phone summary bar (hidden where the ticket is beside the menu). */
+.counter-order__summary-bar {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .counter-order .counter-order__layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+  }
+  .counter-order__layout:not(:has(.counter-order__charge)) .counter-order__ticket {
+    position: static;
+    max-height: none;
+    overflow: visible;
+  }
+  .counter-order__ticket-header {
+    position: static;
+  }
+  .counter-order .counter-order__send {
+    position: static;
+  }
+  .counter-order:has(.counter-order__summary-bar) {
+    padding-bottom: 6rem;
+  }
+  .counter-order__summary-bar {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--bop-space-3);
+    padding: var(--bop-space-3) var(--bop-space-4)
+      calc(var(--bop-space-3) + env(safe-area-inset-bottom, 0px));
+    border-top: 1px solid var(--bop-color-border-default);
+    background: var(--bop-color-surface-default);
+  }
+  .counter-order__summary-text {
+    display: grid;
+    font-size: 14px;
+    font-variant-numeric: tabular-nums;
+  }
+  .counter-order__summary-text strong {
+    font-size: 16px;
+  }
+  .counter-order__summary-bar .counter-order__primary {
+    min-width: 9rem;
+    min-height: 48px;
+  }
+  /* The option chooser opens as a sheet from the bottom, in view of the dish just tapped. */
+  .counter-order__choose {
+    width: 100%;
+    max-width: none;
+    margin: auto 0 0;
+    border-radius: 12px 12px 0 0;
+  }
+  .counter-order .counter-order__items {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* WP-2423 (staff-round-soldout): the guests' unsent items under the refusal, one plain row each
+   (hairlines, no boxes); an item that can't be sent carries its mark on the right. */
+.counter-order__table-cart {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.counter-order__table-cart li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 16px;
+  padding: 8px 0;
+  border-top: 1px solid var(--bop-color-row-divider);
+  font-size: 14px;
+}
+.counter-order__table-cart li:last-child {
+  border-bottom: 1px solid var(--bop-color-row-divider);
+}
+.counter-order__table-cart .order-accept-by {
+  margin-top: 0;
+}
+/* The action names the dishes it takes off, so it wraps instead of running past its edges. */
+.counter-order .counter-order__table-cart-action {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 16px;
+  white-space: normal;
+  text-align: center;
+}
+
+/* WP-2423 M35 (shared-table-cart-staff-round): the guests' unsent lines in the ticket, before
+   staff send: the same rows as the staff's own lines (hairlines, no boxes), each with a plain
+   two-way choice; the chosen one carries the accent, a line taken out reads muted. */
+.counter-order__guest-lines {
+  display: grid;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--bop-color-row-divider);
+}
+.counter-order .counter-order__guest-lines h3 {
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 600;
+}
+.counter-order__guest-lines > p {
+  margin: 0;
+  font-size: 14px;
+}
+.counter-order .counter-order__guest-lines .counter-order__lines {
+  overflow: visible;
+}
+.counter-order__guest-lines li[data-decision="Remove"] .counter-order__line-name {
+  color: var(--bop-color-text-muted);
+}
+.counter-order__guest-lines li[data-decision="Remove"] .counter-order__guest-dish {
+  text-decoration: line-through;
+}
+.counter-order .counter-order__guest-choice {
+  justify-content: flex-end;
+  font-size: 14px;
+}
+.counter-order .counter-order__guest-choice .order-accept-by {
+  margin: 0;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+}
+.counter-order .counter-order__guest-choice > .bop-muted {
+  margin-inline-end: auto;
+}
+.counter-order__part {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}

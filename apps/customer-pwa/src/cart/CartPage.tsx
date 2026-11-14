@@ -1,16 +1,100 @@
-import { useEffect, useState, useSyncExternalStore } from "react";
-import { Link } from "react-router";
+import { v7 as uuidv7 } from "uuid";
+import { AlreadyOrdered } from "../checkout/AlreadyOrdered.js";
+import { ClosedStoreNotice } from "../menu/ClosedStoreNotice.js";
+import {
+  CHINESE_LOCALE,
+  currentLanguage,
+  listSeparator,
+  useReloadOnLanguageChange,
+} from "../i18n/i18n.js";
+import {
+  getGuestTableStarter,
+  isGuestTableQuestion,
+  isUnseatedTableScan,
+} from "../session/customer-transaction-context.js";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { Link, useNavigate } from "react-router";
 import { createBrowserCustomerCartClient } from "./cart-client.js";
 import {
   createCartStateController,
   type CartState,
   type CartStateController,
 } from "./cart-state.js";
-import type { CartItemView, CartMoney, CartView } from "./types.js";
+import {
+  checkoutInProgressMessage,
+  orderProcessingMessage,
+  type CartItemView,
+  type CartView,
+} from "./types.js";
+import { formatCartMoney } from "./format-money.js";
+import {
+  OtherPayerWaits,
+  PayerChoiceBanner,
+  TablePayChooser,
+  TableWaitingDishes,
+  useWaitingReturn,
+} from "./TablePayChoice.js";
+import {
+  cartItemShortMessage,
+  checkoutItemRefusalMessage,
+} from "../checkout/item-refusal-message.js";
+import {
+  sharedSendRoundController,
+  type SeenSubtotal,
+  type SendRoundController,
+  type SendRoundState,
+} from "../checkout/send-round.js";
+import { DiningStaffCallPanel } from "../dining/DiningStaffCallPanel.js";
+import type { DiningSessionClient } from "../dining/dining-session-client.js";
+import { useTablePaymentTiming, type TableTimingAnswer } from "../dining/table-timing.js";
+import { CustomerPage, PageHeading, type CustomerStoreContext } from "../journey/CustomerPage.js";
+import { formatMinutesUntil, formatMoney } from "../journey/format.js";
+import { SlowWaitNote } from "../journey/SlowWaitNote.js";
+import { startTableCartPoll, tableCartPollIntervalMs } from "./table-cart-poll.js";
+import { createRoundWithdrawClient, type RoundWithdrawOutcome } from "./round-withdraw-client.js";
+import {
+  quoteConsistentLinePrices,
+  cartLinesSubtotal,
+  usePublishedMenuRead,
+  type CartLinePrice,
+} from "../menu/menu-line-prices.js";
+import type { CustomerMenuClient, MenuJourneyContext, MenuView } from "../menu/types.js";
+import {
+  acceptSeenPrices,
+  recordFirstSeenPrices,
+  seenPriceChanges,
+  type LinePriceChange,
+  type PricedLine,
+} from "./seen-prices.js";
+import {
+  changesSignature,
+  DishChangeList,
+  hasDishChanges,
+  quoteDishChanges,
+  recordFirstPricedLines,
+} from "./dish-changes.js";
+import type { CheckoutQuote } from "../checkout/types.js";
+import { createCheckoutClient } from "../checkout/checkout-client.js";
+import { PriceChangeList } from "../checkout/PriceChangeList.js";
+import { comboLineAllergenText } from "../menu/combo-allergens.js";
+import { storeServiceNoticeText, useStoreService } from "../store/StoreIdentity.js";
+import { takesNewOrders } from "../store/store-service.js";
+import {
+  createStoreProfileClient,
+  type StoreProfileLoader,
+} from "../store/store-profile-client.js";
 
-function exactMoney(value: CartMoney): string {
-  return `${value.currency} ${value.amountMinor} minor units`;
-}
+const browserCartStoreProfile: StoreProfileLoader = createStoreProfileClient();
+import {
+  cartIssueMessage,
+  cartItemWarningMessage,
+  cartText,
+  checkoutText,
+  commonText,
+  lineEstimateLabel,
+  quoteIssueMessage,
+  specificCartIssues,
+} from "../journey/messages.js";
 
 function StateMessage({
   heading,
@@ -31,20 +115,45 @@ function StateMessage({
   );
 }
 
+/** "Oat milk, Extra shot × 2" or nothing for a standard item. */
+export function describeConfiguration(item: CartItemView): string | null {
+  if (item.configuration.length === 0) return null;
+  return item.configuration
+    .map((option) =>
+      option.quantity === 1 ? option.displayName : `${option.displayName} × ${option.quantity}`,
+    )
+    .join(listSeparator());
+}
+
 function CartItem({
-  cart,
   item,
   pending,
   readOnly,
   controller,
+  price,
+  allergens,
+  payLater,
 }: {
-  readonly cart: CartView;
   readonly item: CartItemView;
+  /** WP-2423 item 6: a table that pays at the end has no checkout to promise a price at. */
+  readonly payLater: boolean;
+  /** WP-2423 item 8 ⑥ part 4: a combo's chosen dishes' allergens (null for other lines). */
+  readonly allergens: string | null;
+  /** The line's price before tax when it can be stated (the Store's, or the published one). */
+  readonly price: CartLinePrice | null;
   readonly pending: boolean;
   readonly readOnly: boolean;
   readonly controller: CartStateController;
 }) {
-  const unavailable = item.lineEstimate.status === "Unavailable";
+  const foreign = item.warnings.includes("OTHER_PARTICIPANT_ITEM");
+  // WP-2423 (guest-cart-503): a line that can't be sold now may be removed by anyone at the table.
+  // WP-2423 (M154): its quantity can't change either (the Store would refuse it); only Remove.
+  const unsellable = cartLineUnsellable(item);
+  // WP-2423 (same-table-ordering, M36): the phone that added it has left the table; anyone may
+  // change or remove it.
+  const stranded = item.warnings.includes("ADDER_LEFT_TABLE");
+  const ownershipDescription = `cart-item-ownership-${item.cartItemReference}`;
+  const configuration = describeConfiguration(item);
   const updateQuantity = (quantity: number) =>
     controller.updateItem(item.cartItemReference, {
       quantity,
@@ -54,53 +163,71 @@ function CartItem({
       })),
       customerNote: item.customerNote,
     });
+  const warnings = item.warnings
+    .map(cartItemWarningMessage)
+    .filter((message): message is string => message !== null);
   return (
     <article className="cart-item" aria-labelledby={`cart-item-${item.cartItemReference}`}>
       <div className="cart-item__heading">
         <div>
           <h3 id={`cart-item-${item.cartItemReference}`}>{item.displayName}</h3>
-          <p className="cart-item__configuration">
-            {item.configuration.length === 0
-              ? "Standard configuration"
-              : item.configuration
-                  .map((option) =>
-                    option.quantity === 1
-                      ? option.displayName
-                      : `${option.displayName} × ${option.quantity}`,
-                  )
-                  .join(", ")}
-          </p>
+          {configuration ? <p className="cart-item__configuration">{configuration}</p> : null}
+          {allergens === null ? null : <p className="cart-item__allergens">{allergens}</p>}
+          {item.customerNote === null || foreign ? null : (
+            <p className="cart-item__note">
+              {commonText.notePrefix} {item.customerNote}
+            </p>
+          )}
         </div>
         <p className="cart-item__estimate">
-          {unavailable
-            ? `Estimate unavailable: ${item.lineEstimate.reasonCode}`
-            : exactMoney(item.lineEstimate.total)}
+          {price !== null
+            ? formatMoney(price.amountMinor, price.currency)
+            : item.lineEstimate.status !== "Unavailable"
+              ? formatCartMoney(item.lineEstimate.total)
+              : payLater
+                ? null
+                : lineEstimateLabel(item.lineEstimate.reasonCode)}
         </p>
       </div>
-      {item.customerNote === null ? null : (
-        <p className="cart-item__note">Note: {item.customerNote}</p>
-      )}
-      {item.warnings.map((warning) => (
+      {foreign ? (
+        <p className="cart-warning" id={ownershipDescription}>
+          {stranded
+            ? cartText.line.addedByPhoneThatLeft
+            : unsellable
+              ? cartText.line.addedByAnotherGuestRemovable
+              : cartText.line.addedByAnotherGuest}
+        </p>
+      ) : null}
+      {warnings.map((warning) => (
         <p className="cart-warning" key={warning}>
-          Warning: {warning}
+          {warning}
         </p>
       ))}
-      <div className="cart-item__actions" aria-label={`Quantity for ${item.displayName}`}>
+      <div
+        className="cart-item__actions"
+        aria-label={cartText.line.quantityGroupLabel(item.displayName)}
+      >
         <button
           type="button"
-          disabled={readOnly || pending || item.quantity <= 1}
-          aria-label={`Decrease ${item.displayName} quantity`}
+          aria-describedby={foreign ? ownershipDescription : undefined}
+          disabled={
+            readOnly || (foreign && !stranded) || pending || unsellable || item.quantity <= 1
+          }
+          aria-label={cartText.line.decreaseLabel(item.displayName)}
           onClick={() => void updateQuantity(item.quantity - 1)}
         >
           −
         </button>
-        <output aria-live="off" aria-label={`${item.displayName} quantity`}>
+        <output aria-live="off" aria-label={cartText.line.quantityLabel(item.displayName)}>
           {item.quantity}
         </output>
         <button
           type="button"
-          disabled={readOnly || pending || item.quantity >= 100}
-          aria-label={`Increase ${item.displayName} quantity`}
+          aria-describedby={foreign ? ownershipDescription : undefined}
+          disabled={
+            readOnly || (foreign && !stranded) || pending || unsellable || item.quantity >= 100
+          }
+          aria-label={cartText.line.increaseLabel(item.displayName)}
           onClick={() => void updateQuantity(item.quantity + 1)}
         >
           +
@@ -108,70 +235,279 @@ function CartItem({
         <button
           className="cart-link-button"
           type="button"
-          disabled={readOnly || pending}
+          aria-describedby={foreign ? ownershipDescription : undefined}
+          disabled={readOnly || (foreign && !unsellable && !stranded) || pending}
+          aria-label={cartText.line.removeLabel(item.displayName)}
           onClick={() => void controller.removeItem(item.cartItemReference)}
         >
-          Remove
+          {cartText.line.remove}
         </button>
       </div>
-      <p className="sr-only">Cart version {cart.cart.version}</p>
     </article>
   );
 }
 
-function CartSummary({ cart }: { readonly cart: CartView }) {
+/** WP-2423 (same-table-ordering): the newest round from this cart, when another phone sent it. */
+export const tableRoundSentByOther = (cart: CartView): number | null =>
+  tableRoundByOther(cart)?.roundNumber ?? null;
+/**
+ * WP-2423 M38: that round, to say where its payment stands. The server lists rounds newest first,
+ * so this is always the table's latest round, whatever older one is still open.
+ */
+const tableRoundByOther = (cart: CartView) => {
+  const latest = cart.cart.recentRounds?.[0];
+  return latest === undefined || latest.sentByThisPhone ? null : latest;
+};
+/**
+ * WP-2423 M38: an older round another phone sent that is still open (being paid, not placed yet,
+ * or waiting for staff), said on its own line so a later round never hides it.
+ */
+const tableOpenRoundByOther = (cart: CartView) => {
+  const shown = tableRoundByOther(cart);
+  return (
+    cart.cart.recentRounds?.find(
+      (round) =>
+        round !== shown &&
+        !round.sentByThisPhone &&
+        (round.paymentState === "AwaitingPayment" || round.paymentState === "WaitingForStaff"),
+    ) ?? null
+  );
+};
+/**
+ * WP-2423 M38: this phone's own newest round, when it is still open or will not be made, so the
+ * sender is told on the cart (not only at checkout) that it is not placed, waiting for staff, or
+ * was cancelled.
+ */
+const tableOwnRound = (cart: CartView, payLater: boolean) => {
+  const own = cart.cart.recentRounds?.find((round) => round.sentByThisPhone);
+  const text =
+    own === undefined || own.paymentState === null
+      ? null
+      : cartText.line.roundSentByThisPhone(own.roundNumber, own.paymentState, payLater);
+  return own === undefined || text === null ? null : { roundNumber: own.roundNumber, text };
+};
+/** WP-2423 (same-table-ordering, M38): what this table's rounds mean for this cart, newest first. */
+function TableRoundNotes({
+  cart,
+  payLater,
+  className,
+}: {
+  readonly cart: CartView;
+  readonly payLater: boolean;
+  readonly className?: string;
+}) {
+  const notes = [
+    tableOwnRound(cart, payLater),
+    ...[tableRoundByOther(cart), tableOpenRoundByOther(cart)].map((round) =>
+      round === null
+        ? null
+        : {
+            roundNumber: round.roundNumber,
+            text: cartText.line.roundSentByTable(round.roundNumber, round.paymentState, payLater, {
+              enteredByStaff: round.enteredByStaff === true,
+              withThisPhoneDishes: round.withThisPhoneDishes !== false,
+            }),
+          },
+    ),
+  ]
+    .filter((note) => note !== null)
+    .sort((a, b) => b.roundNumber - a.roundNumber);
+  return (
+    <>
+      {notes.map((note) => (
+        <p key={note.roundNumber} className={className} role="status">
+          {note.text}
+        </p>
+      ))}
+    </>
+  );
+}
+
+/**
+ * WP-2423 M38: this phone's round still being paid at a table that pays as it orders (the guest
+ * pressed "Continue to payment" and has not paid): the guest may stop and put the dishes back.
+ */
+export const withdrawableOwnRound = (cart: CartView, payLater: boolean) => {
+  if (payLater) return null;
+  const own = cart.cart.recentRounds?.find((round) => round.sentByThisPhone);
+  return own !== undefined && own.paymentState === "AwaitingPayment" ? own : null;
+};
+/**
+ * WP-2423 M38: "Don't pay. Put the dishes back". The store first makes sure nothing was charged,
+ * so a payment that went through (or may still) is said as such and nothing changes. A lost answer
+ * keeps the same operation, so tapping again never cancels twice.
+ */
+export function RoundWithdrawAction({
+  roundNumber,
+  onReturned,
+  client = defaultRoundWithdrawClient,
+}: {
+  readonly roundNumber: number;
+  readonly onReturned: () => void;
+  readonly client?: ReturnType<typeof createRoundWithdrawClient>;
+}) {
+  const operation = useRef<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [outcome, setOutcome] = useState<RoundWithdrawOutcome | null>(null);
+  const tap = async () => {
+    operation.current ??= client.newOperationReference();
+    setBusy(true);
+    try {
+      const result = await client.withdraw(operation.current, roundNumber);
+      setOutcome(result);
+      if (result !== "Unknown") operation.current = null;
+      if (result === "Returned") onReturned();
+    } finally {
+      setBusy(false);
+    }
+  };
+  const text = outcome === null ? null : cartText.line.roundWithdrawOutcome(outcome);
+  return (
+    <div className="cart-state__actions">
+      <button type="button" disabled={busy} onClick={() => void tap()}>
+        {cartText.line.roundWithdraw}
+      </button>
+      {text === null ? null : <p role="status">{text}</p>}
+    </div>
+  );
+}
+const defaultRoundWithdrawClient = createRoundWithdrawClient();
+
+/**
+ * WP-2423 shared-table-checkout (c): the dishes staff took out of this table's cart lately, named
+ * in the guest's language (the menu language when there is no such name). A dish that is on no
+ * current menu has no name: it is still told, as "a dish" (null here).
+ */
+export const staffRemovedDishes = (cart: CartView): readonly (string | null)[] =>
+  (cart.cart.staffRemoved ?? []).map((removal) => {
+    const names = removal.names;
+    const chosen =
+      currentLanguage() === "zh-Hans"
+        ? (names[CHINESE_LOCALE] ?? Object.values(names)[0])
+        : (Object.entries(names).find(([locale]) => locale.startsWith("en"))?.[1] ??
+          Object.values(names)[0]);
+    return chosen === undefined || chosen.trim() === "" ? null : chosen;
+  });
+const staffRemovedNotice = (dish: string | null) =>
+  dish === null ? cartText.line.staffRemovedUnnamed : cartText.line.staffRemoved(dish);
+
+/** WP-2423 (guest-cart-503): the Store marked this line as not sellable now (stable fact). */
+const cartLineUnsellable = (item: CartView["cart"]["items"][number]) =>
+  item.warnings.includes("ITEM_UNAVAILABLE") || item.warnings.includes("ITEM_OPTIONS_CHANGED");
+
+function CartSummary({
+  cart,
+  now,
+  subtotal,
+  payLater,
+}: {
+  readonly cart: CartView;
+  readonly now: () => number;
+  /** Every line's price before tax added up, when each one can be stated; null otherwise. */
+  readonly subtotal: CartLinePrice | null;
+  /** WP-2423 item 6: the table pays at the end: no checkout to point at, no prices to lock. */
+  readonly payLater: boolean;
+}) {
+  // Owner #26 (DEC-PRICE-HOLD), warn before timeouts: shown again when the hold's last minute
+  // starts and when it ends.
+  const [, setClock] = useState(0);
+  const heldUntil = payLater ? null : (cart.cart.quote?.expiresAt ?? null);
+  useEffect(() => {
+    if (heldUntil === null) return;
+    const left = Date.parse(heldUntil) - now();
+    if (!Number.isFinite(left) || left <= 0) return;
+    const timer = window.setTimeout(
+      () => setClock((value) => value + 1),
+      Math.min((left > 60_000 ? left - 60_000 : left) + 20, 2_147_483_647),
+    );
+    return () => window.clearTimeout(timer);
+  });
+  if (cart.cart.lifecycle.status !== "Active")
+    return (
+      <section className="cart-summary" aria-labelledby="cart-summary-heading">
+        <h2 id="cart-summary-heading">{cartText.summary.heading}</h2>
+        <p>{cartText.summary.checkoutUnavailable}</p>
+      </section>
+    );
   const quote = cart.cart.quote;
   if (quote === null || quote.cartVersion !== cart.cart.version)
     return (
       <section className="cart-summary" aria-labelledby="cart-summary-heading">
-        <h2 id="cart-summary-heading">Order summary</h2>
-        <p>No current quote is attached. Requote is required before checkout.</p>
-        <button type="button" disabled aria-describedby="requote-boundary">
-          Requote
-        </button>
-        <p id="requote-boundary" className="cart-boundary">
-          Requote becomes available when the Customer Quote session adapter is composed.
+        <h2 id="cart-summary-heading">{cartText.summary.heading}</h2>
+        {subtotal === null ? null : (
+          <dl>
+            <div className="cart-summary__total">
+              <dt>{cartText.summary.subtotalBeforeTax}</dt>
+              <dd>{formatMoney(subtotal.amountMinor, subtotal.currency)}</dd>
+            </div>
+          </dl>
+        )}
+        <p>
+          {payLater
+            ? subtotal === null
+              ? cartText.summary.totalOnTableBill
+              : cartText.summary.taxOnTableBill
+            : subtotal === null
+              ? cartText.summary.totalAtCheckout
+              : cartText.summary.taxAtCheckout}
         </p>
       </section>
     );
+  const remaining = formatMinutesUntil(quote.expiresAt, now());
   return (
     <section className="cart-summary" aria-labelledby="cart-summary-heading">
-      <div className="cart-summary__heading">
-        <h2 id="cart-summary-heading">Order summary</h2>
-        <span>Quote v{quote.quoteVersion}</span>
-      </div>
+      <h2 id="cart-summary-heading">{cartText.summary.heading}</h2>
       <dl>
         <div>
-          <dt>Subtotal</dt>
-          <dd>{exactMoney(quote.subtotal)}</dd>
+          <dt>{commonText.subtotal}</dt>
+          <dd>{formatCartMoney(quote.subtotal)}</dd>
         </div>
+        {quote.discount.amountMinor !== "0" ? (
+          <div>
+            <dt>{commonText.discount}</dt>
+            <dd>{formatCartMoney(quote.discount)}</dd>
+          </div>
+        ) : null}
         <div>
-          <dt>Discount</dt>
-          <dd>{exactMoney(quote.discount)}</dd>
+          <dt>{commonText.tax}</dt>
+          <dd>{formatCartMoney(quote.tax)}</dd>
         </div>
-        <div>
-          <dt>Tax</dt>
-          <dd>{exactMoney(quote.tax)}</dd>
-        </div>
-        <div>
-          <dt>Fee</dt>
-          <dd>{exactMoney(quote.fee)}</dd>
-        </div>
+        {quote.fee.amountMinor !== "0" ? (
+          <div>
+            <dt>{commonText.fees}</dt>
+            <dd>{formatCartMoney(quote.fee)}</dd>
+          </div>
+        ) : null}
         <div className="cart-summary__total">
-          <dt>Total</dt>
-          <dd>{exactMoney(quote.total)}</dd>
+          <dt>{commonText.total}</dt>
+          <dd>{formatCartMoney(quote.total)}</dd>
         </div>
       </dl>
-      <p>
-        Quote expires <time dateTime={quote.expiresAt}>{quote.expiresAt}</time>.
-      </p>
-      {[...quote.warnings, ...quote.blockingReasons].map((warning) => (
-        <p className="cart-warning" key={warning}>
-          {warning}
+      {payLater ? null : (
+        <p className="cart-summary__validity">
+          {remaining === null ? cartText.summary.pricesExpired : commonText.priceKeptFor(remaining)}
+        </p>
+      )}
+      {!payLater && remaining !== null && Date.parse(quote.expiresAt) - now() <= 60_000 ? (
+        <p role="alert">{commonText.priceKeptLastMinute}</p>
+      ) : null}
+      {[
+        ...quote.blockingReasons.map((code) => quoteIssueMessage(code, true)),
+        ...quote.warnings.map((code) => quoteIssueMessage(code, false)),
+      ].map((message, index) => (
+        <p className="cart-warning" key={`${index}:${message}`}>
+          {message}
         </p>
       ))}
     </section>
   );
+}
+
+/** WP-2423 (M154): the exact reason a change was refused ("This dish just sold out."), or null. */
+function specificRefusal(state: CartState): string | null {
+  if (state.status !== "validation" || !("issueCodes" in state)) return null;
+  const code = state.issueCodes.find((issue) => specificCartIssues.includes(issue));
+  return code === undefined ? null : cartIssueMessage(code);
 }
 
 function ErrorState({
@@ -183,109 +519,587 @@ function ErrorState({
 }) {
   if (!("cart" in state) || !("issueCodes" in state)) return null;
   const retry = state.status === "command-failed" && state.canRetrySameOperation;
+  const failure = cartText.failure;
   const messages = {
-    "session-expired": ["Session expired", "Resume your Store session before opening this cart."],
-    "not-found": ["Cart unavailable", "This cart is not available in the current Store session."],
-    conflict: [
-      "Cart changed",
-      "The latest cart was loaded. Review your change before submitting again.",
+    "replacement-forbidden": failure.replacementForbidden,
+    "session-expired": failure.sessionExpired,
+    "not-found": failure.notFound,
+    conflict: failure.conflict,
+    validation: failure.validation,
+    "rate-limited": [failure.rateLimitedHeading, failure.rateLimited(state.retryAfterSeconds)],
+    expired: [
+      failure.expiredHeading,
+      state.cart?.cart.orderType === "DineIn" ? failure.expiredDineIn : failure.expiredOther,
     ],
-    validation: [
-      "Review this item",
-      "The server rejected this configuration. Update the highlighted selection.",
+    abandoned: failure.abandoned,
+    "order-processing": [
+      commonText.orderProcessingHeading,
+      orderProcessingMessage(state.retryAfterSeconds),
     ],
-    "rate-limited": [
-      "Please wait",
-      `Try again${state.retryAfterSeconds === null ? " shortly" : ` in ${state.retryAfterSeconds} seconds`}.`,
+    "checkout-in-progress": [
+      commonText.checkoutInProgressHeading,
+      checkoutInProgressMessage(state.retryAfterSeconds),
     ],
-    expired: ["Cart expired", "Return to the menu to start a current cart."],
-    abandoned: ["Cart closed", "This cart was abandoned and cannot be changed."],
-    "command-failed": [
-      "Outcome not confirmed",
-      "The network ended before the server outcome was confirmed.",
-    ],
-    unavailable: [
-      "Cart temporarily unavailable",
-      "No change was assumed. Try loading the current cart again.",
-    ],
+    "table-checking-out": failure.tableCheckingOut,
+    "participation-ended": failure.participationEnded,
+    "not-seated": failure.notSeated,
+    "command-failed": failure.commandFailed,
+    // WP-2423 (outage-reads-and-retry): the store's system said it is busy and when to try again
+    // (503 with Retry-After): a read loads again by itself then; a change is the guest's to redo.
+    unavailable:
+      state.retryAfterSeconds === null
+        ? failure.unavailable
+        : ([
+            failure.busyHeading,
+            state.fromRead === true
+              ? failure.busyRead(state.retryAfterSeconds)
+              : failure.busyChange(state.retryAfterSeconds),
+          ] as const),
   } as const;
   const message = messages[state.status as keyof typeof messages];
   if (message === undefined) return null;
+  // WP-2423: a quantity the store can't make names the item and how many it can.
+  const short =
+    state.shortItem === undefined || state.cart === null
+      ? null
+      : cartItemShortMessage(
+          state.shortItem.cartItemReference,
+          state.shortItem.available,
+          state.cart.cart.items,
+        );
+  if (short !== null)
+    return (
+      <StateMessage heading={failure.notEnoughLeftHeading} tone="warning">
+        <p>{short}</p>
+      </StateMessage>
+    );
+  const issues = state.issueCodes
+    .map(cartIssueMessage)
+    .filter((issue): issue is string => issue !== null);
+  // WP-2423 (M154): a refusal that says exactly what happened ("This dish just sold out.") is the
+  // headline; "This choice can't be ordered as selected" would send the guest to choices it lacks.
+  const specific = specificRefusal(state);
   return (
-    <StateMessage heading={message[0]} tone={state.status === "conflict" ? "warning" : "error"}>
-      <p>{message[1]}</p>
-      {state.issueCodes.map((issue) => (
-        <p key={issue}>Issue: {issue}</p>
-      ))}
+    <StateMessage
+      heading={specific ?? message[0]}
+      tone={
+        state.status === "conflict" ||
+        (state.status === "unavailable" && state.retryAfterSeconds !== null)
+          ? "warning"
+          : "error"
+      }
+    >
+      {specific === null ? <p>{message[1]}</p> : null}
+      {issues
+        .filter((issue) => issue !== specific)
+        .map((issue) => (
+          <p key={issue}>{issue}</p>
+        ))}
       <div className="cart-state__actions">
         {retry ? (
           <button type="button" onClick={() => void controller.retry()}>
-            Retry the same operation
+            {failure.retrySameOperation}
           </button>
         ) : (
           <button type="button" onClick={() => void controller.load()}>
-            Refresh cart
+            {failure.refreshCart}
           </button>
         )}
-        <a href="/menu">Return to menu</a>
+        <Link to="/menu">{commonText.returnToMenu}</Link>
+        {/* M126 I.2: the table page says what happened (moved, merged, settled) and what next. */}
+        {state.status === "participation-ended" ? (
+          <Link to="/dine-in/session">{cartText.failure.yourTable}</Link>
+        ) : null}
+        {state.status === "not-seated" && (isGuestTableQuestion() || getGuestTableStarter()) ? (
+          <Link to="/">{failure.goToStart}</Link>
+        ) : state.status === "not-seated" && !isUnseatedTableScan() ? (
+          // WP-2423 M115: an open table this phone hasn't joined: the table's page joins it.
+          <Link to="/">{failure.joinThisTable}</Link>
+        ) : null}
       </div>
     </StateMessage>
+  );
+}
+
+/**
+ * WP-2423 item 6: what a stopped send says, under the button. Nothing here repeats an unknown answer:
+ * that one has its own panel, above everything, because the cart it was about may be gone.
+ */
+function sendRoundMessage(round: SendRoundState, cart: CartView, onRetry: () => void) {
+  switch (round.status) {
+    case "confirm-total": {
+      const total = formatCartMoney(round.total);
+      return (
+        <p role="alert">
+          {round.reason === "changed"
+            ? cartText.priceChangedTotal(total)
+            : round.reason === "fees"
+              ? cartText.orderComesToWithFees(total)
+              : cartText.orderComesTo(total)}
+        </p>
+      );
+    }
+    // price-hold-dish-changes (DEC-PRICE-HOLD §3): the changes are listed above with the tick.
+    case "confirm-changes":
+      return <p role="alert">{cartText.readChangesBeforeOrdering}</p>;
+    case "changes-unknown":
+      return (
+        <div role="alert">
+          <p>{cartText.changesNotChecked}</p>
+          <button type="button" onClick={onRetry}>
+            {commonText.tryAgain}
+          </button>
+        </div>
+      );
+    case "blocked":
+      return (
+        <div role="alert">
+          {round.messages.map((message) => (
+            <p key={message}>{message}</p>
+          ))}
+        </div>
+      );
+    case "refused":
+      return (
+        <p role="alert">{checkoutItemRefusalMessage(round.refusal, round.line, cart.cart.items)}</p>
+      );
+    case "store-closed":
+      return (
+        <div role="alert">
+          <p>{checkoutText.storeClosed}</p>
+          <Link to="/dine-in/session">{checkoutText.backToYourTable}</Link>
+        </div>
+      );
+    case "busy":
+      return (
+        <div role="alert">
+          <p>
+            {round.wait === "order-processing"
+              ? orderProcessingMessage(round.retryAfterSeconds)
+              : checkoutInProgressMessage(round.retryAfterSeconds)}
+          </p>
+          <button type="button" onClick={onRetry}>
+            {commonText.tryAgain}
+          </button>
+        </div>
+      );
+    case "table-checking-out":
+      return <p role="alert">{cartText.failure.tableCheckingOut[1]}</p>;
+    case "participation-ended":
+      return (
+        <div role="alert">
+          <p>{cartText.failure.participationEnded[0]}</p>
+          <p>{cartText.failure.participationEnded[1]}</p>
+          <Link to="/dine-in/session">{cartText.failure.yourTable}</Link>
+        </div>
+      );
+    case "session-ended":
+      return <p role="alert">{checkoutText.sessionEnded}</p>;
+    case "cart-changed":
+      return <p role="alert">{checkoutText.tableCartChanged}</p>;
+    default:
+      return null;
+  }
+}
+
+/** The button can be at the bottom of a long cart: a stop is said where the guest is looking. */
+function SendRoundMessage({
+  round,
+  cart,
+  onRetry,
+}: {
+  readonly round: SendRoundState;
+  readonly cart: CartView;
+  readonly onRetry: () => void;
+}) {
+  const said = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    said.current?.scrollIntoView?.({ block: "nearest" });
+  }, [round.status, cart.cart.version]);
+  const message = sendRoundMessage(round, cart, onRetry);
+  return message === null ? null : <div ref={said}>{message}</div>;
+}
+
+/**
+ * The answer got lost. A send was attempted: it may or may not have been placed, and asking again is
+ * safe. Otherwise nothing was placed, and the guest can try again or change the cart.
+ */
+function UnconfirmedOrder({
+  online,
+  mayBePlaced,
+  onRetry,
+}: {
+  readonly online: boolean;
+  readonly mayBePlaced: boolean;
+  readonly onRetry: () => void;
+}) {
+  const said = useRef<HTMLElement>(null);
+  useEffect(() => {
+    said.current?.scrollIntoView?.({ block: "nearest" });
+  }, []);
+  return (
+    <>
+      <section className="checkout-attention" role="alert" ref={said}>
+        <p>{mayBePlaced ? cartText.orderUnconfirmed : cartText.orderNotPlaced}</p>
+        <button type="button" disabled={!online} onClick={onRetry}>
+          {commonText.tryAgain}
+        </button>
+        {mayBePlaced ? <Link to="/dine-in/session">{cartText.checkYourTable}</Link> : null}
+      </section>
+      <DiningStaffCallPanel />
+    </>
+  );
+}
+
+/** A round placed that this page didn't send the guest away for: said once, and what it doesn't cover. */
+function LastOrderPlaced({
+  held,
+  cartHoldsMore,
+}: {
+  readonly held: boolean;
+  readonly cartHoldsMore: boolean;
+}) {
+  return (
+    <section className="cart-last-order" role="status">
+      <p>{held ? cartText.lastOrderPlacedHeld : cartText.lastOrderPlaced}</p>
+      {cartHoldsMore ? <p>{cartText.stillInYourCart}</p> : null}
+      <Link to="/dine-in/session">{cartText.seeYourTable}</Link>
+    </section>
+  );
+}
+
+/**
+ * WP-2423 M74: the cart's priced lines, recorded the first time the guest sees them, and the lines
+ * whose price changed since. Showing a line again never replaces what the guest first saw.
+ */
+export function cartPriceChanges(
+  cart: CartView["cart"],
+  prices: ReadonlyMap<string, CartLinePrice | null>,
+): readonly LinePriceChange[] {
+  const lines: PricedLine[] = cart.items.flatMap((item) => {
+    const price = prices.get(item.cartItemReference);
+    return price == null
+      ? []
+      : [
+          {
+            cartItemReference: item.cartItemReference,
+            quantity: item.quantity,
+            amountMinor: price.amountMinor,
+            currency: price.currency,
+          },
+        ];
+  });
+  recordFirstSeenPrices(cart.cartReference, lines);
+  return seenPriceChanges(cart.cartReference, lines);
+}
+
+/** The cart's lines as priced on this page (for accepting what the guest was shown). */
+function cartPricedLines(
+  cart: CartView["cart"],
+  prices: ReadonlyMap<string, CartLinePrice | null>,
+): PricedLine[] {
+  return cart.items.flatMap((item) => {
+    const price = prices.get(item.cartItemReference);
+    return price == null
+      ? []
+      : [
+          {
+            cartItemReference: item.cartItemReference,
+            quantity: item.quantity,
+            amountMinor: price.amountMinor,
+            currency: price.currency,
+          },
+        ];
+  });
+}
+
+/**
+ * WP-2423 price-hold-dish-changes: the Store's answer for this cart when the table cart was shown —
+ * the price it keeps for the guest (DEC-PRICE-HOLD), and each line as the cart was first priced
+ * for it — when it is about this cart version.
+ */
+const viewQuoteFor = (cart: CartView["cart"], quote: CheckoutQuote | null) =>
+  quote !== null && quote.cartVersion === cart.version ? quote : null;
+
+/**
+ * Each line's price as the cart shows it: the Store's own line prices when it priced this cart on
+ * screen (the price it keeps), else the menu's where they add up to the attached quote. The
+ * Store's first price for each line is recorded first (what the guest saw before a reload).
+ */
+function cartScreenPrices(
+  cart: CartView["cart"],
+  menu: MenuView | null,
+  shown: CheckoutQuote | null,
+): ReadonlyMap<string, CartLinePrice | null> {
+  recordFirstPricedLines(cart.cartReference, shown);
+  if (shown?.lines !== undefined && shown.lines.length === cart.items.length)
+    return new Map(
+      shown.lines.map((line) => [
+        line.cartItemReference,
+        { amountMinor: BigInt(line.subtotal.amountMinor), currency: line.subtotal.currency },
+      ]),
+    );
+  return quoteConsistentLinePrices(
+    cart.items,
+    menu,
+    cart.quote !== null && cart.quote.cartVersion === cart.version ? cart.quote.subtotal : null,
   );
 }
 
 function CartContent({
   state,
   controller,
+  now,
+  menu,
+  timing,
+  round,
+  menuSettled,
+  onPlace,
+  service = null,
+  confirmedChanges = null,
+  onConfirmChanges = () => undefined,
+  viewQuote = null,
+  changesMenu = null,
 }: {
   readonly state: CartState;
   readonly controller: CartStateController;
+  readonly now: () => number;
+  readonly menu: MenuView | null;
+  /** WP-2423 item 6: how this table pays, and where its one-tap order stands. */
+  readonly timing: TableTimingAnswer;
+  readonly round: SendRoundState;
+  /** Prices have been read, or that read took too long to wait for. */
+  readonly menuSettled: boolean;
+  readonly onPlace: (cart: CartView, seen: SeenSubtotal | null) => void;
+  /**
+   * WP-2423 store-service-controls (v15 M30/M34): the Store's live answer. Past last orders, while
+   * this guest's service is paused or when closed, no new order or round is offered (a bill or a
+   * payment already started is paid elsewhere and is never held here).
+   */
+  readonly service?: ReturnType<typeof useStoreService> | null;
+  /** price-hold-dish-changes: the changes the guest ticked as read (their signature). */
+  readonly confirmedChanges?: string | null;
+  readonly onConfirmChanges?: (signature: string | null) => void;
+  /** price-hold-dish-changes: the Store's answer when this table cart was shown. */
+  readonly viewQuote?: CheckoutQuote | null;
+  /** The menu as read after that answer named a changed dish (null until then). */
+  readonly changesMenu?: MenuView | null;
 }) {
   if (state.status === "loading")
     return (
-      <StateMessage heading="Loading cart">
-        <p>Checking the latest server cart…</p>
+      <StateMessage heading={cartText.loadingHeading}>
+        <p>{commonText.checkingYourCart}</p>
       </StateMessage>
     );
-  if (state.status === "empty")
-    return (
-      <StateMessage heading="Your cart is empty">
-        <p>Add an available item from the current Store menu.</p>
-        <a className="cart-primary-link" href="/menu">
-          Browse menu
-        </a>
+  if (
+    state.status === "empty" ||
+    (state.status === "ready" &&
+      state.cart.cart.lifecycle.status === "Active" &&
+      state.cart.cart.items.length === 0 &&
+      state.cart.cart.warnings.length === 0)
+  )
+    return state.status === "ready" && state.cart.cart.placedOrder ? (
+      <AlreadyOrdered
+        placedOrder={state.cart.cart.placedOrder}
+        onRestored={() => void controller.load()}
+      />
+    ) : round.status === "cart-changed" ? (
+      // A second phone tapped after the first sent: without this she'd add it all again.
+      <StateMessage heading={cartText.someonePlacedIt}>
+        <div className="cart-state__actions">
+          <Link className="cart-primary-link" to="/dine-in/session">
+            {cartText.seeYourTable}
+          </Link>
+          <Link to="/menu">{commonText.browseMenu}</Link>
+        </div>
+      </StateMessage>
+    ) : state.status === "ready" &&
+      (tableRoundSentByOther(state.cart) !== null ||
+        tableOpenRoundByOther(state.cart) !== null ||
+        withdrawableOwnRound(state.cart, timing === "PayLater") !== null) ? (
+      // WP-2423 (same-table-ordering): another phone's round took this cart's dishes, or (M38)
+      // this phone is paying for the round that did.
+      <StateMessage heading={commonText.emptyCartHeading}>
+        {/* v15 batch-5: a phone whose only dish staff took out is told so here too. */}
+        {staffRemovedDishes(state.cart).map((dish, index) => (
+          <p key={"staff-removed:" + String(index)} role="status">
+            {staffRemovedNotice(dish)}
+          </p>
+        ))}
+        <TableRoundNotes cart={state.cart} payLater={timing === "PayLater"} />
+        {(() => {
+          const own = withdrawableOwnRound(state.cart, timing === "PayLater");
+          return own === null ? null : (
+            <RoundWithdrawAction
+              roundNumber={own.roundNumber}
+              onReturned={() => void controller.load()}
+            />
+          );
+        })()}
+        <div className="cart-state__actions">
+          <Link className="cart-primary-link" to="/dine-in/session">
+            {cartText.seeYourTable}
+          </Link>
+          <Link to="/menu">{commonText.browseMenu}</Link>
+        </div>
+      </StateMessage>
+    ) : (
+      <StateMessage heading={commonText.emptyCartHeading}>
+        {state.status === "ready"
+          ? staffRemovedDishes(state.cart).map((dish, index) => (
+              <p key={"staff-removed:" + String(index)} role="status">
+                {staffRemovedNotice(dish)}
+              </p>
+            ))
+          : null}
+        <p>{cartText.emptyBody}</p>
+        <Link className="cart-primary-link" to="/menu">
+          {commonText.browseMenu}
+        </Link>
       </StateMessage>
     );
   const cart = "cart" in state ? state.cart : null;
   if (cart === null) {
     if (state.status === "offline-readonly")
       return (
-        <StateMessage heading="Offline" tone="warning">
-          <p>No private cart is cached. Reconnect to load your cart.</p>
-          <button type="button" onClick={() => void controller.load()}>
-            Refresh after reconnecting
-          </button>
-          <a href="/menu">Return to menu</a>
+        // Said as it works: the cart reads again by itself once back online (e48a3616); the
+        // actions wrap whole at 320px rather than splitting the menu link around the button.
+        <StateMessage heading={commonText.offlineHeading} tone="warning">
+          <p>{cartText.offline.reconnectToLoad}</p>
+          <div className="shell-actions">
+            <button type="button" onClick={() => void controller.load()}>
+              {commonText.tryAgain}
+            </button>
+            <Link to="/menu">{commonText.returnToMenu}</Link>
+          </div>
         </StateMessage>
       );
     return <ErrorState state={state} controller={controller} />;
   }
   if (cart.cart.warnings.includes("FEATURE_DISABLED"))
     return (
-      <StateMessage heading="Cart unavailable" tone="warning">
-        <p>Cart ordering is not enabled for the current Store context.</p>
-        <a href="/menu">Return to menu</a>
+      <StateMessage heading={cartText.featureDisabled.heading} tone="warning">
+        <p>{cartText.featureDisabled.body}</p>
+        <Link to="/menu">{commonText.returnToMenu}</Link>
       </StateMessage>
     );
   const readOnly = state.status === "offline-readonly";
   const pending = state.status === "command-pending";
   const terminal = cart.cart.lifecycle.status !== "Active";
+  const count = cart.cart.items.reduce((total, item) => total + item.quantity, 0);
+  const payLater = timing === "PayLater";
+  const serviceChannel = cart.cart.orderType === "Pickup" ? "Pickup" : "DineIn";
+  const stopped = service !== null && !takesNewOrders(service.phase);
+  const stoppedText =
+    service === null
+      ? null
+      : storeServiceNoticeText(
+          service.profile?.hours ?? null,
+          service.phase,
+          service.minutesLeft,
+          serviceChannel,
+        );
+  // WP-2423 item 6: while a round is on its way the cart holds still: a change now would refuse the
+  // round, and leaving would hide what it answers. So does a send whose answer got lost: the cart it
+  // was about may have just been emptied by it.
+  const sending = round.status === "sending";
+  const held = sending || (round.status === "unconfirmed" && round.mayBePlaced);
+  // WP-2423 (guest-cart-503): ordering waits until no line that can't be sold now is left.
+  const unsellableLines = cart.cart.items.some(cartLineUnsellable);
+  const othersItems = cart.cart.items
+    .filter((item) => item.warnings.includes("OTHER_PARTICIPANT_ITEM"))
+    .reduce((total, item) => total + item.quantity, 0);
+  const shown = viewQuoteFor(cart.cart, viewQuote);
+  const prices = cartScreenPrices(cart.cart, menu, shown);
+  const priceChanges = cartPriceChanges(cart.cart, prices);
+  // WP-2423 price-hold-dish-changes: a renamed dish, other allergens or a higher price since the
+  // cart was first priced for it is said here and, at a table that orders from the cart, ticked
+  // before ordering (the Store's record: after a reload and on another phone too).
+  const dishChanges = quoteDishChanges(shown, cart.cart.items, changesMenu);
+  const changes = changesSignature(
+    dishChanges,
+    priceChanges.filter((change) => change.direction === "up"),
+    shown?.quoteReference ?? null,
+  );
+  const changesUnconfirmed = changes !== null && confirmedChanges !== changes;
+  const placeConfirmed = () => {
+    if (changes !== null)
+      acceptSeenPrices(cart.cart.cartReference, cartPricedLines(cart.cart, prices));
+    onPlace(cart, cartLinesSubtotal(prices));
+  };
+  // WP-2423 M03 review: these dishes are already in an order (a cart filled before pickup carts
+  // were emptied on ordering); their checkout is refused, so say so instead of offering it.
+  const alreadyOrdered =
+    cart.cart.items.length > 0 && cart.cart.placedOrder ? cart.cart.placedOrder : null;
   return (
     <>
+      {alreadyOrdered !== null ? (
+        <AlreadyOrdered placedOrder={alreadyOrdered} dishesInCart />
+      ) : null}
+      {(priceChanges.length > 0 || dishChanges.length > 0) && !terminal ? (
+        <section className="cart-price-changes" role="status">
+          <DishChangeList changes={dishChanges} />
+          <PriceChangeList changes={priceChanges} items={cart.cart.items} />
+          {!payLater ? (
+            <p>
+              {dishChanges.length > 0
+                ? cartText.confirmChangesAtCheckout
+                : cartText.acceptAtCheckout}
+            </p>
+          ) : changes !== null ? (
+            <label>
+              <input
+                type="checkbox"
+                checked={!changesUnconfirmed}
+                disabled={held || readOnly}
+                onChange={(event) => onConfirmChanges(event.target.checked ? changes : null)}
+              />{" "}
+              {cartText.confirmChanges}
+            </label>
+          ) : null}
+        </section>
+      ) : null}
+      {terminal ? (
+        <StateMessage
+          heading={
+            cart.cart.lifecycle.status === "Expired"
+              ? cartText.closed.expiredHeading
+              : cartText.closed.closedHeading
+          }
+          tone="warning"
+        >
+          <p>{cartText.closed.body}</p>
+          {cart.cart.orderType === "DineIn" && controller.replaceExpiredCart !== undefined ? (
+            <>
+              <p>
+                {cart.cart.lifecycle.status === "Expired"
+                  ? cartText.closed.anyoneCanRestart
+                  : cartText.closed.starterCanRestart}
+              </p>
+              <button
+                type="button"
+                disabled={
+                  readOnly ||
+                  pending ||
+                  state.status === "command-failed" ||
+                  state.status === "replacement-forbidden" ||
+                  cart.cart.warnings.includes("PROJECTION_STALE")
+                }
+                onClick={() => void controller.replaceExpiredCart?.()}
+              >
+                {cartText.closed.startEmptyCart}
+              </button>
+            </>
+          ) : (
+            <p>{cartText.closed.askStaff}</p>
+          )}
+        </StateMessage>
+      ) : null}
       {readOnly ? (
         <div className="cart-offline" role="status">
-          Offline read-only. Changes and checkout are disabled; nothing will replay on reconnect.
+          {cartText.offline.paused}
           <button type="button" onClick={() => void controller.load()}>
-            Refresh after reconnecting
+            {cartText.offline.refreshAfterReconnecting}
           </button>
         </div>
       ) : null}
@@ -294,60 +1108,326 @@ function CartContent({
       ) : null}
       {cart.cart.warnings.includes("PROJECTION_STALE") ? (
         <div className="cart-stale" role="status">
-          Cart summary is stale. Refresh before making a change.
+          {cartText.stale}
         </div>
       ) : null}
-      {cart.cart.warnings.includes("QUOTE_EXPIRED") ? (
+      {cart.cart.warnings.includes("QUOTE_EXPIRED") && !payLater ? (
         <div className="cart-stale" role="status">
-          Quote expired. Server requote is required before checkout.
+          {cartText.quoteExpired}
         </div>
       ) : null}
+      <TableRoundNotes cart={cart} payLater={payLater} className="cart-stale" />
+      {(() => {
+        const own = withdrawableOwnRound(cart, payLater);
+        return own === null ? null : (
+          <RoundWithdrawAction
+            roundNumber={own.roundNumber}
+            onReturned={() => void controller.load()}
+          />
+        );
+      })()}
+      {staffRemovedDishes(cart).map((dish, index) => (
+        <p key={"staff-removed:" + String(index)} className="cart-stale" role="status">
+          {staffRemovedNotice(dish)}
+        </p>
+      ))}
       <div className="cart-layout" aria-busy={pending}>
         <section className="cart-items" aria-labelledby="cart-items-heading">
           <div className="cart-page__subheading">
-            <h2 id="cart-items-heading">Items</h2>
-            <span>{cart.cart.items.length} item lines</span>
+            <h2 id="cart-items-heading">{cartText.itemsHeading}</h2>
+            <span>{cartText.itemCount(count)}</span>
           </div>
           {cart.cart.items.map((item) => (
             <CartItem
               key={item.cartItemReference}
-              cart={cart}
               item={item}
+              allergens={comboLineAllergenText(
+                menu,
+                item.sellableReference,
+                item.configuration.map((option) => option.optionReference),
+              )}
+              price={prices.get(item.cartItemReference) ?? null}
+              payLater={payLater}
               pending={pending}
-              readOnly={readOnly || terminal || cart.cart.warnings.includes("PROJECTION_STALE")}
+              readOnly={
+                readOnly ||
+                held ||
+                // WP-2423 shared-table-checkout (a): a phone is paying for dishes it chose.
+                (cart.cart.tablePay?.payer ?? null) !== null ||
+                state.status === "command-failed" ||
+                terminal ||
+                cart.cart.warnings.includes("PROJECTION_STALE")
+              }
               controller={controller}
             />
           ))}
         </section>
-        <CartSummary cart={cart} />
+        <CartSummary
+          cart={cart}
+          now={now}
+          subtotal={cartLinesSubtotal(prices)}
+          payLater={payLater}
+        />
       </div>
-      <section className="cart-next-actions" aria-label="Cart actions">
-        <a href="/menu">Continue shopping</a>
-        <button type="button" disabled aria-describedby="clear-boundary">
-          Clear cart
-        </button>
-        <Link to="/checkout">Review checkout</Link>
+      {stoppedText === null ? null : (
+        <p className="cart-next-actions__stopped" role="alert" id="cart-store-stopped">
+          <strong>{stoppedText.headline}</strong>
+          {stoppedText.detail === null ? null : <> {stoppedText.detail}</>}
+        </p>
+      )}
+      <section className="cart-next-actions" aria-label={cartText.actionsLabel}>
+        {sending ? (
+          <Link
+            to="/menu"
+            aria-disabled="true"
+            tabIndex={-1}
+            onClick={(event) => event.preventDefault()}
+          >
+            {cartText.continueShopping}
+          </Link>
+        ) : (
+          <Link to="/menu">{terminal ? commonText.browseMenu : cartText.continueShopping}</Link>
+        )}
+        {terminal || readOnly ? null : timing === "Loading" ? (
+          <button className="cart-checkout-link" type="button" disabled>
+            {cartText.continueWaiting}
+          </button>
+        ) : payLater ? (
+          <div className="cart-next-actions__place">
+            {othersItems === 0 ? null : (
+              <p className="cart-next-actions__note">{cartText.alsoPlacesOthers(othersItems)}</p>
+            )}
+            <p className="cart-next-actions__note">{cartText.allergiesBeforeOrdering}</p>
+            <button
+              className="cart-checkout-link"
+              type="button"
+              disabled={
+                held ||
+                stopped ||
+                unsellableLines ||
+                changesUnconfirmed ||
+                state.status !== "ready" ||
+                !menuSettled ||
+                cart.cart.warnings.includes("PROJECTION_STALE")
+              }
+              aria-describedby={
+                unsellableLines
+                  ? "cart-remove-unavailable"
+                  : changesUnconfirmed
+                    ? "cart-confirm-changes"
+                    : undefined
+              }
+              onClick={placeConfirmed}
+            >
+              {sending
+                ? cartText.placingOrder
+                : round.status === "confirm-total"
+                  ? cartText.placeOrderWithTotal(formatCartMoney(round.total))
+                  : cartText.placeOrder}
+            </button>
+            {unsellableLines ? (
+              <p className="cart-next-actions__note" id="cart-remove-unavailable">
+                {cartText.line.removeUnavailableFirst}
+              </p>
+            ) : changesUnconfirmed ? (
+              <p className="cart-next-actions__note" id="cart-confirm-changes">
+                {cartText.confirmChangesToOrder}
+              </p>
+            ) : null}
+            <SlowWaitNote active={sending}>{cartText.placedSlowly}</SlowWaitNote>
+            <SendRoundMessage round={round} cart={cart} onRetry={placeConfirmed} />
+            <p className="cart-next-actions__note">{checkoutText.sendToKitchenNote}</p>
+          </div>
+        ) : alreadyOrdered !== null ? null : stopped ? (
+          <div className="cart-next-actions__place">
+            <button
+              className="cart-checkout-link"
+              type="button"
+              disabled
+              aria-describedby="cart-store-stopped"
+            >
+              {cartText.checkout}
+            </button>
+          </div>
+        ) : unsellableLines ? (
+          <div className="cart-next-actions__place">
+            <button
+              className="cart-checkout-link"
+              type="button"
+              disabled
+              aria-describedby="cart-remove-unavailable"
+            >
+              {cartText.checkout}
+            </button>
+            <p className="cart-next-actions__note" id="cart-remove-unavailable">
+              {cartText.line.removeUnavailableBeforeCheckout}
+            </p>
+          </div>
+        ) : cart.cart.tablePay?.payer?.thisPhone === true ? (
+          // WP-2423 shared-table-checkout (a): this phone chose this round's dishes.
+          <PayerChoiceBanner
+            payer={cart.cart.tablePay.payer}
+            onCancelled={() => void controller.refresh()}
+          />
+        ) : cart.cart.tablePay?.payer != null ? (
+          <OtherPayerWaits />
+        ) : cart.cart.tablePay !== undefined && othersItems > 0 ? (
+          <TablePayChooser
+            cart={cart}
+            prices={prices}
+            onChanged={() => void controller.refresh()}
+          />
+        ) : (
+          <Link className="cart-checkout-link" to="/checkout">
+            {cartText.checkout}
+          </Link>
+        )}
       </section>
-      <div className="cart-boundaries">
-        <p id="clear-boundary">Clear cart requires an atomic server command and is unavailable.</p>
-        <p id="checkout-boundary">Payment remains unavailable until the Provider gate is closed.</p>
-      </div>
-      <p className="cart-version">
-        Cart version {cart.cart.version} · {cart.cart.serviceMode}
-      </p>
     </>
   );
 }
 
-export function CartPage({ controller: provided }: { readonly controller?: CartStateController }) {
+/**
+ * WP-2423 (guest-cart-503, same-table-ordering): how often an open table cart re-reads while on
+ * screen, so a dish another phone adds shows here within seconds (`table-cart-poll.ts`: never
+ * hidden or offline, slower after a failure). A pickup cart doesn't poll.
+ */
+export const cartPollIntervalMs = tableCartPollIntervalMs;
+/**
+ * Whether the open table cart re-reads now: only on screen, with the cart shown as it stands or
+ * stuck after a failed read or a lost network (reading is how those recover, never a dead end),
+ * and never while a change or a round is on its way (the cart holds still for those).
+ */
+export function cartPollShouldRead(
+  visibility: DocumentVisibilityState,
+  round: SendRoundState,
+  cart: CartState,
+): boolean {
+  return (
+    visibility === "visible" &&
+    (cart.status === "ready" ||
+      cart.status === "offline-readonly" ||
+      ("fromRead" in cart && cart.fromRead === true)) &&
+    round.status !== "sending" &&
+    !(round.status === "unconfirmed" && round.mayBePlaced)
+  );
+}
+
+/** WP-2423 (outage-reads-and-retry): the wait a busy answer asked for, between 1 s and 60 s. */
+export function busyRetryDelayMs(retryAfterSeconds: number): number {
+  return Math.min(60, Math.max(1, Math.ceil(retryAfterSeconds))) * 1000;
+}
+
+/** Cart prices come from a full menu read; an ordinary guest gets one tap once it's in. */
+const menuPriceWaitMs = 2_000;
+
+/** What a stop says holds for the cart as it stood: any later change to the cart ends it. */
+const aboutThisCart = (round: SendRoundState) =>
+  round.status === "confirm-total" ||
+  round.status === "confirm-changes" ||
+  round.status === "changes-unknown" ||
+  round.status === "refused" ||
+  round.status === "busy" ||
+  round.status === "blocked" ||
+  round.status === "cart-changed" ||
+  (round.status === "unconfirmed" && !round.mayBePlaced);
+
+const cartVersionOf = (state: CartState) =>
+  "cart" in state && state.cart !== null ? state.cart.cart.version : null;
+
+type CartPageProps = Parameters<typeof OpenCartPage>[0];
+
+/**
+ * M116: a guest only looking at a closed (or paused) Store's menu has no visit and no cart there,
+ * so the cart says the Store isn't taking orders and when it opens, instead of reading a cart
+ * that doesn't exist and calling that a failure.
+ */
+export function CartPage(props: CartPageProps) {
+  const closed = props.controller === undefined ? props.menuContext?.closed : undefined;
+  if (closed !== undefined && props.menuContext !== undefined)
+    return (
+      <CustomerPage step="cart" store={props.store} className="cart-page" browseOnly>
+        <PageHeading title={cartText.pageHeading} />
+        <section className="menu-readonly-boundary menu-closed-notice" role="status">
+          <h2>{cartText.storeNotTakingOrders(props.menuContext.storeDisplayName)}</h2>
+          <ClosedStoreNotice
+            closed={closed}
+            primary={
+              <Link className="cart-primary-link" to="/menu">
+                {cartText.backToMenu}
+              </Link>
+            }
+          />
+        </section>
+      </CustomerPage>
+    );
+  return <OpenCartPage {...props} />;
+}
+
+function OpenCartPage({
+  controller: provided,
+  store,
+  now = Date.now,
+  menuContext,
+  menuClient,
+  sendRound,
+  diningClient,
+  storeProfile,
+  quoteClient,
+}: {
+  readonly controller?: CartStateController;
+  readonly store?: CustomerStoreContext | undefined;
+  readonly now?: () => number;
+  /** The published menu prices lines the Store hasn't priced yet (as shown on the item page). */
+  readonly menuContext?: MenuJourneyContext | undefined;
+  readonly menuClient?: CustomerMenuClient | undefined;
+  /** WP-2423 item 6: the one-tap order at a table that pays at the end (tests inject). */
+  readonly sendRound?: SendRoundController | undefined;
+  /** How the table pays, when it isn't known yet (tests inject). */
+  readonly diningClient?: DiningSessionClient | undefined;
+  /** The Store's live service answer (tests inject; null reads nothing). */
+  readonly storeProfile?: StoreProfileLoader | null | undefined;
+  /** price-hold-dish-changes: prices a table cart when it is shown (tests inject). */
+  readonly quoteClient?: Pick<ReturnType<typeof createCheckoutClient>, "quote"> | undefined;
+}) {
   const [controller] = useState(
     () => provided ?? createCartStateController({ client: createBrowserCustomerCartClient() }),
   );
+  const [round] = useState(() => sendRound ?? sharedSendRoundController());
+  const navigate = useNavigate();
+  const roundState = useSyncExternalStore(round.subscribe, round.getState, round.getState);
+  const [online, setOnline] = useState(
+    () => typeof navigator === "undefined" || navigator.onLine !== false,
+  );
+  useEffect(() => {
+    const update = () => setOnline(navigator.onLine !== false);
+    window.addEventListener("online", update);
+    window.addEventListener("offline", update);
+    return () => {
+      window.removeEventListener("online", update);
+      window.removeEventListener("offline", update);
+    };
+  }, []);
   const state = useSyncExternalStore(
     controller.subscribe,
     controller.getState,
     controller.getState,
   );
+  // Owner 2026-10-23: item names come from the Store in the chosen language.
+  useReloadOnLanguageChange(() => void controller.load());
+  // WP-2423 (outage-reads-and-retry): a read the store's system answered "busy, try again in N
+  // seconds" is read again every N seconds until it loads (a table cart's poll may read sooner),
+  // as the page says; a quiet read that fails again leaves the message as it is.
+  const busyReadSeconds =
+    state.status === "unavailable" && state.fromRead === true ? state.retryAfterSeconds : null;
+  useEffect(() => {
+    if (busyReadSeconds === null) return;
+    const timer = window.setInterval(
+      () => void controller.refresh(),
+      busyRetryDelayMs(busyReadSeconds),
+    );
+    return () => window.clearInterval(timer);
+  }, [busyReadSeconds, controller]);
   useEffect(() => {
     void controller.load();
     const offline = () => controller.setOnline(false);
@@ -359,37 +1439,252 @@ export function CartPage({ controller: provided }: { readonly controller?: CartS
       window.removeEventListener("online", online);
     };
   }, [controller]);
+  const cart = "cart" in state && state.cart !== null ? state.cart.cart : null;
+  /** price-hold-dish-changes: the changes the guest ticked as read before ordering. */
+  const [confirmedChanges, setConfirmedChanges] = useState<string | null>(null);
+  const [viewQuote, setViewQuote] = useState<CheckoutQuote | null>(null);
+  // A quote naming a changed dish reads the menu again: its allergens "now" come from that read.
+  const changesQuote =
+    cart !== null && hasDishChanges(viewQuoteFor(cart, viewQuote))
+      ? (viewQuote?.quoteReference ?? null)
+      : null;
+  const {
+    menu,
+    settled,
+    freshFor: menuFreshFor,
+  } = usePublishedMenuRead(
+    menuContext,
+    menuClient,
+    // Also for a line with choices: a combo's chosen dishes show their allergens.
+    changesQuote !== null ||
+      (cart?.items.some(
+        (item) => item.lineEstimate.status !== "Available" || item.configuration.length > 0,
+      ) ??
+        false),
+    changesQuote,
+  );
+  const changesMenu = changesQuote !== null && menuFreshFor === changesQuote ? menu : null;
+  const cartShowsPriceChanges =
+    cart !== null &&
+    cartPriceChanges(cart, cartScreenPrices(cart, menu, viewQuoteFor(cart, viewQuote))).length > 0;
+  const cartShowsDishChanges =
+    cart !== null &&
+    quoteDishChanges(viewQuoteFor(cart, viewQuote), cart.items, changesMenu).length > 0;
+  const [menuWaitOver, setMenuWaitOver] = useState(false);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setMenuWaitOver(true), menuPriceWaitMs);
+    return () => window.clearTimeout(timer);
+  }, []);
+  const timing = useTablePaymentTiming(cart?.orderType === "DineIn", diningClient);
+  // WP-2423 price-hold-dish-changes (DEC-PRICE-HOLD, M74): at a table that orders from the cart,
+  // the cart on screen is the guest's checkout. Once per cart version it is priced, so the Store
+  // keeps that price for the guest and says what changed since each dish was first priced (after
+  // a reload or on another phone too). A failure changes nothing: Place order prices it again.
+  const [viewQuotes] = useState(
+    () => quoteClient ?? createCheckoutClient(createBrowserCustomerCartClient()),
+  );
+  const viewedVersion = useRef<string | null>(null);
+  const viewCart = state.status === "ready" && "cart" in state ? state.cart : null;
+  useEffect(() => {
+    if (
+      timing !== "PayLater" ||
+      viewCart === null ||
+      viewCart.cart.orderType !== "DineIn" ||
+      viewCart.cart.lifecycle.status !== "Active" ||
+      viewCart.cart.items.length === 0 ||
+      roundState.status === "sending"
+    )
+      return;
+    const key = `${viewCart.cart.cartReference}:${viewCart.cart.version}`;
+    if (viewedVersion.current === key) return;
+    viewedVersion.current = key;
+    let current = true;
+    viewQuotes.quote(viewCart, uuidv7()).then(
+      (quote) => {
+        if (current) setViewQuote(quote);
+      },
+      () => undefined,
+    );
+    return () => {
+      current = false;
+    };
+  }, [timing, viewCart, roundState.status, viewQuotes]);
+  // WP-2423 shared-table-checkout (a): dishes that waited for another phone's round come back to
+  // the cart as soon as nobody pays for them.
+  useWaitingReturn("cart" in state ? state.cart : null, () => void controller.refresh());
+  // WP-2423 (guest-cart-503): an open table cart re-reads while it is on screen, so it learns
+  // within one interval that staff started checkout, or that another phone changed it. Never
+  // while a change or a round is on its way; one read per interval per visible phone.
+  const dineIn = cart?.orderType === "DineIn";
+  useEffect(() => {
+    if (!dineIn) return;
+    const poll = startTableCartPoll({
+      read: () => controller.refresh(),
+      shouldRead: () =>
+        cartPollShouldRead(
+          typeof document === "undefined" ? "visible" : document.visibilityState,
+          round.getState(),
+          controller.getState(),
+        ),
+      visible: () => typeof document === "undefined" || document.visibilityState === "visible",
+      online: () => typeof navigator === "undefined" || navigator.onLine !== false,
+    });
+    const wake = () => poll.wake();
+    const reconnected = () => poll.wake("reconnected");
+    document.addEventListener("visibilitychange", wake);
+    window.addEventListener("online", reconnected);
+    return () => {
+      poll.stop();
+      document.removeEventListener("visibilitychange", wake);
+      window.removeEventListener("online", reconnected);
+    };
+  }, [dineIn, controller, round]);
+  // Leaving forgets a stop; a send that may have happened stays, to be finished when the guest is back.
+  useEffect(
+    () => () => {
+      const left = round.getState();
+      if (left.status !== "sending" && !(left.status === "unconfirmed" && left.mayBePlaced))
+        round.reset();
+    },
+    [round],
+  );
+  const [lastOrder, setLastOrder] = useState<{
+    readonly held: boolean;
+    /** The cart was read after it: what it holds is what's left. */
+    readonly cartRead: boolean;
+  } | null>(null);
+  // A send's answer is only acted on by the page that sent it: the guest may have changed the cart
+  // since, and another page instance doesn't know what they're looking at.
+  const startedHere = useRef(false);
+  const place = (placed: CartView | null, seen: SeenSubtotal | null) => {
+    startedHere.current = true;
+    setLastOrder(null);
+    void round.send(placed, seen, placed === null ? null : viewQuoteFor(placed.cart, viewQuote));
+  };
+  // What the send's answer means for this page, once.
+  const acted = useRef<SendRoundState | null>(null);
+  /** The cart as read right after a stop: the stop is about that one. */
+  const stoppedAt = useRef<{ readonly version: number | null } | null>(null);
+  useEffect(() => {
+    if (acted.current === roundState) return;
+    acted.current = roundState;
+    stoppedAt.current = null;
+    if (roundState.status === "sending") return;
+    const mine = startedHere.current;
+    startedHere.current = false;
+    if (roundState.status === "idle") return;
+    if (roundState.status === "sent") {
+      round.reset();
+      if (mine && roundState.more !== true) {
+        void navigate("/dine-in/session", {
+          replace: true,
+          state: { placed: roundState.held ? "Held" : "Sent" },
+        });
+        return;
+      }
+      setLastOrder({ held: roundState.held, cartRead: false });
+      void controller.refresh().then(() => {
+        setLastOrder((note) => (note === null ? null : { ...note, cartRead: true }));
+      });
+      return;
+    }
+    // price-hold-dish-changes: the quote that names the changed dishes is shown with its tick, on
+    // whichever phone tapped; the guest reads it and taps again (nothing was placed).
+    if (roundState.status === "confirm-changes") {
+      setViewQuote(roundState.quote);
+      setConfirmedChanges(null);
+    }
+    if (roundState.status === "needs-page" || roundState.status === "pay-first") {
+      round.reset();
+      if (mine) void navigate("/checkout");
+      return;
+    }
+    // A question or a wait nobody here asked for: the next tap asks again if it still applies.
+    if (!mine && (roundState.status === "confirm-total" || roundState.status === "busy")) {
+      round.reset();
+      return;
+    }
+    // The summary shows the quote's total; a changed cart shows what it holds now.
+    void controller.refresh().then(() => {
+      if (acted.current === roundState)
+        stoppedAt.current = { version: cartVersionOf(controller.getState()) };
+    });
+  }, [controller, navigate, round, roundState]);
+  useEffect(() => {
+    if (
+      stoppedAt.current !== null &&
+      aboutThisCart(roundState) &&
+      state.status !== "loading" &&
+      cartVersionOf(state) !== stoppedAt.current.version
+    )
+      round.reset();
+  }, [round, roundState, state]);
+  const service = useStoreService(
+    storeProfile === undefined ? browserCartStoreProfile : storeProfile,
+  );
+  const resolvedStore: CustomerStoreContext | undefined =
+    store ??
+    (cart
+      ? {
+          storeName: cart.context.storeName,
+          brandName: cart.context.brandName,
+          serviceMode: cart.orderType,
+        }
+      : undefined);
   return (
-    <main id="main-content" className="cart-page">
-      <header className="cart-page__header">
-        <a className="cart-skip-link" href="#cart-content">
-          Skip to cart content
-        </a>
-        <div>
-          <p className="cart-page__eyebrow">Customer cart</p>
-          <h1>Your cart</h1>
-          {"cart" in state && state.cart !== null ? (
-            <p>
-              {state.cart.cart.context.brandName} · {state.cart.cart.context.storeName} ·
-              server-calculated totals only
-            </p>
-          ) : (
-            <p>Current Store · server-calculated totals only</p>
-          )}
-        </div>
-        {"cart" in state && state.cart !== null ? (
-          <div className="cart-page__context" aria-label="Service context">
-            <span>{state.cart.cart.orderType}</span>
-            <span>{state.cart.cart.lifecycle.status}</span>
-          </div>
-        ) : null}
-      </header>
+    <CustomerPage
+      step="cart"
+      store={resolvedStore}
+      className="cart-page"
+      navigationHeld={roundState.status === "sending"}
+    >
+      <PageHeading title={cartText.pageHeading} />
       <div id="cart-content">
-        <CartContent state={state} controller={controller} />
+        {roundState.status === "unconfirmed" ? (
+          <UnconfirmedOrder
+            online={online}
+            mayBePlaced={roundState.mayBePlaced}
+            onRetry={() => place("cart" in state ? state.cart : null, null)}
+          />
+        ) : null}
+        {lastOrder === null ? null : (
+          <LastOrderPlaced
+            held={lastOrder.held}
+            cartHoldsMore={lastOrder.cartRead && (cart?.items.length ?? 0) > 0}
+          />
+        )}
+        {cart?.tablePay !== undefined && timing !== "PayLater" ? (
+          <TableWaitingDishes tablePay={cart.tablePay} />
+        ) : null}
+        <CartContent
+          state={state}
+          controller={controller}
+          now={now}
+          menu={menu}
+          timing={timing}
+          round={roundState}
+          menuSettled={settled || menuWaitOver}
+          onPlace={place}
+          service={service}
+          confirmedChanges={confirmedChanges}
+          onConfirmChanges={setConfirmedChanges}
+          viewQuote={viewQuote}
+          changesMenu={changesMenu}
+        />
       </div>
       <div className="sr-only" role="status" aria-live="polite">
-        {state.status === "command-pending" ? "Cart change pending" : `Cart state ${state.status}`}
+        {roundState.status === "cart-changed" && cart !== null && cart.items.length === 0
+          ? cartText.someonePlacedIt
+          : roundState.status === "cart-changed" && state.status === "empty"
+            ? cartText.someonePlacedIt
+            : state.status === "ready" && cartShowsDishChanges
+              ? // price-hold-dish-changes: never "up to date" while a dish changed since added.
+                cartText.dishesChangedSinceAdded
+              : state.status === "ready" && cartShowsPriceChanges
+                ? // WP-2423 M74: never "up to date" while a dish's price changed since it was added.
+                  cartText.pricesChangedSinceAdded
+                : (specificRefusal(state) ?? cartText.stateAnnouncement[state.status])}
       </div>
-    </main>
+    </CustomerPage>
   );
 }

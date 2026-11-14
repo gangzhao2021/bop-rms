@@ -26,6 +26,8 @@ export const roleAdministrationLifecycles = [
   "Active",
   "Rejected",
   "Deactivated",
+  // WP-2423 role presets: a change taken back before it was turned on (never deleted).
+  "Withdrawn",
 ] as const;
 export type RoleAdministrationLifecycle = (typeof roleAdministrationLifecycles)[number];
 export interface RolePermissionSelection {
@@ -54,7 +56,15 @@ export interface RoleAdministrationVersionRecord {
   readonly decisionEvidenceReference: RoleAdministrationReference | null;
   readonly reasonCode: string;
   readonly changedAt: CanonicalInstant;
+  /**
+   * WP-2423 role presets: how the approval this version carries was given. "SoleOperator" only
+   * with its append-only mark (2000_321): the submitter approved alone while running the Brand
+   * alone. Every other version, and every version recorded before, is "Independent".
+   */
+  readonly approvalMode: RoleApprovalMode;
 }
+export const roleApprovalModes = ["Independent", "SoleOperator"] as const;
+export type RoleApprovalMode = (typeof roleApprovalModes)[number];
 export class RoleAdministrationContractError extends Error {
   constructor(readonly code: "ROLE_ADMIN_INPUT_INVALID" | "ROLE_ADMIN_DEPENDENCY_BLOCKED") {
     super(
@@ -139,6 +149,7 @@ export function createRoleAdministrationVersion(value: unknown): RoleAdministrat
     "decisionEvidenceReference",
     "reasonCode",
     "changedAt",
+    "approvalMode",
   ]);
   if (
     typeof input.displayName !== "string" ||
@@ -151,7 +162,8 @@ export function createRoleAdministrationVersion(value: unknown): RoleAdministrat
     (input.sourcePolicyVersion as number) < 1 ||
     !Array.isArray(input.selections) ||
     typeof input.reasonCode !== "string" ||
-    !code.test(input.reasonCode)
+    !code.test(input.reasonCode) ||
+    !roleApprovalModes.includes(input.approvalMode as RoleApprovalMode)
   )
     return invalid();
   const storeReference =
@@ -177,12 +189,17 @@ export function createRoleAdministrationVersion(value: unknown): RoleAdministrat
       input.decisionEvidenceReference === null
         ? null
         : parseRoleAdministrationReference(input.decisionEvidenceReference);
+  const soleOperator = input.approvalMode === "SoleOperator";
   if (
-    ["InReview", "Approved", "Active", "Rejected", "Deactivated"].includes(
-      String(input.lifecycle),
-    ) !==
-      (submittedByReference !== null) ||
-    (approvedByReference !== null && approvedByReference === submittedByReference) ||
+    (input.lifecycle !== "Withdrawn" &&
+      ["InReview", "Approved", "Active", "Rejected", "Deactivated"].includes(
+        String(input.lifecycle),
+      ) !==
+        (submittedByReference !== null)) ||
+    // The submitter approves their own change only as sole operator, and then always does.
+    (approvedByReference !== null &&
+      (approvedByReference === submittedByReference) !== soleOperator) ||
+    (soleOperator && approvedByReference === null) ||
     (input.lifecycle === "Approved" ||
       input.lifecycle === "Active" ||
       input.lifecycle === "Deactivated") !==
@@ -190,7 +207,8 @@ export function createRoleAdministrationVersion(value: unknown): RoleAdministrat
     (input.lifecycle === "Approved" ||
       input.lifecycle === "Active" ||
       input.lifecycle === "Rejected" ||
-      input.lifecycle === "Deactivated") !==
+      input.lifecycle === "Deactivated" ||
+      input.lifecycle === "Withdrawn") !==
       (decisionEvidenceReference !== null) ||
     (input.roleType === "System" && !["Active", "Deactivated"].includes(String(input.lifecycle)))
   )
@@ -214,6 +232,7 @@ export function createRoleAdministrationVersion(value: unknown): RoleAdministrat
     decisionEvidenceReference,
     reasonCode: input.reasonCode,
     changedAt: parseCanonicalInstant(input.changedAt),
+    approvalMode: input.approvalMode,
   }) as RoleAdministrationVersionRecord;
 }
 export interface RoleAdministrationCompareResult {

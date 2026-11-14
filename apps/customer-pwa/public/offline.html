@@ -5,15 +5,34 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="robots" content="noindex,nofollow" />
     <meta name="referrer" content="no-referrer" />
-    <title>BOP — Offline</title>
+    <title>Try again in a minute · 请稍后再试</title>
   </head>
   <body>
+    <!--
+      WP-2423: shown by the service worker when a page can't be loaded. The phone may be offline,
+      or the restaurant's ordering service may be restarting for a planned update (the whole entry
+      restarts, so nothing can answer for it). Say both honestly, in the guest's words.
+      WP-2423 M122: the page has no script and cannot know the chosen language, so it says it in
+      English and then in Chinese.
+    -->
     <main>
-      <h1>You are offline</h1>
-      <p>
-        This fallback contains no Order, Cart, Payment, identity, pickup or other business data.
-      </p>
-      <p>Reconnect, return to the application and review the current screen before retrying.</p>
+      <section lang="en-CA">
+        <h1>We can’t reach the restaurant right now</h1>
+        <p>
+          If your phone has lost its connection, reconnect first. If you’re connected, the ordering
+          page may be restarting for an update — this usually takes a minute.
+        </p>
+        <p>An order you already placed is kept. Try again to see where it stands.</p>
+        <p><a href="">Try again</a></p>
+      </section>
+      <section lang="zh-Hans">
+        <h1>我们暂时连不上餐厅</h1>
+        <p>
+          如果手机断网了，请先重新连接。如果网络正常，点餐页面可能正在更新重启，通常一分钟左右就好。
+        </p>
+        <p>已下的订单会保留。重试即可查看进度。</p>
+        <p><a href="">重试</a></p>
+      </section>
     </main>
   </body>
 </html>

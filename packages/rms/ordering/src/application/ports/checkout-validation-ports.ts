@@ -4,7 +4,18 @@ import type { CheckoutFulfillmentValidationResult } from "../../contracts/checko
 import type { CartQuoteAttachment } from "../../domain/cart-quote-attachment.js";
 import type { CartAggregate, OrderingInstant, OrderingReference } from "../../domain/cart.js";
 
-export interface CheckoutValidationPorts {
+/** WP-2423: one Cart line as the stock answer needs it (quantity may be lowered by Ordering). */
+export interface CheckoutStockLine {
+  readonly cartItemReference: OrderingReference;
+  readonly sellableReference: OrderingReference;
+  readonly quantity: number;
+  readonly optionSelections: readonly {
+    readonly optionReference: OrderingReference;
+    readonly quantity: number;
+  }[];
+}
+
+export interface CheckoutValidationPorts<V extends 1 | 2 = 1> {
   readonly authorization: {
     authorize(input: {
       readonly action: "ValidateCheckout";
@@ -33,8 +44,20 @@ export interface CheckoutValidationPorts {
   readonly references: {
     hashIntent(value: string): string;
   };
+  /**
+   * WP-2423: Inventory's answer whether the Store's current stock covers these lines together
+   * (each line's recipe demand, as the reservation at submission plans it). Read-only; the lines are
+   * this Cart's own lines, some possibly with a lower quantity or left out. Ordering decides what
+   * the guest is told; without this port a short Cart is only found at submission.
+   */
+  readonly stock?: {
+    covers(input: {
+      readonly lines: readonly CheckoutStockLine[];
+      readonly observedAt: OrderingInstant;
+    }): Promise<boolean>;
+  };
   readonly repository: {
     loadCart(cartReference: OrderingReference): Promise<CartAggregate | null>;
-    loadQuote(cartReference: OrderingReference): Promise<CartQuoteAttachment | null>;
+    loadQuote(cartReference: OrderingReference): Promise<CartQuoteAttachment<V> | null>;
   };
 }

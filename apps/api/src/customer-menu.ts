@@ -103,7 +103,8 @@ function resultStatus(value: unknown): CustomerMenuQueryResult["status"] | null 
     : null;
 }
 
-function publicFound(value: CustomerMenuFound): CustomerMenuFound {
+/** The customer-facing menu fields only (also the counter item picker, WP-2423 Q7). */
+export function publicFound(value: CustomerMenuFound): CustomerMenuFound {
   return {
     status: "Found",
     schemaVersion: value.schemaVersion,
@@ -142,25 +143,37 @@ function publicFound(value: CustomerMenuFound): CustomerMenuFound {
           presentationRole: sellable.presentationRole,
           pinned: sellable.pinned,
           availability: sellable.availability,
+          ...(sellable.alcohol === undefined ? {} : { alcohol: sellable.alcohol }),
           optionRules: sellable.optionRules.map((rule) => ({
+            ...(rule.semanticsVersion === 2
+              ? {
+                  semanticsVersion: 2,
+                  activationOptionReferences: [...(rule.activationOptionReferences ?? [])],
+                }
+              : {}),
+            name: rule.name,
             bindingReference: rule.bindingReference,
             optionSetVersionReference: rule.optionSetVersionReference,
             minimumSelections: rule.minimumSelections,
             maximumSelections: rule.maximumSelections,
             enabledOptionReferences: [...rule.enabledOptionReferences],
             defaultOptionReferences: [...rule.defaultOptionReferences],
+            ...(rule.comboPart === true ? { comboPart: true as const } : {}),
             options: rule.options.map((option) => ({
               optionReference: option.optionReference,
               name: option.name,
               maximumQuantity: option.maximumQuantity,
               conflictOptionReferences: [...option.conflictOptionReferences],
               selectedByDefault: option.selectedByDefault,
-              incrementalPrice: {
-                status: option.incrementalPrice.status,
-                amount: option.incrementalPrice.amount,
-                currency: option.incrementalPrice.currency,
-                reason: option.incrementalPrice.reason,
-              },
+              ...(rule.semanticsVersion === 2
+                ? { defaultQuantity: Number(option.defaultQuantity) }
+                : {}),
+              ...(option.offeredNow === false ? { offeredNow: false as const } : {}),
+              // WP-2423 (M22, M24): sold out at the Store today (only with offeredNow false).
+              ...(option.offeredNow === false && option.soldOut === true
+                ? { soldOut: true as const }
+                : {}),
+              incrementalPrice: { ...option.incrementalPrice },
             })),
           })),
           allergenDisclosure: {
@@ -173,23 +186,140 @@ function publicFound(value: CustomerMenuFound): CustomerMenuFound {
             })),
             allergenFreeClaim: false,
             assistanceCode: sellable.allergenDisclosure.assistanceCode,
+            ...(sellable.allergenDisclosure.byChoice === undefined
+              ? {}
+              : { byChoice: sellable.allergenDisclosure.byChoice }),
+            ...(sellable.allergenDisclosure.byOption === undefined
+              ? {}
+              : { byOption: sellable.allergenDisclosure.byOption }),
+            // WP-2423 (M77, M167): a recipe changed what the dish contains since the listing.
+            ...(sellable.allergenDisclosure.justUpdated === true
+              ? { justUpdated: true as const }
+              : {}),
           },
-          displayPrice: {
-            status: sellable.displayPrice.status,
-            amount: sellable.displayPrice.amount,
-            currency: sellable.displayPrice.currency,
-            reason: sellable.displayPrice.reason,
-          },
+          displayPrice:
+            sellable.displayPrice.status === "Available"
+              ? {
+                  status: "Available" as const,
+                  amount: sellable.displayPrice.amount,
+                  currency: sellable.displayPrice.currency,
+                  reason: null,
+                }
+              : {
+                  status: "Unavailable" as const,
+                  amount: null,
+                  currency: null,
+                  reason: sellable.displayPrice.reason,
+                },
           taxDisplayContext: {
             status: sellable.taxDisplayContext.status,
             taxInclusive: sellable.taxDisplayContext.taxInclusive,
             reason: sellable.taxDisplayContext.reason,
           },
+          // WP-2423 menu descriptions and photos: the published description and photo sizes.
+          description: sellable.description,
+          photo:
+            sellable.photo === null
+              ? null
+              : {
+                  altText: sellable.photo.altText,
+                  width: sellable.photo.width,
+                  height: sellable.photo.height,
+                  renditions: sellable.photo.renditions.map((rendition) => ({
+                    url: rendition.url,
+                    contentType: rendition.contentType,
+                    width: rendition.width,
+                    height: rendition.height,
+                  })),
+                },
         })),
       })),
     },
   };
 }
+
+/**
+ * WP-2423 (reads-under-burst, v15 2026-11-13): a guest menu is the same public answer for every
+ * phone at the Store. Each read did the whole work again: the menu, every dish's offer, price,
+ * each choice's price (one database round trip per choice), sold-out marks and stock, and the
+ * answer was built and serialized per phone. 20 phones opening the menu together took 1.5-2.5 s
+ * (20 cart reads together took 0.4-0.6 s), and in a burst the menu reads held the process and its
+ * connections while every other answer waited past the 15 s clients wait.
+ *
+ * Now the phones asking for the same menu at the same moment share one read, and a menu read in
+ * the last `customerMenuReuseMs` is given again. Commercially: a dish staff mark sold out shows so
+ * on a menu opened up to 3 s later; adding it is refused by the cart with its usual words, as for
+ * any menu already open on a phone. Only a found menu is given again: "busy", "not found" and a
+ * stale menu are always asked anew. The shared read works within its own answer time (the first
+ * phone going away does not cut it for the others), and each phone's own answer time still holds.
+ */
+export const customerMenuReuseMs = 3_000;
+/**
+ * b12 review: what is kept stays small. Only menus without a search term are kept (a search is one
+ * guest's typing: phones asking the same search at the same moment still share its read, but it is
+ * not kept), expired menus are dropped as each new one is kept, and at most this many are kept
+ * (one per Store, channel, order type, language and section seen in the last 3 s).
+ */
+export const customerMenuShareLimit = 100;
+export function createSharedCustomerMenuPort(
+  port: CustomerMenuPort,
+  options: {
+    readonly reuseMs?: number;
+    readonly nowMs?: () => number;
+    /** Runs the shared read in its own answer time (apart from any one phone's request). */
+    readonly detached?: <T>(work: () => Promise<T>) => Promise<T>;
+  } = {},
+): CustomerMenuPort {
+  const reuseMs = options.reuseMs ?? customerMenuReuseMs;
+  const nowMs = options.nowMs ?? Date.now;
+  const detached = options.detached ?? (<T>(work: () => Promise<T>) => work());
+  const flights = new Map<string, Promise<CustomerMenuQueryResult>>();
+  const recent = new Map<
+    string,
+    { readonly at: number; readonly result: CustomerMenuQueryResult }
+  >();
+  return Object.freeze({
+    getPublishedMenu(input: Readonly<CustomerMenuQueryInput>) {
+      const key = JSON.stringify([
+        input.publicStoreReference,
+        input.channelCode,
+        input.orderTypeCode,
+        input.locale,
+        input.searchTerm ?? null,
+        input.sectionReference ?? null,
+      ]);
+      const kept = recent.get(key);
+      if (kept !== undefined) {
+        const age = nowMs() - kept.at;
+        if (age >= 0 && age < reuseMs) return Promise.resolve(kept.result);
+        recent.delete(key);
+      }
+      const flying = flights.get(key);
+      if (flying !== undefined) return flying;
+      const flight = detached(() => port.getPublishedMenu(input)).then((result) => {
+        if (resultStatus(result) === "Found" && !input.searchTerm) {
+          const at = nowMs();
+          // Kept in the order they were read: the expired ones are at the front.
+          for (const [oldKey, old] of recent) {
+            if (recent.size < customerMenuShareLimit && at - old.at < reuseMs) break;
+            recent.delete(oldKey);
+          }
+          recent.set(key, { at, result });
+        }
+        return result;
+      });
+      flights.set(key, flight);
+      const settle = () => {
+        if (flights.get(key) === flight) flights.delete(key);
+      };
+      flight.then(settle, settle);
+      return flight;
+    },
+  });
+}
+
+/** The serialized public answer of each found menu result (one per shared read). */
+const publicBodies = new WeakMap<object, string>();
 
 export class CustomerMenuHandler {
   readonly #now: () => string;
@@ -219,7 +349,13 @@ export class CustomerMenuHandler {
       switch (resultStatus(result)) {
         case "Found":
           try {
-            response.status(200).json(publicFound(result as CustomerMenuFound));
+            // A shared menu (createSharedCustomerMenuPort) is built and serialized once.
+            let body = publicBodies.get(result);
+            if (body === undefined) {
+              body = JSON.stringify(publicFound(result as CustomerMenuFound));
+              publicBodies.set(result, body);
+            }
+            response.status(200).type("application/json").send(body);
           } catch {
             sendError(response, "menu_service_unavailable");
           }

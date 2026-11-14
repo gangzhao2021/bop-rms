@@ -1,6 +1,6 @@
 # Merchant web guidance
 
-- Section 88 Screen IDs, permission/scope semantics, stale/conflict states, and responsive/accessibility rules remain canonical; this WP contains only a synthetic shell.
-- Never infer authorization from hidden UI. Do not add business routes, Provider data, real Store data, or runtime remote fonts.
-- Keep keyboard focus visible, landmarks ordered, state text non-color-only, and scope switching explicitly synthetic until its owning WP.
-- Run this workspace's lint, typecheck, test, and build commands after changes; root guidance remains fully applicable.
+- Section 88 Screen IDs, permission/scope semantics, stale/conflict states, and responsive/accessibility rules remain canonical.
+- Never infer authorization from hidden UI. Do not add Provider data, real Store data, or runtime remote fonts.
+- Keep keyboard focus visible, landmarks ordered, state text non-color-only, and implement business routes and scope switching only within the owning WP and Section 88 contract.
+- Follow the root `AGENTS.md` verification policy: run or reuse affected workspace lint, typecheck, test, and build checks; documentation-only changes need text, source/link, and format review.

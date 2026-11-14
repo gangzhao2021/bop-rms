@@ -1,27 +1,86 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
-import { PickupQueueScreen, PickupStatePanel } from "./PickupPages.js";
+import {
+  mergedPickupLines,
+  pickupOfflineState,
+  pickupRefreshIntervalMs,
+  pickupRetryAttempts,
+  PickupQueueScreen,
+  PickupStatePanel,
+} from "./PickupPages.js";
 import { pickupQueueFixture } from "./pickup.fixtures.js";
 import { parsePickupQueueView } from "./pickup.js";
+import { StoreBusinessDayContext } from "./StoreBusinessDay.js";
 describe("WP-1805 Pickup screens", () => {
-  it("renders proof, wait, staging and explicit completion boundary", () => {
+  it("renders elapsed wait without inventing an overdue threshold", () => {
     const html = renderToStaticMarkup(
       <MemoryRouter>
         <PickupQueueScreen view={parsePickupQueueView(pickupQueueFixture())} />
       </MemoryRouter>,
     );
+    for (const value of ["ORD-1001", "Ready for 20 min", "Shelf A", "Updated"])
+      expect(html).toContain(value);
     for (const value of [
       "FUL-PICKUP-QUEUE",
-      "ORD-1001",
-      "Ready 20 minutes",
       "Overdue",
-      "Shelf A",
-      "Open proof verification",
-      "Explicit handoff confirmation required",
-      "one idempotent",
+      "Check pickup code",
+      "source-bound",
+      "idempotent",
+      "Report exception",
+      ">Claim</button>",
     ])
-      expect(html).toContain(value);
+      expect(html).not.toContain(value);
+  });
+  it("WP-2423: offers claim and exception filters only when the pickups carry those facts", () => {
+    const fixture = pickupQueueFixture();
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <PickupQueueScreen
+          view={parsePickupQueueView({
+            ...fixture,
+            items: fixture.items.map((item) => ({
+              ...item,
+              claimStatus: "Unavailable",
+              exceptionStatus: "Unavailable",
+              allergenCue: "Unavailable",
+            })),
+          })}
+        />
+      </MemoryRouter>,
+    );
+    expect(html).not.toContain("Claim<select");
+    expect(html).not.toContain("Exception<select");
+    expect(html).not.toContain("Unavailable");
+    const known = renderToStaticMarkup(
+      <MemoryRouter>
+        <PickupQueueScreen view={parsePickupQueueView(fixture)} />
+      </MemoryRouter>,
+    );
+    expect(known).toContain("Claim<select");
+    expect(known).toContain('<option value="Unclaimed">Not claimed</option>');
+    expect(known).toContain("Exception<select");
+    expect(known).not.toContain("<option>Unavailable</option>");
+  });
+  it("shows completed pickups as handed over without waiting or handoff actions", () => {
+    const fixture = pickupQueueFixture();
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <PickupQueueScreen
+          view={parsePickupQueueView({
+            ...fixture,
+            items: fixture.items.map((item) => ({ ...item, phase: "Completed" })),
+          })}
+          includeCompleted
+        />
+      </MemoryRouter>,
+    );
+    const card = html.slice(html.indexOf("<article"), html.indexOf("</article>"));
+    expect(card).toContain("Handed over");
+    expect(card).not.toContain("Ready for 20 min");
+    expect(card).not.toContain("Overdue");
+    expect(card).not.toContain("Waiting");
+    expect(card).not.toContain("<button");
   });
   it("locks stale queues and exposes safe command failure", () => {
     const html = renderToStaticMarkup(
@@ -32,7 +91,482 @@ describe("WP-1805 Pickup screens", () => {
         <PickupStatePanel state="CommandFailed" />
       </MemoryRouter>,
     );
-    expect(html).toContain("Queue stale — read-only");
-    expect(html).toContain("No handoff or Fulfillment transition is assumed");
+    expect(html).toContain("Data may be out of date");
+    expect(html).toContain("The handoff was not confirmed");
   });
+  it("v15 store-day L4: says plainly who can help when the queue is not allowed", () => {
+    const denied = renderToStaticMarkup(
+      <MemoryRouter>
+        <PickupStatePanel state="PermissionDenied" />
+      </MemoryRouter>,
+    );
+    expect(denied).toContain("No access");
+    expect(denied).toContain(
+      "You don&#x27;t have access to this page. Ask the owner or a manager.",
+    );
+    expect(denied).not.toMatch(/permission|scope/iu);
+    // A real failure keeps its own message.
+    const offline = renderToStaticMarkup(
+      <MemoryRouter>
+        <PickupStatePanel state="Offline" />
+      </MemoryRouter>,
+    );
+    expect(offline).not.toContain("No access");
+  });
+});
+
+it("WP-2423: offers an in-person handoff when the pickup code expired or was never sent", () => {
+  const fixture = pickupQueueFixture();
+  const render = (proofReadiness: string) => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <PickupQueueScreen
+          view={parsePickupQueueView({
+            ...fixture,
+            workstation: {
+              deviceReference: "01900000-0000-7000-8000-000000000008",
+              pickupLocationReference: "01900000-0000-7000-8000-000000000009",
+            },
+            items: fixture.items.map((item) => ({ ...item, proofReadiness })),
+          })}
+          proofContext={{
+            csrf: "A".repeat(43),
+            storeReference: "01900000-0000-7000-8000-000000000004",
+          }}
+        />
+      </MemoryRouter>,
+    );
+    return html.slice(html.indexOf("<article"), html.indexOf("</article>"));
+  };
+  expect(render("Expired")).toContain("Hand over after checking in person");
+  expect(render("Expired")).toContain("Code expired · check in person");
+  expect(render("NotIssued")).toContain("No code sent · check in person");
+  expect(render("Ready")).not.toContain("Hand over after checking in person");
+  // DEC-PICKUP-COUNTER-CODE: five wrong codes lock code checks; staff check in person instead.
+  expect(render("Locked")).toContain("Hand over after checking in person");
+  expect(render("Locked")).toContain("Too many wrong codes · check in person");
+  expect(render("Locked")).not.toContain("Check pickup code");
+  // The reason stays on the card after the queue re-reads (WP-2423).
+  expect(render("Locked")).toContain("Too many wrong codes for this order. Check the customer");
+  expect(render("Expired")).not.toContain("Too many wrong codes for this order");
+});
+it("WP-2423: a guest who can't show a valid code is a deliberate secondary action beside the code check", () => {
+  const fixture = pickupQueueFixture();
+  const render = (proofReadiness: string) => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <PickupQueueScreen
+          view={parsePickupQueueView({
+            ...fixture,
+            workstation: {
+              deviceReference: "01900000-0000-7000-8000-000000000008",
+              pickupLocationReference: "01900000-0000-7000-8000-000000000009",
+            },
+            items: fixture.items.map((item) => ({
+              ...item,
+              proofReadiness,
+              execution: {
+                aggregateVersion: "3",
+                publicOrderReference: null,
+                proof: { kind: "HumanCode", generation: 1, expiresAt: "2026-08-12T16:00:00.000Z" },
+                items: [
+                  {
+                    fulfillmentItemReference: "01900000-0000-7000-8000-000000000003",
+                    orderedQuantity: 1,
+                    readyQuantity: 1,
+                    handedOverQuantity: 0,
+                  },
+                ],
+              },
+            })),
+          })}
+          proofContext={{
+            csrf: "A".repeat(43),
+            storeReference: "01900000-0000-7000-8000-000000000004",
+          }}
+        />
+      </MemoryRouter>,
+    );
+    return html.slice(html.indexOf("<article"), html.indexOf("</article>"));
+  };
+  const ready = render("Ready");
+  // The code check stays first and primary; the fallback is the quieter action after it.
+  expect(ready.indexOf("Check pickup code")).toBeGreaterThan(-1);
+  expect(ready.indexOf("Guest can’t show the code")).toBeGreaterThan(
+    ready.indexOf("Check pickup code"),
+  );
+  expect(ready).toContain('class="pickup-handoff__no-code"');
+  expect(ready).toContain("The customer&#x27;s pickup code is still valid.");
+  for (const text of [
+    "Choose why",
+    "Phone is dead, lost or left behind",
+    "Customer never got the pickup code",
+    "Order page was closed or lost",
+    "Your name and the reason are kept with the handover.",
+  ])
+    expect(ready).toContain(text);
+  // Without a usable code the ordinary in-person check is offered instead, with no cause to pick.
+  for (const proofReadiness of ["Expired", "NotIssued", "Locked"])
+    expect(render(proofReadiness)).not.toContain("Guest can’t show the code");
+});
+it("WP-2423: a counter order is handed over in person at once, never by pickup code", () => {
+  const fixture = pickupQueueFixture();
+  const render = (proofReadiness: string, takenAtCounter: boolean) => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <PickupQueueScreen
+          view={parsePickupQueueView({
+            ...fixture,
+            workstation: {
+              deviceReference: "01900000-0000-7000-8000-000000000008",
+              pickupLocationReference: "01900000-0000-7000-8000-000000000009",
+            },
+            items: fixture.items.map((item) => ({
+              ...item,
+              proofReadiness,
+              ...(takenAtCounter ? { takenAtCounter: true } : {}),
+            })),
+          })}
+          proofContext={{
+            csrf: "A".repeat(43),
+            storeReference: "01900000-0000-7000-8000-000000000004",
+          }}
+        />
+      </MemoryRouter>,
+    );
+    return html.slice(html.indexOf("<article"), html.indexOf("</article>"));
+  };
+  const counter = render("NotIssued", true);
+  expect(counter).toContain("Counter order");
+  // WP-2423 M21: one tap once the number is called; someone else collecting keeps the form.
+  expect(counter).toContain(">Called and handed over · Order ORD-1001</button>");
+  expect(counter).toContain(">Someone else is collecting</button>");
+  expect(counter).toContain('value="OrderNumberCalled"');
+  expect(counter).toContain("This order was taken at the counter, so no pickup code was sent.");
+  expect(counter).toContain("Order number called at the counter");
+  for (const text of ["Check pickup code", "No code sent", "check in person"])
+    expect(counter).not.toContain(text);
+  // A guest's QR pickup order keeps the code flow.
+  const guest = render("Ready", false);
+  expect(guest).not.toContain("Counter order");
+  expect(guest).not.toContain("Called and handed over");
+  expect(render("NotIssued", false)).toContain("No code sent · check in person");
+  // Only `true` is accepted from the server.
+  expect(() =>
+    parsePickupQueueView({
+      ...fixture,
+      items: fixture.items.map((item) => ({ ...item, takenAtCounter: false })),
+    }),
+  ).toThrow("PICKUP_VIEW_INVALID");
+});
+it("WP-2423: confirms a recorded handover in plain words on the queue", () => {
+  const html = renderToStaticMarkup(
+    <MemoryRouter>
+      <PickupQueueScreen view={parsePickupQueueView(pickupQueueFixture())} handedOver="9" />
+    </MemoryRouter>,
+  );
+  expect(html).toContain("Order 9 handed over.");
+  expect(html).not.toContain("refresh the queue");
+});
+
+it("WP-2423: offers closing as not collected only after the one-hour pickup hold", () => {
+  const fixture = pickupQueueFixture();
+  const render = (readyAt: string) => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <PickupQueueScreen
+          view={parsePickupQueueView({
+            ...fixture,
+            workstation: {
+              deviceReference: "01900000-0000-7000-8000-000000000008",
+              pickupLocationReference: "01900000-0000-7000-8000-000000000009",
+            },
+            items: fixture.items.map((item) => ({ ...item, proofReadiness: "Expired", readyAt })),
+          })}
+          proofContext={{
+            csrf: "A".repeat(43),
+            storeReference: "01900000-0000-7000-8000-000000000004",
+          }}
+        />
+      </MemoryRouter>,
+    );
+    return html.slice(html.indexOf("<article"), html.indexOf("</article>"));
+  };
+  expect(render("2026-08-12T14:00:00.000Z")).toContain("Mark not collected");
+  expect(render("2026-08-12T14:00:00.000Z")).toContain("not refunded automatically");
+  expect(render("2026-08-12T14:50:00.000Z")).not.toContain("Mark not collected");
+});
+it("IDR-0039: keeps the last pickups on a failed refresh, read-only with no handoff", () => {
+  const fixture = pickupQueueFixture();
+  const html = renderToStaticMarkup(
+    <MemoryRouter>
+      <PickupQueueScreen
+        view={parsePickupQueueView({
+          ...fixture,
+          workstation: {
+            deviceReference: "01900000-0000-7000-8000-000000000008",
+            pickupLocationReference: "01900000-0000-7000-8000-000000000009",
+          },
+          items: fixture.items.map((item) => ({ ...item, proofReadiness: "Expired" })),
+        })}
+        proofContext={{
+          csrf: "A".repeat(43),
+          storeReference: "01900000-0000-7000-8000-000000000004",
+        }}
+        stale={{ reason: "Offline", lastLoadedAt: "2026-08-12T15:12:30.000Z", attempts: 1 }}
+      />
+    </MemoryRouter>,
+  );
+  expect(html).toContain("ORD-1001");
+  expect(html).toContain("Offline — showing the last update from");
+  expect(html).toContain("Actions are paused until the connection returns.");
+  // The action stays on screen (an unknown result keeps its retry) but cannot be used.
+  expect(html).toContain('<button disabled="">Hand over after checking in person</button>');
+  expect(html).toContain("Paused until the connection returns.");
+});
+it("IDR-0039: the browser going offline turns the loaded queue read-only at once", () => {
+  const view = parsePickupQueueView(pickupQueueFixture());
+  const loadedAt = "2026-08-12T15:12:30.000Z";
+  const live = { key: "k", failures: 0, state: { kind: "Found" as const, view, loadedAt } };
+  const offline = pickupOfflineState(live);
+  expect(offline.failures).toBe(1);
+  expect(offline.state).toEqual({
+    kind: "Found",
+    view,
+    loadedAt,
+    stale: { reason: "Offline", lastLoadedAt: loadedAt, attempts: 1 },
+  });
+  // Already stale or nothing loaded: unchanged, the retry backoff keeps counting from reads.
+  expect(pickupOfflineState(offline)).toBe(offline);
+  const loading = { key: "k", failures: 0, state: { kind: "Loading" as const } };
+  expect(pickupOfflineState(loading)).toBe(loading);
+  expect(pickupRefreshIntervalMs).toBe(10_000);
+});
+
+it("WP-2423 item 10: a queue that never loaded keeps trying after a fault, not after a refusal", () => {
+  for (const kind of ["ServerProblem", "Unavailable", "Offline"] as const)
+    expect(pickupRetryAttempts({ kind }, 2)).toBe(2);
+  for (const kind of ["PermissionDenied", "NotFound"] as const)
+    expect(pickupRetryAttempts({ kind }, 2)).toBeNull();
+  expect(pickupRetryAttempts({ kind: "Loading" }, 2)).toBeNull();
+  const view = parsePickupQueueView(pickupQueueFixture());
+  const loadedAt = "2026-08-12T15:12:30.000Z";
+  expect(pickupRetryAttempts({ kind: "Found", view, loadedAt }, 0)).toBeNull();
+  const stale = { reason: "ServerProblem" as const, lastLoadedAt: loadedAt, attempts: 3 };
+  expect(pickupRetryAttempts({ kind: "Found", view, loadedAt, stale }, 3)).toBe(3);
+});
+
+it("WP-2423 Q26: tells staff to wait when the kitchen is remaking part of the order", () => {
+  const fixture = pickupQueueFixture();
+  const render = (remakeQuantity: number | undefined, phase = "Ready") =>
+    renderToStaticMarkup(
+      <MemoryRouter>
+        <PickupQueueScreen
+          view={parsePickupQueueView({
+            ...fixture,
+            items: fixture.items.map((item) => ({
+              ...item,
+              phase,
+              ...(remakeQuantity === undefined ? {} : { remakeQuantity }),
+            })),
+          })}
+        />
+      </MemoryRouter>,
+    );
+  expect(render(1)).toContain("Kitchen is remaking 1 item");
+  expect(render(2)).toContain("Kitchen is remaking 2 items");
+  expect(render(undefined)).not.toContain("remaking");
+  expect(render(1, "Completed")).not.toContain("remaking");
+  expect(() =>
+    parsePickupQueueView({
+      ...fixture,
+      items: fixture.items.map((item) => ({ ...item, remakeQuantity: 0 })),
+    }),
+  ).toThrow();
+});
+
+it("WP-2423 Q26: long waits read in hours or days and earlier days' orders are set apart", async () => {
+  const { pickupWaitText, fromEarlierDay } = await import("./PickupPages.js");
+  expect([
+    pickupWaitText(20),
+    pickupWaitText(185),
+    pickupWaitText(120),
+    pickupWaitText(7766),
+  ]).toEqual(["20 min", "3 h 5 min", "2 h", "5 days"]);
+  const fixture = pickupQueueFixture();
+  const today = { ...fixture.items[0], businessDate: "2026-08-12" };
+  const earlier = {
+    ...fixture.items[0],
+    fulfillmentReference: "018f0f58-767a-7f3b-a1d0-000000000511",
+    orderReference: "018f0f58-767a-7f3b-a1d0-000000000512",
+    readyAt: "2026-08-07T15:00:00.000Z",
+    businessDate: "2026-08-07",
+  };
+  const parsedEarlier = parsePickupQueueView({ ...fixture, items: [earlier] }).items[0];
+  if (!parsedEarlier) throw new Error("fixture");
+  expect(fromEarlierDay(parsedEarlier, "2026-08-12")).toBe(true);
+  const html = renderToStaticMarkup(
+    <StoreBusinessDayContext.Provider
+      value={{ businessDate: "2026-08-12", startsAt: null, endsAt: null }}
+    >
+      <MemoryRouter>
+        <PickupQueueScreen view={parsePickupQueueView({ ...fixture, items: [today, earlier] })} />
+      </MemoryRouter>
+    </StoreBusinessDayContext.Provider>,
+  );
+  expect(html).toContain("From earlier days — check and close");
+  expect(html).toContain("From Fri, Aug 7");
+  expect(html).toContain("Ready for 5 days");
+  expect(html.indexOf("Ready for 20 min")).toBeLessThan(html.indexOf("From earlier days"));
+});
+it("WP-2423 UI refresh: the card lists what is in the bag and the page counts what waits", () => {
+  const fixture = pickupQueueFixture();
+  const html = renderToStaticMarkup(
+    <MemoryRouter>
+      <PickupQueueScreen
+        view={parsePickupQueueView({
+          ...fixture,
+          items: fixture.items.map((item) => ({
+            ...item,
+            execution: {
+              aggregateVersion: "3",
+              publicOrderReference: null,
+              proof: { kind: "HumanCode", generation: 1, expiresAt: "2026-08-12T16:00:00.000Z" },
+              items: [
+                {
+                  fulfillmentItemReference: "01900000-0000-7000-8000-000000000003",
+                  orderedQuantity: 2,
+                  readyQuantity: 2,
+                  handedOverQuantity: 0,
+                  name: "Latte",
+                  options: [{ name: "Oat milk", quantity: 1 }],
+                },
+              ],
+            },
+          })),
+        })}
+      />
+    </MemoryRouter>,
+  );
+  expect(html).toContain('aria-label="Items in order ORD-1001"');
+  expect(html).toContain("2 × Latte (Oat milk)");
+  expect(html).toContain("1 order waiting");
+  // One page only: no page buttons to press.
+  expect(html).not.toContain("Next page");
+});
+it("WP-2423 UI refresh: an empty queue and a filtered-out page read differently", () => {
+  const empty = renderToStaticMarkup(
+    <MemoryRouter>
+      <PickupQueueScreen view={parsePickupQueueView({ ...pickupQueueFixture(), items: [] })} />
+    </MemoryRouter>,
+  );
+  expect(empty).toContain("No pickups waiting");
+  expect(empty).not.toContain("No matching pickups");
+  expect(empty).not.toContain("order waiting");
+});
+it("Owner 2026-11-03: the same dish made the same way is one line; a different one stays apart", () => {
+  const line = (reference: string, name: string, option?: string) => ({
+    fulfillmentItemReference: reference,
+    orderedQuantity: 1,
+    readyQuantity: 1,
+    handedOverQuantity: 0,
+    name,
+    ...(option ? { options: [{ name: option, quantity: 1 }] } : {}),
+  });
+  expect(
+    mergedPickupLines([line("a", "Noodles"), line("b", "Noodles"), line("c", "Noodles", "Spicy")]),
+  ).toEqual([
+    { key: "a", quantity: 2, refunded: 0, label: "Noodles" },
+    { key: "c", quantity: 1, refunded: 0, label: "Noodles (Spicy)" },
+  ]);
+});
+it("WP-2423 M10: a refunded dish is left out of the bag and the line says so", () => {
+  expect(
+    mergedPickupLines([
+      {
+        fulfillmentItemReference: "a",
+        orderedQuantity: 2,
+        readyQuantity: 2,
+        handedOverQuantity: 0,
+        refundedQuantity: 1,
+        name: "Fries",
+      },
+    ]),
+  ).toEqual([{ key: "a", quantity: 1, refunded: 1, label: "Fries" }]);
+});
+it("Owner 2026-11-03: a card shows no empty facts and no second status", () => {
+  const html = renderToStaticMarkup(
+    <MemoryRouter>
+      <PickupQueueScreen
+        view={parsePickupQueueView({
+          ...pickupQueueFixture(),
+          items: pickupQueueFixture().items.map((item) => ({
+            ...item,
+            stagingLocation: null,
+            packageCount: null,
+          })),
+        })}
+      />
+    </MemoryRouter>,
+  );
+  for (const value of ["Not set", "No cue", "pickup-queue__status", "e.g. 16"])
+    expect(html).not.toContain(value);
+});
+it("v15 2026-11-03: an earlier day's handed-over order is not one to check and close", () => {
+  const fixture = pickupQueueFixture();
+  const [base] = fixture.items;
+  const html = renderToStaticMarkup(
+    <StoreBusinessDayContext.Provider
+      value={{ businessDate: "2026-08-12", startsAt: null, endsAt: null }}
+    >
+      <MemoryRouter>
+        <PickupQueueScreen
+          includeCompleted
+          view={parsePickupQueueView({
+            ...fixture,
+            items: [{ ...base, phase: "Completed", businessDate: "2026-08-07" }],
+          })}
+        />
+      </MemoryRouter>
+    </StoreBusinessDayContext.Provider>,
+  );
+  expect(html).not.toContain("From earlier days");
+  expect(html).toContain("From Fri, Aug 7");
+  expect(html).toContain("Handed over");
+  expect(html).toContain("No orders waiting today · 1 handed over");
+  // Handed over: no code left to check.
+  expect(html).not.toContain("Pickup code");
+});
+
+it("WP-2423 M121: ?order=3 finds order 3 only, never 13 or 30", () => {
+  const fixture = pickupQueueFixture();
+  const base = fixture.items[0];
+  if (base === undefined) throw new Error("fixture");
+  const view = parsePickupQueueView({
+    ...fixture,
+    items: ["3", "13", "30"].map((number, index) => ({
+      ...base,
+      fulfillmentReference: base.fulfillmentReference.slice(0, -1) + String(index + 1),
+      orderReference: base.orderReference.slice(0, -1) + String(index + 5),
+      publicOrderNumber: number,
+    })),
+  });
+  const host = globalThis as { location?: { search?: string } | undefined };
+  const previous = host.location;
+  host.location = { search: "?order=3" };
+  try {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <PickupQueueScreen view={view} />
+      </MemoryRouter>,
+    );
+    const shown = html
+      .split("<article ")
+      .slice(1)
+      .filter((card) => !/^[^>]*hidden/u.test(card))
+      .map((card) => /pickup-queue__number-value">([^<]*)</u.exec(card)?.[1]);
+    expect(shown).toEqual(["3"]);
+  } finally {
+    host.location = previous;
+  }
 });

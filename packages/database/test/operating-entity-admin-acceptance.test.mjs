@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { it } from "vitest";
+import { createPostgresReceiptIssuerSource } from "../../bop/operating-entity/src/index.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 
 const { Client } = pg;
@@ -149,10 +150,97 @@ async function prove(context) {
       0,
     );
     await admin.query("RESET ROLE");
+    await admin.query(
+      "GRANT SELECT ON bop_operating_entity.operating_entity, " +
+        "bop_operating_entity.store_operating_entity_assignment, " +
+        "bop_operating_entity.brand_operating_entity_assignment TO " +
+        role,
+    );
+    await admin.query(
+      "GRANT UPDATE(version) ON bop_operating_entity.operating_entity, " +
+        "bop_operating_entity.store_operating_entity_assignment TO " +
+        role,
+    );
+    const source = (storeReference = id(2), allowed = true) =>
+      createPostgresReceiptIssuerSource({
+        brandReference: id(1),
+        storeReference,
+        authorize: async (_tx, request) =>
+          allowed && request.businessFunction === "SalesReceiptIssuer",
+      });
+    const transaction = { query: (sql, values) => admin.query(sql, [...values]) };
+    const resolve = async (effectiveAt = at, storeReference = id(2), allowed = true) => {
+      await admin.query("BEGIN");
+      try {
+        await admin.query("SET LOCAL ROLE " + role);
+        return await source(storeReference, allowed).resolve({ transaction, effectiveAt });
+      } finally {
+        await admin.query("ROLLBACK");
+      }
+    };
+    const originalIssuer = await resolve();
+    assert.deepEqual(originalIssuer, {
+      brandReference: id(1),
+      storeReference: id(2),
+      businessFunction: "SalesReceiptIssuer",
+      effectiveAt: at,
+      assignmentReference: id(21),
+      assignmentVersion: 1,
+      operatingEntityReference: id(10),
+      entityVersion: 1,
+      legalName: "Synthetic Ontario Incorporated",
+    });
+    assert.equal(await resolve(at, id(99)), null);
+    assert.equal(await resolve("2026-08-15T12:59:59.999Z"), null);
+    await assert.rejects(resolve(at, id(2), false), { code: "RECEIPT_ISSUER_PERMISSION_DENIED" });
+    // The caller keeps the read transaction open until receipt append. Entity edits must wait.
+    const editor = new Client(context.clientConfig);
+    await editor.connect();
+    await admin.query("BEGIN");
+    try {
+      await admin.query("SET LOCAL ROLE " + role);
+      assert.ok(await source().resolve({ transaction, effectiveAt: at }));
+      await editor.query("BEGIN");
+      await editor.query("SET LOCAL lock_timeout='100ms'");
+      await assert.rejects(
+        editor.query(
+          "UPDATE bop_operating_entity.operating_entity SET version=2,updated_at=$1 WHERE operating_entity_id=$2",
+          [later, id(10)],
+        ),
+        (error) => error.code === "55P03",
+      );
+    } finally {
+      await editor.query("ROLLBACK");
+      await editor.end();
+      await admin.query("ROLLBACK");
+    }
+    await admin.query(
+      "UPDATE bop_operating_entity.operating_entity SET lifecycle='Suspended',version=2,updated_at=$1 WHERE operating_entity_id=$2",
+      [later, id(10)],
+    );
+    assert.equal(await resolve(later), null);
+    await admin.query(
+      "UPDATE bop_operating_entity.operating_entity SET lifecycle='Active',legal_name='Synthetic updated issuer',version=3,updated_at=$1 WHERE operating_entity_id=$2",
+      [later, id(10)],
+    );
+    assert.equal(await resolve(at), null); // A current row cannot reconstruct older issuer facts.
+    assert.equal((await resolve(later)).entityVersion, 3);
+    assert.equal((await resolve(later)).legalName, "Synthetic updated issuer");
+    assert.equal(originalIssuer.legalName, "Synthetic Ontario Incorporated");
+    await admin.query(
+      "UPDATE bop_operating_entity.store_operating_entity_assignment SET effective_until=$1,version=2,updated_at=$1 WHERE assignment_id=$2",
+      [later, id(21)],
+    );
+    assert.equal(await resolve(later), null); // End of the interval is exclusive.
   } finally {
-    await admin.query("RESET ROLE").catch(() => undefined);
-    await admin.query(`DROP ROLE IF EXISTS ${role}`).catch(() => undefined);
-    await admin.end();
+    try {
+      await admin.query("ROLLBACK");
+      await admin.query("RESET ROLE");
+      await admin.query("DROP OWNED BY " + role);
+      await admin.query("DROP ROLE " + role);
+    } finally {
+      await admin.end();
+    }
   }
 }
 

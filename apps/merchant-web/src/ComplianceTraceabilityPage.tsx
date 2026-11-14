@@ -1,4 +1,5 @@
 import { StatePanel } from "@bop-rms/ui";
+import { SourceTime } from "./StoreTime.js";
 import { useEffect, useState } from "react";
 import {
   ComplianceTraceabilityPageError,
@@ -49,7 +50,8 @@ export function ComplianceTraceability({ view }: { readonly view: ComplianceTrac
           <p className="bop-eyebrow">TRACE-EXPLORER · Restricted Food Safety</p>
           <h1>Forward / Backward Traceability</h1>
           <p>
-            Source as of {view.sourceAsOf} · {view.completeness} · {view.freshness}
+            Source as of <SourceTime instant={view.sourceAsOf} /> · {view.completeness} ·{" "}
+            {view.freshness}
           </p>
         </div>
       </header>

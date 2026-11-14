@@ -17,6 +17,11 @@ export interface OidcCodeExchangeRequest {
   readonly code: string;
   readonly nonce: string;
   readonly codeVerifier: string;
+  /**
+   * WP-2423 DEC-COGNITO-STORE-STAFF: when this sign-in's authorization was started. A provider
+   * that forces a fresh sign-in (prompt=login) refuses an authentication dated before it.
+   */
+  readonly authorizationStartedAt?: string;
 }
 
 export interface OidcCodeExchangeResult {

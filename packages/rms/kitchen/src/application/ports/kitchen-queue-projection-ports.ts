@@ -52,6 +52,15 @@ export type KitchenQueueListRead =
       readonly rows: unknown;
       readonly returnedCount: unknown;
       readonly hasMore: unknown;
+    }
+  | {
+      /** A later page of a Retired generation the cursor is pinned to, with when it was superseded. */
+      readonly status: "Continued";
+      readonly generation: unknown;
+      readonly rows: unknown;
+      readonly returnedCount: unknown;
+      readonly hasMore: unknown;
+      readonly supersededAt: unknown;
     };
 
 export type KitchenQueueGetRead =

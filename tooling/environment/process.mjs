@@ -15,24 +15,31 @@ function inspectMacProcess(pid, includeEnvironment = false) {
   ).trim();
 }
 
-export function processMatches(pid, root, script, argument) {
+/**
+ * `nodeOptions`: the interpreter options the process was started with before its script (e.g. a
+ * loader `--import <file>`), matched exactly in that order.
+ */
+export function processMatches(pid, root, script, argument, nodeOptions = []) {
   if (!validPid(pid)) return false;
   try {
     const scripts = [script, path.join(root, script)];
     const interpreters = [process.execPath, "node"];
     if (process.platform === "linux") {
       const args = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0");
+      const k = nodeOptions.length;
       return (
         interpreters.includes(args[0]) &&
-        scripts.includes(args[1]) &&
-        (argument === undefined || args[2] === argument)
+        nodeOptions.every((option, index) => args[1 + index] === option) &&
+        scripts.includes(args[1 + k]) &&
+        (argument === undefined || args[2 + k] === argument)
       );
     }
     if (process.platform !== "darwin") return false;
     const command = inspectMacProcess(pid);
     return interpreters.some((interpreter) =>
       scripts.some((candidate) => {
-        const prefix = `${interpreter} ${candidate}${argument === undefined ? "" : ` ${argument}`}`;
+        const options = nodeOptions.length === 0 ? "" : `${nodeOptions.join(" ")} `;
+        const prefix = `${interpreter} ${options}${candidate}${argument === undefined ? "" : ` ${argument}`}`;
         return command === prefix || command.startsWith(`${prefix} `);
       }),
     );

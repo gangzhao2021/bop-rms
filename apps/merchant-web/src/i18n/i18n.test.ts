@@ -1,0 +1,238 @@
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
+import ts from "typescript";
+import { afterEach, expect, it } from "vitest";
+import {
+  countOf,
+  displayLocale,
+  initialLanguage,
+  listSeparator,
+  saidTable,
+  setLanguageForTest,
+  t,
+  withContentLocale,
+  withNameLocale,
+} from "./i18n.js";
+import { zhHans } from "./zh-Hans.js";
+import { GROUP_LABELS } from "../WorkspaceLayout.js";
+import {
+  brandRoleTemplateProfiles,
+  storePermissionCatalog,
+  storeRoleTemplateProfiles,
+} from "../../../../packages/bop/permission/src/catalog/store-permission-catalog.js";
+import {
+  permissionGroupLabels,
+  permissionWarning,
+} from "../../../../packages/bop/permission/src/catalog/permission-staff-wording.js";
+import {
+  starterRole,
+  starterRoleKeys,
+} from "../../../../packages/bop/permission/src/catalog/starter-role-sets.js";
+
+afterEach(() => setLanguageForTest("en"));
+
+const root = join(import.meta.dirname, "..");
+function sources(dir: string): string[] {
+  return readdirSync(dir).flatMap((name) => {
+    const path = join(dir, name);
+    if (statSync(path).isDirectory()) return sources(path);
+    return /\.(ts|tsx)$/u.test(name) && !/\.test\.|\.fixture\./u.test(name) ? [path] : [];
+  });
+}
+const parse = (file: string) =>
+  ts.createSourceFile(
+    file,
+    readFileSync(file, "utf8"),
+    ts.ScriptTarget.Latest,
+    true,
+    file.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+  );
+/** Texts the staff screens show through `t()` but compute at run time (from a fixed list). */
+const DYNAMIC = ["WorkspaceLayout.tsx"];
+
+function translatedTexts() {
+  const keys = new Set<string>();
+  const dynamic: string[] = [];
+  for (const file of sources(root)) {
+    if (file.includes(join("src", "i18n"))) continue;
+    const source = parse(file);
+    const visit = (node: ts.Node): void => {
+      if (ts.isCallExpression(node) && node.expression.getText(source) === "t") {
+        const text = node.arguments[0];
+        if (text && (ts.isStringLiteral(text) || ts.isNoSubstitutionTemplateLiteral(text)))
+          keys.add(text.text);
+        else if (!DYNAMIC.some((name) => file.endsWith(name)))
+          dynamic.push(`${file}:${source.getLineAndCharacterOfPosition(node.pos).line}`);
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(source);
+  }
+  return { keys, dynamic };
+}
+
+it("Owner 2026-10-24: every staff text has its Simplified Chinese wording, with the same values", () => {
+  const { keys, dynamic } = translatedTexts();
+  expect(keys.size).toBeGreaterThan(3500);
+  // A text built at run time could never be found in the dictionary.
+  expect(dynamic).toEqual([]);
+  // The workspace navigation: group headings here, screen labels from the pilot server.
+  const navigation = readFileSync(
+    join(root, "../../../tooling/environment/pilot-merchant.mjs"),
+    "utf8",
+  );
+  for (const match of navigation.matchAll(/label: "([^"]+)"/gu)) keys.add(match[1] as string);
+  for (const label of Object.values(GROUP_LABELS)) keys.add(label);
+  // Built-in role names and descriptions and permission descriptions the server sends.
+  for (const entry of storePermissionCatalog()) {
+    keys.add(entry.description);
+    // WP-2423 role presets: the permission's group and its warning in staff words.
+    const warning = permissionWarning(entry.code);
+    if (warning !== null) keys.add(warning);
+  }
+  for (const label of Object.values(permissionGroupLabels)) keys.add(label);
+  keys.add("Other");
+  for (const profile of [
+    ...Object.values(storeRoleTemplateProfiles),
+    ...Object.values(brandRoleTemplateProfiles),
+  ]) {
+    keys.add(profile.displayName);
+    keys.add(profile.description);
+  }
+  const missing = [...keys].filter((key) => !Object.hasOwn(zhHans, key));
+  expect(missing).toEqual([]);
+  const placeholders = (text: string) => new Set(text.match(/\{[A-Za-z][A-Za-z0-9]*\}/gu) ?? []);
+  for (const [english, chinese] of Object.entries(zhHans)) {
+    const allowed = placeholders(english);
+    for (const name of placeholders(chinese))
+      expect(allowed.has(name), `${english} → ${name}`).toBe(true);
+    expect(chinese.trim(), english).not.toBe("");
+  }
+});
+
+it("shows each starter role under the Chinese name the server checks names against", () => {
+  // WP-2423: the server refuses a second role under a name staff would read alike, by these names.
+  for (const key of starterRoleKeys) {
+    const role = starterRole(key);
+    expect(zhHans[role.displayName], role.displayName).toBe(role.shownNames["zh-Hans"]);
+    expect(zhHans[role.description], role.description).toBeTruthy();
+  }
+});
+
+it("leaves no plain English text in a translated screen", () => {
+  const untranslated: string[] = [];
+  for (const file of sources(root)) {
+    const text = readFileSync(file, "utf8");
+    if (!/from "\.{1,2}\/(?:\.\.\/)*i18n\/i18n\.js"/u.test(text)) continue;
+    const source = parse(file);
+    const visit = (node: ts.Node): void => {
+      if (ts.isJsxText(node) && /[A-Za-z]{2,}/u.test(node.text) && node.text.trim() !== "BOP")
+        untranslated.push(`${file}: ${node.text.trim().slice(0, 60)}`);
+      ts.forEachChild(node, visit);
+    };
+    visit(source);
+  }
+  expect(untranslated).toEqual([]);
+});
+
+it("chooses Chinese for a device that prefers Chinese, and writes Chinese while chosen", () => {
+  expect(initialLanguage(["zh-CN", "en"])).toBe("zh-Hans");
+  expect(initialLanguage(["en-CA", "zh-CN"])).toBe("en");
+  expect(initialLanguage([])).toBe("en");
+  expect(t("Orders")).toBe("Orders");
+  expect(countOf(3, "order")).toBe("3 orders");
+  expect(countOf(1, "order")).toBe("1 order");
+  expect(withNameLocale("/merchant/orders")).toBe("/merchant/orders");
+  expect(displayLocale()).toBe("en-US");
+  setLanguageForTest("zh-Hans");
+  expect(t("Orders")).toBe("订单");
+  expect(t("Order {orderNumber}", { orderNumber: "12" })).toBe("订单 12");
+  expect(countOf(3, "order")).toBe("3 笔订单");
+  expect(listSeparator()).toBe("、");
+  expect(displayLocale()).toBe("zh-CN");
+  expect(withNameLocale("/merchant/orders?page=2")).toBe(
+    "/merchant/orders?page=2&locale=zh-Hans-CA",
+  );
+});
+
+it("asks /merchant reads for Store content in Chinese only while Chinese is chosen", async () => {
+  const seen: (string | null)[] = [];
+  const fetcher = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    seen.push(new Headers(init?.headers).get("x-bop-content-locale"));
+    return new Response("{}");
+  }) as typeof fetch;
+  const origin = () => "https://pilot.example/operations/orders";
+  const wrapped = withContentLocale(fetcher, origin);
+  await wrapped("/merchant/orders", { headers: { accept: "application/json" } });
+  setLanguageForTest("zh-Hans");
+  await wrapped("/merchant/orders", { headers: { accept: "application/json" } });
+  await wrapped("https://elsewhere.example/merchant/orders");
+  await wrapped("/api/v1/other");
+  expect(seen).toEqual([null, "zh-Hans-CA", null, null]);
+});
+
+// v15 2026-11-01: a table an owner named "Table 1 (TEST)" read "Table Table 1 (TEST)".
+it("says a table's own name as written, and the word Table only with a number or code", () => {
+  for (const [label, english, chinese] of [
+    ["12", "Table 12", "12 号桌"],
+    ["A1", "Table A1", "A1 号桌"],
+    ["DEMO-01", "Table DEMO-01", "DEMO-01 号桌"],
+    ["Table 1 (TEST)", "Table 1 (TEST)", "Table 1 (TEST)"],
+    ["Table 1", "Table 1", "Table 1"],
+    ["Patio 3", "Patio 3", "Patio 3"],
+    ["靠窗 3 号", "靠窗 3 号", "靠窗 3 号"],
+  ] as const) {
+    setLanguageForTest("en");
+    expect(t("Table {table}", { table: saidTable(label) })).toBe(english);
+    setLanguageForTest("zh-Hans");
+    expect(t("Table {table}", { table: saidTable(label) })).toBe(chinese);
+    expect(t("Table {tableLabel}", { tableLabel: saidTable("Patio 3") })).toBe("Patio 3");
+  }
+  setLanguageForTest("en");
+});
+
+it("WP-2423 M122: no Chinese sentence is pieced together around a counted English fragment", () => {
+  // "更早的 1 项{value}" read "项项更改"; "{length} 项{value}" put English inside Chinese.
+  const pieced = Object.entries(zhHans).filter(([, value]) => /(?<!选)项\{value\}/u.test(value));
+  expect(pieced).toEqual([]);
+  // Chinese text ends with Chinese punctuation, never an English full stop.
+  const englishStop = Object.entries(zhHans).filter(([, value]) =>
+    /[\u4e00-\u9fff]\.$/u.test(value),
+  );
+  expect(englishStop).toEqual([]);
+});
+
+it("v15 b12: a table's own name or a number filled into Chinese text is set off by spaces", () => {
+  setLanguageForTest("zh-Hans");
+  const table = t("Table {tableLabel}", { tableLabel: saidTable("B10 SRS Q (TEST)") });
+  expect(
+    t("Take order for table {stableLabel}", { stableLabel: saidTable("B10 SRS Q (TEST)") }),
+  ).toBe("为 B10 SRS Q (TEST) 点单");
+  expect(
+    t(
+      "The guests this order was taken for have left {value}, and the table has been cleared or seated again. Nothing was sent or charged. Check the order with the guests at the table now before sending it for them, or start over.",
+      { value: table },
+    ),
+  ).toMatch(/^这张单点菜时的那桌客人已经离开 B10 SRS Q \(TEST\)，/u);
+  expect(
+    t(
+      "{rounds} entered by staff are waiting for their card-machine payment. Record them by {at}; the kitchen starts once they are recorded.",
+      { rounds: countOf(5, "round"), at: "18:30" },
+    ),
+  ).toMatch(/^员工录入的 5 轮正在等待/u);
+  // A number next to a Chinese word, a table numbered as usual, and English untouched.
+  expect(t("Table {tableLabel}", { tableLabel: saidTable("12") })).toBe("桌台 12");
+  setLanguageForTest("en");
+  expect(
+    t("Take order for table {stableLabel}", { stableLabel: saidTable("B10 SRS Q (TEST)") }),
+  ).toBe("Take order for B10 SRS Q (TEST)");
+});
+
+it("b13: Home's tables to close reads as one Chinese phrase, with no stray space", () => {
+  // v15 b12 live: "5 张桌台 已上桌 — 顾客离开后关台" (the English template's space carried over).
+  setLanguageForTest("zh-Hans");
+  expect(
+    t("{toClose} served — close when the guests have left", { toClose: countOf(5, "table") }),
+  ).toBe("5 张桌台已上完菜，顾客离开后关台");
+  setLanguageForTest("en");
+});

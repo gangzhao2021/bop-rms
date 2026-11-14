@@ -9,6 +9,7 @@ import {
   type CartAggregate,
   type OrderingInstant,
   type OrderingReference,
+  isGuestCartChannel,
 } from "../domain/cart.js";
 import { expireCartLifecycle, terminateCartLifecycle } from "../domain/cart-lifecycle.js";
 import type {
@@ -92,7 +93,7 @@ function guestForCart(
       parseOrderingReference(session.brandReference) !== cart.brandReference ||
       parseOrderingReference(session.storeReference) !== cart.storeReference ||
       session.channel !== cart.orderType ||
-      !["Qr", "Web"].includes(cart.sourceChannel) ||
+      !isGuestCartChannel(cart.orderType, cart.sourceChannel) ||
       (cart.orderType === "Pickup" &&
         (sessionReference !== cart.createdByActorReference ||
           session.diningState !== "ContextOnly" ||
@@ -170,6 +171,7 @@ function parseRecord(value: CartLifecycleOperationRecord): CartLifecycleOperatio
       !["Abandon", "Expire"].includes(String(raw.action)) ||
       parseOrderingReference(raw.cartReference) !== result.cartReference ||
       Date.parse(expiresAt) !== Date.parse(occurredAt) + dayMilliseconds ||
+      result.updatedAt !== occurredAt ||
       result.lifecycle === null ||
       (raw.action === "Abandon" && result.lifecycle.status !== "Abandoned") ||
       (raw.action === "Expire" && result.lifecycle.status !== "Expired")
@@ -209,15 +211,25 @@ async function execute(
   const expectedAggregateVersion = version(raw.expectedAggregateVersion);
   const operationReference = parseOrderingReference(raw.operationReference);
   const observedAt = parseOrderingInstant(raw[timeField]);
-  const intent = parseOrderingHash(
-    ports.references.hashIntent(
-      `${action}:${JSON.stringify({ cartReference, expectedAggregateVersion, operationReference, observedAt })}`,
-    ),
-  );
+  const intentAt = (observedAt: OrderingInstant) =>
+    parseOrderingHash(
+      ports.references.hashIntent(
+        `${action}:${JSON.stringify({ cartReference, expectedAggregateVersion, operationReference, observedAt })}`,
+      ),
+    );
+  const intent = intentAt(observedAt);
   const authorization = await ports.authorization
     .authorize({ action, cartReference, operationReference, observedAt })
     .catch(failure);
-  if (authorization === null) throw new CartError("CART_PERMISSION_DENIED");
+  if (authorization === null || (action === "Abandon") !== (authorization.guestSession !== null))
+    throw new CartError("CART_PERMISSION_DENIED");
+  if (authorization.guestSession !== null) {
+    try {
+      assertGuestSessionUsable(createGuestSession(authorization.guestSession), observedAt);
+    } catch {
+      throw new CartError("CART_PERMISSION_DENIED");
+    }
+  }
   const prior = await ports.repository.resolveOperation(operationReference).catch(failure);
   if (prior !== null) {
     const record = parseRecord(prior);
@@ -228,11 +240,12 @@ async function execute(
             guestForCart(authorization.guestSession, record.result, observedAt).sessionReference,
           );
     if (
+      record.operationReference !== operationReference ||
       record.action !== action ||
       record.cartReference !== cartReference ||
       record.result.aggregateVersion !== expectedAggregateVersion + 1 ||
       record.guestSessionReference !== sessionReference ||
-      !ports.references.equals(record.operationIntentHash, intent) ||
+      !ports.references.equals(record.operationIntentHash, intentAt(record.occurredAt)) ||
       Date.parse(observedAt) >= Date.parse(record.expiresAt)
     )
       throw new CartError("CART_IDEMPOTENCY_CONFLICT");
@@ -244,8 +257,7 @@ async function execute(
   const loaded = await ports.repository.load(cartReference).catch(failure);
   if (loaded === null) throw new CartError("CART_UNAVAILABLE");
   const cart = parseCartAggregate(loaded);
-  if (cart.aggregateVersion !== expectedAggregateVersion)
-    throw new CartError("CART_VERSION_CONFLICT");
+  if (cart.cartReference !== cartReference) throw new CartError("CART_UNAVAILABLE");
   let guestSessionReference: OrderingReference | null = null;
   if (action === "Abandon") {
     if (authorization.guestSession === null) throw new CartError("CART_PERMISSION_DENIED");
@@ -256,6 +268,8 @@ async function execute(
     throw new CartError("CART_PERMISSION_DENIED");
   }
   const auditRecord = audit(authorization.audit, action, cart, observedAt);
+  if (cart.aggregateVersion !== expectedAggregateVersion)
+    throw new CartError("CART_VERSION_CONFLICT");
   const lifecycle =
     action === "Abandon"
       ? terminateCartLifecycle(cart.lifecycle, { status: "Abandoned", terminalAt: observedAt })
@@ -280,11 +294,36 @@ async function execute(
     .commit({ record, expectedAggregateVersion, audit: auditRecord })
     .catch(failure);
   const verified = parseRecord(saved);
+  // A concurrent same-key request may have committed at a different observation time.
+  // Reconstruct the one permitted transition from the source Cart at the winner's time.
+  let canonicalResult: CartAggregate;
+  try {
+    if (Date.parse(verified.occurredAt) < Date.parse(cart.updatedAt))
+      throw new Error("invalid transition time");
+    canonicalResult = parseCartAggregate({
+      ...cart,
+      aggregateVersion: expectedAggregateVersion + 1,
+      updatedAt: verified.occurredAt,
+      lifecycle:
+        action === "Abandon"
+          ? terminateCartLifecycle(cart.lifecycle, {
+              status: "Abandoned",
+              terminalAt: verified.occurredAt,
+            })
+          : expireCartLifecycle(cart.lifecycle, verified.occurredAt),
+    });
+  } catch {
+    throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
+  }
   if (
+    verified.action !== action ||
+    verified.guestSessionReference !== guestSessionReference ||
+    Date.parse(observedAt) >= Date.parse(verified.expiresAt) ||
+    JSON.stringify(verified.result) !== JSON.stringify(canonicalResult) ||
     verified.operationReference !== operationReference ||
     verified.cartReference !== cartReference ||
     verified.result.aggregateVersion !== result.aggregateVersion ||
-    !ports.references.equals(verified.operationIntentHash, intent)
+    !ports.references.equals(verified.operationIntentHash, intentAt(verified.occurredAt))
   )
     throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
   return Object.freeze({ status: "Applied" as const, aggregate: verified.result });

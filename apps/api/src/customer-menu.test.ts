@@ -3,7 +3,13 @@ import type { AddressInfo } from "node:net";
 import type { CustomerMenuQueryInput, CustomerMenuQueryResult } from "@rms/catalog";
 import { afterEach, describe, expect, it } from "vitest";
 import { createApp } from "./app.js";
-import { CustomerMenuHandler, type CustomerMenuPort } from "./customer-menu.js";
+import {
+  CustomerMenuHandler,
+  createSharedCustomerMenuPort,
+  customerMenuShareLimit,
+  customerMenuReuseMs,
+  type CustomerMenuPort,
+} from "./customer-menu.js";
 
 const STORE_REFERENCE = "018f7500-0000-7000-8000-000000000001";
 const MENU_REFERENCE = "018f7500-0000-7000-8000-000000000002";
@@ -68,6 +74,7 @@ function found(): CustomerMenuQueryResult {
               availability: "Available",
               optionRules: [
                 {
+                  name: "Milk",
                   bindingReference: "018f7500-0000-7000-8000-00000000000b" as never,
                   optionSetVersionReference: "018f7500-0000-7000-8000-00000000000c" as never,
                   minimumSelections: 0,
@@ -115,6 +122,8 @@ function found(): CustomerMenuQueryResult {
                 taxInclusive: null,
                 reason: "FINAL_QUOTE_REQUIRED",
               },
+              description: null,
+              photo: null,
             },
           ],
         },
@@ -223,11 +232,270 @@ describe("WP-1026 Customer Menu REST API", () => {
     expect(JSON.stringify(await malformed.json())).not.toContain("raw-secret");
   });
 
+  it("serializes the published description and photo sizes (WP-2423)", async () => {
+    const catalog = new MutablePort();
+    const value = found();
+    if (value.status !== "Found") throw new Error("fixture");
+    const sellable = value.menu.sections[0]?.sellables[0];
+    if (sellable === undefined) throw new Error("fixture");
+    const rendition = {
+      url: "/media/images/" + "b".repeat(64) + ".webp",
+      contentType: "image/webp" as const,
+      width: 640,
+      height: 480,
+    };
+    catalog.result = {
+      ...value,
+      menu: {
+        ...value.menu,
+        sections: [
+          {
+            ...value.menu.sections[0],
+            sellables: [
+              {
+                ...sellable,
+                description: "Espresso with steamed milk.",
+                photo: {
+                  altText: "Latte in a white cup",
+                  width: 1280,
+                  height: 960,
+                  renditions: [{ ...rendition, internalObjectKey: "raw-key" }],
+                },
+              },
+            ],
+          },
+        ],
+      },
+    };
+    const response = await fetch(url(await listen(catalog)));
+    const body = (await response.json()) as {
+      menu: { sections: { sellables: Record<string, unknown>[] }[] };
+    };
+    expect(body.menu.sections[0]?.sellables[0]).toMatchObject({
+      description: "Espresso with steamed milk.",
+      photo: { altText: "Latte in a white cup", width: 1280, height: 960, renditions: [rendition] },
+    });
+    expect(JSON.stringify(body)).not.toContain("raw-key");
+  });
+
+  it("WP-2423 item 12: passes on what each combo dish declares", async () => {
+    const catalog = new MutablePort();
+    const value = found();
+    if (value.status !== "Found") throw new Error("fixture");
+    const sellable = value.menu.sections[0]?.sellables[0];
+    if (sellable === undefined) throw new Error("fixture");
+    const byOption = {
+      "018f7500-0000-7000-8000-00000000000b": [
+        { code: "MILK" as never, classification: "Contains" as const },
+      ],
+    };
+    catalog.result = {
+      ...value,
+      menu: {
+        ...value.menu,
+        sections: [
+          {
+            ...value.menu.sections[0],
+            sellables: [
+              {
+                ...sellable,
+                allergenDisclosure: { ...sellable.allergenDisclosure, byOption },
+              },
+            ],
+          },
+        ],
+      },
+    };
+    const response = await fetch(url(await listen(catalog)));
+    const body = (await response.json()) as {
+      menu: { sections: { sellables: { allergenDisclosure: unknown }[] }[] };
+    };
+    expect(body.menu.sections[0]?.sellables[0]?.allergenDisclosure).toMatchObject({ byOption });
+  });
+
+  it("WP-2423 (M77, M167): passes on that a recipe changed the dish's allergens since the listing", async () => {
+    const catalog = new MutablePort();
+    const value = found();
+    if (value.status !== "Found") throw new Error("fixture");
+    const sellable = value.menu.sections[0]?.sellables[0];
+    if (sellable === undefined) throw new Error("fixture");
+    catalog.result = {
+      ...value,
+      menu: {
+        ...value.menu,
+        sections: [
+          {
+            ...value.menu.sections[0],
+            sellables: [
+              {
+                ...sellable,
+                allergenDisclosure: { ...sellable.allergenDisclosure, justUpdated: true as const },
+              },
+            ],
+          },
+        ],
+      },
+    };
+    const response = await fetch(url(await listen(catalog)));
+    const body = (await response.json()) as {
+      menu: { sections: { sellables: { allergenDisclosure: unknown }[] }[] };
+    };
+    expect(body.menu.sections[0]?.sellables[0]?.allergenDisclosure).toMatchObject({
+      justUpdated: true,
+    });
+  });
+
   it("serializes an allowlisted DTO and drops unexpected internal adapter fields", async () => {
     const catalog = new MutablePort();
     catalog.result = { ...found(), internalDatabaseFact: "raw-secret" };
     const response = await fetch(url(await listen(catalog)));
     expect(response.status).toBe(200);
     expect(JSON.stringify(await response.json())).not.toContain("raw-secret");
+  });
+});
+
+it("transmits explicit quantity semantics and defaults without channel internals", async () => {
+  const value = found();
+  if (value.status !== "Found") throw new Error("fixture");
+  const rule = value.menu.sections[0]?.sellables[0]?.optionRules[0];
+  const option = rule?.options[0];
+  if (!rule || !option) throw new Error("fixture");
+  Object.assign(rule, {
+    semanticsVersion: 2,
+    activationOptionReferences: [],
+    minimumSelections: 2,
+    maximumSelections: 3,
+    defaultOptionReferences: [option.optionReference],
+  });
+  Object.assign(option, { maximumQuantity: 3, selectedByDefault: true, defaultQuantity: 2 });
+  const catalog = new MutablePort();
+  catalog.result = value;
+  const port = await listen(catalog);
+  const result = await fetch(url(port));
+  expect(result.status).toBe(200);
+  const body = await result.json();
+  expect(body).toMatchObject({
+    menu: {
+      sections: [
+        {
+          sellables: [
+            {
+              optionRules: [
+                {
+                  semanticsVersion: 2,
+                  activationOptionReferences: [],
+                  options: [{ defaultQuantity: 2 }],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  });
+  expect(JSON.stringify(body)).not.toContain('"channelCodes"');
+});
+
+it("WP-2423 (cart-unsellable-dishes): sends a choice not offered now as offeredNow false, and nothing for an offered one", async () => {
+  const value = found();
+  if (value.status !== "Found") throw new Error("fixture");
+  const option = value.menu.sections[0]?.sellables[0]?.optionRules[0]?.options[0];
+  if (!option) throw new Error("fixture");
+  Object.assign(option, { offeredNow: false });
+  const catalog = new MutablePort();
+  catalog.result = value;
+  const body = (await (await fetch(url(await listen(catalog)))).json()) as {
+    menu: { sections: { sellables: { optionRules: { options: object[] }[] }[] }[] };
+  };
+  const sent: { offeredNow?: unknown }[] =
+    body.menu.sections[0]?.sellables[0]?.optionRules[0]?.options ?? [];
+  expect(sent[0]?.offeredNow).toBe(false);
+  expect(sent.slice(1).some((o: object) => "offeredNow" in o)).toBe(false);
+});
+
+describe("WP-2423 reads-under-burst: phones opening the same menu share one read", () => {
+  async function listenShared(port: CustomerMenuPort): Promise<number> {
+    const customerMenu = new CustomerMenuHandler({ now: () => AT, port });
+    const server = createServer(createApp({ customerMenu }));
+    servers.push(server);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    return (server.address() as AddressInfo).port;
+  }
+  it("answers 20 phones at once from one read, the same answer each, and reads again after 3 s", async () => {
+    const catalog = new MutablePort();
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const slow: CustomerMenuPort = {
+      async getPublishedMenu(input) {
+        await gate;
+        return catalog.getPublishedMenu(input);
+      },
+    };
+    let clock = 1_000_000;
+    const port = await listenShared(createSharedCustomerMenuPort(slow, { nowMs: () => clock }));
+    const answers = Array.from({ length: 20 }, () => fetch(url(port)));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    release();
+    const responses = await Promise.all(answers);
+    expect(responses.map((response) => response.status)).toEqual(Array(20).fill(200));
+    const bodies = await Promise.all(responses.map((response) => response.text()));
+    expect(new Set(bodies).size).toBe(1);
+    expect(JSON.parse(bodies[0] ?? "")).toEqual(found());
+    expect(responses[0]?.headers.get("content-type")).toBe("application/json; charset=utf-8");
+    expect(catalog.calls).toHaveLength(1);
+    // Within the reuse time the menu is given again; another language or channel is its own read.
+    clock += customerMenuReuseMs - 1;
+    expect((await fetch(url(port))).status).toBe(200);
+    expect(catalog.calls).toHaveLength(1);
+    await fetch(url(port, "channel=DINE_IN&orderType=TABLE_SERVICE&locale=zh-Hans-CN"));
+    expect(catalog.calls).toHaveLength(2);
+    // After it, a sold-out mark staff made meanwhile is read.
+    clock += 2;
+    await fetch(url(port));
+    expect(catalog.calls).toHaveLength(3);
+    expect(customerMenuReuseMs).toBe(3_000);
+  });
+
+  it("keeps no search answer and no expired menu, and at most the limit (b12 review)", async () => {
+    const catalog = new MutablePort();
+    const clock = 1_000;
+    const shared = createSharedCustomerMenuPort(catalog, { nowMs: () => clock });
+    const input = (locale: string, searchTerm?: string) =>
+      ({
+        publicStoreReference: "public-store",
+        channelCode: "QR",
+        orderTypeCode: "PICKUP",
+        locale,
+        ...(searchTerm === undefined ? {} : { searchTerm }),
+      }) as Parameters<CustomerMenuPort["getPublishedMenu"]>[0];
+    // A search is read each time it is asked, one after another.
+    await shared.getPublishedMenu(input("en-CA", "latte"));
+    await shared.getPublishedMenu(input("en-CA", "latte"));
+    expect(catalog.calls).toHaveLength(2);
+    // More menus than the limit: the first one kept is dropped to make room.
+    for (let i = 0; i <= customerMenuShareLimit; i += 1)
+      await shared.getPublishedMenu(input("l" + i));
+    expect(catalog.calls).toHaveLength(3 + customerMenuShareLimit);
+    await shared.getPublishedMenu(input("l" + customerMenuShareLimit));
+    expect(catalog.calls).toHaveLength(3 + customerMenuShareLimit);
+    await shared.getPublishedMenu(input("l0"));
+    expect(catalog.calls).toHaveLength(4 + customerMenuShareLimit);
+  });
+
+  it("never gives a busy, missing or stale answer again: the next phone asks anew", async () => {
+    const catalog = new MutablePort();
+    const port = await listenShared(createSharedCustomerMenuPort(catalog, { nowMs: () => 5 }));
+    catalog.error = new Error("busy");
+    expect((await fetch(url(port))).status).toBe(503);
+    catalog.error = undefined;
+    catalog.result = { status: "ProjectionStale" };
+    expect((await fetch(url(port))).status).toBe(503);
+    catalog.result = { status: "NotFound" };
+    expect((await fetch(url(port))).status).toBe(404);
+    catalog.result = found();
+    expect((await fetch(url(port))).status).toBe(200);
+    expect(catalog.calls).toHaveLength(4);
   });
 });

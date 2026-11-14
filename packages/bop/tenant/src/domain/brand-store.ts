@@ -115,14 +115,22 @@ function lifecycle(value: unknown): OrganizationLifecycle {
     throw new OrganizationContractError("ORGANIZATION_INPUT_INVALID");
   return value as OrganizationLifecycle;
 }
+/**
+ * WP-2423 item 4: canonical IANA zones already accepted by this process. Whether a name is a
+ * canonical zone cannot change while the process runs, and building an Intl formatter for every
+ * Store read was a measurable share of a staff command; the set is bounded.
+ */
+const acceptedTimeZones = new Set<string>();
 function timeZone(value: unknown): string {
   const zone = text(value, 64);
+  if (acceptedTimeZones.has(zone)) return zone;
   try {
     if (new Intl.DateTimeFormat("en-CA", { timeZone: zone }).resolvedOptions().timeZone !== zone)
       throw new Error();
   } catch {
     throw new OrganizationContractError("STORE_SHAPE_INVALID");
   }
+  if (acceptedTimeZones.size < 64) acceptedTimeZones.add(zone);
   return zone;
 }
 

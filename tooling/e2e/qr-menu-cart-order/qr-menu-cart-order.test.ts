@@ -103,6 +103,7 @@ function cartView(version: number, withItem: boolean): CustomerCartView {
       version,
       orderType: "Pickup",
       serviceMode: "Pickup",
+      placedOrder: null,
       context: { brandName: "WP 2020 Brand", storeName: "WP 2020 Store" },
       lifecycle: {
         status: "Active",
@@ -221,6 +222,8 @@ function menuResult(): CustomerMenuQueryResult {
                 taxInclusive: null,
                 reason: "FINAL_QUOTE_REQUIRED",
               },
+              description: null,
+              photo: null,
             },
           ],
         },
@@ -496,6 +499,7 @@ function orderPorts() {
     },
   });
   const ports: OrderCreationPorts = {
+    clock: { now: () => now },
     authorization: { authorize: async () => ({ guestSession: guestSession() }) },
     checkout: { validate: async () => checkoutEvidence() },
     source: {
@@ -627,7 +631,7 @@ function orderPorts() {
             businessDateResolution: input.businessDateResolution,
           }),
         });
-        return stored;
+        return { status: "Created", record: stored } as const;
       },
     },
   };
@@ -644,6 +648,7 @@ async function listen(input: {
   const server = createServer(
     createApp({
       customerEntry: new CustomerEntryHandler({
+        requestAdmission: { consume: async () => ({ status: "Allowed" }) },
         allowedOrigin: origin,
         now: () => now,
         port: input.entry,

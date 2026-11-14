@@ -116,7 +116,8 @@ describe("WP-2175 Allergen and Incident screens", () => {
     const html = renderToStaticMarkup(
       <ComplianceAllergenReview view={parseComplianceAllergenReviewView(allergenView())} />,
     );
-    expect(html).toContain("CMP-ALLERGEN-REVIEW");
+    expect(html).toContain("Allergens · Food Safety");
+    expect(html).not.toContain("CMP-ALLERGEN-REVIEW");
     expect(html).toContain("Contains");
     expect(html).toContain("Enforce owner blocks");
     expect(html).toContain("Open Food Safety Incident");
@@ -166,7 +167,8 @@ describe("WP-2175 Allergen and Incident screens", () => {
     const html = renderToStaticMarkup(
       <ComplianceIncident view={parseComplianceIncidentView(incidentView())} />,
     );
-    expect(html).toContain("CMP-INCIDENT");
+    expect(html).toContain("Food safety incident · Restricted Food Safety");
+    expect(html).not.toContain("CMP-INCIDENT");
     expect(html).toContain("Restricted snapshots 3");
     expect(html).toContain("Trigger owner safety blocks");
     expect(html).not.toContain("fever");

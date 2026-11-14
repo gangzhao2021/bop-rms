@@ -16,7 +16,11 @@ const requiredKeys = [
   "BOP_RMS_MERCHANT_WEB_PORT",
   "BOP_RMS_CUSTOMER_PWA_PORT",
 ] as const;
-const optionalKeys = ["BOP_RMS_POSTGRES_SSL_CA_FILE"] as const;
+const optionalKeys = [
+  "BOP_RMS_POSTGRES_SSL_CA_FILE",
+  "BOP_RMS_API_CONFIGURATION",
+  "BOP_RMS_WORKER_CONFIGURATION",
+] as const;
 const knownKeys = new Set<string>([...requiredKeys, ...optionalKeys]);
 const identifier = /^[a-z][a-z0-9_]{0,62}$/u;
 const hostname = /^(?:[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?|::1)$/u;

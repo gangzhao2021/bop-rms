@@ -170,7 +170,12 @@ describe("WP-1103/1104 Customer Quote API", () => {
       quote: { total: { amountMinor: string }; lines?: unknown[] };
     };
     expect(body.quote.total.amountMinor).toBe("1130");
-    expect(body.quote.lines).toBeUndefined();
+    // WP-2423 M74: each cart line's price before tax, and nothing of how it was priced.
+    expect(body.quote.lines).toEqual([
+      { cartItemReference: id(6), quantity: 1, subtotal: { amountMinor: "1000", currency: "CAD" } },
+    ]);
+    expect(JSON.stringify(body)).not.toContain(id(10));
+    expect(JSON.stringify(body)).not.toContain(id(8));
   });
 
   it("returns the exact current Quote without recalculating its snapshot", async () => {
@@ -180,6 +185,73 @@ describe("WP-1103/1104 Customer Quote API", () => {
     expect(response.status).toBe(200);
     const body = (await response.json()) as { quote: { priceChange: unknown } };
     expect(body.quote.priceChange).toBeNull();
+  });
+
+  it("price-hold-dish-changes: says each line as the cart was first priced for it, and what changed about the dish", async () => {
+    const service = new Port();
+    service.result = {
+      status: "Current",
+      quote: quote(),
+      sinceAdded: [
+        {
+          cartItemReference: id(6),
+          quantity: 1,
+          subtotal: { amountMinor: 950n, currencyCode: "CAD" } as never,
+          changes: ["Name", "Allergens"],
+        },
+      ],
+    };
+    const body = (await (await post(await listen(service))).json()) as {
+      quote: { sinceAdded?: unknown };
+    };
+    expect(body.quote.sinceAdded).toEqual([
+      {
+        cartItemReference: id(6),
+        quantity: 1,
+        subtotal: { amountMinor: "950", currency: "CAD" },
+        changes: ["Name", "Allergens"],
+      },
+    ]);
+    // Never said when the Store did not work it out.
+    service.result = { status: "Current", quote: quote() };
+    const plain = (await (await post(await listen(service))).json()) as { quote: object };
+    expect(Object.hasOwn(plain.quote, "sinceAdded")).toBe(false);
+    // Not known now: said as null, so the page never reads it as "nothing changed".
+    service.result = { status: "Current", quote: quote(), sinceAdded: null };
+    const unknown = (await (await post(await listen(service))).json()) as {
+      quote: { sinceAdded?: unknown };
+    };
+    expect(Object.hasOwn(unknown.quote, "sinceAdded")).toBe(true);
+    expect(unknown.quote.sinceAdded).toBeNull();
+  });
+
+  it("v15 2026-11-11 b10: says which language's name of a renamed dish changed, from what to what", async () => {
+    const service = new Port();
+    service.result = {
+      status: "Current",
+      quote: quote(),
+      sinceAdded: [
+        {
+          cartItemReference: id(6),
+          quantity: 1,
+          subtotal: { amountMinor: 950n, currencyCode: "CAD" } as never,
+          changes: ["Name"],
+          renamed: [{ locale: "zh-Hans-CA", from: "牛肉面", to: "红烧牛肉面" }],
+        },
+      ],
+    };
+    const body = (await (await post(await listen(service))).json()) as {
+      quote: { sinceAdded?: unknown };
+    };
+    expect(body.quote.sinceAdded).toEqual([
+      {
+        cartItemReference: id(6),
+        quantity: 1,
+        subtotal: { amountMinor: "950", currency: "CAD" },
+        changes: ["Name"],
+        renamed: [{ locale: "zh-Hans-CA", from: "牛肉面", to: "红烧牛肉面" }],
+      },
+    ]);
   });
 
   it("returns a replacement Quote with an explicit price-increase decision", async () => {
@@ -213,6 +285,7 @@ describe("WP-1103/1104 Customer Quote API", () => {
       { cartVersion: 7, price: 1 },
       {},
       { cartVersion: 0 },
+      { cartVersion: 2147483648 },
     ])
       expect((await post(port, body)).status).toBe(400);
     expect(service.calls).toEqual([]);
@@ -247,6 +320,71 @@ describe("WP-1103/1104 Customer Quote API", () => {
     }
   });
 
+  it("DEC-DINING-ANY-PARTICIPANT-SUBMIT: says another guest is checking out, with the wait", async () => {
+    const service = new Port();
+    const port = await listen(service);
+    service.result = { status: "CheckoutInProgress", heldUntil: "2026-08-02T16:00:45.500Z" };
+    const response = await post(port);
+    expect(response.status).toBe(409);
+    expect(response.headers.get("retry-after")).toBe("46");
+    expect(await response.json()).toEqual({
+      schemaVersion: 1,
+      error: {
+        code: "cart_checkout_in_progress",
+        messageKey: "customer.cart.checkout_in_progress",
+      },
+    });
+  });
+
+  it("WP-2423 item 6: a table checking out is said as such, with nothing to wait for", async () => {
+    const service = new Port();
+    const port = await listen(service);
+    service.result = { status: "TableCheckingOut" };
+    const response = await post(port);
+    expect(response.status).toBe(409);
+    expect(response.headers.get("retry-after")).toBeNull();
+    expect(await response.json()).toEqual({
+      schemaVersion: 1,
+      error: { code: "cart_table_checking_out", messageKey: "customer.cart.table_checking_out" },
+    });
+  });
+
+  it("M126 I.2: a phone no longer at the table is told why, with nothing to wait for", async () => {
+    const service = new Port();
+    const port = await listen(service);
+    service.result = { status: "ParticipationEnded", reason: "Changed" };
+    const response = await post(port);
+    expect(response.status).toBe(409);
+    expect(response.headers.get("retry-after")).toBeNull();
+    expect(await response.json()).toEqual({
+      schemaVersion: 1,
+      error: {
+        code: "cart_participant_ended",
+        messageKey: "customer.cart.participant_ended",
+        reason: "Changed",
+      },
+    });
+  });
+
+  it.each([
+    ["Unavailable", "quote_item_unavailable", "customer.quote.item_unavailable"],
+    ["OptionsChanged", "quote_item_options_changed", "customer.quote.item_options_changed"],
+  ] as const)(
+    "WP-2423 guest-cart-503: names the %s line with nothing to wait for",
+    async (reason, code, messageKey) => {
+      const service = new Port();
+      const port = await listen(service);
+      const cartItemReference = "0190a7c3-0000-7000-8000-000000000301";
+      service.result = { status: "ItemUnavailable", cartItemReference, reason };
+      const response = await post(port);
+      expect(response.status).toBe(409);
+      expect(response.headers.get("retry-after")).toBeNull();
+      expect(await response.json()).toEqual({
+        schemaVersion: 1,
+        error: { code, messageKey, line: { cartItemReference } },
+      });
+    },
+  );
   it("fails closed on thrown or declared service unavailability", async () => {
     const service = new Port();
     const port = await listen(service);
@@ -264,4 +402,30 @@ describe("WP-1103/1104 Customer Quote API", () => {
   it("defaults to unavailable when the Pricing service is not wired", async () => {
     expect((await post(await listen())).status).toBe(503);
   });
+});
+
+it("returns only a matching closed expiry receipt and no private history", async () => {
+  const service = new Port();
+  service.result = {
+    status: "Expired",
+    resolution: { operationReference: key, cartReference: id(4), cartVersion: 7 },
+  };
+  const port = await listen(service);
+  const response = await post(port);
+  expect(response.status).toBe(410);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(await response.json()).toEqual({
+    schemaVersion: 1,
+    error: { code: "quote_operation_expired", messageKey: "customer.quote.operation_expired" },
+    resolution: service.result.resolution,
+  });
+  for (const resolution of [
+    { operationReference: id(99), cartReference: id(4), cartVersion: 7 },
+    { operationReference: key, cartReference: id(4), cartVersion: 8 },
+    { operationReference: key, cartReference: id(99), cartVersion: 7 },
+    { operationReference: key, cartReference: id(4), cartVersion: 7, private: true },
+  ]) {
+    service.result = { status: "Expired", resolution };
+    expect((await post(port)).status).toBe(503);
+  }
 });

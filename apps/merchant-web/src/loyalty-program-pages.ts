@@ -1,3 +1,4 @@
+import { createContractParsers } from "./contract-parsers.js";
 export type LoyaltyProgramClientErrorCode =
   | "PermissionDenied"
   | "NotFound"
@@ -95,12 +96,7 @@ const object = (value: unknown, fields: readonly string[]) => {
   return value as Record<string, unknown>;
 };
 const ref = (v: unknown) => (typeof v === "string" && uuid.test(v) ? v : fail());
-const instant = (v: unknown) =>
-  typeof v === "string" &&
-  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(v) &&
-  new Date(Date.parse(v)).toISOString() === v
-    ? v
-    : fail();
+const { instant } = createContractParsers(fail);
 const text = (v: unknown) =>
   typeof v === "string" && v.trim() === v && /^[^\p{Cc}\p{Cf}<>{}$]{1,500}$/u.test(v) ? v : fail();
 const integer = (v: unknown) =>

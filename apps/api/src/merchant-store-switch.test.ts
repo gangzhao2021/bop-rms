@@ -185,13 +185,13 @@ class SyntheticSessionPort implements StoreContextSessionPort {
   async authorize(input: { readonly sessionCookie: unknown; readonly csrf: unknown }) {
     this.authorizations += 1;
     if (!this.active || input.sessionCookie !== COOKIE || input.csrf !== CSRF)
-      throw new Error("denied");
+      throw new Error("MERCHANT_AUTHENTICATION_DENIED");
     return currentSession;
   }
 
   async rotate(sessionCookie: unknown, reason: "StoreContextElevation") {
     if (!this.active || sessionCookie !== COOKIE || reason !== "StoreContextElevation")
-      throw new Error("denied");
+      throw new Error("MERCHANT_AUTHENTICATION_DENIED");
     this.active = false;
     this.rotations += 1;
     await Promise.resolve();
@@ -319,19 +319,25 @@ describe("WP-0109 merchant Store switch", () => {
       input(ids.otherStore),
       membershipPort({ memberships: [primaryMembership, otherMembership], assignments: [] }),
     ],
-    [
-      "ambiguous target Membership",
-      input(),
-      membershipPort({
-        memberships: [primaryMembership, primaryMembership],
-        assignments: [primaryAssignment],
-      }),
-    ],
   ])("denies %s before Session rotation", async (_name, request, memberships) => {
     const sessions = new SyntheticSessionPort();
     await expect(service(sessions, memberships).switchStore(request)).rejects.toThrow(
       "STORE_SWITCH_DENIED",
     );
+    expect(sessions.rotations).toBe(0);
+  });
+
+  it("stops before Session rotation on an ambiguous Membership, which is no refusal of the person", async () => {
+    const sessions = new SyntheticSessionPort();
+    await expect(
+      service(
+        sessions,
+        membershipPort({
+          memberships: [primaryMembership, primaryMembership],
+          assignments: [primaryAssignment],
+        }),
+      ).switchStore(input()),
+    ).rejects.toMatchObject({ code: "ACTIVE_MEMBERSHIP_AMBIGUOUS" });
     expect(sessions.rotations).toBe(0);
   });
 
@@ -347,6 +353,21 @@ describe("WP-0109 merchant Store switch", () => {
     const sessions = new SyntheticSessionPort();
     sessions.badCookie = true;
     await expect(service(sessions).switchStore(input())).rejects.toThrow("STORE_SWITCH_DENIED");
+    expect(sessions.rotations).toBe(1);
+  });
+
+  it("denies authority removed while the session is rotating", async () => {
+    const sessions = new SyntheticSessionPort();
+    const memberships = membershipPort();
+    const rotate = sessions.rotate.bind(sessions);
+    sessions.rotate = async (...args) => {
+      const result = await rotate(...args);
+      memberships.findStoreAssignments = async () => Object.freeze([]);
+      return result;
+    };
+    await expect(service(sessions, memberships).switchStore(input())).rejects.toThrow(
+      "STORE_SWITCH_DENIED",
+    );
     expect(sessions.rotations).toBe(1);
   });
 

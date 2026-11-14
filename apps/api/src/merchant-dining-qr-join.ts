@@ -1,0 +1,212 @@
+import { loadDiningGuestPhones } from "./dining-guest-phones.js";
+import { readClosedRecord } from "@bop/identity";
+import type { ConsumerTransaction } from "@bop/eventing";
+import {
+  createPostgresDiningQrJoinStore,
+  parseDiningReference,
+  type DiningCredentialPort,
+} from "@rms/dining";
+import { listDiningSessionRoundSenders, type DiningSessionRoundSender } from "@rms/ordering";
+import { createMerchantStoreScope } from "./merchant-store-scope.js";
+import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
+import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import type { MerchantBffService } from "./merchant-bff.js";
+
+/**
+ * WP-2423 item 8 ⑤ DEC-DINING-QR-JOIN decisions 2 and 3: on the table page staff see the phones
+ * at the table (numbered in join order), pause or resume joining by QR, and take a phone off the
+ * table. Every change is recorded with the staff member and time.
+ */
+export type MerchantDiningQrJoinCommand =
+  | { readonly action: "State"; readonly diningSessionReference: string }
+  | {
+      readonly action: "Pause" | "Resume";
+      readonly diningSessionReference: string;
+      readonly operationReference: string;
+    }
+  | {
+      readonly action: "Remove";
+      readonly diningSessionReference: string;
+      readonly participantReference: string;
+      readonly operationReference: string;
+    };
+
+export function parseMerchantDiningQrJoinCommand(value: unknown): MerchantDiningQrJoinCommand {
+  const action =
+    value !== null && typeof value === "object"
+      ? Object.getOwnPropertyDescriptor(value, "action")?.value
+      : undefined;
+  if (action === "State") {
+    const raw = readClosedRecord(value, ["action", "diningSessionReference"]);
+    return Object.freeze({
+      action,
+      diningSessionReference: String(parseDiningReference(raw.diningSessionReference)),
+    });
+  }
+  if (action === "Pause" || action === "Resume") {
+    const raw = readClosedRecord(value, ["action", "diningSessionReference", "operationReference"]);
+    return Object.freeze({
+      action,
+      diningSessionReference: String(parseDiningReference(raw.diningSessionReference)),
+      operationReference: String(parseDiningReference(raw.operationReference)),
+    });
+  }
+  if (action === "Remove") {
+    const raw = readClosedRecord(value, [
+      "action",
+      "diningSessionReference",
+      "participantReference",
+      "operationReference",
+    ]);
+    return Object.freeze({
+      action,
+      diningSessionReference: String(parseDiningReference(raw.diningSessionReference)),
+      participantReference: String(parseDiningReference(raw.participantReference)),
+      operationReference: String(parseDiningReference(raw.operationReference)),
+    });
+  }
+  throw new Error("DINING_QR_JOIN_INPUT_INVALID");
+}
+
+/**
+ * WP-2423 M139: the phones panel's label for each round — the number of the phone that sent it, or
+ * null for a round staff entered, one whose sender is not recorded, or a phone no longer listed.
+ */
+export function diningRoundPhoneNumbers(
+  senders: readonly DiningSessionRoundSender[],
+  phones: readonly { readonly participantReference: unknown; readonly phoneNumber: number }[],
+): readonly { readonly orderBatchReference: string; readonly phoneNumber: number | null }[] {
+  const phoneOf = new Map(
+    phones.map((phone) => [String(phone.participantReference), phone.phoneNumber]),
+  );
+  const rounds = new Map<string, number | null>(
+    senders.map((round) => [
+      round.orderBatchReference,
+      round.staffEntered || round.participantReference === null
+        ? null
+        : (phoneOf.get(round.participantReference) ?? null),
+    ]),
+  );
+  return Object.freeze(
+    [...rounds].map(([orderBatchReference, phoneNumber]) =>
+      Object.freeze({ orderBatchReference, phoneNumber }),
+    ),
+  );
+}
+
+export function createMerchantDiningQrJoin(options: {
+  persistence: PersistentMerchantBffOptions;
+  authentication: Pick<MerchantBffService, "authorize">;
+  credentials: DiningCredentialPort;
+  retentionPolicyCode: string;
+  retentionPolicyVersion: number;
+  nextReference(): string;
+  now(): string;
+}) {
+  const resolve = createMerchantStoreScope(options.persistence);
+  return async (input: { sessionCookie: unknown; csrf: unknown; command: unknown }) => {
+    const authenticated = await options.authentication.authorize(input);
+    const command = parseMerchantDiningQrJoinCommand(input.command);
+    const denied = (): never => {
+      throw new Error("DINING_QR_JOIN_DENIED");
+    };
+    return options.persistence.transactions.run((tx) =>
+      withMerchantTransactionAuthorization(
+        {
+          transaction: tx,
+          resolve: async () => {
+            const current = await resolve(
+              tx,
+              input.sessionCookie,
+              "dining.operate",
+              authenticated.sessionReference,
+            );
+            if ((await current.allowed()) !== true) return denied();
+            return current;
+          },
+          recheck: async (current) => (await current.allowed()) === true,
+          denied,
+        },
+        async (authority) => {
+          const current = authority.scope;
+          const actorReference = String(current.actorReference);
+          const scope = {
+            tenantReference: current.selected.tenantReference,
+            brandReference: current.context.brand.brandReference,
+            storeReference: current.store.storeReference,
+          };
+          const store = createPostgresDiningQrJoinStore(
+            { run: (work) => work(tx) },
+            {
+              scope,
+              credentials: options.credentials,
+              pepperVersion: 1,
+              now: options.now,
+              authorize: async () => authority.guard(),
+              audit: (record) => ({
+                auditId: options.nextReference(),
+                brandId: scope.brandReference,
+                storeId: scope.storeReference,
+                actor: { type: "User", reference: actorReference },
+                actionCode:
+                  record.action === "Pause"
+                    ? "DINING_QR_JOIN_PAUSE"
+                    : record.action === "Resume"
+                      ? "DINING_QR_JOIN_RESUME"
+                      : "DINING_PARTICIPANT_REMOVE",
+                targetType: "DiningTable",
+                targetId: record.tableReference,
+                reasonCode: "STAFF_TABLE_CONTROL",
+                correlationId: record.operationReference,
+                occurredAt: record.observedAt,
+                sourceChannel: "API",
+                dataClassification: "Internal",
+                retentionPolicyCode: options.retentionPolicyCode,
+                retentionPolicyVersion: options.retentionPolicyVersion,
+              }),
+            },
+          );
+          const observedAt = options.now();
+          if (command.action === "Pause" || command.action === "Resume") {
+            await store.setPaused({
+              operationReference: command.operationReference,
+              diningSessionReference: command.diningSessionReference,
+              paused: command.action === "Pause",
+              actorReference,
+              observedAt,
+            });
+          } else if (command.action === "Remove") {
+            await store.remove({
+              operationReference: command.operationReference,
+              diningSessionReference: command.diningSessionReference,
+              participantReference: command.participantReference,
+              actorReference,
+              observedAt,
+            });
+          }
+          const state = {
+            ...(await store.state(command.diningSessionReference)),
+            phones: await loadDiningGuestPhones(tx as never, scope, command.diningSessionReference),
+          };
+          // Decision 4 / WP-2423 M139: which phone sent each round — the round's own submission,
+          // not the phone that added its first dish; staff rounds have none.
+          const owner = {
+            brandReference: scope.brandReference,
+            storeReference: scope.storeReference,
+          };
+          return Object.freeze({
+            ...state,
+            rounds: diningRoundPhoneNumbers(
+              await listDiningSessionRoundSenders(
+                tx as unknown as ConsumerTransaction,
+                owner,
+                command.diningSessionReference,
+              ),
+              state.phones,
+            ),
+          });
+        },
+      ),
+    );
+  };
+}

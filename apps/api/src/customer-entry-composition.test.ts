@@ -4,7 +4,10 @@ import { GuestSessionService, parseGuestAdmissionEvidence } from "@bop/identity"
 import { parseQrTableContextEvidence } from "@rms/dining";
 import { parseStoreOperatingStatusResolutionEvidence } from "@rms/store";
 import { CustomerEntryHandler } from "./customer-entry.js";
-import { createCustomerEntryComposition } from "./customer-entry-composition.js";
+import {
+  createCustomerEntryComposition,
+  CustomerEntryServiceUnavailableError,
+} from "./customer-entry-composition.js";
 import { createApiRuntimeLogger, createApiServerRuntime } from "./server.js";
 import {
   fixture,
@@ -107,9 +110,15 @@ describe("WP-2208 Customer Entry domain composition", () => {
         });
       });
     if (failure === "store-stale") f.resolution.validUntil = now;
-    expect(await createCustomerEntryComposition(f.options).establish(f.input())).toEqual({
-      status: "EntryUnavailable",
-    });
+    const result = await createCustomerEntryComposition(f.options).establish(f.input());
+    // WP-2423 Q4: a closed Store, or one not serving this channel, says so (no Session).
+    if (failure === "closed" || failure === "mode-disabled")
+      expect(result).toMatchObject({
+        status: "NotAccepting",
+        operatingState: failure === "closed" ? "Closed" : "Open",
+        todayHours: [],
+      });
+    else expect(result).toEqual({ status: "EntryUnavailable" });
     expect(f.admission).not.toHaveBeenCalled();
     expect(f.create).not.toHaveBeenCalled();
   });
@@ -258,6 +267,7 @@ describe("WP-2208 Customer Entry domain composition", () => {
       port: 0,
       logger: createApiRuntimeLogger({ write: (line) => logs.push(String(line)) }),
       customerEntry: new CustomerEntryHandler({
+        requestAdmission: { consume: async () => ({ status: "Allowed" }) }, // Explicit synthetic policy.
         allowedOrigin,
         now: () => now,
         uuidV7Factory: () => id(++sequence),
@@ -329,5 +339,529 @@ describe("WP-2208 Customer Entry domain composition", () => {
       expect(sensitive).toBeTruthy();
       expect(logs.join("")).not.toContain(sensitive);
     }
+  });
+});
+
+it("uses current evaluated operating state without reconstructing publication candidates", async () => {
+  const f = fixture();
+  const input = f.input();
+  const readCurrent = vi.fn(async () => ({
+    brandReference: id(1),
+    storeReference: id(2),
+    evaluatedAt: now,
+    state: "Open" as const,
+    availableServiceModes: ["DineIn", "Pickup"] as const,
+  }));
+  const result = await createCustomerEntryComposition({
+    qr: f.options.qr,
+    profile: f.options.profile,
+    admission: f.options.admission,
+    session: f.options.session,
+    operatingReader: { readCurrent },
+  }).establish(input);
+  expect(result.status).toBe("Established");
+  expect(readCurrent).toHaveBeenCalledExactlyOnceWith({
+    brandReference: id(1),
+    storeReference: id(2),
+    publicStoreReference: id(4),
+    evaluatedAt: now,
+  });
+  expect(f.options.operating.configurations.loadCandidates).not.toHaveBeenCalled();
+});
+it.each(["closed", "paused", "mode", "scope", "time", "missing"])(
+  "denies current operating %s before admission",
+  async (kind) => {
+    const f = fixture();
+    const current = {
+      brandReference: id(1),
+      storeReference: id(2),
+      evaluatedAt: now,
+      state: "Open",
+      availableServiceModes: ["DineIn", "Pickup"],
+    };
+    if (kind === "closed") current.state = "Closed";
+    if (kind === "paused") current.state = "TemporarilyClosed";
+    if (kind === "mode") current.availableServiceModes = ["Pickup"];
+    if (kind === "scope") current.storeReference = id(99);
+    if (kind === "time") current.evaluatedAt = "2026-01-15T11:59:59.000Z";
+    const operatingReader = {
+      readCurrent: async () => (kind === "missing" ? null : current),
+    } as import("./customer-entry-composition.js").CustomerEntryOperatingReader;
+    expect(
+      await createCustomerEntryComposition({
+        qr: f.options.qr,
+        profile: f.options.profile,
+        admission: f.options.admission,
+        session: f.options.session,
+        operatingReader,
+      }).establish(f.input()),
+    ).toEqual(
+      ["closed", "paused", "mode"].includes(kind)
+        ? {
+            status: "NotAccepting",
+            storeDisplayName: expect.any(String),
+            operatingState:
+              kind === "closed" ? "Closed" : kind === "paused" ? "TemporarilyClosed" : "Open",
+            todayHours: [],
+            todayKind: null,
+            nextOpening: null,
+            localDate: null,
+            // M116: the read-only menu's public context; no Session.
+            browse: {
+              brandDisplayName: "Synthetic Brand",
+              publicStoreReference: id(4),
+              locale: expect.any(String),
+              channel: "DineIn",
+            },
+          }
+        : { status: "EntryUnavailable" },
+    );
+    expect(f.admission).not.toHaveBeenCalled();
+    expect(f.create).not.toHaveBeenCalled();
+  },
+);
+
+it("WP-2423: an operating read the database couldn't answer stays an outage, before admission", async () => {
+  const f = fixture();
+  const outage = new CustomerEntryServiceUnavailableError();
+  await expect(
+    createCustomerEntryComposition({
+      qr: f.options.qr,
+      profile: f.options.profile,
+      admission: f.options.admission,
+      session: f.options.session,
+      operatingReader: {
+        readCurrent: async () => {
+          throw outage;
+        },
+      },
+    }).establish(f.input()),
+  ).rejects.toBe(outage);
+  expect(f.admission).not.toHaveBeenCalled();
+  expect(f.create).not.toHaveBeenCalled();
+});
+
+it("WP-2423 item 8 ⑦ 1b: tells a guest at a pickup code that the Store takes dine-in only", async () => {
+  const pickupFixture = () => {
+    const f = fixture();
+    f.payload.channel = f.context.channel = "Pickup";
+    f.payload.publicTableReference =
+      f.context.publicTableReference =
+      f.context.tableReference =
+        null;
+    f.context.tableLifecycle = f.context.assignmentState = null;
+    return f;
+  };
+  const establish = (f: ReturnType<typeof fixture>, servicesTurnedOff: readonly "Pickup"[]) =>
+    createCustomerEntryComposition({
+      qr: f.options.qr,
+      profile: f.options.profile,
+      admission: f.options.admission,
+      session: f.options.session,
+      operatingReader: {
+        readCurrent: async () => ({
+          brandReference: id(1),
+          storeReference: id(2),
+          evaluatedAt: now,
+          state: "Open" as const,
+          availableServiceModes: servicesTurnedOff.length === 0 ? ["DineIn", "Pickup"] : ["DineIn"],
+          servicesTurnedOff,
+        }),
+      },
+    }).establish(f.input());
+  const off = pickupFixture();
+  expect(await establish(off, ["Pickup"])).toEqual({
+    status: "ServiceNotOffered",
+    storeDisplayName: expect.any(String),
+  });
+  expect(off.admission).not.toHaveBeenCalled();
+  expect(off.create).not.toHaveBeenCalled();
+  expect((await establish(pickupFixture(), [])).status).toBe("Established");
+  // A table code at the same Store still seats the guest.
+  expect((await establish(fixture(), ["Pickup"])).status).toBe("Established");
+});
+
+describe("DEC-DINING-GUEST-TABLE-START: a scan at a Store where guests start tables", () => {
+  const table = (changes: object = {}) => ({
+    isOpen: vi.fn(async () => false),
+    guestStart: vi.fn(async () => "MayStart" as const),
+    ...changes,
+  });
+  const noVisit = (f: ReturnType<typeof fixture>) => {
+    expect(f.create).not.toHaveBeenCalled();
+    expect(f.records.size).toBe(0);
+  };
+  it("a scan alone starts nothing: no Session, no admission, nothing a link preview could occupy", async () => {
+    const f = fixture();
+    const result = await createCustomerEntryComposition({ ...f.options, table: table() }).establish(
+      f.input(),
+    );
+    expect(result).toMatchObject({
+      status: "TableMayStart",
+      storeDisplayName: expect.any(String),
+    });
+    expect(Object.hasOwn(result, "sessionCredential")).toBe(false);
+    noVisit(f);
+  });
+  it("the guest's tap starts the visit, and says the table isn't open yet", async () => {
+    const f = fixture();
+    const result = await createCustomerEntryComposition({ ...f.options, table: table() }).establish(
+      { ...f.input(), intent: "Start" },
+    );
+    expect(result).toMatchObject({ status: "Established", tableOpen: false });
+    expect(f.create).toHaveBeenCalledOnce();
+  });
+  it("a table waiting for cleaning starts no visit, whatever is sent", async () => {
+    const f = fixture();
+    const result = await createCustomerEntryComposition({
+      ...f.options,
+      table: table({ guestStart: vi.fn(async () => "BeingCleaned" as const) }),
+    }).establish({ ...f.input(), intent: "Start" });
+    expect(result.status).toBe("TableBeingCleaned");
+    noVisit(f);
+  });
+  it.each([
+    ["the switch off", vi.fn(async () => "No" as const)],
+    ["a read that failed", vi.fn(async () => Promise.reject(new Error("read")))],
+  ])("%s answers exactly as before, whatever is sent", async (_name, guestStart) => {
+    const f = fixture();
+    const result = await createCustomerEntryComposition({
+      ...f.options,
+      table: table({ guestStart }),
+    }).establish({ ...f.input(), intent: "Start" });
+    expect(result.status).toBe("TableNotOpen");
+    noVisit(f);
+  });
+  it("says which table the scanned code is for when that table isn't open, and unnamed if unread", async () => {
+    const f = fixture();
+    const named = await createCustomerEntryComposition({
+      ...f.options,
+      table: table({
+        guestStart: vi.fn(async () => "No" as const),
+        label: vi.fn(async () => "Table 3"),
+      }),
+    }).establish(f.input());
+    expect(named).toMatchObject({ status: "TableNotOpen", tableLabel: "Table 3" });
+    const unread = await createCustomerEntryComposition({
+      ...f.options,
+      table: table({
+        guestStart: vi.fn(async () => "No" as const),
+        label: vi.fn(async () => Promise.reject(new Error("read"))),
+      }),
+    }).establish(f.input());
+    expect(unread.status).toBe("TableNotOpen");
+    expect(Object.hasOwn(unread, "tableLabel")).toBe(false);
+    noVisit(f);
+  });
+  it("an open table a new phone may be a new party at asks once, with no visit yet; the answer goes on", async () => {
+    const asked = table({
+      isOpen: vi.fn(async () => true),
+      asksNewParty: vi.fn(async () => true),
+    });
+    const f = fixture();
+    expect(
+      (await createCustomerEntryComposition({ ...f.options, table: asked }).establish(f.input()))
+        .status,
+    ).toBe("TableAskNewParty");
+    noVisit(f);
+    for (const intent of ["Join", "NewParty"] as const) {
+      const g = fixture();
+      expect(
+        await createCustomerEntryComposition({ ...g.options, table: asked }).establish({
+          ...g.input(),
+          intent,
+        }),
+      ).toMatchObject({ status: "Established", tableOpen: true });
+    }
+  });
+  it("an open table with nothing to ask, or a failed read, joins as before", async () => {
+    for (const asksNewParty of [
+      vi.fn(async () => false),
+      vi.fn(async () => Promise.reject(new Error("read"))),
+    ]) {
+      const f = fixture();
+      const result = await createCustomerEntryComposition({
+        ...f.options,
+        table: table({ isOpen: vi.fn(async () => true), asksNewParty }),
+      }).establish(f.input());
+      expect(result).toMatchObject({ status: "Established", tableOpen: true });
+    }
+  });
+});
+
+describe("WP-2423 item 13 ② (Owner 2026-11-05): a merchant the platform paused", () => {
+  const paused = (f: ReturnType<typeof fixture>, table?: object) =>
+    createCustomerEntryComposition({
+      qr: f.options.qr,
+      profile: f.options.profile,
+      admission: f.options.admission,
+      session: f.options.session,
+      ...(table === undefined ? {} : { table: table as never }),
+      operatingReader: {
+        readCurrent: async () => ({
+          brandReference: id(1),
+          storeReference: id(2),
+          evaluatedAt: now,
+          state: "Open" as const,
+          availableServiceModes: ["DineIn", "Pickup"],
+          newGuestsPaused: true,
+        }),
+      },
+    });
+  const seated = (changes: object = {}) => ({
+    isOpen: vi.fn(async () => true),
+    guestStart: vi.fn(async () => "MayStart" as const),
+    ...changes,
+  });
+  it("starts no new visit: a free table, a guest-started table or a new party, with no hours", async () => {
+    for (const [table, intent] of [
+      [undefined, undefined],
+      [seated({ isOpen: vi.fn(async () => false) }), "Start"],
+      [seated(), "NewParty"],
+    ] as const) {
+      const f = fixture();
+      const result = await paused(f, table).establish({
+        ...f.input(),
+        ...(intent ? { intent } : {}),
+      });
+      expect(result).toMatchObject({ status: "NotAccepting", newGuestsPaused: true });
+      // M116: a merchant paused by the platform shows no menu either.
+      expect(result).not.toHaveProperty("browse");
+      expect(f.admission).not.toHaveBeenCalled();
+      expect(f.create).not.toHaveBeenCalled();
+    }
+  });
+  it("lets a phone join the party already seated, so that visit finishes as usual", async () => {
+    const f = fixture();
+    expect(await paused(f, seated()).establish(f.input())).toMatchObject({
+      status: "Established",
+      tableOpen: true,
+    });
+    expect(f.create).toHaveBeenCalledOnce();
+  });
+});
+
+describe("M104/M105: a rescan goes on with this phone's visit", () => {
+  const pickup = (f: ReturnType<typeof fixture>) => {
+    f.payload.channel = f.context.channel = "Pickup";
+    f.payload.publicTableReference =
+      f.context.publicTableReference =
+      f.context.tableReference =
+        null;
+    f.context.tableLifecycle = f.context.assignmentState = null;
+    return f;
+  };
+  const first = async (f: ReturnType<typeof fixture>) => {
+    const result = await createCustomerEntryComposition(f.options).establish(f.input());
+    if (result.status !== "Established") throw new Error("synthetic entry unavailable");
+    return result;
+  };
+  const again = (
+    f: ReturnType<typeof fixture>,
+    presented: readonly { source: "Current" | "Earlier"; credential: string }[],
+    options = f.options,
+  ) =>
+    createCustomerEntryComposition(options).establish({
+      ...f.input(),
+      presentedCredentials: presented,
+    });
+
+  it("a pickup code scanned again resumes the same visit: no new Session, no admission", async () => {
+    const f = pickup(fixture());
+    const visit = await first(f);
+    const result = await again(f, [{ source: "Current", credential: visit.sessionCredential }]);
+    expect(result).toMatchObject({
+      status: "Established",
+      resumed: true,
+      channel: "Pickup",
+      sessionCredential: visit.sessionCredential,
+      earlierCredentials: [],
+    });
+    expect(f.create).toHaveBeenCalledOnce();
+    expect(f.admission).toHaveBeenCalledOnce();
+    expect(f.records.size).toBe(1);
+    // The resumed visit is renewed, once.
+    expect(f.options.session.store.touchInteractive).toHaveBeenCalledOnce();
+  });
+
+  it("never renews the earlier visits it only checks (a scan elsewhere doesn't extend them)", async () => {
+    const f = fixture();
+    const table = await first(f);
+    pickup(f);
+    const result = await again(f, [{ source: "Current", credential: table.sessionCredential }]);
+    expect(result).toMatchObject({ status: "Established", channel: "Pickup" });
+    expect(result).not.toHaveProperty("resumed");
+    expect(f.options.session.store.touchInteractive).not.toHaveBeenCalled();
+  });
+
+  it("resumes an existing visit while the Store is paused for new guests (it finishes as usual)", async () => {
+    const f = pickup(fixture());
+    const visit = await first(f);
+    const result = await again(f, [{ source: "Current", credential: visit.sessionCredential }], {
+      qr: f.options.qr,
+      profile: f.options.profile,
+      admission: f.options.admission,
+      session: f.options.session,
+      operatingReader: {
+        readCurrent: async () => ({
+          brandReference: id(1),
+          storeReference: id(2),
+          evaluatedAt: now,
+          state: "Closed" as const,
+          availableServiceModes: [],
+          newGuestsPaused: true,
+        }),
+      },
+    } as never);
+    expect(result).toMatchObject({
+      status: "Established",
+      resumed: true,
+      operatingState: "Closed",
+    });
+    expect(f.create).toHaveBeenCalledOnce();
+    // A phone with no visit here is still refused.
+    expect(
+      await again(f, [], {
+        qr: f.options.qr,
+        profile: f.options.profile,
+        admission: f.options.admission,
+        session: f.options.session,
+        operatingReader: {
+          readCurrent: async () => ({
+            brandReference: id(1),
+            storeReference: id(2),
+            evaluatedAt: now,
+            state: "Open" as const,
+            availableServiceModes: ["Pickup"],
+            newGuestsPaused: true,
+          }),
+        },
+      } as never),
+    ).toMatchObject({ status: "NotAccepting", newGuestsPaused: true });
+  });
+
+  it("an ended visit here starts a new one, says so, and keeps the old one for its receipts", async () => {
+    const f = pickup(fixture());
+    const visit = await first(f);
+    const [key, record] = [...f.records.entries()][0] as [string, never];
+    const old = record as { session: Record<string, unknown> };
+    const createdAt = new Date(Date.parse(now) - 5 * 3_600_000).toISOString();
+    f.records.set(key, {
+      ...old,
+      session: {
+        ...old.session,
+        createdAt,
+        lastSeenAt: createdAt,
+        idleExpiresAt: new Date(Date.parse(createdAt) + 4 * 3_600_000).toISOString(),
+        absoluteExpiresAt: new Date(Date.parse(createdAt) + 24 * 3_600_000).toISOString(),
+      },
+    } as never);
+    const result = await again(f, [{ source: "Current", credential: visit.sessionCredential }]);
+    expect(result).toMatchObject({
+      status: "Established",
+      previousVisit: "EndedReceiptsKept",
+      earlierCredentials: [visit.sessionCredential],
+    });
+    expect(result).not.toHaveProperty("resumed");
+    if (result.status !== "Established") throw new Error("expected a visit");
+    expect(result.sessionCredential).not.toBe(visit.sessionCredential);
+    expect(f.create).toHaveBeenCalledTimes(2);
+  });
+
+  it("b9: a table code after an ended pickup visit here says nothing about an earlier cart here", async () => {
+    const f = fixture();
+    const table = {
+      channel: f.context.channel,
+      payloadTable: f.payload.publicTableReference,
+      contextTable: f.context.publicTableReference,
+      tableReference: f.context.tableReference,
+      tableLifecycle: f.context.tableLifecycle,
+      assignmentState: f.context.assignmentState,
+    };
+    pickup(f);
+    const visit = await first(f);
+    const [key, record] = [...f.records.entries()][0] as [string, never];
+    const old = record as { session: Record<string, unknown> };
+    const createdAt = new Date(Date.parse(now) - 5 * 3_600_000).toISOString();
+    f.records.set(key, {
+      ...old,
+      session: {
+        ...old.session,
+        createdAt,
+        lastSeenAt: createdAt,
+        idleExpiresAt: new Date(Date.parse(createdAt) + 4 * 3_600_000).toISOString(),
+        absoluteExpiresAt: new Date(Date.parse(createdAt) + 24 * 3_600_000).toISOString(),
+      },
+    } as never);
+    f.payload.channel = f.context.channel = table.channel;
+    f.payload.publicTableReference = table.payloadTable;
+    f.context.publicTableReference = table.contextTable;
+    f.context.tableReference = table.tableReference;
+    f.context.tableLifecycle = table.tableLifecycle;
+    f.context.assignmentState = table.assignmentState;
+    const result = await again(f, [{ source: "Current", credential: visit.sessionCredential }]);
+    // The pickup order is not this table's cart; it stays on the phone for its own code.
+    expect(result).toMatchObject({
+      status: "Established",
+      channel: "DineIn",
+      earlierCredentials: [visit.sessionCredential],
+    });
+    expect(result).not.toHaveProperty("previousVisit");
+  });
+
+  it("keeps a table visit here, and a visit this Store can't see, when a pickup code starts a new one", async () => {
+    const f = fixture();
+    const table = await first(f);
+    pickup(f);
+    const elsewhere = "E".repeat(43);
+    const result = await again(f, [
+      { source: "Current", credential: table.sessionCredential },
+      { source: "Earlier", credential: elsewhere },
+    ]);
+    expect(result).toMatchObject({
+      status: "Established",
+      channel: "Pickup",
+      earlierCredentials: [table.sessionCredential, elsewhere],
+    });
+    expect(result).not.toHaveProperty("resumed");
+    expect(result).not.toHaveProperty("previousVisit");
+  });
+
+  it("goes back to a kept earlier pickup visit when this Store's code is scanned again", async () => {
+    const f = pickup(fixture());
+    const visit = await first(f);
+    const other = "O".repeat(43);
+    const result = await again(f, [
+      { source: "Current", credential: other },
+      { source: "Earlier", credential: visit.sessionCredential },
+    ]);
+    expect(result).toMatchObject({
+      status: "Established",
+      resumed: true,
+      sessionCredential: visit.sessionCredential,
+      earlierCredentials: [other],
+    });
+    expect(f.create).toHaveBeenCalledOnce();
+  });
+
+  it("answers a retry, never a new visit, when the visit can't be checked", async () => {
+    const f = pickup(fixture());
+    const visit = await first(f);
+    const failing = {
+      ...f.options,
+      session: {
+        ...f.options.session,
+        store: {
+          ...f.options.session.store,
+          resolve: async () => {
+            throw Object.assign(new Error("acquire"), { code: "TENANT_DATABASE_ACQUIRE_FAILED" });
+          },
+        },
+      },
+    };
+    await expect(
+      again(f, [{ source: "Current", credential: visit.sessionCredential }], failing),
+    ).rejects.toBeInstanceOf(CustomerEntryServiceUnavailableError);
+    expect(f.create).toHaveBeenCalledOnce();
   });
 });

@@ -1,10 +1,22 @@
 import type { CustomerCartClient } from "../cart/cart-client.js";
 import { CartClientError, type CartItemDraft, type CartView } from "../cart/types.js";
+import {
+  getCustomerCsrfCredential,
+  getGuestTableJoiner,
+  getGuestTableStarter,
+  isGuestTableQuestion,
+  isUnseatedTableScan,
+} from "../session/customer-transaction-context.js";
 
 export type ConfigureState =
   | Readonly<{ status: "idle" }>
   | Readonly<{ status: "pending"; stage: "locate" | "create" | "add" }>
-  | Readonly<{ status: "added"; cart: CartView }>
+  | Readonly<{
+      status: "added";
+      cart: CartView;
+      /** WP-2423: the table's earlier cart timed out and its unordered items were cleared. */
+      earlierCartCleared?: boolean;
+    }>
   | Readonly<{ status: "offline"; canRetry: boolean }>
   | Readonly<{
       status:
@@ -12,6 +24,16 @@ export type ConfigureState =
         | "conflict"
         | "validation"
         | "rate-limited"
+        | "order-processing"
+        | "checkout-in-progress"
+        | "table-checking-out"
+        /** M126 I.2: this phone's place at the table ended (why: getParticipationEnded). */
+        | "participation-ended"
+        | "not-seated"
+        | "table-start-refused"
+        | "table-join-refused"
+        | "table-in-use"
+        | "table-question"
         | "expired"
         | "abandoned"
         | "unavailable"
@@ -28,7 +50,21 @@ interface AddPlan {
   readonly addOperationReference: string;
   stage: "locate" | "create" | "add";
   cart: CartView | null;
+  outcomeUnknown: boolean;
+  /** WP-2423: automatic continuations already used (short retry, fresh start after a timeout). */
+  retried?: boolean;
+  restarted?: boolean;
+  earlierCartCleared?: boolean;
+  /** WP-2423 M99: adds tried again after someone at the table changed the cart first. */
+  conflictRetries?: number;
 }
+
+/** WP-2423: cart warning set once when the table's timed-out cart held unordered items. */
+export const EARLIER_CART_ITEMS_CLEARED = "EARLIER_CART_ITEMS_CLEARED";
+/** WP-2423: longest server-requested pause before the one automatic retry of cart creation. */
+const MAX_AUTOMATIC_RETRY_SECONDS = 10;
+/** WP-2423 M99: how many times an Add is tried again after a cart version conflict. */
+const MAX_CONFLICT_RETRIES = 2;
 
 export interface ConfigureController {
   getState(): ConfigureState;
@@ -55,9 +91,15 @@ function uuidV7(): string {
 export function createConfigureController({
   client,
   keyFactory = uuidV7,
+  wait = (milliseconds: number) =>
+    new Promise<void>((resolve) => {
+      setTimeout(resolve, milliseconds);
+    }),
 }: {
   readonly client: CustomerCartClient;
   readonly keyFactory?: () => string;
+  /** Pause used before an automatic retry (tests inject an immediate one). */
+  readonly wait?: (milliseconds: number) => Promise<void>;
 }): ConfigureController {
   let state: ConfigureState = { status: "idle" };
   let online = typeof navigator === "undefined" || navigator.onLine !== false;
@@ -80,13 +122,23 @@ export function createConfigureController({
             ? "validation"
             : parsed.code === "cart_rate_limited"
               ? "rate-limited"
-              : parsed.code === "cart_expired"
-                ? "expired"
-                : parsed.code === "cart_abandoned"
-                  ? "abandoned"
-                  : parsed.code === "network_unknown"
-                    ? "outcome-unknown"
-                    : "unavailable";
+              : parsed.code === "cart_order_processing"
+                ? "order-processing"
+                : parsed.code === "cart_checkout_in_progress"
+                  ? "checkout-in-progress"
+                  : parsed.code === "cart_table_checking_out"
+                    ? "table-checking-out"
+                    : parsed.code === "cart_participant_ended"
+                      ? "participation-ended"
+                      : parsed.code === "cart_dining_not_seated"
+                        ? "not-seated"
+                        : parsed.code === "cart_expired"
+                          ? "expired"
+                          : parsed.code === "cart_abandoned"
+                            ? "abandoned"
+                            : parsed.code === "network_unknown"
+                              ? "outcome-unknown"
+                              : "unavailable";
     publish({
       status,
       issueCodes: parsed.issueCodes,
@@ -96,23 +148,100 @@ export function createConfigureController({
   };
   const execute = async (plan: AddPlan): Promise<void> => {
     if (!online) {
-      pending = plan;
-      publish({ status: "offline", canRetry: true });
+      publish({ status: "offline", canRetry: pending !== null });
       return;
+    }
+    // Coordinator 2026-10-30: a scan of a table no party is seated at started no visit; nothing
+    // is sent until staff seat the party and the code is scanned again.
+    // WP-2423 DEC-DINING-GUEST-TABLE-START: where the guest may start this table, their tap on Add
+    // starts and joins it, then the dish they configured goes in. Only a tap reaches here. A start
+    // whose join was refused leaves a starter that only joins, though the visit already exists.
+    // WP-2423 M115: at an open table this phone may join by QR but hasn't, the tap on Add joins it.
+    // The entry's own CSRF credential is already held then (it only names the table, not a place
+    // at it), so the joiner is used whenever one is set; it is cleared once this phone joined.
+    const joiner = getGuestTableJoiner();
+    const starter = getGuestTableStarter() ?? joiner;
+    if (starter !== null || (getCustomerCsrfCredential() === null && isUnseatedTableScan())) {
+      // Asked whether they're with the people here: that answer comes first, not a trip to staff.
+      if (starter === null && isGuestTableQuestion()) {
+        publish({
+          status: "table-question",
+          issueCodes: [],
+          retryAfterSeconds: null,
+          canRetry: false,
+        });
+        return;
+      }
+      if (starter === null) {
+        fail(new CartClientError("cart_dining_not_seated"), false);
+        return;
+      }
+      publish({ status: "pending", stage: "locate" });
+      const answer = await starter().catch(() => "Refused" as const);
+      if (answer !== "Started" || getCustomerCsrfCredential() === null) {
+        publish({
+          status:
+            starter === joiner && joiner !== null
+              ? "table-join-refused"
+              : answer === "InUse"
+                ? "table-in-use"
+                : "table-start-refused",
+          issueCodes: [],
+          retryAfterSeconds: null,
+          canRetry: false,
+        });
+        return;
+      }
     }
     pending = plan;
     try {
       if (plan.stage === "locate") {
         publish({ status: "pending", stage: "locate" });
         plan.cart = await client.loadCurrent();
+        if (plan.cart !== null)
+          plan.cart = Object.freeze({ ...plan.cart, cart: Object.freeze({ ...plan.cart.cart }) });
         plan.stage = plan.cart === null ? "create" : "add";
+        plan.outcomeUnknown = false;
+      }
+      if (!online) {
+        publish({ status: "offline", canRetry: true });
+        return;
       }
       if (plan.stage === "create") {
         publish({ status: "pending", stage: "create" });
-        plan.cart = await client.createCart({
-          operationReference: plan.createOperationReference,
-        });
+        try {
+          plan.cart = await client.createCart({
+            operationReference: plan.createOperationReference,
+          });
+        } catch (error) {
+          // WP-2423: the table's timed-out cart is still being closed; the server asks for a short
+          // pause. Retry the same operation once (nothing was created), then report as usual.
+          if (
+            plan.retried === true ||
+            !(error instanceof CartClientError) ||
+            (error.code !== "cart_service_unavailable" && error.code !== "cart_order_processing") ||
+            error.retryAfterSeconds === null ||
+            error.retryAfterSeconds > MAX_AUTOMATIC_RETRY_SECONDS
+          )
+            throw error;
+          plan.retried = true;
+          await wait(error.retryAfterSeconds * 1000);
+          if (!online) {
+            publish({ status: "offline", canRetry: true });
+            return;
+          }
+          plan.cart = await client.createCart({
+            operationReference: plan.createOperationReference,
+          });
+        }
+        plan.earlierCartCleared ||= plan.cart.cart.warnings.includes(EARLIER_CART_ITEMS_CLEARED);
+        plan.cart = Object.freeze({ ...plan.cart, cart: Object.freeze({ ...plan.cart.cart }) });
         plan.stage = "add";
+        plan.outcomeUnknown = false;
+      }
+      if (!online) {
+        publish({ status: "offline", canRetry: true });
+        return;
       }
       if (plan.cart === null) throw new CartClientError("cart_service_unavailable");
       const priorVersion = plan.cart.cart.version;
@@ -127,22 +256,82 @@ export function createConfigureController({
         result.cart.version <= priorVersion ||
         !result.cart.items.some((item) => item.sellableReference === plan.sellableReference)
       )
-        throw new CartClientError("cart_service_unavailable");
+        throw new CartClientError("network_unknown");
       pending = null;
-      publish({ status: "added", cart: result });
+      publish(
+        plan.earlierCartCleared === true
+          ? { status: "added", cart: result, earlierCartCleared: true }
+          : { status: "added", cart: result },
+      );
     } catch (error) {
-      if (error instanceof CartClientError && error.code === "cart_version_conflict") {
+      let parsed =
+        error instanceof CartClientError ? error : new CartClientError("network_unknown");
+      // WP-2423: the table cart timed out between finding it and adding. Start once more from
+      // the current cart with new operations; the server continues with a fresh table cart.
+      if (
+        parsed.code === "cart_expired" &&
+        plan.stage === "add" &&
+        plan.restarted !== true &&
+        !plan.outcomeUnknown
+      ) {
+        await execute({
+          ...plan,
+          createOperationReference: keyFactory(),
+          addOperationReference: keyFactory(),
+          stage: "locate",
+          cart: null,
+          outcomeUnknown: false,
+          restarted: true,
+        });
+        return;
+      }
+      // WP-2423 M99: someone at the table (or staff saving the party size) changed the cart between
+      // this phone's read and its add. The refused add wrote nothing (the version is checked
+      // first), so add the same dish again to the current cart, with a new operation, after a short
+      // jittered pause. Never for an unknown outcome or an idempotency conflict.
+      if (
+        parsed.code === "cart_version_conflict" &&
+        plan.stage === "add" &&
+        !plan.outcomeUnknown &&
+        (plan.conflictRetries ?? 0) < MAX_CONFLICT_RETRIES
+      ) {
+        await wait(150 + Math.floor(Math.random() * 251));
+        if (!online) {
+          pending = null;
+          publish({ status: "offline", canRetry: false });
+          return;
+        }
+        await execute({
+          ...plan,
+          createOperationReference: keyFactory(),
+          addOperationReference: keyFactory(),
+          stage: "locate",
+          cart: null,
+          outcomeUnknown: false,
+          conflictRetries: (plan.conflictRetries ?? 0) + 1,
+        });
+        return;
+      }
+      plan.outcomeUnknown ||= parsed.code === "network_unknown";
+      if (plan.outcomeUnknown) parsed = new CartClientError("network_unknown");
+      else pending = null;
+      if (parsed.code === "cart_version_conflict") {
         try {
           await client.loadCurrent();
         } catch {
           // A failed canonical refresh must not replace the original conflict semantics.
         }
       }
-      fail(error, true);
+      fail(parsed, true);
     }
   };
-  const begin = (createPlan: () => AddPlan): Promise<void> => {
+  const begin = (createPlan: () => AddPlan, retry = false): Promise<void> => {
     if (commandFlight !== null) return commandFlight;
+    if (pending !== null && !retry) return Promise.resolve();
+    if (!online) {
+      publish({ status: "offline", canRetry: pending !== null });
+      return Promise.resolve();
+    }
     const current = execute(createPlan());
     commandFlight = current;
     void current.then(
@@ -159,21 +348,32 @@ export function createConfigureController({
     getState: () => state,
     retry: () => {
       if (pending !== null && (state.status === "outcome-unknown" || state.status === "offline"))
-        return begin(() => pending as AddPlan);
+        return begin(() => pending as AddPlan, true);
       return Promise.resolve();
     },
     setOnline: (value: boolean) => {
       online = value;
       if (!value) publish({ status: "offline", canRetry: pending !== null });
+      else if (state.status === "offline" && commandFlight === null) {
+        if (pending !== null) fail(new CartClientError("network_unknown"), true);
+        else publish({ status: "idle" });
+      }
     },
     submit: (sellableReference: string, draft: CartItemDraft) =>
       begin(() => ({
         sellableReference,
-        draft,
+        draft: Object.freeze({
+          quantity: draft.quantity,
+          customerNote: draft.customerNote,
+          optionSelections: Object.freeze(
+            draft.optionSelections.map((option) => Object.freeze({ ...option })),
+          ),
+        }),
         createOperationReference: keyFactory(),
         addOperationReference: keyFactory(),
         stage: "locate",
         cart: null,
+        outcomeUnknown: false,
       })),
     subscribe: (listener: () => void) => {
       listeners.add(listener);

@@ -1,4 +1,5 @@
 import { StatePanel } from "@bop-rms/ui";
+import { SourceTime } from "./StoreTime.js";
 import { useEffect, useState } from "react";
 import {
   DevicePageError,
@@ -51,7 +52,8 @@ export function Devices({ view }: { readonly view: DeviceView }) {
           <p className="bop-eyebrow">{view.screenId} · Device Management</p>
           <h1>Devices</h1>
           <p>
-            Source as of {view.sourceAsOf} · {view.completeness} · {view.freshness}
+            Source as of <SourceTime instant={view.sourceAsOf} /> · {view.completeness} ·{" "}
+            {view.freshness}
           </p>
         </div>
         {view.permissions.mayRegister ? <button>Register Device</button> : null}

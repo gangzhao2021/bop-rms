@@ -8,14 +8,28 @@ import {
 import type { CoreTelemetry } from "@bop-rms/observability";
 import type { Request, RequestHandler } from "express";
 import { v7 as uuidV7 } from "uuid";
+import {
+  entryArrivedAtHeader,
+  readAnswerMarginMs,
+  requestReadAnswerWithinMs,
+  statedEntryArrival,
+  requestShedFor,
+  sendReadAnswerBusy,
+  withRequestAcquireBudget,
+} from "./request-acquire-budget.js";
 
 const requestContextKey = Symbol("bop.request-correlation");
 const requestErrorCodeKey = Symbol("bop.request-error-code");
+const requestFailureCodeKey = Symbol("bop.request-failure-code");
+const requestRetryLaterKey = Symbol("bop.request-retry-later");
+const safeFailureCode = /^[A-Z][A-Z0-9_]{0,63}$/u;
 const maximumDurationMs = 86_400_000;
 
 type RequestWithCorrelation = Request & {
   [requestContextKey]?: RequestCorrelationContext;
   [requestErrorCodeKey]?: "INTERNAL_ERROR";
+  [requestFailureCodeKey]?: string;
+  [requestRetryLaterKey]?: true;
 };
 
 export interface RequestCorrelationContext {
@@ -33,9 +47,17 @@ export interface RequestCompletionLogger {
     readonly durationMs: number;
     readonly event: "http_request_completed";
     readonly requestId: string;
-    readonly resultCode: "HTTP_CLIENT_ERROR" | "HTTP_SERVER_ERROR" | "HTTP_SUCCESS";
+    readonly resultCode:
+      "HTTP_CLIENT_ERROR" | "HTTP_RETRY_LATER" | "HTTP_SERVER_ERROR" | "HTTP_SUCCESS";
     readonly statusCode: number;
+    /**
+     * WP-2423 (rush-logging-and-entry): the route template the request matched (or `unmatched`),
+     * so busy answers (503) can be counted by route; never the concrete path.
+     */
+    readonly route: string;
     readonly trustedContext: CorrelationContext;
+    /** A server error's safe cause code (and SQLSTATE), when the route recorded one. */
+    readonly error?: { readonly code: string; readonly value: undefined };
   }): void;
 }
 
@@ -63,7 +85,9 @@ function resultCode(
 
 function routeTemplate(request: Request, registered: ReadonlySet<string>): string {
   const route = (request.route as { path?: unknown } | undefined)?.path;
-  return typeof route === "string" && registered.has(route) ? route : "unmatched";
+  if (typeof route !== "string") return "unmatched";
+  const template = `${request.baseUrl}${route}`;
+  return registered.has(template) ? template : "unmatched";
 }
 
 export function getRequestCorrelationContext(request: Request): RequestCorrelationContext {
@@ -102,6 +126,34 @@ export function markRequestError(request: Request, errorCode: "INTERNAL_ERROR"):
   });
 }
 
+/**
+ * v15 2026-11-02: a 503 the route expects and the client waits out (Retry-After): logged apart from
+ * server errors, so that waiting never counts as a failure.
+ */
+export function markRequestRetryLater(request: Request): void {
+  Object.defineProperty(request as RequestWithCorrelation, requestRetryLaterKey, {
+    configurable: true,
+    enumerable: false,
+    value: true,
+    writable: false,
+  });
+}
+
+/**
+ * v15 2026-10-16: a route answering 503 records why, as a safe upper-case code (for example
+ * `TENANT_DATABASE_TRANSACTION_CONFLICT_SQL_40P01`), so `HTTP_SERVER_ERROR` lines are diagnosable.
+ * Anything that is not a safe code is ignored; nothing else from the error is logged.
+ */
+export function markRequestFailure(request: Request, code: string | undefined): void {
+  if (code === undefined || !safeFailureCode.test(code)) return;
+  Object.defineProperty(request as RequestWithCorrelation, requestFailureCodeKey, {
+    configurable: true,
+    enumerable: false,
+    value: code,
+    writable: false,
+  });
+}
+
 export function createRequestCorrelationMiddleware({
   logger,
   nowMilliseconds = Date.now,
@@ -136,17 +188,27 @@ export function createRequestCorrelationMiddleware({
       response.off("finish", complete);
       response.off("close", complete);
       const durationMs = durationBetween(startedAt, nowMilliseconds());
-      const completionResult = resultCode(response.statusCode);
+      // WP-2423 (reads-under-burst): a 503 the rush itself caused (no connection in time, the
+      // read's answer time spent) is a wait the client sits out, like a route's own Retry-After.
+      const completionResult =
+        response.statusCode === 503 &&
+        (localRequest[requestRetryLaterKey] === true || requestShedFor(response))
+          ? ("HTTP_RETRY_LATER" as const)
+          : resultCode(response.statusCode);
+      const route = routeTemplate(request, registeredRoutes);
       telemetryOperation?.complete({
         durationMs,
         ...(localRequest[requestErrorCodeKey] === undefined
           ? {}
           : { errorCode: localRequest[requestErrorCodeKey] }),
         resultCode: completionResult,
-        routeTemplate: routeTemplate(request, registeredRoutes),
+        routeTemplate: route,
       });
+      const failureCode =
+        completionResult === "HTTP_SERVER_ERROR" ? localRequest[requestFailureCodeKey] : undefined;
       Reflect.deleteProperty(localRequest, requestContextKey);
       Reflect.deleteProperty(localRequest, requestErrorCodeKey);
+      Reflect.deleteProperty(localRequest, requestFailureCodeKey);
       if (logger === undefined) return;
       try {
         logger.info({
@@ -154,8 +216,10 @@ export function createRequestCorrelationMiddleware({
           event: "http_request_completed",
           requestId,
           resultCode: completionResult,
+          route,
           statusCode: response.statusCode,
           trustedContext: correlation,
+          ...(failureCode === undefined ? {} : { error: { code: failureCode, value: undefined } }),
         });
       } catch {
         // Request and business completion never depend on observability.
@@ -163,7 +227,25 @@ export function createRequestCorrelationMiddleware({
     };
     response.once("finish", complete);
     response.once("close", complete);
-    if (telemetryOperation === undefined) next();
-    else telemetryOperation.run(next);
+    // WP-2423 (outage-reads-and-retry): one connection waiting budget for the whole request.
+    withRequestAcquireBudget(
+      () => {
+        if (telemetryOperation === undefined) next();
+        else telemetryOperation.run(next);
+      },
+      {
+        response,
+        // A read answers within its time or says busy; a command's work is never cut short.
+        answerWithinMs: requestReadAnswerWithinMs(
+          request.method,
+          request.originalUrl ?? request.url,
+        ),
+        // WP-2423 (reads-under-burst): and its whole answer, not only its database work.
+        busyAnswerMarginMs: readAnswerMarginMs,
+        answerBusy: () => sendReadAnswerBusy(response, request.originalUrl ?? request.url),
+        // WP-2423 (rush-connection-hold): from when the guest reached the entry, as it states it.
+        arrivedAt: statedEntryArrival(request.headers[entryArrivedAtHeader]),
+      },
+    );
   };
 }

@@ -1,13 +1,17 @@
 import { createServer, type Server } from "node:http";
-import express, { type Request } from "express";
+import express, { type Request, type RequestHandler } from "express";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   correlationForEventEmittedByCommand,
   createRequestCommandCorrelation,
   createRequestCorrelationMiddleware,
   getRequestCorrelationContext,
+  markRequestFailure,
+  markRequestRetryLater,
   type RequestCorrelationContext,
 } from "./request-correlation.js";
+import { customerFailureCode, withFailureCause } from "./customer-failure-diagnostic.js";
+import { entryArrivedAtHeader } from "./request-acquire-budget.js";
 
 const ids = {
   requestA: "018f1f48-7b5d-7a01-8a1b-123456789abc",
@@ -168,5 +172,240 @@ describe("WP-0041 request-local correlation adapter", () => {
     expect(() => getRequestCorrelationContext(completedRequest)).toThrow(
       "REQUEST_CORRELATION_CONTEXT_UNAVAILABLE",
     );
+  });
+});
+
+describe("v15 2026-10-16: a server error logs its safe cause code", () => {
+  it("logs a recorded safe code on a 5xx only, and nothing unsafe", async () => {
+    const app = express();
+    const entries: unknown[] = [];
+    app.use(
+      createRequestCorrelationMiddleware({
+        logger: { info: (entry) => entries.push(entry) },
+        uuidV7Factory: sequence([
+          ids.requestA,
+          ids.correlationA,
+          ids.requestB,
+          ids.correlationB,
+          ids.commandA,
+          "018f1f48-7b5d-7a04-8a1b-123456789abc",
+        ]),
+      }),
+    );
+    app.get("/busy", (request, response) => {
+      markRequestFailure(request, "TENANT_DATABASE_TRANSACTION_CONFLICT_SQL_40P01");
+      response.status(503).end();
+    });
+    app.get("/fine", (request, response) => {
+      markRequestFailure(request, "ORDER_STATUS_NOT_FOUND");
+      response.status(404).end();
+    });
+    app.get("/unsafe", (request, response) => {
+      markRequestFailure(request, "guest@example.test 01a145a7");
+      response.status(503).end();
+    });
+    const base = await listen(app);
+    for (const path of ["/busy", "/fine", "/unsafe"]) await fetch(base + path);
+    await expect.poll(() => entries.length).toBe(3);
+    expect(entries.map((entry) => (entry as { error?: unknown }).error)).toEqual([
+      { code: "TENANT_DATABASE_TRANSACTION_CONFLICT_SQL_40P01", value: undefined },
+      undefined,
+      undefined,
+    ]);
+  });
+
+  it("v15 2026-11-02: an expected wait is not logged as a server error", async () => {
+    const entries: unknown[] = [];
+    const app = express();
+    app.use(
+      createRequestCorrelationMiddleware({
+        logger: { info: (entry) => entries.push(entry) },
+      }),
+    );
+    app.get("/waiting", (request, response) => {
+      markRequestRetryLater(request);
+      response.status(503).end();
+    });
+    app.get("/failed", (_request, response) => {
+      response.status(503).end();
+    });
+    const base = await listen(app);
+    for (const path of ["/waiting", "/failed"]) await fetch(base + path);
+    await expect.poll(() => entries.length).toBe(2);
+    expect(entries.map((entry) => (entry as { resultCode: string }).resultCode)).toEqual([
+      "HTTP_RETRY_LATER",
+      "HTTP_SERVER_ERROR",
+    ]);
+  });
+
+  it("WP-2423 (rush-logging-and-entry): each completion line names the route template it matched, never the path", async () => {
+    // v15 2026-11-13: busy answers (503) could not be counted by route, because the completion
+    // line carried no route or path.
+    const entries: unknown[] = [];
+    const app = express();
+    app.use(
+      createRequestCorrelationMiddleware({
+        logger: { info: (entry) => entries.push(entry) },
+        routeTemplates: ["/bff/customer/carts/:cart_id"],
+      }),
+    );
+    app.get("/bff/customer/carts/:cart_id", (_request, response) => {
+      response.status(503).end();
+    });
+    app.get("/not-registered", (_request, response) => {
+      response.status(200).end();
+    });
+    const base = await listen(app);
+    for (const path of [
+      "/bff/customer/carts/018f1f48-7b5d-7a04-8a1b-123456789abc",
+      "/not-registered",
+      "/nowhere",
+    ])
+      await fetch(base + path);
+    await expect.poll(() => entries.length).toBe(3);
+    expect(
+      entries.map((entry) => {
+        const { route, statusCode } = entry as { route: string; statusCode: number };
+        return { route, statusCode };
+      }),
+    ).toEqual([
+      { route: "/bff/customer/carts/:cart_id", statusCode: 503 },
+      { route: "unmatched", statusCode: 200 },
+      { route: "unmatched", statusCode: 404 },
+    ]);
+    expect(JSON.stringify(entries)).not.toContain("018f1f48-7b5d");
+  });
+
+  it("names the innermost safe code and SQLSTATE behind a customer error", () => {
+    const conflict = Object.assign(new Error("x"), {
+      code: "TENANT_DATABASE_TRANSACTION_CONFLICT",
+      diagnostic: { sqlState: "40P01", constraint: null, table: null, closed: false },
+    });
+    const outer = withFailureCause(
+      Object.assign(new Error("order status is unavailable"), {
+        code: "ORDER_STATUS_DEPENDENCY_UNAVAILABLE",
+      }),
+      conflict,
+    );
+    expect(customerFailureCode(outer)).toBe("TENANT_DATABASE_TRANSACTION_CONFLICT_SQL_40P01");
+    // A domain error a transaction raised after a failed query carries the runner's diagnostic.
+    const denied = Object.assign(new Error("y"), { code: "ORDER_STATUS_DEPENDENCY_UNAVAILABLE" });
+    Object.defineProperty(denied, Symbol.for("bop.database.failure"), {
+      value: { sqlState: "42501" },
+    });
+    expect(customerFailureCode(denied)).toBe("ORDER_STATUS_DEPENDENCY_UNAVAILABLE_SQL_42501");
+    // Messages and unsafe values are never used.
+    expect(customerFailureCode(new Error("guest@example.test"))).toBeUndefined();
+    expect(customerFailureCode({ code: "lower case", diagnostic: { sqlState: "bad" } })).toBe(
+      undefined,
+    );
+  });
+});
+
+describe("WP-2423 guest-table-open-and-busy-reads: a read's whole work time", () => {
+  it("gives a GET 12 s to answer in all and a command none, beside the shared waiting budget", async () => {
+    const store = () =>
+      (
+        globalThis as Record<
+          symbol,
+          { getStore(): { answerBy?: number; startedAt: number } | undefined }
+        >
+      )[Symbol.for("bop.database.request-acquire-budget")]?.getStore();
+    const app = express();
+    app.use(createRequestCorrelationMiddleware());
+    const seen: Record<string, number | null> = {};
+    const record: RequestHandler = (request, response) => {
+      const budget = store();
+      seen[request.method] =
+        budget?.answerBy === undefined ? null : budget.answerBy - budget.startedAt;
+      response.sendStatus(204);
+    };
+    app.get("/read", record);
+    app.post("/read", record);
+    const base = await listen(app);
+    await fetch(`${base}/read`);
+    await fetch(`${base}/read`, { method: "POST" });
+    expect(seen).toEqual({ GET: 12_000, POST: null });
+  });
+
+  it("gives the staff reads whose screens wait longer their own wait less 3 s, never 12 s", async () => {
+    const store = () =>
+      (
+        globalThis as Record<
+          symbol,
+          { getStore(): { answerBy?: number; startedAt: number } | undefined }
+        >
+      )[Symbol.for("bop.database.request-acquire-budget")]?.getStore();
+    const app = express();
+    app.use(createRequestCorrelationMiddleware());
+    const seen: Record<string, number | null> = {};
+    app.use((request, response) => {
+      const budget = store();
+      seen[request.method + " " + request.path] =
+        budget?.answerBy === undefined ? null : budget.answerBy - budget.startedAt;
+      response.sendStatus(204);
+    });
+    const base = await listen(app);
+    for (const path of [
+      "/merchant/reports?from=2026-10-01&to=2026-10-31",
+      "/merchant/reports/tonight",
+      "/merchant/reports/export?report=sales&from=2026-10-01&to=2026-10-31",
+      "/merchant/organization/sole-operator",
+      "/merchant/identity/step-up",
+      "/merchant/payments/refunds/approvals",
+      "/merchant/reportsx",
+      "/bff/customer/cart",
+    ])
+      await fetch(base + path);
+    await fetch(base + "/merchant/reports/export", { method: "POST" });
+    expect(seen).toEqual({
+      "GET /merchant/reports": 27_000,
+      "GET /merchant/reports/tonight": 27_000,
+      "GET /merchant/reports/export": 27_000,
+      "GET /merchant/organization/sole-operator": 17_000,
+      "GET /merchant/identity/step-up": 17_000,
+      "GET /merchant/payments/refunds/approvals": 17_000,
+      "GET /merchant/reportsx": 12_000,
+      "GET /bff/customer/cart": 12_000,
+      "POST /merchant/reports/export": null,
+    });
+  });
+});
+
+describe("WP-2423 (rush-connection-hold): the API counts a guest read from its arrival at the entry", () => {
+  it("answers 12 s from when the entry says the guest arrived (at most 5 s back), so it is busy before the entry", async () => {
+    const store = () =>
+      (
+        globalThis as Record<
+          symbol,
+          { getStore(): { answerBy?: number; startedAt: number } | undefined }
+        >
+      )[Symbol.for("bop.database.request-acquire-budget")]?.getStore();
+    const app = express();
+    app.use(createRequestCorrelationMiddleware());
+    const seen: (number | null)[] = [];
+    app.get("/bff/customer/cart", (_request, response) => {
+      const budget = store();
+      seen.push(budget?.answerBy === undefined ? null : budget.answerBy - Date.now());
+      response.sendStatus(204);
+    });
+    const base = await listen(app);
+    for (const stated of [
+      String(Date.now() - 3_000),
+      String(Date.now() - 60_000),
+      String(Date.now() + 60_000),
+      "not-a-time",
+    ])
+      await fetch(`${base}/bff/customer/cart`, {
+        headers: { [entryArrivedAtHeader]: stated },
+      });
+    const [three, long, future, unreadable] = seen as number[];
+    expect(three).toBeGreaterThan(8_500);
+    expect(three).toBeLessThanOrEqual(9_000);
+    // Never more than 5 s back; a future or unreadable time is the API's own arrival.
+    expect(long).toBeGreaterThan(6_500);
+    expect(long).toBeLessThanOrEqual(7_000);
+    expect(future).toBeGreaterThan(11_500);
+    expect(unreadable).toBeGreaterThan(11_500);
   });
 });

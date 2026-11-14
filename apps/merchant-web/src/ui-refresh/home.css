@@ -1,0 +1,564 @@
+/*
+ * Home (rebuilt 2026-11-03 after the Owner's walkthrough): at a glance, what needs doing.
+ * Title and meta; "Needs attention" as the Orders page's rows; a few numbers staff use now; the
+ * opening and closing checklist closed; the store system in one quiet line at the bottom.
+ * White page, no boxes; hairlines only between rows; 28/20/16/14 at 600/400; one accent for what
+ * can be clicked; every status word follows a dot. Loaded after quiet.css, which it replaces here.
+ */
+
+/* ---- Header: the language switch ends the title row, as on every other page ---------------- */
+.workspace-page--overview .workspace-page__header {
+  flex-wrap: nowrap;
+  align-items: center;
+  margin-bottom: var(--bop-space-8);
+}
+.workspace-page--overview .workspace-page__title {
+  min-width: 0;
+}
+.workspace-page--overview .workspace-page__title h1 {
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+.workspace-page--overview .workspace-page__meta,
+.workspace-page--overview .workspace-page__status {
+  font-size: 14px;
+}
+.workspace-page--overview .workspace-page__toolbar {
+  flex-wrap: nowrap;
+}
+.workspace-page--overview .workspace-page__freshness {
+  white-space: nowrap;
+}
+.workspace-page--overview .workspace-page__freshness[data-freshness="Stale"] {
+  color: var(--bop-color-text-default);
+  font-weight: 400;
+}
+.workspace-page--overview .workspace-page__freshness[data-freshness="Stale"]::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-inline-end: 8px;
+  border-radius: 50%;
+  background: var(--bop-color-danger-mark);
+  vertical-align: 0.1em;
+}
+
+/* The store switch, for those with more than one Store: a plain select and accent words. */
+.workspace-page--overview .scope-switcher {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--bop-space-3);
+  min-width: 0;
+}
+.workspace-page--overview .scope-switcher .scope-switcher__label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.workspace-layout .workspace-content .workspace-page--overview .scope-switcher select {
+  min-width: 0;
+  max-width: 16rem;
+  min-height: 44px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--bop-color-text-default);
+  font: inherit;
+  font-size: 14px;
+}
+.workspace-page--overview .workspace-page__header .scope-switcher button {
+  min-height: 44px;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 400;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.workspace-page--overview .workspace-page__header .scope-switcher button:disabled {
+  color: var(--bop-color-text-muted);
+  cursor: default;
+}
+
+/* ---- The sections: only space between them ------------------------------------------------- */
+.workspace-page--overview.workspace-page--overview .overview-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--bop-space-8);
+}
+.workspace-page--overview :is(.overview-needs, .overview-now, .overview-note) h2 {
+  margin: 0;
+  color: var(--bop-color-text-default);
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: 0;
+}
+.workspace-page--overview :is(.overview-now, .overview-note) h2 {
+  font-size: 16px;
+}
+.workspace-page--overview .overview-note p {
+  margin: var(--bop-space-2) 0 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.workspace-page--overview .stale-warning {
+  margin: 0 0 var(--bop-space-4);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--bop-color-text-default);
+  font-size: 14px;
+  font-weight: 400;
+}
+
+/* Words that act: the accent, no underline until pointed at. */
+.workspace-page--overview :is(.overview-text-action, .overview-attention__action) {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 400;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.workspace-page--overview .overview-attention__action {
+  font-weight: 600;
+}
+.workspace-page--overview :is(.overview-text-action, .overview-attention__action):hover {
+  background: none;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.workspace-page--overview .overview-text-action:disabled {
+  color: var(--bop-color-text-muted);
+  cursor: default;
+  text-decoration: none;
+}
+
+/* ---- Needs attention: the Orders page's rows ----------------------------------------------- */
+.workspace-page--overview .overview-attention {
+  margin: var(--bop-space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.workspace-page--overview .overview-attention li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 13.5rem 9rem;
+  align-items: center;
+  gap: var(--bop-space-2) var(--bop-space-6);
+  min-height: 72px;
+  padding: var(--bop-space-4) 0;
+  border: 0;
+}
+.workspace-page--overview .overview-attention li + li {
+  border-top: 1px solid var(--bop-color-row-divider);
+}
+.workspace-page--overview .overview-attention__text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.workspace-page--overview .overview-attention__text strong {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.workspace-page--overview .overview-attention__text p {
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.workspace-page--overview .overview-attention__label {
+  color: var(--bop-color-text-default);
+}
+.workspace-page--overview .overview-attention__status {
+  display: grid;
+  justify-items: start;
+  gap: 2px;
+  min-width: 0;
+}
+.workspace-page--overview .overview-attention__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  color: var(--bop-color-text-default);
+  font-size: 14px;
+  font-weight: 400;
+}
+.workspace-page--overview .overview-attention__state::before {
+  content: "";
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--tag-dot);
+}
+/* Three meanings only: needs someone (both tones), under way. */
+.workspace-page--overview
+  :is(.overview-attention__state--danger, .overview-attention__state--warning) {
+  --tag-dot: var(--bop-color-danger-mark);
+}
+.workspace-page--overview .overview-attention__state--progress {
+  --tag-dot: var(--bop-color-accent);
+}
+.workspace-page--overview .overview-attention__since {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.workspace-page--overview .overview-attention__action {
+  grid-column: 3;
+  justify-self: end;
+}
+.workspace-page--overview .overview-attention__call {
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.workspace-page--overview .overview-attention__empty {
+  margin: var(--bop-space-2) 0 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+/* The evening reminder has already said what is left; "nothing" would contradict it. */
+.overview-needs:has(.closing-reminder__title[data-tone="action"]) .overview-attention__empty,
+.overview-needs:has(.ordering-ending-notice) .overview-attention__empty {
+  display: none;
+}
+
+/* The evening reminder: the first row of the list. */
+.workspace-page--overview .closing-reminder {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--bop-space-2) var(--bop-space-6);
+  min-height: 72px;
+  margin: var(--bop-space-2) 0 0;
+  padding: var(--bop-space-4) 0;
+  border: 0;
+  border-bottom: 1px solid var(--bop-color-row-divider);
+}
+.workspace-page--overview .closing-reminder__title {
+  font-size: 16px;
+  font-weight: 600;
+}
+.workspace-page--overview .closing-reminder__detail {
+  margin-top: 2px !important;
+  font-size: 14px;
+}
+.workspace-page--overview .closing-reminder__open {
+  min-height: 44px;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.workspace-page--overview .closing-reminder__open:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+/* With only the reminder there is no list after it, so no line under it. */
+.overview-needs:has(.overview-attention__empty) .closing-reminder {
+  border-bottom: 0;
+}
+
+/* ---- Right now: a small row of numbers ------------------------------------------------------ */
+.workspace-page--overview .overview-now header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0 var(--bop-space-4);
+}
+.workspace-page--overview .overview-now__tools {
+  display: flex;
+  align-items: center;
+  gap: var(--bop-space-3);
+}
+.workspace-page--overview .overview-updated {
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.workspace-page--overview .overview-counts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--bop-space-4) var(--bop-space-12, 48px);
+  margin: var(--bop-space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.workspace-page--overview .overview-counts li {
+  display: grid;
+  align-content: start;
+  justify-items: start;
+  gap: 0;
+  min-width: 7rem;
+  max-width: 18rem;
+}
+.workspace-page--overview .overview-count__value {
+  color: var(--bop-color-text-default);
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+}
+.workspace-page--overview .overview-count__qualifier {
+  font-size: 14px;
+  font-weight: 400;
+}
+.workspace-page--overview .overview-count__unread {
+  color: var(--bop-color-text-default);
+  font-size: 14px;
+  line-height: 26px;
+}
+.workspace-page--overview .overview-counts .overview-count__label {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  color: var(--bop-color-accent);
+  font-size: 14px;
+  font-weight: 400;
+  text-decoration: none;
+}
+.workspace-page--overview .overview-counts .overview-count__label:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.workspace-page--overview :is(.overview-count__note, .overview-count__detail) {
+  display: block;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+
+/* ---- Below the numbers: closed until asked for, then quiet ---------------------------------- */
+.workspace-page--overview .overview-more > summary {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 6px;
+  color: var(--bop-color-accent);
+  font-size: 14px;
+  cursor: pointer;
+  list-style: none;
+}
+.workspace-page--overview .overview-more > summary::-webkit-details-marker {
+  display: none;
+}
+.workspace-page--overview .overview-more > summary::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  margin-top: -3px;
+  border: solid currentColor;
+  border-width: 0 1px 1px 0;
+  transform: rotate(45deg);
+}
+.workspace-page--overview .overview-more[open] > summary::after {
+  margin-top: 3px;
+  transform: rotate(225deg);
+}
+.workspace-page--overview .overview-more > summary:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.workspace-page--overview .overview-more > p {
+  margin: 0 0 var(--bop-space-2);
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+/* A problem's background sits under its words, so its "more" is a little tighter. */
+.workspace-page--overview .overview-attention__text .overview-more > summary {
+  min-height: 32px;
+}
+
+/* Opening and closing: two lists of the same rows. */
+.workspace-page--overview .overview-checklist {
+  margin-top: calc(-1 * var(--bop-space-4));
+}
+.workspace-page--overview .overview-checklist__groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 26rem), 1fr));
+  gap: var(--bop-space-4) var(--bop-space-8);
+  align-items: start;
+}
+.workspace-page--overview .overview-checklist__group {
+  min-width: 0;
+}
+.workspace-page--overview .overview-checklist__group h4 {
+  margin: var(--bop-space-2) 0;
+  color: var(--bop-color-text-default);
+  font-size: 14px;
+  font-weight: 600;
+}
+.workspace-page--overview .overview-checklist__group ul {
+  display: block;
+}
+.workspace-page--overview .overview-checklist__group li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0 var(--bop-space-4);
+  align-items: center;
+  padding: var(--bop-space-2) 0;
+  border: 0;
+  font-size: 14px;
+}
+.workspace-page--overview .overview-checklist__group li + li {
+  border-top: 1px solid var(--bop-color-row-divider);
+}
+.workspace-page--overview .overview-checklist__text {
+  grid-column: 1;
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+.workspace-page--overview .overview-checklist__status {
+  grid-column: 1;
+  color: var(--bop-color-text-muted);
+  font-weight: 400;
+  white-space: normal;
+}
+.workspace-page--overview .overview-checklist__group li > a {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  justify-self: end;
+}
+
+/* The store system: one quiet line. */
+.workspace-page--overview .overview-system {
+  margin-top: calc(-1 * var(--bop-space-4));
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.workspace-page--overview .overview-system__line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 var(--bop-space-3);
+}
+.workspace-page--overview .overview-system p {
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.workspace-page--overview .overview-system__note {
+  max-width: 44rem;
+}
+
+/* The name prompt: something to do now, in words, without a box or a coloured edge. */
+.workspace-page--overview.workspace-page--overview .own-name-prompt {
+  margin-bottom: var(--bop-space-8);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+}
+.workspace-page--overview .own-name-prompt h3 {
+  margin: 0 0 var(--bop-space-1);
+  color: var(--bop-color-text-default);
+  font-size: 20px;
+  font-weight: 600;
+}
+.workspace-page--overview .own-name-prompt :is(p, label, .own-name-prompt__hint) {
+  font-size: 14px;
+}
+.workspace-page--overview .own-name-prompt button[type="submit"] {
+  min-height: 44px;
+  padding: 0 var(--bop-space-4);
+  border: 0;
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-accent-fill);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.workspace-page--overview .own-name-prompt button[type="submit"]:disabled {
+  background: var(--bop-color-surface-raised);
+  color: var(--bop-color-text-muted);
+  cursor: default;
+}
+
+/* ---- Phone: title and switch on top, then the store controls; each row stacks --------------- */
+@media (max-width: 48rem) {
+  .workspace-page--overview .workspace-page__header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "title language"
+      "toolbar toolbar";
+    align-items: start;
+    gap: var(--bop-space-1) var(--bop-space-3);
+    margin-bottom: var(--bop-space-6);
+  }
+  .workspace-page--overview .workspace-page__title {
+    grid-area: title;
+  }
+  .workspace-page--overview .workspace-page__language {
+    grid-area: language;
+  }
+  .workspace-page--overview .workspace-page__toolbar {
+    grid-area: toolbar;
+    flex-wrap: wrap;
+    margin-inline-start: 0;
+  }
+  .workspace-page--overview .scope-switcher {
+    flex: 1 1 100%;
+  }
+  .workspace-layout .workspace-content .workspace-page--overview .scope-switcher select {
+    flex: 1 1 0;
+    width: 100%;
+    max-width: none;
+  }
+  .workspace-page--overview .overview-attention li {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: var(--bop-space-1) var(--bop-space-4);
+  }
+  .workspace-page--overview .overview-attention__text {
+    grid-column: 1 / -1;
+  }
+  .workspace-page--overview .overview-attention__action {
+    grid-column: 2;
+  }
+  .workspace-page--overview .overview-counts {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: end;
+    gap: var(--bop-space-3) var(--bop-space-4);
+  }
+  .workspace-page--overview .overview-counts li {
+    min-width: 0;
+    max-width: none;
+  }
+  .workspace-page--overview .closing-reminder {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .workspace-page--overview .closing-reminder__open {
+    justify-self: start;
+  }
+}

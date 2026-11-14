@@ -1,6 +1,10 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { ReportRunHistory, ReportRunHistoryState } from "./ReportRunHistoryPage.js";
+import {
+  ReportRunHistory,
+  ReportRunHistoryState,
+  UnavailableReportRunHistory,
+} from "./ReportRunHistoryPage.js";
 import { parseReportRunHistoryView } from "./report-run-history-page.js";
 const ref = (suffix: string) => `018f9812-0000-7000-8000-${suffix.padStart(12, "0")}`;
 const digest = `sha256:${"a".repeat(64)}`;
@@ -56,6 +60,17 @@ const view = () => ({
   ],
 });
 describe("WP-2162 Report Run history", () => {
+  it("renders an unavailable review without run, permission, or artifact data", () => {
+    const html = renderToStaticMarkup(<UnavailableReportRunHistory />);
+    expect(html).toContain("Authorized run history is unavailable");
+    expect((html.match(/disabled=""/gu) ?? []).length).toBe(6);
+    expect((html.match(/<th /gu) ?? []).length).toBe(8);
+    expect(html).toContain("No run rows shown");
+    expect(html).not.toContain("<button");
+    expect(html).not.toContain("http");
+    expect(html).not.toContain("sha256:");
+    expect(html).not.toContain("requesterReference");
+  });
   it("renders immutable run, freshness, artifact and exact rerun actions", () => {
     const html = renderToStaticMarkup(
       <ReportRunHistory view={parseReportRunHistoryView(view())} />,
@@ -63,6 +78,10 @@ describe("WP-2162 Report Run history", () => {
     expect(html).toContain("Report Run history");
     expect(html).toContain("Rerun exact version and parameters");
     expect(html).toContain("Authorize download");
+    expect(html).toContain("Reporting commands are not connected");
+    expect((html.match(/<button(?=[^>]* disabled)(?=[^>]*aria-describedby)/gu) ?? []).length).toBe(
+      3,
+    );
     expect(html).not.toContain("http");
   });
   it("rejects extra fields, unpinned refs, and failed runs without safe error code", () => {

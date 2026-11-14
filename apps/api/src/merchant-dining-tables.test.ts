@@ -1,0 +1,1072 @@
+import { describe, expect, it, vi, beforeEach } from "vitest";
+import { createMerchantDiningTables } from "./merchant-dining-tables.js";
+const mock = vi.hoisted(() => ({
+  resolve: vi.fn(),
+  list: vi.fn(),
+  store: vi.fn(),
+  loadSessions: vi.fn(),
+  codes: vi.fn(),
+  awaiting: vi.fn(),
+  cardPaid: vi.fn(),
+  sessionOrders: vi.fn(),
+  unpaidGuestRounds: vi.fn(),
+  paidAwaitingAcceptance: vi.fn(),
+  paidOnline: vi.fn(),
+  staffCalls: vi.fn(),
+  waitingRounds: vi.fn(),
+  phones: vi.fn(),
+}));
+const kitchen = vi.hoisted(() => ({
+  progress: new Map<string, { lastChangedAt: string; stillMaking: boolean }>(),
+  remaking: new Map<string, { openQuantity: number }>(),
+}));
+vi.mock("@rms/kitchen", async (original) => ({
+  ...(await original<typeof import("@rms/kitchen")>()),
+  listStoreKitchenOrderProgress: async () => kitchen.progress,
+  listOpenKitchenReworkByOrder: async () => kitchen.remaking,
+}));
+vi.mock("@rms/ordering", async (original) => ({
+  ...(await original<typeof import("@rms/ordering")>()),
+  listStaffDiningRoundAdmissions: async () => [],
+  createPostgresStaffDiningRoundEntryStore: vi.fn(() => ({
+    listAwaitingPaymentByTables: mock.awaiting,
+  })),
+  listStoreDiningSessionOrders: mock.sessionOrders,
+  listStoreDiningSessionOrderActivity: async () => new Map(),
+  listStoreUnpaidGuestDiningRounds: mock.unpaidGuestRounds,
+  listStorePaidDiningRoundsAwaitingAcceptance: mock.paidAwaitingAcceptance,
+  createPostgresOrderRoundStaffHoldStore: vi.fn(() => ({ listWaiting: mock.waitingRounds })),
+}));
+vi.mock("@rms/payment", async (original) => ({
+  ...(await original<typeof import("@rms/payment")>()),
+  createPostgresCardMachinePaymentStore: vi.fn(() => ({ listByBatches: mock.cardPaid })),
+  // WP-2423 item 8 ⑨: nothing paid, split or written off at these tables.
+  createPostgresDiningTableSettlementStore: vi.fn(() => ({
+    listByOrders: async () => [],
+    listOnlinePaymentsByOrders: async () => [],
+    listWriteOffsByOrders: async () => [],
+    listSplitPlans: async () => [],
+  })),
+  listStoreOrderBatchesPaidOnline: mock.paidOnline,
+}));
+vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => mock.resolve }));
+// WP-2423 (M171): the table allergy reads (proven against PostgreSQL in staff-dining-round).
+vi.mock("./merchant-dining-table-allergies.js", () => ({
+  listOpenDiningTableAllergies: async (_tx: unknown, _scope: unknown, sessions: string[]) =>
+    new Map(sessions.filter((s) => s.endsWith("0005")).map((s) => [s, ["PEANUT"]])),
+  tableAllergenChoices: async () => [{ code: "PEANUT", name: "Peanuts", nameZh: "" }],
+}));
+const timing = vi.hoisted(() => ({
+  store: "PayFirst" as "PayFirst" | "PayLater",
+  sessions: new Map<string, "PayFirst" | "PayLater">(),
+}));
+const guestStart = vi.hoisted(() => ({
+  on: false,
+  budgetSpent: false,
+  /** Tables whose CLEANING block a close, move or merge left (not a person on Tables). */
+  cleaningLeft: new Set<string>(),
+  cleaningAsked: [] as unknown[],
+  started: new Map<string, { startedAt: string; endedLastParty?: boolean }>(),
+  activity: new Map<
+    string,
+    {
+      lastPhoneJoinedAt: string | null;
+      lastServedAt: string | null;
+      openStaffCall: boolean;
+      scanPaused?: boolean;
+      phase: string;
+    }
+  >(),
+}));
+vi.mock("@rms/dining", async (original) => ({
+  ...(await original<typeof import("@rms/dining")>()),
+  createPostgresDiningTableStore: mock.store,
+  createPostgresDiningSessionReadStore: vi.fn(() => ({ loadSessions: mock.loadSessions })),
+  createPostgresDiningTableQrStore: vi.fn(() => ({ loadLatestForTables: mock.codes })),
+  // WP-2423 item 8 ⑨: no party was merged into these tables.
+  listDiningSessionMergesInto: async () => new Map(),
+  // DEC-DINING-GUEST-TABLE-START: the tests below add a guest-started table where they need one.
+  loadDiningGuestTableStartPage: async () => ({
+    guestTableStart: guestStart.on,
+    version: guestStart.on ? 2 : 0,
+    started: guestStart.started,
+    storeBudgetSpent: guestStart.budgetSpent,
+  }),
+  loadDiningGuestTableActivity: async () => guestStart.activity,
+  loadDiningCleaningLeftByClose: async (_tx: unknown, _scope: unknown, tables: unknown) => {
+    guestStart.cleaningAsked.push(tables);
+    return guestStart.cleaningLeft;
+  },
+  createPostgresDiningStaffCallStore: vi.fn(() => ({ listOpen: mock.staffCalls })),
+  loadDiningSessionsPhones: mock.phones,
+  // DEC-DINE-IN-PAY-LATER: the Store opens tables pay first; no open table was opened otherwise.
+  createPostgresDiningPaymentTimingStore: vi.fn(() => ({
+    load: async () => ({ paymentTiming: timing.store }),
+    loadSessionTimings: async (_tx: unknown, sessions: string[]) =>
+      new Map(
+        sessions.flatMap((s) => (timing.sessions.has(s) ? [[s, timing.sessions.get(s)]] : [])),
+      ),
+  })),
+}));
+const id = (n: number) => "01909988-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+type Options = Parameters<typeof createMerchantDiningTables>[0];
+function setup() {
+  const allowed = vi.fn(async () => true),
+    authorizeAction = vi.fn<(action?: string) => Promise<{ effect: "Allow" | "Deny" }>>(
+      async () => ({
+        effect: "Allow",
+      }),
+    ),
+    // One permission read answers every action the page needs (WP-2423 query budget).
+    authorizeActions = vi.fn(
+      async (actions: readonly string[]) =>
+        new Map(
+          await Promise.all(actions.map(async (a) => [a, await authorizeAction(a)] as const)),
+        ),
+    ),
+    tx = { query: vi.fn() },
+    authorize = vi.fn(async () => ({ sessionReference: id(9) }));
+  mock.resolve.mockResolvedValue({
+    selected: { tenantReference: id(1) },
+    context: { brand: { brandReference: id(2) } },
+    store: { storeReference: id(3) },
+    allowed,
+    authorizeAction,
+    authorizeActions,
+  });
+  mock.store.mockReturnValue({ listTables: mock.list });
+  mock.loadSessions.mockResolvedValue([]);
+  mock.codes.mockResolvedValue(new Map());
+  mock.awaiting.mockResolvedValue([]);
+  mock.cardPaid.mockResolvedValue(new Map());
+  mock.sessionOrders.mockResolvedValue(new Map());
+  mock.unpaidGuestRounds.mockResolvedValue([]);
+  mock.paidAwaitingAcceptance.mockResolvedValue([]);
+  mock.paidOnline.mockResolvedValue(new Set());
+  mock.staffCalls.mockResolvedValue(new Map());
+  mock.waitingRounds.mockResolvedValue([]);
+  mock.phones.mockResolvedValue(new Map());
+  mock.list.mockResolvedValue({
+    items: [
+      {
+        tableReference: id(4),
+        stableLabel: "T1",
+        areaCode: "MAIN",
+        capacity: 4,
+        lifecycle: "Published",
+        operationalState: "Available",
+        aggregateVersion: 2,
+        activeDiningSessionReference: null,
+        privateField: "secret",
+      },
+    ],
+    nextAfterTableReference: null,
+  });
+  return {
+    allowed,
+    authorizeAction,
+    authorizeActions,
+    tx,
+    authorize,
+    read: createMerchantDiningTables({
+      tableAvailabilityCommandEnabled: true,
+      persistence: {
+        transactions: { run: async (work: (tx: unknown) => unknown) => work(tx) },
+        now: () => "2026-09-25T12:00:00.000Z",
+      } as unknown as Options["persistence"],
+      authentication: { authorize } as unknown as Options["authentication"],
+    }),
+    input: {
+      sessionCookie: "synthetic",
+      csrf: "synthetic",
+      query: { afterTableReference: null, limit: 10 },
+    },
+  };
+}
+beforeEach(() => vi.clearAllMocks());
+it("uses current selected scope and projects only safe fields", async () => {
+  const f = setup(),
+    view = await f.read(f.input);
+  expect(mock.resolve).toHaveBeenCalledWith(f.tx, "synthetic", "dining.operate", id(9));
+  expect(mock.store.mock.calls[0]?.[1]).toEqual({
+    tenantReference: id(1),
+    brandReference: id(2),
+    storeReference: id(3),
+  });
+  expect(view.items[0]).not.toHaveProperty("privateField");
+  expect(view.items[0]?.elapsedMinutes).toBeNull();
+  expect(view.canOperateTables).toBe(true);
+  expect(f.authorizeActions).toHaveBeenCalledOnce();
+  expect(f.authorizeAction).toHaveBeenCalledWith("dining.operate");
+  expect(mock.list).toHaveBeenCalledWith(
+    expect.objectContaining({ afterTableReference: null, limit: 10 }),
+  );
+});
+it("v15 b12: asks the store for the tables in use, so a page with a next reference is full", async () => {
+  const f = setup();
+  const page = Array.from({ length: 10 }, (_, n) => ({
+    tableReference: id(10 + n),
+    stableLabel: "T" + (n + 1),
+    areaCode: "MAIN",
+    capacity: 4,
+    lifecycle: "Published",
+    operationalState: "Available",
+    aggregateVersion: 2,
+    activeDiningSessionReference: null,
+  }));
+  mock.list.mockResolvedValue({ items: page, nextAfterTableReference: id(19) });
+  const view = await f.read(f.input);
+  // Retired tables are left out by the store's query, never after the page was cut.
+  expect(mock.list).toHaveBeenCalledWith(
+    expect.objectContaining({ afterTableReference: null, limit: 10, lifecycle: "InUse" }),
+  );
+  expect(view.items.map((table) => table.stableLabel)).toEqual(page.map((t) => t.stableLabel));
+  expect(view.nextAfterTableReference).toBe(id(19));
+});
+it("refuses the page before any table read without the dining.operate grant", async () => {
+  const f = setup();
+  f.authorizeAction.mockImplementation(async (action?: unknown) => ({
+    effect: action === "dining.operate" ? "Deny" : "Allow",
+  }));
+  await expect(f.read(f.input)).rejects.toThrow("DINING_TABLES_PERMISSION_DENIED");
+  expect(mock.list).not.toHaveBeenCalled();
+});
+it("does not expose table command affordances when the BFF command is unconfigured", async () => {
+  const f = setup();
+  const read = createMerchantDiningTables({
+    persistence: {
+      transactions: { run: async (work: (tx: unknown) => unknown) => work(f.tx) },
+      now: () => "2026-09-25T12:00:00.000Z",
+    } as unknown as Options["persistence"],
+    authentication: { authorize: f.authorize } as unknown as Options["authentication"],
+  });
+  expect((await read(f.input)).canOperateTables).toBe(false);
+});
+it("WP-2423 M08: offers a table round to staff who may enter one, whatever the counter switch says", async () => {
+  const f = setup();
+  const read = (staffDiningRoundEnabled?: boolean) =>
+    createMerchantDiningTables({
+      ...(staffDiningRoundEnabled === undefined ? {} : { staffDiningRoundEnabled }),
+      persistence: {
+        transactions: { run: async (work: (tx: unknown) => unknown) => work(f.tx) },
+        now: () => "2026-09-25T12:00:00.000Z",
+      } as unknown as Options["persistence"],
+      authentication: { authorize: f.authorize } as unknown as Options["authentication"],
+    })(f.input);
+  // Composed and allowed: offered, from the page's one permission read.
+  expect((await read(true)).canTakeTableRounds).toBe(true);
+  expect(f.authorizeActions).toHaveBeenCalledOnce();
+  expect(f.authorizeActions.mock.calls[0]?.[0]).toContain("ordering.order.create_staff");
+  // Store features (the walk-up counter switch) are never read here.
+  expect(JSON.stringify(f.tx.query.mock.calls)).not.toMatch(/store_feature/u);
+  // Not composed in this deployment: never offered.
+  expect((await read(false)).canTakeTableRounds).toBe(false);
+  expect((await read()).canTakeTableRounds).toBe(false);
+  // A kitchen-only role (no staff round permission): not offered.
+  f.authorizeAction.mockImplementation(async (action?: string) => ({
+    effect: action === "ordering.order.create_staff" ? "Deny" : "Allow",
+  }));
+  expect((await read(true)).canTakeTableRounds).toBe(false);
+});
+it("adds elapsed minutes from the current scoped Active Session", async () => {
+  const f = setup();
+  mock.list.mockResolvedValueOnce({
+    items: [
+      {
+        tableReference: id(4),
+        stableLabel: "T1",
+        areaCode: "MAIN",
+        capacity: 4,
+        lifecycle: "Published",
+        operationalState: "Available",
+        aggregateVersion: 3,
+        activeDiningSessionReference: id(5),
+      },
+    ],
+    nextAfterTableReference: null,
+  });
+  mock.loadSessions.mockResolvedValueOnce([
+    {
+      diningSessionReference: id(5),
+      brandReference: id(2),
+      storeReference: id(3),
+      phase: "Active",
+      startedAt: "2026-09-25T11:42:00.000Z",
+    },
+  ]);
+  const view = await f.read(f.input);
+  expect(view.items[0]?.elapsedMinutes).toBe(18);
+  expect(mock.loadSessions).toHaveBeenCalledWith([id(5)]);
+  // WP-2423: resolved in full at the start (one read for all of the page's actions) and
+  // re-checked in full once before the reply only.
+  expect(f.authorizeActions).toHaveBeenCalledOnce();
+  expect(f.allowed).toHaveBeenCalledOnce();
+});
+it("DEC-DINE-IN-PAY-LATER: says how each table pays — an open one as opened, a free one as the Store opens tables now", async () => {
+  const f = setup();
+  const table = (n: number, session: string | null) => ({
+    tableReference: id(n),
+    stableLabel: "T" + n,
+    areaCode: "MAIN",
+    capacity: 4,
+    lifecycle: "Published",
+    operationalState: "Available",
+    aggregateVersion: 3,
+    activeDiningSessionReference: session,
+  });
+  mock.list.mockResolvedValueOnce({
+    items: [table(4, id(5)), table(6, null)],
+    nextAfterTableReference: null,
+  });
+  mock.loadSessions.mockResolvedValueOnce([
+    {
+      diningSessionReference: id(5),
+      brandReference: id(2),
+      storeReference: id(3),
+      phase: "Active",
+      startedAt: "2026-09-25T11:42:00.000Z",
+    },
+  ]);
+  timing.store = "PayLater";
+  timing.sessions = new Map([[id(5), "PayFirst"]]);
+  try {
+    const view = await f.read(f.input);
+    expect(view.items.map((item) => item.paymentTiming)).toEqual(["PayFirst", "PayLater"]);
+  } finally {
+    timing.store = "PayFirst";
+    timing.sessions = new Map();
+  }
+});
+it("does not return elapsed Session data if Store authority changes during the owner read", async () => {
+  const f = setup();
+  mock.list.mockResolvedValueOnce({
+    items: [
+      {
+        tableReference: id(4),
+        stableLabel: "T1",
+        areaCode: "MAIN",
+        capacity: 4,
+        lifecycle: "Published",
+        operationalState: "Available",
+        aggregateVersion: 3,
+        activeDiningSessionReference: id(5),
+      },
+    ],
+    nextAfterTableReference: null,
+  });
+  mock.loadSessions.mockResolvedValueOnce([
+    {
+      diningSessionReference: id(5),
+      brandReference: id(2),
+      storeReference: id(3),
+      phase: "Active",
+      startedAt: "2026-09-25T11:42:00.000Z",
+    },
+  ]);
+  // Allowed at the start; refused by the full re-check before the reply.
+  f.allowed.mockResolvedValueOnce(false);
+  await expect(f.read(f.input)).rejects.toThrow("DINING_TABLES_PERMISSION_DENIED");
+  expect(mock.loadSessions).toHaveBeenCalledWith([id(5)]);
+});
+it.each([
+  { limit: 101 },
+  { limit: 0 },
+  { afterTableReference: "invalid" },
+  { storeReference: id(8) },
+])("rejects invalid or injected selection %j", async (change) => {
+  const f = setup();
+  await expect(f.read({ ...f.input, query: { ...f.input.query, ...change } })).rejects.toThrow();
+  expect(mock.list).not.toHaveBeenCalled();
+});
+it("denies before data read and on authority loss", async () => {
+  const f = setup();
+  f.authorizeAction.mockResolvedValueOnce(null as never);
+  await expect(f.read(f.input)).rejects.toThrow();
+  expect(mock.list).not.toHaveBeenCalled();
+  f.allowed.mockResolvedValueOnce(false);
+  await expect(f.read(f.input)).rejects.toThrow();
+});
+it("WP-2423 Q11: shows until when each table's current printed code works, or none", async () => {
+  const f = setup();
+  mock.list.mockResolvedValueOnce({
+    items: [4, 5, 6].map((n) => ({
+      tableReference: id(n),
+      stableLabel: "T" + String(n),
+      areaCode: "MAIN",
+      capacity: 4,
+      lifecycle: "Published",
+      operationalState: "Available",
+      aggregateVersion: 2,
+      activeDiningSessionReference: null,
+      qrStatus: n === 6 ? "Revoked" : "Active",
+      qrVersion: 2,
+    })),
+    nextAfterTableReference: null,
+  });
+  mock.codes.mockResolvedValueOnce(
+    new Map([
+      [id(4), { qrVersion: 2, expiresAt: "2027-04-12T13:00:00.000Z" }],
+      [id(5), { qrVersion: 1, expiresAt: "2027-01-01T00:00:00.000Z" }],
+      [id(6), { qrVersion: 1, expiresAt: "2027-01-01T00:00:00.000Z" }],
+    ]),
+  );
+  const view = await f.read(f.input);
+  expect(mock.codes).toHaveBeenCalledWith([id(4), id(5), id(6)]);
+  expect(view.items.map((item) => item.qrCodeValidUntil)).toEqual([
+    "2027-04-12T13:00:00.000Z",
+    null,
+    null,
+  ]);
+});
+
+it("WP-2423 item 5: lists the party's staff rounds still awaiting card-machine payment, with their deadline", async () => {
+  const f = setup();
+  mock.list.mockResolvedValueOnce({
+    items: [4, 6].map((n) => ({
+      tableReference: id(n),
+      stableLabel: "T" + String(n),
+      areaCode: "MAIN",
+      capacity: 4,
+      lifecycle: "Published",
+      operationalState: "Available",
+      aggregateVersion: 3,
+      activeDiningSessionReference: id(n + 1),
+    })),
+    nextAfterTableReference: null,
+  });
+  mock.loadSessions.mockResolvedValueOnce(
+    [5, 7].map((n) => ({
+      diningSessionReference: id(n),
+      brandReference: id(2),
+      storeReference: id(3),
+      phase: "Active",
+      startedAt: "2026-09-25T11:42:00.000Z",
+    })),
+  );
+  const round = (table: number, session: number, batch: number, payBy: string) => ({
+    tableReference: id(table),
+    diningSessionReference: id(session),
+    orderReference: id(40),
+    orderBatchReference: id(batch),
+    payBy,
+  });
+  mock.awaiting.mockResolvedValueOnce([
+    round(4, 5, 41, "2026-09-25T12:10:00.000Z"),
+    // Paid on the card machine but not yet seen by Ordering: not waiting.
+    round(4, 5, 42, "2026-09-25T12:15:00.000Z"),
+    // An earlier party's round at table 6 is not this party's.
+    round(6, 99, 43, "2026-09-25T12:20:00.000Z"),
+  ]);
+  mock.cardPaid.mockResolvedValueOnce(new Map([[id(42), { cardMachinePaymentReference: id(44) }]]));
+  const view = await f.read(f.input);
+  expect(mock.awaiting.mock.calls[0]?.[1]).toEqual([id(4), id(6)]);
+  // One Payment read for all of the party's rounds, whatever their number (no read per round).
+  expect(mock.cardPaid).toHaveBeenCalledOnce();
+  expect(mock.cardPaid.mock.calls[0]?.[1]).toEqual([
+    { orderReference: id(40), orderBatchReference: id(41) },
+    { orderReference: id(40), orderBatchReference: id(42) },
+  ]);
+  // v15 batch-5: with the round, so the close step counts its dishes once (as the card-machine
+  // payment, never also as a guest paying on a phone); the paid round is not listed.
+  expect(view.items.map((item) => item.staffRoundsAwaitingPayment)).toEqual([
+    [{ payBy: "2026-09-25T12:10:00.000Z", orderBatchReference: id(41) }],
+    [],
+  ]);
+  expect(JSON.stringify(view)).not.toContain(id(42));
+});
+
+it("WP-2423 abandoned payment: lists each party's unpaid guest rounds and who may cancel them", async () => {
+  const f = setup();
+  const tables = {
+    items: [4, 6].map((n) => ({
+      tableReference: id(n),
+      stableLabel: "T" + String(n),
+      areaCode: "MAIN",
+      capacity: 4,
+      lifecycle: "Published",
+      operationalState: "Available",
+      aggregateVersion: 3,
+      activeDiningSessionReference: id(n + 1),
+    })),
+    nextAfterTableReference: null,
+  };
+  const sessions = [5, 7].map((n) => ({
+    diningSessionReference: id(n),
+    brandReference: id(2),
+    storeReference: id(3),
+    phase: "Active",
+    startedAt: "2026-09-25T11:42:00.000Z",
+  }));
+  mock.list.mockResolvedValueOnce(tables);
+  mock.loadSessions.mockResolvedValueOnce(sessions);
+  const unpaid = {
+    diningSessionReference: id(5),
+    orderReference: id(40),
+    orderBatchReference: id(41),
+    roundNumber: 1,
+    payBy: "2026-09-25T12:10:00.000Z",
+  };
+  mock.unpaidGuestRounds.mockResolvedValueOnce([unpaid]);
+  const view = await f.read(f.input);
+  // One read for every open session on the page.
+  expect(mock.unpaidGuestRounds).toHaveBeenCalledOnce();
+  expect(mock.unpaidGuestRounds.mock.calls[0]?.[2]).toEqual([id(5), id(7)]);
+  expect(view.items.map((item) => item.guestRoundsAwaitingPayment)).toEqual([
+    [
+      {
+        orderReference: id(40),
+        orderBatchReference: id(41),
+        roundNumber: 1,
+        payBy: "2026-09-25T12:10:00.000Z",
+      },
+    ],
+    [],
+  ]);
+  expect(view.canCancelUnpaidRounds).toBe(true);
+  expect(view.items.map((item) => item.roundsAwaitingAcceptance)).toEqual([[], []]);
+  f.authorizeAction.mockImplementation(async (action?: string) => ({
+    effect: action === "ordering.order.cancel" ? "Deny" : "Allow",
+  }));
+  expect((await f.read(f.input)).canCancelUnpaidRounds).toBe(false);
+  // WP-2423 item 8 ①: only a manager who may record it is offered a write-off.
+  f.authorizeAction.mockImplementation(async (action?: string) => ({
+    effect: action === "ordering.order.write_off" ? "Deny" : "Allow",
+  }));
+  expect((await f.read(f.input)).canWriteOff).toBe(false);
+  f.authorizeAction.mockImplementation(async () => ({ effect: "Allow" }));
+  expect((await f.read(f.input)).canWriteOff).toBe(true);
+  // A payment that just arrived (Payment recorded it, Ordering not yet): no longer unpaid, so no
+  // "cancel unpaid round" for it. One Payment read for every listed round.
+  mock.list.mockResolvedValueOnce(tables);
+  mock.loadSessions.mockResolvedValueOnce(sessions);
+  mock.unpaidGuestRounds.mockResolvedValueOnce([unpaid]);
+  mock.paidOnline.mockResolvedValueOnce(new Set([id(41)]));
+  const arrived = await f.read(f.input);
+  expect(mock.paidOnline.mock.calls.at(-1)?.[2]).toEqual([id(41)]);
+  expect(arrived.items.map((item) => item.guestRoundsAwaitingPayment)).toEqual([[], []]);
+});
+
+it("WP-2423 D4: gives each open session's phase, version and Order to staff who may close tables", async () => {
+  const f = setup();
+  mock.list.mockResolvedValue({
+    items: [
+      {
+        tableReference: id(4),
+        stableLabel: "T4",
+        areaCode: "MAIN",
+        capacity: 4,
+        lifecycle: "Published",
+        operationalState: "Available",
+        aggregateVersion: 3,
+        activeDiningSessionReference: id(5),
+      },
+    ],
+    nextAfterTableReference: null,
+  });
+  mock.loadSessions.mockResolvedValue([
+    {
+      diningSessionReference: id(5),
+      brandReference: id(2),
+      storeReference: id(3),
+      phase: "Active",
+      version: 3,
+      startedAt: "2026-09-25T11:42:00.000Z",
+    },
+  ]);
+  mock.sessionOrders.mockResolvedValueOnce(new Map([[id(5), id(40)]]));
+  const view = await f.read(f.input);
+  expect(view.canCloseSessions).toBe(true);
+  expect(f.authorizeAction).toHaveBeenCalledWith("dining.session.close");
+  expect(f.authorizeAction).toHaveBeenCalledWith("order.close");
+  expect(mock.sessionOrders.mock.calls[0]?.[2]).toEqual([id(5)]);
+  expect(view.items[0]?.session).toEqual({
+    phase: "Active",
+    version: 3,
+    orderReference: id(40),
+    // WP-2423 item 8 ⑨: nothing paid or split, nothing merged into it.
+    paymentStarted: false,
+    mergedTables: [],
+  });
+  // Without the closing permission: nothing to close with, but the table's Order is still listed
+  // (item 8 ①: the list shows each table's dishes and bill).
+  f.authorizeAction.mockImplementation(async (action?: unknown) => ({
+    effect: action === "dining.session.close" ? "Deny" : "Allow",
+  }));
+  mock.sessionOrders.mockClear();
+  mock.sessionOrders.mockResolvedValueOnce(new Map([[id(5), id(40)]]));
+  const denied = await f.read(f.input);
+  expect(denied.canCloseSessions).toBe(false);
+  expect(mock.sessionOrders).toHaveBeenCalledOnce();
+  expect(denied.items[0]?.session).toEqual({
+    phase: "Active",
+    version: 3,
+    orderReference: id(40),
+    paymentStarted: false,
+    mergedTables: [],
+  });
+});
+
+it("WP-2423: offers the Order host section only to staff who may transfer the host", async () => {
+  const f = setup();
+  expect((await f.read(f.input)).canTransferHost).toBe(true);
+  f.authorizeAction.mockImplementation(async (action?: unknown) => ({
+    effect: action === "dining.host.transfer" ? "Deny" : "Allow",
+  }));
+  expect((await f.read(f.input)).canTransferHost).toBe(false);
+});
+
+it("WP-2423: lists each party's paid rounds still awaiting acceptance, with when each was paid", async () => {
+  const f = setup();
+  mock.list.mockResolvedValueOnce({
+    items: [4, 6].map((n) => ({
+      tableReference: id(n),
+      stableLabel: "T" + String(n),
+      areaCode: "MAIN",
+      capacity: 4,
+      lifecycle: "Published",
+      operationalState: "Available",
+      aggregateVersion: 3,
+      activeDiningSessionReference: id(n + 1),
+    })),
+    nextAfterTableReference: null,
+  });
+  mock.loadSessions.mockResolvedValueOnce(
+    [5, 7].map((n) => ({
+      diningSessionReference: id(n),
+      brandReference: id(2),
+      storeReference: id(3),
+      phase: "Active",
+      startedAt: "2026-09-25T11:42:00.000Z",
+    })),
+  );
+  mock.paidAwaitingAcceptance.mockResolvedValueOnce([
+    {
+      diningSessionReference: id(7),
+      orderReference: id(40),
+      orderBatchReference: id(41),
+      roundNumber: 2,
+      paidAt: "2026-09-25T11:51:00.000Z",
+    },
+  ]);
+  const view = await f.read(f.input);
+  // One read for every open session on the page; no references reach the page.
+  expect(mock.paidAwaitingAcceptance).toHaveBeenCalledOnce();
+  expect(mock.paidAwaitingAcceptance.mock.calls[0]?.[2]).toEqual([id(5), id(7)]);
+  expect(view.items.map((item) => item.roundsAwaitingAcceptance)).toEqual([
+    [],
+    [{ roundNumber: 2, paidAt: "2026-09-25T11:51:00.000Z" }],
+  ]);
+  expect(JSON.stringify(view)).not.toContain(id(41));
+});
+it("reads the polled Tables page in the composition's snapshot transaction when it has one", async () => {
+  const f = setup();
+  const run = vi.fn(async (work: (tx: unknown) => unknown) => work(f.tx)),
+    runSnapshot = vi.fn(async (work: (tx: unknown) => unknown) => work(f.tx));
+  const persistence = (transactions: object) =>
+    ({ transactions, now: () => "2026-09-25T12:00:00.000Z" }) as unknown as Options["persistence"];
+  const read = (transactions: object) =>
+    createMerchantDiningTables({
+      persistence: persistence(transactions),
+      authentication: { authorize: f.authorize } as unknown as Options["authentication"],
+    })(f.input);
+  // WP-2423 (v15 2026-10-18): one read-only snapshot, never an ordinary (locking) transaction.
+  expect((await read({ run, runSnapshot })).items).toHaveLength(1);
+  expect(runSnapshot).toHaveBeenCalledOnce();
+  expect(run).not.toHaveBeenCalled();
+  expect(mock.list).toHaveBeenCalledOnce();
+  // A composition without a snapshot transaction still reads, as an ordinary transaction.
+  expect((await read({ run })).items).toHaveLength(1);
+  expect(run).toHaveBeenCalledOnce();
+});
+it("WP-2423 Q28: shows the open call for staff at each open table, and none elsewhere", async () => {
+  const f = setup();
+  mock.list.mockResolvedValueOnce({
+    items: [
+      {
+        tableReference: id(4),
+        stableLabel: "T1",
+        areaCode: "MAIN",
+        capacity: 4,
+        lifecycle: "Published",
+        operationalState: "Available",
+        aggregateVersion: 3,
+        activeDiningSessionReference: id(5),
+      },
+      {
+        tableReference: id(6),
+        stableLabel: "T2",
+        areaCode: "MAIN",
+        capacity: 4,
+        lifecycle: "Published",
+        operationalState: "Available",
+        aggregateVersion: 1,
+        activeDiningSessionReference: null,
+      },
+    ],
+    nextAfterTableReference: null,
+  });
+  mock.loadSessions.mockResolvedValueOnce([
+    {
+      diningSessionReference: id(5),
+      brandReference: id(2),
+      storeReference: id(3),
+      phase: "Active",
+      startedAt: "2026-09-25T11:42:00.000Z",
+    },
+  ]);
+  mock.staffCalls.mockResolvedValueOnce(
+    new Map([
+      [
+        id(5),
+        {
+          callReference: id(7),
+          diningSessionReference: id(5),
+          participantReference: id(8),
+          reason: "TableNeeds",
+          calledAt: "2026-09-25T11:55:00.000Z",
+        },
+      ],
+    ]),
+  );
+  const view = await f.read(f.input);
+  expect(mock.staffCalls).toHaveBeenCalledWith(expect.anything(), [id(5)], expect.any(Function));
+  expect(view.items[0]?.staffCall).toEqual({
+    callReference: id(7),
+    reason: "TableNeeds",
+    calledAt: "2026-09-25T11:55:00.000Z",
+  });
+  // Never the participant who called: staff go to the table.
+  expect(JSON.stringify(view.items[0]?.staffCall)).not.toContain(id(8));
+  expect(view.items[1]?.staffCall).toBeNull();
+});
+
+it("WP-2423 item 8 ⑤: a round waiting for staff needs action (not awaiting payment), and a phone that just joined is pointed out", async () => {
+  const f = setup();
+  mock.list.mockResolvedValueOnce({
+    items: [
+      {
+        tableReference: id(4),
+        stableLabel: "T4",
+        areaCode: "MAIN",
+        capacity: 4,
+        lifecycle: "Published",
+        operationalState: "Available",
+        aggregateVersion: 3,
+        activeDiningSessionReference: id(5),
+      },
+    ],
+    nextAfterTableReference: null,
+  });
+  mock.loadSessions.mockResolvedValueOnce([
+    {
+      diningSessionReference: id(5),
+      brandReference: id(2),
+      storeReference: id(3),
+      phase: "Active",
+      startedAt: "2026-09-25T11:42:00.000Z",
+    },
+  ]);
+  mock.sessionOrders.mockResolvedValueOnce(new Map([[id(5), id(40)]]));
+  // The held round is also a submitted round nobody paid for: it is listed once, as waiting.
+  mock.unpaidGuestRounds.mockResolvedValueOnce([
+    {
+      diningSessionReference: id(5),
+      orderReference: id(40),
+      orderBatchReference: id(41),
+      roundNumber: 3,
+      payBy: "2026-09-25T12:10:00.000Z",
+    },
+  ]);
+  mock.waitingRounds.mockResolvedValueOnce([
+    {
+      orderReference: id(40),
+      orderBatchReference: id(41),
+      submissionReference: id(42),
+      reason: "PhoneRapid",
+      heldAt: "2026-09-25T11:58:00.000Z",
+      release: null,
+    },
+  ]);
+  mock.phones.mockResolvedValueOnce(
+    new Map([
+      [
+        id(5),
+        [
+          {
+            participantReference: id(60),
+            phoneNumber: 1,
+            joinedAt: "2026-09-25T11:43:00.000Z",
+            left: false,
+            removed: false,
+          },
+          {
+            participantReference: id(61),
+            phoneNumber: 2,
+            joinedAt: "2026-09-25T11:58:00.000Z",
+            left: false,
+            removed: false,
+          },
+          {
+            participantReference: id(62),
+            phoneNumber: 3,
+            joinedAt: "2026-09-25T11:57:00.000Z",
+            left: true,
+            removed: true,
+          },
+        ],
+      ],
+    ]),
+  );
+
+  const [table] = (await f.read(f.input)).items;
+  expect(table?.guestRoundsAwaitingPayment).toEqual([]);
+  expect(table?.heldRounds).toEqual([
+    {
+      orderReference: id(40),
+      orderBatchReference: id(41),
+      roundNumber: 3,
+      reason: "PhoneRapid",
+      heldAt: "2026-09-25T11:58:00.000Z",
+    },
+  ]);
+  // Joined in the last 3 minutes and still at the table (phone 3 was taken off it).
+  expect(table?.newPhones).toEqual([{ phoneNumber: 2, joinedAt: "2026-09-25T11:58:00.000Z" }]);
+});
+
+it("DEC-DINING-GUEST-TABLE-START: says which table a guest started and when it frees itself, and adds nothing to any other", async () => {
+  const f = setup();
+  guestStart.on = true;
+  const startedAt = "2026-09-25T11:55:00.000Z";
+  guestStart.started = new Map([[id(5), { startedAt }]]);
+  guestStart.cleaningLeft = new Set([id(6)]);
+  guestStart.activity = new Map([
+    [
+      id(5),
+      { lastPhoneJoinedAt: startedAt, lastServedAt: null, openStaffCall: false, phase: "Active" },
+    ],
+  ]);
+  mock.list.mockResolvedValue({
+    items: [
+      {
+        tableReference: id(4),
+        stableLabel: "T4",
+        areaCode: "MAIN",
+        capacity: 4,
+        lifecycle: "Published",
+        operationalState: "Available",
+        aggregateVersion: 3,
+        activeDiningSessionReference: id(5),
+      },
+      {
+        tableReference: id(6),
+        stableLabel: "T6",
+        areaCode: "MAIN",
+        capacity: 4,
+        lifecycle: "Published",
+        operationalState: "TemporarilyBlocked",
+        blockReasonCode: "CLEANING",
+        aggregateVersion: 3,
+        activeDiningSessionReference: null,
+        observedAt: startedAt,
+      },
+    ],
+    nextAfterTableReference: null,
+  });
+  mock.loadSessions.mockResolvedValue([
+    {
+      diningSessionReference: id(5),
+      brandReference: id(2),
+      storeReference: id(3),
+      phase: "Active",
+      version: 3,
+      startedAt,
+    },
+  ]);
+  // Phones joining a guest-started table are what every normal party does: nothing to check.
+  mock.phones.mockResolvedValue(
+    new Map([
+      [
+        id(5),
+        [
+          {
+            participantReference: id(90),
+            phoneNumber: 1,
+            joinedAt: startedAt,
+            left: false,
+            removed: false,
+          },
+        ],
+      ],
+    ]),
+  );
+  try {
+    const view = (await f.read(f.input)) as unknown as {
+      guestTableStart?: { version: number; canTurnOff: boolean; startsBusy?: boolean };
+      items: readonly {
+        guestStart?: { closesByItselfAt: string | null };
+        blockedSince?: string;
+        newPhones: readonly unknown[];
+      }[];
+    };
+    expect(view.guestTableStart).toEqual({ version: 2, canTurnOff: true });
+    expect(view.items[0]?.guestStart?.closesByItselfAt).toBe(
+      new Date(Date.parse(startedAt) + 20 * 60_000).toISOString(),
+    );
+    expect(view.items[0]?.newPhones).toEqual([]);
+    expect(view.items[1]?.guestStart).toBeUndefined();
+    expect(view.items[1]?.blockedSince).toBe(startedAt);
+    // Only the CLEANING-blocked table is asked about, at its own version.
+    expect(guestStart.cleaningAsked.at(-1)).toEqual([
+      { tableReference: id(6), aggregateVersion: 3 },
+    ]);
+    // A "Being cleaned" block a person set never reads as one guests can start.
+    guestStart.cleaningLeft = new Set();
+    const manual = (await f.read(f.input)) as unknown as {
+      items: readonly { blockedSince?: string }[];
+    };
+    expect(Object.hasOwn(manual.items[1] ?? {}, "blockedSince")).toBe(false);
+    // The Store's budget is spent: staff are told why guests at free tables are coming to them.
+    guestStart.budgetSpent = true;
+    const busy = (await f.read(f.input)) as unknown as {
+      guestTableStart?: { version: number; canTurnOff: boolean; startsBusy?: boolean };
+    };
+    expect(busy.guestTableStart).toEqual({ version: 2, canTurnOff: true, startsBusy: true });
+  } finally {
+    guestStart.budgetSpent = false;
+    guestStart.cleaningLeft = new Set();
+    guestStart.on = false;
+    guestStart.started = new Map();
+    guestStart.activity = new Map();
+  }
+});
+
+it("DEC-DINING-GUEST-TABLE-START: a Store that never used it reads exactly as before", async () => {
+  const f = setup();
+  const view = await f.read(f.input);
+  expect(Object.hasOwn(view, "guestTableStart")).toBe(false);
+  for (const item of view.items) {
+    expect(Object.hasOwn(item, "guestStart")).toBe(false);
+    expect(Object.hasOwn(item, "blockedSince")).toBe(false);
+  }
+});
+
+describe("DEC-DINING-GUEST-TABLE-START: when Tables says a table frees itself", () => {
+  const startedAt = "2026-09-25T09:00:00.000Z";
+  const closesAt = (from: string, minutes: number) =>
+    new Date(Date.parse(from) + minutes * 60_000).toISOString();
+  async function read(changes: {
+    round?: boolean;
+    still?: boolean;
+    remake?: boolean;
+    order?: boolean;
+    unpaid?: boolean;
+    awaiting?: boolean;
+    ended?: boolean;
+    kitchenAt?: string;
+    call?: boolean;
+  }) {
+    const f = setup();
+    guestStart.on = true;
+    guestStart.started = new Map([
+      [id(5), { startedAt, ...(changes.ended ? { endedLastParty: true } : {}) }],
+    ]);
+    guestStart.activity = new Map([
+      [
+        id(5),
+        {
+          lastPhoneJoinedAt: startedAt,
+          lastServedAt: null,
+          openStaffCall: changes.call === true,
+          phase: "Active",
+        },
+      ],
+    ]);
+    mock.list.mockResolvedValue({
+      items: [
+        {
+          tableReference: id(4),
+          stableLabel: "T4",
+          areaCode: "MAIN",
+          capacity: 4,
+          lifecycle: "Published",
+          operationalState: "Available",
+          aggregateVersion: 3,
+          activeDiningSessionReference: id(5),
+        },
+      ],
+      nextAfterTableReference: null,
+    });
+    mock.loadSessions.mockResolvedValue([
+      {
+        diningSessionReference: id(5),
+        brandReference: id(2),
+        storeReference: id(3),
+        phase: "Active",
+        version: 3,
+        startedAt,
+      },
+    ]);
+    mock.phones.mockResolvedValue(new Map());
+    if (changes.order !== false) mock.sessionOrders.mockResolvedValue(new Map([[id(5), id(6)]]));
+    if (changes.unpaid)
+      mock.unpaidGuestRounds.mockResolvedValue([
+        {
+          diningSessionReference: id(5),
+          orderReference: id(6),
+          orderBatchReference: id(7),
+          roundNumber: 1,
+          payBy: "2026-09-25T12:30:00.000Z",
+        },
+      ]);
+    if (changes.awaiting)
+      mock.paidAwaitingAcceptance.mockResolvedValue([
+        { diningSessionReference: id(5), roundNumber: 1, paidAt: startedAt },
+      ]);
+    kitchen.progress = new Map(
+      changes.order === false
+        ? []
+        : [
+            [
+              id(6),
+              {
+                lastChangedAt: changes.kitchenAt ?? startedAt,
+                stillMaking: changes.still === true,
+              },
+            ],
+          ],
+    );
+    kitchen.remaking = new Map(changes.remake ? [[id(6), { openQuantity: 1 }]] : []);
+    try {
+      const view = (await f.read(f.input)) as unknown as {
+        items: readonly {
+          guestStart?: { closesByItselfAt: string | null; endedLastParty?: true };
+        }[];
+      };
+      return view.items[0]?.guestStart;
+    } finally {
+      guestStart.on = false;
+      guestStart.started = new Map();
+      guestStart.activity = new Map();
+      kitchen.progress = new Map();
+      kitchen.remaking = new Map();
+    }
+  }
+  it("counts the kitchen's last change, as the System's own rule does", async () => {
+    const kitchenAt = "2026-09-25T09:40:00.000Z";
+    expect((await read({ kitchenAt }))?.closesByItselfAt).toBe(closesAt(kitchenAt, 90));
+    expect((await read({ order: false }))?.closesByItselfAt).toBe(closesAt(startedAt, 20));
+  });
+  it.each([
+    ["the kitchen still making something", { still: true }],
+    ["a dish being remade", { remake: true }],
+    ["a round not paid", { unpaid: true }],
+    ["a paid round not accepted", { awaiting: true }],
+    ["an open staff call", { call: true }],
+  ])("promises nothing with %s", async (_name, changes) => {
+    expect((await read(changes))?.closesByItselfAt).toBeNull();
+  });
+  it("says a new party ended the last visit only when it did", async () => {
+    expect(await read({ ended: true })).toMatchObject({ endedLastParty: true });
+    expect(Object.hasOwn((await read({})) ?? {}, "endedLastParty")).toBe(false);
+  });
+});
