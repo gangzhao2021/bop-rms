@@ -271,3 +271,61 @@ it("the opening round on a free table reaches the card machine's amount under th
     }
   });
 });
+
+/**
+ * WP-2423 (rush-connection-hold, integration of batch 16): no step of a table's opening staff round
+ * holds one of the API pool's connections while it takes a second. Since batch 16 such a second acquire is
+ * answered busy at once when no connection is free, so in a rush any nested one fails the round
+ * ("couldn't send, try again") however long the pool would have taken. The checkout's stock check
+ * used to open the guest's access transaction from inside the stock read's snapshot. On a pool of
+ * one connection, every second acquire made while holding one is refused, so the round only
+ * completes when each step gives its connection back before the next takes one. (A later round's
+ * current checks still read the menu in their own snapshots inside the round's write transaction:
+ * open in WP-2423, rush-connection-hold integration.)
+ */
+it("an opening staff round is sent on a pool of one connection: no step takes a second while it holds one", async () => {
+  await withIsolatedDatabase({ caseId: "wp2423_round_one" }, async (context) => {
+    const admin = new Client(context.clientConfig);
+    await admin.connect();
+    vi.stubEnv("NODE_ENV", "development");
+    const api = await createPilotApiRole(admin, context, "wp2423_rs1");
+    let store = null;
+    try {
+      store = await prepareRealStaffRoundStore({
+        admin,
+        context,
+        api,
+        paymentTiming: "PayFirst",
+        apiPool: { max: 1, acquireBudgetMs: 5000 },
+      });
+      const { soup, tableReference, reference } = store;
+      const server = await store.staff(id(0x730), [
+        "ordering.order.create_staff",
+        "dining.operate",
+        "dining.session.close",
+      ]);
+      const counter = await store.counterFor(server);
+      const as = { sessionCookie: server.sessionCookie, csrf: server.csrf };
+      // The opening round: it seats the party and checks two dishes' stock, one at a time.
+      const { result } = await timedRound(counter, as, {
+        operationReference: reference(),
+        tableReference,
+        tip: { kind: "None" },
+        recordedAfterOutage: false,
+        lines: [
+          { sellableReference: soup.skuReference, quantity: 1, optionSelections: [], note: null },
+          { sellableReference: soup.skuReference, quantity: 1, optionSelections: [], note: null },
+        ],
+      });
+      assert.deepEqual([result.status, result.totalMinor], ["Placed", "1469"]);
+    } finally {
+      vi.unstubAllEnvs();
+      if (store !== null) await store.close();
+      for (const name of [api, api + "_w"]) {
+        await admin.query("DROP OWNED BY " + name).catch(() => undefined);
+        await admin.query("DROP ROLE " + name).catch(() => undefined);
+      }
+      await admin.end();
+    }
+  });
+});

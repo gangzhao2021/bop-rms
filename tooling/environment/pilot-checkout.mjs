@@ -123,6 +123,12 @@ export function createInternalCheckout(resources, configuredEntry, catalogOption
       csrfCredential: csrfCredential,
       cartReference: request.cartReference,
     });
+    // The guest's access, confirmed again after a stock read answered: the same guest, still current.
+    const stillAuthorized = async (before) => {
+      const after = await access.authorize(request, now());
+      if (!after || after.guestSessionReference !== before.guestSessionReference)
+        throw coded("INTERNAL_CHECKOUT_AUTHORITY_UNAVAILABLE");
+    };
     const catalog = {
       async validateSelection(selection) {
         const authority = await access.authorize(request, selection.observedAt);
@@ -145,33 +151,36 @@ export function createInternalCheckout(resources, configuredEntry, catalogOption
                 configuration(selection.optionSelections ?? []),
           )
           .reduce((sum, item) => sum + item.quantity, 0);
-        return transactions.run(async (authorityTx) => {
-          const selected = createCustomerCartSelectionInventory(
-            catalogOptions.catalogTransactions,
-            {
-              ...scope,
-              ...catalogOptions.catalogScope,
-              orderType,
-              orderTypeCode:
-                orderType === "DineIn" ? "DINE_IN" : catalogOptions.catalogScope.orderTypeCode,
-            },
-            { ...catalogOptions.catalogSafety, clock: { now } },
-            {
-              ...catalogOptions.selectedInventory,
-              authorize: async (_tx, request, context) =>
-                request.quantity === quantity &&
-                context.cartVersion === cart.aggregateVersion &&
-                (await access.authorizeInTransaction(authorityTx, authority, request.observedAt)),
-            },
-          );
-          return selected.validateSelection(selection, {
-            diningSessionReference: cart.diningSessionReference,
-            cartReference: cart.cartReference,
-            cartVersion: cart.aggregateVersion,
-            guestSessionReference: guestSessionReference,
-            quantity,
-          });
+        // WP-2423 (rush-connection-hold): the guest's access is confirmed in its own transaction
+        // before the stock read (above) and again once it answered (below), never in a transaction
+        // opened from inside its snapshot: that would hold two connections at once, and in a rush
+        // the second is refused. The binding check locks rows, so it can't run in the read-only
+        // snapshot itself; inside it only this line's quantity and the Cart's version are checked.
+        const selected = createCustomerCartSelectionInventory(
+          catalogOptions.catalogTransactions,
+          {
+            ...scope,
+            ...catalogOptions.catalogScope,
+            orderType,
+            orderTypeCode:
+              orderType === "DineIn" ? "DINE_IN" : catalogOptions.catalogScope.orderTypeCode,
+          },
+          { ...catalogOptions.catalogSafety, clock: { now } },
+          {
+            ...catalogOptions.selectedInventory,
+            authorize: async (_tx, request, context) =>
+              request.quantity === quantity && context.cartVersion === cart.aggregateVersion,
+          },
+        );
+        const result = await selected.validateSelection(selection, {
+          diningSessionReference: cart.diningSessionReference,
+          cartReference: cart.cartReference,
+          cartVersion: cart.aggregateVersion,
+          guestSessionReference: guestSessionReference,
+          quantity,
         });
+        await stillAuthorized(authority);
+        return result;
       },
     };
     // WP-2423: whether the Store's stock covers the Cart's lines together (items sharing an
@@ -184,7 +193,7 @@ export function createInternalCheckout(resources, configuredEntry, catalogOption
       orderTypeCode: orderType === "DineIn" ? "DINE_IN" : catalogOptions.catalogScope.orderTypeCode,
     };
     let coverage = null,
-      held = null;
+      held = false;
     const stock = {
       async covers({ lines, observedAt }) {
         const authority = await access.authorize(request, observedAt);
@@ -211,25 +220,26 @@ export function createInternalCheckout(resources, configuredEntry, catalogOption
           )
             throw coded("INTERNAL_CHECKOUT_STOCK_LINE_UNKNOWN");
         }
-        // Ordering asks one question at a time; each holds the guest's Cart access open (as the
-        // selection check above does) while Inventory answers.
+        // Ordering asks one question at a time; the guest's Cart access is confirmed before it
+        // (above) and after Inventory answered, each in its own transaction (rush-connection-hold).
         coverage ??= createCustomerCartStockCoverage(
           catalogOptions.catalogTransactions,
           catalogScope,
           { ...catalogOptions.catalogSafety, clock: { now } },
           {
             ...catalogOptions.selectedInventory,
-            authorize: async (_tx, input) => (held === null ? false : held(input.observedAt)),
+            authorize: async () => held,
           },
         );
-        return transactions.run(async (authorityTx) => {
-          held = (at) => access.authorizeInTransaction(authorityTx, authority, at);
-          try {
-            return await coverage.covers({ lines, observedAt });
-          } finally {
-            held = null;
-          }
-        });
+        held = true;
+        let covered;
+        try {
+          covered = await coverage.covers({ lines, observedAt });
+        } finally {
+          held = false;
+        }
+        await stillAuthorized(authority);
+        return covered;
       },
     };
     return {
