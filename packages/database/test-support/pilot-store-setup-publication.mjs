@@ -254,12 +254,26 @@ export async function exercisePilotStoreSetupPublication(input) {
             (response) => {
               const chunks = [];
               response.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
-              response.once("end", () =>
-                resolve({
-                  status: response.statusCode,
-                  body: JSON.parse(Buffer.concat(chunks).toString("utf8")),
-                }),
-              );
+              response.once("end", () => {
+                // A body that isn't JSON (an HTML 500 from a route that threw) fails this request
+                // at once, never as an uncaught throw that leaves the test waiting out its timeout.
+                const text = Buffer.concat(chunks).toString("utf8");
+                try {
+                  resolve({ status: response.statusCode, body: JSON.parse(text) });
+                } catch {
+                  reject(
+                    new Error(
+                      "PILOT_PUBLICATION_NOT_JSON " +
+                        response.statusCode +
+                        " /merchant/" +
+                        path.split("?")[0] +
+                        ": " +
+                        text.slice(0, 80),
+                    ),
+                  );
+                }
+              });
+              response.once("error", reject);
             },
           );
           req.setTimeout(20000, () => req.destroy(new Error("PILOT_PUBLICATION_HTTP_TIMEOUT")));
