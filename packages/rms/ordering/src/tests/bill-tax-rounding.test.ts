@@ -387,3 +387,92 @@ describe("v15 b16 DEC-COMP-BILL-CENT: a reduction takes off exactly what the bil
     expect(shares.get(id(202))).toBe(0n);
   });
 });
+
+describe("v15 b16 review: the bill's cent on a merged bill and its bound", () => {
+  const holder = id(1),
+    merged = id(2);
+  /** One $12.50 round with one dish of `order`, its own $1.63 tax, and a reduction if given. */
+  const roundOf = (
+    order: string,
+    n: number,
+    reduction: BillTaxRoundingRound["items"][number]["reduction"] = null,
+  ): BillTaxRoundingRound => ({
+    orderReference: order,
+    orderBatchReference: id(100 + n),
+    items: [
+      {
+        orderItemReference: id(200 + n),
+        netMinor: 1250n,
+        taxComponents: [hst(163n)],
+        reduction,
+      },
+    ],
+  });
+  const onCarrier = { carrierOrderReference: holder };
+  const owedOf = (rounds: readonly BillTaxRoundingRound[], order: string) => {
+    const rounding = computeBillTaxRounding(rounds, onCarrier).lines.filter(
+      (line) => line.orderReference === order,
+    );
+    return (
+      rounds
+        .filter((round) => round.orderReference === order)
+        .flatMap((round) => round.items)
+        .reduce(
+          (sum, item) =>
+            sum +
+            1413n -
+            (item.reduction === null ? 0n : item.reduction.netMinor + item.reduction.taxMinor),
+          0n,
+        ) + rounding.reduce((sum, line) => sum + line.amountMinor, 0n)
+    );
+  };
+
+  it("a merged table's dish comped in full comes to nothing; the holder's round owes the rest", () => {
+    // Order B merged into holder A, one $12.50 round each: $28.25 with −$0.01 on A's round.
+    const rounds = [roundOf(holder, 1), roundOf(merged, 2)];
+    expect(owedOf(rounds, holder) + owedOf(rounds, merged)).toBe(2825n);
+    const shares = billReductionTaxRoundingShares(
+      rounds,
+      [{ orderItemReference: id(202), netMinor: 1250n, taxMinor: 163n }],
+      onCarrier,
+    );
+    const share = shares.get(id(202)) ?? 0n;
+    // The comp takes off what the bill goes down by ($14.12) ...
+    expect(share).toBe(-1n);
+    const after = [
+      roundOf(holder, 1),
+      roundOf(merged, 2, { netMinor: 1250n, taxMinor: 163n + share, taxRoundingMinor: share }),
+    ];
+    // ... and B's round, comped in full, owes nothing (it read $0.01 before the review).
+    expect(owedOf(after, merged)).toBe(0n);
+    expect(owedOf(after, holder)).toBe(1413n);
+    // The bill's rounding is what it was: −$0.01, now on B's round (its comp's cent given back).
+    expect(computeBillTaxRounding(after, onCarrier).totalMinor).toBe(-1n);
+  });
+
+  it("puts the cent on the holder's dish first when both tables' dishes are comped", () => {
+    const rounds = [roundOf(holder, 1), roundOf(merged, 2)];
+    const shares = billReductionTaxRoundingShares(
+      rounds,
+      [
+        { orderItemReference: id(201), netMinor: 1250n, taxMinor: 163n },
+        { orderItemReference: id(202), netMinor: 1250n, taxMinor: 163n },
+      ],
+      onCarrier,
+    );
+    expect([shares.get(id(201)), shares.get(id(202))]).toEqual([-1n, 0n]);
+    const after = [
+      roundOf(holder, 1, { netMinor: 1250n, taxMinor: 162n, taxRoundingMinor: -1n }),
+      roundOf(merged, 2, { netMinor: 1250n, taxMinor: 163n }),
+    ];
+    expect([owedOf(after, holder), owedOf(after, merged)]).toEqual([0n, 0n]);
+  });
+
+  it("refuses a recorded cent beyond nine either way", () => {
+    expect(() =>
+      computeBillTaxRounding([
+        roundOf(holder, 1, { netMinor: 1250n, taxMinor: 173n, taxRoundingMinor: 10n }),
+      ]),
+    ).toThrow("BILL_TAX_ROUNDING_INVALID");
+  });
+});

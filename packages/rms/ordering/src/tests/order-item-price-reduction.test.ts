@@ -74,8 +74,12 @@ describe("v15 b16 DEC-COMP-BILL-CENT: the whole bill's tax cent on a reduction",
     // Applied again with other shares, it starts from the dish's own share, never twice.
     expect(withBillTaxRoundingShares(settled, new Map()).totalMinor).toBe(2826n);
   });
-  it("never takes a dish's tax below nothing nor a share beyond a dollar", () => {
+  it("never takes a dish's tax below nothing nor a share beyond nine cents", () => {
     expect(() => withBillTaxRoundingShares(plan, new Map([["i1", -164n]]))).toThrow();
-    expect(() => withBillTaxRoundingShares(plan, new Map([["i1", 100n]]))).toThrow();
+    expect(() => withBillTaxRoundingShares(plan, new Map([["i1", 10n]]))).toThrow();
+    expect(() => withBillTaxRoundingShares(plan, new Map([["i1", -10n]]))).toThrow();
+    expect(withBillTaxRoundingShares(plan, new Map([["i1", 9n]])).lines[0]?.taxRoundingMinor).toBe(
+      9n,
+    );
   });
 });

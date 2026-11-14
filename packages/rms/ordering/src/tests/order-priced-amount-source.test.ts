@@ -41,6 +41,7 @@ function setup() {
   };
   mock.cancelled.mockResolvedValue({
     cancelledTotalMinor: 0n,
+    billTaxShareMinor: 0n,
     snapshotDigest: "sha256:" + "c".repeat(64),
   });
   mock.taxRounding.mockResolvedValue(0n);
@@ -118,6 +119,7 @@ it("deducts cancelled batch frozen amount without changing submitted history", a
   const f = setup();
   mock.cancelled.mockResolvedValue({
     cancelledTotalMinor: 400n,
+    billTaxShareMinor: 0n,
     snapshotDigest: "sha256:" + "d".repeat(64),
   });
   const value = await f.load();
@@ -130,6 +132,7 @@ it.each([-1n, 1001n])("rejects invalid cancellation deduction %s", async (amount
   const f = setup();
   mock.cancelled.mockResolvedValue({
     cancelledTotalMinor: amount,
+    billTaxShareMinor: 0n,
     snapshotDigest: "sha256:" + "d".repeat(64),
   });
   await expect(f.load()).rejects.toThrow("ORDER_PRICED_AMOUNT_UNAVAILABLE");
@@ -150,6 +153,7 @@ it("v15 b11: a bill read with nothing paid prices the Order without the recorded
   // Split recorded −$0.01 on the bill, then every dish was comped: comps take the full $10.00.
   mock.cancelled.mockResolvedValue({
     cancelledTotalMinor: 1000n,
+    billTaxShareMinor: 0n,
     snapshotDigest: "sha256:" + "c".repeat(64),
   });
   mock.taxRounding.mockResolvedValue(-1n);
@@ -161,4 +165,41 @@ it("v15 b11: a bill read with nothing paid prices the Order without the recorded
   })(f.tx, query);
   expect(excluded.pricedTotalMinor).toBe(0n);
   expect(excluded.taxRoundingMinor).toBe(0n);
+});
+it("v15 b16 DEC-COMP-BILL-CENT: an Order comped in full whose comps took the bill's +$0.01 prices at nothing with its recorded rounding", async () => {
+  const f = setup();
+  // Two $3.80 rounds at 13 %: dishes 429 + 429 = 858 (base 1000 here, as the fixture's); the
+  // bill's tax is a cent over, so comping both took 1001 (one dish 1 cent of the bill's tax more).
+  mock.cancelled.mockResolvedValue({
+    cancelledTotalMinor: 1001n,
+    billTaxShareMinor: 1n,
+    snapshotDigest: "sha256:" + "c".repeat(64),
+  });
+  mock.taxRounding.mockResolvedValue(1n);
+  const value = await f.load();
+  expect(value.cancelledBatchTotalMinor).toBe(1001n);
+  expect(value.pricedTotalMinor).toBe(0n);
+  // A bill read before anything is paid adds the rounding it computes: −$0.01 here, never below.
+  const excluded = createPostgresOrderPricedAmountSource({
+    ...scope,
+    authorize: f.authorize,
+    taxRounding: "Excluded",
+  });
+  expect((await excluded(f.tx, query)).pricedTotalMinor).toBe(-1n);
+  // Beyond the dishes by more than the cents the comps took is refused.
+  mock.cancelled.mockResolvedValue({
+    cancelledTotalMinor: 1002n,
+    billTaxShareMinor: 1n,
+    snapshotDigest: "sha256:" + "c".repeat(64),
+  });
+  await expect(f.load()).rejects.toThrow("ORDER_PRICED_AMOUNT_UNAVAILABLE");
+  await expect(excluded(f.tx, query)).rejects.toThrow("ORDER_PRICED_AMOUNT_UNAVAILABLE");
+  // Without its recorded rounding the Recorded reading is below nothing: refused.
+  mock.cancelled.mockResolvedValue({
+    cancelledTotalMinor: 1001n,
+    billTaxShareMinor: 1n,
+    snapshotDigest: "sha256:" + "c".repeat(64),
+  });
+  mock.taxRounding.mockResolvedValue(0n);
+  await expect(f.load()).rejects.toThrow("ORDER_PRICED_AMOUNT_UNAVAILABLE");
 });

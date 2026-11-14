@@ -108,14 +108,21 @@ export function createPostgresOrderCancelledAmountSource(options: Options) {
       });
       // WP-2423 item 8 ① segment 2: comps and discounts a manager decided before the table paid
       // (append-only compensating records): the dish stays sold, the reduction leaves the total.
-      const reductions = (
-        await listOrderPriceReductions(
-          tx as Parameters<typeof listOrderPriceReductions>[0],
-          { brandReference: brand, storeReference: store },
-          [query.orderReference],
-          query.observedAt,
-        )
-      ).map((record) =>
+      const reductionRecords = await listOrderPriceReductions(
+        tx as Parameters<typeof listOrderPriceReductions>[0],
+        { brandReference: brand, storeReference: store },
+        [query.orderReference],
+        query.observedAt,
+      );
+      // v15 b16 (DEC-COMP-BILL-CENT): a reduction may also take the whole bill's tax cent, beyond
+      // its dish's own total (a table comped in full whose bill's tax is a cent over its rounds').
+      // The bill's tax rounding gives that cent back on the dish's round, so the Order's reductions
+      // may come to more than its dishes by exactly those cents, never by more.
+      const billTaxShareMinor = reductionRecords.reduce(
+        (sum, record) => sum + (record.taxRoundingMinor > 0n ? record.taxRoundingMinor : 0n),
+        0n,
+      );
+      const reductions = reductionRecords.map((record) =>
         Object.freeze({
           reductionReference: record.reductionReference,
           orderItemReference: record.orderItemReference,
@@ -127,7 +134,7 @@ export function createPostgresOrderCancelledAmountSource(options: Options) {
         voidedEvidence.reduce((sum, row) => sum + BigInt(row.amountMinor), 0n) +
         reductions.reduce((sum, row) => sum + BigInt(row.amountMinor), 0n);
       if (
-        cancelledTotalMinor > base.totalMinor ||
+        cancelledTotalMinor > base.totalMinor + billTaxShareMinor ||
         (await options.authorize(tx, {
           ...query,
           brandReference: brand,
@@ -137,6 +144,7 @@ export function createPostgresOrderCancelledAmountSource(options: Options) {
         return fail();
       return Object.freeze({
         cancelledTotalMinor,
+        billTaxShareMinor,
         snapshotDigest:
           "sha256:" +
           createHash("sha256")

@@ -243,6 +243,15 @@ it("comping both dishes of a $28.25 table takes off $28.25, and every record agr
   journey("CompCentsWhole"));
 it("a comp then a 50 % discount take off exactly what the bill goes down by; the table pays the rest", () =>
   journey("CompCentsPartial"));
+// v15 b16 review: two $3.80 rounds at 13 % are charged $0.49 tax each, the whole bill $0.99 (+$0.01):
+// comping both takes off $8.59, one cent more than the dishes. Ordering's priced total, closing the
+// table without a payment and the day's report still read it ($0.00 owed, $8.59 comped).
+it("comping every dish of a bill whose tax is a cent over its rounds' takes that cent too; the table closes", () =>
+  journey("CompCentsUp"));
+// v15 b16 review: a merged table's dish comped in full owes nothing, though the bill's cent is on
+// the host's Order: no $0.01 round is left on the bill, its parts or Ordering's priced total.
+it("a merged table's dish comped in full owes nothing; the host pays the rest and both close", () =>
+  journey("MergedCompCent"));
 
 // WP-2423 DEC-TAX-WHOLE-RECEIPT step 2: the bill's tax is rounded once over every dish; the rounds'
 // difference is recorded by the system rule as the bill's tax rounding, paid exactly, part by part.
@@ -1131,37 +1140,41 @@ async function journey(journeyEnding) {
                         ? "wp2423_plccw"
                         : ending === "CompCentsPartial"
                           ? "wp2423_plccp"
-                          : ending === "MemberPointsOnline"
-                            ? "wp2423_plmembon"
-                            : ending === "MemberPointsOtherPhone"
-                              ? "wp2423_plmembop"
-                              : ending === "MemberPointsStoreAccount"
-                                ? "wp2423_plmembac"
-                                : ending === "MemberPointsRefunded"
-                                  ? "wp2423_plmembrf"
-                                  : ending === "MemberPointsPickup"
-                                    ? "wp2423_plmembpk"
-                                    : ending === "MemberPoints"
-                                      ? "wp2423_plmember"
-                                      : ending === "MemberPointsSplit"
-                                        ? "wp2423_plmembsp"
-                                        : ending === "MemberPointsWrittenOff"
-                                          ? "wp2423_plmembwo"
-                                          : ending === "PaidSplit"
-                                            ? "wp2423_plsplit"
-                                            : ending === "SplitWrittenOff"
-                                              ? "wp2423_plsplwo"
-                                              : ending === "Held"
-                                                ? "wp2423_plheld"
-                                                : ending === "HeldAtCheckout"
-                                                  ? "wp2423_plheldco"
-                                                  : ending === "TipsOff"
-                                                    ? "wp2423_pltips"
-                                                    : ending === "Moved"
-                                                      ? "wp2423_plmove"
-                                                      : ending === "Merged"
-                                                        ? "wp2423_plmerge"
-                                                        : "wp2423_plon",
+                          : ending === "CompCentsUp"
+                            ? "wp2423_plccu"
+                            : ending === "MergedCompCent"
+                              ? "wp2423_plmergc"
+                              : ending === "MemberPointsOnline"
+                                ? "wp2423_plmembon"
+                                : ending === "MemberPointsOtherPhone"
+                                  ? "wp2423_plmembop"
+                                  : ending === "MemberPointsStoreAccount"
+                                    ? "wp2423_plmembac"
+                                    : ending === "MemberPointsRefunded"
+                                      ? "wp2423_plmembrf"
+                                      : ending === "MemberPointsPickup"
+                                        ? "wp2423_plmembpk"
+                                        : ending === "MemberPoints"
+                                          ? "wp2423_plmember"
+                                          : ending === "MemberPointsSplit"
+                                            ? "wp2423_plmembsp"
+                                            : ending === "MemberPointsWrittenOff"
+                                              ? "wp2423_plmembwo"
+                                              : ending === "PaidSplit"
+                                                ? "wp2423_plsplit"
+                                                : ending === "SplitWrittenOff"
+                                                  ? "wp2423_plsplwo"
+                                                  : ending === "Held"
+                                                    ? "wp2423_plheld"
+                                                    : ending === "HeldAtCheckout"
+                                                      ? "wp2423_plheldco"
+                                                      : ending === "TipsOff"
+                                                        ? "wp2423_pltips"
+                                                        : ending === "Moved"
+                                                          ? "wp2423_plmove"
+                                                          : ending === "Merged"
+                                                            ? "wp2423_plmerge"
+                                                            : "wp2423_plon",
     },
     async (context) => {
       const admin = new Client(context.clientConfig);
@@ -1195,10 +1208,10 @@ async function journey(journeyEnding) {
         // bills) give their rounds prices whose whole-bill tax differs from the rounds' own: a
         // $3.80 dish a round is charged $0.49 each, the bill $0.99 (+$0.01).
         const centsPrice =
-          ending.startsWith("CompCents") || ending === "Merged"
-            ? { quantity: 1, unitPriceMinor: 1250n }
-            : ending === "TaxRounding" || ending === "TaxRoundingCancelled"
-              ? { quantity: 1, unitPriceMinor: 380n }
+          ending === "TaxRounding" || ending === "TaxRoundingCancelled" || ending === "CompCentsUp"
+            ? { quantity: 1, unitPriceMinor: 380n }
+            : ending.startsWith("CompCents") || ending === "Merged" || ending === "MergedCompCent"
+              ? { quantity: 1, unitPriceMinor: 1250n }
               : {};
         const R1 = journeyRound({ at: time(-minutes(40)), prefix: "01a00011", ...centsPrice });
         const tableGuest = id(0x602);
@@ -1951,7 +1964,7 @@ async function journey(journeyEnding) {
               )
             )[0].version,
           );
-        if (ending === "Merged") {
+        if (ending === "Merged" || ending === "MergedCompCent") {
           // ── WP-2423 item 8 ⑨ (DEC-DINING-TABLE-MERGE): the party at another table (T-M, its own
           // Order and round) merges into this table. TEST-only identities.
           const M = journeyRound({
@@ -2376,6 +2389,190 @@ async function journey(journeyEnding) {
               orderReference: mOrder,
             },
           ]);
+          if (ending === "MergedCompCent") {
+            // v15 b16 review: three $12.50 rounds (two on the host's Order, T-M's on its own) are
+            // $42.38 with the bill's −$0.01 on the host's rounds. A manager comps the host's round 2
+            // dish, then T-M's dish, each in full: T-M's round owes nothing (it read $0.01, its
+            // Order priced at a cent) and the host pays the rest; both Orders close.
+            const compIn = (order, item) =>
+              createMerchantDiningItemComp({
+                persistence: persistenceOf(manager),
+                authentication: manager.authentication,
+                nextReference: fresh,
+                installContext: async (tx, selected) => {
+                  await tx.query(
+                    "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
+                    [selected.tenantReference, selected.brandReference, selected.storeReference],
+                  );
+                },
+              })({
+                ...as(manager),
+                command: {
+                  orderReference: order,
+                  orderItemReferences: [item],
+                  kind: "Comp",
+                  percent: null,
+                  amountOffMinor: null,
+                  reasonCode: "GOODWILL",
+                  operationReference: fresh(),
+                },
+              });
+            const pricedOf = (order) =>
+              transactions().run((tx) =>
+                createPostgresOrderPricedAmountSource({ ...scope, authorize: async () => true })(
+                  tx,
+                  { orderReference: order, observedAt: now() },
+                ),
+              );
+            const amountOf = (recorded) =>
+              recorded.reductions.reduce((sum, entry) => sum + BigInt(entry.amountMinor), 0n);
+            const original = BigInt((await bill()).owed.totalMinor);
+            assert.equal(original, 4238n);
+            const hostComp = await compIn(orderReference, String(items2[0].orderItemReference));
+            assert.equal(hostComp.status, "Recorded");
+            assert.equal(amountOf(hostComp), 1413n);
+            assert.equal((await bill()).owed.totalMinor, "2825");
+            const mComp = await compIn(mOrder, String(mItems[0].orderItemReference));
+            assert.equal(mComp.status, "Recorded");
+            // What the bill goes down by: $14.12 (T-M's dish less the bill's cent).
+            assert.equal(amountOf(mComp), 1412n);
+            assert.deepEqual(
+              await rows(
+                "SELECT net_minor::text AS net,tax_minor::text AS tax,total_minor::text AS total,tax_rounding_minor::text AS share FROM rms_ordering.order_item_price_reduction WHERE order_id=$1",
+                [mOrder],
+              ),
+              [{ net: "1250", tax: "162", total: "1412", share: "-1" }],
+            );
+            const comped = await bill();
+            assert.equal(comped.consistent, true);
+            assert.equal(comped.owed.totalMinor, "1413");
+            assert.equal(comped.taxRoundingMinor, "-1");
+            // Each round as staff and the guests read it: T-M's comes to nothing, its comp's cent
+            // given back on it; the host's round 1 is its $14.13, its round 2 (comped) nothing.
+            assert.deepEqual(
+              comped.rounds.map((round) => [
+                round.orderBatchReference,
+                round.totalMinor,
+                round.taxRoundingMinor,
+              ]),
+              [
+                [R1.batch.orderBatchReference, "1413", "0"],
+                [R2.batch.orderBatchReference, "0", "0"],
+                [M.batch.orderBatchReference, "0", "-1"],
+              ],
+            );
+            assert.equal((await pageFacts()).owedMinor, 1413n);
+            // Ordering's priced totals, as a payment, a write-off and closing check them.
+            assert.deepEqual(
+              [
+                (await pricedOf(orderReference)).pricedTotalMinor,
+                (await pricedOf(mOrder)).pricedTotalMinor,
+              ],
+              [1413n, 0n],
+            );
+            // The comps and what is still owed are the bill before, to the cent.
+            assert.equal(amountOf(hostComp) + amountOf(mComp) + 1413n, original);
+            // Split by rounds: T-M's round owes nothing, so it is in no part (before the review it
+            // owed $0.01 and became a $0.01 part); naming it is refused, nothing recorded.
+            assert.equal((await closing(server, "Begin")).phase, "Closing");
+            const splitByRounds = (rounds) =>
+              createMerchantDiningTableSplit({
+                persistence: persistenceOf(server),
+                authentication: server.authentication,
+                nextReference: fresh,
+              })({
+                ...as(server),
+                command: {
+                  operationReference: fresh(),
+                  diningSessionReference: sessionReference,
+                  mode: "ByRounds",
+                  people: null,
+                  rounds,
+                },
+              });
+            const toSplit = await bill();
+            const mNumber = toSplit.rounds.find(
+              (round) => round.orderBatchReference === M.batch.orderBatchReference,
+            ).roundNumber;
+            await assert.rejects(
+              splitByRounds(
+                toSplit.rounds.map((round) => ({
+                  roundNumber: round.roundNumber,
+                  partNumber: round.roundNumber === mNumber ? 2 : 1,
+                })),
+              ),
+              { code: "TABLE_CHECKOUT_INPUT_INVALID" },
+            );
+            assert.deepEqual(
+              await rows(
+                "SELECT count(*)::int n FROM rms_payment.dining_table_split_plan WHERE order_id=$1",
+                [orderReference],
+              ),
+              [{ n: 0 }],
+            );
+            // Staff take the whole bill in cash: $14.13.
+            const paid = await settleWith(server, {
+              tip: { kind: "None" },
+              tenderedMinor: "100000",
+            });
+            assert.equal(paid.status, "Recorded");
+            assert.equal(paid.bill.settlement.roundsMinor, "1413");
+            const paidBill = await bill();
+            assert.equal(paidBill.owed.totalMinor, "0");
+            assert.equal(
+              paidBill.rounds.find(
+                (round) => round.orderBatchReference === M.batch.orderBatchReference,
+              ).totalMinor,
+              "0",
+            );
+            assert.deepEqual(
+              [
+                (await pricedOf(orderReference)).pricedTotalMinor,
+                (await pricedOf(mOrder)).pricedTotalMinor,
+              ],
+              [1413n, 0n],
+            );
+            for (const order of [mOrder, orderReference]) {
+              const progress = await createMerchantDiningOrderProgress({
+                persistence: persistenceOf(server),
+                locale: "en-CA",
+                authentication: server.authentication,
+              })({ ...as(server), query: { orderReference: order } });
+              const closed = await createMerchantDiningOrderCloseCommand({
+                persistence: persistenceOf(server),
+                authentication: server.authentication,
+                resolveConfiguration: createDiningOrderCloseConfiguration({
+                  ...ownerScope,
+                  providerAccountReference: provider,
+                  environment: "Test",
+                }),
+                newReference: fresh,
+                audit: { retentionPolicyCode: "ORDER_AUDIT", retentionPolicyVersion: 1 },
+              })({
+                ...as(server),
+                command: {
+                  orderReference: order,
+                  operationReference: fresh(),
+                  expectedOrderVersion: progress.currentOrderVersion,
+                  expectedClosureVersion: progress.closureVersion,
+                  reasonCode: "ORDER_COMPLETED",
+                },
+              });
+              assert.equal(closed.status, "Committed");
+            }
+            assert.equal((await closing(server, "Finalize")).phase, "Closed");
+            // The day's report: the comps with their tax and what was paid are the bill, to the
+            // cent; net sales and tax are what was paid.
+            const report = await salesReport();
+            assert.equal(report.summary.grossSalesMinor, "3750");
+            assert.equal(BigInt(report.summary.compsWithTaxMinor), 2825n);
+            assert.equal(BigInt(report.summary.compsWithTaxMinor) + 1413n, original);
+            assert.equal(
+              BigInt(report.summary.netSalesMinor) + BigInt(report.summary.taxMinor),
+              1413n,
+            );
+            return;
+          }
           const owed = (await bill()).owed.totalMinor;
           // The tea read (staff) works on a merged bill (each Order's lines, one at a time).
           const [{ sku }] = await rows(
@@ -3521,11 +3718,12 @@ async function journey(journeyEnding) {
         // v15 b16: two $12.50 rounds were each charged $1.63; the whole bill's tax is $3.25, so
         // the bill's tax rounding (−$0.01) is on round 2 (largest remainder, then round order).
         // At $3.80 a round the +$0.01 is on round 1.
-        const [rounding1, rounding2] = ending.startsWith("CompCents")
-          ? [0n, -1n]
-          : centsPrice.unitPriceMinor === 380n
+        const [rounding1, rounding2] =
+          centsPrice.unitPriceMinor === 380n
             ? [1n, 0n]
-            : [0n, 0n];
+            : ending.startsWith("CompCents")
+              ? [0n, -1n]
+              : [0n, 0n];
         assert.deepEqual(
           open.rounds.map((round) => [round.roundNumber, round.totalMinor, round.paid]),
           [
@@ -3911,6 +4109,7 @@ async function journey(journeyEnding) {
             !ending.startsWith("TaxRounding") &&
             !ending.startsWith("MemberPoints") &&
             ending !== "Merged" &&
+            ending !== "MergedCompCent" &&
             cooked === orderReference
           ) {
             // Round 1 served; round 2's dishes, taken off the bill before the table paid, are cancelled.
@@ -5586,19 +5785,31 @@ async function journey(journeyEnding) {
          * can be a cent more or less than the change; that cent is on the reduction's tax
          * (tax_rounding_minor), never left as a gap between the comps and the bill.
          */
-        async function compCentsEnding(whole) {
+        /**
+         * v15 b16 (DEC-COMP-BILL-CENT). `mode`: "Whole" comps both $12.50 dishes at once, "Partial"
+         * comps one then takes 50 % off the other, "Up" comps both $3.80 dishes (b16 review: the
+         * bill's tax a cent over its rounds', so the comps take a cent more than the dishes).
+         */
+        async function compCentsEnding(mode) {
+          const whole = mode !== "Partial";
+          const up = mode === "Up";
           await cookAndServeRound1([round1, round2]);
           const dish1 = String(items1[0].orderItemReference),
             dish2 = String(items2[0].orderItemReference);
           assert.deepEqual(
             [price(items1[0]), price(items2[0])].map((p) => [p.net, p.tax, p.total]),
-            [
-              [1250n, 163n, 1413n],
-              [1250n, 163n, 1413n],
-            ],
+            up
+              ? [
+                  [380n, 49n, 429n],
+                  [380n, 49n, 429n],
+                ]
+              : [
+                  [1250n, 163n, 1413n],
+                  [1250n, 163n, 1413n],
+                ],
           );
           const original = BigInt((await bill()).owed.totalMinor);
-          assert.equal(original, 2825n);
+          assert.equal(original, up ? 859n : 2825n);
           const previewOf = (who, command) =>
             createMerchantDiningItemCompPreview({
               persistence: persistenceOf(who),
@@ -5662,7 +5873,29 @@ async function journey(journeyEnding) {
           };
           let recordedSoFar = 0;
           let after;
-          if (whole) {
+          if (up) {
+            // Both $3.80 dishes at once: $8.59, the bill. The dishes are $4.29 each (858); the
+            // whole bill's extra cent of tax is on the last dish's comp (+1).
+            after = await decide({ orderItemReferences: [dish1, dish2].sort() }, 859n);
+            assert.deepEqual(
+              (await records()).map((row) => [row.net, row.tax, row.total, row.share]),
+              [
+                ["380", "49", "429", "0"],
+                ["380", "50", "430", "1"],
+              ],
+            );
+            assert.equal(after.owed.totalMinor, "0");
+            assert.ok(after.rounds.every((round) => round.totalMinor === "0"));
+            // The bill's tax rounding is still +$0.01, now recorded (no payment will record it).
+            assert.equal(after.taxRoundingMinor, "1");
+            assert.deepEqual(
+              await rows(
+                "SELECT total_minor::text AS total FROM rms_ordering.order_tax_rounding_adjustment WHERE bill_order_id=$1 ORDER BY version DESC LIMIT 1",
+                [orderReference],
+              ),
+              [{ total: "1" }],
+            );
+          } else if (whole) {
             // Both dishes at once: $28.25 (v15 offered "Comp $28.26" and recorded 1413 + 1413).
             after = await decide({ orderItemReferences: [dish1, dish2].sort() }, 2825n);
             assert.deepEqual(
@@ -5705,11 +5938,12 @@ async function journey(journeyEnding) {
           // The reductions and what is still owed are the bill before them, to the cent.
           assert.equal((await reductionsNow()) + BigInt(after.owed.totalMinor), original);
           // The database checks the cent too: a share on a dish's tax must match the tax, and is
-          // never more than a dollar.
-          // ($1.00 off a $12.50 dish takes $0.13 of its tax: 13 with a −1 share would be 12.)
+          // never more than nine cents (b16 review: it was a dollar).
+          // ($1.00 off a $12.50 or $3.80 dish takes $0.13 of its tax: 13 with a −1 share would be 12.)
           for (const [tax, share, pattern] of [
             [13, -1, /price reduction amount mismatch/u],
-            [113, 100, /order_item_price_reduction_tax_rounding/u],
+            [23, 10, /order_item_price_reduction_tax_rounding/u],
+            [3, -10, /order_item_price_reduction_tax_rounding/u],
           ])
             await assert.rejects(
               (async () => {
@@ -5755,7 +5989,19 @@ async function journey(journeyEnding) {
                 observedAt: now(),
               }),
             );
-          assert.equal((await pricedNow()).pricedTotalMinor, BigInt(after.owed.totalMinor));
+          // b16 review: with the +$0.01 the comps (859) are more than the Order's dishes (858); the
+          // Order's recorded rounding gives the cent back, so it prices at $0.00 (it was unavailable).
+          const pricedAfterComps = await pricedNow();
+          assert.equal(pricedAfterComps.pricedTotalMinor, BigInt(after.owed.totalMinor));
+          if (up)
+            assert.deepEqual(
+              [
+                pricedAfterComps.submittedTotalMinor,
+                pricedAfterComps.cancelledBatchTotalMinor,
+                pricedAfterComps.taxRoundingMinor,
+              ],
+              [858n, 859n, 1n],
+            );
           let paidMinor = 0n;
           if (whole) {
             await assert.rejects(settleWith(server, {}), { code: "TABLE_CHECKOUT_NOTHING_OWED" });
@@ -5772,8 +6018,62 @@ async function journey(journeyEnding) {
           // Reports (as the reports page composes them): the comps with their tax are what came
           // off the bill, and with what was paid they are the bill before, to the cent; the tax is
           // the bill's whole-bill tax after the comps.
+          if (up) {
+            // Nothing to pay: the table closes without a payment, as the Tables page does it (the
+            // close check, the Order, then the table), and its phone reads a $0.00 receipt.
+            const closePlan = await createMerchantDiningTableClosePlan({
+              persistence: persistenceOf(server),
+              authentication: server.authentication,
+              resolveRefundConfiguration: async () => ({
+                providerAccountReference: provider,
+                environment: "Test",
+              }),
+            })({
+              ...as(server),
+              query: { orderReference, diningSessionReference: sessionReference },
+            });
+            assert.deepEqual(closePlan.closeBlockers, []);
+            const progress = await createMerchantDiningOrderProgress({
+              persistence: persistenceOf(server),
+              locale: "en-CA",
+              authentication: server.authentication,
+            })({ ...as(server), query: { orderReference } });
+            const closed = await createMerchantDiningOrderCloseCommand({
+              persistence: persistenceOf(server),
+              authentication: server.authentication,
+              resolveConfiguration: createDiningOrderCloseConfiguration({
+                ...ownerScope,
+                providerAccountReference: provider,
+                environment: "Test",
+              }),
+              newReference: fresh,
+              audit: { retentionPolicyCode: "ORDER_AUDIT", retentionPolicyVersion: 1 },
+            })({
+              ...as(server),
+              command: {
+                orderReference,
+                operationReference: fresh(),
+                expectedOrderVersion: progress.currentOrderVersion,
+                expectedClosureVersion: progress.closureVersion,
+                reasonCode: "ORDER_COMPLETED",
+              },
+            });
+            assert.equal(closed.status, "Committed");
+            assert.equal((await closing(server, "Finalize")).phase, "Closed");
+            assert.equal((await pricedNow()).pricedTotalMinor, 0n);
+            const receipt = await settledReceiptFor({
+              scope,
+              ownerScope,
+              transactions: transactions(),
+              phone: tablePhone,
+              provider,
+            });
+            assert.notEqual(receipt, null);
+            assert.equal(receipt.paidMinor, "0");
+            assert.equal(receipt.ordersTotalMinor, "0");
+          }
           const report = await salesReport();
-          assert.equal(report.summary.grossSalesMinor, "2500");
+          assert.equal(report.summary.grossSalesMinor, up ? "760" : "2500");
           assert.equal(report.summary.compCount, 2);
           assert.equal(BigInt(report.summary.compsWithTaxMinor), await reductionsNow());
           assert.equal(BigInt(report.summary.compsWithTaxMinor) + paidMinor, original);
@@ -5795,7 +6095,7 @@ async function journey(journeyEnding) {
           );
           assert.deepEqual(
             decided.map((record) => record.taxRoundingMinor),
-            whole ? [0n, -1n] : [-1n, 0n],
+            up ? [0n, 1n] : whole ? [0n, -1n] : [-1n, 0n],
           );
         }
 
@@ -7739,7 +8039,9 @@ async function journey(journeyEnding) {
           return;
         }
         if (ending.startsWith("CompCents")) {
-          await compCentsEnding(ending === "CompCentsWhole");
+          await compCentsEnding(
+            ending === "CompCentsWhole" ? "Whole" : ending === "CompCentsUp" ? "Up" : "Partial",
+          );
           return;
         }
         if (ending === "CompedWhole") {

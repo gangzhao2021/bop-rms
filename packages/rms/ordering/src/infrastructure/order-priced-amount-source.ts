@@ -81,7 +81,11 @@ export function createPostgresOrderPricedAmountSource(
       if (
         typeof cancelled.cancelledTotalMinor !== "bigint" ||
         cancelled.cancelledTotalMinor < 0n ||
-        cancelled.cancelledTotalMinor > base.totalMinor ||
+        typeof cancelled.billTaxShareMinor !== "bigint" ||
+        cancelled.billTaxShareMinor < 0n ||
+        // v15 b16 (DEC-COMP-BILL-CENT): beyond the dishes only by the whole bill's cents the
+        // reductions took, which this Order's share of the bill's tax rounding gives back.
+        cancelled.cancelledTotalMinor > base.totalMinor + cancelled.billTaxShareMinor ||
         !/^sha256:[a-f0-9]{64}$/u.test(cancelled.snapshotDigest)
       )
         return fail();
@@ -96,7 +100,14 @@ export function createPostgresOrderPricedAmountSource(
             );
       const pricedTotalMinor =
         base.totalMinor + adjustment - cancelled.cancelledTotalMinor + taxRounding;
-      if (pricedTotalMinor < 0n || pricedTotalMinor > 9223372036854775807n) return fail();
+      // Without the rounding (a bill nothing is paid on adds the one it computes now), an Order
+      // comped in full can read those cents below nothing; with it, never.
+      if (
+        pricedTotalMinor <
+          (options.taxRounding === "Excluded" ? -cancelled.billTaxShareMinor : 0n) ||
+        pricedTotalMinor > 9223372036854775807n
+      )
+        return fail();
       const evidence = Object.freeze(
         changes.amendments.map((change) => Object.freeze({ ...change })),
       );

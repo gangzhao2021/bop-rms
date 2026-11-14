@@ -16,9 +16,15 @@
 -- tax_minor stays what the reduction took off the bill's tax (its dish share plus that cent), so
 -- every reader keeps adding the same columns. Rows already recorded keep 0 (append-only; nothing
 -- is updated). No new grant: api keeps SELECT/INSERT on the table.
+-- Bound: when dishes come off a bill its tax rounding moves by about a cent per tax type (two in
+-- Canada) plus one from a compound tax, and one reduction spreads it a cent at a time over its
+-- dishes, so a dish takes one or two cents. The database cannot recompute the whole bill in a row
+-- trigger, so it holds the dish's own share exactly and the cent to at most 9 either way: a
+-- defect can never record more than $0.09 of a dish's tax beyond its own share (the System's
+-- bound, billTaxRoundingShareLimitMinor, is the same).
 ALTER TABLE rms_ordering.order_item_price_reduction
   ADD COLUMN tax_rounding_minor bigint NOT NULL DEFAULT 0
-  CONSTRAINT order_item_price_reduction_tax_rounding CHECK (tax_rounding_minor BETWEEN -99 AND 99);
+  CONSTRAINT order_item_price_reduction_tax_rounding CHECK (tax_rounding_minor BETWEEN -9 AND 9);
 
 CREATE OR REPLACE FUNCTION rms_ordering.validate_order_item_price_reduction() RETURNS trigger
 LANGUAGE plpgsql

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { appendAuditRecordInTransaction, validateAuditRecord } from "@bop/audit";
 import type { ConsumerTransaction } from "@bop/eventing";
 import { parseOrderingInstant, parseOrderingReference } from "../../domain/cart.js";
+import { billTaxRoundingShareLimitMinor } from "../../application/bill-tax-rounding.js";
 import {
   decodeConfiguredOrderItemSnapshot,
   decodeOrderItemSnapshot,
@@ -97,7 +98,7 @@ const minor = (value: unknown) => {
 };
 const signedCents = (value: unknown) => {
   const text = String(value);
-  if (!/^-?(0|[1-9][0-9]?)$/u.test(text)) return unavailable();
+  if (!/^-?[0-9]$/u.test(text) || text === "-0") return unavailable();
   return BigInt(text);
 };
 /** Half up to the cent: share of `amount` in proportion `part / whole` (whole > 0). */
@@ -149,7 +150,12 @@ export function withBillTaxRoundingShares(
   const lines = plan.lines.map((line) => {
     const base = line.taxMinor - line.taxRoundingMinor;
     const share = shares.get(line.orderItemReference) ?? 0n;
-    if (share < -99n || share > 99n || base + share < 0n) return unavailable();
+    if (
+      share < -billTaxRoundingShareLimitMinor ||
+      share > billTaxRoundingShareLimitMinor ||
+      base + share < 0n
+    )
+      return unavailable();
     return Object.freeze({
       ...line,
       taxMinor: base + share,

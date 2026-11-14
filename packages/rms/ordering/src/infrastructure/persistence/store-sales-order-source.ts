@@ -10,6 +10,7 @@ import {
 } from "./order-item-price-reduction-store.js";
 import { listOrdersTaxRoundingLines } from "./order-tax-rounding-store.js";
 import { createPostgresPayLaterItemCancellationStore } from "./pay-later-item-cancellation-store.js";
+import { billTaxRoundingShareLimitMinor } from "../../application/bill-tax-rounding.js";
 
 /** One priced line as the customer was charged for it (immutable snapshot, minor units). */
 export interface StoreSalesOrderItem {
@@ -184,9 +185,9 @@ export function createPostgresStoreSalesOrderSource(options: {
         // tax rounding gives it back.
         if (
           off !== null &&
-          (components.some((c) => c.amountMinor < -99n) ||
+          (components.some((c) => c.amountMinor < -billTaxRoundingShareLimitMinor) ||
             spread !== taxOff ||
-            pricing.tax.amountMinor - taxOff < -99n)
+            pricing.tax.amountMinor - taxOff < -billTaxRoundingShareLimitMinor)
         )
           return fail();
         lines.push(

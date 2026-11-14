@@ -1442,7 +1442,11 @@ export function createPersistentMerchantOrderQueue(options: {
                             reduction:
                               reduction === undefined
                                 ? null
-                                : { netMinor: reduction.netMinor, taxMinor: reduction.taxMinor },
+                                : {
+                                    netMinor: reduction.netMinor,
+                                    taxMinor: reduction.taxMinor,
+                                    taxRoundingMinor: reduction.taxRoundingMinor,
+                                  },
                           };
                         }),
                     })),

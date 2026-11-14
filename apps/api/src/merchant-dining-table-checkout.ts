@@ -427,7 +427,7 @@ function billTaxRoundingRoundsOf(
     discountMinor: bigint;
     taxComponents: BillTaxRoundingRound["items"][number]["taxComponents"];
   }[],
-  reductions: ReadonlyMap<string, { netMinor: bigint; taxMinor: bigint }>,
+  reductions: ReadonlyMap<string, { netMinor: bigint; taxMinor: bigint; taxRoundingMinor: bigint }>,
 ): BillTaxRoundingRound[] {
   return confirmations.map((confirmation) => ({
     orderReference: String(confirmation.orderReference),
@@ -445,7 +445,11 @@ function billTaxRoundingRoundsOf(
           reduction:
             reduction === null
               ? null
-              : { netMinor: reduction.netMinor, taxMinor: reduction.taxMinor },
+              : {
+                  netMinor: reduction.netMinor,
+                  taxMinor: reduction.taxMinor,
+                  taxRoundingMinor: reduction.taxRoundingMinor,
+                },
         };
       }),
   }));
