@@ -45,3 +45,8 @@ export const StoreProfilePublishedContext = createContext<(() => void) | null>(n
  * introduction. False in a first Store's fold, where each section still says what it is.
  */
 export const StoreSetupInPlaceContext = createContext(false);
+/**
+ * b19: true when the page's title already says only the Owner can change Store setup (a Store
+ * Manager reading it); a section in its place then does not say it a second time.
+ */
+export const StoreSetupOwnerOnlyContext = createContext(false);

@@ -5,6 +5,7 @@ import { serviceOperationReference } from "./service-control-client.js";
 import {
   StoreProfilePublishedContext,
   StoreSetupInPlaceContext,
+  StoreSetupOwnerOnlyContext,
 } from "./store-opening-list-client.js";
 import {
   createStorePublicProfileClient,
@@ -160,6 +161,8 @@ export function StorePublicProfilePanel({
   // b18 polish: in its own place the link and lead already say what this is and that it is live
   // once saved; the section neither repeats its name nor explains itself again.
   const inPlace = useContext(StoreSetupInPlaceContext);
+  // b19: the page title already says only the Owner can change Store setup.
+  const ownerNoteShown = useContext(StoreSetupOwnerOnlyContext) && inPlace;
   // One operation per intended publication: a lost answer is retried as the same publication.
   const operation = useRef<{ reference: string; key: string } | null>(null);
   const load = useCallback(async () => {
@@ -359,7 +362,9 @@ export function StorePublicProfilePanel({
           {t("Customers cannot open this store’s menu until its name and address are published.")}
         </p>
       )}
-      {readOnly ? <p role="note">{t("Only the Owner can change these details.")}</p> : null}
+      {readOnly && !ownerNoteShown ? (
+        <p role="note">{t("Only the Owner can change these details.")}</p>
+      ) : null}
       <form
         noValidate
         onSubmit={(event) => {

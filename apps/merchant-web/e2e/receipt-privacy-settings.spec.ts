@@ -58,7 +58,7 @@ async function noOverflowOrBlockingAxe(page: Page) {
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     await expect(
-      page.getByRole("heading", { name: "Receipts and tax numbers", exact: true }),
+      page.getByRole("region", { name: "Receipts and tax numbers", exact: true }),
     ).toBeVisible();
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),

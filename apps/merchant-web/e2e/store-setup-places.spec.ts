@@ -384,7 +384,7 @@ test("@production an open Store's setup is a few places, each saying whether a c
   await expect(page.getByText("For example “Maple Noodle House – King Street”.")).toBeVisible();
   await expect(page.getByText("For example “枫叶面馆 国王街店”.")).toBeVisible();
   await expect(page.getByRole("button", { name: "Save and make live" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Receipts and tax numbers" })).toBeHidden();
+  await expect(page.getByRole("region", { name: "Receipts and tax numbers" })).toBeHidden();
   // b18 polish: the link and its one-line lead name Store details; the section doesn't repeat its
   // name or explain itself again. The title row ends with the language switch.
   await expect(page.getByRole("heading", { name: "Store details" })).toHaveCount(0);
@@ -402,7 +402,9 @@ test("@production an open Store's setup is a few places, each saying whether a c
   // Receipts: one save, live for receipts issued from then on.
   await nav.getByRole("link", { name: "Receipts and tax numbers" }).click();
   await expect(page).toHaveURL(/\?section=receipts$/u);
-  await expect(page.getByRole("heading", { name: "Receipts and tax numbers" })).toBeVisible();
+  // b19: the link and lead name the place; the section has no heading repeating it.
+  await expect(page.getByRole("region", { name: "Receipts and tax numbers" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Receipts and tax numbers" })).toHaveCount(0);
   await expect(page.getByLabel("GST/HST registration number")).toHaveValue("123456789RT0001");
   await expect(page.getByRole("button", { name: "Save and make live" })).toBeVisible();
   await expect(page.getByLabel("Store name customers see (English)")).toBeHidden();
@@ -411,7 +413,8 @@ test("@production an open Store's setup is a few places, each saying whether a c
   await nav.getByRole("link", { name: "Kitchen setup" }).click();
   await expect(page.locator("#kitchen-setup")).toBeVisible();
   await expect(page.locator("#kitchen-setup")).toContainText("Every dish with a recipe");
-  await expect(page.getByRole("heading", { name: "Kitchen setup" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Kitchen setup" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Kitchen setup" })).toHaveCount(0);
 
   // Permissions and safety: support leads with what it changed or tried; every record one click away.
   await nav.getByRole("link", { name: "Permissions and safety" }).click();
@@ -549,13 +552,19 @@ test("@production an open Store's setup is a few places, each saying whether a c
     "page",
   );
   await page.goto(setupHref + "#receipts-and-privacy");
-  await expect(page.getByRole("heading", { name: "Receipts and tax numbers" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Receipts and tax numbers" })).toBeVisible();
   // Approvals' sole-operator link opens Permissions and safety.
-  await page.goto(setupHref + "?section=access#sole-operator");
-  await expect(nav.getByRole("link", { name: "Permissions and safety" })).toHaveAttribute(
-    "aria-current",
-    "page",
-  );
+  // b19: and brings the Sole operator section into view (it loads after the page).
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await page.goto(setupHref + "?section=access#sole-operator");
+    await expect(nav.getByRole("link", { name: "Permissions and safety" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    await expect(page.locator("section#sole-operator")).toBeInViewport();
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
   expect(errors).toEqual([]);
 });
 

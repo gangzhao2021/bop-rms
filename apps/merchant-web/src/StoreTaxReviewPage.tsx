@@ -157,7 +157,11 @@ export function ReceiptSetupNotice({
   if (gaps === undefined || (!gaps.taxRegistrationMissing && !gaps.privacyNoticeMissing))
     return null;
   return (
-    <StatePanel heading={t("Receipts and privacy need the Owner's details")} tone="error" status>
+    <StatePanel
+      heading={t("Receipts and tax numbers need the Owner's details")}
+      tone="error"
+      status
+    >
       <ul>
         {gaps.taxRegistrationMissing ? (
           <li>

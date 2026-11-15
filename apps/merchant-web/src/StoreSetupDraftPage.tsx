@@ -1,4 +1,4 @@
-import { serviceModeText, t } from "./i18n/i18n.js";
+import { currentLanguage, serviceModeText, t } from "./i18n/i18n.js";
 import { StoreConfigurationOrdinaryPanel } from "./StoreConfigurationOrdinaryPanel.js";
 import type { StoreConfigurationSnapshot } from "./store-configuration-client.js";
 import { createStoreConfigurationOrdinaryClient } from "./store-configuration-ordinary-client.js";
@@ -45,6 +45,7 @@ import {
   loadOpeningListRead,
   StoreProfilePublishedContext,
   StoreSetupInPlaceContext,
+  StoreSetupOwnerOnlyContext,
 } from "./store-opening-list-client.js";
 import {
   createStoreSetupClient,
@@ -434,6 +435,8 @@ const placeAnchors: Readonly<Record<string, StoreSetupPlace>> = {
   "#sole-operator": "access",
   "#store-setup-changes": "changes",
 };
+/** The space between a sentence and a link inside it: none in Chinese, one in English. */
+export const wordGap = () => (currentLanguage() === "zh-Hans" ? "" : " ");
 /** The place an address asks for: `?section=` first, then an anchor other pages link to. */
 export function storeSetupPlaceOf(search: string, hash: string): StoreSetupPlace | null {
   const asked = new URLSearchParams(search).get("section");
@@ -447,7 +450,11 @@ export const storeSetupPlaceHref = (storeReference: string, place: StoreSetupPla
   "/setup" +
   (place === "profile" ? "" : "?section=" + place);
 /** Each place's name, and one line on what it holds and when a change there takes effect. */
-export function storeSetupPlaceText(place: StoreSetupPlace): {
+export function storeSetupPlaceText(
+  place: StoreSetupPlace,
+  /** b19: the reader cannot change anything here (a Store Manager): no "live once you save it". */
+  readOnly = false,
+): {
   readonly name: string;
   readonly lead: string;
 } {
@@ -455,23 +462,29 @@ export function storeSetupPlaceText(place: StoreSetupPlace): {
     case "profile":
       return {
         name: t("Store details"),
-        lead: t(
-          "The name, address and phone customers see. A change is live as soon as you save it.",
-        ),
+        lead: readOnly
+          ? t("The name, address and phone customers see.")
+          : t(
+              "The name, address and phone customers see. A change is live as soon as you save it.",
+            ),
       };
     case "receipts":
       return {
         name: t("Receipts and tax numbers"),
-        lead: t(
-          "The business name and tax numbers printed on receipts, and your privacy notice. A change is live as soon as you save it, for receipts issued from then on.",
-        ),
+        lead: readOnly
+          ? t("The business name and tax numbers printed on receipts, and your privacy notice.")
+          : t(
+              "The business name and tax numbers printed on receipts, and your privacy notice. A change is live as soon as you save it, for receipts issued from then on.",
+            ),
       };
     case "kitchen":
       return {
         name: t("Kitchen setup"),
-        lead: t(
-          "Whether every dish reaches this Store's Kitchen screen. A change is live at once, for orders confirmed from then on.",
-        ),
+        lead: readOnly
+          ? t("Whether every dish reaches this Store's Kitchen screen.")
+          : t(
+              "Whether every dish reaches this Store's Kitchen screen. A change is live at once, for orders confirmed from then on.",
+            ),
       };
     case "access":
       return {
@@ -1096,7 +1109,7 @@ export function StoreSetupDraftPage({
   // An address for a place this person is not offered shows the first one they are.
   const place: StoreSetupPlace =
     asked !== null && offered.includes(asked) ? asked : (offered[0] ?? "profile");
-  const placeText = storeSetupPlaceText(place);
+  const placeText = storeSetupPlaceText(place, ownerOnly);
   const renderedPanels = (only: StoreSetupPlace | null) =>
     (panels ?? []).map((panel) => (
       <div
@@ -1105,9 +1118,11 @@ export function StoreSetupDraftPage({
         hidden={only !== null && panel.place !== only}
       >
         <StoreSetupInPlaceContext.Provider value={only !== null}>
-          <Suspense fallback={only === panel.place ? <p role="status">{t("Loading…")}</p> : null}>
-            {panel.render(hiders.get(panel.key) ?? (() => undefined))}
-          </Suspense>
+          <StoreSetupOwnerOnlyContext.Provider value={ownerOnly}>
+            <Suspense fallback={only === panel.place ? <p role="status">{t("Loading…")}</p> : null}>
+              {panel.render(hiders.get(panel.key) ?? (() => undefined))}
+            </Suspense>
+          </StoreSetupOwnerOnlyContext.Provider>
         </StoreSetupInPlaceContext.Provider>
       </div>
     ));
@@ -1191,11 +1206,14 @@ export function StoreSetupDraftPage({
             <p className="store-setup-place__lead">{placeText.lead}</p>
             {place === "changes" ? (
               <p className="store-setup-place__lead">
-                {t("Opening hours and holidays are changed in")}{" "}
+                {/* b19: Chinese runs words and links together; English puts a space between. */}
+                {t("Opening hours and holidays are changed in")}
+                {wordGap()}
                 <Link to={"/app/organization/stores/" + storeReference + "/service"}>
                   {t("Hours & ordering")}
                 </Link>
-                {t("; the name, address and phone customers see in")}{" "}
+                {t("; the name, address and phone customers see in")}
+                {wordGap()}
                 <Link to={storeSetupPlaceHref(storeReference, "profile")}>
                   {t("Store details")}
                 </Link>

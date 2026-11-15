@@ -3342,7 +3342,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Receipt template review status": "收据模板审核状态",
   "Receipt template the Store started with": "门店开业时的收据模板",
   "Receipts and privacy": "收据与隐私",
-  "Receipts and privacy need the Owner's details": "收据与隐私需要店主填写信息",
   "Receive goods": "收货",
   "Receive goods · Store direct": "收货 · 门店直采",
   Received: "已收货",
@@ -9828,6 +9827,11 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Whether every dish reaches this Store's Kitchen screen. A change is live at once, for orders confirmed from then on.":
     "每道菜是否都能送到本店的后厨屏。修改立即生效，用于之后确认的订单。",
   "Permissions and safety": "权限与安全",
+  "The name, address and phone customers see.": "顾客看到的店名、地址和电话。",
+  "The business name and tax numbers printed on receipts, and your privacy notice.":
+    "收据上印的商家名称和税号，以及你的隐私声明。",
+  "Whether every dish reaches this Store's Kitchen screen.": "每道菜是否都能送到本店的后厨屏。",
+  "Receipts and tax numbers need the Owner's details": "收据与税号还需要店主填写",
   "Who besides you may change things: platform support, and approving your own changes when you run the business alone. Each change is live at once and is recorded.":
     "除了你，谁还能改动门店：平台支持；以及你一个人经营时，自己批准自己的修改。每项更改立即生效，并会留下记录。",
   "Settings that need approval": "需审批的设置",

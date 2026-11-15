@@ -8,6 +8,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { findInternalText, staticText } from "../e2e/internal-text-patterns.js";
 import { MemoryRouter } from "react-router";
+import { setLanguageForTest } from "./i18n/i18n.js";
 import {
   StoreSetupDraftPage,
   StoreSetupHeader,
@@ -15,6 +16,7 @@ import {
   storeSetupPlaceOf,
   storeSetupPlaces,
   storeSetupPlaceText,
+  wordGap,
   storeSetupOwnerOnly,
   StoreSetupFeeContextEditor,
   validateStoreSetupFeeSelections,
@@ -453,6 +455,21 @@ it("b18: an open Store's setup is a few places, each saying when a change takes 
     />,
   );
   expect(live).not.toContain("draft");
+});
+it("b19: a reader who cannot save is not told a change is live once saved; zh links sit in the sentence", () => {
+  for (const place of ["profile", "receipts", "kitchen"] as const) {
+    const { lead } = storeSetupPlaceText(place, true);
+    expect(lead).not.toMatch(/live|save/u);
+    expect(lead).not.toBe("");
+  }
+  setLanguageForTest("zh-Hans");
+  try {
+    expect(storeSetupPlaceText("profile", true).lead).toBe("顾客看到的店名、地址和电话。");
+    expect(wordGap()).toBe("");
+  } finally {
+    setLanguageForTest("en");
+  }
+  expect(wordGap()).toBe(" ");
 });
 it("a Store Manager refused the setup read sees the page read-only, not a permission error (v15)", async () => {
   // The real client turns the server's 403 on the setup read into Denied.

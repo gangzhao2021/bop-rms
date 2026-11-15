@@ -286,9 +286,14 @@ test("@production the Store Manager opens Store setup from the navigation and se
   await expect(page.getByRole("button", { name: "Restore the last saved draft" })).toHaveCount(0);
   const profile = page.getByRole("region", { name: heading });
   await expect(profile.getByLabel("Store name customers see")).toHaveValue("Maple Noodle House");
-  await expect(profile.getByText("Only the Owner can change these details.")).toBeVisible();
+  // b19: the title already says only the Owner can change Store setup; not again in the section,
+  // and the lead does not say a change is live once saved.
+  await expect(profile.getByText("Only the Owner can change these details.")).toHaveCount(0);
+  await expect(page.getByText("The name, address and phone customers see.")).toBeVisible();
+  await expect(page.getByText("A change is live as soon as you save it.")).toHaveCount(0);
   await openStoreSetupPlace(page, "Receipts and tax numbers");
   const receipts = page.getByRole("region", { name: "Receipts and tax numbers" });
+  await expect(receipts.getByText("Only the Owner can change these details.")).toHaveCount(0);
   await expect(receipts.getByLabel("GST/HST registration number")).toHaveValue("000000000RT0001");
   await expectNoInternalText(page);
 });

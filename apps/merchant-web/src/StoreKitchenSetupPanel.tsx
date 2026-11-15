@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { StoreSetupInPlaceContext } from "./store-opening-list-client.js";
 import { useLocation } from "react-router";
 import { t } from "./i18n/i18n.js";
 import { serviceOperationReference } from "./service-control-client.js";
@@ -26,6 +27,8 @@ export function StoreKitchenSetupPanel({
   const client = useMemo(() => createStoreKitchenSetupClient({ csrf }), [csrf]);
   const [view, setView] = useState<StoreKitchenSetupView | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "denied" | "unavailable">("loading");
+  // b19: in its own place the link "Kitchen setup" already names it.
+  const inPlace = useContext(StoreSetupInPlaceContext);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // A retry after an unknown outcome repeats the same operation, so it can't apply twice.
@@ -88,9 +91,11 @@ export function StoreKitchenSetupPanel({
       ref={section}
       id="kitchen-setup"
       className="kitchen-setup"
-      aria-labelledby="kitchen-setup-heading"
+      {...(inPlace
+        ? { "aria-label": t("Kitchen setup") }
+        : { "aria-labelledby": "kitchen-setup-heading" })}
     >
-      <h3 id="kitchen-setup-heading">{t("Kitchen setup")}</h3>
+      {inPlace ? null : <h3 id="kitchen-setup-heading">{t("Kitchen setup")}</h3>}
       {state === "loading" ? <p role="status">{t("Loading the kitchen…")}</p> : null}
       {state === "unavailable" ? (
         <div role="status">

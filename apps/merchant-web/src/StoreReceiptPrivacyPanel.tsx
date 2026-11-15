@@ -1,6 +1,10 @@
 import { t } from "./i18n/i18n.js";
 import { StatePanel } from "@bop-rms/ui";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import {
+  StoreSetupInPlaceContext,
+  StoreSetupOwnerOnlyContext,
+} from "./store-opening-list-client.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import {
   createStoreReceiptProfileClient,
@@ -111,6 +115,16 @@ export function StoreReceiptPrivacyPanel({
   );
   const [view, setView] = useState<StoreReceiptProfileView | null>(null);
   const [status, setStatus] = useState<"Loading" | "Ready" | "Hidden" | "Unavailable">("Loading");
+  // b19: in its own place the link and lead already name it; no heading repeating the place, and
+  // no second "only the Owner" when the page title says it.
+  const inPlace = useContext(StoreSetupInPlaceContext),
+    ownerNoteShown = useContext(StoreSetupOwnerOnlyContext) && inPlace,
+    named = inPlace
+      ? { "aria-label": t("Receipts and tax numbers") }
+      : { "aria-labelledby": "receipt-privacy-heading" },
+    heading = inPlace ? null : (
+      <h3 id="receipt-privacy-heading">{t("Receipts and tax numbers")}</h3>
+    );
   const [fields, setFields] = useState<Fields>(empty);
   const [busy, setBusy] = useState(false);
   const [showErrors, setShowErrors] = useState(false);
@@ -140,19 +154,15 @@ export function StoreReceiptPrivacyPanel({
   if (status === "Hidden") return null;
   if (status === "Loading")
     return (
-      <section id="receipts-and-privacy" className="receipt-privacy" aria-busy="true">
-        <h3>{t("Receipts and tax numbers")}</h3>
+      <section id="receipts-and-privacy" className="receipt-privacy" aria-busy="true" {...named}>
+        {heading}
         <p role="status">{t("Loading receipt and privacy details…")}</p>
       </section>
     );
   if (status === "Unavailable" || view === null)
     return (
-      <section
-        id="receipts-and-privacy"
-        className="receipt-privacy"
-        aria-labelledby="receipt-privacy-heading"
-      >
-        <h3 id="receipt-privacy-heading">{t("Receipts and tax numbers")}</h3>
+      <section id="receipts-and-privacy" className="receipt-privacy" {...named}>
+        {heading}
         <StatePanel
           heading={t("Receipt and privacy details could not be loaded")}
           tone="error"
@@ -269,12 +279,8 @@ export function StoreReceiptPrivacyPanel({
     );
   };
   return (
-    <section
-      id="receipts-and-privacy"
-      className="receipt-privacy"
-      aria-labelledby="receipt-privacy-heading"
-    >
-      <h3 id="receipt-privacy-heading">{t("Receipts and tax numbers")}</h3>
+    <section id="receipts-and-privacy" className="receipt-privacy" {...named}>
+      {heading}
       <p>
         {t(
           "Customer receipts show your business name, the store address, each tax with its rate, and the registration numbers below. Customers see your privacy notice link where they enter their contact details and on their receipt. Enter only your own registered numbers and notice; leave a number empty if the business is not registered for that tax.",
@@ -293,7 +299,9 @@ export function StoreReceiptPrivacyPanel({
           {t("Live since")} <SourceTime instant={view.recordedAt} />
         </p>
       ) : null}
-      {!view.canChange ? <p role="note">{t("Only the Owner can change these details.")}</p> : null}
+      {!view.canChange && !ownerNoteShown ? (
+        <p role="note">{t("Only the Owner can change these details.")}</p>
+      ) : null}
       <form
         noValidate
         onSubmit={(event) => {
