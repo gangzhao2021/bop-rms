@@ -17,7 +17,10 @@ import type {
   createMerchantDiningPaymentTimingRead,
 } from "./merchant-dining-payment-timing.js";
 import type { createMerchantDiningUnpaidDeparture } from "./merchant-dining-unpaid-departure.js";
-import type { createMerchantDiningUnpaidItemRemoval } from "./merchant-dining-unpaid-item-removal.js";
+import type {
+  createMerchantDiningUnpaidItemRemoval,
+  createMerchantDiningUnpaidItemRemovalPreview,
+} from "./merchant-dining-unpaid-item-removal.js";
 import type {
   createMerchantDiningItemComp,
   createMerchantDiningItemCompPreview,
@@ -746,6 +749,10 @@ export interface MerchantBffRouterOptions {
   /** A manager records a refund made on the card machine, of a table paid there. */
   readonly tableCardRefund?: ReturnType<typeof createMerchantDiningTableCardRefund>;
   readonly unpaidItemRemoval?: ReturnType<typeof createMerchantDiningUnpaidItemRemoval>;
+  /** v15 b20 DEC-TAX-WHOLE-RECEIPT: what taking those dishes off would take off (no PIN, no record). */
+  readonly unpaidItemRemovalPreview?: ReturnType<
+    typeof createMerchantDiningUnpaidItemRemovalPreview
+  >;
   /** WP-2423 item 8 ① segment 2: a manager comps or discounts dishes before the table pays. */
   readonly itemComp?: ReturnType<typeof createMerchantDiningItemComp>;
   /** v15 b16 DEC-COMP-BILL-CENT: what that comp or discount would take off (no PIN, no record). */

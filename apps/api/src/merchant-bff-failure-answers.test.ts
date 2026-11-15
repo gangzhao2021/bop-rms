@@ -8,6 +8,7 @@ import { bodyParserClientStatus } from "./merchant-bff-body-parsers.js";
 import { withCause } from "./merchant-failure.js";
 import { MerchantMenuError } from "./merchant-menus.js";
 import { DiningTableCheckoutError } from "./merchant-dining-table-checkout.js";
+import { UnpaidItemRemovalError } from "./merchant-dining-unpaid-item-removal.js";
 
 /**
  * WP-2423 item 10: a failure is a permission refusal only when the error says so. These run through
@@ -556,12 +557,14 @@ it.each(["/payments/refunds/preview", "/payments/refunds/request"])(
 it.each([
   "/orders/comp-items",
   "/orders/comp-items/preview",
+  "/orders/remove-unpaid-items/preview",
   "/dining/staff-rounds",
   "/payments/refunds/request",
 ])("POST %s with broken JSON answers 400 input_invalid as JSON", async (path) => {
   const reported = await serve({
     itemComp: () => Promise.resolve({}),
     itemCompPreview: () => Promise.resolve({}),
+    unpaidItemRemovalPreview: () => Promise.resolve({}),
   } as never);
   const response = await reported.raw(path, "{bad");
   expect(response.status).toBe(400);
@@ -592,4 +595,39 @@ it("v15 b17 review: a body parser failure is the client's only with its own 4xx 
   expect(bodyParserClientStatus(Object.assign(new Error("x"), { status: 500 }))).toBeNull();
   expect(bodyParserClientStatus(new Error("stream not readable"))).toBeNull();
   expect(bodyParserClientStatus("broken")).toBeNull();
+});
+
+// v15 b20 (DEC-TAX-WHOLE-RECEIPT): the take-off button's amount. A refusal is its own answer, the
+// one the command gives; only the error saying so is a permission refusal; an outage is 503.
+describe("POST /orders/remove-unpaid-items/preview", () => {
+  it("answers the amount, the command's refusals, a permission refusal and an outage", async () => {
+    const answer = async (preview: () => Promise<unknown>) => {
+      const app = await serve({ unpaidItemRemovalPreview: preview } as never);
+      const response = await app.post("/orders/remove-unpaid-items/preview");
+      return [response.status, await response.json(), response.headers.get("cache-control")];
+    };
+    expect(await answer(() => Promise.resolve({ status: "Preview", totalMinor: "1412" }))).toEqual([
+      200,
+      { status: "Preview", totalMinor: "1412" },
+      "no-store",
+    ]);
+    for (const [code, status, error] of [
+      ["UNPAID_ITEM_REMOVAL_ALREADY_PAID", 409, "already_paid"],
+      ["UNPAID_ITEM_REMOVAL_VERSION_CONFLICT", 409, "version_conflict"],
+      ["UNPAID_ITEM_REMOVAL_COMPED", 409, "comped"],
+      ["UNPAID_ITEM_REMOVAL_INPUT_INVALID", 400, "input_invalid"],
+      ["UNPAID_ITEM_REMOVAL_UNAVAILABLE", 503, "unavailable"],
+    ] as const)
+      expect(await answer(rejecting(new UnpaidItemRemovalError(code)))).toEqual([
+        status,
+        { error },
+        "no-store",
+      ]);
+    const denied = await answer(
+      rejecting(new UnpaidItemRemovalError("UNPAID_ITEM_REMOVAL_PERMISSION_DENIED")),
+    );
+    expect(denied[0]).toBe(403);
+    // A database refusal is never read as no permission.
+    expect((await answer(rejecting(missingGrant())))[0]).toBe(503);
+  });
 });

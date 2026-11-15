@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { ConsumerTransaction } from "@bop/eventing";
 import { readClosedRecord } from "@bop/identity";
 import { createPostgresFulfillmentItemCancellation } from "@rms/fulfillment";
@@ -6,7 +7,9 @@ import {
   KitchenBatchCancellationError,
 } from "@rms/kitchen";
 import {
+  createPostgresOrderPayLaterConfirmationStore,
   createPostgresPayLaterItemCancellationStore,
+  listOrderItemPrices,
   listOrderPriceReductions,
   listOrderBillOrders,
   listOrderMergedInto,
@@ -25,6 +28,7 @@ import { createSubmissionInventoryRelease } from "./submission-inventory-release
 import { staffOrderCancellationPermission } from "./merchant-order-staff-cancellation.js";
 import { keepingCause, onlyRefusal } from "./merchant-failure.js";
 import { fenceTableBill } from "./dining-waiting-rounds.js";
+import { billOwedMinor } from "./merchant-order-bill-owed.js";
 import {
   refreshBillTaxRounding,
   splitAgainAfterBillChange,
@@ -65,7 +69,130 @@ const databaseCode = (error: unknown) => {
   return typeof code === "string" ? code : null;
 };
 
-export function createMerchantDiningUnpaidItemRemoval(options: {
+const sha256 = (value: string) => "sha256:" + createHash("sha256").update(value).digest("hex");
+
+/** The browser's intent: the round's dishes, the Order version it saw and a reason. */
+export function parseUnpaidItemRemovalCommand(value: unknown) {
+  return parseUnpaidItemRemoval(value, "Command") as UnpaidItemRemovalIntent & {
+    readonly operationReference: string;
+    readonly reasonCode: StaffOrderCancellationReasonCode;
+  };
+}
+
+/** v15 b20: what taking these dishes off would take off the bill (no reason or reference). */
+export function parseUnpaidItemRemovalPreview(value: unknown): UnpaidItemRemovalIntent {
+  return parseUnpaidItemRemoval(value, "Preview");
+}
+
+interface UnpaidItemRemovalIntent {
+  readonly orderReference: string;
+  readonly orderBatchReference: string;
+  readonly orderItemReferences: readonly string[];
+  readonly expectedOrderVersion: number;
+  readonly operationReference: string | null;
+  readonly reasonCode: StaffOrderCancellationReasonCode | null;
+}
+
+function parseUnpaidItemRemoval(
+  value: unknown,
+  mode: "Command" | "Preview",
+): UnpaidItemRemovalIntent {
+  try {
+    const raw = readClosedRecord(value, [
+      "orderReference",
+      "orderBatchReference",
+      "orderItemReferences",
+      "expectedOrderVersion",
+      ...(mode === "Command" ? ["operationReference", "reasonCode"] : []),
+    ]);
+    if (
+      typeof raw.expectedOrderVersion !== "number" ||
+      !Number.isSafeInteger(raw.expectedOrderVersion) ||
+      raw.expectedOrderVersion < 2 ||
+      (mode === "Command" &&
+        (typeof raw.reasonCode !== "string" ||
+          !(staffOrderCancellationReasonCodes as readonly string[]).includes(raw.reasonCode)))
+    )
+      throw new Error();
+    return Object.freeze({
+      orderReference: String(parseOrderingReference(raw.orderReference)),
+      orderBatchReference: String(parseOrderingReference(raw.orderBatchReference)),
+      orderItemReferences: parseStaffItemCancellationSelection(raw.orderItemReferences).map(String),
+      expectedOrderVersion: raw.expectedOrderVersion,
+      operationReference:
+        mode === "Command" ? String(parseOrderingReference(raw.operationReference)) : null,
+      reasonCode: mode === "Command" ? (raw.reasonCode as StaffOrderCancellationReasonCode) : null,
+    });
+  } catch {
+    return fail("UNPAID_ITEM_REMOVAL_INPUT_INVALID");
+  }
+}
+
+/**
+ * v15 b20 (DEC-TAX-WHOLE-RECEIPT): what the bill holding this Order goes down by when these
+ * dishes come off it: the bill as it stands (earlier dishes taken off left out, comps kept) less
+ * the bill without them, its tax worked out once over the whole bill (a merged table's too). The
+ * same sum the Order's detail reads afterwards as "Taken off the bill", so the button and the
+ * bill agree to the cent; their own prices added up can be a cent more. A read.
+ */
+async function billRemovalMinor(
+  tx: ConsumerTransaction,
+  owner: { readonly brandReference: string; readonly storeReference: string },
+  orderReference: string,
+  lines: ReadonlySet<string>,
+  authorize: () => Promise<boolean>,
+): Promise<bigint> {
+  const holder =
+    (await listOrderMergedInto(tx, owner, [orderReference])).get(orderReference) ?? orderReference;
+  const billOrders = await listOrderBillOrders(tx, owner, holder);
+  const rounds = await createPostgresOrderPayLaterConfirmationStore({
+    ...owner,
+    quoteVersion: 2,
+    sha256,
+    authorize,
+  }).listByOrders({ transaction: tx, orderReferences: billOrders });
+  const sent = new Set(rounds.map((round) => String(round.orderBatchReference)));
+  const takenOff = new Set(
+    (
+      await createPostgresPayLaterItemCancellationStore({
+        ...owner,
+        authorize: async (_tx, value) =>
+          billOrders.includes(String(value.orderReference)) && (await authorize()),
+      }).listByOrders(tx, billOrders)
+    ).flatMap((record) => record.orderItemReferences.map(String)),
+  );
+  const prices = [];
+  // One query at a time on the transaction.
+  for (const billOrder of billOrders)
+    prices.push(
+      ...(await listOrderItemPrices(tx, owner, billOrder)).filter(
+        (price) =>
+          sent.has(String(price.orderBatchReference)) &&
+          !takenOff.has(String(price.orderItemReference)),
+      ),
+    );
+  const reduced = new Map(
+    (await listOrderPriceReductions(tx, owner, billOrders)).map(
+      (record) => [record.orderItemReference, record] as const,
+    ),
+  );
+  if (!(await authorize())) return fail("UNPAID_ITEM_REMOVAL_PERMISSION_DENIED");
+  const billRounds = rounds.map((round) => ({
+    orderReference: String(round.orderReference),
+    orderBatchReference: String(round.orderBatchReference),
+  }));
+  return (
+    billOwedMinor(holder, billRounds, prices, reduced) -
+    billOwedMinor(
+      holder,
+      billRounds,
+      prices.filter((price) => !lines.has(String(price.orderItemReference))),
+      reduced,
+    )
+  );
+}
+
+interface UnpaidItemRemovalOptions {
   persistence: PersistentMerchantBffOptions;
   authentication: Pick<MerchantBffService, "authorize">;
   installContext(
@@ -73,48 +200,119 @@ export function createMerchantDiningUnpaidItemRemoval(options: {
     scope: { tenantReference: string; brandReference: string; storeReference: string },
   ): Promise<void>;
   nextReference(): string;
-}) {
+}
+
+/**
+ * v15 b20 (DEC-TAX-WHOLE-RECEIPT): what taking the chosen dishes off the bill would take off it —
+ * the amount the button names — with the command's permission and checks (paid, a guest paying,
+ * the dishes and version, a comp on them). Nothing is recorded and no staff PIN is asked (the PIN
+ * confirms the command).
+ */
+export function createMerchantDiningUnpaidItemRemovalPreview(options: UnpaidItemRemovalOptions) {
+  const resolveScope = createMerchantStoreScope(options.persistence);
+  return async (input: {
+    sessionCookie: unknown;
+    csrf: unknown;
+    command: unknown;
+  }): Promise<{ readonly status: "Preview"; readonly totalMinor: string }> => {
+    const session = await options.authentication.authorize(input);
+    const intent = parseUnpaidItemRemovalPreview(input.command);
+    try {
+      return await options.persistence.transactions.run((transaction) =>
+        withMerchantTransactionAuthorization(
+          {
+            transaction,
+            resolve: async () => {
+              const current = await resolveScope(
+                transaction,
+                input.sessionCookie,
+                staffOrderCancellationPermission,
+                session.sessionReference,
+              ).catch(onlyRefusal(() => fail("UNPAID_ITEM_REMOVAL_PERMISSION_DENIED")));
+              if ((await current.allowed()) !== true)
+                return fail("UNPAID_ITEM_REMOVAL_PERMISSION_DENIED");
+              return current;
+            },
+            recheck: async (current) => (await current.allowed()) === true,
+            denied: () => fail("UNPAID_ITEM_REMOVAL_PERMISSION_DENIED"),
+          },
+          async (authority) => {
+            const tx = transaction as unknown as ConsumerTransaction;
+            const scope = authority.scope;
+            const guard = () => authority.guard();
+            const selected = {
+              tenantReference: String(scope.selected.tenantReference),
+              brandReference: String(scope.context.brand.brandReference),
+              storeReference: String(scope.store.storeReference),
+            };
+            const owner = {
+              brandReference: selected.brandReference,
+              storeReference: selected.storeReference,
+            };
+            await options.installContext(tx, selected);
+            const payments = createPostgresDiningTableSettlementStore({
+              scope: selected,
+              authorize: async (_t, value) =>
+                value.orderReference === intent.orderReference && (await guard()) === true,
+            });
+            if ((await payments.listByOrders(tx, [intent.orderReference])).length > 0)
+              return fail("UNPAID_ITEM_REMOVAL_ALREADY_PAID");
+            if (
+              (await payments.listOnlinePaymentsByOrders(tx, [intent.orderReference])).some(
+                (attempt) => attempt.outcome === null,
+              )
+            )
+              return fail("UNPAID_ITEM_REMOVAL_ALREADY_PAID");
+            const prepared = await createPostgresPayLaterItemCancellationStore({
+              ...owner,
+              authorize: async (t, value) =>
+                t === tx && value.orderReference === intent.orderReference && (await guard()),
+            }).prepare(tx, intent);
+            if (prepared.status === "NotEligible") return fail(notEligibleCode(prepared.reason));
+            const removing = new Set(prepared.plan.lines.map((line) => line.orderItemReference));
+            if (
+              (await listOrderPriceReductions(tx, owner, [intent.orderReference])).some(
+                (reduction) => removing.has(String(reduction.orderItemReference)),
+              )
+            )
+              return fail("UNPAID_ITEM_REMOVAL_COMPED");
+            const totalMinor = await billRemovalMinor(
+              tx,
+              owner,
+              intent.orderReference,
+              removing,
+              async () => (await guard()) === true,
+            );
+            if (!(await guard())) return fail("UNPAID_ITEM_REMOVAL_PERMISSION_DENIED");
+            if (totalMinor < 0n) return fail("UNPAID_ITEM_REMOVAL_UNAVAILABLE");
+            return Object.freeze({ status: "Preview" as const, totalMinor: totalMinor.toString() });
+          },
+        ),
+      );
+    } catch (error) {
+      if (error instanceof UnpaidItemRemovalError) throw error;
+      const code = databaseCode(error);
+      if (code === "40P01" || code === "40001" || code === "55P03")
+        return fail("UNPAID_ITEM_REMOVAL_VERSION_CONFLICT");
+      return keepingCause(() => fail("UNPAID_ITEM_REMOVAL_UNAVAILABLE"))(error);
+    }
+  };
+}
+
+const notEligibleCode = (reason: string): UnpaidItemRemovalErrorCode =>
+  reason === "NotFound" || reason === "ItemNotInBatch"
+    ? "UNPAID_ITEM_REMOVAL_NOT_FOUND"
+    : reason === "NotPayLater"
+      ? "UNPAID_ITEM_REMOVAL_NOT_PAY_LATER"
+      : reason === "VersionConflict"
+        ? "UNPAID_ITEM_REMOVAL_VERSION_CONFLICT"
+        : "UNPAID_ITEM_REMOVAL_NOT_REMOVABLE";
+
+export function createMerchantDiningUnpaidItemRemoval(options: UnpaidItemRemovalOptions) {
   const resolveScope = createMerchantStoreScope(options.persistence);
   return async (input: { sessionCookie: unknown; csrf: unknown; command: unknown }) => {
     const session = await options.authentication.authorize(input);
-    let intent: {
-      orderReference: string;
-      orderBatchReference: string;
-      orderItemReferences: readonly string[];
-      expectedOrderVersion: number;
-      operationReference: string;
-      reasonCode: StaffOrderCancellationReasonCode;
-    };
-    try {
-      const raw = readClosedRecord(input.command, [
-        "orderReference",
-        "orderBatchReference",
-        "orderItemReferences",
-        "expectedOrderVersion",
-        "operationReference",
-        "reasonCode",
-      ]);
-      if (
-        typeof raw.expectedOrderVersion !== "number" ||
-        !Number.isSafeInteger(raw.expectedOrderVersion) ||
-        raw.expectedOrderVersion < 2 ||
-        typeof raw.reasonCode !== "string" ||
-        !(staffOrderCancellationReasonCodes as readonly string[]).includes(raw.reasonCode)
-      )
-        throw new Error();
-      intent = {
-        orderReference: String(parseOrderingReference(raw.orderReference)),
-        orderBatchReference: String(parseOrderingReference(raw.orderBatchReference)),
-        orderItemReferences: parseStaffItemCancellationSelection(raw.orderItemReferences).map(
-          String,
-        ),
-        expectedOrderVersion: raw.expectedOrderVersion,
-        operationReference: String(parseOrderingReference(raw.operationReference)),
-        reasonCode: raw.reasonCode as StaffOrderCancellationReasonCode,
-      };
-    } catch {
-      return fail("UNPAID_ITEM_REMOVAL_INPUT_INVALID");
-    }
+    const intent = parseUnpaidItemRemovalCommand(input.command);
     try {
       return await options.persistence.transactions.run((transaction) =>
         withMerchantTransactionAuthorization(
@@ -201,16 +399,7 @@ export function createMerchantDiningUnpaidItemRemoval(options: {
               ) ?? intent.orderReference;
             await fenceTableBill(tx, owner, await listOrderBillOrders(tx, owner, holder));
             const prepared = await ordering.prepare(tx, intent);
-            if (prepared.status === "NotEligible")
-              return fail(
-                prepared.reason === "NotFound" || prepared.reason === "ItemNotInBatch"
-                  ? "UNPAID_ITEM_REMOVAL_NOT_FOUND"
-                  : prepared.reason === "NotPayLater"
-                    ? "UNPAID_ITEM_REMOVAL_NOT_PAY_LATER"
-                    : prepared.reason === "VersionConflict"
-                      ? "UNPAID_ITEM_REMOVAL_VERSION_CONFLICT"
-                      : "UNPAID_ITEM_REMOVAL_NOT_REMOVABLE",
-              );
+            if (prepared.status === "NotEligible") return fail(notEligibleCode(prepared.reason));
             const plan = prepared.plan;
             // A comped or discounted dish stays on the bill (the fence is held, so a comp either
             // committed before this read or waits): its reduction would otherwise stay on a dish the

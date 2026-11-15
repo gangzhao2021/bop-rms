@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { KitchenMayHaveStartedNote } from "./kitchen-cancel-warning.js";
 import { Link } from "react-router";
 import { t } from "./i18n/i18n.js";
@@ -144,6 +144,36 @@ export function PayLaterRemoveRefusalNotice({
 }
 
 /**
+ * v15 b20 (DEC-TAX-WHOLE-RECEIPT): what the take-off button says. The amount is what the bill goes
+ * down by, from the server's preview (tax is worked out once over the whole bill, so it can be a
+ * cent less than the dishes' own prices); while that is not known the button names no amount, and
+ * taking the dishes off still works (it records no amount).
+ */
+export function payLaterRemoveButtonText(input: {
+  readonly busy: boolean;
+  readonly chosen: number;
+  readonly offered: number;
+  readonly previewMinor: string | null;
+  readonly currencyCode: string;
+}): string {
+  if (input.busy) return t("Recording…");
+  if (input.chosen === 0) return t("Take dishes off the bill");
+  const whole = input.chosen === input.offered;
+  if (input.previewMinor === null)
+    return whole ? t("Take the whole round off") : t("Take these dishes off");
+  const amount = orderMoney({ amountMinor: input.previewMinor, currencyCode: input.currencyCode });
+  return whole
+    ? t("Take the whole round off · {amount}", { amount })
+    : t("Take off {amount}", { amount });
+}
+
+/** The preview's amount, or null when the answer is not one (an older server, a refusal). */
+export function payLaterRemovePreviewMinor(payload: unknown): string | null {
+  const total = (payload as { totalMinor?: unknown } | null)?.totalMinor;
+  return typeof total === "string" && /^(0|[1-9][0-9]{0,17})$/u.test(total) ? total : null;
+}
+
+/**
  * WP-2423 DEC-DINE-IN-PAY-LATER (rule 2): take dishes — or the whole round — off the bill of a table
  * that pays at the end, before it pays and before the kitchen starts them. Staff tick the dishes
  * and give a reason; the server records who and why (PIN-confirmed) and the dishes are never
@@ -174,15 +204,60 @@ export function PayLaterItemRemoveAction({
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<Failure | null>(null);
   const attempt = useRef<{ key: string; reference: string } | null>(null);
+  const [preview, setPreview] = useState<{ readonly key: string; readonly minor: string } | null>(
+    null,
+  );
   const offered = lines.filter(
     (line) =>
       line.orderBatchReference === batch.orderBatchReference &&
       batch.unpaidRemovableItems.includes(line.orderItemReference),
   );
-  if (offered.length === 0 || order.currentVersion === null) return null;
   const chosen = offered.filter((line) => selected.has(line.orderItemReference));
-  const amountMinor = chosen.reduce((sum, line) => sum + BigInt(line.total.amountMinor), 0n);
   const currencyCode = offered[0]?.total.currencyCode ?? "CAD";
+  // v15 b20 (DEC-TAX-WHOLE-RECEIPT): the server works out what the bill goes down by.
+  const previewKey =
+    open && chosen.length > 0 && order.currentVersion !== null
+      ? JSON.stringify({
+          orderReference: order.orderReference,
+          orderBatchReference: batch.orderBatchReference,
+          orderItemReferences: chosen.map((line) => line.orderItemReference).sort(),
+          expectedOrderVersion: order.currentVersion,
+        })
+      : null;
+  const previewMinor = preview !== null && preview.key === previewKey ? preview.minor : null;
+  useEffect(() => {
+    if (previewKey === null) return;
+    const abort = new AbortController();
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const response = await fetcher("/merchant/orders/remove-unpaid-items/preview", {
+            method: "POST",
+            credentials: "same-origin",
+            cache: "no-store",
+            redirect: "error",
+            signal: abort.signal,
+            headers: {
+              "Content-Type": "application/json",
+              Accept: "application/json",
+              "X-BOP-CSRF": csrf,
+            },
+            body: previewKey,
+          });
+          const payload = (await response.json().catch(() => null)) as unknown;
+          const minor = response.ok ? payLaterRemovePreviewMinor(payload) : null;
+          if (!abort.signal.aborted && minor !== null) setPreview({ key: previewKey, minor });
+        } catch {
+          // No amount on the button; taking the dishes off still works and says its own result.
+        }
+      })();
+    }, 200);
+    return () => {
+      clearTimeout(timer);
+      abort.abort();
+    };
+  }, [previewKey, csrf, fetcher]);
+  if (offered.length === 0 || order.currentVersion === null) return null;
   const send = async () => {
     if (busy || chosen.length === 0 || reason === "") return;
     const items = chosen.map((line) => line.orderItemReference).sort();
@@ -277,7 +352,10 @@ export function PayLaterItemRemoveAction({
                   setSelected(next);
                 }}
               />{" "}
-              {line.quantity} × {line.name} · {orderMoney(line.total)}
+              {/* v15 b20: the dish's own price, said as that: what the bill goes down by can be
+                  a cent less (tax on the whole bill), and the button names that. */}
+              {line.quantity} × {line.name} ·{" "}
+              {t("price {amount}", { amount: orderMoney(line.total) })}
             </label>
           </li>
         ))}
@@ -303,17 +381,13 @@ export function PayLaterItemRemoveAction({
         disabled={busy || chosen.length === 0 || reason === ""}
         onClick={() => void send()}
       >
-        {busy
-          ? t("Recording…")
-          : chosen.length === 0
-            ? t("Take dishes off the bill")
-            : chosen.length === offered.length
-              ? t("Take the whole round off · {amount}", {
-                  amount: orderMoney({ amountMinor: amountMinor.toString(), currencyCode }),
-                })
-              : t("Take off {amount}", {
-                  amount: orderMoney({ amountMinor: amountMinor.toString(), currencyCode }),
-                })}
+        {payLaterRemoveButtonText({
+          busy,
+          chosen: chosen.length,
+          offered: offered.length,
+          previewMinor,
+          currencyCode,
+        })}
       </button>{" "}
       <button type="button" disabled={busy} onClick={() => setOpen(false)}>
         {t("Cancel")}

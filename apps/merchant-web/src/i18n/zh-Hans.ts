@@ -6522,6 +6522,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Tick the dishes the table won't be charged for. The kitchen stops them.":
     "勾选这桌不收钱的菜，后厨会停做。",
   "Take the whole round off · {amount}": "删掉整轮 · {amount}",
+  "Take the whole round off": "删掉整轮",
+  "Take these dishes off": "删掉这些菜",
   "Take off {amount}": "删掉 {amount}",
   "Taken off the bill · not charged": "已从账单删除 · 不收费",
   "Taken off the bill": "已从账单删除",

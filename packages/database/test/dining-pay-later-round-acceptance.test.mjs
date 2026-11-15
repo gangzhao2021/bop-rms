@@ -61,7 +61,10 @@ import {
   createMerchantDiningTableSplit,
 } from "../../../apps/api/src/merchant-dining-table-checkout.ts";
 import { createMerchantDiningUnpaidDeparture } from "../../../apps/api/src/merchant-dining-unpaid-departure.ts";
-import { createMerchantDiningUnpaidItemRemoval } from "../../../apps/api/src/merchant-dining-unpaid-item-removal.ts";
+import {
+  createMerchantDiningUnpaidItemRemoval,
+  createMerchantDiningUnpaidItemRemovalPreview,
+} from "../../../apps/api/src/merchant-dining-unpaid-item-removal.ts";
 import {
   createMerchantDiningItemComp,
   createMerchantDiningItemCompPreview,
@@ -1961,6 +1964,27 @@ async function journey(journeyEnding) {
               ...command,
             },
           });
+        // v15 b20: what taking those dishes off would take off the bill, for the button.
+        const removalPreview = (who, command) =>
+          createMerchantDiningUnpaidItemRemovalPreview({
+            persistence: persistenceOf(who),
+            authentication: who.authentication,
+            nextReference: fresh,
+            installContext: async (tx, selected) => {
+              await tx.query(
+                "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
+                [selected.tenantReference, selected.brandReference, selected.storeReference],
+              );
+            },
+          })({
+            ...as(who),
+            command: {
+              orderReference,
+              orderBatchReference: R2.batch.orderBatchReference,
+              orderItemReferences: [String(items2[0].orderItemReference)],
+              ...command,
+            },
+          });
         const versionNow = async () =>
           Number(
             (
@@ -2396,6 +2420,11 @@ async function journey(journeyEnding) {
             // alone would say $28.25 − $14.13 = $14.12, a cent off the bill it was on.
             const before = BigInt((await orderDetail()).items[0].tableBill.totalMinor);
             assert.equal(before, 4238n);
+            // v15 b20: the button names what the merged bill goes down by, before it is pressed.
+            const hostPreview = await removalPreview(server, {
+              expectedOrderVersion: await versionNow(),
+            });
+            assert.equal(hostPreview.totalMinor, "1413");
             const off = await removal(server, {
               expectedOrderVersion: await versionNow(),
               operationReference: fresh(),
@@ -2405,6 +2434,28 @@ async function journey(journeyEnding) {
             assert.equal(host.totalMinor, (await bill()).owed.totalMinor);
             assert.equal(host.totalMinor, "2825");
             assert.equal(host.removedMinor, "1413");
+            // v15 b20 live check: T-M's $12.50 round ($14.13 on its own) would take the merged
+            // $28.25 bill to $14.13, so its button says $14.12, never the dish's own price.
+            const mVersion = Number(
+              (
+                await rows(
+                  "SELECT max(version)::int AS version FROM rms_ordering.order_revision WHERE order_id=$1",
+                  [mOrder],
+                )
+              )[0].version,
+            );
+            assert.equal(mItems[0].pricing.total.amountMinor, 1413n);
+            assert.equal(
+              (
+                await removalPreview(server, {
+                  orderReference: mOrder,
+                  orderBatchReference: M.batch.orderBatchReference,
+                  orderItemReferences: [String(mItems[0].orderItemReference)],
+                  expectedOrderVersion: mVersion,
+                })
+              ).totalMinor,
+              "1412",
+            );
             // T-M's Order had nothing taken off: its detail says none.
             const merged = await createPersistentMerchantOrderQueue({
               persistence: persistenceOf(server),
@@ -3682,6 +3733,20 @@ async function journey(journeyEnding) {
             }),
             { code: "UNPAID_ITEM_REMOVAL_VERSION_CONFLICT" },
           );
+          // v15 b20 (DEC-TAX-WHOLE-RECEIPT): the button's amount, worked out on the whole bill,
+          // with the command's permission and version checks and nothing recorded.
+          await assert.rejects(removalPreview(outsider, { expectedOrderVersion: beforeRemoval }), {
+            code: "UNPAID_ITEM_REMOVAL_PERMISSION_DENIED",
+          });
+          await assert.rejects(
+            removalPreview(server, { expectedOrderVersion: beforeRemoval - 1 }),
+            {
+              code: "UNPAID_ITEM_REMOVAL_VERSION_CONFLICT",
+            },
+          );
+          const previewed = await removalPreview(server, { expectedOrderVersion: beforeRemoval });
+          assert.equal(previewed.status, "Preview");
+          assert.equal(await versionNow(), beforeRemoval);
           const removed = await removal(server, {
             expectedOrderVersion: beforeRemoval,
             operationReference: removeOperation,
@@ -3736,6 +3801,13 @@ async function journey(journeyEnding) {
             afterRemoval.removedMinor,
             (billBeforeRemovalMinor - BigInt(afterRemoval.totalMinor)).toString(),
           );
+          // v15 b20: and the button named exactly that (a dish's own price can be a cent more).
+          assert.equal(previewed.totalMinor, afterRemoval.removedMinor);
+          // Two $12.50 rounds at 13%: each dish is $14.13, the bill $28.25, so it goes down $14.12.
+          if (billBeforeRemovalMinor === 2825n && items2[0].pricing.total.amountMinor === 1413n)
+            assert.equal(previewed.totalMinor, "1412");
+          // Once removed, the preview of the same dishes is refused as the round changed.
+          await assert.rejects(removalPreview(server, { expectedOrderVersion: beforeRemoval + 1 }));
         }
         // Round 2's only dish came off: the whole round is off the bill (it owes nothing).
         assert.equal(items2.length, 1);

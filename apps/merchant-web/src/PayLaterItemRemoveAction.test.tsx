@@ -5,8 +5,11 @@ import { removedItemsTotal } from "./CurrentOrderQueuePage.js";
 import {
   PayLaterItemRemoveAction,
   PayLaterRemoveRefusalNotice,
+  payLaterRemoveButtonText,
   payLaterRemoveFailureText,
+  payLaterRemovePreviewMinor,
 } from "./PayLaterItemRemoveAction.js";
+import { setLanguageForTest } from "./i18n/i18n.js";
 import { MemoryRouter } from "react-router";
 
 const id = (n: number) => `01909968-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
@@ -168,4 +171,30 @@ it("Coordinator 2026-10-30: a refusal names what to do instead, with the way the
   expect(comped).not.toContain("Ask a manager to comp them.");
   expect(comped).not.toContain("Comp these dishes");
   expect(payLaterRemoveFailureText("Comped")).toContain("tell the kitchen");
+});
+
+// v15 b20 live check: the panel read "1 × Beef noodles (TEST) · $14.13" and the button "Take the
+// whole round off · $14.13", but the bill went down by $14.12 (its tax is worked out on the whole
+// bill). The button names what the bill goes down by, from the server; the dish says its price.
+it("v15 b20: the take-off button names what the bill goes down by, never the dishes' own prices", () => {
+  const text = (previewMinor: string | null, chosen = 1, offered = 1, busy = false) =>
+    payLaterRemoveButtonText({ busy, chosen, offered, previewMinor, currencyCode: "CAD" });
+  expect(text("1412")).toBe("Take the whole round off · $14.12");
+  expect(text("1412", 1, 2)).toBe("Take off $14.12");
+  // Not worked out yet (or it couldn't be): no amount, never the dishes' own sum.
+  expect(text(null)).toBe("Take the whole round off");
+  expect(text(null, 1, 2)).toBe("Take these dishes off");
+  expect(text(null, 0, 2)).toBe("Take dishes off the bill");
+  expect(text("1412", 1, 1, true)).toBe("Recording…");
+  expect(payLaterRemovePreviewMinor({ status: "Preview", totalMinor: "1412" })).toBe("1412");
+  for (const broken of [null, {}, { totalMinor: 1412 }, { totalMinor: "-1" }, { totalMinor: "01" }])
+    expect(payLaterRemovePreviewMinor(broken)).toBeNull();
+  setLanguageForTest("zh-Hans");
+  try {
+    expect(text("1412")).toBe("删掉整轮 · $14.12");
+    expect(text(null)).toBe("删掉整轮");
+    expect(text(null, 1, 2)).toBe("删掉这些菜");
+  } finally {
+    setLanguageForTest("en");
+  }
 });

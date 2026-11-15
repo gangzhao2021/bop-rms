@@ -1040,6 +1040,13 @@ test("@production DEC-DINE-IN-PAY-LATER: staff take a dish off an unpaid table's
     }),
   );
   const sent: unknown[] = [];
+  // v15 b20 (DEC-TAX-WHOLE-RECEIPT): the button names what the bill goes down by, from the
+  // server's preview: here a cent less than the soup's own $11.30 (tax on the whole bill).
+  const previewed: unknown[] = [];
+  await page.route("**/merchant/orders/remove-unpaid-items/preview", (route) => {
+    previewed.push(route.request().postDataJSON());
+    return route.fulfill({ headers, json: { status: "Preview", totalMinor: "1129" } });
+  });
   await page.route("**/merchant/orders/remove-unpaid-items", (route) => {
     sent.push(route.request().postDataJSON());
     removed = true;
@@ -1061,11 +1068,20 @@ test("@production DEC-DINE-IN-PAY-LATER: staff take a dish off an unpaid table's
     await page.goto("/operations/orders/" + id(1));
     await page.getByRole("button", { name: "Take dishes off the bill" }).click();
     const group = page.getByRole("group", { name: "Take dishes off the bill" });
+    // The dish says its own price; the button what the bill goes down by.
+    await expect(group.getByLabel(/Synthetic soup/u)).toBeVisible();
+    await expect(group).toContainText("1 × Synthetic soup · price $11.30");
     await group.getByLabel(/Synthetic soup/u).check();
     // Nothing is sent without a reason.
-    await expect(group.getByRole("button", { name: "Take off $11.30" })).toBeDisabled();
+    await expect(group.getByRole("button", { name: "Take off $11.29" })).toBeDisabled();
+    expect(previewed.at(-1)).toEqual({
+      orderReference: id(1),
+      orderBatchReference: id(51),
+      orderItemReferences: [id(202)],
+      expectedOrderVersion: 3,
+    });
     await group.getByLabel("Reason").selectOption("CUSTOMER_REQUEST");
-    await group.getByRole("button", { name: "Take off $11.30" }).click();
+    await group.getByRole("button", { name: "Take off $11.29" }).click();
     await expect(page.getByText("Taken off the bill · not charged").first()).toBeVisible();
     expect(sent.length).toBe(before + 1);
     expect(sent.at(-1)).toMatchObject({
@@ -1217,7 +1233,9 @@ test("@production Coordinator 2026-10-30: a dish that can't come off the bill sa
     const group = page.getByRole("group", { name: "Take dishes off the bill" });
     await group.getByLabel(/Synthetic soup/u).check();
     await group.getByLabel("Reason").selectOption("CUSTOMER_REQUEST");
-    await group.getByRole("button", { name: "Take off $11.30" }).click();
+    // v15 b20: the amount could not be worked out (the preview answered unavailable): the button
+    // names none, never the dish's own price, and still takes the dishes off.
+    await group.getByRole("button", { name: "Take these dishes off" }).click();
     // The order is read again (the dish is no longer offered here), but the answer stays.
     const alert = page.getByRole("alert").filter({ hasText: "the comp is recorded" });
     if (mode === "not_removable") {

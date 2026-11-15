@@ -90,7 +90,10 @@ import { createMerchantDiningTableClosePlan } from "../../apps/api/dist/merchant
 import { createMerchantDiningOrderCloseCommand } from "../../apps/api/dist/merchant-dining-order-close-command.js";
 import { createMerchantGuestTableStartOff } from "../../apps/api/dist/merchant-dining-guest-table-start.js";
 import { createMerchantDiningUnpaidDeparture } from "../../apps/api/dist/merchant-dining-unpaid-departure.js";
-import { createMerchantDiningUnpaidItemRemoval } from "../../apps/api/dist/merchant-dining-unpaid-item-removal.js";
+import {
+  createMerchantDiningUnpaidItemRemoval,
+  createMerchantDiningUnpaidItemRemovalPreview,
+} from "../../apps/api/dist/merchant-dining-unpaid-item-removal.js";
 import {
   createMerchantDiningItemComp,
   createMerchantDiningItemCompPreview,
@@ -986,7 +989,7 @@ export async function createInternalMerchant(
     authentication: service,
   });
   // DEC-DINE-IN-PAY-LATER: dishes taken off an unpaid pay-later bill (who and why).
-  const unpaidItemRemoval = createMerchantDiningUnpaidItemRemoval({
+  const unpaidItemRemovalOptions = {
     persistence,
     authentication: service,
     nextReference: () => resources.credentials.reference(),
@@ -999,7 +1002,11 @@ export async function createInternalMerchant(
         [scope.tenantReference, scope.brandReference, scope.storeReference],
       );
     },
-  });
+  };
+  const unpaidItemRemoval = createMerchantDiningUnpaidItemRemoval(unpaidItemRemovalOptions);
+  // v15 b20 (DEC-TAX-WHOLE-RECEIPT): what taking dishes off would take off the bill, for its button.
+  const unpaidItemRemovalPreview =
+    createMerchantDiningUnpaidItemRemovalPreview(unpaidItemRemovalOptions);
   // WP-2423 item 8 ① segment 2: a manager comps or discounts dishes before the table pays.
   const itemCompOptions = {
     persistence,
@@ -1911,6 +1918,7 @@ export async function createInternalMerchant(
       tableCardRefund,
       ...(tableOnlineRefund === undefined ? {} : { tableOnlineRefund }),
       unpaidItemRemoval,
+      unpaidItemRemovalPreview,
       itemComp,
       itemCompPreview,
       diningOrderProgress,

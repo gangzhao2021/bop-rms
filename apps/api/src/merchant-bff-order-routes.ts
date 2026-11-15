@@ -969,6 +969,41 @@ export function installMerchantOrderRoutes(
           .json({ error: error.code.replace(/^UNPAID_ITEM_REMOVAL_/u, "").toLowerCase() });
       });
   });
+  // v15 b20 (DEC-TAX-WHOLE-RECEIPT): what taking dishes off a bill would take off it, for the
+  // button. A read with the command's checks: same origin and CSRF, no staff PIN, nothing recorded.
+  router.post(
+    "/orders/remove-unpaid-items/preview",
+    sameOriginMutation(options),
+    (request, response) => {
+      const auth = mutation(request, response);
+      if (auth === null) return;
+      if (!options.unpaidItemRemovalPreview) {
+        response.status(503).json({ error: "unpaid_item_removal_unavailable" });
+        return;
+      }
+      void options
+        .unpaidItemRemovalPreview({ ...auth, command: request.body })
+        .then((result) => response.set("Cache-Control", NO_STORE).json(result))
+        .catch((error: unknown) => {
+          noteFailure(response, error);
+          if (
+            !(error instanceof UnpaidItemRemovalError) ||
+            error.code === "UNPAID_ITEM_REMOVAL_UNAVAILABLE"
+          ) {
+            response.status(503).set("Cache-Control", NO_STORE).json({ error: "unavailable" });
+            return;
+          }
+          if (error.code === "UNPAID_ITEM_REMOVAL_PERMISSION_DENIED") {
+            denied(response);
+            return;
+          }
+          response
+            .status(error.code === "UNPAID_ITEM_REMOVAL_INPUT_INVALID" ? 400 : 409)
+            .set("Cache-Control", NO_STORE)
+            .json({ error: error.code.replace(/^UNPAID_ITEM_REMOVAL_/u, "").toLowerCase() });
+        });
+    },
+  );
   // v15 b16 (DEC-COMP-BILL-CENT): what a comp or discount would take off, for its confirm button.
   // A read with the command's checks: same origin and CSRF, no staff PIN, nothing recorded.
   router.post("/orders/comp-items/preview", sameOriginMutation(options), (request, response) => {
