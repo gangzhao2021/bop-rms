@@ -13,7 +13,7 @@ import {
 import type { MerchantBffRouterOptions } from "./merchant-bff-contract.js";
 import { tableClosePlanResponse } from "./merchant-dining-table-close-plan-response.js";
 import { DiningServeReadyError } from "./merchant-dining-serve-ready-command.js";
-import { diningServeChangedCode } from "./merchant-dining-serve-command.js";
+import { diningServeChangedCode, diningServeInvalidCode } from "./merchant-dining-serve-command.js";
 import { merchantFailureCode } from "./merchant-failure.js";
 import { DiningClosingError } from "@rms/dining";
 import { DiningCheckoutAlreadyPaidError } from "./merchant-dining-closing-command.js";
@@ -1222,6 +1222,11 @@ export function installMerchantDiningRoutes(
         // M147: served on another screen, or changed since read — 409, never "no permission".
         if (merchantFailureCode(error) === diningServeChangedCode) {
           response.status(409).set("Cache-Control", NO_STORE).json({ error: "changed" });
+          return;
+        }
+        // v15 b19: a body that is not a serve command is the request's fault, never "no permission".
+        if (merchantFailureCode(error) === diningServeInvalidCode) {
+          response.status(400).set("Cache-Control", NO_STORE).json({ error: "input_invalid" });
           return;
         }
         failed(response, error);

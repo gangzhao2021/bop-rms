@@ -507,6 +507,17 @@ describe("M147: a stale serve answers 409, never a refusal", () => {
     expect(await response.json()).toEqual({ error: "changed" });
     expect(app.reported).toEqual([]);
   });
+  // v15 b19: an empty or malformed body is the request's own fault, never "no permission".
+  it("DINING_SERVE_COMMAND_INVALID", async () => {
+    const app = await serve(
+      option("diningServe", rejecting(new Error("DINING_SERVE_COMMAND_INVALID"))) as never,
+    );
+    const response = await app.post("/dining/serve");
+    expect(response.status).toBe(400);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ error: "input_invalid" });
+    expect(app.reported).toEqual([]);
+  });
 });
 
 // WP-2423 M10: refunding every dish of a paid order nobody accepted is answered so the page offers

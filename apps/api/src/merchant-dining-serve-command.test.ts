@@ -245,3 +245,14 @@ it("M147: a dish another screen already served, or one that changed, is stale, n
   f.allowed.mockResolvedValue(false);
   await expect(f.execute(f.input)).rejects.toThrow("DINING_SERVE_COMMAND_DENIED");
 });
+it.each([
+  ["an empty body", {}],
+  ["no body", undefined],
+  ["a missing field", { quantity: 1 }],
+  ["a count over 999", "quantity"],
+])("v15 b19: %s is the request's fault, never a refusal", async (_name, body) => {
+  const f = setup();
+  const command = body === "quantity" ? { ...f.input.command, quantity: 1000 } : body;
+  await expect(f.execute({ ...f.input, command })).rejects.toThrow("DINING_SERVE_COMMAND_INVALID");
+  expect(f.run).not.toHaveBeenCalled();
+});

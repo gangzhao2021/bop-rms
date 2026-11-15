@@ -27,6 +27,14 @@ export const diningServeChangedCode = "DINING_SERVE_COMMAND_CHANGED";
 const stale = (): never => {
   throw new Error(diningServeChangedCode);
 };
+/**
+ * v15 b19: a body that is not a serve command (empty, missing or extra fields, a bad reference or
+ * count) is the request's own fault: the route answers 400 input_invalid, never "no permission".
+ */
+export const diningServeInvalidCode = "DINING_SERVE_COMMAND_INVALID";
+const malformed = (): never => {
+  throw new Error(diningServeInvalidCode);
+};
 const version = (value: unknown, min = 1) => {
   if (
     typeof value !== "number" ||
@@ -34,7 +42,7 @@ const version = (value: unknown, min = 1) => {
     value < min ||
     value >= 2147483647
   )
-    return fail();
+    return malformed();
   return value;
 };
 type Preparation = NonNullable<
@@ -52,19 +60,9 @@ const digest = (current: Preparation) =>
       }),
     )
     .digest("hex");
-export function createMerchantDiningServeCommand(options: {
-  persistence: PersistentMerchantBffOptions;
-  authentication: Pick<MerchantBffService, "authorize">;
-  reference(): string;
-  audit: Pick<
-    AppendAuditRecordInput,
-    "reasonCode" | "retentionPolicyCode" | "retentionPolicyVersion"
-  >;
-}) {
-  const resolve = createMerchantStoreScope(options.persistence);
-  return async (input: { sessionCookie: unknown; csrf: unknown; command: unknown }) => {
-    const authorized = await options.authentication.authorize(input);
-    const raw = readClosedRecord(input.command, [
+function parseServeCommand(value: unknown) {
+  try {
+    const raw = readClosedRecord(value, [
       "operationReference",
       "orderReference",
       "orderItemReference",
@@ -84,7 +82,25 @@ export function createMerchantDiningServeCommand(options: {
       expectedSessionVersion: version(raw.expectedSessionVersion),
       expectedTableAssignmentVersion: version(raw.expectedTableAssignmentVersion),
     };
-    if (command.quantity > 999) return fail();
+    if (command.quantity > 999) return malformed();
+    return command;
+  } catch {
+    return malformed();
+  }
+}
+export function createMerchantDiningServeCommand(options: {
+  persistence: PersistentMerchantBffOptions;
+  authentication: Pick<MerchantBffService, "authorize">;
+  reference(): string;
+  audit: Pick<
+    AppendAuditRecordInput,
+    "reasonCode" | "retentionPolicyCode" | "retentionPolicyVersion"
+  >;
+}) {
+  const resolve = createMerchantStoreScope(options.persistence);
+  return async (input: { sessionCookie: unknown; csrf: unknown; command: unknown }) => {
+    const authorized = await options.authentication.authorize(input);
+    const command = parseServeCommand(input.command);
     // WP-2423: one authorized run. The caller and `dining.item.serve` are resolved in full once at
     // the start and once more before the commit (inside this transaction, so a withdrawn
     // permission or ended Session never commits); the Ordering, Kitchen and Dining owner reads and
