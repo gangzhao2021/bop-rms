@@ -219,7 +219,7 @@ test("@production a sole operator turns it on and approves their own refund afte
     code: "123456",
   });
   await turnOn.click();
-  await expect(section).toContainText("On and in effect: you are the only person");
+  await expect(section).toContainText("On and in effect. You are the only person");
   expect(JSON.parse(changes[0] ?? "{}")).toMatchObject({
     state: "On",
     reasonCode: "OWNER_RUNS_STORE_ALONE",
@@ -331,7 +331,7 @@ test("@production sole operator not in effect names the other approver", async (
   await page.goto(`/app/organization/stores/${id(99)}/setup?section=access`);
   const section = page.getByRole("region", { name: "Sole operator" });
   await expect(section).toContainText(
-    "On, but not in effect: Mia also holds refund approval at this store, so a second person is required.",
+    "On, but not in effect. Mia also holds refund approval at this store, so a second person is required.",
   );
   await expect(section.getByRole("button", { name: "Turn off sole operator" })).toHaveCount(0);
   await expect(section.getByRole("button", { name: "Verify to turn it off" })).toBeVisible();

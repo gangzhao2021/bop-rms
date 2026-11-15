@@ -1,5 +1,8 @@
+import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { createStoreConfigurationVersion } from "../../../packages/rms/store/src/contracts/store-configuration-administration.js";
+import { canonicalPublicationValue as canonical } from "../src/product-publication-command-client-v2.js";
 import { establishedOpeningList } from "./store-setup-panels";
 import { expectNoInternalText } from "./internal-text-guard";
 
@@ -51,6 +54,59 @@ function supportPage(from: number) {
   };
 }
 const supportReads: string[] = [];
+
+/** b18 review: the configuration the Store runs on today (business day from 05:00). */
+function liveConfiguration() {
+  const at = new Date(Date.now() - 3_600_000).toISOString();
+  return createStoreConfigurationVersion({
+    configurationReference: id(20),
+    brandReference: id(2),
+    storeReference: store,
+    configurationVersion: 1,
+    lifecycle: "Published",
+    source: "StoreOverride",
+    brandBaseVersionReference: id(21),
+    defaultLocale: "en-CA",
+    currencyCode: "CAD",
+    timeZone: "America/Toronto",
+    businessDayStartLocalTime: "05:00:00",
+    addressReference: id(22),
+    contactReference: id(23),
+    receiptReference: id(24),
+    taxConfigurationReference: id(25),
+    paymentConfigurationReference: id(26),
+    capacityConfigurationReference: null,
+    enabledServiceModes: ["DineIn", "Pickup"],
+    weeklySchedule: Array.from({ length: 7 }, (_, index) => ({
+      isoWeekday: index + 1,
+      intervals: [
+        {
+          startLocalTime: "11:00:00",
+          endLocalTime: "21:00:00",
+          endsNextDay: false,
+          serviceModes: ["DineIn", "Pickup"],
+          orderCutoffSeconds: 0,
+          leadTimeSeconds: 0,
+        },
+      ],
+    })),
+    exceptions: [],
+    effectiveFrom: at,
+    effectiveUntil: null,
+    supersedesConfigurationReference: null,
+    reasonCode: "INTERNAL_TEST_STORE_SETUP",
+    authoredByReference: id(30),
+    approvedByReference: id(31),
+    approvalEvidenceReference: id(32),
+    publicationReference: id(33),
+    liveGateEvidenceReference: id(34),
+    createdAt: at,
+    updatedAt: at,
+    dataClassification: "ConfigurationMetadata",
+  });
+}
+const hash = (value: unknown) =>
+  "sha256:" + createHash("sha256").update(canonical(value)).digest("hex");
 
 /** The record holds 36 changes; the first read returns the newest 10, then pages of 20. */
 function soleOperatorHistory(before = 37, count = 10) {
@@ -237,6 +293,32 @@ async function install(page: Page, options: { readonly manager?: boolean } = {})
         },
       });
     }
+    if (path === "/merchant/store-configuration/ordinary") {
+      if (options.manager) return respond(route, { error: "request_denied" }, 403);
+      const current = liveConfiguration(),
+        observedAt = new Date().toISOString();
+      return respond(route, {
+        profile: "StoreConfigurationOrdinaryWorkspaceV1",
+        scope: {
+          tenantReference: id(1),
+          brandReference: id(2),
+          storeReference: store,
+          actorReference: id(4),
+        },
+        latest: null,
+        current,
+        expectedHead: {
+          configurationReference: current.configurationReference,
+          configurationVersion: current.configurationVersion,
+          contentDigest: hash(current),
+        },
+        original: null,
+        observedAt,
+        validUntil: new Date(Date.parse(observedAt) + 5000).toISOString(),
+        businessReferenceValidation: "NotEvaluated",
+        storeTaxConfigurationReference: id(25),
+      });
+    }
     // b18 review: nothing saved for the setup's address and contact yet.
     if (path === "/merchant/store-setup/references") {
       const observedAt = new Date().toISOString();
@@ -421,11 +503,22 @@ test("@production an open Store's setup is a few places, each saying whether a c
   // b18 polish: the draft starts from the time zone the Store runs on, never "Not configured".
   await expect(page.getByLabel("Draft timezone")).toHaveValue("America/Toronto");
   await expect(page.getByLabel("Draft timezone").locator("option[value='']")).toHaveCount(0);
+  // b18 review: and from the business day start it runs on, on this first step already.
+  await expect(page.getByLabel("Business day starts at (local time)")).toHaveValue("05:00:00");
   await expect(
     page.getByText(
-      "Filled in with the time zone the Store runs on today; saving the draft keeps it.",
+      "Filled in with the time zone and business day start the Store runs on today; saving the draft keeps them.",
     ),
   ).toBeVisible();
+  // Review says they are filled in but not saved, so it agrees with the publication below.
+  await page.getByRole("button", { name: "4. Review and publish" }).click();
+  const unsaved = page.getByRole("region", { name: "Filled in, not saved yet" });
+  await expect(unsaved).toContainText("Time zone");
+  await expect(unsaved).toContainText("Business day start");
+  await expect(
+    page.getByRole("region", { name: "Settings not set yet" }).getByText(/^Time zone/u),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: "1. Time zone and business day" }).click();
   // The step controls: "Previous step" is disabled on the first step only, "Next step" is not.
   await expect(page.getByRole("button", { name: "Previous step" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Next step" })).toBeEnabled();

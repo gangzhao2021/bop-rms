@@ -2747,7 +2747,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "在设置好的平板上，用 PIN 换人。",
   "On a shared tablet, staff switch to themselves with their own 6-digit PIN instead of signing in each time. Refunds, price and staff changes still need a full sign-in or the authenticator code.":
     "在共享平板上，员工用自己的 6 位 PIN 换成自己，不必每次都登录。退款、价格和员工更改仍需要完整登录或验证器验证码。",
-  "On and in effect: you are the only person who can approve refunds at this store, so you may approve your own after confirming it is you.":
+  "On and in effect. You are the only person who can approve refunds at this store, so you may approve your own after confirming it is you.":
     "开启并生效。你是本店唯一可以批准退款的人，确认身份后可以批准自己的退款。",
   "Search dishes (Chinese or English)": "搜索菜品（中文或英文）",
   "Often ordered": "常点",
@@ -2758,10 +2758,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Only opens the kitchen, not orders, refunds or settings.": "只开后厨，不含订单、退款和设置。",
   "On this Store's menu": "在本店菜单上",
   "On {value}.": "用于{value}。",
-  "On, but not in effect: {named} also {value} refund approval at this store, so a second person is required.":
-    "开启，但未生效：{named}也{value}本店的退款批准权限，因此需要第二个人批准。",
-  "On, but you don't hold refund approval at this store, so it has no effect for you.":
-    "开启，但你没有本店的退款批准权限，因此对你无效。",
+  "On, but not in effect. {named} also {value} refund approval at this store, so a second person is required.":
+    "开启，但未生效。{named}也{value}本店的退款批准权限，因此需要第二个人批准。",
+  "On, but it has no effect for you. You don't hold refund approval at this store.":
+    "开启，但对你无效。你没有本店的退款批准权限。",
   "One less {name}": "{name}减一份",
   "One more {name}": "{name}加一份",
   Online: "线上",
@@ -9908,4 +9908,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Now: {status}": "现在：{status}",
   "Filled in with the time zone the Store runs on today; saving the draft keeps it.":
     "已按门店现在使用的时区填好，存为草稿后保留。",
+  "Filled in with the time zone and business day start the Store runs on today; saving the draft keeps them.":
+    "已按门店现在使用的时区和营业日开始时间填好，存为草稿后保留。",
+  "Filled in, not saved yet": "已填好，尚未保存",
+  "Save as draft to keep them. Until then, publishing below counts them as not set, because it uses the saved draft.":
+    "存为草稿后才会保留。在那之前，下方发布按已保存的草稿检查，仍把它们算作未设置。",
 });

@@ -2,6 +2,7 @@ import { serviceModeText, t } from "./i18n/i18n.js";
 import { StoreConfigurationOrdinaryPanel } from "./StoreConfigurationOrdinaryPanel.js";
 import type { StoreConfigurationSnapshot } from "./store-configuration-client.js";
 import { createStoreConfigurationOrdinaryClient } from "./store-configuration-ordinary-client.js";
+import { createStoreConfigurationPendingJournal } from "./store-configuration-pending-journal.js";
 import { FullSignInPrompt } from "./FullSignInPrompt.js";
 import { FULL_SIGN_IN_REQUIRED_TEXT } from "./full-sign-in.js";
 import { ReceiptTemplateStoreSelection } from "./ReceiptTemplateStoreSelection.js";
@@ -1000,30 +1001,39 @@ export function StoreSetupDraftPage({
       stopped = true;
     };
   }, [wantsProfile, profileSuggestion === null, csrf, fetcher]);
-  // WP-2423 (v15): step 5 offers the receipt template the live Store issues receipts with; read
-  // the live configuration once when it is needed (step 8 reads it again with its panel).
-  const liveScope = workspace ? JSON.stringify(workspace.scope) : null;
-  useEffect(() => {
-    if (liveScope === null || workspace === null || activeStep !== 4 || live !== null) return;
-    const c = new AbortController();
-    void createStoreConfigurationOrdinaryClient()
-      .load(workspace.scope, { signal: c.signal })
-      .then((read) => {
-        if (!c.signal.aborted)
-          setLive((old) => old ?? { current: read.current, observedAt: read.observedAt });
-      })
-      .catch(() => undefined);
-    return () => c.abort();
-  }, [liveScope, activeStep, live === null]);
-  // b18 polish (Owner 2026-11-14): an open Store already runs on a time zone and a business day
-  // start. While the saved draft has none and nothing was typed, the draft starts from them instead
-  // of saying "Not configured"; saving the draft keeps them, as any other value in it. The business
-  // day start is known once the live configuration has been read (step 3 or the last step); no
-  // extra read is made for it, so a pending request's recovery is never preceded by one.
-  const storeTimeZone = openLayout && workspace !== null ? workspace.store.timeZone : null;
-  const liveBusinessStart = openLayout ? (live?.current?.businessDayStartLocalTime ?? null) : null;
   const draftTimeZoneSaved = content.timeZone.state === "Configured",
     draftBusinessStartSaved = content.businessDayStartLocalTime.state === "Configured";
+  // WP-2423 (v15): step 5 offers the receipt template the live Store issues receipts with; read
+  // the live configuration once when it is needed (step 8 reads it again with its panel).
+  // b18 review: an open Store's step 1 needs it too while the saved draft has no business day
+  // start, so the field starts from the one the Store runs on instead of blank. That read waits
+  // for this device's record of an unconfirmed configuration request: while one is waiting to be
+  // recovered, nothing reads the live configuration before the recovery does.
+  const liveScope = workspace ? JSON.stringify(workspace.scope) : null;
+  const wantsLiveStart = openLayout && activeStep === 1 && !draftBusinessStartSaved;
+  useEffect(() => {
+    if (liveScope === null || workspace === null || live !== null) return;
+    if (activeStep !== 4 && !wantsLiveStart) return;
+    const c = new AbortController();
+    void (async () => {
+      if (activeStep !== 4) {
+        const waiting = await createStoreConfigurationPendingJournal(workspace.scope).load();
+        if (waiting !== null || c.signal.aborted) return;
+      }
+      const read = await createStoreConfigurationOrdinaryClient().load(workspace.scope, {
+        signal: c.signal,
+      });
+      if (!c.signal.aborted)
+        setLive((old) => old ?? { current: read.current, observedAt: read.observedAt });
+    })().catch(() => undefined);
+    return () => c.abort();
+  }, [liveScope, activeStep, wantsLiveStart, live === null]);
+  // b18 polish (Owner 2026-11-14): an open Store already runs on a time zone and a business day
+  // start. While the saved draft has none and nothing was typed, the draft starts from them instead
+  // of saying "Not configured"; saving the draft keeps them, as any other value in it. Until it is
+  // saved, Review lists them as filled in but not saved (the publication checks the saved draft).
+  const storeTimeZone = openLayout && workspace !== null ? workspace.store.timeZone : null;
+  const liveBusinessStart = openLayout ? (live?.current?.businessDayStartLocalTime ?? null) : null;
   useEffect(() => {
     if (storeTimeZone === null) return;
     setInputs((old) => {
@@ -1279,9 +1289,15 @@ export function StoreSetupDraftPage({
                 {openLayout ? (
                   !draftTimeZoneSaved && inputs.timeZone === workspace.store.timeZone ? (
                     <p>
-                      {t(
-                        "Filled in with the time zone the Store runs on today; saving the draft keeps it.",
-                      )}
+                      {!draftBusinessStartSaved &&
+                      liveBusinessStart !== null &&
+                      inputs.businessStart === liveBusinessStart
+                        ? t(
+                            "Filled in with the time zone and business day start the Store runs on today; saving the draft keeps them.",
+                          )
+                        : t(
+                            "Filled in with the time zone the Store runs on today; saving the draft keeps it.",
+                          )}
                     </p>
                   ) : inputs.timeZone !== workspace.store.timeZone ? (
                     <p>
@@ -1765,7 +1781,11 @@ export function StoreSetupDraftPage({
             />
             {activeStep === 7 && (
               <>
-                <StoreSetupDraftReview content={parsed} layout={layout} />
+                <StoreSetupDraftReview
+                  content={parsed}
+                  saved={workspace.setup.snapshot?.content ?? null}
+                  layout={layout}
+                />
                 <StoreSetupLiveSettings
                   layout={layout}
                   content={parsed ?? content}
@@ -1835,7 +1855,12 @@ export function StoreSetupDraftPage({
             >
               {t("Save as draft")}
             </button>
-            <button type="button" disabled={disabled || !dirty} onClick={() => void refresh(true)}>
+            <button
+              className="store-setup-discard"
+              type="button"
+              disabled={disabled || !dirty}
+              onClick={() => void refresh(true)}
+            >
               {t("Discard unsaved changes")}
             </button>
           </footer>
@@ -1940,13 +1965,26 @@ function storeReview(
 
 export function StoreSetupDraftReview({
   content,
+  saved = null,
   layout = "Opening",
 }: {
   readonly content: StoreSetupContent | null;
+  /** The saved draft; what is set here but not in it is named as not saved yet. */
+  readonly saved?: StoreSetupContent | null;
   readonly layout?: StoreSetupLayout;
 }) {
   // WP-2423 (v15): the count is exactly the list of what is not set, each with where to set it.
   const missing = content ? storeSetupMissingItems(content, layout) : null;
+  // b18 review: the publication below checks the saved draft. A setting filled in on this page
+  // (by staff, or from the Store's own time zone and business day start) but not saved yet is said
+  // to be exactly that, so Review and the publication never seem to disagree.
+  const unsaved =
+    missing === null
+      ? []
+      : (saved === null
+          ? storeSetupMissingItems(createUnconfiguredStoreSetupContent(), layout)
+          : storeSetupMissingItems(saved, layout)
+        ).filter((item) => !missing.some((m) => m.label === item.label));
   return (
     <>
       <p>
@@ -1970,6 +2008,21 @@ export function StoreSetupDraftReview({
               </li>
             ))}
           </ul>
+        </section>
+      )}
+      {unsaved.length > 0 && (
+        <section aria-label={t("Filled in, not saved yet")}>
+          <h4>{t("Filled in, not saved yet")}</h4>
+          <ul>
+            {unsaved.map((item) => (
+              <li key={item.label}>{item.label}</li>
+            ))}
+          </ul>
+          <p>
+            {t(
+              "Save as draft to keep them. Until then, publishing below counts them as not set, because it uses the saved draft.",
+            )}
+          </p>
         </section>
       )}
       {content && (

@@ -114,29 +114,40 @@ once, or more plainly.
    there are two actions, each a sentence naming its effect and duration, one per line, the shorter
    first: "Let platform support change my settings for the next hour" /
    “允许平台支持在接下来一小时内帮我改设置” and "Let platform support change my settings until I
-   turn it off" / “允许平台支持帮我改设置，直到我关闭”. "Turn off now" is unchanged.
+   turn it off" / “允许平台支持帮我改设置，直到我关闭”, 8px apart so a grant that wraps on a phone
+   still reads as one action. "Turn off now" is unchanged.
 3. The support access log starts folded (see Logs); every record is still reachable.
 4. Sole operator: one lead ("When it is on and there is no second person, you can approve your own
    refunds, prices, menus and other things that need approval." / “开启后，没有第二个人时你可以自己批准
    退款、价格、菜单等需要批准的事。”), the full list behind "What this covers" / 具体包括哪些, and the
    state as one sentence ("Now: Off. Refunds that need approval are approved by a second owner or
    finance member." / “现在：关闭。需要批准的退款由第二位店主或财务人员批准。”, and the on-state
-   equivalents) instead of the label grid.
-5. Settings that need approval, step 1: an open Store already runs on a time zone, so while the saved
-   draft has none and nothing was typed, the draft starts from the Store's time zone (and its
-   business day start once the live configuration has been read on step 3 or 4; no extra read is
-   made, so a pending request's recovery is never preceded by one). It says "Filled in with the time
-   zone the Store runs on today; saving the draft keeps it." / “已按门店现在使用的时区填好，存为草稿后
-   保留。”; "Not configured" / 未配置 is offered only while nothing is set. The review lists only what
-   the Store has no value for; the publication panel still checks the saved setup, so it names a
-   time zone missing until the draft is saved. A Store being opened is unchanged.
+   equivalents, each a state then a full stop: "Now: On and in effect. You are …", "Now: On, but
+   not in effect. Mia also holds …", "Now: On, but it has no effect for you. You don't hold …")
+   instead of the label grid.
+5. Settings that need approval, step 1: an open Store already runs on a time zone and a business
+   day start, so while the saved draft has none and nothing was typed, the draft starts from them:
+   the time zone from the Store, the business day start from the live configuration, read on step 1
+   itself unless this device holds an unconfirmed configuration request waiting to be recovered
+   (then nothing reads the live configuration before the recovery does, and the field fills once
+   step 3 or 4 has read it). It says "Filled in with the time zone and business day start the Store
+   runs on today; saving the draft keeps them." / “已按门店现在使用的时区和营业日开始时间填好，存为
+   草稿后保留。” (the time-zone-only sentence while the business day start is not known); "Not
+   configured" / 未配置 is offered only while nothing is set. Prefilled values are not unsaved
+   changes (no save prompt, "Discard unsaved changes" stays off). Review lists as missing only what
+   the Store has no value for, and lists anything set on the page but not in the saved draft under
+   "Filled in, not saved yet" / “已填好，尚未保存”: "Save as draft to keep them. Until then,
+   publishing below counts them as not set, because it uses the saved draft." The publication panel
+   still checks the saved draft and says so ("the saved setup still has …"), so the two agree. A
+   Store being opened is unchanged.
 6. "Reload the saved draft" is now "Restore the last saved draft" / 恢复上次保存的草稿, a small text
    action under the step controls, shown while nothing is unsaved (with unsaved changes, "Discard
    unsaved changes" is what restores the saved draft). Before the draft has been read, or when the
    read failed, it stays above as the way to read it again.
 7. The step controls are ordinary accent text at every width; only a step that truly cannot move
    ("Previous step" on the first step, "Next step" on the last) is grey. On a phone, Previous and
-   Next share one line, the solid "Save as draft" is full width under them.
+   Next share one line, the solid "Save as draft" is full width under them, and "Discard unsaved
+   changes" (placed by its own class, not by its position) under that.
 
 ## Wording
 

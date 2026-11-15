@@ -1103,6 +1103,12 @@ test("WP-2423 v15: 'Use the live Store's settings' fills time zone, business day
   await expect(missing).toContainText("Service modes: set it in step 2, Services");
   await expect(missing).toContainText("Receipt template: set it in step 3, Fees, tax and payment");
   await expect(page.getByText("2 settings are not set yet.", { exact: false })).toBeVisible();
+  // b18 review: Review says the two prefilled values are filled in but not saved, and why the
+  // publication below still counts them, so the two never seem to disagree.
+  const unsaved = page.getByRole("region", { name: "Filled in, not saved yet" });
+  await expect(unsaved).toContainText("Time zone");
+  await expect(unsaved).toContainText("Business day start");
+  await expect(unsaved).toContainText("publishing below counts them as not set");
   // The publication panel names what the saved setup is missing instead of only disabling Create.
   await expect(panel(page)).toContainText(
     "Time zone (step 1, Time zone and business day); Business day start (step 1, Time zone and business day)",

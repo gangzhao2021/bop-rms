@@ -10738,11 +10738,12 @@ tr[data-drop-target="true"] {
   min-height: 36px;
   padding-block: 4px;
 }
-/* Platform support's two grants are sentences: one per line, each its own action. */
+/* Platform support's two grants are sentences: one per line, each its own action, with a little
+   space between them so a grant that wraps on a phone still reads as one action. */
 .store-setup-place__panel .support-access > .card-actions {
   flex-direction: column;
   align-items: flex-start;
-  gap: 0;
+  gap: var(--bop-space-2);
 }
 .store-setup-place__panel .support-access > .card-actions button {
   margin: 0;
@@ -10794,7 +10795,7 @@ tr[data-drop-target="true"] {
     order: 3;
     text-align: center;
   }
-  .store-setup-draft-page .store-setup-actions button:nth-child(4) {
+  .store-setup-draft-page .store-setup-actions button.store-setup-discard {
     order: 4;
   }
 }

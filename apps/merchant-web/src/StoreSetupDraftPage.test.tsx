@@ -367,6 +367,30 @@ it("review names the saved time zone in plain words, not its identifier", () => 
   expect(html).not.toContain("America/Toronto");
   expect(findInternalText([staticText(html)])).toEqual([]);
 });
+it("b18 review: a setting filled in here but not in the saved draft is named as not saved yet", () => {
+  const saved = createUnconfiguredStoreSetupContent();
+  const html = renderToStaticMarkup(
+    <StoreSetupDraftReview
+      content={{
+        ...saved,
+        timeZone: { state: "Configured", value: "America/Toronto" },
+        businessDayStartLocalTime: { state: "Configured", value: "04:00:00" },
+      }}
+      saved={saved}
+      layout="Open"
+    />,
+  );
+  expect(html).toContain('aria-label="Filled in, not saved yet"');
+  expect(html).toContain("<li>Time zone</li>");
+  expect(html).toContain("<li>Business day start</li>");
+  expect(html).toContain("publishing below counts them as not set");
+  expect(html).not.toContain("Time zone: set it in");
+  // Nothing unsaved: no such section.
+  const same = renderToStaticMarkup(
+    <StoreSetupDraftReview content={saved} saved={saved} layout="Open" />,
+  );
+  expect(same).not.toContain("Filled in, not saved yet");
+});
 it("b18 review: an open Store's review names only its approval steps and where the rest is set", () => {
   const html = renderToStaticMarkup(
     <StoreSetupDraftReview content={createUnconfiguredStoreSetupContent()} layout="Open" />,

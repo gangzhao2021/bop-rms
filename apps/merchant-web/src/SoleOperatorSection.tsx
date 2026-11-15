@@ -42,14 +42,14 @@ function effectText(view: SoleOperatorView): string {
   if (view.state === "Off")
     return t("Off. Refunds that need approval are approved by a second owner or finance member.");
   if (!view.refundApproval.youHoldApproval)
-    return t("On, but you don't hold refund approval at this store, so it has no effect for you.");
+    return t("On, but it has no effect for you. You don't hold refund approval at this store.");
   if (view.refundApproval.status === "Effective")
     return t(
-      "On and in effect: you are the only person who can approve refunds at this store, so you may approve your own after confirming it is you.",
+      "On and in effect. You are the only person who can approve refunds at this store, so you may approve your own after confirming it is you.",
     );
   const named = others(view);
   return t(
-    "On, but not in effect: {named} also {value} refund approval at this store, so a second person is required.",
+    "On, but not in effect. {named} also {value} refund approval at this store, so a second person is required.",
     { named: named, value: view.refundApproval.otherApprovers.length === 1 ? "holds" : "hold" },
   );
 }
