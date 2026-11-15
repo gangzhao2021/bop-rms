@@ -208,6 +208,123 @@ test.describe("@production CUST-DINE-IN-SESSION table view", () => {
     expect(errors).toEqual([]);
   });
 
+  // v15 b20 live checks: a pay-first round with a dish cancelled and refunded says what went back
+  // on that round; a pay-at-end round staff took off the bill shows no charged totals.
+  for (const language of ["en", "zh-Hans"] as const)
+    test(`v15 b20: a round's refund and a round taken off the bill read as such (${language})`, async ({
+      page,
+    }) => {
+      const zh = language === "zh-Hans";
+      const round = (overrides: Record<string, unknown>) => ({
+        orderedBy: "You",
+        submittedAt: "2026-10-13T17:40:00.000Z",
+        cancelsAt: null,
+        storeCancellationReason: null,
+        ...overrides,
+      });
+      const refunded = {
+        schemaVersion: 1,
+        session: {
+          ...session.session,
+          rounds: [
+            round({
+              roundNumber: 1,
+              status: "Serving",
+              payment: "Paid",
+              items: [
+                {
+                  displayName: "Synthetic steamed rice",
+                  quantity: 1,
+                  servedQuantity: 1,
+                  cancelled: false,
+                  lineTotal: cad("282"),
+                },
+                {
+                  displayName: "Synthetic lemon tea",
+                  quantity: 1,
+                  servedQuantity: 0,
+                  cancelled: true,
+                  lineTotal: cad("537"),
+                },
+              ],
+              itemsTotal: cad("819"),
+              refunded: cad("537"),
+            }),
+          ],
+          summary: {
+            paid: cad("819"),
+            refunded: cad("537"),
+            refundPending: cad("0"),
+            due: cad("0"),
+          },
+        },
+      };
+      const takenOff = {
+        schemaVersion: 1,
+        session: {
+          ...session.session,
+          paymentTiming: "PayLater",
+          rounds: [
+            round({
+              roundNumber: 1,
+              orderedBy: "Staff",
+              status: "StoreCancelled",
+              payment: "NotCharged",
+              storeCancellationReason: "SoldOut",
+              items: [
+                {
+                  displayName: "Synthetic beef noodles",
+                  quantity: 1,
+                  servedQuantity: 0,
+                  cancelled: true,
+                  lineTotal: cad("1413"),
+                  priceBeforeTax: cad("1250"),
+                },
+              ],
+              subtotal: cad("1250"),
+              tax: cad("163"),
+              itemsTotal: cad("1413"),
+            }),
+          ],
+          summary: {
+            paid: cad("0"),
+            refunded: cad("0"),
+            refundPending: cad("0"),
+            due: cad("0"),
+            // Nothing is on order: the round taken off is not counted.
+            ordered: { subtotal: cad("0"), tax: cad("0"), total: cad("0") },
+          },
+        },
+      };
+      let current: unknown = refunded;
+      await enterTable(page, () => ({ status: 200, json: current }));
+      const main = page.getByRole("main");
+      if (zh) await page.getByRole("button", { name: "切换到中文" }).click();
+      const card = main.locator("article.order-status__batch").first();
+      await expect(card).toContainText(zh ? "已退款$5.37" : "Refunded$5.37");
+      await expect(card).toContainText("$8.19");
+      for (const width of [1440, 1024, 390]) {
+        await page.setViewportSize({ width, height: 900 });
+        await expectNoHorizontalOverflow(page);
+        await card.screenshot({
+          path: `test-results-b20/round-refunded-${language}-${width}.png`,
+        });
+      }
+      current = takenOff;
+      await main.getByRole("button", { name: zh ? "立即刷新" : "Refresh now" }).click();
+      await expect(card).toContainText(zh ? "本轮合计未扣款" : "Round totalNot charged");
+      await expect(card).not.toContainText("$14.13");
+      await expect(card).not.toContainText("$1.63");
+      for (const width of [1440, 1024, 390]) {
+        await page.setViewportSize({ width, height: 900 });
+        await expectNoHorizontalOverflow(page);
+        await card.screenshot({
+          path: `test-results-b20/round-taken-off-${language}-${width}.png`,
+        });
+      }
+      await expect(main.getByText(/NotCharged|StoreCancelled|018f2330/u)).toHaveCount(0);
+    });
+
   test("WP-2423 D5: lists item prices before tax, then subtotal, tax and total per round and table", async ({
     page,
   }) => {

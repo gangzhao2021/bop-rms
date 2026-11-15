@@ -357,6 +357,58 @@
   align-items: center;
   gap: 4px 12px;
 }
+/* v15 b20: taking dishes off a bill reads top to bottom — what to do, one row per dish (hairlines
+   between rows only), the reason, then the action — on the Orders panel and the Tables page alike;
+   the panel's dishes were squeezed into one narrow column beside the rest. */
+.pay-later-remove.order-cancel-actions,
+.orders-page .order-panel__next .pay-later-remove.order-cancel-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  flex: 1 1 100%;
+  gap: 16px;
+}
+.pay-later-remove > p {
+  margin: 0;
+}
+.pay-later-remove .pay-later-remove__lines {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.pay-later-remove .pay-later-remove__lines li {
+  display: block;
+}
+.pay-later-remove .pay-later-remove__lines li + li {
+  border-top: 1px solid var(--bop-color-row-divider, #e5e5e5);
+}
+.pay-later-remove .pay-later-remove__lines label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  overflow-wrap: anywhere;
+}
+.pay-later-remove .table-checkout__field {
+  justify-self: start;
+}
+.pay-later-remove__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 24px;
+}
+/* v3: one filled primary action; Cancel is accent text, no outline. */
+.pay-later-remove__actions > button:not(.table-checkout__primary) {
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent, #1f63e0);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
 /* Coordinator 2026-10-30: what to do instead when dishes can't come off the bill. */
 .pay-later-remove__instead {
   display: flex;

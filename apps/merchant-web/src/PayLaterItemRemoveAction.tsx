@@ -375,23 +375,25 @@ export function PayLaterItemRemoveAction({
           ))}
         </select>
       </label>
-      <button
-        type="button"
-        className="table-checkout__primary"
-        disabled={busy || chosen.length === 0 || reason === ""}
-        onClick={() => void send()}
-      >
-        {payLaterRemoveButtonText({
-          busy,
-          chosen: chosen.length,
-          offered: offered.length,
-          previewMinor,
-          currencyCode,
-        })}
-      </button>{" "}
-      <button type="button" disabled={busy} onClick={() => setOpen(false)}>
-        {t("Cancel")}
-      </button>
+      <div className="pay-later-remove__actions">
+        <button
+          type="button"
+          className="table-checkout__primary"
+          disabled={busy || chosen.length === 0 || reason === ""}
+          onClick={() => void send()}
+        >
+          {payLaterRemoveButtonText({
+            busy,
+            chosen: chosen.length,
+            offered: offered.length,
+            previewMinor,
+            currencyCode,
+          })}
+        </button>{" "}
+        <button type="button" disabled={busy} onClick={() => setOpen(false)}>
+          {t("Cancel")}
+        </button>
+      </div>
       {failure === "FullSignInRequired" ? (
         <FullSignInPrompt csrf={csrf} fetcher={fetcher} />
       ) : failure !== null &&
