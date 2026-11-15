@@ -90,7 +90,7 @@ describe("WP-2423 DEC-STORE-SETUP-PUBLICATION Store setup publication screens", 
     expect(html).toContain("Settings from the live Store");
     // b19: one sentence naming only what still comes from the live Store, then a text button.
     expect(staticText(html)).toContain(
-      "Still to take from the Store as it runs today: tax settings (see Tax review), Brand settings, holidays and special hours, when it takes effect, time zone, business day start, services, opening hours, order limits, receipt layout.",
+      "Still to take from the Store as it runs today: tax settings (see Tax review), brand settings, holidays and special hours, when it takes effect, time zone, business day start, services, opening hours, order limits, receipt layout.",
     );
     expect(html).toContain("Use the live Store’s settings");
     expect(findInternalText([staticText(html)])).toEqual([]);

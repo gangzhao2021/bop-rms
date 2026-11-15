@@ -453,6 +453,36 @@ it("b19: Review says what publishing changes against the live Store, in plain va
     "Tip: on (Dine-in)",
   ]);
   expect(summary.unchanged).toEqual(["Time zone", "Order limits", "Address"]);
+  // b19 review: a fee whose only change is its tax treatment says so; it never reads as unchanged.
+  const taxedTip = (taxClassificationReference: string | null) => ({
+    chargeType: "Tip",
+    state: "Enabled",
+    taxClassificationReference,
+    orderTypes: ["DineIn"],
+  });
+  const withFees = {
+    ...current,
+    setupBasis: {
+      feeContexts: [
+        { chargeType: "ServiceCharge", state: "Disabled" },
+        { chargeType: "DeliveryFee", state: "Disabled" },
+        taxedTip(id(14)),
+      ],
+    },
+  } as unknown as StoreConfigurationSnapshot;
+  expect(
+    storeSetupChangeSummary(content, withFees).changed.find((item) => item.label === "Fees")?.value,
+  ).toEqual([
+    "Service charge: off",
+    "Delivery fee: off",
+    "Tip: on (Dine-in)",
+    "Tip: taxed differently (see Tax review)",
+  ]);
+  const sameFees = {
+    ...current,
+    setupBasis: { feeContexts: content.feeContexts.value },
+  } as unknown as StoreConfigurationSnapshot;
+  expect(storeSetupChangeSummary(content, sameFees).unchanged).toContain("Fees");
   const text = staticText(
     renderToStaticMarkup(<StoreSetupDraftReview content={content} current={current} />),
   );

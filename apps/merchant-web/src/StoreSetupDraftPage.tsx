@@ -1282,7 +1282,9 @@ export function StoreSetupDraftPage({
             </ol>
           </nav>
           <section className="store-setup-step-content" aria-labelledby="setup-step-heading">
-            <h3 id="setup-step-heading" ref={heading} tabIndex={-1}>
+            {/* b19 review: the step's name is the marked tab right above; the heading names the
+                step's region and takes focus when moving between steps, without repeating it. */}
+            <h3 id="setup-step-heading" className="visually-hidden" ref={heading} tabIndex={-1}>
               {stepName(activeStep)}
             </h3>
             {activeStep === 0 && (
@@ -1853,7 +1855,8 @@ export function StoreSetupDraftPage({
               type="button"
               disabled={activeStep === shownSteps[0]}
               onClick={() => {
-                setStep(shownSteps[shownSteps.indexOf(activeStep) - 1] ?? activeStep);
+                const to = shownSteps[shownSteps.indexOf(activeStep) - 1] ?? activeStep;
+                setStep(to);
                 heading.current?.focus();
               }}
             >
@@ -1863,14 +1866,21 @@ export function StoreSetupDraftPage({
               type="button"
               disabled={activeStep === 7}
               onClick={() => {
-                setStep(shownSteps[shownSteps.indexOf(activeStep) + 1] ?? activeStep);
+                const to = shownSteps[shownSteps.indexOf(activeStep) + 1] ?? activeStep;
+                setStep(to);
                 heading.current?.focus();
               }}
             >
               {t("Next step")}
             </button>
+            {/* b19 review: on Review and publish, the step's own next action is the one solid button;
+                saving again is accent text there unless something is not saved yet. */}
             <button
-              className="store-setup-save"
+              className={
+                activeStep === 7 && !dirty
+                  ? "store-setup-save store-setup-save--quiet"
+                  : "store-setup-save"
+              }
               type="button"
               disabled={disabled}
               onClick={() => void save()}
@@ -2003,8 +2013,19 @@ export function storeSetupChangeSummary(
   if (content.feeContexts?.state === "Configured") {
     const fees = content.feeContexts.value;
     const live = current?.setupBasis?.feeContexts;
+    // b19 review: a fee whose tax treatment changes says so, so a change is never invisible.
     add(t("Fees"), known ? live !== undefined && feesKey(live) === feesKey(fees) : null, () =>
-      fees.map(feeText),
+      fees.flatMap((fee) => {
+        const before: FeeLike | undefined = live?.find((old) => old.chargeType === fee.chargeType);
+        const after: FeeLike = fee;
+        return before !== undefined &&
+          (before.taxClassificationReference ?? null) !== (after.taxClassificationReference ?? null)
+          ? [
+              feeText(fee),
+              t("{fee}: taxed differently (see Tax review)", { fee: feeLabel(fee.chargeType) }),
+            ]
+          : [feeText(fee)];
+      }),
     );
   }
   if (content.capacityConfigurationReference.state === "Configured") {
@@ -3431,7 +3452,7 @@ export function StoreSetupLiveSettings({
   // does, this says nothing (the summary above already shows what publishing changes).
   const needed = [
     ...(tax ? [] : [t("tax settings (see Tax review)")]),
-    ...(brand ? [] : [t("Brand settings")]),
+    ...(brand ? [] : [t("brand settings")]),
     ...(closures ? [] : [t("holidays and special hours")]),
     ...(start ? [] : [t("when it takes effect")]),
     ...missingOperating.flatMap((field) => liveFieldWords()[field] ?? []),

@@ -10656,7 +10656,12 @@ tr[data-drop-target="true"] {
 }
 .store-setup-draft-page .store-setup-step-content {
   padding-inline: 0;
+  /* b19 review: the step's name is the marked tab above (its heading is for assistive technology
+     only), so the content starts right under the tabs. */
+  padding-block-start: 0;
   border: 0;
+  /* Moving to a step focuses its hidden heading: keep it at the top of the step. */
+  position: relative;
 }
 
 /* b18 review (v3): Store setup's title row ends with the language switch, as on Orders. */
@@ -10786,6 +10791,18 @@ tr[data-drop-target="true"] {
 .store-setup-draft-page .store-setup-actions + .store-setup-reload button {
   font-size: 14px;
 }
+/* b19 review: on Review and publish with nothing unsaved, Save as draft is accent text, so the
+   step's next action stays the one solid button. */
+.store-setup-draft-page .store-setup-actions button.store-setup-save--quiet {
+  padding: 0;
+  border-radius: 0;
+  color: var(--bop-color-accent);
+  background: none;
+  font-weight: 400;
+}
+.store-setup-draft-page .store-setup-actions button.store-setup-save--quiet:disabled {
+  color: var(--bop-color-text-muted);
+}
 @media (max-width: 640px) {
   .store-setup-draft-page .store-setup-actions button:not(.store-setup-save) {
     flex: 0 1 auto;
@@ -10794,6 +10811,11 @@ tr[data-drop-target="true"] {
     flex: 1 1 100%;
     order: 3;
     text-align: center;
+  }
+  .store-setup-draft-page .store-setup-actions button.store-setup-save--quiet {
+    flex: 0 1 auto;
+    order: 0;
+    text-align: start;
   }
   .store-setup-draft-page .store-setup-actions button.store-setup-discard {
     order: 4;
