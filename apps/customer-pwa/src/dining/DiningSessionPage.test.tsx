@@ -14,6 +14,7 @@ import type { DiningRound, DiningSessionView } from "./dining-session-client.js"
 import { formatClockTime } from "../journey/format.js";
 import { CustomerPage } from "../journey/CustomerPage.js";
 import { zhHans } from "../i18n/zh-Hans.js";
+import { LanguageRoot } from "../i18n/i18n.js";
 import { parseSettledTableReceipt, SettledTableReceiptView } from "./SettledTableReceipt.js";
 
 const cad = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
@@ -141,6 +142,38 @@ describe("CUST-DINE-IN-SESSION (WP-2423 Q8)", () => {
     expect(html).toContain("$4.52");
     expect(html).toContain("Nothing");
     expect(html).toContain("Served");
+  });
+
+  // v15 b19: two Chinese sentences built from parts meet at their 句号 with no space between.
+  it("writes a refused round's reason and refund, and a held round's two notes, without a gap in Chinese", () => {
+    const state: DiningSessionState = {
+      status: "ready",
+      refreshing: false,
+      view: view({
+        rounds: [
+          round({
+            status: "StoreCancelled",
+            payment: "Refunded",
+            storeCancellationReason: "CustomerRequest",
+          }),
+          round({
+            roundNumber: 2,
+            status: "WaitingForStaff",
+            payment: "NotCharged",
+            waitingReason: "FirstOrder",
+          }),
+        ],
+      }),
+    };
+    const zh = renderToStaticMarkup(
+      <LanguageRoot initial="zh-Hans">{() => render(state)}</LanguageRoot>,
+    );
+    renderToStaticMarkup(<LanguageRoot initial="en">{() => null}</LanguageRoot>);
+    expect(zh).toContain("门店已按你的要求取消。款项已退回。");
+    expect(zh).not.toMatch(/。 /u);
+    const en = render(state);
+    expect(en).toContain("The store cancelled it at your request. The payment was refunded.");
+    expect(en).toMatch(/before the kitchen\. It is not charged/u);
   });
 
   // WP-2423 abandoned payment: the guest who sent a round and left the payment page pays it here.

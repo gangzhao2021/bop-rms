@@ -1,5 +1,5 @@
 import { createTablePaymentClient } from "./table-payment-client.js";
-import { dateLocale, t, useReloadOnLanguageChange, saidTable } from "../i18n/i18n.js";
+import { dateLocale, t, useReloadOnLanguageChange, saidTable, wordGap } from "../i18n/i18n.js";
 import {
   useCallback,
   useEffect,
@@ -216,7 +216,8 @@ function RoundNote({ round }: { readonly round: DiningRound }) {
       <p role="status">
         {round.waitingReason === "FirstOrder"
           ? t("This is the first round from this phone, so staff confirm it before the kitchen.")
-          : t("Many rounds were sent just now, so staff confirm this one before the kitchen.")}{" "}
+          : t("Many rounds were sent just now, so staff confirm this one before the kitchen.")}
+        {wordGap()}
         {t("It is not charged until it goes to the kitchen.")}
       </p>
     );
@@ -224,7 +225,7 @@ function RoundNote({ round }: { readonly round: DiningRound }) {
     return (
       <p>
         {round.storeCancellationReason
-          ? staffCancellationReasonText[round.storeCancellationReason] + " "
+          ? staffCancellationReasonText[round.storeCancellationReason] + wordGap()
           : ""}
         {round.payment === "NotCharged"
           ? // v15 2026-10-29: a table paying at the end paid nothing for it; nothing is refunded.
@@ -684,7 +685,9 @@ function TableSummary({ view }: { readonly view: DiningSessionView }) {
           ? ""
           : payLater
             ? t("Item prices are before tax. ")
-            : t("Item prices are before tax. Rounds that were never paid are not included. ")}
+            : t(
+                "Item prices are before tax. Rounds that were cancelled or never paid are not included. ",
+              )}
         {payLater && summary.splitParts !== undefined && summary.splitParts.count === null
           ? t(
               "The table is paying by dish; {paid} paid so far. Each payment has its own tip, and cash is rounded to the nearest 5 cents.",

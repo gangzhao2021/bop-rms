@@ -329,8 +329,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Item amounts on this version already include tax and any fees or discounts.":
     "本版本的商品金额已包含税费以及任何费用或折扣。",
   "Item not found": "找不到商品",
-  "Item prices are before tax. Rounds that were never paid are not included. ":
-    "商品价格为税前价格，从未付款的轮次不计入。",
+  "Item prices are before tax. Rounds that were cancelled or never paid are not included. ":
+    "商品价格为税前价格，已取消或从未付款的轮次不计入。",
   Items: "商品",
   "Items served": "已上的商品",
   "I’ve read and agree to the policies above": "我已阅读并同意以上条款",
