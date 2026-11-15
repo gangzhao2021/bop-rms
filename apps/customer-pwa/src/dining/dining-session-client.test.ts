@@ -387,6 +387,27 @@ describe("v15 batch-5: a round stopped before anyone paid", () => {
   });
 });
 
+describe("v15 b20: what went back for a round's cancelled dishes", () => {
+  it("decodes the refund on its round, and refuses zero, more than the round or another currency", () => {
+    const p = payload();
+    Object.assign(firstRound(p), { refunded: cad("900") });
+    expect(parseDiningSessionView(p).rounds[0]?.refunded).toEqual(cad("900"));
+    expect(parseDiningSessionView(p).rounds[0]).not.toHaveProperty("refundPending");
+    Object.assign(firstRound(p), { refundPending: cad("2100") });
+    expect(parseDiningSessionView(p).rounds[0]?.refundPending).toEqual(cad("2100"));
+    for (const broken of [
+      { refunded: cad("0") },
+      { refundPending: cad("2101") },
+      { refunded: { amountMinor: "900", currencyCode: "USD" } },
+    ]) {
+      const q = payload();
+      Object.assign(firstRound(q), { refunded: cad("900"), refundPending: cad("100") }, broken);
+      expect(() => parseDiningSessionView(q)).toThrow(DiningSessionClientError);
+    }
+    expect(parseDiningSessionView(payload()).rounds[0]).not.toHaveProperty("refunded");
+  });
+});
+
 describe("DEC-DINING-GUEST-TABLE-START: the table view", () => {
   const session = (changes: object) => ({
     schemaVersion: 1,

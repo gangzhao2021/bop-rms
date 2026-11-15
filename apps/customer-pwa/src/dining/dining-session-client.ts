@@ -95,6 +95,12 @@ export interface DiningRound {
   readonly itemsTotal: DiningMoney;
   /** b13: a round on the table's bill, as the bill prints it (after comps, tax worked once). */
   readonly bill?: DiningBillLines;
+  /**
+   * v15 b20: what went back for this round's dishes staff cancelled after it was paid — confirmed
+   * (`refunded`) or on its way (`refundPending`); each absent while nothing.
+   */
+  readonly refunded?: DiningMoney;
+  readonly refundPending?: DiningMoney;
 }
 
 export interface DiningOrderAgain {
@@ -359,8 +365,14 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
     const stopped =
       value !== null && typeof value === "object" && Object.hasOwn(value, "stoppedBeforePaying");
     const billed = value !== null && typeof value === "object" && Object.hasOwn(value, "bill");
+    const refunded =
+      value !== null && typeof value === "object" && Object.hasOwn(value, "refunded");
+    const refundPending =
+      value !== null && typeof value === "object" && Object.hasOwn(value, "refundPending");
     const round = record(value, [
       ...(billed ? ["bill"] : []),
+      ...(refunded ? ["refunded"] : []),
+      ...(refundPending ? ["refundPending"] : []),
       ...(stopped ? ["stoppedBeforePaying"] : []),
       ...(priced ? ["subtotal", "tax"] : []),
       ...(awaitingStore ? ["awaitingStore"] : []),
@@ -484,6 +496,27 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
       ...(() => {
         const bill = billed ? billLines(round.bill) : null;
         return bill === null ? {} : { bill };
+      })(),
+      ...(() => {
+        // v15 b20: what went back for the round's cancelled dishes: never zero, never more than
+        // the round came to, in its currency.
+        const back = (field: unknown) => {
+          const amount = money(field);
+          return amount.currencyCode === itemsTotal.currencyCode && BigInt(amount.amountMinor) > 0n
+            ? amount
+            : invalid();
+        };
+        const confirmed = refunded ? back(round.refunded) : null;
+        const pending = refundPending ? back(round.refundPending) : null;
+        if (
+          BigInt(confirmed?.amountMinor ?? "0") + BigInt(pending?.amountMinor ?? "0") >
+          BigInt(itemsTotal.amountMinor)
+        )
+          return invalid();
+        return {
+          ...(confirmed === null ? {} : { refunded: confirmed }),
+          ...(pending === null ? {} : { refundPending: pending }),
+        };
       })(),
     });
   });

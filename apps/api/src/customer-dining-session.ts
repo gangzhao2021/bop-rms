@@ -166,6 +166,11 @@ export class CustomerDiningSessionHandler {
             itemsTotal: money(round.itemsTotal),
             // b13: a round on the table's bill, as the bill prints it.
             ...(round.bill === undefined ? {} : { bill: billLines(round.bill) }),
+            // v15 b20: what went back for this round's cancelled dishes (absent while nothing).
+            ...(round.refunded === undefined ? {} : { refunded: money(round.refunded) }),
+            ...(round.refundPending === undefined
+              ? {}
+              : { refundPending: money(round.refundPending) }),
           })),
           summary:
             view.summary === null

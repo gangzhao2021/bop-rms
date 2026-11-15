@@ -457,6 +457,30 @@ it("v15 b20: a table read the phone left before it answered is logged at level 3
   ]);
 });
 
+it("v15 b20: a round's refunds for its cancelled dishes are sent as money, only when present", async () => {
+  const f = await setup();
+  const base = view();
+  const round = base.rounds[0];
+  if (round === undefined) throw new Error("fixture");
+  f.read.mockResolvedValueOnce({
+    ...base,
+    rounds: [{ ...round, refunded: cad(900n), refundPending: cad(100n) }],
+  });
+  const body = (await (await f.send()).json()) as {
+    session: { rounds: Record<string, unknown>[] };
+  };
+  expect(body.session.rounds[0]?.refunded).toEqual({ amountMinor: "900", currencyCode: "CAD" });
+  expect(body.session.rounds[0]?.refundPending).toEqual({
+    amountMinor: "100",
+    currencyCode: "CAD",
+  });
+  const plain = (await (await f.send()).json()) as {
+    session: { rounds: Record<string, unknown>[] };
+  };
+  expect(plain.session.rounds[0]).not.toHaveProperty("refunded");
+  expect(plain.session.rounds[0]).not.toHaveProperty("refundPending");
+});
+
 it("DEC-DINE-IN-PAY-LATER: a paid table's summary carries its tip and cash rounding", async () => {
   const f = await setup();
   const paid = view();

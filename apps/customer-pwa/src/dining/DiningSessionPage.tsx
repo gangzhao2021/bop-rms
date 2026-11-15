@@ -363,7 +363,11 @@ function RoundCard({
   const headingId = `dining-round-${round.roundNumber}`;
   const charge = staffCharge(round);
   // v15 batch-5: cancelled before anyone paid, so nothing is owed for it: no tax, no total.
-  const notCharged = round.status === "NotPaidCancelled";
+  // v15 b20: so is a round staff took off a table's bill before it paid (never charged): its
+  // dishes' own subtotal, tax and total must not read as owed.
+  const notCharged =
+    round.status === "NotPaidCancelled" ||
+    (round.status === "StoreCancelled" && round.payment === "NotCharged");
   return (
     <article className="order-status__card order-status__batch" aria-labelledby={headingId}>
       <h3 id={headingId}>
@@ -478,6 +482,23 @@ function RoundCard({
           <span>{money(round.itemsTotal)}</span>
         </p>
       )}
+      {/* v15 b20: what went back for this round's cancelled dishes, on the round it was paid on. */}
+      {round.refunded !== undefined || round.refundPending !== undefined ? (
+        <dl className="order-status__money">
+          {round.refunded !== undefined ? (
+            <div>
+              <dt>{t("Refunded")}</dt>
+              <dd>{money(round.refunded)}</dd>
+            </div>
+          ) : null}
+          {round.refundPending !== undefined ? (
+            <div>
+              <dt>{t("Refund on its way")}</dt>
+              <dd>{money(round.refundPending)}</dd>
+            </div>
+          ) : null}
+        </dl>
+      ) : null}
     </article>
   );
 }

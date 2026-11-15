@@ -1177,6 +1177,89 @@ describe("WP-2423 D5 item prices before tax at the table", () => {
     ).toBe(summary?.ordered?.total.amountMinor);
   });
 
+  it("v15 b20: a paid round with a dish cancelled and refunded says on that round what went back", () => {
+    // Round 1 paid $39.00 (Ramen $30.00 + Gyoza $9.00), the Gyoza cancelled with $9.00 back;
+    // round 2 paid $9.00, nothing cancelled. A refund still on its way says so instead.
+    const view = (refunded: boolean) =>
+      composeCustomerDiningSession(
+        facts({
+          batches: [
+            {
+              orderBatchReference: id(30),
+              submittedAt: at,
+              items: [item(31, "Ramen", 2, 3000n), item(41, "Gyoza", 1, 900n)],
+            },
+            { orderBatchReference: id(50), submittedAt: at, items: [item(51, "Soda", 1, 900n)] },
+          ],
+          authorship: new Map([
+            [id(30), true],
+            [id(50), true],
+          ]),
+          paymentOutcomes: new Map([
+            [id(30), "Succeeded" as const],
+            [id(50), "Succeeded" as const],
+          ]),
+          delivery: new Map([
+            [id(31), { phase: "InProgress" as const, deliveredQuantity: 0 }],
+            [id(41), { phase: "Cancelled" as const, deliveredQuantity: 0 }],
+            [id(51), { phase: "InProgress" as const, deliveredQuantity: 0 }],
+          ]),
+          itemCancellations: [{ orderItemReferences: [id(41)], refunded, refundAmount: cad(900n) }],
+          payments: [
+            { status: "Succeeded" as const, amount: cad(3900n) },
+            { status: "Succeeded" as const, amount: cad(900n) },
+          ],
+          refunds: refunded
+            ? { confirmedMinor: 900n, pendingMinor: 0n }
+            : { confirmedMinor: 0n, pendingMinor: 900n },
+        }),
+      );
+    const done = view(true);
+    expect(done.rounds.map((round) => [round.payment, round.itemsTotal])).toEqual([
+      ["Paid", cad(3900n)],
+      ["Paid", cad(900n)],
+    ]);
+    expect(done.rounds[0]?.refunded).toEqual(cad(900n));
+    expect(done.rounds[0]?.refundPending).toBeUndefined();
+    expect(done.rounds[1]).not.toHaveProperty("refunded");
+    expect(done.rounds[1]).not.toHaveProperty("refundPending");
+    // The table's totals are as before: the refund is counted once, on its own line.
+    expect(done.summary?.refunded).toEqual(cad(900n));
+    const pending = view(false);
+    expect(pending.rounds[0]?.refundPending).toEqual(cad(900n));
+    expect(pending.rounds[0]).not.toHaveProperty("refunded");
+  });
+
+  it("v15 b20: a round whose dishes were all taken off before the table paid at the end is never charged", () => {
+    const view = composeCustomerDiningSession({
+      ...facts({
+        paymentOutcomes: new Map(),
+        payments: [{ status: "Succeeded", amount: cad(3000n) }],
+        delivery: new Map([
+          [id(31), { phase: "InProgress", deliveredQuantity: 0 }],
+          [id(41), { phase: "Cancelled", deliveredQuantity: 0 }],
+        ]),
+        payLaterRounds: new Set([id(30), id(40)]),
+        itemCancellations: [
+          {
+            orderItemReferences: [id(41)],
+            refunded: false,
+            refundAmount: cad(0n),
+            notCharged: true,
+          },
+        ],
+        tableBill: { owedMinor: 0n, pointsUsedMinor: 0n, takenOffMinor: 0n, taxRoundingMinor: 0n },
+        settledRounds: new Set([id(30), id(40)]),
+      }),
+      paymentTiming: "PayLater",
+    });
+    expect(view.rounds.map((round) => [round.status, round.payment])).toEqual([
+      ["Preparing", "Paid"],
+      ["StoreCancelled", "NotCharged"],
+    ]);
+    expect(view.rounds[1]).not.toHaveProperty("refundPending");
+  });
+
   it("v15 b19: a paid dish the kitchen refused with no refund recorded stays in Total ordered", () => {
     // Both rounds paid ($30.00 and $9.00); the kitchen refused the Gyoza, nothing went back yet.
     const view = composeCustomerDiningSession(

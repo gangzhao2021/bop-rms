@@ -322,6 +322,13 @@ export interface CustomerDiningSessionView {
     readonly itemsTotal: CustomerMoney;
     /** b13: a round on a table's bill, as the bill prints it (after comps, tax worked once). */
     readonly bill?: CustomerBillView;
+    /**
+     * v15 b20: what went back for dishes of this round staff cancelled with a refund, after it was
+     * paid: confirmed (`refunded`) and still on its way (`refundPending`), each present only when
+     * not zero. Absent for a round the store cancelled whole (its payment says it).
+     */
+    readonly refunded?: CustomerMoney;
+    readonly refundPending?: CustomerMoney;
   }[];
   /** Null until the table has ordered. Due is the item total of rounds still waiting for payment. */
   readonly summary: null | {
@@ -626,6 +633,19 @@ export function composeCustomerDiningSession(
       });
     });
     const itemsTotal = items.reduce((sum, item) => sum + item.lineTotal.amountMinor, 0n);
+    // v15 b20: the refunds recorded for this round's dishes (one record per round), each once.
+    const roundRefunds = { confirmed: 0n, pending: 0n };
+    if (staff === undefined)
+      for (const entry of new Set(
+        batch.items.map((item) => itemCancellation(item.orderItemReference)),
+      )) {
+        if (entry === undefined || entry.notCharged === true) continue;
+        if (entry.refundAmount.amountMinor <= 0n) continue;
+        if (entry.refundAmount.currencyCode !== currency) return unavailable();
+        if (entry.refunded) roundRefunds.confirmed += entry.refundAmount.amountMinor;
+        else roundRefunds.pending += entry.refundAmount.amountMinor;
+      }
+    if (roundRefunds.confirmed + roundRefunds.pending > itemsTotal) return unavailable();
     const subtotal = items.reduce(
       (sum, item) => sum + (item.price?.subtotal.amountMinor ?? 0n),
       0n,
@@ -714,8 +734,12 @@ export function composeCustomerDiningSession(
         status = "StoreCancelled";
         const lines = batch.items.map((item) => itemCancellation(item.orderItemReference));
         // Nothing of an unpaid round was charged, so nothing is refunded.
-        if (payment === "Paid")
-          payment = lines.every((entry) => entry?.refunded === true) ? "Refunded" : "RefundPending";
+        // v15 b20: nor is a round whose dishes were all taken off its bill before the table paid
+        // at the end (the table paying the rest later refunds nothing for it).
+        if (payment === "Paid" && !lines.every((entry) => entry?.notCharged === true))
+          payment = lines.every((entry) => entry?.refunded === true || entry?.notCharged === true)
+            ? "Refunded"
+            : "RefundPending";
         else payment = "NotCharged";
       } else if (active.every((item) => item.phase === "Fulfilled")) status = "Served";
       else if (active.some((item) => item.servedQuantity > 0)) status = "Serving";
@@ -782,6 +806,8 @@ export function composeCustomerDiningSession(
       order.tableBill?.rounds?.get(reference) !== undefined
         ? { bill: billView(order.tableBill.rounds.get(reference) as CustomerTableBillLines) }
         : {}),
+      ...(roundRefunds.confirmed > 0n ? { refunded: money(roundRefunds.confirmed) } : {}),
+      ...(roundRefunds.pending > 0n ? { refundPending: money(roundRefunds.pending) } : {}),
     });
   });
   let paid = 0n;

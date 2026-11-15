@@ -962,6 +962,97 @@ describe("CUST-DINE-IN-SESSION item prices before tax (WP-2423 D5)", () => {
     expect(html).not.toContain("$13.31");
     expect(html.match(/Not charged/gu)?.length).toBeGreaterThanOrEqual(2);
   });
+
+  // v15 b20 live check: a pay-at-end round staff took off the bill read Subtotal $12.50, Tax $1.63
+  // and Round total $14.13 (本轮合计) under "Not charged", as if it were owed.
+  it("v15 b20: a round staff took off a table's bill shows no subtotal, tax or round total", () => {
+    const taken = round({
+      roundNumber: 2,
+      orderedBy: "Staff",
+      status: "StoreCancelled",
+      payment: "NotCharged",
+      storeCancellationReason: "SoldOut",
+      items: [
+        {
+          displayName: "Beef noodles",
+          quantity: 1,
+          servedQuantity: 0,
+          cancelled: true,
+          lineTotal: cad("1413"),
+          priceBeforeTax: cad("1250"),
+        },
+      ],
+      subtotal: cad("1250"),
+      tax: cad("163"),
+      itemsTotal: cad("1413"),
+    });
+    const html = text(
+      render({
+        status: "ready",
+        refreshing: false,
+        view: view({ paymentTiming: "PayLater", rounds: [taken], summary: null }),
+      }),
+    );
+    expect(html).toContain("Staff took this round off the bill. It is not charged.");
+    expect(html).toContain("Round total Not charged");
+    expect(html).not.toContain("$1.63");
+    expect(html).not.toContain("$14.13");
+    const zh = text(
+      renderToStaticMarkup(
+        <LanguageRoot initial="zh-Hans">
+          {() => (
+            <MemoryRouter initialEntries={["/dine-in/session"]}>
+              <DiningSessionScreen
+                state={{
+                  status: "ready",
+                  refreshing: false,
+                  view: view({ paymentTiming: "PayLater", rounds: [taken], summary: null }),
+                }}
+                store={store}
+                onRefresh={() => undefined}
+              />
+            </MemoryRouter>
+          )}
+        </LanguageRoot>,
+      ),
+    );
+    renderToStaticMarkup(<LanguageRoot initial="en">{() => null}</LanguageRoot>);
+    expect(zh).toContain("本轮合计 未扣款");
+    expect(zh).not.toContain("$14.13");
+  });
+
+  // v15 b20 live check: a paid round with the Lemon tea cancelled and refunded ($5.37) read only
+  // "Paid" and its full total; the refund showed only in the table's combined line.
+  it("v15 b20: a paid round with a dish refunded says on that round what went back", () => {
+    const items = [
+      { ...round().items[0], displayName: "Steamed rice", lineTotal: cad("282") },
+      {
+        displayName: "Lemon tea",
+        quantity: 1,
+        servedQuantity: 0,
+        cancelled: true,
+        lineTotal: cad("537"),
+      },
+    ] as DiningRound["items"];
+    const refundedRound = round({ items, itemsTotal: cad("819"), refunded: cad("537") });
+    const html = text(
+      render({ status: "ready", refreshing: false, view: view({ rounds: [refundedRound] }) }),
+    );
+    expect(html).toContain("Round total including tax $8.19 Refunded $5.37");
+    const pending = text(
+      render({
+        status: "ready",
+        refreshing: false,
+        view: view({
+          rounds: [round({ items, itemsTotal: cad("819"), refundPending: cad("537") })],
+        }),
+      }),
+    );
+    expect(pending).toContain("Round total including tax $8.19 Refund on its way $5.37");
+    expect(text(render({ status: "ready", refreshing: false, view: view() }))).not.toContain(
+      "Refunded $",
+    );
+  });
 });
 
 it("WP-2423 D5: a round from another day shows its date, today's only its time", () => {
