@@ -2,7 +2,7 @@ import { afterEach, expect, it } from "vitest";
 import { setLanguageForTest } from "./i18n/i18n.js";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { SupportAccessLog, supportLogShown, supportLogSummary } from "./StoreSupportAccessPanel.js";
+import { SupportAccessLog, supportLogSummary } from "./StoreSupportAccessPanel.js";
 import { storeNameExample, storeNameLabel } from "./StorePublicProfilePanel.js";
 import { plainLanguageName } from "./staff-text.js";
 
@@ -38,8 +38,9 @@ it("b18: what the support log says comes from the whole log, not the records on 
   expect(html).toContain("Set up your kitchen");
   expect(html).not.toContain("hasn&#x27;t changed or tried");
   expect(html).toContain("Support looked at your Store 159 times");
-  expect(html).toContain("Show all 160 records");
-  expect(supportLogShown).toBe(5);
+  // b18 polish: the access log repeats the looks counted above, so it starts folded; one toggle opens it.
+  expect(html).toContain("View all 160 access records");
+  expect(html).not.toContain("Looked at whether your Store is ready");
 });
 
 it("b18: a Store name field says its language plainly, with an example in that language", () => {

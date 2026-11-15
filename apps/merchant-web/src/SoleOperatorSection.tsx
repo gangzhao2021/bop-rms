@@ -1,4 +1,4 @@
-import { systemText, t } from "./i18n/i18n.js";
+import { t } from "./i18n/i18n.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { StatePanel } from "@bop-rms/ui";
 import { SourceTime } from "./StoreTime.js";
@@ -213,23 +213,22 @@ export function SoleOperatorSection({
   return (
     <section aria-labelledby="sole-operator-heading" className="sole-operator">
       <h2 id="sole-operator-heading">{t("Sole operator")}</h2>
+      {/* b18 polish (Owner 2026-11-14): one short lead, the full list behind "What this covers",
+          and where the setting stands now as one sentence. */}
       <p>
         {t(
-          "For a business run by one owner with no one else who can approve. When it is on and you are the only person who can approve, you may approve your own changes: refunds that need approval (over $100, from an earlier business day or more than 24 hours after payment), new prices (price books and option prices), menus, recipes (including option recipes) and the allergen list, staff roles (giving someone a role), and the Store’s configuration (Store setup, opening hours and the receipt template) before you publish it. You still confirm with your authenticator code, every approval is recorded as approved by you alone, and the day-end settlement shows your own refund approvals for your review.",
+          "When it is on and there is no second person, you can approve your own refunds, prices, menus and other things that need approval.",
         )}
       </p>
-      <dl>
-        <div>
-          <dt>{t("Sole operator")}</dt>
-          <dd>
-            <strong>{systemText(view.state)}</strong>
-          </dd>
-        </div>
-        <div>
-          <dt>{t("Refund approval")}</dt>
-          <dd>{effectText(view)}</dd>
-        </div>
-      </dl>
+      <details className="sole-operator__covers">
+        <summary>{t("What this covers")}</summary>
+        <p>
+          {t(
+            "For a business run by one owner with no one else who can approve. When it is on and you are the only person who can approve, you may approve your own changes: refunds that need approval (over $100, from an earlier business day or more than 24 hours after payment), new prices (price books and option prices), menus, recipes (including option recipes) and the allergen list, staff roles (giving someone a role), and the Store’s configuration (Store setup, opening hours and the receipt template) before you publish it. You still confirm with your authenticator code, every approval is recorded as approved by you alone, and the day-end settlement shows your own refund approvals for your review.",
+          )}
+        </p>
+      </details>
+      <p className="sole-operator__now">{t("Now: {status}", { status: effectText(view) })}</p>
       {/* WP-2423 (2026-10-16 v15): who turned it on or off, when and why — newest first. */}
       {view.history.length > 0 ? (
         <section aria-labelledby="sole-operator-history-heading" className="sole-operator-history">

@@ -303,10 +303,13 @@ test("@production an open Store's setup is a few places, each saying whether a c
   await expect(page.getByText("For example “枫叶面馆 国王街店”.")).toBeVisible();
   await expect(page.getByRole("button", { name: "Save and make live" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Receipts and tax numbers" })).toBeHidden();
-  // Each place's heading is its own name, and the title row ends with the language switch.
-  await expect(page.getByRole("heading", { name: "Store details" })).toBeVisible();
+  // b18 polish: the link and its one-line lead name Store details; the section doesn't repeat its
+  // name or explain itself again. The title row ends with the language switch.
+  await expect(page.getByRole("heading", { name: "Store details" })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Store details" })).toBeVisible();
+  await expect(page.getByText(/Customers see this name on the menu/u)).toHaveCount(0);
   await expect(page.getByRole("button", { name: "切换到中文" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Reload the saved draft" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Restore the last saved draft" })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Platform support" })).toBeHidden();
   await expect(page.getByRole("navigation", { name: "Setup steps" })).toHaveCount(0);
   // The store-type question is asked while a Store is being opened, not on an open Store's setup.
@@ -343,9 +346,11 @@ test("@production an open Store's setup is a few places, each saying whether a c
   ).toBeVisible();
   await expect(support).toContainText("Support looked at your Store 157 times, last");
   await expect(support).not.toContainText("hasn't changed or tried");
+  // b18 polish: the access log repeats the looks counted above, so it starts folded.
+  await expect(support.locator("table.support-access__log")).toHaveCount(1);
+  await expect(support.getByRole("heading", { name: "Support access log" })).toHaveCount(0);
+  await support.getByRole("button", { name: "View all 160 access records" }).click();
   const fullLog = support.locator("table.support-access__log").last();
-  await expect(fullLog.locator("tbody tr")).toHaveCount(5);
-  await support.getByRole("button", { name: "Show all 160 records" }).click();
   await expect(fullLog.locator("tbody tr")).toHaveCount(50);
   await expect(support).toContainText("Showing 50 of 160 records.");
   // "Show all" reaches every record: the earlier ones are read a page at a time.
@@ -356,11 +361,28 @@ test("@production an open Store's setup is a few places, each saying whether a c
   await expect(support.getByRole("button", { name: "Show earlier records" })).toHaveCount(0);
   await expect(support).not.toContainText("Showing");
   expect(supportReads).toHaveLength(3);
-  await support.getByRole("button", { name: "Show fewer" }).click();
-  await expect(fullLog.locator("tbody tr")).toHaveCount(5);
+  await support.getByRole("button", { name: "Hide the access records" }).click();
+  await expect(support.locator("table.support-access__log")).toHaveCount(1);
+  // Platform support's two grants are named by what they do and for how long.
+  await expect(
+    support.getByRole("button", {
+      name: "Let platform support change my settings for the next hour",
+    }),
+  ).toBeVisible();
+  await expect(
+    support.getByRole("button", {
+      name: "Let platform support change my settings until I turn it off",
+    }),
+  ).toBeVisible();
   // Sole operator: no change numbers; the newest five, then every change of the record.
   const sole = page.locator("section.sole-operator");
   await expect(sole.getByRole("heading", { name: "Sole operator" })).toBeVisible();
+  // b18 polish: one short lead, the full list behind "What this covers", the state in one sentence.
+  await expect(sole).toContainText("you can approve your own refunds, prices, menus");
+  await expect(sole).toContainText("Now: Off. Refunds that need approval");
+  await expect(sole.getByText(/price books and option prices/u)).toBeHidden();
+  await sole.getByText("What this covers").click();
+  await expect(sole.getByText(/price books and option prices/u)).toBeVisible();
   await expect(sole).not.toContainText("setting change 36");
   await expect(sole.locator(".sole-operator-history li")).toHaveCount(5);
   await sole.getByRole("button", { name: "Show all 36 changes" }).click();
@@ -385,7 +407,7 @@ test("@production an open Store's setup is a few places, each saying whether a c
   await expect(page.getByRole("navigation", { name: "Setup steps" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Save as draft" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Discard unsaved changes" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Reload the saved draft" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Restore the last saved draft" })).toBeVisible();
   await expect(page.getByText(/Revision \d/u)).toHaveCount(0);
   // Only the settings that need approval: no opening steps, and hours live in Hours & ordering.
   await expect(
@@ -396,7 +418,17 @@ test("@production an open Store's setup is a few places, each saying whether a c
     "3. Fees, tax and payment",
     "4. Review and publish",
   ]);
-  await expect(page.getByText("The Store runs on Eastern Time", { exact: false })).toBeVisible();
+  // b18 polish: the draft starts from the time zone the Store runs on, never "Not configured".
+  await expect(page.getByLabel("Draft timezone")).toHaveValue("America/Toronto");
+  await expect(page.getByLabel("Draft timezone").locator("option[value='']")).toHaveCount(0);
+  await expect(
+    page.getByText(
+      "Filled in with the time zone the Store runs on today; saving the draft keeps it.",
+    ),
+  ).toBeVisible();
+  // The step controls: "Previous step" is disabled on the first step only, "Next step" is not.
+  await expect(page.getByRole("button", { name: "Previous step" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Next step" })).toBeEnabled();
   await expect(page.getByRole("link", { name: "Hours & ordering" }).first()).toHaveAttribute(
     "href",
     "/app/organization/stores/" + store + "/service",

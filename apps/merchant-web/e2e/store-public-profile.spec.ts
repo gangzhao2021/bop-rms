@@ -121,7 +121,9 @@ test("@production the Owner publishes the store name, address and phone customer
 
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
-    await expect(panel.getByRole("heading", { name: heading })).toBeVisible();
+    // b18 polish: in its own place the link and lead name it; the section is labelled, not headed.
+    await expect(panel).toBeVisible();
+    await expect(panel.getByRole("heading", { name: heading })).toHaveCount(0);
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
     ).toBe(true);
@@ -281,7 +283,7 @@ test("@production the Store Manager opens Store setup from the navigation and se
   await expect(page.getByText("Only the Owner can change Store setup.")).toBeVisible();
   await expect(page.getByText("does not allow this action", { exact: false })).toHaveCount(0);
   await expect(page.getByText("could not be loaded", { exact: false })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Reload the saved draft" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Restore the last saved draft" })).toHaveCount(0);
   const profile = page.getByRole("region", { name: heading });
   await expect(profile.getByLabel("Store name customers see")).toHaveValue("Maple Noodle House");
   await expect(profile.getByText("Only the Owner can change these details.")).toBeVisible();

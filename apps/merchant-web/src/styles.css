@@ -10717,3 +10717,84 @@ tr[data-drop-target="true"] {
   min-height: 44px;
   text-align: start;
 }
+
+/* b18 polish (Owner 2026-11-14, v3). Fields in Store setup's places: label, help text and field sit
+   close together (a single bottom line still marks the field), so an empty optional field no longer
+   leaves a tall gap. */
+.store-setup-place__panel .receipt-privacy__field {
+  gap: 2px;
+}
+.store-setup-place__panel .receipt-privacy__field > :is(label, p) {
+  margin: 0;
+}
+.store-setup-place__panel .receipt-privacy__field label {
+  font-size: 14px;
+  font-weight: 600;
+}
+.store-setup-place__panel .receipt-privacy__hint {
+  font-size: 14px;
+}
+.store-setup-draft-page .store-setup-place__panel .receipt-privacy__field :is(input, select) {
+  min-height: 36px;
+  padding-block: 4px;
+}
+/* Platform support's two grants are sentences: one per line, each its own action. */
+.store-setup-place__panel .support-access > .card-actions {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+}
+.store-setup-place__panel .support-access > .card-actions button {
+  margin: 0;
+  text-align: start;
+}
+/* Sole operator: "What this covers" opens the full list; the status is one sentence. */
+.sole-operator__covers > summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--bop-color-accent);
+  cursor: pointer;
+  list-style: none;
+}
+.sole-operator__covers > summary::-webkit-details-marker {
+  display: none;
+}
+.sole-operator__covers > summary:focus-visible {
+  outline: 3px solid var(--bop-color-focus);
+  outline-offset: 2px;
+}
+.sole-operator__covers > p {
+  margin: 0 0 var(--bop-space-2);
+  color: var(--bop-color-text-muted);
+}
+.sole-operator__now {
+  margin: var(--bop-space-2) 0 0;
+}
+/* The step controls are ordinary accent text; only a step that truly can't move looks disabled. */
+.store-setup-draft-page .store-setup-actions button:not(.store-setup-save) {
+  color: var(--bop-color-accent);
+  opacity: 1;
+}
+.store-setup-draft-page .store-setup-actions button:not(.store-setup-save):disabled {
+  color: var(--bop-color-text-muted);
+}
+.store-setup-draft-page .store-setup-reload {
+  margin: var(--bop-space-2) 0 0;
+}
+.store-setup-draft-page .store-setup-actions + .store-setup-reload button {
+  font-size: 14px;
+}
+@media (max-width: 640px) {
+  .store-setup-draft-page .store-setup-actions button:not(.store-setup-save) {
+    flex: 0 1 auto;
+  }
+  .store-setup-draft-page .store-setup-actions button.store-setup-save {
+    flex: 1 1 100%;
+    order: 3;
+    text-align: center;
+  }
+  .store-setup-draft-page .store-setup-actions button:nth-child(4) {
+    order: 4;
+  }
+}

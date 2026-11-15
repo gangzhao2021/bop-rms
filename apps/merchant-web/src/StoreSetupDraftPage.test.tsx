@@ -395,7 +395,7 @@ it("the ordinary route shell offers refresh without fake Store facts", () => {
     </MemoryRouter>,
   );
   // b18: before anything is read the page is a draft page (a first Store, or the approval place).
-  expect(html).toContain("Reload the saved draft");
+  expect(html).toContain("Restore the last saved draft");
   expect(html).not.toContain("Saving a draft does not change the live Store");
   expect(html).not.toContain("Synthetic store");
 });
@@ -456,7 +456,7 @@ it("a Store Manager refused the setup read sees the page read-only, not a permis
     />,
   );
   expect(html).toContain("Only the Owner can change Store setup.");
-  expect(html).not.toContain("Reload the saved draft");
+  expect(html).not.toContain("Restore the last saved draft");
   expect(html).not.toContain("Saving a draft");
   expect(html).not.toContain("does not allow");
   expect(findInternalText([staticText(html)])).toEqual([]);
@@ -466,7 +466,7 @@ it("a Store Manager refused the setup read sees the page read-only, not a permis
   // b18 review (v3): the title row ends with the language switch, as on Orders; reloading the
   // draft sits with the draft.
   expect(owner).toContain("workspace-page__language");
-  expect(owner).not.toContain("Reload the saved draft");
+  expect(owner).not.toContain("Restore the last saved draft");
   expect(owner).not.toContain("Only the Owner");
 });
 it("normal save reacquires exact current root and reserves before its first write, then refreshes before cleanup", async () => {

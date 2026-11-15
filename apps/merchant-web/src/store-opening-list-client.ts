@@ -39,3 +39,9 @@ export async function loadOpeningListRead(
  * records are separate decisions.
  */
 export const StoreProfilePublishedContext = createContext<(() => void) | null>(null);
+/**
+ * b18 polish (Owner 2026-11-14): true while a section is shown in its own place of an open Store's
+ * setup, whose link and one-line lead already name it; a section then does not repeat its name and
+ * introduction. False in a first Store's fold, where each section still says what it is.
+ */
+export const StoreSetupInPlaceContext = createContext(false);

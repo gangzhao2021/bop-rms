@@ -328,13 +328,17 @@ test("@production the Owner allows, limits and stops support, and reads the log"
   await noOverflow(page, "support-owner-off", "#support-access");
   await axe(page, "#support-access");
 
-  await panel.getByRole("button", { name: "Allow for one hour" }).click();
+  await panel
+    .getByRole("button", { name: "Let platform support change my settings for the next hour" })
+    .click();
   await expect(panel.getByRole("status")).toContainText("It ends by itself");
   await expect(panel).toContainText("Platform support can change your settings until");
   await page.reload();
   await expect(panel).toContainText("Platform support can change your settings until");
 
-  await panel.getByRole("button", { name: "Allow platform support to change my settings" }).click();
+  await panel
+    .getByRole("button", { name: "Let platform support change my settings until I turn it off" })
+    .click();
   await expect(panel).toContainText("until you turn this off");
   await page.reload();
   await expect(panel).toContainText("until you turn this off");

@@ -26,13 +26,10 @@ function logText(entry: StoreSupportLogEntry): string {
   return t("Tried something that was refused; nothing changed");
 }
 
-/** How many of the newest records show before "Show all". */
-export const supportLogShown = 5;
-
 /**
  * b18 (Owner 2026-11-14): the log leads with what support changed or tried, the lines that matter;
- * the many "looked" lines are counted, and every record of the Store's log is reachable ("Show
- * all", then page by page). What is said about the log is read from all of it on the server, never
+ * the many "looked" lines are counted, and every record of the Store's log is reachable ("View
+ * all access records", then page by page). What is said about the log is read from all of it on the server, never
  * from the records on screen. Collapsed only on screen: nothing is left out or removed.
  */
 export function supportLogSummary(summary: StoreSupportLogSummary) {
@@ -113,7 +110,7 @@ export function SupportAccessLog({ view }: { readonly view: StoreSupportAccessVi
           {actedCount > acted.length ? (
             <p>
               {t(
-                "The newest {shown} of {count} are listed here; every one is in the access log below.",
+                "The newest {shown} of {count} are listed here; every one is in the access records below.",
                 { shown: acted.length, count: actedCount },
               )}
             </p>
@@ -128,9 +125,11 @@ export function SupportAccessLog({ view }: { readonly view: StoreSupportAccessVi
           {lastLook === null ? null : <SourceTime instant={lastLook} />}
         </p>
       )}
-      <h4>{t("Support access log")}</h4>
+      {/* b18 polish (Owner 2026-11-14): the access log mostly repeats the looks counted above, so
+          it is folded behind one plain toggle; every record is still one click away. */}
       {all ? (
         <>
+          <h4>{t("Support access log")}</h4>
           <SupportLogTable log={loaded} />
           {loaded.length < total ? (
             <p>{t("Showing {shown} of {total} records.", { shown: loaded.length, total })}</p>
@@ -149,25 +148,29 @@ export function SupportAccessLog({ view }: { readonly view: StoreSupportAccessVi
                 {reading === "reading" ? t("Loading…") : t("Show earlier records")}
               </button>
             ) : null}
-            <button type="button" className="support-access__toggle" onClick={() => setAll(false)}>
-              {t("Show fewer")}
+            <button
+              type="button"
+              className="support-access__toggle"
+              aria-expanded={true}
+              onClick={() => setAll(false)}
+            >
+              {t("Hide the access records")}
             </button>
           </p>
         </>
       ) : (
-        <>
-          <SupportLogTable log={loaded.slice(0, supportLogShown)} />
-          {total > supportLogShown ? (
-            <button
-              type="button"
-              className="support-access__toggle"
-              aria-expanded={false}
-              onClick={() => setAll(true)}
-            >
-              {t("Show all {count} records", { count: total })}
-            </button>
-          ) : null}
-        </>
+        <p className="card-actions">
+          <button
+            type="button"
+            className="support-access__toggle"
+            aria-expanded={false}
+            onClick={() => setAll(true)}
+          >
+            {total === 1
+              ? t("View the access record")
+              : t("View all {count} access records", { count: total })}
+          </button>
+        </p>
       )}
     </>
   );
@@ -262,18 +265,9 @@ export function StoreSupportAccessPanel({
               </>
             )}
           </p>
+          {/* b18 polish (Owner 2026-11-14): the two grants the server offers, each named by what it
+              does and for how long; the shorter one first. */}
           <div className="card-actions">
-            {view.mode === "Standing" ? null : (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() =>
-                  void change("Standing", null, t("Platform support can change your settings."))
-                }
-              >
-                {t("Allow platform support to change my settings")}
-              </button>
-            )}
             {view.mode === "Limited" ? null : (
               <button
                 type="button"
@@ -282,7 +276,18 @@ export function StoreSupportAccessPanel({
                   void change("Limited", 1, t("Allowed for one hour. It ends by itself."))
                 }
               >
-                {t("Allow for one hour")}
+                {t("Let platform support change my settings for the next hour")}
+              </button>
+            )}
+            {view.mode === "Standing" ? null : (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() =>
+                  void change("Standing", null, t("Platform support can change your settings."))
+                }
+              >
+                {t("Let platform support change my settings until I turn it off")}
               </button>
             )}
             {view.mode === "Off" ? null : (

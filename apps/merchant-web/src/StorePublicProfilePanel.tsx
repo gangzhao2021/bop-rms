@@ -2,7 +2,10 @@ import { displayLocale, t } from "./i18n/i18n.js";
 import { StatePanel } from "@bop-rms/ui";
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { serviceOperationReference } from "./service-control-client.js";
-import { StoreProfilePublishedContext } from "./store-opening-list-client.js";
+import {
+  StoreProfilePublishedContext,
+  StoreSetupInPlaceContext,
+} from "./store-opening-list-client.js";
 import {
   createStorePublicProfileClient,
   StorePublicProfileClientError,
@@ -154,6 +157,9 @@ export function StorePublicProfilePanel({
   const [showErrors, setShowErrors] = useState(false);
   const [message, setMessage] = useState<{ tone: "status" | "alert"; text: string } | null>(null);
   const onPublished = useContext(StoreProfilePublishedContext);
+  // b18 polish: in its own place the link and lead already say what this is and that it is live
+  // once saved; the section neither repeats its name nor explains itself again.
+  const inPlace = useContext(StoreSetupInPlaceContext);
   // One operation per intended publication: a lost answer is retried as the same publication.
   const operation = useRef<{ reference: string; key: string } | null>(null);
   const load = useCallback(async () => {
@@ -179,8 +185,13 @@ export function StorePublicProfilePanel({
   if (status === "Hidden") return null;
   if (status === "Loading")
     return (
-      <section id="store-public-profile" className="receipt-privacy" aria-busy="true">
-        <h3>{t("Store details")}</h3>
+      <section
+        id="store-public-profile"
+        className="receipt-privacy"
+        aria-busy="true"
+        aria-label={t("Store details")}
+      >
+        {inPlace ? null : <h3>{t("Store details")}</h3>}
         <p role="status">{t("Loading the store name and contact details…")}</p>
       </section>
     );
@@ -325,14 +336,20 @@ export function StorePublicProfilePanel({
     <section
       id="store-public-profile"
       className="receipt-privacy"
-      aria-labelledby="store-public-profile-heading"
+      {...(inPlace
+        ? { "aria-label": t("Store details") }
+        : { "aria-labelledby": "store-public-profile-heading" })}
     >
-      <h3 id="store-public-profile-heading">{t("Store details")}</h3>
-      <p>
-        {t(
-          "Customers see this name on the menu, their order page, the pickup screen and their receipt, and use the address and phone to reach the store. Receipts already issued keep the name they were issued with.",
-        )}
-      </p>
+      {inPlace ? null : (
+        <>
+          <h3 id="store-public-profile-heading">{t("Store details")}</h3>
+          <p>
+            {t(
+              "Customers see this name on the menu, their order page, the pickup screen and their receipt, and use the address and phone to reach the store. Receipts already issued keep the name they were issued with.",
+            )}
+          </p>
+        </>
+      )}
       {view.current !== null ? (
         <p className="receipt-privacy__hint">
           {t("Live since")} <SourceTime instant={view.current.publishedAt} />

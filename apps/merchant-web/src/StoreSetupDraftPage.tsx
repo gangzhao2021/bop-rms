@@ -40,7 +40,11 @@ import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useLocation, useParams } from "react-router";
 import { lazyPage } from "./route-chunks.js";
-import { loadOpeningListRead, StoreProfilePublishedContext } from "./store-opening-list-client.js";
+import {
+  loadOpeningListRead,
+  StoreProfilePublishedContext,
+  StoreSetupInPlaceContext,
+} from "./store-opening-list-client.js";
 import {
   createStoreSetupClient,
   createUnconfiguredStoreSetupContent,
@@ -383,7 +387,7 @@ export function StoreSetupHeader({
         ) : null}
       </div>
       {/* Owner 2026-10-26 (v3): the language switch ends the title row, as on Orders. The draft's
-          "Reload the saved draft" sits with the draft, not in this corner (b18 review). */}
+          "Restore the last saved draft" sits with the draft, not in this corner (b18 review). */}
       <LanguageSwitch className="workspace-page__language" />
     </header>
   );
@@ -402,7 +406,7 @@ export function StoreSetupReloadDraft({
   return (
     <p className="store-setup-reload">
       <button type="button" disabled={disabled} onClick={onReload}>
-        {t("Reload the saved draft")}
+        {t("Restore the last saved draft")}
       </button>
     </p>
   );
@@ -1011,6 +1015,32 @@ export function StoreSetupDraftPage({
       .catch(() => undefined);
     return () => c.abort();
   }, [liveScope, activeStep, live === null]);
+  // b18 polish (Owner 2026-11-14): an open Store already runs on a time zone and a business day
+  // start. While the saved draft has none and nothing was typed, the draft starts from them instead
+  // of saying "Not configured"; saving the draft keeps them, as any other value in it. The business
+  // day start is known once the live configuration has been read (step 3 or the last step); no
+  // extra read is made for it, so a pending request's recovery is never preceded by one.
+  const storeTimeZone = openLayout && workspace !== null ? workspace.store.timeZone : null;
+  const liveBusinessStart = openLayout ? (live?.current?.businessDayStartLocalTime ?? null) : null;
+  const draftTimeZoneSaved = content.timeZone.state === "Configured",
+    draftBusinessStartSaved = content.businessDayStartLocalTime.state === "Configured";
+  useEffect(() => {
+    if (storeTimeZone === null) return;
+    setInputs((old) => {
+      const timeZone =
+        old.timeZone === "" && !draftTimeZoneSaved && storeTimeZone !== "" ? storeTimeZone : null;
+      const businessStart =
+        old.businessStart === "" && !draftBusinessStartSaved && liveBusinessStart !== null
+          ? liveBusinessStart
+          : null;
+      if (timeZone === null && businessStart === null) return old;
+      return {
+        ...old,
+        ...(timeZone === null ? {} : { timeZone }),
+        ...(businessStart === null ? {} : { businessStart }),
+      };
+    });
+  }, [storeTimeZone, liveBusinessStart, draftTimeZoneSaved, draftBusinessStartSaved, inputs]);
   // On a first Store these are about the steps under the fold (a save pending, a read that failed);
   // the one page says what concerns it. Above it they would read as something being wrong with it.
   const stepsStatus = (
@@ -1061,13 +1091,16 @@ export function StoreSetupDraftPage({
         className="store-setup-place__panel"
         hidden={only !== null && panel.place !== only}
       >
-        <Suspense fallback={only === panel.place ? <p role="status">{t("Loading…")}</p> : null}>
-          {panel.render(hiders.get(panel.key) ?? (() => undefined))}
-        </Suspense>
+        <StoreSetupInPlaceContext.Provider value={only !== null}>
+          <Suspense fallback={only === panel.place ? <p role="status">{t("Loading…")}</p> : null}>
+            {panel.render(hiders.get(panel.key) ?? (() => undefined))}
+          </Suspense>
+        </StoreSetupInPlaceContext.Provider>
       </div>
     ));
   const established = id === storeReference && !firstStore && !deciding;
   const draftPlace = !established || place === "changes";
+  const stepsShown = workspace !== null && !deciding && (firstStore || place === "changes");
   // Order limits: their own step while a Store is opened, asked with the services once it is open.
   const orderLimits = (
     <>
@@ -1161,7 +1194,9 @@ export function StoreSetupDraftPage({
           {renderedPanels(place === "changes" ? "changes" : place)}
         </>
       ) : null}
-      {draftPlace && !ownerOnly && !firstStore ? (
+      {/* b18 polish: before the draft is read (or when the read failed) this is how to read it
+          again; once the steps show, it sits quietly under them. */}
+      {draftPlace && !ownerOnly && !firstStore && !stepsShown ? (
         <StoreSetupReloadDraft
           disabled={busy || !online || id !== storeReference}
           onReload={() => void refresh()}
@@ -1174,7 +1209,7 @@ export function StoreSetupDraftPage({
       )}
       {firstStore || !draftPlace ? null : stepsStatus}
       {deciding ? <p role="status">{t("Loading…")}</p> : null}
-      {workspace && !deciding && (firstStore || place === "changes") && (
+      {stepsShown && workspace && (
         <FirstStoreFold
           active={firstStore}
           status={stepsStatus}
@@ -1242,11 +1277,19 @@ export function StoreSetupDraftPage({
             {activeStep === 1 && (
               <>
                 {openLayout ? (
-                  <p>
-                    {t("The Store runs on {zone} today.", {
-                      zone: timeZoneLabel(workspace.store.timeZone),
-                    })}
-                  </p>
+                  !draftTimeZoneSaved && inputs.timeZone === workspace.store.timeZone ? (
+                    <p>
+                      {t(
+                        "Filled in with the time zone the Store runs on today; saving the draft keeps it.",
+                      )}
+                    </p>
+                  ) : inputs.timeZone !== workspace.store.timeZone ? (
+                    <p>
+                      {t("The Store runs on {zone} today.", {
+                        zone: timeZoneLabel(workspace.store.timeZone),
+                      })}
+                    </p>
+                  ) : null
                 ) : (
                   <>
                     <h4>{t("Address")}</h4>
@@ -1261,7 +1304,10 @@ export function StoreSetupDraftPage({
                     value={inputs.timeZone}
                     onChange={(e) => changeInputs({ timeZone: e.currentTarget.value })}
                   >
-                    <option value="">{t("Not configured")}</option>
+                    {/* b18 polish: an open Store says "Not configured" only while nothing is set. */}
+                    {!openLayout || inputs.timeZone === "" ? (
+                      <option value="">{t("Not configured")}</option>
+                    ) : null}
                     <optgroup label={t("Canada")}>
                       {zones.canada.map((zone) => (
                         <option key={zone.value} value={zone.value}>
@@ -1793,6 +1839,14 @@ export function StoreSetupDraftPage({
               {t("Discard unsaved changes")}
             </button>
           </footer>
+          {/* b18 polish: with nothing unsaved, reading the saved draft again shows the last one
+              saved (here or elsewhere); with unsaved changes, "Discard unsaved changes" does that. */}
+          {!ownerOnly && !firstStore && !dirty ? (
+            <StoreSetupReloadDraft
+              disabled={busy || !online || id !== storeReference}
+              onReload={() => void refresh()}
+            />
+          ) : null}
         </FirstStoreFold>
       )}
       {/* b18: the store-type question ("What kind of store is this?") is an opening question:

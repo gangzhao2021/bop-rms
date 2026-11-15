@@ -1096,14 +1096,14 @@ test("WP-2423 v15: 'Use the live Store's settings' fills time zone, business day
   await openStoreSetupPlace(page, "Settings that need approval");
   await page.getByRole("button", { name: /^4\. Review and publish$/u }).click();
   const missing = page.getByRole("region", { name: "Settings not set yet" });
-  await expect(missing).toContainText("Time zone: set it in step 1, Time zone and business day");
-  await expect(missing).toContainText(
-    "Business day start: set it in step 1, Time zone and business day",
-  );
+  // b18 polish: the draft starts from the time zone and business day start the open Store runs on
+  // (not saved until "Save as draft"), so only what the Store has no value for is missing.
+  await expect(missing).not.toContainText("Time zone");
+  await expect(missing).not.toContainText("Business day start");
   await expect(missing).toContainText("Service modes: set it in step 2, Services");
   await expect(missing).toContainText("Receipt template: set it in step 3, Fees, tax and payment");
-  await expect(page.getByText("4 settings are not set yet.", { exact: false })).toBeVisible();
-  // The publication panel names what is missing instead of only disabling Create.
+  await expect(page.getByText("2 settings are not set yet.", { exact: false })).toBeVisible();
+  // The publication panel names what the saved setup is missing instead of only disabling Create.
   await expect(panel(page)).toContainText(
     "Time zone (step 1, Time zone and business day); Business day start (step 1, Time zone and business day)",
   );

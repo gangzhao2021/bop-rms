@@ -2716,7 +2716,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Oat milk": "燕麦奶",
   Off: "关",
   "Off. Refunds that need approval are approved by a second owner or finance member.":
-    "已关闭。需要批准的退款由第二位店主或财务人员批准。",
+    "关闭。需要批准的退款由第二位店主或财务人员批准。",
   "Offer at this Store": "在本店提供",
   "Offer {value}": "提供{value}",
   "Offer {value} at this Store now": "现在在本店提供{value}",
@@ -2748,7 +2748,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "On a shared tablet, staff switch to themselves with their own 6-digit PIN instead of signing in each time. Refunds, price and staff changes still need a full sign-in or the authenticator code.":
     "在共享平板上，员工用自己的 6 位 PIN 换成自己，不必每次都登录。退款、价格和员工更改仍需要完整登录或验证器验证码。",
   "On and in effect: you are the only person who can approve refunds at this store, so you may approve your own after confirming it is you.":
-    "已开启并生效：你是本店唯一可以批准退款的人，确认身份后可以批准自己的退款。",
+    "开启并生效。你是本店唯一可以批准退款的人，确认身份后可以批准自己的退款。",
   "Search dishes (Chinese or English)": "搜索菜品（中文或英文）",
   "Often ordered": "常点",
   "No dish matches “{query}”.": "没有找到“{query}”。",
@@ -2759,9 +2759,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "On this Store's menu": "在本店菜单上",
   "On {value}.": "用于{value}。",
   "On, but not in effect: {named} also {value} refund approval at this store, so a second person is required.":
-    "已开启但未生效：{named}也{value}本店的退款批准权限，因此需要第二个人。",
+    "开启，但未生效：{named}也{value}本店的退款批准权限，因此需要第二个人批准。",
   "On, but you don't hold refund approval at this store, so it has no effect for you.":
-    "已开启，但你没有本店的退款批准权限，因此对你无效。",
+    "开启，但你没有本店的退款批准权限，因此对你无效。",
   "One less {name}": "{name}减一份",
   "One more {name}": "{name}加一份",
   Online: "线上",
@@ -7582,8 +7582,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "平台支持可以更改你的设置，直到你关闭为止。",
   "Platform support can change your settings until": "平台支持可以更改你的设置，截止到",
   "Platform support can change your settings.": "平台支持可以更改你的设置了。",
-  "Allow platform support to change my settings": "允许平台支持帮我改设置",
-  "Allow for one hour": "允许一小时",
+  "Let platform support change my settings for the next hour":
+    "允许平台支持在接下来一小时内帮我改设置",
+  "Let platform support change my settings until I turn it off":
+    "允许平台支持帮我改设置，直到我关闭",
   "Allowed for one hour. It ends by itself.": "已允许一小时，到时自动结束。",
   "Platform support can't change anything now.": "平台支持现在不能更改任何内容。",
   "Turn off now": "立即关闭",
@@ -9815,10 +9817,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "The bill changed after it was split: it is now {amount} for the whole table. Split it again before taking payments.":
     "分单以后账单有变化：现在整桌是 {amount}。请重新分单再收款。",
   // b18 (Owner 2026-11-14): Store setup in a few places, one save model.
-  "Reload the saved draft": "重新读取已存的草稿",
+  "Restore the last saved draft": "恢复上次保存的草稿",
   "Store details": "门店资料",
   "The name, address and phone customers see. A change is live as soon as you save it.":
-    "顾客看到的店名、地址和电话。保存后立即生效。",
+    "顾客看到的店名、地址和电话，保存后立即生效。",
   "Receipts and tax numbers": "收据与税号",
   "The business name and tax numbers printed on receipts, and your privacy notice. A change is live as soon as you save it, for receipts issued from then on.":
     "收据上印的商家名称和税号，以及你的隐私声明。保存后立即生效，用于之后开出的收据。",
@@ -9843,7 +9845,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Support looked at your Store {looks} times, last":
     "平台支持查看过你的门店 {looks} 次，最近一次在",
   "Show fewer": "收起",
-  "Show all {count} records": "显示全部 {count} 条记录",
+  "View all {count} access records": "查看全部访问记录（{count} 条）",
+  "View the access record": "查看访问记录",
+  "Hide the access records": "收起访问记录",
   "Store name customers see (English)": "店名（英文）",
   "Store name customers see (Chinese)": "店名（中文）",
   "Store name customers see (French)": "店名（法文）",
@@ -9888,7 +9892,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Created from the saved setup draft. {value2} Once approved, you can publish it to the live Store.":
     "由已存的设置草稿生成。{value2}批准后即可发布到门店。",
   "Kitchen setup in Store setup": "门店设置里的后厨",
-  "The newest {shown} of {count} are listed here; every one is in the access log below.":
+  "The newest {shown} of {count} are listed here; every one is in the access records below.":
     "这里列出 {count} 条中最新的 {shown} 条；每一条都在下面的访问记录里。",
   "Showing {shown} of {total} records.": "已显示 {total} 条中的 {shown} 条。",
   "The earlier records could not be read. Try again.": "没能读取更早的记录，请再试一次。",
@@ -9897,4 +9901,11 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "The earlier changes could not be read. Try again.": "没能读取更早的更改，请再试一次。",
   "Show earlier changes": "显示更早的更改",
   "Show all {count} changes": "显示全部 {count} 项更改",
+  // b18 polish (Owner 2026-11-14): plainer Store setup places.
+  "When it is on and there is no second person, you can approve your own refunds, prices, menus and other things that need approval.":
+    "开启后，没有第二个人时你可以自己批准退款、价格、菜单等需要批准的事。",
+  "What this covers": "具体包括哪些",
+  "Now: {status}": "现在：{status}",
+  "Filled in with the time zone the Store runs on today; saving the draft keeps it.":
+    "已按门店现在使用的时区填好，存为草稿后保留。",
 });

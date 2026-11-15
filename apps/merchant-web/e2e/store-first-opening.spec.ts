@@ -1358,7 +1358,7 @@ test("@production an established Store sees its setup in places, the steps in th
   await expect(page.getByText("All settings, step by step")).toHaveCount(0);
   await page.goto(href + "?section=changes");
   await expect(page.getByRole("navigation", { name: "Setup steps" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Reload the saved draft" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Restore the last saved draft" })).toBeVisible();
   await page.goto(href + "?section=kitchen");
   await expect(page.getByRole("heading", { name: "Kitchen setup", exact: true })).toBeVisible();
 });
@@ -1371,7 +1371,7 @@ test("@production a failed read shows the page as it always was, for an establis
     await page.goto(href + "?section=changes");
     // Nothing about the Store is swapped for an error: every step and place is there.
     await expect(page.getByRole("navigation", { name: "Setup steps" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Reload the saved draft" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Restore the last saved draft" })).toBeVisible();
     await page.goto(href + "?section=kitchen");
     await expect(page.getByRole("heading", { name: "Kitchen setup", exact: true })).toBeVisible();
     await expect(panel(page)).toHaveCount(0);
