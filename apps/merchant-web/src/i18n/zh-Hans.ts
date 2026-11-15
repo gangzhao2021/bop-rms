@@ -10000,4 +10000,16 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "还有 {count} 项要处理，才能提交审批或发布。",
   "To make a new change, save as draft again (it then builds on the latest settings), then come back here.":
     "要做新的修改，请再存一次草稿（会以最新的设置为基础），然后回到这里。",
+  "Change created from the saved setup.": "已用保存的设置生成修改。",
+  "Settings checked.": "设置已检查。",
+  "Sent for approval.": "已提交审批。",
+  "Approved by you alone as sole operator.": "已由你作为独立经营者单独批准。",
+  "Change approved.": "修改已批准。",
+  "Published. Customers and staff see the new settings now.":
+    "已发布，顾客和员工现在就能看到新的设置。",
+  "Approve and publish it by": "请在",
+  "; after that it has to be created again.": "前批准并发布，过后需要重新生成。",
+  "Another person with Owner access must approve it, because you made this change.":
+    "这次修改是你做的，需要另一位有店主权限的人批准。",
+  "{day}: {times}": "{day}：{times}",
 });

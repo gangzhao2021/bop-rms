@@ -636,32 +636,24 @@ test("ordinary Store Review materializes validates submits independently approve
   const state = await install(page);
   await enter(page);
   await panel(page).getByRole("button", { name: "Create the change from the saved setup" }).click();
-  await expect(panel(page).getByRole("status")).toHaveText(
-    "Configuration created from the saved setup. Current configuration refreshed.",
-  );
+  await expect(panel(page).getByRole("status")).toHaveText("Change created from the saved setup.");
   // b19: one sentence on where it stands; the one next step is offered alone.
   await expect(panel(page)).toContainText("Draft, not yet sent for approval.");
   await expect(panel(page).getByRole("button", { name: "Publish to the Store" })).toHaveCount(0);
   await panel(page).getByRole("button", { name: "Check the settings again" }).click();
-  await expect(panel(page).getByRole("status")).toHaveText(
-    "Configuration checked. Current configuration refreshed.",
-  );
+  await expect(panel(page).getByRole("status")).toHaveText("Settings checked.");
   await panel(page).getByRole("button", { name: "Send it for approval" }).click();
-  await expect(panel(page).getByRole("status")).toHaveText(
-    "Configuration sent for approval. Current configuration refreshed.",
-  );
+  await expect(panel(page).getByRole("status")).toHaveText("Sent for approval.");
   // Your own change: another person approves it; no approve button for you.
   await expect(panel(page).getByRole("button", { name: "Approve this change" })).toHaveCount(0);
   state.actor = id(80);
   await reloadReview(page);
   await expect(panel(page).getByRole("button", { name: "Approve this change" })).toBeEnabled();
   await panel(page).getByRole("button", { name: "Approve this change" }).click();
-  await expect(panel(page).getByRole("status")).toHaveText(
-    "Configuration approved. Current configuration refreshed.",
-  );
+  await expect(panel(page).getByRole("status")).toHaveText("Change approved.");
   await panel(page).getByRole("button", { name: "Publish to the Store" }).click();
   await expect(panel(page).getByRole("status")).toHaveText(
-    "Configuration published. Current configuration refreshed.",
+    "Published. Customers and staff see the new settings now.",
   );
   await expect(panel(page)).toContainText("Published on");
   await expect(panel(page)).not.toContainText(/Version \d/u);
@@ -710,7 +702,7 @@ test("lost reply retains original through denied conflict and failed refresh the
   state.failState = false;
   await panel(page).getByRole("button", { name: "Recover original configuration request" }).click();
   await expect(panel(page).getByRole("status")).toContainText(
-    "Configuration created from the saved setup.",
+    "Change created from the saved setup.",
   );
   await expect(panel(page)).toContainText("Waiting for approval");
   expect(await cursor(page)).toEqual([]);
@@ -733,7 +725,7 @@ test("Review controls retain 320px 200 percent text keyboard and 44px targets @p
   await expect(create).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(panel(page).getByRole("status")).toContainText(
-    "Configuration created from the saved setup.",
+    "Change created from the saved setup.",
   );
   for (const button of await panel(page).getByRole("button").all()) {
     const box = await button.boundingBox();
@@ -754,14 +746,10 @@ test("actual immutable history paginates original authors and read refusal keeps
   const state = await install(page);
   await enter(page);
   await panel(page).getByRole("button", { name: "Create the change from the saved setup" }).click();
-  await expect(panel(page).getByRole("status")).toHaveText(
-    "Configuration created from the saved setup. Current configuration refreshed.",
-  );
+  await expect(panel(page).getByRole("status")).toHaveText("Change created from the saved setup.");
   for (let i = 0; i < 2; i++) {
     await panel(page).getByRole("button", { name: "Check the settings again" }).click();
-    await expect(panel(page).getByRole("status")).toHaveText(
-      "Configuration checked. Current configuration refreshed.",
-    );
+    await expect(panel(page).getByRole("status")).toHaveText("Settings checked.");
   }
   state.actor = id(80);
   await reloadReview(page);
@@ -805,7 +793,7 @@ test("actual immutable history paginates original authors and read refusal keeps
   expect(await cursor(page)).toEqual(original);
   state.denyHistory = false;
   await panel(page).getByRole("button", { name: "Recover original configuration request" }).click();
-  await expect(panel(page).getByRole("status")).toContainText("Configuration checked.");
+  await expect(panel(page).getByRole("status")).toContainText("Settings checked.");
   expect(await cursor(page)).toEqual([]);
   expect(state.errors).toEqual([]);
 });
@@ -842,7 +830,7 @@ test("publication checks say what blocks publication and who must approve, at 14
   await expect(checks).toContainText("2 things need fixing");
   await expect(checks).toContainText("Tax settings are not the ones in force");
   await expect(checks).not.toContainText("Opening hours are complete.");
-  await expect(panel(page)).toContainText("It must be approved and published by");
+  await expect(panel(page)).toContainText("Approve and publish it by");
   await expect(panel(page).getByRole("button", { name: "Send it for approval" })).toBeDisabled();
   state.failing = [];
   await reloadReview(page);
@@ -850,7 +838,7 @@ test("publication checks say what blocks publication and who must approve, at 14
   await expect(checks).toHaveCount(0);
   await panel(page).getByRole("button", { name: "Send it for approval" }).click();
   await expect(panel(page)).toContainText(
-    "Another person with Owner access must approve this configuration.",
+    "Another person with Owner access must approve it, because you made this change.",
   );
   await expect(panel(page).getByRole("button", { name: "Approve this change" })).toHaveCount(0);
   state.failing = ["GoLive"];
@@ -925,13 +913,9 @@ test("the Owner approves their own configuration alone as sole operator, at 1440
   state.soleOperator = { status: "NotSet", otherApprovers: [], verifiedUntil: null };
   await enter(page);
   await panel(page).getByRole("button", { name: "Create the change from the saved setup" }).click();
-  await expect(panel(page).getByRole("status")).toHaveText(
-    "Configuration created from the saved setup. Current configuration refreshed.",
-  );
+  await expect(panel(page).getByRole("status")).toHaveText("Change created from the saved setup.");
   await panel(page).getByRole("button", { name: "Send it for approval" }).click();
-  await expect(panel(page).getByRole("status")).toHaveText(
-    "Configuration sent for approval. Current configuration refreshed.",
-  );
+  await expect(panel(page).getByRole("status")).toHaveText("Sent for approval.");
   const own = panel(page).getByRole("region", { name: "Approve your own configuration" });
   // Sole operator off: another person must approve, and how to change that.
   await expect(own).toContainText(
@@ -993,14 +977,12 @@ test("the Owner approves their own configuration alone as sole operator, at 1440
   await own.getByLabel("I checked this Store configuration and approve on my own").check();
   await own.getByRole("button", { name: "Approve configuration on my own" }).click();
   await expect(
-    panel(page).getByRole("status").filter({ hasText: "Configuration approved" }),
-  ).toHaveText(
-    "Configuration approved by you alone as sole operator. Current configuration refreshed.",
-  );
+    panel(page).getByRole("status").filter({ hasText: "Approved by you alone" }),
+  ).toHaveText("Approved by you alone as sole operator.");
   await expect(own).toHaveCount(0);
   await panel(page).getByRole("button", { name: "Publish to the Store" }).click();
   await expect(panel(page).getByRole("status")).toHaveText(
-    "Configuration published. Current configuration refreshed.",
+    "Published. Customers and staff see the new settings now.",
   );
   await expectNoInternalText(page);
   expect(state.writes).toEqual(["Materialize", "Submit", "Approve", "SoleOperator", "Publish"]);
@@ -1017,9 +999,7 @@ test("someone else's open configuration is shown, cannot be replaced and can be 
   await enter(page);
   await panel(page).getByRole("button", { name: "Create the change from the saved setup" }).click();
   await panel(page).getByRole("button", { name: "Send it for approval" }).click();
-  await expect(panel(page).getByRole("status")).toHaveText(
-    "Configuration sent for approval. Current configuration refreshed.",
-  );
+  await expect(panel(page).getByRole("status")).toHaveText("Sent for approval.");
   // The author sees their own open change and may withdraw it.
   // b19: in one sentence, without version numbers; withdrawing is confirmed first.
   await expect(panel(page)).toContainText("Waiting for approval.");

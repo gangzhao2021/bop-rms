@@ -1991,7 +1991,12 @@ export function storeSetupChangeSummary(
             openDaysText(schedule),
             ...schedule
               .filter((day) => day.intervals.length > 0)
-              .map((day) => `${days[day.isoWeekday - 1]}: ${dayText(day.intervals, false)}`),
+              .map((day) =>
+                t("{day}: {times}", {
+                  day: days[day.isoWeekday - 1] ?? "",
+                  times: dayText(day.intervals, false),
+                }),
+              ),
           ],
     );
   }

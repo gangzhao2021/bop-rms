@@ -474,6 +474,7 @@ it("b19: Review says what publishing changes against the live Store, in plain va
     expect(zh.changed.find((item) => item.label === "营业时间")?.value[0]).toBe("每周营业 5 天");
     expect(zh.changed.find((item) => item.label === "营业日开始时间")?.value).toEqual(["05:30"]);
     expect(JSON.stringify(zh)).not.toMatch(/days|closed/u);
+    expect(zh.changed.find((item) => item.label === "营业时间")?.value[1]).toMatch(/：/u);
   } finally {
     setLanguageForTest("en");
   }

@@ -69,14 +69,14 @@ export const storeConfigurationPendingText = (action: string): string =>
     { value: requestLabel(action) ?? t("configuration") },
   );
 const doneText: Record<string, string> = {
-  Materialize: t("Configuration created from the saved setup."),
-  Validate: t("Configuration checked."),
-  Submit: t("Configuration sent for approval."),
-  Approve: t("Configuration approved."),
-  Publish: t("Configuration published."),
+  Materialize: t("Change created from the saved setup."),
+  Validate: t("Settings checked."),
+  Submit: t("Sent for approval."),
+  Approve: t("Change approved."),
+  Publish: t("Published. Customers and staff see the new settings now."),
 };
 /** WP-2423 DEC-SOLE-OPERATOR-APPROVAL: the Owner's own approval, given alone. */
-const soleOperatorDoneText = t("Configuration approved by you alone as sole operator.");
+const soleOperatorDoneText = t("Approved by you alone as sole operator.");
 const outcomeText = (action: string, outcome: "Committed" | "Abandoned") =>
   outcome === "Committed"
     ? (doneText[action] ?? t("Change recorded."))
@@ -565,12 +565,10 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
       setWorkspace(after);
       setPending(null);
       setNotice(
-        t("{value} Current configuration refreshed.", {
-          value:
-            approvalMode !== undefined && receipt.outcome === "Committed"
-              ? soleOperatorDoneText
-              : outcomeText(action, receipt.outcome),
-        }),
+        // b19: what happened, in plain words (the page below already shows the state).
+        approvalMode !== undefined && receipt.outcome === "Committed"
+          ? soleOperatorDoneText
+          : outcomeText(action, receipt.outcome),
       );
     } catch (e) {
       if (current()) setError(message(e));
@@ -650,11 +648,7 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
       if (current()) {
         setWorkspace(result.workspace);
         setPending(null);
-        setNotice(
-          t("{action} Current configuration refreshed.", {
-            action: outcomeText(original.action, result.receipt.outcome),
-          }),
-        );
+        setNotice(outcomeText(original.action, result.receipt.outcome));
       }
     } catch (e) {
       if (current()) setError(message(e));
@@ -779,11 +773,11 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
           )}
           {openLatest && latest?.setupBasis !== undefined && (
             <p>
-              {t("It must be approved and published by")}{" "}
+              {t("Approve and publish it by")}{" "}
               <StaffTime
                 instant={new Date(Date.parse(latest.createdAt) + publicationWindowMs).toISOString()}
               />
-              {t("; after that, create it again from the saved setup.")}
+              {t("; after that it has to be created again.")}
             </p>
           )}
           {setupIncomplete && (
@@ -872,9 +866,7 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
           )}
           {ownChange && soleOperator === undefined && latest?.setupBasis !== undefined && (
             <p>
-              {t(
-                "Another person with Owner access must approve this configuration. You cannot approve a change you made.",
-              )}
+              {t("Another person with Owner access must approve it, because you made this change.")}
             </p>
           )}
           {next !== null && next.action !== "SoleOperator" && (

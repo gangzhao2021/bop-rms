@@ -10871,6 +10871,7 @@ tr[data-drop-target="true"] {
 }
 .store-setup-draft-page :is(.store-setup-publish, .store-setup-carry) button {
   min-height: 44px;
+  margin: 0;
   padding: 0;
   border: 0;
   border-radius: 0;
