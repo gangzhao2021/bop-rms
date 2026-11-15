@@ -412,10 +412,13 @@ test("@production Store Setup saves Address and Contact references then binds se
   // while the saved setup has none; once chosen and saved, Review says so and asks no more.
   await page.reload();
   await page.getByRole("button", { name: "4. Review and publish", exact: true }).click();
-  await expect(page.getByText("Address: Already configured", { exact: true })).toBeVisible();
-  await expect(
-    page.getByText("Contact details: Already configured", { exact: true }),
-  ).toBeVisible();
+  // b19: Review's summary names them (changed or staying as they are), never as not set.
+  const summary = page.locator(".store-setup-summary");
+  await expect(summary).toContainText("Address");
+  await expect(summary).toContainText("Contact details");
+  await expect(page.getByRole("region", { name: "Settings not set yet" })).not.toContainText(
+    /Address|Contact details/u,
+  );
   await expect(page.getByRole("heading", { name: "Still needed" })).toHaveCount(0);
   await expect(
     page.getByRole("region", { name: "Address configuration", exact: true }),

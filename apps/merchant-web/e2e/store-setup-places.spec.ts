@@ -507,7 +507,7 @@ test("@production an open Store's setup is a few places, each saying whether a c
   await expect(page.getByLabel("Draft timezone")).toHaveValue("America/Toronto");
   await expect(page.getByLabel("Draft timezone").locator("option[value='']")).toHaveCount(0);
   // b18 review: and from the business day start it runs on, on this first step already.
-  await expect(page.getByLabel("Business day starts at (local time)")).toHaveValue("05:00:00");
+  await expect(page.getByLabel("Business day starts at (local time)")).toHaveValue("05:00");
   await expect(
     page.getByText(
       "Filled in with the time zone and business day start the Store runs on today; saving the draft keeps them.",

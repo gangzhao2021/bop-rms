@@ -786,6 +786,12 @@ test("actual immutable history paginates original authors and read refusal keeps
   await reopen();
   await expect(history.getByRole("alert")).toContainText("Actor changed");
   state.wrongHistory = false;
+  // b19: checking again is offered to the person who made the draft (the server refuses anyone
+  // else), so its author comes back for the lost reply.
+  state.actor = scope.actorReference;
+  await reloadReview(page);
+  await earlier.click();
+  await expect(history.getByRole("listitem")).toHaveCount(2);
   state.loseNext = true;
   await panel(page).getByRole("button", { name: "Check the settings again" }).click();
   await expect(

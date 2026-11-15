@@ -1360,7 +1360,8 @@ test("@production an established Store sees its setup in places, the steps in th
   await expect(page.getByRole("navigation", { name: "Setup steps" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Restore the last saved draft" })).toBeVisible();
   await page.goto(href + "?section=kitchen");
-  await expect(page.getByRole("heading", { name: "Kitchen setup", exact: true })).toBeVisible();
+  // b19: in its place the link names it; the section has no heading repeating it.
+  await expect(page.getByRole("region", { name: "Kitchen setup", exact: true })).toBeVisible();
 });
 
 test("@production a failed read shows the page as it always was, for an established Store or a first one", async ({
@@ -1373,7 +1374,7 @@ test("@production a failed read shows the page as it always was, for an establis
     await expect(page.getByRole("navigation", { name: "Setup steps" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Restore the last saved draft" })).toBeVisible();
     await page.goto(href + "?section=kitchen");
-    await expect(page.getByRole("heading", { name: "Kitchen setup", exact: true })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Kitchen setup", exact: true })).toBeVisible();
     await expect(panel(page)).toHaveCount(0);
     await expect(page.getByText("All settings, step by step")).toHaveCount(0);
     // A first Store gets its one page back once the read answers.

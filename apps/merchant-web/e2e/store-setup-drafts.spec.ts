@@ -258,7 +258,7 @@ async function timezone(page: Page) {
   await page
     .getByRole("combobox", { name: "Draft timezone", exact: true })
     .selectOption("America/Toronto");
-  await page.getByLabel("Business day starts at (local time)", { exact: true }).fill("04:00:00");
+  await page.getByLabel("Business day starts at (local time)", { exact: true }).fill("04:00");
 }
 test("@production Store Setup ordinary entry approval steps partial save refresh and reload", async ({
   page,
@@ -317,7 +317,8 @@ test("@production Store Setup ordinary entry approval steps partial save refresh
     page.getByRole("combobox", { name: "Draft timezone", exact: true }).locator("option:checked"),
   ).toHaveText("Eastern Time (Toronto, Ottawa and Montréal)");
   await expect(page.getByLabel("Business day starts at (local time)", { exact: true })).toHaveValue(
-    "04:00:00",
+    // b19: the field shows hours and minutes; the draft still saves 04:00:00.
+    "04:00",
   );
   expect(fixture.control.errors).toEqual([]);
 });
