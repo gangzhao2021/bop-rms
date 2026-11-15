@@ -22,10 +22,13 @@ under the page title (accent colour, the current one marked by weight and a line
 | Settings that need approval / 需审批的设置 | `…/setup?section=changes`  | Four steps: time zone and business day; services and order limits; fees, tax, payment and receipt layout; review and publish (the publication of the Store configuration) | Saved as a draft first; live only after it is submitted, approved and published in the last step | Save as draft / 存为草稿, then Submit for review and Publish in step 4            |
 
 Each place opens with one line saying what it holds and when a change there takes effect, and its
-section heading is the place's own name (Store details, Receipts and tax numbers, Kitchen setup). Only the
-last place talks about drafts; the old header line "Saving a draft does not change the live Store"
-and the page-wide "Refresh saved setup" are gone from the other four ("Reload the saved draft" /
-重新读取已存的草稿 sits in the draft place only). No button means two things: "保存并生效" always
+section heading is the place's own name (Receipts and tax numbers, Kitchen setup). Store details
+says it once: the selected link and the lead "The name, address and phone customers see. A change is
+live as soon as you save it." / “顾客看到的店名、地址和电话，保存后立即生效。”; the section has no
+second heading or introduction there (it is labelled for screen readers; a first Store's fold still
+shows both, `StoreSetupInPlaceContext`). Only the last place talks about drafts; the old header line
+"Saving a draft does not change the live Store" and the page-wide "Refresh saved setup" are gone
+from the other four ("Restore the last saved draft" / 恢复上次保存的草稿 sits in the draft place only). No button means two things: "保存并生效" always
 means live now; "存为草稿" / "提交审批" always mean a draft that needs approval.
 
 ### The opening steps only while a Store is opened (b18 review)
@@ -87,14 +90,53 @@ nor loses an unsaved edit, and the reads are the ones the one page made before.
   (`summarizeStoreSupportAccess`: how many records, how many looks and the last one, and every
   Changed/Refused record, newest 50 with their count), never from the records on screen, so a change
   older than the newest page is still listed ("What support changed or tried") and counted. Then
-  "Support looked at your Store N times, last …", then the access log: the newest five, "Show all N
-  records", then "Show earlier records" a page of 50 at a time until the first record
+  "Support looked at your Store N times, last …". The access log itself only repeats those looks,
+  so it is folded (polish, below): "View all N access records" / “查看全部访问记录（N 条）” opens it,
+  then "Show earlier records" reads a page of 50 at a time until the first record
   (`GET /merchant/store/support-access?before=<instant to the microsecond>&skip=<n>`,
-  `pageStoreSupportAccess`; the log is append-only so a page once read stays the same).
+  `pageStoreSupportAccess`; the log is append-only so a page once read stays the same); "Hide the
+  access records" / 收起访问记录 folds it again.
 - Sole operator: the newest five changes, "Show all N changes", then "Show earlier changes" 20 at a
   time down to the first (`GET /merchant/organization/sole-operator?before=<change number>`; the
   setting itself is still the latest). "Showing x of N" while not all are on screen. No change
   numbers on screen.
+
+## Polish (Owner, 2026-11-14, Chinese first)
+
+Nothing here changes a command, permission, step-up, approval or log; each item only says a thing
+once, or more plainly.
+
+1. Store details: one line (what it is, live once saved) instead of the lead, a heading and a
+   paragraph saying the same; label, help text and field sit close (2px apart, a 36px single-line
+   field), so the empty "Unit or suite (optional)" no longer leaves a tall gap. The same field
+   spacing applies to Receipts and tax numbers.
+2. Platform support: the server offers two grants (`changeAccess` `Limited` 1 hour, `Standing`), so
+   there are two actions, each a sentence naming its effect and duration, one per line, the shorter
+   first: "Let platform support change my settings for the next hour" /
+   “允许平台支持在接下来一小时内帮我改设置” and "Let platform support change my settings until I
+   turn it off" / “允许平台支持帮我改设置，直到我关闭”. "Turn off now" is unchanged.
+3. The support access log starts folded (see Logs); every record is still reachable.
+4. Sole operator: one lead ("When it is on and there is no second person, you can approve your own
+   refunds, prices, menus and other things that need approval." / “开启后，没有第二个人时你可以自己批准
+   退款、价格、菜单等需要批准的事。”), the full list behind "What this covers" / 具体包括哪些, and the
+   state as one sentence ("Now: Off. Refunds that need approval are approved by a second owner or
+   finance member." / “现在：关闭。需要批准的退款由第二位店主或财务人员批准。”, and the on-state
+   equivalents) instead of the label grid.
+5. Settings that need approval, step 1: an open Store already runs on a time zone, so while the saved
+   draft has none and nothing was typed, the draft starts from the Store's time zone (and its
+   business day start once the live configuration has been read on step 3 or 4; no extra read is
+   made, so a pending request's recovery is never preceded by one). It says "Filled in with the time
+   zone the Store runs on today; saving the draft keeps it." / “已按门店现在使用的时区填好，存为草稿后
+   保留。”; "Not configured" / 未配置 is offered only while nothing is set. The review lists only what
+   the Store has no value for; the publication panel still checks the saved setup, so it names a
+   time zone missing until the draft is saved. A Store being opened is unchanged.
+6. "Reload the saved draft" is now "Restore the last saved draft" / 恢复上次保存的草稿, a small text
+   action under the step controls, shown while nothing is unsaved (with unsaved changes, "Discard
+   unsaved changes" is what restores the saved draft). Before the draft has been read, or when the
+   read failed, it stays above as the way to read it again.
+7. The step controls are ordinary accent text at every width; only a step that truly cannot move
+   ("Previous step" on the first step, "Next step" on the last) is grey. On a phone, Previous and
+   Next share one line, the solid "Save as draft" is full width under them.
 
 ## Wording
 
@@ -121,8 +163,8 @@ border; fields are single bottom lines; buttons are accent text except the one s
 for the step that saves; the support log and sole-operator history use hairlines between rows only;
 type 28 (page title) / 20 (section) / 16 (place links, sub-headings) / 14 (text), weights 600/400.
 The title row ends with the language switch, as on Orders (AppFrame pages hide the shell's own
-header in the workspace, so Store setup draws it in its header); "Reload the saved draft" sits with
-the draft under the approval place's lead. Sole operator's change is a reason field, then one action
+header in the workspace, so Store setup draws it in its header); "Restore the last saved draft" sits with
+the draft (under the step controls since the polish). Sole operator's change is a reason field, then one action
 on one line: "Verify to turn it on/off" until the authenticator code is confirmed, then the one
 solid button.
 The wizard's step buttons and footer follow the same rules (they were boxed, with a black save
