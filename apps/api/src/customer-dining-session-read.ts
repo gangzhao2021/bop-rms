@@ -637,7 +637,13 @@ export function composeCustomerDiningSession(
     // pending). A dish cancelled or refused by the kitchen with no refund recorded was charged and
     // stays on it, so paid − refunded − refund pending + still to pay is always Total ordered.
     const roundRefunded = staff !== undefined && staff.refundedMinor + staff.pendingMinor > 0n;
-    if (!unpaidCancelled && waiting === null && !roundRefunded) {
+    // A round staff cancelled on a table paying at the end, before it paid, was never charged.
+    const roundNotCharged =
+      staff !== undefined &&
+      !roundRefunded &&
+      order.payLaterRounds?.has(reference) === true &&
+      order.settledRounds?.has(reference) !== true;
+    if (!unpaidCancelled && waiting === null && !roundRefunded && !roundNotCharged) {
       const charged = items.filter((item) => !item.notCharged && !item.refundRecorded);
       ordered.subtotal += charged.reduce(
         (sum, item) => sum + (item.price?.subtotal.amountMinor ?? 0n),

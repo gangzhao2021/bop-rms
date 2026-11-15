@@ -371,13 +371,17 @@ describe("WP-2423 Q8 composeCustomerDiningSession", () => {
         payments: [],
         payLaterRounds: new Set([id(30), id(40)]),
         tableBill: {
-          owedMinor: 3900n,
+          owedMinor: 900n,
           pointsUsedMinor: 0n,
           takenOffMinor: 0n,
           taxRoundingMinor: 0n,
         },
         staffCancellations: new Map([
           [id(30), { reason: "SoldOut", refundedMinor: 0n, pendingMinor: 0n }],
+        ]),
+        itemPrices: new Map([
+          [id(31), { subtotal: cad(2655n), tax: cad(345n) }],
+          [id(41), { subtotal: cad(796n), tax: cad(104n) }],
         ]),
       }),
       paymentTiming: "PayLater",
@@ -386,6 +390,9 @@ describe("WP-2423 Q8 composeCustomerDiningSession", () => {
       ["StoreCancelled", "NotCharged"],
       ["Received", "OnTableBill"],
     ]);
+    // v15 b19: the cancelled round was never charged, so Total ordered is what is still to pay.
+    expect(view.summary?.ordered?.total).toEqual(cad(900n));
+    expect(view.summary?.due).toEqual(cad(900n));
   });
 
   it("DEC-DINE-IN-PAY-LATER: once the table paid at the end, its rounds read paid and nothing is owed", () => {
