@@ -68,6 +68,7 @@ import { serviceOperationReference, type ServiceMode } from "./service-control-c
 import { plainLanguageName } from "./staff-text.js";
 import { LanguageSwitch } from "./i18n/LanguageSwitch.js";
 import { timeZoneChoices, timeZoneLabel } from "./time-zone-names.js";
+import { useScrollToAnchor } from "./scroll-to-anchor.js";
 const StoreFirstOpeningPanel = lazyPage(
   () => import("./StoreFirstOpeningPanel.js"),
   "StoreFirstOpeningPanel",
@@ -603,6 +604,8 @@ export function StoreSetupDraftPage({
     { search, hash } = useLocation(),
     client = useMemo(() => injected ?? createStoreSetupClient(), [injected]),
     feeClient = useMemo(() => createStoreSetupClient(), []);
+  // b19: a link to a section (#sole-operator from Approvals) brings it into view once it loads.
+  useScrollToAnchor(hash);
   const [workspace, setWorkspace] = useState<StoreSetupWorkspace | null>(null),
     [baseline, setBaseline] = useState<StoreSetupWorkspace | null>(null),
     [content, setContent] = useState<StoreSetupContent>(createUnconfiguredStoreSetupContentV2),

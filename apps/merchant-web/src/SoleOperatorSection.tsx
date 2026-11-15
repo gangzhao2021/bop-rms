@@ -128,7 +128,7 @@ export function SoleOperatorSection({
   if (status === "Hidden" || status === "Loading") return null;
   if (status === "Unavailable" || view === null)
     return (
-      <section aria-labelledby="sole-operator-heading" className="sole-operator">
+      <section id="sole-operator" aria-labelledby="sole-operator-heading" className="sole-operator">
         <h2 id="sole-operator-heading">{t("Sole operator")}</h2>
         <StatePanel heading={t("Setting could not be loaded")} tone="error" status>
           <p>{t("Check your connection, then refresh.")}</p>
@@ -211,7 +211,7 @@ export function SoleOperatorSection({
     }
   };
   return (
-    <section aria-labelledby="sole-operator-heading" className="sole-operator">
+    <section id="sole-operator" aria-labelledby="sole-operator-heading" className="sole-operator">
       <h2 id="sole-operator-heading">{t("Sole operator")}</h2>
       {/* b18 polish (Owner 2026-11-14): one short lead, the full list behind "What this covers",
           and where the setting stands now as one sentence. */}
