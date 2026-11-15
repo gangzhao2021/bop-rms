@@ -417,7 +417,7 @@ test("@production Store Setup mismatched selected scope refuses editing and narr
   expect(fixture.control.writes).toHaveLength(0);
   expect(fixture.control.errors).toEqual([]);
 });
-test("@production b20: an edit not saved yet comes back after switching the language, and fields typed in a place ask first", async ({
+test("@production b20: an edit not saved yet comes back after switching the language", async ({
   page,
 }) => {
   const fixture = await install(page);

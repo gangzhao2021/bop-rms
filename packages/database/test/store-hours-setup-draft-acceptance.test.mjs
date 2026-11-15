@@ -803,26 +803,6 @@ it("WP-2423 Q4: a Store Manager changes hours on a configuration from Store setu
           },
         });
         assert.deepEqual(withdrawn, { status: "Applied", kind: "Withdrawn" });
-        // b20 (v15 live check): Earlier changes lists the withdrawal after the change's last step,
-        // read from its append-only record by the restricted role; for anyone else it is not "yours".
-        for (const [person, byYou] of [
-          [people.owner, true],
-          [people.manager, false],
-        ]) {
-          const page = await ordinary(person).history({
-            sessionCookie: person.sessionCookie,
-            csrf: person.csrf,
-            expectedStoreReference: scope.storeReference,
-            expectedScope: { ...scope, actorReference: person.actor },
-            beforeSequence: null,
-          });
-          const [newest, ...older] = page.entries;
-          assert.equal(newest.configuration.configurationReference, created.configurationReference);
-          assert.equal(newest.withdrawal.kind, "Withdrawn");
-          assert.equal(newest.withdrawal.byYou, byYou);
-          assert(newest.withdrawal.withdrawnAt >= newest.occurredAt);
-          assert(older.every((entry) => entry.withdrawal === undefined));
-        }
         /** The browser's ordinary hours save: from the published hours (the latest was withdrawn),
          * superseding the latest recorded change. */
         const ordinaryHours = async (person, cutoff) => {

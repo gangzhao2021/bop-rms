@@ -1330,6 +1330,51 @@ export async function exercisePilotStoreSetupPublication(input) {
         ],
       ],
     );
+    // b20 (v15 live check): Earlier changes lists each withdrawal and decline after the step it
+    // ended, read over HTTP by the restricted role from the append-only record, paged as staff
+    // page it; "yours" only for the person who withdrew or declined it.
+    for (const [reader, byYou] of [
+      [session, true],
+      [manager, false],
+    ])
+      await listen(reader, async (send) => {
+        const entries = [];
+        let beforeSequence = null;
+        do {
+          const page = await send("store-configuration/ordinary-history", {
+            expectedStoreReference: store,
+            beforeSequence,
+          });
+          assert.equal(page.status, 200, JSON.stringify(page.body));
+          entries.push(...page.body.entries);
+          beforeSequence = page.body.nextBeforeSequence;
+        } while (beforeSequence !== null);
+        const ended = entries.filter((entry) => entry.withdrawal !== undefined);
+        assert.deepEqual(
+          ended.map((entry) => [
+            entry.configuration.configurationReference,
+            entry.command,
+            entry.withdrawal.kind,
+            entry.withdrawal.byYou,
+          ]),
+          [
+            [managerOpen.configurationReference, "SaveDraft", "Declined", byYou],
+            [ownOpen.configurationReference, "Submit", "Withdrawn", byYou],
+          ],
+        );
+        for (const entry of ended) assert(entry.withdrawal.withdrawnAt >= entry.occurredAt);
+        // Only the configuration's last step carries it: its earlier steps do not.
+        const ownSteps = entries.filter(
+          (entry) => entry.configuration.configurationReference === ownOpen.configurationReference,
+        );
+        assert.deepEqual(
+          ownSteps.map((entry) => [entry.command, entry.withdrawal !== undefined]),
+          [
+            ["Submit", true],
+            ["SaveDraft", false],
+          ],
+        );
+      });
     const withdrawalAudits = (
       await admin.query(
         "SELECT target_id::text target,reason_code,after_summary_json FROM platform_audit.audit_record WHERE action_code='STORE_CONFIGURATION_CHANGED' AND reason_code IN ('STORE_CONFIGURATION_WITHDRAWN','STORE_CONFIGURATION_DECLINED') ORDER BY occurred_at",

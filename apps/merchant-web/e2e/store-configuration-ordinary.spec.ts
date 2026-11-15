@@ -958,13 +958,13 @@ test("the Owner approves their own configuration alone as sole operator, at 1440
   await expect(panel(page).getByRole("status")).toHaveText(
     "Sent for approval, waiting to be approved.",
   );
-  const own = panel(page).getByRole("region", { name: "Approve your own configuration" });
+  const own = panel(page).getByRole("region", { name: "Approve your own change to the Store" });
   // Sole operator off: another person must approve, and how to change that.
   await expect(own).toContainText(
-    "You made this change, so someone else who holds Owner access to this Store must approve it.",
+    "You made this change to the Store, so someone else who holds Owner access to this Store must approve it.",
   );
   await expect(own).toContainText("turn on Sole operator");
-  await expect(own.getByRole("button", { name: "Approve configuration on my own" })).toHaveCount(0);
+  await expect(own.getByRole("button", { name: "Approve this change on my own" })).toHaveCount(0);
   await expect(panel(page).getByRole("button", { name: "Approve this change" })).toHaveCount(0);
   // On, but someone else also holds Owner access here: named.
   state.soleOperator = {
@@ -976,7 +976,7 @@ test("the Owner approves their own configuration alone as sole operator, at 1440
   await expect(own).toContainText(
     "Sole operator is on, but Mia Chen also holds Owner access to this Store, so they must approve this.",
   );
-  await expect(own.getByRole("button", { name: "Approve configuration on my own" })).toHaveCount(0);
+  await expect(own.getByRole("button", { name: "Approve this change on my own" })).toHaveCount(0);
   // In effect: check, verify, confirm, approve alone; at every width.
   state.soleOperator = { status: "Effective", otherApprovers: [], verifiedUntil: null };
   for (const [width, height] of [
@@ -989,10 +989,10 @@ test("the Owner approves their own configuration alone as sole operator, at 1440
     await expect(own).toContainText(
       "you are the only person who holds Owner access to this Store (sole operator), so you may approve it yourself",
     );
-    await expect(own).toContainText("Every check above has passed.");
+    await expect(own).toContainText("Every check passed.");
     await expect(own).toContainText("It will be recorded as approved by you alone.");
     await expect(
-      own.getByRole("button", { name: "Approve configuration on my own" }),
+      own.getByRole("button", { name: "Approve this change on my own" }),
     ).toBeDisabled();
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
@@ -1015,9 +1015,9 @@ test("the Owner approves their own configuration alone as sole operator, at 1440
   await dialog.getByRole("button", { name: "Verify" }).click();
   await expect(dialog).toBeHidden();
   await expect(own).toContainText("Verified until");
-  await expect(own.getByRole("button", { name: "Approve configuration on my own" })).toBeDisabled();
-  await own.getByLabel("I checked this Store configuration and approve on my own").check();
-  await own.getByRole("button", { name: "Approve configuration on my own" }).click();
+  await expect(own.getByRole("button", { name: "Approve this change on my own" })).toBeDisabled();
+  await own.getByLabel("I checked this change to the Store and approve on my own").check();
+  await own.getByRole("button", { name: "Approve this change on my own" }).click();
   await expect(
     panel(page).getByRole("status").filter({ hasText: "Approved by you alone" }),
   ).toHaveText("Approved by you alone as sole operator, waiting to be published.");

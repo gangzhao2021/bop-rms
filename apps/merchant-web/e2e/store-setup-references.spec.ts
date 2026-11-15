@@ -541,3 +541,26 @@ test("@production Reference controls reflow at 390px and scope or CSRF denial ca
   expect(await records(page)).toHaveLength(1);
   expect(f.control.errors).toEqual([]);
 });
+test("@production b20: an address typed and not saved yet makes the language switch ask first", async ({
+  page,
+}) => {
+  const f = await install(page);
+  await open(page);
+  await addressStep(page);
+  const region = page.getByRole("region", { name: "Address configuration", exact: true });
+  await region.getByLabel("City", { exact: true }).fill("Synthetic locality");
+  const asked: string[] = [];
+  page.once("dialog", (dialog) => {
+    asked.push(dialog.message());
+    void dialog.dismiss();
+  });
+  await page.getByRole("button", { name: "切换到中文" }).click();
+  expect(asked).toEqual([
+    "What you typed here is not saved yet. Switching the language reloads the page and loses it. Switch anyway?",
+  ]);
+  // Kept: still in English, the typed value still there, nothing saved.
+  await expect(page.getByRole("button", { name: "切换到中文" })).toBeVisible();
+  await expect(region.getByLabel("City", { exact: true })).toHaveValue("Synthetic locality");
+  expect(f.control.referenceWrites).toHaveLength(0);
+  expect(f.control.errors).toEqual([]);
+});
