@@ -25,6 +25,12 @@ type TableBill = NonNullable<ReturnType<typeof parseTableBillBody>> & {
    * not a detail).
    */
   readonly rounds?: readonly OrderBillRound[];
+  /**
+   * v15 b19 (DEC-TAX-WHOLE-RECEIPT): on an Order's detail, what the dishes taken off its unpaid
+   * bill took off it — the bill with them less the bill now, to the cent (absent: none, an older
+   * server, or not a detail).
+   */
+  readonly removedMinor?: string;
 };
 export interface OrderBillRound {
   readonly orderBatchReference: string;
@@ -64,13 +70,19 @@ function parseTableBill(value: unknown, orderType: unknown): TableBill | null {
   if (
     value === null ||
     typeof value !== "object" ||
-    !(Object.hasOwn(value, "taxRoundingMinor") || Object.hasOwn(value, "rounds"))
+    !(
+      Object.hasOwn(value, "taxRoundingMinor") ||
+      Object.hasOwn(value, "rounds") ||
+      Object.hasOwn(value, "removedMinor")
+    )
   )
     return parseTableBillBody(value, orderType);
-  const { taxRoundingMinor, rounds, ...rest } = value as Record<string, unknown>;
+  const { taxRoundingMinor, rounds, removedMinor, ...rest } = value as Record<string, unknown>;
   if (
-    taxRoundingMinor !== undefined &&
-    (typeof taxRoundingMinor !== "string" || !/^-?[1-9][0-9]{0,5}$/u.test(taxRoundingMinor))
+    (taxRoundingMinor !== undefined &&
+      (typeof taxRoundingMinor !== "string" || !/^-?[1-9][0-9]{0,5}$/u.test(taxRoundingMinor))) ||
+    (removedMinor !== undefined &&
+      (typeof removedMinor !== "string" || !minorAmount.test(removedMinor)))
   )
     return fail();
   const body = parseTableBillBody(rest, orderType);
@@ -80,6 +92,7 @@ function parseTableBill(value: unknown, orderType: unknown): TableBill | null {
         ...body,
         ...(taxRoundingMinor === undefined ? {} : { taxRoundingMinor: taxRoundingMinor as string }),
         ...(rounds === undefined ? {} : { rounds: parseBillRounds(rounds) }),
+        ...(removedMinor === undefined ? {} : { removedMinor: removedMinor as string }),
       });
 }
 function parseTableBillBody(

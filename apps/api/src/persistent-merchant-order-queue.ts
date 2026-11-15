@@ -19,7 +19,6 @@ import {
   listStoreOrderAcceptanceHolds,
   listStoreOrderAutoAcceptanceFacts,
   listStoreUnfulfillablePaidOrders,
-  computeBillTaxRounding,
   listOrderItemPrices,
   listOrderBillOrders,
   listOrderDiningSessions,
@@ -67,6 +66,7 @@ import {
   listOrderOrdinaryRefundRequesters,
 } from "@rms/payment";
 import { createPostgresCurrentBrowserSessionSource } from "@bop/identity";
+import { orderBillWithRemoved } from "./merchant-order-bill-owed.js";
 import { createHash, randomBytes } from "node:crypto";
 import { readStaffDiningRoundPaymentPreparation } from "./staff-dining-round-payment-preparation.js";
 import { readCounterPaymentPreparation } from "./counter-payment-preparation.js";
@@ -717,6 +717,8 @@ export function createPersistentMerchantOrderQueue(options: {
             }
           >();
           const unpaidRemoved = new Map<string, string[]>();
+          /** v15 b19: an unpaid bill's dishes taken off, as what the bill went down by. */
+          const removedFromBill = new Map<string, bigint>();
           // WP-2423 item 8 ① segment 2: dishes a manager may comp or discount on an unpaid
           // pay-later round (started in the kitchen), and those comped or discounted.
           const compable = new Map<string, string[]>();
@@ -1410,48 +1412,20 @@ export function createPersistentMerchantOrderQueue(options: {
                     .filter((round) => String(round.orderReference) === order)
                     .map((round) => String(round.orderBatchReference)),
                 );
-                const billed = (
+                const priced = (
                   await listOrderItemPrices(businessTransaction, scoped, order)
-                ).filter(
-                  (price) =>
-                    sent.has(String(price.orderBatchReference)) &&
-                    !removed.has(String(price.orderItemReference)),
-                );
+                ).filter((price) => sent.has(String(price.orderBatchReference)));
                 // Owner 2026-11-03 walkthrough: the same figure as the table's own bill, with its
-                // tax worked out once over the whole bill (DEC-TAX-WHOLE-RECEIPT).
-                const owed =
-                  billed.reduce(
-                    (sum, price) =>
-                      sum +
-                      price.total.amountMinor -
-                      (reduced.get(String(price.orderItemReference))?.totalMinor ?? 0n),
-                    0n,
-                  ) +
-                  computeBillTaxRounding(
-                    [...sent].map((batch) => ({
-                      orderReference: order,
-                      orderBatchReference: batch,
-                      items: billed
-                        .filter((price) => String(price.orderBatchReference) === batch)
-                        .map((price) => {
-                          const reduction = reduced.get(String(price.orderItemReference));
-                          return {
-                            orderItemReference: String(price.orderItemReference),
-                            netMinor: price.subtotal.amountMinor - price.discountMinor,
-                            taxComponents: price.taxComponents,
-                            reduction:
-                              reduction === undefined
-                                ? null
-                                : {
-                                    netMinor: reduction.netMinor,
-                                    taxMinor: reduction.taxMinor,
-                                    taxRoundingMinor: reduction.taxRoundingMinor,
-                                  },
-                          };
-                        }),
-                    })),
-                    { carrierOrderReference: order },
-                  ).lines.reduce((sum, line) => sum + line.amountMinor, 0n);
+                // tax worked out once over the whole bill (DEC-TAX-WHOLE-RECEIPT). v15 b19: and the
+                // dishes taken off it, as what the bill went down by.
+                const { owedMinor: owed, removedMinor } = orderBillWithRemoved(
+                  order,
+                  [...sent],
+                  priced,
+                  reduced,
+                  removed,
+                );
+                if (removedMinor !== null) removedFromBill.set(order, removedMinor);
                 tableBills.set(order, {
                   totalMinor: owed.toString(),
                   ...(plan !== undefined && plan.mode !== "Whole" && parts.length > 0
@@ -2132,24 +2106,32 @@ export function createPersistentMerchantOrderQueue(options: {
                   ),
                   // DEC-DINE-IN-PAY-LATER: on the table's bill (owed), or what the table paid.
                   tableBill: ((bill) =>
-                    bill !== undefined &&
-                    billRounds.length > 0 &&
-                    item.orderReference === only?.orderReference
-                      ? {
-                          ...bill,
-                          ...(roundingShareMinor === 0n
-                            ? {}
-                            : { taxRoundingMinor: roundingShareMinor.toString() }),
-                          // v15 b15 (DEC-TAX-WHOLE-RECEIPT): this Order's rounds as the bill
-                          // charges them, in the order they were confirmed.
-                          rounds: billRounds.map((round) => ({
-                            orderBatchReference: round.orderBatchReference,
-                            subtotalMinor: round.subtotalMinor.toString(),
-                            taxMinor: round.taxMinor.toString(),
-                            totalMinor: round.totalMinor.toString(),
-                          })),
-                        }
-                      : (bill ?? null))(tableBills.get(item.orderReference)),
+                    withRemovedFromBill(
+                      bill,
+                      item.orderReference === only?.orderReference
+                        ? removedFromBill.get(item.orderReference)
+                        : undefined,
+                    ))(
+                    ((bill) =>
+                      bill !== undefined &&
+                      billRounds.length > 0 &&
+                      item.orderReference === only?.orderReference
+                        ? {
+                            ...bill,
+                            ...(roundingShareMinor === 0n
+                              ? {}
+                              : { taxRoundingMinor: roundingShareMinor.toString() }),
+                            // v15 b15 (DEC-TAX-WHOLE-RECEIPT): this Order's rounds as the bill
+                            // charges them, in the order they were confirmed.
+                            rounds: billRounds.map((round) => ({
+                              orderBatchReference: round.orderBatchReference,
+                              subtotalMinor: round.subtotalMinor.toString(),
+                              taxMinor: round.taxMinor.toString(),
+                              totalMinor: round.totalMinor.toString(),
+                            })),
+                          }
+                        : (bill ?? null))(tableBills.get(item.orderReference)),
+                  ),
                   ...(item.diningSessionReference !== null &&
                   guestStartedSessions.has(item.diningSessionReference)
                     ? { startedByGuest: true as const }
@@ -2191,4 +2173,15 @@ function transientReference(): string {
   const time = Date.now().toString(16).padStart(12, "0");
   const random = randomBytes(10).toString("hex");
   return `${time.slice(0, 8)}-${time.slice(8, 12)}-7${random.slice(0, 3)}-${(8 + (Number.parseInt(random.slice(3, 4), 16) % 4)).toString(16)}${random.slice(4, 7)}-${random.slice(7, 19)}`;
+}
+/**
+ * v15 b19 (DEC-TAX-WHOLE-RECEIPT): on an Order's detail, what its dishes taken off the unpaid bill
+ * took off it: the bill with them less the bill now (absent: none taken off, or not a detail).
+ */
+function withRemovedFromBill<Bill extends object>(
+  bill: Bill | null,
+  removedMinor: bigint | undefined,
+): Bill | (Bill & { removedMinor: string }) | null {
+  if (bill === null || removedMinor === undefined || removedMinor < 0n) return bill;
+  return { ...bill, removedMinor: removedMinor.toString() };
 }

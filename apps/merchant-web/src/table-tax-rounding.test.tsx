@@ -156,6 +156,48 @@ describe("v15 b15: an Order on a pay-at-end table reads the bill's rounds, Tax a
       round(3, "1250", "162", "1412"),
     ],
   };
+  // v15 b19 live (TM2 L17 LTT A): every round taken off read "Taken off the bill · not charged
+  // $42.39" (3 × $14.13) while the bill it replaced was $42.38. The server says what the bill went
+  // down by; an older server's answer still adds up the dishes' own prices.
+  it("b19: dishes taken off the bill come to the bill they were on, to the cent", () => {
+    const all = new Set([ref(201), ref(202), ref(203)]);
+    const off = (removedFromBillMinor?: string) =>
+      renderToStaticMarkup(
+        <CurrentOrderLines
+          lines={lines}
+          removedItems={all}
+          removedFromBillMinor={removedFromBillMinor}
+        />,
+      ).match(/<dt>Taken off the bill · not charged<\/dt><dd>([^<]+)<\/dd>/u)?.[1];
+    expect(off("4238")).toBe("$42.38");
+    expect(off()).toBe("$42.39");
+    const parsed = parseCurrentOrderDetail(
+      ((detail) => ({
+        ...detail,
+        order: {
+          ...(detail.order as Record<string, unknown>),
+          orderType: "DineIn",
+          tableBill: { totalMinor: "0", paid: null, removedMinor: "4238" },
+        },
+      }))(currentOrderDetailFixture()),
+      orderId,
+    );
+    expect(parsed.order.tableBill?.removedMinor).toBe("4238");
+    for (const broken of ["-1", "1.5", 4238])
+      expect(() =>
+        parseCurrentOrderDetail(
+          ((detail) => ({
+            ...detail,
+            order: {
+              ...(detail.order as Record<string, unknown>),
+              orderType: "DineIn",
+              tableBill: { totalMinor: "0", paid: null, removedMinor: broken },
+            },
+          }))(currentOrderDetailFixture()),
+          orderId,
+        ),
+      ).toThrow();
+  });
   it("says each round, the Tax and the Total as the bill charges them, with no second total", () => {
     const html = render(orderBill(order(unpaid)));
     expect(amounts(html)).toEqual(["$14.13", "$14.13", "$14.12"]);

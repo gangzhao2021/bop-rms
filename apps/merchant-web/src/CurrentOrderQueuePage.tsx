@@ -321,6 +321,7 @@ export function CurrentOrderLines({
   unpaidCancelledBatches,
   failedPaymentBatches,
   removedItems,
+  removedFromBillMinor,
   waitingBatches,
   refundRows,
   rounds,
@@ -352,6 +353,12 @@ export function CurrentOrderLines({
   /** DEC-DINE-IN-PAY-LATER: dishes taken off the bill before the table paid (never charged). */
   readonly removedItems?: ReadonlySet<string> | undefined;
   /**
+   * v15 b19 (DEC-TAX-WHOLE-RECEIPT): what those dishes took off the bill, from the server (the
+   * bill with them less the bill now), so it equals the bill they were on to the cent. Absent:
+   * their own prices added up (an older server).
+   */
+  readonly removedFromBillMinor?: string | undefined;
+  /**
    * 46940b76 L2: every refund on the order (items, whole order or round cancellations, others),
    * from orderRefundRows. Absent: only the cancelled items' refund is listed.
    */
@@ -369,7 +376,7 @@ export function CurrentOrderLines({
     item.cancellation === null && unpaidCancelledBatches?.has(item.orderBatchReference) === true;
   const removedLine = (item: CurrentOrderDetail["lines"]["items"][number]) =>
     removedItems?.has(item.orderItemReference) === true;
-  const removed = removedItemsTotal(lines, removedItems);
+  const removed = removedItemsTotal(lines, removedItems, removedFromBillMinor ?? null);
   const waitingLine = (item: CurrentOrderDetail["lines"]["items"][number]) =>
     item.cancellation === null &&
     !removedLine(item) &&
@@ -940,13 +947,21 @@ export function chargedTotals(
 export function removedItemsTotal(
   lines: CurrentOrderDetail["lines"],
   items: ReadonlySet<string> | undefined,
+  /**
+   * v15 b19 (DEC-TAX-WHOLE-RECEIPT): what the bill went down by, from the server, so the amount
+   * equals the bill it replaced to the cent (null: the dishes' own prices added up).
+   */
+  billMinor: string | null = null,
 ) {
   if (items === undefined || items.size === 0) return null;
   const currencyCode = lines.totals.total.currencyCode;
   const removed = lines.items.filter((item) => items.has(item.orderItemReference));
   if (removed.length === 0 || removed.some((item) => item.total.currencyCode !== currencyCode))
     return null;
-  const amount = removed.reduce((sum, item) => sum + BigInt(item.total.amountMinor), 0n);
+  const amount =
+    billMinor !== null
+      ? BigInt(billMinor)
+      : removed.reduce((sum, item) => sum + BigInt(item.total.amountMinor), 0n);
   return Object.freeze({
     cancelled: Object.freeze({ amountMinor: amount.toString(), currencyCode }),
     remaining: Object.freeze({
@@ -1944,6 +1959,7 @@ function QueuedOrderLines({
         unpaidCancelledBatches={unpaidCancelledBatches(state.detail.view)}
         failedPaymentBatches={failedPaymentBatches(state.detail.view)}
         removedItems={removedUnpaidItems(state.detail.view)}
+        removedFromBillMinor={state.detail.order.tableBill?.removedMinor}
         waitingBatches={waitingForStaffBatches(state.detail.view)}
         refundRows={orderRefundRows(
           state.detail.order,
@@ -4797,6 +4813,7 @@ export function CurrentOrderQueuePage({
                             unpaidCancelledBatches={unpaidCancelledBatches(detail.view)}
                             failedPaymentBatches={failedPaymentBatches(detail.view)}
                             removedItems={removedUnpaidItems(detail.view)}
+                            removedFromBillMinor={detail.order.tableBill?.removedMinor}
                             waitingBatches={waitingForStaffBatches(detail.view)}
                             refundRows={orderRefundRows(
                               detail.order,
