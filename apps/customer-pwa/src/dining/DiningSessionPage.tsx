@@ -685,9 +685,7 @@ function TableSummary({ view }: { readonly view: DiningSessionView }) {
           ? ""
           : payLater
             ? t("Item prices are before tax. ")
-            : t(
-                "Item prices are before tax. Rounds that were cancelled or never paid are not included. ",
-              )}
+            : t("Item prices are before tax. Dishes refunded or never charged are not included. ")}
         {payLater && summary.splitParts !== undefined && summary.splitParts.count === null
           ? t(
               "The table is paying by dish; {paid} paid so far. Each payment has its own tip, and cash is rounded to the nearest 5 cents.",
