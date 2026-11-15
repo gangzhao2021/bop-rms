@@ -77,7 +77,8 @@ it("v15 b17: a ticked dish shows what really comes off it, so the ticked dishes 
   ]);
   expect(compChoiceMoney(noodles(1), true, preview)).toBe("−$14.13");
   expect(compChoiceMoney(noodles(2), true, preview)).toBe("−$14.12");
-  // Not ticked, or no preview back yet: the dish's own price.
-  expect(compChoiceMoney(noodles(2), false, preview)).toBe("$14.13");
-  expect(compChoiceMoney(noodles(2), true, null)).toBe("$14.13");
+  // Not ticked, or no preview back yet: the dish's own price, said as its price (v15 b19: comping
+  // it alone can take a cent less, so a bare amount would read as what comping takes off).
+  expect(compChoiceMoney(noodles(2), false, preview)).toBe("price $14.13");
+  expect(compChoiceMoney(noodles(2), true, null)).toBe("price $14.13");
 });

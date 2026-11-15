@@ -522,9 +522,11 @@ for (const language of ["en", "zh-Hans"] as const)
     await details.getByRole("button", { name: title }).click();
     const group = details.getByRole("group", { name: title });
     const choices = group.locator(".pay-later-remove__lines label");
+    // v15 b19: an unticked dish's own price is said as its price, never as what comping it takes.
+    const price = zh ? "价格 $14.13" : "price $14.13";
     await expect(choices).toHaveText([
-      "1 × Synthetic beef noodles · $14.13",
-      "1 × Synthetic beef noodles · $14.13",
+      `1 × Synthetic beef noodles · ${price}`,
+      `1 × Synthetic beef noodles · ${price}`,
     ]);
     await choices.nth(0).getByRole("checkbox").check();
     await choices.nth(1).getByRole("checkbox").check();
@@ -540,7 +542,7 @@ for (const language of ["en", "zh-Hans"] as const)
     await choices.nth(1).getByRole("checkbox").uncheck();
     await expect(choices).toHaveText([
       "1 × Synthetic beef noodles · −$14.13",
-      "1 × Synthetic beef noodles · $14.13",
+      `1 × Synthetic beef noodles · ${price}`,
     ]);
     await expect(
       group.getByRole("button", { name: zh ? "免单 $14.13" : "Comp $14.13" }),

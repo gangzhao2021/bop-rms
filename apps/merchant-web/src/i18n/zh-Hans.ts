@@ -6695,6 +6695,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "We couldn't work out the amount. Check the connection, then try again.":
     "没能算出减多少。请检查网络，然后重试。",
   "Comp {amount}": "免单 {amount}",
+  "price {amount}": "价格 {amount}",
   "Take {amount} off": "减 {amount}",
   Comped: "已免单",
   "{percent}% off": "减 {percent}%",

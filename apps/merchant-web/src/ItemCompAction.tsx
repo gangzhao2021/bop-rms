@@ -105,7 +105,9 @@ export function compAmountMinor(
 /**
  * v15 b17 (DEC-COMP-BILL-CENT): what a dish's choice shows. A ticked dish shows what will really
  * come off it, from the server's preview (the whole bill's tax cent included), so the ticked dishes
- * add up to the button; any other dish, or one whose preview is not back yet, shows its own price.
+ * add up to the button; any other dish, or one whose preview is not back yet, shows its own price,
+ * said as its price (v15 b19): with tax worked out on the whole bill, comping it can take a cent
+ * less, so the bare amount must not read as what comping it takes off.
  */
 export function compChoiceMoney(
   line: Pick<CurrentOrderLine, "orderItemReference" | "total">,
@@ -114,7 +116,7 @@ export function compChoiceMoney(
 ): string {
   const off = ticked ? previewLines?.get(line.orderItemReference) : undefined;
   return off === undefined
-    ? orderMoney(line.total)
+    ? t("price {amount}", { amount: orderMoney(line.total) })
     : "−" + orderMoney({ amountMinor: off, currencyCode: line.total.currencyCode });
 }
 
