@@ -5,6 +5,7 @@ import { customerFailureCode } from "./customer-failure-diagnostic.js";
 import { markRequestFailure, markRequestRetryLater } from "./request-correlation.js";
 import { customerDisplayLocale } from "./customer-display-locale.js";
 import { logGuestFailure } from "./guest-failure-log.js";
+import { noteRequestRealFault, requestClientLeft } from "./request-acquire-budget.js";
 import {
   DiningOrderStillProcessingError,
   DiningSessionReadBusyError,
@@ -273,9 +274,19 @@ export class CustomerDiningSessionHandler {
             ? 404
             : 503;
         if (status === 503) {
-          markRequestFailure(request, customerFailureCode(error));
-          // v15 b17 review: an outage or a real contradiction says why, at failure level.
-          logGuestFailure("CUSTOMER_DINING_SESSION_READ_FAILED", error);
+          // v15 b20 (money-display-followups): a phone that went to another page before its
+          // table read answered cut that read, so it failed (its connection refused), beside a
+          // 499 HTTP_CLIENT_CLOSED: nobody waits for the answer, so it is information (level 30,
+          // its own event) and no dependency failure, as the cart read does. A real fault it met
+          // stays a level-50 failure, and so does any failure while the phone still waits.
+          const faulted = noteRequestRealFault(error);
+          if (!faulted && requestClientLeft())
+            logGuestFailure("CUSTOMER_DINING_SESSION_READ_CLIENT_CLOSED", error, undefined, 30);
+          else {
+            markRequestFailure(request, customerFailureCode(error));
+            // v15 b17 review: an outage or a real contradiction says why, at failure level.
+            logGuestFailure("CUSTOMER_DINING_SESSION_READ_FAILED", error);
+          }
         }
         reject(response, status);
       }

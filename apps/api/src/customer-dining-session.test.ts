@@ -68,8 +68,9 @@ async function setup(enabled = true) {
     "http://127.0.0.1:" + (server.address() as AddressInfo).port + "/api/v1/dine-in/session";
   return {
     read,
-    send: (headers: Record<string, string> = {}, query = "") =>
+    send: (headers: Record<string, string> = {}, query = "", signal?: AbortSignal) =>
       fetch(url + query, {
+        ...(signal === undefined ? {} : { signal }),
         headers: {
           "sec-fetch-site": "same-origin",
           cookie: "__Host-bop-guest=" + "s".repeat(43),
@@ -366,6 +367,94 @@ it("v15 b17 review: an unavailable table read answers 503 and logs one level-50 
     .filter((line) => line.includes("CUSTOMER_DINING_SESSION_READ_FAILED"))
     .map((line) => JSON.parse(line) as Record<string, unknown>)[0];
   expect(failure).toMatchObject({ level: 50, code: "ORDER_STATUS_DEPENDENCY_UNAVAILABLE" });
+});
+
+// v15 b20 (money-display-followups): the phone went on to another page before its table read
+// answered (499 HTTP_CLIENT_CLOSED beside it); the read, cut, failed: information, not a failure.
+it("v15 b20: a table read the phone left before it answered is logged at level 30, not as a failure", async () => {
+  const f = await setup();
+  const lines: string[] = [];
+  const write = vi
+    .spyOn(process.stderr, "write")
+    .mockImplementation((line: string | Uint8Array) => {
+      lines.push(String(line));
+      return true;
+    });
+  const outage = () =>
+    Object.assign(new OrderStatusProjectionError("ORDER_STATUS_DEPENDENCY_UNAVAILABLE"), {
+      cause: Object.assign(new Error("GUEST_SESSION_UNAVAILABLE"), {
+        code: "GUEST_SESSION_UNAVAILABLE",
+        cause: Object.assign(new Error("TENANT_DATABASE_TRANSACTION_FAILED"), {
+          code: "TENANT_DATABASE_TRANSACTION_FAILED",
+        }),
+      }),
+    });
+  try {
+    // The phone leaves (its connection closes), then the cut read fails.
+    let fail: (error: unknown) => void = () => undefined;
+    const started = new Promise<void>((resolve) => {
+      f.read.mockImplementationOnce(
+        () =>
+          new Promise((_resolve, reject) => {
+            fail = reject;
+            resolve();
+          }),
+      );
+    });
+    const abort = new AbortController();
+    const answered = f.send({}, "", abort.signal).catch(() => "closed");
+    await started;
+    abort.abort();
+    expect(await answered).toBe("closed");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    fail(outage());
+    await vi.waitFor(() =>
+      expect(lines.some((line) => line.includes("CUSTOMER_DINING_SESSION_READ"))).toBe(true),
+    );
+    // The same outage while the phone still waits stays a failure (level 50).
+    f.read.mockRejectedValueOnce(outage());
+    expect((await f.send()).status).toBe(503);
+    // A real database refusal (a missing grant) the left read met stays a failure too.
+    let failGrant: (error: unknown) => void = () => undefined;
+    const grantStarted = new Promise<void>((resolve) => {
+      f.read.mockImplementationOnce(
+        () =>
+          new Promise((_resolve, reject) => {
+            failGrant = reject;
+            resolve();
+          }),
+      );
+    });
+    const grantAbort = new AbortController();
+    const grantAnswered = f.send({}, "", grantAbort.signal).catch(() => "closed");
+    await grantStarted;
+    grantAbort.abort();
+    await grantAnswered;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    failGrant(
+      Object.assign(new OrderStatusProjectionError("ORDER_STATUS_DEPENDENCY_UNAVAILABLE"), {
+        cause: Object.assign(new Error("permission denied"), { severity: "ERROR", code: "42501" }),
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(lines.filter((line) => line.includes("CUSTOMER_DINING_SESSION_READ"))).toHaveLength(3),
+    );
+  } finally {
+    write.mockRestore();
+  }
+  const read = lines
+    .filter((line) => line.includes("CUSTOMER_DINING_SESSION_READ"))
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+  expect(read).toMatchObject([
+    {
+      level: 30,
+      event: "CUSTOMER_DINING_SESSION_READ_CLIENT_CLOSED",
+      code: "ORDER_STATUS_DEPENDENCY_UNAVAILABLE",
+      causes: ["GUEST_SESSION_UNAVAILABLE", "TENANT_DATABASE_TRANSACTION_FAILED"],
+    },
+    { level: 50, event: "CUSTOMER_DINING_SESSION_READ_FAILED" },
+    { level: 50, event: "CUSTOMER_DINING_SESSION_READ_FAILED" },
+  ]);
 });
 
 it("DEC-DINE-IN-PAY-LATER: a paid table's summary carries its tip and cash rounding", async () => {
