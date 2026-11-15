@@ -1094,6 +1094,40 @@ describe("WP-2423 D5 item prices before tax at the table", () => {
     ).not.toHaveProperty("teaCharge");
   });
 
+  it("v15 b19: a round the store refused and refunded is not in Total ordered; the refund is its own line", () => {
+    // Round 1 (Ramen, paid $30.00) refused and refunded; round 2 (Gyoza $9.00) waits for payment.
+    const view = composeCustomerDiningSession(
+      facts({
+        ...threeRounds,
+        batches: threeRounds.batches.slice(0, 2),
+        itemPrices: prices,
+        unpaidCancellations: new Set(),
+        paymentOutcomes: new Map([[id(30), "Succeeded" as const]]),
+        delivery: new Map([
+          [id(31), { phase: "Cancelled" as const, deliveredQuantity: 0 }],
+          [id(41), { phase: "Submitted" as const, deliveredQuantity: 0 }],
+        ]),
+        staffCancellations: new Map([
+          [id(30), { reason: "CustomerRequest", refundedMinor: 3000n, pendingMinor: 0n }],
+        ]),
+        refunds: { confirmedMinor: 3000n, pendingMinor: 0n },
+      }),
+    );
+    expect(view.rounds.map((round) => [round.status, round.payment])).toEqual([
+      ["StoreCancelled", "Refunded"],
+      ["AwaitingPayment", "Awaiting"],
+    ]);
+    expect(view.summary?.ordered).toEqual({
+      subtotal: cad(796n),
+      tax: cad(104n),
+      total: cad(900n),
+    });
+    // Paid less refunded, plus what is waiting, is what the table has on order.
+    expect(view.summary?.paid).toEqual(cad(3000n));
+    expect(view.summary?.refunded).toEqual(cad(3000n));
+    expect(view.summary?.due).toEqual(cad(900n));
+  });
+
   it("never mixes priced and unpriced items", () => {
     const partial = new Map([...prices].filter(([reference]) => reference !== id(41)));
     const view = composeCustomerDiningSession(facts({ ...threeRounds, itemPrices: partial }));

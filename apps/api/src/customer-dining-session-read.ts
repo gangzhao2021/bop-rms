@@ -629,8 +629,10 @@ export function composeCustomerDiningSession(
     );
     const tax = items.reduce((sum, item) => sum + (item.price?.tax.amountMinor ?? 0n), 0n);
     const waiting = order.heldRounds?.get(reference) ?? null;
-    if (!unpaidCancelled && waiting === null) {
-      const charged = items.filter((item) => !item.notCharged);
+    // v15 b19: what the table has on order: a round the store refused (and refunded) and a dish
+    // taken off are not on it; the refund is its own line, so the total matches what is paid.
+    if (!unpaidCancelled && waiting === null && staff === undefined) {
+      const charged = items.filter((item) => !item.cancelled);
       ordered.subtotal += charged.reduce(
         (sum, item) => sum + (item.price?.subtotal.amountMinor ?? 0n),
         0n,
