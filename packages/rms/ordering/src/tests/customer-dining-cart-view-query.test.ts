@@ -486,30 +486,68 @@ describe("safe shared Dining Cart display", () => {
       code: "CART_DEPENDENCY_UNAVAILABLE",
     });
   });
-  it.each(["cart", "locale", "time", "missing"])(
-    "denies changed %s after dependencies",
-    async (key) => {
-      const f = fixture();
+  // v15 b19 (quiet table, add then reload): the phone's own add committed between the two reads of
+  // the cart, so the second found it a version on and the read answered "unavailable" with no
+  // cause; the read was retried and a level-40 line written. The cart is read again from the newer
+  // version instead: never two versions mixed, and never "unavailable" for a cart that moved on.
+  it("v15 b19: a cart that moved on while being read is read again from its newer version", async () => {
+    const f = fixture();
+    const next = snapshot();
+    const moved = { ...next, cart: parseCartAggregate({ ...next.cart, aggregateVersion: 2 }) };
+    f.read.mockResolvedValueOnce(snapshot()).mockResolvedValue(moved);
+    const view = await f.query.read(request);
+    expect(view?.cart.version).toBe(2);
+    // First read, the read that found it moved on (the new first), and its check.
+    expect(f.read).toHaveBeenCalledTimes(3);
+    expect(f.describeMany).toHaveBeenCalledTimes(2);
+  });
+  it("v15 b19: a cart that keeps moving on while being read answers unavailable, a few reads at most", async () => {
+    const f = fixture();
+    let version = 0;
+    f.read.mockImplementation(async () => {
+      version += 1;
       const next = snapshot();
-      f.read.mockResolvedValueOnce(snapshot()).mockResolvedValue(
-        key === "missing"
-          ? null
-          : {
-              ...next,
-              cart:
-                key === "cart"
-                  ? parseCartAggregate({ ...next.cart, aggregateVersion: 2 })
-                  : next.cart,
-              context: key === "locale" ? { ...next.context, locale: "fr-CA" } : next.context,
-              observedAt:
-                key === "time" ? parseOrderingInstant("2026-09-08T12:00:59.000Z") : next.observedAt,
-            },
-      );
-      await expect(f.query.read(request)).rejects.toMatchObject({
-        code: "CART_DEPENDENCY_UNAVAILABLE",
-      });
-    },
-  );
+      return { ...next, cart: parseCartAggregate({ ...next.cart, aggregateVersion: version }) };
+    });
+    await expect(f.query.read(request)).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
+    expect(f.read).toHaveBeenCalledTimes(4);
+  });
+  it("v15 b19: an older version on the second read is still refused", async () => {
+    const f = fixture();
+    const next = snapshot();
+    f.read
+      .mockResolvedValueOnce({
+        ...next,
+        cart: parseCartAggregate({ ...next.cart, aggregateVersion: 3 }),
+      })
+      .mockResolvedValue(snapshot());
+    await expect(f.query.read(request)).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
+  });
+  it.each(["locale", "time", "missing"])("denies changed %s after dependencies", async (key) => {
+    const f = fixture();
+    const next = snapshot();
+    f.read.mockResolvedValueOnce(snapshot()).mockResolvedValue(
+      key === "missing"
+        ? null
+        : {
+            ...next,
+            cart:
+              key === "cart"
+                ? parseCartAggregate({ ...next.cart, aggregateVersion: 2 })
+                : next.cart,
+            context: key === "locale" ? { ...next.context, locale: "fr-CA" } : next.context,
+            observedAt:
+              key === "time" ? parseOrderingInstant("2026-09-08T12:00:59.000Z") : next.observedAt,
+          },
+    );
+    await expect(f.query.read(request)).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
+  });
   it("reports effective expiry at the final authorized observation", async () => {
     const f = fixture();
     f.read.mockResolvedValueOnce(snapshot()).mockResolvedValue({

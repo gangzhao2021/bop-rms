@@ -353,6 +353,8 @@ function viewer(value: unknown): DiningCartViewer {
 function unavailable(): never {
   throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
 }
+/** v15 b19: how many times a cart that moved on while being read is read again from its newer version. */
+export const cartMovedOnRereads = 2;
 /**
  * WP-2423 (rush-logging-and-entry review): an owner answered that what the cart shows can't be had
  * now (the Store profile, a dish's name). Its answer has no other fields, so reading it as a full
@@ -476,390 +478,408 @@ function createViewQuery(ports: ViewPorts, mode: "Pickup" | "DineIn") {
         }
       };
       try {
-        const loaded = await read();
-        if (loaded === null) return null;
-        const first = snapshot(loaded, mode);
-        const cart = first.cart;
-        const requests = cart.items.map((item) => {
-          const evidence = item.catalogSelectionEvidence;
-          if (evidence === null) return unavailable();
-          return {
-            brandReference: cart.brandReference,
-            storeReference: cart.storeReference,
-            menuVersionReference: evidence.menuVersionReference,
-            productVersionReference: evidence.productVersionReference,
-            sellableReference: item.sellableReference,
-            channelCode: evidence.catalogChannelCode,
-            orderTypeCode: evidence.catalogOrderTypeCode,
-            ruleEvidence: evidence.ruleEvidence,
-            optionReferences: item.optionSelections.map((option) => option.optionReference),
-            locale: nameLocale ?? first.storeRequest.requestedLocale,
-          };
-        });
-        // Sequential: owner ports may share one caller transaction (no concurrent use of a client).
-        const storeResult = await ports.stores.getPublicStore(first.storeRequest);
-        const descriptions = await ports.catalog.describeMany(requests);
-        const quoteResult = await ports.quotes.loadLatest({
-          cartReference: cart.cartReference,
-          cartVersion: cart.aggregateVersion,
-          observedAt: first.observedAt,
-        });
-        if (answerStatus(storeResult) !== "Available")
-          return ownerAnswered("PUBLIC_STORE_UNAVAILABLE");
-        const store = closed(storeResult, ["status", "profile"]);
-        if (store.status !== "Available") return unavailable();
-        const profile = closed(store.profile, [
-          "profileReference",
-          "profileVersion",
-          "releaseReference",
-          "contentDigest",
-          "defaultLocale",
-          "selectedLocale",
-          "currencyCode",
-          "timeZone",
-          "brandDisplayName",
-          "storeDisplayName",
-          "address",
-          "businessPhone",
-          "website",
-          "logoAssetVersionReference",
-        ]);
-        if (profile.currencyCode !== "CAD") return unavailable();
-        const context = Object.freeze({
-          brandName: text(profile.brandDisplayName),
-          storeName: text(profile.storeDisplayName),
-        });
-        if (!Array.isArray(descriptions) || descriptions.length !== cart.items.length)
-          return unavailable();
-        // WP-2423 (guest-cart-503): a line a stable Catalog fact says can't be sold now is marked
-        // before anyone taps 下单, so it can be removed. A listing in progress marks nothing.
-        let marks: readonly (string | null)[] = cart.items.map(() => null);
-        if (ports.availability !== undefined && cart.items.length > 0) {
-          try {
-            const standings = await ports.availability.explainMany(
-              cart.items.map((item) => ({
-                brandReference: cart.brandReference as never,
-                storeReference: cart.storeReference as never,
-                sourceChannel: cart.sourceChannel,
-                orderType: cart.orderType,
-                sellableReference: item.sellableReference as never,
-                optionSelections: item.optionSelections as never,
-                observedAt: first.observedAt as never,
-              })),
-            );
-            if (Array.isArray(standings) && standings.length === cart.items.length)
-              marks = standings.map((standing) => {
-                const reason = cartItemUnavailableReason(standing);
-                return reason === null
-                  ? null
-                  : reason === "OptionsChanged"
-                    ? "ITEM_OPTIONS_CHANGED"
-                    : "ITEM_UNAVAILABLE";
+        let loaded = await read();
+        // v15 b19: a phone at the table added a dish (or another phone did) between the two reads of
+        // the cart, so the second read found it a version on. Nothing failed: the cart is read again
+        // from the newer version, a few times at most, never answered "unavailable".
+        for (let attempt = 0; ; attempt += 1) {
+          if (loaded === null) return null;
+          const first = snapshot(loaded, mode);
+          const cart = first.cart;
+          const requests = cart.items.map((item) => {
+            const evidence = item.catalogSelectionEvidence;
+            if (evidence === null) return unavailable();
+            return {
+              brandReference: cart.brandReference,
+              storeReference: cart.storeReference,
+              menuVersionReference: evidence.menuVersionReference,
+              productVersionReference: evidence.productVersionReference,
+              sellableReference: item.sellableReference,
+              channelCode: evidence.catalogChannelCode,
+              orderTypeCode: evidence.catalogOrderTypeCode,
+              ruleEvidence: evidence.ruleEvidence,
+              optionReferences: item.optionSelections.map((option) => option.optionReference),
+              locale: nameLocale ?? first.storeRequest.requestedLocale,
+            };
+          });
+          // Sequential: owner ports may share one caller transaction (no concurrent use of a client).
+          const storeResult = await ports.stores.getPublicStore(first.storeRequest);
+          const descriptions = await ports.catalog.describeMany(requests);
+          const quoteResult = await ports.quotes.loadLatest({
+            cartReference: cart.cartReference,
+            cartVersion: cart.aggregateVersion,
+            observedAt: first.observedAt,
+          });
+          if (answerStatus(storeResult) !== "Available")
+            return ownerAnswered("PUBLIC_STORE_UNAVAILABLE");
+          const store = closed(storeResult, ["status", "profile"]);
+          if (store.status !== "Available") return unavailable();
+          const profile = closed(store.profile, [
+            "profileReference",
+            "profileVersion",
+            "releaseReference",
+            "contentDigest",
+            "defaultLocale",
+            "selectedLocale",
+            "currencyCode",
+            "timeZone",
+            "brandDisplayName",
+            "storeDisplayName",
+            "address",
+            "businessPhone",
+            "website",
+            "logoAssetVersionReference",
+          ]);
+          if (profile.currencyCode !== "CAD") return unavailable();
+          const context = Object.freeze({
+            brandName: text(profile.brandDisplayName),
+            storeName: text(profile.storeDisplayName),
+          });
+          if (!Array.isArray(descriptions) || descriptions.length !== cart.items.length)
+            return unavailable();
+          // WP-2423 (guest-cart-503): a line a stable Catalog fact says can't be sold now is marked
+          // before anyone taps 下单, so it can be removed. A listing in progress marks nothing.
+          let marks: readonly (string | null)[] = cart.items.map(() => null);
+          if (ports.availability !== undefined && cart.items.length > 0) {
+            try {
+              const standings = await ports.availability.explainMany(
+                cart.items.map((item) => ({
+                  brandReference: cart.brandReference as never,
+                  storeReference: cart.storeReference as never,
+                  sourceChannel: cart.sourceChannel,
+                  orderType: cart.orderType,
+                  sellableReference: item.sellableReference as never,
+                  optionSelections: item.optionSelections as never,
+                  observedAt: first.observedAt as never,
+                })),
+              );
+              if (Array.isArray(standings) && standings.length === cart.items.length)
+                marks = standings.map((standing) => {
+                  const reason = cartItemUnavailableReason(standing);
+                  return reason === null
+                    ? null
+                    : reason === "OptionsChanged"
+                      ? "ITEM_OPTIONS_CHANGED"
+                      : "ITEM_UNAVAILABLE";
+                });
+            } catch {
+              // Fail-open: the cart is still shown; the quote names the line if it is refused.
+            }
+          }
+          // WP-2423 (same-table-ordering): other phones' lines whose phone has left the table.
+          const gone = new Set<string>();
+          const others = [
+            ...new Set(
+              cart.items
+                .map((item) => item.addedByParticipantReference)
+                .filter(
+                  (participant): participant is NonNullable<typeof participant> =>
+                    participant !== null &&
+                    first.viewer !== null &&
+                    participant !== first.viewer.participantReference,
+                )
+                .map(String),
+            ),
+          ];
+          if (
+            ports.adders !== undefined &&
+            others.length > 0 &&
+            cart.diningSessionReference !== null
+          ) {
+            try {
+              const standings = await ports.adders.standing({
+                diningSessionReference: String(cart.diningSessionReference),
+                participantReferences: Object.freeze(others),
+                observedAt: first.observedAt,
+                // Polled every few seconds by every phone: recorded facts only, never a binding
+                // check per phone (the remove command runs the full check).
+                check: "Recorded",
               });
-          } catch {
-            // Fail-open: the cart is still shown; the quote names the line if it is refused.
-          }
-        }
-        // WP-2423 (same-table-ordering): other phones' lines whose phone has left the table.
-        const gone = new Set<string>();
-        const others = [
-          ...new Set(
-            cart.items
-              .map((item) => item.addedByParticipantReference)
-              .filter(
-                (participant): participant is NonNullable<typeof participant> =>
-                  participant !== null &&
-                  first.viewer !== null &&
-                  participant !== first.viewer.participantReference,
-              )
-              .map(String),
-          ),
-        ];
-        if (
-          ports.adders !== undefined &&
-          others.length > 0 &&
-          cart.diningSessionReference !== null
-        ) {
-          try {
-            const standings = await ports.adders.standing({
-              diningSessionReference: String(cart.diningSessionReference),
-              participantReferences: Object.freeze(others),
-              observedAt: first.observedAt,
-              // Polled every few seconds by every phone: recorded facts only, never a binding
-              // check per phone (the remove command runs the full check).
-              check: "Recorded",
-            });
-            if (Array.isArray(standings))
-              for (const standing of standings)
-                if (standing.standing === "Gone" && others.includes(standing.participantReference))
-                  gone.add(standing.participantReference);
-          } catch {
-            // Fail-open: no line is marked; the remove command checks again at its own instant.
-          }
-        }
-        // WP-2423 (same-table-ordering): rounds this table Cart sent lately (fail-open: absent).
-        let recentRounds: readonly CustomerCartRecentRound[] | undefined;
-        if (mode === "DineIn" && ports.rounds !== undefined && first.viewer !== null) {
-          try {
-            const rounds = await ports.rounds.recent({
-              cartReference: cart.cartReference,
-              observedAt: first.observedAt,
-            });
-            if (Array.isArray(rounds) && rounds.length <= 5)
-              recentRounds = Object.freeze(
-                rounds.map((round) => {
+              if (Array.isArray(standings))
+                for (const standing of standings)
                   if (
-                    !Number.isSafeInteger(round.roundNumber) ||
-                    round.roundNumber < 1 ||
-                    !Array.isArray(round.cartItemReferences) ||
-                    !roundPaymentStates.has(round.paymentState)
+                    standing.standing === "Gone" &&
+                    others.includes(standing.participantReference)
                   )
-                    throw new Error("bad round");
-                  return Object.freeze({
-                    roundNumber: round.roundNumber,
-                    sentAt: parseOrderingInstant(round.sentAt),
-                    // The same phone at the table, even on a later session of it; the
-                    // session itself only when the participant isn't recorded.
-                    sentByThisPhone:
-                      round.participantReference !== undefined &&
-                      round.participantReference !== null
-                        ? parseOrderingReference(round.participantReference) ===
-                          first.viewer?.participantReference
-                        : parseOrderingReference(round.guestSessionReference) ===
-                          first.viewer?.guestSessionReference,
-                    cartItemReferences: Object.freeze(
-                      round.cartItemReferences.map((reference: string) =>
-                        String(parseOrderingReference(reference)),
-                      ),
-                    ),
-                    paymentState: round.paymentState,
-                    enteredByStaff: round.enteredByStaff === true,
-                    withThisPhoneDishes:
-                      round.adderParticipantReferences === undefined
-                        ? true
-                        : round.adderParticipantReferences.some(
-                            (reference: string) =>
-                              parseOrderingReference(reference) ===
-                              first.viewer?.participantReference,
-                          ),
-                  });
-                }),
-              );
-          } catch {
-            recentRounds = undefined;
+                    gone.add(standing.participantReference);
+            } catch {
+              // Fail-open: no line is marked; the remove command checks again at its own instant.
+            }
           }
-        }
-        // WP-2423 shared-table-checkout (c): dishes staff took out lately (fail-open: absent).
-        let staffRemoved: readonly CustomerCartStaffRemoval[] | undefined;
-        if (
-          mode === "DineIn" &&
-          ports.staffRemovals !== undefined &&
-          first.viewer !== null &&
-          cart.diningSessionReference !== null
-        ) {
-          try {
-            const removals = await ports.staffRemovals.recent({
-              diningSessionReference: String(cart.diningSessionReference),
-              observedAt: first.observedAt,
-            });
-            if (Array.isArray(removals) && removals.length <= 20)
-              staffRemoved = Object.freeze(
-                removals.map((removal) => {
-                  if (
-                    !Number.isSafeInteger(removal.quantity) ||
-                    removal.quantity < 1 ||
-                    removal.names === null ||
-                    typeof removal.names !== "object"
-                  )
-                    throw new Error("bad removal");
-                  return Object.freeze({
-                    removedAt: parseOrderingInstant(removal.removedAt),
-                    quantity: removal.quantity,
-                    names: Object.freeze(
-                      Object.fromEntries(
-                        Object.entries(removal.names as Readonly<Record<string, unknown>>).filter(
-                          (entry): entry is [string, string] =>
-                            /^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/u.test(entry[0]) &&
-                            typeof entry[1] === "string" &&
-                            entry[1].length > 0 &&
-                            entry[1].length <= 200,
+          // WP-2423 (same-table-ordering): rounds this table Cart sent lately (fail-open: absent).
+          let recentRounds: readonly CustomerCartRecentRound[] | undefined;
+          if (mode === "DineIn" && ports.rounds !== undefined && first.viewer !== null) {
+            try {
+              const rounds = await ports.rounds.recent({
+                cartReference: cart.cartReference,
+                observedAt: first.observedAt,
+              });
+              if (Array.isArray(rounds) && rounds.length <= 5)
+                recentRounds = Object.freeze(
+                  rounds.map((round) => {
+                    if (
+                      !Number.isSafeInteger(round.roundNumber) ||
+                      round.roundNumber < 1 ||
+                      !Array.isArray(round.cartItemReferences) ||
+                      !roundPaymentStates.has(round.paymentState)
+                    )
+                      throw new Error("bad round");
+                    return Object.freeze({
+                      roundNumber: round.roundNumber,
+                      sentAt: parseOrderingInstant(round.sentAt),
+                      // The same phone at the table, even on a later session of it; the
+                      // session itself only when the participant isn't recorded.
+                      sentByThisPhone:
+                        round.participantReference !== undefined &&
+                        round.participantReference !== null
+                          ? parseOrderingReference(round.participantReference) ===
+                            first.viewer?.participantReference
+                          : parseOrderingReference(round.guestSessionReference) ===
+                            first.viewer?.guestSessionReference,
+                      cartItemReferences: Object.freeze(
+                        round.cartItemReferences.map((reference: string) =>
+                          String(parseOrderingReference(reference)),
                         ),
-                      ) as Record<string, string>,
-                    ),
-                  });
+                      ),
+                      paymentState: round.paymentState,
+                      enteredByStaff: round.enteredByStaff === true,
+                      withThisPhoneDishes:
+                        round.adderParticipantReferences === undefined
+                          ? true
+                          : round.adderParticipantReferences.some(
+                              (reference: string) =>
+                                parseOrderingReference(reference) ===
+                                first.viewer?.participantReference,
+                            ),
+                    });
+                  }),
+                );
+            } catch {
+              recentRounds = undefined;
+            }
+          }
+          // WP-2423 shared-table-checkout (c): dishes staff took out lately (fail-open: absent).
+          let staffRemoved: readonly CustomerCartStaffRemoval[] | undefined;
+          if (
+            mode === "DineIn" &&
+            ports.staffRemovals !== undefined &&
+            first.viewer !== null &&
+            cart.diningSessionReference !== null
+          ) {
+            try {
+              const removals = await ports.staffRemovals.recent({
+                diningSessionReference: String(cart.diningSessionReference),
+                observedAt: first.observedAt,
+              });
+              if (Array.isArray(removals) && removals.length <= 20)
+                staffRemoved = Object.freeze(
+                  removals.map((removal) => {
+                    if (
+                      !Number.isSafeInteger(removal.quantity) ||
+                      removal.quantity < 1 ||
+                      removal.names === null ||
+                      typeof removal.names !== "object"
+                    )
+                      throw new Error("bad removal");
+                    return Object.freeze({
+                      removedAt: parseOrderingInstant(removal.removedAt),
+                      quantity: removal.quantity,
+                      names: Object.freeze(
+                        Object.fromEntries(
+                          Object.entries(removal.names as Readonly<Record<string, unknown>>).filter(
+                            (entry): entry is [string, string] =>
+                              /^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/u.test(entry[0]) &&
+                              typeof entry[1] === "string" &&
+                              entry[1].length > 0 &&
+                              entry[1].length <= 200,
+                          ),
+                        ) as Record<string, string>,
+                      ),
+                    });
+                  }),
+                );
+            } catch {
+              staffRemoved = undefined;
+            }
+          }
+          // WP-2423 shared-table-checkout (a): who is paying for which dishes (fail-closed).
+          let tablePay: CustomerCartTablePay | undefined;
+          if (
+            mode === "DineIn" &&
+            ports.tablePay !== undefined &&
+            first.viewer !== null &&
+            cart.diningSessionReference !== null
+          )
+            tablePay = tablePayView(
+              await ports.tablePay.read({
+                diningSessionReference: String(cart.diningSessionReference),
+                cartReference: String(cart.cartReference),
+                cartVersion: cart.aggregateVersion,
+                participantReference: String(first.viewer.participantReference),
+                guestSessionReference: String(first.viewer.guestSessionReference),
+                observedAt: first.observedAt,
+              }),
+            );
+          const items = Object.freeze(
+            cart.items.map((item, index) => {
+              if (answerStatus(descriptions[index]) !== "Found")
+                return ownerAnswered("CATALOG_DISPLAY_UNAVAILABLE");
+              const description = closed(descriptions[index], [
+                "status",
+                "menuVersionReference",
+                "productVersionReference",
+                "sellableReference",
+                "displayName",
+                "options",
+              ]);
+              if (
+                description.status !== "Found" ||
+                description.menuVersionReference !==
+                  item.catalogSelectionEvidence?.menuVersionReference ||
+                description.productVersionReference !==
+                  item.catalogSelectionEvidence?.productVersionReference ||
+                description.sellableReference !== item.sellableReference ||
+                !Array.isArray(description.options) ||
+                description.options.length !== item.optionSelections.length
+              )
+                return unavailable();
+              const options = new Map<string, string>();
+              for (const value of description.options) {
+                const option = closed(value, ["optionReference", "displayName"]);
+                const reference = parseOrderingReference(option.optionReference);
+                if (options.has(reference)) return unavailable();
+                options.set(reference, text(option.displayName));
+              }
+              const configuration = Object.freeze(
+                item.optionSelections.map((option) => {
+                  const displayName = options.get(option.optionReference);
+                  if (displayName === undefined) return unavailable();
+                  return Object.freeze({ ...option, displayName });
                 }),
               );
-          } catch {
-            staffRemoved = undefined;
-          }
-        }
-        // WP-2423 shared-table-checkout (a): who is paying for which dishes (fail-closed).
-        let tablePay: CustomerCartTablePay | undefined;
-        if (
-          mode === "DineIn" &&
-          ports.tablePay !== undefined &&
-          first.viewer !== null &&
-          cart.diningSessionReference !== null
-        )
-          tablePay = tablePayView(
-            await ports.tablePay.read({
-              diningSessionReference: String(cart.diningSessionReference),
-              cartReference: String(cart.cartReference),
-              cartVersion: cart.aggregateVersion,
-              participantReference: String(first.viewer.participantReference),
-              guestSessionReference: String(first.viewer.guestSessionReference),
-              observedAt: first.observedAt,
+              return Object.freeze({
+                cartItemReference: item.cartItemReference,
+                sellableReference: item.sellableReference,
+                displayName: text(description.displayName),
+                quantity: item.quantity,
+                configuration,
+                customerNote:
+                  first.viewer !== null &&
+                  item.addedByParticipantReference !== first.viewer.participantReference
+                    ? null
+                    : item.customerNote,
+                lineEstimate: Object.freeze({
+                  status: "Unavailable" as const,
+                  reasonCode: "LINE_ESTIMATE_UNAVAILABLE" as const,
+                }),
+                warnings: Object.freeze([
+                  ...(first.viewer !== null &&
+                  item.addedByParticipantReference !== first.viewer.participantReference
+                    ? ["OTHER_PARTICIPANT_ITEM"]
+                    : []),
+                  ...(item.addedByParticipantReference !== null &&
+                  gone.has(String(item.addedByParticipantReference))
+                    ? ["ADDER_LEFT_TABLE"]
+                    : []),
+                  ...(marks[index] == null ? [] : [marks[index] as string]),
+                ]),
+              });
             }),
           );
-        const items = Object.freeze(
-          cart.items.map((item, index) => {
-            if (answerStatus(descriptions[index]) !== "Found")
-              return ownerAnswered("CATALOG_DISPLAY_UNAVAILABLE");
-            const description = closed(descriptions[index], [
-              "status",
-              "menuVersionReference",
-              "productVersionReference",
-              "sellableReference",
-              "displayName",
-              "options",
-            ]);
-            if (
-              description.status !== "Found" ||
-              description.menuVersionReference !==
-                item.catalogSelectionEvidence?.menuVersionReference ||
-              description.productVersionReference !==
-                item.catalogSelectionEvidence?.productVersionReference ||
-              description.sellableReference !== item.sellableReference ||
-              !Array.isArray(description.options) ||
-              description.options.length !== item.optionSelections.length
-            )
-              return unavailable();
-            const options = new Map<string, string>();
-            for (const value of description.options) {
-              const option = closed(value, ["optionReference", "displayName"]);
-              const reference = parseOrderingReference(option.optionReference);
-              if (options.has(reference)) return unavailable();
-              options.set(reference, text(option.displayName));
-            }
-            const configuration = Object.freeze(
-              item.optionSelections.map((option) => {
-                const displayName = options.get(option.optionReference);
-                if (displayName === undefined) return unavailable();
-                return Object.freeze({ ...option, displayName });
-              }),
-            );
-            return Object.freeze({
-              cartItemReference: item.cartItemReference,
-              sellableReference: item.sellableReference,
-              displayName: text(description.displayName),
-              quantity: item.quantity,
-              configuration,
-              customerNote:
-                first.viewer !== null &&
-                item.addedByParticipantReference !== first.viewer.participantReference
-                  ? null
-                  : item.customerNote,
-              lineEstimate: Object.freeze({
-                status: "Unavailable" as const,
-                reasonCode: "LINE_ESTIMATE_UNAVAILABLE" as const,
-              }),
-              warnings: Object.freeze([
-                ...(first.viewer !== null &&
-                item.addedByParticipantReference !== first.viewer.participantReference
-                  ? ["OTHER_PARTICIPANT_ITEM"]
-                  : []),
-                ...(item.addedByParticipantReference !== null &&
-                gone.has(String(item.addedByParticipantReference))
-                  ? ["ADDER_LEFT_TABLE"]
-                  : []),
-                ...(marks[index] == null ? [] : [marks[index] as string]),
-              ]),
+          // WP-2423 Q27: a cart priced with the configured Quote carries a v2 attachment.
+          const quote = quoteResult === null ? null : parseAnyCartQuoteAttachment(quoteResult);
+          if (
+            quote !== null &&
+            (quote.brandReference !== cart.brandReference ||
+              quote.storeReference !== cart.storeReference ||
+              quote.cartReference !== cart.cartReference ||
+              quote.cartVersion !== cart.aggregateVersion ||
+              quote.guestSessionReference !== cart.createdByActorReference ||
+              quote.currencyCode !== profile.currencyCode ||
+              quote.attachedAt > first.observedAt ||
+              quote.lines.length !== cart.items.length ||
+              !quote.lines.every((line) =>
+                cart.items.some(
+                  (item) =>
+                    item.cartItemReference === line.lineReference &&
+                    item.sellableReference === line.sellableReference &&
+                    item.quantity === line.quantity &&
+                    item.catalogSelectionEvidence?.menuVersionReference ===
+                      line.menuVersionReference &&
+                    item.catalogSelectionEvidence?.productVersionReference ===
+                      line.productVersionReference,
+                ),
+              ))
+          )
+            return unavailable();
+          const reloaded = await read();
+          if (reloaded === null) return unavailable();
+          const final = snapshot(reloaded, mode);
+          if (
+            attempt < cartMovedOnRereads &&
+            final.cart.cartReference === cart.cartReference &&
+            final.cart.aggregateVersion > cart.aggregateVersion &&
+            JSON.stringify(first.viewer) === JSON.stringify(final.viewer) &&
+            final.observedAt >= first.observedAt
+          ) {
+            loaded = reloaded;
+            continue;
+          }
+          if (
+            JSON.stringify(cart) !== JSON.stringify(final.cart) ||
+            JSON.stringify(first.viewer) !== JSON.stringify(final.viewer) ||
+            first.storeRequest.publicStoreReference !== final.storeRequest.publicStoreReference ||
+            first.storeRequest.requestedLocale !== final.storeRequest.requestedLocale ||
+            final.observedAt < first.observedAt
+          )
+            return unavailable();
+          const lifecycle = final.cart.lifecycle;
+          if (lifecycle === null) return unavailable();
+          const money = (value: { amountMinor: bigint; currencyCode: string }) =>
+            Object.freeze({
+              amountMinor: value.amountMinor.toString(),
+              currency: value.currencyCode,
             });
-          }),
-        );
-        // WP-2423 Q27: a cart priced with the configured Quote carries a v2 attachment.
-        const quote = quoteResult === null ? null : parseAnyCartQuoteAttachment(quoteResult);
-        if (
-          quote !== null &&
-          (quote.brandReference !== cart.brandReference ||
-            quote.storeReference !== cart.storeReference ||
-            quote.cartReference !== cart.cartReference ||
-            quote.cartVersion !== cart.aggregateVersion ||
-            quote.guestSessionReference !== cart.createdByActorReference ||
-            quote.currencyCode !== profile.currencyCode ||
-            quote.attachedAt > first.observedAt ||
-            quote.lines.length !== cart.items.length ||
-            !quote.lines.every((line) =>
-              cart.items.some(
-                (item) =>
-                  item.cartItemReference === line.lineReference &&
-                  item.sellableReference === line.sellableReference &&
-                  item.quantity === line.quantity &&
-                  item.catalogSelectionEvidence?.menuVersionReference ===
-                    line.menuVersionReference &&
-                  item.catalogSelectionEvidence?.productVersionReference ===
-                    line.productVersionReference,
-              ),
-            ))
-        )
-          return unavailable();
-        const reloaded = await read();
-        if (reloaded === null) return unavailable();
-        const final = snapshot(reloaded, mode);
-        if (
-          JSON.stringify(cart) !== JSON.stringify(final.cart) ||
-          JSON.stringify(first.viewer) !== JSON.stringify(final.viewer) ||
-          first.storeRequest.publicStoreReference !== final.storeRequest.publicStoreReference ||
-          first.storeRequest.requestedLocale !== final.storeRequest.requestedLocale ||
-          final.observedAt < first.observedAt
-        )
-          return unavailable();
-        const lifecycle = final.cart.lifecycle;
-        if (lifecycle === null) return unavailable();
-        const money = (value: { amountMinor: bigint; currencyCode: string }) =>
-          Object.freeze({
-            amountMinor: value.amountMinor.toString(),
-            currency: value.currencyCode,
-          });
-        return Object.freeze({
-          schemaVersion: 1,
-          cart: Object.freeze({
-            cartReference: cart.cartReference,
-            version: cart.aggregateVersion,
-            orderType: mode,
-            serviceMode: mode,
-            context,
-            lifecycle: Object.freeze({
-              status: final.effectiveStatus,
-              idleExpiresAt: lifecycle.idleExpiresAt,
-              absoluteExpiresAt: lifecycle.absoluteExpiresAt,
+          return Object.freeze({
+            schemaVersion: 1,
+            cart: Object.freeze({
+              cartReference: cart.cartReference,
+              version: cart.aggregateVersion,
+              orderType: mode,
+              serviceMode: mode,
+              context,
+              lifecycle: Object.freeze({
+                status: final.effectiveStatus,
+                idleExpiresAt: lifecycle.idleExpiresAt,
+                absoluteExpiresAt: lifecycle.absoluteExpiresAt,
+              }),
+              items,
+              quote:
+                quote === null
+                  ? null
+                  : Object.freeze({
+                      quoteReference: quote.quoteReference,
+                      quoteVersion: quote.quoteVersion,
+                      cartVersion: quote.cartVersion,
+                      subtotal: money(quote.subtotal),
+                      discount: money(quote.discount),
+                      tax: money(quote.tax),
+                      fee: money(quote.fee),
+                      total: money(quote.total),
+                      expiresAt: quote.quoteExpiresAt,
+                      warnings: quote.warnings,
+                      blockingReasons: Object.freeze(
+                        final.observedAt >= quote.quoteExpiresAt ? ["QUOTE_EXPIRED"] : [],
+                      ),
+                    }),
+              warnings: Object.freeze([] as string[]),
+              placedOrder: final.placedOrder,
+              ...(recentRounds === undefined ? {} : { recentRounds }),
+              ...(staffRemoved === undefined ? {} : { staffRemoved }),
+              ...(tablePay === undefined ? {} : { tablePay }),
             }),
-            items,
-            quote:
-              quote === null
-                ? null
-                : Object.freeze({
-                    quoteReference: quote.quoteReference,
-                    quoteVersion: quote.quoteVersion,
-                    cartVersion: quote.cartVersion,
-                    subtotal: money(quote.subtotal),
-                    discount: money(quote.discount),
-                    tax: money(quote.tax),
-                    fee: money(quote.fee),
-                    total: money(quote.total),
-                    expiresAt: quote.quoteExpiresAt,
-                    warnings: quote.warnings,
-                    blockingReasons: Object.freeze(
-                      final.observedAt >= quote.quoteExpiresAt ? ["QUOTE_EXPIRED"] : [],
-                    ),
-                  }),
-            warnings: Object.freeze([] as string[]),
-            placedOrder: final.placedOrder,
-            ...(recentRounds === undefined ? {} : { recentRounds }),
-            ...(staffRemoved === undefined ? {} : { staffRemoved }),
-            ...(tablePay === undefined ? {} : { tablePay }),
-          }),
-        });
+          });
+        }
       } catch (error) {
         if (endedReason !== null) throw new CartParticipationEndedError(endedReason);
         if (authorizationErrorCode !== null) throw new CartError(authorizationErrorCode);
