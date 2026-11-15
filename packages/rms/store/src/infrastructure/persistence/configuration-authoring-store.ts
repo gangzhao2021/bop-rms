@@ -229,6 +229,44 @@ export async function readStoreConfigurationSubmitter(
   return actor === undefined ? null : String(parseStoreAdministrationReference(actor));
 }
 
+/**
+ * b20 (v15 live check): the sequence number of a configuration's last recorded step (Store-scoped
+ * read), or null. A withdrawn or declined configuration takes no further step, so its withdrawal
+ * belongs after this step in the Store's history.
+ */
+export async function readStoreConfigurationLastStep(
+  tx: Transaction,
+  input: {
+    readonly brandReference: string;
+    readonly storeReference: string;
+    readonly configurationReference: string;
+  },
+): Promise<number | null> {
+  const brand = parseBrandReference(input.brandReference),
+    store = parseStoreReference(input.storeReference),
+    configuration = parseStoreAdministrationReference(input.configurationReference);
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    brand,
+    store,
+  ]);
+  const found = rows(
+    await tx.query(
+      "SELECT max(sequence_number)::text last FROM rms_store.store_configuration_authoring_operation WHERE brand_id=$1 AND store_id=$2 AND configuration_id=$3",
+      [brand, store, configuration],
+    ),
+  );
+  if (found.length !== 1) return unavailable();
+  const last = found[0]?.last;
+  if (last === null || last === undefined) return null;
+  if (
+    typeof last !== "string" ||
+    !/^[1-9][0-9]*$/u.test(last) ||
+    !Number.isSafeInteger(Number(last))
+  )
+    return unavailable();
+  return Number(last);
+}
+
 /** Latest administration state, not proof of effective published configuration.
  * Caller must retain transaction and current authorization fence while composing
  * this with the independently verified current publication.

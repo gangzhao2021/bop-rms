@@ -5,6 +5,7 @@ import {
   createPostgresStoreConfigurationAuthoringSource,
   createPostgresStoreConfigurationHistorySource,
   storeConfigurationHistoryRequiredFields,
+  readStoreConfigurationLastStep,
   type StoreConfigurationHistorySourceOptions,
 } from "../infrastructure/persistence/configuration-authoring-store.js";
 const brand = "01902501-0000-7000-8000-000000000001",
@@ -424,5 +425,38 @@ describe("held owning immutable Store configuration history", () => {
       storeReference: ref(999),
     });
     await expect(foreign.source.readPage({ beforeSequence: null })).rejects.toThrow();
+  });
+});
+
+// b20 (v15 live check): the history lists a withdrawal after the configuration's last step.
+describe("a configuration's last recorded step", () => {
+  const configuration = "01902501-0000-7000-8000-000000000003";
+  const read = (rows: readonly Record<string, unknown>[]) => {
+    const query = vi.fn(async (sql: string) =>
+      sql.startsWith("SELECT set_config") ? { rows: [{}] } : { rows },
+    );
+    return {
+      query,
+      result: readStoreConfigurationLastStep({ query } as never, {
+        brandReference: brand,
+        storeReference: store,
+        configurationReference: configuration,
+      }),
+    };
+  };
+  it("reads the highest sequence number of that configuration in the Store's scope", async () => {
+    const { query, result } = read([{ last: "17" }]);
+    expect(await result).toBe(17);
+    expect(query).toHaveBeenLastCalledWith(
+      expect.stringContaining(
+        "max(sequence_number)::text last FROM rms_store.store_configuration_authoring_operation WHERE brand_id=$1 AND store_id=$2 AND configuration_id=$3",
+      ),
+      [brand, store, configuration],
+    );
+    expect(await read([{ last: null }]).result).toBeNull();
+  });
+  it("refuses a malformed answer", async () => {
+    for (const rows of [[], [{ last: "0" }], [{ last: 17 }], [{ last: "x" }]])
+      await expect(read(rows).result).rejects.toThrow();
   });
 });

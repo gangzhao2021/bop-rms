@@ -220,6 +220,13 @@ export interface StoreConfigurationOrdinaryPanelProps {
   readonly onSetupChanged?: () => void;
   /** b18: which steps Store setup shows (an open Store's approval steps, or a Store being opened). */
   readonly setupLayout?: StoreSetupLayout;
+  /**
+   * b20: a step here changed where the change stands (created, sent, approved, published,
+   * withdrawn or declined), so a notice about an earlier action on the page no longer applies.
+   */
+  readonly onChanged?: () => void;
+  /** b20: the page has edits that are not saved yet; the steps here use the saved setup only. */
+  readonly unsavedEdits?: boolean;
 }
 const denied = () => {
   throw new StoreSetupClientError("ScopeChanged");
@@ -591,6 +598,7 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
       setWorkspace(after);
       setPending(null);
       // b19: what happened, in plain words; said as the status sentence when the page shows it.
+      if (receipt.outcome === "Committed") props.onChanged?.();
       if (receipt.outcome === "Committed")
         setDone({
           action,
@@ -635,6 +643,7 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
       const next = await client.load(props.scope, { signal: c.signal });
       if (current()) {
         setWorkspace(next);
+        props.onChanged?.();
         // WP-2423 (v15 D6): what to do next is said from the current state below, not here.
         // b19: no version numbers on the page; the status sentence says it was withdrawn or
         // declined, so only the hours note is added to it.
@@ -682,6 +691,7 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
       if (current()) {
         setWorkspace(result.workspace);
         setPending(null);
+        if (result.receipt.outcome === "Committed") props.onChanged?.();
         if (result.receipt.outcome === "Committed")
           setDone({
             action: original.action,
@@ -867,7 +877,8 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
           )}
           {openLatest && latest?.setupBasis !== undefined && (
             <p>
-              {t("Approve and publish it by")}{" "}
+              {t("Approve and publish it by")}
+              {wordGap()}
               <StaffTime
                 instant={new Date(Date.parse(latest.createdAt) + publicationWindowMs).toISOString()}
               />
@@ -908,7 +919,15 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
                 )}
               </p>
             )}
-          {createdFromSaved && !openLatest && withdrawal === undefined && (
+          {/* b20: with edits not saved yet, nothing here says everything is saved and published. */}
+          {props.unsavedEdits && !pending && (
+            <p>
+              {t(
+                "Some changes on this page are not saved yet, so the steps here wait. Save as draft first; the change is then created from what you saved.",
+              )}
+            </p>
+          )}
+          {createdFromSaved && !openLatest && withdrawal === undefined && !props.unsavedEdits && (
             <p>
               {t(
                 "Everything saved in this setup is published. To change the Store again, change the setup, save as draft, then come back here.",
@@ -925,7 +944,7 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
           {ownChange && soleOperator !== undefined && latest && (
             <section
               className="store-setup-publish__next"
-              aria-label={t("Approve your own configuration")}
+              aria-label={t("Approve your own change to the Store")}
             >
               <SoleOperatorSelfApproval
                 gate={soleOperator}
@@ -937,15 +956,17 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
                       "Created from the saved setup draft. {value2} Once approved, you can publish it to the live Store.",
                       {
                         value2: ready
-                          ? t("Every check above has passed.")
+                          ? t("Every check passed.")
                           : t("Some checks above still need attention."),
                       },
                     )}
                   </p>
                 }
-                what={t("this Store configuration")}
+                // b20: the same word for the change as the rest of the step ("修改" in Chinese).
+                yourPart={t("You made this change to the Store")}
+                what={t("this change to the Store")}
                 permissionName={t("Owner access to this Store")}
-                actionLabel={t("Approve configuration on my own")}
+                actionLabel={t("Approve this change on my own")}
                 busy={locked || !ready}
                 onApprove={() => void act("Approve", "SoleOperator")}
               />
@@ -1256,7 +1277,8 @@ function StoreConfigurationStatus({
             : t("The last change was withdrawn on")
           : withdrawal.byYou
             ? t("You declined the last change on")
-            : t("The last change was declined on")}{" "}
+            : t("The last change was declined on")}
+        {wordGap()}
         <StaffTime instant={withdrawal.withdrawnAt} />
         {t("; it will not be published.")}
       </>
@@ -1272,7 +1294,9 @@ function StoreConfigurationStatus({
   if (current !== null)
     return (
       <>
-        {t("Published on")} <StaffTime instant={current.updatedAt} />
+        {t("Published on")}
+        {wordGap()}
+        <StaffTime instant={current.updatedAt} />
         {t(".")}
       </>
     );
@@ -1303,15 +1327,35 @@ export function StoreConfigurationHistoryView({
 }) {
   return (
     <ol>
-      {entries.map((entry) => (
+      {entries.flatMap((entry) => [
+        // b20 (v15 live check): a withdrawal or decline is listed too, newest first, so the history
+        // never suggests a change is still waiting.
+        ...(entry.withdrawal === undefined
+          ? []
+          : [
+              <li key={entry.operationReference + ":withdrawal"}>
+                <span>
+                  {entry.withdrawal.kind === "Withdrawn"
+                    ? entry.withdrawal.byYou
+                      ? t("Withdrawn by you")
+                      : t("Withdrawn")
+                    : entry.withdrawal.byYou
+                      ? t("Declined by you")
+                      : t("Declined")}
+                </span>{" "}
+                <span className="store-setup-publish__when">
+                  <StaffTime instant={entry.withdrawal.withdrawnAt} />
+                </span>
+              </li>,
+            ]),
         <li key={entry.operationReference}>
           {/* b19: what was done and when; no version numbers. */}
           <span>{actionLabel[entry.command] ?? t("Changed")}</span>{" "}
           <span className="store-setup-publish__when">
             <StaffTime instant={entry.occurredAt} />
           </span>
-        </li>
-      ))}
+        </li>,
+      ])}
     </ol>
   );
 }

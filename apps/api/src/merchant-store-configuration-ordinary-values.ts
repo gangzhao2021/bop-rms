@@ -77,11 +77,29 @@ function parseSoleOperatorView(value: unknown): MerchantStoreConfigurationSoleOp
   });
 }
 
+/**
+ * b20 (v15 live check): an entry that was the configuration's last step when it was withdrawn by
+ * its author or declined by an approver carries that withdrawal, so the history lists it too.
+ */
+export interface MerchantStoreConfigurationHistoryWithdrawal {
+  readonly kind: "Withdrawn" | "Declined";
+  readonly withdrawnAt: string;
+  readonly byYou: boolean;
+}
+export type MerchantStoreConfigurationHistoryEntry = StoreConfigurationHistoryEntry & {
+  readonly withdrawal?: MerchantStoreConfigurationHistoryWithdrawal;
+};
+export type MerchantStoreConfigurationHistoryPage = Omit<
+  StoreConfigurationHistoryPage,
+  "entries"
+> & {
+  readonly entries: readonly MerchantStoreConfigurationHistoryEntry[];
+};
 export function parseMerchantStoreConfigurationHistoryPage(
   value: unknown,
   expectedScope: StoreConfigurationOriginalScope,
   beforeSequence: number | null,
-): StoreConfigurationHistoryPage {
+): MerchantStoreConfigurationHistoryPage {
   try {
     if (beforeSequence !== null && (!Number.isSafeInteger(beforeSequence) || beforeSequence < 1))
       return invalid();
@@ -117,11 +135,16 @@ export function parseMerchantStoreConfigurationHistoryPage(
     )
       return invalid();
     let previous = beforeSequence ?? Number.MAX_SAFE_INTEGER + 1;
-    const entries: StoreConfigurationHistoryEntry[] = Array.from(
+    const entries: MerchantStoreConfigurationHistoryEntry[] = Array.from(
       { length: raw.length },
       (_, index) => {
         const descriptor = Object.getOwnPropertyDescriptor(raw, String(index));
         if (!descriptor?.enumerable || !("value" in descriptor)) return invalid();
+        const withdrawn =
+          descriptor.value !== null &&
+          typeof descriptor.value === "object" &&
+          Object.hasOwn(descriptor.value, "withdrawal") &&
+          (descriptor.value as { withdrawal?: unknown }).withdrawal !== undefined;
         const e = readClosedRecord(descriptor.value, [
           "sequenceNumber",
           "operationReference",
@@ -133,6 +156,7 @@ export function parseMerchantStoreConfigurationHistoryPage(
           "auditReference",
           "occurredAt",
           "expectedVersion",
+          ...(withdrawn ? ["withdrawal"] : []),
         ]);
         if (
           typeof e.sequenceNumber !== "number" ||
@@ -177,6 +201,20 @@ export function parseMerchantStoreConfigurationHistoryPage(
           !/^[A-Z][A-Z0-9_.:-]{0,63}$/u.test(e.purposeCode)
         )
           return invalid();
+        let withdrawal: MerchantStoreConfigurationHistoryWithdrawal | undefined;
+        if (withdrawn) {
+          const w = readClosedRecord(e.withdrawal, ["kind", "withdrawnAt", "byYou"]);
+          const at = parseCanonicalInstant(w.withdrawnAt);
+          if (
+            (w.kind !== "Withdrawn" && w.kind !== "Declined") ||
+            typeof w.byYou !== "boolean" ||
+            // Only a configuration that is not published is withdrawn, after its last step.
+            lifecycle === "Published" ||
+            at < occurredAt
+          )
+            return invalid();
+          withdrawal = Object.freeze({ kind: w.kind, withdrawnAt: at, byYou: w.byYou });
+        }
         return Object.freeze({
           sequenceNumber: e.sequenceNumber,
           operationReference: parseStoreAdministrationReference(e.operationReference),
@@ -188,6 +226,7 @@ export function parseMerchantStoreConfigurationHistoryPage(
           auditReference: parseStoreAdministrationReference(e.auditReference),
           occurredAt,
           expectedVersion: configuration.configurationVersion - (command === "SaveDraft" ? 1 : 0),
+          ...(withdrawal === undefined ? {} : { withdrawal }),
         });
       },
     );

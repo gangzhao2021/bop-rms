@@ -172,7 +172,13 @@ interface OrdinaryFixtureControl {
   /** Step-ups the fixture recorded (sole-operator approval needs one). */
   stepUps: number;
   /** WP-2423 (v15 D2/D3): the recorded withdrawal of the latest configuration. */
-  withdrawal: { kind: "Withdrawn" | "Declined"; actor: string; at: string } | null;
+  withdrawal: {
+    kind: "Withdrawn" | "Declined";
+    actor: string;
+    at: string;
+    /** b20: the configuration withdrawn (its last step carries the withdrawal in the history). */
+    configurationReference?: string;
+  } | null;
   writes: string[];
   reads: string[];
   errors: string[];
@@ -308,7 +314,12 @@ async function install(
       if (!latest || body.configurationReference !== latest.configurationReference)
         return respond(route, { error: "store_configuration_conflict" }, 409);
       const kind = latest.authoredByReference === control.actor ? "Withdrawn" : "Declined";
-      control.withdrawal = { kind, actor: control.actor, at: new Date().toISOString() };
+      control.withdrawal = {
+        kind,
+        actor: control.actor,
+        at: new Date().toISOString(),
+        configurationReference: latest.configurationReference,
+      };
       control.writes.push(kind);
       return route.fulfill({
         status: 200,
@@ -426,6 +437,20 @@ async function install(
           };
         })
         .reverse()
+        // b20: the withdrawn configuration's last step carries its withdrawal, as the server does.
+        .map((entry, index, newestFirst) => {
+          const w = control.withdrawal;
+          return w !== null &&
+            w.configurationReference === entry.configuration.configurationReference &&
+            newestFirst.findIndex(
+              (other) => other.configuration.configurationReference === w.configurationReference,
+            ) === index
+            ? {
+                ...entry,
+                withdrawal: { kind: w.kind, withdrawnAt: w.at, byYou: w.actor === control.actor },
+              }
+            : entry;
+        })
         .filter((entry) => beforeSequence === null || entry.sequenceNumber < beforeSequence);
       const entries = all.slice(0, 2),
         observedAt = new Date().toISOString();
@@ -1144,5 +1169,38 @@ test("WP-2423 v15: 'Use the live Store's settings' fills time zone, business day
   await expect(page.getByLabel("Draft timezone")).toHaveValue("America/Toronto");
   await expect(page.getByLabel("Business day starts at (local time)")).toHaveValue("04:00");
   await expectNoInternalText(page);
+  expect(state.errors).toEqual([]);
+});
+test("b20: a withdrawn change is listed in Earlier changes, and the Chinese status reads without stray spaces @production", async ({
+  page,
+}) => {
+  const state = await install(page);
+  state.failing = [];
+  await enter(page);
+  await panel(page).getByRole("button", { name: "Create the change from the saved setup" }).click();
+  await panel(page).getByRole("button", { name: "Send it for approval" }).click();
+  await expect(panel(page).getByRole("status")).toHaveText(
+    "Sent for approval, waiting to be approved.",
+  );
+  await panel(page).getByRole("button", { name: "Withdraw this change" }).click();
+  await panel(page)
+    .getByRole("group", { name: "Withdraw this change" })
+    .getByRole("button", { name: "Withdraw this change" })
+    .click();
+  await expect(panel(page).getByRole("status")).toContainText("You withdrew the last change on");
+  // The history never suggests the change is still waiting: the withdrawal is its newest row.
+  await panel(page).getByText("Earlier changes", { exact: true }).click();
+  const rows = panel(page).getByRole("region", { name: "Store configuration operation history" });
+  await expect(rows.getByRole("listitem").first()).toContainText(/^Withdrawn by you /u);
+  await expect(rows.getByRole("listitem").nth(1)).toContainText(/^Sent for approval /u);
+  await page.getByRole("button", { name: "切换到中文" }).click();
+  await page.getByRole("button", { name: /^4\. 核对并发布$/u }).click();
+  const zh = page.getByRole("region", { name: "门店配置发布", exact: true });
+  await expect(zh.locator(".store-setup-publish__status")).toHaveText(
+    /^你撤回了上一次修改（\d+月\d+日 \d{2}:\d{2}），不会发布。$/u,
+  );
+  await zh.getByText("以前的修改", { exact: true }).click();
+  await expect(zh.getByRole("listitem").first()).toContainText(/^已由你撤回 /u);
+  expect(state.writes).toEqual(["Materialize", "Submit", "Withdrawn"]);
   expect(state.errors).toEqual([]);
 });

@@ -13,6 +13,7 @@ import {
   StoreConfigurationAdministrationServiceError,
   StoreSetupOperationError,
   readStoreConfigurationSubmitter,
+  readStoreConfigurationLastStep,
   createPostgresStoreConfigurationOriginalStore,
   createPostgresStoreConfigurationAuthoringSource,
   createPostgresStoreConfigurationHistorySource,
@@ -649,7 +650,43 @@ export function createMerchantStoreConfigurationOrdinary(
             },
           },
         });
-        const page = await history.readPage(historyRequest);
+        const read = await history.readPage(historyRequest);
+        // b20 (v15 live check): a withdrawal or decline is listed after the configuration's last
+        // step, read from its append-only record in this transaction (at most two per page).
+        const entries = [];
+        for (const entry of read.entries) {
+          const configurationReference = entry.configuration.configurationReference;
+          const withdrawal =
+            entry.configuration.lifecycle === "Published"
+              ? null
+              : await readStoreConfigurationWithdrawal(tx, {
+                  brandReference: fixed.brandReference,
+                  storeReference: fixed.storeReference,
+                  configurationReference,
+                });
+          const last =
+            withdrawal === null
+              ? null
+              : await readStoreConfigurationLastStep(tx, {
+                  brandReference: fixed.brandReference,
+                  storeReference: fixed.storeReference,
+                  configurationReference,
+                });
+          entries.push(
+            withdrawal !== null && last === entry.sequenceNumber
+              ? {
+                  ...entry,
+                  withdrawal: {
+                    kind: withdrawal.kind,
+                    withdrawnAt: withdrawal.withdrawnAt,
+                    byYou: withdrawal.actorReference === fixed.actorReference,
+                  },
+                }
+              : entry,
+          );
+        }
+        check();
+        const page = Object.freeze({ ...read, entries: Object.freeze(entries) });
         finalized = () => {
           assertScope();
           tighten(history.assertFinalized(tx));

@@ -3938,7 +3938,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Settlement run {completedAt}{value}": "结算运行 {completedAt}{value}",
   "Settlement unavailable": "结算暂不可用",
   "Setup draft saved. These settings have not been validated or published.":
-    "设置草稿已保存。这些设置尚未校验或发布。",
+    "设置草稿已保存，还没有检查或发布。",
   "Setup steps": "设置步骤",
   Severity: "严重程度",
   "Share this one-time code with the party at this table.": "把这个一次性码告诉这桌客人。",
@@ -9895,7 +9895,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "营业时间在这里修改。保存不会改动门店设置里的其他内容；其他需要审批的设置在“需审批的设置”里。",
   "Store setup, Permissions and safety": "门店设置的“权限与安全”",
   "Created from the saved setup draft. {value2} Once approved, you can publish it to the live Store.":
-    "由已存的设置草稿生成。{value2}批准后即可发布到门店。",
+    "这次修改用已保存的设置草稿生成。{value2}批准后即可发布到门店。",
   "Kitchen setup in Store setup": "门店设置里的后厨",
   "The newest {shown} of {count} are listed here; every one is in the access records below.":
     "这里列出 {count} 条中最新的 {shown} 条；每一条都在下面的访问记录里。",
@@ -9992,7 +9992,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "The receipt layout chosen in this setup": "改为这份设置里选的收据样式",
   "The tax settings chosen in this setup (see Tax review)":
     "改为这份设置里选的税务设置（见“税务核对”）",
-  "What changes when it is published": "发布后会改变",
+  "What changes when it is published": "发布后有哪些变化",
   "What this setup holds": "这份设置的内容",
   "Nothing changes: every setting is the same as the Store runs with today.":
     "不会有变化：每项设置都和门店现在的一样。",
@@ -10030,4 +10030,20 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Another person with Owner access must approve it, because you made this change.":
     "这次修改是你做的，需要另一位有店主权限的人批准。",
   "{day}: {times}": "{day}：{times}",
+  // b20 (v15 live check of b19): Store setup's step 4 follow-ups.
+  "Some changes on this page are not saved yet, so the steps here wait. Save as draft first; the change is then created from what you saved.":
+    "这页上有修改还没保存，这里的步骤要等一等。请先存为草稿，之后会用保存的内容生成修改。",
+  "You made this change to the Store": "这次修改是你做的",
+  "this change to the Store": "这次修改",
+  "Approve this change on my own": "自行批准这次修改",
+  "Approve your own change to the Store": "批准你自己的修改",
+  "Withdrawn by you": "已由你撤回",
+  "What you had not saved before switching the language was not brought back: this setup was saved again in between. Make those changes again here.":
+    "切换语言前没保存的修改没有恢复：这份设置在这期间又保存过。请在这里重新修改。",
+  "Your changes that are not saved yet are kept after switching the language. Save as draft to keep them.":
+    "切换语言后，还没保存的修改仍在这里。存为草稿后才会保留。",
+  "Now {now} → changes to {value}": "现在{now} → 改为{value}",
+  "Not saved yet": "尚未保存",
+  "What is marked not saved yet goes into the change below only after you save as draft.":
+    "标着“尚未保存”的设置，存为草稿后才会进入下面生成的修改。",
 });

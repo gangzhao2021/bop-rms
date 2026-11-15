@@ -18,6 +18,7 @@ import {
   storeSetupPlaces,
   storeSetupPlaceText,
   storeSetupChangeSummary,
+  storeSetupKeptEdits,
   clockField,
   wordGap,
   storeSetupOwnerOnly,
@@ -1499,4 +1500,110 @@ it("WP-2423 v15 D6: step 8 texts come from the current configuration, not earlie
   expect(render("Withdrawn")).not.toContain("not yet sent");
   expect(render("Declined")).toContain("Declined, will not be published");
   expect(render()).toContain("no tax classification (tips are not taxed)");
+});
+// b20 (v15 live check of b19): an edit not saved yet, against the Store as it runs today.
+it("b20: Review shows an unsaved edit from what the Store runs with now, and says it is not saved", () => {
+  const current = {
+    timeZone: "America/Toronto",
+    businessDayStartLocalTime: "04:00:00",
+    enabledServiceModes: ["DineIn"],
+    weeklySchedule: [],
+    capacityConfigurationReference: null,
+    addressReference: id(8),
+    contactReference: id(9),
+    paymentConfigurationReference: id(10),
+    receiptReference: id(11),
+    taxConfigurationReference: id(12),
+  } as unknown as StoreConfigurationSnapshot;
+  const saved = {
+    ...createUnconfiguredStoreSetupContentV2(),
+    timeZone: { state: "Configured" as const, value: "America/Toronto" },
+    businessDayStartLocalTime: { state: "Configured" as const, value: "04:00:00" },
+    enabledServiceModes: { state: "Configured" as const, value: ["DineIn", "Pickup"] as never },
+  };
+  const edited = {
+    ...saved,
+    businessDayStartLocalTime: { state: "Configured" as const, value: "04:30:00" },
+  };
+  const summary = storeSetupChangeSummary(edited, current, saved);
+  expect(summary.changed.find((item) => item.label === "Business day start")).toEqual({
+    label: "Business day start",
+    value: ["04:30"],
+    now: "04:00",
+    unsaved: true,
+  });
+  // Saved already (Pickup added and saved): from now to new, not marked unsaved.
+  expect(summary.changed.find((item) => item.label === "Service modes")).toEqual({
+    label: "Service modes",
+    value: ["Dine-in, Pickup"],
+    now: "Dine-in",
+  });
+  expect(summary.unchanged).toContain("Time zone");
+  const text = staticText(
+    renderToStaticMarkup(
+      <StoreSetupDraftReview content={edited} saved={saved} current={current} />,
+    ),
+  );
+  expect(text).toContain("Now 04:00 → changes to 04:30");
+  expect(text).toContain("Not saved yet");
+  expect(text).toContain("goes into the change below only after you save as draft");
+  // Nothing unsaved: no mark and no note.
+  const clean = staticText(
+    renderToStaticMarkup(<StoreSetupDraftReview content={saved} saved={saved} current={current} />),
+  );
+  expect(clean).not.toContain("Not saved yet");
+  expect(clean).toContain("Now Dine-in → changes to Dine-in, Pickup");
+  setLanguageForTest("zh-Hans");
+  try {
+    const zh = staticText(
+      renderToStaticMarkup(
+        <StoreSetupDraftReview content={edited} saved={saved} current={current} />,
+      ),
+    );
+    expect(zh).toContain("发布后有哪些变化");
+    expect(zh).not.toContain("发布后会改变");
+    // The app's zh spacing: a space between Chinese and a time, none between Chinese words.
+    expect(zh).toContain("现在 04:00 → 改为 04:30");
+    expect(zh).toContain("现在堂食 → 改为堂食、自取");
+    expect(zh).toContain("尚未保存");
+  } finally {
+    setLanguageForTest("en");
+  }
+});
+it("b20: what was kept at a language switch comes back only onto the same saved draft", () => {
+  const content = {
+    ...createUnconfiguredStoreSetupContentV2(),
+    businessDayStartLocalTime: { state: "Configured" as const, value: "04:00:00" },
+  };
+  const inputs = {
+    timeZone: "America/Toronto",
+    businessStart: "04:30",
+    serviceModes: [],
+    hours: null,
+  };
+  const kept = { setupDraftReference: id(30), revision: 2, content, inputs, step: 1 };
+  const same = { setupDraftReference: id(30), revision: 2 };
+  const back = storeSetupKeptEdits(JSON.parse(JSON.stringify(kept)), same);
+  expect(back).not.toBe("Outdated");
+  expect(back).not.toBeNull();
+  if (back === null || back === "Outdated") throw new Error("not kept");
+  expect(back.inputs.businessStart).toBe("04:30");
+  expect(back.step).toBe(1);
+  expect(back.content.businessDayStartLocalTime).toEqual(content.businessDayStartLocalTime);
+  // Saved again elsewhere in between: not brought back (the page says so).
+  expect(storeSetupKeptEdits(kept, { ...same, revision: 3 })).toBe("Outdated");
+  expect(storeSetupKeptEdits(kept, null)).toBe("Outdated");
+  expect(
+    storeSetupKeptEdits({ ...kept, setupDraftReference: null, revision: null }, null),
+  ).not.toBe("Outdated");
+  // Anything else is ignored.
+  for (const junk of [
+    null,
+    "x",
+    { ...kept, step: 99 },
+    { ...kept, inputs: { ...inputs, serviceModes: ["Teleport"] } },
+    { ...kept, inputs: { ...inputs, hours: [[{ start: 1 }]] } },
+    { ...kept, content: { profile: "nope" } },
+  ])
+    expect(storeSetupKeptEdits(junk, same)).toBeNull();
 });

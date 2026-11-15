@@ -165,6 +165,28 @@ it("history refuses changed reader, cursor, ordering, record tuple and extra aut
     expect(() => history(poisoned, scope, null)).toThrow();
   expect(() => history(page, scope, 4)).toThrow();
 });
+// b20 (v15 live check): a withdrawal or decline travels with the configuration's last step.
+it("history carries a withdrawal on an entry and refuses a malformed one", () => {
+  const page = historicalPage(),
+    entry = historicalEntry(5);
+  const withdrawal = { kind: "Withdrawn", withdrawnAt: at, byYou: true };
+  const one = { ...page, entries: [{ ...entry, withdrawal }], nextBeforeSequence: null };
+  expect(history(one, scope, null).entries[0]?.withdrawal).toEqual(withdrawal);
+  expect(history(page, scope, null).entries[0]).not.toHaveProperty("withdrawal");
+  for (const poisoned of [
+    { ...withdrawal, kind: "Cancelled" },
+    { ...withdrawal, byYou: "yes" },
+    { ...withdrawal, withdrawnAt: "2026-10-05T09:59:59.999Z" },
+    { ...withdrawal, actorReference: id(4) },
+  ])
+    expect(() =>
+      history(
+        { ...page, entries: [{ ...entry, withdrawal: poisoned }], nextBeforeSequence: null },
+        scope,
+        null,
+      ),
+    ).toThrow();
+});
 // WP-2423 v15 (`8bd902e3` D1): the Store's tax configuration in force travels with the workspace.
 it("carries the Store's tax configuration in force, or none, and refuses anything else", () => {
   expect(

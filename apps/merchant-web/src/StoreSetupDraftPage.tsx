@@ -1,4 +1,12 @@
-import { listSeparator, serviceModeText, t } from "./i18n/i18n.js";
+import {
+  forgetKeptThroughLanguageSwitch,
+  keepThroughLanguageSwitch,
+  listSeparator,
+  serviceModeText,
+  t,
+  takeKeptThroughLanguageSwitch,
+  holdUnsavedWork,
+} from "./i18n/i18n.js";
 import { wordGap } from "./word-gap.js";
 export { wordGap };
 import { StoreConfigurationOrdinaryPanel } from "./StoreConfigurationOrdinaryPanel.js";
@@ -580,6 +588,111 @@ function FirstStoreFold({
     </>
   );
 }
+/**
+ * b20 (v15 live check): fields typed in a place of Store setup and not saved yet hold the language
+ * switch, which then asks first (as other forms do) instead of reloading them away.
+ */
+function useUnsavedHold() {
+  const release = useRef<(() => void) | null>(null);
+  useEffect(
+    () => () => {
+      release.current?.();
+      release.current = null;
+    },
+    [],
+  );
+  return useMemo(
+    () => ({
+      mark: () => {
+        release.current ??= holdUnsavedWork();
+      },
+      clear: () => {
+        release.current?.();
+        release.current = null;
+      },
+    }),
+    [],
+  );
+}
+/** b20: the unsaved edits Store setup keeps across the language switch's reload, in this tab. */
+export interface StoreSetupKeptEdits {
+  readonly setupDraftReference: string | null;
+  readonly revision: number | null;
+  readonly content: StoreSetupContent;
+  readonly inputs: StoreSetupEditorInputs;
+  readonly step: number;
+}
+export const storeSetupKeptKey = (storeReference: string) => "storeSetup:" + storeReference;
+const keptText = (value: unknown, max = 64) => typeof value === "string" && value.length <= max;
+const keptModes = (value: unknown): value is readonly ServiceMode[] =>
+  Array.isArray(value) &&
+  value.length <= modes.length &&
+  value.every((mode) => modes.includes(mode as ServiceMode));
+const keptHour = (value: unknown): value is StoreSetupHourInput => {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const h = value as Record<string, unknown>;
+  const seconds = (v: unknown) =>
+    v === undefined || v === null || (typeof v === "number" && Number.isSafeInteger(v) && v >= 0);
+  return (
+    keptText(h.start, 8) &&
+    keptText(h.end, 8) &&
+    typeof h.followingDay === "boolean" &&
+    keptModes(h.modes) &&
+    keptText(h.cutoff, 8) &&
+    keptText(h.lead, 8) &&
+    seconds(h.savedCutoffSeconds) &&
+    seconds(h.savedLeadSeconds)
+  );
+};
+/**
+ * b20 (v15 live check): what Store setup kept at a language switch, read back against the saved
+ * draft the reloaded page shows. "Outdated" when the draft was saved again in between (the edits
+ * then build on something else, so they are not brought back and the page says so); null when
+ * nothing usable was kept.
+ */
+export function storeSetupKeptEdits(
+  value: unknown,
+  saved: { readonly setupDraftReference: string; readonly revision: number } | null,
+): Omit<StoreSetupKeptEdits, "setupDraftReference" | "revision"> | "Outdated" | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  const k = value as Record<string, unknown>;
+  const i = k.inputs as Record<string, unknown> | null | undefined;
+  if (
+    !(k.setupDraftReference === null || keptText(k.setupDraftReference, 128)) ||
+    !(
+      k.revision === null ||
+      (typeof k.revision === "number" && Number.isSafeInteger(k.revision))
+    ) ||
+    typeof k.step !== "number" ||
+    !Number.isSafeInteger(k.step) ||
+    k.step < 0 ||
+    k.step >= steps.length ||
+    i === null ||
+    typeof i !== "object" ||
+    !keptText(i.timeZone) ||
+    !keptText(i.businessStart, 8) ||
+    !keptModes(i.serviceModes) ||
+    !(
+      i.hours === null ||
+      (Array.isArray(i.hours) &&
+        i.hours.length === 7 &&
+        i.hours.every((day) => Array.isArray(day) && day.length <= 12 && day.every(keptHour)))
+    )
+  )
+    return null;
+  let content: StoreSetupContent;
+  try {
+    content = normalizeStoreSetupContentV2(parseStoreSetupContent(k.content));
+  } catch {
+    return null;
+  }
+  if (
+    k.setupDraftReference !== (saved?.setupDraftReference ?? null) ||
+    k.revision !== (saved?.revision ?? null)
+  )
+    return "Outdated";
+  return { content, inputs: i as unknown as StoreSetupEditorInputs, step: k.step };
+}
 export function StoreSetupDraftPage({
   storeReference,
   csrf,
@@ -640,6 +753,21 @@ export function StoreSetupDraftPage({
     journal = useRef<StoreSetupPendingJournal | null>(null),
     savedScope = useRef<StoreSetupScope | null>(null),
     heading = useRef<HTMLHeadingElement | null>(null);
+  // b20 (v15 live check): switching the language reloads the page; edits not saved yet come back
+  // with it (this tab only, for a minute), so a language switch never drops them unseen.
+  const keptKey = storeSetupKeptKey(storeReference);
+  const keptNow = useRef<StoreSetupKeptEdits | null>(null);
+  keptNow.current =
+    dirty && baseline !== null
+      ? {
+          setupDraftReference: baseline.setup.snapshot?.setupDraftReference ?? null,
+          revision: baseline.setup.snapshot?.revision ?? null,
+          content,
+          inputs,
+          step,
+        }
+      : null;
+  useEffect(() => keepThroughLanguageSwitch(keptKey, () => keptNow.current), [keptKey]);
   const current = (value: number, signal: AbortSignal) =>
     value === epoch.current && !signal.aborted;
   const apply = (view: StoreSetupWorkspace) => {
@@ -696,6 +824,28 @@ export function StoreSetupDraftPage({
           savedScope.current = view.scope;
           journal.current = original;
           apply(view);
+          const kept = storeSetupKeptEdits(
+            takeKeptThroughLanguageSwitch(keptKey),
+            view.setup.snapshot ?? null,
+          );
+          forgetKeptThroughLanguageSwitch(keptKey);
+          if (kept === "Outdated")
+            setNotice(
+              t(
+                "What you had not saved before switching the language was not brought back: this setup was saved again in between. Make those changes again here.",
+              ),
+            );
+          else if (kept !== null && cursor === null) {
+            setContent(kept.content);
+            setInputs(kept.inputs);
+            setStep(kept.step);
+            setDirty(true);
+            setNotice(
+              t(
+                "Your changes that are not saved yet are kept after switching the language. Save as draft to keep them.",
+              ),
+            );
+          }
           setPending(cursor);
           setReady(true);
           if (cursor)
@@ -723,6 +873,7 @@ export function StoreSetupDraftPage({
       window.removeEventListener("offline", offline);
       window.removeEventListener("online", reconnect);
     };
+    // keptKey follows storeReference.
   }, [client, csrf, id, journalFactory, storeReference]);
   const begin = () => {
     running.current = true;
@@ -1844,8 +1995,12 @@ export function StoreSetupDraftPage({
                   csrf={csrf}
                   saved={workspace.setup.snapshot}
                   freshDisabled={disabled || dirty}
+                  unsavedEdits={dirty}
                   onLiveConfiguration={setLive}
                   onSetupChanged={() => void refresh()}
+                  // b20: the saved-draft notice no longer describes the page once a step here
+                  // changes where the change stands; the status sentence there says it.
+                  onChanged={() => setNotice("")}
                 />
               </>
             )}
@@ -1918,6 +2073,10 @@ export function StoreSetupDraftPage({
 export interface StoreSetupSummaryItem {
   readonly label: string;
   readonly value: readonly string[];
+  /** b20: what the Store runs with today, for a setting with one plain value ("04:00"). */
+  readonly now?: string;
+  /** b20: set on this page but not saved yet, so the change created below does not have it. */
+  readonly unsaved?: boolean;
 }
 interface FeeLike {
   readonly chargeType: string;
@@ -1955,6 +2114,11 @@ const openDaysText = (schedule: WeeklySchedule) => {
 export function storeSetupChangeSummary(
   content: StoreSetupContent,
   current: StoreConfigurationSnapshot | null,
+  /**
+   * b20: the saved draft. A setting whose value here differs from it is marked as not saved yet,
+   * since the change created below is made from the saved draft only.
+   */
+  saved: StoreSetupContent | null = null,
 ): {
   readonly changed: readonly StoreSetupSummaryItem[];
   readonly unchanged: readonly string[];
@@ -1963,14 +2127,43 @@ export function storeSetupChangeSummary(
   const changed: StoreSetupSummaryItem[] = [],
     unchanged: string[] = [],
     filledIn: string[] = [];
-  const add = (label: string, same: boolean | null, value: () => readonly string[]) => {
-    if (same === true) unchanged.push(label);
-    else changed.push({ label, value: value() });
+  const savedValues =
+    saved === null
+      ? null
+      : new Map(
+          storeSetupChangeSummary(saved, current).changed.map((item) => [
+            item.label,
+            JSON.stringify(item.value),
+          ]),
+        );
+  const add = (
+    label: string,
+    same: boolean | null,
+    value: () => readonly string[],
+    now?: () => string,
+  ) => {
+    if (same === true) {
+      unchanged.push(label);
+      return;
+    }
+    const lines = value();
+    const unsaved = savedValues !== null && savedValues.get(label) !== JSON.stringify(lines);
+    changed.push({
+      label,
+      value: lines,
+      ...(same === false && now !== undefined ? { now: now() } : {}),
+      ...(unsaved ? { unsaved } : {}),
+    });
   };
   const known = current !== null;
   if (content.timeZone.state === "Configured") {
     const zone = content.timeZone.value;
-    add(t("Time zone"), known ? zone === current.timeZone : null, () => [timeZoneLabel(zone)]);
+    add(
+      t("Time zone"),
+      known ? zone === current.timeZone : null,
+      () => [timeZoneLabel(zone)],
+      () => timeZoneLabel(current?.timeZone ?? ""),
+    );
   }
   if (content.businessDayStartLocalTime.state === "Configured") {
     const start = content.businessDayStartLocalTime.value;
@@ -1978,6 +2171,7 @@ export function storeSetupChangeSummary(
       t("Business day start"),
       known ? clock(start) === clock(current.businessDayStartLocalTime) : null,
       () => [clock(start)],
+      () => clock(current?.businessDayStartLocalTime ?? ""),
     );
   }
   if (content.enabledServiceModes.state === "Configured") {
@@ -1989,6 +2183,7 @@ export function storeSetupChangeSummary(
             JSON.stringify([...current.enabledServiceModes].sort())
         : null,
       () => [services.map(serviceModeText).join(listSeparator())],
+      () => (current?.enabledServiceModes ?? []).map(serviceModeText).join(listSeparator()),
     );
   }
   if (content.weeklySchedule.state === "Configured") {
@@ -2083,11 +2278,13 @@ export function storeSetupChangeSummary(
 function StoreSetupChangeSummary({
   content,
   current,
+  saved,
 }: {
   readonly content: StoreSetupContent;
   readonly current: StoreConfigurationSnapshot | null;
+  readonly saved: StoreSetupContent | null;
 }) {
-  const { changed, unchanged, filledIn } = storeSetupChangeSummary(content, current);
+  const { changed, unchanged, filledIn } = storeSetupChangeSummary(content, current, saved);
   const known = current !== null;
   return (
     <section className="store-setup-summary" aria-labelledby="store-setup-summary-heading">
@@ -2102,13 +2299,32 @@ function StoreSetupChangeSummary({
             <div key={item.label}>
               <dt>{item.label}</dt>
               <dd>
-                {item.value.map((line) => (
-                  <span key={line}>{line}</span>
-                ))}
+                {/* b20: a setting with one value reads "now → changes to"; one not saved yet
+                    says so, since the change created below is made from the saved draft. */}
+                {item.now !== undefined && item.value.length === 1 ? (
+                  <span>
+                    {t("Now {now} → changes to {value}", {
+                      now: item.now,
+                      value: item.value[0] ?? "",
+                    })}
+                  </span>
+                ) : (
+                  item.value.map((line) => <span key={line}>{line}</span>)
+                )}
+                {item.unsaved ? (
+                  <span className="store-setup-summary__unsaved">{t("Not saved yet")}</span>
+                ) : null}
               </dd>
             </div>
           ))}
         </dl>
+      )}
+      {changed.some((item) => item.unsaved) && (
+        <p className="store-setup-summary__rest">
+          {t(
+            "What is marked not saved yet goes into the change below only after you save as draft.",
+          )}
+        </p>
       )}
       {unchanged.length > 0 && (
         <p className="store-setup-summary__rest">
@@ -2188,7 +2404,7 @@ export function StoreSetupDraftReview({
           </p>
         </section>
       )}
-      {content && <StoreSetupChangeSummary content={content} current={current} />}
+      {content && <StoreSetupChangeSummary content={content} current={current} saved={saved} />}
     </>
   );
 }
@@ -2255,6 +2471,7 @@ export function StoreSetupReferenceEditor({
     businessPhone: "",
     website: "",
   });
+  const hold = useUnsavedHold();
   const dirty = useRef(false),
     epoch = useRef(0),
     active = useRef<AbortController | null>(null),
@@ -2439,6 +2656,7 @@ export function StoreSetupReferenceEditor({
       if (valid()) {
         setPending(null);
         dirty.current = false;
+        hold.clear();
         apply(v);
         setNotice(
           t(
@@ -2465,6 +2683,7 @@ export function StoreSetupReferenceEditor({
         onChange={(e) => {
           const value = e.currentTarget.value;
           dirty.current = true;
+          hold.mark();
           setFields((v) => ({ ...v, [key]: value }));
           setError(null);
         }}
@@ -2673,6 +2892,7 @@ export function StorePaymentConfigurationEditor({
     staffTerminalCardPresentEnabled: false,
     staffTerminalInteracEnabled: false,
   });
+  const hold = useUnsavedHold();
   const dirty = useRef(false),
     epoch = useRef(0),
     active = useRef<AbortController | null>(null),
@@ -2695,6 +2915,7 @@ export function StorePaymentConfigurationEditor({
     running.current = false;
     journal.current = null;
     dirty.current = false;
+    hold.clear();
     setFields({
       customerOnlineCardEnabled: false,
       staffTerminalCardPresentEnabled: false,
@@ -2803,6 +3024,7 @@ export function StorePaymentConfigurationEditor({
       if (valid()) {
         setPending(null);
         dirty.current = false;
+        hold.clear();
         apply(result.current);
         setNotice(
           t(
@@ -2880,6 +3102,7 @@ export function StorePaymentConfigurationEditor({
               onChange={(e) => {
                 const checked = e.currentTarget.checked;
                 dirty.current = true;
+                hold.mark();
                 setFields((v) => ({ ...v, [key]: checked }));
                 setError(null);
               }}

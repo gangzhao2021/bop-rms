@@ -116,6 +116,12 @@ export interface StoreConfigurationOrdinaryHistoryEntry {
   readonly auditReference: string;
   readonly occurredAt: string;
   readonly expectedVersion: number;
+  /** b20: this was the configuration's last step, and it was then withdrawn or declined. */
+  readonly withdrawal?: {
+    readonly kind: "Withdrawn" | "Declined";
+    readonly withdrawnAt: string;
+    readonly byYou: boolean;
+  };
 }
 export interface StoreConfigurationOrdinaryHistory {
   readonly tenantReference: string;
@@ -210,6 +216,11 @@ export function parseStoreConfigurationOrdinaryHistory(
     )
       return fail("Stale");
     const entries = r.entries.map((raw) => {
+      const withdrawn =
+        raw !== null &&
+        typeof raw === "object" &&
+        Object.hasOwn(raw, "withdrawal") &&
+        (raw as { withdrawal?: unknown }).withdrawal !== undefined;
       const e = record(raw, [
         "sequenceNumber",
         "operationReference",
@@ -221,6 +232,7 @@ export function parseStoreConfigurationOrdinaryHistory(
         "auditReference",
         "occurredAt",
         "expectedVersion",
+        ...(withdrawn ? ["withdrawal"] : []),
       ]);
       const configuration = parseStoreConfigurationSnapshot(e.configuration, scope.storeReference),
         occurredAt = parseCatalogInstant(e.occurredAt);
@@ -256,6 +268,19 @@ export function parseStoreConfigurationOrdinaryHistory(
         !/^[A-Z][A-Z0-9_.:-]{0,63}$/u.test(e.purposeCode)
       )
         return fail();
+      let withdrawal: StoreConfigurationOrdinaryHistoryEntry["withdrawal"];
+      if (withdrawn) {
+        const w = record(e.withdrawal, ["kind", "withdrawnAt", "byYou"]);
+        const at = parseCatalogInstant(w.withdrawnAt);
+        if (
+          (w.kind !== "Withdrawn" && w.kind !== "Declined") ||
+          typeof w.byYou !== "boolean" ||
+          e.command === "Publish" ||
+          at < occurredAt
+        )
+          return fail();
+        withdrawal = Object.freeze({ kind: w.kind, withdrawnAt: at, byYou: w.byYou });
+      }
       return Object.freeze({
         sequenceNumber: sequence(e.sequenceNumber),
         operationReference: parseCatalogReference(e.operationReference),
@@ -267,6 +292,7 @@ export function parseStoreConfigurationOrdinaryHistory(
         auditReference: parseCatalogReference(e.auditReference),
         occurredAt,
         expectedVersion: e.expectedVersion,
+        ...(withdrawal === undefined ? {} : { withdrawal }),
       });
     });
     let previous = beforeSequence;

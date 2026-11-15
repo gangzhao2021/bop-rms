@@ -417,3 +417,48 @@ test("@production Store Setup mismatched selected scope refuses editing and narr
   expect(fixture.control.writes).toHaveLength(0);
   expect(fixture.control.errors).toEqual([]);
 });
+test("@production b20: an edit not saved yet comes back after switching the language, and fields typed in a place ask first", async ({
+  page,
+}) => {
+  const fixture = await install(page);
+  await open(page);
+  await timezone(page);
+  await page.getByRole("button", { name: "Save as draft", exact: true }).click();
+  await expect(
+    page.getByText("Setup draft saved. These settings have not been validated or published.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  expect(fixture.control.writes).toHaveLength(1);
+  // Changed, not saved: the language switch reloads the page and brings the edit back.
+  await page.getByLabel("Business day starts at (local time)", { exact: true }).fill("04:30");
+  await page.getByRole("button", { name: "切换到中文" }).click();
+  await expect(page.getByLabel("营业日开始于（当地时间）", { exact: true })).toHaveValue("04:30");
+  await expect(
+    page.getByText("切换语言后，还没保存的修改仍在这里。存为草稿后才会保留。", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "放弃未保存的修改" })).toBeEnabled();
+  expect(fixture.control.writes).toHaveLength(1);
+  // Back to English: still there (kept again), and saving keeps it for good.
+  await page.getByRole("button", { name: "Switch to English" }).click();
+  await expect(page.getByLabel("Business day starts at (local time)", { exact: true })).toHaveValue(
+    "04:30",
+  );
+  await page.getByRole("button", { name: "Save as draft", exact: true }).click();
+  await expect(
+    page.getByText("Setup draft saved. These settings have not been validated or published.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  expect(fixture.snapshot()?.content.businessDayStartLocalTime).toEqual({
+    state: "Configured",
+    value: "04:30:00",
+  });
+  // Nothing unsaved: a switch brings nothing back and says nothing about it.
+  await page.getByRole("button", { name: "切换到中文" }).click();
+  await expect(page.getByLabel("营业日开始于（当地时间）", { exact: true })).toHaveValue("04:30");
+  await expect(
+    page.getByText("切换语言后，还没保存的修改仍在这里。", { exact: false }),
+  ).toHaveCount(0);
+  expect(fixture.control.errors).toEqual([]);
+});
