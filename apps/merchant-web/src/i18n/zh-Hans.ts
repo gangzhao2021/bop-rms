@@ -9938,7 +9938,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Withdraw this change? It stays in the history and can no longer be approved or published. The Store keeps running as it does today.":
     "要撤回这次修改吗？它会留在记录里，不能再批准或发布。门店继续按现在的设置运行。",
   "Check the settings again": "重新检查设置",
-  "Check where it stands again": "刷新状态",
+  "Refresh the status": "刷新状态",
   "Earlier changes": "以前的修改",
   "Create the change from the saved setup": "用已保存的设置生成修改",
   "The setup was saved again after this change was made. Creating it again replaces the earlier one; nothing changes for customers yet.":

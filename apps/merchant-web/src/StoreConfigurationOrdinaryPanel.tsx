@@ -1001,7 +1001,7 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
           </button>
         )}
         <button type="button" disabled={busy || !!pending} onClick={() => void refresh()}>
-          {t("Check where it stands again")}
+          {t("Refresh the status")}
         </button>
       </div>
       <details
