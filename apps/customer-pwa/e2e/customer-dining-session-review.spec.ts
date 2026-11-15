@@ -256,8 +256,23 @@ test.describe("@production CUST-DINE-IN-SESSION table view", () => {
     // What the table paid and still owes is the same as before.
     await expect(summary.getByText("$42.82", { exact: true })).toBeVisible();
     await expect(summary.getByText("$9.04", { exact: true })).toBeVisible();
-    await expect(summary).toContainText("Item prices are before tax.");
+    await expect(summary).toContainText(
+      "Item prices are before tax. Dishes refunded or never charged are not included.",
+    );
     await expectNoInternalText(page);
+    // v15 b19: the note says what Total ordered leaves out, in English and Chinese.
+    for (const width of [1440, 1024, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await summary.screenshot({ path: `test-results/b19-table-total-note-en-${width}.png` });
+    }
+    await page.getByRole("button", { name: "切换到中文" }).click();
+    const zhSummary = main.getByRole("region", { name: "本桌合计" });
+    await expect(zhSummary).toContainText("菜品价格为税前价格，已退款或未收费的菜品不计入。");
+    for (const width of [1440, 1024, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await zhSummary.screenshot({ path: `test-results/b19-table-total-note-zh-${width}.png` });
+    }
+    await page.getByRole("button", { name: "Switch to English" }).click();
     for (const width of [390, 320]) {
       await page.setViewportSize({ width, height: 844 });
       await expectNoHorizontalOverflow(page);
