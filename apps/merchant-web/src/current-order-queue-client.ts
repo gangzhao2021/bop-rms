@@ -26,9 +26,9 @@ type TableBill = NonNullable<ReturnType<typeof parseTableBillBody>> & {
    */
   readonly rounds?: readonly OrderBillRound[];
   /**
-   * v15 b19 (DEC-TAX-WHOLE-RECEIPT): on an Order's detail, what the dishes taken off its unpaid
-   * bill took off it — the bill with them less the bill now, to the cent (absent: none, an older
-   * server, or not a detail).
+   * v15 b19 (DEC-TAX-WHOLE-RECEIPT): on an Order's detail, what the dishes taken off its bill
+   * before it was paid took off it — the bill with them less the bill without them, to the cent,
+   * open, paid, split, merged or written off (absent: none, an older server, or not a detail).
    */
   readonly removedMinor?: string;
 };

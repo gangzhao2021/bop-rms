@@ -66,7 +66,7 @@ import {
   listOrderOrdinaryRefundRequesters,
 } from "@rms/payment";
 import { createPostgresCurrentBrowserSessionSource } from "@bop/identity";
-import { orderBillWithRemoved } from "./merchant-order-bill-owed.js";
+import { billRemovedMinor, orderBillWithRemoved } from "./merchant-order-bill-owed.js";
 import { createHash, randomBytes } from "node:crypto";
 import { readStaffDiningRoundPaymentPreparation } from "./staff-dining-round-payment-preparation.js";
 import { readCounterPaymentPreparation } from "./counter-payment-preparation.js";
@@ -717,7 +717,7 @@ export function createPersistentMerchantOrderQueue(options: {
             }
           >();
           const unpaidRemoved = new Map<string, string[]>();
-          /** v15 b19: an unpaid bill's dishes taken off, as what the bill went down by. */
+          /** v15 b19: dishes taken off a bill before it was paid, as what the bill went down by. */
           const removedFromBill = new Map<string, bigint>();
           // WP-2423 item 8 ① segment 2: dishes a manager may comp or discount on an unpaid
           // pay-later round (started in the kitchen), and those comped or discounted.
@@ -1114,10 +1114,13 @@ export function createPersistentMerchantOrderQueue(options: {
             for (let index = 0; index < orderReferences.length; index += 200) {
               const orders = orderReferences.slice(index, index + 200);
               const removed = new Set<string>();
+              /** v15 b19: Orders with dishes taken off their bill before it was paid. */
+              const removedOrders = new Set<string>();
               for (const record of await createPostgresPayLaterItemCancellationStore({
                 ...scoped,
                 authorize: async () => stillAllowed(),
-              }).listByOrders(businessTransaction, orders))
+              }).listByOrders(businessTransaction, orders)) {
+                removedOrders.add(String(record.orderReference));
                 for (const line of record.orderItemReferences) {
                   removed.add(line);
                   unpaidRemoved.set(record.orderBatchReference, [
@@ -1125,6 +1128,7 @@ export function createPersistentMerchantOrderQueue(options: {
                     line,
                   ]);
                 }
+              }
               if (tenantReference === null) continue;
               const rounds = await createPostgresOrderPayLaterConfirmationStore({
                 ...scoped,
@@ -1289,8 +1293,98 @@ export function createPersistentMerchantOrderQueue(options: {
                   payLaterOrders.slice(index, index + 200),
                 ))
                   mergedTargets.set(source, target);
+              // The dishes on an Order's rounds sent to the kitchen, as their prices were recorded.
+              const sentOf = (order: string) =>
+                new Set(
+                  rounds
+                    .filter((round) => String(round.orderReference) === order)
+                    .map((round) => String(round.orderBatchReference)),
+                );
+              const pricedOf = async (order: string, sent: ReadonlySet<string>) =>
+                (await listOrderItemPrices(businessTransaction, scoped, order)).filter((price) =>
+                  sent.has(String(price.orderBatchReference)),
+                );
+              // v15 b19 (DEC-TAX-WHOLE-RECEIPT): on a merged bill (DEC-DINING-TABLE-MERGE), what one
+              // Order's dishes taken off it took off, worked out on the whole merged bill.
+              const mergedBillRemovedMinor = async (
+                host: string,
+                billOrders: readonly string[],
+                order: string,
+              ) => {
+                const billRounds = await createPostgresOrderPayLaterConfirmationStore({
+                  ...scoped,
+                  quoteVersion: 2,
+                  sha256: (value) => "sha256:" + createHash("sha256").update(value).digest("hex"),
+                  authorize: async () => stillAllowed(),
+                }).listByOrders({ transaction: businessTransaction, orderReferences: billOrders });
+                const billSent = new Set(
+                  billRounds.map((round) => String(round.orderBatchReference)),
+                );
+                const billPrices = [];
+                // One query at a time on the transaction.
+                for (const billOrder of billOrders)
+                  billPrices.push(
+                    ...(await listOrderItemPrices(businessTransaction, scoped, billOrder)).filter(
+                      (price) => billSent.has(String(price.orderBatchReference)),
+                    ),
+                  );
+                // Each Order's dishes taken off, in the bill's order.
+                const removedByOrder = billOrders.map(
+                  (billOrder) => [billOrder, new Set<string>()] as const,
+                );
+                for (const record of await createPostgresPayLaterItemCancellationStore({
+                  ...scoped,
+                  authorize: async () => stillAllowed(),
+                }).listByOrders(businessTransaction, billOrders))
+                  for (const line of record.orderItemReferences)
+                    removedByOrder
+                      .find(([billOrder]) => billOrder === String(record.orderReference))?.[1]
+                      .add(String(line));
+                const billReduced = new Map(
+                  (await listOrderPriceReductions(businessTransaction, scoped, billOrders)).map(
+                    (record) => [record.orderItemReference, record] as const,
+                  ),
+                );
+                return billRemovedMinor(
+                  host,
+                  billRounds.map((round) => ({
+                    orderReference: String(round.orderReference),
+                    orderBatchReference: String(round.orderBatchReference),
+                  })),
+                  billPrices,
+                  billReduced,
+                  removedByOrder,
+                  order,
+                );
+              };
               // The table's bill on the Orders list: what it paid, else what its rounds come to.
               for (const order of payLaterOrders) {
+                // v15 b19 (DEC-TAX-WHOLE-RECEIPT): dishes taken off the bill before it was paid,
+                // merged or written off took off what the bill went down by, to the cent, however
+                // the bill ended (their prices and comps do not change when it is paid).
+                const sent = sentOf(order);
+                let priced: Awaited<ReturnType<typeof pricedOf>> | null = null;
+                if (removedOrders.has(order)) {
+                  // The table whose bill these dishes were on: this one, or the one it merged into.
+                  let host = order;
+                  for (let depth = 0; depth < 50 && mergedTargets.has(host); depth += 1)
+                    host = mergedTargets.get(host) as string;
+                  const billOrders = await listOrderBillOrders(businessTransaction, scoped, host);
+                  if (billOrders.length <= 1) {
+                    priced = await pricedOf(order, sent);
+                    const { removedMinor } = orderBillWithRemoved(
+                      order,
+                      [...sent],
+                      priced,
+                      reduced,
+                      removed,
+                    );
+                    if (removedMinor !== null) removedFromBill.set(order, removedMinor);
+                  } else {
+                    const removedMinor = await mergedBillRemovedMinor(host, billOrders, order);
+                    if (removedMinor !== null) removedFromBill.set(order, removedMinor);
+                  }
+                }
                 // The guests left and it was written off: nothing is waiting to be paid.
                 const writtenOffMinor = writtenOff.get(order);
                 if (writtenOffMinor !== undefined) {
@@ -1407,25 +1501,15 @@ export function createPersistentMerchantOrderQueue(options: {
                     continue;
                   }
                 }
-                const sent = new Set(
-                  rounds
-                    .filter((round) => String(round.orderReference) === order)
-                    .map((round) => String(round.orderBatchReference)),
-                );
-                const priced = (
-                  await listOrderItemPrices(businessTransaction, scoped, order)
-                ).filter((price) => sent.has(String(price.orderBatchReference)));
                 // Owner 2026-11-03 walkthrough: the same figure as the table's own bill, with its
-                // tax worked out once over the whole bill (DEC-TAX-WHOLE-RECEIPT). v15 b19: and the
-                // dishes taken off it, as what the bill went down by.
-                const { owedMinor: owed, removedMinor } = orderBillWithRemoved(
+                // tax worked out once over the whole bill (DEC-TAX-WHOLE-RECEIPT).
+                const { owedMinor: owed } = orderBillWithRemoved(
                   order,
                   [...sent],
-                  priced,
+                  priced ?? (await pricedOf(order, sent)),
                   reduced,
                   removed,
                 );
-                if (removedMinor !== null) removedFromBill.set(order, removedMinor);
                 tableBills.set(order, {
                   totalMinor: owed.toString(),
                   ...(plan !== undefined && plan.mode !== "Whole" && parts.length > 0
@@ -2175,8 +2259,9 @@ function transientReference(): string {
   return `${time.slice(0, 8)}-${time.slice(8, 12)}-7${random.slice(0, 3)}-${(8 + (Number.parseInt(random.slice(3, 4), 16) % 4)).toString(16)}${random.slice(4, 7)}-${random.slice(7, 19)}`;
 }
 /**
- * v15 b19 (DEC-TAX-WHOLE-RECEIPT): on an Order's detail, what its dishes taken off the unpaid bill
- * took off it: the bill with them less the bill now (absent: none taken off, or not a detail).
+ * v15 b19 (DEC-TAX-WHOLE-RECEIPT): on an Order's detail, what its dishes taken off the bill before
+ * it was paid took off it: the bill with them less the bill without them, whether the bill is
+ * still open, paid, split, merged or written off (absent: none taken off, or not a detail).
  */
 function withRemovedFromBill<Bill extends object>(
   bill: Bill | null,

@@ -252,6 +252,10 @@ it("comping every dish of a bill whose tax is a cent over its rounds' takes that
 // the host's Order: no $0.01 round is left on the bill, its parts or Ordering's priced total.
 it("a merged table's dish comped in full owes nothing; the host pays the rest and both close", () =>
   journey("MergedCompCent"));
+// v15 b19 (DEC-TAX-WHOLE-RECEIPT): a dish taken off a merged bill reads, on its Order's detail,
+// what the merged bill went down by — never its own Order's rounds worked out alone.
+it("a dish taken off a merged table's bill reads what the merged bill went down by", () =>
+  journey("MergedRemoved"));
 
 // WP-2423 DEC-TAX-WHOLE-RECEIPT step 2: the bill's tax is rounded once over every dish; the rounds'
 // difference is recorded by the system rule as the bill's tax rounding, paid exactly, part by part.
@@ -1144,37 +1148,39 @@ async function journey(journeyEnding) {
                             ? "wp2423_plccu"
                             : ending === "MergedCompCent"
                               ? "wp2423_plmergc"
-                              : ending === "MemberPointsOnline"
-                                ? "wp2423_plmembon"
-                                : ending === "MemberPointsOtherPhone"
-                                  ? "wp2423_plmembop"
-                                  : ending === "MemberPointsStoreAccount"
-                                    ? "wp2423_plmembac"
-                                    : ending === "MemberPointsRefunded"
-                                      ? "wp2423_plmembrf"
-                                      : ending === "MemberPointsPickup"
-                                        ? "wp2423_plmembpk"
-                                        : ending === "MemberPoints"
-                                          ? "wp2423_plmember"
-                                          : ending === "MemberPointsSplit"
-                                            ? "wp2423_plmembsp"
-                                            : ending === "MemberPointsWrittenOff"
-                                              ? "wp2423_plmembwo"
-                                              : ending === "PaidSplit"
-                                                ? "wp2423_plsplit"
-                                                : ending === "SplitWrittenOff"
-                                                  ? "wp2423_plsplwo"
-                                                  : ending === "Held"
-                                                    ? "wp2423_plheld"
-                                                    : ending === "HeldAtCheckout"
-                                                      ? "wp2423_plheldco"
-                                                      : ending === "TipsOff"
-                                                        ? "wp2423_pltips"
-                                                        : ending === "Moved"
-                                                          ? "wp2423_plmove"
-                                                          : ending === "Merged"
-                                                            ? "wp2423_plmerge"
-                                                            : "wp2423_plon",
+                              : ending === "MergedRemoved"
+                                ? "wp2423_plmergrm"
+                                : ending === "MemberPointsOnline"
+                                  ? "wp2423_plmembon"
+                                  : ending === "MemberPointsOtherPhone"
+                                    ? "wp2423_plmembop"
+                                    : ending === "MemberPointsStoreAccount"
+                                      ? "wp2423_plmembac"
+                                      : ending === "MemberPointsRefunded"
+                                        ? "wp2423_plmembrf"
+                                        : ending === "MemberPointsPickup"
+                                          ? "wp2423_plmembpk"
+                                          : ending === "MemberPoints"
+                                            ? "wp2423_plmember"
+                                            : ending === "MemberPointsSplit"
+                                              ? "wp2423_plmembsp"
+                                              : ending === "MemberPointsWrittenOff"
+                                                ? "wp2423_plmembwo"
+                                                : ending === "PaidSplit"
+                                                  ? "wp2423_plsplit"
+                                                  : ending === "SplitWrittenOff"
+                                                    ? "wp2423_plsplwo"
+                                                    : ending === "Held"
+                                                      ? "wp2423_plheld"
+                                                      : ending === "HeldAtCheckout"
+                                                        ? "wp2423_plheldco"
+                                                        : ending === "TipsOff"
+                                                          ? "wp2423_pltips"
+                                                          : ending === "Moved"
+                                                            ? "wp2423_plmove"
+                                                            : ending === "Merged"
+                                                              ? "wp2423_plmerge"
+                                                              : "wp2423_plon",
     },
     async (context) => {
       const admin = new Client(context.clientConfig);
@@ -1210,7 +1216,7 @@ async function journey(journeyEnding) {
         const centsPrice =
           ending === "TaxRounding" || ending === "TaxRoundingCancelled" || ending === "CompCentsUp"
             ? { quantity: 1, unitPriceMinor: 380n }
-            : ending.startsWith("CompCents") || ending === "Merged" || ending === "MergedCompCent"
+            : ending.startsWith("CompCents") || ending.startsWith("Merged")
               ? { quantity: 1, unitPriceMinor: 1250n }
               : {};
         const R1 = journeyRound({ at: time(-minutes(40)), prefix: "01a00011", ...centsPrice });
@@ -1964,7 +1970,16 @@ async function journey(journeyEnding) {
               )
             )[0].version,
           );
-        if (ending === "Merged" || ending === "MergedCompCent") {
+        // The Order's detail on the Orders page, as staff read it.
+        const orderDetail = () =>
+          createPersistentMerchantOrderQueue({
+            persistence: persistenceOf(server),
+            quoteVersion: 1,
+            acceptanceConfigured: true,
+          })({ sessionCookie: server.sessionCookie, afterOrderReference: null, orderReference });
+        /** v15 b19: the Order's bill before round 2 came off it (null: it stays on the bill). */
+        let billBeforeRemovalMinor = null;
+        if (ending.startsWith("Merged")) {
           // ── WP-2423 item 8 ⑨ (DEC-DINING-TABLE-MERGE): the party at another table (T-M, its own
           // Order and round) merges into this table. TEST-only identities.
           const M = journeyRound({
@@ -2374,6 +2389,35 @@ async function journey(journeyEnding) {
               .every((round) => round.orderedBy !== mRound.orderedBy),
           );
 
+          if (ending === "MergedRemoved") {
+            // Three $12.50 rounds (two on the host's Order, T-M's on its own) are $42.38 on the
+            // merged bill. Staff take the host's round 2 dish off before the kitchen starts it:
+            // the bill is $28.25 ($25.00 + $3.25 tax), so $14.13 came off. The host's two rounds
+            // alone would say $28.25 − $14.13 = $14.12, a cent off the bill it was on.
+            const before = BigInt((await orderDetail()).items[0].tableBill.totalMinor);
+            assert.equal(before, 4238n);
+            const off = await removal(server, {
+              expectedOrderVersion: await versionNow(),
+              operationReference: fresh(),
+            });
+            assert.equal(off.status, "Removed");
+            const host = (await orderDetail()).items[0].tableBill;
+            assert.equal(host.totalMinor, (await bill()).owed.totalMinor);
+            assert.equal(host.totalMinor, "2825");
+            assert.equal(host.removedMinor, "1413");
+            // T-M's Order had nothing taken off: its detail says none.
+            const merged = await createPersistentMerchantOrderQueue({
+              persistence: persistenceOf(server),
+              quoteVersion: 1,
+              acceptanceConfigured: true,
+            })({
+              sessionCookie: server.sessionCookie,
+              afterOrderReference: null,
+              orderReference: mOrder,
+            });
+            assert.equal(Object.hasOwn(merged.items[0].tableBill, "removedMinor"), false);
+            return;
+          }
           // ── The table eats, pays once and closes: both Orders' rounds cooked and served at this
           // table, one cash payment whose lines keep each round's Order, both Orders closed.
           await cookAndServeRound1([
@@ -3613,6 +3657,8 @@ async function journey(journeyEnding) {
         ) {
           const removeOperation = fresh();
           const beforeRemoval = await versionNow();
+          // v15 b19 (DEC-TAX-WHOLE-RECEIPT): the Order's bill with round 2, before it comes off.
+          billBeforeRemovalMinor = BigInt((await orderDetail()).items[0].tableBill.totalMinor);
           // Without the cancel permission nothing is written.
           const outsider = await seedMerchantAcceptanceSession({
             admin,
@@ -3683,6 +3729,12 @@ async function journey(journeyEnding) {
               )
             )[0].n,
             1,
+          );
+          // The Order's detail says what came off as what the bill went down by, to the cent.
+          const afterRemoval = (await orderDetail()).items[0].tableBill;
+          assert.equal(
+            afterRemoval.removedMinor,
+            (billBeforeRemovalMinor - BigInt(afterRemoval.totalMinor)).toString(),
           );
         }
         // Round 2's only dish came off: the whole round is off the bill (it owes nothing).
@@ -8225,6 +8277,11 @@ async function journey(journeyEnding) {
           const paid = await bill();
           assert.equal(paid.split.paidParts, 2);
           assert.equal(paid.owed.totalMinor, "0");
+          // v15 b19: split and paid in full, the detail still says what round 2 took off.
+          assert.equal(
+            (await orderDetail()).items[0].tableBill.removedMinor,
+            (billBeforeRemovalMinor - round1Minor - rounding1).toString(),
+          );
           await assertSalesCountEveryRoundOnce();
           return;
         }
@@ -8719,6 +8776,11 @@ async function journey(journeyEnding) {
           [true, false],
         );
         assert.equal(paid.bill.owed.totalMinor, "0");
+        // v15 b19: paid, the detail still says what round 2 took off the bill, to the cent.
+        assert.equal(
+          (await orderDetail()).items[0].tableBill.removedMinor,
+          (billBeforeRemovalMinor - round1Minor - rounding1).toString(),
+        );
         // A paid table can't go back to ordering: it pays once and its payment never changes.
         await assert.rejects(closing(server, "Cancel"), { code: "DINING_CHECKOUT_ALREADY_PAID" });
         // Once the table paid, no dish comes off its bill (it is refunded from the payment instead).
