@@ -654,6 +654,23 @@ async function cursor(page: Page) {
 }
 
 test.beforeEach(({ page }) => serveStoreSetupPanels(page));
+/** b20: screenshots for the design review at 1440, 1024 and 390, when BOP_B20_SHOTS names a folder. */
+async function b20Shots(page: Page, name: string) {
+  for (const [width, height] of [
+    [1440, 900],
+    [1024, 768],
+    [390, 844],
+  ] as const) {
+    await page.setViewportSize({ width, height });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      `no horizontal overflow at ${width}`,
+    ).toBe(true);
+    const folder = process.env.BOP_B20_SHOTS;
+    if (folder) await page.screenshot({ path: `${folder}/${name}-${width}.png`, fullPage: true });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+}
 
 test("ordinary Store Review materializes validates submits independently approves and publishes @production", async ({
   page,
@@ -991,9 +1008,7 @@ test("the Owner approves their own configuration alone as sole operator, at 1440
     );
     await expect(own).toContainText("Every check passed.");
     await expect(own).toContainText("It will be recorded as approved by you alone.");
-    await expect(
-      own.getByRole("button", { name: "Approve this change on my own" }),
-    ).toBeDisabled();
+    await expect(own.getByRole("button", { name: "Approve this change on my own" })).toBeDisabled();
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
       `no horizontal overflow at ${width}`,
@@ -1193,6 +1208,7 @@ test("b20: a withdrawn change is listed in Earlier changes, and the Chinese stat
   const rows = panel(page).getByRole("region", { name: "Store configuration operation history" });
   await expect(rows.getByRole("listitem").first()).toContainText(/^Withdrawn by you /u);
   await expect(rows.getByRole("listitem").nth(1)).toContainText(/^Sent for approval /u);
+  await b20Shots(page, "review-withdrawn-history-en");
   await page.getByRole("button", { name: "切换到中文" }).click();
   await page.getByRole("button", { name: /^4\. 核对并发布$/u }).click();
   const zh = page.getByRole("region", { name: "门店配置发布", exact: true });
@@ -1201,6 +1217,38 @@ test("b20: a withdrawn change is listed in Earlier changes, and the Chinese stat
   );
   await zh.getByText("以前的修改", { exact: true }).click();
   await expect(zh.getByRole("listitem").first()).toContainText(/^已由你撤回 /u);
+  await b20Shots(page, "review-withdrawn-history-zh-Hans");
   expect(state.writes).toEqual(["Materialize", "Submit", "Withdrawn"]);
+  expect(state.errors).toEqual([]);
+});
+test("b20: an edit not saved yet reads from now to new on Review, and nothing says everything saved is published @production", async ({
+  page,
+}) => {
+  const state = await install(page, { live: true });
+  await page.goto("/app");
+  await followWorkspaceLink(page, "Store setup");
+  await openStoreSetupPlace(page, "Settings that need approval");
+  await page.getByRole("button", { name: /^1\. Time zone and business day$/u }).click();
+  await page.getByLabel("Business day starts at (local time)").fill("04:30");
+  await page.getByRole("button", { name: /^4\. Review and publish$/u }).click();
+  const summary = page.locator(".store-setup-summary");
+  await expect(summary).toContainText("What changes when it is published");
+  await expect(summary).toContainText("Now 04:00 → changes to 04:30");
+  await expect(summary).toContainText("Not saved yet");
+  await expect(panel(page)).toContainText("Some changes on this page are not saved yet");
+  await expect(panel(page)).not.toContainText("Everything saved in this setup is published.");
+  await expectNoInternalText(page);
+  await b20Shots(page, "review-unsaved-edit-en");
+  // The language switch keeps the edit (and the step); the same summary reads in Chinese.
+  await page.getByRole("button", { name: "切换到中文" }).click();
+  const zh = page.locator(".store-setup-summary");
+  await expect(zh).toContainText("发布后有哪些变化");
+  await expect(zh).toContainText("现在 04:00 → 改为 04:30");
+  await expect(zh).toContainText("尚未保存");
+  await expect(
+    page.getByText("切换语言后，还没保存的修改仍在这里。存为草稿后才会保留。"),
+  ).toBeVisible();
+  await b20Shots(page, "review-unsaved-edit-zh-Hans");
+  expect(state.writes).toEqual([]);
   expect(state.errors).toEqual([]);
 });

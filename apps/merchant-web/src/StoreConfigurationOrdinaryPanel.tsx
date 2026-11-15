@@ -900,19 +900,24 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
               )}
             </p>
           )}
-          {setupOutdated && !openByAnother && !setupIncomplete && withdrawal !== undefined && (
-            <p>
-              {t(
-                "To make a new change, save as draft again (it then builds on the latest settings), then come back here.",
-              )}
-            </p>
-          )}
+          {setupOutdated &&
+            !openByAnother &&
+            !setupIncomplete &&
+            withdrawal !== undefined &&
+            !props.unsavedEdits && (
+              <p>
+                {t(
+                  "To make a new change, save as draft again (it then builds on the latest settings), then come back here.",
+                )}
+              </p>
+            )}
           {setupOutdated &&
             !openByAnother &&
             !createdFromSaved &&
             !setupIncomplete &&
             withdrawal === undefined &&
-            !openLatest && (
+            !openLatest &&
+            !props.unsavedEdits && (
               <p>
                 {t(
                   "The Store’s settings changed after this setup was saved. Save as draft again (it then builds on the latest settings), then come back here.",

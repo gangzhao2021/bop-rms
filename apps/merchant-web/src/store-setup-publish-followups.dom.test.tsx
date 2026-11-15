@@ -121,6 +121,15 @@ it("b20: with edits not saved yet, step 4 never says everything saved is publish
   expect(text).not.toContain("Everything saved in this setup is published.");
   expect(text).toContain("Some changes on this page are not saved yet");
   expect(text).toContain("Save as draft first");
+  // b20 review: one sentence asks to save; the outdated-setup sentence waits until it is saved.
+  document.body.replaceChildren();
+  const outdated = { latest: published, current: published };
+  const stale = await panel(workspaceOf(outdated), {
+    saved: { ...saved, baseConfigurationReference: id(19), revision: 2 },
+    unsavedEdits: true,
+  });
+  expect(stale.container.textContent).not.toContain("Save as draft again");
+  expect(stale.container.textContent).toContain("Some changes on this page are not saved yet");
 });
 
 it("b20: a step that changes where the change stands tells the page, so its notice clears", async () => {
