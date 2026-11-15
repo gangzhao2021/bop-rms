@@ -9,6 +9,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { findInternalText, staticText } from "../e2e/internal-text-patterns.js";
 import { MemoryRouter } from "react-router";
 import { setLanguageForTest } from "./i18n/i18n.js";
+import type { StoreConfigurationSnapshot } from "./store-configuration-client.js";
 import {
   StoreSetupDraftPage,
   StoreSetupHeader,
@@ -16,6 +17,8 @@ import {
   storeSetupPlaceOf,
   storeSetupPlaces,
   storeSetupPlaceText,
+  storeSetupChangeSummary,
+  clockField,
   wordGap,
   storeSetupOwnerOnly,
   StoreSetupFeeContextEditor,
@@ -351,9 +354,12 @@ it("review never shows opaque references or asserts approval/publication", () =>
     capacityConfigurationReference: { state: "Configured" as const, value: null },
   };
   const html = renderToStaticMarkup(<StoreSetupDraftReview content={content} />);
-  expect(html).toContain("Already configured");
+  // b19: saved records are named as filled in, plain values are shown; no "already configured"
+  // mixed into the values, and no "still needs validation" next to the status below.
+  expect(html).toContain("Also filled in: Address.");
   expect(html).toContain("No order limits");
-  expect(html).toContain("not approved, published, or live");
+  expect(html).not.toContain("Already configured");
+  expect(html).not.toContain("still need validation");
   expect(html).not.toContain(id(8));
 });
 it("review names the saved time zone in plain words, not its identifier", () => {
@@ -365,9 +371,112 @@ it("review names the saved time zone in plain words, not its identifier", () => 
       }}
     />,
   );
-  expect(html).toContain("Time zone: Eastern Time (Toronto, Ottawa and Montréal)");
+  expect(html).toContain(
+    "<dt>Time zone</dt><dd><span>Eastern Time (Toronto, Ottawa and Montréal)</span></dd>",
+  );
   expect(html).not.toContain("America/Toronto");
   expect(findInternalText([staticText(html)])).toEqual([]);
+});
+it("b19: the business day start field shows hours and minutes, never seconds of zero", () => {
+  expect(clockField("04:00:00")).toBe("04:00");
+  expect(clockField("04:00")).toBe("04:00");
+  // A saved time with seconds (never entered here) is kept whole rather than changed unseen.
+  expect(clockField("04:00:30")).toBe("04:00:30");
+  expect(clockField("")).toBe("");
+});
+it("b19: Review says what publishing changes against the live Store, in plain values", () => {
+  const schedule = (end: string) =>
+    Array.from({ length: 7 }, (_, i) => ({
+      isoWeekday: i + 1,
+      intervals:
+        i < 5
+          ? [
+              {
+                startLocalTime: "11:00:00",
+                endLocalTime: end,
+                endsNextDay: false,
+                serviceModes: ["DineIn"],
+                orderCutoffSeconds: 0,
+                leadTimeSeconds: 0,
+              },
+            ]
+          : [],
+    }));
+  const current = {
+    timeZone: "America/Toronto",
+    businessDayStartLocalTime: "04:00:00",
+    enabledServiceModes: ["DineIn"],
+    weeklySchedule: schedule("21:00:00"),
+    capacityConfigurationReference: null,
+    addressReference: id(8),
+    contactReference: id(9),
+    paymentConfigurationReference: id(10),
+    receiptReference: id(11),
+    taxConfigurationReference: id(12),
+  } as unknown as StoreConfigurationSnapshot;
+  const content = {
+    ...createUnconfiguredStoreSetupContentV2(),
+    timeZone: { state: "Configured" as const, value: "America/Toronto" },
+    businessDayStartLocalTime: { state: "Configured" as const, value: "05:30:00" },
+    enabledServiceModes: { state: "Configured" as const, value: ["DineIn", "Pickup"] as never },
+    weeklySchedule: { state: "Configured" as const, value: schedule("22:00:00") as never },
+    capacityConfigurationReference: { state: "Configured" as const, value: null },
+    addressReference: { state: "Configured" as const, value: id(8) },
+    contactReference: { state: "Configured" as const, value: id(13) },
+    feeContexts: {
+      state: "Configured" as const,
+      value: [
+        { chargeType: "ServiceCharge", state: "Disabled" },
+        { chargeType: "DeliveryFee", state: "Disabled" },
+        {
+          chargeType: "Tip",
+          state: "Enabled",
+          taxClassificationReference: null,
+          orderTypes: ["DineIn"],
+        },
+      ] as never,
+    },
+  };
+  const summary = storeSetupChangeSummary(content, current);
+  expect(summary.changed.map((item) => item.label)).toEqual([
+    "Business day start",
+    "Service modes",
+    "Opening hours",
+    "Fees",
+    "Contact details",
+  ]);
+  expect(summary.changed[0]?.value).toEqual(["05:30"]);
+  expect(summary.changed[2]?.value).toContain("Monday: 11:00\u201321:00 becomes 11:00\u201322:00");
+  expect(summary.changed[3]?.value).toEqual([
+    "Service charge: off",
+    "Delivery fee: off",
+    "Tip: on (Dine-in)",
+  ]);
+  expect(summary.unchanged).toEqual(["Time zone", "Order limits", "Address"]);
+  const text = staticText(
+    renderToStaticMarkup(<StoreSetupDraftReview content={content} current={current} />),
+  );
+  expect(text).toContain("What changes when it is published");
+  expect(text).toContain("Staying as they are: Time zone, Order limits, Address.");
+  // No seconds, no English plural inserted into the sentence, no references.
+  expect(text).not.toMatch(/\d{2}:\d{2}:\d{2}/u);
+  expect(text).not.toContain(id(13));
+  expect(findInternalText([text])).toEqual([]);
+  // Nothing published to compare with: every value, with the open days counted in words.
+  const alone = storeSetupChangeSummary(content, null);
+  expect(alone.changed.find((item) => item.label === "Opening hours")?.value[0]).toBe(
+    "Open 5 days a week",
+  );
+  expect(alone.filledIn).toEqual(["Address", "Contact details"]);
+  setLanguageForTest("zh-Hans");
+  try {
+    const zh = storeSetupChangeSummary(content, null);
+    expect(zh.changed.find((item) => item.label === "营业时间")?.value[0]).toBe("每周营业 5 天");
+    expect(zh.changed.find((item) => item.label === "营业日开始时间")?.value).toEqual(["05:30"]);
+    expect(JSON.stringify(zh)).not.toMatch(/days|closed/u);
+  } finally {
+    setLanguageForTest("en");
+  }
 });
 it("b18 review: a setting filled in here but not in the saved draft is named as not saved yet", () => {
   const saved = createUnconfiguredStoreSetupContent();

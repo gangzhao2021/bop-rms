@@ -9,6 +9,7 @@ import {
   StoreConfigurationHistoryView,
   appendStoreConfigurationHistory,
   storeConfigurationPendingText,
+  storeConfigurationNextStep,
 } from "./StoreConfigurationOrdinaryPanel.js";
 import { setLanguageForTest } from "./i18n/i18n.js";
 import {
@@ -205,10 +206,57 @@ it("initial render declares saved source is not effective configuration and show
     <StoreConfigurationOrdinaryPanel scope={scope} csrf={csrf} saved={null} freshDisabled />,
   );
   expect(html).toContain("Store configuration publication");
-  expect(html).toContain("A saved setup draft does not change the live Store");
+  expect(html).toContain("Approval and publishing");
   expect(findInternalText([staticText(html)])).toEqual([]);
   expect(html).toContain("Loading Store configuration");
-  expect(html).not.toContain("Publish Store configuration");
+  expect(html).not.toContain("Publish to the Store");
+  // b19 (v3): earlier changes are folded away; no boxed refresh buttons up front.
+  expect(html).toContain("<details");
+  expect(html).not.toContain("Refresh Store configuration");
+});
+it("b19: offers exactly one next step for each state, with the same commands as before", () => {
+  const base = {
+    saved: true,
+    setupIncomplete: false,
+    setupOutdated: false,
+    openByAnother: false,
+    openYours: false,
+    lifecycle: null,
+    ownChange: false,
+    soleOperator: false,
+  } as const;
+  const step = (change: Partial<Parameters<typeof storeConfigurationNextStep>[0]>) =>
+    storeConfigurationNextStep({ ...base, ...change });
+  // Nothing open: create the change from the saved setup, when it is complete and current.
+  expect(step({})?.action).toBe("Materialize");
+  expect(step({ setupIncomplete: true })).toBeNull();
+  expect(step({ setupOutdated: true })).toBeNull();
+  expect(step({ saved: false })).toBeNull();
+  // Your draft: send it for approval (or create it again when the setup was saved since).
+  expect(step({ lifecycle: "Draft", openYours: true, setupOutdated: true })?.action).toBe("Submit");
+  expect(step({ lifecycle: "Draft", openYours: true })?.action).toBe("Materialize");
+  expect(step({ lifecycle: "Draft", openByAnother: true, setupOutdated: true })).toBeNull();
+  // Waiting for approval: someone else's is approved here; your own alone as sole operator.
+  expect(step({ lifecycle: "PendingApproval", setupOutdated: true })?.action).toBe("Approve");
+  expect(
+    step({ lifecycle: "PendingApproval", ownChange: true, soleOperator: true, setupOutdated: true })
+      ?.action,
+  ).toBe("SoleOperator");
+  expect(step({ lifecycle: "PendingApproval", ownChange: true, setupOutdated: true })).toBeNull();
+  // Approved: publish.
+  const publish = step({ lifecycle: "Approved", setupOutdated: true });
+  expect(publish?.action).toBe("Publish");
+  expect(publish?.label).toBe("Publish to the Store");
+  expect(publish?.effect).toMatch(/live at once/u);
+  for (const lifecycle of ["Draft", "PendingApproval", "Approved", null] as const) {
+    const next = step({
+      lifecycle,
+      openYours: lifecycle === "Draft",
+      setupOutdated: lifecycle !== null,
+    });
+    expect(findInternalText([next?.label ?? "", next?.effect ?? ""])).toEqual([]);
+    expect(`${next?.label ?? ""} ${next?.effect ?? ""}`).not.toMatch(/[Vv]ersion \d/u);
+  }
 });
 it("recovers terminal then owner-reobserved original before clearing and accepts successor head", async () => {
   const cursor = await original(),
@@ -359,7 +407,8 @@ it("displays recorded changes in staff words without actor, audit or purpose cod
   const page = recordedPage(null, [4, 3], true),
     html = renderToStaticMarkup(<StoreConfigurationHistoryView entries={page.entries} />);
   expect(html).toContain("Checked");
-  expect(html).toContain("Version 1");
+  // b19: what was done and when, without version numbers.
+  expect(html).not.toContain("Version");
   expect(html).not.toContain(id(40));
   expect(html).not.toContain("Original author");
   expect(findInternalText([staticText(html)], [/\bUTC\b/u])).toEqual([]);

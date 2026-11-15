@@ -9917,4 +9917,87 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Filled in, not saved yet": "已填好，尚未保存",
   "Save as draft to keep them. Until then, publishing below counts them as not set, because it uses the saved draft.":
     "存为草稿后才会保留。在那之前，下方发布按已保存的草稿检查，仍把它们算作未设置。",
+  "Change withdrawn. It can no longer be approved or published.":
+    "这次修改已撤回，不能再批准或发布。",
+  "Change declined. It can no longer be approved or published.":
+    "这次修改已被拒绝，不能再批准或发布。",
+  "Approval and publishing": "审批和发布",
+  "A change cannot be created yet: the saved setup still has {value} not set: {setupMissing}. Set {value2}, save as draft, then come back here.":
+    "还不能生成修改：已保存的设置里还有{value}没有设置：{setupMissing}。请设置{value2}，存为草稿后再回到这里。",
+  "The Store’s settings changed after this setup was saved. Save as draft again (it then builds on the latest settings), then come back here.":
+    "这份设置保存后，门店的设置又有了变化。请再存一次草稿（会以最新的设置为基础），然后回到这里。",
+  "Everything saved in this setup is published. To change the Store again, change the setup, save as draft, then come back here.":
+    "这份设置里保存的内容都已发布。要再次修改门店，请修改设置并存为草稿，然后回到这里。",
+  "A new change cannot be created until this one is approved and published, or declined. Declining keeps it in the history; the person who made it can make a new change.":
+    "在这次修改被批准并发布，或被拒绝之前，不能生成新的修改。拒绝后它仍留在记录里，提交人可以重新修改。",
+  "If you run the business alone, turn on": "如果你一个人经营，可以开启",
+  "to approve it yourself after confirming it is you.": "，验证身份后自己批准。",
+  "Decline this change? It stays in the history and cannot be approved or published. The person who made it sees that it was declined{value}.":
+    "要拒绝这次修改吗？它会留在记录里，不能再批准或发布。提交人会看到它被拒绝{value}。",
+  "Withdraw this change": "撤回这次修改",
+  "Withdraw this change? It stays in the history and can no longer be approved or published. The Store keeps running as it does today.":
+    "要撤回这次修改吗？它会留在记录里，不能再批准或发布。门店继续按现在的设置运行。",
+  "Check the settings again": "重新检查设置",
+  "Check where it stands again": "刷新状态",
+  "Earlier changes": "以前的修改",
+  "Create the change from the saved setup": "用已保存的设置生成修改",
+  "The setup was saved again after this change was made. Creating it again replaces the earlier one; nothing changes for customers yet.":
+    "这次修改生成后，设置又保存过。重新生成会替换之前的修改；顾客那边暂时不会有变化。",
+  "Each setting is checked against the Store as it runs today. Nothing changes for customers yet.":
+    "会对照门店现在的设置逐项检查。顾客那边暂时不会有变化。",
+  "Send it for approval": "提交审批",
+  "Another person with Owner access approves it, then it can be published. The Store keeps running as it does today until then.":
+    "由另一位有店主权限的人批准后才能发布。在此之前，门店继续按现在的设置运行。",
+  "Approve this change": "批准这次修改",
+  "Once approved, it can be published. The Store keeps running as it does today until then.":
+    "批准后就可以发布。在此之前，门店继续按现在的设置运行。",
+  "Publish to the Store": "发布到门店",
+  "Publishing makes these settings live at once: customers and staff see them straight away.":
+    "发布后立即生效，顾客和员工马上就能看到新的设置。",
+  "You withdrew the last change on": "你撤回了上一次修改（",
+  "The last change was withdrawn on": "上一次修改已撤回（",
+  "You declined the last change on": "你拒绝了上一次修改（",
+  "The last change was declined on": "上一次修改已被拒绝（",
+  "; it will not be published.": "），不会发布。",
+  "A change made by someone else: ": "别人做的修改：",
+  ".": "。",
+  "Published on": "已发布于",
+  "Nothing has been published yet.": "还没有发布过。",
+  "{fee}: on ({services})": "{fee}：开（{services}）",
+  "{fee}: off": "{fee}：关",
+  "Open 1 day a week": "每周营业 1 天",
+  "Open {open} days a week": "每周营业 {open} 天",
+  "The order limits saved earlier": "之前保存的订单限制",
+  "The address saved in this setup": "改为这份设置里保存的地址",
+  "The contact details saved in this setup": "改为这份设置里保存的联系方式",
+  "The payment settings saved in this setup": "改为这份设置里保存的付款设置",
+  "The receipt layout chosen in this setup": "改为这份设置里选的收据样式",
+  "The tax settings chosen in this setup (see Tax review)":
+    "改为这份设置里选的税务设置（见“税务核对”）",
+  "What changes when it is published": "发布后会改变",
+  "What this setup holds": "这份设置的内容",
+  "Nothing changes: every setting is the same as the Store runs with today.":
+    "不会有变化：每项设置都和门店现在的一样。",
+  "Staying as they are: {list}.": "保持不变：{list}。",
+  "Also filled in: {list}.": "也已填写：{list}。",
+  "tax settings (see Tax review)": "税务设置（见“税务核对”）",
+  "holidays and special hours": "节假日和特殊营业时间",
+  "when it takes effect": "生效时间",
+  "Still to take from the Store as it runs today: {list}. These are not changed in Store setup. Use them, then save as draft.":
+    "还需要沿用门店现在的：{list}。这些不在门店设置里修改。请点下面的按钮沿用，然后存为草稿。",
+  " This also replaces the opening hours in this setup with the live Store’s.":
+    "这也会把这份设置里的营业时间换成门店现在的营业时间。",
+  "Publishing changes the opening hours as shown above. To keep the hours the Store opens with today, use them and save as draft.":
+    "发布会按上面所列改变营业时间。如果想保留门店现在的营业时间，请点下面的按钮沿用，然后存为草稿。",
+  "time zone": "时区",
+  "business day start": "营业日开始时间",
+  services: "服务方式",
+  "opening hours": "营业时间",
+  "order limits": "订单限制",
+  "1 thing needs fixing before this can be sent for approval or published.":
+    "还有 1 项要处理，才能提交审批或发布。",
+  "{count} things need fixing before this can be sent for approval or published.":
+    "还有 {count} 项要处理，才能提交审批或发布。",
+  "To make a new change, save as draft again (it then builds on the latest settings), then come back here.":
+    "要做新的修改，请再存一次草稿（会以最新的设置为基础），然后回到这里。",
 });

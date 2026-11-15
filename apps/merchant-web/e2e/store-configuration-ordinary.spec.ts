@@ -596,7 +596,7 @@ async function enter(page: Page) {
   await openStoreSetupPlace(page, "Settings that need approval");
   await page.getByRole("button", { name: /^4\. Review and publish$/u }).click();
   await expect(
-    panel(page).getByRole("button", { name: "Create configuration from saved setup" }),
+    panel(page).getByRole("button", { name: "Create the change from the saved setup" }),
   ).toBeEnabled();
 }
 async function reloadReview(page: Page) {
@@ -635,41 +635,37 @@ test("ordinary Store Review materializes validates submits independently approve
 }) => {
   const state = await install(page);
   await enter(page);
-  await panel(page).getByRole("button", { name: "Create configuration from saved setup" }).click();
+  await panel(page).getByRole("button", { name: "Create the change from the saved setup" }).click();
   await expect(panel(page).getByRole("status")).toHaveText(
     "Configuration created from the saved setup. Current configuration refreshed.",
   );
-  await expect(
-    panel(page).getByRole("region", { name: "Recorded fee configuration" }),
-  ).toContainText("Service charge");
-  await panel(page).getByRole("button", { name: "Validate configuration" }).click();
+  // b19: one sentence on where it stands; the one next step is offered alone.
+  await expect(panel(page)).toContainText("Draft, not yet sent for approval.");
+  await expect(panel(page).getByRole("button", { name: "Publish to the Store" })).toHaveCount(0);
+  await panel(page).getByRole("button", { name: "Check the settings again" }).click();
   await expect(panel(page).getByRole("status")).toHaveText(
     "Configuration checked. Current configuration refreshed.",
   );
-  await panel(page).getByRole("button", { name: "Submit configuration for review" }).click();
+  await panel(page).getByRole("button", { name: "Send it for approval" }).click();
   await expect(panel(page).getByRole("status")).toHaveText(
     "Configuration sent for approval. Current configuration refreshed.",
   );
-  await expect(
-    panel(page).getByRole("button", { name: "Approve configuration independently" }),
-  ).toBeDisabled();
+  // Your own change: another person approves it; no approve button for you.
+  await expect(panel(page).getByRole("button", { name: "Approve this change" })).toHaveCount(0);
   state.actor = id(80);
   await reloadReview(page);
-  await expect(
-    panel(page).getByRole("button", { name: "Approve configuration independently" }),
-  ).toBeEnabled();
-  await panel(page).getByRole("button", { name: "Approve configuration independently" }).click();
+  await expect(panel(page).getByRole("button", { name: "Approve this change" })).toBeEnabled();
+  await panel(page).getByRole("button", { name: "Approve this change" }).click();
   await expect(panel(page).getByRole("status")).toHaveText(
     "Configuration approved. Current configuration refreshed.",
   );
-  await panel(page).getByRole("button", { name: "Publish Store configuration" }).click();
+  await panel(page).getByRole("button", { name: "Publish to the Store" }).click();
   await expect(panel(page).getByRole("status")).toHaveText(
     "Configuration published. Current configuration refreshed.",
   );
-  await expect(
-    panel(page).getByRole("region", { name: "Published fee configuration" }),
-  ).toContainText("Service charge");
-  await expect(panel(page)).toContainText("Current published configuration");
+  await expect(panel(page)).toContainText("Published on");
+  await expect(panel(page)).not.toContainText(/Version \d/u);
+  await expect(panel(page).getByRole("button", { name: "Publish to the Store" })).toHaveCount(0);
   await expectNoInternalText(page);
   expect(state.writes).toEqual(["Materialize", "Validate", "Submit", "Approve", "Publish"]);
   expect(await cursor(page)).toEqual([]);
@@ -681,7 +677,7 @@ test("lost reply retains original through denied conflict and failed refresh the
   const state = await install(page);
   await enter(page);
   state.loseNext = true;
-  await panel(page).getByRole("button", { name: "Create configuration from saved setup" }).click();
+  await panel(page).getByRole("button", { name: "Create the change from the saved setup" }).click();
   await expect(
     panel(page).getByRole("button", { name: "Recover original configuration request" }),
   ).toBeEnabled();
@@ -730,7 +726,9 @@ test("Review controls retain 320px 200 percent text keyboard and 44px targets @p
   await page.evaluate(() => {
     document.documentElement.style.fontSize = "200%";
   });
-  const create = panel(page).getByRole("button", { name: "Create configuration from saved setup" });
+  const create = panel(page).getByRole("button", {
+    name: "Create the change from the saved setup",
+  });
   await create.focus();
   await expect(create).toBeFocused();
   await page.keyboard.press("Enter");
@@ -755,12 +753,12 @@ test("actual immutable history paginates original authors and read refusal keeps
 }) => {
   const state = await install(page);
   await enter(page);
-  await panel(page).getByRole("button", { name: "Create configuration from saved setup" }).click();
+  await panel(page).getByRole("button", { name: "Create the change from the saved setup" }).click();
   await expect(panel(page).getByRole("status")).toHaveText(
     "Configuration created from the saved setup. Current configuration refreshed.",
   );
   for (let i = 0; i < 2; i++) {
-    await panel(page).getByRole("button", { name: "Validate configuration" }).click();
+    await panel(page).getByRole("button", { name: "Check the settings again" }).click();
     await expect(panel(page).getByRole("status")).toHaveText(
       "Configuration checked. Current configuration refreshed.",
     );
@@ -771,7 +769,13 @@ test("actual immutable history paginates original authors and read refusal keeps
     name: "Store configuration operation history",
     exact: true,
   });
-  await history.getByRole("button", { name: "Refresh configuration history" }).click();
+  // b19: earlier changes are folded; opening them reads them (again each time).
+  const earlier = panel(page).getByText("Earlier changes", { exact: true });
+  const reopen = async () => {
+    await earlier.click();
+    await earlier.click();
+  };
+  await earlier.click();
   await expect(history.getByRole("listitem")).toHaveCount(2);
   await history.getByRole("button", { name: "Load older changes" }).click();
   await expect(history.getByRole("listitem")).toHaveCount(3);
@@ -779,18 +783,18 @@ test("actual immutable history paginates original authors and read refusal keeps
   await expect(history).toContainText("Created from saved setup");
   await expect(history).not.toContainText(scope.actorReference);
   state.wrongHistory = true;
-  await history.getByRole("button", { name: "Refresh configuration history" }).click();
+  await reopen();
   await expect(history.getByRole("alert")).toContainText("Actor changed");
   state.wrongHistory = false;
   state.loseNext = true;
-  await panel(page).getByRole("button", { name: "Validate configuration" }).click();
+  await panel(page).getByRole("button", { name: "Check the settings again" }).click();
   await expect(
     panel(page).getByRole("button", { name: "Recover original configuration request" }),
   ).toBeEnabled();
   const original = await cursor(page);
   expect(original).toHaveLength(1);
   state.denyHistory = true;
-  await history.getByRole("button", { name: "Refresh configuration history" }).click();
+  await reopen();
   await expect(history.getByRole("alert")).toContainText("permission");
   expect(await cursor(page)).toEqual(original);
   state.denyHistory = false;
@@ -827,25 +831,22 @@ test("publication checks say what blocks publication and who must approve, at 14
   const state = await install(page);
   state.failing = ["Tax", "GoLive"];
   await enter(page);
-  await panel(page).getByRole("button", { name: "Create configuration from saved setup" }).click();
+  await panel(page).getByRole("button", { name: "Create the change from the saved setup" }).click();
   const checks = panel(page).getByRole("region", { name: "Publication checks" });
-  await expect(checks).toContainText("2 checks need attention");
-  await expect(checks).toContainText("Needs attention: Tax settings are not the ones in force");
-  await expect(checks).toContainText("Ready: Opening hours are complete.");
+  await expect(checks).toContainText("2 things need fixing");
+  await expect(checks).toContainText("Tax settings are not the ones in force");
+  await expect(checks).not.toContainText("Opening hours are complete.");
   await expect(panel(page)).toContainText("It must be approved and published by");
-  await expect(
-    panel(page).getByRole("button", { name: "Submit configuration for review" }),
-  ).toBeDisabled();
+  await expect(panel(page).getByRole("button", { name: "Send it for approval" })).toBeDisabled();
   state.failing = [];
   await reloadReview(page);
-  await expect(checks).toContainText("Every check passed.");
-  await panel(page).getByRole("button", { name: "Submit configuration for review" }).click();
+  // b19: nothing to fix, so no checklist; the next step is open.
+  await expect(checks).toHaveCount(0);
+  await panel(page).getByRole("button", { name: "Send it for approval" }).click();
   await expect(panel(page)).toContainText(
     "Another person with Owner access must approve this configuration.",
   );
-  await expect(
-    panel(page).getByRole("button", { name: "Approve configuration independently" }),
-  ).toBeDisabled();
+  await expect(panel(page).getByRole("button", { name: "Approve this change" })).toHaveCount(0);
   state.failing = ["GoLive"];
   for (const [width, height] of [
     [1440, 900],
@@ -875,10 +876,10 @@ test("M109: a setup offering pickup can't be sent until the store has a phone, a
   const state = await install(page);
   state.failing = ["StorePhone"];
   await enter(page);
-  await panel(page).getByRole("button", { name: "Create configuration from saved setup" }).click();
+  await panel(page).getByRole("button", { name: "Create the change from the saved setup" }).click();
   const checks = panel(page).getByRole("region", { name: "Publication checks" });
   // Created and confirmed before the page is read again at each width.
-  await expect(checks).toContainText("1 check needs attention");
+  await expect(checks).toContainText("1 thing needs fixing");
   for (const [width, height] of [
     [1440, 900],
     [1024, 768],
@@ -886,13 +887,11 @@ test("M109: a setup offering pickup can't be sent until the store has a phone, a
   ] as const) {
     await page.setViewportSize({ width, height });
     await reloadReview(page);
-    await expect(checks).toContainText("1 check needs attention");
+    await expect(checks).toContainText("1 thing needs fixing");
     await expect(checks).toContainText(
-      "Needs attention: This setup offers pickup, and pickup guests call the store about allergies or their order. Add the store's phone number in Store details, or take pickup out of the services this setup offers.",
+      "This setup offers pickup, and pickup guests call the store about allergies or their order. Add the store's phone number in Store details, or take pickup out of the services this setup offers.",
     );
-    await expect(
-      panel(page).getByRole("button", { name: "Submit configuration for review" }),
-    ).toBeDisabled();
+    await expect(panel(page).getByRole("button", { name: "Send it for approval" })).toBeDisabled();
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
       `no horizontal overflow at ${width}`,
@@ -907,12 +906,8 @@ test("M109: a setup offering pickup can't be sent until the store has a phone, a
   // The phone published: the check passes and the setup can be sent.
   state.failing = [];
   await reloadReview(page);
-  await expect(checks).toContainText(
-    "Ready: The store has a phone number for pickup guests, or does not offer pickup.",
-  );
-  await expect(
-    panel(page).getByRole("button", { name: "Submit configuration for review" }),
-  ).toBeEnabled();
+  await expect(checks).toHaveCount(0);
+  await expect(panel(page).getByRole("button", { name: "Send it for approval" })).toBeEnabled();
   expect(state.errors).toEqual([]);
 });
 
@@ -923,11 +918,11 @@ test("the Owner approves their own configuration alone as sole operator, at 1440
   state.failing = [];
   state.soleOperator = { status: "NotSet", otherApprovers: [], verifiedUntil: null };
   await enter(page);
-  await panel(page).getByRole("button", { name: "Create configuration from saved setup" }).click();
+  await panel(page).getByRole("button", { name: "Create the change from the saved setup" }).click();
   await expect(panel(page).getByRole("status")).toHaveText(
     "Configuration created from the saved setup. Current configuration refreshed.",
   );
-  await panel(page).getByRole("button", { name: "Submit configuration for review" }).click();
+  await panel(page).getByRole("button", { name: "Send it for approval" }).click();
   await expect(panel(page).getByRole("status")).toHaveText(
     "Configuration sent for approval. Current configuration refreshed.",
   );
@@ -938,9 +933,7 @@ test("the Owner approves their own configuration alone as sole operator, at 1440
   );
   await expect(own).toContainText("turn on Sole operator");
   await expect(own.getByRole("button", { name: "Approve configuration on my own" })).toHaveCount(0);
-  await expect(
-    panel(page).getByRole("button", { name: "Approve configuration independently" }),
-  ).toBeDisabled();
+  await expect(panel(page).getByRole("button", { name: "Approve this change" })).toHaveCount(0);
   // On, but someone else also holds Owner access here: named.
   state.soleOperator = {
     status: "OtherApprovers",
@@ -999,7 +992,7 @@ test("the Owner approves their own configuration alone as sole operator, at 1440
     "Configuration approved by you alone as sole operator. Current configuration refreshed.",
   );
   await expect(own).toHaveCount(0);
-  await panel(page).getByRole("button", { name: "Publish Store configuration" }).click();
+  await panel(page).getByRole("button", { name: "Publish to the Store" }).click();
   await expect(panel(page).getByRole("status")).toHaveText(
     "Configuration published. Current configuration refreshed.",
   );
@@ -1016,20 +1009,22 @@ test("someone else's open configuration is shown, cannot be replaced and can be 
   const state = await install(page);
   state.failing = [];
   await enter(page);
-  await panel(page).getByRole("button", { name: "Create configuration from saved setup" }).click();
-  await panel(page).getByRole("button", { name: "Submit configuration for review" }).click();
+  await panel(page).getByRole("button", { name: "Create the change from the saved setup" }).click();
+  await panel(page).getByRole("button", { name: "Send it for approval" }).click();
   await expect(panel(page).getByRole("status")).toHaveText(
     "Configuration sent for approval. Current configuration refreshed.",
   );
   // The author sees their own open change and may withdraw it.
-  const yours = panel(page).getByRole("region", { name: "Your configuration waiting" });
-  await expect(yours).toContainText("Your version 1 is waiting for approval.");
-  await expect(yours.getByRole("button", { name: "Withdraw version 1" })).toBeEnabled();
+  // b19: in one sentence, without version numbers; withdrawing is confirmed first.
+  await expect(panel(page)).toContainText("Waiting for approval.");
+  await panel(page).getByRole("button", { name: "Withdraw this change" }).click();
+  const withdraw = panel(page).getByRole("group", { name: "Withdraw this change" });
+  await expect(withdraw).toContainText("The Store keeps running as it does today.");
+  await withdraw.getByRole("button", { name: "Keep it" }).click();
+  expect(state.writes).toEqual(["Materialize", "Submit"]);
   // Another Owner: it is shown as someone else's; creating is blocked; declining is offered.
   state.actor = id(80);
-  const theirs = panel(page).getByRole("region", {
-    name: "Configuration waiting from someone else",
-  });
+  const theirs = panel(page);
   for (const [width, height] of [
     [1440, 900],
     [1024, 768],
@@ -1037,12 +1032,13 @@ test("someone else's open configuration is shown, cannot be replaced and can be 
   ] as const) {
     await page.setViewportSize({ width, height });
     await reloadReview(page);
+    await expect(theirs).toContainText("A change made by someone else: Waiting for approval.");
     await expect(theirs).toContainText(
-      "Version 1, made by someone else, is waiting for approval. A new configuration cannot be created until it is approved and published, or declined.",
+      "A new change cannot be created until this one is approved and published, or declined.",
     );
     await expect(
-      panel(page).getByRole("button", { name: "Create configuration from saved setup" }),
-    ).toBeDisabled();
+      panel(page).getByRole("button", { name: "Create the change from the saved setup" }),
+    ).toHaveCount(0);
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
       `no horizontal overflow at ${width}`,
@@ -1059,25 +1055,23 @@ test("someone else's open configuration is shown, cannot be replaced and can be 
     });
   }
   // WP-2423 v15: declining is confirmed first, with an optional reason.
-  await theirs.getByRole("button", { name: "Decline version 1" }).click();
+  await theirs.getByRole("button", { name: "Decline this change" }).click();
   expect(state.writes).toEqual(["Materialize", "Submit"]);
   const confirm = theirs.getByRole("group", { name: "Decline this configuration" });
   await confirm.getByLabel("Reason (optional)").selectOption("TalkFirst");
-  await confirm.getByRole("button", { name: "Decline version 1" }).click();
+  await confirm.getByRole("button", { name: "Decline this change" }).click();
   // WP-2423 (v15 D6): the result names only what happened; what to do next comes from the
   // current state (never "a new configuration can now be created" when it cannot).
   await expect(panel(page).getByRole("status")).toHaveText(
-    "Version 1 declined. It can no longer be approved or published.",
+    "Change declined. It can no longer be approved or published.",
   );
-  await expect(panel(page)).toContainText("Version 1 was declined by you");
-  // The saved setup was made before that version: it must be saved again first (said plainly).
+  await expect(panel(page)).toContainText("You declined the last change on");
+  // The saved setup was made before that change: it must be saved again first (said plainly).
   await expect(panel(page)).toContainText(
-    "To create a new configuration, save the setup again (Save as draft, it then builds on the latest configuration), then create it.",
+    "To make a new change, save as draft again (it then builds on the latest settings), then come back here.",
   );
   await expect(panel(page)).not.toContainText("changed after this setup was saved");
-  await expect(
-    panel(page).getByRole("button", { name: "Approve configuration independently" }),
-  ).toBeDisabled();
+  await expect(panel(page).getByRole("button", { name: "Approve this change" })).toHaveCount(0);
   await expectNoInternalText(page);
   expect(state.writes).toEqual(["Materialize", "Submit", "Declined"]);
   expect(state.errors).toEqual([]);
@@ -1114,14 +1108,17 @@ test("WP-2423 v15: 'Use the live Store's settings' fills time zone, business day
     "Time zone (step 1, Time zone and business day); Business day start (step 1, Time zone and business day)",
   );
   await expect(
-    panel(page).getByRole("button", { name: "Create configuration from saved setup" }),
-  ).toBeDisabled();
+    panel(page).getByRole("button", { name: "Create the change from the saved setup" }),
+  ).toHaveCount(0);
   await page.getByRole("button", { name: "Use the live Store’s settings" }).click();
   await expect(missing).toHaveCount(0);
-  await expect(page.getByText("Every setting is set.")).toBeVisible();
-  await expect(page.getByText("Business day start: 04:00:00")).toBeVisible();
-  await expect(page.getByText("Service modes: Pickup", { exact: true })).toBeVisible();
-  await expect(page.getByText("Receipt template: Already configured")).toBeVisible();
+  // b19: the summary compares with the Store as it runs today, in plain values without seconds.
+  const summary = page.locator(".store-setup-summary");
+  await expect(summary).toContainText("What changes when it is published");
+  await expect(summary).toContainText(/Staying as they are: .*Business day start/u);
+  await expect(summary).toContainText(/Staying as they are: .*Service modes/u);
+  await expect(summary).not.toContainText("04:00:00");
+  await expect(summary).not.toContainText("Already configured");
   for (const [width, height] of [
     [1440, 900],
     [1024, 768],
@@ -1141,7 +1138,7 @@ test("WP-2423 v15: 'Use the live Store's settings' fills time zone, business day
   // Step 1 now holds the live Store's time zone (the inputs Save reads).
   await page.getByRole("button", { name: /^1\. Time zone and business day$/u }).click();
   await expect(page.getByLabel("Draft timezone")).toHaveValue("America/Toronto");
-  await expect(page.getByLabel("Business day starts at (local time)")).toHaveValue("04:00:00");
+  await expect(page.getByLabel("Business day starts at (local time)")).toHaveValue("04:00");
   await expectNoInternalText(page);
   expect(state.errors).toEqual([]);
 });

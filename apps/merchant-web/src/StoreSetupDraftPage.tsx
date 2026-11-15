@@ -1,4 +1,6 @@
-import { currentLanguage, serviceModeText, t } from "./i18n/i18n.js";
+import { listSeparator, serviceModeText, t } from "./i18n/i18n.js";
+import { wordGap } from "./word-gap.js";
+export { wordGap };
 import { StoreConfigurationOrdinaryPanel } from "./StoreConfigurationOrdinaryPanel.js";
 import type { StoreConfigurationSnapshot } from "./store-configuration-client.js";
 import { createStoreConfigurationOrdinaryClient } from "./store-configuration-ordinary-client.js";
@@ -8,12 +10,7 @@ import { FULL_SIGN_IN_REQUIRED_TEXT } from "./full-sign-in.js";
 import { ReceiptTemplateStoreSelection } from "./ReceiptTemplateStoreSelection.js";
 import { ReceiptTemplateArtifactEditor } from "./ReceiptTemplateArtifactEditor.js";
 import { ReceiptTemplateDraftEditor } from "./ReceiptTemplateDraftEditor.js";
-import {
-  storeSetupMissingItems,
-  storeSetupWhere,
-  type StoreSetupFieldPlace,
-  type StoreSetupLayout,
-} from "./store-setup-missing.js";
+import { storeSetupMissingItems, type StoreSetupLayout } from "./store-setup-missing.js";
 import { createStorePublicProfileClient } from "./store-public-profile-client.js";
 import {
   createStorePaymentConfigurationClient,
@@ -158,12 +155,16 @@ function SavedWaitNote({ seconds }: { readonly seconds?: number | null | undefin
     </p>
   );
 }
+/** b19: a time field shows hours and minutes ("04:00", not "04:00:00 AM"); a saved time with
+ * seconds other than zero (never entered here) is shown whole so it is never changed unseen. */
+export const clockField = (value: string) =>
+  /^\d{2}:\d{2}:00$/u.test(value) ? value.slice(0, 5) : value;
 function editInputs(content: StoreSetupContent): StoreSetupEditorInputs {
   return {
     timeZone: content.timeZone.state === "Configured" ? content.timeZone.value : "",
     businessStart:
       content.businessDayStartLocalTime.state === "Configured"
-        ? content.businessDayStartLocalTime.value
+        ? clockField(content.businessDayStartLocalTime.value)
         : "",
     serviceModes:
       content.enabledServiceModes.state === "Configured" ? content.enabledServiceModes.value : [],
@@ -435,8 +436,6 @@ const placeAnchors: Readonly<Record<string, StoreSetupPlace>> = {
   "#sole-operator": "access",
   "#store-setup-changes": "changes",
 };
-/** The space between a sentence and a link inside it: none in Chinese, one in English. */
-export const wordGap = () => (currentLanguage() === "zh-Hans" ? "" : " ");
 /** The place an address asks for: `?section=` first, then an anchor other pages link to. */
 export function storeSetupPlaceOf(search: string, hash: string): StoreSetupPlace | null {
   const asked = new URLSearchParams(search).get("section");
@@ -1049,7 +1048,8 @@ export function StoreSetupDraftPage({
   // of saying "Not configured"; saving the draft keeps them, as any other value in it. Until it is
   // saved, Review lists them as filled in but not saved (the publication checks the saved draft).
   const storeTimeZone = openLayout && workspace !== null ? workspace.store.timeZone : null;
-  const liveBusinessStart = openLayout ? (live?.current?.businessDayStartLocalTime ?? null) : null;
+  const liveStart = openLayout ? (live?.current?.businessDayStartLocalTime ?? null) : null;
+  const liveBusinessStart = liveStart === null ? null : clockField(liveStart);
   useEffect(() => {
     if (storeTimeZone === null) return;
     setInputs((old) => {
@@ -1365,7 +1365,7 @@ export function StoreSetupDraftPage({
                   {t("Business day starts at (local time)")}
                   <input
                     type="time"
-                    step="1"
+                    step={inputs.businessStart.length > 5 ? 1 : 60}
                     disabled={disabled}
                     value={inputs.businessStart}
                     onChange={(e) => changeInputs({ businessStart: e.currentTarget.value })}
@@ -1806,6 +1806,7 @@ export function StoreSetupDraftPage({
                   content={parsed}
                   saved={workspace.setup.snapshot?.content ?? null}
                   layout={layout}
+                  current={live?.current ?? null}
                 />
                 <StoreSetupLiveSettings
                   layout={layout}
@@ -1903,96 +1904,212 @@ export function StoreSetupDraftPage({
     </AppFrame>
   );
 }
-/** WP-2423: what is still missing says where to set it (step names as on screen). */
-const notSetIn = (where: string) => t("Not set yet ({where})", { where });
-function storeReview(
+/** b19: one setting of the summary: its name and, in plain words, what it is in this setup. */
+export interface StoreSetupSummaryItem {
+  readonly label: string;
+  readonly value: readonly string[];
+}
+interface FeeLike {
+  readonly chargeType: string;
+  readonly state: string;
+  readonly orderTypes?: readonly string[];
+  readonly taxClassificationReference?: string | null;
+}
+const feesKey = (fees: readonly FeeLike[]) =>
+  JSON.stringify(
+    fees.map((fee) => [
+      fee.chargeType,
+      fee.state === "Enabled" ? "Enabled" : "Off",
+      [...(fee.orderTypes ?? [])].sort(),
+      fee.taxClassificationReference ?? null,
+    ]),
+  );
+const feeText = (fee: FeeLike) =>
+  fee.state === "Enabled"
+    ? t("{fee}: on ({services})", {
+        fee: feeLabel(fee.chargeType),
+        services: (fee.orderTypes ?? []).map(serviceModeText).join(listSeparator()),
+      })
+    : t("{fee}: off", { fee: feeLabel(fee.chargeType) });
+const openDaysText = (schedule: WeeklySchedule) => {
+  const open = schedule.filter((day) => day.intervals.length > 0).length;
+  return open === 1 ? t("Open 1 day a week") : t("Open {open} days a week", { open });
+};
+/**
+ * b19 (Owner: step 4 was messy): what publishing this setup changes, in plain values. Against the
+ * Store as it runs today (`current`), settings that differ are listed with their new value and the
+ * rest are named as unchanged; with nothing published to compare with, every setting that has a
+ * value shows it and the saved records (address, contact, payment, …) are named as filled in.
+ * Settings not set yet are not here: Review lists them with where to set them.
+ */
+export function storeSetupChangeSummary(
   content: StoreSetupContent,
-  layout: StoreSetupLayout,
-): readonly (readonly [string, string])[] {
-  const notSet = (field: StoreSetupFieldPlace) => notSetIn(storeSetupWhere(layout, field));
-  return [
-    [
-      t("Time zone"),
-      content.timeZone.state === "Configured"
-        ? timeZoneLabel(content.timeZone.value)
-        : notSet("timeZone"),
-    ],
-    [
+  current: StoreConfigurationSnapshot | null,
+): {
+  readonly changed: readonly StoreSetupSummaryItem[];
+  readonly unchanged: readonly string[];
+  readonly filledIn: readonly string[];
+} {
+  const changed: StoreSetupSummaryItem[] = [],
+    unchanged: string[] = [],
+    filledIn: string[] = [];
+  const add = (label: string, same: boolean | null, value: () => readonly string[]) => {
+    if (same === true) unchanged.push(label);
+    else changed.push({ label, value: value() });
+  };
+  const known = current !== null;
+  if (content.timeZone.state === "Configured") {
+    const zone = content.timeZone.value;
+    add(t("Time zone"), known ? zone === current.timeZone : null, () => [timeZoneLabel(zone)]);
+  }
+  if (content.businessDayStartLocalTime.state === "Configured") {
+    const start = content.businessDayStartLocalTime.value;
+    add(
       t("Business day start"),
-      content.businessDayStartLocalTime.state === "Configured"
-        ? content.businessDayStartLocalTime.value
-        : notSet("timeZone"),
-    ],
-    [
+      known ? clock(start) === clock(current.businessDayStartLocalTime) : null,
+      () => [clock(start)],
+    );
+  }
+  if (content.enabledServiceModes.state === "Configured") {
+    const services = content.enabledServiceModes.value;
+    add(
       t("Service modes"),
-      content.enabledServiceModes.state === "Configured"
-        ? content.enabledServiceModes.value.map(serviceModeText).join(", ")
-        : notSet("serviceModes"),
-    ],
-    [
-      t("Weekly hours"),
-      content.weeklySchedule.state === "Configured"
-        ? ((open) =>
-            t("Open {open} {value} a week", { open: open, value: open === 1 ? "day" : "days" }))(
-            content.weeklySchedule.value.filter((day) => day.intervals.length > 0).length,
-          )
-        : notSet("hours"),
-    ],
+      known
+        ? JSON.stringify([...services].sort()) ===
+            JSON.stringify([...current.enabledServiceModes].sort())
+        : null,
+      () => [services.map(serviceModeText).join(listSeparator())],
+    );
+  }
+  if (content.weeklySchedule.state === "Configured") {
+    const schedule = content.weeklySchedule.value;
+    const lines = known ? openingHoursChanges(current.weeklySchedule, schedule) : [];
+    add(t("Opening hours"), known ? lines.length === 0 : null, () =>
+      known
+        ? lines
+        : [
+            openDaysText(schedule),
+            ...schedule
+              .filter((day) => day.intervals.length > 0)
+              .map((day) => `${days[day.isoWeekday - 1]}: ${dayText(day.intervals, false)}`),
+          ],
+    );
+  }
+  if (content.feeContexts?.state === "Configured") {
+    const fees = content.feeContexts.value;
+    const live = current?.setupBasis?.feeContexts;
+    add(t("Fees"), known ? live !== undefined && feesKey(live) === feesKey(fees) : null, () =>
+      fees.map(feeText),
+    );
+  }
+  if (content.capacityConfigurationReference.state === "Configured") {
+    const limits = content.capacityConfigurationReference.value;
+    add(t("Order limits"), known ? limits === current.capacityConfigurationReference : null, () => [
+      limits === null ? t("No order limits") : t("The order limits saved earlier"),
+    ]);
+  }
+  const records: readonly (readonly [
+    string,
+    StoreSetupContent["addressReference"],
+    string | null,
+    string,
+  ])[] = [
     [
       t("Address"),
-      content.addressReference.state === "Configured" ? t("Already configured") : notSet("address"),
-    ],
-    [
-      t("Fees"),
-      content.feeContexts?.state === "Configured"
-        ? content.feeContexts.value
-            .map(
-              (v) =>
-                `${feeLabel(v.chargeType)}: ${v.state === "Enabled" ? t("On") : v.state === "Disabled" ? t("Off") : t("Not set")}`,
-            )
-            .join(", ")
-        : notSet("payment"),
-    ],
-    [
-      t("Tax settings"),
-      content.taxConfigurationReference.state === "Configured"
-        ? t("Set (see Tax review)")
-        : t("Not set yet (use the live Store's settings below)"),
-    ],
-    [
-      t("Payment"),
-      content.paymentConfigurationReference.state === "Configured"
-        ? t("Already configured")
-        : notSet("payment"),
-    ],
-    [
-      t("Receipt template"),
-      content.receiptReference.state === "Configured" ? t("Already configured") : notSet("payment"),
-    ],
-    [
-      t("Order limits"),
-      content.capacityConfigurationReference.state === "Unconfigured"
-        ? notSet("capacity")
-        : content.capacityConfigurationReference.value === null
-          ? t("No order limits")
-          : t("Already configured"),
+      content.addressReference,
+      current?.addressReference ?? null,
+      t("The address saved in this setup"),
     ],
     [
       t("Contact details"),
-      content.contactReference.state === "Configured" ? t("Already configured") : notSet("contact"),
+      content.contactReference,
+      current?.contactReference ?? null,
+      t("The contact details saved in this setup"),
+    ],
+    [
+      t("Payment"),
+      content.paymentConfigurationReference,
+      current?.paymentConfigurationReference ?? null,
+      t("The payment settings saved in this setup"),
+    ],
+    [
+      t("Receipt template"),
+      content.receiptReference,
+      current?.receiptReference ?? null,
+      t("The receipt layout chosen in this setup"),
+    ],
+    [
+      t("Tax settings"),
+      content.taxConfigurationReference,
+      current?.taxConfigurationReference ?? null,
+      t("The tax settings chosen in this setup (see Tax review)"),
     ],
   ];
+  for (const [label, value, live, text] of records) {
+    if (value.state !== "Configured") continue;
+    if (!known) filledIn.push(label);
+    else add(label, value.value === live, () => [text]);
+  }
+  return { changed, unchanged, filledIn };
+}
+
+/** b19: the summary of what publishing changes, as rows of name and new value. */
+function StoreSetupChangeSummary({
+  content,
+  current,
+}: {
+  readonly content: StoreSetupContent;
+  readonly current: StoreConfigurationSnapshot | null;
+}) {
+  const { changed, unchanged, filledIn } = storeSetupChangeSummary(content, current);
+  const known = current !== null;
+  return (
+    <section className="store-setup-summary" aria-labelledby="store-setup-summary-heading">
+      <h4 id="store-setup-summary-heading">
+        {known ? t("What changes when it is published") : t("What this setup holds")}
+      </h4>
+      {known && changed.length === 0 ? (
+        <p>{t("Nothing changes: every setting is the same as the Store runs with today.")}</p>
+      ) : (
+        <dl className="store-setup-summary__rows">
+          {changed.map((item) => (
+            <div key={item.label}>
+              <dt>{item.label}</dt>
+              <dd>
+                {item.value.map((line) => (
+                  <span key={line}>{line}</span>
+                ))}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {unchanged.length > 0 && (
+        <p className="store-setup-summary__rest">
+          {t("Staying as they are: {list}.", { list: unchanged.join(listSeparator()) })}
+        </p>
+      )}
+      {filledIn.length > 0 && (
+        <p className="store-setup-summary__rest">
+          {t("Also filled in: {list}.", { list: filledIn.join(listSeparator()) })}
+        </p>
+      )}
+    </section>
+  );
 }
 
 export function StoreSetupDraftReview({
   content,
   saved = null,
   layout = "Opening",
+  current = null,
 }: {
   readonly content: StoreSetupContent | null;
   /** The saved draft; what is set here but not in it is named as not saved yet. */
   readonly saved?: StoreSetupContent | null;
   readonly layout?: StoreSetupLayout;
+  /** b19: the configuration the Store runs with today, when read: the summary says what changes. */
+  readonly current?: StoreConfigurationSnapshot | null;
 }) {
   // WP-2423 (v15): the count is exactly the list of what is not set, each with where to set it.
   const missing = content ? storeSetupMissingItems(content, layout) : null;
@@ -2008,20 +2125,19 @@ export function StoreSetupDraftReview({
         ).filter((item) => !missing.some((m) => m.label === item.label));
   return (
     <>
-      <p>
-        {missing === null
-          ? t("Some edited times or wait values need correction before saving.")
-          : missing.length === 0
-            ? t("Every setting is set.")
-            : missing.length === 1
+      {missing === null && (
+        <p>{t("Some edited times or wait values need correction before saving.")}</p>
+      )}
+      {missing !== null && missing.length > 0 && (
+        <section aria-label={t("Settings not set yet")}>
+          <h4>{t("Not set yet")}</h4>
+          <p>
+            {missing.length === 1
               ? t("1 setting is not set yet. An unfinished draft can be saved.")
               : t("{length} settings are not set yet. An unfinished draft can be saved.", {
                   length: missing.length,
                 })}
-      </p>
-      {missing !== null && missing.length > 0 && (
-        <section aria-label={t("Settings not set yet")}>
-          <h4>{t("Not set yet")}</h4>
+          </p>
           <ul>
             {missing.map((item) => (
               <li key={item.label}>
@@ -2046,18 +2162,7 @@ export function StoreSetupDraftReview({
           </p>
         </section>
       )}
-      {content && (
-        <ul>
-          {storeReview(content, layout).map(([label, value]) => (
-            <li key={label}>
-              {label}: {value}
-            </li>
-          ))}
-        </ul>
-      )}
-      <p>
-        {t("These settings still need validation. This draft is not approved, published, or live.")}
-      </p>
+      {content && <StoreSetupChangeSummary content={content} current={current} />}
     </>
   );
 }
@@ -3236,7 +3341,7 @@ function intervalText(interval: ScheduleInterval, detailed: boolean): string {
 }
 function dayText(intervals: readonly ScheduleInterval[] | undefined, detailed: boolean): string {
   return intervals === undefined || intervals.length === 0
-    ? "closed"
+    ? t("closed")
     : intervals.map((interval) => intervalText(interval, detailed)).join(", ");
 }
 /**
@@ -3291,7 +3396,6 @@ export function StoreSetupLiveSettings({
   live,
   disabled,
   onUse,
-  layout = "Opening",
 }: {
   readonly layout?: StoreSetupLayout;
   readonly content: StoreSetupContent;
@@ -3318,116 +3422,68 @@ export function StoreSetupLiveSettings({
   const missingOperating = liveOperatingFields.filter(
     (field) => content[field].state !== "Configured",
   );
-  const complete = tax && brand && closures && start && hours && missingOperating.length === 0;
-  const hourChanges =
-    content.weeklySchedule.state === "Configured"
-      ? openingHoursChanges(current.weeklySchedule, content.weeklySchedule.value)
-      : [];
+  // b19: only what still has to come from the live Store is named, in plain words; when nothing
+  // does, this says nothing (the summary above already shows what publishing changes).
+  const needed = [
+    ...(tax ? [] : [t("tax settings (see Tax review)")]),
+    ...(brand ? [] : [t("Brand settings")]),
+    ...(closures ? [] : [t("holidays and special hours")]),
+    ...(start ? [] : [t("when it takes effect")]),
+    ...missingOperating.flatMap((field) => liveFieldWords()[field] ?? []),
+  ];
+  const hoursConfigured = content.weeklySchedule.state === "Configured";
+  if (needed.length === 0 && (hours || !hoursConfigured)) return null;
   return (
-    <section aria-label={t("Settings from the live Store")}>
-      <h4>{t("Settings from the live Store")}</h4>
-      <p>
-        {t(
-          "These are not changed in Store setup. They come from the Store as it runs today; save the setup draft after using them.",
-        )}
-      </p>
-      <ul>
-        <li>
-          {t("Tax settings (see Tax review): {value}", {
-            value: tax ? t("same as the live Store") : t("not the live Store's settings yet"),
-          })}
-        </li>
-        <li>
-          {t("Brand settings: {value}", {
-            value: brand ? t("same as the live Store") : t("not set yet"),
-          })}
-        </li>
-        <li>
-          {t("Holidays and special hours (changed in Hours & ordering): {value}", {
-            value: closures
-              ? content.exceptions.state === "Configured" && content.exceptions.value.length === 0
-                ? t("none")
-                : t("kept as saved")
-              : t("not set yet"),
-          })}
-        </li>
-        <li>
-          {t("Takes effect: {value}", {
-            value: start ? t("as soon as it is published") : t("not set yet"),
-          })}
-        </li>
-        {missingOperating.length > 0 && (
-          <li>
-            {t(
-              "Time zone, business day start, service modes, opening hours, order limits and the receipt template not set in this setup: the live Store’s are used when you choose “Use the live Store’s settings”.",
-            )}
-          </li>
-        )}
-        {(content.addressReference.state !== "Configured" ||
-          content.contactReference.state !== "Configured" ||
-          content.paymentConfigurationReference.state !== "Configured") && (
-          <li>
-            {layout === "Open"
-              ? t(
-                  "Address, contact details and payment settings: the ones the Store runs with today were set when it was installed and cannot be carried over. The address and phone are filled in from Store details under “Still needed” above, payment is in step 3; save each, choose “Use saved”, then save as draft.",
-                )
-              : t(
-                  "Address, contact details and payment settings: the ones the Store runs with today were set when it was installed and cannot be carried over. Enter them in step 2 (address), step 7 (contact) and step 5 (payment), save each, choose “Use saved”, then save the setup draft. They can be the same as the name and contact customers see in Store details.",
-                )}
-          </li>
-        )}
-        <li>
-          {t("Opening hours: {value}", {
-            value: hours
-              ? t("same as the live Store")
-              : content.weeklySchedule.state !== "Configured"
-                ? t("not set yet")
-                : hourChanges.length === 0
-                  ? t("different from the live Store")
-                  : t("different from the live Store (see below)"),
-          })}
-        </li>
-      </ul>
-      {!hours && hourChanges.length > 0 && (
-        <div role="note" aria-label={t("Opening hours change")}>
-          <p>{t("Publishing this setup changes the Store’s opening hours:")}</p>
-          <ul>
-            {hourChanges.map((line) => (
-              <li key={line}>{line}</li>
-            ))}
-          </ul>
+    <section className="store-setup-carry" aria-label={t("Settings from the live Store")}>
+      {needed.length > 0 && (
+        <>
           <p>
             {t(
-              "To keep the hours the Store opens with today, choose “Use the live Store’s opening hours” and save the setup draft before sending or publishing it.",
+              "Still to take from the Store as it runs today: {list}. These are not changed in Store setup. Use them, then save as draft.",
+              { list: needed.join(listSeparator()) },
+            )}
+            {!hours && hoursConfigured
+              ? t(" This also replaces the opening hours in this setup with the live Store’s.")
+              : ""}
+          </p>
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => onUse(liveStoreSettingsChange(content, known))}
+          >
+            {t("Use the live Store’s settings")}
+          </button>
+        </>
+      )}
+      {!hours && hoursConfigured && (
+        <>
+          <p>
+            {t(
+              "Publishing changes the opening hours as shown above. To keep the hours the Store opens with today, use them and save as draft.",
             )}
           </p>
-        </div>
-      )}
-      {!hours && (
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={() =>
-            onUse({ weeklySchedule: { state: "Configured", value: current.weeklySchedule } })
-          }
-        >
-          {t("Use the live Store’s opening hours")}
-        </button>
-      )}
-      <button
-        type="button"
-        disabled={disabled || complete}
-        onClick={() => onUse(liveStoreSettingsChange(content, known))}
-      >
-        {t("Use the live Store’s settings")}
-      </button>
-      {!hours && content.weeklySchedule.state === "Configured" && (
-        <p>
-          {t(
-            "“Use the live Store’s settings” also replaces the opening hours in this setup with the live Store’s.",
-          )}
-        </p>
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() =>
+              onUse({ weeklySchedule: { state: "Configured", value: current.weeklySchedule } })
+            }
+          >
+            {t("Use the live Store’s opening hours")}
+          </button>
+        </>
       )}
     </section>
   );
 }
+/** b19: the live operating settings in plain words (`source` is not one staff see). */
+const liveFieldWords = (): Readonly<
+  Partial<Record<(typeof liveOperatingFields)[number], string>>
+> => ({
+  timeZone: t("time zone"),
+  businessDayStartLocalTime: t("business day start"),
+  enabledServiceModes: t("services"),
+  weeklySchedule: t("opening hours"),
+  capacityConfigurationReference: t("order limits"),
+  receiptReference: t("receipt layout"),
+});

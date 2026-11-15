@@ -10799,3 +10799,137 @@ tr[data-drop-target="true"] {
     order: 4;
   }
 }
+
+/* b19 (Owner: "核对并发布" was messy). Review and publish reads top to bottom: what publishing
+   changes (name and new value per row, hairlines between rows only), anything still to take from
+   the live Store, then where the change stands in one sentence and the one next step as the solid
+   button; the other actions are accent text (withdraw/decline in red), earlier changes folded. */
+.store-setup-draft-page
+  .store-setup-step-content
+  :is(.store-setup-summary, .store-setup-carry, .store-setup-publish) {
+  display: grid;
+  gap: var(--bop-space-2);
+  max-width: 48rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.store-setup-draft-page .store-setup-publish {
+  margin-top: var(--bop-space-6);
+}
+.store-setup-draft-page
+  .store-setup-step-content
+  :is(.store-setup-summary, .store-setup-publish)
+  h4 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.store-setup-draft-page .store-setup-step-content .store-setup-summary__rows {
+  display: block;
+  margin: 0;
+}
+.store-setup-summary__rows > div {
+  display: grid;
+  grid-template-columns: minmax(8rem, 12rem) minmax(0, 1fr);
+  gap: var(--bop-space-1) var(--bop-space-4);
+  padding-block: var(--bop-space-3);
+}
+.store-setup-summary__rows > div + div {
+  border-top: 1px solid var(--bop-color-row-divider);
+}
+.store-setup-draft-page .store-setup-step-content .store-setup-summary__rows dt {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
+}
+.store-setup-summary__rows dd {
+  display: grid;
+  gap: var(--bop-space-1);
+  margin: 0;
+  font-size: 16px;
+}
+.store-setup-summary__rest,
+.store-setup-publish__when {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.store-setup-publish__status {
+  font-size: 16px;
+}
+.store-setup-publish__next {
+  display: grid;
+  justify-items: start;
+  gap: var(--bop-space-2);
+  margin-top: var(--bop-space-2);
+}
+.store-setup-publish__more {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 var(--bop-space-6);
+}
+.store-setup-draft-page :is(.store-setup-publish, .store-setup-carry) button {
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: var(--bop-color-accent);
+  background: none;
+  font-weight: 400;
+  opacity: 1;
+}
+.store-setup-draft-page :is(.store-setup-publish, .store-setup-carry) button:disabled {
+  color: var(--bop-color-text-muted);
+}
+.store-setup-draft-page .store-setup-publish button[data-variant="danger"] {
+  color: var(--bop-color-danger);
+}
+.store-setup-draft-page .store-setup-publish button[data-variant="primary"] {
+  padding: 0 var(--bop-space-5);
+  border-radius: var(--bop-radius-control);
+  color: var(--bop-color-on-primary);
+  background: var(--bop-color-accent);
+  font-weight: 600;
+}
+.store-setup-draft-page .store-setup-publish button[data-variant="primary"]:disabled {
+  color: var(--bop-color-on-primary);
+  opacity: 0.45;
+}
+.store-setup-carry {
+  justify-items: start;
+}
+.store-setup-publish__history > summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--bop-color-accent);
+  cursor: pointer;
+}
+.store-setup-publish__history > summary:focus-visible {
+  outline: 3px solid var(--bop-color-focus);
+  outline-offset: 2px;
+}
+.store-setup-draft-page .store-setup-step-content .store-setup-publish__history ol {
+  display: block;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 14px;
+}
+.store-setup-publish__history li {
+  padding-block: var(--bop-space-2);
+}
+.store-setup-publish__history li + li {
+  border-top: 1px solid var(--bop-color-row-divider);
+}
+@media (max-width: 640px) {
+  .store-setup-summary__rows > div {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .store-setup-draft-page .store-setup-publish button[data-variant="primary"] {
+    width: 100%;
+    justify-content: center;
+    text-align: center;
+  }
+}

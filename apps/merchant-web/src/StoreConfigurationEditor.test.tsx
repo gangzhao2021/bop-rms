@@ -2,6 +2,7 @@ import { expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { findInternalText, staticText } from "../e2e/internal-text-patterns.js";
 import { MemoryRouter } from "react-router";
+import { setLanguageForTest } from "./i18n/i18n.js";
 import {
   StoreConfigurationFeeBasisView,
   StoreConfigurationEditingBoundary,
@@ -126,6 +127,24 @@ it("distinguishes actual Published content from a legacy record lacking fee fact
   );
   expect(published).toContain('aria-label="Published fee configuration"');
   expect(published).toContain("Published.");
+  // b19: in Chinese the state ends with "。", never an English full stop.
+  setLanguageForTest("zh-Hans");
+  try {
+    const zh = renderToStaticMarkup(
+      <MemoryRouter>
+        <StoreConfigurationFeeBasisView
+          configuration={parseStoreConfigurationSnapshot(
+            { ...configuration("Published"), setupBasis: basis },
+            id(3),
+          )}
+        />
+      </MemoryRouter>,
+    );
+    expect(zh).toContain("已发布。");
+    expect(zh).not.toContain("已发布.");
+  } finally {
+    setLanguageForTest("en");
+  }
   const legacy = renderToStaticMarkup(
     <MemoryRouter>
       <StoreConfigurationFeeBasisView

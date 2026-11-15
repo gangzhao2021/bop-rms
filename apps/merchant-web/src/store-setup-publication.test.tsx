@@ -48,10 +48,14 @@ describe("WP-2423 DEC-STORE-SETUP-PUBLICATION Store setup publication screens", 
     const html = renderToStaticMarkup(
       <StoreConfigurationPublicationChecklist checks={checks(["Tax", "GoLive"])} />,
     );
-    expect(html).toContain("2 checks need attention");
-    expect(html).toContain("Needs attention: Tax settings are not the ones in force");
-    expect(html).toContain("Needs attention: This Store&#x27;s go-live check is not approved");
-    expect(html).toContain("Ready: Opening hours are complete.");
+    // b19: only what blocks it is listed; what passed is not repeated.
+    expect(html).toContain(
+      "2 things need fixing before this can be sent for approval or published.",
+    );
+    expect(html).toContain("<li>Tax settings are not the ones in force");
+    expect(html).toContain("<li>This Store&#x27;s go-live check is not approved");
+    expect(html).not.toContain("Opening hours are complete.");
+    expect(html).not.toContain("Ready: ");
     expect(findInternalText([staticText(html)], [/\bUTC\b/u])).toEqual([]);
     expect(
       renderToStaticMarkup(<StoreConfigurationPublicationChecklist checks={checks([])} />),
@@ -61,13 +65,10 @@ describe("WP-2423 DEC-STORE-SETUP-PUBLICATION Store setup publication screens", 
     const html = renderToStaticMarkup(
       <StoreConfigurationPublicationChecklist checks={checks(["StorePhone"])} />,
     );
-    expect(html).toContain("1 check needs attention");
+    expect(html).toContain("1 thing needs fixing");
     expect(html).toContain(
-      "Needs attention: This setup offers pickup, and pickup guests call the store about allergies or their order. Add the store&#x27;s phone number in Store details, or take pickup out of the services this setup offers.",
+      "<li>This setup offers pickup, and pickup guests call the store about allergies or their order. Add the store&#x27;s phone number in Store details, or take pickup out of the services this setup offers.",
     );
-    expect(
-      renderToStaticMarkup(<StoreConfigurationPublicationChecklist checks={checks([])} />),
-    ).toContain("Ready: The store has a phone number for pickup guests, or does not offer pickup.");
     expect(findInternalText([staticText(html)], [/\bUTC\b/u])).toEqual([]);
     // The new store's one page says it in its own words, not "does not match BOP support".
     expect(checkWords("StorePhone")).toBe(
@@ -87,8 +88,11 @@ describe("WP-2423 DEC-STORE-SETUP-PUBLICATION Store setup publication screens", 
       </MemoryRouter>,
     );
     expect(html).toContain("Settings from the live Store");
-    expect(html).toContain("Tax settings (see Tax review): not the live Store&#x27;s settings yet");
-    expect(html).toContain("Use the live Store&rsquo;s settings".replace("&rsquo;", "’"));
+    // b19: one sentence naming only what still comes from the live Store, then a text button.
+    expect(staticText(html)).toContain(
+      "Still to take from the Store as it runs today: tax settings (see Tax review), Brand settings, holidays and special hours, when it takes effect, time zone, business day start, services, opening hours, order limits, receipt layout.",
+    );
+    expect(html).toContain("Use the live Store’s settings");
     expect(findInternalText([staticText(html)])).toEqual([]);
     const change = liveStoreSettingsChange(content, live);
     expect(change).toEqual({
@@ -136,7 +140,20 @@ describe("WP-2423 DEC-STORE-SETUP-PUBLICATION Store setup publication screens", 
         />
       </MemoryRouter>,
     );
-    expect(inForceHtml).toContain("Tax settings (see Tax review): same as the live Store");
+    expect(inForceHtml).not.toContain("tax settings (see Tax review)");
+    // Nothing left to take from the live Store: the section says nothing.
+    expect(
+      renderToStaticMarkup(
+        <MemoryRouter>
+          <StoreSetupLiveSettings
+            content={{ ...content, ...liveStoreSettingsChange(content, live) }}
+            live={live}
+            disabled={false}
+            onUse={() => undefined}
+          />
+        </MemoryRouter>,
+      ),
+    ).toBe("");
     expect(
       renderToStaticMarkup(
         <StoreSetupLiveSettings
@@ -198,14 +215,14 @@ describe("WP-2423 DEC-STORE-SETUP-PUBLICATION Store setup publication screens", 
       </MemoryRouter>,
     );
     const text = staticText(html);
-    expect(text).toContain("Publishing this setup changes the Store\u2019s opening hours:");
-    expect(text).toContain("Sunday: 10:00\u201320:00 becomes 10:00\u201315:00");
-    expect(text.indexOf("Sunday: 10:00")).toBeLessThan(
-      text.indexOf("\nUse the live Store\u2019s settings\n"),
+    // b19: the days that change are in the summary above; here, how to keep today's hours.
+    expect(text).toContain(
+      "This also replaces the opening hours in this setup with the live Store\u2019s.",
     );
     expect(text).toContain(
-      "\u201cUse the live Store\u2019s settings\u201d also replaces the opening hours in this setup with the live Store\u2019s.",
+      "Publishing changes the opening hours as shown above. To keep the hours the Store opens with today, use them and save as draft.",
     );
+    expect(text).toContain("Use the live Store\u2019s opening hours");
     expect(findInternalText([text])).toEqual([]);
     // DEC-STORE-SETUP-PUBLICATION 13: using the live settings carries its opening hours too.
     expect(liveStoreSettingsChange(content, running).weeklySchedule).toEqual({

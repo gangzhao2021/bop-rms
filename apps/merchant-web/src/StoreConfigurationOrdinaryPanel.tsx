@@ -1,6 +1,7 @@
 import { t } from "./i18n/i18n.js";
 import { FULL_SIGN_IN_REQUIRED_TEXT } from "./full-sign-in.js";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router";
 import {
   createStoreConfigurationOrdinaryClient,
   StoreConfigurationPublicationNotOfferedError,
@@ -39,10 +40,8 @@ import {
   publicationValueDigest,
 } from "./product-publication-command-client-v2.js";
 import { serviceOperationReference } from "./service-control-client.js";
-import {
-  StoreConfigurationFeeBasisView,
-  storeConfigurationStateLabel,
-} from "./StoreConfigurationEditor.js";
+import { storeConfigurationStateLabel } from "./StoreConfigurationEditor.js";
+import { wordGap } from "./word-gap.js";
 import { StaffTime } from "./StoreTime.js";
 import { SoleOperatorSelfApproval } from "./SoleOperatorSelfApproval.js";
 /** Configuration steps in staff words (WP-2423: no command or outcome codes on screen). */
@@ -150,30 +149,30 @@ export function StoreConfigurationPublicationChecklist({
 }: {
   readonly checks: StoreConfigurationPublicationChecks;
 }) {
-  const blocked = checks.checks.filter((check) => check.outcome === "Fail").length;
+  // b19: only what blocks it is listed, each with where to fix it; what passed is not repeated.
+  const failing = checks.checks.filter((check) => check.outcome === "Fail");
   return (
     <section aria-label={t("Publication checks")}>
       <h4>{t("Before it can be published")}</h4>
       <p>
-        {t("{value} Checked", {
-          value:
-            blocked === 0
-              ? t("Every check passed.")
-              : t(
-                  "{blocked} {value} attention before this can be sent for approval or published.",
-                  { blocked: blocked, value: blocked === 1 ? "check needs" : "checks need" },
-                ),
-        })}{" "}
-        <StaffTime instant={checks.checkedAt} />.
+        {failing.length === 0
+          ? t("Every check passed.")
+          : failing.length === 1
+            ? t("1 thing needs fixing before this can be sent for approval or published.")
+            : t("{count} things need fixing before this can be sent for approval or published.", {
+                count: failing.length,
+              })}{" "}
+        <span className="store-setup-publish__when">
+          {t("Checked")} <StaffTime instant={checks.checkedAt} />
+        </span>
       </p>
-      <ul>
-        {checks.checks.map((check) => (
-          <li key={check.code}>
-            {check.outcome === "Pass" ? t("Ready: ") : t("Needs attention: ")}
-            {check.outcome === "Pass" ? checkText[check.code].pass : checkText[check.code].fail}
-          </li>
-        ))}
-      </ul>
+      {failing.length > 0 && (
+        <ul>
+          {failing.map((check) => (
+            <li key={check.code}>{checkText[check.code].fail}</li>
+          ))}
+        </ul>
+      )}
     </section>
   );
 }
@@ -402,7 +401,9 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
     [notOffered, setNotOffered] = useState(false),
     // WP-2423 (v15): declining someone else's configuration is confirmed, with an optional reason.
     [declining, setDeclining] = useState(false),
-    [declineReason, setDeclineReason] = useState<StoreConfigurationDeclineReason | "">("");
+    [declineReason, setDeclineReason] = useState<StoreConfigurationDeclineReason | "">(""),
+    // b19: withdrawing your own change is confirmed first, like declining.
+    [withdrawing, setWithdrawing] = useState(false);
   useEffect(() => {
     ++historyGeneration.current;
     historyController.current?.abort();
@@ -608,21 +609,11 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
         setWorkspace(next);
         setNotice(
           // WP-2423 (v15 D6): what to do next is said from the current state below, not here.
-          kind === "Withdrawn"
-            ? t(
-                "Version {configurationVersion} withdrawn. It can no longer be approved or published.{value}",
-                {
-                  configurationVersion: target.configurationVersion,
-                  value: setupHoursRestored ? RESTORED_HOURS_NOTE : "",
-                },
-              )
-            : t(
-                "Version {configurationVersion} declined. It can no longer be approved or published.{value}",
-                {
-                  configurationVersion: target.configurationVersion,
-                  value: setupHoursRestored ? RESTORED_HOURS_NOTE : "",
-                },
-              ),
+          // b19: no version numbers on the page.
+          (kind === "Withdrawn"
+            ? t("Change withdrawn. It can no longer be approved or published.")
+            : t("Change declined. It can no longer be approved or published.")) +
+            (setupHoursRestored ? RESTORED_HOURS_NOTE : ""),
         );
         if (setupHoursRestored) props.onSetupChanged?.();
       }
@@ -729,231 +720,76 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
       (soleOperator !== undefined || latest.authoredByReference === props.scope.actorReference);
   // WP-2423 Q15/Q16: no publication path in this deployment; no panel rather than an outage.
   if (notOffered) return null;
+  const next =
+    workspace === null || pending
+      ? null
+      : storeConfigurationNextStep({
+          saved: props.saved !== null,
+          setupIncomplete,
+          setupOutdated,
+          openByAnother,
+          openYours,
+          lifecycle: openLatest ? latest.lifecycle : null,
+          ownChange,
+          soleOperator: soleOperator !== undefined,
+        });
+  const failing = checks?.checks.filter((check) => check.outcome === "Fail") ?? [];
+  const stepBlocked =
+    next !== null && next.action !== "Materialize" && next.action !== "SoleOperator" && !ready;
   return (
-    <section className="store-setup-review" aria-label={t("Store configuration publication")}>
-      <h3>{t("Store configuration publication")}</h3>
-      <p>
-        {t(
-          "A saved setup draft does not change the live Store. Create a configuration from it, have it approved, then publish it.",
-        )}
-      </p>
+    <section
+      className="store-setup-review store-setup-publish"
+      aria-label={t("Store configuration publication")}
+      aria-busy={busy}
+    >
+      {/* b19 (Owner: step 4 was messy): where the change stands in one sentence, then the one
+          thing to do next and what it does; the record of earlier changes is folded away. */}
+      <h4>{t("Approval and publishing")}</h4>
+      {workspace ? (
+        <p className="store-setup-publish__status">
+          <StoreConfigurationStatus
+            latest={latest ?? null}
+            current={current ?? null}
+            withdrawal={withdrawal}
+            openLatest={openLatest}
+            openByAnother={openByAnother}
+          />
+        </p>
+      ) : null}
       {busy && <p role="status">{t("Loading Store configuration…")}</p>}
       {error && <p role="alert">{error}</p>}
       {notice && <p role="status">{notice}</p>}
       {pending && (
-        <>
+        <div className="store-setup-publish__next">
           <p>{storeConfigurationPendingText(pending.action)}</p>
-          <button type="button" disabled={busy} onClick={() => void recover()}>
-            {t("Recover original configuration request")}
-          </button>
-        </>
-      )}
-      <button type="button" disabled={busy || !!pending} onClick={() => void refresh()}>
-        {t("Refresh Store configuration")}
-      </button>
-      <section aria-label={t("Store configuration operation history")}>
-        <h3>{t("Recorded configuration history")}</h3>
-        <p>{t("Every recorded change to this Store’s configuration, newest first.")}</p>
-        <button
-          type="button"
-          disabled={busy || historyBusy || !!props.freshDisabled}
-          onClick={() => void loadHistory()}
-        >
-          {t("Refresh configuration history")}
-        </button>
-        {historyBusy && <p role="status">{t("Loading configuration history…")}</p>}
-        {historyError && <p role="alert">{historyError}</p>}
-        {historyLoaded && history.length === 0 && (
-          <p>{t("No configuration changes have been recorded yet.")}</p>
-        )}
-        <StoreConfigurationHistoryView entries={history} />
-        {nextHistory !== null && (
           <button
             type="button"
-            disabled={busy || historyBusy || !!props.freshDisabled}
-            onClick={() => void loadHistory(true)}
+            data-variant="primary"
+            disabled={busy}
+            onClick={() => void recover()}
           >
-            {t("Load older changes")}
+            {t("Recover original configuration request")}
           </button>
-        )}
-      </section>
+        </div>
+      )}
       {workspace && (
         <>
-          <dl>
-            <dt>{t("Latest recorded configuration")}</dt>
-            <dd>
-              {latest
-                ? t("Version {configurationVersion} · {value}", {
-                    configurationVersion: latest.configurationVersion,
-                    value: withdrawal
-                      ? withdrawal.kind === "Withdrawn"
-                        ? "Withdrawn"
-                        : "Declined"
-                      : storeConfigurationStateLabel(latest.lifecycle),
-                  })
-                : t("None recorded")}
-            </dd>
-            <dt>{t("Current published configuration")}</dt>
-            <dd>
-              {current
-                ? t("Version {configurationVersion} · {lifecycle}", {
-                    configurationVersion: current.configurationVersion,
-                    lifecycle: storeConfigurationStateLabel(current.lifecycle),
-                  })
-                : t("Nothing published yet")}
-            </dd>
-          </dl>
-          {latest && (
-            <StoreConfigurationFeeBasisView configuration={latest} withdrawal={withdrawal?.kind} />
-          )}{" "}
-          {checks && <StoreConfigurationPublicationChecklist checks={checks} />}
-          {latest?.setupBasis !== undefined &&
-            withdrawal === undefined &&
-            (latest.lifecycle === "Draft" ||
-              latest.lifecycle === "PendingApproval" ||
-              latest.lifecycle === "Approved") && (
-              <p>
-                {t("It must be approved and published by")}{" "}
-                <StaffTime
-                  instant={new Date(
-                    Date.parse(latest.createdAt) + publicationWindowMs,
-                  ).toISOString()}
-                />
-                {t("; after that, create it again from the saved setup.")}
-              </p>
-            )}
-          {withdrawal && latest && (
+          {checks && failing.length > 0 && (openLatest || next?.action === "Materialize") && (
+            <StoreConfigurationPublicationChecklist checks={checks} />
+          )}
+          {openLatest && latest?.setupBasis !== undefined && (
             <p>
-              {t("Version {configurationVersion} was {value}{value2}", {
-                configurationVersion: latest.configurationVersion,
-                value: withdrawal.kind === "Withdrawn" ? t("withdrawn") : t("declined"),
-                value2: withdrawal.byYou ? t(" by you") : "",
-              })}{" "}
-              <StaffTime instant={withdrawal.withdrawnAt} />
-              {t(". It can no longer be approved or published. {value}", {
-                value: setupOutdated
-                  ? t(
-                      "To create a new configuration, save the setup again (Save as draft, it then builds on the latest configuration), then create it.",
-                    )
-                  : t("Create a new configuration from the saved setup."),
-              })}
-            </p>
-          )}
-          {openByAnother && latest && (
-            <section aria-label={t("Configuration waiting from someone else")}>
-              <p>
-                {t(
-                  "Version {configurationVersion}, made by someone else, is {value}. A new configuration cannot be created until it is approved and published, or declined. Declining keeps it in the history; the person who made it can make a new change.",
-                  {
-                    configurationVersion: latest.configurationVersion,
-                    value: storeConfigurationStateLabel(latest.lifecycle).toLowerCase(),
-                  },
-                )}
-              </p>
-              {!declining ? (
-                <button type="button" disabled={locked} onClick={() => setDeclining(true)}>
-                  {t("Decline version {configurationVersion}", {
-                    configurationVersion: latest.configurationVersion,
-                  })}
-                </button>
-              ) : (
-                <div role="group" aria-label={t("Decline this configuration")}>
-                  <p>
-                    {t(
-                      "Decline version {configurationVersion}? It stays in the history and cannot be approved or published. The person who made it sees that it was declined{value}.",
-                      {
-                        configurationVersion: latest.configurationVersion,
-                        value: declineReason === "" ? "" : t(" and why"),
-                      },
-                    )}
-                  </p>
-                  <label>
-                    {t("Reason (optional)")}
-                    <select
-                      value={declineReason}
-                      disabled={locked}
-                      onChange={(event) =>
-                        setDeclineReason(
-                          event.currentTarget.value as StoreConfigurationDeclineReason,
-                        )
-                      }
-                    >
-                      <option value="">{t("No reason given")}</option>
-                      {(
-                        Object.keys(
-                          storeConfigurationDeclineReasonText,
-                        ) as StoreConfigurationDeclineReason[]
-                      ).map((reason) => (
-                        <option key={reason} value={reason}>
-                          {storeConfigurationDeclineReasonText[reason]}
-                        </option>
-                      ))}
-                    </select>
-                  </label>{" "}
-                  <button
-                    type="button"
-                    disabled={locked}
-                    onClick={() => {
-                      setDeclining(false);
-                      void withdrawLatest(declineReason === "" ? undefined : declineReason);
-                    }}
-                  >
-                    {t("Decline version {configurationVersion}", {
-                      configurationVersion: latest.configurationVersion,
-                    })}
-                  </button>{" "}
-                  <button type="button" disabled={locked} onClick={() => setDeclining(false)}>
-                    {t("Keep it")}
-                  </button>
-                </div>
-              )}
-            </section>
-          )}
-          {openYours && latest && (
-            <section aria-label={t("Your configuration waiting")}>
-              <p>
-                {t("Your version {configurationVersion} is {value}. {value2}", {
-                  configurationVersion: latest.configurationVersion,
-                  value: storeConfigurationStateLabel(latest.lifecycle).toLowerCase(),
-                  value2: createdFromSaved
-                    ? t(
-                        "It was created from this saved setup. To change it, change the setup and save it, then create a new configuration (it replaces version {configurationVersion}); or withdraw it to stop it being approved.",
-                        { configurationVersion: latest.configurationVersion },
-                      )
-                    : t(
-                        "Creating a new configuration from the saved setup replaces it; or withdraw it to stop it being approved.",
-                      ),
-                })}
-              </p>
-              <button type="button" disabled={locked} onClick={() => void withdrawLatest()}>
-                {t("Withdraw version {configurationVersion}", {
-                  configurationVersion: latest.configurationVersion,
-                })}
-              </button>
-            </section>
-          )}
-          {setupOutdated && !openByAnother && !createdFromSaved && withdrawal === undefined && (
-            <p>
-              {t(
-                "The Store’s configuration changed after this setup was saved. Save the setup again (it then builds on the latest configuration) before creating a configuration.",
-              )}
-            </p>
-          )}
-          {createdFromSaved && !openLatest && withdrawal === undefined && latest && (
-            <p>
-              {t(
-                "Version {configurationVersion} was created from this saved setup and is {value}. To change the Store again, change the setup and save it, then create a new configuration.",
-                {
-                  configurationVersion: latest.configurationVersion,
-                  value: storeConfigurationStateLabel(latest.lifecycle).toLowerCase(),
-                },
-              )}
+              {t("It must be approved and published by")}{" "}
+              <StaffTime
+                instant={new Date(Date.parse(latest.createdAt) + publicationWindowMs).toISOString()}
+              />
+              {t("; after that, create it again from the saved setup.")}
             </p>
           )}
           {setupIncomplete && (
             <p>
               {t(
-                "A configuration cannot be created yet: the saved setup still has {value} not set: {setupMissing}. Set {value2}, save the setup draft, then create the configuration.",
+                "A change cannot be created yet: the saved setup still has {value} not set: {setupMissing}. Set {value2}, save as draft, then come back here.",
                 {
                   value:
                     setupMissing.length === 1
@@ -965,9 +801,44 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
               )}
             </p>
           )}
-          {ownChange && latest && soleOperator !== undefined && (
-            <section aria-label={t("Approve your own configuration")}>
-              <h4>{t("Approval")}</h4>
+          {setupOutdated && !openByAnother && !setupIncomplete && withdrawal !== undefined && (
+            <p>
+              {t(
+                "To make a new change, save as draft again (it then builds on the latest settings), then come back here.",
+              )}
+            </p>
+          )}
+          {setupOutdated &&
+            !openByAnother &&
+            !createdFromSaved &&
+            !setupIncomplete &&
+            withdrawal === undefined &&
+            !openLatest && (
+              <p>
+                {t(
+                  "The Store’s settings changed after this setup was saved. Save as draft again (it then builds on the latest settings), then come back here.",
+                )}
+              </p>
+            )}
+          {createdFromSaved && !openLatest && withdrawal === undefined && (
+            <p>
+              {t(
+                "Everything saved in this setup is published. To change the Store again, change the setup, save as draft, then come back here.",
+              )}
+            </p>
+          )}
+          {openByAnother && (
+            <p>
+              {t(
+                "A new change cannot be created until this one is approved and published, or declined. Declining keeps it in the history; the person who made it can make a new change.",
+              )}
+            </p>
+          )}
+          {ownChange && soleOperator !== undefined && latest && (
+            <section
+              className="store-setup-publish__next"
+              aria-label={t("Approve your own configuration")}
+            >
               <SoleOperatorSelfApproval
                 gate={soleOperator}
                 csrf={props.csrf}
@@ -1006,65 +877,281 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
               )}
             </p>
           )}
-          {workspace.original && (
-            <p>
-              {t("Last request: {action}", {
-                action: outcomeText(workspace.original.action, workspace.original.outcome),
-              })}{" "}
-              <StaffTime instant={workspace.original.occurredAt} />
-            </p>
+          {next !== null && next.action !== "SoleOperator" && (
+            <div className="store-setup-publish__next">
+              <p>{next.effect}</p>
+              {next.action === "Submit" && (
+                <p>
+                  {t("If you run the business alone, turn on")}
+                  {wordGap()}
+                  <Link
+                    to={`/app/organization/stores/${props.scope.storeReference}/setup?section=access#sole-operator`}
+                  >
+                    {t("Sole operator")}
+                  </Link>
+                  {wordGap()}
+                  {t("to approve it yourself after confirming it is you.")}
+                </p>
+              )}
+              <button
+                type="button"
+                data-variant="primary"
+                disabled={
+                  locked ||
+                  stepBlocked ||
+                  (next.action === "Materialize" &&
+                    (!props.saved || setupIncomplete || setupOutdated || openByAnother))
+                }
+                onClick={() => void act(next.action as StoreConfigurationOrdinaryAction)}
+              >
+                {next.label}
+              </button>
+            </div>
           )}
-          <div className="store-setup-actions">
-            <button
-              type="button"
-              disabled={locked || !props.saved || setupIncomplete || setupOutdated || openByAnother}
-              onClick={() => void act("Materialize")}
-            >
-              {t("Create configuration from saved setup")}
-            </button>
-            <button
-              type="button"
-              disabled={locked || withdrawal !== undefined || latest?.lifecycle !== "Draft"}
-              onClick={() => void act("Validate")}
-            >
-              {t("Validate configuration")}
-            </button>
-            <button
-              type="button"
-              disabled={
-                locked || withdrawal !== undefined || latest?.lifecycle !== "Draft" || !ready
-              }
-              onClick={() => void act("Submit")}
-            >
-              {t("Submit configuration for review")}
-            </button>
-            <button
-              type="button"
-              disabled={
-                locked ||
-                withdrawal !== undefined ||
-                latest?.lifecycle !== "PendingApproval" ||
-                ownChange ||
-                !ready
-              }
-              onClick={() => void act("Approve")}
-            >
-              {t("Approve configuration independently")}
-            </button>
-            <button
-              type="button"
-              disabled={
-                locked || withdrawal !== undefined || latest?.lifecycle !== "Approved" || !ready
-              }
-              onClick={() => void act("Publish")}
-            >
-              {t("Publish Store configuration")}
-            </button>
-          </div>
+          {openByAnother && latest && declining && (
+            <div role="group" aria-label={t("Decline this configuration")}>
+              <p>
+                {t(
+                  "Decline this change? It stays in the history and cannot be approved or published. The person who made it sees that it was declined{value}.",
+                  { value: declineReason === "" ? "" : t(" and why") },
+                )}
+              </p>
+              <label>
+                {t("Reason (optional)")}
+                <select
+                  value={declineReason}
+                  disabled={locked}
+                  onChange={(event) =>
+                    setDeclineReason(event.currentTarget.value as StoreConfigurationDeclineReason)
+                  }
+                >
+                  <option value="">{t("No reason given")}</option>
+                  {(
+                    Object.keys(
+                      storeConfigurationDeclineReasonText,
+                    ) as StoreConfigurationDeclineReason[]
+                  ).map((reason) => (
+                    <option key={reason} value={reason}>
+                      {storeConfigurationDeclineReasonText[reason]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="store-setup-publish__more">
+                <button
+                  type="button"
+                  data-variant="danger"
+                  disabled={locked}
+                  onClick={() => {
+                    setDeclining(false);
+                    void withdrawLatest(declineReason === "" ? undefined : declineReason);
+                  }}
+                >
+                  {t("Decline this change")}
+                </button>
+                <button type="button" disabled={locked} onClick={() => setDeclining(false)}>
+                  {t("Keep it")}
+                </button>
+              </div>
+            </div>
+          )}
+          {openYours && latest && withdrawing && (
+            <div role="group" aria-label={t("Withdraw this change")}>
+              <p>
+                {t(
+                  "Withdraw this change? It stays in the history and can no longer be approved or published. The Store keeps running as it does today.",
+                )}
+              </p>
+              <div className="store-setup-publish__more">
+                <button
+                  type="button"
+                  data-variant="danger"
+                  disabled={locked}
+                  onClick={() => {
+                    setWithdrawing(false);
+                    void withdrawLatest();
+                  }}
+                >
+                  {t("Withdraw this change")}
+                </button>
+                <button type="button" disabled={locked} onClick={() => setWithdrawing(false)}>
+                  {t("Keep it")}
+                </button>
+              </div>
+            </div>
+          )}
         </>
       )}
+      <div className="store-setup-publish__more">
+        {workspace && openYours && latest?.lifecycle === "Draft" && (
+          <button type="button" disabled={locked} onClick={() => void act("Validate")}>
+            {t("Check the settings again")}
+          </button>
+        )}
+        {workspace && openYours && !withdrawing && (
+          <button
+            type="button"
+            data-variant="danger"
+            disabled={locked}
+            onClick={() => setWithdrawing(true)}
+          >
+            {t("Withdraw this change")}
+          </button>
+        )}
+        {workspace && openByAnother && !declining && (
+          <button
+            type="button"
+            data-variant="danger"
+            disabled={locked}
+            onClick={() => setDeclining(true)}
+          >
+            {t("Decline this change")}
+          </button>
+        )}
+        <button type="button" disabled={busy || !!pending} onClick={() => void refresh()}>
+          {t("Check where it stands again")}
+        </button>
+      </div>
+      <details
+        className="store-setup-publish__history"
+        onToggle={(event) => {
+          if (event.currentTarget.open) void loadHistory();
+        }}
+      >
+        <summary>{t("Earlier changes")}</summary>
+        <section aria-label={t("Store configuration operation history")}>
+          {historyBusy && <p role="status">{t("Loading configuration history…")}</p>}
+          {historyError && <p role="alert">{historyError}</p>}
+          {historyLoaded && history.length === 0 && (
+            <p>{t("No configuration changes have been recorded yet.")}</p>
+          )}
+          <StoreConfigurationHistoryView entries={history} />
+          {nextHistory !== null && (
+            <button
+              type="button"
+              disabled={busy || historyBusy || !!props.freshDisabled}
+              onClick={() => void loadHistory(true)}
+            >
+              {t("Load older changes")}
+            </button>
+          )}
+        </section>
+      </details>
     </section>
   );
+}
+
+/**
+ * b19: the one step Store setup offers next, from the state of the latest change (the same
+ * commands and conditions as before; only one is offered at a time). "SoleOperator" is the Owner's
+ * own approval with a step-up, shown by its own section.
+ */
+export function storeConfigurationNextStep(state: {
+  readonly saved: boolean;
+  readonly setupIncomplete: boolean;
+  readonly setupOutdated: boolean;
+  readonly openByAnother: boolean;
+  readonly openYours: boolean;
+  readonly lifecycle: "Draft" | "PendingApproval" | "Approved" | null;
+  readonly ownChange: boolean;
+  readonly soleOperator: boolean;
+}): {
+  readonly action: StoreConfigurationOrdinaryAction | "SoleOperator";
+  readonly label: string;
+  readonly effect: string;
+} | null {
+  const canCreate =
+    state.saved && !state.setupIncomplete && !state.setupOutdated && !state.openByAnother;
+  const create = {
+    action: "Materialize" as const,
+    label: t("Create the change from the saved setup"),
+    effect: state.openYours
+      ? t(
+          "The setup was saved again after this change was made. Creating it again replaces the earlier one; nothing changes for customers yet.",
+        )
+      : t(
+          "Each setting is checked against the Store as it runs today. Nothing changes for customers yet.",
+        ),
+  };
+  switch (state.lifecycle) {
+    case "Draft":
+      if (canCreate) return create;
+      return state.openYours
+        ? {
+            action: "Submit",
+            label: t("Send it for approval"),
+            effect: t(
+              "Another person with Owner access approves it, then it can be published. The Store keeps running as it does today until then.",
+            ),
+          }
+        : null;
+    case "PendingApproval":
+      if (state.ownChange)
+        return state.soleOperator ? { action: "SoleOperator", label: "", effect: "" } : null;
+      return {
+        action: "Approve",
+        label: t("Approve this change"),
+        effect: t(
+          "Once approved, it can be published. The Store keeps running as it does today until then.",
+        ),
+      };
+    case "Approved":
+      return {
+        action: "Publish",
+        label: t("Publish to the Store"),
+        effect: t(
+          "Publishing makes these settings live at once: customers and staff see them straight away.",
+        ),
+      };
+    case null:
+      return canCreate ? create : null;
+  }
+}
+
+/** b19: where the latest change stands, in one sentence (no version numbers). */
+function StoreConfigurationStatus({
+  latest,
+  current,
+  withdrawal,
+  openLatest,
+  openByAnother,
+}: {
+  readonly latest: StoreConfigurationSnapshot | null;
+  readonly current: StoreConfigurationSnapshot | null;
+  readonly withdrawal: StoreConfigurationOrdinaryWorkspace["latestWithdrawal"];
+  readonly openLatest: boolean;
+  readonly openByAnother: boolean;
+}) {
+  if (withdrawal !== undefined)
+    return (
+      <>
+        {withdrawal.kind === "Withdrawn"
+          ? withdrawal.byYou
+            ? t("You withdrew the last change on")
+            : t("The last change was withdrawn on")
+          : withdrawal.byYou
+            ? t("You declined the last change on")
+            : t("The last change was declined on")}{" "}
+        <StaffTime instant={withdrawal.withdrawnAt} />
+        {t("; it will not be published.")}
+      </>
+    );
+  if (openLatest && latest !== null)
+    return (
+      <>
+        {openByAnother ? t("A change made by someone else: ") : null}
+        {storeConfigurationStateLabel(latest.lifecycle)}
+        {t(".")}
+      </>
+    );
+  if (current !== null)
+    return (
+      <>
+        {t("Published on")} <StaffTime instant={current.updatedAt} />
+        {t(".")}
+      </>
+    );
+  return <>{t("Nothing has been published yet.")}</>;
 }
 
 export function appendStoreConfigurationHistory(
@@ -1093,14 +1180,11 @@ export function StoreConfigurationHistoryView({
     <ol>
       {entries.map((entry) => (
         <li key={entry.operationReference}>
-          <p>
-            {t("{value} · Version {configurationVersion} · {lifecycle} ·", {
-              value: actionLabel[entry.command] ?? t("Changed"),
-              configurationVersion: entry.configuration.configurationVersion,
-              lifecycle: storeConfigurationStateLabel(entry.configuration.lifecycle),
-            })}{" "}
+          {/* b19: what was done and when; no version numbers. */}
+          <span>{actionLabel[entry.command] ?? t("Changed")}</span>{" "}
+          <span className="store-setup-publish__when">
             <StaffTime instant={entry.occurredAt} />
-          </p>
+          </span>
         </li>
       ))}
     </ol>

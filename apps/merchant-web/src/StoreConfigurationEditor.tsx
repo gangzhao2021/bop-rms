@@ -2,6 +2,7 @@ import { serviceModeText, systemText, t } from "./i18n/i18n.js";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { timeZoneLabel } from "./time-zone-names.js";
+import { wordGap } from "./word-gap.js";
 import {
   createStoreConfigurationClient,
   type StoreConfigurationView,
@@ -1033,7 +1034,9 @@ export function StoreConfigurationFeeBasisView({
           : withdrawal === "Withdrawn"
             ? t("Withdrawn, will not be published")
             : t("Declined, will not be published")}
-        .{" "}
+        {/* b19: a Chinese sentence ends with "。", not an English full stop. */}
+        {t(".")}
+        {wordGap()}
         {configuration.lifecycle !== "Published" &&
           t("These settings do not change the live Store.")}
       </p>
