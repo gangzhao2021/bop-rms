@@ -77,6 +77,28 @@ const doneText: Record<string, string> = {
 };
 /** WP-2423 DEC-SOLE-OPERATOR-APPROVAL: the Owner's own approval, given alone. */
 const soleOperatorDoneText = t("Approved by you alone as sole operator.");
+/**
+ * b19 review: once the page shows the state an action led to, what the action did is said as the
+ * one status sentence (not a second line repeating it). Publish adds what it means for customers.
+ */
+const doneStatus: Record<string, { readonly lifecycle: string; readonly text: string }> = {
+  Materialize: {
+    lifecycle: "Draft",
+    text: t("Change created from the saved setup, not yet sent for approval."),
+  },
+  Validate: { lifecycle: "Draft", text: t("Settings checked, not yet sent for approval.") },
+  Submit: { lifecycle: "PendingApproval", text: t("Sent for approval, waiting to be approved.") },
+  Approve: { lifecycle: "Approved", text: t("Change approved, waiting to be published.") },
+};
+const soleOperatorDoneStatus = t(
+  "Approved by you alone as sole operator, waiting to be published.",
+);
+/** What an action that went through did: `notice` is said when the page does not show its state. */
+interface StoreConfigurationDone {
+  readonly action: string;
+  readonly sole: boolean;
+  readonly notice: string;
+}
 const outcomeText = (action: string, outcome: "Committed" | "Abandoned") =>
   outcome === "Committed"
     ? (doneText[action] ?? t("Change recorded."))
@@ -398,6 +420,7 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
     [busy, setBusy] = useState(true),
     [error, setError] = useState<string | null>(null),
     [notice, setNotice] = useState<string | null>(null),
+    [done, setDone] = useState<StoreConfigurationDone | null>(null),
     [notOffered, setNotOffered] = useState(false),
     // WP-2423 (v15): declining someone else's configuration is confirmed, with an optional reason.
     [declining, setDeclining] = useState(false),
@@ -460,6 +483,7 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
     setPending(null);
     setError(null);
     setNotice(null);
+    setDone(null);
     setNotOffered(false);
     const current = () => epoch === generation.current && !c.signal.aborted;
     const j = (props.journalFactory ?? createStoreConfigurationPendingJournal)(props.scope);
@@ -501,6 +525,7 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
     setError(null);
     // WP-2423 (v15 D6): an earlier action's result no longer describes the refreshed state.
     setNotice(null);
+    setDone(null);
     try {
       const next = await client.load(props.scope, { signal: c.signal });
       if (epoch === generation.current && !c.signal.aborted) setWorkspace(next);
@@ -527,6 +552,7 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
     setBusy(true);
     setError(null);
     setNotice(null);
+    setDone(null);
     const current = () => epoch === generation.current && !c.signal.aborted;
     const check = () => {
       if (!current()) denied();
@@ -564,12 +590,15 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
       });
       setWorkspace(after);
       setPending(null);
-      setNotice(
-        // b19: what happened, in plain words (the page below already shows the state).
-        approvalMode !== undefined && receipt.outcome === "Committed"
-          ? soleOperatorDoneText
-          : outcomeText(action, receipt.outcome),
-      );
+      // b19: what happened, in plain words; said as the status sentence when the page shows it.
+      if (receipt.outcome === "Committed")
+        setDone({
+          action,
+          sole: approvalMode !== undefined,
+          notice:
+            approvalMode !== undefined ? soleOperatorDoneText : outcomeText(action, "Committed"),
+        });
+      else setNotice(outcomeText(action, receipt.outcome));
     } catch (e) {
       if (current()) setError(message(e));
     } finally {
@@ -591,6 +620,7 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
     setBusy(true);
     setError(null);
     setNotice(null);
+    setDone(null);
     const current = () => epoch === generation.current && !c.signal.aborted;
     try {
       const { kind, setupHoursRestored } = await withdrawStoreConfiguration(
@@ -605,14 +635,18 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
       const next = await client.load(props.scope, { signal: c.signal });
       if (current()) {
         setWorkspace(next);
-        setNotice(
-          // WP-2423 (v15 D6): what to do next is said from the current state below, not here.
-          // b19: no version numbers on the page.
-          (kind === "Withdrawn"
-            ? t("Change withdrawn. It can no longer be approved or published.")
-            : t("Change declined. It can no longer be approved or published.")) +
-            (setupHoursRestored ? RESTORED_HOURS_NOTE : ""),
-        );
+        // WP-2423 (v15 D6): what to do next is said from the current state below, not here.
+        // b19: no version numbers on the page; the status sentence says it was withdrawn or
+        // declined, so only the hours note is added to it.
+        setDone({
+          action: "Withdraw",
+          sole: false,
+          notice:
+            kind === "Withdrawn"
+              ? t("Change withdrawn. It can no longer be approved or published.")
+              : t("Change declined. It can no longer be approved or published."),
+        });
+        if (setupHoursRestored) setNotice(RESTORED_HOURS_NOTE.trim());
         if (setupHoursRestored) props.onSetupChanged?.();
       }
     } catch (e) {
@@ -648,7 +682,13 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
       if (current()) {
         setWorkspace(result.workspace);
         setPending(null);
-        setNotice(outcomeText(original.action, result.receipt.outcome));
+        if (result.receipt.outcome === "Committed")
+          setDone({
+            action: original.action,
+            sole: false,
+            notice: outcomeText(original.action, "Committed"),
+          });
+        else setNotice(outcomeText(original.action, result.receipt.outcome));
       }
     } catch (e) {
       if (current()) setError(message(e));
@@ -661,7 +701,10 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
   }
   // WP-2423 (v15 D6): saving the setup again makes an earlier action's result out of date.
   const savedRevision = props.saved?.revision ?? 0;
-  useEffect(() => setNotice(null), [savedRevision]);
+  useEffect(() => {
+    setNotice(null);
+    setDone(null);
+  }, [savedRevision]);
   const onLive = props.onLiveConfiguration;
   useEffect(() => {
     if (workspace && onLive)
@@ -728,8 +771,37 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
           soleOperator: soleOperator !== undefined,
         });
   const failing = checks?.checks.filter((check) => check.outcome === "Fail") ?? [];
-  const stepBlocked =
-    next !== null && next.action !== "Materialize" && next.action !== "SoleOperator" && !ready;
+  // Said with sending for approval: how an Owner who runs the business alone approves it.
+  const soleOperatorHint = (
+    <p>
+      {t("If you run the business alone, turn on")}
+      {wordGap()}
+      <Link
+        to={`/app/organization/stores/${props.scope.storeReference}/setup?section=access#sole-operator`}
+      >
+        {t("Sole operator")}
+      </Link>
+      {wordGap()}
+      {t("to approve it yourself after confirming it is you.")}
+    </p>
+  );
+  // Sending, approving and publishing need every check to pass; creating a change does not.
+  const blocked = (action: StoreConfigurationStep["action"]) =>
+    locked ||
+    (action === "Materialize"
+      ? !props.saved || setupIncomplete || setupOutdated || openByAnother
+      : !ready);
+  // The Owner's own approval as sole operator has its own solid button; the step is text then.
+  const selfApproval = ownChange && soleOperator !== undefined && latest !== undefined;
+  // b19 review: the status sentence says what an action just did once the page shows its result.
+  const doneShown =
+    done === null || !workspace
+      ? false
+      : done.action === "Withdraw"
+        ? withdrawal !== undefined
+        : done.action === "Publish"
+          ? !openLatest && withdrawal === undefined && current !== null && current !== undefined
+          : openLatest && latest.lifecycle === doneStatus[done.action]?.lifecycle;
   return (
     <section
       className="store-setup-review store-setup-publish"
@@ -740,19 +812,41 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
           thing to do next and what it does; the record of earlier changes is folded away. */}
       <h4>{t("Approval and publishing")}</h4>
       {workspace ? (
-        <p className="store-setup-publish__status">
-          <StoreConfigurationStatus
-            latest={latest ?? null}
-            current={current ?? null}
-            withdrawal={withdrawal}
-            openLatest={openLatest}
-            openByAnother={openByAnother}
-          />
+        <p className="store-setup-publish__status" role={doneShown ? "status" : undefined}>
+          {doneShown && done && done.action !== "Withdraw" && done.action !== "Publish" ? (
+            done.sole ? (
+              soleOperatorDoneStatus
+            ) : (
+              doneStatus[done.action]?.text
+            )
+          ) : (
+            <StoreConfigurationStatus
+              latest={latest ?? null}
+              current={current ?? null}
+              withdrawal={withdrawal}
+              openLatest={openLatest}
+              openByAnother={openByAnother}
+            />
+          )}
+          {doneShown && done?.action === "Publish" ? (
+            <>
+              {wordGap()}
+              {t("Customers and staff see the new settings now.")}
+            </>
+          ) : null}
+          {doneShown && notice ? (
+            <>
+              {wordGap()}
+              {notice}
+            </>
+          ) : null}
         </p>
       ) : null}
       {busy && <p role="status">{t("Loading Store configuration…")}</p>}
       {error && <p role="alert">{error}</p>}
-      {notice && <p role="status">{notice}</p>}
+      {!doneShown && (notice || done) && (
+        <p role="status">{[done?.notice, notice].filter((text) => text).join(wordGap())}</p>
+      )}
       {pending && (
         <div className="store-setup-publish__next">
           <p>{storeConfigurationPendingText(pending.action)}</p>
@@ -872,32 +966,27 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
           {next !== null && next.action !== "SoleOperator" && (
             <div className="store-setup-publish__next">
               <p>{next.effect}</p>
-              {next.action === "Submit" && (
-                <p>
-                  {t("If you run the business alone, turn on")}
-                  {wordGap()}
-                  <Link
-                    to={`/app/organization/stores/${props.scope.storeReference}/setup?section=access#sole-operator`}
-                  >
-                    {t("Sole operator")}
-                  </Link>
-                  {wordGap()}
-                  {t("to approve it yourself after confirming it is you.")}
-                </p>
-              )}
+              {next.action === "Submit" && soleOperatorHint}
               <button
                 type="button"
-                data-variant="primary"
-                disabled={
-                  locked ||
-                  stepBlocked ||
-                  (next.action === "Materialize" &&
-                    (!props.saved || setupIncomplete || setupOutdated || openByAnother))
-                }
+                data-variant={selfApproval ? undefined : "primary"}
+                disabled={blocked(next.action)}
                 onClick={() => void act(next.action as StoreConfigurationOrdinaryAction)}
               >
                 {next.label}
               </button>
+              {next.alternative !== undefined && next.alternative.action !== "SoleOperator" && (
+                <button
+                  type="button"
+                  disabled={blocked(next.alternative.action)}
+                  onClick={() =>
+                    void act(next.alternative?.action as StoreConfigurationOrdinaryAction)
+                  }
+                >
+                  {next.alternative.label}
+                </button>
+              )}
+              {next.alternative?.action === "Submit" && soleOperatorHint}
             </div>
           )}
           {openByAnother && latest && declining && (
@@ -1033,10 +1122,25 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
   );
 }
 
+/** One step Store setup offers: the command, its button label and what it does, in staff words. */
+export interface StoreConfigurationStep {
+  readonly action: StoreConfigurationOrdinaryAction | "SoleOperator";
+  readonly label: string;
+  readonly effect: string;
+  /**
+   * b19 review: when the setup was saved again after your own open change was made, the next step
+   * is to create the change again (as before, it replaces the open one); the open change's own step
+   * stays offered as this quieter alternative, so nothing the old screen allowed is lost.
+   */
+  readonly alternative?: {
+    readonly action: StoreConfigurationOrdinaryAction | "SoleOperator";
+    readonly label: string;
+  };
+}
 /**
  * b19: the one step Store setup offers next, from the state of the latest change (the same
- * commands and conditions as before; only one is offered at a time). "SoleOperator" is the Owner's
- * own approval with a step-up, shown by its own section.
+ * commands and conditions as before; only one is the solid next step). "SoleOperator" is the
+ * Owner's own approval with a step-up, shown by its own section.
  */
 export function storeConfigurationNextStep(state: {
   readonly saved: boolean;
@@ -1047,57 +1151,86 @@ export function storeConfigurationNextStep(state: {
   readonly lifecycle: "Draft" | "PendingApproval" | "Approved" | null;
   readonly ownChange: boolean;
   readonly soleOperator: boolean;
-}): {
-  readonly action: StoreConfigurationOrdinaryAction | "SoleOperator";
-  readonly label: string;
-  readonly effect: string;
-} | null {
+}): StoreConfigurationStep | null {
+  // As before b19: a change can be created from the saved setup whenever it is saved, complete and
+  // up to date and no one else has a change open — also over your own open change, which it replaces.
   const canCreate =
     state.saved && !state.setupIncomplete && !state.setupOutdated && !state.openByAnother;
-  const create = {
-    action: "Materialize" as const,
-    label: t("Create the change from the saved setup"),
-    effect: state.openYours
-      ? t(
-          "The setup was saved again after this change was made. Creating it again replaces the earlier one; nothing changes for customers yet.",
-        )
-      : t(
+  const own = (): StoreConfigurationStep | null => {
+    switch (state.lifecycle) {
+      case "Draft":
+        return state.openYours
+          ? {
+              action: "Submit",
+              label: t("Send it for approval"),
+              effect: t(
+                "Another person with Owner access approves it, then it can be published. The Store keeps running as it does today until then.",
+              ),
+            }
+          : null;
+      case "PendingApproval":
+        if (state.ownChange)
+          return state.soleOperator ? { action: "SoleOperator", label: "", effect: "" } : null;
+        return {
+          action: "Approve",
+          label: t("Approve this change"),
+          effect: t(
+            "Once approved, it can be published. The Store keeps running as it does today until then.",
+          ),
+        };
+      case "Approved":
+        return {
+          action: "Publish",
+          label: t("Publish to the Store"),
+          effect: t(
+            "Publishing makes these settings live at once: customers and staff see them straight away.",
+          ),
+        };
+      case null:
+        return null;
+    }
+  };
+  const step = own();
+  if (!canCreate) return step;
+  if (state.lifecycle === null || !state.openYours)
+    return (
+      step ?? {
+        action: "Materialize",
+        label: t("Create the change from the saved setup"),
+        effect: t(
           "Each setting is checked against the Store as it runs today. Nothing changes for customers yet.",
         ),
-  };
-  switch (state.lifecycle) {
-    case "Draft":
-      if (canCreate) return create;
-      return state.openYours
-        ? {
-            action: "Submit",
-            label: t("Send it for approval"),
-            effect: t(
-              "Another person with Owner access approves it, then it can be published. The Store keeps running as it does today until then.",
+      }
+    );
+  const recreate: StoreConfigurationStep = {
+    action: "Materialize",
+    label: t("Create the change again from the saved setup"),
+    effect:
+      state.lifecycle === "Draft"
+        ? t(
+            "The setup was saved again after this change was made, so what was saved since is not in it. Creating it again replaces this change with one that has it; nothing changes for customers yet.",
+          )
+        : state.lifecycle === "PendingApproval"
+          ? t(
+              "The setup was saved again after this change was sent, so what was saved since is not in the change waiting for approval. Creating it again replaces that change; the new one is then sent for approval again.",
+            )
+          : t(
+              "The setup was saved again after this change was approved, so what was saved since is not in it. Creating it again replaces the approved change; the new one has to be approved again before it is published.",
             ),
-          }
-        : null;
-    case "PendingApproval":
-      if (state.ownChange)
-        return state.soleOperator ? { action: "SoleOperator", label: "", effect: "" } : null;
-      return {
-        action: "Approve",
-        label: t("Approve this change"),
-        effect: t(
-          "Once approved, it can be published. The Store keeps running as it does today until then.",
-        ),
-      };
-    case "Approved":
-      return {
-        action: "Publish",
-        label: t("Publish to the Store"),
-        effect: t(
-          "Publishing makes these settings live at once: customers and staff see them straight away.",
-        ),
-      };
-    case null:
-      return canCreate ? create : null;
-  }
+  };
+  if (step === null) return recreate;
+  return {
+    ...recreate,
+    alternative: {
+      action: step.action,
+      label:
+        step.action === "Submit"
+          ? t("Or send this change for approval as it is")
+          : step.action === "Publish"
+            ? t("Or publish the approved change as it is")
+            : step.label,
+    },
+  };
 }
 
 /** b19: where the latest change stands, in one sentence (no version numbers). */

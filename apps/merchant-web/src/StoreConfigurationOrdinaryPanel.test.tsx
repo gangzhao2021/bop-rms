@@ -214,7 +214,7 @@ it("initial render declares saved source is not effective configuration and show
   expect(html).toContain("<details");
   expect(html).not.toContain("Refresh Store configuration");
 });
-it("b19: offers exactly one next step for each state, with the same commands as before", () => {
+it("b19: offers one solid next step for each state, with the same commands as before", () => {
   const base = {
     saved: true,
     setupIncomplete: false,
@@ -229,33 +229,63 @@ it("b19: offers exactly one next step for each state, with the same commands as 
     storeConfigurationNextStep({ ...base, ...change });
   // Nothing open: create the change from the saved setup, when it is complete and current.
   expect(step({})?.action).toBe("Materialize");
+  expect(step({})?.alternative).toBeUndefined();
   expect(step({ setupIncomplete: true })).toBeNull();
   expect(step({ setupOutdated: true })).toBeNull();
   expect(step({ saved: false })).toBeNull();
-  // Your draft: send it for approval (or create it again when the setup was saved since).
+  // Your draft, created from the setup as saved: send it for approval.
   expect(step({ lifecycle: "Draft", openYours: true, setupOutdated: true })?.action).toBe("Submit");
-  expect(step({ lifecycle: "Draft", openYours: true })?.action).toBe("Materialize");
   expect(step({ lifecycle: "Draft", openByAnother: true, setupOutdated: true })).toBeNull();
+  expect(step({ lifecycle: "Draft", openByAnother: true })).toBeNull();
   // Waiting for approval: someone else's is approved here; your own alone as sole operator.
   expect(step({ lifecycle: "PendingApproval", setupOutdated: true })?.action).toBe("Approve");
   expect(
     step({ lifecycle: "PendingApproval", ownChange: true, soleOperator: true, setupOutdated: true })
       ?.action,
   ).toBe("SoleOperator");
-  expect(step({ lifecycle: "PendingApproval", ownChange: true, setupOutdated: true })).toBeNull();
+  expect(
+    step({ lifecycle: "PendingApproval", openYours: true, ownChange: true, setupOutdated: true }),
+  ).toBeNull();
   // Approved: publish.
-  const publish = step({ lifecycle: "Approved", setupOutdated: true });
+  const publish = step({ lifecycle: "Approved", openYours: true, setupOutdated: true });
   expect(publish?.action).toBe("Publish");
   expect(publish?.label).toBe("Publish to the Store");
   expect(publish?.effect).toMatch(/live at once/u);
+  // b19 review: as before, the setup saved again over your own open change can be created again
+  // in every state (it replaces that change), and the change's own step stays offered beside it.
+  const draft = step({ lifecycle: "Draft", openYours: true });
+  expect(draft?.action).toBe("Materialize");
+  expect(draft?.alternative?.action).toBe("Submit");
+  expect(draft?.alternative?.label).toBe("Or send this change for approval as it is");
+  const waiting = step({ lifecycle: "PendingApproval", openYours: true, ownChange: true });
+  expect(waiting?.action).toBe("Materialize");
+  expect(waiting?.alternative).toBeUndefined();
+  expect(waiting?.effect).toMatch(/not in the change waiting for approval/u);
+  expect(waiting?.effect).toMatch(/sent for approval again/u);
+  const alone = step({
+    lifecycle: "PendingApproval",
+    openYours: true,
+    ownChange: true,
+    soleOperator: true,
+  });
+  expect(alone?.action).toBe("Materialize");
+  expect(alone?.alternative?.action).toBe("SoleOperator");
+  const approved = step({ lifecycle: "Approved", openYours: true });
+  expect(approved?.action).toBe("Materialize");
+  expect(approved?.alternative?.action).toBe("Publish");
+  expect(approved?.effect).toMatch(/approved again before it is published/u);
   for (const lifecycle of ["Draft", "PendingApproval", "Approved", null] as const) {
-    const next = step({
-      lifecycle,
-      openYours: lifecycle === "Draft",
-      setupOutdated: lifecycle !== null,
-    });
-    expect(findInternalText([next?.label ?? "", next?.effect ?? ""])).toEqual([]);
-    expect(`${next?.label ?? ""} ${next?.effect ?? ""}`).not.toMatch(/[Vv]ersion \d/u);
+    for (const setupOutdated of [true, false]) {
+      const next = step({
+        lifecycle,
+        openYours: lifecycle !== null,
+        ownChange: lifecycle === "PendingApproval",
+        setupOutdated,
+      });
+      const words = [next?.label ?? "", next?.effect ?? "", next?.alternative?.label ?? ""];
+      expect(findInternalText(words)).toEqual([]);
+      expect(words.join(" ")).not.toMatch(/[Vv]ersion \d/u);
+    }
   }
 });
 it("recovers terminal then owner-reobserved original before clearing and accepts successor head", async () => {

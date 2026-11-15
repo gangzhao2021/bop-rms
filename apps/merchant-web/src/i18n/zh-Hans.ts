@@ -9941,8 +9941,25 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Refresh the status": "刷新状态",
   "Earlier changes": "以前的修改",
   "Create the change from the saved setup": "用已保存的设置生成修改",
-  "The setup was saved again after this change was made. Creating it again replaces the earlier one; nothing changes for customers yet.":
-    "这次修改生成后，设置又保存过。重新生成会替换之前的修改；顾客那边暂时不会有变化。",
+  "Create the change again from the saved setup": "用已保存的设置重新生成修改",
+  "The setup was saved again after this change was made, so what was saved since is not in it. Creating it again replaces this change with one that has it; nothing changes for customers yet.":
+    "这次修改生成后，设置又保存过，之后保存的内容不在这次修改里。重新生成会用包含这些内容的新修改替换它；顾客那边暂时不会有变化。",
+  "The setup was saved again after this change was sent, so what was saved since is not in the change waiting for approval. Creating it again replaces that change; the new one is then sent for approval again.":
+    "这次修改提交后，设置又保存过，之后保存的内容不在等待批准的修改里。重新生成会替换它，新的修改需要重新提交审批。",
+  "The setup was saved again after this change was approved, so what was saved since is not in it. Creating it again replaces the approved change; the new one has to be approved again before it is published.":
+    "这次修改批准后，设置又保存过，之后保存的内容不在这次修改里。重新生成会替换已批准的修改，新的修改要重新批准后才能发布。",
+  "Or send this change for approval as it is": "或者按现在的内容提交审批",
+  "Or publish the approved change as it is": "或者按已批准的内容发布",
+  "Change created from the saved setup, not yet sent for approval.":
+    "已用保存的设置生成修改，尚未提交审批。",
+  "Settings checked, not yet sent for approval.": "设置已检查，尚未提交审批。",
+  "Sent for approval, waiting to be approved.": "已提交审批，等待批准。",
+  "Change approved, waiting to be published.": "修改已批准，等待发布。",
+  "Approved by you alone as sole operator, waiting to be published.":
+    "已由你作为独立经营者单独批准，等待发布。",
+  "Customers and staff see the new settings now.": "顾客和员工现在就能看到新的设置。",
+  "{fee}: taxed differently (see Tax review)": "{fee}：计税方式改变（见“税务核对”）",
+  "brand settings": "品牌设置",
   "Each setting is checked against the Store as it runs today. Nothing changes for customers yet.":
     "会对照门店现在的设置逐项检查。顾客那边暂时不会有变化。",
   "Send it for approval": "提交审批",
