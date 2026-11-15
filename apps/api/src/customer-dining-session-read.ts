@@ -620,6 +620,9 @@ export function composeCustomerDiningSession(
             ? undefined
             : order.orderAgain?.get(item.orderItemReference),
         notCharged: itemCancellation(item.orderItemReference)?.notCharged === true,
+        // v15 b19: staff cancelled this dish with a refund recorded (confirmed or pending).
+        refundRecorded:
+          (itemCancellation(item.orderItemReference)?.refundAmount.amountMinor ?? 0n) > 0n,
       });
     });
     const itemsTotal = items.reduce((sum, item) => sum + item.lineTotal.amountMinor, 0n);
@@ -629,10 +632,13 @@ export function composeCustomerDiningSession(
     );
     const tax = items.reduce((sum, item) => sum + (item.price?.tax.amountMinor ?? 0n), 0n);
     const waiting = order.heldRounds?.get(reference) ?? null;
-    // v15 b19: what the table has on order: a round the store refused (and refunded) and a dish
-    // taken off are not on it; the refund is its own line, so the total matches what is paid.
-    if (!unpaidCancelled && waiting === null && staff === undefined) {
-      const charged = items.filter((item) => !item.cancelled);
+    // v15 b19: what the table has on order. A dish taken off before it was charged is not on it,
+    // nor is a round or dish the store refunded (the refund is its own line, confirmed or
+    // pending). A dish cancelled or refused by the kitchen with no refund recorded was charged and
+    // stays on it, so paid − refunded − refund pending + still to pay is always Total ordered.
+    const roundRefunded = staff !== undefined && staff.refundedMinor + staff.pendingMinor > 0n;
+    if (!unpaidCancelled && waiting === null && !roundRefunded) {
+      const charged = items.filter((item) => !item.notCharged && !item.refundRecorded);
       ordered.subtotal += charged.reduce(
         (sum, item) => sum + (item.price?.subtotal.amountMinor ?? 0n),
         0n,
