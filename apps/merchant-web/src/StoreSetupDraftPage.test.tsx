@@ -1137,7 +1137,7 @@ it("Payment editor presents three actual channel controls and explicit readiness
     "Customer online card",
     "Staff terminal card present",
     "Staff terminal Interac",
-    "Save payment configuration",
+    "Save payment methods",
     "payment provider account",
   ])
     expect(html).toContain(label);
@@ -1525,6 +1525,8 @@ it("b20: Review shows an unsaved edit from what the Store runs with now, and say
     value: ["04:30"],
     now: "04:00",
     unsaved: true,
+    // b22: an open Store keeps its business day start, so this change cannot be sent.
+    cannotSend: true,
   });
   // Saved already (Pickup added and saved): from now to new, not marked unsaved.
   expect(summary.changed.find((item) => item.label === "Service modes")).toEqual({

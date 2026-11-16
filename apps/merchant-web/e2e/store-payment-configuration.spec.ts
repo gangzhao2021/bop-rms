@@ -356,7 +356,7 @@ async function open(page: Page) {
   await expect(page.getByRole("button", { name: "Save as draft", exact: true })).toBeEnabled();
   await page.getByRole("button", { name: "3. Fees, tax and payment", exact: true }).click();
   await expect(
-    page.getByRole("button", { name: "Save payment configuration", exact: true }),
+    page.getByRole("button", { name: "Save payment methods", exact: true }),
   ).toBeEnabled();
 }
 
@@ -367,9 +367,9 @@ test("@production Store payment rules save, explicit selection, setup resume ret
   await open(page);
   await page.getByRole("checkbox", { name: "Staff terminal card present", exact: true }).check();
   await page.getByRole("checkbox", { name: "Staff terminal Interac", exact: true }).check();
-  await page.getByRole("button", { name: "Save payment configuration", exact: true }).click();
+  await page.getByRole("button", { name: "Save payment methods", exact: true }).click();
   await expect(
-    page.getByRole("button", { name: "Use saved payment configuration", exact: true }),
+    page.getByRole("button", { name: "Use the saved payment methods", exact: true }),
   ).toBeVisible();
   expect(f.payment()?.content).toEqual({
     customerOnlineCardEnabled: false,
@@ -377,7 +377,7 @@ test("@production Store payment rules save, explicit selection, setup resume ret
     staffTerminalInteracEnabled: true,
   });
   expect(f.draft()).toBeNull();
-  await page.getByRole("button", { name: "Use saved payment configuration", exact: true }).click();
+  await page.getByRole("button", { name: "Use the saved payment methods", exact: true }).click();
   await page.getByRole("button", { name: "Save as draft", exact: true }).click();
   await expect.poll(() => f.draft()?.revision).toBe(1);
   const selected = f.payment()?.configurationReference;
@@ -387,7 +387,7 @@ test("@production Store payment rules save, explicit selection, setup resume ret
   });
   f.newManager();
   await page
-    .getByRole("button", { name: "Refresh saved payment configuration", exact: true })
+    .getByRole("button", { name: "Refresh the saved payment methods", exact: true })
     .click();
   await expect(
     page.getByText(
@@ -401,7 +401,7 @@ test("@production Store payment rules save, explicit selection, setup resume ret
   await page.reload();
   await page.getByRole("button", { name: "3. Fees, tax and payment", exact: true }).click();
   await expect(
-    page.getByRole("button", { name: "Save payment configuration", exact: true }),
+    page.getByRole("button", { name: "Save payment methods", exact: true }),
   ).toBeEnabled();
   expect(f.draft()?.content.paymentConfigurationReference).toEqual({
     state: "Configured",
@@ -417,7 +417,7 @@ test("@production payment committed reply loss reload denies recovery then clear
   f.control.losePayment = true;
   await open(page);
   await page.getByRole("checkbox", { name: "Customer online card", exact: true }).check();
-  await page.getByRole("button", { name: "Save payment configuration", exact: true }).click();
+  await page.getByRole("button", { name: "Save payment methods", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "Recover original payment save", exact: true }),
   ).toBeEnabled();
@@ -437,18 +437,16 @@ test("@production payment committed reply loss reload denies recovery then clear
   await page.reload();
   await page.getByRole("button", { name: "3. Fees, tax and payment", exact: true }).click();
   await expect(
-    page.getByRole("button", { name: "Save payment configuration", exact: true }),
+    page.getByRole("button", { name: "Save payment methods", exact: true }),
   ).toBeDisabled();
   f.control.denyResolve = true;
   await page.getByRole("button", { name: "Recover original payment save", exact: true }).click();
-  await expect(
-    page.getByText("You cannot access payment configuration in the current Store."),
-  ).toBeVisible();
+  await expect(page.getByText("You cannot see this Store's payment methods.")).toBeVisible();
   expect(await records(page)).toEqual(pending);
   f.control.denyResolve = false;
   await page.getByRole("button", { name: "Recover original payment save", exact: true }).click();
   await expect(
-    page.getByText("Earlier payment save confirmed. Choose the saved configuration to use it."),
+    page.getByText("Earlier payment save confirmed. Choose the saved payment methods to use them."),
   ).toBeVisible();
   expect(await records(page)).toEqual([]);
   expect(f.control.paymentWrites).toHaveLength(1);
@@ -466,14 +464,12 @@ test("@production mobile payment keyboard controls and CSRF denial preserve orig
   await page.keyboard.press("Space");
   await expect(toggle).toBeChecked();
   f.control.requiredCsrf = "B".repeat(43);
-  await page.getByRole("button", { name: "Save payment configuration", exact: true }).click();
-  await expect(
-    page.getByText("You cannot access payment configuration in the current Store."),
-  ).toBeVisible();
+  await page.getByRole("button", { name: "Save payment methods", exact: true }).click();
+  await expect(page.getByText("You cannot see this Store's payment methods.")).toBeVisible();
   expect(f.control.paymentWrites).toEqual([]);
   expect(await records(page)).toHaveLength(1);
   await expect(
-    page.getByRole("button", { name: "Save payment configuration", exact: true }),
+    page.getByRole("button", { name: "Save payment methods", exact: true }),
   ).toBeDisabled();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,

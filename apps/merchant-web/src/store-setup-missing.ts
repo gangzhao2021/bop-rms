@@ -111,3 +111,22 @@ export function storeSetupMissingItems(
 export function storeSetupMissingText(items: readonly StoreSetupMissingItem[]): string {
   return items.map((item) => `${item.label} (${item.where})`).join("; ");
 }
+/** "04:00" for 04:00:00; a time with seconds other than zero is shown whole. */
+const startText = (value: string) => (/^\d{2}:\d{2}:00$/u.test(value) ? value.slice(0, 5) : value);
+const withSeconds = (value: string) => (/^\d{2}:\d{2}$/u.test(value) ? value + ":00" : value);
+/**
+ * b22 (v15 live check of b21): a Store that already runs keeps its business day start, so past
+ * business days and reports keep their boundaries (DEC-STORE-SETUP-PUBLICATION, the
+ * BusinessDayStart publication check). A setup that starts the day at another time can never be
+ * sent for approval, so it is named before a change is created from it: the setup's start and the
+ * one the Store runs on now, or null when the setup keeps it (or nothing runs yet to compare with).
+ */
+export function storeSetupBusinessStartChange(
+  start: string | null,
+  current: { readonly businessDayStartLocalTime: string } | null | undefined,
+): { readonly setup: string; readonly now: string } | null {
+  if (start === null || start === "" || current === null || current === undefined) return null;
+  return withSeconds(start) === withSeconds(current.businessDayStartLocalTime)
+    ? null
+    : { setup: startText(withSeconds(start)), now: startText(current.businessDayStartLocalTime) };
+}

@@ -297,7 +297,11 @@ export function holdUnsavedWork(): () => void {
     unsavedWork.delete(key);
   };
 }
-/** True once staff chose to switch language and lose unsaved work (the page asks no more). */
+/**
+ * True once staff chose to switch language: the page reloads, and what it keeps was written or what
+ * it loses was confirmed, so a page's own leave question is not asked again (b22: Store setup asks
+ * before leaving with edits it keeps through the switch).
+ */
 export function leavingWithUnsavedWork(): boolean {
   return leavingOnPurpose;
 }
@@ -398,6 +402,6 @@ export function chooseLanguage(language: StaffLanguage): void {
   }
   if (language === current) return;
   current = language;
-  leavingOnPurpose = losing;
+  leavingOnPurpose = true;
   globalThis.location.reload();
 }

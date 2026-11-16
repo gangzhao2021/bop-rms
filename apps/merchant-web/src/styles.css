@@ -10953,6 +10953,28 @@ tr[data-drop-target="true"] {
   margin: var(--bop-space-2) 0 0;
   font-size: 14px;
 }
+/* b22: what stops a setup from being saved or sent is said where it is, in the danger colour at
+   14px, and the way back is accent text on its own line (no box). */
+.store-setup-summary__cannot-send,
+.store-setup-draft-page .store-setup-step-content .store-setup-field-problem {
+  color: var(--bop-color-danger);
+  font-size: 14px;
+}
+.store-setup-draft-page .store-setup-step-content .store-setup-field-problem {
+  margin: var(--bop-space-1) 0 0;
+}
+.store-setup-draft-page .store-setup-step-content button.store-setup-inline-action {
+  justify-self: start;
+  width: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: var(--bop-color-accent);
+  background: none;
+}
+.store-setup-draft-page .store-setup-step-content button.store-setup-inline-action:disabled {
+  color: var(--bop-color-text-muted);
+}
 @media (max-width: 640px) {
   .store-setup-summary__rows > div {
     grid-template-columns: minmax(0, 1fr);

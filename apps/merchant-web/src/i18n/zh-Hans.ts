@@ -1744,8 +1744,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "每件菜单商品及规格，税前。随商品选择的选项计入其价格。退款包括付款后取消的菜品。",
   "Earlier check of {businessDate}": "{businessDate} 的较早核对",
   "Earlier days · still holding stock": "较早的营业日 · 仍占用库存",
-  "Earlier payment save confirmed. Choose the saved configuration to use it.":
-    "已确认之前的付款保存。请选择已保存的配置以使用它。",
+  "Earlier payment save confirmed. Choose the saved payment methods to use them.":
+    "已确认之前的付款方式已保存。请选用已保存的付款方式。",
   "Earlier payment save did not commit. You can save again.":
     "之前的付款保存未提交。你可以再次保存。",
   "Earlier save confirmed. Choose this saved configuration to use it in the setup draft.":
@@ -2277,7 +2277,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Loading order": "正在加载订单",
   "Loading orders": "正在加载订单",
   "Loading participants…": "正在加载参与者…",
-  "Loading payment configuration…": "正在加载付款配置…",
+  "Loading payment methods…": "正在加载付款方式…",
   "Loading pickups…": "正在加载取餐…",
   "Loading prices…": "正在加载价格…",
   "Loading products…": "正在加载商品…",
@@ -3042,11 +3042,11 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   Paused: "已暂停",
   "Paused until the connection returns.": "网络恢复前暂停。",
   Payment: "付款",
-  "Payment configuration": "付款配置",
-  "Payment configuration changed. Refresh and review before saving.":
-    "付款配置已变更。保存前请刷新并核对。",
-  "Payment configuration saved. Choose it below, then save the setup draft to keep that selection.":
-    "付款配置已保存。请在下方选择它，然后存为草稿以保留所选。",
+  "Payment methods": "付款方式",
+  "The payment methods were changed elsewhere. Refresh and check them before saving.":
+    "付款方式在别处被修改了。保存前请刷新并核对。",
+  "Payment methods saved. Choose them below, then save the setup draft to keep that choice.":
+    "付款方式已保存。请在下方选用，然后存为草稿以保留这个选择。",
   "Payment failed · being cancelled automatically": "付款失败 · 正在自动取消",
   "Payment failed · don't prepare": "付款失败 · 不要制作",
   "Payment failed · will be cancelled automatically at {at}": "付款失败 · 将于 {at} 自动取消",
@@ -3425,7 +3425,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Refresh order": "刷新订单",
   "Refresh orders": "刷新订单",
   "Refresh participants": "刷新参与者",
-  "Refresh saved payment configuration": "刷新已保存的付款配置",
+  "Refresh the saved payment methods": "刷新已保存的付款方式",
   "Refresh saved setup": "刷新已保存的设置",
   "Refresh saved template draft": "刷新已保存的模板草稿",
   "Refresh saved templates": "刷新已保存的模板",
@@ -3745,7 +3745,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Save hours draft": "保存营业时间草稿",
   "Save menu": "保存菜单",
   "Save name": "保存名字",
-  "Save payment configuration": "保存付款配置",
+  "Save payment methods": "保存付款方式",
   "Save prices": "保存价格",
   "Save receipt and privacy details": "保存收据和隐私信息",
   "Orders cancelled and refunded in full": "已取消并全额退款的订单",
@@ -5254,7 +5254,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Use plain words only: no links and none of these characters: < > { }":
     "请只使用普通文字：不要包含链接，也不要使用这些字符：< > { }",
   "Use published receipt template": "使用已发布的收据模板",
-  "Use saved payment configuration": "使用已保存的付款配置",
+  "Use the saved payment methods": "使用已保存的付款方式",
   "Use saved {value}": "使用已保存的{value}",
   "Use service settings from": "服务设置来源",
   "Use the live Store’s opening hours": "使用当前门店的营业时间",
@@ -5485,7 +5485,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "你可以恢复使用门店开业时的收据模板。",
   "You can't check this table's orders with your current access. Ask an Owner or Store Manager to close it.":
     "以你当前的权限无法检查这张桌台的订单。请店主或店长关台。",
-  "You cannot access payment configuration in the current Store.": "你无法在当前门店访问付款配置。",
+  "You cannot see this Store's payment methods.": "你无法查看这家门店的付款方式。",
   "You cannot access this configuration in the current Store.": "你无法在当前门店访问此配置。",
   "You cannot change your own roles.": "你不能更改自己的角色。",
   "You chose to refund this order. The customer's payment is being refunded in full to their original payment method.":
@@ -10079,4 +10079,26 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   // b22: Store setup review gaps.
   "Offline. Earlier changes load again by themselves once the connection is back.":
     "已离线。网络恢复后，以前的修改会自动重新加载。",
+  "A change cannot be created from this setup: it starts the business day at {setup}, and a Store that already runs keeps {now}, so past days and reports keep their boundaries. Put it back to {now} in step 1, Time zone and business day, save as draft, then come back here.":
+    "这份设置不能生成修改：它把营业日开始时间设为{setup}，而已经营业的门店要保持{now}，这样过去的营业日和报表才能保持界限。请在第 1 步“时区和营业日”改回{now}，存为草稿，再回到这里。",
+  "The business day keeps starting at {now}, as the Store runs today, so past days and reports keep their boundaries.":
+    "营业日开始时间保持门店现在的{now}，这样过去的营业日和报表才能保持界限。",
+  "This setup starts the business day at {setup}. A Store that already runs keeps {now}, so past days and reports keep their boundaries; a change with {setup} cannot be sent for approval.":
+    "这份设置把营业日开始时间设为{setup}。已经营业的门店要保持{now}，这样过去的营业日和报表才能保持界限；设为{setup}的修改无法提交审批。",
+  "Put it back to {now}": "改回{now}",
+  "{fee} is on, but which orders it applies to is not chosen yet. Choose them in {where}.":
+    "{fee}已开启，但还没有选择适用于哪些订单。请在{where}中选择。",
+  "{fee} is on, but its tax classification is not chosen yet. Choose one in {where}.":
+    "{fee}已开启，但还没有选择税务分类。请在{where}中选择。",
+  "{fee}: on, which orders it applies to is not chosen yet":
+    "{fee}：开启，还没有选择适用于哪些订单",
+  "{fee}: on, its tax classification is not chosen yet": "{fee}：开启，还没有选择税务分类",
+  "Cannot be sent for approval": "无法提交审批",
+  "Business day start: a change with {setup} cannot be sent for approval. A Store that already runs keeps {now}, so past days and reports keep their boundaries. Put it back to {now} in {where}.":
+    "营业日开始时间：设为{setup}的修改无法提交审批。已经营业的门店要保持{now}，这样过去的营业日和报表才能保持界限。请在{where}中改回{now}。",
+  "Needs fixing first": "需要先改正",
+  "Choose which orders the {fee} applies to.": "请选择{fee}适用于哪些订单。",
+  "{method}: {before} → {after}": "{method}：{before} → {after}",
+  "Save payment methods in {where}, choose the saved payment methods for this setup, then save as draft.":
+    "请在{where}中保存付款方式，为这份设置选用已保存的付款方式，然后存为草稿。",
 });

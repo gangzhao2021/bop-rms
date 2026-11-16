@@ -6,6 +6,7 @@ import {
   t,
   takeKeptThroughLanguageSwitch,
   holdUnsavedWork,
+  leavingWithUnsavedWork,
 } from "./i18n/i18n.js";
 import { wordGap } from "./word-gap.js";
 export { wordGap };
@@ -18,7 +19,12 @@ import { FULL_SIGN_IN_REQUIRED_TEXT } from "./full-sign-in.js";
 import { ReceiptTemplateStoreSelection } from "./ReceiptTemplateStoreSelection.js";
 import { ReceiptTemplateArtifactEditor } from "./ReceiptTemplateArtifactEditor.js";
 import { ReceiptTemplateDraftEditor } from "./ReceiptTemplateDraftEditor.js";
-import { storeSetupMissingItems, type StoreSetupLayout } from "./store-setup-missing.js";
+import {
+  storeSetupBusinessStartChange,
+  storeSetupMissingItems,
+  storeSetupWhere,
+  type StoreSetupLayout,
+} from "./store-setup-missing.js";
 import { createStorePublicProfileClient } from "./store-public-profile-client.js";
 import {
   createStorePaymentConfigurationClient,
@@ -750,7 +756,22 @@ export function StoreSetupDraftPage({
     [online, setOnline] = useState(() => typeof navigator === "undefined" || navigator.onLine),
     [ready, setReady] = useState(false),
     [setupAnswered, setSetupAnswered] = useState(false),
-    [live, setLive] = useState<StoreSetupLiveConfiguration | null>(null);
+    [live, setLive] = useState<StoreSetupLiveConfiguration | null>(null),
+    // b22 (v15 live check of b21): payment methods ticked or unticked in step 3 and not saved yet
+    // are unsaved edits too (Discard, Review, the language switch and leaving the page).
+    [paymentChanges, setPaymentChanges] = useState<readonly StorePaymentUnsavedChange[]>([]),
+    [discardPayment, setDiscardPayment] = useState(0);
+  const unsavedEdits = dirty || paymentChanges.length > 0;
+  // b22: leaving or reloading the page with unsaved edits asks first (the browser's own question),
+  // as other forms do; a language switch that kept them, or that staff confirmed, does not ask again.
+  useEffect(() => {
+    if (!unsavedEdits) return;
+    const warn = (event: BeforeUnloadEvent) => {
+      if (!leavingWithUnsavedWork()) event.preventDefault();
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [unsavedEdits]);
   const running = useRef(false),
     epoch = useRef(0),
     controller = useRef<AbortController | null>(null),
@@ -1069,6 +1090,19 @@ export function StoreSetupDraftPage({
   } catch {
     /* Review shows a safe validation state; local raw input remains. */
   }
+  // b22 (v15 live check of b21): a fee turned on without its orders (or tax classification) is
+  // named as that in Review, and the rest of the summary is still read without that fee.
+  const feeProblems = storeSetupFeeProblems(content);
+  let reviewParsed = parsed;
+  if (reviewParsed === null && feeProblems.length > 0)
+    try {
+      reviewParsed = buildStoreSetupEditedContent(
+        storeSetupReviewContent(content, feeProblems),
+        inputs,
+      );
+    } catch {
+      /* A time or wait value is wrong too: Review says so, and still names the fee. */
+    }
   const ownerOnly = storeSetupOwnerOnly(error, workspace, id === storeReference);
   // WP-2423 item 14 (DEC-STORE-FIRST-OPENING): a Store whose setup has not been published gets one
   // page and one action, and only once a read has said so. A read that fails shows the page as it
@@ -1187,7 +1221,8 @@ export function StoreSetupDraftPage({
   // for this device's record of an unconfirmed configuration request: while one is waiting to be
   // recovered, nothing reads the live configuration before the recovery does.
   const liveScope = workspace ? JSON.stringify(workspace.scope) : null;
-  const wantsLiveStart = openLayout && activeStep === 1 && !draftBusinessStartSaved;
+  // b22: step 1 of an open Store always reads the start the Store runs on: it is kept (see below).
+  const wantsLiveStart = openLayout && activeStep === 1;
   useEffect(() => {
     if (liveScope === null || workspace === null || live !== null) return;
     if (activeStep !== 4 && !wantsLiveStart) return;
@@ -1212,6 +1247,13 @@ export function StoreSetupDraftPage({
   const storeTimeZone = openLayout && workspace !== null ? workspace.store.timeZone : null;
   const liveStart = openLayout ? (live?.current?.businessDayStartLocalTime ?? null) : null;
   const liveBusinessStart = liveStart === null ? null : clockField(liveStart);
+  // b22 (v15 live check of b21): an open Store keeps its business day start (the BusinessDayStart
+  // publication check), so step 1 shows it as kept, and a setup that starts the day at another time
+  // is named with the way back, before any change is created from it.
+  const startChange = storeSetupBusinessStartChange(
+    inputs.businessStart,
+    openLayout ? live?.current : null,
+  );
   useEffect(() => {
     if (storeTimeZone === null) return;
     setInputs((old) => {
@@ -1522,10 +1564,38 @@ export function StoreSetupDraftPage({
                     type="time"
                     step={inputs.businessStart.length > 5 ? 1 : 60}
                     disabled={disabled}
+                    // b22: an open Store keeps the start it runs on; it is shown, not changed here.
+                    readOnly={liveBusinessStart !== null}
+                    aria-describedby={
+                      liveBusinessStart === null ? undefined : "setup-business-start-kept"
+                    }
                     value={inputs.businessStart}
                     onChange={(e) => changeInputs({ businessStart: e.currentTarget.value })}
                   />
                 </label>
+                {liveBusinessStart !== null && (
+                  <p id="setup-business-start-kept">
+                    {startChange === null
+                      ? t(
+                          "The business day keeps starting at {now}, as the Store runs today, so past days and reports keep their boundaries.",
+                          { now: liveBusinessStart },
+                        )
+                      : t(
+                          "This setup starts the business day at {setup}. A Store that already runs keeps {now}, so past days and reports keep their boundaries; a change with {setup} cannot be sent for approval.",
+                          startChange,
+                        )}
+                  </p>
+                )}
+                {startChange !== null && liveBusinessStart !== null && (
+                  <button
+                    type="button"
+                    className="store-setup-inline-action"
+                    disabled={disabled}
+                    onClick={() => changeInputs({ businessStart: liveBusinessStart })}
+                  >
+                    {t("Put it back to {now}", startChange)}
+                  </button>
+                )}
                 {openLayout ? null : (
                   <p>
                     {t(
@@ -1896,6 +1966,8 @@ export function StoreSetupDraftPage({
               csrf={csrf}
               hidden={activeStep !== 4}
               disabled={busy || !online || !!pending}
+              onUnsavedChange={setPaymentChanges}
+              discardSignal={discardPayment}
               onSelect={(reference) => {
                 setContent((v) =>
                   parseStoreSetupContent({
@@ -1958,7 +2030,9 @@ export function StoreSetupDraftPage({
             {activeStep === 7 && (
               <>
                 <StoreSetupDraftReview
-                  content={parsed}
+                  content={reviewParsed}
+                  feeProblems={feeProblems}
+                  paymentChanges={paymentChanges}
                   saved={workspace.setup.snapshot?.content ?? null}
                   layout={layout}
                   current={live?.current ?? null}
@@ -1996,8 +2070,8 @@ export function StoreSetupDraftPage({
                   scope={workspace.scope}
                   csrf={csrf}
                   saved={workspace.setup.snapshot}
-                  freshDisabled={disabled || dirty}
-                  unsavedEdits={dirty}
+                  freshDisabled={disabled || unsavedEdits}
+                  unsavedEdits={unsavedEdits}
                   // b22: Earlier changes keep their rows offline and read again once back online.
                   online={online}
                   onLiveConfiguration={setLive}
@@ -2049,15 +2123,18 @@ export function StoreSetupDraftPage({
             <button
               className="store-setup-discard"
               type="button"
-              disabled={disabled || !dirty}
-              onClick={() => void refresh(true)}
+              disabled={disabled || !unsavedEdits}
+              onClick={() => {
+                if (paymentChanges.length > 0) setDiscardPayment((n) => n + 1);
+                if (dirty) void refresh(true);
+              }}
             >
               {t("Discard unsaved changes")}
             </button>
           </footer>
           {/* b18 polish: with nothing unsaved, reading the saved draft again shows the last one
               saved (here or elsewhere); with unsaved changes, "Discard unsaved changes" does that. */}
-          {!ownerOnly && !firstStore && !dirty ? (
+          {!ownerOnly && !firstStore && !unsavedEdits ? (
             <StoreSetupReloadDraft
               disabled={busy || !online || id !== storeReference}
               onReload={() => void refresh()}
@@ -2082,6 +2159,61 @@ export interface StoreSetupSummaryItem {
   readonly now?: string;
   /** b20: set on this page but not saved yet, so the change created below does not have it. */
   readonly unsaved?: boolean;
+  /** b22: a change with this value can never be sent for approval (the business day start). */
+  readonly cannotSend?: boolean;
+}
+/**
+ * b22 (v15 live check of b21): a fee turned on in step 3 that cannot be saved yet: which orders it
+ * applies to, or (a service charge or delivery fee) its tax classification, is not chosen yet.
+ */
+export interface StoreSetupFeeProblem {
+  readonly chargeType: string;
+  readonly kind: "OrderTypes" | "TaxClassification";
+}
+export function storeSetupFeeProblems(content: StoreSetupContent): readonly StoreSetupFeeProblem[] {
+  if (content.feeContexts?.state !== "Configured") return [];
+  return content.feeContexts.value.flatMap((fee): StoreSetupFeeProblem[] =>
+    fee.state !== "Enabled"
+      ? []
+      : fee.orderTypes.length === 0
+        ? [{ chargeType: fee.chargeType, kind: "OrderTypes" }]
+        : fee.taxClassificationReference === "" ||
+            (fee.taxClassificationReference === null && fee.chargeType !== "Tip")
+          ? [{ chargeType: fee.chargeType, kind: "TaxClassification" }]
+          : [],
+  );
+}
+/** b22: what is wrong with a fee that is on, in plain words, with where to put it right. */
+export const storeSetupFeeProblemText = (problem: StoreSetupFeeProblem, where: string) =>
+  problem.kind === "OrderTypes"
+    ? t("{fee} is on, but which orders it applies to is not chosen yet. Choose them in {where}.", {
+        fee: feeLabel(problem.chargeType),
+        where,
+      })
+    : t("{fee} is on, but its tax classification is not chosen yet. Choose one in {where}.", {
+        fee: feeLabel(problem.chargeType),
+        where,
+      });
+/**
+ * b22: Review reads a setup whose fees still need a choice: those fees are left out (each is named
+ * as what needs fixing instead), so the rest of the summary still says what changes.
+ */
+export function storeSetupReviewContent(
+  content: StoreSetupContent,
+  problems: readonly StoreSetupFeeProblem[],
+): StoreSetupContent {
+  if (problems.length === 0 || content.feeContexts?.state !== "Configured") return content;
+  return {
+    ...content,
+    feeContexts: {
+      state: "Configured",
+      value: content.feeContexts.value.map((fee) =>
+        problems.some((problem) => problem.chargeType === fee.chargeType)
+          ? { chargeType: fee.chargeType, state: "Unconfigured" as const }
+          : fee,
+      ),
+    },
+  };
 }
 interface FeeLike {
   readonly chargeType: string;
@@ -2163,6 +2295,13 @@ export function storeSetupChangeSummary(
    * since the change created below is made from the saved draft only.
    */
   saved: StoreSetupContent | null = null,
+  /** b22: fees turned on that still need a choice (left out of `content`), and where each is set. */
+  feeProblems: readonly StoreSetupFeeProblem[] = [],
+  /** b22: payment methods changed in step 3 and not saved yet, and where they are saved. */
+  paymentUnsaved: {
+    readonly changes: readonly StorePaymentUnsavedChange[];
+    readonly where: string;
+  } | null = null,
 ): {
   readonly changed: readonly StoreSetupSummaryItem[];
   readonly unchanged: readonly string[];
@@ -2188,8 +2327,11 @@ export function storeSetupChangeSummary(
     same: boolean | null,
     value: () => readonly string[],
     now?: () => string,
+    cannotSend = false,
   ) => {
-    const unsaved = savedSettings !== null && savedSettings.get(key) !== settings.get(key);
+    const unsaved =
+      (savedSettings !== null && savedSettings.get(key) !== settings.get(key)) ||
+      (key === "feeContexts" && feeProblems.length > 0);
     if (same === true) {
       // b21: an unsaved edit that puts a setting back to how the Store runs today, while the saved
       // draft still changes it, is named with its mark (the change below would still change it).
@@ -2220,6 +2362,7 @@ export function storeSetupChangeSummary(
       value: value(),
       ...(same === false && now !== undefined ? { now: now() } : {}),
       ...(unsaved ? { unsaved } : {}),
+      ...(cannotSend ? { cannotSend } : {}),
     });
   };
   const known = current !== null;
@@ -2242,6 +2385,8 @@ export function storeSetupChangeSummary(
       known ? clock(start) === clock(current.businessDayStartLocalTime) : null,
       () => [clock(start)],
       () => clock(current?.businessDayStartLocalTime ?? ""),
+      // b22: a Store that already runs keeps its business day start, so this cannot be sent.
+      storeSetupBusinessStartChange(start, current) !== null,
     );
   }
   if (content.enabledServiceModes.state === "Configured") {
@@ -2283,7 +2428,9 @@ export function storeSetupChangeSummary(
     // b21: each fee that changes reads "Tip: off becomes on (Dine-in)", like opening hours; a fee
     // the Store has no setting for is not charged today, so it reads as off.
     // b19 review: a fee whose tax treatment changes says so, so a change is never invisible.
-    const changes = fees.flatMap((fee) => {
+    const listed = (fee: { readonly chargeType: string }) =>
+      !feeProblems.some((problem) => problem.chargeType === fee.chargeType);
+    const changes = fees.filter(listed).flatMap((fee) => {
       const before: FeeLike = live?.find((old) => old.chargeType === fee.chargeType) ?? {
         chargeType: fee.chargeType,
         state: "Disabled",
@@ -2308,8 +2455,18 @@ export function storeSetupChangeSummary(
         );
       return lines;
     });
-    add(t("Fees"), "feeContexts", known ? changes.length === 0 : null, () =>
-      known ? changes : fees.map(feeText),
+    // b22: a fee that is on but still needs a choice is named so, not compared or listed as set.
+    const open = feeProblems.map((problem) =>
+      problem.kind === "OrderTypes"
+        ? t("{fee}: on, which orders it applies to is not chosen yet", {
+            fee: feeLabel(problem.chargeType),
+          })
+        : t("{fee}: on, its tax classification is not chosen yet", {
+            fee: feeLabel(problem.chargeType),
+          }),
+    );
+    add(t("Fees"), "feeContexts", known ? changes.length === 0 && open.length === 0 : null, () =>
+      known ? [...changes, ...open] : [...fees.filter(listed).map(feeText), ...open],
     );
   }
   if (content.capacityConfigurationReference.state === "Configured") {
@@ -2390,6 +2547,48 @@ export function storeSetupChangeSummary(
         () => before,
       );
   }
+  // b22 (v15 live check of b21): payment methods ticked or unticked and not saved yet are listed as
+  // a change not saved yet, never as Payment staying as it is.
+  if (paymentUnsaved !== null && paymentUnsaved.changes.length > 0) {
+    const label = t("Payment"),
+      lines = [
+        ...paymentUnsaved.changes.map((change) =>
+          t("{method}: {before} → {after}", {
+            method: change.label,
+            before: change.on ? t("Off") : t("On"),
+            after: change.on ? t("On") : t("Off"),
+          }),
+        ),
+        t(
+          "Save payment methods in {where}, choose the saved payment methods for this setup, then save as draft.",
+          { where: paymentUnsaved.where },
+        ),
+      ];
+    const at = changed.findIndex((item) => item.label === label);
+    const before = changed[at];
+    if (before === undefined) changed.push({ label, value: lines, unsaved: true });
+    else
+      changed[at] = {
+        label,
+        value: [
+          ...(before.now !== undefined && before.value.length === 1
+            ? [
+                t("Now {now} → changes to {value}", {
+                  now: before.now,
+                  value: before.value[0] ?? "",
+                }),
+              ]
+            : before.value),
+          ...lines,
+        ],
+        unsaved: true,
+      };
+    return {
+      changed,
+      unchanged: unchanged.filter((item) => item !== label),
+      filledIn: filledIn.filter((item) => item !== label),
+    };
+  }
   return { changed, unchanged, filledIn };
 }
 
@@ -2398,12 +2597,22 @@ function StoreSetupChangeSummary({
   content,
   current,
   saved,
+  feeProblems,
+  paymentUnsaved,
 }: {
   readonly content: StoreSetupContent;
   readonly current: StoreConfigurationSnapshot | null;
   readonly saved: StoreSetupContent | null;
+  readonly feeProblems: readonly StoreSetupFeeProblem[];
+  readonly paymentUnsaved: Parameters<typeof storeSetupChangeSummary>[4];
 }) {
-  const { changed, unchanged, filledIn } = storeSetupChangeSummary(content, current, saved);
+  const { changed, unchanged, filledIn } = storeSetupChangeSummary(
+    content,
+    current,
+    saved,
+    feeProblems,
+    paymentUnsaved,
+  );
   const known = current !== null;
   return (
     <section className="store-setup-summary" aria-labelledby="store-setup-summary-heading">
@@ -2430,6 +2639,11 @@ function StoreSetupChangeSummary({
                 ) : (
                   item.value.map((line) => <span key={line}>{line}</span>)
                 )}
+                {item.cannotSend ? (
+                  <span className="store-setup-summary__cannot-send">
+                    {t("Cannot be sent for approval")}
+                  </span>
+                ) : null}
                 {item.unsaved ? (
                   <span className="store-setup-summary__unsaved">{t("Not saved yet")}</span>
                 ) : null}
@@ -2464,8 +2678,15 @@ export function StoreSetupDraftReview({
   saved = null,
   layout = "Opening",
   current = null,
+  feeProblems = [],
+  paymentChanges = [],
 }: {
+  /** b22: payment methods changed in step 3 and not saved yet. */
+  readonly paymentChanges?: readonly StorePaymentUnsavedChange[];
+  /** The setup as edited (fees in `feeProblems` left out), or null when a time or wait is wrong. */
   readonly content: StoreSetupContent | null;
+  /** b22: fees turned on that still need a choice before the setup can be saved. */
+  readonly feeProblems?: readonly StoreSetupFeeProblem[];
   /** The saved draft; what is set here but not in it is named as not saved yet. */
   readonly saved?: StoreSetupContent | null;
   readonly layout?: StoreSetupLayout;
@@ -2473,7 +2694,30 @@ export function StoreSetupDraftReview({
   readonly current?: StoreConfigurationSnapshot | null;
 }) {
   // WP-2423 (v15): the count is exactly the list of what is not set, each with where to set it.
-  const missing = content ? storeSetupMissingItems(content, layout) : null;
+  // b22: a fee that is on but needs a choice is named under what needs fixing, not as not set.
+  const problemFees = new Set(feeProblems.map((problem) => feeLabel(problem.chargeType)));
+  const missing = content
+    ? storeSetupMissingItems(content, layout).filter((item) => !problemFees.has(item.label))
+    : null;
+  // b22 (v15 live check of b21): what stops this setup from being saved or sent, named before a
+  // change is created from it, each with where to put it right.
+  const start =
+    content?.businessDayStartLocalTime.state === "Configured"
+      ? storeSetupBusinessStartChange(content.businessDayStartLocalTime.value, current)
+      : null;
+  const fixes = [
+    ...(start === null
+      ? []
+      : [
+          t(
+            "Business day start: a change with {setup} cannot be sent for approval. A Store that already runs keeps {now}, so past days and reports keep their boundaries. Put it back to {now} in {where}.",
+            { ...start, where: storeSetupWhere(layout, "timeZone") },
+          ),
+        ]),
+    ...feeProblems.map((problem) =>
+      storeSetupFeeProblemText(problem, storeSetupWhere(layout, "payment")),
+    ),
+  ];
   // b18 review: the publication below checks the saved draft. A setting filled in on this page
   // (by staff, or from the Store's own time zone and business day start) but not saved yet is said
   // to be exactly that, so Review and the publication never seem to disagree.
@@ -2483,9 +2727,21 @@ export function StoreSetupDraftReview({
       : (saved === null
           ? storeSetupMissingItems(createUnconfiguredStoreSetupContent(), layout)
           : storeSetupMissingItems(saved, layout)
-        ).filter((item) => !missing.some((m) => m.label === item.label));
+        ).filter(
+          (item) => !missing.some((m) => m.label === item.label) && !problemFees.has(item.label),
+        );
   return (
     <>
+      {fixes.length > 0 && (
+        <section aria-label={t("Needs fixing first")}>
+          <h4>{t("Needs fixing first")}</h4>
+          <ul>
+            {fixes.map((text) => (
+              <li key={text}>{text}</li>
+            ))}
+          </ul>
+        </section>
+      )}
       {missing === null && (
         <p>{t("Some edited times or wait values need correction before saving.")}</p>
       )}
@@ -2523,7 +2779,15 @@ export function StoreSetupDraftReview({
           </p>
         </section>
       )}
-      {content && <StoreSetupChangeSummary content={content} current={current} saved={saved} />}
+      {content && (
+        <StoreSetupChangeSummary
+          content={content}
+          current={current}
+          saved={saved}
+          feeProblems={feeProblems}
+          paymentUnsaved={{ changes: paymentChanges, where: storeSetupWhere(layout, "payment") }}
+        />
+      )}
     </>
   );
 }
@@ -2980,6 +3244,16 @@ export async function recoverStoreSetupReference(input: {
   return { receipt, current };
 }
 
+/** b22: one payment method ticked or unticked in step 3 and not saved yet. */
+export interface StorePaymentUnsavedChange {
+  readonly label: string;
+  readonly on: boolean;
+}
+const noPaymentChannels: StorePaymentConfigurationContent = {
+  customerOnlineCardEnabled: false,
+  staffTerminalCardPresentEnabled: false,
+  staffTerminalInteracEnabled: false,
+};
 /** Saves immutable channel rules, not Provider readiness. Explicit selection is a
  * separate local setup edit and never follows a newer Manager's save silently. */
 export function StorePaymentConfigurationEditor({
@@ -2988,6 +3262,8 @@ export function StorePaymentConfigurationEditor({
   hidden = false,
   disabled = false,
   onSelect,
+  onUnsavedChange,
+  discardSignal = 0,
   client: injected,
   journalFactory = createStorePaymentConfigurationPendingJournal,
 }: {
@@ -2996,6 +3272,13 @@ export function StorePaymentConfigurationEditor({
   readonly hidden?: boolean;
   readonly disabled?: boolean;
   readonly onSelect: (reference: string) => void;
+  /**
+   * b22 (v15 live check of b21): the payment methods ticked or unticked here and not saved yet, so
+   * the page counts them as unsaved (Discard, Review, the language switch and leaving the page).
+   */
+  readonly onUnsavedChange?: (changes: readonly StorePaymentUnsavedChange[]) => void;
+  /** b22: raised by the page's "Discard unsaved changes": the saved payment methods come back. */
+  readonly discardSignal?: number;
   readonly client?: ReturnType<typeof createStorePaymentConfigurationClient>;
   readonly journalFactory?: (scope: StoreSetupScope) => StorePaymentConfigurationPendingJournal;
 }) {
@@ -3006,11 +3289,7 @@ export function StorePaymentConfigurationEditor({
     [ready, setReady] = useState(false),
     [error, setError] = useState<StoreSetupClientError["code"] | null>(null),
     [notice, setNotice] = useState("");
-  const [fields, setFields] = useState<StorePaymentConfigurationContent>({
-    customerOnlineCardEnabled: false,
-    staffTerminalCardPresentEnabled: false,
-    staffTerminalInteracEnabled: false,
-  });
+  const [fields, setFields] = useState<StorePaymentConfigurationContent>(noPaymentChannels);
   const hold = useUnsavedHold();
   const dirty = useRef(false),
     epoch = useRef(0),
@@ -3035,11 +3314,7 @@ export function StorePaymentConfigurationEditor({
     journal.current = null;
     dirty.current = false;
     hold.clear();
-    setFields({
-      customerOnlineCardEnabled: false,
-      staffTerminalCardPresentEnabled: false,
-      staffTerminalInteracEnabled: false,
-    });
+    setFields(noPaymentChannels);
     void client
       .load({ storeReference: scope.storeReference, expectedScope: scope, signal: c.signal })
       .then(async (v) => {
@@ -3119,7 +3394,7 @@ export function StorePaymentConfigurationEditor({
           setReady(true);
           setNotice(
             result.receipt.outcome === "Committed"
-              ? t("Earlier payment save confirmed. Choose the saved configuration to use it.")
+              ? t("Earlier payment save confirmed. Choose the saved payment methods to use them.")
               : t("Earlier payment save did not commit. You can save again."),
           );
         }
@@ -3147,7 +3422,7 @@ export function StorePaymentConfigurationEditor({
         apply(result.current);
         setNotice(
           t(
-            "Payment configuration saved. Choose it below, then save the setup draft to keep that selection.",
+            "Payment methods saved. Choose them below, then save the setup draft to keep that choice.",
           ),
         );
       }
@@ -3165,8 +3440,33 @@ export function StorePaymentConfigurationEditor({
     ["staffTerminalCardPresentEnabled", t("Staff terminal card present")],
     ["staffTerminalInteracEnabled", t("Staff terminal Interac")],
   ];
+  // b22: what differs from the saved payment methods (none saved yet: every method is off).
+  const savedFields = view?.snapshot?.content ?? noPaymentChannels;
+  const unsaved = labels
+    .filter(([key]) => ready && fields[key] !== savedFields[key])
+    .map(([key, label]) => ({ label, on: fields[key] }));
+  const unsavedKey = JSON.stringify(unsaved);
+  const reported = useRef(onUnsavedChange);
+  reported.current = onUnsavedChange;
+  useEffect(() => {
+    reported.current?.(unsaved);
+    if (unsaved.length === 0) {
+      dirty.current = false;
+      hold.clear();
+    }
+  }, [unsavedKey]);
+  useEffect(() => () => reported.current?.([]), []);
+  const discarded = useRef(discardSignal);
+  useEffect(() => {
+    if (discarded.current === discardSignal) return;
+    discarded.current = discardSignal;
+    dirty.current = false;
+    hold.clear();
+    setFields(view?.snapshot?.content ?? noPaymentChannels);
+    setError(null);
+  }, [discardSignal]);
   return (
-    <section hidden={hidden} aria-label={t("Payment configuration")}>
+    <section hidden={hidden} aria-label={t("Payment methods")}>
       <h4>{t("Store payment rules")}</h4>
       <p>
         {t(
@@ -3187,9 +3487,11 @@ export function StorePaymentConfigurationEditor({
       ) : error ? (
         <p role="alert">
           {error === "Denied"
-            ? t("You cannot access payment configuration in the current Store.")
+            ? t("You cannot see this Store's payment methods.")
             : error === "Conflict"
-              ? t("Payment configuration changed. Refresh and review before saving.")
+              ? t(
+                  "The payment methods were changed elsewhere. Refresh and check them before saving.",
+                )
               : error === "OutcomeUnknown"
                 ? t(
                     "The payment save could not be confirmed. Recover the original save before making another change.",
@@ -3202,7 +3504,7 @@ export function StorePaymentConfigurationEditor({
         </p>
       ) : null}
       {notice && <p role="status">{notice}</p>}
-      {busy && <p role="status">{t("Loading payment configuration…")}</p>}
+      {busy && <p role="status">{t("Loading payment methods…")}</p>}
       {pending && (
         <>
           <p role="status">{t("An earlier payment save must be recovered before another save.")}</p>
@@ -3231,14 +3533,14 @@ export function StorePaymentConfigurationEditor({
         ))}
       </fieldset>
       <button type="button" disabled={disabled || busy} onClick={() => void action("Refresh")}>
-        {t("Refresh saved payment configuration")}
+        {t("Refresh the saved payment methods")}
       </button>
       <button
         type="button"
         disabled={disabled || busy || !ready || !!pending}
         onClick={() => void action("Save")}
       >
-        {t("Save payment configuration")}
+        {t("Save payment methods")}
       </button>
       {view?.snapshot && (
         <>
@@ -3262,7 +3564,7 @@ export function StorePaymentConfigurationEditor({
               setNotice(t("Selection changed locally. Save the setup draft to keep it."));
             }}
           >
-            {t("Use saved payment configuration")}
+            {t("Use the saved payment methods")}
           </button>
         </>
       )}
@@ -3591,6 +3893,14 @@ export function StoreSetupFeeContextEditor({
                   {mode === "DineIn" ? t("Dine in") : serviceModeText(mode)}
                 </label>
               ))}
+              {/* b22: said at the field, so it is fixed here rather than found in Review. */}
+              {entry.orderTypes.length === 0 && (
+                <p className="store-setup-field-problem">
+                  {t("Choose which orders the {fee} applies to.", {
+                    fee: feeLabel(entry.chargeType).toLowerCase(),
+                  })}
+                </p>
+              )}
             </fieldset>
           )}
         </fieldset>

@@ -20,6 +20,7 @@ import {
   type StoreConfigurationPublicationChecks,
 } from "./store-configuration-pending-journal.js";
 import {
+  storeSetupBusinessStartChange,
   storeSetupMissingItems,
   storeSetupMissingText,
   type StoreSetupLayout,
@@ -797,6 +798,13 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
         ? []
         : storeSetupMissingItems(props.saved.content, props.setupLayout ?? "Opening"),
     setupIncomplete = setupMissing.length > 0,
+    // b22: a saved setup that starts the business day at another time than the Store runs on now
+    // can never be sent for approval (the BusinessDayStart check), so no change is created from it.
+    savedStart = props.saved?.content.businessDayStartLocalTime,
+    startChange = storeSetupBusinessStartChange(
+      savedStart?.state === "Configured" ? savedStart.value : null,
+      current,
+    ),
     // The setup builds on the configuration that was latest when it was saved.
     setupOutdated =
       props.saved !== null &&
@@ -819,6 +827,7 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
           saved: props.saved !== null,
           setupIncomplete,
           setupOutdated,
+          setupCannotBeSent: startChange !== null,
           openByAnother,
           openYours,
           lifecycle: openLatest ? latest.lifecycle : null,
@@ -844,7 +853,7 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
   const blocked = (action: StoreConfigurationStep["action"]) =>
     locked ||
     (action === "Materialize"
-      ? !props.saved || setupIncomplete || setupOutdated || openByAnother
+      ? !props.saved || setupIncomplete || setupOutdated || startChange !== null || openByAnother
       : !ready);
   // The Owner's own approval as sole operator has its own solid button; the step is text then.
   const selfApproval = ownChange && soleOperator !== undefined && latest !== undefined;
@@ -942,6 +951,14 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
                   setupMissing: storeSetupMissingText(setupMissing),
                   value2: setupMissing.length === 1 ? t("it") : t("them"),
                 },
+              )}
+            </p>
+          )}
+          {startChange !== null && !openLatest && !setupIncomplete && (
+            <p>
+              {t(
+                "A change cannot be created from this setup: it starts the business day at {setup}, and a Store that already runs keeps {now}, so past days and reports keep their boundaries. Put it back to {now} in step 1, Time zone and business day, save as draft, then come back here.",
+                startChange,
               )}
             </p>
           )}
@@ -1230,6 +1247,8 @@ export function storeConfigurationNextStep(state: {
   readonly saved: boolean;
   readonly setupIncomplete: boolean;
   readonly setupOutdated: boolean;
+  /** b22: the saved setup breaks a rule that would stop it being sent (the business day start). */
+  readonly setupCannotBeSent?: boolean;
   readonly openByAnother: boolean;
   readonly openYours: boolean;
   readonly lifecycle: "Draft" | "PendingApproval" | "Approved" | null;
@@ -1239,7 +1258,11 @@ export function storeConfigurationNextStep(state: {
   // As before b19: a change can be created from the saved setup whenever it is saved, complete and
   // up to date and no one else has a change open — also over your own open change, which it replaces.
   const canCreate =
-    state.saved && !state.setupIncomplete && !state.setupOutdated && !state.openByAnother;
+    state.saved &&
+    !state.setupIncomplete &&
+    !state.setupOutdated &&
+    state.setupCannotBeSent !== true &&
+    !state.openByAnother;
   const own = (): StoreConfigurationStep | null => {
     switch (state.lifecycle) {
       case "Draft":
