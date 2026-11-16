@@ -1188,8 +1188,47 @@ export async function exercisePilotStoreSetupPublication(input) {
         409,
         "store_setup_incomplete",
       );
+      // b24 correction: a draft is partial, so a fee on for dine-in saves while the services are
+      // not set; creating a change from it is refused as invalid (never "unavailable") and nothing
+      // is recorded. Once the services are set, a save whose fee names one they leave out is
+      // refused the same way.
+      const tipFor = (orderTypes) => ({
+        state: "Configured",
+        value: [
+          { chargeType: "ServiceCharge", state: "Disabled" },
+          { chargeType: "DeliveryFee", state: "Disabled" },
+          { chargeType: "Tip", state: "Enabled", taxClassificationReference: null, orderTypes },
+        ],
+      });
+      const servicesUnset = await saveSetup(send, {
+        capacityConfigurationReference: { state: "Configured", value: null },
+        enabledServiceModes: { state: "Unconfigured" },
+        feeContexts: tipFor(["DineIn"]),
+      });
+      await refusedUnchanged(
+        () => materialize(send, selected, workspace.body.expectedHead, servicesUnset),
+        400,
+        "store_setup_invalid",
+      );
+      await refusedUnchanged(
+        () =>
+          send("store-setup", {
+            command: "SaveDraft",
+            operationReference: next(),
+            expectedSetupReference: servicesUnset.setupDraftReference,
+            expectedRevision: servicesUnset.revision,
+            content: {
+              ...servicesUnset.content,
+              enabledServiceModes: { state: "Configured", value: ["Pickup"] },
+            },
+          }),
+        400,
+        "store_setup_invalid",
+      );
       const finished = await saveSetup(send, {
         capacityConfigurationReference: { state: "Configured", value: null },
+        enabledServiceModes: unfinished.content.enabledServiceModes,
+        feeContexts: unfinished.content.feeContexts,
       });
       const created = await materialize(send, selected, workspace.body.expectedHead, finished);
       assert.equal(created.status, 200, JSON.stringify(created.body));

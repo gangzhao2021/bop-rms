@@ -2833,13 +2833,20 @@ export async function exerciseStoreSetupRuntimeHttp(context) {
           : error instanceof Error
             ? "Error"
             : "Other";
+    // b24 correction: an owning refusal thrown outside any request (a binder or parser) is named by
+    // its code; the HTTP part is only the last reply seen, so it is labelled as such.
+    const code =
+      typeof error?.code === "string" && /^STORE_[A-Z_]{1,80}$/u.test(error.code)
+        ? "(" + error.code + ")"
+        : "";
     throw new Error(
       "STORE_SETUP_NATIVE_FAILED:" +
         stage +
         sql +
         ":" +
         kind +
-        ":HTTP" +
+        code +
+        ":lastHTTP" +
         httpStatus +
         ":" +
         httpCode,
