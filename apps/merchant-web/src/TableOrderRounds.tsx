@@ -130,6 +130,8 @@ export function TableOrderRounds({
           lines={detail.lines.items}
           csrf={csrf}
           fetcher={fetcher}
+          // b22: what the round reads on the bill, to say why taking it all off differs.
+          roundMinor={orderBill(detail.order)?.rounds?.get(batch.orderBatchReference)?.totalMinor}
           onRefused={(refusal) =>
             setRemoveRefusals((current) => ({
               ...current,

@@ -1068,9 +1068,9 @@ test("@production DEC-DINE-IN-PAY-LATER: staff take a dish off an unpaid table's
     await page.goto("/operations/orders/" + id(1));
     await page.getByRole("button", { name: "Take dishes off round 1" }).click();
     const group = page.getByRole("group", { name: "Take dishes off round 1" });
-    // The dish says its own price; the button what the bill goes down by.
+    // b22: the dish says what the bill goes down by, as the button does.
     await expect(group.getByLabel(/Synthetic soup/u)).toBeVisible();
-    await expect(group).toContainText("1 × Synthetic soup · price $11.30");
+    await expect(group).toContainText("1 × Synthetic soup · bill goes down $11.29");
     await group.getByLabel(/Synthetic soup/u).check();
     // Nothing is sent without a reason.
     await expect(group.getByRole("button", { name: "Take off $11.29" })).toBeDisabled();

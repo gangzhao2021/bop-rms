@@ -147,7 +147,8 @@ export function PayLaterRemoveRefusalNotice({
  * v15 b20 (DEC-TAX-WHOLE-RECEIPT): what the take-off button says. The amount is what the bill goes
  * down by, from the server's preview (tax is worked out once over the whole bill, so it can be a
  * cent less than the dishes' own prices); while that is not known the button names no amount, and
- * taking the dishes off still works (it records no amount).
+ * taking the dishes off still works (it records no amount). b22: with nothing ticked it asks for
+ * dishes of its round (it can't be pressed), never the older unnumbered name.
  */
 export function payLaterRemoveButtonText(input: {
   readonly busy: boolean;
@@ -155,9 +156,11 @@ export function payLaterRemoveButtonText(input: {
   readonly offered: number;
   readonly previewMinor: string | null;
   readonly currencyCode: string;
+  readonly sequence: number;
 }): string {
   if (input.busy) return t("Recording…");
-  if (input.chosen === 0) return t("Take dishes off the bill");
+  if (input.chosen === 0)
+    return t("Choose dishes to take off round {sequence}", { sequence: input.sequence });
   const whole = input.chosen === input.offered;
   if (input.previewMinor === null)
     return whole ? t("Take the whole round off") : t("Take these dishes off");
@@ -165,6 +168,63 @@ export function payLaterRemoveButtonText(input: {
   return whole
     ? t("Take the whole round off · {amount}", { amount })
     : t("Take off {amount}", { amount });
+}
+
+/**
+ * b22 (DEC-TAX-WHOLE-RECEIPT): what a dish in the panel says — what the bill goes down by when it
+ * alone comes off (the server's preview), so the dish and the button agree to the cent ($7.06,
+ * never its own price $7.07 beside "Take off $7.06"). While that is being worked out the dish names
+ * no amount; when it can't be (an older server, a refusal) the dish says its own price, as that.
+ */
+export function payLaterRemoveDishText(input: {
+  readonly quantity: number;
+  readonly name: string;
+  /** The preview for this dish alone: a string, null when it couldn't be worked out, or absent. */
+  readonly billDownMinor: string | null | undefined;
+  readonly total: { readonly amountMinor: string; readonly currencyCode: string };
+}): string {
+  const dish = input.quantity + " × " + input.name;
+  if (input.billDownMinor === undefined) return dish;
+  return (
+    dish +
+    " · " +
+    (input.billDownMinor === null
+      ? t("price {amount}", { amount: orderMoney(input.total) })
+      : t("bill goes down {amount}", {
+          amount: orderMoney({
+            amountMinor: input.billDownMinor,
+            currencyCode: input.total.currencyCode,
+          }),
+        }))
+  );
+}
+
+/**
+ * b22 (DEC-TAX-WHOLE-RECEIPT): taken off together, dishes can take a cent more or less off the bill
+ * than their figures added up (or than the round's own figure when it all comes off), because the
+ * bill's tax is worked out once. Then the panel says why the button's amount is what it is; null
+ * when the figures agree, or when they are not all known.
+ */
+export function payLaterRemoveTogetherNote(input: {
+  readonly previewMinor: string | null;
+  readonly dishMinors: readonly (string | null | undefined)[];
+  /** What the round reads on the bill, when the whole round is ticked. */
+  readonly roundMinor?: string | undefined;
+  readonly currencyCode: string;
+}): string | null {
+  if (input.previewMinor === null || input.dishMinors.length === 0) return null;
+  const preview = BigInt(input.previewMinor);
+  const known = input.dishMinors.every((minor) => typeof minor === "string");
+  const dishes = known
+    ? input.dishMinors.reduce((sum, minor) => sum + BigInt(minor as string), 0n)
+    : null;
+  const differs =
+    (dishes !== null && dishes !== preview) ||
+    (input.roundMinor !== undefined && BigInt(input.roundMinor) !== preview);
+  if (!differs) return null;
+  return t("Tax is worked out once on the whole bill, so the bill goes down {amount}.", {
+    amount: orderMoney({ amountMinor: input.previewMinor, currencyCode: input.currencyCode }),
+  });
 }
 
 /** The preview's amount, or null when the answer is not one (an older server, a refusal). */
@@ -186,6 +246,9 @@ export function PayLaterItemRemoveAction({
   csrf,
   onSettled,
   onRefused,
+  roundMinor,
+  openOnArrival = false,
+  onArrived,
   fetcher = fetch,
 }: {
   readonly order: Order;
@@ -196,17 +259,27 @@ export function PayLaterItemRemoveAction({
   readonly onSettled: () => void;
   /** The dishes couldn't come off the bill (made, served or paid): the page shows what to do. */
   readonly onRefused: (refusal: PayLaterRemoveRefusal) => void;
+  /** b22: what the round reads on the bill (its heading), to say why the whole round differs. */
+  readonly roundMinor?: string | undefined;
+  /**
+   * b22: staff came here from this round's "Take dishes off round N" on the Orders workbench: the
+   * panel is open on arrival and has the focus, never a second button of the same name to press.
+   */
+  readonly openOnArrival?: boolean | undefined;
+  readonly onArrived?: (() => void) | undefined;
   readonly fetcher?: typeof fetch | undefined;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(openOnArrival);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [reason, setReason] = useState<StaffCancellationReason | "">("");
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<Failure | null>(null);
   const attempt = useRef<{ key: string; reference: string } | null>(null);
-  const [preview, setPreview] = useState<{ readonly key: string; readonly minor: string } | null>(
-    null,
-  );
+  const panel = useRef<HTMLDivElement | null>(null);
+  const arrived = useRef(openOnArrival);
+  // v15 b20 / b22 (DEC-TAX-WHOLE-RECEIPT): what the bill goes down by, from the server, by the
+  // dishes asked about (null: it couldn't be worked out).
+  const [previews, setPreviews] = useState<ReadonlyMap<string, string | null>>(new Map());
   const offered = lines.filter(
     (line) =>
       line.orderBatchReference === batch.orderBatchReference &&
@@ -214,49 +287,87 @@ export function PayLaterItemRemoveAction({
   );
   const chosen = offered.filter((line) => selected.has(line.orderItemReference));
   const currencyCode = offered[0]?.total.currencyCode ?? "CAD";
-  // v15 b20 (DEC-TAX-WHOLE-RECEIPT): the server works out what the bill goes down by.
-  const previewKey =
-    open && chosen.length > 0 && order.currentVersion !== null
-      ? JSON.stringify({
+  const keyFor = (items: readonly string[]) =>
+    order.currentVersion === null
+      ? null
+      : JSON.stringify({
           orderReference: order.orderReference,
           orderBatchReference: batch.orderBatchReference,
-          orderItemReferences: chosen.map((line) => line.orderItemReference).sort(),
+          orderItemReferences: [...items].sort(),
           expectedOrderVersion: order.currentVersion,
-        })
-      : null;
-  const previewMinor = preview !== null && preview.key === previewKey ? preview.minor : null;
+        });
+  const previewKey =
+    open && chosen.length > 0 ? keyFor(chosen.map((line) => line.orderItemReference)) : null;
+  const previewMinor = previewKey === null ? null : (previews.get(previewKey) ?? null);
+  const dishKeys =
+    open && order.currentVersion !== null
+      ? offered.map((line) => keyFor([line.orderItemReference]) as string)
+      : [];
+  const dishKeysText = JSON.stringify(dishKeys);
+  const ask = async (key: string, signal: AbortSignal): Promise<string | null> => {
+    try {
+      const response = await fetcher("/merchant/orders/remove-unpaid-items/preview", {
+        method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
+        redirect: "error",
+        signal,
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          "X-BOP-CSRF": csrf,
+        },
+        body: key,
+      });
+      const payload = (await response.json().catch(() => null)) as unknown;
+      return response.ok ? payLaterRemovePreviewMinor(payload) : null;
+    } catch {
+      // No amount; taking the dishes off still works and says its own result.
+      return null;
+    }
+  };
+  const askRef = useRef(ask);
+  askRef.current = ask;
+  // b22: each dish says what the bill goes down by when it alone comes off, asked one at a time
+  // when the panel opens (a round has a few dishes; nothing is recorded).
   useEffect(() => {
-    if (previewKey === null) return;
+    const keys = JSON.parse(dishKeysText) as string[];
+    if (keys.length === 0) return;
+    const abort = new AbortController();
+    void (async () => {
+      for (const key of keys) {
+        if (abort.signal.aborted) return;
+        const minor = await askRef.current(key, abort.signal);
+        if (abort.signal.aborted) return;
+        setPreviews((current) => (current.has(key) ? current : new Map(current).set(key, minor)));
+      }
+    })();
+    return () => abort.abort();
+  }, [dishKeysText]);
+  // v15 b20: the ticked dishes together, for the button (one dish: its own answer above).
+  const known = previewKey !== null && previews.has(previewKey);
+  useEffect(() => {
+    if (previewKey === null || known) return;
     const abort = new AbortController();
     const timer = setTimeout(() => {
-      void (async () => {
-        try {
-          const response = await fetcher("/merchant/orders/remove-unpaid-items/preview", {
-            method: "POST",
-            credentials: "same-origin",
-            cache: "no-store",
-            redirect: "error",
-            signal: abort.signal,
-            headers: {
-              "Content-Type": "application/json",
-              Accept: "application/json",
-              "X-BOP-CSRF": csrf,
-            },
-            body: previewKey,
-          });
-          const payload = (await response.json().catch(() => null)) as unknown;
-          const minor = response.ok ? payLaterRemovePreviewMinor(payload) : null;
-          if (!abort.signal.aborted && minor !== null) setPreview({ key: previewKey, minor });
-        } catch {
-          // No amount on the button; taking the dishes off still works and says its own result.
-        }
-      })();
+      void askRef.current(previewKey, abort.signal).then((minor) => {
+        if (!abort.signal.aborted)
+          setPreviews((current) => new Map(current).set(previewKey, minor));
+      });
     }, 200);
     return () => {
       clearTimeout(timer);
       abort.abort();
     };
-  }, [previewKey, csrf, fetcher]);
+  }, [previewKey, known]);
+  // b22: arriving for this round, the open panel takes the focus (once).
+  useEffect(() => {
+    if (!open || !arrived.current) return;
+    arrived.current = false;
+    panel.current?.focus();
+    panel.current?.scrollIntoView?.({ block: "nearest" });
+    onArrived?.();
+  }, [open, onArrived]);
   if (offered.length === 0 || order.currentVersion === null) return null;
   const send = async () => {
     if (busy || chosen.length === 0 || reason === "") return;
@@ -326,6 +437,12 @@ export function PayLaterItemRemoveAction({
   // v15 b21: a table's rounds each have this action, so it names its round (as the round's own
   // heading does) and no two read the same.
   const title = t("Take dishes off round {sequence}", { sequence: batch.sequence });
+  const together = payLaterRemoveTogetherNote({
+    previewMinor,
+    dishMinors: chosen.map((line) => previews.get(keyFor([line.orderItemReference]) as string)),
+    roundMinor: chosen.length === offered.length ? roundMinor : undefined,
+    currencyCode,
+  });
   if (!open)
     return (
       <button type="button" onClick={() => setOpen(true)}>
@@ -333,7 +450,13 @@ export function PayLaterItemRemoveAction({
       </button>
     );
   return (
-    <div role="group" aria-label={title} className="pay-later-remove order-cancel-actions">
+    <div
+      ref={panel}
+      tabIndex={-1}
+      role="group"
+      aria-label={title}
+      className="pay-later-remove order-cancel-actions"
+    >
       <p>{t("Tick the dishes the table won't be charged for. The kitchen stops them.")}</p>
       <KitchenMayHaveStartedNote receivedAt={batch.kitchenReceivedAt} />
       <ul className="pay-later-remove__lines">
@@ -351,10 +474,13 @@ export function PayLaterItemRemoveAction({
                   setSelected(next);
                 }}
               />{" "}
-              {/* v15 b20: the dish's own price, said as that: what the bill goes down by can be
-                  a cent less (tax on the whole bill), and the button names that. */}
-              {line.quantity} × {line.name} ·{" "}
-              {t("price {amount}", { amount: orderMoney(line.total) })}
+              {/* b22: what the bill goes down by for this dish alone (the button's figure). */}
+              {payLaterRemoveDishText({
+                quantity: line.quantity,
+                name: line.name,
+                billDownMinor: previews.get(keyFor([line.orderItemReference]) as string),
+                total: line.total,
+              })}
             </label>
           </li>
         ))}
@@ -374,6 +500,7 @@ export function PayLaterItemRemoveAction({
           ))}
         </select>
       </label>
+      {together === null ? null : <p className="pay-later-remove__note">{together}</p>}
       <div className="pay-later-remove__actions">
         <button
           type="button"
@@ -387,6 +514,7 @@ export function PayLaterItemRemoveAction({
             offered: offered.length,
             previewMinor,
             currencyCode,
+            sequence: batch.sequence,
           })}
         </button>{" "}
         <button type="button" disabled={busy} onClick={() => setOpen(false)}>

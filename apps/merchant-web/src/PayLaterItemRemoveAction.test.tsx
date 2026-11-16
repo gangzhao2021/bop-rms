@@ -6,8 +6,10 @@ import {
   PayLaterItemRemoveAction,
   PayLaterRemoveRefusalNotice,
   payLaterRemoveButtonText,
+  payLaterRemoveDishText,
   payLaterRemoveFailureText,
   payLaterRemovePreviewMinor,
+  payLaterRemoveTogetherNote,
 } from "./PayLaterItemRemoveAction.js";
 import { setLanguageForTest } from "./i18n/i18n.js";
 import { MemoryRouter } from "react-router";
@@ -203,16 +205,24 @@ it("Coordinator 2026-10-30: a refusal names what to do instead, with the way the
 
 // v15 b20 live check: the panel read "1 × Beef noodles (TEST) · $14.13" and the button "Take the
 // whole round off · $14.13", but the bill went down by $14.12 (its tax is worked out on the whole
-// bill). The button names what the bill goes down by, from the server; the dish says its price.
+// bill). The button names what the bill goes down by, from the server (b22: so does each dish).
 it("v15 b20: the take-off button names what the bill goes down by, never the dishes' own prices", () => {
   const text = (previewMinor: string | null, chosen = 1, offered = 1, busy = false) =>
-    payLaterRemoveButtonText({ busy, chosen, offered, previewMinor, currencyCode: "CAD" });
+    payLaterRemoveButtonText({
+      busy,
+      chosen,
+      offered,
+      previewMinor,
+      currencyCode: "CAD",
+      sequence: 1,
+    });
   expect(text("1412")).toBe("Take the whole round off · $14.12");
   expect(text("1412", 1, 2)).toBe("Take off $14.12");
   // Not worked out yet (or it couldn't be): no amount, never the dishes' own sum.
   expect(text(null)).toBe("Take the whole round off");
   expect(text(null, 1, 2)).toBe("Take these dishes off");
-  expect(text(null, 0, 2)).toBe("Take dishes off the bill");
+  // b22: nothing ticked yet: a prompt for its round, never the older unnumbered name.
+  expect(text(null, 0, 2)).toBe("Choose dishes to take off round 1");
   expect(text("1412", 1, 1, true)).toBe("Recording…");
   expect(payLaterRemovePreviewMinor({ status: "Preview", totalMinor: "1412" })).toBe("1412");
   for (const broken of [null, {}, { totalMinor: 1412 }, { totalMinor: "-1" }, { totalMinor: "01" }])
@@ -222,6 +232,68 @@ it("v15 b20: the take-off button names what the bill goes down by, never the dis
     expect(text("1412")).toBe("删掉整轮 · $14.12");
     expect(text(null)).toBe("删掉整轮");
     expect(text(null, 1, 2)).toBe("删掉这些菜");
+  } finally {
+    setLanguageForTest("en");
+  }
+});
+
+// v15 live21 (TM2 Order 9, round 2): the panel listed "1 × Smashed cucumber · price $7.07" while
+// the preview, the button and the bill drop were $7.06; and before anything was ticked the round's
+// own panel said "Take dishes off the bill".
+it("b22: a dish says what the bill goes down by, as the button does, and the empty button asks for its round's dishes", () => {
+  const dish = (billDownMinor: string | null | undefined) =>
+    payLaterRemoveDishText({
+      quantity: 1,
+      name: "Smashed cucumber",
+      billDownMinor,
+      total: money("707"),
+    });
+  expect(dish("706")).toBe("1 × Smashed cucumber · bill goes down $7.06");
+  // Being worked out: no figure yet; couldn't be: its own price, said as that.
+  expect(dish(undefined)).toBe("1 × Smashed cucumber");
+  expect(dish(null)).toBe("1 × Smashed cucumber · price $7.07");
+  const empty = (sequence: number) =>
+    payLaterRemoveButtonText({
+      busy: false,
+      chosen: 0,
+      offered: 2,
+      previewMinor: null,
+      currencyCode: "CAD",
+      sequence,
+    });
+  expect(empty(3)).toBe("Choose dishes to take off round 3");
+  setLanguageForTest("zh-Hans");
+  try {
+    expect(dish("706")).toBe("1 × Smashed cucumber · 账单减 $7.06");
+    expect(empty(3)).toBe("请选要从第 3 轮删的菜");
+  } finally {
+    setLanguageForTest("en");
+  }
+});
+
+it("b22: when dishes together take a cent more or less off than their figures, the panel says why", () => {
+  const note = (
+    previewMinor: string | null,
+    dishMinors: (string | null | undefined)[],
+    roundMinor?: string,
+  ) => payLaterRemoveTogetherNote({ previewMinor, dishMinors, roundMinor, currencyCode: "CAD" });
+  // Soy milk alone $3.67 + Smashed cucumber alone $7.06; the whole round takes $10.74 off.
+  expect(note("1074", ["367", "706"])).toBe(
+    "Tax is worked out once on the whole bill, so the bill goes down $10.74.",
+  );
+  // One dish: its figure is the button's.
+  expect(note("706", ["706"])).toBeNull();
+  // The whole round reads $14.13 on the bill; taking it off takes $14.12 off.
+  expect(note("1412", ["1412"], "1413")).toBe(
+    "Tax is worked out once on the whole bill, so the bill goes down $14.12.",
+  );
+  expect(note("1413", ["1413"], "1413")).toBeNull();
+  // Not known yet: nothing said.
+  expect(note(null, ["706"])).toBeNull();
+  expect(note("1074", ["367", undefined])).toBeNull();
+  setLanguageForTest("zh-Hans");
+  try {
+    expect(note("1074", ["367", "706"])).toBe("税按整张账单算一次，所以账单减 $10.74。");
   } finally {
     setLanguageForTest("en");
   }
