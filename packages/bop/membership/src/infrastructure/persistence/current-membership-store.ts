@@ -304,44 +304,70 @@ export function createPostgresCurrentMembershipSource(
       try {
         if (storeReference !== store.storeReference) return unavailable();
         await fence();
-        const candidates = rows(
+        // WP-2423 (tax-config hold round trips): the Membership and its Store assignments at
+        // this Store in one statement (one snapshot), instead of one round trip each. A
+        // Membership without an assignment here comes back as one row with no assignment.
+        const joined = rows(
           await tx.query(
-            "SELECT * FROM bop_membership.membership WHERE membership_id=$1 AND actor_id=$2 AND brand_id=$3",
-            [membershipReference, actor, brand],
+            `SELECT m.membership_id,m.actor_id,m.brand_id,m.workforce_relationship_reference,
+              m.lifecycle,m.effective_from,m.effective_until,m.version,m.created_at,m.updated_at,
+              a.assignment_id AS a_assignment_id,a.membership_id AS a_membership_id,
+              a.actor_id AS a_actor_id,a.brand_id AS a_brand_id,a.store_id AS a_store_id,
+              a.lifecycle AS a_lifecycle,a.effective_from AS a_effective_from,
+              a.effective_until AS a_effective_until,a.version AS a_version,
+              a.created_at AS a_created_at,a.updated_at AS a_updated_at
+              FROM bop_membership.membership m
+              LEFT JOIN LATERAL (SELECT * FROM bop_membership.store_assignment
+                WHERE membership_id=$1 AND actor_id=$2 AND brand_id=$3 AND store_id=$4
+                ORDER BY assignment_id LIMIT 1025) a ON true
+              WHERE m.membership_id=$1 AND m.actor_id=$2 AND m.brand_id=$3
+              ORDER BY a.assignment_id`,
+            [membershipReference, actor, brand, store.storeReference],
           ),
         );
-        if (candidates.length !== 1) return unavailable();
-        const row = candidates[0];
+        const row = joined[0];
         if (!row || row.membership_id !== membershipReference) return unavailable();
         const parent = membership(row, context, instant);
+        const assigned = joined.filter((record) => record.a_assignment_id !== null);
+        if (assigned.length !== 0 && assigned.length !== joined.length) return unavailable();
         return Object.freeze(
-          rows(
-            await tx.query(
-              "SELECT * FROM bop_membership.store_assignment WHERE membership_id=$1 AND actor_id=$2 AND brand_id=$3 AND store_id=$4 ORDER BY assignment_id LIMIT 1025",
-              [membershipReference, actor, brand, store.storeReference],
-            ),
-          ).map((record) => {
-            const result = createStoreAssignment(
-              {
-                storeAssignmentReference: record.assignment_id,
-                membershipReference: record.membership_id,
-                actorReference: record.actor_id,
-                brandReference: record.brand_id,
-                storeReference: record.store_id,
-                lifecycle: record.lifecycle,
-                effectiveFrom: instant(record.effective_from),
-                effectiveUntil:
-                  record.effective_until === null ? null : instant(record.effective_until),
-                version: record.version,
-                createdAt: instant(record.created_at),
-                updatedAt: instant(record.updated_at),
-              },
-              parent,
-              store,
-            );
-            if (Date.parse(result.updatedAt) > Date.parse(context.resolvedAt)) return unavailable();
-            return result;
-          }),
+          assigned
+            .map((record) => ({
+              assignment_id: record.a_assignment_id,
+              membership_id: record.a_membership_id,
+              actor_id: record.a_actor_id,
+              brand_id: record.a_brand_id,
+              store_id: record.a_store_id,
+              lifecycle: record.a_lifecycle,
+              effective_from: record.a_effective_from,
+              effective_until: record.a_effective_until,
+              version: record.a_version,
+              created_at: record.a_created_at,
+              updated_at: record.a_updated_at,
+            }))
+            .map((record) => {
+              const result = createStoreAssignment(
+                {
+                  storeAssignmentReference: record.assignment_id,
+                  membershipReference: record.membership_id,
+                  actorReference: record.actor_id,
+                  brandReference: record.brand_id,
+                  storeReference: record.store_id,
+                  lifecycle: record.lifecycle,
+                  effectiveFrom: instant(record.effective_from),
+                  effectiveUntil:
+                    record.effective_until === null ? null : instant(record.effective_until),
+                  version: record.version,
+                  createdAt: instant(record.created_at),
+                  updatedAt: instant(record.updated_at),
+                },
+                parent,
+                store,
+              );
+              if (Date.parse(result.updatedAt) > Date.parse(context.resolvedAt))
+                return unavailable();
+              return result;
+            }),
         );
       } catch (error) {
         // WP-2423 item 10: what could not be read is not an invalid membership.

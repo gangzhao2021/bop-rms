@@ -59,6 +59,33 @@ const store = createStore({
   updatedAt: from,
 });
 const context = createTenantContext(actor, brand, store, now);
+/** The Membership-with-assignments statement: one row per assignment, or one without any. */
+const joinedMembership = "SELECT m.membership_id,";
+function joined(
+  parents: readonly Record<string, unknown>[],
+  assignments: readonly Record<string, unknown>[],
+) {
+  return parents.flatMap((parent) =>
+    (assignments.length === 0 ? [null] : assignments).map((assignment) => ({
+      ...parent,
+      ...Object.fromEntries(
+        [
+          "assignment_id",
+          "membership_id",
+          "actor_id",
+          "brand_id",
+          "store_id",
+          "lifecycle",
+          "effective_from",
+          "effective_until",
+          "version",
+          "created_at",
+          "updated_at",
+        ].map((key) => ["a_" + key, assignment === null ? null : assignment[key]]),
+      ),
+    })),
+  );
+}
 function fixture() {
   const parent: Record<string, unknown> = {
     membership_id: id(4),
@@ -87,6 +114,7 @@ function fixture() {
   };
   const calls: { sql: string; values: readonly unknown[] }[] = [];
   let parents = [parent];
+  let assignments = [assignment];
   const source = createPostgresCurrentMembershipSource(
     {
       async query(sql, values) {
@@ -94,8 +122,8 @@ function fixture() {
         return {
           rows: sql.startsWith("SELECT * FROM bop_membership.membership")
             ? parents
-            : sql.startsWith("SELECT * FROM bop_membership.store_assignment")
-              ? [assignment]
+            : sql.startsWith(joinedMembership)
+              ? joined(parents, assignments)
               : [],
         };
       },
@@ -109,6 +137,9 @@ function fixture() {
     calls,
     setParents: (value: typeof parents) => {
       parents = value;
+    },
+    setAssignments: (value: typeof assignments) => {
+      assignments = value;
     },
   };
 }
@@ -132,6 +163,32 @@ it("reads owner rows under scoped transaction fences and resolves current access
   expect(f.calls[0]?.values).toEqual([brand.brandReference, store.storeReference]);
   expect(f.calls[1]?.sql).toContain("pg_advisory_xact_lock_shared");
   expect(f.calls[1]?.values).toEqual(["MembershipFence:" + brand.brandReference]);
+});
+it("reads the Membership and its Store assignments in one statement after the fence", async () => {
+  const f = fixture();
+  if (actor.actorReference === null) throw new Error("fixture");
+  f.calls.length = 0;
+  const assignments = await f.source.findStoreAssignments(
+    String(f.parent.membership_id),
+    store.storeReference,
+  );
+  expect(assignments.map((a) => a.storeAssignmentReference)).toEqual([id(6)]);
+  expect(f.calls.map((c) => c.sql.slice(0, 40))).toEqual([
+    "SELECT set_config('bop.brand_id',$1,true",
+    "SELECT pg_advisory_xact_lock_shared(hash",
+    expect.stringContaining(joinedMembership),
+  ]);
+  expect(f.calls[2]?.values).toEqual([id(4), id(1), id(2), id(3)]);
+  // A Membership with no assignment at this Store: no assignment, not a refusal.
+  f.setAssignments([]);
+  expect(
+    await f.source.findStoreAssignments(String(f.parent.membership_id), store.storeReference),
+  ).toEqual([]);
+  // No Membership row: unavailable, as when the parent read found nothing.
+  f.setParents([]);
+  await expect(
+    f.source.findStoreAssignments(String(f.parent.membership_id), store.storeReference),
+  ).rejects.toThrow();
 });
 it("denies a foreign requested Store before any database query", async () => {
   const f = fixture();
@@ -721,8 +778,8 @@ function eligibilityFixture() {
           ? state.duplicate
             ? [f.parent, f.parent]
             : [f.parent]
-          : sql.startsWith("SELECT * FROM bop_membership.store_assignment")
-            ? [f.assignment]
+          : sql.startsWith(joinedMembership)
+            ? joined([f.parent], [f.assignment])
             : [],
       };
     },
@@ -736,7 +793,11 @@ it("authorizes target employee eligibility through owner facts without changing 
   expect(f.calls.some((c) => c.sql.includes("pg_advisory_xact_lock_shared"))).toBe(true);
   expect(
     f.calls
-      .filter((c) => c.sql.startsWith("SELECT * FROM bop_membership.membership"))
+      .filter(
+        (c) =>
+          c.sql.startsWith("SELECT * FROM bop_membership.membership") ||
+          c.sql.startsWith(joinedMembership),
+      )
       .every((c) => c.values.includes(id(9))),
   ).toBe(true);
 });
