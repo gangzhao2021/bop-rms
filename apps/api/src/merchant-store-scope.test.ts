@@ -1,8 +1,10 @@
 import { createPostgresCurrentPermissionPolicySource } from "@bop/permission";
+import { MembershipContractError } from "@bop/membership";
 import { createIdentityActor } from "@bop/identity";
 import { createBrand, createStore, createTenantContext } from "@bop/tenant";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  createFreshlyAuthorizedMerchantStoreScope,
   createMerchantStoreScope,
   createInitiallyAuthorizedMerchantStoreScope,
 } from "./merchant-store-scope.js";
@@ -12,6 +14,7 @@ const ports = vi.hoisted(() => ({
   selected: vi.fn(),
   memberships: vi.fn(),
   assignments: vi.fn(),
+  combined: vi.fn(),
   membership: vi.fn(),
   assignment: vi.fn(),
   authorize: vi.fn(),
@@ -26,10 +29,16 @@ vi.mock("@bop/identity", async (original) => ({
 vi.mock("./merchant-selected-context.js", () => ({
   createMerchantSelectedContext: () => ports.selected,
 }));
-vi.mock("@bop/membership", () => ({
+vi.mock("@bop/membership", async (original) => ({
+  MembershipContractError: (await original<typeof import("@bop/membership")>())
+    .MembershipContractError,
   createPostgresCurrentMembershipSource: (...args: unknown[]) => {
     ports.source(...args);
-    return { findMemberships: ports.memberships, findStoreAssignments: ports.assignments };
+    return {
+      findMemberships: ports.memberships,
+      findStoreAssignments: ports.assignments,
+      findMembershipsWithStoreAssignments: ports.combined,
+    };
   },
   resolveActiveMembership: ports.membership,
   resolveActiveStoreAssignment: ports.assignment,
@@ -544,4 +553,57 @@ it("WP-2423: answers several actions from one current Session, selection and per
   // A Session that changed answers nothing.
   ports.session.mockResolvedValueOnce({ ...session(), sessionReference: id(66) });
   expect((await scope.authorizeActions(["dining.operate"])).get("dining.operate")).toBeNull();
+});
+
+it("WP-2423: a fresh Tax admission reads the Membership and its Store assignments in one read", async () => {
+  const assignments = Object.freeze([assignment]);
+  const storeAssignments = vi.fn(() => assignments);
+  ports.combined.mockResolvedValue({ memberships: [membership], storeAssignments });
+  const fresh = await createFreshlyAuthorizedMerchantStoreScope({
+    identity: {},
+    now: () => at,
+  } as never)(tx, "synthetic-cookie", "pricing.tax-config.manage", id(6));
+  expect(fresh.initialAuthorization).toMatchObject({
+    effect: "Allow",
+    action: "pricing.tax-config.manage",
+  });
+  expect(ports.combined).toHaveBeenCalledExactlyOnceWith(id(2), id(1), id(4));
+  expect(ports.memberships).not.toHaveBeenCalled();
+  expect(ports.assignments).not.toHaveBeenCalled();
+  // The same resolution the two separate reads feed: active Membership, then its assignment.
+  expect(ports.membership).toHaveBeenCalledWith([membership], id(2), id(1), at);
+  expect(storeAssignments).toHaveBeenCalledExactlyOnceWith(id(5));
+  expect(ports.assignment).toHaveBeenCalledWith(membership, assignments, id(4), at);
+  // Opt-in only: the ordinary initial admission keeps its two reads.
+  vi.clearAllMocks();
+  await createInitiallyAuthorizedMerchantStoreScope({ identity: {}, now: () => at } as never)(
+    tx,
+    "synthetic-cookie",
+    id(6),
+  );
+  expect(ports.combined).not.toHaveBeenCalled();
+  expect(ports.memberships).toHaveBeenCalledOnce();
+  expect(ports.assignments).toHaveBeenCalledOnce();
+  vi.clearAllMocks();
+  await createInitiallyAuthorizedMerchantStoreScope(
+    { identity: {}, now: () => at } as never,
+    undefined,
+    {
+      combinedMembershipRead: true,
+    },
+  )(tx, "synthetic-cookie", id(6));
+  expect(ports.combined).toHaveBeenCalledOnce();
+  expect(ports.memberships).not.toHaveBeenCalled();
+});
+it("WP-2423: a fresh Tax admission with no active Membership is a refusal, not a fault", async () => {
+  ports.combined.mockResolvedValue({ memberships: [], storeAssignments: () => [] });
+  ports.membership.mockImplementation(() => {
+    throw new MembershipContractError("ACTIVE_MEMBERSHIP_NOT_FOUND");
+  });
+  const fresh = await createFreshlyAuthorizedMerchantStoreScope({
+    identity: {},
+    now: () => at,
+  } as never)(tx, "synthetic-cookie", "pricing.tax-config.manage", id(6));
+  expect(fresh.initialAuthorization).toBeNull();
+  expect(ports.authorize).not.toHaveBeenCalled();
 });

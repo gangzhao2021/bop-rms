@@ -674,3 +674,46 @@ describe("WP-2423 once-per-transaction Brand authorization", () => {
     ).rejects.toMatchObject({ code: "CATALOG_PERMISSION_DENIED" });
   });
 });
+
+it("WP-2423: with initial admission the one current read decides navigation, with no second read", async () => {
+  const allowed = vi.fn(async () => true);
+  ports.resolve.mockResolvedValue({ ...selected(), allowed });
+  const scope = await createMerchantBrandScope({ now: () => at } as never, undefined, {
+    initialAdmission: true,
+  })({} as never, "synthetic-cookie", id(6));
+  expect(scope.context.scopeKind).toBe("Brand");
+  expect(ports.storeFactory).toHaveBeenCalledOnce();
+  expect(ports.initialFactory).toHaveBeenCalledExactlyOnceWith(
+    { now: expect.any(Function) },
+    undefined,
+    {
+      combinedMembershipRead: true,
+    },
+  );
+  expect(ports.resolve).toHaveBeenCalledExactlyOnceWith({}, "synthetic-cookie", id(6));
+  expect(allowed).not.toHaveBeenCalled();
+  // Without the option: resolved, then navigation read again by allowed().
+  vi.clearAllMocks();
+  ports.resolve.mockResolvedValue({ ...selected(), allowed });
+  await resolve();
+  expect(ports.initialFactory).not.toHaveBeenCalled();
+  expect(allowed).toHaveBeenCalledOnce();
+});
+
+it("WP-2423: an initial admission that is not this Session's navigation Allow is refused", async () => {
+  for (const changed of [
+    { initialAuthorization: null },
+    { initialAuthorization: { ...navigationDecision(), effect: "Deny" } },
+    { initialAuthorization: { ...navigationDecision(), action: "catalog.manage" } },
+    { sessionReference: id(9) },
+  ]) {
+    ports.resolve.mockResolvedValue({ ...selected(), ...changed });
+    await expect(
+      createMerchantBrandScope({ now: () => at } as never, undefined, { initialAdmission: true })(
+        {} as never,
+        "synthetic-cookie",
+        id(6),
+      ),
+    ).rejects.toThrow("BRAND_SERVICE_PERMISSION_DENIED");
+  }
+});

@@ -27,22 +27,43 @@ import {
 export function createMerchantBrandScope(
   source: PersistentMerchantBffOptions,
   permissionPolicy?: TransactionPermissionPolicy,
+  options?: {
+    /**
+     * WP-2423 (tax-config hold round trips): the navigation admission is decided by the one
+     * current Session/selection/Membership/permission read it makes, instead of resolving the
+     * Session and selection and then reading them all again for the same decision.
+     */
+    readonly initialAdmission?: boolean;
+  },
 ) {
   const resolveStore =
       permissionPolicy === undefined
         ? createMerchantStoreScope(source)
         : createMerchantStoreScope(source, permissionPolicy),
+    initialAdmission = options?.initialAdmission === true,
+    initialStoreScope = () =>
+      initialAdmission
+        ? createInitiallyAuthorizedMerchantStoreScope(source, permissionPolicy, {
+            combinedMembershipRead: true,
+          })
+        : permissionPolicy === undefined
+          ? createInitiallyAuthorizedMerchantStoreScope(source)
+          : createInitiallyAuthorizedMerchantStoreScope(source, permissionPolicy),
     batchNow = typeof source.now === "function" ? source.now.bind(source) : undefined;
   type Transaction = Parameters<Parameters<typeof source.transactions.run>[0]>[0];
   return async (transaction: Transaction, sessionCookie: unknown, expectedSession: string) => {
     if (typeof expectedSession !== "string") throw new Error("BRAND_SERVICE_PERMISSION_DENIED");
-    const selected = await resolveStore(
-      transaction,
-      sessionCookie,
-      "merchant.access",
-      expectedSession,
-    );
-    if (!(await selected.allowed())) throw new Error("BRAND_SERVICE_PERMISSION_DENIED");
+    const selected = initialAdmission
+      ? await initialStoreScope()(transaction, sessionCookie, expectedSession)
+      : await resolveStore(transaction, sessionCookie, "merchant.access", expectedSession);
+    if (
+      initialAdmission
+        ? selected.initialAuthorization?.effect !== "Allow" ||
+          selected.initialAuthorization.action !== "merchant.access" ||
+          selected.sessionReference !== expectedSession
+        : !(await selected.allowed())
+    )
+      throw new Error("BRAND_SERVICE_PERMISSION_DENIED");
     const context = createTenantContext(
       selected.context.actor,
       selected.context.brand,
@@ -194,11 +215,7 @@ export function createMerchantBrandScope(
       storeBoundary(selected, startedAt);
       const current = async () => {
         const observedAt = check();
-        const fresh = await (
-          permissionPolicy === undefined
-            ? createInitiallyAuthorizedMerchantStoreScope(source)
-            : createInitiallyAuthorizedMerchantStoreScope(source, permissionPolicy)
-        )(transaction, sessionCookie, expectedSession);
+        const fresh = await initialStoreScope()(transaction, sessionCookie, expectedSession);
         const initialObservedAt = parseCanonicalInstant(fresh.initialObservedAt);
         if (
           fresh.initialAuthorization?.effect !== "Allow" ||

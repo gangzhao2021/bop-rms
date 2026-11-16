@@ -300,7 +300,7 @@ export function createMerchantTaxConfigAuthoring(options: MerchantTaxConfigAutho
           policy = createPostgresTransactionCurrentPermissionPolicySource(tx);
         const resolveStore = createMerchantStoreScope(persistence, policy),
           resolveFresh = createFreshlyAuthorizedMerchantStoreScope(persistence, policy),
-          resolveBrand = createMerchantBrandScope(persistence, policy);
+          resolveBrand = createMerchantBrandScope(persistence, policy, { initialAdmission: true });
         const initial = await resolveStore(
           tx,
           input.sessionCookie,

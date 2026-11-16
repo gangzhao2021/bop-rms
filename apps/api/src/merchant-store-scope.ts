@@ -26,6 +26,8 @@ export { kdsOperatorProfileActions } from "./merchant-kds-operator-profile.js";
 function createMerchantStoreScopeResolver(
   source: PersistentMerchantBffOptions,
   permissionPolicy?: TransactionPermissionPolicy,
+  /** WP-2423 (tax-config hold round trips): Membership and Store assignment in one read. */
+  combinedMembershipRead = false,
 ) {
   const now = source.now.bind(source);
   const currentSession = createPostgresCurrentBrowserSessionSource({
@@ -105,8 +107,11 @@ function createMerchantStoreScopeResolver(
     const staffMembership = async (
       memberships: ReturnType<typeof createPostgresCurrentMembershipSource>,
       at: Parameters<typeof resolveActiveMembership>[3],
+      read?: Awaited<ReturnType<typeof memberships.findMembershipsWithStoreAssignments>>,
     ) => {
-      const found = await memberships.findMemberships(actorReference, context.brand.brandReference);
+      const found =
+        read?.memberships ??
+        (await memberships.findMemberships(actorReference, context.brand.brandReference));
       try {
         return resolveActiveMembership(found, actorReference, context.brand.brandReference, at);
       } catch (error) {
@@ -124,14 +129,23 @@ function createMerchantStoreScopeResolver(
     ) => {
       if (!kdsOperatorProfileAllows(session, requestedAction)) return null;
       const memberships = createPostgresCurrentMembershipSource(tx, fresh.context);
-      const membership = await staffMembership(memberships, fresh.context.resolvedAt);
+      const read = combinedMembershipRead
+        ? await memberships.findMembershipsWithStoreAssignments(
+            actorReference,
+            context.brand.brandReference,
+            store.storeReference,
+          )
+        : undefined;
+      const membership = await staffMembership(memberships, fresh.context.resolvedAt, read);
       if (membership === null) return null;
       const storeAssignment = resolveActiveStoreAssignment(
         membership,
-        await memberships.findStoreAssignments(
-          membership.membershipReference,
-          store.storeReference,
-        ),
+        read
+          ? read.storeAssignments(membership.membershipReference)
+          : await memberships.findStoreAssignments(
+              membership.membershipReference,
+              store.storeReference,
+            ),
         store.storeReference,
         fresh.context.resolvedAt,
       );
@@ -289,8 +303,14 @@ export function createMerchantStoreScope(
 export function createInitiallyAuthorizedMerchantStoreScope(
   source: PersistentMerchantBffOptions,
   permissionPolicy?: TransactionPermissionPolicy,
+  /** WP-2423 (tax-config hold round trips): Membership and Store assignment in one read. */
+  options?: { readonly combinedMembershipRead?: boolean },
 ) {
-  const resolve = createMerchantStoreScopeResolver(source, permissionPolicy);
+  const resolve = createMerchantStoreScopeResolver(
+    source,
+    permissionPolicy,
+    options?.combinedMembershipRead === true,
+  );
   return (tx: Parameters<typeof resolve>[0], sessionCookie: unknown, expectedSession: string) => {
     if (typeof expectedSession !== "string") throw new Error("STORE_SERVICE_PERMISSION_DENIED");
     return resolve(tx, sessionCookie, "merchant.access", expectedSession, true);
@@ -304,7 +324,7 @@ export function createFreshlyAuthorizedMerchantStoreScope(
   source: PersistentMerchantBffOptions,
   permissionPolicy?: TransactionPermissionPolicy,
 ) {
-  const resolve = createMerchantStoreScopeResolver(source, permissionPolicy);
+  const resolve = createMerchantStoreScopeResolver(source, permissionPolicy, true);
   return (
     tx: Parameters<typeof resolve>[0],
     sessionCookie: unknown,
