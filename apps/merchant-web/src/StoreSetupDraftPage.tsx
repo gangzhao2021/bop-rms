@@ -756,6 +756,8 @@ export function StoreSetupDraftPage({
     [online, setOnline] = useState(() => typeof navigator === "undefined" || navigator.onLine),
     [ready, setReady] = useState(false),
     [setupAnswered, setSetupAnswered] = useState(false),
+    // b23: the first read again, after the connection came back before it had finished.
+    [firstRead, setFirstRead] = useState(0),
     [live, setLive] = useState<StoreSetupLiveConfiguration | null>(null),
     // b22 (v15 live check of b21): payment methods ticked or unticked in step 3 and not saved yet
     // are unsaved edits too (Discard, Review, the language switch and leaving the page).
@@ -817,10 +819,11 @@ export function StoreSetupDraftPage({
     setPending(null);
     savedScope.current = null;
     journal.current = null;
+    // b23 (v15 live check of b22): losing the connection is said by the offline line, not as
+    // settings that could not be loaded; once it is back the page reads again by itself (below).
     const offline = () => {
       setOnline(false);
       controller.current?.abort();
-      setError("Unavailable");
       setBusy(false);
       running.current = false;
     };
@@ -834,9 +837,9 @@ export function StoreSetupDraftPage({
       running.current = false;
       setSetupAnswered(true);
     } else if (!navigator.onLine) {
+      setOnline(false);
       setBusy(false);
       running.current = false;
-      setError("Unavailable");
       setSetupAnswered(true);
     } else
       void client
@@ -899,7 +902,7 @@ export function StoreSetupDraftPage({
       window.removeEventListener("online", reconnect);
     };
     // keptKey follows storeReference.
-  }, [client, csrf, id, journalFactory, storeReference]);
+  }, [client, csrf, id, journalFactory, storeReference, firstRead]);
   const begin = () => {
     running.current = true;
     controller.current?.abort();
@@ -947,6 +950,22 @@ export function StoreSetupDraftPage({
       }
     }
   };
+  // b23: once the connection is back, read the current settings and draft again by themselves. A
+  // page already read refreshes as "Restore" does without discarding: what was typed here stays,
+  // and a draft saved elsewhere meanwhile is a Conflict, as before. A first read that never
+  // finished (or a page opened offline) is read from the start instead.
+  const offlineSeen = useRef(false);
+  useEffect(() => {
+    if (!online) {
+      offlineSeen.current = true;
+      return;
+    }
+    if (!offlineSeen.current) return;
+    offlineSeen.current = false;
+    if (id !== storeReference) return;
+    if (ready && journal.current !== null) void refresh();
+    else setFirstRead((n) => n + 1);
+  }, [online]);
   const save = async () => {
     if (
       running.current ||
@@ -1279,7 +1298,8 @@ export function StoreSetupDraftPage({
   // the one page says what concerns it. Above it they would read as something being wrong with it.
   const stepsStatus = (
     <>
-      {error && !ownerOnly && (
+      {/* b23: a read cut off by the connection going is said by the offline line alone. */}
+      {error && !ownerOnly && !(error === "Unavailable" && !online) && (
         <p id="setup-validation-error" role="alert">
           {messages[error]}
         </p>
@@ -1443,7 +1463,9 @@ export function StoreSetupDraftPage({
       ) : null}
       {!online && (
         <p role="status">
-          {t("Offline. Your local edits are retained. Reconnect and refresh before saving.")}
+          {t(
+            "Offline. What you typed here is kept. The current Store settings are read again when the connection is back.",
+          )}
         </p>
       )}
       {firstStore || !draftPlace ? null : stepsStatus}

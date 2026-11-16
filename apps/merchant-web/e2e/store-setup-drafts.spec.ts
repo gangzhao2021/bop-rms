@@ -502,3 +502,92 @@ test("@production b21: with tab storage refusing writes, switching the language 
   expect(fixture.control.writes).toHaveLength(0);
   expect(fixture.control.errors).toEqual([]);
 });
+// b23 (v15 live check of b22, store-setup-reconnect): losing the connection says the page is
+// offline, not that the settings could not be loaded; once it is back the page reads the current
+// settings again by itself and keeps what was typed.
+const notLoaded =
+  "The current Store settings could not be loaded. Connect and refresh to try again.";
+const offlineLine =
+  "Offline. What you typed here is kept. The current Store settings are read again when the connection is back.";
+test("@production b23: back online, Store setup reads again by itself and keeps an unsaved edit", async ({
+  page,
+  context,
+}) => {
+  const fixture = await install(page);
+  await open(page);
+  await timezone(page);
+  await page.getByLabel("Business day starts at (local time)", { exact: true }).fill("04:30");
+  const before = fixture.control.reads;
+  await context.setOffline(true);
+  // Soft: a failure here still goes on to show what happens once the connection is back.
+  await expect.soft(page.getByText(offlineLine, { exact: true })).toBeVisible();
+  await expect.soft(page.getByText(notLoaded, { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Save as draft", exact: true })).toBeDisabled();
+  await context.setOffline(false);
+  await expect.poll(() => fixture.control.reads).toBeGreaterThan(before);
+  await expect(page.getByText(offlineLine, { exact: true })).toHaveCount(0);
+  await expect(page.getByText(notLoaded, { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel("Business day starts at (local time)", { exact: true })).toHaveValue(
+    "04:30",
+  );
+  await expect(page.getByRole("button", { name: "Save as draft", exact: true })).toBeEnabled();
+  // Still gone a while later and on another step.
+  await page.getByRole("button", { name: "2. Services", exact: true }).click();
+  await expect(page.getByText(notLoaded, { exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Save as draft", exact: true }).click();
+  await expect(
+    page.getByText("Setup draft saved. These settings have not been validated or published.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  expect(fixture.snapshot()?.content.businessDayStartLocalTime).toEqual({
+    state: "Configured",
+    value: "04:30:00",
+  });
+  expect(fixture.control.errors).toEqual([]);
+});
+test("@production b23: the connection dropping during the first read loads Store setup once it is back", async ({
+  page,
+  context,
+}) => {
+  const fixture = await install(page);
+  // The first read of the setup does not answer before the connection goes.
+  let held = true;
+  await page.route("**/merchant/store-setup?**", async (route) => {
+    if (held && route.request().method() === "GET") {
+      held = false;
+      await new Promise((resolve) => setTimeout(resolve, 1_500));
+      return route.abort("internetdisconnected");
+    }
+    return route.fallback();
+  });
+  await page.goto("/app");
+  await followWorkspaceLink(page, "Store setup");
+  await openStoreSetupPlace(page, "Settings that need approval");
+  await context.setOffline(true);
+  // Soft: a failure here still goes on to show what happens once the connection is back.
+  await expect.soft(page.getByText(offlineLine, { exact: true })).toBeVisible();
+  await expect.soft(page.getByText(notLoaded, { exact: true })).toHaveCount(0);
+  await page.waitForTimeout(1_800);
+  await context.setOffline(false);
+  await expect(page.getByRole("button", { name: "Save as draft", exact: true })).toBeEnabled();
+  await expect(page.getByText(offlineLine, { exact: true })).toHaveCount(0);
+  await expect(page.getByText(notLoaded, { exact: true })).toHaveCount(0);
+  expect(fixture.control.errors).toEqual([]);
+});
+test("@production b23: a setup read that fails while online still says it could not be loaded", async ({
+  page,
+}) => {
+  const fixture = await install(page);
+  await page.route("**/merchant/store-setup?**", (route) =>
+    route.request().method() === "GET"
+      ? respond(route, { error: "fixture_unavailable" }, 503)
+      : route.fallback(),
+  );
+  await page.goto("/app");
+  await followWorkspaceLink(page, "Store setup");
+  await openStoreSetupPlace(page, "Settings that need approval");
+  await expect(page.getByText(notLoaded, { exact: true })).toBeVisible();
+  await expect(page.getByText(offlineLine, { exact: true })).toHaveCount(0);
+  expect(fixture.control.errors).toEqual([]);
+});

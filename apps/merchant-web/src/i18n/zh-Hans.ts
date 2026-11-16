@@ -2738,8 +2738,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "已离线。收货未确认；重试会再次发送同一请求。",
   "Offline. Your change was not confirmed; retry sends the same request again.":
     "已离线。你的更改未确认；重试会再次发送同一请求。",
-  "Offline. Your local edits are retained. Reconnect and refresh before saving.":
-    "已离线。你的本地编辑会保留。保存前请重新联网并刷新。",
+  "Offline. What you typed here is kept. The current Store settings are read again when the connection is back.":
+    "已离线。你在这里输入的内容会保留，网络恢复后会自动重新读取当前门店设置。",
   "Older resolved exceptions could not be loaded. Try again.": "无法加载较早的已解决异常。请重试。",
   On: "开",
   "On a shared store tablet a manager has set up, switch to yourself with your PIN.":
