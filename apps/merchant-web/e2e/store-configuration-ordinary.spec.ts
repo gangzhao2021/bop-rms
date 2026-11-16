@@ -1558,17 +1558,32 @@ test("b22: earlier changes keep their rows offline and through an edit, and read
   await where.getByText("以前的修改", { exact: true }).click();
   const history = where.locator(".store-setup-publish__history section");
   await expect(history.getByRole("listitem")).toHaveCount(20);
-  await history.getByRole("button", { name: "加载更早的修改" }).click();
-  await expect(history.getByRole("listitem")).toHaveCount(23);
+  // b22 review: offline with older changes still to load, loading them waits for the connection.
+  const historyReads = () => state.reads.filter((read) => read === "history").length;
   await context.setOffline(true);
   await expect(history).toContainText("已离线。网络恢复后，以前的修改会自动重新加载。");
-  await expect(history.getByRole("listitem")).toHaveCount(23);
-  await b20Shots(page, "history-offline-rows-kept-zh-Hans", "BOP_B22_SHOTS");
-  const reads = state.reads.filter((read) => read === "history").length;
+  await expect(history.getByRole("button", { name: "加载更早的修改" })).toBeDisabled();
+  await expect(history.getByRole("listitem")).toHaveCount(20);
+  const offlineReads = historyReads();
   await context.setOffline(false);
-  await expect.poll(() => state.reads.filter((read) => read === "history").length).toBe(reads + 1);
-  await expect(history).not.toContainText("已离线");
+  await expect.poll(historyReads).toBe(offlineReads + 1);
+  await expect(history.getByRole("button", { name: "加载更早的修改" })).toBeEnabled();
+  await history.getByRole("button", { name: "加载更早的修改" }).click();
   await expect(history.getByRole("listitem")).toHaveCount(23);
+  // b22 review: a step run here while the list is open shows on top, the older rows kept.
+  const beforeCheck = historyReads();
+  await where.getByRole("button", { name: "重新检查设置" }).click();
+  await expect.poll(historyReads).toBe(beforeCheck + 1);
+  await expect(history.getByRole("listitem")).toHaveCount(24);
+  await context.setOffline(true);
+  await expect(history).toContainText("已离线。网络恢复后，以前的修改会自动重新加载。");
+  await expect(history.getByRole("listitem")).toHaveCount(24);
+  await b20Shots(page, "history-offline-rows-kept-zh-Hans", "BOP_B22_SHOTS");
+  const reads = historyReads();
+  await context.setOffline(false);
+  await expect.poll(historyReads).toBe(reads + 1);
+  await expect(history).not.toContainText("已离线");
+  await expect(history.getByRole("listitem")).toHaveCount(24);
   await expect(history.getByRole("alert")).toHaveCount(0);
   // An edit not saved yet keeps the rows too.
   await page.getByRole("button", { name: /^1\. 时区和营业日$/u }).click();
@@ -1579,7 +1594,7 @@ test("b22: earlier changes keep their rows offline and through an edit, and read
   await expect(history.getByRole("listitem")).toHaveCount(20);
   await expect(history.getByRole("button", { name: "加载更早的修改" })).toBeEnabled();
   await history.getByRole("button", { name: "加载更早的修改" }).click();
-  await expect(history.getByRole("listitem")).toHaveCount(23);
+  await expect(history.getByRole("listitem")).toHaveCount(24);
   await b20Shots(page, "history-rows-kept-unsaved-edit-zh-Hans", "BOP_B22_SHOTS");
   expect(state.errors).toEqual([]);
 });
