@@ -403,9 +403,11 @@ const feeLabel = (chargeType: string) =>
 function StoreSetupTaxSection({
   value,
   live,
+  where,
 }: {
   readonly value: StoreSetupContent["taxConfigurationReference"];
   readonly live: string | null;
+  readonly where: string;
 }) {
   return (
     <section className="store-setup-tax store-setup-block" aria-label={t("Tax")}>
@@ -420,9 +422,12 @@ function StoreSetupTaxSection({
             <p>
               {value.state !== "Configured" || (live !== null && value.value === live)
                 ? t("Orders are taxed with the tax settings this store uses today.")
-                : t(
-                    "Orders are taxed with the tax settings this setup took in earlier, not the ones this store uses today. Step 4 can take in today's.",
-                  )}
+                : live === null
+                  ? t("Orders are taxed with the tax settings in this setup.")
+                  : t(
+                      "Orders are taxed with the tax settings this setup took in earlier, not the ones this store uses today. To use today's, go to {where}.",
+                      { where },
+                    )}
             </p>
             <p className="store-setup-block__note">
               {t("Tax rates and tax names are in")}
@@ -2080,6 +2085,7 @@ export function StoreSetupDraftPage({
                 <StoreSetupTaxSection
                   value={content.taxConfigurationReference}
                   live={live?.current?.taxConfigurationReference ?? null}
+                  where={storeSetupWhere(layout, "live")}
                 />
               </>
             )}
@@ -3933,7 +3939,6 @@ export function validateStoreSetupFeeSelections(
       throw new StoreSetupClientError("Invalid");
   }
 }
-/** b24 (Owner 2026-11-16 "这个页面还是很难看"): what each fee is, in one line. */
 /** b24: a Brand tax class in the staff member's language when the Brand named it in that language
  * (a Chinese name on a Chinese screen), else its name in the Brand's own language. */
 export function taxClassificationName(
@@ -3951,6 +3956,7 @@ export function taxClassificationName(
     t("Unnamed tax classification")
   );
 }
+/** b24 (Owner 2026-11-16 "这个页面还是很难看"): what each fee is, in one line. */
 const feeHint = (chargeType: string) =>
   chargeType === "ServiceCharge"
     ? t("Added to every order it applies to, and taxed.")

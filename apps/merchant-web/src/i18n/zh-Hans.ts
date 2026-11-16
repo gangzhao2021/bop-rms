@@ -10120,8 +10120,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "The sales tax added to orders.": "订单上要加的销售税。",
   "Orders are taxed with the tax settings this store uses today.":
     "订单按本店现在用的税务设置计税。",
-  "Orders are taxed with the tax settings this setup took in earlier, not the ones this store uses today. Step 4 can take in today's.":
-    "订单按这份设置早先带入的税务设置计税，和本店现在用的不同。可在第 4 步改用现在的。",
+  "Orders are taxed with the tax settings in this setup.": "订单按这份设置里的税务设置计税。",
+  "Orders are taxed with the tax settings this setup took in earlier, not the ones this store uses today. To use today's, go to {where}.":
+    "订单按这份设置早先带入的税务设置计税，和本店现在用的不同。要改用现在的，请到{where}。",
   "Tax rates and tax names are in": "税率和税名在",
   ", where they are checked and changed.": "里查看和修改。",
   "Receipt templates": "收据模板",
