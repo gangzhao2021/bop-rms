@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { lstat, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import net from "node:net";
 import path from "node:path";
 import process from "node:process";
 import { clearTimeout, setTimeout } from "node:timers";
@@ -91,12 +92,65 @@ async function run(command, args, options = {}) {
     child.once("close", (code, signal) => {
       clearTimeout(timer);
       if (code === 0) resolve(stdout);
-      else reject(new Error(`${command} failed (${signal ?? code})`));
+      else {
+        const failure = new Error(`${command} failed (${signal ?? code})`);
+        failure.stderr = stderr;
+        reject(failure);
+      }
     });
   });
 }
 
-async function allocatePort(runId) {
+// Host ports compose binds for this project: compose.yaml publishes only
+// 127.0.0.1:${BOP_RMS_POSTGRES_PORT}. The range stays below every common
+// ephemeral range (Linux 32768-60999, macOS and Windows 49152-65535) so outgoing
+// connections do not sit on a leased port; the API/web values written to the
+// env file (lease + 5000..5002) stay below 32768 as well and are never bound.
+export const leasePortRange = Object.freeze({ count: 5_000, first: 20_000 });
+export const composeStartAttempts = 3;
+const diagnosticLimit = 2_000;
+const portConflictPattern =
+  /address already in use|port is already allocated|ports are not available/iu;
+
+export function isComposePortConflict(stderr) {
+  return typeof stderr === "string" && portConflictPattern.test(stderr);
+}
+
+export function shouldRetryComposeStart({ attempt, stderr }) {
+  return attempt < composeStartAttempts && isComposePortConflict(stderr);
+}
+
+// Bounded, secret-free tail of a child process diagnostic for error causes.
+export function composeDiagnostic(stderr, secrets = []) {
+  if (typeof stderr !== "string") return "";
+  let text = stderr;
+  for (const secret of secrets)
+    if (typeof secret === "string" && secret !== "") text = text.split(secret).join("[redacted]");
+  text = text
+    .replace(/((?:password|secret|token)[a-z_]*\s*[=:]\s*)\S+/giu, "$1[redacted]")
+    .replace(/[^\S\n]+/gu, " ")
+    .split("")
+    .filter((character) => {
+      const code = character.charCodeAt(0);
+      return code === 10 || (code >= 32 && code !== 127);
+    })
+    .join("")
+    .trim();
+  return text.length > diagnosticLimit ? `...${text.slice(-diagnosticLimit)}` : text;
+}
+
+// True when 127.0.0.1:port can be listened on right now (the address compose binds).
+export async function isPortBindable(port, host = "127.0.0.1") {
+  return await new Promise((resolve) => {
+    const server = net.createServer();
+    server.unref();
+    server.once("error", () => resolve(false));
+    server.listen({ exclusive: true, host, port }, () => server.close(() => resolve(true)));
+  });
+}
+
+export async function allocatePort(runId, options = {}) {
+  const portFree = options.isPortBindable ?? isPortBindable;
   const leaseRoot = path.join(await realpath(tmpdir()), "bop-rms-isolated-db-leases");
   await mkdir(leaseRoot, { mode: 0o700, recursive: true });
   const leaseState = await lstat(leaseRoot);
@@ -113,16 +167,32 @@ async function allocatePort(runId) {
       "lease",
       "the isolated port lease root is unsafe",
     );
-  const start = 55_000 + (Number.parseInt(runId.slice(0, 6), 16) % 5_000);
-  for (let offset = 0; offset < 5_000; offset += 1) {
-    const port = 55_000 + ((start - 55_000 + offset) % 5_000);
+  const { count, first } = leasePortRange;
+  const start = Number.parseInt(runId.slice(0, 6), 16) % count;
+  for (let offset = 0; offset < count; offset += 1) {
+    const port = first + ((start + offset) % count);
     const lease = path.join(leaseRoot, String(port));
     try {
       await mkdir(lease, { mode: 0o700 });
+    } catch (error) {
+      if (error && error.code === "EEXIST") continue;
+      throw new IsolatedDatabaseError(
+        "ISOLATED_DB_LEASE_FAILED",
+        "lease",
+        "could not claim an isolated port lease",
+        error,
+      );
+    }
+    try {
+      // Checked after the lease is held so two runs never probe and take the same port.
+      if (!(await portFree(port))) {
+        await rm(lease, { force: true, recursive: true });
+        continue;
+      }
       await writeFile(path.join(lease, "owner"), `${owner}:${runId}\n`, { mode: 0o600 });
       return { lease, port };
     } catch (error) {
-      if (error && error.code === "EEXIST") continue;
+      await rm(lease, { force: true, recursive: true }).catch(() => undefined);
       throw new IsolatedDatabaseError(
         "ISOLATED_DB_LEASE_FAILED",
         "lease",
@@ -336,24 +406,26 @@ export async function withIsolatedDatabase(options, testBody) {
     const secret = path.join(controlRoot, "password");
     composeEnv = path.join(controlRoot, "compose.env");
     await writeFile(secret, password, { mode: 0o600 });
-    await writeFile(
-      composeEnv,
-      [
-        `BOP_RMS_COMPOSE_PROJECT=${project}`,
-        "BOP_RMS_ENVIRONMENT=test",
-        "BOP_RMS_POSTGRES_HOST=127.0.0.1",
-        `BOP_RMS_POSTGRES_PASSWORD_FILE=${secret}`,
-        `BOP_RMS_POSTGRES_PORT=${lease.port}`,
-        `BOP_RMS_POSTGRES_DB=${adminDatabase}`,
-        `BOP_RMS_POSTGRES_USER=${user}`,
-        "BOP_RMS_POSTGRES_SSL_MODE=disable",
-        `BOP_RMS_API_PORT=${lease.port + 5_000}`,
-        `BOP_RMS_MERCHANT_WEB_PORT=${lease.port + 5_001}`,
-        `BOP_RMS_CUSTOMER_PWA_PORT=${lease.port + 5_002}`,
-        "",
-      ].join("\n"),
-      { mode: 0o600 },
-    );
+    const writeComposeEnv = async () =>
+      await writeFile(
+        composeEnv,
+        [
+          `BOP_RMS_COMPOSE_PROJECT=${project}`,
+          "BOP_RMS_ENVIRONMENT=test",
+          "BOP_RMS_POSTGRES_HOST=127.0.0.1",
+          `BOP_RMS_POSTGRES_PASSWORD_FILE=${secret}`,
+          `BOP_RMS_POSTGRES_PORT=${lease.port}`,
+          `BOP_RMS_POSTGRES_DB=${adminDatabase}`,
+          `BOP_RMS_POSTGRES_USER=${user}`,
+          "BOP_RMS_POSTGRES_SSL_MODE=disable",
+          `BOP_RMS_API_PORT=${lease.port + 5_000}`,
+          `BOP_RMS_MERCHANT_WEB_PORT=${lease.port + 5_001}`,
+          `BOP_RMS_CUSTOMER_PWA_PORT=${lease.port + 5_002}`,
+          "",
+        ].join("\n"),
+        { mode: 0o600 },
+      );
+    await writeComposeEnv();
     const existing = await projectResources(project, root, childEnvironment);
     if (existing.length > 0)
       throw new IsolatedDatabaseError(
@@ -362,28 +434,53 @@ export async function withIsolatedDatabase(options, testBody) {
         "owned resources existed before the run",
       );
     injected("beforeComposeStart", options.failureAt);
-    await run(
-      "docker",
-      composeArguments(
-        root,
-        project,
-        composeEnv,
-        "up",
-        "--detach",
-        "--wait",
-        "--wait-timeout",
-        "120",
-        "postgres",
-      ),
-      { cwd: root, env: childEnvironment, timeoutMs: 150_000 },
-    ).catch((error) => {
-      throw new IsolatedDatabaseError(
-        "ISOLATED_DB_START_FAILED",
-        "composeStart",
-        "isolated PostgreSQL failed to start",
-        error,
-      );
-    });
+    for (let attempt = 1; ; attempt += 1) {
+      let stderr = "";
+      let startError;
+      try {
+        await run(
+          "docker",
+          composeArguments(
+            root,
+            project,
+            composeEnv,
+            "up",
+            "--detach",
+            "--wait",
+            "--wait-timeout",
+            "120",
+            "postgres",
+          ),
+          { cwd: root, env: childEnvironment, timeoutMs: 150_000 },
+        );
+        break;
+      } catch (error) {
+        stderr = typeof error?.stderr === "string" ? error.stderr : "";
+        const diagnostic = composeDiagnostic(stderr, [password]);
+        const summary = error instanceof Error ? error.message : "docker failed";
+        startError = new IsolatedDatabaseError(
+          "ISOLATED_DB_START_FAILED",
+          "composeStart",
+          "isolated PostgreSQL failed to start",
+          new Error(diagnostic === "" ? summary : `${summary}: ${diagnostic}`),
+        );
+      }
+      if (!shouldRetryComposeStart({ attempt, stderr })) throw startError;
+      // Another process took the port between the probe and Docker's bind: remove
+      // this project's half-started resources and retry on a newly leased port.
+      await run(
+        "docker",
+        composeArguments(root, project, composeEnv, "down", "--volumes", "--remove-orphans"),
+        { cwd: root, env: childEnvironment, timeoutMs: 60_000 },
+      ).catch(() => {
+        throw startError;
+      });
+      if ((await projectResources(project, root, childEnvironment)).length > 0) throw startError;
+      const conflicted = lease;
+      lease = await allocatePort(runId);
+      await rm(conflicted.lease, { force: true, recursive: true });
+      await writeComposeEnv();
+    }
     injected("afterComposeStart", options.failureAt);
     admin = new Client({
       application_name: owner,
