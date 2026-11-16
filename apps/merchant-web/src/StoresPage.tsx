@@ -4,6 +4,7 @@ import { newOperationReference } from "./operation-reference.js";
 import { WorkspacePage } from "./WorkspacePage.js";
 import { FullSignInPrompt } from "./FullSignInPrompt.js";
 import { FULL_SIGN_IN_REQUIRED } from "./full-sign-in.js";
+import { canadianStoreTimeZoneText } from "./time-zone-names.js";
 import {
   mayOpenStore,
   openStore,
@@ -12,18 +13,8 @@ import {
   storeOpeningTimeZones,
 } from "./store-opening-client.js";
 
-/** City names staff recognise, not IANA codes. */
-const timeZoneText: Record<(typeof storeOpeningTimeZones)[number], string> = {
-  "America/Toronto": t("Eastern time (Toronto, Ottawa, Montréal)"),
-  "America/Vancouver": t("Pacific time (Vancouver)"),
-  "America/Edmonton": t("Mountain time (Calgary, Edmonton)"),
-  "America/Winnipeg": t("Central time (Winnipeg)"),
-  "America/Regina": t("Saskatchewan (Regina, Saskatoon)"),
-  "America/Halifax": t("Atlantic time (Halifax)"),
-  "America/St_Johns": t("Newfoundland time (St. John's)"),
-  "America/Moncton": t("Atlantic time (Moncton)"),
-  "America/Whitehorse": t("Yukon (Whitehorse)"),
-};
+/** City names staff recognise, not IANA codes (the same list Store setup offers). */
+const timeZoneText = canadianStoreTimeZoneText();
 const localeText: Record<(typeof storeOpeningLocales)[number], string> = {
   "en-CA": t("English"),
   "fr-CA": t("French"),

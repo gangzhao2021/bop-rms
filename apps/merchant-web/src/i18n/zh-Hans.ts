@@ -1726,7 +1726,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "草稿已放弃。菜单已恢复为已发布的版本。",
   "Draft saved. It takes effect only after approval and publication.":
     "草稿已保存。只有在批准并发布后才会生效。",
-  "Draft timezone": "草稿时区",
   "Draft — being edited": "草稿 — 编辑中",
   "Draft, not published yet": "草稿，尚未发布",
   "Draft, not yet sent for approval": "草稿，尚未提交审批",
@@ -9991,12 +9990,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Open 1 day a week": "每周营业 1 天",
   "Open {open} days a week": "每周营业 {open} 天",
   "The order limits saved earlier": "之前保存的订单限制",
-  "The address saved in this setup": "改为这份设置里保存的地址",
-  "The contact details saved in this setup": "改为这份设置里保存的联系方式",
-  "The payment settings saved in this setup": "改为这份设置里保存的付款设置",
-  "The receipt layout chosen in this setup": "改为这份设置里选的收据样式",
-  "The tax settings chosen in this setup (see Tax review)":
-    "改为这份设置里选的税务设置（见“税务核对”）",
   "What changes when it is published": "发布后有哪些变化",
   "What this setup holds": "这份设置的内容",
   "Nothing changes: every setting is the same as the Store runs with today.":
@@ -10048,6 +10041,23 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Your changes that are not saved yet are kept after switching the language. Save as draft to keep them.":
     "切换语言后，还没保存的修改仍在这里。存为草稿后才会保留。",
   "Now {now} → changes to {value}": "现在{now} → 改为{value}",
+  "Back to how the Store runs today": "改回门店现在的样子",
+  "on ({services})": "开启（{services}）",
+  "not set up": "未设置",
+  "no order limits": "不限制订单",
+  "the order limits saved earlier": "之前保存的订单限制",
+  "the order limits the Store uses": "门店在用的订单限制",
+  "the address the Store uses": "门店在用的地址",
+  "the address saved in this setup": "这份设置里保存的地址",
+  "the contact details the Store uses": "门店在用的联系方式",
+  "the contact details saved in this setup": "这份设置里保存的联系方式",
+  "the payment settings the Store uses": "门店在用的付款设置",
+  "the payment settings saved in this setup": "这份设置里保存的付款设置",
+  "the receipt layout the Store uses": "门店在用的收据样式",
+  "the receipt layout chosen in this setup": "这份设置里选的收据样式",
+  "the tax settings the Store uses": "门店在用的税务设置",
+  "the tax settings chosen in this setup (see Tax review)":
+    "这份设置里选的税务设置（见“税务核对”）",
   "Not saved yet": "尚未保存",
   "What is marked not saved yet goes into the change below only after you save as draft.":
     "标着“尚未保存”的设置，存为草稿后才会进入下面生成的修改。",

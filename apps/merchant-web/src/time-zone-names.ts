@@ -1,3 +1,4 @@
+import { storeOpeningTimeZones } from "./store-opening-client.js";
 import { displayLocale, t } from "./i18n/i18n.js";
 /**
  * Staff choose and read a store's time zone by name and place ("Eastern Time (Toronto, Ottawa
@@ -101,4 +102,52 @@ export function timeZoneChoices(
     .map((value) => ({ value, label: timeZoneLabel(value, at) }))
     .sort((a, b) => a.label.localeCompare(b.label, "en-CA") || a.value.localeCompare(b.value));
   return { canada, other };
+}
+
+/**
+ * b21 (product definition: Chinese restaurants in Canada): the Canadian zones a restaurant runs
+ * on, named plainly in the staff language. Opening a Store and Store setup use the same list.
+ */
+export const canadianStoreTimeZoneText = (): Record<
+  (typeof storeOpeningTimeZones)[number],
+  string
+> => ({
+  "America/Toronto": t("Eastern time (Toronto, Ottawa, Montréal)"),
+  "America/Vancouver": t("Pacific time (Vancouver)"),
+  "America/Edmonton": t("Mountain time (Calgary, Edmonton)"),
+  "America/Winnipeg": t("Central time (Winnipeg)"),
+  "America/Regina": t("Saskatchewan (Regina, Saskatoon)"),
+  "America/Halifax": t("Atlantic time (Halifax)"),
+  "America/St_Johns": t("Newfoundland time (St. John's)"),
+  "America/Moncton": t("Atlantic time (Moncton)"),
+  "America/Whitehorse": t("Yukon (Whitehorse)"),
+});
+/** Older identifiers of the same zone: a Store kept on one selects that zone with its own value. */
+const sameZone: Readonly<Record<string, (typeof storeOpeningTimeZones)[number]>> = {
+  "America/Montreal": "America/Toronto",
+  "America/Nipigon": "America/Toronto",
+  "America/Thunder_Bay": "America/Toronto",
+  "America/Rainy_River": "America/Winnipeg",
+  "America/Yellowknife": "America/Edmonton",
+};
+
+/**
+ * The Store setup choices: the Canadian zones, then any zone the Store runs on or the draft holds
+ * that is not one of them, still selectable and named by place. The value stays the IANA id.
+ */
+export function storeTimeZoneChoices(
+  kept: readonly string[],
+  at: Date = new Date(),
+): readonly TimeZoneChoice[] {
+  const wanted = kept.filter((id) => id !== "");
+  const text = canadianStoreTimeZoneText();
+  const listed = storeOpeningTimeZones.map((zone) => ({
+    value: wanted.find((id) => sameZone[id] === zone) ?? zone,
+    label: text[zone],
+  }));
+  const covered = new Set<string>([...storeOpeningTimeZones, ...Object.keys(sameZone)]);
+  const extra = [...new Set(wanted)]
+    .filter((id) => !covered.has(id))
+    .map((value) => ({ value, label: timeZoneLabel(value, at) }));
+  return [...listed, ...extra];
 }

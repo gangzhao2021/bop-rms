@@ -256,7 +256,7 @@ async function journalRecords(page: Page) {
 async function timezone(page: Page) {
   await page.getByRole("button", { name: "1. Time zone and business day", exact: true }).click();
   await page
-    .getByRole("combobox", { name: "Draft timezone", exact: true })
+    .getByRole("combobox", { name: "Time zone", exact: true })
     .selectOption("America/Toronto");
   await page.getByLabel("Business day starts at (local time)", { exact: true }).fill("04:00");
 }
@@ -310,12 +310,19 @@ test("@production Store Setup ordinary entry approval steps partial save refresh
   // opened (store-first-opening.spec.ts) and Hours & ordering (StoreConfigurationEditor tests).
   await page.reload();
   await page.getByRole("button", { name: "1. Time zone and business day", exact: true }).click();
-  await expect(page.getByRole("combobox", { name: "Draft timezone", exact: true })).toHaveValue(
+  await expect(page.getByRole("combobox", { name: "Time zone", exact: true })).toHaveValue(
     "America/Toronto",
   );
   await expect(
-    page.getByRole("combobox", { name: "Draft timezone", exact: true }).locator("option:checked"),
-  ).toHaveText("Eastern Time (Toronto, Ottawa and Montréal)");
+    page.getByRole("combobox", { name: "Time zone", exact: true }).locator("option:checked"),
+  ).toHaveText("Eastern time (Toronto, Ottawa, Montréal)");
+  // b21: the Canadian zones by plain name, not every world zone.
+  const zoneField = page.getByRole("combobox", { name: "Time zone", exact: true });
+  await expect(zoneField.locator("optgroup")).toHaveCount(0);
+  await expect(zoneField.locator("option[value='America/Vancouver']")).toHaveText(
+    "Pacific time (Vancouver)",
+  );
+  await expect(zoneField.locator("option[value='Pacific/Bougainville']")).toHaveCount(0);
   await expect(page.getByLabel("Business day starts at (local time)", { exact: true })).toHaveValue(
     // b19: the field shows hours and minutes; the draft still saves 04:00:00.
     "04:00",
@@ -386,7 +393,7 @@ test("@production Store Setup mismatched selected scope refuses editing and narr
   await expect(
     page.getByRole("heading", { name: "Time zone and business day", exact: true }),
   ).toBeVisible();
-  await expect(page.getByRole("combobox", { name: "Draft timezone", exact: true })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "Time zone", exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   );
@@ -397,7 +404,7 @@ test("@production Store Setup mismatched selected scope refuses editing and narr
   ).toBeGreaterThanOrEqual(44);
   expect(
     await page
-      .getByRole("combobox", { name: "Draft timezone", exact: true })
+      .getByRole("combobox", { name: "Time zone", exact: true })
       .evaluate((element) => element.getBoundingClientRect().height),
   ).toBeGreaterThanOrEqual(44);
   await page.screenshot({ path: "/tmp/wp2421-store-setup-mobile.png", fullPage: true });

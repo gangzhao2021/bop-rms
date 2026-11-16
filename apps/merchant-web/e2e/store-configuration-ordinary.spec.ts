@@ -1181,7 +1181,7 @@ test("WP-2423 v15: 'Use the live Store's settings' fills time zone, business day
   await page.setViewportSize({ width: 1440, height: 900 });
   // Step 1 now holds the live Store's time zone (the inputs Save reads).
   await page.getByRole("button", { name: /^1\. Time zone and business day$/u }).click();
-  await expect(page.getByLabel("Draft timezone")).toHaveValue("America/Toronto");
+  await expect(page.getByLabel("Time zone", { exact: true })).toHaveValue("America/Toronto");
   await expect(page.getByLabel("Business day starts at (local time)")).toHaveValue("04:00");
   await expectNoInternalText(page);
   expect(state.errors).toEqual([]);

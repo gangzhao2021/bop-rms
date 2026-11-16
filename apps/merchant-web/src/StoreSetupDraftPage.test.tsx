@@ -448,10 +448,11 @@ it("b19: Review says what publishing changes against the live Store, in plain va
   ]);
   expect(summary.changed[0]?.value).toEqual(["05:30"]);
   expect(summary.changed[2]?.value).toContain("Monday: 11:00\u201321:00 becomes 11:00\u201322:00");
+  // b21: each fee says what it is today and what it becomes (none were set up before).
   expect(summary.changed[3]?.value).toEqual([
-    "Service charge: off",
-    "Delivery fee: off",
-    "Tip: on (Dine-in)",
+    "Service charge: not set up becomes off",
+    "Delivery fee: not set up becomes off",
+    "Tip: not set up becomes on (Dine-in)",
   ]);
   expect(summary.unchanged).toEqual(["Time zone", "Order limits", "Address"]);
   // b19 review: a fee whose only change is its tax treatment says so; it never reads as unchanged.
@@ -473,12 +474,7 @@ it("b19: Review says what publishing changes against the live Store, in plain va
   } as unknown as StoreConfigurationSnapshot;
   expect(
     storeSetupChangeSummary(content, withFees).changed.find((item) => item.label === "Fees")?.value,
-  ).toEqual([
-    "Service charge: off",
-    "Delivery fee: off",
-    "Tip: on (Dine-in)",
-    "Tip: taxed differently (see Tax review)",
-  ]);
+  ).toEqual(["Tip: taxed differently (see Tax review)"]);
   const sameFees = {
     ...current,
     setupBasis: { feeContexts: content.feeContexts.value },
@@ -1566,6 +1562,129 @@ it("b20: Review shows an unsaved edit from what the Store runs with now, and say
     expect(zh).toContain("现在 04:00 → 改为 04:30");
     expect(zh).toContain("现在堂食 → 改为堂食、自取");
     expect(zh).toContain("尚未保存");
+  } finally {
+    setLanguageForTest("en");
+  }
+});
+// b21 (b20 review carry-over): every kind of setting in the summary says what it is now and what
+// it becomes, and is marked not saved yet whenever it differs from the saved draft.
+it("b21: every setting kind reads from now to new and is marked when not saved yet", () => {
+  const day = (end: string) =>
+    Array.from({ length: 7 }, (_, i) => ({
+      isoWeekday: i + 1,
+      intervals:
+        i === 0
+          ? [
+              {
+                startLocalTime: "11:00:00",
+                endLocalTime: end,
+                endsNextDay: false,
+                serviceModes: ["DineIn"],
+                orderCutoffSeconds: 0,
+                leadTimeSeconds: 0,
+              },
+            ]
+          : [],
+    }));
+  const current = {
+    timeZone: "America/Toronto",
+    businessDayStartLocalTime: "04:00:00",
+    enabledServiceModes: ["DineIn"],
+    weeklySchedule: day("21:00:00"),
+    capacityConfigurationReference: null,
+    addressReference: id(8),
+    contactReference: id(9),
+    paymentConfigurationReference: id(10),
+    receiptReference: id(11),
+    taxConfigurationReference: id(12),
+    setupBasis: {
+      feeContexts: [{ chargeType: "Tip", state: "Disabled" }],
+    },
+  } as unknown as StoreConfigurationSnapshot;
+  const saved = {
+    ...createUnconfiguredStoreSetupContentV2(),
+    businessDayStartLocalTime: { state: "Configured" as const, value: "04:30:00" },
+    weeklySchedule: { state: "Configured" as const, value: day("22:00:00") as never },
+    addressReference: { state: "Configured" as const, value: id(20) },
+    capacityConfigurationReference: { state: "Configured" as const, value: null },
+    feeContexts: {
+      state: "Configured" as const,
+      value: [{ chargeType: "Tip", state: "Disabled" }] as never,
+    },
+  };
+  const edited = {
+    ...saved,
+    // Put back to how the Store runs today, while the saved draft still changes it.
+    businessDayStartLocalTime: { state: "Configured" as const, value: "04:00:00" },
+    weeklySchedule: { state: "Configured" as const, value: day("23:00:00") as never },
+    // Another address saved in this setup: worded like the saved one, still not saved yet.
+    addressReference: { state: "Configured" as const, value: id(21) },
+    capacityConfigurationReference: { state: "Configured" as const, value: id(22) },
+    feeContexts: {
+      state: "Configured" as const,
+      value: [
+        {
+          chargeType: "Tip",
+          state: "Enabled",
+          taxClassificationReference: null,
+          orderTypes: ["DineIn"],
+        },
+      ] as never,
+    },
+  };
+  const summary = storeSetupChangeSummary(edited, current, saved);
+  const item = (label: string) => summary.changed.find((entry) => entry.label === label);
+  expect(item("Business day start")).toEqual({
+    label: "Business day start",
+    value: ["Back to how the Store runs today"],
+    unsaved: true,
+  });
+  expect(item("Opening hours")).toEqual({
+    label: "Opening hours",
+    value: ["Monday: 11:00\u201321:00 becomes 11:00\u201323:00"],
+    unsaved: true,
+  });
+  expect(item("Fees")).toEqual({
+    label: "Fees",
+    value: ["Tip: off becomes on (Dine-in)"],
+    unsaved: true,
+  });
+  expect(item("Order limits")).toEqual({
+    label: "Order limits",
+    value: ["the order limits saved earlier"],
+    now: "no order limits",
+    unsaved: true,
+  });
+  expect(item("Address")).toEqual({
+    label: "Address",
+    value: ["the address saved in this setup"],
+    now: "the address the Store uses",
+    unsaved: true,
+  });
+  // Saved as it is: from now to new, with no mark.
+  expect(storeSetupChangeSummary(saved, current, saved).changed.some((e) => e.unsaved)).toBe(false);
+  const text = staticText(
+    renderToStaticMarkup(
+      <StoreSetupDraftReview content={edited} saved={saved} current={current} />,
+    ),
+  );
+  expect(text).toContain(
+    "Now the address the Store uses → changes to the address saved in this setup",
+  );
+  expect(text).toContain("Now no order limits → changes to the order limits saved earlier");
+  expect(text.match(/^Not saved yet$/gmu)).toHaveLength(5);
+  setLanguageForTest("zh-Hans");
+  try {
+    const zh = staticText(
+      renderToStaticMarkup(
+        <StoreSetupDraftReview content={edited} saved={saved} current={current} />,
+      ),
+    );
+    expect(zh).toContain("现在门店在用的地址 → 改为这份设置里保存的地址");
+    expect(zh).toContain("小费：关闭 变为 开启（堂食）");
+    expect(zh).toContain("改回门店现在的样子");
+    expect(zh.match(/^尚未保存$/gmu)).toHaveLength(5);
+    expect(zh).not.toMatch(/改为改为|配置/u);
   } finally {
     setLanguageForTest("en");
   }

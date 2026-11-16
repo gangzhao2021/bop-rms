@@ -73,7 +73,7 @@ import {
 import { serviceOperationReference, type ServiceMode } from "./service-control-client.js";
 import { plainLanguageName } from "./staff-text.js";
 import { LanguageSwitch } from "./i18n/LanguageSwitch.js";
-import { timeZoneChoices, timeZoneLabel } from "./time-zone-names.js";
+import { storeTimeZoneChoices, timeZoneLabel } from "./time-zone-names.js";
 import { useScrollToAnchor } from "./scroll-to-anchor.js";
 const StoreFirstOpeningPanel = lazyPage(
   () => import("./StoreFirstOpeningPanel.js"),
@@ -1051,7 +1051,14 @@ export function StoreSetupDraftPage({
       ),
     });
   };
-  const zones = useMemo(() => timeZoneChoices(inputs.timeZone), [inputs.timeZone]);
+  // b21: Canadian zones by plain name; the zone the Store runs on, the saved one and the one chosen
+  // stay selectable even when they are not on that list.
+  const runningZone = workspace?.store.timeZone ?? "",
+    savedZone = content.timeZone.state === "Configured" ? content.timeZone.value : "";
+  const zones = useMemo(
+    () => storeTimeZoneChoices([runningZone, savedZone, inputs.timeZone]),
+    [runningZone, savedZone, inputs.timeZone],
+  );
   let parsed: StoreSetupContent | null = null;
   try {
     parsed = buildStoreSetupEditedContent(content, inputs);
@@ -1488,7 +1495,7 @@ export function StoreSetupDraftPage({
                   </>
                 )}
                 <label>
-                  {t("Draft timezone")}
+                  {t("Time zone")}
                   <select
                     disabled={disabled}
                     value={inputs.timeZone}
@@ -1498,20 +1505,11 @@ export function StoreSetupDraftPage({
                     {!openLayout || inputs.timeZone === "" ? (
                       <option value="">{t("Not configured")}</option>
                     ) : null}
-                    <optgroup label={t("Canada")}>
-                      {zones.canada.map((zone) => (
-                        <option key={zone.value} value={zone.value}>
-                          {zone.label}
-                        </option>
-                      ))}
-                    </optgroup>
-                    <optgroup label={t("Other time zones")}>
-                      {zones.other.map((zone) => (
-                        <option key={zone.value} value={zone.value}>
-                          {zone.label}
-                        </option>
-                      ))}
-                    </optgroup>
+                    {zones.map((zone) => (
+                      <option key={zone.value} value={zone.value}>
+                        {zone.label}
+                      </option>
+                    ))}
                   </select>
                 </label>
                 <label>
@@ -2073,7 +2071,8 @@ export function StoreSetupDraftPage({
 export interface StoreSetupSummaryItem {
   readonly label: string;
   readonly value: readonly string[];
-  /** b20: what the Store runs with today, for a setting with one plain value ("04:00"). */
+  /** b20: what the Store runs with today, for a setting with one value ("04:00"); settings with
+   * several lines (opening hours, fees) say "… becomes …" on each line instead. */
   readonly now?: string;
   /** b20: set on this page but not saved yet, so the change created below does not have it. */
   readonly unsaved?: boolean;
@@ -2104,6 +2103,41 @@ const openDaysText = (schedule: WeeklySchedule) => {
   const open = schedule.filter((day) => day.intervals.length > 0).length;
   return open === 1 ? t("Open 1 day a week") : t("Open {open} days a week", { open });
 };
+/** b21: a fee's state in words, "on (Dine-in, Pickup)" or "off", for "becomes" lines. */
+const feeStateText = (fee: FeeLike) =>
+  fee.state === "Enabled"
+    ? t("on ({services})", {
+        services: (fee.orderTypes ?? []).map(serviceModeText).join(listSeparator()),
+      })
+    : t("off");
+/** b21: each configured setting of a setup as one comparable value, by its field name. */
+function storeSetupSettingValues(content: StoreSetupContent): ReadonlyMap<string, string> {
+  const values = new Map<string, string>();
+  const put = (
+    key: string,
+    field: { readonly state: string; readonly value?: unknown } | undefined,
+  ) => {
+    if (field?.state === "Configured") values.set(key, JSON.stringify(field.value ?? null));
+  };
+  if (content.businessDayStartLocalTime.state === "Configured")
+    values.set("businessDayStartLocalTime", clock(content.businessDayStartLocalTime.value));
+  if (content.enabledServiceModes.state === "Configured")
+    values.set(
+      "enabledServiceModes",
+      JSON.stringify([...content.enabledServiceModes.value].sort()),
+    );
+  if (content.feeContexts?.state === "Configured")
+    values.set("feeContexts", feesKey(content.feeContexts.value));
+  put("timeZone", content.timeZone);
+  put("weeklySchedule", content.weeklySchedule);
+  put("capacityConfigurationReference", content.capacityConfigurationReference);
+  put("addressReference", content.addressReference);
+  put("contactReference", content.contactReference);
+  put("paymentConfigurationReference", content.paymentConfigurationReference);
+  put("receiptReference", content.receiptReference);
+  put("taxConfigurationReference", content.taxConfigurationReference);
+  return values;
+}
 /**
  * b19 (Owner: step 4 was messy): what publishing this setup changes, in plain values. Against the
  * Store as it runs today (`current`), settings that differ are listed with their new value and the
@@ -2127,30 +2161,29 @@ export function storeSetupChangeSummary(
   const changed: StoreSetupSummaryItem[] = [],
     unchanged: string[] = [],
     filledIn: string[] = [];
-  const savedValues =
-    saved === null
-      ? null
-      : new Map(
-          storeSetupChangeSummary(saved, current).changed.map((item) => [
-            item.label,
-            JSON.stringify(item.value),
-          ]),
-        );
+  // b21: "not saved yet" compares the setting itself with the saved draft, not its words, so a
+  // newly chosen address (worded like the saved one) or a setting put back is still marked.
+  const savedSettings = saved === null ? null : storeSetupSettingValues(saved),
+    settings = storeSetupSettingValues(content);
   const add = (
     label: string,
+    key: string,
     same: boolean | null,
     value: () => readonly string[],
     now?: () => string,
   ) => {
+    const unsaved = savedSettings !== null && savedSettings.get(key) !== settings.get(key);
     if (same === true) {
-      unchanged.push(label);
+      // b21: an unsaved edit that puts a setting back to how the Store runs today, while the saved
+      // draft still changes it, is named with its mark (the change below would still change it).
+      if (unsaved && savedSettings?.has(key) === true)
+        changed.push({ label, value: [t("Back to how the Store runs today")], unsaved });
+      else unchanged.push(label);
       return;
     }
-    const lines = value();
-    const unsaved = savedValues !== null && savedValues.get(label) !== JSON.stringify(lines);
     changed.push({
       label,
-      value: lines,
+      value: value(),
       ...(same === false && now !== undefined ? { now: now() } : {}),
       ...(unsaved ? { unsaved } : {}),
     });
@@ -2160,6 +2193,7 @@ export function storeSetupChangeSummary(
     const zone = content.timeZone.value;
     add(
       t("Time zone"),
+      "timeZone",
       known ? zone === current.timeZone : null,
       () => [timeZoneLabel(zone)],
       () => timeZoneLabel(current?.timeZone ?? ""),
@@ -2169,6 +2203,7 @@ export function storeSetupChangeSummary(
     const start = content.businessDayStartLocalTime.value;
     add(
       t("Business day start"),
+      "businessDayStartLocalTime",
       known ? clock(start) === clock(current.businessDayStartLocalTime) : null,
       () => [clock(start)],
       () => clock(current?.businessDayStartLocalTime ?? ""),
@@ -2178,6 +2213,7 @@ export function storeSetupChangeSummary(
     const services = content.enabledServiceModes.value;
     add(
       t("Service modes"),
+      "enabledServiceModes",
       known
         ? JSON.stringify([...services].sort()) ===
             JSON.stringify([...current.enabledServiceModes].sort())
@@ -2188,8 +2224,9 @@ export function storeSetupChangeSummary(
   }
   if (content.weeklySchedule.state === "Configured") {
     const schedule = content.weeklySchedule.value;
+    // Each changed day reads "Monday: 09:00–17:00 becomes 10:00–22:00".
     const lines = known ? openingHoursChanges(current.weeklySchedule, schedule) : [];
-    add(t("Opening hours"), known ? lines.length === 0 : null, () =>
+    add(t("Opening hours"), "weeklySchedule", known ? lines.length === 0 : null, () =>
       known
         ? lines
         : [
@@ -2208,68 +2245,117 @@ export function storeSetupChangeSummary(
   if (content.feeContexts?.state === "Configured") {
     const fees = content.feeContexts.value;
     const live = current?.setupBasis?.feeContexts;
+    // b21: each fee that changes reads "Tip: off becomes on (Dine-in)", like opening hours.
     // b19 review: a fee whose tax treatment changes says so, so a change is never invisible.
-    add(t("Fees"), known ? live !== undefined && feesKey(live) === feesKey(fees) : null, () =>
-      fees.flatMap((fee) => {
-        const before: FeeLike | undefined = live?.find((old) => old.chargeType === fee.chargeType);
-        const after: FeeLike = fee;
-        return before !== undefined &&
-          (before.taxClassificationReference ?? null) !== (after.taxClassificationReference ?? null)
-          ? [
-              feeText(fee),
+    add(
+      t("Fees"),
+      "feeContexts",
+      known ? live !== undefined && feesKey(live) === feesKey(fees) : null,
+      () =>
+        fees.flatMap((fee) => {
+          if (!known) return [feeText(fee)];
+          const before: FeeLike | undefined = live?.find(
+            (old) => old.chargeType === fee.chargeType,
+          );
+          const after: FeeLike = fee;
+          const lines: string[] = [];
+          if (before === undefined || feeStateText(before) !== feeStateText(after))
+            lines.push(
+              t("{name}: {before} becomes {after}", {
+                name: feeLabel(fee.chargeType),
+                before: before === undefined ? t("not set up") : feeStateText(before),
+                after: feeStateText(after),
+              }),
+            );
+          if (
+            before !== undefined &&
+            (before.taxClassificationReference ?? null) !==
+              (after.taxClassificationReference ?? null)
+          )
+            lines.push(
               t("{fee}: taxed differently (see Tax review)", { fee: feeLabel(fee.chargeType) }),
-            ]
-          : [feeText(fee)];
-      }),
+            );
+          return lines;
+        }),
     );
   }
   if (content.capacityConfigurationReference.state === "Configured") {
     const limits = content.capacityConfigurationReference.value;
-    add(t("Order limits"), known ? limits === current.capacityConfigurationReference : null, () => [
-      limits === null ? t("No order limits") : t("The order limits saved earlier"),
-    ]);
+    add(
+      t("Order limits"),
+      "capacityConfigurationReference",
+      known ? limits === current.capacityConfigurationReference : null,
+      () =>
+        known
+          ? [limits === null ? t("no order limits") : t("the order limits saved earlier")]
+          : [limits === null ? t("No order limits") : t("The order limits saved earlier")],
+      () =>
+        current?.capacityConfigurationReference === null
+          ? t("no order limits")
+          : t("the order limits the Store uses"),
+    );
   }
   const records: readonly (readonly [
     string,
-    StoreSetupContent["addressReference"],
+    (
+      | "addressReference"
+      | "contactReference"
+      | "paymentConfigurationReference"
+      | "receiptReference"
+      | "taxConfigurationReference"
+    ),
     string | null,
+    string,
     string,
   ])[] = [
     [
       t("Address"),
-      content.addressReference,
+      "addressReference",
       current?.addressReference ?? null,
-      t("The address saved in this setup"),
+      t("the address the Store uses"),
+      t("the address saved in this setup"),
     ],
     [
       t("Contact details"),
-      content.contactReference,
+      "contactReference",
       current?.contactReference ?? null,
-      t("The contact details saved in this setup"),
+      t("the contact details the Store uses"),
+      t("the contact details saved in this setup"),
     ],
     [
       t("Payment"),
-      content.paymentConfigurationReference,
+      "paymentConfigurationReference",
       current?.paymentConfigurationReference ?? null,
-      t("The payment settings saved in this setup"),
+      t("the payment settings the Store uses"),
+      t("the payment settings saved in this setup"),
     ],
     [
       t("Receipt template"),
-      content.receiptReference,
+      "receiptReference",
       current?.receiptReference ?? null,
-      t("The receipt layout chosen in this setup"),
+      t("the receipt layout the Store uses"),
+      t("the receipt layout chosen in this setup"),
     ],
     [
       t("Tax settings"),
-      content.taxConfigurationReference,
+      "taxConfigurationReference",
       current?.taxConfigurationReference ?? null,
-      t("The tax settings chosen in this setup (see Tax review)"),
+      t("the tax settings the Store uses"),
+      t("the tax settings chosen in this setup (see Tax review)"),
     ],
   ];
-  for (const [label, value, live, text] of records) {
+  for (const [label, key, live, before, after] of records) {
+    const value = content[key];
     if (value.state !== "Configured") continue;
     if (!known) filledIn.push(label);
-    else add(label, value.value === live, () => [text]);
+    else
+      add(
+        label,
+        key,
+        value.value === live,
+        () => [after],
+        () => before,
+      );
   }
   return { changed, unchanged, filledIn };
 }
