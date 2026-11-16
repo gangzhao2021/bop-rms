@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
-import { filledPrimaries } from "./tables-v3-look";
+import { accent, choiceLook, filledPrimaries } from "./tables-v3-look";
 
 /**
  * WP-2423 DEC-DINE-IN-PAY-LATER (DIN-FLOOR-BOARD): a pay-later table pays once at the end. Staff
@@ -2405,4 +2405,112 @@ for (const width of [1440, 1024, 390])
       path: test.info().outputPath(`b13-serve-at-zero-${width}.png`),
       fullPage: true,
     });
+  });
+
+// b24 (b23 live check): checkout's tip and "How the table pays" were drawn as chips with the chosen
+// one a black pill. v3 chooses as Orders' filters and the comp panel do: plain words, the chosen
+// one accent words at 600 over an accent line; still radios (arrow keys move the choice), with a
+// visible focus ring and 44px targets on a phone.
+for (const language of ["en", "zh-Hans"] as const)
+  test(`@production checkout's tip and payment choices read as v3 choices, not black pills (${language})`, async ({
+    page,
+  }) => {
+    const zh = language === "zh-Hans";
+    if (zh)
+      await page.addInitScript(() => {
+        window.localStorage.setItem("bop.merchant.language", "zh-Hans");
+      });
+    const state: { phase: "Active" | "Closing"; version: number } = {
+      phase: "Closing",
+      version: 7,
+    };
+    await floor(page, state);
+    await page.route("**/merchant/dining/table-close-plan", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          orderReference: id(3),
+          diningSessionReference: id(2),
+          orderVersion: 4,
+          observedAt: "2026-10-15T19:00:00.000Z",
+          rounds: [],
+          closeBlockers: ["ORDER_BALANCE_UNPAID"],
+          totals: { onlineMinor: "0", cardMachineMinor: "0" },
+        },
+      }),
+    );
+    await page.route("**/merchant/dining/table-bill", (route) =>
+      route.fulfill({ headers, json: unpaidBill("Closing", 7) }),
+    );
+    await page.goto("/operations/dining");
+    await page.getByRole("button", { name: zh ? "选择 T2" : "Select T2", exact: true }).click();
+    const checkout = page.getByRole("region", { name: zh ? "结账" : "Checkout" });
+    const tip = checkout.getByRole("group", { name: zh ? "小费" : "Tip" });
+    const method = checkout.getByRole("group", { name: zh ? "付款方式" : "How the table pays" });
+    await tip.getByRole("radio", { name: /15%/u }).check();
+    await method.getByRole("radio", { name: zh ? "现金" : "Cash" }).check();
+    const plain = {
+      background: "rgba(0, 0, 0, 0)",
+      color: "rgb(23, 23, 23)",
+      weight: "400",
+      line: "rgba(0, 0, 0, 0)",
+    };
+    const chosen = { background: "rgba(0, 0, 0, 0)", color: accent, weight: "600", line: accent };
+    for (const group of [tip, method]) {
+      const labels = group.locator("label");
+      for (const index of Array.from({ length: await labels.count() }, (_, n) => n)) {
+        const label = labels.nth(index);
+        const checked = await label.getByRole("radio").isChecked();
+        expect(await choiceLook(label)).toEqual(checked ? chosen : plain);
+      }
+    }
+    // The split beside them chooses the same way (the Owner's 2026-11-03 "looks chosen, as the
+    // tip and payment method do"), not a black pill.
+    const modes = checkout.locator(".table-split__modes button");
+    for (const index of Array.from({ length: await modes.count() }, (_, n) => n)) {
+      const mode = modes.nth(index);
+      const pressed = (await mode.getAttribute("aria-pressed")) === "true";
+      expect(await choiceLook(mode)).toEqual(pressed ? chosen : plain);
+    }
+    // Still a radio group: the arrow key moves the choice, and the focus ring shows where it is.
+    const cash = method.getByRole("radio", { name: zh ? "现金" : "Cash" });
+    await cash.focus();
+    await page.keyboard.press("ArrowLeft");
+    const card = method.getByRole("radio", { name: zh ? "刷卡机" : "Card machine" });
+    await expect(card).toBeChecked();
+    await expect(card).toBeFocused();
+    const ring = await card.locator("xpath=..").evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { style: style.outlineStyle, width: style.outlineWidth, color: style.outlineColor };
+    });
+    expect(ring).toEqual({ style: "solid", width: "2px", color: accent });
+    const shots = process.env.B24_SHOTS ?? "test-results-b24/shots";
+    for (const width of [1440, 1024, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      if (width === 390)
+        for (const group of [tip, method]) {
+          const heights = await group
+            .locator("label")
+            .evaluateAll((labels) => labels.map((label) => label.getBoundingClientRect().height));
+          expect(Math.min(...heights)).toBeGreaterThanOrEqual(44);
+        }
+      await checkout.scrollIntoViewIfNeeded();
+      await page.screenshot({
+        path: `${shots}/tables-checkout-choices-${language}-${String(width)}.png`,
+        fullPage: true,
+      });
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const axe = await new AxeBuilder({ page })
+      .include(".table-checkout")
+      .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+      .analyze();
+    expect(
+      axe.violations
+        .filter((v) => v.impact === "serious" || v.impact === "critical")
+        .map((v) => v.id),
+    ).toEqual([]);
   });

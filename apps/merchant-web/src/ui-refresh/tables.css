@@ -828,12 +828,21 @@
   font: inherit;
 }
 
-/* Checkout on the panel: tip and method as chips, the selected one a dark pill. */
+/* b24: checkout's tip and how the table pays choose as v3 chooses elsewhere (Orders' filters, the
+   comp panel): plain words, the chosen one in accent words at 600 over a 2px accent line; never a
+   black pill (brief §2). Each choice is a 44px target. */
+.workspace-page.tables-v3 :is(.table-checkout__tip, .table-checkout__method) {
+  gap: 0 24px;
+}
 .workspace-page.tables-v3 :is(.table-checkout__tip, .table-checkout__method) label {
   position: relative;
-  min-height: 36px;
-  padding: 0 12px;
-  border-radius: 999px;
+  min-height: 44px;
+  padding: 0 0 2px;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: none;
+  color: var(--bop-color-text-default);
+  font-weight: 400;
   cursor: pointer;
 }
 /* The radio covers its chip (invisible), so a tap anywhere on the chip chooses it. */
@@ -849,8 +858,9 @@
 .workspace-page.tables-v3
   :is(.table-checkout__tip, .table-checkout__method)
   label:has(input[type="radio"]:checked) {
-  background: var(--bop-color-text-default);
-  color: var(--bop-color-surface-default);
+  border-bottom-color: var(--bop-color-accent);
+  color: var(--bop-color-accent);
+  font-weight: 600;
 }
 .workspace-page.tables-v3
   :is(.table-checkout__tip, .table-checkout__method)
@@ -1169,6 +1179,8 @@
 .tables-v3 .table-split h4 {
   margin: 0 0 8px;
   font-size: 16px;
+  /* b24: a heading of checkout's choices, as "Tip" and "How the table pays" are. */
+  font-weight: 600;
 }
 .tables-v3 .table-split__modes {
   display: flex;
@@ -1476,11 +1488,23 @@
   margin: 0;
 }
 
-/* Owner 2026-11-03 walkthrough: the split chosen looks chosen, as the tip and payment method do. */
-.workspace-page.tables-v3 .table-split__modes button[aria-pressed="true"] {
-  border-radius: 999px;
-  background: var(--bop-color-brand-primary);
-  color: var(--bop-color-on-primary);
+/* Owner 2026-11-03 walkthrough: the split chosen looks chosen, as the tip and payment method do.
+   b24: those are v3 choices now (plain words, the chosen one accent words at 600 over an accent
+   line), so the split chooses the same way, never a black pill beside them (brief §2). */
+.workspace-page.tables-v3 .table-panel .table-split__modes button:not([data-variant]) {
+  min-height: 44px;
+  padding: 0 0 2px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: none;
+  color: var(--bop-color-text-default);
+  font-weight: 400;
+}
+.workspace-page.tables-v3 .table-panel .table-split__modes button[aria-pressed="true"] {
+  border-bottom-color: var(--bop-color-accent);
+  color: var(--bop-color-accent);
+  font-weight: 600;
 }
 .workspace-page.tables-v3 .table-checkout__cash-quick {
   display: flex;
