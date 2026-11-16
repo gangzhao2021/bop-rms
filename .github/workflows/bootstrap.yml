@@ -105,6 +105,9 @@ jobs:
       - name: Build workspace
         run: pnpm build
 
+      - name: Install browser for database journeys
+        run: pnpm --filter @bop-rms/merchant-web exec playwright install --with-deps chromium
+
       - name: PostgreSQL acceptance shard
         env:
           SHARD: ${{ matrix.shard }}
