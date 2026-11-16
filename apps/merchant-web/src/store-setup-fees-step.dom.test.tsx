@@ -208,15 +208,9 @@ it("b24: Review names the fee and both places to put it right; nothing is sent",
   );
 });
 
-it("b24: no change is created from a saved setup whose fee names a service it does not offer", async () => {
+const savedSetupPanel = async (content: StoreSetupContent, onlyFees: boolean) => {
   setLanguageForTest("zh-Hans");
   vi.spyOn(Date, "now").mockReturnValue(Date.parse(at));
-  const content = {
-    ...setup({
-      enabledServiceModes: { state: "Configured", value: ["DineIn"] },
-      feeContexts: fees(["DineIn", "Pickup"]),
-    }),
-  };
   const current = {
     configurationReference: id(20),
     timeZone: "America/Toronto",
@@ -257,8 +251,10 @@ it("b24: no change is created from a saved setup whose fee names a service it do
     resolve: vi.fn(),
     history: vi.fn(),
   };
-  const missing = await import("./store-setup-missing.js");
-  vi.spyOn(missing, "storeSetupMissingItems").mockReturnValue([]);
+  if (onlyFees) {
+    const missing = await import("./store-setup-missing.js");
+    vi.spyOn(missing, "storeSetupMissingItems").mockReturnValue([]);
+  }
   const { container } = await mount(
     <MemoryRouter>
       <StoreConfigurationOrdinaryPanel
@@ -284,10 +280,34 @@ it("b24: no change is created from a saved setup whose fee names a service it do
     </MemoryRouter>,
   );
   await settle();
-  const text = container.textContent ?? "";
+  return { text: container.textContent ?? "", client };
+};
+it("b24: no change is created from a saved setup whose fee names a service it does not offer", async () => {
+  const { text, client } = await savedSetupPanel(
+    setup({
+      enabledServiceModes: { state: "Configured", value: ["DineIn"] },
+      feeContexts: fees(["DineIn", "Pickup"]),
+    }),
+    true,
+  );
   expect(text).toContain(
     "还不能生成修改：这份已保存设置里，服务费适用于自取，但本店没有提供这些服务。",
   );
+  expect(text).not.toContain("用已保存的设置生成修改");
+  expect(client.prepare).not.toHaveBeenCalled();
+});
+
+// b24 correction: a draft whose services are not set yet saves with a fee on; no change is created
+// from it, and what to do is to choose the services in step 2.
+it("b24: a setup saved before its services are set is built for saving, and no change is created from it", async () => {
+  const content = setup({
+    enabledServiceModes: { state: "Unconfigured" },
+    feeContexts: fees(["DineIn"]),
+  });
+  expect(() => buildStoreSetupEditedContent(content, inputs([]))).not.toThrow();
+  const { text, client } = await savedSetupPanel(content, false);
+  expect(text).toContain("还不能生成修改");
+  expect(text).toContain("服务方式 (第 2 步，服务方式)");
   expect(text).not.toContain("用已保存的设置生成修改");
   expect(client.prepare).not.toHaveBeenCalled();
 });

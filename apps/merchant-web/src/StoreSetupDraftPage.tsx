@@ -248,8 +248,13 @@ export function buildStoreSetupEditedContent(
     weeklySchedule,
   });
   // b24 (Owner 2026-11-16): a fee applies only to orders this setup offers; the server refuses
-  // anything else, so it is never sent (Review and the fee itself say what to change).
-  if (storeSetupFeesNotOffered(edited).length > 0) throw new StoreSetupClientError("Invalid");
+  // anything else, so it is never sent (Review and the fee itself say what to change). A draft whose
+  // services are not set yet still saves; no change is created from it until they are.
+  if (
+    edited.enabledServiceModes.state === "Configured" &&
+    storeSetupFeesNotOffered(edited).length > 0
+  )
+    throw new StoreSetupClientError("Invalid");
   return edited;
 }
 /**
