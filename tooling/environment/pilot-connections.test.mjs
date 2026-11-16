@@ -10,6 +10,7 @@ import {
   pilotDatabaseHeartbeatMs,
   pilotDatabaseHeartbeatReopenBeats,
   startPilotDatabaseHeartbeat,
+  trackPilotPoolClients,
 } from "./pilot-connections.mjs";
 
 // WP-2423 pilot resilience (2026-10-15): v15 customer process exited three times on an unhandled
@@ -282,4 +283,34 @@ it("WP-2423 (rush-connection-hold): readiness never queues behind requests: a bu
   // The database itself stopped answering: not ready.
   answered = false;
   expect(await readiness.probe()).toBe("not_ready");
+});
+
+// WP-2423 (ci-brand-startup-cleanup): pg-pool's end() resolved while the database still listed the
+// pool's connections (CI shard 8, brand startup cleanup); a closed pool waits for each client's end.
+it("a closing pool is ended only once every opened client's connection has ended, and refuses after its bound", async () => {
+  vi.useFakeTimers();
+  try {
+    const pool = new EventEmitter(),
+      first = {},
+      second = {};
+    const clients = trackPilotPoolClients(pool);
+    await expect(clients.ended(100)).resolves.toBeUndefined();
+    pool.emit("connect", first);
+    pool.emit("connect", second);
+    let ended = false;
+    const closing = clients.ended(100).then(() => (ended = true));
+    pool.emit("remove", first);
+    await Promise.resolve();
+    expect(ended).toBe(false);
+    expect(clients.open()).toBe(1);
+    pool.emit("remove", second);
+    await closing;
+    expect(ended).toBe(true);
+    pool.emit("connect", first);
+    const late = clients.ended(100);
+    vi.advanceTimersByTime(100);
+    await expect(late).rejects.toThrow("LOCAL_DATABASE_CLOSE_INCOMPLETE");
+  } finally {
+    vi.useRealTimers();
+  }
 });

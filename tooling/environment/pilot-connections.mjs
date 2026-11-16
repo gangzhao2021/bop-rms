@@ -60,6 +60,40 @@ export function guardPilotPoolConnections(pool, write = (line) => process.stderr
   pool.on("connect", (client) => client.on("error", report));
   return pool;
 }
+/**
+ * WP-2423 (ci-brand-startup-cleanup): pg-pool's end() resolves once it has asked every client to
+ * end, before their connections have closed; on a loaded host the database still lists them right
+ * after. A closed pool here means its connections are gone: `ended(ms)` waits for each opened
+ * client's own end, and refuses when one is still open after `ms`.
+ */
+export function trackPilotPoolClients(pool) {
+  const open = new Set();
+  let settle = null;
+  pool.on("connect", (client) => open.add(client));
+  pool.on("remove", (client) => {
+    open.delete(client);
+    if (open.size === 0) settle?.();
+  });
+  return Object.freeze({
+    open: () => open.size,
+    ended(ms) {
+      if (open.size === 0) return Promise.resolve();
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          settle = null;
+          reject(new Error("LOCAL_DATABASE_CLOSE_INCOMPLETE"));
+        }, ms);
+        settle = () => {
+          clearTimeout(timer);
+          settle = null;
+          resolve();
+        };
+      });
+    },
+  });
+}
+/** WP-2423 (ci-brand-startup-cleanup): how long a closing pool's connections may take to end. */
+export const pilotPoolCloseMs = 5000;
 /** WP-2423 M68 (a): this process's whole acquire budget for one request (entries 10 s). */
 export const pilotAcquireBudgetMs = (entryFile = process.argv[1]) =>
   isPilotEntryProcess(entryFile) ? pilotEntryAcquireBudgetMs : pilotWorkerAcquireBudgetMs;
@@ -297,6 +331,7 @@ async function openPool(service, config) {
     statement_timeout: 5000,
   });
   guardPilotPoolConnections(pool);
+  const clients = trackPilotPoolClients(pool);
   // WP-2423 (reads-under-burst, b12 review): its handed-out clients are counted from the start,
   // so a wait for a pool full of work is told apart from a database that cannot be reached.
   watchTenantConnectionPool(pool);
@@ -314,7 +349,7 @@ async function openPool(service, config) {
           }),
       )
     : null;
-  return { pool, heartbeat };
+  return { pool, heartbeat, clients };
 }
 export async function createApplicationDatabase(
   service,
@@ -340,7 +375,12 @@ export async function createApplicationDatabase(
   const opened = shared === undefined ? await openPool(service, config) : null;
   const pool = shared?.pool ?? opened.pool;
   if (shared === undefined)
-    sharedPools.set(service + ":" + database, { pool, heartbeat: opened.heartbeat, users: 1 });
+    sharedPools.set(service + ":" + database, {
+      pool,
+      heartbeat: opened.heartbeat,
+      clients: opened.clients,
+      users: 1,
+    });
   else shared.users += 1;
   if (process.env.PILOT_CLOCK_FROM_DATABASE === "1")
     await alignProcessClockToDatabase((sql) => pool.query(sql));
@@ -365,6 +405,8 @@ export async function createApplicationDatabase(
         sharedPools.delete(service + ":" + database);
         entry.heartbeat?.stop();
         await pool.end();
+        // Shutdown is complete only once the database no longer holds this pool's connections.
+        await entry.clients.ended(pilotPoolCloseMs);
       })();
       return closing;
     },
