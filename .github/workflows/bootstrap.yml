@@ -13,34 +13,16 @@ env:
   TURBO_TELEMETRY_DISABLED: "1"
 
 jobs:
-  verify:
-    name: verify
+  static:
+    name: static
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - name: Check out repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
-      - name: Set up Node.js
-        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
-        with:
-          node-version-file: .nvmrc
-          package-manager-cache: false
-
-      - name: Install exact package manager
-        run: |
-          npm install --global corepack@0.35.0
-          corepack enable pnpm
-          corepack install --global pnpm@11.13.0
-
-      - name: Verify tool versions
-        run: |
-          test "$(node --version)" = "v24.18.0"
-          test "$(corepack --version)" = "0.35.0"
-          test "$(pnpm --version)" = "11.13.0"
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+      - name: Set up toolchain
+        uses: ./.github/actions/setup
 
       - name: Verify WP-0005 PostgreSQL local environment
         run: ./tooling/postgres/verify-local.sh
@@ -85,7 +67,70 @@ jobs:
           pnpm typecheck
           pnpm screen-registry:check
           pnpm build
-          pnpm test
+
+  unit:
+    name: unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Set up toolchain
+        uses: ./.github/actions/setup
+
+      - name: Build workspace
+        run: pnpm build
+
+      - name: Unit and package tests
+        run: |
+          pnpm exec vitest run
+          pnpm exec turbo run test
+
+  database:
+    name: database ${{ matrix.shard }}/8
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Set up toolchain
+        uses: ./.github/actions/setup
+
+      - name: Build workspace
+        run: pnpm build
+
+      - name: PostgreSQL acceptance shard
+        env:
+          SHARD: ${{ matrix.shard }}
+          SHARDS: "8"
+        run: |
+          node -e 'const s=require("./package.json").scripts["test:database"]; const c=[...s.matchAll(/--config (\S+)/g)].map((m)=>m[1]); const mine=c.filter((_,i)=>i%Number(process.env.SHARDS)===Number(process.env.SHARD)-1); if(!c.length||!mine.length) process.exit(1); console.log(mine.join("\n"))' > "$RUNNER_TEMP/configs.txt"
+          echo "$(wc -l < "$RUNNER_TEMP/configs.txt") configs in this shard"
+          while read -r config; do
+            echo "::group::$config"
+            pnpm exec vitest run --config "$config" < /dev/null
+            echo "::endgroup::"
+          done < "$RUNNER_TEMP/configs.txt"
+
+  browser:
+    name: browser and eventing
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Set up toolchain
+        uses: ./.github/actions/setup
+
+      - name: Build workspace
+        run: pnpm build
 
       - name: Verify local demo browser acceptance
         run: |
@@ -113,3 +158,17 @@ jobs:
 
       - name: Verify WP-0024 isolated PostgreSQL lifecycle
         run: pnpm isolated-database:acceptance
+
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: always()
+    needs: [static, unit, database, browser]
+    steps:
+      - name: All verification jobs passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "$RESULTS"
+          for result in $RESULTS; do test "$result" = "success"; done

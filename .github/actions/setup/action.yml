@@ -1,0 +1,28 @@
+name: setup
+description: Exact Node and pnpm toolchain with a frozen install
+runs:
+  using: composite
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+      with:
+        node-version-file: .nvmrc
+        package-manager-cache: false
+
+    - name: Install exact package manager
+      shell: bash
+      run: |
+        npm install --global corepack@0.35.0
+        corepack enable pnpm
+        corepack install --global pnpm@11.13.0
+
+    - name: Verify tool versions
+      shell: bash
+      run: |
+        test "$(node --version)" = "v24.18.0"
+        test "$(corepack --version)" = "0.35.0"
+        test "$(pnpm --version)" = "11.13.0"
+
+    - name: Install dependencies
+      shell: bash
+      run: pnpm install --frozen-lockfile
