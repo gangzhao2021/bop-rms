@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { mkdir } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { URL } from "node:url";
 
 const webRequire = createRequire(
@@ -126,7 +128,8 @@ export async function openBrandStartupBrowser({
         if (closePromise) throw new Error("STARTUP_BROWSER_CLOSED");
         await page.reload();
         await verifyDetail();
-        await mkdir("/private/tmp/wp2421-m133", { recursive: true, mode: 0o700 });
+        const shots = path.join(tmpdir(), "wp2421-m133");
+        await mkdir(shots, { recursive: true, mode: 0o700 });
         for (const [name, width, height, textSize] of [
           ["desktop", 1440, 1000, "100%"],
           ["mobile", 320, 900, "200%"],
@@ -147,7 +150,7 @@ export async function openBrandStartupBrowser({
             "STARTUP_BROWSER_HORIZONTAL_OVERFLOW",
           );
           await page.screenshot({
-            path: `/private/tmp/wp2421-m133/brand-startup-${name}.png`,
+            path: path.join(shots, `brand-startup-${name}.png`),
             fullPage: true,
           });
         }
