@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, type ReactNode } from "react";
+import { act, type ReactNode, useState } from "react";
 import { afterEach, expect, it } from "vitest";
 import { parseCurrentOrderDetail } from "./current-order-queue-client.js";
 import { PayLaterItemRemoveAction } from "./PayLaterItemRemoveAction.js";
@@ -344,5 +344,45 @@ it("b23 review: some dishes taken off on a page that mounts the take-off anew: t
     root.render(round2(takeOff(after, "v8")));
   });
   await later();
+  expect(document.activeElement).toBe(buttonNamed(container, "Take dishes off round 2"));
+});
+
+// b24 (live23, TM2 L23 MCT A round 4): on Tables, taking one of a round's two dishes off left the
+// focus on the page (BODY) for 5 s+: the confirm rereads the floor, which locks the table panel
+// (its fieldset disabled) in the same render as the panel closes, so the opener couldn't take it.
+function TablesRound() {
+  const [locked, setLocked] = useState(false);
+  const detail = readDetail(
+    [line(1, "Soy milk", "325", "42", "367"), line(2, "Smashed cucumber", "625", "82", "707")],
+    [id(201), id(202)],
+    { subtotal: "950", tax: "124", total: "1074" },
+  );
+  const round = detail.order.batches[1];
+  if (round === undefined) throw new Error("fixture");
+  return round2(
+    <fieldset disabled={locked}>
+      <PayLaterItemRemoveAction
+        order={detail.order}
+        batch={round}
+        lines={detail.lines.items}
+        csrf={"a".repeat(43)}
+        fetcher={takeOffFetcher}
+        onSettled={() => {
+          setLocked(true);
+          setTimeout(() => setLocked(false), 40);
+        }}
+        onRefused={() => undefined}
+      />
+    </fieldset>,
+  );
+}
+
+it("b24: on Tables one dish of two taken off: the focus goes back to the opener once the panel unlocks", async () => {
+  const { container } = await mount(<TablesRound />);
+  await confirmTakeOff(container, ["Soy milk"]);
+  for (let step = 0; step < 8; step += 1)
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
   expect(document.activeElement).toBe(buttonNamed(container, "Take dishes off round 2"));
 });

@@ -45,12 +45,23 @@ export function useSettledFocus(selectors: readonly string[], gone: boolean) {
 
 /** The focus goes to the place only when it has nowhere else to be (never taken from staff). */
 export function returnSettledFocus(place: HTMLElement, selectors: readonly string[]): boolean {
-  if (!place.isConnected) return false;
   const active = document.activeElement;
   if (active !== null && active !== document.body && active.isConnected) return false;
+  if (!place.isConnected) {
+    // b24: the place was drawn again (a reread replaced it): its opener, found by its stable
+    // `data-focus-opener` value, is the one place that still says where staff were.
+    for (const selector of selectors) {
+      if (!selector.startsWith("[data-focus-opener=")) continue;
+      const element = document.querySelector<HTMLElement>(selector);
+      if (element === null || element.matches(":disabled")) continue;
+      element.focus();
+      return document.activeElement === element;
+    }
+    return false;
+  }
   for (const selector of selectors) {
     const element = place.querySelector<HTMLElement>(selector);
-    if (element === null || (element as HTMLButtonElement).disabled === true) continue;
+    if (element === null || element.matches(":disabled")) continue;
     focusable(element).focus();
     return true;
   }
@@ -62,6 +73,34 @@ function focusable(element: HTMLElement): HTMLElement {
   if (element.tabIndex < 0 && !element.hasAttribute("tabindex"))
     element.setAttribute("tabindex", "-1");
   return element;
+}
+
+/** How long a closed panel keeps trying to give the focus back to its opener (ms). */
+export const OPENER_FOCUS_WAIT_MS = 6_000;
+const OPENER_FOCUS_STEP_MS = 50;
+
+/**
+ * b24 (live23, Tables): a confirm rereads the floor, which locks the table panel (its fieldset
+ * disabled) in the same render as the take-off or comp panel closes, and the table's order may be
+ * drawn again, replacing the opener: `focus()` on it then did nothing and the focus stayed on the
+ * page. The opener is found again by its `data-focus-opener` value and focused once it can take
+ * it, for a few seconds at most; never once staff have put the focus somewhere else.
+ */
+export function focusOpenerWhenReady(value: string, current: HTMLElement | null): void {
+  const selector = focusOpenerSelector(value);
+  const until = Date.now() + OPENER_FOCUS_WAIT_MS;
+  const attempt = () => {
+    const active = document.activeElement;
+    if (active !== null && active !== document.body && active.isConnected) return;
+    const opener =
+      current?.isConnected === true ? current : document.querySelector<HTMLElement>(selector);
+    if (opener !== null && !opener.matches(":disabled")) {
+      opener.focus();
+      if (document.activeElement === opener) return;
+    }
+    if (Date.now() < until) setTimeout(attempt, OPENER_FOCUS_STEP_MS);
+  };
+  attempt();
 }
 
 /** The selector of an action's button by its `data-focus-opener` value (references only). */

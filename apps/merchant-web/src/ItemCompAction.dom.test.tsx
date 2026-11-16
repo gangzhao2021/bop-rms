@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, type ReactNode } from "react";
+import { act, type ReactNode, useState } from "react";
 import { afterEach, expect, it } from "vitest";
 import { parseCurrentOrderDetail } from "./current-order-queue-client.js";
 import { ItemCompAction } from "./ItemCompAction.js";
@@ -307,4 +307,78 @@ it("b23 review: the last dishes comped with the action still there: the focus go
   });
   await later();
   expect(document.activeElement).toBe(container.querySelector(".table-order-rounds__comps"));
+});
+
+// b24 (live23, TM2 L23 MCT A): on Tables, comping one dish while others stay compable left the
+// focus on the page (BODY) for 5 s+. The confirm rereads the floor, which locks the table panel
+// (its fieldset disabled) in the same render as the panel closes, so the opener could not take the
+// focus; and the table's order may be drawn again, replacing the opener.
+function TablesPanel({ remount }: { readonly remount: boolean }) {
+  const [locked, setLocked] = useState(false);
+  const [revision, setRevision] = useState(0);
+  return table(
+    false,
+    <fieldset disabled={locked}>
+      <ItemCompAction
+        key={remount ? revision : 0}
+        order={order}
+        lines={lines.items}
+        csrf={"a".repeat(43)}
+        fetcher={compFetcher}
+        onSettled={() => {
+          setLocked(true);
+          setTimeout(() => {
+            setLocked(false);
+            setRevision((value) => value + 1);
+          }, 40);
+        }}
+      />
+    </fieldset>,
+  );
+}
+const compOne = async (container: HTMLElement) => {
+  await click(buttonNamed(container, "Comp or discount"));
+  await pause();
+  await tick(container, "Smashed cucumber");
+  await click(
+    [...container.querySelectorAll('input[name="item-comp-reason"]')].find((input) =>
+      input.parentElement?.textContent?.includes("Goodwill"),
+    ),
+  );
+  await click(buttonNamed(container, "Comp $7.06"));
+  await settle(10);
+};
+/** The floor read again and the panel unlocked (React applies the unlock as each act ends). */
+const reread = async () => {
+  for (let step = 0; step < 8; step += 1)
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+};
+
+it("b24: on Tables one dish comped: the focus goes back to the opener once the panel unlocks", async () => {
+  const { container } = await mount(<TablesPanel remount={false} />);
+  await compOne(container);
+  await reread();
+  expect(document.activeElement).toBe(buttonNamed(container, "Comp or discount"));
+});
+
+it("b24: on Tables the opener drawn again after the reread still gets the focus", async () => {
+  const { container } = await mount(<TablesPanel remount />);
+  await compOne(container);
+  await reread();
+  expect(document.activeElement).toBe(buttonNamed(container, "Comp or discount"));
+});
+
+it("b24: staff already moved on: the focus is never taken back", async () => {
+  const { container } = await mount(
+    <>
+      <TablesPanel remount={false} />
+      <input aria-label="Search" />
+    </>,
+  );
+  await compOne(container);
+  container.querySelector<HTMLInputElement>('input[aria-label="Search"]')?.focus();
+  await reread();
+  expect(document.activeElement).toBe(container.querySelector('input[aria-label="Search"]'));
 });
