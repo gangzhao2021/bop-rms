@@ -141,6 +141,15 @@
   padding-inline: 0;
 }
 
+/* v15 b21: a round's total is the card's main figure (16, 600, body colour). It sat under the
+   card's grey 14px note style, so a refund line under it (16, 400, like Subtotal and Tax) read as
+   the round's figure. */
+.customer-page .order-status__batch > p.order-status__total {
+  color: var(--bop-color-text-default);
+  font-size: 16px;
+  font-weight: 600;
+}
+
 :where(.customer-page) :focus-visible {
   outline: 2px solid var(--bop-color-focus);
   outline-offset: 2px;

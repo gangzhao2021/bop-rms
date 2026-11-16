@@ -325,6 +325,132 @@ test.describe("@production CUST-DINE-IN-SESSION table view", () => {
       await expect(main.getByText(/NotCharged|StoreCancelled|018f2330/u)).toHaveCount(0);
     });
 
+  // v15 b21 live check: "Refunded $5.37" read at 16px regular while "Round total $8.19" read at
+  // 13px bold grey, so the refund looked like the round's figure. The round total is the main
+  // figure (16, 600, body colour); the refund is a secondary line styled like Subtotal and Tax.
+  for (const language of ["en", "zh-Hans"] as const)
+    test(`v15 b21: a round's total is its main figure and its refund a secondary line (${language})`, async ({
+      page,
+    }) => {
+      const zh = language === "zh-Hans";
+      const round = (overrides: Record<string, unknown>) => ({
+        orderedBy: "You",
+        submittedAt: "2026-10-13T17:40:00.000Z",
+        cancelsAt: null,
+        storeCancellationReason: null,
+        ...overrides,
+      });
+      const item = (displayName: string, cancelled: boolean, total: string, before: string) => ({
+        displayName,
+        quantity: 1,
+        servedQuantity: cancelled ? 0 : 1,
+        cancelled,
+        lineTotal: cad(total),
+        priceBeforeTax: cad(before),
+      });
+      const view = {
+        schemaVersion: 1,
+        session: {
+          ...session.session,
+          rounds: [
+            round({
+              roundNumber: 1,
+              status: "Serving",
+              payment: "Paid",
+              items: [
+                item("Synthetic steamed rice", false, "282", "250"),
+                item("Synthetic lemon tea", true, "537", "475"),
+              ],
+              subtotal: cad("725"),
+              tax: cad("94"),
+              itemsTotal: cad("819"),
+              refunded: cad("537"),
+            }),
+            round({
+              roundNumber: 2,
+              status: "Serving",
+              payment: "Paid",
+              items: [item("Synthetic beef noodles", false, "1413", "1250")],
+              subtotal: cad("1250"),
+              tax: cad("163"),
+              itemsTotal: cad("1413"),
+            }),
+            round({
+              roundNumber: 3,
+              status: "NotPaidCancelled",
+              payment: "NotCharged",
+              items: [item("Synthetic dumplings", false, "1130", "1000")],
+              subtotal: cad("1000"),
+              tax: cad("130"),
+              itemsTotal: cad("1130"),
+            }),
+          ],
+          summary: {
+            paid: cad("2232"),
+            refunded: cad("537"),
+            refundPending: cad("0"),
+            due: cad("0"),
+            ordered: { subtotal: cad("1500"), tax: cad("195"), total: cad("1695") },
+          },
+        },
+      };
+      await enterTable(page, () => ({ status: 200, json: view }));
+      const main = page.getByRole("main");
+      if (zh) await page.getByRole("button", { name: "切换到中文" }).click();
+      // Newest round first: each card is found by its round number.
+      const cards = {
+        nth: (index: number) =>
+          main.locator("article.order-status__batch").filter({
+            has: page.getByRole("heading", {
+              name: new RegExp(zh ? `^第 ${index + 1} 轮` : `^Round ${index + 1} `, "u"),
+            }),
+          }),
+      };
+      await expect(cards.nth(0)).toContainText(zh ? "已退款$5.37" : "Refunded$5.37");
+      const style = (locator: ReturnType<typeof page.locator>) =>
+        locator.evaluate((element) => {
+          const computed = getComputedStyle(element);
+          return {
+            size: computed.fontSize,
+            weight: computed.fontWeight,
+            color: computed.color,
+            top: element.getBoundingClientRect().top,
+          };
+        });
+      const body = await style(cards.nth(0).locator("h3"));
+      const row = (card: number, label: string) =>
+        cards
+          .nth(card)
+          .locator(".order-status__money > div, p.order-status__total")
+          .filter({ hasText: label });
+      for (const width of [1440, 1024, 390]) {
+        await page.setViewportSize({ width, height: 900 });
+        await expectNoHorizontalOverflow(page);
+        // Every round's total, paid, refunded or not charged: 16px, 600, the body colour.
+        for (const card of [0, 1, 2]) {
+          const total = await style(row(card, zh ? "本轮合计" : "Round total"));
+          expect(total).toMatchObject({ size: "16px", weight: "600", color: body.color });
+        }
+        // The refund reads like Subtotal and Tax, under the total it came out of.
+        const subtotal = await style(row(0, zh ? "小计" : "Subtotal"));
+        const refund = await style(row(0, zh ? "已退款" : "Refunded"));
+        const total = await style(row(0, zh ? "本轮合计" : "Round total"));
+        expect({ ...refund, top: 0 }).toEqual({ ...subtotal, top: 0 });
+        expect(refund.weight).toBe("400");
+        expect(refund.top).toBeGreaterThan(total.top);
+        await expect(row(0, zh ? "本轮合计" : "Round total")).toHaveText(
+          zh ? "本轮合计$8.19" : "Round total$8.19",
+        );
+        await expect(row(2, zh ? "本轮合计" : "Round total")).toHaveText(
+          zh ? "本轮合计未扣款" : "Round totalNot charged",
+        );
+        for (const card of [0, 1, 2])
+          await cards.nth(card).screenshot({
+            path: `test-results-b21/round-${["refunded", "paid", "not-charged"][card]}-${language}-${width}.png`,
+          });
+      }
+    });
+
   test("WP-2423 D5: lists item prices before tax, then subtotal, tax and total per round and table", async ({
     page,
   }) => {
