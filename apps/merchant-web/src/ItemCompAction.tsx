@@ -503,7 +503,7 @@ export function ItemCompAction({
       <fieldset className="table-checkout__method" disabled={busy}>
         <legend>{t("Reason")}</legend>
         {compReasons.map((code) => (
-          <label key={code}>
+          <label key={code} data-choice={compReasonLabel[code]}>
             <input
               type="radio"
               name="item-comp-reason"

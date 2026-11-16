@@ -942,20 +942,24 @@ export function TableCheckout({
                   {tipOptions.length === 0 ? null : (
                     <fieldset className="table-checkout__tip" disabled={busy || locked}>
                       <legend>{t("Tip")}</legend>
-                      {tipOptions.map((value) => (
-                        <label key={value}>
-                          <input
-                            type="radio"
-                            name="table-tip"
-                            checked={chosenTip === value}
-                            onChange={() => setTip(value)}
-                          />
-                          {value === "0"
+                      {tipOptions.map((value) => {
+                        const words =
+                          value === "0"
                             ? t("No tip")
-                            : `${value}% · ${cad((subtotal * BigInt(value) + 50n) / 100n)}`}
-                        </label>
-                      ))}
-                      <label>
+                            : `${value}% · ${cad((subtotal * BigInt(value) + 50n) / 100n)}`;
+                        return (
+                          <label key={value} data-choice={words}>
+                            <input
+                              type="radio"
+                              name="table-tip"
+                              checked={chosenTip === value}
+                              onChange={() => setTip(value)}
+                            />
+                            {words}
+                          </label>
+                        );
+                      })}
+                      <label data-choice={t("Other amount")}>
                         <input
                           type="radio"
                           name="table-tip"
@@ -977,7 +981,7 @@ export function TableCheckout({
                   )}
                   <fieldset className="table-checkout__method" disabled={busy || locked}>
                     <legend>{t("How the table pays")}</legend>
-                    <label>
+                    <label data-choice={t("Card machine")}>
                       <input
                         type="radio"
                         name="table-method"
@@ -986,7 +990,7 @@ export function TableCheckout({
                       />
                       {t("Card machine")}
                     </label>
-                    <label>
+                    <label data-choice={t("Cash")}>
                       <input
                         type="radio"
                         name="table-method"

@@ -2481,9 +2481,21 @@ for (const language of ["en", "zh-Hans"] as const)
     await expect(card).toBeFocused();
     const ring = await card.locator("xpath=..").evaluate((element) => {
       const style = getComputedStyle(element);
-      return { style: style.outlineStyle, width: style.outlineWidth, color: style.outlineColor };
+      return {
+        style: style.outlineStyle,
+        width: style.outlineWidth,
+        color: style.outlineColor,
+        offset: style.outlineOffset,
+      };
     });
-    expect(ring).toEqual({ style: "solid", width: "2px", color: accent });
+    expect(ring).toEqual({ style: "solid", width: "2px", color: accent, offset: "2px" });
+    // b24 review: the words kept for the width at 600 are never read out.
+    await expect(
+      method.getByRole("radio", { name: zh ? "现金" : "Cash", exact: true }),
+    ).toHaveCount(1);
+    await expect(
+      checkout.getByRole("button", { name: zh ? "整桌一起" : "All together", exact: true }),
+    ).toHaveCount(1);
     const shots = process.env.B24_SHOTS ?? "test-results-b24/shots";
     for (const width of [1440, 1024, 390]) {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
@@ -2497,6 +2509,29 @@ for (const language of ["en", "zh-Hans"] as const)
             .evaluateAll((labels) => labels.map((label) => label.getBoundingClientRect().height));
           expect(Math.min(...heights)).toBeGreaterThanOrEqual(44);
         }
+      // b24 review (seen at 390 zh-Hans): choosing another tip or method moves nothing, at any width.
+      const boxes = () =>
+        checkout
+          .locator(
+            ".table-checkout__tip label, .table-checkout__method label, .table-split__modes button",
+          )
+          .evaluateAll((elements) =>
+            elements.map((element) => {
+              // Where each choice sits in its own group (the page may scroll to the one checked).
+              const box = element.getBoundingClientRect();
+              const group = element.parentElement?.getBoundingClientRect() ?? box;
+              return [box.x - group.x, box.y - group.y, box.width, box.height].map((value) =>
+                Math.round(value * 4),
+              );
+            }),
+          );
+      const before = await boxes();
+      await tip.getByRole("radio", { name: zh ? "不加小费" : "No tip" }).check();
+      await method.getByRole("radio", { name: zh ? "现金" : "Cash", exact: true }).check();
+      expect(await boxes()).toEqual(before);
+      await tip.getByRole("radio", { name: /15%/u }).check();
+      await card.check();
+      expect(await boxes()).toEqual(before);
       await checkout.scrollIntoViewIfNeeded();
       await page.screenshot({
         path: `${shots}/tables-checkout-choices-${language}-${String(width)}.png`,

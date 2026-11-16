@@ -868,6 +868,34 @@
   outline: 2px solid var(--bop-color-accent);
   outline-offset: 2px;
 }
+/* b24 review (390 zh-Hans): the chosen choice turning 600 never moves the row. Each choice keeps
+   the width of its words at 600: a copy of them (data-choice) at 600 under the words, no height,
+   hidden and with empty alt text so it is never read out. */
+.workspace-page.tables-v3 :is(.table-checkout__tip, .table-checkout__method) label[data-choice],
+.workspace-page.tables-v3 .table-panel .table-split__modes button[data-choice] {
+  display: inline-flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 0;
+}
+.workspace-page.tables-v3
+  :is(.table-checkout__tip, .table-checkout__method)
+  label[data-choice]::after,
+.workspace-page.tables-v3 .table-panel .table-split__modes button[data-choice]::after {
+  content: attr(data-choice);
+  content: attr(data-choice) / "";
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  font-weight: 600;
+  pointer-events: none;
+  user-select: none;
+}
+.workspace-page.tables-v3 .table-panel .table-split__modes button:focus-visible {
+  outline: 2px solid var(--bop-color-accent);
+  outline-offset: 2px;
+}
 .workspace-page.tables-v3 .table-checkout__confirm {
   display: grid;
   gap: 12px;

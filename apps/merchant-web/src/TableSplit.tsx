@@ -260,27 +260,32 @@ export function TableSplitControls({
           {(offersByRounds
             ? (["Whole", "Even", "ByItems", "ByRounds"] as const)
             : (["Whole", "Even", "ByItems"] as const)
-          ).map((value) => (
-            <button
-              key={value}
-              type="button"
-              aria-pressed={mode === value}
-              disabled={disabled || busy || locked}
-              onClick={() => {
-                setMode(value);
-                if (value === "Whole" && split !== null) void apply("Whole");
-                if (value === "Even" && !evenApplied) void apply("Even");
-              }}
-            >
-              {value === "Whole"
+          ).map((value) => {
+            const words =
+              value === "Whole"
                 ? t("All together")
                 : value === "Even"
                   ? t("Split evenly")
                   : value === "ByItems"
                     ? t("By dish")
-                    : t("Each pays own rounds")}
-            </button>
-          ))}
+                    : t("Each pays own rounds");
+            return (
+              <button
+                key={value}
+                type="button"
+                data-choice={words}
+                aria-pressed={mode === value}
+                disabled={disabled || busy || locked}
+                onClick={() => {
+                  setMode(value);
+                  if (value === "Whole" && split !== null) void apply("Whole");
+                  if (value === "Even" && !evenApplied) void apply("Even");
+                }}
+              >
+                {words}
+              </button>
+            );
+          })}
         </div>
       )}
       {(mode === "Even" || mode === "ByItems") && !locked ? (
