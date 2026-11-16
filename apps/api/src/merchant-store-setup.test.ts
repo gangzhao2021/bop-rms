@@ -765,6 +765,8 @@ const feeBody = () => ({
   ...body(),
   content: {
     ...createUnconfiguredStoreSetupDraftContentV2(),
+    // b24: a fee applies only to services the setup offers.
+    enabledServiceModes: { state: "Configured", value: ["Pickup"] },
     feeContexts: {
       state: "Configured",
       value: [
@@ -895,6 +897,7 @@ it("saves a Tip that is On without a tax classification and never reads the regi
   f.state.classificationDenied = true;
   const content = {
     ...createUnconfiguredStoreSetupDraftContentV2(),
+    enabledServiceModes: { state: "Configured", value: ["Pickup"] },
     feeContexts: {
       state: "Configured",
       value: [

@@ -1,6 +1,7 @@
 import {
   parseStoreSetupSaveCommand,
   parseStoreSetupResolveCommand,
+  storeSetupFeesWithinServices,
   StoreSetupOperationError,
   type StoreSetupOperationScope,
 } from "@rms/store";
@@ -54,18 +55,20 @@ export function bindMerchantStoreSetupCommand(raw: unknown, actualScope: StoreSe
       expectedRevision: input.expectedRevision,
       purposeCode: "STORE_SETUP_DRAFT",
     };
-    if (input.command === "SaveDraft")
-      return Object.freeze({
-        method: "save" as const,
-        command: parseStoreSetupSaveCommand({
-          profile:
-            Object.getOwnPropertyDescriptor(input.content ?? {}, "feeContexts") !== undefined
-              ? "StoreSetupSaveV2"
-              : "StoreSetupSaveV1",
-          ...identity,
-          content: input.content,
-        }),
+    if (input.command === "SaveDraft") {
+      const command = parseStoreSetupSaveCommand({
+        profile:
+          Object.getOwnPropertyDescriptor(input.content ?? {}, "feeContexts") !== undefined
+            ? "StoreSetupSaveV2"
+            : "StoreSetupSaveV1",
+        ...identity,
+        content: input.content,
       });
+      // b24 (Owner 2026-11-16): a fee may apply only to orders this setup offers; any client that
+      // sends a fee for a service the setup does not offer is refused, as the page never sends it.
+      if (!storeSetupFeesWithinServices(command.content)) return invalid();
+      return Object.freeze({ method: "save" as const, command });
+    }
     if (input.command === "ResolveOriginal")
       return Object.freeze({
         method: "resolve" as const,

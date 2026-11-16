@@ -256,6 +256,21 @@ export function parseStoreSetupDraftContent(value: unknown): StoreSetupDraftCont
     return fail("STORE_SETUP_STATE_INVALID");
   return Object.freeze(content);
 }
+/**
+ * WP-2423 b24 (Owner 2026-11-16): a fee that is on applies only to orders the setup offers. True
+ * when every order type named by a fee that is on is one of the setup's services (none are offered
+ * while the services are not set). A configuration made from a setup already enforces this
+ * (createStoreConfigurationVersion); a draft save from staff is held to it too, so a setup that
+ * could never be sent is not saved. Stored drafts and originals are read as they are.
+ */
+export function storeSetupFeesWithinServices(content: StoreSetupDraftContent): boolean {
+  if (content.feeContexts?.state !== "Configured") return true;
+  const offered =
+    content.enabledServiceModes.state === "Configured" ? content.enabledServiceModes.value : [];
+  return content.feeContexts.value.every(
+    (fee) => fee.state !== "Enabled" || fee.orderTypes.every((mode) => offered.includes(mode)),
+  );
+}
 export function createUnconfiguredStoreSetupDraftContent(): StoreSetupDraftContent {
   return parseStoreSetupDraftContent(
     Object.fromEntries(

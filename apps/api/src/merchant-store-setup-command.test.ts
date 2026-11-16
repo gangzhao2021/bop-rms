@@ -228,3 +228,54 @@ it("does not execute a feeContexts getter or silently downgrade malformed V2", (
     content: { ...createUnconfiguredStoreSetupDraftContent(), feeContexts: undefined },
   });
 });
+
+// b24 (Owner 2026-11-16 "服务费的订单类型为什么可以勾选服务方式没有勾选的选项？"): a draft save whose
+// fee applies to a service the setup does not offer is refused, whatever client sends it.
+it("b24: refuses a fee on for an order type the setup's services do not offer", () => {
+  const fees = (orderTypes: readonly string[]) => ({
+    state: "Configured",
+    value: [
+      {
+        chargeType: "ServiceCharge",
+        state: "Enabled",
+        taxClassificationReference: id(9),
+        orderTypes,
+      },
+      { chargeType: "DeliveryFee", state: "Disabled" },
+      { chargeType: "Tip", state: "Disabled" },
+    ],
+  });
+  const content = (modes: readonly string[] | null, orderTypes: readonly string[]) => ({
+    ...createUnconfiguredStoreSetupDraftContentV2(),
+    enabledServiceModes:
+      modes === null ? { state: "Unconfigured" } : { state: "Configured", value: modes },
+    feeContexts: fees(orderTypes),
+  });
+  rejected({ ...save(), content: content(["DineIn"], ["DineIn", "Delivery"]) });
+  rejected({ ...save(), content: content(null, ["DineIn"]) });
+  const bound = bindMerchantStoreSetupCommand(
+    { ...save(), content: content(["DineIn", "Pickup"], ["DineIn"]) },
+    scope,
+  );
+  expect(bound.method).toBe("save");
+  // A fee that is off names no order types, whatever the services.
+  expect(
+    bindMerchantStoreSetupCommand(
+      {
+        ...save(),
+        content: {
+          ...createUnconfiguredStoreSetupDraftContentV2(),
+          feeContexts: {
+            state: "Configured",
+            value: [
+              { chargeType: "ServiceCharge", state: "Disabled" },
+              { chargeType: "DeliveryFee", state: "Disabled" },
+              { chargeType: "Tip", state: "Unconfigured" },
+            ],
+          },
+        },
+      },
+      scope,
+    ).method,
+  ).toBe("save");
+});
