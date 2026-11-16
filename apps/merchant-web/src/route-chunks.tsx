@@ -140,10 +140,16 @@ export function WithModule<M>({
  * Shows "Try again" when a screen's code could not be loaded; any other rendering fault still
  * reaches the application boundary. Opening another screen clears the message. Browsers keep a
  * failed module download for the life of the page, so "Try again" reloads the page once the device
- * is online; while it is still offline the message says so and nothing is reloaded.
+ * is online; while it is still offline the message says so and nothing is reloaded. b24: the page
+ * also reloads by itself when the browser comes back online.
  */
 export class PageChunkBoundary extends Component<
-  { readonly resetKey: string; readonly children: ReactNode },
+  {
+    readonly resetKey: string;
+    readonly children: ReactNode;
+    /** How the page is opened again (the browser's reload; a test passes its own). */
+    readonly reload?: (() => void) | undefined;
+  },
   { readonly error: unknown; readonly stillOffline: boolean }
 > {
   override state: { readonly error: unknown; readonly stillOffline: boolean } = {
@@ -159,10 +165,28 @@ export class PageChunkBoundary extends Component<
       this.setState({ error: null, stillOffline: false });
     }
   }
+  private readonly reload = () => {
+    if (this.props.reload === undefined) globalThis.location.reload();
+    else this.props.reload();
+  };
   private readonly retry = () => {
-    if (globalThis.navigator.onLine) globalThis.location.reload();
+    if (globalThis.navigator.onLine) this.reload();
     else this.setState({ stillOffline: true });
   };
+  /**
+   * b24 (live23): the message stayed after the Wi-Fi came back until staff pressed Try again. Once
+   * the browser is back online the page opens again by itself (nothing was saved on it, so
+   * reloading loses nothing); Try again stays for a connection the browser can't see.
+   */
+  private readonly backOnline = () => {
+    if (this.state.error instanceof PageChunkError) this.reload();
+  };
+  override componentDidMount() {
+    globalThis.addEventListener("online", this.backOnline);
+  }
+  override componentWillUnmount() {
+    globalThis.removeEventListener("online", this.backOnline);
+  }
   override render() {
     const { error, stillOffline } = this.state;
     if (error === null) return this.props.children;

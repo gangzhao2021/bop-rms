@@ -4,7 +4,8 @@ import { followWorkspaceLink } from "./workspace-navigation";
 // WP-2423 C2: screens outside the first download load on first use. When a screen's code does
 // not arrive (old files gone after a deploy, or dropped Wi-Fi), the app reloads once to pick up
 // new files, then shows plain words with "Try again" (a page reload once online, since browsers
-// keep a failed module download) instead of a raw error.
+// keep a failed module download) instead of a raw error. b24: once the browser is back online
+// the page reloads by itself.
 test("@production a screen whose code does not arrive reloads once, then offers Try again", async ({
   page,
 }) => {
@@ -28,9 +29,9 @@ test("@production a screen whose code does not arrive reloads once, then offers 
   await page.getByRole("button", { name: "Try again" }).click();
   await expect(page.getByText("This device is still offline.", { exact: false })).toBeVisible();
   expect(documents).toBe(2);
-  await page.context().setOffline(false);
+  // b24 (live23): back online, the page opens again by itself; staff need not press Try again.
   blocked = false;
-  await page.getByRole("button", { name: "Try again" }).click();
+  await page.context().setOffline(false);
   await expect(
     page.getByRole("heading", { name: "Brand setup templates", exact: true }),
   ).toBeVisible();

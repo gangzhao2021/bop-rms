@@ -41,6 +41,17 @@ export function PageDidNotLoad({
   // that, with the way to sign in again, never as a dropped connection or a fault. Once this
   // screen's sign-in works again (Check again), the page reads again by itself.
   const live = useReadAgainWhenSignedInAgain(onRetry);
+  // b24 (live23): a read the connection cut off is read again by itself once the browser is back
+  // online, instead of waiting for Try again; a fault on our side is not (being online fixes
+  // nothing there).
+  const retry = useRef(onRetry);
+  retry.current = onRetry;
+  useEffect(() => {
+    if (code !== "Offline") return;
+    const backOnline = () => retry.current();
+    globalThis.addEventListener("online", backOnline);
+    return () => globalThis.removeEventListener("online", backOnline);
+  }, [code]);
   const panel =
     code === "SignedOut" || !live ? (
       <StatePanel heading={t("Sign in again")} tone="neutral" status>
