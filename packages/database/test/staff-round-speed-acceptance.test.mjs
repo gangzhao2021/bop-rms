@@ -97,14 +97,21 @@ pg.Client.prototype.query = function (config, ...rest) {
  * still took 2.1–2.4 s here at load 7–9; the review cut single-read transactions (each BEGIN,
  * read, COMMIT) of the guest's cart now answered from the request's own check, and scope settings
  * sent as round trips of their own (now with BEGIN): about 2,180 statements a later round. What
- * is left grows with the dishes in a round (about 500 statements a dish: the menu, availability,
- * recipe and stock snapshot reads, each switching the Store scope off and on again).
+ * is left grows with the dishes in a round (about 340 statements a dish, 280 after the cut below:
+ * the menu, availability, recipe and stock snapshot reads, each switching the Store scope off and
+ * on again, and the dish's own cart command and its guest checks).
+ * Staff round round trips (CI measured 2.1–2.36 s, 2,491 / 2,149 statements): a dish's checks are
+ * one read snapshot (each check still read, in order) instead of five, a snapshot begins with its
+ * first statement and the scope it runs under, its mode and a scope it knows are not read back,
+ * and the staff member's Session runs on the pilot's runner as the pilot's does (it ran on a
+ * connection of its own opened for each transaction): 2,162 statements the opening round, 1,765
+ * a later one (from 2,479 / 2,090 here).
  *
  * Under the restricted NOBYPASSRLS pilot role, on the pilot's own transaction runner
  * (createTenantTransactionRunner) and the pilot's staff round composition: twelve rounds on one
  * pay-each-round table, each charged on the card machine and accepted, as a real Store does; and
  * the opening round on another Store's free table once the process is warm.
- * - Statement guard: each round is held to 2,250 statements (4,136 before), and from the third
+ * - Statement guard: each round is held to 2,000 statements (4,136 before), and from the third
  *   round on every round costs the same (before: 3 more a round).
  * - Time: every round, Send to the card machine's amount, is under 2 s on this machine (the
  *   slowest round, not the median). This times the pilot's command, not the HTTP route and the
@@ -126,9 +133,9 @@ const reviewedGuestChecks = [
   "SELECT 1 FROM rms_dining.dining_participant_readmission WHERE brand_id=$1 AND store_id=$2 AND from_guest_session_id=$3",
   "SELECT s.session_snapshot AS session,p.participant_snapshot AS participant,t.table_snapshot AS table FROM rms_dining.din",
 ].sort();
-const roundBudget = 2250;
-/** The opening round seats the party and sends two dishes: about 500 statements a dish. */
-const openingBudget = 2750;
+const roundBudget = 2000;
+/** The opening round seats the party and sends two dishes: about 280 statements a dish. */
+const openingBudget = 2300;
 const roundMs = 2000;
 /** One staff round as one request (the pilot's own wrapper joins this one), timed and counted. */
 async function timedRound(counter, as, command) {

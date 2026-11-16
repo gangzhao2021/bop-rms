@@ -415,7 +415,13 @@ export async function prepareRealStaffRoundStore({
     expectedDatabaseName: database,
   });
 
-  /** A staff member with a real Session (membership, role, permission grants). */
+  /**
+   * A staff member with a real Session (membership, role, permission grants). WP-2423 M35 (staff
+   * round round trips): their Session and its authority are read on the pilot's runner, as the
+   * pilot's staff sessions are (pilot-merchant-session: the installation's `transactions`); they
+   * were read on a connection of their own opened for every transaction (`asApi`), which the
+   * pilot never does: twelve connections and about 220 statements more a round than the pilot.
+   */
   let sessions = 0;
   const staff = (actor, extraPermissions) => {
     sessions += 1;
@@ -424,7 +430,7 @@ export async function prepareRealStaffRoundStore({
     const sessionPrefix = (base + 1).toString(16).padStart(8, "0");
     return seedMerchantAcceptanceSession({
       admin,
-      runner: { run: asApi },
+      runner: resources.transactions,
       scope: ownerScope,
       actor,
       at: now(),
