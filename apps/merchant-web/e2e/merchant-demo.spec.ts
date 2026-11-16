@@ -9,17 +9,18 @@ const ORDER_REFERENCE = "018f7600-0000-7000-8000-000000000001";
 const WORK_ITEM_REFERENCE = "018f0f58-767a-7f3b-a1d0-000000000401";
 
 const routes = [
-  // Pilot pages no longer print Screen IDs; the identity is the page's own heading.
+  // Pilot pages no longer print Screen IDs; the identity is the page's own heading (the workspace
+  // frame shows no page description since the one-frame change).
   { path: "/app", identity: "Training Store" },
-  { path: "/app/organization/stores", identity: "Permission-trimmed Store configuration" },
-  { path: `/app/organization/stores/${STORE_REFERENCE}`, identity: "Store · Draft" },
+  { path: "/app/organization/stores", identity: "Authorized Stores" },
+  { path: `/app/organization/stores/${STORE_REFERENCE}`, identity: "Store detail" },
   { path: `/app/organization/stores/${STORE_REFERENCE}/setup`, identity: "Store setup" },
   {
     path: `/app/organization/stores/${STORE_REFERENCE}/service`,
     identity: "Hours & ordering",
   },
-  { path: "/app/commerce/menus", identity: "Menus are unavailable" },
-  { path: `/app/commerce/menus/${MENU_REFERENCE}/edit`, identity: "Synthetic Brand" },
+  // The local demo has no menu source: the Menus page fails closed with its failure state.
+  { path: "/app/commerce/menus", identity: "This page didn't load" },
   { path: "/operations/orders", identity: "ORD-1002" },
   { path: `/operations/orders/${ORDER_REFERENCE}`, identity: "Synthetic mushroom rice bowl" },
   { path: "/operations/kitchen", identity: "Kitchen display" },
@@ -29,6 +30,12 @@ const routes = [
   },
   { path: "/app/compliance", identity: "CMP-DASHBOARD" },
   { path: "/platform/support-cases", identity: "PLT-SUPPORT-CASE" },
+] as const;
+// Not a demo page since the menu builder moved to the real menu source (/menus/:id, no longer
+// /menus/:id/edit): production still has to fail closed on it.
+const productionRoutes = [
+  ...routes,
+  { path: `/app/commerce/menus/${MENU_REFERENCE}`, identity: "Menu builder" },
 ] as const;
 
 function monitorBrowserBoundary(page: Page) {
@@ -73,7 +80,7 @@ async function filesBelow(root: string): Promise<string[]> {
 
 test.describe("@demo local-only Merchant showcase", () => {
   for (const route of routes) {
-    test(`${route.identity} stays synthetic, local, and responsive`, async ({ page }) => {
+    test(`${route.path} stays synthetic, local, and responsive`, async ({ page }) => {
       const violations = monitorBrowserBoundary(page);
       await page.goto(route.path);
       await expect(page.getByText(route.identity, { exact: false }).first()).toBeVisible();
@@ -125,8 +132,8 @@ test.describe("@production production demo exclusion", () => {
       expect(emittedText).not.toContain(marker);
   });
 
-  for (const route of routes) {
-    test(`${route.identity} fails closed without synthetic authority`, async ({ page }) => {
+  for (const route of productionRoutes) {
+    test(`${route.path} fails closed without synthetic authority`, async ({ page }) => {
       const violations = monitorBrowserBoundary(page);
       await page.route("**/merchant/session", async (request) =>
         request.fulfill({ status: 401, contentType: "application/json", body: "{}" }),
