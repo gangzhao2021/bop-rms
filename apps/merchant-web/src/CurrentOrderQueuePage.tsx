@@ -1914,7 +1914,12 @@ function QueuedOrderLines({
    * order's detail once read (undefined while it isn't: the action then links to the order's page).
    */
   readonly roundAction?:
-    | ((batch: QueuedOrder["batches"][number], detail?: CurrentOrderDetail) => React.ReactNode)
+    | ((
+        batch: QueuedOrder["batches"][number],
+        detail?: CurrentOrderDetail,
+        /** The lines are still being read (not failed): the action waits for them in place. */
+        loading?: boolean,
+      ) => React.ReactNode)
     | undefined;
   /** The list's rounds: while the items are read (or can't be), each round still shows its head. */
   readonly batches?: readonly QueuedOrder["batches"][number][] | undefined;
@@ -2016,7 +2021,7 @@ function QueuedOrderLines({
                 </header>
                 {roundHead(batch)}
                 <DiningRoundProgressItems sequence={batch.sequence} />
-                {roundAction?.(batch)}
+                {roundAction?.(batch, undefined, state.kind === "Loading")}
               </section>
             ))}
         </RoundPaymentWaitContext.Provider>
@@ -3914,6 +3919,7 @@ export function CurrentOrderQueuePage({
     batch: QueuedOrder["batches"][number],
     lines: CurrentOrderDetail["lines"]["items"] | undefined,
     roundMinor?: string,
+    linesLoading = false,
   ) =>
     !takeOffInLines(order, batch) ? null : removeRefusals[batch.orderBatchReference] !==
       undefined ? (
@@ -3955,6 +3961,12 @@ export function CurrentOrderQueuePage({
             }
             onSettled={() => reload(after)}
           />
+        ) : linesLoading ? (
+          // b22 review: while the dishes are being read, the same button in the same place, not
+          // pressable yet; never a link to the order's page that turns into it a moment later.
+          <button type="button" disabled>
+            {t("Take dishes off round {sequence}", { sequence: batch.sequence })}
+          </button>
         ) : (
           // The order's dishes could not be read here: its page, with this round's panel open.
           <Link
@@ -4283,6 +4295,31 @@ export function CurrentOrderQueuePage({
   };
   const single = orderReference !== undefined;
   const detail = state.kind === "Ready" ? state.detail : undefined;
+  // b22 review: staff arrived for a round whose dishes can no longer come off (taken off, started
+  // or paid elsewhere meanwhile): its panel never opens, so the arrival is spent here, and a later
+  // reload never opens that round's panel by surprise. Only once the order and its dishes are read.
+  const arrivalSpent = (() => {
+    if (arrivalRound === null || detail === undefined) return false;
+    const order = detail.view.items.find((entry) => entry.orderReference === orderReference);
+    const batch = order?.batches.find((entry) => entry.sequence === arrivalRound);
+    return (
+      order === undefined ||
+      batch === undefined ||
+      order.currentVersion === null ||
+      !takeOffInLines(order, batch) ||
+      removeRefusals[batch.orderBatchReference] !== undefined ||
+      !detail.lines.items.some(
+        (line) =>
+          line.orderBatchReference === batch.orderBatchReference &&
+          batch.unpaidRemovableItems.includes(line.orderItemReference),
+      )
+    );
+  })();
+  const arrivedNow = useRef(arrived);
+  arrivedNow.current = arrived;
+  useEffect(() => {
+    if (arrivalSpent) arrivedNow.current();
+  }, [arrivalSpent]);
   // M100: only a device with no network pauses Accept (see OrderAcceptanceAction).
   const [offline, setOffline] = useState(browserOffline);
   useEffect(() => {
@@ -4990,7 +5027,7 @@ export function CurrentOrderQueuePage({
                         client={client}
                         revision={linesRevision}
                         roundHead={roundHead}
-                        roundAction={(batch, read) =>
+                        roundAction={(batch, read, loading) =>
                           roundTakeOff(
                             order,
                             batch,
@@ -4999,6 +5036,7 @@ export function CurrentOrderQueuePage({
                               ? undefined
                               : orderBill(read.order)?.rounds?.get(batch.orderBatchReference)
                                   ?.totalMinor,
+                            loading,
                           )
                         }
                         timeZone={timeZone}

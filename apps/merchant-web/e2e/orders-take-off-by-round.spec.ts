@@ -20,7 +20,15 @@ const csrf = "a".repeat(43);
 const money = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
 const shots = process.env.B22_SHOTS ?? "test-results-b22/shots";
 
-async function mock(page: Page, zh: boolean, state: { detailFails: boolean }) {
+interface MockState {
+  detailFails: boolean;
+  /** The order's dishes answer only once this settles (the workbench is still reading them). */
+  hold?: Promise<void> | undefined;
+  /** false: round 3 can no longer come off (taken off or started elsewhere meanwhile). */
+  round3Removable?: boolean;
+}
+
+async function mock(page: Page, zh: boolean, state: MockState) {
   if (zh)
     await page.addInitScript(() => {
       try {
@@ -100,7 +108,7 @@ async function mock(page: Page, zh: boolean, state: { detailFails: boolean }) {
     totalMinor: total,
   });
   // The live bill: $38.99 (tax worked out once), round 2 carries the bill's −1¢.
-  const order = {
+  const orderNow = () => ({
     orderReference: id(1),
     orderNumber: "9",
     orderType: "DineIn",
@@ -108,7 +116,11 @@ async function mock(page: Page, zh: boolean, state: { detailFails: boolean }) {
     submittedAt: "2026-11-16T05:32:48.000Z",
     observedAt: "2026-11-16T05:39:00.000Z",
     initialBatchReference: id(51),
-    batches: [batch(1, []), batch(2, [id(202), id(203)]), batch(3, [id(204)])],
+    batches: [
+      batch(1, []),
+      batch(2, [id(202), id(203)]),
+      batch(3, state.round3Removable === false ? [] : [id(204)]),
+    ],
     canRequestAcceptance: false,
     tableBill: {
       totalMinor: "3899",
@@ -125,19 +137,20 @@ async function mock(page: Page, zh: boolean, state: { detailFails: boolean }) {
     pickupNotCollected: false,
     acceptBy: null,
     awaitingPayment: false,
-  };
+  });
   await page.route("**/merchant/orders*", (route) =>
-    route.fulfill({ headers, json: { items: [order], nextAfterOrderReference: null } }),
+    route.fulfill({ headers, json: { items: [orderNow()], nextAfterOrderReference: null } }),
   );
-  await page.route("**/merchant/orders/detail*", (route) =>
-    state.detailFails
+  await page.route("**/merchant/orders/detail*", async (route) => {
+    await state.hold;
+    return state.detailFails
       ? route.fulfill({ status: 503, headers, json: { error: "unavailable" } })
       : route.fulfill({
           headers,
           json: {
             screenId: "OPS-ORDER-DETAIL",
             pickupContact: null,
-            order,
+            order: orderNow(),
             lines: {
               items: [
                 line(1, 1, "Beef noodles (TEST)", "1250", "163", "1413"),
@@ -155,8 +168,8 @@ async function mock(page: Page, zh: boolean, state: { detailFails: boolean }) {
               },
             },
           },
-        }),
-  );
+        });
+  });
   // What the bill goes down by (the server's preview on the live bill).
   await page.route("**/merchant/orders/remove-unpaid-items/preview", (route) => {
     const items = (route.request().postDataJSON() as { orderItemReferences: string[] })
@@ -252,7 +265,7 @@ for (const zh of [false, true]) {
         ? "税按整张账单算一次，所以账单减 $10.74。"
         : "Tax is worked out once on the whole bill, so the bill goes down $10.74.",
     );
-    await shoot(page, `orders-page-round2-whole-${lang}`, [1440, 390]);
+    await shoot(page, `orders-page-round2-whole-${lang}`);
     const axe = await new AxeBuilder({ page })
       .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
       .analyze();
@@ -320,6 +333,65 @@ for (const zh of [false, true]) {
     );
     await shoot(page, `orders-arrival-round3-${lang}`);
     // Reloading does not open it again.
+    await page.reload();
+    await expect(page3.getByRole("button", { name: takeOff(3) })).toBeVisible();
+    await expect(page3.getByRole("group", { name: takeOff(3) })).toHaveCount(0);
+    await expectNoInternalText(page, ["Temporarily unavailable"]);
+  });
+
+  test(`@production b22 review: the workbench waits in place for a round's dishes, and an arrival for a round that can no longer come off is spent (${lang})`, async ({
+    page,
+  }) => {
+    let release: () => void = () => undefined;
+    const state: MockState = {
+      detailFails: false,
+      hold: new Promise<void>((done) => {
+        release = done;
+      }),
+    };
+    await mock(page, zh, state);
+    await page.goto("/operations/orders");
+    const opener = page.locator("li.order-row").first().locator(".order-row__open");
+    await expect(opener).toBeVisible();
+    if ((await opener.getAttribute("aria-expanded")) !== "true") await opener.click();
+    const panel = page.locator("aside.order-panel");
+    const round = (n: number) => panel.getByRole("region", { name: roundName(n), exact: true });
+    // While the dishes are read: the same button in the same place, not pressable yet, and never
+    // a link to the order's page.
+    const waiting = round(2).getByRole("button", { name: takeOff(2) });
+    await expect(waiting).toBeDisabled();
+    await expect(round(2).getByRole("link", { name: takeOff(2) })).toHaveCount(0);
+    release();
+    await expect(waiting).toBeEnabled();
+    await expect(page).toHaveURL(/\/operations\/orders(\?.*)?$/u);
+
+    // The dishes can't be read on the workbench: staff follow round 3's link, but meanwhile its
+    // dish came off elsewhere. Its panel can't open, and the arrival is spent: once the round
+    // could come off again, a reload doesn't open its panel by surprise.
+    state.hold = undefined;
+    state.detailFails = true;
+    await page.goto("/operations/orders");
+    if ((await opener.getAttribute("aria-expanded")) !== "true") await opener.click();
+    const link = round(3).getByRole("link", { name: takeOff(3) });
+    await expect(link).toBeVisible();
+    state.detailFails = false;
+    state.round3Removable = false;
+    await link.click();
+    await expect(page).toHaveURL(new RegExp(`/operations/orders/${id(1)}$`, "u"));
+    const page2 = page.getByRole("region", { name: roundName(2), exact: true });
+    const page3 = page.getByRole("region", { name: roundName(3), exact: true });
+    await expect(page2.getByRole("button", { name: takeOff(2) })).toBeVisible();
+    await expect(page3.getByRole("button", { name: takeOff(3) })).toHaveCount(0);
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (window.history.state as { usr?: { takeOffRound?: unknown } } | null)?.usr
+              ?.takeOffRound,
+        ),
+      )
+      .toBeUndefined();
+    state.round3Removable = true;
     await page.reload();
     await expect(page3.getByRole("button", { name: takeOff(3) })).toBeVisible();
     await expect(page3.getByRole("group", { name: takeOff(3) })).toHaveCount(0);
