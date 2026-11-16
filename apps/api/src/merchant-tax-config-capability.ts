@@ -412,6 +412,19 @@ export function createMerchantTaxConfigCapability(options: MerchantTaxConfigCapa
           );
           if (result !== undefined) return poison();
         }
+        // The first evaluation takes the brand's FeatureControl shared
+        // transaction lock, so its definitions cannot change before COMMIT and
+        // its time boundaries already tightened the deadline. A later Work hold,
+        // or a later owner's COMMIT-guard hold after this capability's own
+        // guard fully re-evaluated, rechecks only fine permission. Re-reading
+        // the definitions on every source hold cost several authority round
+        // trips each and pushed ordinary Tax saves past their 5 s window on a
+        // loaded host, where staff saw "unavailable" for a permitted save.
+        if (ready && (phase === "Work" || (phase === "Checks" && checked))) {
+          await current();
+          check();
+          return;
+        }
         await evaluate();
       } catch (error) {
         failed = true;

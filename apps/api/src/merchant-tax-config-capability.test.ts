@@ -192,15 +192,50 @@ it("holds real Store Tax permission and the owning definition on the captured tr
   await f.guard.holdUntilCommit();
   expect(f.hooks).toHaveLength(1);
   expect(await f.finalize()).toBe(after(5000));
+  // First hold and the COMMIT guard read definitions; the repeated Work hold
+  // relies on the shared FeatureControl lock the first read took.
   expect(
     f.queries.filter((sql) => sql.includes("FROM bop_feature_control.control_version")),
-  ).toHaveLength(3);
+  ).toHaveLength(2);
   expect(
     f.requests.every(
       (r) => r.permission === "pricing.tax-config.manage" && r.scope === f.requests[0]?.scope,
     ),
   ).toBe(true);
   expect(f.guard.leaseDeadline()).toBe(after(5000));
+});
+it("keeps many source holds in one Work phase to one permission check each and one definition read", async () => {
+  const f = setup();
+  await f.guard.holdUntilCommit();
+  const firstRequests = f.requests.length,
+    lock = (sql: string) => sql.includes("pg_advisory_xact_lock_shared");
+  expect(f.queries.filter(lock)).toHaveLength(1);
+  for (let i = 0; i < 20; i++) await f.guard.holdUntilCommit();
+  expect(f.requests.length - firstRequests).toBe(20);
+  expect(
+    f.queries.filter((sql) => sql.includes("FROM bop_feature_control.control_version")),
+  ).toHaveLength(1);
+  f.state.allowed = false;
+  await expect(f.guard.holdUntilCommit()).rejects.toMatchObject({
+    code: "TAX_CONFIG_PERMISSION_DENIED",
+  });
+  await expect(f.finalize()).rejects.toThrow(TaxConfigWorkflowError);
+});
+it("lets later owners' COMMIT guards recheck fine permission without re-reading definitions", async () => {
+  const f = setup();
+  await f.guard.holdUntilCommit();
+  const h = f.hooks[0];
+  if (!h || !h.final) throw new Error("Missing actual hook");
+  await h.guard();
+  const definitionReads = () =>
+    f.queries.filter((sql) => sql.includes("FROM bop_feature_control.control_version")).length;
+  expect(definitionReads()).toBe(2);
+  const before = f.requests.length;
+  for (let i = 0; i < 10; i++) await f.guard.holdUntilCommit();
+  expect(f.requests.length - before).toBe(10);
+  expect(definitionReads()).toBe(2);
+  h.final();
+  expect(f.guard.assertFinalized()).toBe(after(5000));
 });
 it("preserves an actual Disabled outcome as the bounded Tax subtype", async () => {
   const f = setup([definition({ configuredValue: "Disabled" })]);

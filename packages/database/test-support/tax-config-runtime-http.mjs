@@ -75,7 +75,9 @@ export async function exerciseTaxConfigRuntimeHttp(context) {
     lateCandidateGuardCode = "NONE",
     lateCandidateGuardSite = "NONE",
     lateCandidateSourceStep = "NONE",
-    lateCandidateAssertSite = "NONE";
+    lateCandidateAssertSite = "NONE",
+    featureDefinitionReads = 0,
+    authorityPolicyReads = 0;
   const reference = () => id(++serial),
     hooks = new WeakMap();
   await admin.connect();
@@ -115,6 +117,8 @@ export async function exerciseTaxConfigRuntimeHttp(context) {
                 else if (sql.startsWith("INSERT INTO rms_pricing.tax_config_publication_candidate"))
                   lateCandidateSourceStep = "CandidateRecordInsert";
               }
+              if (sql.includes("'controlId',v.control_id")) featureDefinitionReads++;
+              else if (sql.includes("PermissionCurrentPolicyPacketV1")) authorityPolicyReads++;
               const result = await client.query(sql, values);
               if (
                 lateCandidateFineRole !== null &&
@@ -1339,8 +1343,16 @@ export async function exerciseTaxConfigRuntimeHttp(context) {
           declaredSourceDigest: null,
         },
       });
+      // Fixed per-request work: FeatureControl definitions are read once at the
+      // first hold and once in the COMMIT guard (the first read holds the shared
+      // lock), not once per source hold. Repeating them made this ordinary
+      // report save exceed its 5 s authority window on a loaded CI host (503).
+      featureDefinitionReads = 0;
+      authorityPolicyReads = 0;
       const reportResponse = await send("materials/commands", reportCommand);
       assert.equal(reportResponse.status, 200);
+      assert.equal(featureDefinitionReads, 2);
+      assert(authorityPolicyReads <= 150, "report save authority reads " + authorityPolicyReads);
       const reportReceipt = parseTaxConfigMaterialOperation(reportResponse.body);
       assert.equal(reportReceipt.version.qualification, "NotEvaluated");
       assert.equal(reportReceipt.version.content.declaredConclusion, "Pass");
