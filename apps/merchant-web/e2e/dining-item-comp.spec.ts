@@ -305,6 +305,9 @@ test("@production a manager discounts a started dish from the Tables page; only 
   await expect(details.getByRole("list", { name: "Comps and discounts" })).toContainText(
     "Whole bill to pay after comps$20.91",
   );
+  // b24 (live23): the mapo tofu can still be comped, so its button stays; the floor reread locks
+  // the table panel while the confirm settles, and the focus still goes back to that button.
+  await expect(details.getByRole("button", { name: "Comp or discount" })).toBeFocused();
   // v15 batch 9 (DEC-TAX-WHOLE-RECEIPT): the order's Total stays what was ordered ($22.60).
   // v15 b16 (DEC-COMP-BILL-CENT): $22.60 − $1.69 is the bill, $20.91: the discount took off
   // exactly what the bill went down by, so there is no separate "tax worked out again" cent.
