@@ -77,7 +77,8 @@ export async function exerciseTaxConfigRuntimeHttp(context) {
     lateCandidateSourceStep = "NONE",
     lateCandidateAssertSite = "NONE",
     featureDefinitionReads = 0,
-    authorityPolicyReads = 0;
+    authorityPolicyReads = 0,
+    authoritySessionReads = 0;
   const reference = () => id(++serial),
     hooks = new WeakMap();
   await admin.connect();
@@ -119,6 +120,8 @@ export async function exerciseTaxConfigRuntimeHttp(context) {
               }
               if (sql.includes("'controlId',v.control_id")) featureDefinitionReads++;
               else if (sql.includes("PermissionCurrentPolicyPacketV1")) authorityPolicyReads++;
+              else if (sql.includes("FROM bop_identity.authentication_session WHERE"))
+                authoritySessionReads++;
               const result = await client.query(sql, values);
               if (
                 lateCandidateFineRole !== null &&
@@ -1347,12 +1350,16 @@ export async function exerciseTaxConfigRuntimeHttp(context) {
       // first hold and once in the COMMIT guard (the first read holds the shared
       // lock), not once per source hold. Repeating them made this ordinary
       // report save exceed its 5 s authority window on a loaded CI host (503).
+      // Each source hold is one Tax authority check (not one by the request and
+      // another by the capability), and each check reads the Session once.
       featureDefinitionReads = 0;
       authorityPolicyReads = 0;
+      authoritySessionReads = 0;
       const reportResponse = await send("materials/commands", reportCommand);
       assert.equal(reportResponse.status, 200);
       assert.equal(featureDefinitionReads, 2);
-      assert(authorityPolicyReads <= 150, "report save authority reads " + authorityPolicyReads);
+      assert(authorityPolicyReads <= 64, "report save authority reads " + authorityPolicyReads);
+      assert(authoritySessionReads <= 65, "report save Session reads " + authoritySessionReads);
       const reportReceipt = parseTaxConfigMaterialOperation(reportResponse.body);
       assert.equal(reportReceipt.version.qualification, "NotEvaluated");
       assert.equal(reportReceipt.version.content.declaredConclusion, "Pass");

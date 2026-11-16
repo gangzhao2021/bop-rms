@@ -68,8 +68,20 @@ const boundary = vi.hoisted(() => ({
   material: vi.fn(),
   candidate: vi.fn(),
   registrant: vi.fn(),
+  freshReads: 0,
 }));
-vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => boundary.store }));
+vi.mock("./merchant-store-scope.js", () => ({
+  createMerchantStoreScope: () => boundary.store,
+  // A fresh admission decides its action from the same Session read, as the real one does.
+  createFreshlyAuthorizedMerchantStoreScope:
+    () =>
+    async (...args: [unknown, unknown, string, string]) => {
+      boundary.freshReads++;
+      const current = await boundary.store(...args);
+      current.initialAuthorization = await current.authorizeAction(args[2]);
+      return current;
+    },
+}));
 vi.mock("./merchant-brand-scope.js", () => ({ createMerchantBrandScope: () => boundary.brand }));
 vi.mock("@rms/pricing", async (original) => ({
   ...(await original<typeof import("@rms/pricing")>()),
@@ -2210,4 +2222,22 @@ it("refuses full immutable Suite currency drift instead of substituting current 
       },
     }),
   ).rejects.toMatchObject({ code: "TAX_CONFIG_VERSION_CONFLICT" });
+});
+it("checks Tax authority once per source hold, each from one current Session read", async () => {
+  const f = fixture();
+  boundary.freshReads = 0;
+  const result = await f.service.execute(request());
+  expect(result.outcome).toBe("Committed");
+  const resolutions = f.events.filter((e) => e === "store:pricing.tax-config.manage").length,
+    decisions = f.events.filter((e) => e === "pricing.tax-config.manage").length;
+  // One initial scope read, then every check reads the Session once and decides from it.
+  // Before, each hold checked twice (the request, then the capability) and each check
+  // re-read the Session for its decision: 20 Session resolutions for this save.
+  expect(resolutions).toBe(boundary.freshReads + 1);
+  expect(decisions).toBe(boundary.freshReads);
+  expect(resolutions).toBeLessThanOrEqual(14);
+  f.events.forEach((e, index) => {
+    if (e === "pricing.tax-config.manage")
+      expect(f.events[index - 1]).toBe("store:pricing.tax-config.manage");
+  });
 });

@@ -61,7 +61,10 @@ import {
   merchantTaxConfigCapabilityRequiredFields,
 } from "./merchant-tax-config-capability.js";
 import { createMerchantCategoryTransactions } from "./merchant-category-transactions.js";
-import { createMerchantStoreScope } from "./merchant-store-scope.js";
+import {
+  createFreshlyAuthorizedMerchantStoreScope,
+  createMerchantStoreScope,
+} from "./merchant-store-scope.js";
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import {
   bindMerchantTaxConfigAuthoringCommand,
@@ -294,6 +297,7 @@ export function createMerchantTaxConfigAuthoring(options: MerchantTaxConfigAutho
           capturedQuery = queryPort.bind(tx),
           policy = createPostgresTransactionCurrentPermissionPolicySource(tx);
         const resolveStore = createMerchantStoreScope(persistence, policy),
+          resolveFresh = createFreshlyAuthorizedMerchantStoreScope(persistence, policy),
           resolveBrand = createMerchantBrandScope(persistence, policy);
         const initial = await resolveStore(
           tx,
@@ -331,7 +335,8 @@ export function createMerchantTaxConfigAuthoring(options: MerchantTaxConfigAutho
           authorityActive = true;
           try {
             checkTx();
-            const current = await resolveStore(tx, input.sessionCookie, action, sessionReference);
+            // One current Session/selection/permission read decides this check.
+            const current = await resolveFresh(tx, input.sessionCookie, action, sessionReference);
             checkTx();
             const allowed = current.authorizeAction,
               lease = current.authorizationValidUntil;
@@ -351,8 +356,7 @@ export function createMerchantTaxConfigAuthoring(options: MerchantTaxConfigAutho
                 return fail("TAX_CONFIG_PERMISSION_DENIED");
             };
             identityCheck();
-            const permission = await allowed.call(current, action);
-            identityCheck();
+            const permission = current.initialAuthorization;
             if (
               permission?.effect !== "Allow" ||
               permission.action !== action ||
@@ -376,6 +380,15 @@ export function createMerchantTaxConfigAuthoring(options: MerchantTaxConfigAutho
             authorityActive = false;
           }
         }
+        // One full Session/permission check per source hold: the Tax capability
+        // asks this same port for current authority on every hold, so fresh()
+        // returns the latest authority the capability itself obtained and
+        // validated instead of resolving the Session again just before it.
+        interface PendingHold {
+          readonly mode: "Read" | "Write" | "Resolve";
+          authority?: Awaited<ReturnType<typeof bareFresh>>;
+        }
+        let pendingHold: PendingHold | undefined;
         const capability = createMerchantTaxConfigCapability({
           transaction: tx,
           scope,
@@ -400,13 +413,24 @@ export function createMerchantTaxConfigAuthoring(options: MerchantTaxConfigAutho
             )
               return fail();
             tighten(request.validUntil);
-            return bareFresh("Read");
+            const hold = pendingHold,
+              authority = await bareFresh(hold?.mode ?? "Read");
+            if (hold) hold.authority = authority;
+            return authority;
           },
         });
         async function fresh(mode: "Read" | "Write" | "Resolve") {
-          const authority = await bareFresh(mode);
-          await capability.holdUntilCommit();
+          if (pendingHold) return fail();
+          const hold: PendingHold = { mode };
+          pendingHold = hold;
+          try {
+            await capability.holdUntilCommit();
+          } finally {
+            pendingHold = undefined;
+          }
           checkTx();
+          const authority = hold.authority;
+          if (!authority) return fail();
           tighten(capability.leaseDeadline());
           return { ...authority, validUntil: deadline };
         }

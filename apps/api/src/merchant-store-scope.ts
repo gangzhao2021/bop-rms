@@ -296,3 +296,22 @@ export function createInitiallyAuthorizedMerchantStoreScope(
     return resolve(tx, sessionCookie, "merchant.access", expectedSession, true);
   };
 }
+
+/** Fresh admission for one action at one checkpoint: one Session, selection, membership and
+ * permission packet read decides it, with no retained Allow for later callbacks. Each call reads
+ * its own current facts; the caller rechecks by calling again, not by reusing the result. */
+export function createFreshlyAuthorizedMerchantStoreScope(
+  source: PersistentMerchantBffOptions,
+  permissionPolicy?: TransactionPermissionPolicy,
+) {
+  const resolve = createMerchantStoreScopeResolver(source, permissionPolicy);
+  return (
+    tx: Parameters<typeof resolve>[0],
+    sessionCookie: unknown,
+    action: string,
+    expectedSession: string,
+  ) => {
+    if (typeof expectedSession !== "string") throw new Error("STORE_SERVICE_PERMISSION_DENIED");
+    return resolve(tx, sessionCookie, action, expectedSession, true);
+  };
+}
