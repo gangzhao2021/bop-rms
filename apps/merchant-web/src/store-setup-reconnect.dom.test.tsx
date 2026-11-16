@@ -3,9 +3,48 @@ import { act } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { StoreSetupDraftPage } from "./StoreSetupDraftPage.js";
-import { createStoreSetupClient, type StoreSetupSnapshot } from "./store-setup-client.js";
+import {
+  createStoreSetupClient,
+  createUnconfiguredStoreSetupContentV2,
+  type StoreSetupCursor,
+  type StoreSetupSnapshot,
+} from "./store-setup-client.js";
+import type { StoreSetupPendingJournal } from "./store-setup-pending-journal.js";
+import { publicationValueDigest } from "./product-publication-command-client-v2.js";
 import { setLanguageForTest } from "./i18n/i18n.js";
-import { buttonNamed, click, deferred, mount, settle, typeInto } from "./dom-test-kit.fixture.js";
+import {
+  buttonNamed,
+  click,
+  deferred,
+  mount,
+  selectValue,
+  settle,
+  typeInto,
+} from "./dom-test-kit.fixture.js";
+
+// The live configuration read (the start the open Store runs on): held until it is cut off.
+const liveReads = vi.hoisted(() => ({ count: 0 }));
+vi.mock("./store-configuration-pending-journal.js", async (original) => ({
+  ...(await original<typeof import("./store-configuration-pending-journal.js")>()),
+  createStoreConfigurationPendingJournal: () => ({ load: async () => null }),
+}));
+vi.mock("./store-configuration-ordinary-client.js", async (original) => {
+  const actual = await original<typeof import("./store-configuration-ordinary-client.js")>();
+  return {
+    ...actual,
+    createStoreConfigurationOrdinaryClient: (...args: unknown[]) => ({
+      ...actual.createStoreConfigurationOrdinaryClient(...(args as [])),
+      load: (_scope: unknown, options?: { signal?: AbortSignal }) => {
+        liveReads.count++;
+        return new Promise((_, reject) =>
+          options?.signal?.addEventListener("abort", () =>
+            reject(new DOMException("gone", "AbortError")),
+          ),
+        );
+      },
+    }),
+  };
+});
 
 /**
  * b23 (v15 live check of b22, store-setup-reconnect): losing the connection on Store setup says the
@@ -173,4 +212,250 @@ it("b23: the offline line reads in Chinese", async () => {
     "已离线。你在这里输入的内容会保留，网络恢复后会自动重新读取当前门店设置。",
   );
   expect(container.textContent).not.toContain("无法加载当前门店设置");
+});
+
+/**
+ * b23 review: a server holding a saved draft, and this device's record of a save waiting for its
+ * result, so reconnect can meet a draft saved elsewhere, a save whose answer was lost, or a newer
+ * draft to show.
+ */
+const conflictText =
+  "The saved settings or their baseline changed. Refresh, then discard your local edits to use the latest saved version.";
+const invalidText = "Check the edited settings.";
+const savedText = "Setup draft saved. These settings have not been validated or published.";
+const recoveryText = "An earlier save has not been cleared. A new save is blocked.";
+function snapshot(revision: number, start: string): StoreSetupSnapshot {
+  return {
+    profile: "StoreSetupDraftV2",
+    tenantReference: id(1),
+    brandReference: id(2),
+    storeReference: id(3),
+    setupDraftReference: id(6),
+    revision,
+    authoredByReference: id(4),
+    defaultLocale: "en-CA",
+    currencyCode: "CAD",
+    baseConfigurationReference: null,
+    content: {
+      ...createUnconfiguredStoreSetupContentV2(),
+      businessDayStartLocalTime: { state: "Configured", value: start },
+    } as StoreSetupSnapshot["content"],
+    createdAt: at,
+    updatedAt: at,
+    purposeCode: "STORE_SETUP_DRAFT",
+    dataClassification: "ConfigurationMetadata",
+  };
+}
+function server(first: StoreSetupSnapshot | null) {
+  const state = {
+    saved: first,
+    cursor: null as StoreSetupCursor | null,
+    receipt: null as unknown,
+    // While set, the answer to a save is held until the connection drops (the save still lands).
+    holdSaves: false,
+    // A held save the server never received: the original is found not to have gone through.
+    dropHeld: false,
+  };
+  const workspaceBody = () => ({
+    ...body(),
+    setup: { ...body().setup, snapshot: state.saved },
+  });
+  const commands: string[] = [];
+  const fetcher = vi.fn<typeof fetch>(async (_url, init) => {
+    if (init?.method !== "POST") {
+      commands.push("read");
+      return new Response(JSON.stringify(workspaceBody()), {
+        headers: { "content-type": "application/json", "cache-control": "no-store" },
+      });
+    }
+    const sent = JSON.parse(String(init.body)) as Record<string, unknown>;
+    commands.push(String(sent.command));
+    if (sent.command === "ResolveOriginal")
+      return new Response(JSON.stringify(state.receipt), {
+        headers: { "content-type": "application/json", "cache-control": "no-store" },
+      });
+    const content = sent.content as StoreSetupSnapshot["content"];
+    const before = state.saved;
+    state.saved = {
+      ...snapshot(Number(sent.expectedRevision) + 1, "04:00:00"),
+      content,
+    };
+    state.receipt = {
+      profile: "StoreSetupOperationReceiptV1",
+      ...scope,
+      operationReference: sent.operationReference,
+      expectedSetupReference: sent.expectedSetupReference,
+      expectedRevision: sent.expectedRevision,
+      purposeCode: "STORE_SETUP_DRAFT",
+      intentDigest: await publicationValueDigest({
+        profile: "StoreSetupSaveV2",
+        ...scope,
+        operationReference: sent.operationReference,
+        expectedSetupReference: sent.expectedSetupReference,
+        expectedRevision: sent.expectedRevision,
+        content,
+        purposeCode: "STORE_SETUP_DRAFT",
+      }),
+      outcome: "Committed",
+      snapshot: state.saved,
+      auditReference: id(7),
+      occurredAt: at,
+    };
+    if (state.dropHeld)
+      state.receipt = {
+        ...(state.receipt as Record<string, unknown>),
+        outcome: "Abandoned",
+        snapshot: null,
+      };
+    if (state.dropHeld) state.saved = before;
+    if (state.holdSaves) {
+      const signal = init.signal;
+      return new Promise<Response>((_, reject) =>
+        signal?.addEventListener("abort", () => reject(new DOMException("gone", "AbortError"))),
+      );
+    }
+    return new Response(JSON.stringify(state.receipt), {
+      headers: { "content-type": "application/json", "cache-control": "no-store" },
+    });
+  });
+  const journal: StoreSetupPendingJournal = {
+    load: async () => state.cursor,
+    reserve: vi.fn(async (cursor: StoreSetupCursor) => {
+      state.cursor = cursor;
+    }),
+    complete: vi.fn(async () => {
+      state.cursor = null;
+    }),
+  };
+  return { state, fetcher, journal, commands };
+}
+async function serverPage(s: ReturnType<typeof server>) {
+  const { container } = await mount(
+    <MemoryRouter initialEntries={[`/app/organization/stores/${id(3)}/setup`]}>
+      <Routes>
+        <Route
+          path="/app/organization/stores/:id/setup"
+          element={
+            <StoreSetupDraftPage
+              storeReference={id(3)}
+              csrf={csrf}
+              client={createStoreSetupClient(s.fetcher)}
+              journalFactory={() => s.journal}
+              fetcher={vi.fn(async () => new Response("{}", { status: 503 }))}
+            />
+          }
+        />
+      </Routes>
+    </MemoryRouter>,
+  );
+  await settle(10);
+  return container;
+}
+
+it("b23 review: a draft saved elsewhere while offline is a Conflict on reconnect, and the edit stays", async () => {
+  const s = server(snapshot(1, "04:00:00"));
+  const container = await serverPage(s);
+  await click(buttonNamed(container, "1. Time zone and business day"));
+  await typeInto(startField(container), "05:00");
+  await connection(false);
+  s.state.saved = snapshot(2, "06:00:00");
+  await connection(true);
+  expect(alerts(container)).toContain(conflictText);
+  expect(startField(container)?.value).toBe("05:00");
+});
+
+it("b23 review: a save whose answer was lost offline is settled on reconnect, with no Conflict", async () => {
+  const s = server(snapshot(1, "04:00:00"));
+  const container = await serverPage(s);
+  await click(buttonNamed(container, "1. Time zone and business day"));
+  await typeInto(startField(container), "05:00");
+  s.state.holdSaves = true;
+  await click(buttonNamed(container, "Save as draft"));
+  await settle(20);
+  expect(s.state.cursor).not.toBeNull();
+  // The server committed it; the answer is lost with the connection.
+  await connection(false);
+  expect(container.textContent).toContain(recoveryText);
+  s.state.holdSaves = false;
+  await connection(true);
+  await settle(20);
+  expect(s.commands).toContain("ResolveOriginal");
+  expect(alerts(container)).not.toContain(conflictText);
+  expect(container.textContent).not.toContain(recoveryText);
+  expect(container.textContent).toContain(
+    "The original save was committed. Current saved settings are shown.",
+  );
+  expect(s.state.cursor).toBeNull();
+  expect(startField(container)?.value).toBe("05:00");
+  expect(buttonNamed(container, "Save as draft")?.hasAttribute("disabled")).toBe(false);
+});
+
+it("b23 review: with nothing typed, reconnect shows a newer draft saved elsewhere", async () => {
+  const s = server(snapshot(1, "04:00:00"));
+  const container = await serverPage(s);
+  await click(buttonNamed(container, "1. Time zone and business day"));
+  expect(startField(container)?.value).toBe("04:00");
+  await connection(false);
+  s.state.saved = snapshot(2, "06:00:00");
+  await connection(true);
+  expect(alerts(container)).not.toContain(conflictText);
+  expect(startField(container)?.value).toBe("06:00");
+});
+
+it("b23 review: reconnect keeps a save notice and a validation message that are still true", async () => {
+  const s = server(snapshot(1, "04:00:00"));
+  const container = await serverPage(s);
+  await click(buttonNamed(container, "1. Time zone and business day"));
+  await typeInto(startField(container), "04:00");
+  await click(buttonNamed(container, "Save as draft"));
+  await settle(20);
+  expect(container.textContent).toContain(savedText);
+  await connection(false);
+  await connection(true);
+  expect(s.commands.filter((c) => c === "read").length).toBeGreaterThan(2);
+  expect(container.textContent).toContain(savedText);
+  // A tip turned on without its orders cannot be saved; that stays said while it is still so.
+  await click(buttonNamed(container, "3. Fees, tax and payment"));
+  await selectValue(container.querySelector('select[aria-label="Tip"]'), "Enabled");
+  await click(buttonNamed(container, "Save as draft"));
+  await settle(10);
+  expect(alerts(container).some((text) => text?.startsWith(invalidText))).toBe(true);
+  await connection(false);
+  await connection(true);
+  expect(alerts(container).some((text) => text?.startsWith(invalidText))).toBe(true);
+});
+
+it("b23 review: the start the open Store runs on is read again when the connection came back mid-read", async () => {
+  liveReads.count = 0;
+  const { container } = await page(async () => ok());
+  await click(buttonNamed(container, "1. Time zone and business day"));
+  await settle(10);
+  expect(liveReads.count).toBeGreaterThan(0);
+  await connection(false);
+  const before = liveReads.count;
+  await connection(true);
+  await settle(10);
+  expect(liveReads.count).toBeGreaterThan(before);
+});
+
+it("b23 review: a lost save that did not go through keeps what was typed, ready to save again", async () => {
+  const s = server(snapshot(1, "04:00:00"));
+  const container = await serverPage(s);
+  await click(buttonNamed(container, "1. Time zone and business day"));
+  await typeInto(startField(container), "05:00");
+  s.state.holdSaves = true;
+  s.state.dropHeld = true;
+  await click(buttonNamed(container, "Save as draft"));
+  await settle(20);
+  await connection(false);
+  s.state.holdSaves = false;
+  await connection(true);
+  await settle(20);
+  expect(s.commands).toContain("ResolveOriginal");
+  expect(alerts(container)).not.toContain(conflictText);
+  expect(container.textContent).toContain(
+    "The original save was not committed. You can continue editing.",
+  );
+  expect(startField(container)?.value).toBe("05:00");
+  expect(buttonNamed(container, "Save as draft")?.hasAttribute("disabled")).toBe(false);
 });

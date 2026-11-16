@@ -903,20 +903,25 @@ export function StoreSetupDraftPage({
     };
     // keptKey follows storeReference.
   }, [client, csrf, id, journalFactory, storeReference, firstRead]);
-  const begin = () => {
+  // b23 review: the read the page makes by itself once the connection is back clears only what the
+  // outage said; a notice or a validation message that is still true stays where it was.
+  const begin = (automatic = false) => {
     running.current = true;
     controller.current?.abort();
     const request = new AbortController();
     controller.current = request;
     const token = ++epoch.current;
     setBusy(true);
-    setError(null);
-    setNotice("");
+    if (automatic) setError((old) => (old === "Unavailable" ? null : old));
+    else {
+      setError(null);
+      setNotice("");
+    }
     return { request, token };
   };
-  const refresh = async (discard = false) => {
+  const refresh = async (discard = false, automatic = false) => {
     if (running.current || busy || !online || id !== storeReference) return;
-    const { request, token } = begin();
+    const { request, token } = begin(automatic);
     try {
       const view = await client.load({
         storeReference,
@@ -937,7 +942,9 @@ export function StoreSetupDraftPage({
       if (discard || !dirty || settledElsewhere) apply(view);
       else {
         setWorkspace(view);
-        if (baseline && !sameRoot(baseline, view)) setError("Conflict");
+        // b23 review: while a save of this page's is still waiting for its result, a newer saved
+        // draft may be that save itself; its recovery says what happened, never a Conflict.
+        if (baseline && cursor === null && !sameRoot(baseline, view)) setError("Conflict");
       }
       setReady(true);
     } catch (value) {
@@ -953,7 +960,9 @@ export function StoreSetupDraftPage({
   // b23: once the connection is back, read the current settings and draft again by themselves. A
   // page already read refreshes as "Restore" does without discarding: what was typed here stays,
   // and a draft saved elsewhere meanwhile is a Conflict, as before. A first read that never
-  // finished (or a page opened offline) is read from the start instead.
+  // finished (or a page opened offline) is read from the start instead. b23 review: a save whose
+  // answer was lost with the connection is settled first, by the same recovery staff can choose,
+  // so staff are never told of a conflict their own save caused.
   const offlineSeen = useRef(false);
   useEffect(() => {
     if (!online) {
@@ -963,7 +972,7 @@ export function StoreSetupDraftPage({
     if (!offlineSeen.current) return;
     offlineSeen.current = false;
     if (id !== storeReference) return;
-    if (ready && journal.current !== null) void refresh();
+    if (ready && journal.current !== null) void (pending ? recover(true) : refresh(false, true));
     else setFirstRead((n) => n + 1);
   }, [online]);
   const save = async () => {
@@ -1036,17 +1045,17 @@ export function StoreSetupDraftPage({
       }
     }
   };
-  const recover = async () => {
+  const recover = async (automatic = false) => {
     if (running.current || busy || !online || !pending || !journal.current) return;
     const activeJournal = journal.current,
       original = pending;
     // Settled elsewhere since this page read it: nothing is left to recover, only to read again.
     if ((await activeJournal.load()) === null) {
       setPending(null);
-      await refresh(true);
+      await refresh(true, automatic);
       return;
     }
-    const { request, token } = begin();
+    const { request, token } = begin(automatic);
     try {
       const { receipt, workspace: fresh } = await recoverStoreSetupDraft({
         client,
@@ -1057,11 +1066,18 @@ export function StoreSetupDraftPage({
       });
       if (!current(token, request.signal)) return;
       setPending(null);
-      apply(fresh);
+      // b23 review: a save that did not go through leaves what was typed here as it was, when the
+      // saved draft it started from is still the one saved; staff save it again.
+      const kept =
+        receipt.outcome !== "Committed" && dirty && baseline !== null && sameRoot(baseline, fresh);
+      if (kept) setWorkspace(fresh);
+      else apply(fresh);
       setNotice(
         receipt.outcome === "Committed"
           ? t("The original save was committed. Current saved settings are shown.")
-          : t("The original save was not committed. You can continue with a new save."),
+          : kept
+            ? t("The original save was not committed. You can continue editing.")
+            : t("The original save was not committed. You can continue with a new save."),
       );
     } catch (value) {
       if (current(token, request.signal))
@@ -1246,8 +1262,9 @@ export function StoreSetupDraftPage({
   const liveScope = workspace ? JSON.stringify(workspace.scope) : null;
   // b22: step 1 of an open Store always reads the start the Store runs on: it is kept (see below).
   const wantsLiveStart = openLayout && activeStep === 1;
+  // b23 review: a read cut off by the connection going is made again once it is back.
   useEffect(() => {
-    if (liveScope === null || workspace === null || live !== null) return;
+    if (liveScope === null || workspace === null || live !== null || !online) return;
     if (activeStep !== 4 && !wantsLiveStart) return;
     const c = new AbortController();
     void (async () => {
@@ -1262,7 +1279,7 @@ export function StoreSetupDraftPage({
         setLive((old) => old ?? { current: read.current, observedAt: read.observedAt });
     })().catch(() => undefined);
     return () => c.abort();
-  }, [liveScope, activeStep, wantsLiveStart, live === null]);
+  }, [liveScope, activeStep, wantsLiveStart, live === null, online]);
   // b18 polish (Owner 2026-11-14): an open Store already runs on a time zone and a business day
   // start. While the saved draft has none and nothing was typed, the draft starts from them instead
   // of saying "Not configured"; saving the draft keeps them, as any other value in it. Until it is
