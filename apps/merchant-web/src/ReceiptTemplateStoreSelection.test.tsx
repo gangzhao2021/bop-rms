@@ -1,6 +1,7 @@
 // Controlled public packets; rendered production/native acceptance belongs to the coordinator.
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
+import { MemoryRouter } from "react-router";
 import {
   ReceiptTemplateStoreSelection,
   applyReceiptTemplateStoreSelection,
@@ -71,61 +72,59 @@ it("expired, foreign Actor or wrong store locale never updates parent draft", ()
   expect(() => applyReceiptTemplateStoreSelection(v, scope, "en", selected)).toThrow();
   expect(selected).not.toHaveBeenCalled();
 });
-it("rendered entry keeps discovery separate from current qualification and saves parent separately", () => {
-  const html = renderToStaticMarkup(
-    <ReceiptTemplateStoreSelection
-      scope={scope}
-      locale="en"
-      csrf={"A".repeat(43)}
-      value={{ state: "Configured", value: id(8) }}
-      onSelect={() => undefined}
-    />,
+// b24 (Owner 2026-11-16 "费用、税务和付款这个页面还是很难看"): one choice of template, a link to
+// where templates are written, and no buttons to refresh, check or clear.
+const selection = (
+  props: Partial<Parameters<typeof ReceiptTemplateStoreSelection>[0]> & {
+    value: { state: "Unconfigured" } | { state: "Configured"; value: string };
+  },
+) =>
+  renderToStaticMarkup(
+    <MemoryRouter>
+      <ReceiptTemplateStoreSelection
+        scope={scope}
+        locale="en"
+        csrf={"A".repeat(43)}
+        onSelect={() => undefined}
+        {...props}
+      />
+    </MemoryRouter>,
   );
-  expect(html).toContain("Saved templates");
-  expect(html).toContain("Check published receipt template");
-  expect(html).toContain("Save the setup draft separately");
-  expect(html).toContain("Clear receipt template choice");
+it("b24: the receipt is one choice and a link to edit templates, never a tool dump", () => {
+  const html = selection({
+    value: { state: "Configured", value: id(8) },
+    editHref: "/app/organization/stores/x/setup?section=receipts#receipt-templates",
+  });
+  expect(html).toContain('aria-label="Receipt template"');
+  expect(html).toContain(">The template saved in this setup</option>");
+  expect(html).toContain(">None chosen yet (needed to publish)</option>");
+  expect(html).toContain(">Edit receipt templates</a>");
+  expect(html).not.toMatch(/Refresh|Next saved|Check published|Clear receipt|draft \d/u);
   expect(html).not.toContain("Provider ready");
   expect(html).not.toContain('value="' + id(9) + '"');
+  expect(html.match(/<button/gu)).toBeNull();
 });
 it("WP-2423 v15: offers the template the Store issues receipts with today, and says when it is kept", () => {
   const render = (value: { state: "Unconfigured" } | { state: "Configured"; value: string }) =>
-    renderToStaticMarkup(
-      <ReceiptTemplateStoreSelection
-        scope={scope}
-        locale="en"
-        csrf={"A".repeat(43)}
-        value={value}
-        liveTemplateReference={id(30)}
-        onSelect={() => undefined}
-      />,
-    );
+    selection({ value, liveTemplateReference: id(30) });
   const open = render({ state: "Unconfigured" });
-  expect(open).toContain("Keep the receipt template in use today");
   expect(open).toContain(">Receipt template in use today</option>");
-  expect(open).toContain("cannot be published");
+  expect(open).toContain("needed to publish");
   const kept = render({ state: "Configured", value: id(30) });
-  expect(kept).toContain(
-    "This setup uses the receipt template the Store issues receipts with today.",
-  );
+  expect(kept).toContain("Guests get the receipt this store issues today.");
   expect(kept).not.toContain(id(30) + "</");
 });
-it("parent pending barrier disables every initial selection action and hidden step remains scoped", () => {
+it("parent pending barrier disables the choice and a hidden step stays hidden", () => {
   const selected = vi.fn(),
-    html = renderToStaticMarkup(
-      <ReceiptTemplateStoreSelection
-        scope={scope}
-        locale="en"
-        csrf={"A".repeat(43)}
-        hidden
-        disabled
-        value={{ state: "Unconfigured" }}
-        onSelect={selected}
-      />,
-    );
+    html = selection({
+      hidden: true,
+      disabled: true,
+      value: { state: "Unconfigured" },
+      onSelect: selected,
+    });
   expect(html).toContain("hidden");
-  expect(html.match(/disabled=""/gu)?.length).toBe(5);
-  expect(html).toContain('aria-label="Published receipt template selection"');
+  expect(html.match(/disabled=""/gu)?.length).toBe(1);
+  expect(html).toContain('aria-label="Receipt"');
   expect(selected).not.toHaveBeenCalled();
 });
 it("forged readiness and non-effective scheduled metadata cannot be applied as a current template", () => {

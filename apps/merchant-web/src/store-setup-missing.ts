@@ -67,11 +67,17 @@ export function storeSetupWhere(layout: StoreSetupLayout, field: StoreSetupField
       return t("step 8: Use the live Store’s settings");
   }
 }
-const feeNames: Readonly<Record<string, string>> = Object.freeze({
-  ServiceCharge: t("Service charge"),
-  DeliveryFee: t("Delivery fee"),
-  Tip: t("Tip"),
-});
+/** b24: said in the language in use when asked (not when this module loaded). */
+const feeName = (chargeType: string) =>
+  chargeType === "ServiceCharge"
+    ? t("Service charge")
+    : chargeType === "DeliveryFee"
+      ? t("Delivery fee")
+      : chargeType === "Tip"
+        ? t("Tip")
+        : t("Fees");
+/** "Service charge", "Delivery fee", "Tip" in staff words. */
+export const storeSetupFeeName = feeName;
 export function storeSetupMissingItems(
   content: StoreSetupContent,
   layout: StoreSetupLayout = "Opening",
@@ -91,7 +97,7 @@ export function storeSetupMissingItems(
   add(unset(content.weeklySchedule), t("Weekly hours"), "hours");
   if (content.feeContexts?.state === "Configured")
     for (const fee of content.feeContexts.value)
-      add(fee.state === "Unconfigured", feeNames[fee.chargeType] ?? t("Fees"), "payment");
+      add(fee.state === "Unconfigured", feeName(fee.chargeType), "payment");
   else add(true, t("Fees"), "payment");
   add(unset(content.paymentConfigurationReference), t("Payment settings"), "payment");
   add(unset(content.receiptReference), t("Receipt template"), "payment");
@@ -106,6 +112,25 @@ export function storeSetupMissingItems(
     "live",
   );
   return Object.freeze(missing);
+}
+/**
+ * b24 (Owner 2026-11-16 "服务费的订单类型为什么可以勾选服务方式没有勾选的选项？"): a fee that is on
+ * may only apply to orders the setup offers (its services, step 2). Each fee that names an order
+ * type the setup does not offer, with those order types. `offered` defaults to the setup's own
+ * services; the setup page passes the services as edited, saved or not.
+ */
+export function storeSetupFeesNotOffered(
+  content: StoreSetupContent,
+  offered: readonly string[] = content.enabledServiceModes.state === "Configured"
+    ? content.enabledServiceModes.value
+    : [],
+): readonly { readonly chargeType: string; readonly modes: readonly string[] }[] {
+  if (content.feeContexts?.state !== "Configured") return [];
+  return content.feeContexts.value.flatMap((fee) => {
+    if (fee.state !== "Enabled") return [];
+    const modes = fee.orderTypes.filter((mode) => !offered.includes(mode));
+    return modes.length === 0 ? [] : [Object.freeze({ chargeType: fee.chargeType, modes })];
+  });
 }
 /** "Address (step 2, …), Receipt template (step 5, …)" for one sentence. */
 export function storeSetupMissingText(items: readonly StoreSetupMissingItem[]): string {

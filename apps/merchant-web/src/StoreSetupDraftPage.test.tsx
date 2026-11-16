@@ -1133,14 +1133,11 @@ it("Payment editor presents three actual channel controls and explicit readiness
   const html = renderToStaticMarkup(
     <StorePaymentConfigurationEditor scope={scope} csrf={csrf} onSelect={() => undefined} />,
   );
-  for (const label of [
-    "Customer online card",
-    "Staff terminal card present",
-    "Staff terminal Interac",
-    "Save payment methods",
-    "payment provider account",
-  ])
-    expect(html).toContain(label);
+  // b24 (v15 live check of b23): before the saved methods are read none is shown, ticked or not.
+  expect(html).toContain("payment provider account");
+  expect(html).toContain("The payment methods this store has now are not known yet.");
+  expect(html).not.toContain('type="checkbox"');
+  expect(html).not.toContain("Save payment methods");
   expect(html).not.toContain("ProviderReady");
 });
 it("Payment Save reserves before POST and fresh current before clearing; selection remains separate", async () => {
@@ -1291,9 +1288,9 @@ it("renders three explicit fee configurations, actual order types and honest pre
   expect(html).toContain(">Off<");
   // Staff read fee names, never the charge codes (WP-2423 internal-text guard).
   expect(findInternalText([staticText(html)])).toEqual([]);
-  expect(html).toContain(
-    "Saving the setup draft keeps these choices. It does not set fee amounts or tax rates",
-  );
+  expect(html).toContain("guests see a change only once this setup is published");
+  // b24: no refresh button; the choices load and reload by themselves.
+  expect(html).not.toContain("Refresh");
   expect(html).not.toMatch(/Fee contexts|Draft configuration|effective policy/u);
   expect(html).not.toContain('type="text"');
 });
@@ -1449,10 +1446,9 @@ it("WP-2423 v15 D5/D7: fee classification choices load on entry; a Tip needs non
   expect(html).toContain("No tax classification (tips are not taxed)");
   const tipSelect = /<select aria-label="Tip tax classification"[^>]*>/u.exec(html)?.[0] ?? "";
   expect(tipSelect).not.toContain("disabled");
-  const serviceSelect =
-    /<select aria-label="Service charge tax classification"[^>]*>/u.exec(html)?.[0] ?? "";
-  expect(serviceSelect).toContain("disabled");
-  expect(html).toContain("generally not subject to GST/HST");
+  // b24: a fee that is off shows no tax class to choose.
+  expect(html).not.toContain('aria-label="Service charge tax classification"');
+  expect(html).toContain("Tips go to staff and are generally not taxed.");
   expect(findInternalText([staticText(html)])).toEqual([]);
 });
 it("WP-2423 v15 D6: step 8 texts come from the current configuration, not earlier actions", () => {

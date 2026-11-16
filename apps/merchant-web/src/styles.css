@@ -10995,3 +10995,152 @@ tr[data-drop-target="true"] {
     text-align: center;
   }
 }
+
+/* b24 (Owner 2026-11-16 "3. 费用、税务和付款 这个页面还是很难看"): the fees step reads as four calm
+   sections, Fees, Tax, Payment and Receipt (v3: white, no boxes, a 20/600 name per section, 14px
+   help in the muted colour, each fee one row with hairlines between rows only, fields a single
+   bottom line, accent text for every action; the page's one solid button stays Save as draft). */
+.store-setup-draft-page .store-setup-step-content .store-setup-block {
+  display: grid;
+  gap: var(--bop-space-2);
+  max-width: 52rem;
+  min-width: 0;
+  margin: 0 0 var(--bop-space-8);
+  padding: 0;
+  border: 0;
+}
+.store-setup-draft-page .store-setup-step-content .store-setup-block > h4 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+.store-setup-draft-page .store-setup-step-content .store-setup-block p {
+  font-size: 14px;
+}
+.store-setup-draft-page .store-setup-step-content .store-setup-block__lead,
+.store-setup-draft-page .store-setup-step-content .store-setup-block__note,
+.store-setup-row__hint,
+.store-setup-row__label {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
+}
+.store-setup-draft-page .store-setup-step-content .store-setup-block__note:empty {
+  display: none;
+}
+.store-setup-draft-page .store-setup-step-content .store-setup-block__problem {
+  color: var(--bop-color-danger);
+}
+.store-setup-draft-page .store-setup-step-content .store-setup-block a {
+  color: var(--bop-color-accent);
+}
+.store-setup-draft-page .store-setup-step-content .store-setup-rows {
+  display: block;
+  margin: var(--bop-space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.store-setup-draft-page .store-setup-step-content .store-setup-rows > li.store-setup-row {
+  display: grid;
+  grid-template-columns: minmax(10rem, 16rem) minmax(0, 1fr);
+  gap: var(--bop-space-2) var(--bop-space-6);
+  padding-block: var(--bop-space-4);
+}
+.store-setup-draft-page .store-setup-step-content .store-setup-rows > li + li {
+  border-top: 1px solid var(--bop-color-row-divider);
+}
+.store-setup-row__head {
+  display: grid;
+  align-content: start;
+  gap: var(--bop-space-1);
+}
+.store-setup-row__name {
+  font-size: 16px;
+  font-weight: 600;
+}
+.store-setup-draft-page
+  .store-setup-step-content
+  :is(.store-setup-block, .store-setup-row)
+  fieldset {
+  display: grid;
+  gap: var(--bop-space-3);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+}
+.store-setup-draft-page .store-setup-step-content .store-setup-row__modes,
+.store-setup-draft-page .store-setup-step-content .store-setup-payment__group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 var(--bop-space-6);
+}
+.store-setup-draft-page .store-setup-step-content .store-setup-row__modes > p {
+  flex-basis: 100%;
+}
+.store-setup-draft-page .store-setup-step-content .store-setup-payment__methods {
+  gap: var(--bop-space-1);
+}
+.store-setup-draft-page
+  .store-setup-step-content
+  .store-setup-payment__group
+  .store-setup-row__label {
+  min-width: 4rem;
+}
+.store-setup-draft-page
+  .store-setup-step-content
+  :is(.store-setup-block, .store-setup-row)
+  label:has(input[type="checkbox"]) {
+  display: inline-flex;
+  min-height: 44px;
+  padding: 0;
+  font-size: 16px;
+  font-weight: 400;
+}
+.store-setup-draft-page .store-setup-step-content label.store-setup-row__field {
+  display: grid;
+  gap: 2px;
+  max-width: 24rem;
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--bop-color-text-muted);
+}
+.store-setup-draft-page .store-setup-step-content label.store-setup-row__field select {
+  min-height: 40px;
+  padding: var(--bop-space-1) 0;
+  border: 0;
+  border-bottom: 1px solid var(--bop-color-border-control);
+  border-radius: 0;
+  color: var(--bop-color-text-default);
+  background: var(--bop-color-surface-default);
+  font-size: 16px;
+}
+.store-setup-draft-page .store-setup-step-content label.store-setup-row__field select:focus {
+  border-bottom-color: var(--bop-color-text-default);
+}
+.store-setup-draft-page
+  .store-setup-step-content
+  .store-setup-block
+  button.store-setup-inline-action {
+  display: inline;
+  min-height: 44px;
+  font-size: 14px;
+}
+.store-setup-place__panel .store-setup-receipt-tools > section {
+  margin-top: var(--bop-space-6);
+}
+.store-setup-place__panel .store-setup-receipt-tools fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+@media (max-width: 640px) {
+  .store-setup-draft-page .store-setup-step-content .store-setup-rows > li.store-setup-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .store-setup-draft-page .store-setup-step-content label.store-setup-row__field {
+    max-width: none;
+  }
+}

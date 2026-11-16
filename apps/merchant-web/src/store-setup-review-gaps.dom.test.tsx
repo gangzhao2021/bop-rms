@@ -268,8 +268,9 @@ it("b22: unticking a payment method reports it as unsaved, Discard puts it back,
   );
   const { container, root } = await mount(view(0));
   await settle();
-  const buttons = [...container.querySelectorAll("button")].map((b) => b.textContent);
-  expect(buttons).toContain("保存付款方式");
+  const buttons = () => [...container.querySelectorAll("button")].map((b) => b.textContent);
+  // b24: nothing to save until a method is changed; then one accent action says what it saves.
+  expect(buttons()).not.toContain("保存付款方式");
   expect(container.textContent).not.toContain("配置");
   const online = [...container.querySelectorAll("label")].find(
     (label) => label.textContent === "顾客在线刷卡",
@@ -282,6 +283,7 @@ it("b22: unticking a payment method reports it as unsaved, Discard puts it back,
   });
   await settle();
   expect(reports.at(-1)).toEqual([{ label: "顾客在线刷卡", on: false }]);
+  expect(buttons()).toContain("保存付款方式");
   // Ticking it again is back to what is saved: nothing unsaved.
   await act(async () => {
     box.click();
@@ -297,7 +299,10 @@ it("b22: unticking a payment method reports it as unsaved, Discard puts it back,
     root.render(view(1));
   });
   await settle();
-  expect(box.checked).toBe(true);
+  const after = [...container.querySelectorAll("label")]
+    .find((label) => label.textContent === "顾客在线刷卡")
+    ?.querySelector("input");
+  expect(after?.checked).toBe(true);
   expect(reports.at(-1)).toEqual([]);
 });
 

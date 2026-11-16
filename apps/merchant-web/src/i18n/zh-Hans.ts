@@ -1286,8 +1286,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Check serving result": "检查上桌结果",
   "Try again. If the system stays down, take the order on paper and record it here afterwards.":
     "请重试。如果系统一直无法使用，请用纸质记录订单，之后再在此录入。",
-  "Check the edited settings. Each service interval needs valid times and at least one service mode. Wait times are whole minutes, up to 24 hours (1,440 minutes). A service charge or delivery fee that is On needs a tax classification that is still in use, and every fee that is On needs at least one order type.":
-    "请检查已编辑的设置。每个服务时段需要有效的时间和至少一种服务方式。等待时间为整数分钟，最长 24 小时（1,440 分钟）。开启的服务费或配送费需要仍在使用的税类，且每项开启的费用至少需要一种订单类型。",
+  "Check the edited settings. Each service interval needs valid times and at least one service mode. Wait times are whole minutes, up to 24 hours (1,440 minutes). A service charge or delivery fee that is On needs a tax classification that is still in use, and every fee that is On needs at least one order type, chosen from the services this setup offers.":
+    "请检查已编辑的设置。每个服务时段需要有效的时间和至少一种服务方式。等待时间为整数分钟，最长 24 小时（1,440 分钟）。开启的服务费或配送费需要仍在使用的税类，且每项开启的费用至少要适用于一种订单，只能从本店提供的服务方式中选。",
   "Check the entered details. Phone numbers need a country code; websites must use HTTPS.":
     "请检查填写的信息。电话号码需要国家代码；网站必须使用 HTTPS。",
   "Check the highlighted details and try again.": "请检查高亮的信息后重试。",
@@ -10101,4 +10101,74 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{method}: {before} → {after}": "{method}：{before} → {after}",
   "Save payment methods in {where}, choose the saved payment methods for this setup, then save as draft.":
     "请在{where}中保存付款方式，为这份设置选用已保存的付款方式，然后存为草稿。",
+  "{locale} receipt template, version {revision}": "{locale}收据模板（第 {revision} 版）",
+  "Guests get the receipt this store issues today.": "顾客拿到的是本店现在开出的收据。",
+  "The receipt guests get. Choose which template this store uses.":
+    "顾客拿到的收据。请选择本店使用哪个收据模板。",
+  "None chosen yet (needed to publish)": "还没有选（发布前必须选）",
+  "The template saved in this setup": "这份设置里保存的模板",
+  "Checking the receipt template…": "正在核对收据模板…",
+  "You do not have permission to choose receipt templates. The saved choice is kept.":
+    "你没有选择收据模板的权限。已保存的选择不变。",
+  "This template is not published for this store's language yet. The saved choice is kept.":
+    "这个模板还没有发布本店语言的版本。已保存的选择不变。",
+  "The check took too long. Choose the template again.": "核对时间太久，请重新选择模板。",
+  "The template could not be checked. The saved choice is kept.":
+    "暂时无法核对这个模板。已保存的选择不变。",
+  "Saved receipt templates could not be loaded.": "暂时读不到已保存的收据模板。",
+  "Edit receipt templates": "编辑收据模板",
+  "A change cannot be created yet: in this saved setup, {fees}, which it does not offer. Untick them in {where}, or offer them in {services}, save as draft, then come back here.":
+    "还不能生成修改：这份已保存设置里，{fees}，但本店没有提供这些服务。请在{where}中取消勾选，或在{services}中提供它们，存为草稿，再回到这里。",
+  "{fee} applies to {modes}": "{fee}适用于{modes}",
+  "Not taken in yet. It comes with the store's current settings in {where}.":
+    "还没有带入。会在{where}时随门店现在的设置一起带入。",
+  "Taxed with the tax settings this store uses today.": "按本店现在使用的税务设置计税。",
+  "Taxed with the tax settings taken in for this setup.": "按这份设置带入的税务设置计税。",
+  "Tax rates and tax names are in": "税率和税名在",
+  ", where they are checked and changed.": "里查看和修改。",
+  "Receipt templates": "收据模板",
+  "What a receipt shows and how it is laid out. A template you save here reaches guests once it is chosen in Settings that need approval, step 3, and published.":
+    "收据上显示哪些内容、怎样排版。在这里保存的模板，要在「需审批的设置」第 3 步选用并发布后，顾客才会拿到。",
+  "{fee} applies to {modes} orders, but this setup does not offer {modes}. Untick {modes} for it in {where}, or offer {modes} in {services}.":
+    "{fee}适用于{modes}订单，但这份设置没有提供{modes}。请在{where}中取消勾选{modes}，或在{services}中提供{modes}。",
+  "{fee}: on for {modes}, which this setup does not offer":
+    "{fee}：对{modes}开启，但这份设置没有提供{modes}",
+  "Payment methods saved. Save as draft to keep them in this setup.":
+    "付款方式已保存。存为草稿后，这份设置就会使用它们。",
+  Guests: "顾客",
+  "Which ways guests and staff can pay. Card payments also need the payment provider account set up before they work.":
+    "顾客和员工可以用哪些方式付款。刷卡付款还需要先开通支付服务商账户才能使用。",
+  "The payment methods were changed elsewhere. What is saved now is shown below; check it, then save again.":
+    "付款方式刚在别处改过。下面显示的是现在保存的内容，请检查后再保存。",
+  "The saved payment methods were read too long ago. Try again.":
+    "已保存的付款方式读取时间太久，请重试。",
+  "Payment methods could not be loaded. Your earlier save is safe.":
+    "暂时读不到付款方式。之前保存的内容不受影响。",
+  "The payment methods this store has now are not known yet.": "还不知道本店现在的付款方式。",
+  "These saved payment methods are not used in this setup yet.":
+    "这份设置还没有使用这些已保存的付款方式。",
+  "Save as draft to keep this choice.": "存为草稿后保留这个选择。",
+  "Added to every order it applies to, and taxed.": "加在适用的每张订单上，要计税。",
+  "Added to delivery orders, and taxed.": "加在配送订单上，要计税。",
+  "Guests choose to tip. Tips go to staff and are generally not taxed.":
+    "顾客自愿给小费。小费归员工，一般不计税。",
+  "What guests pay on top of their food. Amounts and tip percentages are set in Store features; guests see a change only once this setup is published.":
+    "顾客在菜品之外要付的钱。金额和小费比例在门店功能中设置；这份设置发布后，顾客才会看到变化。",
+  "No tax classifications are set up for this Brand yet, so a service charge or delivery fee cannot be turned on here. Tips can still be turned on, and you can save the rest of this setup.":
+    "这个品牌还没有设置税类，所以这里不能开启服务费或配送费。小费仍可开启，其他设置也可以保存。",
+  ", then come back here.": "，然后回到这里。",
+  "Tax classifications could not be loaded. Tips, and fees that are off, can still be saved.":
+    "暂时读不到税类。小费和已关闭的费用仍可保存。",
+  "This store does not offer delivery, so it charges no delivery fee.":
+    "本店不提供配送，所以不收配送费。",
+  "Charge it": "是否收取",
+  "This store does not offer delivery. Turn the delivery fee off, or offer delivery in {where}.":
+    "本店不提供配送。请关闭配送费，或在{where}中提供配送。",
+  "Applies to": "适用于",
+  "No services are chosen yet. Choose them in {where} first.":
+    "还没有选服务方式。请先在{where}中选择。",
+  "This store does not offer {modes}. Untick it here, or offer it in {where}.":
+    "本店不提供{modes}。请在这里取消勾选，或在{where}中提供{modes}。",
+  "The tax class is the Brand’s own choice; it has not been checked by a tax professional.":
+    "税类由品牌自行选择，未经税务专业人士核对。",
 });

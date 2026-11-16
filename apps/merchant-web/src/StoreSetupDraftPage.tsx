@@ -21,6 +21,7 @@ import { ReceiptTemplateArtifactEditor } from "./ReceiptTemplateArtifactEditor.j
 import { ReceiptTemplateDraftEditor } from "./ReceiptTemplateDraftEditor.js";
 import {
   storeSetupBusinessStartChange,
+  storeSetupFeesNotOffered,
   storeSetupMissingItems,
   storeSetupWhere,
   type StoreSetupLayout,
@@ -85,6 +86,7 @@ import {
   storeTimeZoneNamesApart,
 } from "./time-zone-names.js";
 import { useScrollToAnchor } from "./scroll-to-anchor.js";
+import { useReadAgainWhenOnline } from "./reconnect-read.js";
 const StoreFirstOpeningPanel = lazyPage(
   () => import("./StoreFirstOpeningPanel.js"),
   "StoreFirstOpeningPanel",
@@ -234,14 +236,39 @@ export function buildStoreSetupEditedContent(
             })),
           })),
         );
-  return parseStoreSetupContent({
+  const feeContexts = storeSetupFeesForServices(content.feeContexts, inputs.serviceModes);
+  const edited = parseStoreSetupContent({
     ...content,
+    ...(feeContexts === undefined ? {} : { feeContexts }),
     timeZone: inputs.timeZone === "" ? empty : configured(inputs.timeZone),
     businessDayStartLocalTime:
       inputs.businessStart === "" ? empty : configured(time(inputs.businessStart)),
     enabledServiceModes: inputs.serviceModes.length === 0 ? empty : configured(inputs.serviceModes),
     weeklySchedule,
   });
+  // b24 (Owner 2026-11-16): a fee applies only to orders this setup offers; the server refuses
+  // anything else, so it is never sent (Review and the fee itself say what to change).
+  if (storeSetupFeesNotOffered(edited).length > 0) throw new StoreSetupClientError("Invalid");
+  return edited;
+}
+/**
+ * b24: a Store that offers no delivery charges no delivery fee. Its delivery fee, while still not
+ * set, is saved as off (the fees step says so instead of asking); a delivery fee already on stays as
+ * it is, so it is shown and put right rather than changed unseen.
+ */
+export function storeSetupFeesForServices(
+  fees: StoreSetupContent["feeContexts"],
+  services: readonly string[],
+): StoreSetupContent["feeContexts"] {
+  if (fees?.state !== "Configured" || services.includes("Delivery")) return fees;
+  return {
+    state: "Configured",
+    value: fees.value.map((fee) =>
+      fee.chargeType === "DeliveryFee" && fee.state === "Unconfigured"
+        ? { chargeType: fee.chargeType, state: "Disabled" as const }
+        : fee,
+    ),
+  };
 }
 /** The actual page uses this reserve-before-dispatch routine. Storage failure
  * never dispatches, and a reserved original survives all transport failures. */
@@ -303,7 +330,7 @@ export async function recoverStoreSetupDraft(input: {
 }
 const messages: Record<StoreSetupClientError["code"], string> = {
   Invalid: t(
-    "Check the edited settings. Each service interval needs valid times and at least one service mode. Wait times are whole minutes, up to 24 hours (1,440 minutes). A service charge or delivery fee that is On needs a tax classification that is still in use, and every fee that is On needs at least one order type.",
+    "Check the edited settings. Each service interval needs valid times and at least one service mode. Wait times are whole minutes, up to 24 hours (1,440 minutes). A service charge or delivery fee that is On needs a tax classification that is still in use, and every fee that is On needs at least one order type, chosen from the services this setup offers.",
   ),
   Denied: t("Your current permission or selected Store does not allow this action."),
   Conflict: t(
@@ -367,6 +394,75 @@ const feeLabel = (chargeType: string) =>
     : chargeType === "DeliveryFee"
       ? t("Delivery fee")
       : t("Tip");
+/**
+ * b24: the tax this setup uses, in one sentence, and where rates and names are changed. The setup
+ * takes the Store's tax settings with "Use the live Store's settings" in Review; rates and tax names
+ * themselves are checked and changed in Tax review.
+ */
+function StoreSetupTaxSection({
+  value,
+  live,
+  where,
+}: {
+  readonly value: StoreSetupContent["taxConfigurationReference"];
+  readonly live: string | null;
+  readonly where: string;
+}) {
+  return (
+    <section className="store-setup-tax store-setup-block" aria-label={t("Tax")}>
+      <h4>{t("Tax")}</h4>
+      <p>
+        {value.state !== "Configured"
+          ? t("Not taken in yet. It comes with the store's current settings in {where}.", {
+              where,
+            })
+          : live !== null && value.value === live
+            ? t("Taxed with the tax settings this store uses today.")
+            : t("Taxed with the tax settings taken in for this setup.")}
+      </p>
+      <p>
+        {t("Tax rates and tax names are in")}
+        {wordGap()}
+        <Link to="/app/commerce/tax-review">{t("Tax review")}</Link>
+        {t(", where they are checked and changed.")}
+      </p>
+    </section>
+  );
+}
+/** b24: writing and changing receipt templates, in Receipts and tax numbers (not in the fees step). */
+function StoreReceiptTemplateTools({
+  scope,
+  csrf,
+  locale,
+  disabled,
+}: {
+  readonly scope: StoreSetupScope;
+  readonly csrf: string;
+  readonly locale: string;
+  readonly disabled: boolean;
+}) {
+  return (
+    <section
+      id="receipt-templates"
+      className="store-setup-receipt-tools"
+      aria-labelledby="receipt-templates-heading"
+    >
+      <h3 id="receipt-templates-heading">{t("Receipt templates")}</h3>
+      <p>
+        {t(
+          "What a receipt shows and how it is laid out. A template you save here reaches guests once it is chosen in Settings that need approval, step 3, and published.",
+        )}
+      </p>
+      <ReceiptTemplateArtifactEditor scope={scope} csrf={csrf} disabled={disabled} />
+      <ReceiptTemplateDraftEditor
+        scope={scope}
+        csrf={csrf}
+        defaultLocale={locale}
+        disabled={disabled}
+      />
+    </section>
+  );
+}
 function SavedReference({ value }: { value: StoreSetupContent["addressReference"] }) {
   return <p>{value.state === "Configured" ? t("Already configured.") : t("Not configured.")}</p>;
 }
@@ -449,6 +545,7 @@ export const storeSetupPlaces: readonly StoreSetupPlace[] = [
 const placeAnchors: Readonly<Record<string, StoreSetupPlace>> = {
   "#store-public-profile": "profile",
   "#receipts-and-privacy": "receipts",
+  "#receipt-templates": "receipts",
   "#kitchen-setup": "kitchen",
   "#support-access": "access",
   "#sole-operator": "access",
@@ -1127,7 +1224,7 @@ export function StoreSetupDraftPage({
   }
   // b22 (v15 live check of b21): a fee turned on without its orders (or tax classification) is
   // named as that in Review, and the rest of the summary is still read without that fee.
-  const feeProblems = storeSetupFeeProblems(content);
+  const feeProblems = storeSetupFeeProblems(content, inputs.serviceModes);
   // b22: a fee left half set cannot be read back after the language switch's reload (the kept edits
   // are read like a saved setup), so the switch asks first instead of dropping it unseen.
   const halfSetFee = dirty && feeProblems.length > 0;
@@ -1468,6 +1565,17 @@ export function StoreSetupDraftPage({
           </div>
           {children}
           {renderedPanels(place === "changes" ? "changes" : place)}
+          {place === "receipts" && workspace !== null && !ownerOnly ? (
+            <div className="store-setup-place__panel">
+              <StoreReceiptTemplateTools
+                key={`receipt-tools:${JSON.stringify(workspace.scope)}:${csrf}`}
+                scope={workspace.scope}
+                csrf={csrf}
+                locale={workspace.store.locale}
+                disabled={busy || !online || !!pending}
+              />
+            </div>
+          ) : null}
         </>
       ) : null}
       {/* b18 polish: before the draft is read (or when the read failed) this is how to read it
@@ -1495,6 +1603,15 @@ export function StoreSetupDraftPage({
             <StoreProfilePublishedContext.Provider value={profilePublished}>
               {children}
               {renderedPanels(null)}
+              <div className="store-setup-place__panel">
+                <StoreReceiptTemplateTools
+                  key={`receipt-tools:${JSON.stringify(workspace.scope)}:${csrf}`}
+                  scope={workspace.scope}
+                  csrf={csrf}
+                  locale={workspace.store.locale}
+                  disabled={busy || !online || !!pending}
+                />
+              </div>
             </StoreProfilePublishedContext.Provider>
           }
           panel={
@@ -1937,6 +2054,9 @@ export function StoreSetupDraftPage({
                 )}
               </>
             )}
+            {/* b24 (Owner 2026-11-16 "这个页面还是很难看"): fees, tax, payment and receipt,
+                each a short section a busy owner reads at a glance; writing receipt templates is
+                in Receipts and tax numbers. */}
             {activeStep === 4 && (
               <>
                 <StoreSetupFeeContextEditor
@@ -1946,15 +2066,15 @@ export function StoreSetupDraftPage({
                   value={content.feeContexts ?? { state: "Unconfigured" }}
                   disabled={disabled}
                   onChange={(feeContexts) => changeContent({ feeContexts })}
+                  offered={inputs.serviceModes}
+                  servicesWhere={storeSetupWhere(layout, "serviceModes")}
                   {...(taxClassificationsHref === undefined ? {} : { taxClassificationsHref })}
                 />
-                <h4>{t("Tax settings")}</h4>
-                <SavedReference value={content.taxConfigurationReference} />
-                <h4>{t("Payment settings")}</h4>
-                <SavedReference value={content.paymentConfigurationReference} />
-                <h4>{t("Receipt settings")}</h4>
-                <SavedReference value={content.receiptReference} />
-                <p>{t("Tax rates and tax names are set in Tax review.")}</p>
+                <StoreSetupTaxSection
+                  value={content.taxConfigurationReference}
+                  live={live?.current?.taxConfigurationReference ?? null}
+                  where={storeSetupWhere(layout, "live")}
+                />
               </>
             )}
             {activeStep === 5 && orderLimits}
@@ -1965,6 +2085,30 @@ export function StoreSetupDraftPage({
                 <p>{t("Save contact details below, then choose them for this draft.")}</p>
               </>
             )}
+            <StorePaymentConfigurationEditor
+              key={`payment:${JSON.stringify(workspace.scope)}:${csrf}`}
+              scope={workspace.scope}
+              csrf={csrf}
+              hidden={activeStep !== 4}
+              disabled={busy || !online || !!pending}
+              selectedReference={
+                content.paymentConfigurationReference.state === "Configured"
+                  ? content.paymentConfigurationReference.value
+                  : null
+              }
+              onUnsavedChange={setPaymentChanges}
+              discardSignal={discardPayment}
+              onSelect={(reference) => {
+                setContent((v) =>
+                  parseStoreSetupContent({
+                    ...v,
+                    paymentConfigurationReference: { state: "Configured", value: reference },
+                  }),
+                );
+                setDirty(true);
+                setError(null);
+              }}
+            />
             <ReceiptTemplateStoreSelection
               key={`receipt-selection:${JSON.stringify(workspace.scope)}:${csrf}`}
               scope={workspace.scope}
@@ -1972,6 +2116,11 @@ export function StoreSetupDraftPage({
               csrf={csrf}
               value={content.receiptReference}
               liveTemplateReference={live?.current?.receiptReference ?? null}
+              editHref={
+                firstStore
+                  ? "#receipt-templates"
+                  : storeSetupPlaceHref(storeReference, "receipts") + "#receipt-templates"
+              }
               hidden={activeStep !== 4}
               disabled={busy || !ready || !online || !!pending}
               onSelect={(templateReference) => {
@@ -1982,40 +2131,6 @@ export function StoreSetupDraftPage({
                       templateReference === null
                         ? { state: "Unconfigured" }
                         : { state: "Configured", value: templateReference },
-                  }),
-                );
-                setDirty(true);
-                setError(null);
-              }}
-            />
-            <ReceiptTemplateArtifactEditor
-              key={`receipt-artifacts:${JSON.stringify(workspace.scope)}:${csrf}`}
-              scope={workspace.scope}
-              csrf={csrf}
-              hidden={activeStep !== 4}
-              disabled={busy || !online || !!pending}
-            />
-            <ReceiptTemplateDraftEditor
-              key={`receipt-templates:${JSON.stringify(workspace.scope)}:${csrf}`}
-              scope={workspace.scope}
-              csrf={csrf}
-              defaultLocale={workspace.store.locale}
-              hidden={activeStep !== 4}
-              disabled={busy || !online || !!pending}
-            />
-            <StorePaymentConfigurationEditor
-              key={`payment:${JSON.stringify(workspace.scope)}:${csrf}`}
-              scope={workspace.scope}
-              csrf={csrf}
-              hidden={activeStep !== 4}
-              disabled={busy || !online || !!pending}
-              onUnsavedChange={setPaymentChanges}
-              discardSignal={discardPayment}
-              onSelect={(reference) => {
-                setContent((v) =>
-                  parseStoreSetupContent({
-                    ...v,
-                    paymentConfigurationReference: { state: "Configured", value: reference },
                   }),
                 );
                 setDirty(true);
@@ -2209,34 +2324,54 @@ export interface StoreSetupSummaryItem {
  * b22 (v15 live check of b21): a fee turned on in step 3 that cannot be saved yet: which orders it
  * applies to, or (a service charge or delivery fee) its tax classification, is not chosen yet.
  */
-export interface StoreSetupFeeProblem {
-  readonly chargeType: string;
-  readonly kind: "OrderTypes" | "TaxClassification";
-}
-export function storeSetupFeeProblems(content: StoreSetupContent): readonly StoreSetupFeeProblem[] {
+export type StoreSetupFeeProblem =
+  | { readonly chargeType: string; readonly kind: "OrderTypes" | "TaxClassification" }
+  /** b24: it applies to orders (`modes`) the setup's services (step 2) do not offer. */
+  | { readonly chargeType: string; readonly kind: "NotOffered"; readonly modes: readonly string[] };
+export function storeSetupFeeProblems(
+  content: StoreSetupContent,
+  /** b24: the services as edited on the page (saved or not); the setup's own when not given. */
+  offered?: readonly string[],
+): readonly StoreSetupFeeProblem[] {
   if (content.feeContexts?.state !== "Configured") return [];
-  return content.feeContexts.value.flatMap((fee): StoreSetupFeeProblem[] =>
-    fee.state !== "Enabled"
-      ? []
+  const notOffered = storeSetupFeesNotOffered(content, offered);
+  return content.feeContexts.value.flatMap((fee): StoreSetupFeeProblem[] => {
+    if (fee.state !== "Enabled") return [];
+    const outside = notOffered.find((entry) => entry.chargeType === fee.chargeType);
+    return outside !== undefined
+      ? [{ chargeType: fee.chargeType, kind: "NotOffered", modes: outside.modes }]
       : fee.orderTypes.length === 0
         ? [{ chargeType: fee.chargeType, kind: "OrderTypes" }]
         : fee.taxClassificationReference === "" ||
             (fee.taxClassificationReference === null && fee.chargeType !== "Tip")
           ? [{ chargeType: fee.chargeType, kind: "TaxClassification" }]
-          : [],
-  );
+          : [];
+  });
 }
+const modesText = (modes: readonly string[]) => modes.map(serviceModeText).join(listSeparator());
 /** b22: what is wrong with a fee that is on, in plain words, with where to put it right. */
-export const storeSetupFeeProblemText = (problem: StoreSetupFeeProblem, where: string) =>
-  problem.kind === "OrderTypes"
-    ? t("{fee} is on, but which orders it applies to is not chosen yet. Choose them in {where}.", {
-        fee: feeLabel(problem.chargeType),
-        where,
-      })
-    : t("{fee} is on, but its tax classification is not chosen yet. Choose one in {where}.", {
-        fee: feeLabel(problem.chargeType),
-        where,
-      });
+export const storeSetupFeeProblemText = (
+  problem: StoreSetupFeeProblem,
+  where: string,
+  services = where,
+) =>
+  problem.kind === "NotOffered"
+    ? t(
+        "{fee} applies to {modes} orders, but this setup does not offer {modes}. Untick {modes} for it in {where}, or offer {modes} in {services}.",
+        { fee: feeLabel(problem.chargeType), modes: modesText(problem.modes), where, services },
+      )
+    : problem.kind === "OrderTypes"
+      ? t(
+          "{fee} is on, but which orders it applies to is not chosen yet. Choose them in {where}.",
+          {
+            fee: feeLabel(problem.chargeType),
+            where,
+          },
+        )
+      : t("{fee} is on, but its tax classification is not chosen yet. Choose one in {where}.", {
+          fee: feeLabel(problem.chargeType),
+          where,
+        });
 /**
  * b22: Review reads a setup whose fees still need a choice: those fees are left out (each is named
  * as what needs fixing instead), so the rest of the summary still says what changes.
@@ -2500,13 +2635,18 @@ export function storeSetupChangeSummary(
     });
     // b22: a fee that is on but still needs a choice is named so, not compared or listed as set.
     const open = feeProblems.map((problem) =>
-      problem.kind === "OrderTypes"
-        ? t("{fee}: on, which orders it applies to is not chosen yet", {
+      problem.kind === "NotOffered"
+        ? t("{fee}: on for {modes}, which this setup does not offer", {
             fee: feeLabel(problem.chargeType),
+            modes: modesText(problem.modes),
           })
-        : t("{fee}: on, its tax classification is not chosen yet", {
-            fee: feeLabel(problem.chargeType),
-          }),
+        : problem.kind === "OrderTypes"
+          ? t("{fee}: on, which orders it applies to is not chosen yet", {
+              fee: feeLabel(problem.chargeType),
+            })
+          : t("{fee}: on, its tax classification is not chosen yet", {
+              fee: feeLabel(problem.chargeType),
+            }),
     );
     add(t("Fees"), "feeContexts", known ? changes.length === 0 && open.length === 0 : null, () =>
       known ? [...changes, ...open] : [...fees.filter(listed).map(feeText), ...open],
@@ -2758,7 +2898,11 @@ export function StoreSetupDraftReview({
           ),
         ]),
     ...feeProblems.map((problem) =>
-      storeSetupFeeProblemText(problem, storeSetupWhere(layout, "payment")),
+      storeSetupFeeProblemText(
+        problem,
+        storeSetupWhere(layout, "payment"),
+        storeSetupWhere(layout, "serviceModes"),
+      ),
     ),
   ];
   // b18 review: the publication below checks the saved draft. A setting filled in on this page
@@ -2883,6 +3027,7 @@ export function StoreSetupReferenceEditor({
     [pending, setPending] = useState<StoreSetupReferenceCursor | null>(null),
     [busy, setBusy] = useState(false),
     [ready, setReady] = useState(false),
+    [readAgain, setReadAgain] = useState(0),
     [error, setError] = useState<StoreSetupClientError["code"] | null>(null),
     [notice, setNotice] = useState("");
   const [fields, setFields] = useState<StoreSetupReferenceFields>({
@@ -2979,7 +3124,9 @@ export function StoreSetupReferenceEditor({
       c.abort();
       active.current = null;
     };
-  }, [client, scopeKey, csrf, kind, journalFactory]);
+  }, [client, scopeKey, csrf, kind, journalFactory, readAgain]);
+  // b24 (v15 live check of b23): a first read that failed with the connection is made again.
+  useReadAgainWhenOnline(!ready && !busy && error !== null, () => setReadAgain((n) => n + 1));
   useEffect(() => {
     if (disabled) {
       active.current?.abort();
@@ -3305,6 +3452,7 @@ export function StorePaymentConfigurationEditor({
   hidden = false,
   disabled = false,
   onSelect,
+  selectedReference = null,
   onUnsavedChange,
   discardSignal = 0,
   client: injected,
@@ -3315,6 +3463,8 @@ export function StorePaymentConfigurationEditor({
   readonly hidden?: boolean;
   readonly disabled?: boolean;
   readonly onSelect: (reference: string) => void;
+  /** b24: the payment methods this setup uses now (its own, saved or not), when chosen. */
+  readonly selectedReference?: string | null;
   /**
    * b22 (v15 live check of b21): the payment methods ticked or unticked here and not saved yet, so
    * the page counts them as unsaved (Discard, Review, the language switch and leaving the page).
@@ -3344,6 +3494,8 @@ export function StorePaymentConfigurationEditor({
     if (v.snapshot && !dirty.current) setFields(v.snapshot.content);
   };
   const scopeKey = JSON.stringify(scope);
+  // b24: a first read that failed (the connection was gone) is made again once it is back.
+  const [firstRead, setFirstRead] = useState(0);
   useEffect(() => {
     const e = ++epoch.current,
       c = new AbortController();
@@ -3382,7 +3534,10 @@ export function StorePaymentConfigurationEditor({
       c.abort();
       active.current = null;
     };
-  }, [client, scopeKey, csrf, journalFactory]);
+  }, [client, scopeKey, csrf, journalFactory, firstRead]);
+  const online = useReadAgainWhenOnline(!ready && error !== null && !busy, () =>
+    setFirstRead((n) => n + 1),
+  );
   // Parent draft saves may temporarily disable this child. Keep its initial
   // read alive; cancel only an active command, whose durable original survives.
   useEffect(() => {
@@ -3463,14 +3618,26 @@ export function StorePaymentConfigurationEditor({
         dirty.current = false;
         hold.clear();
         apply(result.current);
-        setNotice(
-          t(
-            "Payment methods saved. Choose them below, then save the setup draft to keep that choice.",
-          ),
-        );
+        // b24: saving the payment methods here means this setup uses them; Save as draft keeps it.
+        const saved = result.current.snapshot;
+        if (saved) onSelect(saved.configurationReference);
+        setNotice(t("Payment methods saved. Save as draft to keep them in this setup."));
       }
     } catch (value) {
-      if (valid()) setError(value instanceof StoreSetupClientError ? value.code : "Unavailable");
+      const code = value instanceof StoreSetupClientError ? value.code : "Unavailable";
+      if (valid()) setError(code);
+      // b24: changed elsewhere meanwhile: what is saved now is read and shown, to check and save.
+      if (valid() && code === "Conflict" && mode === "Save")
+        void client
+          .load({ storeReference: scope.storeReference, expectedScope: scope, signal: c.signal })
+          .then((v) => {
+            if (!valid()) return;
+            dirty.current = false;
+            hold.clear();
+            setView(v);
+            setFields(v.snapshot?.content ?? noPaymentChannels);
+          })
+          .catch(() => undefined);
     } finally {
       if (valid()) {
         setBusy(false);
@@ -3508,12 +3675,22 @@ export function StorePaymentConfigurationEditor({
     setFields(view?.snapshot?.content ?? noPaymentChannels);
     setError(null);
   }, [discardSignal]);
+  const savedReference = view?.snapshot?.configurationReference ?? null;
+  // b24: what guests and staff can pay with, in two plain groups.
+  const groups: readonly (readonly [string, typeof labels])[] = [
+    [t("Guests"), labels.filter(([key]) => key === "customerOnlineCardEnabled")],
+    [t("Staff"), labels.filter(([key]) => key !== "customerOnlineCardEnabled")],
+  ];
   return (
-    <section hidden={hidden} aria-label={t("Payment methods")}>
-      <h4>{t("Store payment rules")}</h4>
-      <p>
+    <section
+      hidden={hidden}
+      className="store-setup-payment store-setup-block"
+      aria-label={t("Payment methods")}
+    >
+      <h4>{t("Payment")}</h4>
+      <p className="store-setup-block__lead">
         {t(
-          "Saving these rules does not turn on card payments by itself: the payment provider account must be set up, and the rules approved and published.",
+          "Which ways guests and staff can pay. Card payments also need the payment provider account set up before they work.",
         )}
       </p>
       {error === "FullSignInRequired" ? (
@@ -3527,13 +3704,13 @@ export function StorePaymentConfigurationEditor({
             </p>
           ) : null}
         </>
-      ) : error ? (
+      ) : error && !(error === "Unavailable" && !online) ? (
         <p role="alert">
           {error === "Denied"
             ? t("You cannot see this Store's payment methods.")
             : error === "Conflict"
               ? t(
-                  "The payment methods were changed elsewhere. Refresh and check them before saving.",
+                  "The payment methods were changed elsewhere. What is saved now is shown below; check it, then save again.",
                 )
               : error === "OutcomeUnknown"
                 ? t(
@@ -3541,76 +3718,102 @@ export function StorePaymentConfigurationEditor({
                   )
                 : error === "Invalid"
                   ? t("Check the three payment channel settings.")
-                  : t(
-                      "Payment settings could not be loaded. Refresh when connected; an earlier save remains protected.",
-                    )}
+                  : error === "Stale"
+                    ? t("The saved payment methods were read too long ago. Try again.")
+                    : t("Payment methods could not be loaded. Your earlier save is safe.")}{" "}
+          {!ready && error !== "Denied" ? (
+            <button
+              type="button"
+              className="store-setup-inline-action"
+              disabled={busy}
+              onClick={() => setFirstRead((n) => n + 1)}
+            >
+              {t("Try again")}
+            </button>
+          ) : null}
         </p>
       ) : null}
       {notice && <p role="status">{notice}</p>}
-      {busy && <p role="status">{t("Loading payment methods…")}</p>}
+      {busy && !ready && <p role="status">{t("Loading payment methods…")}</p>}
       {pending && (
-        <>
-          <p role="status">{t("An earlier payment save must be recovered before another save.")}</p>
-          <button type="button" disabled={disabled || busy} onClick={() => void action("Resolve")}>
-            {t("Recover original payment save")}
-          </button>
-        </>
-      )}
-      <fieldset disabled={disabled || busy || !ready || !!pending}>
-        <legend>{t("Allowed payment channels")}</legend>
-        {labels.map(([key, label]) => (
-          <label key={key}>
-            <input
-              type="checkbox"
-              checked={fields[key]}
-              onChange={(e) => {
-                const checked = e.currentTarget.checked;
-                dirty.current = true;
-                hold.mark();
-                setFields((v) => ({ ...v, [key]: checked }));
-                setError(null);
-              }}
-            />
-            {label}
-          </label>
-        ))}
-      </fieldset>
-      <button type="button" disabled={disabled || busy} onClick={() => void action("Refresh")}>
-        {t("Refresh the saved payment methods")}
-      </button>
-      <button
-        type="button"
-        disabled={disabled || busy || !ready || !!pending}
-        onClick={() => void action("Save")}
-      >
-        {t("Save payment methods")}
-      </button>
-      {view?.snapshot && (
-        <>
-          <p>
-            {t(
-              "Saved payment rules, version {revision}. Card payments still need the payment provider account to be set up.",
-              { revision: view.snapshot.revision },
-            )}
-          </p>
+        <p role="status">
+          {t("An earlier payment save must be recovered before another save.")}{" "}
           <button
             type="button"
+            className="store-setup-inline-action"
+            disabled={disabled || busy}
+            onClick={() => void action("Resolve")}
+          >
+            {t("Recover original payment save")}
+          </button>
+        </p>
+      )}
+      {/* b24 (v15 live check of b23): until the saved methods are read, none is shown as off. */}
+      {ready ? (
+        <fieldset className="store-setup-payment__methods" disabled={disabled || busy || !!pending}>
+          <legend className="visually-hidden">{t("Allowed payment channels")}</legend>
+          {groups.map(([group, items]) => (
+            <div className="store-setup-payment__group" key={group}>
+              <span className="store-setup-row__label">{group}</span>
+              {items.map(([key, label]) => (
+                <label key={key}>
+                  <input
+                    type="checkbox"
+                    checked={fields[key]}
+                    onChange={(e) => {
+                      const checked = e.currentTarget.checked;
+                      dirty.current = true;
+                      hold.mark();
+                      setFields((v) => ({ ...v, [key]: checked }));
+                      setError(null);
+                    }}
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+          ))}
+        </fieldset>
+      ) : (
+        <p className="store-setup-block__note">
+          {t("The payment methods this store has now are not known yet.")}
+        </p>
+      )}
+      {ready && (unsaved.length > 0 || !view?.snapshot) ? (
+        <p>
+          <button
+            type="button"
+            className="store-setup-inline-action"
+            disabled={disabled || busy || !!pending}
+            onClick={() => void action("Save")}
+          >
+            {t("Save payment methods")}
+          </button>
+        </p>
+      ) : null}
+      {ready && view?.snapshot && savedReference !== selectedReference && unsaved.length === 0 ? (
+        <p>
+          {t("These saved payment methods are not used in this setup yet.")}{" "}
+          <button
+            type="button"
+            className="store-setup-inline-action"
             disabled={disabled || busy || !!pending}
             onClick={() => {
               if (Date.now() >= Date.parse(view.validUntil)) {
                 setError("Stale");
+                setFirstRead((n) => n + 1);
                 return;
               }
               const selected = view.snapshot;
               if (!selected) return;
               onSelect(selected.configurationReference);
-              setNotice(t("Selection changed locally. Save the setup draft to keep it."));
+              setNotice(t("Save as draft to keep this choice."));
             }}
           >
             {t("Use the saved payment methods")}
           </button>
-        </>
-      )}
+        </p>
+      ) : null}
     </section>
   );
 }
@@ -3709,6 +3912,13 @@ export function validateStoreSetupFeeSelections(
       throw new StoreSetupClientError("Invalid");
   }
 }
+/** b24 (Owner 2026-11-16 "这个页面还是很难看"): what each fee is, in one line. */
+const feeHint = (chargeType: string) =>
+  chargeType === "ServiceCharge"
+    ? t("Added to every order it applies to, and taxed.")
+    : chargeType === "DeliveryFee"
+      ? t("Added to delivery orders, and taxed.")
+      : t("Guests choose to tip. Tips go to staff and are generally not taxed.");
 export function StoreSetupFeeContextEditor({
   scope,
   csrf,
@@ -3717,6 +3927,8 @@ export function StoreSetupFeeContextEditor({
   onChange,
   client: injected,
   taxClassificationsHref,
+  offered = modes,
+  servicesWhere = "",
 }: {
   readonly scope: StoreSetupScope;
   readonly csrf: string;
@@ -3726,6 +3938,13 @@ export function StoreSetupFeeContextEditor({
   readonly client?: ReturnType<typeof createStoreSetupClient>;
   /** WP-2423: where the Brand Owner adds tax classifications (only for people who can). */
   readonly taxClassificationsHref?: string;
+  /**
+   * b24 (Owner 2026-11-16 "服务费的订单类型为什么可以勾选服务方式没有勾选的选项？"): the services
+   * this setup offers (step 2, as edited, saved or not). A fee is offered only these orders.
+   */
+  readonly offered?: readonly ServiceMode[];
+  /** b24: where the services are chosen ("step 2, Services"), named when a fee needs one. */
+  readonly servicesWhere?: string;
 }) {
   const client = useMemo(() => injected ?? createStoreSetupClient(), [injected]);
   const [choices, setChoices] = useState<Awaited<ReturnType<typeof client.classifications>> | null>(
@@ -3762,6 +3981,21 @@ export function StoreSetupFeeContextEditor({
       controller.abort();
     };
   }, [client, scope, csrf, reload]);
+  // b24: the choices are read again by themselves once the connection is back, and when the
+  // Brand Owner comes back from adding tax classifications (no button to refresh them).
+  const noneActive =
+    error === "NotRegistered" ||
+    (choices !== null && !choices.choices.some((v) => v.lifecycle === "Active"));
+  const online = useReadAgainWhenOnline(error === "Unavailable", () => setReload((v) => v + 1));
+  const readOnReturn = useRef(noneActive);
+  readOnReturn.current = noneActive;
+  useEffect(() => {
+    const back = () => {
+      if (document.visibilityState === "visible" && readOnReturn.current) setReload((v) => v + 1);
+    };
+    document.addEventListener("visibilitychange", back);
+    return () => document.removeEventListener("visibilitychange", back);
+  }, []);
   const entries: readonly StoreSetupFeeContext[] =
     value.state === "Configured"
       ? value.value
@@ -3772,30 +4006,31 @@ export function StoreSetupFeeContextEditor({
   // picked: the server answers within seconds of reading them, and Save reads them again and
   // refuses a classification no longer in use, so picking never waits for a manual refresh.
   const loading = choices === null && error === false;
+  const delivery = offered.includes("Delivery");
+  const offeredText = (mode: ServiceMode) =>
+    mode === "DineIn" ? t("Dine in") : serviceModeText(mode);
   return (
-    <section className="store-setup-fee-contexts" aria-label={t("Fees")}>
+    <section className="store-setup-fees store-setup-block" aria-label={t("Fees")}>
       <h4>{t("Fees")}</h4>
-      <p>
+      <p className="store-setup-block__lead">
         {t(
-          "Choose whether this store uses a service charge, a delivery fee and tips, and which orders each one applies to. Saving the setup draft keeps these choices. It does not set fee amounts or tax rates, and customers are not charged anything new until the store settings are approved and published.",
+          "What guests pay on top of their food. Amounts and tip percentages are set in Store features; guests see a change only once this setup is published.",
         )}
       </p>
       {loading && <p role="status">{t("Loading tax classification choices…")}</p>}
       {error === "NotRegistered" && (
         <p role="status">
           {t(
-            "No tax classifications are set up for this Brand yet, so a service charge or delivery fee cannot be turned on here. Leave them as Not set or Off; tips can still be turned on, and you can save the rest of this setup.",
+            "No tax classifications are set up for this Brand yet, so a service charge or delivery fee cannot be turned on here. Tips can still be turned on, and you can save the rest of this setup.",
           )}
         </p>
       )}
-      {taxClassificationsHref !== undefined &&
-        (error === "NotRegistered" ||
-          (choices !== null && !choices.choices.some((v) => v.lifecycle === "Active"))) && (
-          <p>
-            <Link to={taxClassificationsHref}>{t("Set up the Brand’s tax classifications")}</Link>
-            {t(", then come back and choose Refresh fee classification choices.")}
-          </p>
-        )}
+      {taxClassificationsHref !== undefined && noneActive && (
+        <p>
+          <Link to={taxClassificationsHref}>{t("Set up the Brand’s tax classifications")}</Link>
+          {t(", then come back here.")}
+        </p>
+      )}
       {error === "Denied" && (
         <p role="status">
           {t(
@@ -3803,154 +4038,202 @@ export function StoreSetupFeeContextEditor({
           )}
         </p>
       )}
-      {error === "Unavailable" && (
-        <p role="status">
+      {/* b24: an outage is said by the page's offline line; this says only a read that failed. */}
+      {error === "Unavailable" && online && (
+        <p role="status" className="store-setup-block__problem">
           {t(
-            "Tax classifications could not be loaded. Choose Refresh fee classification choices to try again; tips, and fees that are Not set or Off, can still be saved.",
-          )}
+            "Tax classifications could not be loaded. Tips, and fees that are off, can still be saved.",
+          )}{" "}
+          <button
+            type="button"
+            className="store-setup-inline-action"
+            disabled={disabled}
+            onClick={() => setReload((v) => v + 1)}
+          >
+            {t("Try again")}
+          </button>
         </p>
       )}
-      <button type="button" disabled={disabled || loading} onClick={() => setReload((v) => v + 1)}>
-        {t("Refresh fee classification choices")}
-      </button>
-      {entries.map((entry, index) => (
-        <fieldset disabled={disabled} key={entry.chargeType}>
-          <legend>{feeLabel(entry.chargeType)}</legend>
-          <label>
-            {feeLabel(entry.chargeType)}
-            <select
-              aria-label={feeLabel(entry.chargeType)}
-              value={entry.state}
-              onChange={(e) => {
-                const state = e.currentTarget.value;
-                if (state === "Unconfigured" || state === "Disabled")
-                  change(index, { chargeType: entry.chargeType, state });
-                else if (state === "Enabled")
-                  change(
-                    index,
-                    entry.state === "Enabled"
-                      ? entry
-                      : {
-                          chargeType: entry.chargeType,
-                          state: "Enabled",
-                          // WP-2423 (v15 D7): a tip is not taxed, so it starts without one.
-                          taxClassificationReference: entry.chargeType === "Tip" ? null : "",
-                          orderTypes: [],
-                        },
-                  );
-              }}
-            >
-              <option value="Unconfigured">{t("Not set")}</option>
-              <option value="Disabled">{t("Off")}</option>
-              <option value="Enabled">{t("On")}</option>
-            </select>
-          </label>
-          {entry.chargeType === "Tip" ? (
-            <p>
-              {t(
-                "Off: once published, guests and staff are not asked for a tip at this Store. On: tips are offered; the percentages are under Store features.",
-              )}
-            </p>
-          ) : null}
-          <label>
-            {t("{chargeType} tax classification", { chargeType: feeLabel(entry.chargeType) })}
-            <select
-              aria-label={t("{chargeType} tax classification", {
-                chargeType: feeLabel(entry.chargeType),
-              })}
-              disabled={
-                disabled ||
-                entry.state !== "Enabled" ||
-                (choices === null && entry.chargeType !== "Tip")
-              }
-              value={
-                entry.state === "Enabled" && entry.taxClassificationReference !== null
-                  ? entry.taxClassificationReference
-                  : ""
-              }
-              onChange={(e) => {
-                if (entry.state !== "Enabled") return;
-                if (e.currentTarget.value === "" && entry.chargeType === "Tip") {
-                  change(index, { ...entry, taxClassificationReference: null });
-                  return;
-                }
-                const selected = choices?.choices.find(
-                  (v) =>
-                    v.classificationReference === e.currentTarget.value && v.lifecycle === "Active",
-                );
-                if (!selected) return;
-                change(index, {
-                  ...entry,
-                  taxClassificationReference: selected.classificationReference,
-                });
-              }}
-            >
-              <option value="">
-                {entry.chargeType === "Tip"
-                  ? t("No tax classification (tips are not taxed)")
-                  : t("Choose a tax classification to turn this on")}
-              </option>
-              {entry.state === "Enabled" &&
-                entry.taxClassificationReference !== null &&
-                entry.taxClassificationReference !== "" &&
-                !choices?.choices.some(
-                  (v) => v.classificationReference === entry.taxClassificationReference,
-                ) && (
-                  <option value={entry.taxClassificationReference}>
-                    {t("Saved classification retained")}
-                  </option>
+      <ul className="store-setup-rows">
+        {entries.map((entry, index) => {
+          const label = feeLabel(entry.chargeType);
+          // b24: a delivery fee only means something where delivery is offered. Without delivery,
+          // one that is not on is said in a sentence; one still on is shown to be put right.
+          const noDelivery = entry.chargeType === "DeliveryFee" && !delivery;
+          const outside =
+            entry.state === "Enabled" ? entry.orderTypes.filter((m) => !offered.includes(m)) : [];
+          const shownModes = modes.filter(
+            (mode) =>
+              offered.includes(mode) ||
+              (entry.state === "Enabled" && entry.orderTypes.includes(mode)),
+          );
+          return (
+            <li className="store-setup-row" key={entry.chargeType}>
+              <div className="store-setup-row__head">
+                <span className="store-setup-row__name">{label}</span>
+                <span className="store-setup-row__hint">{feeHint(entry.chargeType)}</span>
+              </div>
+              <fieldset className="store-setup-row__fields" disabled={disabled}>
+                <legend className="visually-hidden">{label}</legend>
+                {noDelivery && entry.state !== "Enabled" ? (
+                  <p>{t("This store does not offer delivery, so it charges no delivery fee.")}</p>
+                ) : (
+                  <label className="store-setup-row__field">
+                    <span>{t("Charge it")}</span>
+                    <select
+                      aria-label={label}
+                      value={entry.state}
+                      onChange={(e) => {
+                        const state = e.currentTarget.value;
+                        if (state === "Unconfigured" || state === "Disabled")
+                          change(index, { chargeType: entry.chargeType, state });
+                        else if (state === "Enabled")
+                          change(
+                            index,
+                            entry.state === "Enabled"
+                              ? entry
+                              : {
+                                  chargeType: entry.chargeType,
+                                  state: "Enabled",
+                                  // WP-2423 (v15 D7): a tip is not taxed, so it starts without one.
+                                  taxClassificationReference:
+                                    entry.chargeType === "Tip" ? null : "",
+                                  // b24: a fee starts on every order the setup offers.
+                                  orderTypes: modes.filter((mode) => offered.includes(mode)),
+                                },
+                          );
+                      }}
+                    >
+                      <option value="Unconfigured">{t("Not set")}</option>
+                      <option value="Disabled">{t("Off")}</option>
+                      <option value="Enabled">{t("On")}</option>
+                    </select>
+                  </label>
                 )}
-              {choices?.choices.map((choice) => (
-                <option
-                  key={choice.classificationReference}
-                  value={choice.classificationReference}
-                  disabled={choice.lifecycle !== "Active"}
-                >
-                  {choice.localizedNames[choices.defaultLocale] ??
-                    Object.values(choice.localizedNames)[0] ??
-                    t("Unnamed tax classification")}
-                  {choice.lifecycle === "Active" ? "" : t(" (no longer in use)")}
-                </option>
-              ))}
-            </select>
-          </label>
-          {entry.state === "Enabled" && (
-            <fieldset>
-              <legend>
-                {t("{chargeType} order types", { chargeType: feeLabel(entry.chargeType) })}
-              </legend>
-              {modes.map((mode) => (
-                <label key={mode}>
-                  <input
-                    type="checkbox"
-                    checked={entry.orderTypes.includes(mode)}
-                    onChange={(e) =>
-                      change(index, {
-                        ...entry,
-                        orderTypes: e.currentTarget.checked
-                          ? modes.filter((v) => v === mode || entry.orderTypes.includes(v))
-                          : entry.orderTypes.filter((v) => v !== mode),
-                      })
-                    }
-                  />
-                  {mode === "DineIn" ? t("Dine in") : serviceModeText(mode)}
-                </label>
-              ))}
-              {/* b22: said at the field, so it is fixed here rather than found in Review. */}
-              {entry.orderTypes.length === 0 && (
-                <p className="store-setup-field-problem">
-                  {t("Choose which orders the {fee} applies to.", {
-                    fee: feeLabel(entry.chargeType).toLowerCase(),
-                  })}
-                </p>
-              )}
-            </fieldset>
-          )}
-        </fieldset>
-      ))}
-      <p>
+                {noDelivery && entry.state === "Enabled" && (
+                  <p className="store-setup-field-problem">
+                    {t(
+                      "This store does not offer delivery. Turn the delivery fee off, or offer delivery in {where}.",
+                      { where: servicesWhere },
+                    )}
+                  </p>
+                )}
+                {entry.state === "Enabled" && (
+                  <fieldset className="store-setup-row__modes">
+                    <legend className="visually-hidden">
+                      {t("{chargeType} order types", { chargeType: label })}
+                    </legend>
+                    <span className="store-setup-row__label" aria-hidden="true">
+                      {t("Applies to")}
+                    </span>
+                    {shownModes.length === 0 ? (
+                      <p>
+                        {t("No services are chosen yet. Choose them in {where} first.", {
+                          where: servicesWhere,
+                        })}
+                      </p>
+                    ) : (
+                      shownModes.map((mode) => (
+                        <label key={mode}>
+                          <input
+                            type="checkbox"
+                            checked={entry.orderTypes.includes(mode)}
+                            onChange={(e) =>
+                              change(index, {
+                                ...entry,
+                                orderTypes: e.currentTarget.checked
+                                  ? modes.filter((v) => v === mode || entry.orderTypes.includes(v))
+                                  : entry.orderTypes.filter((v) => v !== mode),
+                              })
+                            }
+                          />
+                          {offeredText(mode)}
+                        </label>
+                      ))
+                    )}
+                    {/* b24: an order type the setup no longer offers is named here, to untick. */}
+                    {outside.length > 0 && (
+                      <p className="store-setup-field-problem">
+                        {t(
+                          "This store does not offer {modes}. Untick it here, or offer it in {where}.",
+                          {
+                            modes: outside.map(offeredText).join(listSeparator()),
+                            where: servicesWhere,
+                          },
+                        )}
+                      </p>
+                    )}
+                    {/* b22: said at the field, so it is fixed here rather than found in Review. */}
+                    {entry.orderTypes.length === 0 && shownModes.length > 0 && (
+                      <p className="store-setup-field-problem">
+                        {t("Choose which orders the {fee} applies to.", {
+                          fee: label.toLowerCase(),
+                        })}
+                      </p>
+                    )}
+                  </fieldset>
+                )}
+                {entry.state === "Enabled" && (
+                  <label className="store-setup-row__field">
+                    <span>{t("Tax class")}</span>
+                    <select
+                      aria-label={t("{chargeType} tax classification", { chargeType: label })}
+                      disabled={disabled || (choices === null && entry.chargeType !== "Tip")}
+                      value={entry.taxClassificationReference ?? ""}
+                      onChange={(e) => {
+                        if (e.currentTarget.value === "" && entry.chargeType === "Tip") {
+                          change(index, { ...entry, taxClassificationReference: null });
+                          return;
+                        }
+                        const selected = choices?.choices.find(
+                          (v) =>
+                            v.classificationReference === e.currentTarget.value &&
+                            v.lifecycle === "Active",
+                        );
+                        if (!selected) return;
+                        change(index, {
+                          ...entry,
+                          taxClassificationReference: selected.classificationReference,
+                        });
+                      }}
+                    >
+                      <option value="">
+                        {entry.chargeType === "Tip"
+                          ? t("No tax classification (tips are not taxed)")
+                          : t("Choose a tax classification to turn this on")}
+                      </option>
+                      {entry.taxClassificationReference !== null &&
+                        entry.taxClassificationReference !== "" &&
+                        !choices?.choices.some(
+                          (v) => v.classificationReference === entry.taxClassificationReference,
+                        ) && (
+                          <option value={entry.taxClassificationReference}>
+                            {t("Saved classification retained")}
+                          </option>
+                        )}
+                      {choices?.choices.map((choice) => (
+                        <option
+                          key={choice.classificationReference}
+                          value={choice.classificationReference}
+                          disabled={choice.lifecycle !== "Active"}
+                        >
+                          {choice.localizedNames[choices.defaultLocale] ??
+                            Object.values(choice.localizedNames)[0] ??
+                            t("Unnamed tax classification")}
+                          {choice.lifecycle === "Active" ? "" : t(" (no longer in use)")}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+              </fieldset>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="store-setup-block__note">
         {t(
-          "A service charge or delivery fee that is On needs a tax classification, and every fee that is On needs at least one order type before saving. Tips customers choose to give go to staff and are generally not subject to GST/HST, so a tip needs no tax classification (a service charge every customer must pay is taxed). The classification is the Brand’s own choice; it has not been checked by a tax professional.",
+          "The tax class is the Brand’s own choice; it has not been checked by a tax professional.",
         )}
       </p>
     </section>

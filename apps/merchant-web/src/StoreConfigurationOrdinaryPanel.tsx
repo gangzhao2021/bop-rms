@@ -1,4 +1,4 @@
-import { t } from "./i18n/i18n.js";
+import { listSeparator, serviceModeText, t } from "./i18n/i18n.js";
 import { FULL_SIGN_IN_REQUIRED_TEXT } from "./full-sign-in.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
@@ -21,6 +21,8 @@ import {
 } from "./store-configuration-pending-journal.js";
 import {
   storeSetupBusinessStartChange,
+  storeSetupFeeName,
+  storeSetupFeesNotOffered,
   storeSetupMissingItems,
   storeSetupMissingText,
   storeSetupWhere,
@@ -823,6 +825,9 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
       savedStart?.state === "Configured" ? savedStart.value : null,
       current,
     ),
+    // b24 (Owner 2026-11-16): a saved setup whose fee applies to a service it does not offer can
+    // never be sent (the Fees check), so no change is created from it.
+    feesNotOffered = props.saved === null ? [] : storeSetupFeesNotOffered(props.saved.content),
     // The setup builds on the configuration that was latest when it was saved.
     setupOutdated =
       props.saved !== null &&
@@ -845,7 +850,7 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
           saved: props.saved !== null,
           setupIncomplete,
           setupOutdated,
-          setupCannotBeSent: startChange !== null,
+          setupCannotBeSent: startChange !== null || feesNotOffered.length > 0,
           openByAnother,
           openYours,
           lifecycle: openLatest ? latest.lifecycle : null,
@@ -871,7 +876,12 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
   const blocked = (action: StoreConfigurationStep["action"]) =>
     locked ||
     (action === "Materialize"
-      ? !props.saved || setupIncomplete || setupOutdated || startChange !== null || openByAnother
+      ? !props.saved ||
+        setupIncomplete ||
+        setupOutdated ||
+        startChange !== null ||
+        feesNotOffered.length > 0 ||
+        openByAnother
       : !ready);
   // The Owner's own approval as sole operator has its own solid button; the step is text then.
   const selfApproval = ownChange && soleOperator !== undefined && latest !== undefined;
@@ -980,6 +990,25 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
                 {
                   ...startChange,
                   where: storeSetupWhere(props.setupLayout ?? "Opening", "timeZone"),
+                },
+              )}
+            </p>
+          )}
+          {feesNotOffered.length > 0 && !openLatest && !setupIncomplete && (
+            <p>
+              {t(
+                "A change cannot be created yet: in this saved setup, {fees}, which it does not offer. Untick them in {where}, or offer them in {services}, save as draft, then come back here.",
+                {
+                  fees: feesNotOffered
+                    .map((fee) =>
+                      t("{fee} applies to {modes}", {
+                        fee: storeSetupFeeName(fee.chargeType),
+                        modes: fee.modes.map(serviceModeText).join(listSeparator()),
+                      }),
+                    )
+                    .join(listSeparator()),
+                  where: storeSetupWhere(props.setupLayout ?? "Opening", "payment"),
+                  services: storeSetupWhere(props.setupLayout ?? "Opening", "serviceModes"),
                 },
               )}
             </p>
