@@ -84,6 +84,9 @@ it("serves polled pickup lists from one snapshot without fences: no lock timeout
       connectionTimeoutMillis: 5000,
       query_timeout: 10_000,
     });
+    // An idle pooled connection is closed (57P01) when the isolated database stops after the
+    // test; the pool reports that only for idle connections, so queries still fail on their own.
+    pool.on("error", () => undefined);
     try {
       for (const name of [api, worker])
         await admin.query(
@@ -559,6 +562,9 @@ it("serves the polled Tables page from one snapshot: no wait behind a role chang
       connectionTimeoutMillis: 5000,
       query_timeout: 10_000,
     });
+    // An idle pooled connection is closed (57P01) when the isolated database stops after the
+    // test; the pool reports that only for idle connections, so queries still fail on their own.
+    pool.on("error", () => undefined);
     try {
       for (const name of [api, worker])
         await admin.query(
