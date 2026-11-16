@@ -58,7 +58,8 @@ export async function exerciseBrandAdministrationStartup(
     browser,
     primaryError,
     primaryFailed = false,
-    cleanupFailed = false;
+    cleanupFailed = false,
+    cleanupCode = null;
   const previousRead = participantState.onWorkforceRead;
   const connections = async () =>
     Number(
@@ -418,28 +419,40 @@ export async function exerciseBrandAdministrationStartup(
   } finally {
     participantState.onWorkforceRead = previousRead;
     participantState.membersEnabled = true;
+    // Each cleanup step still runs; the first failure keeps its step and code (never a message,
+    // which may carry a path or value) so a failed cleanup names its own cause.
+    const failed = (step, error) => {
+      if (cleanupFailed) return;
+      cleanupFailed = step;
+      const code = error?.code ?? error?.message;
+      cleanupCode = typeof code === "string" && /^[A-Z0-9_]{2,80}$/u.test(code) ? code : null;
+    };
     try {
       if (browser) await browser.close();
-    } catch {
-      cleanupFailed = true;
+    } catch (error) {
+      failed("browser", error);
     }
     try {
       if (runtime) await runtime.shutdown("SIGTERM");
-    } catch {
-      cleanupFailed = true;
+    } catch (error) {
+      failed("runtime", error);
     }
     try {
-      if ((await connections()) !== 0) cleanupFailed = true;
-    } catch {
-      cleanupFailed = true;
+      const open = await connections();
+      if (open !== 0) failed("connections", { code: `OPEN_${open}` });
+    } catch (error) {
+      failed("connections", error);
     }
     try {
       await rm(directory, { recursive: true, force: true });
-    } catch {
-      cleanupFailed = true;
+    } catch (error) {
+      failed("directory", error);
     }
   }
   if (primaryFailed) throw primaryError;
-  if (cleanupFailed) throw new Error("BRAND_STARTUP_NATIVE_CLEANUP_UNAVAILABLE");
+  if (cleanupFailed)
+    throw new Error(
+      `BRAND_STARTUP_NATIVE_CLEANUP_UNAVAILABLE step=${cleanupFailed} code=${cleanupCode ?? "none"}`,
+    );
   return sensitive;
 }
