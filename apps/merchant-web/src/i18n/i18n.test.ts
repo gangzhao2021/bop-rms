@@ -1,10 +1,13 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import ts from "typescript";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import {
+  chooseLanguage,
   countOf,
   displayLocale,
+  keepThroughLanguageSwitch,
+  takeKeptThroughLanguageSwitch,
   initialLanguage,
   listSeparator,
   saidTable,
@@ -235,4 +238,44 @@ it("b13: Home's tables to close reads as one Chinese phrase, with no stray space
     t("{toClose} served — close when the guests have left", { toClose: countOf(5, "table") }),
   ).toBe("5 张桌台已上完菜，顾客离开后关台");
   setLanguageForTest("en");
+});
+
+// b21 (b20 review): Store setup keeps an unsaved edit through the language switch in this tab's
+// storage. When that storage throws (private browsing, full), the switch asks first instead of
+// reloading the edit away; cancelling keeps the page as it is.
+it("b21: a language switch that cannot keep an unsaved edit asks before reloading it away", () => {
+  const reload = vi.fn(),
+    confirm = vi.fn(() => false);
+  vi.stubGlobal("location", { reload });
+  vi.stubGlobal("confirm", confirm);
+  vi.stubGlobal("localStorage", { setItem: () => undefined, getItem: () => null });
+  vi.stubGlobal("sessionStorage", {
+    getItem: () => null,
+    setItem: () => {
+      throw new DOMException("Full", "QuotaExceededError");
+    },
+    removeItem: () => undefined,
+  });
+  const stop = keepThroughLanguageSwitch("storeSetup:s", () => ({ businessStart: "04:30" }));
+  try {
+    chooseLanguage("zh-Hans");
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(reload).not.toHaveBeenCalled();
+    expect(t("Orders")).toBe("Orders");
+    // Storage that works keeps it and switches without asking.
+    const stored = new Map<string, string>();
+    vi.stubGlobal("sessionStorage", {
+      getItem: (key: string) => stored.get(key) ?? null,
+      setItem: (key: string, value: string) => void stored.set(key, value),
+      removeItem: (key: string) => void stored.delete(key),
+    });
+    chooseLanguage("zh-Hans");
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(takeKeptThroughLanguageSwitch("storeSetup:s")).toEqual({ businessStart: "04:30" });
+  } finally {
+    stop();
+    setLanguageForTest("en");
+    vi.unstubAllGlobals();
+  }
 });

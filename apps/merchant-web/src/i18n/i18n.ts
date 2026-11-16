@@ -346,33 +346,51 @@ export function forgetKeptThroughLanguageSwitch(key: string): void {
     // Nothing kept.
   }
 }
-function keepForSwitch(): void {
+/**
+ * Writes what each screen keeps for the reload. b21: false when something to keep could not be
+ * written (private browsing, a full or blocked store), so the switch asks first instead of
+ * reloading it away without a word; `written` lists what was written, to undo on a cancel.
+ */
+function keepForSwitch(written: string[]): boolean {
+  let kept = true;
   for (const [key, snapshot] of keptThroughSwitch) {
     try {
       const value = snapshot();
-      if (value !== null && value !== undefined)
-        globalThis.sessionStorage.setItem(
-          KEPT_PREFIX + key,
-          JSON.stringify({ at: Date.now(), value }),
-        );
+      if (value === null || value === undefined) continue;
+      const raw = JSON.stringify({ at: Date.now(), value });
+      globalThis.sessionStorage.setItem(KEPT_PREFIX + key, raw);
+      written.push(KEPT_PREFIX + key);
+      if (globalThis.sessionStorage.getItem(KEPT_PREFIX + key) !== raw) kept = false;
     } catch {
-      // Private browsing or a full store: the page reloads without it, as before.
+      kept = false;
     }
   }
+  return kept;
 }
 
 /** Chooses a language for this device and reloads, so every text follows it. */
 export function chooseLanguage(language: StaffLanguage): void {
+  const written: string[] = [];
+  // b21: what a screen keeps through the reload is written first; if it cannot be, that work is
+  // lost by the reload too, so the switch asks first, as it does for other unsaved work.
+  const kept = language === current || keepForSwitch(written);
+  const losing = language !== current && (unsavedWork.size > 0 || !kept);
   if (
-    language !== current &&
-    unsavedWork.size > 0 &&
+    losing &&
     !globalThis.confirm(
       t(
         "What you typed here is not saved yet. Switching the language reloads the page and loses it. Switch anyway?",
       ),
     )
-  )
+  ) {
+    for (const key of written)
+      try {
+        globalThis.sessionStorage.removeItem(key);
+      } catch {
+        // Nothing more to undo.
+      }
     return;
+  }
   try {
     globalThis.localStorage.setItem(STORAGE_KEY, language);
   } catch {
@@ -380,7 +398,6 @@ export function chooseLanguage(language: StaffLanguage): void {
   }
   if (language === current) return;
   current = language;
-  leavingOnPurpose = unsavedWork.size > 0;
-  keepForSwitch();
+  leavingOnPurpose = losing;
   globalThis.location.reload();
 }

@@ -469,3 +469,36 @@ test("@production b20: an edit not saved yet comes back after switching the lang
   ).toHaveCount(0);
   expect(fixture.control.errors).toEqual([]);
 });
+test("@production b21: with tab storage refusing writes, switching the language asks before losing an unsaved edit", async ({
+  page,
+}) => {
+  const fixture = await install(page);
+  // Private browsing or a full store: this tab cannot keep anything through the reload.
+  await page.addInitScript(() => {
+    const write = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (this: Storage, key: string, value: string) {
+      if (this === window.sessionStorage) throw new DOMException("Full", "QuotaExceededError");
+      write.call(this, key, value);
+    };
+  });
+  await open(page);
+  await timezone(page);
+  await page.getByLabel("Business day starts at (local time)", { exact: true }).fill("04:30");
+  const dialogs: string[] = [];
+  page.once("dialog", (dialog) => {
+    dialogs.push(dialog.message());
+    void dialog.dismiss();
+  });
+  await page.getByRole("button", { name: "切换到中文" }).click();
+  await expect.poll(() => dialogs.length).toBe(1);
+  expect(dialogs[0]).toContain("Switching the language reloads the page and loses it");
+  // Cancelled: still English, and the edit is still on the page.
+  await expect(page.getByLabel("Business day starts at (local time)", { exact: true })).toHaveValue(
+    "04:30",
+  );
+  await expect(page.getByRole("combobox", { name: "Time zone", exact: true })).toHaveValue(
+    "America/Toronto",
+  );
+  expect(fixture.control.writes).toHaveLength(0);
+  expect(fixture.control.errors).toEqual([]);
+});
