@@ -347,7 +347,11 @@ export interface CustomerDiningSessionView {
     readonly splitParts?: CustomerSplitParts;
     /** WP-2423 取舍 18: why what was paid is less than what was ordered. */
     readonly pointsUsed?: CustomerMoney;
-    /** v15 2026-11-02: what staff took off (comps, discounts), tax included. */
+    /**
+     * v15 2026-11-02: what staff took off (comps, discounts), tax included — what the bill went
+     * down by (b23: with the bill's tax cent each comp carries). Not `bill.takenOff`, the printed
+     * receipt's line before tax.
+     */
     readonly takenOff?: CustomerMoney;
     /** v15 2026-11-02: the bill's tax rounding (DEC-TAX-WHOLE-RECEIPT), which can be negative. */
     readonly taxRounding?: CustomerMoney;
@@ -829,8 +833,11 @@ export function composeCustomerDiningSession(
     });
   });
   // b22 (DEC-TAX-WHOLE-RECEIPT): a table paying at the end ordered what its one receipt says — the
-  // dishes as ordered with the bill's tax worked out once — so paid − refunded − refund pending +
-  // still to pay is Total ordered to the cent (the dishes' own taxes add up to a cent more or less).
+  // dishes as ordered with the bill's tax worked out once (the dishes' own taxes add up to a cent
+  // more or less). b23: a comped dish stays in it at what it was ordered; `takenOff` (and points)
+  // is what came off the bill, tax and the bill's cent included, so paid − refunded − refund
+  // pending + still to pay + takenOff + pointsUsed is Total ordered to the cent. The bill's own
+  // `takenOff` line is before tax (the printed receipt's dishes − taken off = Subtotal).
   const billRounding = order.tableBill?.taxRoundingMinor ?? 0n;
   ordered.tax += billRounding;
   ordered.total += billRounding;
