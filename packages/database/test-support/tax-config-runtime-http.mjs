@@ -1441,10 +1441,12 @@ export async function exerciseTaxConfigRuntimeHttp(context) {
       assert(authoritySessionReads <= 65, reportRoundTrips);
       // Every source hold still rechecks the Session, selection, Membership and policy packet,
       // but the transaction sends the settings written since its last statement as one statement
-      // (none when already held) and answers a lock it already holds. Before: 2,096 round trips,
-      // 1,166 of them settings and 145 advisory locks; 1,114, 435 and 13 after.
-      assert(transactionStatements <= 1150, reportRoundTrips);
-      assert(settingStatements <= 450, reportRoundTrips);
+      // (none when already held), answers a lock it already holds, sends no statement limit
+      // longer than the one already in force, and reads the Membership with its Store assignment
+      // in one statement. Before: 2,096 round trips, 1,166 of them settings and 145 advisory
+      // locks; 1,114, 435 and 13 after the settings were combined; 813-828, 195-210 and 13 now.
+      assert(transactionStatements <= 880, reportRoundTrips);
+      assert(settingStatements <= 260, reportRoundTrips);
       assert(advisoryLockStatements <= 16, reportRoundTrips);
       const reportReceipt = parseTaxConfigMaterialOperation(reportResponse.body);
       assert.equal(reportReceipt.version.qualification, "NotEvaluated");
