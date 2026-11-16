@@ -159,7 +159,9 @@ export function createMerchantTaxConfigAuthoring(options: MerchantTaxConfigAutho
     currency = parsed;
     return parsed;
   }
-  const host = createMerchantCategoryTransactions(runner);
+  // Every Tax source hold rechecks the Session, selection, Membership and permission packet;
+  // the host combines the settings those reads write so the save fits its 5 s window.
+  const host = createMerchantCategoryTransactions(runner, { combineSettings: true });
   if (
     [now, run, authenticate, generate, actor, association].some(
       (port) => typeof port !== "function",

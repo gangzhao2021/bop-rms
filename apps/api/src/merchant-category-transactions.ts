@@ -17,6 +17,7 @@ import { StorePaymentConfigurationError } from "@rms/payment";
 import { DigitalReceiptTemplateError } from "@rms/printing-device";
 import { BrandStoreTopologyError, BrandConfigurationOperationError } from "@bop/tenant";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
+import { createTransactionSettingsTracker } from "./merchant-transaction-settings.js";
 
 type Transaction = Parameters<CategoryPersistenceAuthority["holdUntilTransactionCompletes"]>[0];
 type Check = () => Promise<void>;
@@ -137,6 +138,14 @@ export async function registerMerchantTransactionBeforeCommit(
  */
 export function createMerchantCategoryTransactions(
   source: PersistentMerchantBffOptions["transactions"],
+  hostOptions?: {
+    /**
+     * WP-2423 (tax-config hold round trips): each transaction sends the settings written since
+     * its last statement as one statement before the next one, and answers settings and locks it
+     * already holds (merchant-transaction-settings). Tax configuration authoring only.
+     */
+    readonly combineSettings?: boolean;
+  },
 ) {
   if (!source || typeof source.run !== "function") return unavailable();
   const active = new WeakMap<Transaction, State>();
@@ -187,20 +196,40 @@ export function createMerchantCategoryTransactions(
             checks: new Map(),
             lastChecks: [],
           };
+          // This transaction's own settings and held locks; dropped with it (never shared).
+          const settings =
+            hostOptions?.combineSettings === true ? createTransactionSettingsTracker() : null;
           const tx: Transaction = Object.freeze({
             async query<Row = Record<string, unknown>>(sql: string, values: readonly unknown[]) {
               if (state.phase === "closed" || state.phase === "final" || state.failed) {
                 state.failed = true;
                 return unavailable();
               }
+              const concurrent = state.pending > 0;
               state.pending++;
               try {
+                // Written settings go with the next statement that runs, as one statement;
+                // a statement sent while another is in flight is sent as written, after them.
+                const send = async (text: string, args: readonly unknown[]) => {
+                  if (settings === null) return original.query(text, args);
+                  const planned = concurrent ? null : settings.plan(text, args);
+                  if (planned?.kind === "Answer") return planned.result;
+                  const before = planned ? planned.before : settings.pending();
+                  if (before !== null) {
+                    await original.query(before.sql, before.values);
+                    settings.observe(before.sql, before.values);
+                  }
+                  const sent = await original.query(text, args);
+                  if (concurrent) settings.forget();
+                  else settings.observe(text, args);
+                  return sent;
+                };
                 const deferred = state.deferred;
                 if (deferred !== undefined) {
                   state.deferred = undefined;
-                  await original.query(deferred.sql, deferred.values);
+                  await send(deferred.sql, deferred.values);
                 }
-                const result = await original.query(sql, values);
+                const result = await send(sql, values);
                 if (active.get(tx) !== state) return unavailable();
                 if (!result || typeof result !== "object") return unavailable();
                 const rows = Object.getOwnPropertyDescriptor(result, "rows");
@@ -221,6 +250,7 @@ export function createMerchantCategoryTransactions(
                   ...(count?.value === undefined ? {} : { rowCount: count.value as number | null }),
                 };
               } catch (error) {
+                settings?.forget();
                 state.failed = true;
                 return bounded(error);
               } finally {
@@ -238,6 +268,22 @@ export function createMerchantCategoryTransactions(
             state.phase = "checks";
             for (const check of [...state.checks.keys(), ...state.lastChecks]) {
               await check();
+              if (state.failed || state.pending !== 0) return unavailable();
+            }
+            // Settings written last are in force at COMMIT (deferred constraint triggers read
+            // them), exactly as when each was sent as it was written.
+            const last = settings?.pending() ?? null;
+            if (settings !== null && last !== null) {
+              state.pending++;
+              try {
+                await original.query(last.sql, last.values);
+                settings.observe(last.sql, last.values);
+              } catch (error) {
+                state.failed = true;
+                return bounded(error);
+              } finally {
+                state.pending--;
+              }
               if (state.failed || state.pending !== 0) return unavailable();
             }
             // A later asynchronous authority check can consume an earlier

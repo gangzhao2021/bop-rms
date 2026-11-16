@@ -761,3 +761,88 @@ it("reruns read-only work on a transaction conflict only when asked, and keeps a
   });
   expect(calls).toBe(4);
 });
+
+it("combines settings per transaction only when asked, and sends the last ones before COMMIT", async () => {
+  const sent: string[] = [];
+  const query = vi.fn(async (sql: string) => {
+    sent.push(sql);
+    return { rows: [], rowCount: 0 };
+  });
+  const source: PersistentMerchantBffOptions["transactions"] = {
+    async run(work) {
+      sent.push("BEGIN");
+      const result = await work({ query });
+      sent.push("COMMIT");
+      return result;
+    },
+  };
+  const scope = "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)";
+  const lock = "SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))";
+  const work = async (host: ReturnType<typeof createMerchantCategoryTransactions>) =>
+    host.transactions.run(async (tx) => {
+      await host.registerBeforeCommit(tx, async () => {
+        await tx.query(scope, ["b", "t"]);
+      });
+      await tx.query(scope, ["b", ""]);
+      await tx.query(scope, ["b", "s"]);
+      await tx.query(lock, ["MembershipFence:b"]);
+      await tx.query(scope, ["b", "s"]);
+      await tx.query(lock, ["MembershipFence:b"]);
+      await tx.query("SELECT 1", []);
+      await tx.query(scope, ["b", ""]);
+      return "done";
+    });
+  // Unchanged by default: every statement is sent as written.
+  expect(await work(createMerchantCategoryTransactions(source))).toBe("done");
+  expect(sent).toEqual([
+    "BEGIN",
+    scope,
+    scope,
+    lock,
+    scope,
+    lock,
+    "SELECT 1",
+    scope,
+    scope,
+    "COMMIT",
+  ]);
+  sent.length = 0;
+  expect(await work(createMerchantCategoryTransactions(source, { combineSettings: true }))).toBe(
+    "done",
+  );
+  expect(sent).toEqual([
+    "BEGIN",
+    scope,
+    lock,
+    "SELECT 1",
+    // The Store the before-commit check wrote last is in force at COMMIT, as when sent at once.
+    "SELECT set_config('bop.store_id',$1,true)",
+    "COMMIT",
+  ]);
+  expect(query.mock.calls.at(-1)).toEqual(["SELECT set_config('bop.store_id',$1,true)", ["t"]]);
+});
+
+it("forgets combined settings after a failed statement and rolls back", async () => {
+  const sent: string[] = [];
+  const source: PersistentMerchantBffOptions["transactions"] = {
+    async run(work) {
+      return work({
+        query: async (sql: string) => {
+          sent.push(sql);
+          if (sql === "SELECT fail") throw new Error("lost");
+          return { rows: [], rowCount: 0 };
+        },
+      });
+    },
+  };
+  const host = createMerchantCategoryTransactions(source, { combineSettings: true });
+  await expect(
+    host.transactions.run(async (tx) => {
+      await host.registerBeforeCommit(tx, async () => undefined);
+      await tx.query("SELECT set_config('bop.brand_id',$1,true)", ["b"]);
+      await tx.query("SELECT fail", []).catch(() => undefined);
+      await tx.query("SELECT 2", []);
+    }),
+  ).rejects.toEqual(new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE"));
+  expect(sent).toEqual(["SELECT set_config('bop.brand_id',$1,true)", "SELECT fail"]);
+});
