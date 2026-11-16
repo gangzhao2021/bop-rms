@@ -84,7 +84,7 @@ function snapshot(): CurrentCatalogSelectionSnapshot {
     ],
   };
 }
-function setup() {
+function setup(together?: <T>(work: () => Promise<T>) => Promise<T>) {
   const authorize = vi.fn(async () => true);
   // No dish here contains alcohol (WP-2423 DEC-ALCOHOL).
   const runner = {
@@ -110,6 +110,7 @@ function setup() {
       transactions: runner,
       authorize,
       resolveExpiryCutoff: vi.fn(),
+      ...(together === undefined ? {} : { together }),
     },
   );
   return { service, authorize };
@@ -134,6 +135,27 @@ it("uses the accepted product, exact binding/options and target quantity with cu
   const tx = {};
   await (f.authorizers[0] as (tx: unknown, input: unknown) => Promise<boolean>)(tx, expected);
   expect(authorize).toHaveBeenCalledWith(tx, expected, context);
+});
+it("WP-2423 M35 (staff round round trips): one validation's reads run inside `together`, each still read, its answer and failure its own", async () => {
+  const inside: string[] = [];
+  let open = false;
+  const together = vi.fn(async <T>(work: () => Promise<T>) => {
+    open = true;
+    try {
+      return await work();
+    } finally {
+      open = false;
+    }
+  });
+  f.resolve.mockImplementation(async () => (inside.push("catalog:" + open), snapshot()));
+  f.observe.mockImplementation(async () => (inside.push("stock:" + open), { status: "Available" }));
+  const { service } = setup(together);
+  expect((await service.validateSelection(input, context)).status).toBe("Accepted");
+  expect(together).toHaveBeenCalledTimes(1);
+  expect(inside).toEqual(["catalog:true", "stock:true"]);
+  // A read that failed fails the validation with its own error.
+  f.observe.mockRejectedValueOnce(new Error("unavailable"));
+  await expect(service.validateSelection(input, context)).rejects.toThrow("unavailable");
 });
 it("rejects invalid Catalog options before Inventory", async () => {
   const { service } = setup();

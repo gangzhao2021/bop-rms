@@ -33,6 +33,13 @@ export type CustomerCartSelectionInventoryOptions = Omit<InventoryOptions, "auth
     input: CustomerRecipeInventoryObservationInput,
     context: Context,
   ): Promise<boolean>;
+  /**
+   * WP-2423 M35 (staff round round trips): runs one validation's reads (menu, availability,
+   * alcohol, recipe and stock) in one read-only snapshot of `runner` when the runner joins reads
+   * made inside it (the pilot's read transactions); each read is still made, in the same order.
+   * Omitted: each read is its own transaction.
+   */
+  readonly together?: <T>(work: () => Promise<T>) => Promise<T>;
 };
 
 /** Each validation owns its snapshot and authorization context. Inventory is an
@@ -69,63 +76,69 @@ export function createCustomerCartSelectionInventory(
     },
     scope,
   );
+  const { together, ...observation } = inventory;
   return Object.freeze({
-    async validateSelection(input, context) {
-      const captured: { snapshot: CurrentCatalogSelectionSnapshot | null } = { snapshot: null };
-      const result = await createCatalogSelectionValidationService({
-        snapshots: {
-          async resolveCurrent(request) {
-            const snapshot = await snapshots.resolveCurrent(request);
-            captured.snapshot = snapshot;
-            return snapshot;
-          },
-        },
-      }).validateSelection(input);
-      if (result.status !== "Accepted") return result;
-      // WP-2423 DEC-ALCOHOL: the guest's phone, staff and the checkout all pass through here.
-      if (
-        !(await alcoholMaySell(runner, scope, {
-          sellableReference: String(result.sellableReference),
-          orderType: input.orderType,
-          at: String(result.validatedAt),
-        }))
-      )
-        return { status: "Rejected", reason: "SELLABLE_UNAVAILABLE" };
-      const snapshot = captured.snapshot;
-      if (snapshot === null) throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
-      const selections = result.optionSelections.map((selected) => {
-        const matches = snapshot.rules.filter((rule) =>
-          rule.options.some((option) => option.optionReference === selected.optionReference),
-        );
-        const rule = matches[0];
-        if (matches.length !== 1 || rule === undefined)
-          throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
-        return parseRecipeOptionSelection({
-          bindingReference: rule.bindingReference,
-          optionReference: selected.optionReference,
-          quantity: selected.quantity,
-        });
-      });
-      const observer = createCustomerRecipeInventoryObservation({
-        ...inventory,
-        authorize: (tx, selection) => inventory.authorize(tx, selection, context),
-      });
-      const covers = async (quantity: number) =>
-        (
-          await observer.observe({
-            sellableReference: result.sellableReference,
-            productVersionReference: result.productVersionReference,
-            quantity,
-            selections,
-            observedAt: result.validatedAt,
-          })
-        ).status === "Available";
-      if (await covers(context.quantity)) return result;
-      const shortage = selectionShortage.getStore();
-      if (shortage !== undefined) shortage.available = await mostCovered(context.quantity, covers);
-      return { status: "Rejected", reason: "SELLABLE_UNAVAILABLE" };
-    },
+    validateSelection: (input, context) =>
+      together === undefined ? validate(input, context) : together(() => validate(input, context)),
   });
+  async function validate(
+    input: Parameters<Catalog["validateSelection"]>[0],
+    context: Context,
+  ): ReturnType<Catalog["validateSelection"]> {
+    const captured: { snapshot: CurrentCatalogSelectionSnapshot | null } = { snapshot: null };
+    const result = await createCatalogSelectionValidationService({
+      snapshots: {
+        async resolveCurrent(request) {
+          const snapshot = await snapshots.resolveCurrent(request);
+          captured.snapshot = snapshot;
+          return snapshot;
+        },
+      },
+    }).validateSelection(input);
+    if (result.status !== "Accepted") return result;
+    // WP-2423 DEC-ALCOHOL: the guest's phone, staff and the checkout all pass through here.
+    if (
+      !(await alcoholMaySell(runner, scope, {
+        sellableReference: String(result.sellableReference),
+        orderType: input.orderType,
+        at: String(result.validatedAt),
+      }))
+    )
+      return { status: "Rejected", reason: "SELLABLE_UNAVAILABLE" };
+    const snapshot = captured.snapshot;
+    if (snapshot === null) throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
+    const selections = result.optionSelections.map((selected) => {
+      const matches = snapshot.rules.filter((rule) =>
+        rule.options.some((option) => option.optionReference === selected.optionReference),
+      );
+      const rule = matches[0];
+      if (matches.length !== 1 || rule === undefined)
+        throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
+      return parseRecipeOptionSelection({
+        bindingReference: rule.bindingReference,
+        optionReference: selected.optionReference,
+        quantity: selected.quantity,
+      });
+    });
+    const observer = createCustomerRecipeInventoryObservation({
+      ...observation,
+      authorize: (tx, selection) => inventory.authorize(tx, selection, context),
+    });
+    const covers = async (quantity: number) =>
+      (
+        await observer.observe({
+          sellableReference: result.sellableReference,
+          productVersionReference: result.productVersionReference,
+          quantity,
+          selections,
+          observedAt: result.validatedAt,
+        })
+      ).status === "Available";
+    if (await covers(context.quantity)) return result;
+    const shortage = selectionShortage.getStore();
+    if (shortage !== undefined) shortage.available = await mostCovered(context.quantity, covers);
+    return { status: "Rejected", reason: "SELLABLE_UNAVAILABLE" };
+  }
 }
 
 /** WP-2423: how many the stock makes when it refused the quantity asked for a Cart item. */

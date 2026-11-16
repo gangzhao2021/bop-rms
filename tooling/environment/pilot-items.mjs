@@ -83,6 +83,8 @@ export async function createInternalTestItems(resources, installed, sourceChanne
         scope: saved.scope,
         transactions: reads,
         resolveExpiryCutoff: createInternalExpiryCutoff(resources),
+        // WP-2423 M35 (staff round round trips): a dish's checks in one snapshot.
+        together: (work) => reads.together(work),
       },
       writeTransactions: resources.transactions,
       references: {
