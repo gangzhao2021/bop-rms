@@ -69,7 +69,9 @@ function order(
         canCantMake: who === "Cashier" && waiting,
         staffCancellation: null,
         canCancelItems: false,
-        awaitingAcceptanceSince: new Date(Date.now() - 6 * 60_000)
+        // Six and a half minutes, so "6 min" holds whether the page reads its clock a little
+        // before or after this fixture was built (a slow runner can cross a minute boundary).
+        awaitingAcceptanceSince: new Date(Date.now() - 6.5 * 60_000)
           .toISOString()
           .replace(/\.\d{3}Z$/u, ".000Z"),
       },
