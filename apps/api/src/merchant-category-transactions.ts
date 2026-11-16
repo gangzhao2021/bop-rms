@@ -199,29 +199,42 @@ export function createMerchantCategoryTransactions(
           // This transaction's own settings and held locks; dropped with it (never shared).
           const settings =
             hostOptions?.combineSettings === true ? createTransactionSettingsTracker() : null;
+          // With combined settings, statements run one after another in the order they were
+          // asked for: a statement asked for while another (or its settings) is in flight waits
+          // its turn, so no statement can overtake an earlier one or run under a later scope.
+          let turn: Promise<void> = Promise.resolve();
           const tx: Transaction = Object.freeze({
             async query<Row = Record<string, unknown>>(sql: string, values: readonly unknown[]) {
               if (state.phase === "closed" || state.phase === "final" || state.failed) {
                 state.failed = true;
                 return unavailable();
               }
-              const concurrent = state.pending > 0;
               state.pending++;
+              let release: (() => void) | undefined;
               try {
-                // Written settings go with the next statement that runs, as one statement;
-                // a statement sent while another is in flight is sent as written, after them.
+                if (settings !== null) {
+                  const previous = turn;
+                  turn = new Promise<void>((resolve) => {
+                    release = resolve;
+                  });
+                  await previous;
+                  // An earlier statement failed while this one waited: nothing more is sent.
+                  if (state.failed || active.get(tx) !== state) {
+                    state.failed = true;
+                    return unavailable();
+                  }
+                }
+                // Written settings go with the next statement that runs, as one statement.
                 const send = async (text: string, args: readonly unknown[]) => {
                   if (settings === null) return original.query(text, args);
-                  const planned = concurrent ? null : settings.plan(text, args);
-                  if (planned?.kind === "Answer") return planned.result;
-                  const before = planned ? planned.before : settings.pending();
-                  if (before !== null) {
-                    await original.query(before.sql, before.values);
-                    settings.observe(before.sql, before.values);
+                  const planned = settings.plan(text, args);
+                  if (planned.kind === "Answer") return planned.result;
+                  if (planned.before !== null) {
+                    await original.query(planned.before.sql, planned.before.values);
+                    settings.observe(planned.before.sql, planned.before.values);
                   }
                   const sent = await original.query(text, args);
-                  if (concurrent) settings.forget();
-                  else settings.observe(text, args);
+                  settings.observe(text, args);
                   return sent;
                 };
                 const deferred = state.deferred;
@@ -255,6 +268,7 @@ export function createMerchantCategoryTransactions(
                 return bounded(error);
               } finally {
                 state.pending--;
+                release?.();
               }
             },
           });

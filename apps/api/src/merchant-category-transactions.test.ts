@@ -846,3 +846,68 @@ it("forgets combined settings after a failed statement and rolls back", async ()
   ).rejects.toEqual(new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE"));
   expect(sent).toEqual(["SELECT set_config('bop.brand_id',$1,true)", "SELECT fail"]);
 });
+
+it("runs statements asked for together in the order asked, each under its own scope", async () => {
+  const sent: [string, readonly unknown[]][] = [];
+  let release: (() => void) | undefined;
+  const source: PersistentMerchantBffOptions["transactions"] = {
+    async run(work) {
+      return work({
+        query: async (sql: string, values: readonly unknown[] = []) => {
+          sent.push([sql, values]);
+          // The first combined settings statement is slow: anything asked for meanwhile waits.
+          if (sent.length === 1)
+            await new Promise<void>((resolve) => {
+              release = resolve;
+            });
+          return { rows: [], rowCount: 0 };
+        },
+      });
+    },
+  };
+  const host = createMerchantCategoryTransactions(source, { combineSettings: true });
+  const store = "SELECT set_config('bop.store_id',$1,true)";
+  await host.transactions.run(async (tx) => {
+    await host.registerBeforeCommit(tx, async () => undefined);
+    await tx.query(store, ["a"]);
+    const together = Promise.all([
+      tx.query("SELECT first", []),
+      tx.query(store, ["b"]),
+      tx.query("SELECT second", []),
+    ]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // Only Store a's settings are in flight; neither later statement has overtaken them.
+    expect(sent).toEqual([[store, ["a"]]]);
+    release?.();
+    await together;
+  });
+  expect(sent).toEqual([
+    [store, ["a"]],
+    ["SELECT first", []],
+    [store, ["b"]],
+    ["SELECT second", []],
+  ]);
+});
+
+it("sends nothing more once a statement asked for earlier failed", async () => {
+  const sent: string[] = [];
+  const source: PersistentMerchantBffOptions["transactions"] = {
+    async run(work) {
+      return work({
+        query: async (sql: string) => {
+          sent.push(sql);
+          if (sql === "SELECT fail") throw new Error("lost");
+          return { rows: [], rowCount: 0 };
+        },
+      });
+    },
+  };
+  const host = createMerchantCategoryTransactions(source, { combineSettings: true });
+  await expect(
+    host.transactions.run(async (tx) => {
+      await host.registerBeforeCommit(tx, async () => undefined);
+      await Promise.allSettled([tx.query("SELECT fail", []), tx.query("SELECT after", [])]);
+    }),
+  ).rejects.toEqual(new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE"));
+  expect(sent).toEqual(["SELECT fail"]);
+});
