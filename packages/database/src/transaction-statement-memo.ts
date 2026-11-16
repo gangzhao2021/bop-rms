@@ -33,6 +33,22 @@ const pureSetConfig = new RegExp(
   "iu",
 );
 const setConfigCalls = new RegExp(setConfigCall, "giu");
+/**
+ * WP-2423 M35 (staff round round trips): a read of scope settings only, each `current_setting(
+ * '<name>',true)` under a plain lower-case column name (`AS` optional), as owners read the scope
+ * they must restore. The tax-config tracker (apps/api merchant-transaction-settings) answers the
+ * same reads in its own transactions.
+ */
+const currentSettingCall = String.raw`current_setting\(\s*'([a-z_.]+)'\s*,\s*true\s*\)(?:\s+AS)?\s+([a-z_][a-z0-9_]*)`;
+const pureCurrentSetting = new RegExp(
+  String.raw`^SELECT\s+` +
+    currentSettingCall +
+    String.raw`(?:\s*,\s*` +
+    currentSettingCall +
+    String.raw`)*\s*;?$`,
+  "u",
+);
+const currentSettingCalls = new RegExp(currentSettingCall, "gu");
 const advisoryLock =
   /^SELECT\s+pg_advisory_xact_lock(_shared)?\(\s*hashtextextended\(\s*[^()]*,\s*0\s*\)\s*\)\s*;?$/iu;
 const tableLock =
@@ -315,6 +331,28 @@ export function createTransactionStatementMemo(
         kind: "Answer",
         result: resultOf("set_config", remembered.pairs.at(-1)?.[1] ?? null),
       };
+    }
+    // A read of scope settings the transaction holds (or that go with its next statement): the
+    // value that read would return, each a setting this transaction itself wrote or began with.
+    if (remembered === null && values.length === 0 && pureCurrentSetting.test(sql.trim())) {
+      const row: Record<string, string> = {};
+      let known = true;
+      for (const match of sql.trim().matchAll(currentSettingCalls)) {
+        const name = match[1] ?? "",
+          value = wanted.get(name) ?? settings.get(name);
+        if (
+          !scopeSettings.has(name) ||
+          value === undefined ||
+          (!defer && settings.get(name) !== value)
+        )
+          known = false;
+        else row[match[2] ?? ""] = value;
+      }
+      if (known)
+        return {
+          kind: "Answer",
+          result: Object.freeze({ command: "SELECT", rowCount: 1, rows: [row], fields: [] }),
+        };
     }
     if (
       remembered?.kind === "lock" &&

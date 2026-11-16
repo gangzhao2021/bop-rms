@@ -196,6 +196,45 @@ describe("WP-2423 transaction statement memo", () => {
     const unknown = createTransactionStatementMemo({ "bop.other": "s" });
     expect(unknown.answer("SELECT set_config('bop.other',$1,true)", ["s"])).toBeNull();
   });
+  it("WP-2423 staff round round trips: answers a read of scope settings it knows, never one it does not", () => {
+    const memo = createTransactionStatementMemo({ "bop.brand_id": brand, "bop.store_id": store });
+    const read =
+      "SELECT current_setting('bop.brand_id',true) brand,current_setting('bop.store_id',true) store";
+    expect(memo.plan(read, [])).toMatchObject({
+      kind: "Answer",
+      result: { rows: [{ brand, store }], rowCount: 1 },
+    });
+    // The value the next statement runs under: what was written last, sent or not.
+    write(memo, "SELECT set_config('bop.store_id',$1,true)", [""]);
+    expect(memo.plan("SELECT current_setting('bop.store_id',true) AS store", [])).toMatchObject({
+      kind: "Answer",
+      result: { rows: [{ store: "" }] },
+    });
+    // Without deferral only what the transaction holds.
+    expect(memo.answer("SELECT current_setting('bop.store_id',true) AS store", [])).toBeNull();
+    expect(memo.answer("SELECT current_setting('bop.brand_id',true) AS brand", [])).toMatchObject({
+      rows: [{ brand }],
+    });
+    // A setting never written or begun with (identity, tenant), another setting, a read with
+    // values or anything more than the settings reaches the database.
+    for (const [sql, values] of [
+      ["SELECT current_setting('bop.identity_session_id',true) AS session_scope", []],
+      [
+        "SELECT current_setting('bop.brand_id',true) brand,current_setting('bop.tenant_id',true) t",
+        [],
+      ],
+      ["SELECT current_setting('statement_timeout',true) AS limit_ms", []],
+      ["SELECT current_setting('bop.brand_id') AS brand", []],
+      ["SELECT current_setting('bop.brand_id',true) AS brand", ["x"]],
+      ["SELECT current_setting('bop.brand_id',true) AS brand FROM rms_catalog.sku", []],
+      ["SELECT current_setting('bop.brand_id',true) AS \"Brand\"", []],
+    ] as const)
+      expect(memo.plan(sql, values).kind, sql).toBe("Run");
+    // Once it forgets (a failure, a rollback), nothing is known.
+    memo.forget();
+    expect(memo.plan(read, []).kind).toBe("Run");
+  });
+
   it("lets a joined run set the scope its statements see", () => {
     const memo = createTransactionStatementMemo({ "bop.brand_id": brand, "bop.store_id": store });
     memo.useScope({ "bop.brand_id": brand, "bop.store_id": "" });
