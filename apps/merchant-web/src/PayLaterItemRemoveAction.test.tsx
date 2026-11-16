@@ -133,11 +133,15 @@ it("v15 b21: each round's take-off button names its round, in staff words", () =
       />,
     );
   };
-  expect(render(2)).toBe('<button type="button">Take dishes off round 2</button>');
+  // b23 review: the button says which round's take-off it is, so the focus can come back to it.
+  const round = detail({ unpaidRemovableItems: [id(201)], unpaidRemovedItems: [] }).order.batches[0]
+    ?.orderBatchReference;
+  const opened = `<button type="button" data-focus-opener="take-off:${String(round)}">`;
+  expect(render(2)).toBe(opened + "Take dishes off round 2</button>");
   expect(render(3)).toContain("Take dishes off round 3");
   setLanguageForTest("zh-Hans");
   try {
-    expect(render(2)).toBe('<button type="button">从第 2 轮删菜</button>');
+    expect(render(2)).toBe(opened + "从第 2 轮删菜</button>");
   } finally {
     setLanguageForTest("en");
   }
