@@ -1,7 +1,12 @@
 import { expect, it } from "vitest";
 import { findInternalText } from "../e2e/internal-text-patterns.js";
 import { setLanguageForTest } from "./i18n/i18n.js";
-import { storeTimeZoneChoices, timeZoneChoices, timeZoneLabel } from "./time-zone-names.js";
+import {
+  storeTimeZoneChoices,
+  storeTimeZoneName,
+  timeZoneChoices,
+  timeZoneLabel,
+} from "./time-zone-names.js";
 
 const at = new Date("2026-10-14T16:00:00Z");
 
@@ -81,6 +86,10 @@ it("Store setup lists the Canadian zones plainly and keeps a zone outside them",
     { value: "Europe/Athens", label: timeZoneLabel("Europe/Athens", at) },
   ]);
   expect(findInternalText(kept.map((zone) => zone.label))).toEqual([]);
+  expect(storeTimeZoneName("America/Montreal", at)).toBe(
+    "Eastern time (Toronto, Ottawa, Montréal)",
+  );
+  expect(storeTimeZoneName("Europe/Athens", at)).toBe(timeZoneLabel("Europe/Athens", at));
   setLanguageForTest("zh-Hans");
   try {
     expect(storeTimeZoneChoices(["America/Vancouver"], at).map((zone) => zone.label)).toEqual([

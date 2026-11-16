@@ -159,6 +159,8 @@ interface OrdinaryFixtureControl {
   failState: boolean;
   wrongWorkspace: boolean;
   denyHistory: boolean;
+  /** b21: a page of older changes fails as an outage (the v15 DEMO Store about 26 pages back). */
+  olderHistoryDown: boolean;
   wrongHistory: boolean;
   /** WP-2423 DEC-STORE-SETUP-PUBLICATION: publication checks the fixture reports as failing. */
   failing: string[] | null;
@@ -198,6 +200,7 @@ async function install(
     failState: false,
     wrongWorkspace: false,
     denyHistory: false,
+    olderHistoryDown: false,
     wrongHistory: false,
     failing: null as string[] | null,
     soleOperator: null,
@@ -419,6 +422,8 @@ async function install(
       ).toBe(true);
       control.reads.push("history");
       if (control.denyHistory) return respond(route, { error: "request_denied" }, 403);
+      if (control.olderHistoryDown && beforeSequence !== null)
+        return respond(route, { error: "store_configuration_unavailable" }, 503);
       const all = Array.from(ledger.values())
         .map((receipt, index) => {
           if (!receipt.operation) throw new Error("Controlled committed history absent");
@@ -655,7 +660,7 @@ async function cursor(page: Page) {
 
 test.beforeEach(({ page }) => serveStoreSetupPanels(page));
 /** b20: screenshots for the design review at 1440, 1024 and 390, when BOP_B20_SHOTS names a folder. */
-async function b20Shots(page: Page, name: string) {
+async function b20Shots(page: Page, name: string, env = "BOP_B20_SHOTS") {
   for (const [width, height] of [
     [1440, 900],
     [1024, 768],
@@ -666,7 +671,7 @@ async function b20Shots(page: Page, name: string) {
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
       `no horizontal overflow at ${width}`,
     ).toBe(true);
-    const folder = process.env.BOP_B20_SHOTS;
+    const folder = process.env[env];
     if (folder) await page.screenshot({ path: `${folder}/${name}-${width}.png`, fullPage: true });
   }
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -1181,7 +1186,9 @@ test("WP-2423 v15: 'Use the live Store's settings' fills time zone, business day
   await page.setViewportSize({ width: 1440, height: 900 });
   // Step 1 now holds the live Store's time zone (the inputs Save reads).
   await page.getByRole("button", { name: /^1\. Time zone and business day$/u }).click();
-  await expect(page.getByLabel("Time zone", { exact: true })).toHaveValue("America/Toronto");
+  await expect(page.getByRole("combobox", { name: "Time zone", exact: true })).toHaveValue(
+    "America/Toronto",
+  );
   await expect(page.getByLabel("Business day starts at (local time)")).toHaveValue("04:00");
   await expectNoInternalText(page);
   expect(state.errors).toEqual([]);
@@ -1249,6 +1256,90 @@ test("b20: an edit not saved yet reads from now to new on Review, and nothing sa
     page.getByText("切换语言后，还没保存的修改仍在这里。存为草稿后才会保留。"),
   ).toBeVisible();
   await b20Shots(page, "review-unsaved-edit-zh-Hans");
+  expect(state.writes).toEqual([]);
+  expect(state.errors).toEqual([]);
+});
+
+test("b21: a failed load of older changes keeps the rows and says so under the button, in both languages @production", async ({
+  page,
+}) => {
+  const state = await install(page);
+  state.failing = [];
+  await enter(page);
+  await panel(page).getByRole("button", { name: "Create the change from the saved setup" }).click();
+  for (let i = 0; i < 2; i++) {
+    await panel(page).getByRole("button", { name: "Check the settings again" }).click();
+    await expect(panel(page).getByRole("status")).toHaveText(
+      "Settings checked, not yet sent for approval.",
+    );
+  }
+  state.olderHistoryDown = true;
+  const check = async (region: string, earlier: string, more: string, message: string) => {
+    const where = page.getByRole("region", { name: region, exact: true });
+    await where.getByText(earlier, { exact: true }).click();
+    const history = where.locator(".store-setup-publish__history section");
+    await expect(history.getByRole("listitem")).toHaveCount(2);
+    await history.getByRole("button", { name: more }).click();
+    const alert = history.getByRole("alert");
+    await expect(alert).toHaveText(message);
+    await expect(history.getByRole("listitem")).toHaveCount(2);
+    // Right under the button just pressed, and in view at phone width.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await history.getByRole("button", { name: more }).scrollIntoViewIfNeeded();
+    await expect(alert).toBeInViewport();
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await expect(history).not.toContainText(/配置|仍在等待的请求会保留|更改/u);
+  };
+  await check(
+    "Store configuration publication",
+    "Earlier changes",
+    "Load older changes",
+    "Earlier changes could not be loaded just now. Check the connection and try again.",
+  );
+  await expectNoInternalText(page);
+  await b20Shots(page, "history-load-older-failed-en", "BOP_B21_SHOTS");
+  await page.getByRole("button", { name: "切换到中文" }).click();
+  await page.getByRole("button", { name: /^4\. 核对并发布$/u }).click();
+  await check(
+    "门店配置发布",
+    "以前的修改",
+    "加载更早的修改",
+    "暂时无法加载以前的修改。请检查网络后再试。",
+  );
+  await b20Shots(page, "history-load-older-failed-zh-Hans", "BOP_B21_SHOTS");
+  expect(state.errors).toEqual([]);
+});
+test("b21: step 1 asks for the Time zone from the Canadian zones, and Review reads it from now to new @production", async ({
+  page,
+}) => {
+  const state = await install(page, { live: true });
+  await page.goto("/app");
+  await followWorkspaceLink(page, "Store setup");
+  await openStoreSetupPlace(page, "Settings that need approval");
+  await page.getByRole("button", { name: /^1\. Time zone and business day$/u }).click();
+  const zone = page.getByRole("combobox", { name: "Time zone", exact: true });
+  await expect(zone.locator("optgroup")).toHaveCount(0);
+  await expect(zone.locator("option")).toHaveCount(9);
+  await zone.selectOption("America/Vancouver");
+  await b20Shots(page, "step1-time-zone-en", "BOP_B21_SHOTS");
+  await page.getByRole("button", { name: /^4\. Review and publish$/u }).click();
+  const summary = page.locator(".store-setup-summary");
+  await expect(summary).toContainText(
+    "Now Eastern time (Toronto, Ottawa, Montréal) → changes to Pacific time (Vancouver)",
+  );
+  await expect(summary).toContainText("Not saved yet");
+  await b20Shots(page, "review-time-zone-unsaved-en", "BOP_B21_SHOTS");
+  await page.getByRole("button", { name: "切换到中文" }).click();
+  await expect(page.locator(".store-setup-summary")).toContainText(
+    "现在东部时间（多伦多、渥太华、蒙特利尔） → 改为太平洋时间（温哥华）",
+  );
+  await b20Shots(page, "review-time-zone-unsaved-zh-Hans", "BOP_B21_SHOTS");
+  await page.getByRole("button", { name: /^1\. 时区和营业日$/u }).click();
+  const zh = page.getByRole("combobox", { name: "时区", exact: true });
+  await expect(zh).toHaveValue("America/Vancouver");
+  await expect(zh.locator("option:checked")).toHaveText("太平洋时间（温哥华）");
+  await expectNoInternalText(page);
+  await b20Shots(page, "step1-time-zone-zh-Hans", "BOP_B21_SHOTS");
   expect(state.writes).toEqual([]);
   expect(state.errors).toEqual([]);
 });

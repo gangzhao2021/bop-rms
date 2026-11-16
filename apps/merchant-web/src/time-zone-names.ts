@@ -151,3 +151,9 @@ export function storeTimeZoneChoices(
     .map((value) => ({ value, label: timeZoneLabel(value, at) }));
   return [...listed, ...extra];
 }
+
+/** b21: a Store's zone in Store setup's words: its Canadian name when listed, else name and place. */
+export function storeTimeZoneName(timeZone: string, at: Date = new Date()): string {
+  const text: Readonly<Record<string, string>> = canadianStoreTimeZoneText();
+  return text[sameZone[timeZone] ?? timeZone] ?? timeZoneLabel(timeZone, at);
+}

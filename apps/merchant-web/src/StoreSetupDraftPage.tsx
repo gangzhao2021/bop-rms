@@ -73,7 +73,7 @@ import {
 import { serviceOperationReference, type ServiceMode } from "./service-control-client.js";
 import { plainLanguageName } from "./staff-text.js";
 import { LanguageSwitch } from "./i18n/LanguageSwitch.js";
-import { storeTimeZoneChoices, timeZoneLabel } from "./time-zone-names.js";
+import { storeTimeZoneChoices, storeTimeZoneName } from "./time-zone-names.js";
 import { useScrollToAnchor } from "./scroll-to-anchor.js";
 const StoreFirstOpeningPanel = lazyPage(
   () => import("./StoreFirstOpeningPanel.js"),
@@ -1458,7 +1458,7 @@ export function StoreSetupDraftPage({
                     : workspace.store.currencyCode}
                 </dd>
                 <dt>{t("Current timezone")}</dt>
-                <dd>{timeZoneLabel(workspace.store.timeZone)}</dd>
+                <dd>{storeTimeZoneName(workspace.store.timeZone)}</dd>
                 <dt>{t("Saved draft")}</dt>
                 <dd>
                   {workspace.setup.snapshot ? t("A draft is saved") : t("No draft saved yet")}
@@ -1483,7 +1483,7 @@ export function StoreSetupDraftPage({
                   ) : inputs.timeZone !== workspace.store.timeZone ? (
                     <p>
                       {t("The Store runs on {zone} today.", {
-                        zone: timeZoneLabel(workspace.store.timeZone),
+                        zone: storeTimeZoneName(workspace.store.timeZone),
                       })}
                     </p>
                   ) : null
@@ -2195,8 +2195,8 @@ export function storeSetupChangeSummary(
       t("Time zone"),
       "timeZone",
       known ? zone === current.timeZone : null,
-      () => [timeZoneLabel(zone)],
-      () => timeZoneLabel(current?.timeZone ?? ""),
+      () => [storeTimeZoneName(zone)],
+      () => storeTimeZoneName(current?.timeZone ?? ""),
     );
   }
   if (content.businessDayStartLocalTime.state === "Configured") {
@@ -2245,38 +2245,36 @@ export function storeSetupChangeSummary(
   if (content.feeContexts?.state === "Configured") {
     const fees = content.feeContexts.value;
     const live = current?.setupBasis?.feeContexts;
-    // b21: each fee that changes reads "Tip: off becomes on (Dine-in)", like opening hours.
+    // b21: each fee that changes reads "Tip: off becomes on (Dine-in)", like opening hours; a fee
+    // the Store has no setting for is not charged today, so it reads as off.
     // b19 review: a fee whose tax treatment changes says so, so a change is never invisible.
-    add(
-      t("Fees"),
-      "feeContexts",
-      known ? live !== undefined && feesKey(live) === feesKey(fees) : null,
-      () =>
-        fees.flatMap((fee) => {
-          if (!known) return [feeText(fee)];
-          const before: FeeLike | undefined = live?.find(
-            (old) => old.chargeType === fee.chargeType,
-          );
-          const after: FeeLike = fee;
-          const lines: string[] = [];
-          if (before === undefined || feeStateText(before) !== feeStateText(after))
-            lines.push(
-              t("{name}: {before} becomes {after}", {
-                name: feeLabel(fee.chargeType),
-                before: before === undefined ? t("not set up") : feeStateText(before),
-                after: feeStateText(after),
-              }),
-            );
-          if (
-            before !== undefined &&
-            (before.taxClassificationReference ?? null) !==
-              (after.taxClassificationReference ?? null)
-          )
-            lines.push(
-              t("{fee}: taxed differently (see Tax review)", { fee: feeLabel(fee.chargeType) }),
-            );
-          return lines;
-        }),
+    const changes = fees.flatMap((fee) => {
+      const before: FeeLike = live?.find((old) => old.chargeType === fee.chargeType) ?? {
+        chargeType: fee.chargeType,
+        state: "Disabled",
+      };
+      const after: FeeLike = fee;
+      const lines: string[] = [];
+      if (feeStateText(before) !== feeStateText(after))
+        lines.push(
+          t("{name}: {before} becomes {after}", {
+            name: feeLabel(fee.chargeType),
+            before: feeStateText(before),
+            after: feeStateText(after),
+          }),
+        );
+      if (
+        before.state === "Enabled" &&
+        after.state === "Enabled" &&
+        (before.taxClassificationReference ?? null) !== (after.taxClassificationReference ?? null)
+      )
+        lines.push(
+          t("{fee}: taxed differently (see Tax review)", { fee: feeLabel(fee.chargeType) }),
+        );
+      return lines;
+    });
+    add(t("Fees"), "feeContexts", known ? changes.length === 0 : null, () =>
+      known ? changes : fees.map(feeText),
     );
   }
   if (content.capacityConfigurationReference.state === "Configured") {

@@ -373,7 +373,8 @@ it("review names the saved time zone in plain words, not its identifier", () => 
     />,
   );
   expect(html).toContain(
-    "<dt>Time zone</dt><dd><span>Eastern Time (Toronto, Ottawa and Montréal)</span></dd>",
+    // b21: the same plain Canadian name step 1 offers.
+    "<dt>Time zone</dt><dd><span>Eastern time (Toronto, Ottawa, Montréal)</span></dd>",
   );
   expect(html).not.toContain("America/Toronto");
   expect(findInternalText([staticText(html)])).toEqual([]);
@@ -448,12 +449,9 @@ it("b19: Review says what publishing changes against the live Store, in plain va
   ]);
   expect(summary.changed[0]?.value).toEqual(["05:30"]);
   expect(summary.changed[2]?.value).toContain("Monday: 11:00\u201321:00 becomes 11:00\u201322:00");
-  // b21: each fee says what it is today and what it becomes (none were set up before).
-  expect(summary.changed[3]?.value).toEqual([
-    "Service charge: not set up becomes off",
-    "Delivery fee: not set up becomes off",
-    "Tip: not set up becomes on (Dine-in)",
-  ]);
+  // b21: each fee that changes says what it is today and what it becomes; a fee the Store has no
+  // setting for is not charged today, so only the Tip changes.
+  expect(summary.changed[3]?.value).toEqual(["Tip: off becomes on (Dine-in)"]);
   expect(summary.unchanged).toEqual(["Time zone", "Order limits", "Address"]);
   // b19 review: a fee whose only change is its tax treatment says so; it never reads as unchanged.
   const taxedTip = (taxClassificationReference: string | null) => ({

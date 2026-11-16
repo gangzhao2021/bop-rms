@@ -504,9 +504,11 @@ test("@production an open Store's setup is a few places, each saying whether a c
     "4. Review and publish",
   ]);
   // b18 polish: the draft starts from the time zone the Store runs on, never "Not configured".
-  await expect(page.getByLabel("Time zone", { exact: true })).toHaveValue("America/Toronto");
+  await expect(page.getByRole("combobox", { name: "Time zone", exact: true })).toHaveValue(
+    "America/Toronto",
+  );
   await expect(
-    page.getByLabel("Time zone", { exact: true }).locator("option[value='']"),
+    page.getByRole("combobox", { name: "Time zone", exact: true }).locator("option[value='']"),
   ).toHaveCount(0);
   // b18 review: and from the business day start it runs on, on this first step already.
   await expect(page.getByLabel("Business day starts at (local time)")).toHaveValue("05:00");

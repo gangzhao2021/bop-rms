@@ -10043,7 +10043,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Now {now} → changes to {value}": "现在{now} → 改为{value}",
   "Back to how the Store runs today": "改回门店现在的样子",
   "on ({services})": "开启（{services}）",
-  "not set up": "未设置",
   "no order limits": "不限制订单",
   "the order limits saved earlier": "之前保存的订单限制",
   "the order limits the Store uses": "门店在用的订单限制",
