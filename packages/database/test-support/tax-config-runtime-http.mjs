@@ -87,7 +87,10 @@ export async function exerciseTaxConfigRuntimeHttp(context) {
     authoritySessionReads = 0,
     transactionStatements = 0,
     settingStatements = 0,
-    advisoryLockStatements = 0;
+    advisoryLockStatements = 0,
+    databaseMillis = 0,
+    allStatements = 0,
+    allDatabaseMillis = 0;
   // Load check only (never in CI): TAX_RUNTIME_QUERY_DELAY_MS adds that many milliseconds before
   // every statement of the code under test, as a slower database round trip would.
   // Measurement only: TAX_RUNTIME_NOTES_FILE collects the measured lines of a run.
@@ -144,7 +147,11 @@ export async function exerciseTaxConfigRuntimeHttp(context) {
               if (sql.startsWith("SELECT set_config(")) settingStatements++;
               else if (sql.includes("pg_advisory_xact_lock")) advisoryLockStatements++;
               if (queryDelayMs > 0) await delay(queryDelayMs);
+              const sentAt = performance.now();
               const result = await client.query(sql, values);
+              databaseMillis += performance.now() - sentAt;
+              allDatabaseMillis += performance.now() - sentAt;
+              allStatements++;
               if (
                 lateMutation !== null &&
                 stage.startsWith("MaterialLate") &&
@@ -432,7 +439,24 @@ export async function exerciseTaxConfigRuntimeHttp(context) {
       });
       const address = server.address();
       assert(address && typeof address !== "string");
-      const send = (
+      const send = async (endpoint, body, options) => {
+        const statements = allStatements,
+          waited = allDatabaseMillis,
+          started = performance.now();
+        const answer = await sendNow(endpoint, body, options);
+        note(
+          [
+            stage,
+            endpoint,
+            answer.status ?? "reply lost",
+            allStatements - statements + " statements",
+            Math.round(performance.now() - started) + " ms",
+            Math.round(allDatabaseMillis - waited) + " ms database",
+          ].join(" "),
+        );
+        return answer;
+      };
+      const sendNow = (
         endpoint,
         body,
         { selected = scope, csrf = session.csrf, query = "", dropReply = false } = {},
@@ -1397,6 +1421,7 @@ export async function exerciseTaxConfigRuntimeHttp(context) {
       transactionStatements = 0;
       settingStatements = 0;
       advisoryLockStatements = 0;
+      databaseMillis = 0;
       const reportStarted = performance.now();
       const reportResponse = await send("materials/commands", reportCommand);
       const reportMillis = Math.round(performance.now() - reportStarted);
@@ -1407,6 +1432,7 @@ export async function exerciseTaxConfigRuntimeHttp(context) {
         "Session reads " + authoritySessionReads,
         "policy reads " + authorityPolicyReads,
         reportMillis + " ms",
+        Math.round(databaseMillis) + " ms waiting for the database",
       ].join(", ");
       note(reportRoundTrips);
       assert.equal(reportResponse.status, 200, reportRoundTrips);
