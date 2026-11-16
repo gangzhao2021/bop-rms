@@ -830,7 +830,7 @@ test("Review controls retain 320px 200 percent text keyboard and 44px targets @p
     true,
   );
   await page.screenshot({
-    path: "/private/tmp/wp2421-store-configuration-review-mobile.png",
+    path: test.info().outputPath("wp2421-store-configuration-review-mobile.png"),
     fullPage: true,
   });
 });
@@ -894,7 +894,11 @@ test("actual immutable history paginates original authors and read refusal keeps
   expect(await cursor(page)).toEqual(original);
   state.denyHistory = false;
   await panel(page).getByRole("button", { name: "Recover original configuration request" }).click();
-  await expect(panel(page).getByRole("status")).toContainText("Settings checked");
+  // The open "Earlier changes" list reads again after the recovery and has its own loading
+  // status beside the publication status; the publication status is the one that answers.
+  await expect(
+    panel(page).getByRole("status").filter({ hasText: "Settings checked" }),
+  ).toBeVisible();
   expect(await cursor(page)).toEqual([]);
   expect(state.errors).toEqual([]);
 });
@@ -1066,7 +1070,7 @@ test("the Owner approves their own configuration alone as sole operator, at 1440
     ).toEqual([]);
     await expectNoInternalText(page);
     await page.screenshot({
-      path: `/private/tmp/wp2423-store-configuration-sole-operator-${width}.png`,
+      path: test.info().outputPath(`wp2423-store-configuration-sole-operator-${width}.png`),
       fullPage: true,
     });
   }
@@ -1141,7 +1145,7 @@ test("someone else's open configuration is shown, cannot be replaced and can be 
     ).toEqual([]);
     await expectNoInternalText(page);
     await page.screenshot({
-      path: `/private/tmp/wp2423-store-configuration-open-change-${width}.png`,
+      path: test.info().outputPath(`wp2423-store-configuration-open-change-${width}.png`),
       fullPage: true,
     });
   }
@@ -1220,7 +1224,7 @@ test("WP-2423 v15: 'Use the live Store's settings' fills time zone, business day
       `no horizontal overflow at ${width}`,
     ).toBe(true);
     await page.screenshot({
-      path: `/private/tmp/wp2423-store-setup-live-settings-${width}.png`,
+      path: test.info().outputPath(`wp2423-store-setup-live-settings-${width}.png`),
       fullPage: true,
     });
   }
