@@ -10076,4 +10076,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Not saved yet": "尚未保存",
   "What is marked not saved yet goes into the change below only after you save as draft.":
     "标着“尚未保存”的设置，存为草稿后才会进入下面生成的修改。",
+  // b22: Store setup review gaps.
+  "Offline. Earlier changes load again by themselves once the connection is back.":
+    "已离线。网络恢复后，以前的修改会自动重新加载。",
 });

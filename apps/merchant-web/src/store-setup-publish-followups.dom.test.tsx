@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from "vitest";
+import { act } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
   StoreConfigurationHistoryView,
@@ -276,7 +277,8 @@ it("b21: a failed load of older changes keeps the rows and says so beside the bu
       storeReference: scope.storeReference,
       readerActorReference: scope.actorReference,
       beforeSequence: null,
-      entries: [historyEntry(3, "Submit", "PendingApproval"), historyEntry(2, "Validate", "Draft")],
+      // b22: a full page is 20 steps (21 to 2); older ones are read before 2.
+      entries: Array.from({ length: 20 }, (_, i) => historyEntry(21 - i, "Validate", "Draft")),
       nextBeforeSequence: 2,
       observedAt: at,
       validUntil: "2026-11-15T17:32:05.000Z",
@@ -296,10 +298,10 @@ it("b21: a failed load of older changes keeps the rows and says so beside the bu
   details.open = true;
   details.dispatchEvent(new Event("toggle"));
   await settle();
-  expect(details.querySelectorAll("li")).toHaveLength(2);
+  expect(details.querySelectorAll("li")).toHaveLength(20);
   await click(buttonNamed(container, "加载更早的修改"));
   await settle();
-  expect(details.querySelectorAll("li")).toHaveLength(2);
+  expect(details.querySelectorAll("li")).toHaveLength(20);
   const alerts = [...details.querySelectorAll('[role="alert"]')];
   expect(alerts.map((node) => node.textContent)).toEqual([
     "暂时无法加载以前的修改。请检查网络后再试。",
@@ -328,4 +330,138 @@ it.each([
   const alerts = [...details.querySelectorAll('[role="alert"]')].map((node) => node.textContent);
   expect(alerts).toEqual([text]);
   if (code !== "Unavailable") expect(alerts.join("")).not.toMatch(/网络|再试/u);
+});
+
+// b22 (v15 live check of b21): going offline, or starting an edit that is not saved yet, wiped the
+// earlier changes already shown, and after reconnecting the list stayed empty with no button and
+// no message. History is a read of past facts: the rows stay, only loading more waits for the
+// connection (said in plain words), and the list reads again by itself once the connection is back.
+it("b22: earlier changes keep their rows offline and through an edit, and read again on reconnect", async () => {
+  setLanguageForTest("zh-Hans");
+  vi.spyOn(Date, "now").mockReturnValue(Date.parse(at));
+  const page = (beforeSequence: number | null, from: number, next: number | null) =>
+    parseStoreConfigurationOrdinaryHistory(
+      {
+        tenantReference: scope.tenantReference,
+        brandReference: scope.brandReference,
+        storeReference: scope.storeReference,
+        readerActorReference: scope.actorReference,
+        beforeSequence,
+        entries: Array.from({ length: next === null ? from : 20 }, (_, i) =>
+          historyEntry(from - i, "Validate", "Draft"),
+        ),
+        nextBeforeSequence: next,
+        observedAt: at,
+        validUntil: "2026-11-15T17:32:05.000Z",
+      },
+      scope,
+      beforeSequence,
+    );
+  const client = clientOf(workspaceOf({ latest: configuration("Draft") }));
+  // The newest page reads 41 down to 22 (one newer step recorded while offline: 41).
+  let newest = 40;
+  client.history.mockImplementation(async (_scope, options: { beforeSequence: number | null }) => {
+    if (options.beforeSequence === null) return page(null, newest, newest - 19);
+    if (options.beforeSequence === 21) return page(21, 20, 1);
+    throw new StoreSetupClientError("Unavailable");
+  });
+  const view = (props: { online: boolean; freshDisabled: boolean }) => (
+    <MemoryRouter>
+      <StoreConfigurationOrdinaryPanel
+        scope={scope}
+        csrf={csrf}
+        saved={saved as never}
+        setupLayout="Open"
+        client={client as never}
+        journalFactory={journal as never}
+        online={props.online}
+        freshDisabled={props.freshDisabled}
+        unsavedEdits={props.freshDisabled}
+      />
+    </MemoryRouter>
+  );
+  const { container, root } = await mount(view({ online: true, freshDisabled: false }));
+  await settle();
+  const details = container.querySelector("details.store-setup-publish__history");
+  if (!(details instanceof HTMLDetailsElement)) throw new Error("history absent");
+  details.open = true;
+  details.dispatchEvent(new Event("toggle"));
+  await settle();
+  await click(buttonNamed(container, "加载更早的修改"));
+  await settle();
+  expect(details.querySelectorAll("li")).toHaveLength(40);
+  const rerender = async (props: { online: boolean; freshDisabled: boolean }) => {
+    await act(async () => {
+      root.render(view(props));
+    });
+    await settle();
+  };
+  // An edit not saved yet: the rows stay.
+  await rerender({ online: true, freshDisabled: true });
+  expect(details.querySelectorAll("li")).toHaveLength(40);
+  // Offline: the rows stay and the list says why nothing more loads now.
+  newest = 41;
+  await rerender({ online: false, freshDisabled: true });
+  expect(details.querySelectorAll("li")).toHaveLength(40);
+  expect(details.textContent).toContain("已离线。网络恢复后，以前的修改会自动重新加载。");
+  // Back online: the list reads again by itself and keeps the rows, with the newer step on top.
+  const reads = client.history.mock.calls.length;
+  await rerender({ online: true, freshDisabled: true });
+  expect(client.history.mock.calls.length).toBe(reads + 1);
+  const rows = [...details.querySelectorAll("li")];
+  expect(rows).toHaveLength(41);
+  expect(details.textContent).not.toContain("已离线");
+  expect(details.querySelector('[role="alert"]')).toBeNull();
+});
+
+it("b22: earlier changes opened while offline say so, then load by themselves on reconnect", async () => {
+  setLanguageForTest("zh-Hans");
+  vi.spyOn(Date, "now").mockReturnValue(Date.parse(at));
+  const client = clientOf(workspaceOf({ latest: configuration("Draft") }));
+  client.history.mockResolvedValue(
+    parseStoreConfigurationOrdinaryHistory(
+      {
+        tenantReference: scope.tenantReference,
+        brandReference: scope.brandReference,
+        storeReference: scope.storeReference,
+        readerActorReference: scope.actorReference,
+        beforeSequence: null,
+        entries: [historyEntry(2, "Submit", "PendingApproval")],
+        nextBeforeSequence: null,
+        observedAt: at,
+        validUntil: "2026-11-15T17:32:05.000Z",
+      },
+      scope,
+      null,
+    ),
+  );
+  const view = (online: boolean) => (
+    <MemoryRouter>
+      <StoreConfigurationOrdinaryPanel
+        scope={scope}
+        csrf={csrf}
+        saved={saved as never}
+        setupLayout="Open"
+        client={client as never}
+        journalFactory={journal as never}
+        online={online}
+        freshDisabled={!online}
+      />
+    </MemoryRouter>
+  );
+  const { container, root } = await mount(view(false));
+  await settle();
+  const details = container.querySelector("details.store-setup-publish__history");
+  if (!(details instanceof HTMLDetailsElement)) throw new Error("history absent");
+  details.open = true;
+  details.dispatchEvent(new Event("toggle"));
+  await settle();
+  expect(client.history).not.toHaveBeenCalled();
+  expect(details.textContent).toContain("已离线");
+  await act(async () => {
+    root.render(view(true));
+  });
+  await settle();
+  expect(client.history).toHaveBeenCalledTimes(1);
+  expect(details.querySelectorAll("li")).toHaveLength(1);
 });

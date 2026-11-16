@@ -227,6 +227,12 @@ export interface StoreConfigurationOrdinaryPanelProps {
   readonly onChanged?: () => void;
   /** b20: the page has edits that are not saved yet; the steps here use the saved setup only. */
   readonly unsavedEdits?: boolean;
+  /**
+   * b22: whether the device is online. Earlier changes are a read of past facts: the rows already
+   * shown stay while offline or while edits are not saved; only loading more waits for the
+   * connection, and the list reads again by itself once it is back.
+   */
+  readonly online?: boolean;
 }
 const denied = () => {
   throw new StoreSetupClientError("ScopeChanged");
@@ -414,7 +420,9 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
     [nextHistory, setNextHistory] = useState<number | null>(null),
     [historyBusy, setHistoryBusy] = useState(false),
     [historyError, setHistoryError] = useState<string | null>(null),
-    [historyLoaded, setHistoryLoaded] = useState(false);
+    [historyLoaded, setHistoryLoaded] = useState(false),
+    [historyOpen, setHistoryOpen] = useState(false);
+  const online = props.online ?? true;
   const identity = canonical(props.scope) + props.csrf;
   const generation = useRef(0),
     controller = useRef<AbortController | null>(null),
@@ -448,9 +456,19 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
       historyController.current?.abort();
       historyClient.invalidate();
     };
-  }, [identity, historyClient, props.freshDisabled]);
-  async function loadHistory(more = false) {
-    if (busy || historyBusy || props.freshDisabled || (more && nextHistory === null)) return;
+    // b22: only another Store or Actor (or session) starts the list again. Going offline or starting
+    // an edit no longer clears the rows already shown.
+  }, [identity, historyClient]);
+  // b22: the list reads when it is opened, by itself once the connection is back and after a change
+  // of Store or session. Rows already shown for the same Store stay, with any newer ones on top.
+  const historyIdentity = useRef<string | null>(null);
+  useEffect(() => {
+    if (!historyOpen || !online) return;
+    void loadHistory(false, historyIdentity.current === identity && history.length > 0);
+  }, [online, historyOpen, identity]);
+  async function loadHistory(more = false, keep = false) {
+    if (!online || (more && (historyBusy || nextHistory === null))) return;
+    historyIdentity.current = identity;
     const selector = more ? nextHistory : null,
       epoch = ++historyGeneration.current,
       c = new AbortController();
@@ -466,8 +484,14 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
         signal: c.signal,
       });
       if (current()) {
-        setHistory(more ? appendStoreConfigurationHistory(history, page) : page.entries);
-        setNextHistory(page.nextBeforeSequence);
+        if (keep) {
+          const merged = mergeNewestStoreConfigurationHistory(history, nextHistory, page);
+          setHistory(merged.entries);
+          setNextHistory(merged.nextBeforeSequence);
+        } else {
+          setHistory(more ? appendStoreConfigurationHistory(history, page) : page.entries);
+          setNextHistory(page.nextBeforeSequence);
+        }
         setHistoryLoaded(true);
       }
     } catch (e) {
@@ -1143,13 +1167,14 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
       <details
         className="store-setup-publish__history"
         onToggle={(event) => {
-          if (event.currentTarget.open) void loadHistory();
+          // b22: opening the list reads it (see the effect above), also when offline at first.
+          setHistoryOpen(event.currentTarget.open);
         }}
       >
         <summary>{t("Earlier changes")}</summary>
         <section aria-label={t("Store configuration operation history")}>
           {historyBusy && <p role="status">{t("Loading earlier changes…")}</p>}
-          {historyError && history.length === 0 && <p role="alert">{historyError}</p>}
+          {historyError && history.length === 0 && online && <p role="alert">{historyError}</p>}
           {historyLoaded && history.length === 0 && (
             <p>{t("No changes have been recorded yet.")}</p>
           )}
@@ -1157,16 +1182,22 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
           {nextHistory !== null && (
             <button
               type="button"
-              disabled={busy || historyBusy || !!props.freshDisabled}
+              disabled={historyBusy || !online}
               onClick={() => void loadHistory(true)}
             >
               {t("Load older changes")}
             </button>
           )}
           {/* b21: a failed "load older" keeps the rows shown and says so beside the button. */}
-          {historyError && history.length > 0 && (
+          {historyError && history.length > 0 && online && (
             <p role="alert" className="store-setup-publish__history-error">
               {historyError}
+            </p>
+          )}
+          {/* b22: offline, the rows stay; the list loads again by itself once the connection is back. */}
+          {!online && (
+            <p role="status" className="store-setup-publish__history-error">
+              {t("Offline. Earlier changes load again by themselves once the connection is back.")}
             </p>
           )}
         </section>
@@ -1351,6 +1382,32 @@ export function appendStoreConfigurationHistory(
   )
     throw new StoreSetupClientError("Conflict");
   return Object.freeze([...previous, ...page.entries]);
+}
+/**
+ * b22: the newest page read again (after reconnecting, or opening the list again) on top of the rows
+ * already shown. Where it reaches the rows shown, they are kept below it, each newer row read from
+ * the page; a page that does not reach them (more than a page of newer changes) is shown alone.
+ */
+export function mergeNewestStoreConfigurationHistory(
+  previous: readonly StoreConfigurationOrdinaryHistoryEntry[],
+  previousNext: number | null,
+  page: StoreConfigurationOrdinaryHistory,
+): {
+  readonly entries: readonly StoreConfigurationOrdinaryHistoryEntry[];
+  readonly nextBeforeSequence: number | null;
+} {
+  const first = previous[0],
+    last = page.entries.at(-1);
+  if (page.beforeSequence !== null) throw new StoreSetupClientError("Conflict");
+  if (first === undefined || last === undefined)
+    return { entries: page.entries, nextBeforeSequence: page.nextBeforeSequence };
+  const reaches = page.nextBeforeSequence === null || last.sequenceNumber <= first.sequenceNumber;
+  if (!reaches) return { entries: page.entries, nextBeforeSequence: page.nextBeforeSequence };
+  const older = previous.filter((e) => e.sequenceNumber < last.sequenceNumber);
+  return {
+    entries: Object.freeze([...page.entries, ...older]),
+    nextBeforeSequence: older.length > 0 ? previousNext : page.nextBeforeSequence,
+  };
 }
 export function StoreConfigurationHistoryView({
   entries,

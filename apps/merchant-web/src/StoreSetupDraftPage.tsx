@@ -1998,6 +1998,8 @@ export function StoreSetupDraftPage({
                   saved={workspace.setup.snapshot}
                   freshDisabled={disabled || dirty}
                   unsavedEdits={dirty}
+                  // b22: Earlier changes keep their rows offline and read again once back online.
+                  online={online}
                   onLiveConfiguration={setLive}
                   onSetupChanged={() => void refresh()}
                   // b20: the saved-draft notice no longer describes the page once a step here
