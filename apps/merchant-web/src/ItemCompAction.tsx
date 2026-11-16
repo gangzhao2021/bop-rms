@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { focusOpenerSelector, useSettledFocus } from "./settled-focus.js";
 import { listSeparator, t } from "./i18n/i18n.js";
 import type { CurrentOrderLine, CurrentOrderQueue } from "./current-order-queue-client.js";
 import { FullSignInPrompt } from "./FullSignInPrompt.js";
@@ -24,6 +25,8 @@ export const compReasonLabel: Readonly<Record<CompReason, string>> = {
   GOODWILL: t("Goodwill"),
 };
 type Choice = "Comp" | "Percent" | "Amount";
+/** How long the comp panel waits after a change before asking what it takes off (ms). */
+export const COMP_PREVIEW_WAIT_MS = 200;
 type Failure =
   | "FullSignInRequired"
   | "Denied"
@@ -181,6 +184,13 @@ export function ItemCompAction({
   const compable = new Set(order.batches.flatMap((batch) => batch.compableItems));
   const offered = lines.filter((line) => compable.has(line.orderItemReference));
   const chosen = offered.filter((line) => selected.has(line.orderItemReference));
+  const openerKey = "comp:" + order.orderReference;
+  // b23 review: the last dish comped leaves no button to give the focus back to: it goes to the
+  // button again when the table still offers it, else to the comps the table now has.
+  const settledFocus = useSettledFocus(
+    [focusOpenerSelector(openerKey), ".table-order-rounds__comps"],
+    offered.length === 0,
+  );
   // A dish that can still come off the bill (the kitchen has not marked it started) can't once it
   // is comped or discounted: say so before, while taking it off is still the better choice.
   const removable = new Set(order.batches.flatMap((batch) => batch.unpaidRemovableItems));
@@ -269,7 +279,7 @@ export function ItemCompAction({
             setPreview({ key: previewKey, totalMinor: null, lines: null, failure: "Unknown" });
         }
       })();
-    }, 200);
+    }, COMP_PREVIEW_WAIT_MS);
     return () => {
       clearTimeout(timer);
       abort.abort();
@@ -283,7 +293,9 @@ export function ItemCompAction({
     const keys = (JSON.parse(dishKeysText) as string[]).filter((key) => !known.current.has(key));
     if (keys.length === 0) return;
     const abort = new AbortController();
-    void (async () => {
+    // b23 review: typed Percent or Amount waits as the button's preview does, so a keystroke asks
+    // nothing; a newer run cancels this one (its wait, or the dish it is asking about).
+    const ask = async () => {
       for (const key of keys) {
         if (abort.signal.aborted) return;
         let minor: string | null = null;
@@ -316,8 +328,12 @@ export function ItemCompAction({
         if (abort.signal.aborted) return;
         setDishPreviews((current) => new Map(current).set(key, minor));
       }
-    })();
-    return () => abort.abort();
+    };
+    const timer = setTimeout(() => void ask(), COMP_PREVIEW_WAIT_MS);
+    return () => {
+      clearTimeout(timer);
+      abort.abort();
+    };
     // previewRun: the table changed (a refused confirm): the figures are asked again.
   }, [dishKeysText, csrf, fetcher, previewRun]);
   useEffect(() => {
@@ -357,6 +373,7 @@ export function ItemCompAction({
       if (response.ok) {
         attempt.current = null;
         setDishPreviews(new Map());
+        settledFocus.settled(panel.current);
         focusTo.current = "opener";
         setOpen(false);
         setSelected(new Set());
@@ -387,7 +404,9 @@ export function ItemCompAction({
         ref={opener}
         type="button"
         data-variant="destructive"
+        data-focus-opener={openerKey}
         onClick={() => {
+          settledFocus.reset();
           focusTo.current = "panel";
           setOpen(true);
         }}

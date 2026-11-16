@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from "react";
+import { act, type ReactNode } from "react";
 import { afterEach, expect, it } from "vitest";
 import { parseCurrentOrderDetail } from "./current-order-queue-client.js";
 import { ItemCompAction } from "./ItemCompAction.js";
@@ -149,7 +149,7 @@ const tick = async (container: HTMLElement, name: string) => {
 it("each dish says what the bill goes down by, and the button says the same", async () => {
   const { container } = await comp();
   await click(buttonNamed(container, "Comp or discount"));
-  await settle(10);
+  await pause();
   expect(labels(container)).toEqual([
     "1 × Soy milk · bill goes down $3.67 with tax",
     "1 × Smashed cucumber · bill goes down $7.06 with tax",
@@ -180,7 +180,7 @@ it("a partial discount: each dish says what the bill goes down by for that perce
     "1 × Smashed cucumber · price $7.07",
   ]);
   await typeInto(container.querySelector('input[inputmode="numeric"]'), "50");
-  await settle(10);
+  await pause();
   expect(labels(container)).toEqual([
     "1 × Soy milk · bill goes down $1.84 with tax",
     "1 × Smashed cucumber · bill goes down $3.53 with tax",
@@ -193,7 +193,7 @@ it("in Chinese the dish and the button read the same amount", async () => {
   setLanguageForTest("zh-Hans");
   const { container } = await comp();
   await click(buttonNamed(container, "免单或折让"));
-  await settle(10);
+  await pause();
   expect(labels(container)).toContain("1 × Smashed cucumber · 账单减 $7.06（含税）");
   await tick(container, "Smashed cucumber");
   expect(buttonNamed(container, "免单 $7.06")).toBeDefined();
@@ -211,4 +211,100 @@ it("opening moves the focus into the panel; Cancel gives it back to the opener",
   await click(buttonNamed(container, "Cancel"));
   expect(container.querySelector('[role="group"]')).toBeNull();
   expect(document.activeElement).toBe(buttonNamed(container, "Comp or discount"));
+});
+
+// b23 review: each keystroke in Percent or Amount asked the server about every dish at once; the
+// dishes' figures now wait as the button's does, and a newer keystroke cancels the older wait.
+it("typing a percent asks about the dishes once it is typed, not at each keystroke", async () => {
+  const { container } = await comp();
+  await click(buttonNamed(container, "Comp or discount"));
+  await click(
+    [...container.querySelectorAll('input[type="radio"]')].find((input) =>
+      input.parentElement?.textContent?.includes("Percent off"),
+    ),
+  );
+  asked.length = 0;
+  const input = container.querySelector('input[inputmode="numeric"]');
+  await typeInto(input, "5");
+  await typeInto(input, "50");
+  await pause();
+  expect(asked.filter((body) => body.percent === 5)).toHaveLength(0);
+  expect(asked.filter((body) => body.percent === 50)).toHaveLength(2);
+  expect(labels(container)).toEqual([
+    "1 × Soy milk · bill goes down $1.84 with tax",
+    "1 × Smashed cucumber · bill goes down $3.53 with tax",
+  ]);
+});
+
+// b23 review: comping the table's last dishes leaves no "Comp or discount" button to give the
+// focus back to (Tables drops the action): it fell to the page (document.activeElement BODY).
+const compFetcher = (async (url: string, init?: RequestInit) =>
+  url.endsWith("/preview")
+    ? fetcher(url, init)
+    : new Response(JSON.stringify({ status: "Recorded" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })) as typeof fetch;
+const table = (comped: boolean, action: ReactNode) => (
+  <section className="table-order-rounds" data-focus-return="table">
+    <h3>Round 1</h3>
+    {comped ? (
+      <ul className="table-order-rounds__comps" aria-label="Comps and discounts">
+        <li>Smashed cucumber · Comped</li>
+      </ul>
+    ) : null}
+    {action}
+  </section>
+);
+const compAll = async (container: HTMLElement) => {
+  await click(buttonNamed(container, "Comp or discount"));
+  await pause();
+  await tick(container, "Soy milk");
+  await tick(container, "Smashed cucumber");
+  await click(
+    [...container.querySelectorAll('input[name="item-comp-reason"]')].find((input) =>
+      input.parentElement?.textContent?.includes("Goodwill"),
+    ),
+  );
+  await click(buttonNamed(container, "Comp $10.74"));
+  await settle(10);
+};
+const later = async () => {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+};
+const action = (detail: typeof order) => (
+  <ItemCompAction
+    order={detail}
+    lines={lines.items}
+    csrf={"a".repeat(43)}
+    fetcher={compFetcher}
+    onSettled={() => undefined}
+  />
+);
+const nothingCompable = {
+  ...order,
+  batches: order.batches.map((batch) => ({ ...batch, compableItems: [] })),
+};
+
+it("b23 review: the last dishes comped: the focus goes to the table's comps, not the page", async () => {
+  const { container, root } = await mount(table(false, action(order)));
+  await compAll(container);
+  // The table read again: nothing left to comp, so Tables shows no comp action.
+  await act(async () => {
+    root.render(table(true, null));
+  });
+  await later();
+  expect(document.activeElement).toBe(container.querySelector(".table-order-rounds__comps"));
+});
+
+it("b23 review: the last dishes comped with the action still there: the focus goes to the comps", async () => {
+  const { container, root } = await mount(table(false, action(order)));
+  await compAll(container);
+  await act(async () => {
+    root.render(table(true, action(nothingCompable)));
+  });
+  await later();
+  expect(document.activeElement).toBe(container.querySelector(".table-order-rounds__comps"));
 });
