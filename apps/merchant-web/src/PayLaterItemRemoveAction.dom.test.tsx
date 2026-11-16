@@ -230,3 +230,19 @@ it("a round with a dish that stays: ticking all that can come off is not the who
   expect(buttonNamed(container, "Take the whole round off · $3.67")).toBeUndefined();
   expect(container.querySelector(".pay-later-remove__note")).toBeNull();
 });
+
+// live22: on Tables, the Orders workbench and the order page, pressing "Take dishes off round 4"
+// replaced the button with the panel and left the focus on the page (document.activeElement BODY).
+it("b23: opening the panel in place moves the focus into it; Cancel gives it back to the opener", async () => {
+  const { container } = await panel();
+  const opener = buttonNamed(container, "Take dishes off round 2");
+  opener?.focus();
+  await click(opener);
+  await settle(10);
+  const group = container.querySelector('[role="group"]');
+  expect(group).not.toBeNull();
+  expect(document.activeElement).toBe(group);
+  await click(buttonNamed(container, "Cancel"));
+  expect(container.querySelector('[role="group"]')).toBeNull();
+  expect(document.activeElement).toBe(buttonNamed(container, "Take dishes off round 2"));
+});

@@ -309,6 +309,10 @@ export function PayLaterItemRemoveAction({
   const attempt = useRef<{ key: string; reference: string } | null>(null);
   const panel = useRef<HTMLDivElement | null>(null);
   const arrived = useRef(openOnArrival);
+  const opener = useRef<HTMLButtonElement | null>(null);
+  // b23: opening in place moves the focus into the panel (the opener is replaced by it), as
+  // arriving does; Cancel gives it back to the opener, so focus never drops to the page itself.
+  const focusTo = useRef<"panel" | "opener" | null>(null);
   // v15 b20 / b22 (DEC-TAX-WHOLE-RECEIPT): what the bill goes down by, from the server, by the
   // dishes asked about (null: it couldn't be worked out).
   const [previews, setPreviews] = useState<ReadonlyMap<string, string | null>>(new Map());
@@ -400,6 +404,12 @@ export function PayLaterItemRemoveAction({
     panel.current?.scrollIntoView?.({ block: "nearest" });
     onArrived?.();
   }, [open, onArrived]);
+  useEffect(() => {
+    if (open && focusTo.current === "panel") panel.current?.focus();
+    else if (!open && focusTo.current === "opener") opener.current?.focus();
+    else return;
+    focusTo.current = null;
+  }, [open]);
   if (offered.length === 0 || order.currentVersion === null) return null;
   const send = async () => {
     if (busy || chosen.length === 0 || reason === "") return;
@@ -432,6 +442,7 @@ export function PayLaterItemRemoveAction({
       const payload = (await response.json().catch(() => null)) as unknown;
       if (response.ok) {
         attempt.current = null;
+        focusTo.current = "opener";
         setOpen(false);
         setSelected(new Set());
         setReason("");
@@ -484,7 +495,14 @@ export function PayLaterItemRemoveAction({
   });
   if (!open)
     return (
-      <button type="button" onClick={() => setOpen(true)}>
+      <button
+        ref={opener}
+        type="button"
+        onClick={() => {
+          focusTo.current = "panel";
+          setOpen(true);
+        }}
+      >
         {title}
       </button>
     );
@@ -556,7 +574,14 @@ export function PayLaterItemRemoveAction({
             sequence: batch.sequence,
           })}
         </button>{" "}
-        <button type="button" disabled={busy} onClick={() => setOpen(false)}>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => {
+            focusTo.current = "opener";
+            setOpen(false);
+          }}
+        >
           {t("Cancel")}
         </button>
       </div>
