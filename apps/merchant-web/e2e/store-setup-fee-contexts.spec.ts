@@ -388,6 +388,11 @@ async function journalRecords(page: Page) {
 }
 
 async function feeStep(page: Page) {
+  // b24: a fee applies only to services the setup offers; these cases offer pickup and delivery.
+  await page.getByRole("button", { name: "2. Services", exact: true }).click();
+  const services = page.getByRole("group", { name: "Service modes", exact: true });
+  for (const mode of ["Pickup", "Delivery"])
+    await services.getByRole("checkbox", { name: mode, exact: true }).check();
   await page.getByRole("button", { name: "3. Fees, tax and payment", exact: true }).click();
   return page.getByRole("region", { name: "Fees", exact: true });
 }
@@ -413,6 +418,11 @@ async function enabledFee(page: Page) {
   return panel;
 }
 const save = (page: Page) => page.getByRole("button", { name: "Save as draft", exact: true });
+/** b24: there is no refresh button; the choices are read again when the step is opened again. */
+async function readChoicesAgain(page: Page) {
+  await page.getByRole("button", { name: "2. Services", exact: true }).click();
+  await page.getByRole("button", { name: "3. Fees, tax and payment", exact: true }).click();
+}
 const recover = (page: Page) =>
   page.getByRole("button", { name: "Recover original save", exact: true });
 test("@production WP-2423 v15 D5/D7: classification choices load on entry and stay choosable; a Tip is On without one", async ({
@@ -453,7 +463,7 @@ test("@production WP-2423 v15 D5/D7: classification choices load on entry and st
     .getByRole("group", { name: "Tip order types", exact: true })
     .getByLabel("Pickup", { exact: true })
     .check();
-  await expect(panel).toContainText("generally not subject to GST/HST");
+  await expect(panel).toContainText("Tips go to staff and are generally not taxed.");
   await save(page).click();
   await expect(
     page.getByText("Setup draft saved. These settings have not been validated or published.", {
@@ -591,9 +601,7 @@ test("@production Store fee contexts reject unavailable retired or foreign class
   expect(await journalRecords(page)).toEqual([]);
   await feeStep(page);
   f.control.choiceMode = "Retired";
-  await panel
-    .getByRole("button", { name: "Refresh fee classification choices", exact: true })
-    .click();
+  await readChoicesAgain(page);
   await expect(
     panel
       .getByRole("combobox", { name: "Service charge tax classification", exact: true })
@@ -613,15 +621,11 @@ test("@production Store fee contexts reject unavailable retired or foreign class
   expect(f.control.writes).toHaveLength(0);
   expect(await journalRecords(page)).toEqual([]);
   f.control.choiceMode = "Foreign";
-  await panel
-    .getByRole("button", { name: "Refresh fee classification choices", exact: true })
-    .click();
+  await readChoicesAgain(page);
   await expect(panel.getByRole("status")).toContainText("Tax classifications could not be loaded");
   // WP-2423 Q15/Q16: a Brand with no tax classifications gets a plain answer, not "unavailable".
   f.control.choiceMode = "NotRegistered";
-  await panel
-    .getByRole("button", { name: "Refresh fee classification choices", exact: true })
-    .click();
+  await readChoicesAgain(page);
   await expect(panel.getByRole("status")).toContainText(
     "No tax classifications are set up for this Brand yet",
   );
@@ -629,9 +633,7 @@ test("@production Store fee contexts reject unavailable retired or foreign class
   // Without the manage permission there is no link to the tax classifications page.
   await expect(panel.getByRole("link", { name: /tax classifications/u })).toHaveCount(0);
   f.control.choiceMode = "Active";
-  await panel
-    .getByRole("button", { name: "Refresh fee classification choices", exact: true })
-    .click();
+  await readChoicesAgain(page);
   await expect(
     panel.getByRole("combobox", { name: "Service charge tax classification", exact: true }),
   ).toBeEnabled();
@@ -702,7 +704,7 @@ test("@production Store fee contexts late Actor choices cannot replace new scope
   expect(await config.evaluate((e) => e.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
   await expect(
     panel.getByText(
-      "Choose whether this store uses a service charge, a delivery fee and tips, and which orders each one applies to. Saving the setup draft keeps these choices. It does not set fee amounts or tax rates, and customers are not charged anything new until the store settings are approved and published.",
+      "What guests pay on top of their food. Amounts and tip percentages are set in Store features; guests see a change only once this setup is published.",
       { exact: true },
     ),
   ).toBeVisible();
@@ -733,21 +735,15 @@ test("@production Store fee contexts link the Brand Owner to set up tax classifi
   await expectNoInternalText(page);
   // Classifications that exist but are all retired also lead there.
   f.control.choiceMode = "Retired";
-  await panel
-    .getByRole("button", { name: "Refresh fee classification choices", exact: true })
-    .click();
+  await readChoicesAgain(page);
   await expect(link).toBeVisible();
   f.control.choiceMode = "Active";
-  await panel
-    .getByRole("button", { name: "Refresh fee classification choices", exact: true })
-    .click();
+  await readChoicesAgain(page);
   // Active choices: nothing to set up, so no link.
   await expect(link).toHaveCount(0);
   await expect(panel.getByRole("status")).toHaveCount(0);
   f.control.choiceMode = "NotRegistered";
-  await panel
-    .getByRole("button", { name: "Refresh fee classification choices", exact: true })
-    .click();
+  await readChoicesAgain(page);
   await link.click();
   await expect(page).toHaveURL(/\/app\/commerce\/tax-classifications$/u);
   expect(f.control.errors).toEqual([]);
@@ -803,6 +799,12 @@ test("@production b22: a tip on without an order type is named at the field and 
   await expect.poll(() => asked).toContain("not saved yet");
   await page.getByRole("button", { name: "Discard unsaved changes", exact: true }).click();
   await page.getByRole("button", { name: "切换到中文" }).click();
+  // b24: the tip can apply only to a service the setup offers.
+  await page.getByRole("button", { name: "2. 服务方式", exact: true }).click();
+  await page
+    .getByRole("group", { name: "服务方式", exact: true })
+    .getByRole("checkbox", { name: "自取", exact: true })
+    .check();
   const zhFees = await page
     .getByRole("button", { name: "3. 费用、税务和付款", exact: true })
     .click()

@@ -413,9 +413,12 @@ function StoreSetupTaxSection({
       <h4>{t("Tax")}</h4>
       <p>
         {value.state !== "Configured"
-          ? t("Not taken in yet. It comes with the store's current settings in {where}.", {
-              where,
-            })
+          ? t(
+              "This setup has no tax settings yet. They come with the store's current settings ({where}).",
+              {
+                where,
+              },
+            )
           : live !== null && value.value === live
             ? t("Taxed with the tax settings this store uses today.")
             : t("Taxed with the tax settings taken in for this setup.")}
@@ -4098,8 +4101,8 @@ export function StoreSetupFeeContextEditor({
                                   // WP-2423 (v15 D7): a tip is not taxed, so it starts without one.
                                   taxClassificationReference:
                                     entry.chargeType === "Tip" ? null : "",
-                                  // b24: a fee starts on every order the setup offers.
-                                  orderTypes: modes.filter((mode) => offered.includes(mode)),
+                                  // Which orders it applies to is chosen, never assumed (money).
+                                  orderTypes: [],
                                 },
                           );
                       }}

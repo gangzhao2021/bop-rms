@@ -808,9 +808,8 @@ async function open(page: Page) {
   await page.goto("/app");
   // The Menu drawer on phones, the closed navigation group on wider screens (UI refresh 2026-10-21).
   await followWorkspaceLink(page, "Store setup");
-  await openStoreSetupPlace(page, "Settings that need approval");
-  await expect(page.getByRole("button", { name: "Save as draft", exact: true })).toBeEnabled();
-  await page.getByRole("button", { name: "3. Fees, tax and payment", exact: true }).click();
+  // b24: receipt templates are written in Receipts and tax numbers, not in the fees step.
+  await openStoreSetupPlace(page, "Receipts and tax numbers");
   const region = page.getByRole("region", { name: "Receipt template drafts", exact: true });
   await expect(
     region.getByRole("textbox", { name: "Receipt language", exact: true }),
@@ -843,7 +842,6 @@ test("@production ordinary template draft save, actual generated current and ros
   expect(await cursors(page)).toEqual([]);
   await expectNoInternalText(page);
   await page.reload();
-  await page.getByRole("button", { name: "3. Fees, tax and payment", exact: true }).click();
   await region
     .getByRole("combobox", { name: "Receipt template", exact: true })
     .selectOption({ label: "Canadian French · draft 1" });
@@ -875,7 +873,6 @@ test("@production lost template reply retains real payload-free IDB through deni
   ).toBeVisible();
   const original = state.posts[0];
   await page.reload();
-  await page.getByRole("button", { name: "3. Fees, tax and payment", exact: true }).click();
   await expect(
     region.getByRole("button", { name: "Recover original template draft save", exact: true }),
   ).toBeEnabled();
@@ -970,7 +967,6 @@ test("@production ordinary template review submission reloads real state and fre
   ).toContainText("Waiting for approval");
   await expect.poll(() => cursors(page, true)).toEqual([]);
   await page.reload();
-  await page.getByRole("button", { name: "3. Fees, tax and payment", exact: true }).click();
   await region
     .getByRole("combobox", { name: "Receipt template", exact: true })
     .selectOption({ label: "Canadian French · draft 1" });
@@ -1002,7 +998,6 @@ test("@production lost template submission survives reload and denied recovery w
   const original = state.submitPosts[0];
   expect(await cursors(page, true)).toHaveLength(1);
   await page.reload();
-  await page.getByRole("button", { name: "3. Fees, tax and payment", exact: true }).click();
   await region
     .getByRole("combobox", { name: "Receipt template", exact: true })
     .selectOption({ label: "Canadian French · draft 1" });
@@ -1047,7 +1042,6 @@ test("@production template submission recovery restores readiness after initial 
     region.getByRole("button", { name: "Recover earlier template submission", exact: true }),
   ).toBeEnabled();
   await page.reload();
-  await page.getByRole("button", { name: "3. Fees, tax and payment", exact: true }).click();
   state.failReview = 1;
   await region
     .getByRole("combobox", { name: "Receipt template", exact: true })
@@ -1099,7 +1093,6 @@ async function independentReview(
   ).toBeVisible();
   state.selectActor(id(40));
   await page.reload();
-  await page.getByRole("button", { name: "3. Fees, tax and payment", exact: true }).click();
   await region.getByRole("combobox", { name: "Receipt template", exact: true }).selectOption({
     label: `${locale === "en-CA" ? "Canadian English" : "Canadian French"} · draft 1`,
   });
@@ -1149,7 +1142,6 @@ test("@production 390px independent template approval and publication refresh re
   );
   await region.screenshot({ path: "/private/tmp/wp2421-receipt-template-lifecycle-mobile.png" });
   await page.reload();
-  await page.getByRole("button", { name: "3. Fees, tax and payment", exact: true }).click();
   await region
     .getByRole("combobox", { name: "Receipt template", exact: true })
     .selectOption({ label: "Canadian French · draft 1" });
@@ -1186,7 +1178,6 @@ test("@production lost template publication survives denied reload recovery and 
   });
   state.denyLifecycle = true;
   await page.reload();
-  await page.getByRole("button", { name: "3. Fees, tax and payment", exact: true }).click();
   await region
     .getByRole("combobox", { name: "Receipt template", exact: true })
     .selectOption({ label: "Canadian French · draft 1" });
@@ -1245,23 +1236,14 @@ test("@production published receipt template selection saves stable Store refere
   expect(await cursors(page, "Lifecycle")).toEqual([]);
   state.selectActor(scope.actorReference);
   await page.reload();
+  // b24: the fees step offers one choice of receipt template; choosing checks and takes it.
+  await openStoreSetupPlace(page, "Settings that need approval");
   await page.getByRole("button", { name: "3. Fees, tax and payment", exact: true }).click();
-  const picker = page.getByRole("region", {
-    name: "Published receipt template selection",
-    exact: true,
-  });
-  await picker
-    .getByRole("combobox", { name: "Saved templates", exact: true })
-    .selectOption({ label: "Canadian English · draft 1" });
-  await picker
-    .getByRole("button", { name: "Check published receipt template", exact: true })
-    .click();
-  const use = picker.getByRole("button", { name: "Use published receipt template", exact: true });
-  await expect(use).toBeEnabled();
-  await expect(picker).toContainText(
-    "This template has not been checked by a tax or legal professional.",
-  );
-  await use.click();
+  const picker = page.getByRole("region", { name: "Receipts", exact: true });
+  const choice = picker.getByRole("combobox", { name: "Receipt template", exact: true });
+  await choice.selectOption({ label: "Canadian English receipt template, version 1" });
+  await expect.poll(() => state.publishedGets).toBe(1);
+  await expect(picker.getByRole("link", { name: "Edit receipt templates" })).toBeVisible();
   expect(state.setupPosts).toEqual([]);
   await page.getByRole("button", { name: "Save as draft", exact: true }).click();
   await expect(
@@ -1283,11 +1265,7 @@ test("@production published receipt template selection saves stable Store refere
   expect(state.publishedGets).toBe(1);
   await page.reload();
   await page.getByRole("button", { name: "3. Fees, tax and payment", exact: true }).click();
-  await expect(
-    page
-      .getByRole("heading", { name: "Receipt settings", exact: true })
-      .locator("xpath=following-sibling::p[1]"),
-  ).toHaveText("Already configured.");
+  await expect(choice).toHaveValue(template);
   await expect(page.getByRole("button", { name: "Save as draft", exact: true })).toBeEnabled();
   state.loseSetup = true;
   await page.getByRole("button", { name: "Save as draft", exact: true }).click();
@@ -1315,9 +1293,7 @@ test("@production published receipt template selection saves stable Store refere
   expect(await cursors(page, "Setup")).toEqual(original);
   await expect(page.getByRole("button", { name: "Save as draft", exact: true })).toBeDisabled();
   await page.getByRole("button", { name: "3. Fees, tax and payment", exact: true }).click();
-  await expect(
-    picker.getByRole("combobox", { name: "Saved templates", exact: true }),
-  ).toBeDisabled();
+  await expect(choice).toBeDisabled();
   state.denySetupResolve = false;
   await recover.click();
   await expect(recover).toHaveCount(0);
@@ -1337,10 +1313,6 @@ test("@production published receipt template selection saves stable Store refere
   expect(state.setupPosts[2]?.operationReference).toBe(state.setupPosts[1]?.operationReference);
   expect(state.setupPosts[3]?.operationReference).toBe(state.setupPosts[1]?.operationReference);
   expect(state.setupPosts[2]).not.toHaveProperty("content");
-  await expect(
-    page
-      .getByRole("heading", { name: "Receipt settings", exact: true })
-      .locator("xpath=following-sibling::p[1]"),
-  ).toHaveText("Already configured.");
+  await expect(choice).toHaveValue(template);
   expect(state.errors).toEqual([]);
 });

@@ -248,10 +248,10 @@ export function ReceiptTemplateStoreSelection(props: ReceiptTemplateStoreSelecti
   return (
     <section
       hidden={props.hidden}
-      aria-label={t("Receipt")}
+      aria-label={t("Receipts")}
       className="store-setup-receipt store-setup-block"
     >
-      <h4>{t("Receipt")}</h4>
+      <h4>{t("Receipts")}</h4>
       <p className="store-setup-block__lead">
         {live !== null && chosen === live
           ? t("Guests get the receipt this store issues today.")

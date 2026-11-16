@@ -244,9 +244,8 @@ async function open(page: Page) {
   await page.goto("/app");
   // The Menu drawer on phones, the closed navigation group on wider screens (UI refresh 2026-10-21).
   await followWorkspaceLink(page, "Store setup");
-  await openStoreSetupPlace(page, "Settings that need approval");
-  await expect(page.getByRole("button", { name: "Save as draft", exact: true })).toBeEnabled();
-  await page.getByRole("button", { name: "3. Fees, tax and payment", exact: true }).click();
+  // b24: receipt presets are written in Receipts and tax numbers, not in the fees step.
+  await openStoreSetupPlace(page, "Receipts and tax numbers");
   await expect(
     page.getByRole("button", { name: "Save receipt layout", exact: true }),
   ).toBeEnabled();
@@ -264,7 +263,6 @@ test("@production receipt presets save both kinds and reload current revisions",
   }
   expect(await cursors(page)).toEqual([]);
   await page.reload();
-  await page.getByRole("button", { name: "3. Fees, tax and payment", exact: true }).click();
   await expect(
     page
       .getByRole("region", { name: "receipt layout", exact: true })
@@ -284,7 +282,6 @@ test("@production lost receipt reply reload retains denied original then resolve
   ).toBeVisible();
   const original = state.posts[0];
   await page.reload();
-  await page.getByRole("button", { name: "3. Fees, tax and payment", exact: true }).click();
   state.deny = true;
   await page
     .getByRole("button", { name: "Recover original receipt layout save", exact: true })

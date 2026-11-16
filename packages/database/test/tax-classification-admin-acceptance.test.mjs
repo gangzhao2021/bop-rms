@@ -422,6 +422,8 @@ it("WP-2423: the Brand Owner manages tax classifications under the pilot API gra
             expectedRevision,
             content: {
               ...createUnconfiguredStoreSetupDraftContentV2(),
+              // b24: a fee applies only to services the setup offers.
+              enabledServiceModes: { state: "Configured", value: ["DineIn"] },
               feeContexts: {
                 state: "Configured",
                 value: [

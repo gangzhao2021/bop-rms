@@ -335,10 +335,88 @@ async function install(page: Page, options: { readonly manager?: boolean } = {})
         businessReferenceValidation: "NotEvaluated",
       });
     }
+    // b24: what the fees step reads (choices, payment methods, receipt templates).
+    const ids = {
+      tenantReference: id(1),
+      brandReference: id(2),
+      storeReference: store,
+      actorReference: id(4),
+    };
+    const observedAt = new Date().toISOString(),
+      validUntil = new Date(Date.parse(observedAt) + 5000).toISOString();
+    if (path === "/merchant/store-setup" && request.method() === "POST") {
+      setupWrites.push(path);
+      return respond(route, { error: "fixture_unavailable" }, 503);
+    }
+    if (path === "/merchant/store-setup/fee-context-classifications")
+      return respond(route, {
+        profile: "TaxConfigClassificationChoicesV1",
+        ...ids,
+        registryReference: id(40),
+        versionReference: id(41),
+        registryVersion: 1,
+        snapshotDigest: "sha256:" + "a".repeat(64),
+        defaultLocale: "en-CA",
+        choices: [
+          {
+            classificationReference: id(42),
+            code: "SYNTH_FEE_CLASS",
+            localizedNames: { "en-CA": "Standard taxable" },
+            lifecycle: "Active",
+          },
+        ],
+        observedAt,
+        validUntil,
+        sourceQualification: "NotEvaluated",
+      });
+    if (path === "/merchant/store-setup/payment-configuration" && request.method() === "GET")
+      return respond(route, {
+        profile: "StorePaymentConfigurationCurrentV1",
+        ...ids,
+        snapshot: {
+          profile: "StorePaymentConfigurationV1",
+          tenantReference: id(1),
+          brandReference: id(2),
+          storeReference: store,
+          configurationReference: id(26),
+          revision: 1,
+          authoredByReference: id(4),
+          previousConfigurationReference: null,
+          content: {
+            customerOnlineCardEnabled: true,
+            staffTerminalCardPresentEnabled: true,
+            staffTerminalInteracEnabled: false,
+          },
+          currencyCode: "CAD",
+          createdAt: observedAt,
+          updatedAt: observedAt,
+          dataClassification: "Internal",
+        },
+        observedAt,
+        validUntil,
+        providerReadiness: "NotEvaluated",
+      });
+    if (path === "/merchant/store-setup/receipt-template-drafts")
+      return respond(route, {
+        profile: "DigitalReceiptTemplateDraftRosterV1",
+        ...ids,
+        afterTemplate: null,
+        entries: [],
+        nextAfter: null,
+        observedAt,
+        validUntil,
+        sourceQualification: "NotEvaluated",
+      });
+    if (
+      path === "/merchant/store-setup/receipt-template-published" &&
+      new URL(request.url()).searchParams.get("installed") === "true"
+    )
+      return respond(route, { error: "receipt_template_installed_none" }, 404);
     return respond(route, { error: "fixture_unavailable" }, 503);
   });
   return errors;
 }
+const setupWrites: string[] = [];
 
 async function language(page: Page, value: "en" | "zh-Hans") {
   await page.addInitScript((chosen) => {
@@ -628,4 +706,195 @@ for (const lang of ["en", "zh-Hans"] as const)
             fullPage: true,
           });
       }
+  });
+
+// b24 (Owner 2026-11-16 "服务费的订单类型为什么可以勾选服务方式没有勾选的选项？" and "3. 费用、税务和付
+// 款 这个页面还是很难看"): the fees step offers a fee only the orders the store offers (step 2, saved or
+// not), names one that no longer fits at the fee and in Review and never sends it, and reads as four
+// calm sections. Shots go to BOP_B24_SHOTS when it names a folder.
+const b24Shots = process.env.BOP_B24_SHOTS ?? "";
+async function b24Shot(page: Page, name: string) {
+  for (const [width, height] of [
+    [1440, 900],
+    [1024, 768],
+    [390, 844],
+  ] as const) {
+    await page.setViewportSize({ width, height });
+    await noOverflow(page);
+    if (b24Shots) {
+      mkdirSync(b24Shots, { recursive: true });
+      await page.screenshot({ path: `${b24Shots}/${name}-${width}.png`, fullPage: true });
+    }
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+}
+const b24Words = {
+  en: {
+    services: "2. Services",
+    servicesGroup: "Service modes",
+    fees: "3. Fees, tax and payment",
+    review: "4. Review and publish",
+    dineIn: "Dine in",
+    pickup: "Pickup",
+    delivery: "Delivery",
+    serviceCharge: "Service charge",
+    orderTypes: "Service charge order types",
+    taxClass: "Service charge tax classification",
+    noDelivery: "This store does not offer delivery, so it charges no delivery fee.",
+    notOffered:
+      "This store does not offer Pickup. Untick it here, or offer it in step 2, Services.",
+    fix: "Service charge applies to Pickup orders, but this setup does not offer Pickup.",
+    regions: ["Fees", "Tax", "Payment methods", "Receipts"],
+    known: "Customer online card",
+    save: "Save as draft",
+    alert: "Check the edited settings.",
+  },
+  "zh-Hans": {
+    services: "2. 服务方式",
+    servicesGroup: "服务方式",
+    fees: "3. 费用、税务和付款",
+    review: "4. 核对并发布",
+    dineIn: "堂食",
+    pickup: "自取",
+    delivery: "配送",
+    serviceCharge: "服务费",
+    orderTypes: "服务费的订单类型",
+    taxClass: "服务费的税类",
+    noDelivery: "本店不提供配送，所以不收配送费。",
+    notOffered: "本店不提供自取。请在这里取消勾选，或在第 2 步，服务方式中提供自取。",
+    fix: "服务费适用于自取订单，但这份设置没有提供自取。",
+    regions: ["费用", "税", "付款方式", "收据"],
+    known: "顾客在线刷卡",
+    save: "存为草稿",
+    alert: "请检查已编辑的设置。",
+  },
+} as const;
+for (const lang of ["en", "zh-Hans"] as const)
+  test(`@production b24: the fees step offers a fee only the orders the store offers, and reads at a glance (${lang})`, async ({
+    page,
+  }) => {
+    const w = b24Words[lang];
+    const errors = await install(page);
+    await language(page, lang);
+    await page.goto(setupHref + "?section=changes");
+    const step = (name: string) => page.getByRole("button", { name, exact: true }).click();
+    await step(w.services);
+    const services = page.getByRole("group", { name: w.servicesGroup, exact: true });
+    await services.getByRole("checkbox", { name: w.dineIn, exact: true }).check();
+    await services.getByRole("checkbox", { name: w.pickup, exact: true }).check();
+    await services.getByRole("checkbox", { name: w.delivery, exact: true }).uncheck();
+    await step(w.fees);
+    const content = page.locator(".store-setup-step-content");
+    for (const name of w.regions)
+      await expect(content.getByRole("region", { name, exact: true })).toBeVisible();
+    // Loaded by themselves: no refresh, next-batch or tool buttons, no internal words.
+    await expect(page.getByRole("checkbox", { name: w.known, exact: true })).toBeChecked();
+    await expect(
+      content.getByRole("button", { name: /Refresh|Next|刷新|下一批/u }).filter({ visible: true }),
+    ).toHaveCount(0);
+    await expect(content).not.toContainText(/配置|预设|模板草稿|en-CA|yyyy|draft \d/u, {
+      useInnerText: true,
+    });
+    await expect(content.getByText(w.noDelivery)).toBeVisible();
+    const fees = content.getByRole("region", { name: w.regions[0], exact: true });
+    await fees
+      .getByRole("combobox", { name: w.serviceCharge, exact: true })
+      .selectOption("Enabled");
+    const orders = fees.getByRole("group", { name: w.orderTypes, exact: true });
+    await expect(orders.getByRole("checkbox")).toHaveCount(2);
+    await expect(orders.getByRole("checkbox", { name: w.delivery, exact: true })).toHaveCount(0);
+    await orders.getByRole("checkbox", { name: w.pickup, exact: true }).check();
+    await fees
+      .getByRole("combobox", { name: w.taxClass, exact: true })
+      .selectOption({ label: "Standard taxable" });
+    await b24Shot(page, `fees-step-${lang}`);
+    // Step 2 stops pickup (not saved yet): the fee says so where it is set.
+    await step(w.services);
+    await services.getByRole("checkbox", { name: w.pickup, exact: true }).uncheck();
+    await step(w.fees);
+    await expect(fees.getByText(w.notOffered)).toBeVisible();
+    await expect(orders.getByRole("checkbox", { name: w.pickup, exact: true })).toBeChecked();
+    await b24Shot(page, `fees-step-not-offered-${lang}`);
+    await step(w.review);
+    await expect(page.getByText(w.fix, { exact: false }).first()).toBeVisible();
+    // Never sent.
+    await page.getByRole("button", { name: w.save, exact: true }).click();
+    await expect(page.locator("#setup-validation-error")).toContainText(w.alert);
+    expect(setupWrites).toEqual([]);
+    // Untick it at the fee: it can be saved again.
+    await step(w.fees);
+    // Unticked, it is no longer offered, so it leaves the list.
+    await orders.getByRole("checkbox", { name: w.pickup, exact: true }).click();
+    await expect(fees.getByText(w.notOffered)).toHaveCount(0);
+    await expect(orders.getByRole("checkbox")).toHaveCount(1);
+    await expectNoInternalText(page);
+    expect(errors).toEqual([]);
+  });
+
+// b24 (v15 live check of b23): Store setup opened while offline read every section again by itself
+// once the connection was back; nothing says "could not be loaded" or "refresh" on a page online again.
+for (const lang of ["en", "zh-Hans"] as const)
+  test(`@production b24: Store setup opened offline reads every section again once the connection is back (${lang})`, async ({
+    page,
+    context,
+  }) => {
+    const errors = await install(page);
+    await language(page, lang);
+    const zh = lang === "zh-Hans";
+    const failures =
+      /could not be loaded|can't show|didn't load|Refresh|无法加载|暂时无法显示|没有加载|刷新/u;
+    const nav = page.getByRole("navigation", {
+      name: zh ? "门店设置分区" : "Store setup sections",
+    });
+    const place = (en: string, zhName: string) =>
+      nav.getByRole("link", { name: zh ? zhName : en, exact: true }).click();
+    // Case 2 of the live check: Store setup is open; the Wi-Fi drops; "Settings that need
+    // approval" is opened, so the fees step's sections read while offline.
+    await page.goto(setupHref);
+    await expect(
+      page.getByRole("region", { name: zh ? "门店资料" : "Store details" }),
+    ).toBeVisible();
+    await context.setOffline(true);
+    await place("Settings that need approval", "需审批的设置");
+    await page.waitForTimeout(2500);
+    await context.setOffline(false);
+    await page
+      .getByRole("button", { name: zh ? "3. 费用、税务和付款" : "3. Fees, tax and payment" })
+      .click();
+    await expect(
+      page.getByRole("checkbox", { name: zh ? "顾客在线刷卡" : "Customer online card" }),
+    ).toBeChecked();
+    await expect(page.locator(".store-setup-step-content")).not.toContainText(failures, {
+      useInnerText: true,
+    });
+    await b24Shot(page, `reconnected-fees-step-${lang}`);
+    // Case 1: Store setup opened from the sidebar while offline: every place reads by itself.
+    await page
+      .getByRole("link", { name: zh ? "首页" : "Home", exact: true })
+      .first()
+      .click();
+    await expect(page).toHaveURL(/\/app$/u);
+    await context.setOffline(true);
+    await page
+      .getByRole("link", { name: zh ? "门店设置" : "Store setup", exact: true })
+      .first()
+      .click();
+    await page.waitForTimeout(2500);
+    await context.setOffline(false);
+    for (const [, en, zhName] of places.slice(0, 4)) {
+      await place(en, zhName);
+      await expect(page.locator(".store-setup-place__panel:not([hidden])").first()).toBeVisible();
+      // The receipt template tools (served by receipt-template-*.spec.ts, not this fixture) aside.
+      const shown = page.locator(
+        ".store-setup-place__panel:not([hidden]):not(:has(#receipt-templates))",
+      );
+      for (const panel of await shown.all())
+        await expect(panel).not.toContainText(failures, { useInnerText: true });
+    }
+    await expect(
+      page.getByLabel(zh ? "GST/HST 登记号" : "GST/HST registration number"),
+    ).toBeAttached();
+    await expect(page.locator("#sole-operator")).toBeVisible();
+    await b24Shot(page, `reconnected-access-${lang}`);
+    expect(errors).toEqual([]);
   });

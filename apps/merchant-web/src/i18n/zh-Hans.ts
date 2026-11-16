@@ -10120,8 +10120,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "A change cannot be created yet: in this saved setup, {fees}, which it does not offer. Untick them in {where}, or offer them in {services}, save as draft, then come back here.":
     "还不能生成修改：这份已保存设置里，{fees}，但本店没有提供这些服务。请在{where}中取消勾选，或在{services}中提供它们，存为草稿，再回到这里。",
   "{fee} applies to {modes}": "{fee}适用于{modes}",
-  "Not taken in yet. It comes with the store's current settings in {where}.":
-    "还没有带入。会在{where}时随门店现在的设置一起带入。",
+  "This setup has no tax settings yet. They come with the store's current settings ({where}).":
+    "这份设置还没有税务设置，会随门店现在的设置一起带入（{where}）。",
   "Taxed with the tax settings this store uses today.": "按本店现在使用的税务设置计税。",
   "Taxed with the tax settings taken in for this setup.": "按这份设置带入的税务设置计税。",
   "Tax rates and tax names are in": "税率和税名在",

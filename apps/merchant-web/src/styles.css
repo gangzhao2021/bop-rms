@@ -11070,8 +11070,7 @@ tr[data-drop-target="true"] {
   border: 0;
   border-radius: 0;
 }
-.store-setup-draft-page .store-setup-step-content .store-setup-row__modes,
-.store-setup-draft-page .store-setup-step-content .store-setup-payment__group {
+.store-setup-draft-page .store-setup-step-content fieldset.store-setup-row__modes {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -11108,7 +11107,7 @@ tr[data-drop-target="true"] {
   color: var(--bop-color-text-muted);
 }
 .store-setup-draft-page .store-setup-step-content label.store-setup-row__field select {
-  min-height: 40px;
+  min-height: 44px;
   padding: var(--bop-space-1) 0;
   border: 0;
   border-bottom: 1px solid var(--bop-color-border-control);
@@ -11143,4 +11142,38 @@ tr[data-drop-target="true"] {
   .store-setup-draft-page .store-setup-step-content label.store-setup-row__field {
     max-width: none;
   }
+}
+/* b24 review: payment methods in two rows, who (Guests, Staff) in a narrow first column. */
+.store-setup-draft-page .store-setup-step-content .store-setup-payment__group {
+  display: grid;
+  grid-template-columns: 5rem minmax(0, 1fr);
+  align-items: center;
+  column-gap: var(--bop-space-4);
+}
+.store-setup-draft-page .store-setup-step-content .store-setup-payment__group > label {
+  grid-column: 2;
+}
+.store-setup-draft-page
+  .store-setup-step-content
+  .store-setup-payment__group
+  > .store-setup-row__label {
+  grid-row: 1 / span 2;
+  align-self: start;
+  padding-top: 12px;
+}
+.store-setup-draft-page
+  .store-setup-step-content
+  fieldset.store-setup-row__modes
+  .store-setup-row__label {
+  margin-inline-end: var(--bop-space-2);
+}
+/* b24 review: choices in a row or a short list sit 44px apart, with no extra margin under each. */
+.store-setup-draft-page
+  .store-setup-step-content
+  :is(.store-setup-payment__group, fieldset.store-setup-row__modes)
+  > label {
+  margin: 0;
+}
+.store-setup-draft-page .store-setup-step-content .store-setup-payment__methods {
+  row-gap: var(--bop-space-2);
 }

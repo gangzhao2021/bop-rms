@@ -124,7 +124,7 @@ it("parent pending barrier disables the choice and a hidden step stays hidden", 
     });
   expect(html).toContain("hidden");
   expect(html.match(/disabled=""/gu)?.length).toBe(1);
-  expect(html).toContain('aria-label="Receipt"');
+  expect(html).toContain('aria-label="Receipts"');
   expect(selected).not.toHaveBeenCalled();
 });
 it("forged readiness and non-effective scheduled metadata cannot be applied as a current template", () => {
