@@ -1,6 +1,7 @@
 import { GuestSessionError, type GuestSession } from "@bop/identity";
 import { OrderStatusProjectionError } from "@rms/ordering";
 import { describe, expect, it, vi } from "vitest";
+import { computeBillTaxRounding } from "@rms/ordering";
 import {
   composeCustomerDiningSession,
   createCustomerDiningSessionRead,
@@ -217,7 +218,8 @@ describe("WP-2423 Q8 composeCustomerDiningSession", () => {
     expect(view.summary?.due).toEqual(cad(3412n));
     expect(view.summary?.pointsUsed).toEqual(cad(339n));
     expect(view.summary?.takenOff).toEqual(cad(150n));
-    expect(view.summary?.taxRounding).toEqual(cad(1n));
+    // b22: the bill's rounding is in Total ordered's tax, never a line of its own.
+    expect(view.summary?.taxRounding).toBeUndefined();
   });
 
   // v15 b12 live (BR E-style bill): the guest read Tax $6.51, "Taken off −$31.09" and "Rounding
@@ -339,7 +341,8 @@ describe("WP-2423 Q8 composeCustomerDiningSession", () => {
       paymentTiming: "PayLater",
     });
     expect(view.summary?.bill).toBeUndefined();
-    expect(view.summary?.taxRounding).toEqual(cad(1n));
+    // b22: one tax figure: the rounding is in Total ordered, not a line of its own.
+    expect(view.summary?.taxRounding).toBeUndefined();
   });
 
   it("b13: a split the bill outgrew says nothing of its old parts", () => {
@@ -1364,5 +1367,260 @@ describe("M91/M41: each dish's progress and a paid round nobody accepted", () =>
       [33, "Submitted", 0],
     ]);
     expect(accepted?.awaitingStore).toBeUndefined();
+  });
+});
+
+// b22 (v15 live21, TM2 pay-at-end table, staff rounds Beef noodles / Soy milk + Smashed cucumber /
+// Beef noodles): the session JSON said ordered.total 3900 while bill.total and due were 3899 (and
+// 3193 vs 3192 after the cucumber came off), because ordered added each dish's own tax and the bill
+// works its tax out once. The receipt is the bill: paid − refunded − refund pending + due = ordered.
+describe("b22 DEC-TAX-WHOLE-RECEIPT: what the guest's page says adds up to the bill to the cent", () => {
+  const hst = (taxAmountMinor: bigint) => ({
+    taxComponentCode: "SYNTHETIC_TAX",
+    treatment: "Taxable" as const,
+    rate: "0.13",
+    roundingMode: "HalfUp" as const,
+    calculationOrder: 1,
+    compoundOnPriorTax: false,
+    taxAmountMinor,
+  });
+  interface Dish {
+    n: number;
+    name: string;
+    net: bigint;
+    tax: bigint;
+  }
+  const beef = (n: number): Dish => ({ n, name: "Beef noodles (TEST)", net: 1250n, tax: 163n });
+  const soy = (n: number): Dish => ({ n, name: "Soy milk", net: 325n, tax: 42n });
+  const cucumber = (n: number): Dish => ({ n, name: "Smashed cucumber", net: 625n, tax: 82n });
+  /** The table's rounds as the session read and the bill read them (the bill's own algorithm). */
+  function table(
+    rounds: readonly (readonly Dish[])[],
+    takenOff: ReadonlySet<number> = new Set(),
+    unprinted: number | null = null,
+  ) {
+    const batch = (index: number) => id(300 + index);
+    const rounding = computeBillTaxRounding(
+      rounds.map((dishes, index) => ({
+        orderReference: id(1),
+        orderBatchReference: batch(index),
+        items: dishes
+          .filter((dish) => !takenOff.has(dish.n))
+          .map((dish) => ({
+            orderItemReference: id(dish.n),
+            netMinor: dish.net,
+            taxComponents: [hst(dish.tax)],
+            reduction: null,
+          })),
+      })),
+    );
+    const share = (index: number) =>
+      rounding.lines
+        .filter((line) => line.orderBatchReference === batch(index))
+        .reduce((sum, line) => sum + line.amountMinor, 0n);
+    const billRounds = rounds.map((dishes, index) => {
+      const on = dishes.filter((dish) => !takenOff.has(dish.n));
+      const subtotal = on.reduce((sum, dish) => sum + dish.net, 0n);
+      const tax = on.reduce((sum, dish) => sum + dish.tax, 0n) + share(index);
+      return {
+        roundNumber: index + 1,
+        orderReference: id(1),
+        orderBatchReference: batch(index),
+        submissionReference: id(400 + index),
+        items: on.map((dish) => ({
+          orderItemReference: id(dish.n),
+          quantity: 1,
+          displayName: dish.name,
+          subtotalMinor: String(dish.net),
+          totalMinor: String(dish.net + dish.tax),
+          reduction: null,
+        })),
+        subtotalMinor: String(subtotal),
+        taxMinor: String(tax),
+        totalMinor: String(subtotal + tax),
+        taxRoundingMinor: String(share(index)),
+        paid: false,
+        orderedBy: null,
+        fromTableLabel: null,
+        liveOrderedAt: null,
+      };
+    });
+    const lines = customerTableBillLines(billRounds);
+    // A round whose lines don't add up as printed (an order-time fee): no lines for it or the bill.
+    const printed =
+      unprinted === null
+        ? lines
+        : {
+            rounds: new Map([...lines.rounds].filter(([key]) => key !== batch(unprinted))),
+          };
+    const owed = billRounds.reduce((sum, round) => sum + BigInt(round.totalMinor), 0n);
+    const dishes = rounds.flat();
+    const removed = dishes.filter((dish) => takenOff.has(dish.n));
+    return composeCustomerDiningSession({
+      diningSessionReference: id(20),
+      tableLabel: "L21 TML A (TEST)",
+      checkedAt: at,
+      paymentTiming: "PayLater",
+      order: {
+        orderNumber: "9",
+        batches: rounds.map((round, index) => ({
+          orderBatchReference: batch(index),
+          submittedAt: at,
+          items: round.map((dish) => item(dish.n, dish.name, 1, dish.net + dish.tax)),
+        })),
+        authorship: new Map(rounds.map((_, index) => [batch(index), false])),
+        staffRounds: new Set(rounds.map((_, index) => batch(index))),
+        delivery: new Map(
+          dishes.map((dish) => [
+            id(dish.n),
+            { phase: takenOff.has(dish.n) ? "Cancelled" : "Accepted", deliveredQuantity: 0 },
+          ]),
+        ),
+        itemPrices: new Map(
+          dishes.map((dish) => [id(dish.n), { subtotal: cad(dish.net), tax: cad(dish.tax) }]),
+        ),
+        paymentOutcomes: new Map(),
+        paymentDeadlines: new Map(),
+        payLaterRounds: new Set(rounds.map((_, index) => batch(index))),
+        unpaidCancellations: new Set(),
+        staffCancellations: new Map(),
+        itemCancellations: removed.map((dish) => ({
+          orderItemReferences: [id(dish.n)],
+          refunded: false,
+          refundAmount: cad(0n),
+          notCharged: true as const,
+        })),
+        payments: [],
+        refunds: { confirmedMinor: 0n, pendingMinor: 0n },
+        tableBill: {
+          owedMinor: owed,
+          pointsUsedMinor: 0n,
+          takenOffMinor: 0n,
+          taxRoundingMinor: rounding.totalMinor,
+          ...printed,
+          roundTaxRounding: new Map(billRounds.map((round, index) => [batch(index), share(index)])),
+        },
+      } as Order,
+    });
+  }
+  const reconciles = (view: ReturnType<typeof composeCustomerDiningSession>) => {
+    const summary = view.summary;
+    const minor = (value: { amountMinor: bigint } | undefined) => value?.amountMinor ?? 0n;
+    // The API's own check: what was paid, given back and still owed is what was ordered.
+    expect(
+      minor(summary?.paid) -
+        minor(summary?.refunded) -
+        minor(summary?.refundPending) +
+        minor(summary?.due) +
+        minor(summary?.takenOff) +
+        minor(summary?.pointsUsed),
+    ).toBe(minor(summary?.ordered?.total));
+    // Every round card adds up to the Table total, and that is what is still to pay.
+    const rounds = view.rounds
+      .filter((round) => round.payment !== "NotCharged")
+      .reduce(
+        (sum, round) => sum + (round.bill?.total.amountMinor ?? round.itemsTotal.amountMinor),
+        0n,
+      );
+    expect(rounds).toBe(minor(summary?.bill?.total));
+    expect(minor(summary?.ordered?.total)).toBe(minor(summary?.bill?.total));
+    expect(summary?.taxRounding).toBeUndefined();
+  };
+
+  it("Total ordered is the bill (3899, not 3900) and the round totals add up to it", () => {
+    const view = table([[beef(31)], [soy(41), cucumber(42)], [beef(51)]]);
+    expect(view.summary?.bill?.total).toEqual(cad(3899n));
+    expect(view.summary?.due).toEqual(cad(3899n));
+    expect(view.summary?.ordered).toEqual({
+      subtotal: cad(3450n),
+      tax: cad(449n),
+      total: cad(3899n),
+    });
+    // The bill's cent sits on one round (largest remainder of the whole-bill tax).
+    expect(view.rounds.map((round) => round.bill?.total.amountMinor)).toEqual([
+      1413n,
+      1073n,
+      1413n,
+    ]);
+    reconciles(view);
+  });
+
+  it("after the cucumber came off: 3192 ordered, 3192 to pay", () => {
+    const view = table([[beef(31)], [soy(41), cucumber(42)], [beef(51)]], new Set([42]));
+    expect(view.summary?.due).toEqual(cad(3192n));
+    expect(view.summary?.ordered?.total).toEqual(cad(3192n));
+    reconciles(view);
+  });
+
+  it("four rounds, round 3 taken off: the round totals ($14.12 / $10.74 / $3.67) add up to the bill", () => {
+    const view = table([[beef(31)], [soy(41), cucumber(42)], [beef(51)], [soy(61)]], new Set([51]));
+    expect(view.rounds.map((round) => round.bill?.total.amountMinor)).toEqual([
+      1412n,
+      1074n,
+      undefined,
+      367n,
+    ]);
+    // Round 3 reads "Not charged" (nothing of it is on the bill).
+    expect(view.rounds[2]?.payment).toBe("NotCharged");
+    expect(view.summary?.ordered?.total).toEqual(cad(2853n));
+    reconciles(view);
+  });
+
+  it("a round whose lines can't be printed as the bill's still totals the bill's share", () => {
+    const view = table([[beef(31)], [soy(41), cucumber(42)], [beef(51)]], new Set(), 1);
+    expect(view.summary?.bill).toBeUndefined();
+    // Round 2's card: its dishes before tax, its tax with its share of the bill's rounding.
+    expect(view.rounds[1]?.bill).toBeUndefined();
+    expect(view.rounds[1]?.subtotal).toEqual(cad(950n));
+    expect(view.rounds[1]?.tax).toEqual(cad(123n));
+    expect(view.rounds[1]?.itemsTotal).toEqual(cad(1073n));
+    expect(view.summary?.ordered?.total).toEqual(cad(3899n));
+    expect(view.summary?.taxRounding).toBeUndefined();
+    const cards = view.rounds.reduce(
+      (sum, round) => sum + (round.bill?.total.amountMinor ?? round.itemsTotal.amountMinor),
+      0n,
+    );
+    expect(cards).toBe(3899n);
+  });
+
+  // DEMO Store 2 (pay-first table): the guest paid Steamed rice + Lemon tea ($8.19); staff took the
+  // Lemon tea off with a $5.37 refund. Each round is its own receipt: ordered is the rice.
+  it("a paid round with a refunded dish: paid − refunded is Total ordered", () => {
+    const view = composeCustomerDiningSession({
+      ...facts({
+        batches: [
+          {
+            orderBatchReference: id(30),
+            submittedAt: at,
+            items: [item(31, "Steamed rice", 1, 282n), item(32, "Lemon tea", 1, 537n)],
+          },
+        ],
+        authorship: new Map([[id(30), true]]),
+        delivery: new Map([
+          [id(31), { phase: "Fulfilled", deliveredQuantity: 1 }],
+          [id(32), { phase: "Cancelled", deliveredQuantity: 0 }],
+        ]),
+        itemPrices: new Map([
+          [id(31), { subtotal: cad(250n), tax: cad(32n) }],
+          [id(32), { subtotal: cad(475n), tax: cad(62n) }],
+        ]),
+        paymentOutcomes: new Map([[id(30), "Succeeded"]]),
+        paymentDeadlines: new Map(),
+        itemCancellations: [
+          { orderItemReferences: [id(32)], refunded: true, refundAmount: cad(537n) },
+        ],
+        payments: [{ status: "Succeeded", amount: cad(819n) }],
+        refunds: { confirmedMinor: 537n, pendingMinor: 0n },
+      }),
+    });
+    expect(view.summary?.ordered?.total).toEqual(cad(282n));
+    expect(view.rounds[0]?.refunded).toEqual(cad(537n));
+    const summary = view.summary;
+    expect(
+      (summary?.paid.amountMinor ?? 0n) -
+        (summary?.refunded.amountMinor ?? 0n) -
+        (summary?.refundPending.amountMinor ?? 0n) +
+        (summary?.due.amountMinor ?? 0n),
+    ).toBe(summary?.ordered?.total.amountMinor);
   });
 });

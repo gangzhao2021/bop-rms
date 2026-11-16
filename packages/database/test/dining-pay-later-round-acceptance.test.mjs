@@ -1682,6 +1682,12 @@ async function journey(journeyEnding) {
           const owed = await bill();
           assert.equal(facts.owedMinor.toString(), owed.owed.totalMinor);
           assert.equal(facts.taxRoundingMinor.toString(), owed.taxRoundingMinor);
+          // b22: each round's share of the bill's tax rounding, as the bill holds it (so a round
+          // the guest's page can't print as lines still totals what the bill charges for it).
+          assert.deepEqual(
+            [...facts.roundTaxRounding].map(([batch, share]) => [batch, share.toString()]),
+            owed.rounds.map((round) => [round.orderBatchReference, round.taxRoundingMinor]),
+          );
           // b13 (DEC-TAX-WHOLE-RECEIPT): the guest's Table total and round cards are the bill as
           // staff checkout prints it — after comps, one tax worked out on the whole bill — never
           // the items' own tax with a rounding line beside it.

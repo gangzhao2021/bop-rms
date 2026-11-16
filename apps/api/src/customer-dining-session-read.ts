@@ -168,6 +168,12 @@ export interface CustomerDiningSessionFacts {
        */
       readonly bill?: CustomerTableBillLines;
       readonly rounds?: ReadonlyMap<string, CustomerTableBillLines>;
+      /**
+       * b22 (DEC-TAX-WHOLE-RECEIPT): each round's share of the bill's tax rounding, every round of
+       * the bill (also one whose lines don't add up as printed), so its round total is still what
+       * the bill charges for it.
+       */
+      readonly roundTaxRounding?: ReadonlyMap<string, bigint>;
     };
     /**
      * WP-2423 item 8 ④ (v15 2026-10-28 a): a split bill being paid part by part — how many parts
@@ -663,6 +669,18 @@ export function composeCustomerDiningSession(
       !roundRefunded &&
       order.payLaterRounds?.has(reference) === true &&
       order.settledRounds?.has(reference) !== true;
+    // b22 (DEC-TAX-WHOLE-RECEIPT): a round on the table's bill whose lines can't be printed as the
+    // bill's (an order-time discount or fee) still totals what the bill charges for it: its share
+    // of the bill's tax rounding is in its tax and total, so every round card adds up to the bill.
+    const onBill =
+      order.payLaterRounds?.has(reference) === true &&
+      !unpaidCancelled &&
+      staff === undefined &&
+      waiting === null;
+    const roundShare =
+      onBill && order.tableBill?.rounds?.get(reference) === undefined
+        ? (order.tableBill?.roundTaxRounding?.get(reference) ?? 0n)
+        : 0n;
     if (!unpaidCancelled && waiting === null && !roundRefunded && !roundNotCharged) {
       const charged = items.filter((item) => !item.notCharged && !item.refundRecorded);
       ordered.subtotal += charged.reduce(
@@ -798,8 +816,8 @@ export function composeCustomerDiningSession(
           }),
         ),
       ),
-      ...(prices === undefined ? {} : { subtotal: money(subtotal), tax: money(tax) }),
-      itemsTotal: money(itemsTotal),
+      ...(prices === undefined ? {} : { subtotal: money(subtotal), tax: money(tax + roundShare) }),
+      itemsTotal: money(itemsTotal + roundShare),
       // b13: a round on the table's bill says what the bill says of it (comps taken off, the tax
       // worked out once), so the round cards add up to the Table total and the paid bill.
       ...((payment === "OnTableBill" || order.settledRounds?.has(reference) === true) &&
@@ -810,6 +828,12 @@ export function composeCustomerDiningSession(
       ...(roundRefunds.pending > 0n ? { refundPending: money(roundRefunds.pending) } : {}),
     });
   });
+  // b22 (DEC-TAX-WHOLE-RECEIPT): a table paying at the end ordered what its one receipt says — the
+  // dishes as ordered with the bill's tax worked out once — so paid − refunded − refund pending +
+  // still to pay is Total ordered to the cent (the dishes' own taxes add up to a cent more or less).
+  const billRounding = order.tableBill?.taxRoundingMinor ?? 0n;
+  ordered.tax += billRounding;
+  ordered.total += billRounding;
   let paid = 0n;
   for (const entry of order.payments) {
     if (entry.status !== "Succeeded" || entry.amount === null) continue;
@@ -844,10 +868,8 @@ export function composeCustomerDiningSession(
       ...((order.tableBill?.takenOffMinor ?? 0n) > 0n
         ? { takenOff: money(order.tableBill?.takenOffMinor as bigint) }
         : {}),
-      // b13: a bill read whole says its one tax; only an older bill read has a rounding line.
-      ...(order.tableBill?.bill === undefined && (order.tableBill?.taxRoundingMinor ?? 0n) !== 0n
-        ? { taxRounding: money(order.tableBill?.taxRoundingMinor as bigint) }
-        : {}),
+      // b22: the bill's tax rounding is in Total ordered's tax (one tax figure), never a line of
+      // its own (older pages still read one from an older server).
       ...(order.tableBill?.bill === undefined ? {} : { bill: billView(order.tableBill.bill) }),
       paid: money(paid),
       refunded: money(refunded),
@@ -1631,6 +1653,9 @@ export async function readCustomerTableBillFacts(
     ...(bill.split?.stale === true ? { splitStale: true } : {}),
     ...(printed.bill === undefined ? {} : { bill: printed.bill }),
     rounds: printed.rounds,
+    roundTaxRounding: new Map(
+      bill.rounds.map((round) => [round.orderBatchReference, BigInt(round.taxRoundingMinor)]),
+    ),
   };
 }
 
