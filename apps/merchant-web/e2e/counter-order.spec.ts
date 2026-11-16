@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { orderPanel } from "./order-queue-helpers";
+import { storeLocalInput } from "./store-time";
 
 // WP-2423 Q7 (OPS-ORDER-ENTRY, DEC-COUNTER-PAYMENT-RECORD): staff take a pickup order at the
 // counter, charge it on the store's card machine and record it; a paper order is entered after an
@@ -353,8 +354,7 @@ test("@production staff take a counter pickup order, charge it on the card machi
   const sendPaper = page.getByRole("button", { name: "Send and record paper order" });
   await expect(sendPaper).toBeDisabled();
   const paid = new Date(Date.now() - 2 * 60 * 60_000);
-  const local = (value: Date) =>
-    new Date(value.getTime() - value.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+  const local = (value: Date) => storeLocalInput(value, scope.timeZone);
   await page.getByLabel("Paid at (store time, from the paper order)").fill(local(paid));
   const how = page.getByRole("group", { name: "How it was paid during the outage" });
   await expect(how.getByRole("radio", { name: "Card machine" })).toBeChecked();
@@ -454,23 +454,7 @@ for (const language of ["en", "zh-Hans"] as const)
         },
       });
     });
-    // Store time (America/Toronto) as the paid-at field takes it, whatever the device's zone.
-    const storeLocal = (at: number) => {
-      const parts = Object.fromEntries(
-        new Intl.DateTimeFormat("en-CA", {
-          timeZone: "America/Toronto",
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-          hour: "2-digit",
-          minute: "2-digit",
-          hourCycle: "h23",
-        })
-          .formatToParts(new Date(at))
-          .map((part) => [part.type, part.value]),
-      );
-      return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
-    };
+    const storeLocal = (at: number) => storeLocalInput(at, scope.timeZone);
     const paidAtLabel = zh
       ? "付款时间（门店时间，以纸质订单为准）"
       : "Paid at (store time, from the paper order)";
@@ -1392,7 +1376,7 @@ test("@production a paper order paid in cash is recorded with the send", async (
   const paid = new Date(Date.now() - 60 * 60_000);
   await page
     .getByLabel("Paid at (store time, from the paper order)")
-    .fill(new Date(paid.getTime() - paid.getTimezoneOffset() * 60_000).toISOString().slice(0, 16));
+    .fill(storeLocalInput(paid, scope.timeZone));
   await page
     .getByRole("group", { name: "How it was paid during the outage" })
     .getByRole("radio", { name: "Cash" })
@@ -1560,9 +1544,7 @@ test("@production a paper order is recorded from Orders by its cash total, never
     "Paid in cash during the outage: $11.30. Its change was given then.",
   );
   const paid = new Date(Date.now() - 40 * 60_000);
-  await form
-    .getByLabel("Paid at (store time)")
-    .fill(new Date(paid.getTime() - paid.getTimezoneOffset() * 60_000).toISOString().slice(0, 16));
+  await form.getByLabel("Paid at (store time)").fill(storeLocalInput(paid, scope.timeZone));
   await expect(form.getByRole("button", { name: /Cash received/u })).toHaveCount(0);
   await form.getByRole("button", { name: "Record paper payment · $11.30" }).click();
   await expect(
@@ -1717,8 +1699,7 @@ test("@production a paper send with no answer stays the same order after the pai
     if (answer === undefined) throw new Error("no more sends were expected");
     return answer(route);
   });
-  const local = (at: Date) =>
-    new Date(at.getTime() - at.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+  const local = (at: Date) => storeLocalInput(at, scope.timeZone);
   await page.goto("/operations/order-entry");
   await page.getByRole("button", { name: "Add Banana Bread" }).click();
   await page.getByRole("checkbox", { name: "Recorded after an outage (taken on paper)" }).check();
@@ -1826,9 +1807,7 @@ test("@production a paper send with no answer is the same order after the page i
     });
   });
   const paidAt = new Date(Date.now() - 20 * 60_000);
-  const local = new Date(paidAt.getTime() - paidAt.getTimezoneOffset() * 60_000)
-    .toISOString()
-    .slice(0, 16);
+  const local = storeLocalInput(paidAt, scope.timeZone);
   const enterSlip = async () => {
     await page.getByRole("button", { name: "Add Banana Bread" }).click();
     await page.getByRole("checkbox", { name: "Recorded after an outage (taken on paper)" }).check();
@@ -2021,7 +2000,7 @@ test("@production a paper send whose payment is already recorded reads as record
   const paid = new Date(Date.now() - 60 * 60_000);
   await page
     .getByLabel("Paid at (store time, from the paper order)")
-    .fill(new Date(paid.getTime() - paid.getTimezoneOffset() * 60_000).toISOString().slice(0, 16));
+    .fill(storeLocalInput(paid, scope.timeZone));
   await page.getByRole("button", { name: "Send and record paper order" }).click();
   await expect(page.getByRole("heading", { name: "Order 8 paid" })).toBeVisible();
   await expect(
@@ -2304,8 +2283,7 @@ for (const language of ["en", "zh-Hans"] as const)
         },
       });
     });
-    const local = (at: Date) =>
-      new Date(at.getTime() - at.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+    const local = (at: Date) => storeLocalInput(at, scope.timeZone);
     const sendPaper = page.getByRole("button", {
       name: zh ? "发送并录入纸质订单" : "Send and record paper order",
     });

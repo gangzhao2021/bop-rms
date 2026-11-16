@@ -1,6 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 import { orderPanel } from "./order-queue-helpers";
+import { storeLocalInput } from "./store-time";
 
 // WP-2423 Q7 slice 2 (DEC-STAFF-DINE-IN-ROUND): from the Tables page staff take an order for a
 // table on behalf of guests who can't or won't use their phone, send it to the table's order,
@@ -1611,8 +1612,7 @@ test("@production a table round's slip question and Send stay reachable at table
       },
     });
   });
-  const local = (at: Date) =>
-    new Date(at.getTime() - at.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+  const local = (at: Date) => storeLocalInput(at, scope.timeZone);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/operations/dining");
   await page.getByRole("button", { name: "Select T4", exact: true }).click();
