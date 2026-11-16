@@ -13,6 +13,8 @@ const reply = (route: Route, body: unknown, status = 200) =>
   });
 // Controlled owner HTTP packets, synthetic challenge origin and actual browser
 // IndexedDB/App. Genuine Session/IAM/Tenant/Audit/COMMIT behavior is separate native evidence.
+/** The production preview this project runs against (its port differs between checkouts). */
+const appOrigin = () => new URL(test.info().project.use.baseURL ?? "http://127.0.0.1:4173").origin;
 async function backend(page: Page) {
   const state = {
     lifecycle: "Draft",
@@ -115,7 +117,7 @@ async function backend(page: Page) {
   await page.route("https://identity.example.test/fresh-lifecycle", (route) => {
     state.mfa = false;
     state.csrf = "d".repeat(43);
-    return route.fulfill({ status: 302, headers: { location: "http://127.0.0.1:4173" + href } });
+    return route.fulfill({ status: 302, headers: { location: appOrigin() + href } });
   });
   return state;
 }

@@ -12,6 +12,8 @@ const reply = (route: Route, value: unknown, status = 200) =>
     body: JSON.stringify(value),
   });
 // Controlled HTTP owner packets exercise the production App; actual PG/IAM/Provider sources are covered separately.
+/** The production preview this project runs against (its port differs between checkouts). */
+const appOrigin = () => new URL(test.info().project.use.baseURL ?? "http://127.0.0.1:4173").origin;
 async function backend(page: Page) {
   const state = {
     authenticated: true,
@@ -144,7 +146,7 @@ async function backend(page: Page) {
     state.csrf = "d".repeat(43);
     return route.fulfill({
       status: 302,
-      headers: { location: "http://127.0.0.1:4173/app/organization/brands" },
+      headers: { location: appOrigin() + "/app/organization/brands" },
     });
   });
   return state;
@@ -332,8 +334,8 @@ async function invitationBackend(page: Page) {
       url = new URL(request.url());
     expect(request.method()).toBe("GET");
     const response = await route.fetch({
-      url: `http://127.0.0.1:4173${url.pathname}${url.search}`,
-      headers: { ...request.headers(), host: "127.0.0.1:4173" },
+      url: `${appOrigin()}${url.pathname}${url.search}`,
+      headers: { ...request.headers(), host: new URL(appOrigin()).host },
     });
     await route.fulfill({ response });
   });
