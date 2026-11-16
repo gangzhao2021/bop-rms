@@ -252,7 +252,11 @@ it("b24: refuses a fee on for an order type the setup's services do not offer", 
     feeContexts: fees(orderTypes),
   });
   rejected({ ...save(), content: content(["DineIn"], ["DineIn", "Delivery"]) });
-  rejected({ ...save(), content: content(null, ["DineIn"]) });
+  // b24 correction: a draft is partial; while its services are not set, it saves (creating a change
+  // from it is what refuses it then).
+  expect(
+    bindMerchantStoreSetupCommand({ ...save(), content: content(null, ["DineIn"]) }, scope).method,
+  ).toBe("save");
   const bound = bindMerchantStoreSetupCommand(
     { ...save(), content: content(["DineIn", "Pickup"], ["DineIn"]) },
     scope,

@@ -546,6 +546,18 @@ it("names the refusals an Owner can act on (WP-2423 v15 D2/D3)", async () => {
     expect(reply.body).toEqual({ error: reason });
   }
 });
+// b24 correction: a change refused because its saved setup's fee names an order type the setup does
+// not offer is an invalid input (400), never "unavailable", and says nothing more.
+it("b24: answers a change refused for a fee outside the setup's services as invalid, not unavailable", async () => {
+  const endpoint = port(),
+    h = await serve(endpoint);
+  endpoint.write.mockRejectedValueOnce(
+    new StoreSetupOperationError("STORE_SETUP_OPERATION_INPUT_INVALID"),
+  );
+  const reply = await send(h.root);
+  expect(reply.status).toBe(400);
+  expect(reply.body).toEqual({ error: "store_setup_invalid" });
+});
 it("rejects wrong returned Actor, malformed clock and expired/unknown workspace", async () => {
   const endpoint = port(),
     h = await serve(endpoint);

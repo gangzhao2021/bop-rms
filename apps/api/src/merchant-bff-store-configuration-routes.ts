@@ -108,6 +108,12 @@ export function installMerchantStoreConfigurationRoutes(
       response.status(409).set("Cache-Control", NO_STORE).json({ error: reason });
       return;
     }
+    // b24: a setup the server refuses as input (a fee on for an order type it does not offer) is
+    // answered as that, never as an outage, with the Store setup reason and nothing else.
+    if (code === "STORE_SETUP_OPERATION_INPUT_INVALID") {
+      response.status(400).set("Cache-Control", NO_STORE).json({ error: "store_setup_invalid" });
+      return;
+    }
     const invalid =
       code === "STORE_CONFIGURATION_ORIGINAL_INPUT_INVALID" ||
       code === "STORE_CONFIGURATION_INPUT_INVALID";

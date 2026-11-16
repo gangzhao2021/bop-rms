@@ -13,6 +13,8 @@ import {
   materializeStoreSetupConfigurationVersion,
   materializeStoreSetupConfigurationVersionV2,
   storeSetupDraftContentFields,
+  storeSetupDraftFeesSaveable,
+  storeSetupFeesWithinServices,
   type StoreSetupActualScope,
 } from "../contracts/store-setup-draft.js";
 const id = (n: number) => `01902501-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
@@ -555,5 +557,47 @@ describe("V2 complete configuration materialization", () => {
       materializeStoreSetupConfigurationVersionV2(completeV2(), scope(), metadata(), refs),
     ).toThrow();
     expect(called).toBe(false);
+  });
+});
+
+// b24 correction (coordinator 2026-11-16): drafts are partial. A fee on for an order type the setup
+// does not offer is refused on save only once services are set; a change refuses it either way.
+describe("b24: a fee that is on names only order types the setup offers", () => {
+  const ref = "01902501-0000-7000-8000-000000000009";
+  const content = (modes: readonly string[] | null, orderTypes: readonly string[]) =>
+    parseStoreSetupDraftContent({
+      ...createUnconfiguredStoreSetupDraftContentV2(),
+      enabledServiceModes:
+        modes === null ? { state: "Unconfigured" } : { state: "Configured", value: modes },
+      feeContexts: {
+        state: "Configured",
+        value: [
+          {
+            chargeType: "ServiceCharge",
+            state: "Enabled",
+            taxClassificationReference: ref,
+            orderTypes,
+          },
+          { chargeType: "DeliveryFee", state: "Disabled" },
+          { chargeType: "Tip", state: "Unconfigured" },
+        ],
+      },
+    });
+  it("services not set: the draft saves, a change is refused", () => {
+    const unset = content(null, ["DineIn"]);
+    expect(storeSetupDraftFeesSaveable(unset)).toBe(true);
+    expect(storeSetupFeesWithinServices(unset)).toBe(false);
+  });
+  it("services set: a fee outside them is refused on save and for a change", () => {
+    const outside = content(["DineIn"], ["DineIn", "Pickup"]);
+    expect(storeSetupDraftFeesSaveable(outside)).toBe(false);
+    expect(storeSetupFeesWithinServices(outside)).toBe(false);
+    const inside = content(["DineIn", "Pickup"], ["Pickup"]);
+    expect(storeSetupDraftFeesSaveable(inside)).toBe(true);
+    expect(storeSetupFeesWithinServices(inside)).toBe(true);
+  });
+  it("fees not set or off: nothing to check", () => {
+    expect(storeSetupFeesWithinServices(createUnconfiguredStoreSetupDraftContentV2())).toBe(true);
+    expect(storeSetupDraftFeesSaveable(createUnconfiguredStoreSetupDraftContentV2())).toBe(true);
   });
 });

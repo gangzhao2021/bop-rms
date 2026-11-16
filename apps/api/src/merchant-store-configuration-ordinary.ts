@@ -24,6 +24,7 @@ import {
   createStoreConfigurationPublicationHash,
   createStoreConfigurationVersion,
   materializeStoreSetupConfigurationVersionV2,
+  storeSetupFeesWithinServices,
   parseStoreAdministrationReference,
   parseStoreConfigurationOrdinaryCommand,
   parseStoreConfigurationOrdinaryResolve,
@@ -829,6 +830,11 @@ export function createMerchantStoreConfigurationOrdinary(
             digest(snapshot.snapshot) !== command.setupSelector.sourceSnapshotDigest
           )
             fail("STORE_CONFIGURATION_ORIGINAL_VERSION_CONFLICT");
+          // b24 (coordinator 2026-11-16): a saved setup whose fee that is on names an order type
+          // its services do not offer (or whose services are not set yet) is an invalid input, as
+          // its draft save would be once services are set; it was refused only deep in the build.
+          if (!storeSetupFeesWithinServices(snapshot.snapshot.content))
+            throw new StoreSetupOperationError("STORE_SETUP_OPERATION_INPUT_INVALID");
           // WP-2423 (v15 D2): an unfinished saved setup is answered as such (it was a 503 and an
           // unknown result), before any configuration is made from it.
           if (assessStoreSetupDraftCompleteness(snapshot.snapshot).missingPaths.length !== 0)

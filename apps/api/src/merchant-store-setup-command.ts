@@ -1,7 +1,7 @@
 import {
   parseStoreSetupSaveCommand,
   parseStoreSetupResolveCommand,
-  storeSetupFeesWithinServices,
+  storeSetupDraftFeesSaveable,
   StoreSetupOperationError,
   type StoreSetupOperationScope,
 } from "@rms/store";
@@ -66,7 +66,8 @@ export function bindMerchantStoreSetupCommand(raw: unknown, actualScope: StoreSe
       });
       // b24 (Owner 2026-11-16): a fee may apply only to orders this setup offers; any client that
       // sends a fee for a service the setup does not offer is refused, as the page never sends it.
-      if (!storeSetupFeesWithinServices(command.content)) return invalid();
+      // A draft whose services are not set yet still saves; creating a change refuses it then.
+      if (!storeSetupDraftFeesSaveable(command.content)) return invalid();
       return Object.freeze({ method: "save" as const, command });
     }
     if (input.command === "ResolveOriginal")

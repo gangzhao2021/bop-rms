@@ -260,8 +260,9 @@ export function parseStoreSetupDraftContent(value: unknown): StoreSetupDraftCont
  * WP-2423 b24 (Owner 2026-11-16): a fee that is on applies only to orders the setup offers. True
  * when every order type named by a fee that is on is one of the setup's services (none are offered
  * while the services are not set). A configuration made from a setup already enforces this
- * (createStoreConfigurationVersion); a draft save from staff is held to it too, so a setup that
- * could never be sent is not saved. Stored drafts and originals are read as they are.
+ * (createStoreConfigurationVersion), and creating a change from a saved setup checks it first.
+ * A draft is partial by design: its save is held to this only once its services are set (see
+ * storeSetupDraftFeesSaveable). Stored drafts and originals are read as they are.
  */
 export function storeSetupFeesWithinServices(content: StoreSetupDraftContent): boolean {
   if (content.feeContexts?.state !== "Configured") return true;
@@ -269,6 +270,16 @@ export function storeSetupFeesWithinServices(content: StoreSetupDraftContent): b
     content.enabledServiceModes.state === "Configured" ? content.enabledServiceModes.value : [];
   return content.feeContexts.value.every(
     (fee) => fee.state !== "Enabled" || fee.orderTypes.every((mode) => offered.includes(mode)),
+  );
+}
+/**
+ * b24 correction (coordinator 2026-11-16): a draft whose services are not set yet still saves (a
+ * setup is filled in over several visits); once its services are set, a fee that is on may name only
+ * those. The mismatch left while services are unset is refused when a change is created from it.
+ */
+export function storeSetupDraftFeesSaveable(content: StoreSetupDraftContent): boolean {
+  return (
+    content.enabledServiceModes.state !== "Configured" || storeSetupFeesWithinServices(content)
   );
 }
 export function createUnconfiguredStoreSetupDraftContent(): StoreSetupDraftContent {
