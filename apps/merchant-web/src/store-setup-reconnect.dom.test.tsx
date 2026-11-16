@@ -20,6 +20,7 @@ import {
   selectValue,
   settle,
   typeInto,
+  until,
 } from "./dom-test-kit.fixture.js";
 
 // The live configuration read (the start the open Store runs on): held until it is cut off.
@@ -360,7 +361,7 @@ it("b23 review: a draft saved elsewhere while offline is a Conflict on reconnect
   await connection(false);
   s.state.saved = snapshot(2, "06:00:00");
   await connection(true);
-  expect(alerts(container)).toContain(conflictText);
+  await until(() => alerts(container).includes(conflictText));
   expect(startField(container)?.value).toBe("05:00");
 });
 
@@ -371,14 +372,20 @@ it("b23 review: a save whose answer was lost offline is settled on reconnect, wi
   await typeInto(startField(container), "05:00");
   s.state.holdSaves = true;
   await click(buttonNamed(container, "Save as draft"));
-  await settle(20);
-  expect(s.state.cursor).not.toBeNull();
+  // The save's digest is Web Crypto work: wait for the save itself, not a number of rounds.
+  await until(() => s.state.cursor !== null && s.state.receipt !== null);
   // The server committed it; the answer is lost with the connection.
   await connection(false);
-  expect(container.textContent).toContain(recoveryText);
+  await until(() => container.textContent?.includes(recoveryText) === true);
   s.state.holdSaves = false;
   await connection(true);
-  await settle(20);
+  await until(
+    () =>
+      s.state.cursor === null &&
+      container.textContent?.includes(
+        "The original save was committed. Current saved settings are shown.",
+      ) === true,
+  );
   expect(s.commands).toContain("ResolveOriginal");
   expect(alerts(container)).not.toContain(conflictText);
   expect(container.textContent).not.toContain(recoveryText);
@@ -398,8 +405,8 @@ it("b23 review: with nothing typed, reconnect shows a newer draft saved elsewher
   await connection(false);
   s.state.saved = snapshot(2, "06:00:00");
   await connection(true);
+  await until(() => startField(container)?.value === "06:00");
   expect(alerts(container)).not.toContain(conflictText);
-  expect(startField(container)?.value).toBe("06:00");
 });
 
 it("b23 review: reconnect keeps a save notice and a validation message that are still true", async () => {
@@ -408,20 +415,25 @@ it("b23 review: reconnect keeps a save notice and a validation message that are 
   await click(buttonNamed(container, "1. Time zone and business day"));
   await typeInto(startField(container), "04:00");
   await click(buttonNamed(container, "Save as draft"));
-  await settle(20);
-  expect(container.textContent).toContain(savedText);
+  await until(() => container.textContent?.includes(savedText) === true);
+  const reads = () => s.commands.filter((c) => c === "read").length;
+  let before = reads();
   await connection(false);
   await connection(true);
-  expect(s.commands.filter((c) => c === "read").length).toBeGreaterThan(2);
+  // Read again by itself; the notice is still true afterwards.
+  await until(() => reads() > before && buttonNamed(container, "Save as draft") !== undefined);
+  await settle(10);
   expect(container.textContent).toContain(savedText);
   // A tip turned on without its orders cannot be saved; that stays said while it is still so.
   await click(buttonNamed(container, "3. Fees, tax and payment"));
   await selectValue(container.querySelector('select[aria-label="Tip"]'), "Enabled");
   await click(buttonNamed(container, "Save as draft"));
-  await settle(10);
-  expect(alerts(container).some((text) => text?.startsWith(invalidText))).toBe(true);
+  await until(() => alerts(container).some((text) => text?.startsWith(invalidText)));
+  before = reads();
   await connection(false);
   await connection(true);
+  await until(() => reads() > before);
+  await settle(10);
   expect(alerts(container).some((text) => text?.startsWith(invalidText))).toBe(true);
 });
 
@@ -446,11 +458,16 @@ it("b23 review: a lost save that did not go through keeps what was typed, ready 
   s.state.holdSaves = true;
   s.state.dropHeld = true;
   await click(buttonNamed(container, "Save as draft"));
-  await settle(20);
+  await until(() => s.state.cursor !== null && s.state.receipt !== null);
   await connection(false);
   s.state.holdSaves = false;
   await connection(true);
-  await settle(20);
+  await until(
+    () =>
+      container.textContent?.includes(
+        "The original save was not committed. You can continue editing.",
+      ) === true,
+  );
   expect(s.commands).toContain("ResolveOriginal");
   expect(alerts(container)).not.toContain(conflictText);
   expect(container.textContent).toContain(

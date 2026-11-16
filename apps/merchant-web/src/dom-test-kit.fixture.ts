@@ -17,6 +17,26 @@ export async function mount(node: ReactNode): Promise<{ container: HTMLElement; 
   return { container, root };
 }
 
+/**
+ * Waits, in real time, until `condition` holds (letting renders run between checks). Use it when
+ * the work being waited for is not only promises: Web Crypto digests, for example, finish on
+ * another thread, so a fixed number of `settle` rounds passes on a quiet machine and fails on a
+ * busy CI runner.
+ */
+export async function until(condition: () => boolean, timeoutMs = 5_000): Promise<void> {
+  const started = performance.now();
+  for (;;) {
+    let met = false;
+    await act(async () => {
+      met = condition();
+      if (!met) await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    if (met) return;
+    if (performance.now() - started > timeoutMs)
+      throw new Error(`condition not met within ${timeoutMs} ms: ${condition.toString()}`);
+  }
+}
+
 /** Lets pending promises (and the renders they cause) finish. */
 export async function settle(rounds = 5): Promise<void> {
   for (let index = 0; index < rounds; index += 1)
