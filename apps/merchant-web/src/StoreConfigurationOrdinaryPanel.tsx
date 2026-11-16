@@ -957,7 +957,7 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
           {startChange !== null && !openLatest && !setupIncomplete && (
             <p>
               {t(
-                "A change cannot be created from this setup: it starts the business day at {setup}, and a Store that already runs keeps {now}, so past days and reports keep their boundaries. Put it back to {now} in step 1, Time zone and business day, save as draft, then come back here.",
+                "A change cannot be created yet: the business day start in this saved setup cannot be sent for approval. Put it back to {now} in step 1, Time zone and business day, save as draft, then come back here.",
                 startChange,
               )}
             </p>

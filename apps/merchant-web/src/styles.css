@@ -10975,6 +10975,16 @@ tr[data-drop-target="true"] {
 .store-setup-draft-page .store-setup-step-content button.store-setup-inline-action:disabled {
   color: var(--bop-color-text-muted);
 }
+/* b22: a value kept as the Store runs (an open Store's business day start) reads as text, not as a
+   field to type in: no bottom line. */
+.store-setup-draft-page
+  .store-setup-step-content
+  label
+  input[readonly]:is([type="time"], [type="text"]) {
+  border-color: transparent;
+  padding-inline: 0;
+  background: none;
+}
 @media (max-width: 640px) {
   .store-setup-summary__rows > div {
     grid-template-columns: minmax(0, 1fr);

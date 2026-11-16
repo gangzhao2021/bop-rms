@@ -156,7 +156,7 @@ it("b22: no change is created from a saved setup whose business day start differ
   const text = container.textContent ?? "";
   expect(text).not.toContain("用已保存的设置生成修改");
   expect(text).toContain(
-    "这份设置不能生成修改：它把营业日开始时间设为 04:30，而已经营业的门店要保持 04:00，这样过去的营业日和报表才能保持界限。请在第 1 步“时区和营业日”改回 04:00，存为草稿，再回到这里。",
+    "还不能生成修改：这份已保存设置的营业日开始时间无法提交审批。请在第 1 步“时区和营业日”改回 04:00，存为草稿，再回到这里。",
   );
   expect(client.prepare).not.toHaveBeenCalled();
   completeness.complete = false;

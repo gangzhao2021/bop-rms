@@ -10079,8 +10079,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   // b22: Store setup review gaps.
   "Offline. Earlier changes load again by themselves once the connection is back.":
     "已离线。网络恢复后，以前的修改会自动重新加载。",
-  "A change cannot be created from this setup: it starts the business day at {setup}, and a Store that already runs keeps {now}, so past days and reports keep their boundaries. Put it back to {now} in step 1, Time zone and business day, save as draft, then come back here.":
-    "这份设置不能生成修改：它把营业日开始时间设为{setup}，而已经营业的门店要保持{now}，这样过去的营业日和报表才能保持界限。请在第 1 步“时区和营业日”改回{now}，存为草稿，再回到这里。",
+  "A change cannot be created yet: the business day start in this saved setup cannot be sent for approval. Put it back to {now} in step 1, Time zone and business day, save as draft, then come back here.":
+    "还不能生成修改：这份已保存设置的营业日开始时间无法提交审批。请在第 1 步“时区和营业日”改回{now}，存为草稿，再回到这里。",
   "The business day keeps starting at {now}, as the Store runs today, so past days and reports keep their boundaries.":
     "营业日开始时间保持门店现在的{now}，这样过去的营业日和报表才能保持界限。",
   "This setup starts the business day at {setup}. A Store that already runs keeps {now}, so past days and reports keep their boundaries; a change with {setup} cannot be sent for approval.":

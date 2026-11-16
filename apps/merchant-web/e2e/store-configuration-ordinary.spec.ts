@@ -1499,7 +1499,7 @@ test("b22: an open Store's business day start is kept; a setup that changes it i
     panel(page).getByRole("button", { name: "Create the change from the saved setup" }),
   ).toHaveCount(0);
   await expect(panel(page)).toContainText(
-    "A change cannot be created from this setup: it starts the business day at 04:30",
+    "A change cannot be created yet: the business day start in this saved setup cannot be sent for approval.",
   );
   await expectNoInternalText(page);
   await b20Shots(page, "review-business-start-cannot-send-en", "BOP_B22_SHOTS");
