@@ -242,8 +242,13 @@ test("@production a manager discounts a started dish from the Tables page; only 
   const first = group.getByRole("button", { name: "Take $1.70 off" });
   await expect(first).toBeEnabled();
   const confirm = group.getByRole("button", { name: "Take $1.69 off" });
-  // The preview asks with the choice only: no reason, no reference, no amount.
-  expect(previews.at(-1)).toEqual({
+  // The preview asks with the choice only: no reason, no reference, no amount. (b23: each dish is
+  // also asked about alone, for its own figure.)
+  expect(
+    previews
+      .filter((body) => JSON.stringify(body.orderItemReferences) === JSON.stringify([id(202)]))
+      .at(-1),
+  ).toEqual({
     orderReference: id(1),
     orderItemReferences: [id(202)],
     kind: "Percent",
@@ -522,30 +527,57 @@ for (const language of ["en", "zh-Hans"] as const)
     await details.getByRole("button", { name: title }).click();
     const group = details.getByRole("group", { name: title });
     const choices = group.locator(".pay-later-remove__lines label");
-    // v15 b19: an unticked dish's own price is said as its price, never as what comping it takes.
-    const price = zh ? "价格 $14.13" : "price $14.13";
+    // b23 (live22): each dish says what the bill goes down by if it alone is comped (the server's
+    // figure, as the button and the take-off panel say it), never its order-time price.
+    const down = (amount: string) =>
+      zh ? `账单减 ${amount}（含税）` : `bill goes down ${amount} with tax`;
     await expect(choices).toHaveText([
-      `1 × Synthetic beef noodles · ${price}`,
-      `1 × Synthetic beef noodles · ${price}`,
+      `1 × Synthetic beef noodles · ${down("$14.13")}`,
+      `1 × Synthetic beef noodles · ${down("$14.13")}`,
     ]);
+    // b23: the panel took the focus from the opener it replaced.
+    await expect(group).toBeFocused();
     await choices.nth(0).getByRole("checkbox").check();
     await choices.nth(1).getByRole("checkbox").check();
-    // What comes off each ticked dish, from the server: −$14.13 and −$14.12, the button's $28.25.
+    // What comes off each ticked dish together, from the server: $14.13 and $14.12, the button's
+    // $28.25.
     await expect(choices).toHaveText([
-      "1 × Synthetic beef noodles · −$14.13",
-      "1 × Synthetic beef noodles · −$14.12",
+      `1 × Synthetic beef noodles · ${down("$14.13")}`,
+      `1 × Synthetic beef noodles · ${down("$14.12")}`,
     ]);
     await expect(
       group.getByRole("button", { name: zh ? "免单 $28.25" : "Comp $28.25" }),
     ).toBeVisible();
-    // Unticked again: the dish's own price.
+    // Unticked again: what the bill goes down by for it alone.
     await choices.nth(1).getByRole("checkbox").uncheck();
     await expect(choices).toHaveText([
-      "1 × Synthetic beef noodles · −$14.13",
-      `1 × Synthetic beef noodles · ${price}`,
+      `1 × Synthetic beef noodles · ${down("$14.13")}`,
+      `1 × Synthetic beef noodles · ${down("$14.13")}`,
     ]);
-    await expect(
-      group.getByRole("button", { name: zh ? "免单 $14.13" : "Comp $14.13" }),
-    ).toBeVisible();
+    const confirm = group.getByRole("button", { name: zh ? "免单 $14.13" : "Comp $14.13" });
+    await expect(confirm).toBeVisible();
+    // b23: with a reason the confirm is the filled primary, as the take-off's on every screen.
+    await group.getByRole("radio", { name: zh ? "致歉/好意" : "Goodwill" }).check();
+    await expect(confirm).toBeEnabled();
+    expect(
+      await confirm.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return { background: style.backgroundColor, color: style.color };
+      }),
+    ).toEqual({ background: "rgb(31, 99, 224)", color: "rgb(255, 255, 255)" });
+    for (const width of [1440, 1024, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      await page.screenshot({
+        path: `${process.env.B23_SHOTS ?? "test-results-b23/shots"}/tables-comp-${zh ? "zh-Hans" : "en"}-${width}.png`,
+        fullPage: true,
+      });
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+    // Cancel gives the focus back to the opener.
+    await group.getByRole("button", { name: zh ? "取消" : "Cancel" }).click();
+    await expect(details.getByRole("button", { name: title })).toBeFocused();
     await expectNoInternalText(page, ["Temporarily unavailable"]);
   });

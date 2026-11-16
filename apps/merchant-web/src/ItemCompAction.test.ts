@@ -1,7 +1,7 @@
 import { expect, it } from "vitest";
 import {
   compAmountMinor,
-  compChoiceMoney,
+  compDishBillDownMinor,
   compIntroText,
   compRecordText,
 } from "./ItemCompAction.js";
@@ -65,20 +65,19 @@ it("v15 M87/M161: a comp says why, who and when; points say they were the guest'
   expect(compRecordText({ kind: "Percent", percent: 20 }, "America/Toronto")).toBe("20% off");
 });
 
-it("v15 b17: a ticked dish shows what really comes off it, so the ticked dishes add up to the button", () => {
+it("v15 b17 / b23: a ticked dish says its part of the ticked dishes' figure, so they add up to the button", () => {
   // Two $12.50 Beef noodles at 13 %: each $14.13 alone, $28.25 on the whole bill (−$14.13/−$14.12).
-  const noodles = (n: number) => ({
-    orderItemReference: "item-" + String(n),
-    total: money("1413"),
-  });
+  const noodles = (n: number) => ({ orderItemReference: "item-" + String(n) });
   const preview = new Map([
     ["item-1", "1413"],
     ["item-2", "1412"],
   ]);
-  expect(compChoiceMoney(noodles(1), true, preview)).toBe("−$14.13");
-  expect(compChoiceMoney(noodles(2), true, preview)).toBe("−$14.12");
-  // Not ticked, or no preview back yet: the dish's own price, said as its price (v15 b19: comping
-  // it alone can take a cent less, so a bare amount would read as what comping takes off).
-  expect(compChoiceMoney(noodles(2), false, preview)).toBe("price $14.13");
-  expect(compChoiceMoney(noodles(2), true, null)).toBe("price $14.13");
+  expect(compDishBillDownMinor(noodles(1), true, preview, "1413")).toBe("1413");
+  expect(compDishBillDownMinor(noodles(2), true, preview, "1413")).toBe("1412");
+  // Not ticked, or the ticked dishes' preview not back yet: what the bill goes down by for it alone
+  // (b23: never its own price beside a button a cent lower); unknown or not yet known as such.
+  expect(compDishBillDownMinor(noodles(2), false, preview, "1413")).toBe("1413");
+  expect(compDishBillDownMinor(noodles(2), true, null, "1413")).toBe("1413");
+  expect(compDishBillDownMinor(noodles(2), true, null, null)).toBeNull();
+  expect(compDishBillDownMinor(noodles(2), false, preview, undefined)).toBeUndefined();
 });

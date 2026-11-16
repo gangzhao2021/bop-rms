@@ -1,0 +1,214 @@
+// @vitest-environment jsdom
+import { act } from "react";
+import { afterEach, expect, it } from "vitest";
+import { parseCurrentOrderDetail } from "./current-order-queue-client.js";
+import { ItemCompAction } from "./ItemCompAction.js";
+import { buttonNamed, click, mount, settle, typeInto } from "./dom-test-kit.fixture.js";
+import { setLanguageForTest } from "./i18n/i18n.js";
+
+/**
+ * b23 (live22, TM2 L22 MCC A): the Comp or discount panel listed "1 × Smashed cucumber · price
+ * $7.07" while its own button read "Comp $7.06" and the bill went down $7.06 (the bill's tax is
+ * worked out once). Each dish now says what the bill goes down by, as the take-off panel does, so
+ * the list and the button agree; partial discounts too.
+ */
+afterEach(() => {
+  setLanguageForTest("en");
+  document.body.replaceChildren();
+});
+
+const id = (n: number) => `01909968-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
+const money = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
+const line = (n: number, name: string, subtotal: string, tax: string, total: string) => ({
+  orderItemReference: id(200 + n),
+  orderBatchReference: id(91),
+  name,
+  options: [],
+  quantity: 1,
+  customerNote: null,
+  unitPrice: money(subtotal),
+  subtotal: money(subtotal),
+  discount: money("0"),
+  tax: money(tax),
+  fee: money("0"),
+  total: money(total),
+  canCancel: false,
+  cancellation: null,
+});
+const { order, lines } = parseCurrentOrderDetail(
+  {
+    screenId: "OPS-ORDER-DETAIL",
+    pickupContact: null,
+    order: {
+      orderReference: id(1),
+      orderNumber: "1",
+      orderType: "DineIn",
+      sourceChannel: "Qr",
+      submittedAt: "2026-11-16T05:32:48.000Z",
+      observedAt: "2026-11-16T05:39:00.000Z",
+      initialBatchReference: id(91),
+      batches: [
+        {
+          orderBatchReference: id(91),
+          sequence: 1,
+          acceptanceStatus: "Accepted",
+          canRequestAcceptance: false,
+          canCancel: false,
+          staffCancellation: null,
+          canCancelItems: false,
+          unpaidRemovableItems: [],
+          unpaidRemovedItems: [],
+          compableItems: [id(201), id(202)],
+          compedItems: [],
+        },
+      ],
+      canRequestAcceptance: false,
+      unfulfillable: null,
+      pickupNotCollected: false,
+      acceptBy: null,
+      awaitingPayment: false,
+      currentPhase: "InProgress",
+      currentVersion: 7,
+    },
+    lines: {
+      items: [
+        line(1, "Soy milk", "325", "42", "367"),
+        line(2, "Smashed cucumber", "625", "82", "707"),
+      ],
+      totals: {
+        subtotal: money("950"),
+        discount: money("0"),
+        tax: money("124"),
+        fee: money("0"),
+        total: money("1074"),
+      },
+    },
+  },
+  id(1),
+);
+/** The server's preview on the live bill: what the bill goes down by for this choice. */
+const asked: { orderItemReferences: string[]; kind: string; percent: number | null }[] = [];
+const fetcher = (async (_url: string, init?: RequestInit) => {
+  const body = JSON.parse(String(init?.body)) as (typeof asked)[number];
+  asked.push(body);
+  const half = body.kind === "Percent" && body.percent === 50;
+  const each = new Map([
+    [id(201), half ? "184" : "367"],
+    [id(202), half ? "353" : "706"],
+  ]);
+  const both = body.orderItemReferences.length === 2;
+  // Together the bill's cent falls differently: $3.67 + $7.07 = $10.74 (or $1.84 + $3.53).
+  const together = new Map([
+    [id(201), half ? "184" : "367"],
+    [id(202), half ? "354" : "707"],
+  ]);
+  const amounts = body.orderItemReferences.map((item) =>
+    (both ? together : each).get(item),
+  ) as string[];
+  return new Response(
+    JSON.stringify({
+      status: "Preview",
+      totalMinor: String(amounts.reduce((sum, value) => sum + Number(value), 0)),
+      lines: body.orderItemReferences.map((item, index) => ({
+        orderItemReference: item,
+        amountMinor: amounts[index],
+      })),
+    }),
+    { status: 200, headers: { "Content-Type": "application/json" } },
+  );
+}) as typeof fetch;
+const comp = () =>
+  mount(
+    <ItemCompAction
+      order={order}
+      lines={lines.items}
+      csrf={"a".repeat(43)}
+      fetcher={fetcher}
+      onSettled={() => undefined}
+    />,
+  );
+const pause = async () => {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  });
+  await settle(10);
+};
+const labels = (container: HTMLElement) =>
+  [...container.querySelectorAll(".pay-later-remove__lines label")].map((label) =>
+    label.textContent?.trim(),
+  );
+const tick = async (container: HTMLElement, name: string) => {
+  await click(
+    [...container.querySelectorAll(".pay-later-remove__lines label")]
+      .find((label) => label.textContent?.includes(name))
+      ?.querySelector("input"),
+  );
+  await pause();
+};
+
+it("each dish says what the bill goes down by, and the button says the same", async () => {
+  const { container } = await comp();
+  await click(buttonNamed(container, "Comp or discount"));
+  await settle(10);
+  expect(labels(container)).toEqual([
+    "1 × Soy milk · bill goes down $3.67 with tax",
+    "1 × Smashed cucumber · bill goes down $7.06 with tax",
+  ]);
+  expect(container.textContent).not.toContain("price $7.07");
+  await tick(container, "Smashed cucumber");
+  expect(buttonNamed(container, "Comp $7.06")).toBeDefined();
+  // Both ticked: each says its part of the ticked dishes' figure, which add up to the button.
+  await tick(container, "Soy milk");
+  expect(labels(container)).toEqual([
+    "1 × Soy milk · bill goes down $3.67 with tax",
+    "1 × Smashed cucumber · bill goes down $7.07 with tax",
+  ]);
+  expect(buttonNamed(container, "Comp $10.74")).toBeDefined();
+});
+
+it("a partial discount: each dish says what the bill goes down by for that percent", async () => {
+  const { container } = await comp();
+  await click(buttonNamed(container, "Comp or discount"));
+  await settle(10);
+  const percent = [...container.querySelectorAll('input[type="radio"]')].find((input) =>
+    input.parentElement?.textContent?.includes("Percent off"),
+  );
+  await click(percent);
+  // No percent yet: no figure for the choice, so each dish says its own price as that.
+  expect(labels(container)).toEqual([
+    "1 × Soy milk · price $3.67",
+    "1 × Smashed cucumber · price $7.07",
+  ]);
+  await typeInto(container.querySelector('input[inputmode="numeric"]'), "50");
+  await settle(10);
+  expect(labels(container)).toEqual([
+    "1 × Soy milk · bill goes down $1.84 with tax",
+    "1 × Smashed cucumber · bill goes down $3.53 with tax",
+  ]);
+  await tick(container, "Smashed cucumber");
+  expect(buttonNamed(container, "Take $3.53 off")).toBeDefined();
+});
+
+it("in Chinese the dish and the button read the same amount", async () => {
+  setLanguageForTest("zh-Hans");
+  const { container } = await comp();
+  await click(buttonNamed(container, "免单或折让"));
+  await settle(10);
+  expect(labels(container)).toContain("1 × Smashed cucumber · 账单减 $7.06（含税）");
+  await tick(container, "Smashed cucumber");
+  expect(buttonNamed(container, "免单 $7.06")).toBeDefined();
+});
+
+it("opening moves the focus into the panel; Cancel gives it back to the opener", async () => {
+  const { container } = await comp();
+  const opener = buttonNamed(container, "Comp or discount");
+  opener?.focus();
+  await click(opener);
+  await settle(10);
+  const group = container.querySelector('[role="group"]');
+  expect(group?.getAttribute("aria-label")).toBe("Comp or discount");
+  expect(document.activeElement).toBe(group);
+  await click(buttonNamed(container, "Cancel"));
+  expect(container.querySelector('[role="group"]')).toBeNull();
+  expect(document.activeElement).toBe(buttonNamed(container, "Comp or discount"));
+});

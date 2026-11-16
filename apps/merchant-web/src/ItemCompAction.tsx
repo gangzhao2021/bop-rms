@@ -5,6 +5,7 @@ import { FullSignInPrompt } from "./FullSignInPrompt.js";
 import { FULL_SIGN_IN_REQUIRED_TEXT, isFullSignInRequired } from "./full-sign-in.js";
 import { orderMoney } from "./order-money.js";
 import { serviceOperationReference } from "./service-control-client.js";
+import { payLaterRemoveDishText } from "./PayLaterItemRemoveAction.js";
 import { dollarsToMinor } from "./TableCheckout.js";
 import { storeTime } from "./StoreTime.js";
 
@@ -103,21 +104,22 @@ export function compAmountMinor(
 }
 
 /**
- * v15 b17 (DEC-COMP-BILL-CENT): what a dish's choice shows. A ticked dish shows what will really
- * come off it, from the server's preview (the whole bill's tax cent included), so the ticked dishes
- * add up to the button; any other dish, or one whose preview is not back yet, shows its own price,
- * said as its price (v15 b19): with tax worked out on the whole bill, comping it can take a cent
- * less, so the bare amount must not read as what comping it takes off.
+ * b23 (DEC-TAX-WHOLE-RECEIPT, DEC-COMP-BILL-CENT): what the bill goes down by for a dish in the
+ * comp panel, the take-off panel's way. A ticked dish says its part of the ticked dishes' preview
+ * (the whole bill's tax cent included), so the ticked dishes add up to the button; any other dish
+ * says what the bill goes down by when it alone gets this choice (the server's preview for it).
+ * Absent (undefined) while that is being worked out; null when it can't be (an older server, a
+ * refusal, or no amount or percent chosen yet): the dish then says its own price, as its price —
+ * never "price $7.07" beside "Comp $7.06".
  */
-export function compChoiceMoney(
-  line: Pick<CurrentOrderLine, "orderItemReference" | "total">,
+export function compDishBillDownMinor(
+  line: Pick<CurrentOrderLine, "orderItemReference">,
   ticked: boolean,
   previewLines: ReadonlyMap<string, string> | null,
-): string {
-  const off = ticked ? previewLines?.get(line.orderItemReference) : undefined;
-  return off === undefined
-    ? t("price {amount}", { amount: orderMoney(line.total) })
-    : "−" + orderMoney({ amountMinor: off, currencyCode: line.total.currencyCode });
+  alone: string | null | undefined,
+): string | null | undefined {
+  const together = ticked ? previewLines?.get(line.orderItemReference) : undefined;
+  return together ?? alone;
 }
 
 /**
@@ -146,11 +148,17 @@ export function ItemCompAction({
   readonly fetcher?: typeof fetch | undefined;
 }) {
   const [open, setOpen] = useState(false);
+  const panel = useRef<HTMLDivElement | null>(null);
+  const opener = useRef<HTMLButtonElement | null>(null);
+  // b23: opening moves the focus into the panel (the opener is replaced by it); Cancel gives it
+  // back to the opener, so a keyboard or screen-reader user never lands on the page itself.
+  const focusTo = useRef<"panel" | "opener" | null>(null);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [opened, setOpened] = useState<number | null>(null);
   if (preselect !== undefined && preselect.nonce !== opened) {
     setOpened(preselect.nonce);
     setOpen(true);
+    focusTo.current = "panel";
     setSelected(new Set(preselect.items));
   }
   const [choice, setChoice] = useState<Choice>("Comp");
@@ -167,6 +175,9 @@ export function ItemCompAction({
     readonly failure: Failure | null;
   } | null>(null);
   const [previewRun, setPreviewRun] = useState(0);
+  // b23: what the bill goes down by for each dish alone with this choice (null: couldn't say), by
+  // the Order's version and what was asked (nothing is recorded by asking).
+  const [dishPreviews, setDishPreviews] = useState<ReadonlyMap<string, string | null>>(new Map());
   const compable = new Set(order.batches.flatMap((batch) => batch.compableItems));
   const offered = lines.filter((line) => compable.has(line.orderItemReference));
   const chosen = offered.filter((line) => selected.has(line.orderItemReference));
@@ -192,6 +203,18 @@ export function ItemCompAction({
     amountOffMinor: choice === "Amount" ? String(amountOffMinor) : null,
   };
   const previewKey = valid ? JSON.stringify(asked) : null;
+  // b23: the same choice for one dish alone (an amount off is per dish, so any one dish can ask).
+  const choiceKnown =
+    choice === "Comp" ||
+    (choice === "Percent" && percentValue !== null) ||
+    (choice === "Amount" && amountOffMinor !== null);
+  const dishKeyFor = (orderItemReference: string) =>
+    (order.currentVersion ?? "") +
+    "|" +
+    JSON.stringify({ ...asked, orderItemReferences: [orderItemReference] });
+  const dishKeys =
+    open && choiceKnown ? offered.map((line) => dishKeyFor(line.orderItemReference)) : [];
+  const dishKeysText = JSON.stringify(dishKeys);
   // v15 b16 (DEC-COMP-BILL-CENT): the server works out what really comes off the bill (the bill's
   // tax is worked out once over the whole bill, so it can differ by a cent from the dishes' own).
   const total =
@@ -252,6 +275,57 @@ export function ItemCompAction({
       abort.abort();
     };
   }, [open, previewKey, csrf, fetcher, previewRun]);
+  // b23: each dish's own figure, asked one at a time while the panel is open (a table has a few
+  // dishes; an answer already known is not asked again).
+  const known = useRef(dishPreviews);
+  known.current = dishPreviews;
+  useEffect(() => {
+    const keys = (JSON.parse(dishKeysText) as string[]).filter((key) => !known.current.has(key));
+    if (keys.length === 0) return;
+    const abort = new AbortController();
+    void (async () => {
+      for (const key of keys) {
+        if (abort.signal.aborted) return;
+        let minor: string | null = null;
+        try {
+          const response = await fetcher("/merchant/orders/comp-items/preview", {
+            method: "POST",
+            credentials: "same-origin",
+            cache: "no-store",
+            redirect: "error",
+            signal: abort.signal,
+            headers: {
+              "Content-Type": "application/json",
+              Accept: "application/json",
+              "X-BOP-CSRF": csrf,
+            },
+            body: key.slice(key.indexOf("|") + 1),
+          });
+          const payload = (await response.json().catch(() => null)) as {
+            totalMinor?: unknown;
+          } | null;
+          minor =
+            response.ok &&
+            typeof payload?.totalMinor === "string" &&
+            /^(0|[1-9][0-9]{0,17})$/u.test(payload.totalMinor)
+              ? payload.totalMinor
+              : null;
+        } catch {
+          minor = null;
+        }
+        if (abort.signal.aborted) return;
+        setDishPreviews((current) => new Map(current).set(key, minor));
+      }
+    })();
+    return () => abort.abort();
+    // previewRun: the table changed (a refused confirm): the figures are asked again.
+  }, [dishKeysText, csrf, fetcher, previewRun]);
+  useEffect(() => {
+    if (open && focusTo.current === "panel") panel.current?.focus();
+    else if (!open && focusTo.current === "opener") opener.current?.focus();
+    else return;
+    focusTo.current = null;
+  }, [open]);
   if (offered.length === 0) return null;
   const ready = total !== null && reason !== "" && !busy;
   const send = async () => {
@@ -282,6 +356,8 @@ export function ItemCompAction({
       const payload = (await response.json().catch(() => null)) as unknown;
       if (response.ok) {
         attempt.current = null;
+        setDishPreviews(new Map());
+        focusTo.current = "opener";
         setOpen(false);
         setSelected(new Set());
         setReason("");
@@ -294,6 +370,7 @@ export function ItemCompAction({
       // v15 b16: the amount may have changed with the table: work it out again before the
       // manager can confirm, never the old button amount.
       if (next === "Changed") {
+        setDishPreviews(new Map());
         setPreview(null);
         setPreviewRun((value) => value + 1);
       }
@@ -306,12 +383,26 @@ export function ItemCompAction({
   };
   if (!open)
     return (
-      <button type="button" data-variant="destructive" onClick={() => setOpen(true)}>
+      <button
+        ref={opener}
+        type="button"
+        data-variant="destructive"
+        onClick={() => {
+          focusTo.current = "panel";
+          setOpen(true);
+        }}
+      >
         {t("Comp or discount")}
       </button>
     );
   return (
-    <div role="group" aria-label={t("Comp or discount")} className="item-comp order-cancel-actions">
+    <div
+      ref={panel}
+      tabIndex={-1}
+      role="group"
+      aria-label={t("Comp or discount")}
+      className="item-comp order-cancel-actions"
+    >
       <p>{compIntroText()}</p>
       <ul className="pay-later-remove__lines">
         {offered.map((line) => (
@@ -328,8 +419,20 @@ export function ItemCompAction({
                   setSelected(next);
                 }}
               />{" "}
-              {line.quantity} × {line.name} ·{" "}
-              {compChoiceMoney(line, selected.has(line.orderItemReference), previewLines)}
+              {/* b23: what the bill goes down by for this dish, as the button and take-off say. */}
+              {payLaterRemoveDishText({
+                quantity: line.quantity,
+                name: line.name,
+                billDownMinor: choiceKnown
+                  ? compDishBillDownMinor(
+                      line,
+                      selected.has(line.orderItemReference),
+                      previewLines,
+                      dishPreviews.get(dishKeyFor(line.orderItemReference)),
+                    )
+                  : null,
+                total: line.total,
+              })}
             </label>
           </li>
         ))}
@@ -433,7 +536,14 @@ export function ItemCompAction({
                       amount: orderMoney({ amountMinor: String(total), currencyCode }),
                     })}
       </button>{" "}
-      <button type="button" disabled={busy} onClick={() => setOpen(false)}>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => {
+          focusTo.current = "opener";
+          setOpen(false);
+        }}
+      >
         {t("Cancel")}
       </button>
       {previewFailure !== null && failure === null ? (
