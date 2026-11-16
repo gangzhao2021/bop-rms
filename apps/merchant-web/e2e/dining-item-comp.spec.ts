@@ -1,6 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
+import { accent, choiceLook, filledPrimaries } from "./tables-v3-look";
 
 /**
  * WP-2423 item 8 ① segment 2 (Owner decision 2, Figma 45:315): on the Tables page a manager comps
@@ -524,6 +525,9 @@ for (const language of ["en", "zh-Hans"] as const)
       name: zh ? "所选桌台详情" : "Selected table details",
     });
     const title = zh ? "免单或折让" : "Comp or discount";
+    // b23 review: at most one filled primary on the table's panel before the comp is opened.
+    const shut = await filledPrimaries(details);
+    expect(shut.length).toBeLessThanOrEqual(1);
     await details.getByRole("button", { name: title }).click();
     const group = details.getByRole("group", { name: title });
     const choices = group.locator(".pay-later-remove__lines label");
@@ -565,11 +569,30 @@ for (const language of ["en", "zh-Hans"] as const)
         return { background: style.backgroundColor, color: style.color };
       }),
     ).toEqual({ background: "rgb(31, 99, 224)", color: "rgb(255, 255, 255)" });
+    // b23 review: the chosen "how much" and reason read as v3's chosen filter (accent words at
+    // 600 over an accent line), the rest as plain words; never a black pill.
+    const chips = group.locator(".table-checkout__method label");
+    for (const index of Array.from({ length: await chips.count() }, (_, n) => n)) {
+      const chip = chips.nth(index);
+      const chosen = await chip.getByRole("radio").isChecked();
+      expect(await choiceLook(chip)).toEqual(
+        chosen
+          ? { background: "rgba(0, 0, 0, 0)", color: accent, weight: "600", line: accent }
+          : {
+              background: "rgba(0, 0, 0, 0)",
+              color: "rgb(23, 23, 23)",
+              weight: "400",
+              line: "rgba(0, 0, 0, 0)",
+            },
+      );
+    }
     for (const width of [1440, 1024, 390]) {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
       ).toBe(true);
+      // The comp's confirm is the step being taken: the panel's only filled primary.
+      expect(await filledPrimaries(details)).toEqual([zh ? "免单 $14.13" : "Comp $14.13"]);
       await page.screenshot({
         path: `${process.env.B23_SHOTS ?? "test-results-b23/shots"}/tables-comp-${zh ? "zh-Hans" : "en"}-${width}.png`,
         fullPage: true,
@@ -579,5 +602,6 @@ for (const language of ["en", "zh-Hans"] as const)
     // Cancel gives the focus back to the opener.
     await group.getByRole("button", { name: zh ? "取消" : "Cancel" }).click();
     await expect(details.getByRole("button", { name: title })).toBeFocused();
+    expect(await filledPrimaries(details)).toEqual(shut);
     await expectNoInternalText(page, ["Temporarily unavailable"]);
   });

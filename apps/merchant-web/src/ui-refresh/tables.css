@@ -1032,6 +1032,30 @@
   align-items: center;
   min-height: 36px;
 }
+/* b23 review: the comp's choices as v3 chooses elsewhere (Orders' filters): plain words, the
+   chosen one in accent words at 600 over a 2px accent line; never a black pill (brief §2). */
+.workspace-page.tables-v3 .table-panel .item-comp fieldset.table-checkout__method {
+  gap: 0 24px;
+}
+.workspace-page.tables-v3 .table-panel .item-comp .table-checkout__method label {
+  min-height: 44px;
+  padding: 0 0 2px;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: none;
+  color: var(--bop-color-text-default);
+  font-weight: 400;
+}
+.workspace-page.tables-v3
+  .table-panel
+  .item-comp
+  .table-checkout__method
+  label:has(input[type="radio"]:checked) {
+  border-bottom-color: var(--bop-color-accent);
+  background: none;
+  color: var(--bop-color-accent);
+  font-weight: 600;
+}
 .workspace-page.tables-v3 .item-comp .table-checkout__field {
   display: grid;
   gap: 4px;
