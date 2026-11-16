@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
+import { appendFileSync } from "node:fs";
+import { performance } from "node:perf_hooks";
+import process from "node:process";
+import { setTimeout as delay } from "node:timers/promises";
 import { request } from "node:http";
 import { createRequire } from "node:module";
 import { URL } from "node:url";
@@ -72,13 +76,27 @@ export async function exerciseTaxConfigRuntimeHttp(context) {
     featureCause = "NONE",
     featureCheckpoint = "NONE",
     lateCandidateFineRole = null,
+    /** Another same-transaction authority change injected like the grant withdrawal below. */
+    lateMutation = null,
     lateCandidateGuardCode = "NONE",
     lateCandidateGuardSite = "NONE",
     lateCandidateSourceStep = "NONE",
     lateCandidateAssertSite = "NONE",
     featureDefinitionReads = 0,
     authorityPolicyReads = 0,
-    authoritySessionReads = 0;
+    authoritySessionReads = 0,
+    transactionStatements = 0,
+    settingStatements = 0,
+    advisoryLockStatements = 0;
+  // Load check only (never in CI): TAX_RUNTIME_QUERY_DELAY_MS adds that many milliseconds before
+  // every statement of the code under test, as a slower database round trip would.
+  // Measurement only: TAX_RUNTIME_NOTES_FILE collects the measured lines of a run.
+  const note = (line) => {
+    if (process.env.TAX_RUNTIME_NOTES_FILE)
+      appendFileSync(process.env.TAX_RUNTIME_NOTES_FILE, line + "\n");
+  };
+  const queryDelayMs = Number(process.env.TAX_RUNTIME_QUERY_DELAY_MS ?? 0);
+  assert(Number.isInteger(queryDelayMs) && queryDelayMs >= 0 && queryDelayMs <= 20);
   const reference = () => id(++serial),
     hooks = new WeakMap();
   await admin.connect();
@@ -122,7 +140,28 @@ export async function exerciseTaxConfigRuntimeHttp(context) {
               else if (sql.includes("PermissionCurrentPolicyPacketV1")) authorityPolicyReads++;
               else if (sql.includes("FROM bop_identity.authentication_session WHERE"))
                 authoritySessionReads++;
+              transactionStatements++;
+              if (sql.startsWith("SELECT set_config(")) settingStatements++;
+              else if (sql.includes("pg_advisory_xact_lock")) advisoryLockStatements++;
+              if (queryDelayMs > 0) await delay(queryDelayMs);
               const result = await client.query(sql, values);
+              if (
+                lateMutation !== null &&
+                stage.startsWith("MaterialLate") &&
+                sql.startsWith("INSERT INTO rms_pricing.tax_config_material_operation") &&
+                result.rowCount === 1
+              ) {
+                const selected = lateMutation;
+                lateMutation = null;
+                // As below: a same-transaction Session or Store assignment change after the
+                // terminal original INSERT must deny at the next source hold and roll back.
+                await client.query("RESET ROLE");
+                const mutation = await client.query(selected.sql, selected.values);
+                assert.equal(mutation.rowCount, 1);
+                lateCandidateInjected = true;
+                lateCandidateSourceStep = "TerminalOriginalInserted";
+                await client.query("SET LOCAL ROLE " + role);
+              }
               if (
                 lateCandidateFineRole !== null &&
                 (sql.startsWith("INSERT INTO rms_pricing.tax_config_candidate_operation") ||
@@ -1355,11 +1394,32 @@ export async function exerciseTaxConfigRuntimeHttp(context) {
       featureDefinitionReads = 0;
       authorityPolicyReads = 0;
       authoritySessionReads = 0;
+      transactionStatements = 0;
+      settingStatements = 0;
+      advisoryLockStatements = 0;
+      const reportStarted = performance.now();
       const reportResponse = await send("materials/commands", reportCommand);
-      assert.equal(reportResponse.status, 200);
+      const reportMillis = Math.round(performance.now() - reportStarted);
+      const reportRoundTrips = [
+        "report save round trips " + transactionStatements,
+        "settings " + settingStatements,
+        "advisory locks " + advisoryLockStatements,
+        "Session reads " + authoritySessionReads,
+        "policy reads " + authorityPolicyReads,
+        reportMillis + " ms",
+      ].join(", ");
+      note(reportRoundTrips);
+      assert.equal(reportResponse.status, 200, reportRoundTrips);
       assert.equal(featureDefinitionReads, 2);
-      assert(authorityPolicyReads <= 64, "report save authority reads " + authorityPolicyReads);
-      assert(authoritySessionReads <= 65, "report save Session reads " + authoritySessionReads);
+      assert(authorityPolicyReads <= 64, reportRoundTrips);
+      assert(authoritySessionReads <= 65, reportRoundTrips);
+      // Every source hold still rechecks the Session, selection, Membership and policy packet,
+      // but the transaction sends the settings written since its last statement as one statement
+      // (none when already held) and answers a lock it already holds. Before: 2,096 round trips,
+      // 1,166 of them settings and 145 advisory locks; 1,114, 435 and 13 after.
+      assert(transactionStatements <= 1150, reportRoundTrips);
+      assert(settingStatements <= 450, reportRoundTrips);
+      assert(advisoryLockStatements <= 16, reportRoundTrips);
       const reportReceipt = parseTaxConfigMaterialOperation(reportResponse.body);
       assert.equal(reportReceipt.version.qualification, "NotEvaluated");
       assert.equal(reportReceipt.version.content.declaredConclusion, "Pass");
@@ -1419,6 +1479,50 @@ export async function exerciseTaxConfigRuntimeHttp(context) {
       assert.equal(lateMaterial.status, 403);
       assert.deepEqual(await grantState(), beforeMaterialGrant);
       assert.deepEqual(await materialCounts(), beforeLateMaterial);
+      // A Session revoked, or the Store assignment suspended, inside the request after the
+      // write is refused at the next source hold (each hold reads them again) and rolls back.
+      // Both answer 503 "unavailable", exactly as before the hold round trips were cut (that
+      // refusal is not classified as a permission denial; unchanged here).
+      const authorityRows = async () =>
+        (
+          await admin.query(
+            "SELECT (SELECT jsonb_agg(jsonb_build_object('status',status,'version',version) ORDER BY session_id) FROM bop_identity.authentication_session WHERE actor_id=$1) sessions,(SELECT jsonb_agg(jsonb_build_object('lifecycle',lifecycle,'version',version) ORDER BY assignment_id) FROM bop_membership.store_assignment WHERE actor_id=$1 AND store_id=$2) assignments",
+            [actor, store],
+          )
+        ).rows[0];
+      for (const [lateStage, mutation, expectedStatus] of [
+        [
+          "MaterialLateSessionRevoked",
+          {
+            sql: "UPDATE bop_identity.authentication_session SET status='Revoked',revocation_reason='Administrative',revoked_at=GREATEST(now(),created_at),version=version+1 WHERE actor_id=$1 AND status='Active'",
+            values: [actor],
+          },
+          503,
+        ],
+        [
+          "MaterialLateAssignmentSuspended",
+          {
+            sql: "UPDATE bop_membership.store_assignment SET lifecycle='Suspended',version=version+1 WHERE actor_id=$1 AND store_id=$2 AND lifecycle='Active'",
+            values: [actor, store],
+          },
+          503,
+        ],
+      ]) {
+        stage = lateStage;
+        const beforeLateRows = await authorityRows(),
+          beforeLateCounts = await materialCounts();
+        lateMutation = mutation;
+        const lateResponse = await send("materials/commands", {
+          ...suiteCommand,
+          operationReference: reference(),
+        });
+        assert.equal(lateMutation, null, lateStage + " injected");
+        assert.equal(lateResponse.status, expectedStatus, lateStage);
+        assert.equal(lateResponse.body.error, "tax_config_authoring_unavailable", lateStage);
+        assert.deepEqual(await authorityRows(), beforeLateRows);
+        assert.deepEqual(await materialCounts(), beforeLateMaterial);
+        assert.deepEqual(await materialCounts(), beforeLateCounts);
+      }
       stage = "MaterialImmutableHistory";
       const historicalSuite = await send("materials/version", undefined, {
         query:
