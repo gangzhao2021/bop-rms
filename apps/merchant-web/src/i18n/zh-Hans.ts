@@ -6519,6 +6519,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Give money back from the payment": "从付款中退钱",
   "Ask a manager to comp them.": "请店长为这些菜免单。",
   "Take dishes off the bill": "从账单删菜",
+  "Take dishes off round {sequence}": "从第 {sequence} 轮删菜",
   "Tick the dishes the table won't be charged for. The kitchen stops them.":
     "勾选这桌不收钱的菜，后厨会停做。",
   "Take the whole round off · {amount}": "删掉整轮 · {amount}",

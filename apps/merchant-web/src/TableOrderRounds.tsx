@@ -103,6 +103,46 @@ export function TableOrderRounds({
       </p>
     );
   const { detail } = state;
+  // DEC-DINE-IN-PAY-LATER (rule 2), item 8 ①: dishes come off the unpaid bill right here. v15
+  // b21: with the round they belong to, under its dishes, never stacked under the totals.
+  const removeAction = (batch: CurrentOrderDetail["order"]["batches"][number]) =>
+    batch.unpaidRemovableItems.length === 0 &&
+    removeRefusals[batch.orderBatchReference] === undefined ? null : (
+      <fieldset disabled={locked} className="order-cancel-actions table-order-rounds__remove">
+        {removeRefusals[batch.orderBatchReference] !== undefined ? (
+          <PayLaterRemoveRefusalNotice
+            refusal={removeRefusals[batch.orderBatchReference] as PayLaterRemoveRefusal}
+            order={detail.order}
+            compInstead={(items) => setCompRequest({ items, nonce: Date.now() })}
+            refundHref={`/operations/orders/${orderReference}`}
+            onDone={() =>
+              setRemoveRefusals((current) =>
+                Object.fromEntries(
+                  Object.entries(current).filter(([key]) => key !== batch.orderBatchReference),
+                ),
+              )
+            }
+          />
+        ) : null}
+        <PayLaterItemRemoveAction
+          order={detail.order}
+          batch={batch}
+          lines={detail.lines.items}
+          csrf={csrf}
+          fetcher={fetcher}
+          onRefused={(refusal) =>
+            setRemoveRefusals((current) => ({
+              ...current,
+              [batch.orderBatchReference]: refusal,
+            }))
+          }
+          onSettled={() => {
+            setServed((count) => count + 1);
+            onChanged?.();
+          }}
+        />
+      </fieldset>
+    );
   return (
     <section className="table-order-rounds" aria-label={t("This table's order")}>
       <DiningRoundsProvider
@@ -144,56 +184,10 @@ export function TableOrderRounds({
             head: (batch) => (
               <KitchenReleaseNotice release={batch.kitchenRelease} now={Date.now()} />
             ),
+            action: removeAction,
           }}
         />
       </DiningRoundsProvider>
-      {detail.order.batches
-        .filter(
-          (batch) =>
-            batch.unpaidRemovableItems.length > 0 ||
-            removeRefusals[batch.orderBatchReference] !== undefined,
-        )
-        .map((batch) => (
-          // DEC-DINE-IN-PAY-LATER (rule 2), item 8 ①: dishes come off the unpaid bill right here.
-          <fieldset
-            key={batch.orderBatchReference}
-            disabled={locked}
-            className="order-cancel-actions table-order-rounds__remove"
-          >
-            {removeRefusals[batch.orderBatchReference] !== undefined ? (
-              <PayLaterRemoveRefusalNotice
-                refusal={removeRefusals[batch.orderBatchReference] as PayLaterRemoveRefusal}
-                order={detail.order}
-                compInstead={(items) => setCompRequest({ items, nonce: Date.now() })}
-                refundHref={`/operations/orders/${orderReference}`}
-                onDone={() =>
-                  setRemoveRefusals((current) =>
-                    Object.fromEntries(
-                      Object.entries(current).filter(([key]) => key !== batch.orderBatchReference),
-                    ),
-                  )
-                }
-              />
-            ) : null}
-            <PayLaterItemRemoveAction
-              order={detail.order}
-              batch={batch}
-              lines={detail.lines.items}
-              csrf={csrf}
-              fetcher={fetcher}
-              onRefused={(refusal) =>
-                setRemoveRefusals((current) => ({
-                  ...current,
-                  [batch.orderBatchReference]: refusal,
-                }))
-              }
-              onSettled={() => {
-                setServed((count) => count + 1);
-                onChanged?.();
-              }}
-            />
-          </fieldset>
-        ))}
       {(() => {
         // WP-2423 item 8 ① segment 2: comps and discounts, kept on the record (never removed).
         const comps = detail.order.batches.flatMap((batch) => batch.compedItems);

@@ -1066,8 +1066,8 @@ test("@production DEC-DINE-IN-PAY-LATER: staff take a dish off an unpaid table's
     const before = sent.length;
     await page.setViewportSize({ width, height: 900 });
     await page.goto("/operations/orders/" + id(1));
-    await page.getByRole("button", { name: "Take dishes off the bill" }).click();
-    const group = page.getByRole("group", { name: "Take dishes off the bill" });
+    await page.getByRole("button", { name: "Take dishes off round 1" }).click();
+    const group = page.getByRole("group", { name: "Take dishes off round 1" });
     // The dish says its own price; the button what the bill goes down by.
     await expect(group.getByLabel(/Synthetic soup/u)).toBeVisible();
     await expect(group).toContainText("1 × Synthetic soup · price $11.30");
@@ -1229,8 +1229,8 @@ test("@production Coordinator 2026-10-30: a dish that can't come off the bill sa
     refused = false;
     await page.setViewportSize({ width, height: 900 });
     await page.goto("/operations/orders/" + id(1));
-    await page.getByRole("button", { name: "Take dishes off the bill" }).click();
-    const group = page.getByRole("group", { name: "Take dishes off the bill" });
+    await page.getByRole("button", { name: "Take dishes off round 1" }).click();
+    const group = page.getByRole("group", { name: "Take dishes off round 1" });
     await group.getByLabel(/Synthetic soup/u).check();
     await group.getByLabel("Reason").selectOption("CUSTOMER_REQUEST");
     // v15 b20: the amount could not be worked out (the preview answered unavailable): the button

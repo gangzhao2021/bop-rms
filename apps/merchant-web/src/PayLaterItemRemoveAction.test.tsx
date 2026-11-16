@@ -108,8 +108,36 @@ it("DEC-DINE-IN-PAY-LATER: offers the action only while a dish can come off the 
       />,
     );
   };
-  expect(render([id(201)])).toContain("Take dishes off the bill");
+  expect(render([id(201)])).toContain("Take dishes off round 1");
   expect(render([])).toBe("");
+});
+
+// v15 b21 live check: a table's rounds each had a "Take dishes off the bill" button, stacked
+// under the totals with the same name; staff could tell them apart only by where they were.
+it("v15 b21: each round's take-off button names its round, in staff words", () => {
+  const render = (sequence: number) => {
+    const { order, lines } = detail({ unpaidRemovableItems: [id(201)], unpaidRemovedItems: [] });
+    const batch = order.batches[0];
+    if (!batch) throw new Error("fixture");
+    return renderToStaticMarkup(
+      <PayLaterItemRemoveAction
+        order={order}
+        batch={{ ...batch, sequence }}
+        lines={lines.items}
+        csrf="synthetic"
+        onSettled={() => undefined}
+        onRefused={() => undefined}
+      />,
+    );
+  };
+  expect(render(2)).toBe('<button type="button">Take dishes off round 2</button>');
+  expect(render(3)).toContain("Take dishes off round 3");
+  setLanguageForTest("zh-Hans");
+  try {
+    expect(render(2)).toBe('<button type="button">从第 2 轮删菜</button>');
+  } finally {
+    setLanguageForTest("en");
+  }
 });
 
 it("DEC-DINE-IN-PAY-LATER: the bill shows what came off and what is left", () => {

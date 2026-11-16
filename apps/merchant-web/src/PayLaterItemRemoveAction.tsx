@@ -323,18 +323,17 @@ export function PayLaterItemRemoveAction({
       setBusy(false);
     }
   };
+  // v15 b21: a table's rounds each have this action, so it names its round (as the round's own
+  // heading does) and no two read the same.
+  const title = t("Take dishes off round {sequence}", { sequence: batch.sequence });
   if (!open)
     return (
       <button type="button" onClick={() => setOpen(true)}>
-        {t("Take dishes off the bill")}
+        {title}
       </button>
     );
   return (
-    <div
-      role="group"
-      aria-label={t("Take dishes off the bill")}
-      className="pay-later-remove order-cancel-actions"
-    >
+    <div role="group" aria-label={title} className="pay-later-remove order-cancel-actions">
       <p>{t("Tick the dishes the table won't be charged for. The kitchen stops them.")}</p>
       <KitchenMayHaveStartedNote receivedAt={batch.kitchenReceivedAt} />
       <ul className="pay-later-remove__lines">

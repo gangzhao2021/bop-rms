@@ -271,6 +271,11 @@ export interface OrderLineRounds {
   readonly today?: string | null | undefined;
   /** WP-2423 item 8 ⑤ decision 4: which phone sent each round (staff rounds say so already). */
   readonly phones?: ReadonlyMap<string, number | null> | undefined;
+  /**
+   * v15 b21: what staff can do to the round's dishes (take them off the bill), shown with the
+   * round under its dishes, never stacked under the totals where no round is named.
+   */
+  readonly action?: ((batch: QueuedOrder["batches"][number]) => React.ReactNode) | undefined;
 }
 /** WP-2423 OPS-ORDER-DETAIL: what was ordered — items with options and notes, and the totals. */
 /** WP-2423 (M23): why a line can't be made as ordered now, in staff words. */
@@ -603,6 +608,7 @@ export function CurrentOrderLines({
                     {rounds.head?.(batch)}
                     {members.length === 0 ? null : <ul>{members.map(lineItem)}</ul>}
                     <DiningRoundServeAll sequence={batch.sequence} />
+                    {rounds.action?.(batch)}
                   </section>
                 );
               })}
@@ -5102,7 +5108,7 @@ export function CurrentOrderQueuePage({
                           to={`/operations/orders/${order.orderReference}`}
                           state={{ ordersListSearch: listSearch }}
                         >
-                          {t("Take dishes off the bill")}
+                          {t("Take dishes off round {sequence}", { sequence: batch.sequence })}
                         </Link>
                       )}
                     </fieldset>
