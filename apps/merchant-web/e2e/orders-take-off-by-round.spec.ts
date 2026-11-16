@@ -19,6 +19,20 @@ const headers = { "cache-control": "no-store" };
 const csrf = "a".repeat(43);
 const money = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
 const shots = process.env.B22_SHOTS ?? "test-results-b22/shots";
+const shots23 = process.env.B23_SHOTS ?? "test-results-b23/shots";
+
+/**
+ * b23 (live22): the take-off confirm is one shared component; on Orders it drew as the filled
+ * primary, on Tables as accent words beside Cancel. Brief §2 (v3): one filled primary (accent
+ * background, white words) for the step being taken; Cancel is accent words.
+ */
+async function confirmLooks(button: Locator) {
+  return button.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { background: style.backgroundColor, color: style.color };
+  });
+}
+const filledPrimary = { background: "rgb(31, 99, 224)", color: "rgb(255, 255, 255)" };
 
 interface MockState {
   detailFails: boolean;
@@ -233,6 +247,8 @@ for (const zh of [false, true]) {
       .getByRole("button", { name: takeOff(2) })
       .click();
     const group = round(2).getByRole("group", { name: takeOff(2) });
+    // b23: the opener is replaced by the panel, so the panel takes the focus.
+    await expect(group).toBeFocused();
     const choices = group.locator(".pay-later-remove__lines label");
     const down = (amount: string) =>
       zh ? `账单减 ${amount}（含税）` : `bill goes down ${amount} with tax`;
@@ -266,6 +282,39 @@ for (const zh of [false, true]) {
         : "Tax is worked out once on the whole bill, so the bill goes down $10.74.",
     );
     await shoot(page, `orders-page-round2-whole-${lang}`);
+    // b23: with a reason, the confirm is the filled primary (as on Tables), with room above the
+    // order's Subtotal.
+    await group.getByRole("combobox").selectOption({ index: 1 });
+    const confirm = group.getByRole("button", {
+      name: zh ? "删掉整轮 · $10.74" : "Take the whole round off · $10.74",
+    });
+    await expect(confirm).toBeEnabled();
+    expect(await confirmLooks(confirm)).toEqual(filledPrimary);
+    // Room under the panel: before the next round's line, and (last round) before Subtotal.
+    const roomUnder = async (panel: Locator, next: Locator) => {
+      const box = await panel.boundingBox();
+      if (box === null) throw new Error("not laid out");
+      return (await top(next)) - (box.y + box.height);
+    };
+    expect(await roomUnder(group, round(3))).toBeGreaterThanOrEqual(16);
+    for (const width of [1440, 1024, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      await page.screenshot({
+        path: `${shots23}/orders-page-take-off-confirm-${lang}-${width}.png`,
+        fullPage: true,
+      });
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+    // Cancel gives the focus back to the round's opener.
+    await group.getByRole("button", { name: zh ? "取消" : "Cancel" }).click();
+    await expect(round(2).getByRole("button", { name: takeOff(2) })).toBeFocused();
+    await round(3)
+      .getByRole("button", { name: takeOff(3) })
+      .click();
+    const last = round(3).getByRole("group", { name: takeOff(3) });
+    await expect(last).toBeFocused();
+    expect(await roomUnder(last, totals)).toBeGreaterThanOrEqual(16);
+    await shoot(page, `orders-page-round3-panel-${lang}`);
     const axe = await new AxeBuilder({ page })
       .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
       .analyze();
@@ -302,6 +351,24 @@ for (const zh of [false, true]) {
     await action.click();
     await expect(page).toHaveURL(/\/operations\/orders(\?.*)?$/u);
     await expect(round(2).getByRole("group", { name: takeOff(2) })).toBeVisible();
+    // b23: in place, the panel takes the focus from the opener it replaced.
+    await expect(round(2).getByRole("group", { name: takeOff(2) })).toBeFocused();
+    {
+      const group = round(2).getByRole("group", { name: takeOff(2) });
+      await group.locator(".pay-later-remove__lines label").nth(1).getByRole("checkbox").check();
+      await group.getByRole("combobox").selectOption({ index: 1 });
+      const confirm = group.getByRole("button", { name: zh ? "删掉 $7.06" : "Take off $7.06" });
+      await expect(confirm).toBeEnabled();
+      expect(await confirmLooks(confirm)).toEqual(filledPrimary);
+      for (const width of [1440, 1024, 390]) {
+        await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+        await page.screenshot({
+          path: `${shots23}/orders-workbench-take-off-confirm-${lang}-${width}.png`,
+          fullPage: true,
+        });
+      }
+      await page.setViewportSize({ width: 1440, height: 900 });
+    }
     await shoot(page, `orders-workbench-round2-panel-${lang}`);
 
     // The order's dishes could not be read on the workbench: the round's link opens its page

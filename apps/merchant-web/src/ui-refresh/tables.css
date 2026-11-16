@@ -926,6 +926,21 @@
   background: var(--bop-color-surface-raised, #f2f2f2);
   color: var(--bop-color-text-muted);
 }
+/* b23 (live22): the confirm of taking dishes off a round, and of a comp, is the filled primary
+   here as on Orders (brief §2: one filled primary for the step being taken; the panel-wide
+   accent-word rule above outranked it, so Tables drew it as words beside Cancel). */
+.workspace-page.tables-v3
+  .table-panel
+  :is(.pay-later-remove__actions, .item-comp)
+  > button.table-checkout__primary:not(:disabled) {
+  padding: 0 24px;
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-accent-fill);
+}
+/* b23: the comp's Cancel sits at the start under its confirm, as accent words, not centred. */
+.workspace-page.tables-v3 .table-panel .item-comp > button:not(.table-checkout__primary) {
+  justify-self: start;
+}
 .workspace-page.tables-v3 .table-panel .table-checkout__secondary {
   color: var(--bop-color-danger);
   text-decoration: none;

@@ -1,5 +1,5 @@
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
 
 /**
@@ -12,6 +12,20 @@ const id = (n: number) => "01909969-0000-7000-8000-" + n.toString(16).padStart(1
 const headers = { "cache-control": "no-store" };
 const csrf = "a".repeat(43);
 const money = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
+const shots23 = process.env.B23_SHOTS ?? "test-results-b23/shots";
+
+/**
+ * b23 (live22): the take-off confirm is one shared component; on Orders it drew as the filled
+ * primary, on Tables as accent words beside Cancel. Brief §2 (v3): one filled primary (accent
+ * background, white words) for the step being taken; Cancel is accent words.
+ */
+async function confirmLooks(button: Locator) {
+  return button.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { background: style.backgroundColor, color: style.color };
+  });
+}
+const filledPrimary = { background: "rgb(31, 99, 224)", color: "rgb(255, 255, 255)" };
 
 for (const zh of [false, true]) {
   test(`@production each round's take-off action is with that round and names it (${zh ? "zh-Hans" : "en"})`, async ({
@@ -216,6 +230,8 @@ for (const zh of [false, true]) {
       .getByRole("button", { name: takeOff(3) })
       .click();
     const group = round(3).getByRole("group", { name: takeOff(3) });
+    // b23: the opener is replaced by the panel, so the panel takes the focus.
+    await expect(group).toBeFocused();
     await expect(group.locator(".pay-later-remove__lines label")).toHaveText([
       zh
         ? "1 × Synthetic tea · 账单减 $11.30（含税）"
@@ -224,6 +240,21 @@ for (const zh of [false, true]) {
     await group.getByRole("checkbox").check();
     await expect.poll(() => previewed.at(-1)?.orderBatchReference).toBe(id(53));
     await expect(round(2).getByRole("button", { name: takeOff(2) })).toBeVisible();
+    // b23: with a reason, the confirm is the filled primary, as on Orders.
+    await group.getByRole("combobox").selectOption({ index: 1 });
+    const confirm = group.getByRole("button", {
+      name: zh ? "删掉整轮 · $11.30" : "Take the whole round off · $11.30",
+    });
+    await expect(confirm).toBeEnabled();
+    expect(await confirmLooks(confirm)).toEqual(filledPrimary);
+    for (const width of [1440, 1024, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      await page.screenshot({
+        path: `${shots23}/tables-take-off-confirm-${zh ? "zh-Hans" : "en"}-${width}.png`,
+        fullPage: true,
+      });
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
     for (const width of [1440, 390]) {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
       await page.screenshot({
@@ -240,6 +271,9 @@ for (const zh of [false, true]) {
         .filter((v) => v.impact === "serious" || v.impact === "critical")
         .map((v) => v.id),
     ).toEqual([]);
+    // b23: Cancel gives the focus back to the round's opener.
+    await group.getByRole("button", { name: zh ? "取消" : "Cancel" }).click();
+    await expect(round(3).getByRole("button", { name: takeOff(3) })).toBeFocused();
     await expectNoInternalText(page, ["Temporarily unavailable"]);
   });
 }

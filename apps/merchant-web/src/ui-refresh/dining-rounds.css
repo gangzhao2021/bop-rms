@@ -366,6 +366,8 @@
   grid-template-columns: minmax(0, 1fr);
   flex: 1 1 100%;
   gap: 16px;
+  /* b23 (live22): its confirm sat tight on the next round's line and on Subtotal; room under it. */
+  margin-bottom: 16px;
 }
 .pay-later-remove > p {
   margin: 0;
@@ -398,7 +400,8 @@
 }
 /* b22: the panel takes the focus when staff arrive for its round; the page scrolls to it, and no
    ring is drawn around a panel that is not itself a control. */
-.pay-later-remove:focus {
+.pay-later-remove:focus,
+.item-comp:focus {
   outline: none;
 }
 .pay-later-remove__actions {
