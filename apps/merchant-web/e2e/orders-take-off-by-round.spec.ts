@@ -221,10 +221,11 @@ for (const zh of [false, true]) {
       .click();
     const group = round(2).getByRole("group", { name: takeOff(2) });
     const choices = group.locator(".pay-later-remove__lines label");
-    const down = zh ? "账单减" : "bill goes down";
+    const down = (amount: string) =>
+      zh ? `账单减 ${amount}（含税）` : `bill goes down ${amount} with tax`;
     await expect(choices).toHaveText([
-      `1 × Soy milk · ${down} $3.67`,
-      `1 × Smashed cucumber · ${down} $7.06`,
+      `1 × Soy milk · ${down("$3.67")}`,
+      `1 × Smashed cucumber · ${down("$7.06")}`,
     ]);
     // Nothing ticked: a prompt for this round's dishes, which can't be pressed.
     const empty = group.getByRole("button", {
@@ -307,8 +308,8 @@ for (const zh of [false, true]) {
     await expect(page3.getByRole("button", { name: takeOff(3) })).toHaveCount(0);
     await expect(group.locator(".pay-later-remove__lines label")).toHaveText([
       zh
-        ? "1 × Beef noodles (TEST) · 账单减 $14.12"
-        : "1 × Beef noodles (TEST) · bill goes down $14.12",
+        ? "1 × Beef noodles (TEST) · 账单减 $14.12（含税）"
+        : "1 × Beef noodles (TEST) · bill goes down $14.12 with tax",
     ]);
     // Round 3 reads $14.13 on the bill; taking it all off takes $14.12 off, said why.
     await group.getByRole("checkbox").check();

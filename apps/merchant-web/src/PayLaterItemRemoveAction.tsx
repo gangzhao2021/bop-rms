@@ -153,7 +153,12 @@ export function PayLaterRemoveRefusalNotice({
 export function payLaterRemoveButtonText(input: {
   readonly busy: boolean;
   readonly chosen: number;
-  readonly offered: number;
+  /**
+   * b22: the ticked dishes are every dish of the round still on the bill. Not when a dish of it
+   * stays (the kitchen started it, it was comped): ticking all that can come off is then not the
+   * whole round, and the button never says so.
+   */
+  readonly wholeRound: boolean;
   readonly previewMinor: string | null;
   readonly currencyCode: string;
   readonly sequence: number;
@@ -161,7 +166,7 @@ export function payLaterRemoveButtonText(input: {
   if (input.busy) return t("Recording…");
   if (input.chosen === 0)
     return t("Choose dishes to take off round {sequence}", { sequence: input.sequence });
-  const whole = input.chosen === input.offered;
+  const whole = input.wholeRound;
   if (input.previewMinor === null)
     return whole ? t("Take the whole round off") : t("Take these dishes off");
   const amount = orderMoney({ amountMinor: input.previewMinor, currencyCode: input.currencyCode });
@@ -175,6 +180,7 @@ export function payLaterRemoveButtonText(input: {
  * alone comes off (the server's preview), so the dish and the button agree to the cent ($7.06,
  * never its own price $7.07 beside "Take off $7.06"). While that is being worked out the dish names
  * no amount; when it can't be (an older server, a refusal) the dish says its own price, as that.
+ * It says "with tax", as the round above lists its dishes before tax.
  */
 export function payLaterRemoveDishText(input: {
   readonly quantity: number;
@@ -190,7 +196,7 @@ export function payLaterRemoveDishText(input: {
     " · " +
     (input.billDownMinor === null
       ? t("price {amount}", { amount: orderMoney(input.total) })
-      : t("bill goes down {amount}", {
+      : t("bill goes down {amount} with tax", {
           amount: orderMoney({
             amountMinor: input.billDownMinor,
             currencyCode: input.total.currencyCode,
@@ -225,6 +231,32 @@ export function payLaterRemoveTogetherNote(input: {
   return t("Tax is worked out once on the whole bill, so the bill goes down {amount}.", {
     amount: orderMoney({ amountMinor: input.previewMinor, currencyCode: input.currencyCode }),
   });
+}
+
+/**
+ * b22 (DEC-TAX-WHOLE-RECEIPT): whether the ticked dishes are the whole round as the bill reads it —
+ * every dish of the round still on the bill (not taken off before, not cancelled), comped dishes and
+ * dishes the kitchen started included. Only then do the button and the note speak of the round.
+ */
+export function payLaterChosenWholeRound(input: {
+  readonly batch: Pick<Batch, "orderBatchReference" | "unpaidRemovedItems">;
+  readonly lines: readonly Pick<
+    CurrentOrderLine,
+    "orderItemReference" | "orderBatchReference" | "cancellation"
+  >[];
+  readonly chosen: readonly string[];
+}): boolean {
+  const onBill = input.lines.filter(
+    (line) =>
+      line.orderBatchReference === input.batch.orderBatchReference &&
+      line.cancellation === null &&
+      !input.batch.unpaidRemovedItems.includes(line.orderItemReference),
+  );
+  return (
+    input.chosen.length > 0 &&
+    onBill.length === input.chosen.length &&
+    onBill.every((line) => input.chosen.includes(line.orderItemReference))
+  );
 }
 
 /** The preview's amount, or null when the answer is not one (an older server, a refusal). */
@@ -437,10 +469,17 @@ export function PayLaterItemRemoveAction({
   // v15 b21: a table's rounds each have this action, so it names its round (as the round's own
   // heading does) and no two read the same.
   const title = t("Take dishes off round {sequence}", { sequence: batch.sequence });
+  // b22: the round's own figure is compared only when every dish of it on the bill is ticked; a
+  // round with a dish that stays reads more than what can come off, and that is not tax.
+  const wholeRound = payLaterChosenWholeRound({
+    batch,
+    lines,
+    chosen: chosen.map((line) => line.orderItemReference),
+  });
   const together = payLaterRemoveTogetherNote({
     previewMinor,
     dishMinors: chosen.map((line) => previews.get(keyFor([line.orderItemReference]) as string)),
-    roundMinor: chosen.length === offered.length ? roundMinor : undefined,
+    roundMinor: wholeRound ? roundMinor : undefined,
     currencyCode,
   });
   if (!open)
@@ -511,7 +550,7 @@ export function PayLaterItemRemoveAction({
           {payLaterRemoveButtonText({
             busy,
             chosen: chosen.length,
-            offered: offered.length,
+            wholeRound,
             previewMinor,
             currencyCode,
             sequence: batch.sequence,

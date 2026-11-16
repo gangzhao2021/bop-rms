@@ -5,6 +5,7 @@ import { removedItemsTotal } from "./CurrentOrderQueuePage.js";
 import {
   PayLaterItemRemoveAction,
   PayLaterRemoveRefusalNotice,
+  payLaterChosenWholeRound,
   payLaterRemoveButtonText,
   payLaterRemoveDishText,
   payLaterRemoveFailureText,
@@ -211,7 +212,7 @@ it("v15 b20: the take-off button names what the bill goes down by, never the dis
     payLaterRemoveButtonText({
       busy,
       chosen,
-      offered,
+      wholeRound: chosen === offered,
       previewMinor,
       currencyCode: "CAD",
       sequence: 1,
@@ -248,7 +249,7 @@ it("b22: a dish says what the bill goes down by, as the button does, and the emp
       billDownMinor,
       total: money("707"),
     });
-  expect(dish("706")).toBe("1 × Smashed cucumber · bill goes down $7.06");
+  expect(dish("706")).toBe("1 × Smashed cucumber · bill goes down $7.06 with tax");
   // Being worked out: no figure yet; couldn't be: its own price, said as that.
   expect(dish(undefined)).toBe("1 × Smashed cucumber");
   expect(dish(null)).toBe("1 × Smashed cucumber · price $7.07");
@@ -256,7 +257,7 @@ it("b22: a dish says what the bill goes down by, as the button does, and the emp
     payLaterRemoveButtonText({
       busy: false,
       chosen: 0,
-      offered: 2,
+      wholeRound: false,
       previewMinor: null,
       currencyCode: "CAD",
       sequence,
@@ -264,11 +265,46 @@ it("b22: a dish says what the bill goes down by, as the button does, and the emp
   expect(empty(3)).toBe("Choose dishes to take off round 3");
   setLanguageForTest("zh-Hans");
   try {
-    expect(dish("706")).toBe("1 × Smashed cucumber · 账单减 $7.06");
+    expect(dish("706")).toBe("1 × Smashed cucumber · 账单减 $7.06（含税）");
     expect(empty(3)).toBe("请选要从第 3 轮删的菜");
   } finally {
     setLanguageForTest("en");
   }
+});
+
+// b22 review: a round of Beef noodles the kitchen started and Soy milk not started offers only Soy
+// milk. Ticking it is all that can come off, but the noodles stay: not the whole round, so the
+// round's figure is never compared (it differs because a dish stays, not because of tax).
+it("b22: ticking every dish that can come off is the whole round only when no dish of it stays on the bill", () => {
+  const round = { orderBatchReference: id(91), unpaidRemovedItems: [id(205)] };
+  const dish = (n: number, batch = 91, cancelled = false) => ({
+    orderItemReference: id(200 + n),
+    orderBatchReference: id(batch),
+    cancellation: cancelled
+      ? ({ refund: money("0") } as unknown as Parameters<
+          typeof payLaterChosenWholeRound
+        >[0]["lines"][number]["cancellation"])
+      : null,
+  });
+  const whole = (lines: ReturnType<typeof dish>[], chosen: number[]) =>
+    payLaterChosenWholeRound({ batch: round, lines, chosen: chosen.map((n) => id(200 + n)) });
+  // Soy milk (1) and Beef noodles (3, started): ticking Soy milk is not the whole round.
+  expect(whole([dish(1), dish(3)], [1])).toBe(false);
+  expect(whole([dish(1), dish(3)], [1, 3])).toBe(true);
+  // A dish taken off before (5), a cancelled one (6) and another round's (7) don't count.
+  expect(whole([dish(1), dish(5), dish(6, 91, true), dish(7, 92)], [1])).toBe(true);
+  expect(whole([dish(1)], [])).toBe(false);
+  // The button then names what comes off, never the whole round.
+  expect(
+    payLaterRemoveButtonText({
+      busy: false,
+      chosen: 1,
+      wholeRound: whole([dish(1), dish(3)], [1]),
+      previewMinor: "367",
+      currencyCode: "CAD",
+      sequence: 2,
+    }),
+  ).toBe("Take off $3.67");
 });
 
 it("b22: when dishes together take a cent more or less off than their figures, the panel says why", () => {

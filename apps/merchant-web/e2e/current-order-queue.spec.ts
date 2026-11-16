@@ -1070,7 +1070,7 @@ test("@production DEC-DINE-IN-PAY-LATER: staff take a dish off an unpaid table's
     const group = page.getByRole("group", { name: "Take dishes off round 1" });
     // b22: the dish says what the bill goes down by, as the button does.
     await expect(group.getByLabel(/Synthetic soup/u)).toBeVisible();
-    await expect(group).toContainText("1 × Synthetic soup · bill goes down $11.29");
+    await expect(group).toContainText("1 × Synthetic soup · bill goes down $11.29 with tax");
     await group.getByLabel(/Synthetic soup/u).check();
     // Nothing is sent without a reason.
     await expect(group.getByRole("button", { name: "Take off $11.29" })).toBeDisabled();

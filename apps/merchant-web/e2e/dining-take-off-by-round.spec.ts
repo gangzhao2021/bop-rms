@@ -217,7 +217,9 @@ for (const zh of [false, true]) {
       .click();
     const group = round(3).getByRole("group", { name: takeOff(3) });
     await expect(group.locator(".pay-later-remove__lines label")).toHaveText([
-      zh ? "1 × Synthetic tea · 账单减 $11.30" : "1 × Synthetic tea · bill goes down $11.30",
+      zh
+        ? "1 × Synthetic tea · 账单减 $11.30（含税）"
+        : "1 × Synthetic tea · bill goes down $11.30 with tax",
     ]);
     await group.getByRole("checkbox").check();
     await expect.poll(() => previewed.at(-1)?.orderBatchReference).toBe(id(53));

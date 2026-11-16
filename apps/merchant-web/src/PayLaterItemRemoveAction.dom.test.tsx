@@ -34,65 +34,73 @@ const line = (n: number, name: string, subtotal: string, tax: string, total: str
   canCancel: false,
   cancellation: null,
 });
-const { order, lines } = parseCurrentOrderDetail(
-  {
-    screenId: "OPS-ORDER-DETAIL",
-    pickupContact: null,
-    order: {
-      orderReference: id(1),
-      orderNumber: "9",
-      orderType: "DineIn",
-      sourceChannel: "Qr",
-      submittedAt: "2026-11-16T05:32:48.000Z",
-      observedAt: "2026-11-16T05:39:00.000Z",
-      initialBatchReference: id(90),
-      batches: [
-        {
-          orderBatchReference: id(90),
-          sequence: 1,
-          acceptanceStatus: "Accepted",
-          canRequestAcceptance: false,
-          canCancel: false,
-          staffCancellation: null,
-          canCancelItems: false,
-          unpaidRemovableItems: [],
-          unpaidRemovedItems: [],
+/** Round 2's dishes, and those of them that can still come off (the rest stay on the bill). */
+const readDetail = (
+  dishes: ReturnType<typeof line>[],
+  removable: readonly string[],
+  totals: { subtotal: string; tax: string; total: string },
+) =>
+  parseCurrentOrderDetail(
+    {
+      screenId: "OPS-ORDER-DETAIL",
+      pickupContact: null,
+      order: {
+        orderReference: id(1),
+        orderNumber: "9",
+        orderType: "DineIn",
+        sourceChannel: "Qr",
+        submittedAt: "2026-11-16T05:32:48.000Z",
+        observedAt: "2026-11-16T05:39:00.000Z",
+        initialBatchReference: id(90),
+        batches: [
+          {
+            orderBatchReference: id(90),
+            sequence: 1,
+            acceptanceStatus: "Accepted",
+            canRequestAcceptance: false,
+            canCancel: false,
+            staffCancellation: null,
+            canCancelItems: false,
+            unpaidRemovableItems: [],
+            unpaidRemovedItems: [],
+          },
+          {
+            orderBatchReference: id(91),
+            sequence: 2,
+            acceptanceStatus: "Accepted",
+            canRequestAcceptance: false,
+            canCancel: false,
+            staffCancellation: null,
+            canCancelItems: false,
+            unpaidRemovableItems: removable,
+            unpaidRemovedItems: [],
+          },
+        ],
+        canRequestAcceptance: false,
+        unfulfillable: null,
+        pickupNotCollected: false,
+        acceptBy: null,
+        awaitingPayment: false,
+        currentPhase: "InProgress",
+        currentVersion: 7,
+      },
+      lines: {
+        items: dishes,
+        totals: {
+          subtotal: money(totals.subtotal),
+          discount: money("0"),
+          tax: money(totals.tax),
+          fee: money("0"),
+          total: money(totals.total),
         },
-        {
-          orderBatchReference: id(91),
-          sequence: 2,
-          acceptanceStatus: "Accepted",
-          canRequestAcceptance: false,
-          canCancel: false,
-          staffCancellation: null,
-          canCancelItems: false,
-          unpaidRemovableItems: [id(201), id(202)],
-          unpaidRemovedItems: [],
-        },
-      ],
-      canRequestAcceptance: false,
-      unfulfillable: null,
-      pickupNotCollected: false,
-      acceptBy: null,
-      awaitingPayment: false,
-      currentPhase: "InProgress",
-      currentVersion: 7,
-    },
-    lines: {
-      items: [
-        line(1, "Soy milk", "325", "42", "367"),
-        line(2, "Smashed cucumber", "625", "82", "707"),
-      ],
-      totals: {
-        subtotal: money("950"),
-        discount: money("0"),
-        tax: money("124"),
-        fee: money("0"),
-        total: money("1074"),
       },
     },
-  },
-  id(1),
+    id(1),
+  );
+const { order, lines } = readDetail(
+  [line(1, "Soy milk", "325", "42", "367"), line(2, "Smashed cucumber", "625", "82", "707")],
+  [id(201), id(202)],
+  { subtotal: "950", tax: "124", total: "1074" },
 );
 const batch = order.batches[1];
 if (batch === undefined) throw new Error("fixture");
@@ -142,8 +150,9 @@ it("each dish says what the bill goes down by, and the button says the same for 
   const group = container.querySelector('[role="group"]');
   expect(group?.getAttribute("aria-label")).toBe("Take dishes off round 2");
   const labels = [...container.querySelectorAll("label")].map((label) => label.textContent);
-  expect(labels).toContain(" 1 × Soy milk · bill goes down $3.67");
-  expect(labels).toContain(" 1 × Smashed cucumber · bill goes down $7.06");
+  // "with tax": the round above lists its dishes before tax ($3.25, $6.25).
+  expect(labels).toContain(" 1 × Soy milk · bill goes down $3.67 with tax");
+  expect(labels).toContain(" 1 × Smashed cucumber · bill goes down $7.06 with tax");
   expect(container.textContent).not.toContain("price $7.07");
   // Nothing ticked: a prompt for this round's dishes, which can't be pressed.
   const empty = buttonNamed(container, "Choose dishes to take off round 2");
@@ -168,7 +177,7 @@ it("in Chinese the dish and the button read the same amount", async () => {
   const { container } = await panel();
   await click(buttonNamed(container, "从第 2 轮删菜"));
   await settle(10);
-  expect(container.textContent).toContain("1 × Smashed cucumber · 账单减 $7.06");
+  expect(container.textContent).toContain("1 × Smashed cucumber · 账单减 $7.06（含税）");
   expect(buttonNamed(container, "请选要从第 2 轮删的菜")).toBeDefined();
   await tick(container, "Smashed cucumber");
   expect(buttonNamed(container, "删掉 $7.06")).toBeDefined();
@@ -184,4 +193,40 @@ it("staff arriving for this round find its panel open, with the focus on it", as
   expect(arrived).toBe(1);
   // No second button of the same name to press.
   expect(buttonNamed(container, "Take dishes off round 2")).toBeUndefined();
+});
+
+// b22 review: round 2 has Beef noodles the kitchen started (it stays on the bill) and Soy milk not
+// started. Ticking Soy milk is everything that can come off, but not the whole round: the round's
+// $14.97 on the bill is more than $3.67 because the noodles stay, not because of tax.
+it("a round with a dish that stays: ticking all that can come off is not the whole round, and no tax note", async () => {
+  const mixed = readDetail(
+    [line(1, "Soy milk", "325", "42", "367"), line(3, "Beef noodles", "1000", "130", "1130")],
+    [id(201)],
+    { subtotal: "1325", tax: "172", total: "1497" },
+  );
+  const round = mixed.order.batches[1];
+  if (round === undefined) throw new Error("fixture");
+  const { container } = await mount(
+    <PayLaterItemRemoveAction
+      order={mixed.order}
+      batch={round}
+      lines={mixed.lines.items}
+      csrf={"a".repeat(43)}
+      roundMinor="1497"
+      fetcher={fetcher}
+      onSettled={() => undefined}
+      onRefused={() => undefined}
+    />,
+  );
+  await click(buttonNamed(container, "Take dishes off round 2"));
+  await settle(10);
+  // Only the dish not started is offered.
+  const labels = [...container.querySelectorAll(".pay-later-remove__lines label")].map(
+    (label) => label.textContent,
+  );
+  expect(labels).toEqual([" 1 × Soy milk · bill goes down $3.67 with tax"]);
+  await tick(container, "Soy milk");
+  expect(buttonNamed(container, "Take off $3.67")).toBeDefined();
+  expect(buttonNamed(container, "Take the whole round off · $3.67")).toBeUndefined();
+  expect(container.querySelector(".pay-later-remove__note")).toBeNull();
 });
