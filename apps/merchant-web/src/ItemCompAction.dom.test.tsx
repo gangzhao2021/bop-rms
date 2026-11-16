@@ -313,27 +313,29 @@ it("b23 review: the last dishes comped with the action still there: the focus go
 // focus on the page (BODY) for 5 s+. The confirm rereads the floor, which locks the table panel
 // (its fieldset disabled) in the same render as the panel closes, so the opener could not take the
 // focus; and the table's order may be drawn again, replacing the opener.
-function TablesPanel({ remount }: { readonly remount: boolean }) {
+function TablesPanel({ redraw }: { readonly redraw: boolean }) {
   const [locked, setLocked] = useState(false);
   const [revision, setRevision] = useState(0);
-  return table(
-    false,
+  return (
     <fieldset disabled={locked}>
-      <ItemCompAction
-        key={remount ? revision : 0}
-        order={order}
-        lines={lines.items}
-        csrf={"a".repeat(43)}
-        fetcher={compFetcher}
-        onSettled={() => {
-          setLocked(true);
-          setTimeout(() => {
-            setLocked(false);
-            setRevision((value) => value + 1);
-          }, 40);
-        }}
-      />
-    </fieldset>,
+      {/* b24 review: the table's order drawn again while the panel is still locked. */}
+      <div key={redraw ? revision : 0}>
+        {table(
+          false,
+          <ItemCompAction
+            order={order}
+            lines={lines.items}
+            csrf={"a".repeat(43)}
+            fetcher={compFetcher}
+            onSettled={() => {
+              setLocked(true);
+              if (redraw) setRevision((value) => value + 1);
+              setTimeout(() => setLocked(false), 40);
+            }}
+          />,
+        )}
+      </div>
+    </fieldset>
   );
 }
 const compOne = async (container: HTMLElement) => {
@@ -357,14 +359,14 @@ const reread = async () => {
 };
 
 it("b24: on Tables one dish comped: the focus goes back to the opener once the panel unlocks", async () => {
-  const { container } = await mount(<TablesPanel remount={false} />);
+  const { container } = await mount(<TablesPanel redraw={false} />);
   await compOne(container);
   await reread();
   expect(document.activeElement).toBe(buttonNamed(container, "Comp or discount"));
 });
 
-it("b24: on Tables the opener drawn again after the reread still gets the focus", async () => {
-  const { container } = await mount(<TablesPanel remount />);
+it("b24: on Tables the order drawn again while the panel is still locked: the opener still gets the focus", async () => {
+  const { container } = await mount(<TablesPanel redraw />);
   await compOne(container);
   await reread();
   expect(document.activeElement).toBe(buttonNamed(container, "Comp or discount"));
@@ -373,7 +375,7 @@ it("b24: on Tables the opener drawn again after the reread still gets the focus"
 it("b24: staff already moved on: the focus is never taken back", async () => {
   const { container } = await mount(
     <>
-      <TablesPanel remount={false} />
+      <TablesPanel redraw={false} />
       <input aria-label="Search" />
     </>,
   );
@@ -381,4 +383,38 @@ it("b24: staff already moved on: the focus is never taken back", async () => {
   container.querySelector<HTMLInputElement>('input[aria-label="Search"]')?.focus();
   await reread();
   expect(document.activeElement).toBe(container.querySelector('input[aria-label="Search"]'));
+});
+
+it("b24 review: staff tapped the page while the panel was locked: the focus is never pulled back", async () => {
+  const { container } = await mount(<TablesPanel redraw={false} />);
+  await compOne(container);
+  // A tap on plain text (the bill, a heading) moves no focus, but staff are working there.
+  container.querySelector("h3")?.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+  await reread();
+  expect(document.activeElement).toBe(document.body);
+});
+
+it("b24 review: the focus back on the opener and staff moved on: a later unmount takes nothing", async () => {
+  const { container, root } = await mount(
+    <>
+      {table(false, action(order))}
+      <input aria-label="Search" />
+    </>,
+  );
+  await compOne(container);
+  expect(document.activeElement).toBe(buttonNamed(container, "Comp or discount"));
+  const search = container.querySelector<HTMLInputElement>('input[aria-label="Search"]');
+  search?.focus();
+  search?.blur();
+  await later();
+  await act(async () => {
+    root.render(
+      <>
+        {table(false, null)}
+        <input aria-label="Search" />
+      </>,
+    );
+  });
+  await later();
+  expect(document.activeElement).toBe(document.body);
 });

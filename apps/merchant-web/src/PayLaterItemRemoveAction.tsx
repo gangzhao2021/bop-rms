@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { focusOpenerSelector, focusOpenerWhenReady, useSettledFocus } from "./settled-focus.js";
+import { focusOpenerSelector, useSettledFocus } from "./settled-focus.js";
 import { KitchenMayHaveStartedNote } from "./kitchen-cancel-warning.js";
 import { Link } from "react-router";
 import { t } from "./i18n/i18n.js";
@@ -416,7 +416,7 @@ export function PayLaterItemRemoveAction({
     if (open && focusTo.current === "panel") panel.current?.focus();
     else if (!open && focusTo.current === "opener")
       // b24: on Tables the panel is locked (and may be drawn again) while the floor is reread.
-      focusOpenerWhenReady(openerKey, opener.current);
+      settledFocus.toOpener(openerKey, opener.current);
     else return;
     focusTo.current = null;
   }, [open]);

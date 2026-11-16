@@ -40,6 +40,30 @@ export function useSettledFocus(selectors: readonly string[], gone: boolean) {
     reset() {
       box.place = null;
     },
+    /**
+     * The panel closed with the action still there: the focus goes back to its opener once it can
+     * take it. b24 review: the place is then forgotten once staff move on from the opener, or a few
+     * seconds after, so a much later unmount (staff leaving the page) never looks for it again.
+     * Until then it stays: the reread may still take the opener away (the last dish comped).
+     */
+    toOpener(value: string, current: HTMLElement | null) {
+      const place = box.place;
+      const forget = () => {
+        if (box.place === place) box.place = null;
+      };
+      focusOpenerWhenReady(value, current, (focused) => {
+        if (focused === null) return forget();
+        setTimeout(forget, OPENER_FOCUS_WAIT_MS);
+        focused.addEventListener(
+          "focusout",
+          () =>
+            setTimeout(() => {
+              if (focused.isConnected) forget();
+            }, 0),
+          { once: true },
+        );
+      });
+    },
   };
 }
 
@@ -50,18 +74,20 @@ export function returnSettledFocus(place: HTMLElement, selectors: readonly strin
   if (!place.isConnected) {
     // b24: the place was drawn again (a reread replaced it): its opener, found by its stable
     // `data-focus-opener` value, is the one place that still says where staff were.
-    for (const selector of selectors) {
-      if (!selector.startsWith("[data-focus-opener=")) continue;
-      const element = document.querySelector<HTMLElement>(selector);
-      if (element === null || element.matches(":disabled")) continue;
-      element.focus();
-      return document.activeElement === element;
-    }
-    return false;
+    const opener = selectors.find((selector) => selector.startsWith("[data-focus-opener="));
+    if (opener === undefined) return false;
+    whenFocusable(() => document.querySelector<HTMLElement>(opener));
+    return true;
   }
   for (const selector of selectors) {
     const element = place.querySelector<HTMLElement>(selector);
-    if (element === null || element.matches(":disabled")) continue;
+    if (element === null) continue;
+    if (element.matches(":disabled")) {
+      // b24 review: the opener is there but locked while the floor is reread: wait for it.
+      if (!selector.startsWith("[data-focus-opener=")) continue;
+      whenFocusable(() => document.querySelector<HTMLElement>(selector));
+      return true;
+    }
     focusable(element).focus();
     return true;
   }
@@ -86,19 +112,54 @@ const OPENER_FOCUS_STEP_MS = 50;
  * page. The opener is found again by its `data-focus-opener` value and focused once it can take
  * it, for a few seconds at most; never once staff have put the focus somewhere else.
  */
-export function focusOpenerWhenReady(value: string, current: HTMLElement | null): void {
+export function focusOpenerWhenReady(
+  value: string,
+  current: HTMLElement | null,
+  done?: (focused: HTMLElement | null) => void,
+): void {
   const selector = focusOpenerSelector(value);
+  whenFocusable(
+    () => (current?.isConnected === true ? current : document.querySelector<HTMLElement>(selector)),
+    done,
+  );
+}
+
+/**
+ * Focuses what `find` returns once it is there and enabled (b24 review: also when it is drawn again
+ * while still locked), for `OPENER_FOCUS_WAIT_MS` at most. It stops as soon as staff act: the focus
+ * moved off the page, or they pressed or tapped anywhere (a tap on plain text moves no focus).
+ * `done` runs with what took the focus, or with null once staff moved on.
+ */
+function whenFocusable(
+  find: () => HTMLElement | null,
+  done?: (focused: HTMLElement | null) => void,
+): void {
   const until = Date.now() + OPENER_FOCUS_WAIT_MS;
+  let staffActed = false;
+  const onPointerDown = () => {
+    staffActed = true;
+  };
+  document.addEventListener("pointerdown", onPointerDown, true);
+  const finish = (settled: boolean, focused: HTMLElement | null) => {
+    document.removeEventListener("pointerdown", onPointerDown, true);
+    if (settled) done?.(focused);
+  };
   const attempt = () => {
     const active = document.activeElement;
-    if (active !== null && active !== document.body && active.isConnected) return;
-    const opener =
-      current?.isConnected === true ? current : document.querySelector<HTMLElement>(selector);
-    if (opener !== null && !opener.matches(":disabled")) {
-      opener.focus();
-      if (document.activeElement === opener) return;
+    if (staffActed || (active !== null && active !== document.body && active.isConnected)) {
+      finish(true, null);
+      return;
+    }
+    const target = find();
+    if (target !== null && !target.matches(":disabled")) {
+      target.focus();
+      if (document.activeElement === target) {
+        finish(true, target);
+        return;
+      }
     }
     if (Date.now() < until) setTimeout(attempt, OPENER_FOCUS_STEP_MS);
+    else finish(false, null);
   };
   attempt();
 }
