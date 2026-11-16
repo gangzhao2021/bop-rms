@@ -6,7 +6,9 @@ const settleDelays = [3_000, 10_000, 30_000] as const;
 /**
  * b24 (v15 live check of b23): a read that failed while the connection was gone is made again by
  * itself once the connection is back, so staff are never left with "could not be loaded" on a page
- * that is online again. `failed` says whether the last read failed; `readAgain` reads it again.
+ * that is online again. `failed` says whether the last read failed because the service could not be
+ * reached (Unavailable or offline), never because it was refused (Denied, FullSignInRequired and the
+ * like): a refusal is not read again by itself. `readAgain` reads it again.
  * A read that fails just as the connection comes back (the network is not quite there yet) is
  * tried again a few times, a little later each time; after that the section's own Try again stays.
  * Returns whether this device is online, so a section can leave an outage to the page's offline

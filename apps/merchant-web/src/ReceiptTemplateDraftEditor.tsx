@@ -670,7 +670,7 @@ export function ReceiptTemplateDraftEditor({
     };
   }, [rosterClient, artifactClient, scopeKey, csrf, readAgain]);
   // b24 (v15 live check of b23): reads that failed with the connection are made again once back.
-  useReadAgainWhenOnline(!busy && error !== null && (!ready || roster === null), () =>
+  useReadAgainWhenOnline(!busy && error === "Unavailable" && (!ready || roster === null), () =>
     setReadAgain((n) => n + 1),
   );
   useEffect(() => {

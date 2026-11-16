@@ -293,7 +293,10 @@ export function StarterRoleSetOffer({
     };
   }, [client, generation]);
   // b24: a read that failed with the connection is made again once it is back.
-  useReadAgainWhenOnline(read.kind === "Failed", () => setGeneration((value) => value + 1));
+  useReadAgainWhenOnline(
+    read.kind === "Failed" && (read.code === "Unavailable" || read.code === "Offline"),
+    () => setGeneration((value) => value + 1),
+  );
   const waiting = useMemo(
     () => (read.kind === "Found" ? waitingStarterRoles(read.sets, read.roles) : null),
     [read],

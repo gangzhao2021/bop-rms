@@ -135,7 +135,7 @@ export function SoleOperatorSection({
         <h2 id="sole-operator-heading">{t("Sole operator")}</h2>
         <StatePanel heading={t("Setting could not be loaded")} tone="error" status>
           <p>{t("Check your connection, then try again.")}</p>
-          <button type="button" onClick={reload}>
+          <button type="button" className="store-setup-inline-action" onClick={reload}>
             {t("Try again")}
           </button>
         </StatePanel>

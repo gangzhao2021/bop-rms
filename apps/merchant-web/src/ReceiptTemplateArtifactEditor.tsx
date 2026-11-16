@@ -191,7 +191,9 @@ function Preset({
       c.abort();
     };
   }, [client, scopeKey, csrf, journalFactory, kind, readAgain]);
-  useReadAgainWhenOnline(!ready && !busy && error !== null, () => setReadAgain((n) => n + 1));
+  useReadAgainWhenOnline(!ready && !busy && error === "Unavailable", () =>
+    setReadAgain((n) => n + 1),
+  );
   useEffect(() => {
     if (disabled && running.current) active.current?.abort();
   }, [disabled]);
