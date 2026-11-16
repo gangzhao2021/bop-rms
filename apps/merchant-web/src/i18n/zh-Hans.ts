@@ -2256,7 +2256,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Load eligible employees to select another person.": "加载符合条件的员工以选择其他人。",
   "Load more": "加载更多",
   "Load next page": "加载下一页",
-  "Load older changes": "加载更早的更改",
+  "Load older changes": "加载更早的修改",
   Loading: "正在加载",
   "Loading Store configuration…": "正在加载门店配置…",
   "Loading Store staff…": "正在加载门店员工…",
@@ -2265,7 +2265,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Loading authorized Store configuration…": "正在加载已授权的门店配置…",
   "Loading authorized operational summaries…": "正在加载授权的运营汇总…",
   "Loading authorized role metadata…": "正在加载已授权的角色信息…",
-  "Loading configuration history…": "正在加载配置记录…",
+  "Loading earlier changes…": "正在加载以前的修改…",
   "Loading dashboard": "正在加载看板",
   "Loading exceptions": "正在加载异常",
   "Loading inventory items…": "正在加载库存品项…",
@@ -2468,7 +2468,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "没有为此差异记录无对应订单的扣款。仅凭这一点不代表差异已解决。",
   "No code sent · check in person": "未发送取餐码 · 请当面核对",
   "No code yet": "还没有码",
-  "No configuration changes have been recorded yet.": "还没有记录任何配置更改。",
+  "No changes have been recorded yet.": "还没有任何修改记录。",
   "No connection": "无网络连接",
   "No contact was given. Call out the order number at the counter.":
     "顾客未留联系方式。请在柜台叫号。",
@@ -9944,6 +9944,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Check the settings again": "重新检查设置",
   "Refresh the status": "刷新状态",
   "Earlier changes": "以前的修改",
+  "Earlier changes could not be loaded just now. Check the connection and try again.":
+    "暂时无法加载以前的修改。请检查网络后再试。",
   "Create the change from the saved setup": "用已保存的设置生成修改",
   "Create the change again from the saved setup": "用已保存的设置重新生成修改",
   "The setup was saved again after this change was made, so what was saved since is not in it. Creating it again replaces this change with one that has it; nothing changes for customers yet.":

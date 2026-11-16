@@ -10948,6 +10948,11 @@ tr[data-drop-target="true"] {
 .store-setup-publish__history li + li {
   border-top: 1px solid var(--bop-color-row-divider);
 }
+/* b21: a failed "load older" is said right under the button, so it stays in view at 390. */
+.store-setup-publish__history .store-setup-publish__history-error {
+  margin: var(--bop-space-2) 0 0;
+  font-size: 14px;
+}
 @media (max-width: 640px) {
   .store-setup-summary__rows > div {
     grid-template-columns: minmax(0, 1fr);

@@ -6,7 +6,10 @@ import {
   StoreConfigurationOrdinaryPanel,
 } from "./StoreConfigurationOrdinaryPanel.js";
 import { parseStoreConfigurationOrdinaryHistory } from "./store-configuration-ordinary-client.js";
-import { createUnconfiguredStoreSetupContentV2 } from "./store-setup-client.js";
+import {
+  createUnconfiguredStoreSetupContentV2,
+  StoreSetupClientError,
+} from "./store-setup-client.js";
 import { setLanguageForTest } from "./i18n/i18n.js";
 import { buttonNamed, click, mount, settle } from "./dom-test-kit.fixture.js";
 import { MemoryRouter } from "react-router";
@@ -181,45 +184,46 @@ it("b20: the sole-operator text says 修改, the word the rest of the step uses"
   expect(text).not.toMatch(/此更改|此门店配置|自行批准配置/u);
 });
 
+const historyEntry = (n: number, command: string, lifecycle: string, extra = {}) => ({
+  sequenceNumber: n,
+  operationReference: id(200 + n),
+  command,
+  configuration: {
+    ...Object.fromEntries(
+      Object.entries(configuration(lifecycle)).filter(([key]) => key !== "setupBasis"),
+    ),
+    source: "StoreOverride",
+    brandBaseVersionReference: id(4),
+    defaultLocale: "en-CA",
+    currencyCode: "CAD",
+    addressReference: id(5),
+    contactReference: id(6),
+    receiptReference: id(7),
+    taxConfigurationReference: id(8),
+    paymentConfigurationReference: id(9),
+    capacityConfigurationReference: null,
+    weeklySchedule: Array.from({ length: 7 }, (_, i) => ({ isoWeekday: i + 1, intervals: [] })),
+    exceptions: [],
+    effectiveFrom: at,
+    effectiveUntil: null,
+    supersedesConfigurationReference: null,
+    reasonCode: "SETUP_MATERIALIZATION",
+    approvedByReference: null,
+    approvalEvidenceReference: null,
+    publicationReference: null,
+    liveGateEvidenceReference: null,
+    dataClassification: "ConfigurationMetadata",
+  },
+  intentDigest: "sha256:" + "b".repeat(64),
+  actorReference: id(4),
+  purposeCode: "STORE_CONFIGURATION",
+  auditReference: id(300 + n),
+  occurredAt: at,
+  expectedVersion: command === "SaveDraft" ? 0 : 1,
+  ...extra,
+});
 it("b20: Earlier changes lists each withdrawal and decline after the step it ended", () => {
-  const entry = (n: number, command: string, lifecycle: string, extra = {}) => ({
-    sequenceNumber: n,
-    operationReference: id(200 + n),
-    command,
-    configuration: {
-      ...Object.fromEntries(
-        Object.entries(configuration(lifecycle)).filter(([key]) => key !== "setupBasis"),
-      ),
-      source: "StoreOverride",
-      brandBaseVersionReference: id(4),
-      defaultLocale: "en-CA",
-      currencyCode: "CAD",
-      addressReference: id(5),
-      contactReference: id(6),
-      receiptReference: id(7),
-      taxConfigurationReference: id(8),
-      paymentConfigurationReference: id(9),
-      capacityConfigurationReference: null,
-      weeklySchedule: Array.from({ length: 7 }, (_, i) => ({ isoWeekday: i + 1, intervals: [] })),
-      exceptions: [],
-      effectiveFrom: at,
-      effectiveUntil: null,
-      supersedesConfigurationReference: null,
-      reasonCode: "SETUP_MATERIALIZATION",
-      approvedByReference: null,
-      approvalEvidenceReference: null,
-      publicationReference: null,
-      liveGateEvidenceReference: null,
-      dataClassification: "ConfigurationMetadata",
-    },
-    intentDigest: "sha256:" + "b".repeat(64),
-    actorReference: id(4),
-    purposeCode: "STORE_CONFIGURATION",
-    auditReference: id(300 + n),
-    occurredAt: at,
-    expectedVersion: command === "SaveDraft" ? 0 : 1,
-    ...extra,
-  });
+  const entry = historyEntry;
   vi.spyOn(Date, "now").mockReturnValue(Date.parse(at));
   const page = parseStoreConfigurationOrdinaryHistory(
     {
@@ -258,4 +262,46 @@ it("b20: Earlier changes lists each withdrawal and decline after the step it end
   expect(
     rows(renderToStaticMarkup(<StoreConfigurationHistoryView entries={[declined as never]} />))[0],
   ).toMatch(/^Declined /u);
+});
+
+// b21 (v15 DEMO Store, about 26 pages back): a failed "load older" keeps the rows already shown
+// and says so in plain words right under the button, not at the top of the list.
+it("b21: a failed load of older changes keeps the rows and says so beside the button", async () => {
+  setLanguageForTest("zh-Hans");
+  vi.spyOn(Date, "now").mockReturnValue(Date.parse(at));
+  const first = parseStoreConfigurationOrdinaryHistory(
+    {
+      tenantReference: scope.tenantReference,
+      brandReference: scope.brandReference,
+      storeReference: scope.storeReference,
+      readerActorReference: scope.actorReference,
+      beforeSequence: null,
+      entries: [historyEntry(3, "Submit", "PendingApproval"), historyEntry(2, "Validate", "Draft")],
+      nextBeforeSequence: 2,
+      observedAt: at,
+      validUntil: "2026-11-15T17:32:05.000Z",
+    },
+    scope,
+    null,
+  );
+  const { container, client } = await panel(workspaceOf({ latest: configuration("Draft") }));
+  client.history
+    .mockResolvedValueOnce(first)
+    .mockRejectedValueOnce(new StoreSetupClientError("Unavailable"));
+  const details = container.querySelector("details.store-setup-publish__history");
+  if (!(details instanceof HTMLDetailsElement)) throw new Error("history absent");
+  details.open = true;
+  details.dispatchEvent(new Event("toggle"));
+  await settle();
+  expect(details.querySelectorAll("li")).toHaveLength(2);
+  await click(buttonNamed(container, "加载更早的修改"));
+  await settle();
+  expect(details.querySelectorAll("li")).toHaveLength(2);
+  const alerts = [...details.querySelectorAll('[role="alert"]')];
+  expect(alerts.map((node) => node.textContent)).toEqual([
+    "暂时无法加载以前的修改。请检查网络后再试。",
+  ]);
+  // Right after the button, so it stays in view where the person pressed.
+  expect(alerts[0]?.previousElementSibling?.textContent).toBe("加载更早的修改");
+  expect(details.textContent).not.toMatch(/配置|仍在等待的请求会保留|更改/u);
 });

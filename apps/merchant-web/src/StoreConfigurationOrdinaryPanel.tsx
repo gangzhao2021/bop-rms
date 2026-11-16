@@ -471,11 +471,17 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
         setHistoryLoaded(true);
       }
     } catch (e) {
-      if (current()) setHistoryError(message(e));
+      if (current()) setHistoryError(historyMessage(e));
     } finally {
       if (current()) setHistoryBusy(false);
     }
   }
+  /** b21: a history read that fails for an outage says so in plain words; real refusals keep theirs. */
+  const historyMessage = (e: unknown) =>
+    e instanceof StoreSetupClientError &&
+    (e.code === "Denied" || e.code === "FullSignInRequired" || e.code === "ScopeChanged")
+      ? messages[e.code]
+      : t("Earlier changes could not be loaded just now. Check the connection and try again.");
   const message = (e: unknown) =>
     e instanceof StoreSetupClientError ? messages[e.code] : messages.Unavailable;
   useEffect(() => {
@@ -1127,10 +1133,10 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
       >
         <summary>{t("Earlier changes")}</summary>
         <section aria-label={t("Store configuration operation history")}>
-          {historyBusy && <p role="status">{t("Loading configuration history…")}</p>}
-          {historyError && <p role="alert">{historyError}</p>}
+          {historyBusy && <p role="status">{t("Loading earlier changes…")}</p>}
+          {historyError && history.length === 0 && <p role="alert">{historyError}</p>}
           {historyLoaded && history.length === 0 && (
-            <p>{t("No configuration changes have been recorded yet.")}</p>
+            <p>{t("No changes have been recorded yet.")}</p>
           )}
           <StoreConfigurationHistoryView entries={history} />
           {nextHistory !== null && (
@@ -1141,6 +1147,12 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
             >
               {t("Load older changes")}
             </button>
+          )}
+          {/* b21: a failed "load older" keeps the rows shown and says so beside the button. */}
+          {historyError && history.length > 0 && (
+            <p role="alert" className="store-setup-publish__history-error">
+              {historyError}
+            </p>
           )}
         </section>
       </details>
