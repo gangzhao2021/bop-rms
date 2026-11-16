@@ -173,6 +173,16 @@ function historyCopy(value: unknown): unknown {
   };
   return visit(value, 0);
 }
+/**
+ * WP-2423 b21 (same rule as the Store history source): an approval recorded before the writer fix
+ * carries an updatedAt a little after the instant it recorded. History is append-only, so such an
+ * Approve row is read when the gap is at most 5 seconds; any other later stamp is refused.
+ */
+const historyStampAccepted = (command: string, updatedAt: string, occurredAt: string) => {
+  if (updatedAt <= occurredAt) return true;
+  const gap = Date.parse(updatedAt) - Date.parse(occurredAt);
+  return command === "Approve" && gap > 0 && gap <= 5000;
+};
 /** Immutable operation history is distinct from current head and original recovery.
  * Stored 005 intent hashes have no browser preimage and are never recomputed here. */
 export function parseStoreConfigurationOrdinaryHistory(
@@ -259,7 +269,7 @@ export function parseStoreConfigurationOrdinaryHistory(
               : e.command === "Approve"
                 ? "Approved"
                 : "Published") ||
-        configuration.updatedAt > occurredAt ||
+        !historyStampAccepted(e.command, configuration.updatedAt, occurredAt) ||
         configuration.createdAt > occurredAt ||
         occurredAt > observedAt ||
         typeof e.intentDigest !== "string" ||

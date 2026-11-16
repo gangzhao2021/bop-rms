@@ -418,6 +418,22 @@ export interface StoreConfigurationHistorySourceOptions {
     ): Promise<{ readonly validUntil: string }>;
   };
 }
+/**
+ * WP-2423 b21: an approval recorded before the b21 writer fix stamped its configuration with a
+ * clock reading taken a little after the instant it recorded (v15: 39-157 ms). History is
+ * append-only, so those rows are read as they are: an Approve row may carry an updatedAt at most
+ * this far after its occurred_at. Every other row, and any larger gap, is still refused.
+ */
+export const storeConfigurationApprovalStampSkewMs = 5000;
+export function storeConfigurationHistoryStampAccepted(
+  command: string,
+  updatedAt: string,
+  occurredAt: string,
+): boolean {
+  if (updatedAt <= occurredAt) return true;
+  const gap = Date.parse(updatedAt) - Date.parse(occurredAt);
+  return command === "Approve" && gap > 0 && gap <= storeConfigurationApprovalStampSkewMs;
+}
 /** Two complete immutable configurations per page; the third row is only a
  * pagination probe. The current reader is independent of each original author.
  * The caller's real transaction runner owns COMMIT and rollback. */
@@ -592,7 +608,7 @@ export function createPostgresStoreConfigurationHistorySource(
       expectedVersion !== version - (command === "SaveDraft" ? 1 : 0) ||
       configuration.lifecycle !== row.lifecycle ||
       row.data_classification !== "ConfigurationMetadata" ||
-      configuration.updatedAt > at ||
+      !storeConfigurationHistoryStampAccepted(command, configuration.updatedAt, at) ||
       configuration.createdAt > at ||
       at > observedAt ||
       (configuration.setupBasis?.tenantReference !== undefined &&

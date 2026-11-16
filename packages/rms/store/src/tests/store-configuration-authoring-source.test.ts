@@ -428,6 +428,43 @@ describe("held owning immutable Store configuration history", () => {
   });
 });
 
+// b21 (v15 DEMO Store seq 4, 9, 28, 35): approvals recorded before the writer fix carry an
+// updatedAt 39-157 ms after their occurred_at; history is append-only, so they are read as stored.
+describe("approvals stamped a little after the instant they recorded", () => {
+  const approval = (updatedAt: string, command = "Approve") => {
+    const f = historyFixture(),
+      row = f.table[0];
+    if (!row) throw new Error("fixture row absent");
+    const approved = command === "Approve";
+    row.command_type = command;
+    row.lifecycle = approved ? "Approved" : "Draft";
+    row.configuration_json = createStoreConfigurationVersion({
+      ...row.configuration_json,
+      lifecycle: approved ? "Approved" : "Draft",
+      approvedByReference: approved ? ref(11) : null,
+      approvalEvidenceReference: approved ? ref(12) : null,
+      updatedAt,
+    });
+    return f;
+  };
+  it("reads an Approve row whose stamp is 39 ms later, showing the instant it was recorded", async () => {
+    const f = approval("2026-10-05T10:00:00.039Z");
+    const page = await f.source.readPage({ beforeSequence: null });
+    expect(page.entries[0]?.command).toBe("Approve");
+    expect(page.entries[0]?.occurredAt).toBe(at);
+    expect(page.entries[0]?.configuration.updatedAt).toBe("2026-10-05T10:00:00.039Z");
+    await f.finalize();
+  });
+  it("still refuses a larger gap, and a later stamp on any other step", async () => {
+    await expect(
+      approval("2026-10-05T10:00:05.001Z").source.readPage({ beforeSequence: null }),
+    ).rejects.toThrow();
+    await expect(
+      approval("2026-10-05T10:00:00.001Z", "Validate").source.readPage({ beforeSequence: null }),
+    ).rejects.toThrow();
+  });
+});
+
 // b20 (v15 live check): the history lists a withdrawal after the configuration's last step.
 describe("a configuration's last recorded step", () => {
   const configuration = "01902501-0000-7000-8000-000000000003";

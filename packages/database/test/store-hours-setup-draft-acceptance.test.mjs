@@ -1721,6 +1721,21 @@ it("WP-2423 Q4: a Store Manager changes hours on a configuration from Store setu
         );
       }
 
+      // WP-2423 b21 (v15 DEMO Store seq 4, 9, 28, 35): every approval recorded here, alone or by
+      // another Owner, stamps the configuration it records with the instant it records it, so
+      // Earlier changes can read each of them. The approval path once used a later clock reading.
+      const approvals = (
+        await admin.query(
+          "SELECT sequence_number::int seq,(configuration_json->>'updatedAt')::timestamptz=occurred_at same FROM rms_store.store_configuration_authoring_operation WHERE brand_id=$1 AND store_id=$2 AND command_type='Approve' ORDER BY sequence_number",
+          [scope.brandReference, scope.storeReference],
+        )
+      ).rows;
+      assert.ok(approvals.length >= 3);
+      assert.deepEqual(
+        approvals.filter((row) => !row.same).map((row) => row.seq),
+        [],
+      );
+
       // --- Another Store sees none of it (row-level security under the API role).
       const otherStore = id(0x400);
       await admin.query(

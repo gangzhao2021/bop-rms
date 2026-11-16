@@ -10,6 +10,7 @@ import {
   createStoreConfigurationVersion,
   parseStoreAdministrationReference,
   parseStoreConfigurationOrdinaryReceipt,
+  storeConfigurationHistoryStampAccepted,
   StoreConfigurationOriginalError,
   type StoreConfigurationOriginalScope,
   type StoreConfigurationOrdinaryHead,
@@ -191,7 +192,8 @@ export function parseMerchantStoreConfigurationHistoryPage(
           (configuration.setupBasis &&
             configuration.setupBasis.tenantReference !== expectedScope.tenantReference) ||
           configuration.lifecycle !== lifecycle ||
-          configuration.updatedAt > occurredAt ||
+          // b21: an approval recorded before the writer fix may carry a slightly later stamp.
+          !storeConfigurationHistoryStampAccepted(command, configuration.updatedAt, occurredAt) ||
           occurredAt > observedAt ||
           e.expectedVersion !==
             configuration.configurationVersion - (command === "SaveDraft" ? 1 : 0) ||

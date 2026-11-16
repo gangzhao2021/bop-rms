@@ -187,6 +187,43 @@ it("history carries a withdrawal on an entry and refuses a malformed one", () =>
       ),
     ).toThrow();
 });
+// b21 (v15 DEMO Store seq 4, 9, 28, 35): an approval recorded before the writer fix carries an
+// updatedAt a little after the instant it recorded; such stored rows are read as they are.
+it("history reads an approval stamped up to 5 seconds after it was recorded, and nothing else", () => {
+  const approved = (updatedAt: string) =>
+    createStoreConfigurationVersion({
+      ...configuration,
+      lifecycle: "Approved",
+      approvedByReference: id(91),
+      approvalEvidenceReference: id(92),
+      createdAt: "2026-10-05T09:00:00.000Z",
+      updatedAt,
+    });
+  const page = (command: string, updatedAt: string, occurredAt: string) => ({
+    ...historicalPage(),
+    entries: [
+      {
+        ...historicalEntry(5),
+        command,
+        configuration:
+          command === "Approve"
+            ? approved(updatedAt)
+            : createStoreConfigurationVersion({
+                ...configuration,
+                createdAt: "2026-10-05T09:00:00.000Z",
+                updatedAt,
+              }),
+        occurredAt,
+      },
+    ],
+    nextBeforeSequence: null,
+  });
+  const read = history(page("Approve", at, "2026-10-05T09:59:59.961Z"), scope, null);
+  expect(read.entries[0]?.occurredAt).toBe("2026-10-05T09:59:59.961Z");
+  expect(read.entries[0]?.configuration.updatedAt).toBe(at);
+  expect(() => history(page("Approve", at, "2026-10-05T09:59:54.999Z"), scope, null)).toThrow();
+  expect(() => history(page("Validate", at, "2026-10-05T09:59:59.999Z"), scope, null)).toThrow();
+});
 // WP-2423 v15 (`8bd902e3` D1): the Store's tax configuration in force travels with the workspace.
 it("carries the Store's tax configuration in force, or none, and refuses anything else", () => {
   expect(

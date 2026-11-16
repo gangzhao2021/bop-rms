@@ -585,6 +585,49 @@ it("history parser refuses oversized pages wrong ordering selectors leases scope
     expect(() => parseStoreConfigurationOrdinaryHistory(invalid, scope, null)).toThrow();
   expect(() => parseStoreConfigurationOrdinaryHistory(page, scope, 3)).toThrow();
 });
+// b21 (v15 DEMO Store seq 4, 9, 28, 35): an approval recorded before the writer fix carries an
+// updatedAt a little after the instant it recorded; the page reads such stored rows as they are.
+it("history reads an approval stamped up to 5 seconds after it was recorded, and nothing else", () => {
+  const page = historyPage();
+  const first = page.entries[0];
+  if (!first) throw new Error("history fixtures absent");
+  const with_ = (command: string, lifecycle: "Draft" | "Approved", occurredAt: string) => ({
+    ...page,
+    entries: [
+      {
+        ...first,
+        command,
+        configuration: {
+          ...configuration(lifecycle),
+          createdAt: "2026-10-05T09:00:00.000Z",
+          updatedAt: at,
+        },
+        occurredAt,
+      },
+    ],
+    nextBeforeSequence: null,
+  });
+  const read = parseStoreConfigurationOrdinaryHistory(
+    with_("Approve", "Approved", "2026-10-05T09:59:59.961Z"),
+    scope,
+    null,
+  );
+  expect(read.entries[0]?.occurredAt).toBe("2026-10-05T09:59:59.961Z");
+  expect(() =>
+    parseStoreConfigurationOrdinaryHistory(
+      with_("Approve", "Approved", "2026-10-05T09:59:54.999Z"),
+      scope,
+      null,
+    ),
+  ).toThrow();
+  expect(() =>
+    parseStoreConfigurationOrdinaryHistory(
+      with_("Validate", "Draft", "2026-10-05T09:59:59.999Z"),
+      scope,
+      null,
+    ),
+  ).toThrow();
+});
 it("history rejects accessor output without executing it and preserves accepted historical purposes", () => {
   const page = historyPage(),
     getter = vi.fn(() => page.entries),

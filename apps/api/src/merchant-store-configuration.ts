@@ -592,11 +592,13 @@ export function createMerchantStoreConfiguration(options: {
               });
               // WP-2423: decided before anything is written; recorded with the approval below.
               const soleGate = sole ? await soleCheck(bound.input.occurredAt) : undefined;
+              // b21: the approval is recorded at occurredAt, so the configuration it records carries
+              // that same instant (a later clock reading made Earlier changes refuse the row).
               const prepared = await prepare(
                 tx,
                 bound.input.configuration,
                 scope.context,
-                source.now(),
+                bound.input.occurredAt,
               );
               const storeCommand = { ...bound.input, configuration: prepared.configuration };
               // The sole-operator mark precedes the approval it marks (the database checks both).
