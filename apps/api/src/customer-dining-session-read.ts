@@ -1642,7 +1642,18 @@ export async function readCustomerTableBillFacts(
   scope: Parameters<typeof readDiningTableBill>[1],
   input: Parameters<typeof readDiningTableBill>[2],
 ): Promise<NonNullable<NonNullable<CustomerDiningSessionFacts["order"]>["tableBill"]>> {
-  const bill = await readDiningTableBill(transaction, scope, input);
+  return customerTableBillFacts(await readDiningTableBill(transaction, scope, input));
+}
+
+/**
+ * b23 review: the guest's table bill facts from the bill read. What came off the bill
+ * (takenOffMinor, summary.takenOff) is each reduction's amountMinor — its totalMinor, tax and its
+ * share of the bill cent included — so paid + due + taken off is Total ordered to the cent. The
+ * printed lines (bill.takenOffMinor) say the before-tax netMinor instead.
+ */
+export function customerTableBillFacts(
+  bill: Awaited<ReturnType<typeof readDiningTableBill>>,
+): NonNullable<NonNullable<CustomerDiningSessionFacts["order"]>["tableBill"]> {
   const reductions = bill.rounds.flatMap((round) =>
     round.items.flatMap((item) => (item.reduction === null ? [] : [item.reduction])),
   );

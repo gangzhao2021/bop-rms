@@ -7,6 +7,7 @@ import {
   createCustomerDiningSessionRead,
   createProjectionLagWindow,
   customerSplitParts,
+  customerTableBillFacts,
   customerTableBillLines,
   mergeBillOrderFacts,
   type CustomerDiningSessionDependencies,
@@ -343,6 +344,67 @@ describe("WP-2423 Q8 composeCustomerDiningSession", () => {
     expect(view.summary?.bill).toBeUndefined();
     // b22: one tax figure: the rounding is in Total ordered, not a line of its own.
     expect(view.summary?.taxRounding).toBeUndefined();
+  });
+
+  it("b23 review: what came off the bill is the comp's total with tax and its bill cent", () => {
+    // TM2 live (v15 b22): the cucumber comped, net 625, tax 81 with its -1 bill cent, total 706.
+    const comp = { kind: "Comp" as const, percent: null, amountMinor: "706", netMinor: "625" };
+    const bill = {
+      rounds: [
+        {
+          roundNumber: 1,
+          orderReference: id(1),
+          orderBatchReference: id(50),
+          submissionReference: id(51),
+          items: [
+            {
+              orderItemReference: id(52),
+              quantity: 1,
+              displayName: "Smashed cucumber",
+              subtotalMinor: "625",
+              totalMinor: "707",
+              reduction: comp,
+            },
+            {
+              orderItemReference: id(53),
+              quantity: 1,
+              displayName: "Beef noodles (TEST)",
+              subtotalMinor: "1250",
+              totalMinor: "1413",
+              reduction: null,
+            },
+          ],
+          subtotalMinor: "1250",
+          taxMinor: "163",
+          totalMinor: "1413",
+          taxRoundingMinor: "0",
+          paid: false,
+          orderedBy: null,
+          fromTableLabel: null,
+          liveOrderedAt: null,
+        },
+      ],
+      owed: { totalMinor: "1413" },
+      taxRoundingMinor: "0",
+      split: null,
+      writeOff: null,
+    } as unknown as Parameters<typeof customerTableBillFacts>[0];
+    const tableBill = customerTableBillFacts(bill);
+    expect(tableBill.takenOffMinor).toBe(706n);
+    expect(tableBill.pointsUsedMinor).toBe(0n);
+    expect(tableBill.owedMinor).toBe(1413n);
+    expect(tableBill.bill?.takenOffMinor).toBe(625n);
+    const view = composeCustomerDiningSession({
+      ...facts({
+        paymentOutcomes: new Map(),
+        payments: [],
+        payLaterRounds: new Set([id(50)]),
+        tableBill,
+      }),
+      paymentTiming: "PayLater",
+    });
+    expect(view.summary?.takenOff?.amountMinor).toBe(706n);
+    expect(view.summary?.bill?.takenOff?.amountMinor).toBe(625n);
   });
 
   it("b13: a split the bill outgrew says nothing of its old parts", () => {
