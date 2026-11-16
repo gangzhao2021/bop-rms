@@ -167,11 +167,11 @@ it("reads owner rows under scoped transaction fences and resolves current access
 it("reads the Membership and its Store assignments in one statement after the fence", async () => {
   const f = fixture();
   if (actor.actorReference === null) throw new Error("fixture");
+  const found = (await f.source.findMemberships(actor.actorReference, brand.brandReference))[0];
+  if (!found) throw new Error("fixture");
+  const reference = found.membershipReference;
   f.calls.length = 0;
-  const assignments = await f.source.findStoreAssignments(
-    String(f.parent.membership_id),
-    store.storeReference,
-  );
+  const assignments = await f.source.findStoreAssignments(reference, store.storeReference);
   expect(assignments.map((a) => a.storeAssignmentReference)).toEqual([id(6)]);
   expect(f.calls.map((c) => c.sql.slice(0, 40))).toEqual([
     "SELECT set_config('bop.brand_id',$1,true",
@@ -181,14 +181,10 @@ it("reads the Membership and its Store assignments in one statement after the fe
   expect(f.calls[2]?.values).toEqual([id(4), id(1), id(2), id(3)]);
   // A Membership with no assignment at this Store: no assignment, not a refusal.
   f.setAssignments([]);
-  expect(
-    await f.source.findStoreAssignments(String(f.parent.membership_id), store.storeReference),
-  ).toEqual([]);
+  expect(await f.source.findStoreAssignments(reference, store.storeReference)).toEqual([]);
   // No Membership row: unavailable, as when the parent read found nothing.
   f.setParents([]);
-  await expect(
-    f.source.findStoreAssignments(String(f.parent.membership_id), store.storeReference),
-  ).rejects.toThrow();
+  await expect(f.source.findStoreAssignments(reference, store.storeReference)).rejects.toThrow();
 });
 it("denies a foreign requested Store before any database query", async () => {
   const f = fixture();
