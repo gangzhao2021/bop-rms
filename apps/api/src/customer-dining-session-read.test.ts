@@ -1498,7 +1498,7 @@ describe("b22 DEC-TAX-WHOLE-RECEIPT: what the guest's page says adds up to the b
           takenOffMinor: 0n,
           taxRoundingMinor: rounding.totalMinor,
           ...printed,
-          roundTaxRounding: new Map(billRounds.map((round, index) => [batch(index), share(index)])),
+          roundTaxRounding: new Map(billRounds.map((_, index) => [batch(index), share(index)])),
         },
       } as Order,
     });
