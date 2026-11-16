@@ -146,7 +146,12 @@ export function TableOrderRounds({
       </fieldset>
     );
   return (
-    <section className="table-order-rounds" aria-label={t("This table's order")}>
+    <section
+      className="table-order-rounds"
+      aria-label={t("This table's order")}
+      // b23 review: where the focus goes when a confirmed comp leaves no comp button.
+      data-focus-return="table"
+    >
       <DiningRoundsProvider
         orderReference={orderReference}
         csrf={csrf}

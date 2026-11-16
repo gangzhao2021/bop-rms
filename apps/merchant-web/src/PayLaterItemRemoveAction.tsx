@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { focusOpenerSelector, useSettledFocus } from "./settled-focus.js";
 import { KitchenMayHaveStartedNote } from "./kitchen-cancel-warning.js";
 import { Link } from "react-router";
 import { t } from "./i18n/i18n.js";
@@ -313,6 +314,7 @@ export function PayLaterItemRemoveAction({
   // b23: opening in place moves the focus into the panel (the opener is replaced by it), as
   // arriving does; Cancel gives it back to the opener, so focus never drops to the page itself.
   const focusTo = useRef<"panel" | "opener" | null>(null);
+  const openerKey = "take-off:" + batch.orderBatchReference;
   // v15 b20 / b22 (DEC-TAX-WHOLE-RECEIPT): what the bill goes down by, from the server, by the
   // dishes asked about (null: it couldn't be worked out).
   const [previews, setPreviews] = useState<ReadonlyMap<string, string | null>>(new Map());
@@ -322,6 +324,12 @@ export function PayLaterItemRemoveAction({
       batch.unpaidRemovableItems.includes(line.orderItemReference),
   );
   const chosen = offered.filter((line) => selected.has(line.orderItemReference));
+  // b23 review: the whole round taken off leaves no button to give the focus back to: it goes to
+  // the button again when the round still offers it, else to the round's heading.
+  const settledFocus = useSettledFocus(
+    [focusOpenerSelector(openerKey), ".order-round__head h3"],
+    offered.length === 0 || order.currentVersion === null,
+  );
   const currencyCode = offered[0]?.total.currencyCode ?? "CAD";
   const keyFor = (items: readonly string[]) =>
     order.currentVersion === null
@@ -442,6 +450,7 @@ export function PayLaterItemRemoveAction({
       const payload = (await response.json().catch(() => null)) as unknown;
       if (response.ok) {
         attempt.current = null;
+        settledFocus.settled(panel.current);
         focusTo.current = "opener";
         setOpen(false);
         setSelected(new Set());
@@ -498,7 +507,9 @@ export function PayLaterItemRemoveAction({
       <button
         ref={opener}
         type="button"
+        data-focus-opener={openerKey}
         onClick={() => {
+          settledFocus.reset();
           focusTo.current = "panel";
           setOpen(true);
         }}

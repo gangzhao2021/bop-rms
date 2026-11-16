@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from "react";
+import { act, type ReactNode } from "react";
 import { afterEach, expect, it } from "vitest";
 import { parseCurrentOrderDetail } from "./current-order-queue-client.js";
 import { PayLaterItemRemoveAction } from "./PayLaterItemRemoveAction.js";
@@ -244,5 +244,105 @@ it("b23: opening the panel in place moves the focus into it; Cancel gives it bac
   expect(document.activeElement).toBe(group);
   await click(buttonNamed(container, "Cancel"));
   expect(container.querySelector('[role="group"]')).toBeNull();
+  expect(document.activeElement).toBe(buttonNamed(container, "Take dishes off round 2"));
+});
+
+// b23 review: after a confirmed take-off the focus went back to the button, but the whole round
+// taken off leaves no button (the Tables round drops its take-off; the Orders page mounts it
+// anew for the new version): the focus fell to the page (document.activeElement BODY).
+const takeOffFetcher = (async (url: string, init?: RequestInit) =>
+  url.endsWith("/preview")
+    ? fetcher(url, init)
+    : new Response(JSON.stringify({ status: "Removed" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })) as typeof fetch;
+const round2 = (action: ReactNode) => (
+  <section className="order-round" data-focus-return="round">
+    <header className="order-round__head">
+      <h3>Round 2</h3>
+    </header>
+    {action}
+  </section>
+);
+const takeOff = (detail: ReturnType<typeof readDetail>, key: string) => {
+  const round = detail.order.batches[1];
+  if (round === undefined) throw new Error("fixture");
+  return (
+    <PayLaterItemRemoveAction
+      key={key}
+      order={detail.order}
+      batch={round}
+      lines={detail.lines.items}
+      csrf={"a".repeat(43)}
+      fetcher={takeOffFetcher}
+      onSettled={() => undefined}
+      onRefused={() => undefined}
+    />
+  );
+};
+const confirmTakeOff = async (container: HTMLElement, dishes: readonly string[]) => {
+  await click(buttonNamed(container, "Take dishes off round 2"));
+  await settle(10);
+  for (const dish of dishes) await tick(container, dish);
+  const select = container.querySelector("select");
+  if (!(select instanceof HTMLSelectElement)) throw new Error("no reason");
+  await act(async () => {
+    select.value = select.options[1]?.value ?? "";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await click(container.querySelector(".pay-later-remove__actions .table-checkout__primary"));
+  await settle(10);
+};
+const later = async () => {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+};
+
+it("b23 review: the whole round taken off: the focus goes to the round's heading, not the page", async () => {
+  const { container, root } = await mount(
+    round2(
+      takeOff(
+        readDetail(
+          [
+            line(1, "Soy milk", "325", "42", "367"),
+            line(2, "Smashed cucumber", "625", "82", "707"),
+          ],
+          [id(201), id(202)],
+          { subtotal: "950", tax: "124", total: "1074" },
+        ),
+        "v7",
+      ),
+    ),
+  );
+  await confirmTakeOff(container, ["Soy milk", "Smashed cucumber"]);
+  expect(document.activeElement).toBe(buttonNamed(container, "Take dishes off round 2"));
+  // The table read again: nothing in round 2 comes off any more, so the round has no take-off.
+  await act(async () => {
+    root.render(round2(null));
+  });
+  await later();
+  expect(document.activeElement).toBe(container.querySelector(".order-round__head h3"));
+  expect(document.activeElement).not.toBe(document.body);
+});
+
+it("b23 review: some dishes taken off on a page that mounts the take-off anew: the focus is on its button again", async () => {
+  const before = readDetail(
+    [line(1, "Soy milk", "325", "42", "367"), line(2, "Smashed cucumber", "625", "82", "707")],
+    [id(201), id(202)],
+    { subtotal: "950", tax: "124", total: "1074" },
+  );
+  const { container, root } = await mount(round2(takeOff(before, "v7")));
+  await confirmTakeOff(container, ["Soy milk"]);
+  const after = readDetail([line(2, "Smashed cucumber", "625", "82", "707")], [id(202)], {
+    subtotal: "625",
+    tax: "82",
+    total: "707",
+  });
+  await act(async () => {
+    root.render(round2(takeOff(after, "v8")));
+  });
+  await later();
   expect(document.activeElement).toBe(buttonNamed(container, "Take dishes off round 2"));
 });

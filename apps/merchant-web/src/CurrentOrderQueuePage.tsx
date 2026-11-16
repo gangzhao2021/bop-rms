@@ -580,6 +580,8 @@ export function CurrentOrderLines({
                     key={batch.orderBatchReference}
                     className="order-round order-round--lines"
                     aria-label={t("Round {sequence}", { sequence: batch.sequence })}
+                    // b23 review: where the focus goes when a confirmed take-off leaves no button.
+                    data-focus-return="round"
                   >
                     <header className="order-round__head">
                       <h3>
