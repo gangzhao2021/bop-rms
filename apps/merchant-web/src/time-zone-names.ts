@@ -132,21 +132,48 @@ const sameZone: Readonly<Record<string, (typeof storeOpeningTimeZones)[number]>>
 };
 
 /**
+ * b21 review: an older identifier of a listed zone, named as that zone plus where its id points,
+ * so that it can stand beside the zone's own option without two options reading alike.
+ */
+function olderZoneName(timeZone: string): string | null {
+  const zone = sameZone[timeZone];
+  if (zone === undefined) return null;
+  const place: Readonly<Record<string, string>> = {
+    "America/Montreal": t("Montréal"),
+    "America/Nipigon": t("Nipigon"),
+    "America/Thunder_Bay": t("Thunder Bay"),
+    "America/Rainy_River": t("Rainy River"),
+    "America/Yellowknife": t("Yellowknife"),
+  };
+  return t("{zone}, older setting ({place})", {
+    zone: canadianStoreTimeZoneText()[zone],
+    place: place[timeZone] ?? placeFromId(timeZone),
+  });
+}
+
+/**
  * The Store setup choices: the Canadian zones, then any zone the Store runs on or the draft holds
  * that is not one of them, still selectable and named by place. The value stays the IANA id.
+ * b21 review: a listed zone held under more than one id (the Store runs on America/Montreal and
+ * the draft holds America/Toronto) offers each id as its own option, so the field always has its
+ * own value to show and choosing one never stores the other.
  */
 export function storeTimeZoneChoices(
   kept: readonly string[],
   at: Date = new Date(),
 ): readonly TimeZoneChoice[] {
-  const wanted = kept.filter((id) => id !== "");
+  const wanted = [...new Set(kept.filter((id) => id !== ""))];
   const text = canadianStoreTimeZoneText();
-  const listed = storeOpeningTimeZones.map((zone) => ({
-    value: wanted.find((id) => sameZone[id] === zone) ?? zone,
-    label: text[zone],
-  }));
+  const listed = storeOpeningTimeZones.flatMap((zone): TimeZoneChoice[] => {
+    const held = wanted.filter((id) => id === zone || sameZone[id] === zone);
+    const only = held.length === 1 ? held[0] : undefined;
+    if (held.length === 0 || only !== undefined)
+      return [{ value: only ?? zone, label: text[zone] }];
+    // The zone's own id keeps the plain name; each older id says it is the older setting.
+    return held.map((value) => ({ value, label: olderZoneName(value) ?? text[zone] }));
+  });
   const covered = new Set<string>([...storeOpeningTimeZones, ...Object.keys(sameZone)]);
-  const extra = [...new Set(wanted)]
+  const extra = wanted
     .filter((id) => !covered.has(id))
     .map((value) => ({ value, label: timeZoneLabel(value, at) }));
   return [...listed, ...extra];
@@ -156,4 +183,19 @@ export function storeTimeZoneChoices(
 export function storeTimeZoneName(timeZone: string, at: Date = new Date()): string {
   const text: Readonly<Record<string, string>> = canadianStoreTimeZoneText();
   return text[sameZone[timeZone] ?? timeZone] ?? timeZoneLabel(timeZone, at);
+}
+
+/**
+ * b21 review: two zone ids compared in one sentence ("now … → changes to …"). When both read as the
+ * same zone, the older id says so, so a change of id is never shown as "Eastern → Eastern" alone.
+ */
+export function storeTimeZoneNamesApart(
+  now: string,
+  next: string,
+  at: Date = new Date(),
+): { readonly now: string; readonly next: string } {
+  const a = storeTimeZoneName(now, at),
+    b = storeTimeZoneName(next, at);
+  if (now === next || a !== b) return { now: a, next: b };
+  return { now: olderZoneName(now) ?? a, next: olderZoneName(next) ?? b };
 }

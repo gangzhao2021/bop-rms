@@ -73,7 +73,11 @@ import {
 import { serviceOperationReference, type ServiceMode } from "./service-control-client.js";
 import { plainLanguageName } from "./staff-text.js";
 import { LanguageSwitch } from "./i18n/LanguageSwitch.js";
-import { storeTimeZoneChoices, storeTimeZoneName } from "./time-zone-names.js";
+import {
+  storeTimeZoneChoices,
+  storeTimeZoneName,
+  storeTimeZoneNamesApart,
+} from "./time-zone-names.js";
 import { useScrollToAnchor } from "./scroll-to-anchor.js";
 const StoreFirstOpeningPanel = lazyPage(
   () => import("./StoreFirstOpeningPanel.js"),
@@ -2103,11 +2107,15 @@ const openDaysText = (schedule: WeeklySchedule) => {
   const open = schedule.filter((day) => day.intervals.length > 0).length;
   return open === 1 ? t("Open 1 day a week") : t("Open {open} days a week", { open });
 };
-/** b21: a fee's state in words, "on (Dine-in, Pickup)" or "off", for "becomes" lines. */
+/**
+ * b21: a fee's state in words, "on (Dine-in, Pickup)" or "off", for "becomes" lines. The services
+ * are put in one order first (as feesKey does), so the same services stored in another order never
+ * read as a change.
+ */
 const feeStateText = (fee: FeeLike) =>
   fee.state === "Enabled"
     ? t("on ({services})", {
-        services: (fee.orderTypes ?? []).map(serviceModeText).join(listSeparator()),
+        services: [...(fee.orderTypes ?? [])].sort().map(serviceModeText).join(listSeparator()),
       })
     : t("off");
 /** b21: each configured setting of a setup as one comparable value, by its field name. */
@@ -2165,6 +2173,13 @@ export function storeSetupChangeSummary(
   // newly chosen address (worded like the saved one) or a setting put back is still marked.
   const savedSettings = saved === null ? null : storeSetupSettingValues(saved),
     settings = storeSetupSettingValues(content);
+  // b21 review: what the saved draft itself changes, read only for a setting put back below.
+  let savedChanges: readonly StoreSetupSummaryItem[] | null = null;
+  const savedChange = (label: string) => {
+    if (saved === null) return undefined;
+    savedChanges ??= storeSetupChangeSummary(saved, current).changed;
+    return savedChanges.find((item) => item.label === label);
+  };
   const add = (
     label: string,
     key: string,
@@ -2176,9 +2191,26 @@ export function storeSetupChangeSummary(
     if (same === true) {
       // b21: an unsaved edit that puts a setting back to how the Store runs today, while the saved
       // draft still changes it, is named with its mark (the change below would still change it).
-      if (unsaved && savedSettings?.has(key) === true)
-        changed.push({ label, value: [t("Back to how the Store runs today")], unsaved });
-      else unchanged.push(label);
+      // b21 review: it names the values, "now saved as X → changes to Y, as the Store runs today".
+      if (unsaved && savedSettings?.has(key) === true) {
+        const before = savedChange(label);
+        changed.push({
+          label,
+          value:
+            before?.now !== undefined && before.value.length === 1
+              ? [
+                  t("Now saved as {saved} → changes to {value}, as the Store runs today", {
+                    saved: before.value[0] ?? "",
+                    value: before.now,
+                  }),
+                ]
+              : [
+                  t("Back to how the Store runs today. The saved draft changes:"),
+                  ...(before?.value ?? []),
+                ],
+          unsaved,
+        });
+      } else unchanged.push(label);
       return;
     }
     changed.push({
@@ -2191,12 +2223,13 @@ export function storeSetupChangeSummary(
   const known = current !== null;
   if (content.timeZone.state === "Configured") {
     const zone = content.timeZone.value;
+    const names = current === null ? null : storeTimeZoneNamesApart(current.timeZone, zone);
     add(
       t("Time zone"),
       "timeZone",
       known ? zone === current.timeZone : null,
-      () => [storeTimeZoneName(zone)],
-      () => storeTimeZoneName(current?.timeZone ?? ""),
+      () => [names?.next ?? storeTimeZoneName(zone)],
+      () => names?.now ?? "",
     );
   }
   if (content.businessDayStartLocalTime.state === "Configured") {

@@ -6004,7 +6004,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "{name}：已在线付款 {value}，但从未发送到后厨。它将被取消，并向顾客退款。",
   "{name}: the guest started paying online but hasn't finished. It will be cancelled now and their unfinished payment stopped, so they can't be charged for it. If it was in fact paid, it stays open and shows here again.":
     "{name}：顾客开始在线付款但尚未完成。现在会取消它并停止未完成的付款，顾客不会因此被扣款。如果实际已付款，它会保持未关闭并再次显示在这里。",
-  "{name}: {before} becomes {after}": "{name}：{before} 变为 {after}",
+  "{name}: {before} becomes {after}": "{name}：{before}变为{after}",
   "{name}: {length} not marked started will be cancelled and ":
     "{name}：{length} 项后厨还没标记开始的将被取消，并",
   "{name}: {openItemCount} already being made or paid on the card machine. Serve them, or mark them served on the Orders page.":
@@ -9945,6 +9945,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Earlier changes": "以前的修改",
   "Earlier changes could not be loaded just now. Check the connection and try again.":
     "暂时无法加载以前的修改。请检查网络后再试。",
+  // b21 review: a history answer that is refused or cannot be read is not a connection problem.
+  "This part of the earlier changes cannot be shown. Everything else keeps working as usual.":
+    "这部分以前的修改无法显示。其他操作不受影响，可以照常继续。",
   "Create the change from the saved setup": "用已保存的设置生成修改",
   "Create the change again from the saved setup": "用已保存的设置重新生成修改",
   "The setup was saved again after this change was made, so what was saved since is not in it. Creating it again replaces this change with one that has it; nothing changes for customers yet.":
@@ -10041,7 +10044,17 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Your changes that are not saved yet are kept after switching the language. Save as draft to keep them.":
     "切换语言后，还没保存的修改仍在这里。存为草稿后才会保留。",
   "Now {now} → changes to {value}": "现在{now} → 改为{value}",
-  "Back to how the Store runs today": "改回门店现在的样子",
+  // b21 review: a setting put back to how the Store runs today names the values.
+  "Now saved as {saved} → changes to {value}, as the Store runs today":
+    "现在保存的是{saved} → 改为{value}，和门店现在一样",
+  "Back to how the Store runs today. The saved draft changes:":
+    "改回门店现在的样子。已保存的草稿改的是：",
+  "{zone}, older setting ({place})": "{zone}，旧设置（{place}）",
+  Montréal: "蒙特利尔",
+  Nipigon: "尼皮贡",
+  "Thunder Bay": "桑德贝",
+  "Rainy River": "雷尼河",
+  Yellowknife: "耶洛奈夫",
   "on ({services})": "开启（{services}）",
   "no order limits": "不限制订单",
   "the order limits saved earlier": "之前保存的订单限制",

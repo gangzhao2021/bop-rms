@@ -3,6 +3,7 @@ import { findInternalText } from "../e2e/internal-text-patterns.js";
 import { setLanguageForTest } from "./i18n/i18n.js";
 import {
   storeTimeZoneChoices,
+  storeTimeZoneNamesApart,
   storeTimeZoneName,
   timeZoneChoices,
   timeZoneLabel,
@@ -102,6 +103,43 @@ it("Store setup lists the Canadian zones plainly and keeps a zone outside them",
       "纽芬兰时间（圣约翰斯）",
       "大西洋时间（蒙克顿）",
       "育空（白马市）",
+    ]);
+  } finally {
+    setLanguageForTest("en");
+  }
+});
+
+// b21 review: a Store running on an older id of a listed zone (America/Montreal) while the draft
+// holds that zone's own id (America/Toronto) offers both, each with its own words, so the field
+// shows its own value and choosing one never stores the other.
+it("b21 review: an older id and the zone's own id are separate options", () => {
+  const choices = storeTimeZoneChoices(
+    ["America/Montreal", "America/Montreal", "America/Toronto"],
+    at,
+  );
+  const eastern = choices.filter((zone) => zone.label.startsWith("Eastern time"));
+  expect(eastern).toEqual([
+    {
+      value: "America/Montreal",
+      label: "Eastern time (Toronto, Ottawa, Montréal), older setting (Montréal)",
+    },
+    { value: "America/Toronto", label: "Eastern time (Toronto, Ottawa, Montréal)" },
+  ]);
+  expect(choices.map((zone) => zone.value)).toContain("America/Toronto");
+  expect(new Set(choices.map((zone) => zone.label)).size).toBe(choices.length);
+  expect(storeTimeZoneNamesApart("America/Montreal", "America/Toronto", at)).toEqual({
+    now: "Eastern time (Toronto, Ottawa, Montréal), older setting (Montréal)",
+    next: "Eastern time (Toronto, Ottawa, Montréal)",
+  });
+  setLanguageForTest("zh-Hans");
+  try {
+    expect(
+      storeTimeZoneChoices(["America/Montreal", "America/Toronto"], at)
+        .slice(0, 2)
+        .map((zone) => zone.label),
+    ).toEqual([
+      "东部时间（多伦多、渥太华、蒙特利尔），旧设置（蒙特利尔）",
+      "东部时间（多伦多、渥太华、蒙特利尔）",
     ]);
   } finally {
     setLanguageForTest("en");

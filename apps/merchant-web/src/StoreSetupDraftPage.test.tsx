@@ -1634,7 +1634,7 @@ it("b21: every setting kind reads from now to new and is marked when not saved y
   const item = (label: string) => summary.changed.find((entry) => entry.label === label);
   expect(item("Business day start")).toEqual({
     label: "Business day start",
-    value: ["Back to how the Store runs today"],
+    value: ["Now saved as 04:30 \u2192 changes to 04:00, as the Store runs today"],
     unsaved: true,
   });
   expect(item("Opening hours")).toEqual({
@@ -1679,8 +1679,10 @@ it("b21: every setting kind reads from now to new and is marked when not saved y
       ),
     );
     expect(zh).toContain("现在门店在用的地址 → 改为这份设置里保存的地址");
-    expect(zh).toContain("小费：关闭 变为 开启（堂食）");
-    expect(zh).toContain("改回门店现在的样子");
+    expect(zh).toContain("小费：关闭变为开启（堂食）");
+    expect(zh).toContain("现在保存的是 04:30 → 改为 04:00，和门店现在一样");
+    // Between Chinese words 变为 takes no spaces (a gap next to a number is the usual spacing).
+    expect(zh).not.toMatch(/[\p{Script=Han}）] 变为|变为 [\p{Script=Han}]/u);
     expect(zh.match(/^尚未保存$/gmu)).toHaveLength(5);
     expect(zh).not.toMatch(/改为改为|配置/u);
   } finally {
@@ -1723,4 +1725,66 @@ it("b20: what was kept at a language switch comes back only onto the same saved 
     { ...kept, content: { profile: "nope" } },
   ])
     expect(storeSetupKeptEdits(junk, same)).toBeNull();
+});
+
+// b21 review: a fee whose services are stored in another order is not a change, and a setting with
+// several lines put back to how the Store runs today names what the saved draft changes.
+it("b21 review: fee service order is not a change; a put-back fee names the saved change", () => {
+  const tip = (state: string, orderTypes?: readonly string[]) => ({
+    chargeType: "Tip",
+    state,
+    taxClassificationReference: null,
+    ...(orderTypes === undefined ? {} : { orderTypes }),
+  });
+  const current = {
+    timeZone: "America/Toronto",
+    businessDayStartLocalTime: "04:00:00",
+    enabledServiceModes: ["DineIn", "Pickup"],
+    weeklySchedule: [],
+    capacityConfigurationReference: null,
+    setupBasis: { feeContexts: [tip("Enabled", ["Pickup", "DineIn"])] },
+  } as unknown as StoreConfigurationSnapshot;
+  const fees = (value: unknown) => ({
+    ...createUnconfiguredStoreSetupContentV2(),
+    feeContexts: { state: "Configured" as const, value: value as never },
+  });
+  const sameReordered = fees([tip("Enabled", ["DineIn", "Pickup"])]);
+  const summary = storeSetupChangeSummary(sameReordered, current);
+  expect(summary.changed.find((entry) => entry.label === "Fees")).toBeUndefined();
+  expect(summary.unchanged).toContain("Fees");
+  // Saved draft turns the tip off; the edit puts it back on as the Store has it.
+  const saved = fees([tip("Disabled")]);
+  expect(
+    storeSetupChangeSummary(sameReordered, current, saved).changed.find(
+      (entry) => entry.label === "Fees",
+    ),
+  ).toEqual({
+    label: "Fees",
+    value: [
+      "Back to how the Store runs today. The saved draft changes:",
+      "Tip: on (Dine-in, Pickup) becomes off",
+    ],
+    unsaved: true,
+  });
+});
+// b21 review: a Store on an older id of its zone whose setup moves it to the zone's own id says
+// which is which, never "Eastern time → Eastern time".
+it("b21 review: a time zone id change within one zone reads apart", () => {
+  const current = {
+    timeZone: "America/Montreal",
+    businessDayStartLocalTime: "04:00:00",
+    enabledServiceModes: [],
+    weeklySchedule: [],
+  } as unknown as StoreConfigurationSnapshot;
+  const content = {
+    ...createUnconfiguredStoreSetupContentV2(),
+    timeZone: { state: "Configured" as const, value: "America/Toronto" },
+  };
+  expect(
+    storeSetupChangeSummary(content, current).changed.find((e) => e.label === "Time zone"),
+  ).toEqual({
+    label: "Time zone",
+    value: ["Eastern time (Toronto, Ottawa, Montréal)"],
+    now: "Eastern time (Toronto, Ottawa, Montréal), older setting (Montréal)",
+  });
 });
