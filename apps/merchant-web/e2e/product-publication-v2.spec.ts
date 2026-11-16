@@ -1225,7 +1225,10 @@ test("@production V2 validation report Complete warnings reflow at 320 and chang
       .locator(":scope > li"),
   ).toHaveCount(3);
   await expect(page.locator("[role=dialog]")).toHaveCount(0);
-  await page.screenshot({ path: "/private/tmp/wp2421-validation-report-320.png", fullPage: true });
+  await page.screenshot({
+    path: test.info().outputPath("wp2421-validation-report-320.png"),
+    fullPage: true,
+  });
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)).toBe(
     false,
   );

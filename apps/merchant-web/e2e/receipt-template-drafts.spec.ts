@@ -932,7 +932,9 @@ test("@production 390px keyboard preview and conflict preserve the exact pending
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   );
-  await region.screenshot({ path: "/private/tmp/wp2421-receipt-template-draft-mobile.png" });
+  await region.screenshot({
+    path: test.info().outputPath("wp2421-receipt-template-draft-mobile.png"),
+  });
   expect(state.errors).toEqual([]);
 });
 
@@ -976,7 +978,9 @@ test("@production ordinary template review submission reloads real state and fre
   expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(
     false,
   );
-  await region.screenshot({ path: "/private/tmp/wp2421-receipt-template-submit-mobile.png" });
+  await region.screenshot({
+    path: test.info().outputPath("wp2421-receipt-template-submit-mobile.png"),
+  });
   expect(state.submitPosts.filter((p) => p.command === "SubmitReview")).toHaveLength(1);
   expect(state.errors).toEqual([]);
 });
@@ -1140,7 +1144,9 @@ test("@production 390px independent template approval and publication refresh re
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   );
-  await region.screenshot({ path: "/private/tmp/wp2421-receipt-template-lifecycle-mobile.png" });
+  await region.screenshot({
+    path: test.info().outputPath("wp2421-receipt-template-lifecycle-mobile.png"),
+  });
   await page.reload();
   await region
     .getByRole("combobox", { name: "Receipt template", exact: true })

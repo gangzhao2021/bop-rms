@@ -472,7 +472,10 @@ test("@production registration materials save and replace actual sources, then r
   await expect(panel(page).getByLabel("Declared applicability", { exact: true })).toHaveValue(
     "Applicable",
   );
-  await page.screenshot({ path: "/private/tmp/wp2421-tax-material-desktop.png", fullPage: true });
+  await page.screenshot({
+    path: test.info().outputPath("wp2421-tax-material-desktop.png"),
+    fullPage: true,
+  });
   expect(f.state.errors).toEqual([]);
 });
 test("@production lost reply survives reload and Actor switch, resolving exact original before registration reads", async ({
@@ -577,7 +580,10 @@ test("@production failed refresh retains original and the mobile declaration for
     const box = await panel(page).getByLabel(label, { exact: true }).boundingBox();
     expect(box?.height).toBeGreaterThanOrEqual(44);
   }
-  await page.screenshot({ path: "/private/tmp/wp2421-tax-material-mobile.png", fullPage: true });
+  await page.screenshot({
+    path: test.info().outputPath("wp2421-tax-material-mobile.png"),
+    fullPage: true,
+  });
   expect(
     await page
       .locator(".bop-skip-link")
@@ -591,7 +597,7 @@ test("@production failed refresh retains original and the mobile declaration for
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await expect(panel(page).getByLabel("Source issued at (UTC)", { exact: true })).toBeVisible();
   await page.screenshot({
-    path: "/private/tmp/wp2421-tax-material-narrow-text.png",
+    path: test.info().outputPath("wp2421-tax-material-narrow-text.png"),
     fullPage: true,
   });
 

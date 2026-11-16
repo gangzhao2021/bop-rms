@@ -83,7 +83,7 @@ test("@production current Store capability decisions, gating and scope recovery"
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
     await page.screenshot({
-      path: `/private/tmp/wp2421-current-store-capability-${width}.png`,
+      path: test.info().outputPath(`wp2421-current-store-capability-${width}.png`),
       fullPage: true,
     });
   }

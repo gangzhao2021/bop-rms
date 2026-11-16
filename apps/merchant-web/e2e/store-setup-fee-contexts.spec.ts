@@ -712,7 +712,7 @@ test("@production Store fee contexts late Actor choices cannot replace new scope
   expect(await journalRecords(page)).toEqual([]);
   expect(f.control.errors).toEqual([]);
   await page.screenshot({
-    path: "/private/tmp/wp2421-store-setup-fee-contexts-mobile.png",
+    path: test.info().outputPath("wp2421-store-setup-fee-contexts-mobile.png"),
     fullPage: true,
   });
 });

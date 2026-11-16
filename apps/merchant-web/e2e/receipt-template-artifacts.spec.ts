@@ -327,7 +327,7 @@ test("@production mobile keyboard conflict keeps original protected", async ({ p
   await recover.focus();
   await expect(recover).toBeFocused();
   await page.screenshot({
-    path: "/private/tmp/wp2421-receipt-artifacts-mobile.png",
+    path: test.info().outputPath("wp2421-receipt-artifacts-mobile.png"),
     fullPage: true,
   });
 });

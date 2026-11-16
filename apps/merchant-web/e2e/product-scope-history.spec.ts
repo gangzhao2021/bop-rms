@@ -678,7 +678,7 @@ test("@production ordinary Product history entry, keyboard, responsive records a
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
     await page.screenshot({
-      path: `/private/tmp/wp2421-product-scope-history-${width}.png`,
+      path: test.info().outputPath(`wp2421-product-scope-history-${width}.png`),
       fullPage: true,
     });
   }
@@ -780,7 +780,7 @@ test("@production recorded overlap phone touch preserves exact scope entries and
       for (const privateValue of [id(1), id(2), id(3), id(4), id(10), id(11), id(12), id(13), hash])
         expect(text).not.toContain(privateValue);
       await page.screenshot({
-        path: `/private/tmp/wp2421-m129-recorded-overlap-${relation}-${width}.png`,
+        path: test.info().outputPath(`wp2421-m129-recorded-overlap-${relation}-${width}.png`),
         fullPage: true,
       });
     }
@@ -1089,7 +1089,7 @@ test("@production ordinary current Product content: all groups, keyboard, respon
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
     await page.screenshot({
-      path: `/private/tmp/wp2421-product-current-content-${width}.png`,
+      path: test.info().outputPath(`wp2421-product-current-content-${width}.png`),
       fullPage: true,
     });
   }
@@ -1400,7 +1400,7 @@ test("@production complete Draft ordinary text save preserves all tuples, keyboa
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
     await page.screenshot({
-      path: `/private/tmp/wp2421-complete-draft-form-${width}.png`,
+      path: test.info().outputPath(`wp2421-complete-draft-form-${width}.png`),
       fullPage: true,
     });
   }
@@ -1593,7 +1593,7 @@ test("@production complete Draft recorded SKU Variant Option configuration prese
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
     ).toBe(true);
     await page.screenshot({
-      path: `/private/tmp/wp2421-recorded-configuration-${width}.png`,
+      path: test.info().outputPath(`wp2421-recorded-configuration-${width}.png`),
       fullPage: true,
     });
   }
@@ -2194,7 +2194,7 @@ test("@production publication schedule reschedule cancel keyboard mobile narrow 
     ).toBe(true);
     await page
       .getByRole("region", { name: "Publication requests", exact: true })
-      .screenshot({ path: `/private/tmp/wp2421-publication-${width}.png` });
+      .screenshot({ path: test.info().outputPath(`wp2421-publication-${width}.png`) });
   }
   await page.locator("html").evaluate((el) => {
     el.style.fontSize = "200%";
@@ -2448,7 +2448,7 @@ test("@production publication explicit Brand scope requires validation and keeps
     );
     await page
       .getByRole("region", { name: "Publication requests", exact: true })
-      .screenshot({ path: `/private/tmp/wp2421-m128-publication-scope-${width}.png` });
+      .screenshot({ path: test.info().outputPath(`wp2421-m128-publication-scope-${width}.png`) });
   }
   await page.locator("html").evaluate((element) => {
     element.style.fontSize = "200%";
@@ -2563,7 +2563,7 @@ test("@production publication phone touch Brand proposal keeps current scope and
         true,
       );
       await page.getByRole("region", { name: "Publication requests", exact: true }).screenshot({
-        path: `/private/tmp/wp2421-m128-publication-phone-${width}.png`,
+        path: test.info().outputPath(`wp2421-m128-publication-phone-${width}.png`),
       });
     }
     await page.getByRole("button", { name: "Validate publication", exact: true }).tap();
@@ -2878,7 +2878,7 @@ test("@production initial Product creation ordinary entry, explicit fields, keyb
         .evaluate((element) => element.getBoundingClientRect().height),
     ).toBeGreaterThanOrEqual(44);
     await page.screenshot({
-      path: `/private/tmp/wp2421-product-create-${width}.png`,
+      path: test.info().outputPath(`wp2421-product-create-${width}.png`),
       fullPage: true,
     });
   }
@@ -3258,7 +3258,7 @@ test("@production initial Product creation current Category keyboard multi-selec
   }
   const box = await page.getByRole("checkbox", { name: foodCategory, exact: true }).boundingBox();
   expect(box?.height).toBeGreaterThanOrEqual(44);
-  await page.screenshot({ path: "/private/tmp/wp2421-m102-categories-320.png" });
+  await page.screenshot({ path: test.info().outputPath("wp2421-m102-categories-320.png") });
   await page.evaluate(() => {
     document.documentElement.style.zoom = "2";
   });
@@ -3526,7 +3526,10 @@ test("@production classified Draft Category keyboard multi-selection primary mob
   const box = await drinks.boundingBox();
   expect(box?.width).toBeGreaterThanOrEqual(44);
   expect(box?.height).toBeGreaterThanOrEqual(44);
-  await page.screenshot({ path: "/private/tmp/wp2421-m105-category-edit-320.png", fullPage: true });
+  await page.screenshot({
+    path: test.info().outputPath("wp2421-m105-category-edit-320.png"),
+    fullPage: true,
+  });
   await page.evaluate(() => {
     document.documentElement.style.zoom = "2";
   });

@@ -1031,7 +1031,7 @@ test("@production source drift refuses reserve and POST while evidence controls 
     panel(page).getByRole("combobox", { name: "Evidence material kind", exact: true }),
   ).toHaveValue("ProfessionalReport");
   await page.screenshot({
-    path: "/private/tmp/wp2421-tax-evidence-material-mobile.png",
+    path: test.info().outputPath("wp2421-tax-evidence-material-mobile.png"),
     fullPage: true,
   });
   expect(f.state.errors).toEqual([]);
