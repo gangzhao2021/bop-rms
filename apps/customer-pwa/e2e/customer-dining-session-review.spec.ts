@@ -671,6 +671,101 @@ test.describe("@production CUST-DINE-IN-SESSION table view", () => {
       await expectNoInternalText(page);
     });
 
+  // b23 (live22, TM2 L22 MCC A): the guest's Table total read "Total $49.72" at 700 in the grey
+  // note colour (rgb(102, 102, 102)) while its own Subtotal and Tax read 600 in the body colour:
+  // the bill's total looked weaker than its parts. It reads at least as strong, in the body colour.
+  for (const language of ["en", "zh-Hans"] as const)
+    test(`b23: the Table total's Total reads at least as strong as its Subtotal and Tax (${language})`, async ({
+      page,
+    }) => {
+      const zh = language === "zh-Hans";
+      if (zh)
+        await page.addInitScript(() => localStorage.setItem("bop.customer.language", "zh-Hans"));
+      const [round1] = session.session.rounds;
+      if (round1 === undefined) throw new Error("fixture");
+      const lines = (items: number, off: number, tax: number) => ({
+        items: cad(String(items)),
+        takenOff: cad(String(off)),
+        pointsUsed: cad("0"),
+        subtotal: cad(String(items - off)),
+        tax: cad(String(tax)),
+        total: cad(String(items - off + tax)),
+      });
+      // Four staff rounds: Beef noodles / Soy milk + cucumber / Beef noodles / Soy milk + cucumber
+      // ($14.13 + $10.73 + $14.12 + $10.74 = $49.72, tax worked out once on the whole bill).
+      const rounds = [
+        lines(1250, 0, 163),
+        lines(950, 0, 123),
+        lines(1250, 0, 162),
+        lines(950, 0, 124),
+      ];
+      const priced = {
+        schemaVersion: 1,
+        session: {
+          ...session.session,
+          paymentTiming: "PayLater",
+          rounds: rounds.map((bill, index) => ({
+            ...round1,
+            roundNumber: index + 1,
+            payment: "OnTableBill",
+            items: [
+              {
+                ...round1.items[0],
+                quantity: 1,
+                servedQuantity: 0,
+                lineTotal: cad(String(bill.total.amountMinor)),
+                priceBeforeTax: cad(String(bill.items.amountMinor)),
+              },
+            ],
+            itemsTotal: bill.total,
+            subtotal: bill.subtotal,
+            tax: bill.tax,
+            bill,
+          })),
+          summary: {
+            paid: cad("0"),
+            refunded: cad("0"),
+            refundPending: cad("0"),
+            due: cad("4972"),
+            ordered: { subtotal: cad("4400"), tax: cad("572"), total: cad("4972") },
+            bill: lines(4400, 0, 572),
+          },
+        },
+      };
+      await enterTable(page, () => ({ status: 200, json: priced }));
+      const summary = page
+        .getByRole("main")
+        .getByRole("region", { name: zh ? "本桌合计" : "Table total" });
+      const total = summary.locator("p.order-status__total");
+      await expect(total).toHaveText(zh ? "合计$49.72" : "Total$49.72");
+      const style = (locator: ReturnType<typeof page.locator>) =>
+        locator.evaluate((element) => {
+          const computed = getComputedStyle(element);
+          return {
+            weight: Number(computed.fontWeight),
+            size: Number.parseFloat(computed.fontSize),
+            color: computed.color,
+          };
+        });
+      const totalStyle = await style(total);
+      const subtotal = await style(summary.locator(".order-status__money dd").first());
+      expect(totalStyle.color).toBe("rgb(23, 23, 23)");
+      expect(totalStyle.color).toBe(subtotal.color);
+      expect(totalStyle.weight).toBeGreaterThanOrEqual(subtotal.weight);
+      expect(totalStyle.size).toBeGreaterThanOrEqual(subtotal.size);
+      // v3 type scale: 16 at 600.
+      expect(totalStyle).toEqual({ weight: 600, size: 16, color: "rgb(23, 23, 23)" });
+      for (const width of [1440, 1024, 390]) {
+        await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+        await expectNoHorizontalOverflow(page);
+        await page.screenshot({
+          path: `${process.env.B23_SHOTS ?? test.info().outputPath("")}/guest-table-total-${language}-${width}.png`,
+          fullPage: true,
+        });
+      }
+      await expectNoInternalText(page);
+    });
+
   // WP-2423 Q7 slice 2 (DEC-STAFF-DINE-IN-ROUND): a round staff entered for the table.
   test("WP-2423 item 8 ⑦ 4b-3: tells the table the per-head tea staff added", async ({ page }) => {
     await enterTable(page, () => ({

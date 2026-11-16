@@ -144,7 +144,10 @@
 /* v15 b21: a round's total is the card's main figure (16, 600, body colour). It sat under the
    card's grey 14px note style, so a refund line under it (16, 400, like Subtotal and Tax) read as
    the round's figure. */
-.customer-page .order-status__batch > p.order-status__total {
+/* b23 (live22): the Table total's Total too — it read 700 in the grey note colour under its own
+   Subtotal and Tax (600, body colour), so the bill's total looked weaker than its parts. */
+.customer-page .order-status__batch > p.order-status__total,
+.customer-page .dining-session__summary > p.order-status__total {
   color: var(--bop-color-text-default);
   font-size: 16px;
   font-weight: 600;
