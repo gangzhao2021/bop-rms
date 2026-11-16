@@ -101,66 +101,77 @@ it("b22: Review flags a business day start change as cannot be sent, with the st
   expect(kept).not.toContain("无法提交审批");
 });
 
-it("b22: no change is created from a saved setup whose business day start differs from the Store's", async () => {
-  setLanguageForTest("zh-Hans");
-  vi.spyOn(Date, "now").mockReturnValue(Date.parse(at));
-  const saved = {
-    tenantReference: id(1),
-    brandReference: id(2),
-    storeReference: id(3),
-    setupDraftReference: id(30),
-    revision: 1,
-    baseConfigurationReference: id(20),
-    content: setup({ businessDayStartLocalTime: { state: "Configured", value: "04:30:00" } }),
-  };
-  const workspace = {
-    profile: "StoreConfigurationOrdinaryWorkspaceV1",
-    scope,
-    latest: null,
-    current,
-    expectedHead: { configurationReference: id(20), configurationVersion: 1, contentDigest: null },
-    original: null,
-    observedAt: at,
-    validUntil: at,
-    businessReferenceValidation: "NotEvaluated",
-  };
-  const client = {
-    invalidate: vi.fn(),
-    load: vi.fn(async () => workspace),
-    prepare: vi.fn(),
-    execute: vi.fn(),
-    refreshOriginal: vi.fn(),
-    resolve: vi.fn(),
-    history: vi.fn(),
-  };
-  completeness.complete = true;
-  const { container } = await mount(
-    <MemoryRouter>
-      <StoreConfigurationOrdinaryPanel
-        scope={scope}
-        csrf={csrf}
-        saved={saved as never}
-        setupLayout="Open"
-        client={client as never}
-        journalFactory={
-          (() => ({
-            load: vi.fn(async () => null),
-            reserve: vi.fn(),
-            complete: vi.fn(),
-          })) as never
-        }
-      />
-    </MemoryRouter>,
-  );
-  await settle();
-  const text = container.textContent ?? "";
-  expect(text).not.toContain("用已保存的设置生成修改");
-  expect(text).toContain(
-    "还不能生成修改：这份已保存设置的营业日开始时间无法提交审批。请在第 1 步“时区和营业日”改回 04:00，存为草稿，再回到这里。",
-  );
-  expect(client.prepare).not.toHaveBeenCalled();
-  completeness.complete = false;
-});
+// b22 review: the sentence names where this layout sets the business day start, as Review does.
+it.each([
+  ["Open", "第 1 步，时区和营业日"],
+  ["Opening", "第 2 步，地址和时区"],
+] as const)(
+  "b22: no change is created from a saved setup whose business day start differs from the Store's (%s)",
+  async (layout, where) => {
+    setLanguageForTest("zh-Hans");
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse(at));
+    const saved = {
+      tenantReference: id(1),
+      brandReference: id(2),
+      storeReference: id(3),
+      setupDraftReference: id(30),
+      revision: 1,
+      baseConfigurationReference: id(20),
+      content: setup({ businessDayStartLocalTime: { state: "Configured", value: "04:30:00" } }),
+    };
+    const workspace = {
+      profile: "StoreConfigurationOrdinaryWorkspaceV1",
+      scope,
+      latest: null,
+      current,
+      expectedHead: {
+        configurationReference: id(20),
+        configurationVersion: 1,
+        contentDigest: null,
+      },
+      original: null,
+      observedAt: at,
+      validUntil: at,
+      businessReferenceValidation: "NotEvaluated",
+    };
+    const client = {
+      invalidate: vi.fn(),
+      load: vi.fn(async () => workspace),
+      prepare: vi.fn(),
+      execute: vi.fn(),
+      refreshOriginal: vi.fn(),
+      resolve: vi.fn(),
+      history: vi.fn(),
+    };
+    completeness.complete = true;
+    const { container } = await mount(
+      <MemoryRouter>
+        <StoreConfigurationOrdinaryPanel
+          scope={scope}
+          csrf={csrf}
+          saved={saved as never}
+          setupLayout={layout}
+          client={client as never}
+          journalFactory={
+            (() => ({
+              load: vi.fn(async () => null),
+              reserve: vi.fn(),
+              complete: vi.fn(),
+            })) as never
+          }
+        />
+      </MemoryRouter>,
+    );
+    await settle();
+    const text = container.textContent ?? "";
+    expect(text).not.toContain("用已保存的设置生成修改");
+    expect(text).toContain(
+      `还不能生成修改：这份已保存设置的营业日开始时间无法提交审批。请在${where}中改回 04:00，存为草稿，再回到这里。`,
+    );
+    expect(client.prepare).not.toHaveBeenCalled();
+    completeness.complete = false;
+  },
+);
 
 // Item 3: a tip turned on without its orders names that problem, and the rest of Review stays.
 it("b22: a tip on without an order type is named at the field and in Review, and the summary stays", () => {
