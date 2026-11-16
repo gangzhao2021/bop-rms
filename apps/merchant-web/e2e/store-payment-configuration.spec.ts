@@ -373,7 +373,7 @@ test("@production Store payment rules save, explicit selection, setup resume ret
     page.getByText("Payment methods saved. Save as draft to keep them in this setup."),
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "Use the saved payment methods", exact: true }),
+    page.getByRole("button", { name: /Use (these|the current) payment methods/u }),
   ).toHaveCount(0);
   expect(f.payment()?.content).toEqual({
     customerOnlineCardEnabled: false,
@@ -393,13 +393,13 @@ test("@production Store payment rules save, explicit selection, setup resume ret
   await page.reload();
   await page.getByRole("button", { name: "3. Fees, tax and payment", exact: true }).click();
   await expect(
-    page.getByText("These saved payment methods are not used in this setup yet."),
+    page.getByText("This setup still uses the store's earlier payment methods."),
   ).toBeVisible();
   await expect(
     page.getByRole("checkbox", { name: "Customer online card", exact: true }),
   ).toBeChecked();
   await expect(
-    page.getByRole("button", { name: "Use the saved payment methods", exact: true }),
+    page.getByRole("button", { name: "Use the current payment methods", exact: true }),
   ).toBeEnabled();
   expect(f.draft()?.content.paymentConfigurationReference).toEqual({
     state: "Configured",
@@ -446,9 +446,7 @@ test("@production payment committed reply loss reload denies recovery then clear
   expect(await records(page)).toEqual(pending);
   f.control.denyResolve = false;
   await page.getByRole("button", { name: "Recover original payment save", exact: true }).click();
-  await expect(
-    page.getByText("Earlier payment save confirmed. Choose the saved payment methods to use them."),
-  ).toBeVisible();
+  await expect(page.getByText("Earlier payment save confirmed.")).toBeVisible();
   expect(await records(page)).toEqual([]);
   expect(f.control.paymentWrites).toHaveLength(1);
   expect(f.control.resolves.map((r) => r.operationReference)).toEqual([op, op]);

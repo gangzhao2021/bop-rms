@@ -1,4 +1,5 @@
 import {
+  currentLanguage,
   forgetKeptThroughLanguageSwitch,
   keepThroughLanguageSwitch,
   listSeparator,
@@ -402,33 +403,36 @@ const feeLabel = (chargeType: string) =>
 function StoreSetupTaxSection({
   value,
   live,
-  where,
 }: {
   readonly value: StoreSetupContent["taxConfigurationReference"];
   readonly live: string | null;
-  readonly where: string;
 }) {
   return (
     <section className="store-setup-tax store-setup-block" aria-label={t("Tax")}>
       <h4>{t("Tax")}</h4>
-      <p>
-        {value.state !== "Configured"
-          ? t(
-              "This setup has no tax settings yet. They come with the store's current settings ({where}).",
-              {
-                where,
-              },
-            )
-          : live !== null && value.value === live
-            ? t("Taxed with the tax settings this store uses today.")
-            : t("Taxed with the tax settings taken in for this setup.")}
-      </p>
-      <p>
-        {t("Tax rates and tax names are in")}
-        {wordGap()}
-        <Link to="/app/commerce/tax-review">{t("Tax review")}</Link>
-        {t(", where they are checked and changed.")}
-      </p>
+      <p className="store-setup-block__lead">{t("The sales tax added to orders.")}</p>
+      <ul className="store-setup-rows">
+        <li className="store-setup-row">
+          <div className="store-setup-row__head">
+            <span className="store-setup-row__name">{t("Tax rates")}</span>
+          </div>
+          <div className="store-setup-row__fields">
+            <p>
+              {value.state !== "Configured" || (live !== null && value.value === live)
+                ? t("Orders are taxed with the tax settings this store uses today.")
+                : t(
+                    "Orders are taxed with the tax settings this setup took in earlier, not the ones this store uses today. Step 4 can take in today's.",
+                  )}
+            </p>
+            <p className="store-setup-block__note">
+              {t("Tax rates and tax names are in")}
+              {wordGap()}
+              <Link to="/app/commerce/tax-review">{t("Tax review")}</Link>
+              {t(", where they are checked and changed.")}
+            </p>
+          </div>
+        </li>
+      </ul>
     </section>
   );
 }
@@ -2076,7 +2080,6 @@ export function StoreSetupDraftPage({
                 <StoreSetupTaxSection
                   value={content.taxConfigurationReference}
                   live={live?.current?.taxConfigurationReference ?? null}
-                  where={storeSetupWhere(layout, "live")}
                 />
               </>
             )}
@@ -3129,7 +3132,9 @@ export function StoreSetupReferenceEditor({
     };
   }, [client, scopeKey, csrf, kind, journalFactory, readAgain]);
   // b24 (v15 live check of b23): a first read that failed with the connection is made again.
-  useReadAgainWhenOnline(!ready && !busy && error !== null, () => setReadAgain((n) => n + 1));
+  useReadAgainWhenOnline(!ready && !busy && error === "Unavailable", () =>
+    setReadAgain((n) => n + 1),
+  );
   useEffect(() => {
     if (disabled) {
       active.current?.abort();
@@ -3538,7 +3543,7 @@ export function StorePaymentConfigurationEditor({
       active.current = null;
     };
   }, [client, scopeKey, csrf, journalFactory, firstRead]);
-  const online = useReadAgainWhenOnline(!ready && error !== null && !busy, () =>
+  const online = useReadAgainWhenOnline(!ready && error === "Unavailable" && !busy, () =>
     setFirstRead((n) => n + 1),
   );
   // Parent draft saves may temporarily disable this child. Keep its initial
@@ -3595,7 +3600,7 @@ export function StorePaymentConfigurationEditor({
           setReady(true);
           setNotice(
             result.receipt.outcome === "Committed"
-              ? t("Earlier payment save confirmed. Choose the saved payment methods to use them.")
+              ? t("Earlier payment save confirmed.")
               : t("Earlier payment save did not commit. You can save again."),
           );
         }
@@ -3755,35 +3760,41 @@ export function StorePaymentConfigurationEditor({
       {ready ? (
         <fieldset className="store-setup-payment__methods" disabled={disabled || busy || !!pending}>
           <legend className="visually-hidden">{t("Allowed payment channels")}</legend>
-          {groups.map(([group, items]) => (
-            <div className="store-setup-payment__group" key={group}>
-              <span className="store-setup-row__label">{group}</span>
-              {items.map(([key, label]) => (
-                <label key={key}>
-                  <input
-                    type="checkbox"
-                    checked={fields[key]}
-                    onChange={(e) => {
-                      const checked = e.currentTarget.checked;
-                      dirty.current = true;
-                      hold.mark();
-                      setFields((v) => ({ ...v, [key]: checked }));
-                      setError(null);
-                    }}
-                  />
-                  {label}
-                </label>
-              ))}
-            </div>
-          ))}
+          <ul className="store-setup-rows">
+            {groups.map(([group, items]) => (
+              <li className="store-setup-row store-setup-payment__group" key={group}>
+                <div className="store-setup-row__head">
+                  <span className="store-setup-row__name">{group}</span>
+                </div>
+                <div className="store-setup-row__fields">
+                  {items.map(([key, label]) => (
+                    <label key={key}>
+                      <input
+                        type="checkbox"
+                        checked={fields[key]}
+                        onChange={(e) => {
+                          const checked = e.currentTarget.checked;
+                          dirty.current = true;
+                          hold.mark();
+                          setFields((v) => ({ ...v, [key]: checked }));
+                          setError(null);
+                        }}
+                      />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+              </li>
+            ))}
+          </ul>
         </fieldset>
       ) : (
-        <p className="store-setup-block__note">
+        <p className="store-setup-block__note store-setup-block__after">
           {t("The payment methods this store has now are not known yet.")}
         </p>
       )}
       {ready && (unsaved.length > 0 || !view?.snapshot) ? (
-        <p>
+        <p className="store-setup-block__after">
           <button
             type="button"
             className="store-setup-inline-action"
@@ -3794,9 +3805,14 @@ export function StorePaymentConfigurationEditor({
           </button>
         </p>
       ) : null}
+      {/* b24: shown only when the store's saved methods are not the ones this setup names (a
+          setup started before they were saved, or one that names an earlier version). Saving them
+          here already puts them in the setup, so this never follows a save. */}
       {ready && view?.snapshot && savedReference !== selectedReference && unsaved.length === 0 ? (
-        <p>
-          {t("These saved payment methods are not used in this setup yet.")}{" "}
+        <p className="store-setup-block__after">
+          {selectedReference === null
+            ? t("The store's payment methods are saved, but this setup does not use them yet.")
+            : t("This setup still uses the store's earlier payment methods.")}{" "}
           <button
             type="button"
             className="store-setup-inline-action"
@@ -3813,7 +3829,9 @@ export function StorePaymentConfigurationEditor({
               setNotice(t("Save as draft to keep this choice."));
             }}
           >
-            {t("Use the saved payment methods")}
+            {selectedReference === null
+              ? t("Use these payment methods")
+              : t("Use the current payment methods")}
           </button>
         </p>
       ) : null}
@@ -3916,6 +3934,23 @@ export function validateStoreSetupFeeSelections(
   }
 }
 /** b24 (Owner 2026-11-16 "这个页面还是很难看"): what each fee is, in one line. */
+/** b24: a Brand tax class in the staff member's language when the Brand named it in that language
+ * (a Chinese name on a Chinese screen), else its name in the Brand's own language. */
+export function taxClassificationName(
+  names: Readonly<Record<string, string>>,
+  defaultLocale: string,
+): string {
+  const named = (value: string | undefined) => (value?.trim() ? value : undefined);
+  const language = currentLanguage() === "zh-Hans" ? "zh" : "en";
+  return (
+    named(
+      Object.entries(names).find(([locale, v]) => locale.startsWith(language) && named(v))?.[1],
+    ) ??
+    named(names[defaultLocale]) ??
+    named(Object.values(names).find((v) => named(v))) ??
+    t("Unnamed tax classification")
+  );
+}
 const feeHint = (chargeType: string) =>
   chargeType === "ServiceCharge"
     ? t("Added to every order it applies to, and taxed.")
@@ -4220,9 +4255,7 @@ export function StoreSetupFeeContextEditor({
                           value={choice.classificationReference}
                           disabled={choice.lifecycle !== "Active"}
                         >
-                          {choice.localizedNames[choices.defaultLocale] ??
-                            Object.values(choice.localizedNames)[0] ??
-                            t("Unnamed tax classification")}
+                          {taxClassificationName(choice.localizedNames, choices.defaultLocale)}
                           {choice.lifecycle === "Active" ? "" : t(" (no longer in use)")}
                         </option>
                       ))}
@@ -4234,7 +4267,7 @@ export function StoreSetupFeeContextEditor({
           );
         })}
       </ul>
-      <p className="store-setup-block__note">
+      <p className="store-setup-block__note store-setup-block__after">
         {t(
           "The tax class is the Brand’s own choice; it has not been checked by a tax professional.",
         )}

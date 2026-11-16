@@ -481,3 +481,157 @@ it.each(panels)(
     expect(calls()).toBe(2);
   },
 );
+
+// b24 coordinator review: the Brand's tax class in the staff language, plain payment words, every
+// saved receipt template listed (no silent stop) and no automatic re-read after a refusal.
+const named = (names: Record<string, string>) => ({
+  classifications: vi.fn(async () => ({
+    defaultLocale: "en-CA",
+    choices: [
+      {
+        classificationReference: id(40),
+        code: "SYNTH_FEE_CLASS",
+        localizedNames: names,
+        lifecycle: "Active",
+      },
+    ],
+  })),
+});
+const feeEditorLive = (client: ReturnType<typeof named>) => (
+  <MemoryRouter>
+    <StoreSetupFeeContextEditor
+      scope={scope}
+      csrf={csrf}
+      value={fees(["DineIn"])}
+      disabled={false}
+      onChange={vi.fn()}
+      client={client as never}
+      offered={["DineIn", "Pickup"]}
+      servicesWhere="step 2"
+    />
+  </MemoryRouter>
+);
+const taxClassText = (container: HTMLElement) =>
+  container.querySelector<HTMLSelectElement>(
+    'select[aria-label$="tax classification"], select[aria-label$="的税类"]',
+  )?.selectedOptions[0]?.textContent;
+
+it("b24: a tax class shows the Brand's Chinese name on a Chinese screen, its English name otherwise", async () => {
+  setLanguageForTest("zh-Hans");
+  const both = { "en-CA": "Standard taxable", "zh-Hans-CA": "标准应税" };
+  const zh = await mount(feeEditorLive(named(both)));
+  await settle();
+  expect(taxClassText(zh.container)).toBe("标准应税");
+  setLanguageForTest("en");
+  const en = await mount(feeEditorLive(named(both)));
+  await settle();
+  expect(taxClassText(en.container)).toBe("Standard taxable");
+  // A Brand that named it only in English: that is its name, also on a Chinese screen.
+  setLanguageForTest("zh-Hans");
+  const only = await mount(feeEditorLive(named({ "en-CA": "Standard taxable" })));
+  await settle();
+  expect(taxClassText(only.container)).toBe("Standard taxable");
+  expect(only.container.textContent).toContain("未设置");
+});
+
+it("b24: saved payment methods this setup does not use yet are said plainly, with one action", async () => {
+  setLanguageForTest("zh-Hans");
+  vi.spyOn(Date, "now").mockReturnValue(Date.parse(at));
+  const load = vi.fn().mockResolvedValue(paymentCurrent());
+  const editor = (selectedReference: string | null) => (
+    <StorePaymentConfigurationEditor
+      scope={scope}
+      csrf={csrf}
+      onSelect={vi.fn()}
+      selectedReference={selectedReference}
+      client={{ load } as never}
+      journalFactory={() => ({ load: async () => null }) as never}
+    />
+  );
+  const none = await mount(editor(null));
+  await settle();
+  expect(none.container.textContent).toContain("门店付款方式已保存，但这份设置还没采用。");
+  expect(none.container.textContent).toContain("采用这些付款方式");
+  expect(none.container.textContent).not.toContain("已保存的付款方式。使用已保存");
+  const older = await mount(editor(id(69)));
+  await settle();
+  expect(older.container.textContent).toContain("这份设置用的还是门店之前的付款方式。");
+  expect(older.container.textContent).toContain("改用现在的付款方式");
+  // Already the one in use: nothing to say.
+  const same = await mount(editor(id(70)));
+  await settle();
+  expect(same.container.textContent).not.toMatch(/还没采用|之前的付款方式/u);
+});
+
+const template = (n: number) => ({
+  revision: 1,
+  content: { templateReference: id(1000 + n), locale: "en-CA" },
+});
+const roster = (pages: number) =>
+  vi.fn(async ({ afterTemplate }: { afterTemplate: string | null }) => {
+    const page = afterTemplate === null ? 0 : Number(afterTemplate);
+    return {
+      entries: [template(page)],
+      nextAfter: page + 1 < pages ? String(page + 1) : null,
+    };
+  });
+const selection = (loadRoster: ReturnType<typeof roster>) => (
+  <MemoryRouter>
+    <ReceiptTemplateStoreSelection
+      scope={scope}
+      locale="en-CA"
+      csrf={csrf}
+      value={{ state: "Unconfigured" }}
+      onSelect={vi.fn()}
+      editHref="/app/receipts#receipt-templates"
+      rosterClient={{ loadRoster } as never}
+      client={{ load: vi.fn() } as never}
+    />
+  </MemoryRouter>
+);
+
+it("b24: every saved receipt template is listed, past ten pages, and a list too long says so", async () => {
+  const twelve = roster(12);
+  const all = await mount(selection(twelve));
+  await settle(60);
+  expect(twelve).toHaveBeenCalledTimes(12);
+  // The "not chosen" choice and twelve saved templates.
+  expect(all.container.querySelectorAll("option")).toHaveLength(13);
+  expect(all.container.textContent).not.toContain("More receipt templates");
+  // A list that never ends (or a cursor that does not move on) is cut off, and said.
+  const endless = roster(10_000);
+  const long = await mount(selection(endless));
+  await settle(300);
+  expect(endless).toHaveBeenCalledTimes(50);
+  expect(long.container.textContent).toContain(
+    "More receipt templates are saved than are listed here.",
+  );
+  const link = [...long.container.querySelectorAll("a")].find((a) =>
+    a.textContent?.includes("See them all in Receipts and tax numbers"),
+  );
+  expect(link?.getAttribute("href")).toBe("/app/receipts#receipt-templates");
+});
+
+it("b24 review: a read that was refused is not read again by itself when the connection returns", async () => {
+  const denied = vi.fn().mockRejectedValue(new StoreSetupClientError("Denied"));
+  await mount(
+    <StorePaymentConfigurationEditor
+      scope={scope}
+      csrf={csrf}
+      onSelect={vi.fn()}
+      client={{ load: denied } as never}
+      journalFactory={() => ({ load: async () => null }) as never}
+    />,
+  );
+  const signIn = vi.fn().mockRejectedValue(new StoreSetupClientError("FullSignInRequired"));
+  await mount(selection(signIn as never));
+  await settle();
+  expect(denied).toHaveBeenCalledTimes(1);
+  expect(signIn).toHaveBeenCalledTimes(1);
+  await goOnline();
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 3_200));
+  });
+  expect(denied).toHaveBeenCalledTimes(1);
+  expect(signIn).toHaveBeenCalledTimes(1);
+}, 10_000);

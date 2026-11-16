@@ -361,7 +361,8 @@ async function install(page: Page, options: { readonly manager?: boolean } = {})
           {
             classificationReference: id(42),
             code: "SYNTH_FEE_CLASS",
-            localizedNames: { "en-CA": "Standard taxable" },
+            // b24: the Brand named it in both languages; each screen shows its own.
+            localizedNames: { "en-CA": "Standard taxable", "zh-Hans-CA": "标准应税" },
             lifecycle: "Active",
           },
         ],
@@ -728,6 +729,49 @@ async function b24Shot(page: Page, name: string) {
   }
   await page.setViewportSize({ width: 1440, height: 900 });
 }
+/**
+ * b24 (coordinator review): Fees, Tax, Payment and Receipts share one grid: the names start at one
+ * x, the fields at another, and the fields are equally wide, at 1440 and 1024; stacked at 390.
+ */
+async function sectionsShareOneGrid(page: Page) {
+  for (const [width, height] of [
+    [1440, 900],
+    [1024, 768],
+    [390, 844],
+  ] as const) {
+    await page.setViewportSize({ width, height });
+    const boxes = await page.evaluate(() => {
+      const content = document.querySelector(".store-setup-step-content");
+      const box = (node: Element | null | undefined) => {
+        const r = node?.getBoundingClientRect();
+        return r ? { x: Math.round(r.x), width: Math.round(r.width) } : null;
+      };
+      const rows = [...(content?.querySelectorAll(".store-setup-block .store-setup-row") ?? [])]
+        .filter((row) => (row as HTMLElement).offsetParent !== null)
+        .map((row) => ({
+          name: box(row.querySelector(".store-setup-row__name")),
+          fields: box(row.querySelector(".store-setup-row__fields")),
+        }));
+      const selects = [...(content?.querySelectorAll(".store-setup-block select") ?? [])]
+        .filter((node) => (node as HTMLElement).offsetParent !== null)
+        .map((node) => box(node));
+      const sections = [...(content?.querySelectorAll(".store-setup-block") ?? [])]
+        .filter((node) => (node as HTMLElement).offsetParent !== null)
+        .map((node) => node.getAttribute("aria-label"));
+      return { rows, selects, sections };
+    });
+    expect(boxes.sections.length).toBe(4);
+    const xs = (values: readonly ({ x: number } | null)[]) => new Set(values.map((v) => v?.x));
+    expect(xs(boxes.rows.map((row) => row.name)).size).toBe(1);
+    expect(xs(boxes.rows.map((row) => row.fields)).size).toBe(1);
+    expect(new Set(boxes.selects.map((v) => v?.width)).size).toBe(1);
+    if (width === 390)
+      // Stacked: names and fields start at the same x.
+      expect(boxes.rows[0]?.name?.x).toBe(boxes.rows[0]?.fields?.x);
+    else expect(boxes.rows[0]?.fields?.x).toBeGreaterThan((boxes.rows[0]?.name?.x ?? 0) + 200);
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+}
 const b24Words = {
   en: {
     services: "2. Services",
@@ -746,6 +790,8 @@ const b24Words = {
     fix: "Service charge applies to Pickup orders, but this setup does not offer Pickup.",
     regions: ["Fees", "Tax", "Payment methods", "Receipts"],
     known: "Customer online card",
+    taxClassName: "Standard taxable",
+    tax: "Orders are taxed with the tax settings this store uses today.",
     save: "Save as draft",
     alert: "Check the edited settings.",
   },
@@ -765,6 +811,8 @@ const b24Words = {
     fix: "服务费适用于自取订单，但这份设置没有提供自取。",
     regions: ["费用", "税", "付款方式", "收据"],
     known: "顾客在线刷卡",
+    taxClassName: "标准应税",
+    tax: "订单按本店现在用的税务设置计税。",
     save: "存为草稿",
     alert: "请检查已编辑的设置。",
   },
@@ -806,7 +854,11 @@ for (const lang of ["en", "zh-Hans"] as const)
     await orders.getByRole("checkbox", { name: w.pickup, exact: true }).check();
     await fees
       .getByRole("combobox", { name: w.taxClass, exact: true })
-      .selectOption({ label: "Standard taxable" });
+      .selectOption({ label: w.taxClassName });
+    // Tax says plainly what the store is taxed with, with no step or internal words.
+    await expect(content.getByText(w.tax, { exact: true })).toBeVisible();
+    await expect(content).not.toContainText(/第 4 步：|step 4: Use/u, { useInnerText: true });
+    await sectionsShareOneGrid(page);
     await b24Shot(page, `fees-step-${lang}`);
     // Step 2 stops pickup (not saved yet): the fee says so where it is set.
     await step(w.services);

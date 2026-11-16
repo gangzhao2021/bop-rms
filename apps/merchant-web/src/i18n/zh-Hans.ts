@@ -1744,8 +1744,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "每件菜单商品及规格，税前。随商品选择的选项计入其价格。退款包括付款后取消的菜品。",
   "Earlier check of {businessDate}": "{businessDate} 的较早核对",
   "Earlier days · still holding stock": "较早的营业日 · 仍占用库存",
-  "Earlier payment save confirmed. Choose the saved payment methods to use them.":
-    "已确认之前的付款方式已保存。请选用已保存的付款方式。",
   "Earlier payment save did not commit. You can save again.":
     "之前的付款保存未提交。你可以再次保存。",
   "Earlier save confirmed. Choose this saved configuration to use it in the setup draft.":
@@ -5254,7 +5252,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Use plain words only: no links and none of these characters: < > { }":
     "请只使用普通文字：不要包含链接，也不要使用这些字符：< > { }",
   "Use published receipt template": "使用已发布的收据模板",
-  "Use the saved payment methods": "使用已保存的付款方式",
   "Use saved {value}": "使用已保存的{value}",
   "Use service settings from": "服务设置来源",
   "Use the live Store’s opening hours": "使用当前门店的营业时间",
@@ -10120,10 +10117,11 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "A change cannot be created yet: in this saved setup, {fees}, which it does not offer. Untick them in {where}, or offer them in {services}, save as draft, then come back here.":
     "还不能生成修改：这份已保存设置里，{fees}，但本店没有提供这些服务。请在{where}中取消勾选，或在{services}中提供它们，存为草稿，再回到这里。",
   "{fee} applies to {modes}": "{fee}适用于{modes}",
-  "This setup has no tax settings yet. They come with the store's current settings ({where}).":
-    "这份设置还没有税务设置，会随门店现在的设置一起带入（{where}）。",
-  "Taxed with the tax settings this store uses today.": "按本店现在使用的税务设置计税。",
-  "Taxed with the tax settings taken in for this setup.": "按这份设置带入的税务设置计税。",
+  "The sales tax added to orders.": "订单上要加的销售税。",
+  "Orders are taxed with the tax settings this store uses today.":
+    "订单按本店现在用的税务设置计税。",
+  "Orders are taxed with the tax settings this setup took in earlier, not the ones this store uses today. Step 4 can take in today's.":
+    "订单按这份设置早先带入的税务设置计税，和本店现在用的不同。可在第 4 步改用现在的。",
   "Tax rates and tax names are in": "税率和税名在",
   ", where they are checked and changed.": "里查看和修改。",
   "Receipt templates": "收据模板",
@@ -10145,8 +10143,17 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Payment methods could not be loaded. Your earlier save is safe.":
     "暂时读不到付款方式。之前保存的内容不受影响。",
   "The payment methods this store has now are not known yet.": "还不知道本店现在的付款方式。",
-  "These saved payment methods are not used in this setup yet.":
-    "这份设置还没有使用这些已保存的付款方式。",
+  "The store's payment methods are saved, but this setup does not use them yet.":
+    "门店付款方式已保存，但这份设置还没采用。",
+  "Use these payment methods": "采用这些付款方式",
+  "This setup still uses the store's earlier payment methods.":
+    "这份设置用的还是门店之前的付款方式。",
+  "Use the current payment methods": "改用现在的付款方式",
+  "Earlier payment save confirmed.": "之前的付款方式保存已确认。",
+  "This store uses": "本店使用",
+  "More receipt templates are saved than are listed here.":
+    "还有更多已保存的收据模板没有列在这里。",
+  "See them all in Receipts and tax numbers": "到收据与税号查看全部",
   "Save as draft to keep this choice.": "存为草稿后保留这个选择。",
   "Added to every order it applies to, and taxed.": "加在适用的每张订单上，要计税。",
   "Added to delivery orders, and taxed.": "加在配送订单上，要计税。",

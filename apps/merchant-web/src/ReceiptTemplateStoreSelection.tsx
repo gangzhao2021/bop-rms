@@ -45,7 +45,13 @@ type InstalledTemplate =
   | { readonly state: "Loading" }
   | { readonly state: "Found"; readonly templateReference: string }
   | { readonly state: "None" }
-  | { readonly state: "Unavailable" };
+  | { readonly state: "Unavailable" }
+  /** Refused (not an outage): not read again by itself. */
+  | { readonly state: "Refused" };
+/** b24 review: saved templates are read page after page until the last one. This many pages is far
+ * more than a Store keeps; past it the choice says more exist and where to see them (never a silent
+ * stop). */
+export const RECEIPT_TEMPLATE_PAGE_LIMIT = 50;
 export function applyReceiptTemplateStoreSelection(
   current: ReceiptTemplatePublishedCurrent,
   scope: StoreSetupScope,
@@ -121,7 +127,8 @@ export function ReceiptTemplateStoreSelection(props: ReceiptTemplateStoreSelecti
   const epoch = useRef(0),
     controllers = useRef(new Set<AbortController>()),
     [saved, setSaved] = useState<ReceiptTemplateDraftRoster["entries"] | null>(null),
-    [rosterFailed, setRosterFailed] = useState(false),
+    [rosterError, setRosterError] = useState<StoreSetupClientError["code"] | null>(null),
+    [more, setMore] = useState(false),
     [checking, setChecking] = useState(false),
     [error, setError] = useState(""),
     [installed, setInstalled] = useState<InstalledTemplate | null>(null),
@@ -164,7 +171,8 @@ export function ReceiptTemplateStoreSelection(props: ReceiptTemplateStoreSelecti
     for (const c of controllers.current) c.abort();
     controllers.current.clear();
     setSaved(null);
-    setRosterFailed(false);
+    setRosterError(null);
+    setMore(false);
     setError("");
     setChecking(false);
     const e = epoch.current,
@@ -172,11 +180,18 @@ export function ReceiptTemplateStoreSelection(props: ReceiptTemplateStoreSelecti
       c = new AbortController();
     controllers.current.add(c);
     // Initial observation survives a parent Save temporarily disabling controls. Every page of
-    // saved templates is read (a Store has a handful), so the choice lists them all.
+    // saved templates is read until the last one, so the choice lists them all; a cursor that does
+    // not move on, or more pages than any Store keeps, is said below rather than cut off silently.
     void (async () => {
       const entries: ReceiptTemplateDraftRoster["entries"][number][] = [];
+      const seen = new Set<string>();
       let after: string | null = null;
-      for (let page = 0; page < 10; page++) {
+      for (let page = 0; ; page++) {
+        if (page >= RECEIPT_TEMPLATE_PAGE_LIMIT || (after !== null && seen.has(after))) {
+          if (valid(e, key, c)) setMore(true);
+          break;
+        }
+        if (after !== null) seen.add(after);
         const result: ReceiptTemplateDraftRoster = await rosterClient.loadRoster({
           storeReference: props.scope.storeReference,
           expectedScope: props.scope,
@@ -190,8 +205,8 @@ export function ReceiptTemplateStoreSelection(props: ReceiptTemplateStoreSelecti
       }
       if (valid(e, key, c)) setSaved(entries);
     })()
-      .catch(() => {
-        if (valid(e, key, c)) setRosterFailed(true);
+      .catch((e2: unknown) => {
+        if (valid(e, key, c)) setRosterError(code(e2));
       })
       .finally(() => controllers.current.delete(c));
     if (installedClient) {
@@ -208,8 +223,9 @@ export function ReceiptTemplateStoreSelection(props: ReceiptTemplateStoreSelecti
                 : { state: "Found", templateReference: result.templateReference },
             );
         })
-        .catch(() => {
-          if (valid(e, key, i)) setInstalled({ state: "Unavailable" });
+        .catch((e2: unknown) => {
+          if (valid(e, key, i))
+            setInstalled({ state: code(e2) === "Unavailable" ? "Unavailable" : "Refused" });
         })
         .finally(() => controllers.current.delete(i));
     }
@@ -219,8 +235,9 @@ export function ReceiptTemplateStoreSelection(props: ReceiptTemplateStoreSelecti
       controllers.current.clear();
     };
   }, [identity, client, rosterClient, installedClient, readAgain]);
+  // b24 review: read again by itself only after an outage, never after a refusal.
   const online = useReadAgainWhenOnline(
-    rosterFailed || installed?.state === "Unavailable" || error === "Unavailable",
+    rosterError === "Unavailable" || installed?.state === "Unavailable" || error === "Unavailable",
     () => setReadAgain((n) => n + 1),
   );
   const live = props.liveTemplateReference ?? null,
@@ -244,7 +261,11 @@ export function ReceiptTemplateStoreSelection(props: ReceiptTemplateStoreSelecti
     })),
   ];
   const known = options.some((option) => option.value === chosen);
-  const failed = (rosterFailed || installed?.state === "Unavailable") && online;
+  const failed =
+    (rosterError !== null ||
+      installed?.state === "Unavailable" ||
+      installed?.state === "Refused") &&
+    online;
   return (
     <section
       hidden={props.hidden}
@@ -257,33 +278,46 @@ export function ReceiptTemplateStoreSelection(props: ReceiptTemplateStoreSelecti
           ? t("Guests get the receipt this store issues today.")
           : t("The receipt guests get. Choose which template this store uses.")}
       </p>
-      <label className="store-setup-row__field">
-        <span>{t("Receipt template")}</span>
-        <select
-          aria-label={t("Receipt template")}
-          disabled={props.disabled || checking}
-          value={chosen}
-          onChange={(e) => {
-            const value = e.target.value;
-            setError("");
-            if (value === "") {
-              previewSequence.current++;
-              props.onSelect(null);
-            } else void preview(value);
-          }}
-        >
-          <option value="">{t("None chosen yet (needed to publish)")}</option>
-          {chosen !== "" && !known ? (
-            <option value={chosen}>{t("The template saved in this setup")}</option>
-          ) : null}
-          {options.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-      </label>
-      <p role="status" aria-live="polite" className="store-setup-block__note">
+      <ul className="store-setup-rows">
+        <li className="store-setup-row">
+          <div className="store-setup-row__head">
+            <span className="store-setup-row__name">{t("Receipt template")}</span>
+          </div>
+          <div className="store-setup-row__fields">
+            <label className="store-setup-row__field">
+              <span>{t("This store uses")}</span>
+              <select
+                aria-label={t("Receipt template")}
+                disabled={props.disabled || checking}
+                value={chosen}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setError("");
+                  if (value === "") {
+                    previewSequence.current++;
+                    props.onSelect(null);
+                  } else void preview(value);
+                }}
+              >
+                <option value="">{t("None chosen yet (needed to publish)")}</option>
+                {chosen !== "" && !known ? (
+                  <option value={chosen}>{t("The template saved in this setup")}</option>
+                ) : null}
+                {options.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        </li>
+      </ul>
+      <p
+        role="status"
+        aria-live="polite"
+        className="store-setup-block__note store-setup-block__after"
+      >
         {checking
           ? t("Checking the receipt template…")
           : error === "Denied"
@@ -299,7 +333,7 @@ export function ReceiptTemplateStoreSelection(props: ReceiptTemplateStoreSelecti
                   : ""}
       </p>
       {failed ? (
-        <p className="store-setup-block__problem">
+        <p className="store-setup-block__problem store-setup-block__after">
           {t("Saved receipt templates could not be loaded.")}{" "}
           <button
             type="button"
@@ -310,8 +344,19 @@ export function ReceiptTemplateStoreSelection(props: ReceiptTemplateStoreSelecti
           </button>
         </p>
       ) : null}
+      {more ? (
+        <p className="store-setup-block__note store-setup-block__after">
+          {t("More receipt templates are saved than are listed here.")}
+          {props.editHref === undefined ? null : (
+            <>
+              {" "}
+              <Link to={props.editHref}>{t("See them all in Receipts and tax numbers")}</Link>
+            </>
+          )}
+        </p>
+      ) : null}
       {props.editHref !== undefined ? (
-        <p>
+        <p className="store-setup-block__after">
           <Link to={props.editHref}>{t("Edit receipt templates")}</Link>
         </p>
       ) : null}
