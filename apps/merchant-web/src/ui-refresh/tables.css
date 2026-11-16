@@ -899,8 +899,12 @@
 }
 
 /* v3 inside the table panel: buttons are accent words unless they are the one next step, and
-   amounts sit at the right edge of their row (older Tables rules drew boxes and two columns). */
-.workspace-page.tables-v3 .table-panel button:not([data-variant="destructive"]) {
+   amounts sit at the right edge of their row (older Tables rules drew boxes and two columns).
+   b23 review: the primaries are left out here, so this rule (0,4,1) no longer outranks theirs
+   (0,4,0) and draws "Start checkout", "Open table" or "Close table" as words. */
+.workspace-page.tables-v3
+  .table-panel
+  button:not([data-variant="destructive"], .table-checkout__primary, .table-panel__primary) {
   min-height: 44px;
   padding: 0 4px;
   border: 0;
@@ -918,24 +922,35 @@
   justify-self: start;
   min-height: 44px;
   padding: 0 24px;
+  border: 0;
+  border-radius: var(--bop-radius-control);
   background: var(--bop-color-accent);
   color: var(--bop-color-on-accent-fill);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
 }
 .workspace-page.tables-v3 .table-panel .table-checkout__primary:disabled {
   opacity: 1;
   background: var(--bop-color-surface-raised, #f2f2f2);
   color: var(--bop-color-text-muted);
 }
-/* b23 (live22): the confirm of taking dishes off a round, and of a comp, is the filled primary
-   here as on Orders (brief §2: one filled primary for the step being taken; the panel-wide
-   accent-word rule above outranked it, so Tables drew it as words beside Cancel). */
+/* b23 review (brief §2: one filled primary, for the step being taken): while a round's take-off
+   or the comp is open, its confirm is that step; the panel's other primaries ("Start checkout")
+   read as accent words until it is confirmed or cancelled. */
 .workspace-page.tables-v3
-  .table-panel
-  :is(.pay-later-remove__actions, .item-comp)
-  > button.table-checkout__primary:not(:disabled) {
-  padding: 0 24px;
-  background: var(--bop-color-accent);
-  color: var(--bop-color-on-accent-fill);
+  .table-panel:has(.pay-later-remove, .item-comp)
+  :is(.table-checkout__primary, .table-panel__primary):not(:is(.pay-later-remove, .item-comp) *) {
+  padding: 0 4px;
+  background: none;
+  color: var(--bop-color-accent);
+}
+.workspace-page.tables-v3
+  .table-panel:has(.pay-later-remove, .item-comp)
+  :is(.table-checkout__primary, .table-panel__primary):not(
+    :is(.pay-later-remove, .item-comp) *
+  ):disabled {
+  opacity: 0.45;
 }
 /* b23: the comp's Cancel sits at the start under its confirm, as accent words, not centred. */
 .workspace-page.tables-v3 .table-panel .item-comp > button:not(.table-checkout__primary) {

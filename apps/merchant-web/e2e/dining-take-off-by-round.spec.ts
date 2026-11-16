@@ -1,6 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Locator } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
+import { filledPrimaries } from "./tables-v3-look";
 
 /**
  * v15 b21 live check: on the Tables page every round of a pay-at-end table that still had dishes
@@ -249,6 +250,11 @@ for (const zh of [false, true]) {
     expect(await confirmLooks(confirm)).toEqual(filledPrimary);
     for (const width of [1440, 1024, 390]) {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      // b23 review (brief §2): the take-off's confirm is the step being taken, so it is the
+      // panel's only filled primary; "Start checkout" reads as accent words meanwhile.
+      expect(await filledPrimaries(details)).toEqual([
+        zh ? "删掉整轮 · $11.30" : "Take the whole round off · $11.30",
+      ]);
       await page.screenshot({
         path: `${shots23}/tables-take-off-confirm-${zh ? "zh-Hans" : "en"}-${width}.png`,
         fullPage: true,
@@ -274,6 +280,9 @@ for (const zh of [false, true]) {
     // b23: Cancel gives the focus back to the round's opener.
     await group.getByRole("button", { name: zh ? "取消" : "Cancel" }).click();
     await expect(round(3).getByRole("button", { name: takeOff(3) })).toBeFocused();
+    // Closed again: the panel's own next step is its one filled primary again (b23 review: it was
+    // drawn as words on Tables).
+    expect((await filledPrimaries(details)).length).toBeLessThanOrEqual(1);
     await expectNoInternalText(page, ["Temporarily unavailable"]);
   });
 }

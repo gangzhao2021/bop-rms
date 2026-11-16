@@ -1,6 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
+import { filledPrimaries } from "./tables-v3-look";
 
 /**
  * WP-2423 DEC-DINE-IN-PAY-LATER (DIN-FLOOR-BOARD): a pay-later table pays once at the end. Staff
@@ -10,6 +11,26 @@ import { expectNoInternalText } from "./internal-text-guard";
 const id = (n: number) => "01909969-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const headers = { "cache-control": "no-store" };
 const csrf = "a".repeat(43);
+const shots23 = process.env.B23_SHOTS ?? "test-results-b23/shots";
+
+/**
+ * b23 review (brief §2: one filled primary, for the step being taken): on Tables a panel-wide
+ * accent-words rule outranked the primaries, so "Start checkout" and the payment buttons read as
+ * words. At each step and width the table's panel has exactly that step's filled primary (none
+ * while it can't be pressed), never a second one.
+ */
+async function onePrimary(page: Page, step: string, expected: readonly string[]) {
+  const panel = page.getByRole("complementary", { name: "Selected table details" });
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    expect(await filledPrimaries(panel)).toEqual(expected);
+    await page.screenshot({
+      path: `${shots23}/tables-primary-${step}-${width}.png`,
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+}
 
 const unpaidBill = (phase: "Active" | "Closing", version: number) => ({
   diningSessionReference: id(2),
@@ -227,6 +248,7 @@ test("@production DEC-DINE-IN-PAY-LATER: staff start checkout, take cash rounded
   await page.getByRole("button", { name: "Select T2", exact: true }).click();
   const checkout = page.getByRole("region", { name: "Checkout" });
   await expect(checkout).toContainText("This table pays once at the end.");
+  await onePrimary(page, "start-checkout", ["Start checkout"]);
   await checkout.getByRole("button", { name: "Start checkout" }).click();
   expect(closing[0]).toMatchObject({
     action: "Begin",
@@ -256,12 +278,14 @@ test("@production DEC-DINE-IN-PAY-LATER: staff start checkout, take cash rounded
   await expect(
     checkout.getByRole("button", { name: "Choose a tip to take payment" }),
   ).toBeDisabled();
+  await onePrimary(page, "choose-tip", []);
   await checkout.getByRole("radio", { name: /15%/u }).check();
   await checkout.getByRole("radio", { name: "Cash" }).check();
   // 33.93 + tip 4.50 = 38.43 → 38.45 in cash.
   await expect(checkout.getByText("Cash total $38.45 (rounded to 5 cents)")).toBeVisible();
   await checkout.getByRole("textbox", { name: "Cash received" }).fill("50");
   await expect(checkout.getByText("Change $11.55")).toBeVisible();
+  await onePrimary(page, "take-cash", ["Cash received · $38.45"]);
   // "Temporarily unavailable" is the Tables state filter's own wording.
   await expectNoInternalText(page, ["Temporarily unavailable"]);
   await checkout.getByRole("button", { name: "Cash received · $38.45" }).click();
@@ -271,6 +295,7 @@ test("@production DEC-DINE-IN-PAY-LATER: staff start checkout, take cash rounded
   await expect(confirm).toContainText("Cash received$50.00");
   await expect(confirm).toContainText("Change to give$11.55");
   expect(settles).toEqual([]);
+  await onePrimary(page, "confirm-cash", ["Confirm $38.45 cash received"]);
   await page.screenshot({ path: "test-results/dining-table-checkout-confirm.png", fullPage: true });
   await confirm.getByRole("button", { name: "Confirm $38.45 cash received" }).click();
   // The browser sends intent only: method, tip choice and the cash handed over. The server prices
