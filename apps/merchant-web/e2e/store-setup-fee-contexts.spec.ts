@@ -752,3 +752,75 @@ test("@production Store fee contexts link the Brand Owner to set up tax classifi
   await expect(page).toHaveURL(/\/app\/commerce\/tax-classifications$/u);
   expect(f.control.errors).toEqual([]);
 });
+/** b22: 1440, 1024 and 390 wide, no sideways scroll; saved when BOP_B22_SHOTS names a folder. */
+async function b22Shots(page: Page, name: string) {
+  for (const [width, height] of [
+    [1440, 900],
+    [1024, 768],
+    [390, 844],
+  ] as const) {
+    await page.setViewportSize({ width, height });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      `no horizontal overflow at ${width}`,
+    ).toBe(true);
+    const folder = process.env.BOP_B22_SHOTS;
+    if (folder) await page.screenshot({ path: `${folder}/${name}-${width}.png`, fullPage: true });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+}
+// b22 (v15 live check of b21): a tip turned on without an order type named only "times or wait
+// values" in Review and dropped the summary. The real problem is said at the field and in Review,
+// and the rest of the summary stays.
+test("@production b22: a tip on without an order type is named at the field and in Review, and the summary stays", async ({
+  page,
+}) => {
+  const f = await install(page);
+  await open(page);
+  const panel = await feeStep(page);
+  await panel.getByRole("combobox", { name: "Tip", exact: true }).selectOption("Enabled");
+  await expect(panel).toContainText("Choose which orders the tip applies to.");
+  await b22Shots(page, "step3-tip-without-order-type-en");
+  await page.getByRole("button", { name: /^4\. Review and publish$/u }).click();
+  const fixes = page.getByRole("region", { name: "Needs fixing first", exact: true });
+  await expect(fixes).toContainText(
+    "Tip is on, but which orders it applies to is not chosen yet. Choose them in step 3, Fees, tax and payment.",
+  );
+  await expect(page.locator(".store-setup-summary")).toBeVisible();
+  await expect(page.locator(".store-setup-summary")).toContainText(
+    "Tip: on, which orders it applies to is not chosen yet",
+  );
+  await expect(page.getByText("Some edited times or wait values need correction")).toHaveCount(0);
+  await expectNoInternalText(page);
+  await b22Shots(page, "review-tip-without-order-type-en");
+  // A fee left half set is not kept through the language switch's reload, so the switch asks.
+  let asked = "";
+  page.once("dialog", (dialog) => {
+    asked = dialog.message();
+    void dialog.dismiss();
+  });
+  await page.getByRole("button", { name: "切换到中文" }).click();
+  await expect.poll(() => asked).toContain("not saved yet");
+  await page.getByRole("button", { name: "Discard unsaved changes", exact: true }).click();
+  await page.getByRole("button", { name: "切换到中文" }).click();
+  const zhFees = await page
+    .getByRole("button", { name: "3. 费用、税务和付款", exact: true })
+    .click()
+    .then(() => page.getByRole("region", { name: "费用", exact: true }));
+  await zhFees.getByRole("combobox", { name: "小费", exact: true }).selectOption("Enabled");
+  await page.getByRole("button", { name: /^4\. 核对并发布$/u }).click();
+  await expect(page.getByRole("region", { name: "需要先改正", exact: true })).toContainText(
+    "小费已开启，但还没有选择适用于哪些订单。请在第 3 步，费用、税务和付款中选择。",
+  );
+  await expect(page.locator(".store-setup-summary")).toContainText(
+    "小费：开启，还没有选择适用于哪些订单",
+  );
+  await expect(page.getByText("有些已编辑的时间或等待值需要先修正才能保存")).toHaveCount(0);
+  await b22Shots(page, "review-tip-without-order-type-zh-Hans");
+  await page.getByRole("button", { name: /^3\. 费用、税务和付款$/u }).click();
+  await expect(page.getByRole("region", { name: "费用", exact: true })).toContainText(
+    "请选择小费适用于哪些订单。",
+  );
+  await b22Shots(page, "step3-tip-without-order-type-zh-Hans");
+  expect(f.control.errors).toEqual([]);
+});

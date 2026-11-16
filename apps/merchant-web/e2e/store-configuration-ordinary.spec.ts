@@ -1277,11 +1277,16 @@ test("b20: an edit not saved yet reads from now to new on Review, and nothing sa
   await followWorkspaceLink(page, "Store setup");
   await openStoreSetupPlace(page, "Settings that need approval");
   await page.getByRole("button", { name: /^1\. Time zone and business day$/u }).click();
-  await page.getByLabel("Business day starts at (local time)").fill("04:30");
+  // b22: an open Store keeps its business day start, so the unsaved edit here is the time zone.
+  await page
+    .getByRole("combobox", { name: "Time zone", exact: true })
+    .selectOption("America/Vancouver");
   await page.getByRole("button", { name: /^4\. Review and publish$/u }).click();
   const summary = page.locator(".store-setup-summary");
   await expect(summary).toContainText("What changes when it is published");
-  await expect(summary).toContainText("Now 04:00 → changes to 04:30");
+  await expect(summary).toContainText(
+    "Now Eastern time (Toronto, Ottawa, Montréal) → changes to Pacific time (Vancouver)",
+  );
   await expect(summary).toContainText("Not saved yet");
   await expect(panel(page)).toContainText("Some changes on this page are not saved yet");
   await expect(panel(page)).not.toContainText("Everything saved in this setup is published.");
@@ -1291,7 +1296,9 @@ test("b20: an edit not saved yet reads from now to new on Review, and nothing sa
   await page.getByRole("button", { name: "切换到中文" }).click();
   const zh = page.locator(".store-setup-summary");
   await expect(zh).toContainText("发布后有哪些变化");
-  await expect(zh).toContainText("现在 04:00 → 改为 04:30");
+  await expect(zh).toContainText(
+    "现在东部时间（多伦多、渥太华、蒙特利尔） → 改为太平洋时间（温哥华）",
+  );
   await expect(zh).toContainText("尚未保存");
   await expect(
     page.getByText("切换语言后，还没保存的修改仍在这里。存为草稿后才会保留。"),
@@ -1462,5 +1469,117 @@ test("b21 review: a setting put back to how the Store runs today names what is s
   await expect(zh).toContainText("尚未保存");
   await b20Shots(page, "review-put-back-unsaved-zh-Hans", "BOP_B21_SHOTS");
   expect(state.writes).toEqual([]);
+  expect(state.errors).toEqual([]);
+});
+// b22 (v15 live check of b21): an open Store keeps its business day start, so step 1 shows it as
+// kept, and a saved setup that starts the day at another time is flagged in Review and never
+// becomes a change that cannot be sent.
+test("b22: an open Store's business day start is kept; a setup that changes it is flagged before a change is created @production", async ({
+  page,
+}) => {
+  const state = await install(page, {
+    live: true,
+    saved: { businessDayStartLocalTime: "04:30:00" },
+  });
+  state.failing = [];
+  await page.goto("/app");
+  await followWorkspaceLink(page, "Store setup");
+  await openStoreSetupPlace(page, "Settings that need approval");
+  await page.getByRole("button", { name: /^4\. Review and publish$/u }).click();
+  const fixes = page.getByRole("region", { name: "Needs fixing first", exact: true });
+  await expect(fixes).toContainText(
+    "Business day start: a change with 04:30 cannot be sent for approval. A Store that already runs keeps 04:00",
+  );
+  const row = page
+    .locator(".store-setup-summary__rows > div")
+    .filter({ hasText: "Business day start" });
+  await expect(row).toContainText("Now 04:00 → changes to 04:30");
+  await expect(row).toContainText("Cannot be sent for approval");
+  await expect(
+    panel(page).getByRole("button", { name: "Create the change from the saved setup" }),
+  ).toHaveCount(0);
+  await expect(panel(page)).toContainText(
+    "A change cannot be created from this setup: it starts the business day at 04:30",
+  );
+  await expectNoInternalText(page);
+  await b20Shots(page, "review-business-start-cannot-send-en", "BOP_B22_SHOTS");
+  await page.getByRole("button", { name: /^1\. Time zone and business day$/u }).click();
+  const start = page.getByLabel("Business day starts at (local time)", { exact: true });
+  await expect(start).toHaveValue("04:30");
+  await expect(start).toHaveAttribute("readonly", "");
+  await expect(page.locator("#setup-business-start-kept")).toContainText(
+    "This setup starts the business day at 04:30. A Store that already runs keeps 04:00",
+  );
+  await b20Shots(page, "step1-business-start-differs-en", "BOP_B22_SHOTS");
+  await page.getByRole("button", { name: "切换到中文" }).click();
+  await page.getByRole("button", { name: /^1\. 时区和营业日$/u }).click();
+  await expect(page.locator("#setup-business-start-kept")).toContainText(
+    "这份设置把营业日开始时间设为 04:30。已经营业的门店要保持 04:00",
+  );
+  await b20Shots(page, "step1-business-start-differs-zh-Hans", "BOP_B22_SHOTS");
+  await page.getByRole("button", { name: "改回 04:00", exact: true }).click();
+  await expect(page.getByLabel("营业日开始于（当地时间）", { exact: true })).toHaveValue("04:00");
+  await expect(page.locator("#setup-business-start-kept")).toHaveText(
+    "营业日开始时间保持门店现在的 04:00，这样过去的营业日和报表才能保持界限。",
+  );
+  await b20Shots(page, "step1-business-start-kept-zh-Hans", "BOP_B22_SHOTS");
+  await page.getByRole("button", { name: /^4\. 核对并发布$/u }).click();
+  await expect(page.getByRole("region", { name: "需要先改正", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "放弃未保存的修改", exact: true }).click();
+  await expect(page.getByRole("region", { name: "需要先改正", exact: true })).toContainText(
+    "营业日开始时间：设为 04:30 的修改无法提交审批。",
+  );
+  await expect(panel(page).locator("text=用已保存的设置生成修改")).toHaveCount(0);
+  await b20Shots(page, "review-business-start-cannot-send-zh-Hans", "BOP_B22_SHOTS");
+  expect(state.writes).toEqual([]);
+  expect(state.errors).toEqual([]);
+});
+// b22 (v15 live check of b21): Earlier changes keep their rows through going offline and an edit
+// not saved yet, say in plain words that loading more waits for the connection, and read again by
+// themselves once it is back (before, the list was left with only its heading).
+test("b22: earlier changes keep their rows offline and through an edit, and read again on reconnect @production", async ({
+  page,
+  context,
+}) => {
+  const state = await install(page);
+  state.failing = [];
+  state.earlierSteps = 20;
+  await enter(page);
+  await panel(page).getByRole("button", { name: "Create the change from the saved setup" }).click();
+  for (let i = 0; i < 2; i++) {
+    await panel(page).getByRole("button", { name: "Check the settings again" }).click();
+    await expect(panel(page).getByRole("status")).toHaveText(
+      "Settings checked, not yet sent for approval.",
+    );
+  }
+  await page.getByRole("button", { name: "切换到中文" }).click();
+  await page.getByRole("button", { name: /^4\. 核对并发布$/u }).click();
+  const where = page.getByRole("region", { name: "门店配置发布", exact: true });
+  await where.getByText("以前的修改", { exact: true }).click();
+  const history = where.locator(".store-setup-publish__history section");
+  await expect(history.getByRole("listitem")).toHaveCount(20);
+  await history.getByRole("button", { name: "加载更早的修改" }).click();
+  await expect(history.getByRole("listitem")).toHaveCount(23);
+  await context.setOffline(true);
+  await expect(history).toContainText("已离线。网络恢复后，以前的修改会自动重新加载。");
+  await expect(history.getByRole("listitem")).toHaveCount(23);
+  await b20Shots(page, "history-offline-rows-kept-zh-Hans", "BOP_B22_SHOTS");
+  const reads = state.reads.filter((read) => read === "history").length;
+  await context.setOffline(false);
+  await expect.poll(() => state.reads.filter((read) => read === "history").length).toBe(reads + 1);
+  await expect(history).not.toContainText("已离线");
+  await expect(history.getByRole("listitem")).toHaveCount(23);
+  await expect(history.getByRole("alert")).toHaveCount(0);
+  // An edit not saved yet keeps the rows too.
+  await page.getByRole("button", { name: /^1\. 时区和营业日$/u }).click();
+  await page.getByRole("combobox", { name: "时区", exact: true }).selectOption("America/Vancouver");
+  await page.getByRole("button", { name: /^4\. 核对并发布$/u }).click();
+  // Before, an unsaved edit blocked the list from reading at all (it showed only its heading).
+  await where.getByText("以前的修改", { exact: true }).click();
+  await expect(history.getByRole("listitem")).toHaveCount(20);
+  await expect(history.getByRole("button", { name: "加载更早的修改" })).toBeEnabled();
+  await history.getByRole("button", { name: "加载更早的修改" }).click();
+  await expect(history.getByRole("listitem")).toHaveCount(23);
+  await b20Shots(page, "history-rows-kept-unsaved-edit-zh-Hans", "BOP_B22_SHOTS");
   expect(state.errors).toEqual([]);
 });

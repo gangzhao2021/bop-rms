@@ -476,3 +476,94 @@ test("@production mobile payment keyboard controls and CSRF denial preserve orig
   );
   expect(f.control.errors).toEqual([]);
 });
+/** b22: 1440, 1024 and 390 wide, no sideways scroll; saved when BOP_B22_SHOTS names a folder. */
+async function b22Shots(page: Page, name: string) {
+  for (const [width, height] of [
+    [1440, 900],
+    [1024, 768],
+    [390, 844],
+  ] as const) {
+    await page.setViewportSize({ width, height });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      `no horizontal overflow at ${width}`,
+    ).toBe(true);
+    const folder = process.env.BOP_B22_SHOTS;
+    if (folder) await page.screenshot({ path: `${folder}/${name}-${width}.png`, fullPage: true });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+}
+// b22 (v15 live check of b21): unticking a payment method marked nothing unsaved: Discard stayed
+// off and Review said Payment stays as it is. It is an unsaved edit everywhere the page counts one.
+test("@production b22: an unticked payment method counts as unsaved in Discard, Review, the language switch and leaving", async ({
+  page,
+}) => {
+  const f = await install(page);
+  await open(page);
+  const discard = page.getByRole("button", { name: "Discard unsaved changes", exact: true });
+  await expect(discard).toBeDisabled();
+  const online = page.getByRole("checkbox", { name: "Customer online card", exact: true });
+  await online.check();
+  await expect(discard).toBeEnabled();
+  await b22Shots(page, "step3-payment-method-unsaved-en");
+  await page.getByRole("button", { name: /^4\. Review and publish$/u }).click();
+  const row = page.locator(".store-setup-summary__rows > div").filter({ hasText: "Payment" });
+  await expect(row).toContainText("Customer online card: Off → On");
+  await expect(row).toContainText("Not saved yet");
+  await expect(page.locator(".store-setup-summary")).not.toContainText(
+    /Staying as they are:.*Payment/u,
+  );
+  await b22Shots(page, "review-payment-method-unsaved-en");
+  // The language switch asks first, since these are not kept through its reload.
+  let asked = "";
+  page.once("dialog", (dialog) => {
+    asked = dialog.message();
+    void dialog.dismiss();
+  });
+  await page.getByRole("button", { name: "切换到中文" }).click();
+  await expect.poll(() => asked).toContain("not saved yet");
+  // Leaving the page asks too.
+  expect(
+    await page.evaluate(() => {
+      const event = new Event("beforeunload", { cancelable: true });
+      window.dispatchEvent(event);
+      return event.defaultPrevented;
+    }),
+  ).toBe(true);
+  await page.getByRole("button", { name: /^3\. Fees, tax and payment$/u }).click();
+  await discard.click();
+  await expect(online).not.toBeChecked();
+  await expect(discard).toBeDisabled();
+  expect(
+    await page.evaluate(() => {
+      const event = new Event("beforeunload", { cancelable: true });
+      window.dispatchEvent(event);
+      return event.defaultPrevented;
+    }),
+  ).toBe(false);
+  await expect(
+    page.getByRole("button", { name: "Save payment methods", exact: true }),
+  ).toBeVisible();
+  expect(f.control.paymentWrites).toEqual([]);
+  expect(f.control.errors).toEqual([]);
+});
+test("@production b22: the payment methods read in plain Chinese words, with no 配置", async ({
+  page,
+}) => {
+  const f = await install(page);
+  await open(page);
+  await page.getByRole("button", { name: "切换到中文" }).click();
+  await page.getByRole("button", { name: /^3\. 费用、税务和付款$/u }).click();
+  await expect(page.getByRole("button", { name: "保存付款方式", exact: true })).toBeVisible();
+  const methods = page.getByRole("region", { name: "付款方式", exact: true });
+  await expect(methods).not.toContainText("配置");
+  await page.getByRole("checkbox", { name: "顾客在线刷卡", exact: true }).check();
+  await page.getByRole("button", { name: /^4\. 核对并发布$/u }).click();
+  const row = page.locator(".store-setup-summary__rows > div").filter({ hasText: "付款" });
+  await expect(row).toContainText("顾客在线刷卡：关 → 开");
+  await expect(row).toContainText("尚未保存");
+  await b22Shots(page, "review-payment-method-unsaved-zh-Hans");
+  await page.getByRole("button", { name: /^3\. 费用、税务和付款$/u }).click();
+  await b22Shots(page, "step3-payment-method-unsaved-zh-Hans");
+  expect(f.control.errors).toEqual([]);
+});
