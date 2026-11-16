@@ -465,3 +465,177 @@ it("b22: earlier changes opened while offline say so, then load by themselves on
   expect(client.history).toHaveBeenCalledTimes(1);
   expect(details.querySelectorAll("li")).toHaveLength(1);
 });
+
+// b22 review: a step run in this panel while Earlier changes is open reads the newest page again,
+// keeping the older rows already loaded; a kept row of a configuration later withdrawn says so.
+const historyPage = (
+  beforeSequence: number | null,
+  entries: readonly ReturnType<typeof historyEntry>[],
+  nextBeforeSequence: number | null,
+) =>
+  parseStoreConfigurationOrdinaryHistory(
+    {
+      tenantReference: scope.tenantReference,
+      brandReference: scope.brandReference,
+      storeReference: scope.storeReference,
+      readerActorReference: scope.actorReference,
+      beforeSequence,
+      entries,
+      nextBeforeSequence,
+      observedAt: at,
+      validUntil: "2026-11-15T17:32:05.000Z",
+    },
+    scope,
+    beforeSequence,
+  );
+const steps = (from: number, count: number, extra: (n: number) => object = () => ({})) =>
+  Array.from({ length: count }, (_, i) =>
+    historyEntry(from - i, "Validate", "Draft", extra(from - i)),
+  );
+const openHistory = async (container: HTMLElement) => {
+  const details = container.querySelector("details.store-setup-publish__history");
+  if (!(details instanceof HTMLDetailsElement)) throw new Error("history absent");
+  details.open = true;
+  details.dispatchEvent(new Event("toggle"));
+  await settle();
+  return details;
+};
+
+it("b22 review: a step run here reads the newest earlier changes again and keeps older rows", async () => {
+  setLanguageForTest("zh-Hans");
+  vi.spyOn(Date, "now").mockReturnValue(Date.parse(at));
+  const { container, client } = await panel(workspaceOf({ latest: configuration("Draft") }));
+  let newest = 21;
+  client.history.mockImplementation(async (_scope, options: { beforeSequence: number | null }) => {
+    if (options.beforeSequence === null) return historyPage(null, steps(newest, 20), newest - 19);
+    if (options.beforeSequence === 2) return historyPage(2, steps(1, 1), null);
+    throw new StoreSetupClientError("Unavailable");
+  });
+  const details = await openHistory(container);
+  await click(buttonNamed(container, "加载更早的修改"));
+  await settle();
+  expect(details.querySelectorAll("li")).toHaveLength(21);
+  const reads = client.history.mock.calls.length;
+  // The check records step 22; the open list shows it on top without being closed and opened.
+  newest = 22;
+  await click(buttonNamed(container, "重新检查设置"));
+  await settle();
+  expect(client.execute).toHaveBeenCalledTimes(1);
+  expect(client.history.mock.calls.length).toBe(reads + 1);
+  expect(client.history.mock.calls.at(-1)?.[1]).toMatchObject({ beforeSequence: null });
+  expect(details.querySelectorAll("li")).toHaveLength(22);
+  // Older rows stay loaded, so nothing more is offered below the first step.
+  expect(details.textContent).not.toContain("加载更早的修改");
+});
+
+it("b22 review: withdrawing here shows the withdrawal in the open list at once", async () => {
+  setLanguageForTest("zh-Hans");
+  vi.spyOn(Date, "now").mockReturnValue(Date.parse(at));
+  const draft = configuration("Draft");
+  const { container, client } = await panel(workspaceOf({ latest: draft }));
+  let withdrawn = false;
+  client.history.mockImplementation(async () =>
+    historyPage(
+      null,
+      [
+        historyEntry(
+          2,
+          "Validate",
+          "Draft",
+          withdrawn ? { withdrawal: { kind: "Withdrawn", withdrawnAt: at, byYou: true } } : {},
+        ),
+        historyEntry(1, "SaveDraft", "Draft"),
+      ],
+      null,
+    ),
+  );
+  const fetcher = vi.fn(async () => {
+    withdrawn = true;
+    client.load.mockResolvedValue(
+      workspaceOf({
+        latest: draft,
+        latestWithdrawal: { kind: "Withdrawn", withdrawnAt: at, byYou: true },
+      }) as never,
+    );
+    return new Response(JSON.stringify({ status: "Applied", kind: "Withdrawn" }), {
+      status: 200,
+      headers: { "cache-control": "no-store", "content-type": "application/json" },
+    });
+  });
+  vi.stubGlobal("fetch", fetcher);
+  try {
+    const details = await openHistory(container);
+    expect(details.querySelectorAll("li")).toHaveLength(2);
+    await click(buttonNamed(container, "撤回这次修改"));
+    await click(buttonNamed(container, "撤回这次修改"));
+    await settle();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    const rows = [...details.querySelectorAll("li")].map((li) => li.textContent ?? "");
+    expect(rows).toHaveLength(3);
+    expect(rows[0]).toMatch(/^已由你撤回/u);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+it("b22 review: a kept older row of the latest configuration shows its withdrawal after a newer read", async () => {
+  setLanguageForTest("zh-Hans");
+  vi.spyOn(Date, "now").mockReturnValue(Date.parse(at));
+  // Steps 2 and 1 belong to the configuration that is later withdrawn; the rest to another one.
+  const other = (n: number) =>
+    n > 2
+      ? {
+          configuration: {
+            ...historyEntry(n, "Validate", "Draft").configuration,
+            configurationReference: id(21),
+          },
+        }
+      : {};
+  const client = clientOf(workspaceOf({ latest: configuration("Draft") }));
+  let newest = 21;
+  client.history.mockImplementation(async (_scope, options: { beforeSequence: number | null }) => {
+    if (options.beforeSequence === null)
+      return historyPage(null, steps(newest, 20, other), newest - 19);
+    return historyPage(2, steps(1, 1, other), null);
+  });
+  const view = (online: boolean) => (
+    <MemoryRouter>
+      <StoreConfigurationOrdinaryPanel
+        scope={scope}
+        csrf={csrf}
+        saved={saved as never}
+        setupLayout="Open"
+        client={client as never}
+        journalFactory={journal as never}
+        online={online}
+      />
+    </MemoryRouter>
+  );
+  const { container, root } = await mount(view(true));
+  await settle();
+  const details = await openHistory(container);
+  await click(buttonNamed(container, "加载更早的修改"));
+  await settle();
+  expect(details.querySelectorAll("li")).toHaveLength(21);
+  // While offline, step 22 is recorded and the configuration of steps 2 and 1 is withdrawn.
+  await act(async () => {
+    root.render(view(false));
+  });
+  await settle();
+  newest = 23;
+  client.load.mockResolvedValue(
+    workspaceOf({
+      latest: configuration("Draft"),
+      latestWithdrawal: { kind: "Withdrawn", withdrawnAt: at, byYou: false },
+    }) as never,
+  );
+  await click(buttonNamed(container, "刷新状态"));
+  await act(async () => {
+    root.render(view(true));
+  });
+  await settle();
+  const rows = [...details.querySelectorAll("li")].map((li) => li.textContent ?? "");
+  // 23..4 newest, then kept 3, the withdrawal of step 2's configuration, 2 and 1.
+  expect(rows).toHaveLength(24);
+  expect(rows[21]).toMatch(/^已撤回/u);
+});

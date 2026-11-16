@@ -23,6 +23,7 @@ import {
   storeSetupBusinessStartChange,
   storeSetupMissingItems,
   storeSetupMissingText,
+  storeSetupWhere,
   type StoreSetupLayout,
 } from "./store-setup-missing.js";
 import {
@@ -463,10 +464,14 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
   // b22: the list reads when it is opened, by itself once the connection is back and after a change
   // of Store or session. Rows already shown for the same Store stay, with any newer ones on top.
   const historyIdentity = useRef<string | null>(null);
+  // b22 review: a step run in this panel (create, check, send, approve, publish, withdraw, decline,
+  // recover) reads the newest page again while the list is open, keeping the older rows loaded.
+  const [historyAfterStep, setHistoryAfterStep] = useState(0);
+  const stepRecorded = () => setHistoryAfterStep((n) => n + 1);
   useEffect(() => {
     if (!historyOpen || !online) return;
     void loadHistory(false, historyIdentity.current === identity && history.length > 0);
-  }, [online, historyOpen, identity]);
+  }, [online, historyOpen, identity, historyAfterStep]);
   async function loadHistory(more = false, keep = false) {
     if (!online || (more && (historyBusy || nextHistory === null))) return;
     historyIdentity.current = identity;
@@ -486,7 +491,17 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
       });
       if (current()) {
         if (keep) {
-          const merged = mergeNewestStoreConfigurationHistory(history, nextHistory, page);
+          const merged = mergeNewestStoreConfigurationHistory(
+            history,
+            nextHistory,
+            page,
+            workspace?.latest && workspace.latestWithdrawal
+              ? {
+                  configurationReference: workspace.latest.configurationReference,
+                  withdrawal: workspace.latestWithdrawal,
+                }
+              : undefined,
+          );
           setHistory(merged.entries);
           setNextHistory(merged.nextBeforeSequence);
         } else {
@@ -645,6 +660,7 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
       setPending(null);
       // b19: what happened, in plain words; said as the status sentence when the page shows it.
       if (receipt.outcome === "Committed") props.onChanged?.();
+      if (receipt.outcome === "Committed") stepRecorded();
       if (receipt.outcome === "Committed")
         setDone({
           action,
@@ -690,6 +706,7 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
       if (current()) {
         setWorkspace(next);
         props.onChanged?.();
+        stepRecorded();
         // WP-2423 (v15 D6): what to do next is said from the current state below, not here.
         // b19: no version numbers on the page; the status sentence says it was withdrawn or
         // declined, so only the hours note is added to it.
@@ -738,6 +755,7 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
         setWorkspace(result.workspace);
         setPending(null);
         if (result.receipt.outcome === "Committed") props.onChanged?.();
+        if (result.receipt.outcome === "Committed") stepRecorded();
         if (result.receipt.outcome === "Committed")
           setDone({
             action: original.action,
@@ -957,8 +975,12 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
           {startChange !== null && !openLatest && !setupIncomplete && (
             <p>
               {t(
-                "A change cannot be created yet: the business day start in this saved setup cannot be sent for approval. Put it back to {now} in step 1, Time zone and business day, save as draft, then come back here.",
-                startChange,
+                "A change cannot be created yet: the business day start in this saved setup cannot be sent for approval. Put it back to {now} in {where}, save as draft, then come back here.",
+                // b22 review: named where this layout sets it, as Review does.
+                {
+                  ...startChange,
+                  where: storeSetupWhere(props.setupLayout ?? "Opening", "timeZone"),
+                },
               )}
             </p>
           )}
@@ -1410,11 +1432,17 @@ export function appendStoreConfigurationHistory(
  * b22: the newest page read again (after reconnecting, or opening the list again) on top of the rows
  * already shown. Where it reaches the rows shown, they are kept below it, each newer row read from
  * the page; a page that does not reach them (more than a page of newer changes) is shown alone.
+ * b22 review: a kept row that is the last step of the latest configuration takes that
+ * configuration's withdrawal or decline (from the workspace read), as a fresh read would show it.
  */
 export function mergeNewestStoreConfigurationHistory(
   previous: readonly StoreConfigurationOrdinaryHistoryEntry[],
   previousNext: number | null,
   page: StoreConfigurationOrdinaryHistory,
+  latestWithdrawal?: {
+    readonly configurationReference: string;
+    readonly withdrawal: NonNullable<StoreConfigurationOrdinaryHistoryEntry["withdrawal"]>;
+  },
 ): {
   readonly entries: readonly StoreConfigurationOrdinaryHistoryEntry[];
   readonly nextBeforeSequence: number | null;
@@ -1427,8 +1455,20 @@ export function mergeNewestStoreConfigurationHistory(
   const reaches = page.nextBeforeSequence === null || last.sequenceNumber <= first.sequenceNumber;
   if (!reaches) return { entries: page.entries, nextBeforeSequence: page.nextBeforeSequence };
   const older = previous.filter((e) => e.sequenceNumber < last.sequenceNumber);
+  // Rows are newest first, so the first row of that configuration is its last step.
+  const lastStep =
+    latestWithdrawal &&
+    [...page.entries, ...older].find(
+      (e) => e.configuration.configurationReference === latestWithdrawal.configurationReference,
+    );
+  const kept =
+    !latestWithdrawal || !lastStep || lastStep.withdrawal || !older.includes(lastStep)
+      ? older
+      : older.map((e) =>
+          e === lastStep ? Object.freeze({ ...e, withdrawal: latestWithdrawal.withdrawal }) : e,
+        );
   return {
-    entries: Object.freeze([...page.entries, ...older]),
+    entries: Object.freeze([...page.entries, ...kept]),
     nextBeforeSequence: older.length > 0 ? previousNext : page.nextBeforeSequence,
   };
 }
