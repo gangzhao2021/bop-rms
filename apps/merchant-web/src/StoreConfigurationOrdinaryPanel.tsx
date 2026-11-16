@@ -476,12 +476,27 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
       if (current()) setHistoryBusy(false);
     }
   }
-  /** b21: a history read that fails for an outage says so in plain words; real refusals keep theirs. */
-  const historyMessage = (e: unknown) =>
-    e instanceof StoreSetupClientError &&
-    (e.code === "Denied" || e.code === "FullSignInRequired" || e.code === "ScopeChanged")
-      ? messages[e.code]
-      : t("Earlier changes could not be loaded just now. Check the connection and try again.");
+  /**
+   * b21: a history read that fails for an outage says so in plain words; real refusals keep theirs.
+   * b21 review: only an outage (no answer, or an answer that never arrived whole) asks to check the
+   * connection; an answer that was refused or cannot be read (Invalid, Conflict, a row the reader
+   * refuses) says that part cannot be shown, with no promise that trying again helps.
+   */
+  const historyMessage = (e: unknown) => {
+    const outage =
+      e instanceof StoreSetupClientError &&
+      (e.code === "Unavailable" || e.code === "OutcomeUnknown");
+    if (outage)
+      return t("Earlier changes could not be loaded just now. Check the connection and try again.");
+    if (
+      e instanceof StoreSetupClientError &&
+      (e.code === "Denied" || e.code === "FullSignInRequired" || e.code === "ScopeChanged")
+    )
+      return messages[e.code];
+    return t(
+      "This part of the earlier changes cannot be shown. Everything else keeps working as usual.",
+    );
+  };
   const message = (e: unknown) =>
     e instanceof StoreSetupClientError ? messages[e.code] : messages.Unavailable;
   useEffect(() => {

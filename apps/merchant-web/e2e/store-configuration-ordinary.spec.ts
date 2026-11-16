@@ -93,8 +93,12 @@ const baseConfiguration = (lifecycle: "Draft" | "PendingApproval" | "Approved" |
   dataClassification: "ConfigurationMetadata",
 });
 
-function savedSetup(unset: readonly string[] = []) {
-  const c = baseConfiguration("Draft"),
+function savedSetup(
+  unset: readonly string[] = [],
+  /** b21 review: saved values that differ from the Store as it runs. */
+  saved: Readonly<Record<string, unknown>> = {},
+) {
+  const c = { ...baseConfiguration("Draft"), ...saved },
     configured = (value: unknown) => ({ state: "Configured", value });
   const fields = [
     "source",
@@ -161,6 +165,8 @@ interface OrdinaryFixtureControl {
   denyHistory: boolean;
   /** b21: a page of older changes fails as an outage (the v15 DEMO Store about 26 pages back). */
   olderHistoryDown: boolean;
+  /** b21 review: a page of older changes carries a row the reader refuses (a later stamp). */
+  olderHistoryRefusedRow: boolean;
   wrongHistory: boolean;
   /** WP-2423 DEC-STORE-SETUP-PUBLICATION: publication checks the fixture reports as failing. */
   failing: string[] | null;
@@ -188,10 +194,14 @@ interface OrdinaryFixtureControl {
 async function install(
   page: Page,
   /** WP-2423 v15: settings the saved setup lacks, and whether a live (installed) Store runs. */
-  options: { readonly unset?: readonly string[]; readonly live?: boolean } = {},
+  options: {
+    readonly unset?: readonly string[];
+    readonly live?: boolean;
+    readonly saved?: Readonly<Record<string, unknown>>;
+  } = {},
 ) {
   // Explicitly omit actorReference from the owning snapshot (reader is envelope-only).
-  const setupValue = savedSetup(options.unset);
+  const setupValue = savedSetup(options.unset, options.saved);
   const control: OrdinaryFixtureControl = {
     actor: scope.actorReference,
     loseNext: false,
@@ -201,6 +211,7 @@ async function install(
     wrongWorkspace: false,
     denyHistory: false,
     olderHistoryDown: false,
+    olderHistoryRefusedRow: false,
     wrongHistory: false,
     failing: null as string[] | null,
     soleOperator: null,
@@ -474,6 +485,18 @@ async function install(
         actualScope(),
         beforeSequence,
       );
+      if (control.olderHistoryRefusedRow && beforeSequence !== null) {
+        const [first, ...rest] = value.entries;
+        if (!first) throw new Error("Controlled older history absent");
+        const later = new Date(Date.parse(first.occurredAt) + 3_600_000).toISOString();
+        return respond(route, {
+          ...value,
+          entries: [
+            { ...first, configuration: { ...first.configuration, updatedAt: later } },
+            ...rest,
+          ],
+        });
+      }
       return respond(
         route,
         control.wrongHistory ? { ...value, readerActorReference: id(99) } : value,
@@ -1309,6 +1332,51 @@ test("b21: a failed load of older changes keeps the rows and says so under the b
   await b20Shots(page, "history-load-older-failed-zh-Hans", "BOP_B21_SHOTS");
   expect(state.errors).toEqual([]);
 });
+// b21 review: an older page the reader refuses is not an outage: it says that part cannot be shown
+// and that work goes on, never "check the connection".
+test("b21 review: older changes the page cannot read say so plainly, not as a connection problem, in both languages @production", async ({
+  page,
+}) => {
+  const state = await install(page);
+  state.failing = [];
+  await enter(page);
+  await panel(page).getByRole("button", { name: "Create the change from the saved setup" }).click();
+  for (let i = 0; i < 2; i++) {
+    await panel(page).getByRole("button", { name: "Check the settings again" }).click();
+    await expect(panel(page).getByRole("status")).toHaveText(
+      "Settings checked, not yet sent for approval.",
+    );
+  }
+  state.olderHistoryRefusedRow = true;
+  const check = async (region: string, earlier: string, more: string, message: string) => {
+    const where = page.getByRole("region", { name: region, exact: true });
+    await where.getByText(earlier, { exact: true }).click();
+    const history = where.locator(".store-setup-publish__history section");
+    await expect(history.getByRole("listitem")).toHaveCount(2);
+    await history.getByRole("button", { name: more }).click();
+    await expect(history.getByRole("alert")).toHaveText(message);
+    await expect(history.getByRole("listitem")).toHaveCount(2);
+    await expect(history).not.toContainText(/connection|try again|网络|再试/u);
+  };
+  await check(
+    "Store configuration publication",
+    "Earlier changes",
+    "Load older changes",
+    "This part of the earlier changes cannot be shown. Everything else keeps working as usual.",
+  );
+  await expectNoInternalText(page);
+  await b20Shots(page, "history-older-refused-en", "BOP_B21_SHOTS");
+  await page.getByRole("button", { name: "切换到中文" }).click();
+  await page.getByRole("button", { name: /^4\. 核对并发布$/u }).click();
+  await check(
+    "门店配置发布",
+    "以前的修改",
+    "加载更早的修改",
+    "这部分以前的修改无法显示。其他操作不受影响，可以照常继续。",
+  );
+  await b20Shots(page, "history-older-refused-zh-Hans", "BOP_B21_SHOTS");
+  expect(state.errors).toEqual([]);
+});
 test("b21: step 1 asks for the Time zone from the Canadian zones, and Review reads it from now to new @production", async ({
   page,
 }) => {
@@ -1340,6 +1408,37 @@ test("b21: step 1 asks for the Time zone from the Canadian zones, and Review rea
   await expect(zh.locator("option:checked")).toHaveText("太平洋时间（温哥华）");
   await expectNoInternalText(page);
   await b20Shots(page, "step1-time-zone-zh-Hans", "BOP_B21_SHOTS");
+  expect(state.writes).toEqual([]);
+  expect(state.errors).toEqual([]);
+});
+// b21 review: an edit not saved yet that puts a setting back to how the Store runs today names
+// both values and stays marked not saved; in Chinese too.
+test("b21 review: a setting put back to how the Store runs today names what is saved and what it goes back to @production", async ({
+  page,
+}) => {
+  const state = await install(page, { live: true, saved: { timeZone: "America/Vancouver" } });
+  await page.goto("/app");
+  await followWorkspaceLink(page, "Store setup");
+  await openStoreSetupPlace(page, "Settings that need approval");
+  await page.getByRole("button", { name: /^1\. Time zone and business day$/u }).click();
+  const zone = page.getByRole("combobox", { name: "Time zone", exact: true });
+  await expect(zone).toHaveValue("America/Vancouver");
+  await zone.selectOption("America/Toronto");
+  await page.getByRole("button", { name: /^4\. Review and publish$/u }).click();
+  const row = page.locator(".store-setup-summary__rows > div").filter({ hasText: "Time zone" });
+  await expect(row).toContainText(
+    "Now saved as Pacific time (Vancouver) → changes to Eastern time (Toronto, Ottawa, Montréal), as the Store runs today",
+  );
+  await expect(row).toContainText("Not saved yet");
+  await expectNoInternalText(page);
+  await b20Shots(page, "review-put-back-unsaved-en", "BOP_B21_SHOTS");
+  await page.getByRole("button", { name: "切换到中文" }).click();
+  const zh = page.locator(".store-setup-summary__rows > div").filter({ hasText: "时区" });
+  await expect(zh).toContainText(
+    "现在保存的是太平洋时间（温哥华） → 改为东部时间（多伦多、渥太华、蒙特利尔），和门店现在一样",
+  );
+  await expect(zh).toContainText("尚未保存");
+  await b20Shots(page, "review-put-back-unsaved-zh-Hans", "BOP_B21_SHOTS");
   expect(state.writes).toEqual([]);
   expect(state.errors).toEqual([]);
 });

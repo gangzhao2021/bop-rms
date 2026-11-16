@@ -285,9 +285,12 @@ it("b21: a failed load of older changes keeps the rows and says so beside the bu
     null,
   );
   const { container, client } = await panel(workspaceOf({ latest: configuration("Draft") }));
-  client.history
-    .mockResolvedValueOnce(first)
-    .mockRejectedValueOnce(new StoreSetupClientError("Unavailable"));
+  // Opening the list may read the first page more than once (jsdom fires its own toggle too);
+  // every first-page read answers, every older-page read meets an outage.
+  client.history.mockImplementation(async (_scope, options: { beforeSequence: number | null }) => {
+    if (options.beforeSequence === null) return first;
+    throw new StoreSetupClientError("Unavailable");
+  });
   const details = container.querySelector("details.store-setup-publish__history");
   if (!(details instanceof HTMLDetailsElement)) throw new Error("history absent");
   details.open = true;
@@ -304,4 +307,25 @@ it("b21: a failed load of older changes keeps the rows and says so beside the bu
   // Right after the button, so it stays in view where the person pressed.
   expect(alerts[0]?.previousElementSibling?.textContent).toBe("加载更早的修改");
   expect(details.textContent).not.toMatch(/配置|仍在等待的请求会保留|更改/u);
+});
+
+// b21 review: only an outage asks to check the connection. A refused or unreadable answer (a row
+// the reader refuses, Invalid, Conflict) says that part cannot be shown and that work goes on.
+it.each([
+  ["Unavailable", "暂时无法加载以前的修改。请检查网络后再试。"],
+  ["Invalid", "这部分以前的修改无法显示。其他操作不受影响，可以照常继续。"],
+  ["Conflict", "这部分以前的修改无法显示。其他操作不受影响，可以照常继续。"],
+] as const)("b21 review: a history read failing with %s says what it is", async (code, text) => {
+  setLanguageForTest("zh-Hans");
+  vi.spyOn(Date, "now").mockReturnValue(Date.parse(at));
+  const { container, client } = await panel(workspaceOf({ latest: configuration("Draft") }));
+  client.history.mockRejectedValue(new StoreSetupClientError(code));
+  const details = container.querySelector("details.store-setup-publish__history");
+  if (!(details instanceof HTMLDetailsElement)) throw new Error("history absent");
+  details.open = true;
+  details.dispatchEvent(new Event("toggle"));
+  await settle();
+  const alerts = [...details.querySelectorAll('[role="alert"]')].map((node) => node.textContent);
+  expect(alerts).toEqual([text]);
+  if (code !== "Unavailable") expect(alerts.join("")).not.toMatch(/网络|再试/u);
 });
