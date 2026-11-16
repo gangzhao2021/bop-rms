@@ -1904,10 +1904,18 @@ function QueuedOrderLines({
   revision = 0,
   onDetail,
   roundHead,
+  roundAction,
   timeZone,
   today = null,
   batches,
 }: {
+  /**
+   * b22: what staff can do to a round's dishes (take them off the bill), under its dishes; with the
+   * order's detail once read (undefined while it isn't: the action then links to the order's page).
+   */
+  readonly roundAction?:
+    | ((batch: QueuedOrder["batches"][number], detail?: CurrentOrderDetail) => React.ReactNode)
+    | undefined;
   /** The list's rounds: while the items are read (or can't be), each round still shows its head. */
   readonly batches?: readonly QueuedOrder["batches"][number][] | undefined;
   readonly today?: string | null;
@@ -1975,7 +1983,17 @@ function QueuedOrderLines({
         billRounding={orderBill(state.detail.order)}
         rounds={
           state.detail.order.orderType === "DineIn"
-            ? { batches: state.detail.order.batches, head: roundHead, timeZone, today, phones }
+            ? {
+                batches: state.detail.order.batches,
+                head: roundHead,
+                timeZone,
+                today,
+                phones,
+                action:
+                  roundAction === undefined
+                    ? undefined
+                    : (batch) => roundAction(batch, state.detail),
+              }
             : undefined
         }
       />
@@ -1998,6 +2016,7 @@ function QueuedOrderLines({
                 </header>
                 {roundHead(batch)}
                 <DiningRoundProgressItems sequence={batch.sequence} />
+                {roundAction?.(batch)}
               </section>
             ))}
         </RoundPaymentWaitContext.Provider>
@@ -3842,6 +3861,112 @@ export function CurrentOrderQueuePage({
     failedWith(orderBatchReference)(null);
     reload(after);
   };
+  // What each round of the panel says and offers first, in this order (see `action` below).
+  const heldStockStep = (order: QueuedOrder, batch: QueuedOrder["batches"][number]) =>
+    order.heldStock !== null &&
+    order.heldStock.state === "Ended" &&
+    !order.heldStock.productionStarted &&
+    order.heldStock.orderBatchReference === batch.orderBatchReference;
+  const counterPaymentStep = (order: QueuedOrder, batch: QueuedOrder["batches"][number]) =>
+    batch.sequence === 1 &&
+    order.canRecordCardMachinePayment &&
+    counterAwaitingCardMachine(order, now);
+  const staffRoundPaymentStep = (order: QueuedOrder, batch: QueuedOrder["batches"][number]) =>
+    order.canRecordCardMachinePayment &&
+    batch.staffRound != null &&
+    batch.staffRound.paidOnCardMachine === null &&
+    batch.acceptanceStatus === "NotAccepted" &&
+    batch.paymentDue !== null &&
+    batch.paymentDue.status === "Awaiting" &&
+    (batch.paymentDue.cancelsAt === null || Date.parse(batch.paymentDue.cancelsAt) > Date.now());
+  const cardMachineRefundStep = (order: QueuedOrder, batch: QueuedOrder["batches"][number]) =>
+    (batch.staffCancellation?.refundMethod === "CardMachine" &&
+      batch.staffCancellation.refundStatus === "Pending") ||
+    (batch.sequence === 1 && cardMachineOwed(order) !== null);
+  /**
+   * b22: a round whose dishes can come off the table's bill (or that couldn't, with what to do
+   * instead) offers it under its dishes, as the Tables page does — never between its heading and
+   * its dishes. Only when no earlier step of the round's panel applies.
+   */
+  const takeOffInLines = (order: QueuedOrder, batch: QueuedOrder["batches"][number]) =>
+    !heldStockStep(order, batch) &&
+    !counterPaymentStep(order, batch) &&
+    !staffRoundPaymentStep(order, batch) &&
+    !cardMachineRefundStep(order, batch) &&
+    (removeRefusals[batch.orderBatchReference] !== undefined ||
+      batch.unpaidRemovableItems.length > 0);
+  // b22: the round staff chose "Take dishes off round N" for, on the Orders workbench when its
+  // dishes could not be read there: this page opens its panel on arrival (route state, not URL).
+  const [arrivalRound, setArrivalRound] = useState<number | null>(() =>
+    orderReference === undefined ? null : takeOffRoundFromLink(location.state),
+  );
+  const arrived = () => {
+    setArrivalRound(null);
+    // Back or reload never opens it again.
+    void navigate(
+      { pathname: location.pathname, search: location.search },
+      { replace: true, state: { ordersListSearch: listSearchFromLink(location.state) } },
+    );
+  };
+  /** b22: the round's take-off action, under its dishes (the order's lines when they are read). */
+  const roundTakeOff = (
+    order: QueuedOrder,
+    batch: QueuedOrder["batches"][number],
+    lines: CurrentOrderDetail["lines"]["items"] | undefined,
+    roundMinor?: string,
+  ) =>
+    !takeOffInLines(order, batch) ? null : removeRefusals[batch.orderBatchReference] !==
+      undefined ? (
+      <PayLaterRemoveRefusalNotice
+        refusal={removeRefusals[batch.orderBatchReference] as PayLaterRemoveRefusal}
+        order={order}
+        // Comps are given on the table's page; money back on the order's page.
+        compHref="/operations/dining"
+        refundHref={`/operations/orders/${order.orderReference}`}
+        onDone={() =>
+          setRemoveRefusals((current) =>
+            Object.fromEntries(
+              Object.entries(current).filter(([key]) => key !== batch.orderBatchReference),
+            ),
+          )
+        }
+      />
+    ) : (
+      // DEC-DINE-IN-PAY-LATER (rule 2): dishes come off an unpaid table's bill.
+      <fieldset disabled={servingBusy} className="order-cancel-actions">
+        {lines !== undefined ? (
+          <PayLaterItemRemoveAction
+            key={"remove-" + batch.orderBatchReference + ":" + String(order.currentVersion)}
+            order={order}
+            batch={batch}
+            lines={lines}
+            csrf={csrf}
+            fetcher={fetcher}
+            roundMinor={roundMinor}
+            openOnArrival={
+              order.orderReference === orderReference && arrivalRound === batch.sequence
+            }
+            onArrived={arrived}
+            onRefused={(refusal) =>
+              setRemoveRefusals((current) => ({
+                ...current,
+                [batch.orderBatchReference]: refusal,
+              }))
+            }
+            onSettled={() => reload(after)}
+          />
+        ) : (
+          // The order's dishes could not be read here: its page, with this round's panel open.
+          <Link
+            className="order-cancel-items-link"
+            to={`/operations/orders/${order.orderReference}`}
+            state={{ ordersListSearch: listSearch, takeOffRound: batch.sequence }}
+          >
+            {t("Take dishes off round {sequence}", { sequence: batch.sequence })}
+          </Link>
+        )}
+      </fieldset>
+    );
   // A confirmation belongs to the page it was given on.
   useEffect(() => {
     setReleased(null);
@@ -4835,6 +4960,16 @@ export function CurrentOrderQueuePage({
                                     timeZone,
                                     today: businessDay,
                                     phones,
+                                    // b22: under the round's dishes, as on Tables.
+                                    action: (batch) =>
+                                      roundTakeOff(
+                                        order,
+                                        batch,
+                                        detail.lines.items,
+                                        orderBill(detail.order)?.rounds?.get(
+                                          batch.orderBatchReference,
+                                        )?.totalMinor,
+                                      ),
                                   }
                                 : undefined
                             }
@@ -4855,6 +4990,17 @@ export function CurrentOrderQueuePage({
                         client={client}
                         revision={linesRevision}
                         roundHead={roundHead}
+                        roundAction={(batch, read) =>
+                          roundTakeOff(
+                            order,
+                            batch,
+                            read?.lines.items,
+                            read === undefined
+                              ? undefined
+                              : orderBill(read.order)?.rounds?.get(batch.orderBatchReference)
+                                  ?.totalMinor,
+                          )
+                        }
                         timeZone={timeZone}
                         today={businessDay}
                         batches={order.batches}
@@ -4945,10 +5091,7 @@ export function CurrentOrderQueuePage({
                 ) : null}
                 {
                   // WP-2423 (2026-10-16): an ended earlier-day Order still holding stock.
-                  order.heldStock !== null &&
-                  order.heldStock.state === "Ended" &&
-                  !order.heldStock.productionStarted &&
-                  order.heldStock.orderBatchReference === batch.orderBatchReference ? (
+                  heldStockStep(order, batch) ? (
                     <fieldset disabled={servingBusy}>
                       <HeldStockReleaseAction
                         key={"held-" + batch.orderBatchReference}
@@ -4973,9 +5116,7 @@ export function CurrentOrderQueuePage({
                     </fieldset>
                   ) : // WP-2423 (v15 751dd768): a sent counter order not paid yet is charged and
                   // recorded here too (the counter page may have been reloaded or closed).
-                  batch.sequence === 1 &&
-                    order.canRecordCardMachinePayment &&
-                    counterAwaitingCardMachine(order, now ?? Date.now()) ? (
+                  counterPaymentStep(order, batch) ? (
                     <fieldset disabled={servingBusy}>
                       <StaffRoundPaymentAction
                         key={"counter-pay-" + batch.orderBatchReference}
@@ -5015,14 +5156,7 @@ export function CurrentOrderQueuePage({
                     </fieldset>
                   ) : // WP-2423 D5: an unpaid round staff entered is recorded as paid here too. The list
                   // leaves its amount out (the one-order read builds it when the form is opened).
-                  order.canRecordCardMachinePayment &&
-                    batch.staffRound != null &&
-                    batch.staffRound.paidOnCardMachine === null &&
-                    batch.acceptanceStatus === "NotAccepted" &&
-                    batch.paymentDue !== null &&
-                    batch.paymentDue.status === "Awaiting" &&
-                    (batch.paymentDue.cancelsAt === null ||
-                      Date.parse(batch.paymentDue.cancelsAt) > Date.now()) ? (
+                  staffRoundPaymentStep(order, batch) && batch.staffRound != null ? (
                     <fieldset disabled={servingBusy}>
                       <StaffRoundPaymentAction
                         key={"round-pay-" + batch.orderBatchReference}
@@ -5047,9 +5181,7 @@ export function CurrentOrderQueuePage({
                         onRecorded={() => reload(after)}
                       />
                     </fieldset>
-                  ) : (batch.staffCancellation?.refundMethod === "CardMachine" &&
-                      batch.staffCancellation.refundStatus === "Pending") ||
-                    (batch.sequence === 1 && cardMachineOwed(order) !== null) ? (
+                  ) : cardMachineRefundStep(order, batch) ? (
                     <fieldset disabled={servingBusy}>
                       <CardMachineRefundAction
                         key={"card-refund-" + batch.orderBatchReference}
@@ -5061,58 +5193,8 @@ export function CurrentOrderQueuePage({
                         onSettled={refreshInPlace}
                       />
                     </fieldset>
-                  ) : removeRefusals[batch.orderBatchReference] !== undefined ? (
-                    <PayLaterRemoveRefusalNotice
-                      refusal={removeRefusals[batch.orderBatchReference] as PayLaterRemoveRefusal}
-                      order={order}
-                      // Comps are given on the table's page; money back on the order's page.
-                      compHref="/operations/dining"
-                      refundHref={`/operations/orders/${order.orderReference}`}
-                      onDone={() =>
-                        setRemoveRefusals((current) =>
-                          Object.fromEntries(
-                            Object.entries(current).filter(
-                              ([key]) => key !== batch.orderBatchReference,
-                            ),
-                          ),
-                        )
-                      }
-                    />
-                  ) : batch.unpaidRemovableItems.length > 0 ? (
-                    // DEC-DINE-IN-PAY-LATER (rule 2): dishes come off an unpaid table's bill.
-                    <fieldset disabled={servingBusy} className="order-cancel-actions">
-                      {detail !== undefined ? (
-                        <PayLaterItemRemoveAction
-                          key={
-                            "remove-" +
-                            batch.orderBatchReference +
-                            ":" +
-                            String(order.currentVersion)
-                          }
-                          order={order}
-                          batch={batch}
-                          lines={detail.lines.items}
-                          csrf={csrf}
-                          fetcher={fetcher}
-                          onRefused={(refusal) =>
-                            setRemoveRefusals((current) => ({
-                              ...current,
-                              [batch.orderBatchReference]: refusal,
-                            }))
-                          }
-                          onSettled={() => reload(after)}
-                        />
-                      ) : (
-                        <Link
-                          className="order-cancel-items-link"
-                          to={`/operations/orders/${order.orderReference}`}
-                          state={{ ordersListSearch: listSearch }}
-                        >
-                          {t("Take dishes off round {sequence}", { sequence: batch.sequence })}
-                        </Link>
-                      )}
-                    </fieldset>
-                  ) : !batch.canRequestAcceptance &&
+                  ) : // b22: taking dishes off the bill sits under the round's dishes (roundTakeOff).
+                  takeOffInLines(order, batch) ? null : !batch.canRequestAcceptance &&
                     (batch.canCancel ||
                       batch.canCancelItems ||
                       batch.canCantMake ||
@@ -5336,6 +5418,16 @@ export function CurrentOrderQueuePage({
 }
 
 const orderRoute = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+/**
+ * b22: the round a "Take dishes off round N" link from the Orders workbench carried (a round number,
+ * never an object ID or code); null when the order was opened any other way.
+ */
+export function takeOffRoundFromLink(state: unknown): number | null {
+  const round = (state as { takeOffRound?: unknown } | null)?.takeOffRound;
+  return typeof round === "number" && Number.isInteger(round) && round >= 1 && round <= 999
+    ? round
+    : null;
+}
 /** The list's address a link to an order carried; "" when the order was opened any other way. */
 function listSearchFromLink(state: unknown): string {
   const search =

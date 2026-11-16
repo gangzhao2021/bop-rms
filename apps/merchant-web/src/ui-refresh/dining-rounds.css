@@ -391,6 +391,16 @@
 .pay-later-remove .table-checkout__field {
   justify-self: start;
 }
+/* b22: why the button's amount differs by a cent from the dishes' figures: a secondary line. */
+.pay-later-remove > p.pay-later-remove__note {
+  color: var(--bop-color-text-muted, #666666);
+  font-size: 14px;
+}
+/* b22: the panel takes the focus when staff arrive for its round; the page scrolls to it, and no
+   ring is drawn around a panel that is not itself a control. */
+.pay-later-remove:focus {
+  outline: none;
+}
 .pay-later-remove__actions {
   display: flex;
   flex-wrap: wrap;
@@ -430,4 +440,21 @@ a.table-checkout__primary {
 .table-checkout__phone-stopped {
   font-size: 16px;
   font-weight: 600;
+}
+/* b22: a round's "Take dishes off round N", under its dishes on Orders (page and workbench) as on
+   Tables: accent words, no box (v3); the panel it opens keeps its one filled action. */
+.order-round--lines > .order-cancel-actions > button,
+.order-round--lines > .order-cancel-actions > .order-cancel-items-link {
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent, #1f63e0);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
 }
