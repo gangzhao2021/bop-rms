@@ -15,7 +15,7 @@ async function fixture(work) {
   const runtime = ".local/resume-owner-" + randomUUID();
   const root = path.resolve(runtime),
     control = path.join(root, "recovery-resume.lock");
-  await fs.mkdir(root, { mode: 0o700 });
+  await fs.mkdir(root, { recursive: true, mode: 0o700 });
   try {
     const lease = { operation: "Recovery", pid: process.pid };
     const bytes = JSON.stringify(lease) + "\n";

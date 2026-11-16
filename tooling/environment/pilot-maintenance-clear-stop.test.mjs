@@ -8,7 +8,7 @@ import { withPilotMaintenance, assertPilotMaintenanceAccess } from "./pilot-main
 import { clearStoppedPilotMaintenance } from "./pilot-maintenance-clear-stop.mjs";
 async function fixture(work, operation = "Stop") {
   const directory = ".local/stop-recovery-test-" + randomUUID();
-  await fs.mkdir(directory, { mode: 0o700 });
+  await fs.mkdir(directory, { recursive: true, mode: 0o700 });
   try {
     const script = `import { withPilotMaintenance } from "./tooling/environment/pilot-maintenance.mjs"; await withPilotMaintenance(process.argv[1], async () => process.exit(0), process.argv[2]);`;
     const child = spawn(
@@ -60,7 +60,7 @@ it.each(["Recovery", "Unspecified"])(
 );
 it("refuses active Stop ownership", async () => {
   const directory = ".local/stop-recovery-test-" + randomUUID();
-  await fs.mkdir(directory, { mode: 0o700 });
+  await fs.mkdir(directory, { recursive: true, mode: 0o700 });
   try {
     await withPilotMaintenance(
       directory,

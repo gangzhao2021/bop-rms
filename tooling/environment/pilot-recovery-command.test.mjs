@@ -6,7 +6,7 @@ import { runPilotRecoveryCommand } from "./pilot-recovery-command.mjs";
 async function fixture(work) {
   const runtimeDirectory = ".local/recovery-command-" + randomUUID(),
     folder = runtimeDirectory + "/recovery-test";
-  await fs.mkdir(runtimeDirectory, { mode: 0o700 });
+  await fs.mkdir(runtimeDirectory, { recursive: true, mode: 0o700 });
   await fs.mkdir(folder, { mode: 0o700 });
   try {
     await work({ runtimeDirectory, folder, phase: "Dump", args: ["synthetic"], stdio: "ignore" });

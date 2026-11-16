@@ -117,7 +117,7 @@ it.each([
   state.reviews = 0;
   const previousEnvironment = process.env.NODE_ENV;
   process.env.NODE_ENV = "development";
-  await fs.mkdir(runtimeDirectory, { mode: 0o700 });
+  await fs.mkdir(runtimeDirectory, { recursive: true, mode: 0o700 });
   await fs.mkdir(folder, { mode: 0o700 });
   await fs.mkdir(folder + "/installation", { mode: 0o700 });
   const installationManifest = { files: [] };

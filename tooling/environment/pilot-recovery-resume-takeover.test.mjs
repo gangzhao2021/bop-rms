@@ -28,7 +28,7 @@ async function fixture(work) {
   const previous = process.env.NODE_ENV;
   process.env.NODE_ENV = "development";
   state.drift = false;
-  await fs.mkdir(root, { mode: 0o700 });
+  await fs.mkdir(root, { recursive: true, mode: 0o700 });
   try {
     await fs.mkdir(folder, { mode: 0o700 });
     await fs.mkdir(control, { mode: 0o700 });

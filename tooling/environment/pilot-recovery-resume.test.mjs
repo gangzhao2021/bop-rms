@@ -98,7 +98,7 @@ it.each([null, "review", "lease", "concurrent", "duplicate", "startup", "throw",
     state.actions = [];
     const priorEnvironment = process.env.NODE_ENV;
     process.env.NODE_ENV = "development";
-    await fs.mkdir(state.runtime, { mode: 0o700 });
+    await fs.mkdir(state.runtime, { recursive: true, mode: 0o700 });
     await fs.mkdir(state.folder, { mode: 0o700 });
     try {
       await withPilotMaintenance(
@@ -192,7 +192,7 @@ it.each(["success", "review", "stop", "startup"])(
     state.actions = [];
     const priorEnvironment = process.env.NODE_ENV;
     process.env.NODE_ENV = "development";
-    await fs.mkdir(state.runtime, { mode: 0o700 });
+    await fs.mkdir(state.runtime, { recursive: true, mode: 0o700 });
     await fs.mkdir(originalFolder, { mode: 0o700 });
     try {
       await withPilotMaintenance(

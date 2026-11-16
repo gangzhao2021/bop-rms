@@ -138,7 +138,7 @@ it.each([null, "source", "target", "installation", "stop", "cleanup", "docker", 
     const originalExitCode = process.exitCode;
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    await fs.mkdir(state.runtime, { mode: 0o700 });
+    await fs.mkdir(state.runtime, { recursive: true, mode: 0o700 });
     try {
       await runPilotRecovery([]);
       const expectedCommands = ["stop", "baseline"].includes(failure)
