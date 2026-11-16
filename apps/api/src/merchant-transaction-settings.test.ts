@@ -38,13 +38,14 @@ it("sends the settings written since the last statement as one statement before 
   expect(h.sent).toEqual([
     {
       sql: "SELECT set_config('statement_timeout',$1,true),set_config('lock_timeout',$2,true),set_config('bop.brand_id',$3,true),set_config('bop.store_id',$4,true)",
-      values: ["4929", "4929", "b", "s"],
+      // The limit asked for last, rounded down to its 100 ms step (never longer than asked).
+      values: ["4900", "4900", "b", "s"],
     },
     { sql: "SELECT 1", values: [] },
   ]);
 });
 
-it("leaves out a Scope setting already held but always sends a statement or lock limit", () => {
+it("leaves out a Scope setting already held and a limit no shorter than the one in force", () => {
   const h = host();
   h.run(scope, ["b", "s"]);
   h.run("SELECT 1");
@@ -57,14 +58,42 @@ it("leaves out a Scope setting already held but always sends a statement or lock
   h.run("SELECT 3");
   h.run(limits, ["4000"]);
   h.run("SELECT 4");
-  expect(h.sent.map((s) => s.sql)).toEqual([
-    "SELECT set_config('statement_timeout',$1,true),set_config('lock_timeout',$2,true)",
-    "SELECT 3",
-    "SELECT set_config('statement_timeout',$1,true),set_config('lock_timeout',$2,true)",
-    "SELECT 4",
+  // 4,050 ms left: the 4,000 ms limit in force already ends the statement sooner.
+  h.run(limits, ["4050"]);
+  h.run("SELECT 5");
+  expect(h.sent).toEqual([
+    {
+      sql: "SELECT set_config('statement_timeout',$1,true),set_config('lock_timeout',$2,true)",
+      values: ["4000", "4000"],
+    },
+    { sql: "SELECT 3", values: [] },
+    { sql: "SELECT 4", values: [] },
+    { sql: "SELECT 5", values: [] },
   ]);
-  // The last value written is the one sent; nothing is left pending.
   expect(h.tracker.pending()).toBeNull();
+});
+
+it("never leaves a limit longer than the one asked for in force", () => {
+  const h = host();
+  const sentLimits = () =>
+    h.sent.filter((s) => s.sql.includes("statement_timeout")).map((s) => s.values);
+  for (const asked of ["4987", "4950", "3999", "3901", "250", "199", "150", "0", "10s", "120"]) {
+    h.run(limits, [asked]);
+    h.run("SELECT 1");
+  }
+  expect(sentLimits()).toEqual([
+    ["4900", "4900"],
+    // 3,999 ms asked: 4,900 would be longer, so 3,900 is sent; 3,901 needs nothing more.
+    ["3900", "3900"],
+    ["200", "200"],
+    // Exactly as asked once no more than 200 ms are asked for.
+    ["199", "199"],
+    ["150", "150"],
+    // No limit and any other form are always sent as asked; the next limit is sent again.
+    ["0", "0"],
+    ["10s", "10s"],
+    ["120", "120"],
+  ]);
 });
 
 it("answers a Scope setting read only when it knows the value the next statement runs under", () => {

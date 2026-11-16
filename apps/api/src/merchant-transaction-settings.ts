@@ -12,9 +12,14 @@
  *
  * - records a pure `set_config(...,true)` of a known setting and sends the settings written since
  *   the last statement as one statement immediately before the next statement that runs (a Scope
- *   setting the transaction already holds with the same value is left out; a statement or lock
- *   limit is always sent, with the last value written, because a database function could have
- *   changed it);
+ *   setting the transaction already holds with the same value is left out);
+ * - keeps every statement and lock limit at or below the one last asked for, never above it: a
+ *   limit in milliseconds is sent rounded down to a whole 100 ms step (exactly as asked once no
+ *   more than 200 ms are asked for), and a later ask for a limit no shorter than the one already
+ *   in force sends nothing. Each Tax source statement asks for what is left of its fixed window,
+ *   so a statement can only be stopped up to 100 ms sooner than asked, never later, and the
+ *   window is never wider (as for Scope settings, every database function that changes a limit
+ *   restores it before returning);
  * - answers a `current_setting(...,true)` read of Scope settings it knows (the value the next
  *   statement runs under);
  * - answers a repeat of an advisory transaction lock this transaction already holds (taking it
@@ -33,6 +38,15 @@ const scopeSettings: ReadonlySet<string> = new Set([
   "bop.identity_actor_id",
 ]);
 const limitSettings: ReadonlySet<string> = new Set(["statement_timeout", "lock_timeout"]);
+/** A limit in whole milliseconds (0, no limit, and any other form are not reasoned about). */
+const limitMs = (value: string | undefined) =>
+  value !== undefined && /^[1-9][0-9]{0,8}$/u.test(value) ? Number(value) : null;
+const limitStepMs = 100;
+/** The limit sent for one asked for: never longer than it. */
+const sentLimit = (value: string) => {
+  const ms = limitMs(value);
+  return ms === null || ms <= 2 * limitStepMs ? value : String(ms - (ms % limitStepMs));
+};
 const setConfigCall = String.raw`set_config\(\s*'([a-z_.]+)'\s*,\s*(\$\d+|'[0-9a-z_.:-]*')\s*,\s*true\s*\)`;
 const pureSetConfig = new RegExp(
   String.raw`^SELECT\s+` +
@@ -100,10 +114,18 @@ export function createTransactionSettingsTracker() {
     wanted.clear();
     locks.clear();
   };
+  /** Whether what is held already meets what was written (a limit: no longer than asked). */
+  const satisfied = (name: string, value: string) => {
+    const current = held.get(name);
+    if (!limitSettings.has(name)) return current === value;
+    const heldMs = limitMs(current),
+      askedMs = limitMs(value);
+    return heldMs !== null && askedMs !== null && heldMs <= askedMs;
+  };
   const pending = () => {
-    const changed = [...wanted].filter(
-      ([name, value]) => limitSettings.has(name) || held.get(name) !== value,
-    );
+    const changed = [...wanted]
+      .filter(([name, value]) => !satisfied(name, value))
+      .map(([name, value]) => [name, limitSettings.has(name) ? sentLimit(value) : value] as const);
     if (changed.length === 0) return null;
     return Object.freeze({
       sql:
@@ -162,8 +184,9 @@ export function createTransactionSettingsTracker() {
       const pairs = pureSetConfig.test(text) ? settingPairs(text, values) : null;
       if (pairs !== null) {
         for (const [name, value] of pairs) {
-          if (scopeSettings.has(name)) held.set(name, value);
-          if (wanted.get(name) === value) wanted.delete(name);
+          held.set(name, value);
+          const written = wanted.get(name);
+          if (written !== undefined && satisfied(name, written)) wanted.delete(name);
         }
         return;
       }
