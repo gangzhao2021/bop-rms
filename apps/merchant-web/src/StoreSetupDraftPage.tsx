@@ -1093,6 +1093,10 @@ export function StoreSetupDraftPage({
   // b22 (v15 live check of b21): a fee turned on without its orders (or tax classification) is
   // named as that in Review, and the rest of the summary is still read without that fee.
   const feeProblems = storeSetupFeeProblems(content);
+  // b22: a fee left half set cannot be read back after the language switch's reload (the kept edits
+  // are read like a saved setup), so the switch asks first instead of dropping it unseen.
+  const halfSetFee = dirty && feeProblems.length > 0;
+  useEffect(() => (halfSetFee ? holdUnsavedWork() : undefined), [halfSetFee]);
   let reviewParsed = parsed;
   if (reviewParsed === null && feeProblems.length > 0)
     try {
