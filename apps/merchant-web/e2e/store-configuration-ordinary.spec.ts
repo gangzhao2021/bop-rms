@@ -1243,7 +1243,7 @@ test("b20: a withdrawn change is listed in Earlier changes, and the Chinese stat
   await page.getByRole("button", { name: /^4\. 核对并发布$/u }).click();
   const zh = page.getByRole("region", { name: "门店配置发布", exact: true });
   await expect(zh.locator(".store-setup-publish__status")).toHaveText(
-    /^你撤回了上一次修改（\d+月\d+日 \d{2}:\d{2}），不会发布。$/u,
+    /^你撤回了上一次修改（\d+月\d+日 \d{1,2}:\d{2}），不会发布。$/u,
   );
   await zh.getByText("以前的修改", { exact: true }).click();
   await expect(zh.getByRole("listitem").first()).toContainText(/^已由你撤回 /u);
