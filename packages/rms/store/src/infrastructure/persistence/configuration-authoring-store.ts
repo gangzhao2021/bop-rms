@@ -375,6 +375,11 @@ export interface StoreConfigurationHistoryEntry {
   readonly occurredAt: string;
   readonly expectedVersion: number;
 }
+/**
+ * b22 (v15 DEMO Store: 44 presses to reach its first change at 2 a page): Earlier changes reads 20
+ * steps a page, newest first. The query reads one more to know whether older steps remain.
+ */
+export const storeConfigurationHistoryPageSize = 20;
 export interface StoreConfigurationHistoryPage {
   readonly tenantReference: string;
   readonly brandReference: string;
@@ -653,11 +658,14 @@ export function createPostgresStoreConfigurationHistorySource(
     const observedAt = check();
     const result = rows(
       await sql(
-        "SELECT sequence_number::text sequence_number,operation_id,command_type,configuration_json,intent_digest,actor_reference,purpose_code,audit_reference,CASE WHEN occurred_at=date_trunc('milliseconds',occurred_at) THEN to_char(occurred_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') ELSE NULL END occurred_at,expected_version::text expected_version,configuration_id,configuration_version::text configuration_version,lifecycle,data_classification FROM rms_store.store_configuration_authoring_operation o WHERE o.brand_id=$1 AND o.store_id=$2 AND ($3::bigint IS NULL OR o.sequence_number<$3) ORDER BY o.sequence_number DESC LIMIT 3",
+        "SELECT sequence_number::text sequence_number,operation_id,command_type,configuration_json,intent_digest,actor_reference,purpose_code,audit_reference,CASE WHEN occurred_at=date_trunc('milliseconds',occurred_at) THEN to_char(occurred_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') ELSE NULL END occurred_at,expected_version::text expected_version,configuration_id,configuration_version::text configuration_version,lifecycle,data_classification FROM rms_store.store_configuration_authoring_operation o WHERE o.brand_id=$1 AND o.store_id=$2 AND ($3::bigint IS NULL OR o.sequence_number<$3) ORDER BY o.sequence_number DESC LIMIT 21",
         [fixed.brandReference, fixed.storeReference, selector],
       ),
     );
-    if (result.length > 3 || Reflect.ownKeys(result).length !== result.length + 1)
+    if (
+      result.length > storeConfigurationHistoryPageSize + 1 ||
+      Reflect.ownKeys(result).length !== result.length + 1
+    )
       return unavailable();
     const parsed: StoreConfigurationHistoryEntry[] = [];
     for (let i = 0; i < result.length; i++) {
@@ -675,9 +683,11 @@ export function createPostgresStoreConfigurationHistorySource(
       )
         return unavailable();
     }
-    const entries = Object.freeze(parsed.slice(0, 2)),
+    const entries = Object.freeze(parsed.slice(0, storeConfigurationHistoryPageSize)),
       nextBeforeSequence =
-        parsed.length === 3 ? (entries[1]?.sequenceNumber ?? unavailable()) : null;
+        parsed.length === storeConfigurationHistoryPageSize + 1
+          ? (entries.at(-1)?.sequenceNumber ?? unavailable())
+          : null;
     const identity = canonicalize.call(options, { entries, nextBeforeSequence });
     check();
     if (typeof identity !== "string" || new TextEncoder().encode(identity).byteLength > 8388608)

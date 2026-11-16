@@ -537,7 +537,8 @@ function historyPage(beforeSequence: number | null = null) {
     readerActorReference: scope.actorReference,
     beforeSequence,
     entries,
-    nextBeforeSequence: 2,
+    // b22: a page is 20 steps; this short page is the last one.
+    nextBeforeSequence: null,
     observedAt: at,
     validUntil: until,
   };
@@ -584,6 +585,29 @@ it("history parser refuses oversized pages wrong ordering selectors leases scope
   ])
     expect(() => parseStoreConfigurationOrdinaryHistory(invalid, scope, null)).toThrow();
   expect(() => parseStoreConfigurationOrdinaryHistory(page, scope, 3)).toThrow();
+});
+// b22 (v15 DEMO Store: 44 presses at 2 a page): a page is 20 steps. Only a full page says older
+// steps remain, and its cursor is its last step.
+it("history reads a full page of 20 with its last step as the next cursor, and refuses other cursors", () => {
+  const page = historyPage(),
+    first = page.entries[0];
+  if (!first) throw new Error("history fixtures absent");
+  const entries = Array.from({ length: 20 }, (_, i) => ({
+    ...first,
+    sequenceNumber: 40 - i,
+    operationReference: id(400 + i),
+    auditReference: id(500 + i),
+  }));
+  const full = { ...page, entries, nextBeforeSequence: 21 };
+  const read = parseStoreConfigurationOrdinaryHistory(full, scope, null);
+  expect(read.entries).toHaveLength(20);
+  expect(read.nextBeforeSequence).toBe(21);
+  for (const invalid of [
+    { ...full, nextBeforeSequence: 22 },
+    { ...full, entries: entries.slice(0, 19), nextBeforeSequence: 22 },
+    { ...full, entries: [...entries, { ...first, sequenceNumber: 1 }] },
+  ])
+    expect(() => parseStoreConfigurationOrdinaryHistory(invalid, scope, null)).toThrow();
 });
 // b21 (v15 DEMO Store seq 4, 9, 28, 35): an approval recorded before the writer fix carries an
 // updatedAt a little after the instant it recorded; the page reads such stored rows as they are.

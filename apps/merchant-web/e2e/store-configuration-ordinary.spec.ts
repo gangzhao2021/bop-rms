@@ -167,6 +167,8 @@ interface OrdinaryFixtureControl {
   olderHistoryDown: boolean;
   /** b21 review: a page of older changes carries a row the reader refuses (a later stamp). */
   olderHistoryRefusedRow: boolean;
+  /** b22: older checks recorded before this test (a page of Earlier changes is 20 steps). */
+  earlierSteps: number;
   wrongHistory: boolean;
   /** WP-2423 DEC-STORE-SETUP-PUBLICATION: publication checks the fixture reports as failing. */
   failing: string[] | null;
@@ -212,6 +214,7 @@ async function install(
     denyHistory: false,
     olderHistoryDown: false,
     olderHistoryRefusedRow: false,
+    earlierSteps: 0,
     wrongHistory: false,
     failing: null as string[] | null,
     soleOperator: null,
@@ -435,23 +438,36 @@ async function install(
       if (control.denyHistory) return respond(route, { error: "request_denied" }, 403);
       if (control.olderHistoryDown && beforeSequence !== null)
         return respond(route, { error: "store_configuration_unavailable" }, 503);
-      const all = Array.from(ledger.values())
-        .map((receipt, index) => {
-          if (!receipt.operation) throw new Error("Controlled committed history absent");
-          return {
-            sequenceNumber: index + 1,
-            operationReference: receipt.operationReference,
-            command: receipt.operation.command,
-            configuration: receipt.operation.configuration,
-            intentDigest: receipt.operation.intentDigest,
-            actorReference: receipt.actorReference,
-            purposeCode: "STORE_CONFIGURATION",
-            auditReference: receipt.auditReference,
-            occurredAt: receipt.occurredAt,
-            expectedVersion:
-              receipt.operation.resultingVersion - (receipt.action === "Materialize" ? 1 : 0),
-          };
-        })
+      const recorded = Array.from(ledger.values()).map((receipt, index) => {
+        if (!receipt.operation) throw new Error("Controlled committed history absent");
+        return {
+          sequenceNumber: control.earlierSteps + index + 1,
+          operationReference: receipt.operationReference,
+          command: receipt.operation.command,
+          configuration: receipt.operation.configuration,
+          intentDigest: receipt.operation.intentDigest,
+          actorReference: receipt.actorReference,
+          purposeCode: "STORE_CONFIGURATION",
+          auditReference: receipt.auditReference,
+          occurredAt: receipt.occurredAt,
+          expectedVersion:
+            receipt.operation.resultingVersion - (receipt.action === "Materialize" ? 1 : 0),
+        };
+      });
+      // b22: older checks of the first change, recorded before this test, so paging is real.
+      const first = recorded.find((entry) => entry.command === "Validate") ?? recorded[0];
+      const earlier =
+        first === undefined
+          ? []
+          : Array.from({ length: control.earlierSteps }, (_, index) => ({
+              ...first,
+              command: "Validate" as const,
+              expectedVersion: first.configuration.configurationVersion,
+              sequenceNumber: index + 1,
+              operationReference: id(70000 + index),
+              auditReference: id(71000 + index),
+            }));
+      const all = [...earlier, ...recorded]
         .reverse()
         // b20: the withdrawn configuration's last step carries its withdrawal, as the server does.
         .map((entry, index, newestFirst) => {
@@ -468,7 +484,7 @@ async function install(
             : entry;
         })
         .filter((entry) => beforeSequence === null || entry.sequenceNumber < beforeSequence);
-      const entries = all.slice(0, 2),
+      const entries = all.slice(0, 20),
         observedAt = new Date().toISOString();
       const value = parseMerchantStoreConfigurationHistoryPage(
         {
@@ -478,7 +494,7 @@ async function install(
           readerActorReference: control.actor,
           beforeSequence,
           entries,
-          nextBeforeSequence: all.length > 2 ? entries.at(-1)?.sequenceNumber : null,
+          nextBeforeSequence: all.length > 20 ? entries.at(-1)?.sequenceNumber : null,
           observedAt,
           validUntil: new Date(Date.parse(observedAt) + 5000).toISOString(),
         },
@@ -823,6 +839,8 @@ test("actual immutable history paginates original authors and read refusal keeps
   page,
 }) => {
   const state = await install(page);
+  // b22: 20 older checks, so a page (20 steps) leaves 3 to load.
+  state.earlierSteps = 20;
   await enter(page);
   await panel(page).getByRole("button", { name: "Create the change from the saved setup" }).click();
   await expect(panel(page).getByRole("status")).toHaveText(
@@ -847,9 +865,9 @@ test("actual immutable history paginates original authors and read refusal keeps
     await earlier.click();
   };
   await earlier.click();
-  await expect(history.getByRole("listitem")).toHaveCount(2);
+  await expect(history.getByRole("listitem")).toHaveCount(20);
   await history.getByRole("button", { name: "Load older changes" }).click();
-  await expect(history.getByRole("listitem")).toHaveCount(3);
+  await expect(history.getByRole("listitem")).toHaveCount(23);
   await expect(history.getByRole("button", { name: "Load older changes" })).toHaveCount(0);
   await expect(history).toContainText("Created from saved setup");
   await expect(history).not.toContainText(scope.actorReference);
@@ -862,7 +880,7 @@ test("actual immutable history paginates original authors and read refusal keeps
   state.actor = scope.actorReference;
   await reloadReview(page);
   await earlier.click();
-  await expect(history.getByRole("listitem")).toHaveCount(2);
+  await expect(history.getByRole("listitem")).toHaveCount(20);
   state.loseNext = true;
   await panel(page).getByRole("button", { name: "Check the settings again" }).click();
   await expect(
@@ -1297,15 +1315,17 @@ test("b21: a failed load of older changes keeps the rows and says so under the b
     );
   }
   state.olderHistoryDown = true;
+  // b22: a page is 20 steps; older ones remain to load.
+  state.earlierSteps = 20;
   const check = async (region: string, earlier: string, more: string, message: string) => {
     const where = page.getByRole("region", { name: region, exact: true });
     await where.getByText(earlier, { exact: true }).click();
     const history = where.locator(".store-setup-publish__history section");
-    await expect(history.getByRole("listitem")).toHaveCount(2);
+    await expect(history.getByRole("listitem")).toHaveCount(20);
     await history.getByRole("button", { name: more }).click();
     const alert = history.getByRole("alert");
     await expect(alert).toHaveText(message);
-    await expect(history.getByRole("listitem")).toHaveCount(2);
+    await expect(history.getByRole("listitem")).toHaveCount(20);
     // Right under the button just pressed, and in view at phone width.
     await page.setViewportSize({ width: 390, height: 844 });
     await history.getByRole("button", { name: more }).scrollIntoViewIfNeeded();
@@ -1348,14 +1368,16 @@ test("b21 review: older changes the page cannot read say so plainly, not as a co
     );
   }
   state.olderHistoryRefusedRow = true;
+  // b22: a page is 20 steps; older ones remain to load.
+  state.earlierSteps = 20;
   const check = async (region: string, earlier: string, more: string, message: string) => {
     const where = page.getByRole("region", { name: region, exact: true });
     await where.getByText(earlier, { exact: true }).click();
     const history = where.locator(".store-setup-publish__history section");
-    await expect(history.getByRole("listitem")).toHaveCount(2);
+    await expect(history.getByRole("listitem")).toHaveCount(20);
     await history.getByRole("button", { name: more }).click();
     await expect(history.getByRole("alert")).toHaveText(message);
-    await expect(history.getByRole("listitem")).toHaveCount(2);
+    await expect(history.getByRole("listitem")).toHaveCount(20);
     await expect(history).not.toContainText(/connection|try again|网络|再试/u);
   };
   await check(

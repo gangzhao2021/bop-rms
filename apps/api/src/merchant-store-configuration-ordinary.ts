@@ -652,7 +652,7 @@ export function createMerchantStoreConfigurationOrdinary(
         });
         const read = await history.readPage(historyRequest);
         // b20 (v15 live check): a withdrawal or decline is listed after the configuration's last
-        // step, read from its append-only record in this transaction (at most two per page).
+        // step, read from its append-only record in this transaction (at most 20 per page).
         const entries = [];
         for (const entry of read.entries) {
           const configurationReference = entry.configuration.configurationReference;

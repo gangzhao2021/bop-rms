@@ -226,14 +226,14 @@ describe("head committed while the head lock was awaited", () => {
     ).rejects.toMatchObject({ code: "STORE_CONFIGURATION_DEPENDENCY_UNAVAILABLE" });
   });
 });
-function historyFixture() {
+function historyFixture(count = 5) {
   const state = { clock: at, until: "2026-10-05T10:00:05.000Z", allowed: true };
-  const table = [historyRow(5), historyRow(4), historyRow(3), historyRow(2), historyRow(1)];
+  const table = Array.from({ length: count }, (_, i) => historyRow(count - i));
   const query = vi.fn(async (sql: string, values: readonly unknown[]) => ({
     rows: sql.includes("ORDER BY o.sequence_number")
       ? table
           .filter((row) => values[2] === null || Number(row.sequence_number) < Number(values[2]))
-          .slice(0, 3)
+          .slice(0, Number(/LIMIT (\d+)"?$/u.exec(sql)?.[1] ?? 0))
       : [],
   }));
   const tx = { query },
@@ -295,14 +295,17 @@ function historyFixture() {
   return { state, table, query, tx, checks, finals, authority, options, source, finalize };
 }
 describe("held owning immutable Store configuration history", () => {
-  it("pages every recorded operation with two complete entries and a truthful probe cursor", async () => {
+  // b22 (v15 DEMO Store: 89 steps took 44 presses at 2 a page): 20 complete entries a page.
+  it("pages every recorded operation with twenty complete entries and a truthful probe cursor", async () => {
     let before: number | null = null;
-    const seen: number[] = [];
+    const seen: number[] = [],
+      sizes: number[] = [];
     for (let i = 0; i < 3; i++) {
-      const f = historyFixture(),
+      const f = historyFixture(45),
         page = await f.source.readPage({ beforeSequence: before });
       seen.push(...page.entries.map((entry) => entry.sequenceNumber));
-      expect(page.entries.length).toBeLessThanOrEqual(2);
+      sizes.push(page.entries.length);
+      expect(page.nextBeforeSequence).toBe(i < 2 ? page.entries.at(-1)?.sequenceNumber : null);
       expect(page.readerActorReference).toBe(ref(8));
       expect(page.entries.every((entry) => entry.actorReference === ref(10))).toBe(true);
       expect(
@@ -312,7 +315,8 @@ describe("held owning immutable Store configuration history", () => {
       await f.finalize();
       expect(f.authority.holdUntilTransactionCompletes).toHaveBeenCalledTimes(2);
     }
-    expect(seen).toEqual([5, 4, 3, 2, 1]);
+    expect(sizes).toEqual([20, 20, 5]);
+    expect(seen).toEqual(Array.from({ length: 45 }, (_, i) => 45 - i));
     expect(before).toBeNull();
   });
   it("returns an empty page without inventing a configuration or next cursor", async () => {

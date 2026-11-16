@@ -113,13 +113,13 @@ it("retains historic terminal recovery independently of the latest head", () => 
 
 const historicalEntry = (sequenceNumber: number) => ({
   sequenceNumber,
-  operationReference: id(sequenceNumber + 50),
+  operationReference: id(sequenceNumber + 100),
   command: "Validate",
   configuration,
   intentDigest: `sha256:${"b".repeat(64)}`,
   actorReference: id(90),
   purposeCode: "LEGACY_STORE_CONFIGURATION",
-  auditReference: id(sequenceNumber + 60),
+  auditReference: id(sequenceNumber + 200),
   occurredAt: at,
   expectedVersion: 1,
 });
@@ -129,8 +129,9 @@ const historicalPage = () => ({
   storeReference: scope.storeReference,
   readerActorReference: scope.actorReference,
   beforeSequence: null,
-  entries: [historicalEntry(5), historicalEntry(4)],
-  nextBeforeSequence: 4,
+  // b22: a full page is 20 steps (25 to 6); older ones are read before 6.
+  entries: Array.from({ length: 20 }, (_, i) => historicalEntry(25 - i)),
+  nextBeforeSequence: 6,
   observedAt: at,
   validUntil: "2026-10-05T10:00:05.000Z",
 });
@@ -138,7 +139,8 @@ it("history preserves original authors and legacy stored intent without inventin
   const page = history(historicalPage(), scope, null);
   expect(page.entries[0]?.actorReference).toBe(id(90));
   expect(page.entries[0]?.intentDigest).toBe(`sha256:${"b".repeat(64)}`);
-  expect(page.nextBeforeSequence).toBe(4);
+  expect(page.nextBeforeSequence).toBe(6);
+  expect(page.entries).toHaveLength(20);
   expect(
     history({ ...historicalPage(), entries: [], nextBeforeSequence: null }, scope, null).entries,
   ).toEqual([]);
@@ -152,6 +154,8 @@ it("history refuses changed reader, cursor, ordering, record tuple and extra aut
     { ...page, nextBeforeSequence: 5 },
     { ...page, entries: [...page.entries].reverse() },
     { ...page, entries: [...page.entries, historicalEntry(3)] },
+    // b22: a page that says older steps remain is full; a short one never has a next cursor.
+    { ...page, entries: page.entries.slice(0, 19), nextBeforeSequence: 7 },
     { ...page, entries: [{ ...entry, expectedVersion: 0 }], nextBeforeSequence: null },
     { ...page, entries: [{ ...entry, command: "Submit" }], nextBeforeSequence: null },
     {

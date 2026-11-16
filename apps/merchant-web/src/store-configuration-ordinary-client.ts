@@ -123,6 +123,8 @@ export interface StoreConfigurationOrdinaryHistoryEntry {
     readonly byYou: boolean;
   };
 }
+/** b22: Earlier changes reads 20 steps a page (the Store read's page; see @rms/store). */
+export const storeConfigurationHistoryPageSize = 20;
 export interface StoreConfigurationOrdinaryHistory {
   readonly tenantReference: string;
   readonly brandReference: string;
@@ -213,7 +215,11 @@ export function parseStoreConfigurationOrdinaryHistory(
     if (canonical(scope) !== canonical(parseStoreSetupScope(expectedScope)))
       return fail("ScopeChanged");
     if (beforeSequence !== null) sequence(beforeSequence);
-    if (r.beforeSequence !== beforeSequence || !Array.isArray(r.entries) || r.entries.length > 2)
+    if (
+      r.beforeSequence !== beforeSequence ||
+      !Array.isArray(r.entries) ||
+      r.entries.length > storeConfigurationHistoryPageSize
+    )
       return fail();
     const observedAt = parseCatalogInstant(r.observedAt),
       validUntil = parseCatalogInstant(r.validUntil),
@@ -316,19 +322,12 @@ export function parseStoreConfigurationOrdinaryHistory(
       previous = e.sequenceNumber;
       operations.add(e.operationReference);
     }
-    // Strict descending including the second entry; the first may be MAX_SAFE_INTEGER.
-    if (
-      entries.length === 2 &&
-      entries[0] &&
-      entries[1] &&
-      entries[1].sequenceNumber >= entries[0].sequenceNumber
-    )
-      return fail();
     const nextBeforeSequence =
       r.nextBeforeSequence === null ? null : sequence(r.nextBeforeSequence);
     if (
       nextBeforeSequence !== null &&
-      (entries.length !== 2 || entries[1]?.sequenceNumber !== nextBeforeSequence)
+      (entries.length !== storeConfigurationHistoryPageSize ||
+        entries.at(-1)?.sequenceNumber !== nextBeforeSequence)
     )
       return fail();
     if (Date.now() >= Date.parse(validUntil)) return fail("Stale");

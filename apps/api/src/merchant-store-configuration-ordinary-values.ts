@@ -10,6 +10,7 @@ import {
   createStoreConfigurationVersion,
   parseStoreAdministrationReference,
   parseStoreConfigurationOrdinaryReceipt,
+  storeConfigurationHistoryPageSize,
   storeConfigurationHistoryStampAccepted,
   StoreConfigurationOriginalError,
   type StoreConfigurationOriginalScope,
@@ -131,7 +132,7 @@ export function parseMerchantStoreConfigurationHistoryPage(
     if (
       !Array.isArray(raw) ||
       Object.getPrototypeOf(raw) !== Array.prototype ||
-      raw.length > 2 ||
+      raw.length > storeConfigurationHistoryPageSize ||
       Reflect.ownKeys(raw).length !== raw.length + 1
     )
       return invalid();
@@ -233,7 +234,11 @@ export function parseMerchantStoreConfigurationHistoryPage(
       },
     );
     const next = r.nextBeforeSequence;
-    if (next !== null && (entries.length !== 2 || next !== entries[1]?.sequenceNumber))
+    if (
+      next !== null &&
+      (entries.length !== storeConfigurationHistoryPageSize ||
+        next !== entries.at(-1)?.sequenceNumber)
+    )
       return invalid();
     return Object.freeze({
       tenantReference: expectedScope.tenantReference,
@@ -242,7 +247,7 @@ export function parseMerchantStoreConfigurationHistoryPage(
       readerActorReference: expectedScope.actorReference,
       beforeSequence,
       entries: Object.freeze(entries),
-      nextBeforeSequence: next === null ? null : (entries[1]?.sequenceNumber ?? invalid()),
+      nextBeforeSequence: next === null ? null : (entries.at(-1)?.sequenceNumber ?? invalid()),
       observedAt,
       validUntil,
     });

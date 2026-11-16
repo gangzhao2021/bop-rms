@@ -433,8 +433,11 @@ function recordedPage(
     beforeSequence,
   );
 }
+/** b22: n, n-1, … down to `to` (a page of Earlier changes is 20 steps). */
+const steps = (from: number, to: number) =>
+  Array.from({ length: from - to + 1 }, (_, i) => from - i);
 it("displays recorded changes in staff words without actor, audit or purpose codes", () => {
-  const page = recordedPage(null, [4, 3], true),
+  const page = recordedPage(null, steps(40, 21), true),
     html = renderToStaticMarkup(<StoreConfigurationHistoryView entries={page.entries} />);
   expect(html).toContain("Checked");
   // b19: what was done and when, without version numbers.
@@ -445,13 +448,13 @@ it("displays recorded changes in staff words without actor, audit or purpose cod
   expect(html).not.toContain(page.entries[0]?.intentDigest ?? "missing digest");
 });
 it("appends only the correct strictly older immutable page and refuses wrong selectors or duplicate operations", () => {
-  const first = recordedPage(null, [4, 3], true),
-    second = recordedPage(3, [2, 1], false);
+  const first = recordedPage(null, steps(40, 21), true),
+    second = recordedPage(21, steps(20, 1), false);
   expect(
     appendStoreConfigurationHistory(first.entries, second).map((e) => e.sequenceNumber),
-  ).toEqual([4, 3, 2, 1]);
+  ).toEqual(steps(40, 1));
   expect(() =>
-    appendStoreConfigurationHistory(first.entries, { ...second, beforeSequence: 4 }),
+    appendStoreConfigurationHistory(first.entries, { ...second, beforeSequence: 22 }),
   ).toThrow();
   const old = first.entries[0];
   if (!old) throw new Error("history absent");

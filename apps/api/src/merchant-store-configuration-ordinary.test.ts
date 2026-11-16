@@ -368,7 +368,7 @@ it("reads immutable history through held current read authority without loading 
   expect(f.configure).not.toHaveBeenCalled();
   expect(f.next).not.toHaveBeenCalled();
   expect(
-    f.queries.filter((sql) => sql.includes("ORDER BY o.sequence_number DESC LIMIT 3")),
+    f.queries.filter((sql) => sql.includes("ORDER BY o.sequence_number DESC LIMIT 21")),
   ).toHaveLength(2);
 });
 it("refuses malformed history selectors and denied current history authority without allocating", async () => {
