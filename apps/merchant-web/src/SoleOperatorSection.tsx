@@ -1,4 +1,5 @@
 import { t } from "./i18n/i18n.js";
+import { useReadAgainWhenOnline } from "./reconnect-read.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { StatePanel } from "@bop-rms/ui";
 import { SourceTime } from "./StoreTime.js";
@@ -125,13 +126,18 @@ export function SoleOperatorSection({
   useEffect(() => {
     if (status === "Hidden") onHidden?.();
   }, [status, onHidden]);
+  // b24: a read that failed with the connection is made again once it is back.
+  useReadAgainWhenOnline(status === "Unavailable", reload);
   if (status === "Hidden" || status === "Loading") return null;
   if (status === "Unavailable" || view === null)
     return (
       <section id="sole-operator" aria-labelledby="sole-operator-heading" className="sole-operator">
         <h2 id="sole-operator-heading">{t("Sole operator")}</h2>
         <StatePanel heading={t("Setting could not be loaded")} tone="error" status>
-          <p>{t("Check your connection, then refresh.")}</p>
+          <p>{t("Check your connection, then try again.")}</p>
+          <button type="button" onClick={reload}>
+            {t("Try again")}
+          </button>
         </StatePanel>
       </section>
     );

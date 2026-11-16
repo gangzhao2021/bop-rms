@@ -1,4 +1,5 @@
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { useReadAgainWhenOnline } from "./reconnect-read.js";
 import { StoreSetupInPlaceContext } from "./store-opening-list-client.js";
 import { useLocation } from "react-router";
 import { t } from "./i18n/i18n.js";
@@ -50,6 +51,8 @@ export function StoreKitchenSetupPanel({
   useEffect(() => {
     void load();
   }, [load]);
+  // b24: a read that failed with the connection is made again once it is back.
+  useReadAgainWhenOnline(state === "unavailable", () => void load());
   // The listing refusal links here.
   useEffect(() => {
     if (state === "ready" && hash === "#kitchen-setup") section.current?.scrollIntoView();

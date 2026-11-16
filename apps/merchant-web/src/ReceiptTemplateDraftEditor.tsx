@@ -1,4 +1,5 @@
 import { t } from "./i18n/i18n.js";
+import { useReadAgainWhenOnline } from "./reconnect-read.js";
 import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
   StoreTimeZoneContext,
@@ -468,6 +469,7 @@ export function ReceiptTemplateDraftEditor({
       undefined,
     ),
     [ready, setReady] = useState(false),
+    [readAgain, setReadAgain] = useState(0),
     [busy, setBusy] = useState(false),
     [listing, setListing] = useState(false),
     [error, setError] = useState<StoreSetupClientError["code"] | null>(null),
@@ -634,6 +636,7 @@ export function ReceiptTemplateDraftEditor({
     csrf,
     subject,
     defaultLocale,
+    readAgain,
   ]);
   useEffect(() => {
     const c = new AbortController();
@@ -665,7 +668,11 @@ export function ReceiptTemplateDraftEditor({
       mounted = false;
       c.abort();
     };
-  }, [rosterClient, artifactClient, scopeKey, csrf]);
+  }, [rosterClient, artifactClient, scopeKey, csrf, readAgain]);
+  // b24 (v15 live check of b23): reads that failed with the connection are made again once back.
+  useReadAgainWhenOnline(!busy && error !== null && (!ready || roster === null), () =>
+    setReadAgain((n) => n + 1),
+  );
   useEffect(() => {
     if (disabled && running.current) active.current?.abort();
   }, [disabled]);

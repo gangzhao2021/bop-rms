@@ -1,4 +1,5 @@
 import { t } from "./i18n/i18n.js";
+import { useReadAgainWhenOnline } from "./reconnect-read.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { StoreSetupClientError, type StoreSetupScope } from "./store-setup-client.js";
 import { serviceOperationReference } from "./service-control-client.js";
@@ -152,6 +153,8 @@ function Preset({
     journal = useRef<ReceiptTemplateArtifactPendingJournal | null>(null);
   const label = kind === "Layout" ? t("receipt layout") : t("required receipt fields"),
     scopeKey = JSON.stringify(scope);
+  // b24 (v15 live check of b23): a read that failed with the connection is made again once back.
+  const [readAgain, setReadAgain] = useState(0);
   useEffect(() => {
     const e = ++epoch.current,
       c = new AbortController();
@@ -187,7 +190,8 @@ function Preset({
       active.current?.abort();
       c.abort();
     };
-  }, [client, scopeKey, csrf, journalFactory, kind]);
+  }, [client, scopeKey, csrf, journalFactory, kind, readAgain]);
+  useReadAgainWhenOnline(!ready && !busy && error !== null, () => setReadAgain((n) => n + 1));
   useEffect(() => {
     if (disabled && running.current) active.current?.abort();
   }, [disabled]);

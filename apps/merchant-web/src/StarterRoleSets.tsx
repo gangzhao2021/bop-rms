@@ -1,4 +1,5 @@
 import { listSeparator, systemText, t } from "./i18n/i18n.js";
+import { useReadAgainWhenOnline } from "./reconnect-read.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import { newOperationReference } from "./operation-reference.js";
@@ -291,6 +292,8 @@ export function StarterRoleSetOffer({
       active = false;
     };
   }, [client, generation]);
+  // b24: a read that failed with the connection is made again once it is back.
+  useReadAgainWhenOnline(read.kind === "Failed", () => setGeneration((value) => value + 1));
   const waiting = useMemo(
     () => (read.kind === "Found" ? waitingStarterRoles(read.sets, read.roles) : null),
     [read],

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useReadAgainWhenOnline } from "./reconnect-read.js";
 import { t } from "./i18n/i18n.js";
 import {
   storeSupportClient,
@@ -211,6 +212,8 @@ export function StoreSupportAccessPanel({
   useEffect(() => {
     void load();
   }, [load]);
+  // b24: a read that failed with the connection is made again once it is back.
+  useReadAgainWhenOnline(state === "unavailable", () => void load());
   useEffect(() => {
     if (state === "hidden") onHidden?.();
   }, [state, onHidden]);

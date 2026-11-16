@@ -1,4 +1,5 @@
 import { displayLocale, t } from "./i18n/i18n.js";
+import { useReadAgainWhenOnline } from "./reconnect-read.js";
 import { StatePanel } from "@bop-rms/ui";
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { serviceOperationReference } from "./service-control-client.js";
@@ -182,6 +183,8 @@ export function StorePublicProfilePanel({
   useEffect(() => {
     void load();
   }, [load]);
+  // b24: a read that failed with the connection is made again once it is back.
+  useReadAgainWhenOnline(status === "Unavailable", () => void load());
   useEffect(() => {
     if (status === "Hidden") onHidden?.();
   }, [status, onHidden]);
