@@ -1052,7 +1052,9 @@ export async function exerciseStoreConfigurationOrdinaryRuntimeHttp(input) {
         assert.equal(page.storeReference, store);
         assert.equal(page.readerActorReference, managerScope.actorReference);
         assert.equal(page.beforeSequence, beforeSequence);
-        assert(page.entries.length <= 2);
+        // b22: a page is 20 steps; only a full page says older steps remain.
+        assert(page.entries.length <= 20);
+        if (page.nextBeforeSequence !== null) assert.equal(page.entries.length, 20);
         assert(Date.parse(page.validUntil) - Date.parse(page.observedAt) <= 5000);
         for (const entry of page.entries) {
           assert(
