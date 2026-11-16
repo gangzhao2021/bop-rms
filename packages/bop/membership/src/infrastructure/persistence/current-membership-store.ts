@@ -13,6 +13,8 @@ import {
 import type { MembershipPort } from "../../application/ports/membership-port.js";
 import {
   MembershipContractError,
+  type Membership,
+  type StoreAssignment,
   createMembership,
   createStoreAssignment,
   parseMembershipInstant,
@@ -28,6 +30,16 @@ export type CurrentMembershipReadPort = Pick<
   "findMemberships" | "findStoreAssignments"
 >;
 export type CurrentBrandMembershipReadPort = Pick<MembershipPort, "findMemberships">;
+export interface CurrentMembershipWithStoreAssignmentsReadPort {
+  findMembershipsWithStoreAssignments(
+    actorReference: string,
+    brandReference: string,
+    storeReference: string,
+  ): Promise<{
+    readonly memberships: readonly Membership[];
+    storeAssignments(membershipReference: string): readonly StoreAssignment[];
+  }>;
+}
 const unavailable = (): never => {
   throw new MembershipContractError("MEMBERSHIP_INPUT_INVALID");
 };
@@ -265,7 +277,7 @@ function brandMembershipSource(
 export function createPostgresCurrentMembershipSource(
   tx: MembershipReadTransaction,
   input: TenantContext,
-): CurrentMembershipReadPort {
+): CurrentMembershipReadPort & CurrentMembershipWithStoreAssignmentsReadPort {
   const context = createTenantContext(input.actor, input.brand, input.store, input.resolvedAt);
   const actor = context.actor.actorReference;
   const brand = context.brand.brandReference;
@@ -281,7 +293,50 @@ export function createPostgresCurrentMembershipSource(
       "MembershipFence:" + brand,
     ]);
   }
-  return Object.freeze({
+  const assignmentsOf = (
+    parent: Membership,
+    assigned: readonly Record<string, unknown>[],
+  ): readonly StoreAssignment[] => {
+    return Object.freeze(
+      assigned
+        .map((record) => ({
+          assignment_id: record.a_assignment_id,
+          membership_id: record.a_membership_id,
+          actor_id: record.a_actor_id,
+          brand_id: record.a_brand_id,
+          store_id: record.a_store_id,
+          lifecycle: record.a_lifecycle,
+          effective_from: record.a_effective_from,
+          effective_until: record.a_effective_until,
+          version: record.a_version,
+          created_at: record.a_created_at,
+          updated_at: record.a_updated_at,
+        }))
+        .map((record) => {
+          const result = createStoreAssignment(
+            {
+              storeAssignmentReference: record.assignment_id,
+              membershipReference: record.membership_id,
+              actorReference: record.actor_id,
+              brandReference: record.brand_id,
+              storeReference: record.store_id,
+              lifecycle: record.lifecycle,
+              effectiveFrom: instant(record.effective_from),
+              effectiveUntil:
+                record.effective_until === null ? null : instant(record.effective_until),
+              version: record.version,
+              createdAt: instant(record.created_at),
+              updatedAt: instant(record.updated_at),
+            },
+            parent,
+            store,
+          );
+          if (Date.parse(result.updatedAt) > Date.parse(context.resolvedAt)) return unavailable();
+          return result;
+        }),
+    );
+  };
+  return Object.freeze<CurrentMembershipReadPort & CurrentMembershipWithStoreAssignmentsReadPort>({
     async findMemberships(actorReference, brandReference) {
       try {
         if (actorReference !== actor || brandReference !== brand) return unavailable();
@@ -294,6 +349,70 @@ export function createPostgresCurrentMembershipSource(
             ),
           ).map((row) => membership(row, context, instant)),
         );
+      } catch (error) {
+        // WP-2423 item 10: what could not be read is not an invalid membership.
+        if (isBrowserSessionReadFailure(error)) throw error;
+        return unavailable();
+      }
+    },
+    /**
+     * WP-2423 (tax-config hold round trips): this actor's Memberships of the Brand and each one's
+     * Store assignments at this Store in one statement (one snapshot), instead of a Membership
+     * read and then an assignment read. The answer is the one the two reads give: the
+     * Memberships as findMemberships returns them and, for each, its assignments here as
+     * findStoreAssignments returns them.
+     */
+    async findMembershipsWithStoreAssignments(actorReference, brandReference, storeReference) {
+      try {
+        if (
+          actorReference !== actor ||
+          brandReference !== brand ||
+          storeReference !== store.storeReference
+        )
+          return unavailable();
+        await fence();
+        const joined = rows(
+          await tx.query(
+            `SELECT m.membership_id,m.actor_id,m.brand_id,m.workforce_relationship_reference,
+              m.lifecycle,m.effective_from,m.effective_until,m.version,m.created_at,m.updated_at,
+              a.assignment_id AS a_assignment_id,a.membership_id AS a_membership_id,
+              a.actor_id AS a_actor_id,a.brand_id AS a_brand_id,a.store_id AS a_store_id,
+              a.lifecycle AS a_lifecycle,a.effective_from AS a_effective_from,
+              a.effective_until AS a_effective_until,a.version AS a_version,
+              a.created_at AS a_created_at,a.updated_at AS a_updated_at
+              FROM (SELECT * FROM bop_membership.membership WHERE actor_id=$1 AND brand_id=$2
+                ORDER BY membership_id LIMIT 1025) m
+              LEFT JOIN LATERAL (SELECT * FROM bop_membership.store_assignment
+                WHERE membership_id=m.membership_id AND actor_id=$1 AND brand_id=$2 AND store_id=$3
+                ORDER BY assignment_id LIMIT 1025) a ON true
+              ORDER BY m.membership_id,a.assignment_id`,
+            [actor, brand, store.storeReference],
+          ),
+        );
+        const memberships: Membership[] = [];
+        const assignments = new Map<string, readonly StoreAssignment[]>();
+        for (let index = 0; index < joined.length;) {
+          const first = joined[index];
+          if (!first) return unavailable();
+          const group = [first];
+          while (joined[index + group.length]?.membership_id === first.membership_id)
+            group.push(joined[index + group.length] as Record<string, unknown>);
+          index += group.length;
+          const parent = membership(first, context, instant);
+          const previous = memberships.at(-1);
+          if (previous !== undefined && parent.membershipReference <= previous.membershipReference)
+            return unavailable();
+          const assigned = group.filter((record) => record.a_assignment_id !== null);
+          if (assigned.length !== 0 && assigned.length !== group.length) return unavailable();
+          memberships.push(parent);
+          assignments.set(parent.membershipReference, assignmentsOf(parent, assigned));
+        }
+        return Object.freeze({
+          memberships: Object.freeze(memberships),
+          storeAssignments(membershipReference: string) {
+            return assignments.get(membershipReference) ?? unavailable();
+          },
+        });
       } catch (error) {
         // WP-2423 item 10: what could not be read is not an invalid membership.
         if (isBrowserSessionReadFailure(error)) throw error;
@@ -330,45 +449,7 @@ export function createPostgresCurrentMembershipSource(
         const parent = membership(row, context, instant);
         const assigned = joined.filter((record) => record.a_assignment_id !== null);
         if (assigned.length !== 0 && assigned.length !== joined.length) return unavailable();
-        return Object.freeze(
-          assigned
-            .map((record) => ({
-              assignment_id: record.a_assignment_id,
-              membership_id: record.a_membership_id,
-              actor_id: record.a_actor_id,
-              brand_id: record.a_brand_id,
-              store_id: record.a_store_id,
-              lifecycle: record.a_lifecycle,
-              effective_from: record.a_effective_from,
-              effective_until: record.a_effective_until,
-              version: record.a_version,
-              created_at: record.a_created_at,
-              updated_at: record.a_updated_at,
-            }))
-            .map((record) => {
-              const result = createStoreAssignment(
-                {
-                  storeAssignmentReference: record.assignment_id,
-                  membershipReference: record.membership_id,
-                  actorReference: record.actor_id,
-                  brandReference: record.brand_id,
-                  storeReference: record.store_id,
-                  lifecycle: record.lifecycle,
-                  effectiveFrom: instant(record.effective_from),
-                  effectiveUntil:
-                    record.effective_until === null ? null : instant(record.effective_until),
-                  version: record.version,
-                  createdAt: instant(record.created_at),
-                  updatedAt: instant(record.updated_at),
-                },
-                parent,
-                store,
-              );
-              if (Date.parse(result.updatedAt) > Date.parse(context.resolvedAt))
-                return unavailable();
-              return result;
-            }),
-        );
+        return assignmentsOf(parent, assigned);
       } catch (error) {
         // WP-2423 item 10: what could not be read is not an invalid membership.
         if (isBrowserSessionReadFailure(error)) throw error;

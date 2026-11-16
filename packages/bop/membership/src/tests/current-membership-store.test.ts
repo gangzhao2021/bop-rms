@@ -186,6 +186,85 @@ it("reads the Membership and its Store assignments in one statement after the fe
   f.setParents([]);
   await expect(f.source.findStoreAssignments(reference, store.storeReference)).rejects.toThrow();
 });
+it("reads every Membership and its Store assignments here in one statement, as the two reads would", async () => {
+  const f = fixture();
+  if (actor.actorReference === null) throw new Error("fixture");
+  const separate = await current(f);
+  f.calls.length = 0;
+  const read = await f.source.findMembershipsWithStoreAssignments(
+    actor.actorReference,
+    brand.brandReference,
+    store.storeReference,
+  );
+  expect(f.calls.map((c) => c.sql.slice(0, 40))).toEqual([
+    "SELECT set_config('bop.brand_id',$1,true",
+    "SELECT pg_advisory_xact_lock_shared(hash",
+    expect.stringContaining(joinedMembership),
+  ]);
+  expect(f.calls[2]?.sql).toContain("FROM bop_membership.membership WHERE actor_id=$1");
+  expect(f.calls[2]?.values).toEqual([id(1), id(2), id(3)]);
+  const membership = resolveActiveMembership(
+    read.memberships,
+    actor.actorReference,
+    brand.brandReference,
+    now,
+  );
+  expect(
+    resolveActiveStoreAssignment(
+      membership,
+      read.storeAssignments(membership.membershipReference),
+      store.storeReference,
+      now,
+    ),
+  ).toEqual(separate);
+  // A Membership with no assignment at this Store: no assignment, not a refusal.
+  f.setAssignments([]);
+  const unassigned = await f.source.findMembershipsWithStoreAssignments(
+    actor.actorReference,
+    brand.brandReference,
+    store.storeReference,
+  );
+  expect(unassigned.memberships.map((m) => m.membershipReference)).toEqual([id(4)]);
+  expect(unassigned.storeAssignments(id(4))).toEqual([]);
+  // A Membership it did not read has no assignments to answer with.
+  expect(() => unassigned.storeAssignments(id(9))).toThrow();
+  // No Membership: none, as findMemberships answers.
+  f.setParents([]);
+  expect(
+    (
+      await f.source.findMembershipsWithStoreAssignments(
+        actor.actorReference,
+        brand.brandReference,
+        store.storeReference,
+      )
+    ).memberships,
+  ).toEqual([]);
+  // Another actor, Brand or Store is refused before any statement.
+  f.calls.length = 0;
+  for (const [a, b, st] of [
+    [id(9), brand.brandReference, store.storeReference],
+    [actor.actorReference, id(9), store.storeReference],
+    [actor.actorReference, brand.brandReference, id(9)],
+  ] as const)
+    await expect(f.source.findMembershipsWithStoreAssignments(a, b, st)).rejects.toThrow();
+  expect(f.calls).toEqual([]);
+});
+it("refuses a combined read whose rows are out of order or mix assigned and unassigned rows", async () => {
+  const f = fixture();
+  if (actor.actorReference === null) throw new Error("fixture");
+  const read = () =>
+    f.source.findMembershipsWithStoreAssignments(
+      actor.actorReference ?? "",
+      brand.brandReference,
+      store.storeReference,
+    );
+  const second = { ...f.parent, membership_id: id(7) };
+  f.setParents([second, f.parent]);
+  await expect(read()).rejects.toThrow();
+  f.setParents([f.parent]);
+  f.setAssignments([f.assignment, { ...f.assignment, assignment_id: null }]);
+  await expect(read()).rejects.toThrow();
+});
 it("denies a foreign requested Store before any database query", async () => {
   const f = fixture();
   if (actor.actorReference === null) throw new Error("fixture");
