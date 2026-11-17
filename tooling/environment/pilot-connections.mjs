@@ -3,7 +3,10 @@ import { readFile, lstat, realpath } from "node:fs/promises";
 import { createRequire } from "node:module";
 import process from "node:process";
 import { clearTimeout, setTimeout } from "node:timers";
-import { createTenantTransactionRunner } from "../../packages/database/dist/transaction-runner.js";
+import {
+  createTenantTransactionRunner,
+  settleConsecutive,
+} from "../../packages/database/dist/transaction-runner.js";
 import {
   acquireTenantConnection,
   noteTenantDatabaseAnswered,
@@ -103,6 +106,9 @@ export const pilotAcquireBudgetMs = (entryFile = process.argv[1]) =>
  * spent, before the request answers "busy, try again" (never a refusal).
  */
 export async function acquirePilotConnection(pool, policy = {}) {
+  // WP-2423 M35 (DEC-STAFF-ROUND-FEWER-TRANSACTIONS): a staff round's step transaction of this
+  // pool ends first, so this connection is never taken while that one is held (runConsecutive).
+  await settleConsecutive(pool);
   try {
     return await acquireTenantConnection(pool, {
       budgetMs: pilotAcquireBudgetMs(),

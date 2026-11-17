@@ -1,6 +1,10 @@
 import { expect, it, vi } from "vitest";
 import { createInternalReadTransactions } from "./pilot-read-transactions.mjs";
 import { runWithRequestAcquireBudget } from "../../packages/database/dist/connection-acquire.js";
+import {
+  releaseParkedSnapshot,
+  runConsecutive,
+} from "../../packages/database/dist/transaction-runner.js";
 // WP-2423 (rush-connection-hold): a snapshot sitting idle is let go by the database after 5 s.
 const begin =
   "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY; SET LOCAL lock_timeout = '2s'; " +
@@ -440,3 +444,40 @@ it.each([
     expect(sent.at(-1)).toBe("COMMIT");
   },
 );
+
+// WP-2423 M35 (DEC-STAFF-ROUND-FEWER-TRANSACTIONS): a staff round's checks read one after another
+// share one snapshot, and nothing else of the round takes a connection while it is kept.
+it("inside a staff round's consecutive steps, the next read goes on in the snapshot the last one left", async () => {
+  const f = fixture();
+  const acquire = vi.fn(async () => f.connection);
+  const reads = createInternalReadTransactions({ database: { acquire }, scope: f.scope });
+  const sent = () => f.connection.query.mock.calls.map(([sql]) => sql);
+  await runConsecutive(async () => {
+    await reads.run((tx) => tx.query("SELECT a", []));
+    await reads.run((tx) => tx.query("SELECT b", []));
+    // Kept for the next read: not ended yet.
+    expect(sent().includes("COMMIT")).toBe(false);
+    // Anything that takes a connection ends it first (here: another read's own snapshot).
+    await releaseParkedSnapshot();
+    expect(sent().at(-1)).toBe("COMMIT");
+    await reads.run((tx) => tx.query("SELECT c", []));
+  });
+  expect(acquire).toHaveBeenCalledTimes(2);
+  expect(sent().filter((sql) => sql.startsWith("BEGIN"))).toHaveLength(2);
+  expect(sent().at(-1)).toBe("COMMIT");
+  expect(f.connection.release).toHaveBeenCalledTimes(2);
+  // A read that failed is never kept: the next one begins its own snapshot.
+  await runConsecutive(async () => {
+    await expect(
+      reads.run(async () => {
+        throw new Error("private-query-detail");
+      }),
+    ).rejects.toThrow(/^INTERNAL_INVENTORY_READ_UNAVAILABLE$/);
+    await reads.run((tx) => tx.query("SELECT d", []));
+  });
+  expect(acquire).toHaveBeenCalledTimes(4);
+  // Outside a staff round each read is its own snapshot, as before.
+  await reads.run((tx) => tx.query("SELECT e", []));
+  await reads.run((tx) => tx.query("SELECT f", []));
+  expect(acquire).toHaveBeenCalledTimes(6);
+});

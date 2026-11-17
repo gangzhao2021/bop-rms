@@ -14,6 +14,10 @@ import {
   noteRequestShed,
   requestAnswerTimeLeftMs,
 } from "../../packages/database/dist/connection-acquire.js";
+import {
+  parkConsecutiveSnapshot,
+  takeConsecutiveSnapshot,
+} from "../../packages/database/dist/transaction-runner.js";
 
 /**
  * WP-2423 (rush-connection-hold, v15 2026-11-14): the read snapshot the current work is inside, if
@@ -117,142 +121,195 @@ export function createInternalReadTransactions(resources) {
       ? open
       : undefined;
   };
+  /** Whether a kept snapshot is one this read may go on in (same database and Store scope). */
+  const sameSnapshot = (owner) =>
+    owner !== null &&
+    typeof owner === "object" &&
+    owner.database === resources.database &&
+    owner.scopeKey === scopeKey;
+  /**
+   * One read snapshot on a connection of its own, begun with its first statement: `state` (what a
+   * nested read joins), `query`, and `end(failed)`, which commits a begun snapshot and gives the
+   * connection back (or rolls back and discards it).
+   */
+  const openSession = async () => {
+    const connection = await resources.database.acquire();
+    const state = {
+      active: false,
+      broken: false,
+      database: resources.database,
+      scopeKey,
+      savepoints: 0,
+      turn: Promise.resolve(),
+      own: (sql) => connection.query(sql),
+      /** A nested read's savepoint, taken before the first statement it sends. */
+      beforeSend: null,
+      query: null,
+      forget: () => undefined,
+    };
+    // WP-2423 M35 (staff round round trips): the snapshot begins with the first statement that
+    // must reach the database, not before: a read answered wholly here sends nothing, and the
+    // scope settings that statement runs under go with BEGIN (each dish's menu read, for one,
+    // begins by leaving the Store scope for the Brand's rows: one round trip less a snapshot).
+    let opening = null;
+    // WP-2423 M35 (DEC-STAFF-ROUND-SPEED): as the pilot's transaction runner does, a scope
+    // setting is sent only with the next statement that runs (and only when it changes it), and
+    // an owner's stable read repeated in this one snapshot is answered from its first answer.
+    const memo = createTransactionStatementMemo({
+      "bop.brand_id": resources.scope.brandReference,
+      "bop.store_id": resources.scope.storeReference,
+    });
+    /**
+     * Begins the snapshot (once). `settings`: the scope settings the first statement is sent
+     * after; returned when they still have to be sent, null when they went with BEGIN.
+     * Review of the staff round round trips: when BEGIN cannot carry them (a scope that is not
+     * a checked UUIDv7, a value the checked text refuses), they are sent right after BEGIN as
+     * part of the opening, and every statement waits for the whole opening: a second statement
+     * sent while BEGIN is in flight still goes after the first statement's settings, as it did
+     * when the snapshot was begun before the work.
+     */
+    const open = async (settings) => {
+      if (opening !== null) {
+        await opening;
+        return settings;
+      }
+      // WP-2423 M35: BEGIN, its limits and (review of the third step) the scope in one
+      // simple-protocol round trip; the scope text only as the runner's checked UUIDs.
+      const scopeText = inlineScope(resources.scope);
+      const folded = scopeText === null ? null : foldedSettings(settings);
+      opening = (async () => {
+        await connection.query(
+          "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY; " +
+            snapshotLimits +
+            (scopeText === null ? "" : "; " + scopeText) +
+            (folded === null ? "" : "; " + folded),
+        );
+        if (scopeText === null)
+          await connection.query(
+            "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+            [resources.scope.brandReference, resources.scope.storeReference],
+          );
+        if (settings === null) return;
+        if (folded === null) await connection.query(settings.sql, [...settings.values]);
+        memo.observe(settings.sql, settings.values);
+      })();
+      await opening;
+      return null;
+    };
+    state.own = async (sql) => {
+      await open(null);
+      return connection.query(sql);
+    };
+    let pending = 0;
+    const query = async (sql, values) => {
+      // WP-2423 (rush-connection-hold): a read past its answer time sends nothing more: it
+      // answers "busy, try again" while the phone still listens (as the runner's reads do).
+      const answerLeft = requestAnswerTimeLeftMs();
+      if (answerLeft !== undefined && answerLeft <= 0) {
+        noteRequestShed();
+        throw unavailable();
+      }
+      const marked = stableReadStatement(sql);
+      if (snapshotModeRead(marked.sql, values ?? [])) return snapshotModeAnswer(marked.sql.trim());
+      const stable = snapshotStableRead(marked.sql, values ?? [], marked.stable);
+      let settings = null;
+      if (pending === 0) {
+        const planned = memo.plan(marked.sql, values ?? [], stable);
+        if (planned.kind === "Answer") return stable ? copied(planned.result) : planned.result;
+        settings = planned.settings;
+      }
+      pending += 1;
+      try {
+        // A nested read's settings are sent after its savepoint, never with BEGIN: rolled back
+        // to that savepoint, the snapshot keeps the scope it had before the nested read.
+        // Every statement waits for the opening (BEGIN and the first statement's settings).
+        if (state.beforeSend === null) settings = await open(settings);
+        else await open(null);
+        if (state.beforeSend !== null) await state.beforeSend();
+        if (settings !== null) {
+          await connection.query(settings.sql, [...settings.values]);
+          memo.observe(settings.sql, settings.values);
+        }
+        const result = await connection.query(marked.sql, [...(values ?? [])]);
+        memo.observe(marked.sql, values ?? [], result, stable);
+        return result;
+      } catch (error) {
+        memo.forget();
+        throw error;
+      } finally {
+        pending -= 1;
+      }
+    };
+    state.query = query;
+    state.forget = () => memo.forget();
+    let ended = false;
+    return {
+      state,
+      query,
+      /** True when it ended as it should (committed); a failed one is discarded. */
+      async end(failed) {
+        if (ended) return !failed;
+        ended = true;
+        state.active = false;
+        if (!failed)
+          try {
+            // A snapshot that sent nothing was never begun: there is nothing to end.
+            if (opening !== null) {
+              await opening;
+              await connection.query("COMMIT");
+            }
+            connection.release(false);
+            return true;
+          } catch {
+            // Discarded below, as a failed one.
+          }
+        if (opening !== null) await connection.query("ROLLBACK").catch(() => undefined);
+        connection.release(true);
+        return false;
+      },
+    };
+  };
   const reads = {
     async run(work) {
       const open = joinable();
       if (open !== undefined) return nested(open, work);
-      const connection = await resources.database.acquire();
-      let failed = false;
-      const state = {
-        active: true,
-        broken: false,
-        database: resources.database,
-        scopeKey,
-        savepoints: 0,
-        turn: Promise.resolve(),
-        own: (sql) => connection.query(sql),
-        /** A nested read's savepoint, taken before the first statement it sends. */
-        beforeSend: null,
-        query: null,
-        forget: () => undefined,
-      };
-      // WP-2423 M35 (staff round round trips): the snapshot begins with the first statement that
-      // must reach the database, not before: a read answered wholly here sends nothing, and the
-      // scope settings that statement runs under go with BEGIN (each dish's menu read, for one,
-      // begins by leaving the Store scope for the Brand's rows: one round trip less a snapshot).
-      let opening = null;
+      // WP-2423 M35 (DEC-STAFF-ROUND-FEWER-TRANSACTIONS): inside a staff round's consecutive
+      // steps, a snapshot whose reads just ended, with nothing else of the round reading or
+      // writing since, goes on for this read: one snapshot for the checks read one after another.
+      const kept = takeConsecutiveSnapshot(sameSnapshot);
+      const session = kept?.session ?? (await openSession());
+      const { state } = session;
+      state.active = true;
+      state.turn = Promise.resolve();
+      let result;
       try {
-        // WP-2423 M35 (DEC-STAFF-ROUND-SPEED): as the pilot's transaction runner does, a scope
-        // setting is sent only with the next statement that runs (and only when it changes it), and
-        // an owner's stable read repeated in this one snapshot is answered from its first answer.
-        const memo = createTransactionStatementMemo({
-          "bop.brand_id": resources.scope.brandReference,
-          "bop.store_id": resources.scope.storeReference,
-        });
-        /**
-         * Begins the snapshot (once). `settings`: the scope settings the first statement is sent
-         * after; returned when they still have to be sent, null when they went with BEGIN.
-         * Review of the staff round round trips: when BEGIN cannot carry them (a scope that is not
-         * a checked UUIDv7, a value the checked text refuses), they are sent right after BEGIN as
-         * part of the opening, and every statement waits for the whole opening: a second statement
-         * sent while BEGIN is in flight still goes after the first statement's settings, as it did
-         * when the snapshot was begun before the work.
-         */
-        const open = async (settings) => {
-          if (opening !== null) {
-            await opening;
-            return settings;
-          }
-          // WP-2423 M35: BEGIN, its limits and (review of the third step) the scope in one
-          // simple-protocol round trip; the scope text only as the runner's checked UUIDs.
-          const scopeText = inlineScope(resources.scope);
-          const folded = scopeText === null ? null : foldedSettings(settings);
-          opening = (async () => {
-            await connection.query(
-              "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY; " +
-                snapshotLimits +
-                (scopeText === null ? "" : "; " + scopeText) +
-                (folded === null ? "" : "; " + folded),
-            );
-            if (scopeText === null)
-              await connection.query(
-                "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
-                [resources.scope.brandReference, resources.scope.storeReference],
-              );
-            if (settings === null) return;
-            if (folded === null) await connection.query(settings.sql, [...settings.values]);
-            memo.observe(settings.sql, settings.values);
-          })();
-          await opening;
-          return null;
-        };
-        state.own = async (sql) => {
-          await open(null);
-          return connection.query(sql);
-        };
-        let pending = 0;
-        const query = async (sql, values) => {
-          // WP-2423 (rush-connection-hold): a read past its answer time sends nothing more: it
-          // answers "busy, try again" while the phone still listens (as the runner's reads do).
-          const answerLeft = requestAnswerTimeLeftMs();
-          if (answerLeft !== undefined && answerLeft <= 0) {
-            noteRequestShed();
-            throw unavailable();
-          }
-          const marked = stableReadStatement(sql);
-          if (snapshotModeRead(marked.sql, values ?? []))
-            return snapshotModeAnswer(marked.sql.trim());
-          const stable = snapshotStableRead(marked.sql, values ?? [], marked.stable);
-          let settings = null;
-          if (pending === 0) {
-            const planned = memo.plan(marked.sql, values ?? [], stable);
-            if (planned.kind === "Answer") return stable ? copied(planned.result) : planned.result;
-            settings = planned.settings;
-          }
-          pending += 1;
-          try {
-            // A nested read's settings are sent after its savepoint, never with BEGIN: rolled back
-            // to that savepoint, the snapshot keeps the scope it had before the nested read.
-            // Every statement waits for the opening (BEGIN and the first statement's settings).
-            if (state.beforeSend === null) settings = await open(settings);
-            else await open(null);
-            if (state.beforeSend !== null) await state.beforeSend();
-            if (settings !== null) {
-              await connection.query(settings.sql, [...settings.values]);
-              memo.observe(settings.sql, settings.values);
-            }
-            const result = await connection.query(marked.sql, [...(values ?? [])]);
-            memo.observe(marked.sql, values ?? [], result, stable);
-            return result;
-          } catch (error) {
-            memo.forget();
-            throw error;
-          } finally {
-            pending -= 1;
-          }
-        };
-        state.query = query;
-        state.forget = () => memo.forget();
         // The connection is held from here until it is given back (connection-hold): a second
         // one is never waited for while it is.
         const holding = resources.database.hold ?? ((held) => held());
-        const result = await holding(() => openSnapshots.run(state, () => work({ query })));
+        result = await holding(() =>
+          openSnapshots.run(state, () => work({ query: session.query })),
+        );
         state.active = false;
         await state.turn;
-        // A snapshot that sent nothing was never begun: there is nothing to end.
-        if (opening !== null) {
-          await opening;
-          await connection.query("COMMIT");
-        }
-        return result;
       } catch {
-        failed = true;
-        if (opening !== null) await connection.query("ROLLBACK").catch(() => undefined);
+        await session.end(true);
         throw unavailable();
-      } finally {
-        state.active = false;
-        connection.release(failed);
       }
+      if (
+        !state.broken &&
+        (await parkConsecutiveSnapshot({
+          owner: { database: resources.database, scopeKey },
+          session,
+          // Its reads were answered; ending it later only gives the connection back.
+          release: async () => {
+            await session.end(false);
+          },
+        }))
+      )
+        return result;
+      // As before: a snapshot that could not end as it should fails its read.
+      if (!(await session.end(false))) throw unavailable();
+      return result;
     },
     /**
      * WP-2423 M35 (staff round round trips): `work`'s reads in one snapshot (each in its own
