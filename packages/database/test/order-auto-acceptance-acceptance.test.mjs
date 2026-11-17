@@ -856,7 +856,16 @@ it("staff give back an automatically accepted order, and a pickup nobody touched
       saleOf(order.orderReference).cancelled,
       saleOf(recent.orderReference).cancelled,
     );
-    assert.deepEqual(saleOf(untouched.orderReference), saleOf(order.orderReference));
+    // Paid 32 minutes apart, the two can fall either side of the Store's business-day start
+    // (a run just after it): each keeps its own business date, the rest of the sale is the same.
+    const withoutDay = ({ businessDate, ...sale }) => (
+      assert.match(businessDate, /^\d{4}-\d{2}-\d{2}$/u),
+      sale
+    );
+    assert.deepEqual(
+      withoutDay(saleOf(untouched.orderReference)),
+      withoutDay(saleOf(order.orderReference)),
+    );
     // The one the kitchen touched, and the one just sent, stay open.
     for (const open of [started, recent])
       assert.deepEqual(

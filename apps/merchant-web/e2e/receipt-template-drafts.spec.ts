@@ -897,7 +897,7 @@ test("@production lost template reply retains real payload-free IDB through deni
   });
   expect(state.errors).toEqual([]);
 });
-test("@production 390px keyboard preview and conflict preserve the exact pending original", async ({
+test("@production 390px keyboard preview, and a conflicting first save is let go so staff can save again", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
@@ -925,10 +925,14 @@ test("@production 390px keyboard preview and conflict preserve the exact pending
   state.conflict = true;
   await region.getByRole("button", { name: "Save template draft", exact: true }).click();
   await expect(region.getByRole("alert")).toContainText("original save conflicts");
+  // b26: a definite conflict wrote nothing, so the first save is released, not kept for recovery.
   await expect(
     region.getByRole("combobox", { name: "Receipt template", exact: true }),
-  ).toBeDisabled();
-  expect(await cursors(page)).toHaveLength(1);
+  ).toBeEnabled();
+  await expect(
+    region.getByRole("button", { name: "Save template draft", exact: true }),
+  ).toBeEnabled();
+  expect(await cursors(page)).toHaveLength(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   );

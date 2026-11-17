@@ -596,10 +596,16 @@ test("@production Store fee contexts reject unavailable retired or foreign class
     .getByRole("combobox", { name: "Service charge", exact: true })
     .selectOption("Enabled");
   await save(page).click();
-  // b25: the refusal names the fee and what it still needs.
+  // b26: the refusal says nothing was saved and how many settings need fixing; the detail is
+  // listed once, under "Needs fixing first".
   await expect(page.locator("#setup-validation-error")).toContainText(
-    "This draft was not saved. Service charge is on, but which orders it applies to is not chosen yet.",
+    "This draft was not saved: 1 fee setting needs fixing first, see “Needs fixing first” below.",
   );
+  await expect(
+    page
+      .getByText("Service charge is on, but which orders it applies to is not chosen yet.")
+      .first(),
+  ).toBeVisible();
   expect(f.control.writes).toHaveLength(0);
   expect(await journalRecords(page)).toEqual([]);
   await feeStep(page);
