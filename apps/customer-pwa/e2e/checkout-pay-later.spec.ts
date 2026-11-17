@@ -117,6 +117,8 @@ interface Table {
   attachQuote(reference: string): void;
   /** Where the placed round is on the next read of the table. */
   moveRound(status: string): void;
+  /** WP-2423 batch 28: staff sent the table's cart, this phone's dishes in it, as round `round`. */
+  staffRound(round: number): void;
 }
 
 async function stubTable(
@@ -130,6 +132,7 @@ async function stubTable(
   let roundStatus = options.roundStatus ?? "Queued";
   let cartVersion = 3;
   let attachedQuote: string | null = null;
+  let recent: readonly unknown[] = [];
   const dish = (reference: number, name: string, quantity = 2) => ({
     cartItemReference: id(reference),
     sellableReference: id(3),
@@ -175,6 +178,7 @@ async function stubTable(
               blockingReasons: [],
             },
       warnings: [],
+      ...(recent.length === 0 ? {} : { recentRounds: recent }),
     },
   });
   const calls: string[] = [];
@@ -464,6 +468,21 @@ async function stubTable(
     },
     moveRound(status) {
       roundStatus = status;
+    },
+    staffRound(round) {
+      recent = [
+        {
+          roundNumber: round,
+          sentAt: new Date().toISOString(),
+          sentByThisPhone: false,
+          cartItemReferences: dishes.map((item) => item.cartItemReference),
+          paymentState: "PayLater",
+          enteredByStaff: true,
+          withThisPhoneDishes: true,
+        },
+      ];
+      dishes = [];
+      cartVersion += 1;
     },
   };
 }
@@ -1057,6 +1076,61 @@ test.describe("@production Pay-later table, the round just placed", () => {
     await expect(placeOrder(page)).toBeEnabled();
     expect(table.sent).toEqual([]);
   });
+
+  // WP-2423 batch 28 (v15 live check): the guest pressed Place order 150 ms after staff pressed
+  // Send; the staff round took the guest's dish, and the phone said "nothing was placed yet" until
+  // its next read. It now reads again within a second or two and says staff sent it in round 2.
+  for (const language of ["en", "zh-Hans"] as const)
+    test(`staff sending the table's cart as the guest taps says the dishes went in that round (${language})`, async ({
+      page,
+    }) => {
+      const zh = language === "zh-Hans";
+      if (zh)
+        await page.addInitScript(() => localStorage.setItem("bop.customer.language", "zh-Hans"));
+      const table: Table = await stubTable(page, [], {
+        quote: (route, call) => {
+          if (call < 2) return undefined;
+          // Staff's round is sending the table's cart: it moved on, and is placed a moment later.
+          setTimeout(() => table.staffRound(2), 300);
+          return route.fulfill({
+            status: 409,
+            json: {
+              schemaVersion: 1,
+              error: {
+                code: "quote_version_conflict",
+                messageKey: "customer.quote.version_conflict",
+              },
+            },
+          });
+        },
+      });
+      await openCart(page);
+      await expect.poll(() => table.calls.filter((call) => call === "quote").length).toBe(1);
+      await page.getByRole("button", { name: zh ? "下单" : "Place order", exact: true }).click();
+      const main = page.getByRole("main");
+      // Well before the cart's own 4-second read.
+      await expect(
+        main.getByText(
+          zh
+            ? "店员已把你的菜放在第 2 轮送去厨房。"
+            : "Staff sent your dishes to the kitchen in round 2.",
+        ),
+      ).toBeVisible({ timeout: 2_500 });
+      await expect(main).not.toContainText(zh ? "还没有下单" : "nothing was placed yet");
+      await expect(main).not.toContainText(zh ? "刚刚下单了这些菜" : "just placed this order");
+      expect(table.sent).toEqual([]);
+      await expectNoInternalText(page);
+      for (const width of [1440, 390]) {
+        await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+        expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+          width,
+        );
+        await page.screenshot({
+          path: `test-results/b28-guest-staff-sent-round-${language}-${width}.png`,
+          fullPage: true,
+        });
+      }
+    });
 
   test("a lost checkout whose cart moved on is no longer a retry: another guest's dish", async ({
     page,

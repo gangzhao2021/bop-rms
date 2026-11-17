@@ -604,7 +604,13 @@ export const cartText = Object.freeze({
       sender: TableRoundSender = someoneAtTheTable,
     ) =>
       roundStillOpen(round, false, payLater, paymentState, sender) ??
-      t("Round {round} was sent by someone at your table.", { round: String(round) }),
+      // WP-2423 batch 28: staff sent the table's round with this phone's dishes in it (the guest
+      // pressed Place order as staff pressed Send): said plainly, never "nothing was placed".
+      (sender.enteredByStaff
+        ? sender.withThisPhoneDishes
+          ? t("Staff sent your dishes to the kitchen in round {round}.", { round: String(round) })
+          : t("Staff sent round {round} to the kitchen.", { round: String(round) })
+        : t("Round {round} was sent by someone at your table.", { round: String(round) })),
     /** WP-2423 M38: the guest paying for their round stops and puts its dishes back. */
     get roundWithdraw() {
       return t("Don’t pay. Put the dishes back");

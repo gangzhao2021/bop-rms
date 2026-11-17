@@ -170,6 +170,18 @@ describe("WP-2423 same-table-ordering: what happened at the table while this pho
       "Round 1 was sent by someone at your table.",
     );
   });
+  it("batch 28: a round staff sent with this phone's dishes says so plainly, with its number", () => {
+    const staff = { enteredByStaff: true, withThisPhoneDishes: true };
+    expect(cartText.line.roundSentByTable(3, "PayLater", true, staff)).toBe(
+      "Staff sent your dishes to the kitchen in round 3.",
+    );
+    expect(cartText.line.roundSentByTable(3, "Paid", false, staff)).toBe(
+      "Staff sent your dishes to the kitchen in round 3.",
+    );
+    expect(
+      cartText.line.roundSentByTable(3, "PayLater", true, { ...staff, withThisPhoneDishes: false }),
+    ).toBe("Staff sent round 3 to the kitchen.");
+  });
   it("v15 batch-5: a staff round is charged on the card machine, and only a phone with a dish in it is told so", () => {
     const staff = { enteredByStaff: true, withThisPhoneDishes: true };
     expect(cartText.line.roundSentByTable(1, "AwaitingPayment", false, staff)).toBe(

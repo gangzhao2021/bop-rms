@@ -247,6 +247,12 @@ function CartItem({
   );
 }
 
+/**
+ * WP-2423 batch 28: the table's newest round, sent by someone else (staff too), took this phone's
+ * dishes: the page says which round they went in, not only that someone placed the order.
+ */
+const roundTookThisPhoneDishes = (state: CartState) =>
+  state.status === "ready" && tableRoundByOther(state.cart)?.withThisPhoneDishes === true;
 /** WP-2423 (same-table-ordering): the newest round from this cart, when another phone sent it. */
 export const tableRoundSentByOther = (cart: CartView): number | null =>
   tableRoundByOther(cart)?.roundNumber ?? null;
@@ -903,7 +909,7 @@ function CartContent({
         placedOrder={state.cart.cart.placedOrder}
         onRestored={() => void controller.load()}
       />
-    ) : round.status === "cart-changed" ? (
+    ) : round.status === "cart-changed" && !roundTookThisPhoneDishes(state) ? (
       // A second phone tapped after the first sent: without this she'd add it all again.
       <StateMessage heading={cartText.someonePlacedIt}>
         <div className="cart-state__actions">
@@ -1320,6 +1326,8 @@ export function busyRetryDelayMs(retryAfterSeconds: number): number {
 
 /** Cart prices come from a full menu read; an ordinary guest gets one tap once it's in. */
 const menuPriceWaitMs = 2_000;
+/** WP-2423 batch 28: reads after a stop caused by a round being sent for the table right now. */
+const soonAfterTableChange = [600, 1_500, 3_000] as const;
 
 /** What a stop says holds for the cart as it stood: any later change to the cart ends it. */
 const aboutThisCart = (round: SendRoundState) =>
@@ -1609,6 +1617,23 @@ function OpenCartPage({
       if (acted.current === roundState)
         stoppedAt.current = { version: cartVersionOf(controller.getState()) };
     });
+    // WP-2423 batch 28: at a shared table the change is often a round being sent for the table
+    // right now (staff pressed Send as the guest pressed Place order); it is placed in about a
+    // second. Read again soon, so the page says which round took the dishes instead of leaving
+    // "nothing was placed yet" until the next poll.
+    if (
+      roundState.status === "cart-changed" ||
+      (roundState.status === "busy" && roundState.wait === "checkout-in-progress")
+    ) {
+      const timers = soonAfterTableChange.map((ms) =>
+        window.setTimeout(() => {
+          if (acted.current === roundState) void controller.refresh();
+        }, ms),
+      );
+      return () => {
+        for (const timer of timers) window.clearTimeout(timer);
+      };
+    }
   }, [controller, navigate, round, roundState]);
   useEffect(() => {
     if (
