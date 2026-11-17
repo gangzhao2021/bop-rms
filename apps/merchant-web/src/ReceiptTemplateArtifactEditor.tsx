@@ -147,17 +147,17 @@ export function ReceiptTemplateArtifactEditor(props: ReceiptTemplateArtifactEdit
   );
   const online = useReadAgainWhenOnline(unread.size > 0, () => setRetry((n) => n + 1));
   return (
-    <section hidden={props.hidden} aria-label={t("Receipt presets")}>
-      <h4>{t("Receipt presets")}</h4>
+    <section hidden={props.hidden} aria-label={t("Receipt styles")}>
+      <h4>{t("Receipt styles")}</h4>
       <p>
         {t(
-          "Save the receipt layout and the fields every receipt must show; receipt templates are built from these presets. Saving them does not change customer receipts and does not mean a legal professional has approved them.",
+          "Save the receipt layout and the fields every receipt must show; receipt templates are built from these styles. Saving them does not change customer receipts and does not mean a legal professional has approved them.",
         )}
       </p>
       {unread.size > 0 && (
         <p role="alert">
           {t(
-            "Receipt presets could not be loaded. They are read again once the connection is back; an earlier save remains protected.",
+            "Receipt styles could not be loaded. They are read again once the connection is back; an earlier save remains protected.",
           )}
           {online ? (
             <>
@@ -302,7 +302,7 @@ function Preset({
         if (result.receipt.outcome === "Committed") onSaved?.();
         setNotice(
           result.receipt.outcome === "Committed"
-            ? t("Saved preset confirmed.")
+            ? t("Saved style confirmed.")
             : t("Earlier save did not commit. You can save again."),
         );
       }
@@ -335,26 +335,26 @@ function Preset({
               "Issuer, Store, order number, issue time, items, subtotal, discount, fee, tax, tip, total, payment status and refunded total. Professional and legal review have not been evaluated.",
             )}
       </p>
-      {saved ? <p>{t("Saved.")}</p> : ready ? <p>{t("No saved preset yet.")}</p> : null}
+      {saved ? <p>{t("Saved.")}</p> : ready ? <p>{t("No saved style yet.")}</p> : null}
       {busy && <p role="status">{t("Loading {label}…", { label: label })}</p>}
       {notice && <p role="status">{notice}</p>}
       {error && !readFailed && (
         <p role="alert">
           {error === "Denied"
-            ? t("You do not have permission to manage this receipt preset.")
+            ? t("You do not have permission to manage this receipt style.")
             : error === "Conflict"
               ? t(
-                  "The saved preset was changed elsewhere. What is saved now is shown; save again if you still need to.",
+                  "The saved style was changed elsewhere. What is saved now is shown; save again if you still need to.",
                 )
               : error === "OutcomeUnknown"
                 ? t(
                     "The save could not be confirmed. Recover the original save before saving again.",
                   )
                 : error === "Invalid"
-                  ? t("This preset could not be saved as it is.")
+                  ? t("This style could not be saved as it is.")
                   : !ready
                     ? t(
-                        "Receipt presets could not be loaded. They are read again once the connection is back; an earlier save remains protected.",
+                        "Receipt styles could not be loaded. They are read again once the connection is back; an earlier save remains protected.",
                       )
                     : t(
                         "Could not connect just now. Try again once connected; an earlier save remains protected.",

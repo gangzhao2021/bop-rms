@@ -225,7 +225,7 @@ it("b26: a preset read cut off by the connection shows one alert, and Try again 
     expect(alerts).toHaveLength(1);
     expect(alerts[0]).toContain(
       language === "en"
-        ? "Receipt presets could not be loaded. They are read again once the connection is back"
+        ? "Receipt styles could not be loaded. They are read again once the connection is back"
         : "无法加载收据样式。网络恢复后会自动重新读取",
     );
     expect(alerts[0]).not.toContain(language === "en" ? "Refresh" : "刷新");
@@ -259,7 +259,7 @@ it("b26: the template draft read cut off says it is read again by itself, never 
       const text = container.querySelector("[role=alert]")?.textContent ?? "";
       expect(text).toContain(
         language === "en"
-          ? "The template draft could not be loaded. It is read again by itself once the connection is back"
+          ? "The receipt draft could not be loaded. It is read again by itself once the connection is back"
           : "无法加载收据草稿。网络恢复后会自动重新读取",
       );
       expect(text).not.toContain(language === "en" ? "Refresh when connected" : "联网后请刷新");

@@ -885,7 +885,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "An earlier save must be recovered before another save.": "再次保存前，需先恢复之前的保存。",
   "An earlier save needs recovery. Your new changes stay locked until its result is known.":
     "之前的保存需要恢复。在其结果明确之前，你的新更改保持锁定。",
-  "An earlier template draft save must be recovered before another save or template selection.":
+  "An earlier receipt draft save must be recovered before another save or template selection.":
     "再次保存或选择模板前，需先恢复之前的收据草稿保存。",
   "An earlier {value} request was not confirmed. Recover it before making another change; the saved setup is kept.":
     "之前的{value}请求未确认。再做其他更改前请先恢复它；已保存的设置会保留。",
@@ -1068,7 +1068,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "At this Store": "本门店",
   "Atikokan, Ontario": "阿蒂科肯，安大略省",
   "Attach live-gate evidence": "附加上线检查证据",
-  "Authored template fields": "已填写的模板字段",
+  "Draft details": "草稿内容",
   "Authoring integration required": "需要接入编辑功能",
   "Authorized Store": "已授权门店",
   "Authorized Stores": "已授权门店",
@@ -1299,7 +1299,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Check the entered details. Phone numbers need a country code; websites must use HTTPS.":
     "请检查填写的信息。电话号码需要国家代码；网站必须使用 HTTPS。",
   "Check the highlighted details and try again.": "请检查高亮的信息后重试。",
-  "Check the language, saved receipt presets and the start and end times. An earlier save remains protected.":
+  "Check the language, saved receipt styles and the start and end times. An earlier save remains protected.":
     "请检查语言、已保存的收据样式以及开始和结束时间。之前的保存仍受保护。",
   "Check the name and email.": "请检查名字和邮箱。",
   "Check the names: each needs up to 120 characters and cannot contain links or the characters < > { } [ ].":
@@ -1781,7 +1781,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   Empty: "空",
   "End {value}": "结束 {value}",
   "In use until": "使用到",
-  "Until another receipt replaces it": "直到被新的收据替换",
+  "Until the store switches to another receipt template": "直到本店换用别的收据模板",
   "Until a set date and time": "到指定的日期和时间",
   "Ends at (Store time)": "结束时间（门店时间）",
   "Ends next day": "次日结束",
@@ -2307,7 +2307,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Loading tax classification choices…": "正在加载税类选项…",
   "Loading tax classifications…": "正在加载税类…",
   "Loading tax review…": "正在加载税务核对…",
-  "Loading template draft…": "正在加载收据草稿…",
+  "Loading receipt draft…": "正在加载收据草稿…",
   "Loading the authorized Task queue for this Store…": "正在加载本门店已授权的任务队列…",
   "Loading the kitchen queue…": "正在加载后厨队列…",
   "Loading the menu": "正在加载菜单",
@@ -2435,13 +2435,13 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "New price of {label} on {name}": "{label}在{name}上的新价格",
   "New product": "新建商品",
   "New recipe": "新建配方",
-  "New template draft": "新建收据草稿",
+  "New receipt draft": "新建收据草稿",
   "Newfoundland and Labrador": "纽芬兰与拉布拉多省",
   "Next employee page": "下一页员工",
   "Next page": "下一页",
   "Next saved templates": "下一批已保存的模板",
   "Next step": "下一步",
-  "Next templates": "下一批模板",
+  "More drafts": "更多草稿",
   "No PIN": "无 PIN",
   "No SKU uses this recipe yet.": "还没有 SKU 使用此配方。",
   "No Store configuration success is assumed. Review the safe error and retry when allowed.":
@@ -2554,7 +2554,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "No receipts yet": "还没有收货记录",
   "No recipes yet": "还没有配方",
   "No refund at this store is waiting for approval.": "本店没有等待批准的退款。",
-  "No saved preset yet.": "还没有已保存的样式。",
+  "No saved style yet.": "还没有已保存的样式。",
   "No saved view, export, or schedule was created.": "未创建任何已保存视图、导出或计划。",
   "No selected modifiers": "未选附加选项",
   "No service intervals on this day.": "这一天没有服务时段。",
@@ -3338,13 +3338,14 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Receipt language": "收据语言",
   "{language} ({region})": "{language}（{region}）",
   "Receipt layout selection": "收据版式选择",
-  "Receipt presets": "收据样式",
-  "Receipt presets could not be loaded. They are read again once the connection is back; an earlier save remains protected.":
+  "Receipt styles": "收据样式",
+  "Receipt styles could not be loaded. They are read again once the connection is back; an earlier save remains protected.":
     "无法加载收据样式。网络恢复后会自动重新读取；之前的保存仍受保护。",
   "Receipt required fields selection": "收据必备字段选择",
   "Receipt settings": "收据设置",
   "Receipt template": "收据模板",
-  "Receipt template drafts": "收据草稿",
+  "Receipt draft": "收据草稿",
+  "Receipt drafts": "收据草稿",
   "Receipt template in use today": "目前使用的收据模板",
   "Receipt template in use today (the one the Store started with)":
     "目前使用的收据模板（门店开业时的那个）",
@@ -3417,7 +3418,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Recover original configuration request": "恢复原来的配置请求",
   "Recover original payment save": "恢复原来的付款保存",
   "Recover original save": "恢复原来的保存",
-  "Recover original template draft save": "恢复原来的收据草稿保存",
+  "Recover original receipt draft save": "恢复原来的收据草稿保存",
   "Recover original {label} save": "恢复原来的{label}保存",
   "Recover original {value} save": "恢复原来的{value}保存",
   "Recover the original approval or publication before another write or template selection.":
@@ -3638,7 +3639,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Retry archive": "重试归档",
   "Retry configuration request": "重试配置请求",
   "Retry discard": "重试放弃",
-  "Retry exact template draft save": "重试完全相同的收据草稿保存",
+  "Retry exact receipt draft save": "重试完全相同的收据草稿保存",
   "Retry exact template review action": "重试完全相同的模板审核操作",
   "Retry exact template submission": "重试完全相同的模板提交",
   "Retry loading exceptions": "重新加载异常",
@@ -3736,7 +3737,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "保存草稿后，由两位审核人核对成本和食品安全，之后才能发布。",
   "Save an address below, then choose it for this draft.": "请在下方保存地址，然后为此草稿选择它。",
   "Save and submit for posting": "保存并提交过账",
-  "Save both receipt presets above; each is offered here once it is saved.":
+  "Save both receipt styles above; each is offered here once it is saved.":
     "请先保存上面的两个收据样式；保存后会自动出现在这里供选择。",
   "Save change": "保存更改",
   "Save changes": "保存更改",
@@ -3777,10 +3778,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Receipts cannot be issued at this store until these details are saved, even if every number stays empty.":
     "保存这些信息之前，本店无法开具收据；即使所有号码都留空也需要保存。",
   "Save setup draft": "存为草稿",
-  "Save template draft": "保存收据草稿",
+  "Save receipt draft": "保存收据草稿",
   "Save the changed template fields before submitting for review.":
     "提交审核前请先保存已更改的模板字段。",
-  "Save the receipt layout and the fields every receipt must show; receipt templates are built from these presets. Saving them does not change customer receipts and does not mean a legal professional has approved them.":
+  "Save the receipt layout and the fields every receipt must show; receipt templates are built from these styles. Saving them does not change customer receipts and does not mean a legal professional has approved them.":
     "保存收据版式以及每张收据必须显示的字段；收据模板以这些样式为基础。保存不会更改顾客收据，也不代表已经过法律专业人士批准。",
   "Save unfinished settings and continue later": "保存未完成的设置，稍后继续",
   "Save view": "保存视图",
@@ -3798,7 +3799,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Saved layout selection (retained)": "已保存的版式选择（保留）",
   "Saved payment rules, version {revision}. Card payments still need the payment provider account to be set up.":
     "已保存的付款规则，版本 {revision}。刷卡付款仍需要设置支付方账户。",
-  "Saved preset confirmed.": "已保存的样式已确认。",
+  "Saved style confirmed.": "已保存的样式已确认。",
   "Saved required fields revision {revision}": "已保存的必备字段修订版 {revision}",
   "Saved required fields selection (retained)": "已保存的必备字段选择（保留）",
   "Saved revision {revision}.": "已保存修订版 {revision}。",
@@ -3807,7 +3808,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Saved special dates are kept. Holidays and special hours are changed in Hours & ordering.":
     '已保存的特殊日期会保留。节假日和特殊营业时间在"营业时间与点单"中更改。',
   "Saved special-date hours": "已保存的特殊日期营业时间",
-  "Saved template draft confirmed. Publication has not been evaluated.":
+  "Saved receipt draft confirmed. Publication has not been evaluated.":
     "已确认保存收据草稿。尚未评估发布。",
   "Saved templates": "已保存的模板",
   "Saved {locale} template, draft {revision}. {value}":
@@ -4434,7 +4435,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Tell the author what to fix; they save a corrected change for review.":
     "告诉作者需要修正什么；他们会保存修正后的更改以待审核。",
   Temperature: "温度",
-  "Template activation": "模板启用",
+  Starts: "开始使用",
   "Template publication confirmed. Store selection and operational readiness remain separate.":
     "已确认模板发布。门店选择和运营就绪仍需另行处理。",
   "Temporarily unavailable": "暂时不可用",
@@ -4825,9 +4826,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "The save result could not be confirmed. Recover the original save before making another change.":
     "无法确认保存结果。再做其他更改前，请先恢复原来的保存。",
   "The saved draft has not been submitted for review.": "已保存的草稿尚未提交审核。",
-  "The saved preset was changed elsewhere. What is saved now is shown; save again if you still need to.":
+  "The saved style was changed elsewhere. What is saved now is shown; save again if you still need to.":
     "已保存的样式在别处被改过。现在显示的是已保存的内容；如仍需要，请再保存一次。",
-  "This preset could not be saved as it is.": "这个样式无法按现在的内容保存。",
+  "This style could not be saved as it is.": "这个样式无法按现在的内容保存。",
   "The saved settings or their baseline changed. Refresh, then discard your local edits to use the latest saved version.":
     "已保存的设置或其基准已变更。请刷新，然后放弃本地编辑以使用最新保存的版本。",
   "The saved setup still has settings that are not set (see the list in this step). Finish them, save the setup, then create the configuration.":
@@ -4873,7 +4874,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "本店对每件商品在自取和堂食时收取的税。税率只能通过附带登记和专业审核证明的税务配置更改。数据截至",
   "The template changed or the original save conflicts. Refresh or recover the original save; no version has been silently substituted.":
     "模板已变更，或原来的保存有冲突。请刷新或恢复原来的保存；没有任何版本被悄悄替换。",
-  "The template draft could not be loaded. It is read again by itself once the connection is back; an earlier save remains protected.":
+  "The receipt draft could not be loaded. It is read again by itself once the connection is back; an earlier save remains protected.":
     "无法加载收据草稿。网络恢复后会自动重新读取；之前的保存仍受保护。",
   "Could not connect just now. Try again once connected; an earlier save remains protected.":
     "暂时无法连接。联网后请再试一次；之前的保存仍受保护。",
@@ -5524,7 +5525,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "You do not have permission to choose receipt templates. The saved selection is kept.":
     "你没有选择收据模板的权限。已保存的选择会保留。",
   "You do not have permission to manage stock locations.": "你没有管理库位的权限。",
-  "You do not have permission to manage this receipt preset.": "你没有管理此收据样式的权限。",
+  "You do not have permission to manage this receipt style.": "你没有管理此收据样式的权限。",
   "You do not have permission to read this Store's tax configuration.":
     "你没有读取本门店税务配置的权限。",
   "You do not have refund authority for this store.": "你没有本店的退款权限。",
@@ -10119,8 +10120,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这份草稿没有保存：有 1 处要先改正，见下方“需要先改正”。",
   "This draft was not saved: {count} fee settings need fixing first, see “Needs fixing first” below.":
     "这份草稿没有保存：有 {count} 处要先改正，见下方“需要先改正”。",
-  "This draft was not saved: check the times, wait times and fees you changed against the services this setup offers; the last step lists anything still needed.":
-    "这份草稿没有保存：请对照这份设置提供的服务方式，检查你改过的时间、等待时间和费用；最后一步会列出还需要改的地方。",
+  "This draft was not saved: check the times, wait times and fees you changed; step 4, Review and publish, lists what to change under “Still needed”.":
+    "这份草稿没有保存：请检查你改过的时间、等待时间和费用，第 4 步“核对并发布”里的“还需要”会列出要改的地方。",
   "Choose which orders the {fee} applies to.": "请选择{fee}适用于哪些订单。",
   "{method}: {before} → {after}": "{method}：{before} → {after}",
   "Save payment methods in {where}, choose the saved payment methods for this setup, then save as draft.":

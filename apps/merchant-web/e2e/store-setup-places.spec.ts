@@ -1005,7 +1005,7 @@ for (const lang of ["en", "zh-Hans"] as const)
     // keep a way to read what another person or device did meanwhile (approved, saved elsewhere).
     await expect(
       tools
-        .getByRole("region", { name: zh ? "收据样式" : "Receipt presets", exact: true })
+        .getByRole("region", { name: zh ? "收据样式" : "Receipt styles", exact: true })
         .getByRole("button", { name: /Refresh|刷新/u }),
     ).toHaveCount(0);
     await expect(tools.getByRole("button", { name: /Refresh|刷新/u })).toHaveCount(0);
@@ -1018,7 +1018,7 @@ for (const lang of ["en", "zh-Hans"] as const)
       }),
     ).toHaveCount(2);
     await expect(
-      tools.getByText(zh ? "还没有已保存的样式。" : "No saved preset yet.").first(),
+      tools.getByText(zh ? "还没有已保存的样式。" : "No saved style yet.").first(),
     ).toBeVisible();
     await b25Shot(page, `receipts-${lang}`);
     await expectNoInternalText(page);
@@ -1070,8 +1070,8 @@ for (const lang of ["en", "zh-Hans"] as const)
     const alert = page.locator("#setup-validation-error");
     await expect(alert).toContainText(
       zh
-        ? "这份草稿没有保存：请对照这份设置提供的服务方式，检查你改过的时间、等待时间和费用；最后一步会列出还需要改的地方。"
-        : "This draft was not saved: check the times, wait times and fees you changed against the services this setup offers; the last step lists anything still needed.",
+        ? "这份草稿没有保存：请检查你改过的时间、等待时间和费用，第 4 步“核对并发布”里的“还需要”会列出要改的地方。"
+        : "This draft was not saved: check the times, wait times and fees you changed; step 4, Review and publish, lists what to change under “Still needed”.",
     );
     await b26Shot(page, `server-refused-${lang}`);
     // Two fees on a service this setup does not offer: one sentence above the steps.
@@ -1130,7 +1130,7 @@ for (const lang of ["en", "zh-Hans"] as const)
     await page.goto(setupHref + "?section=receipts");
     const tools = page.locator("#receipt-templates");
     const presets = tools.getByRole("region", {
-      name: zh ? "收据样式" : "Receipt presets",
+      name: zh ? "收据样式" : "Receipt styles",
       exact: true,
     });
     await expect(presets.getByRole("alert")).toHaveCount(1);
@@ -1138,7 +1138,7 @@ for (const lang of ["en", "zh-Hans"] as const)
       zh ? "网络恢复后会自动重新读取" : "They are read again once the connection is back",
     );
     await expect(
-      tools.getByRole("alert").filter({ hasText: zh ? "收据草稿" : "template draft" }),
+      tools.getByRole("alert").filter({ hasText: zh ? "收据草稿" : "receipt draft" }),
     ).toContainText(
       zh ? "网络恢复后会自动重新读取" : "It is read again by itself once the connection is back",
     );

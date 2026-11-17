@@ -233,7 +233,7 @@ for (const [status, alert] of [
   // b28 (v15 live26): the server does not say which rule failed: one sentence, never every rule.
   [
     400,
-    "This draft was not saved: check the times, wait times and fees you changed against the services this setup offers; the last step lists anything still needed.",
+    "This draft was not saved: check the times, wait times and fees you changed; step 4, Review and publish, lists what to change under “Still needed”.",
   ],
   [403, "Your current permission or selected Store does not allow this action."],
   [409, "The saved settings or their baseline changed."],
@@ -292,7 +292,7 @@ it("b25: in Chinese, a refused save shows no recovery line", async () => {
   expect(buttonNamed(container, "恢复原来的保存")).toBeUndefined();
   // b26: and says first that the draft was not saved.
   expect(alerts(container)).toContain(
-    "这份草稿没有保存：请对照这份设置提供的服务方式，检查你改过的时间、等待时间和费用；最后一步会列出还需要改的地方。",
+    "这份草稿没有保存：请检查你改过的时间、等待时间和费用，第 4 步“核对并发布”里的“还需要”会列出要改的地方。",
   );
 });
 

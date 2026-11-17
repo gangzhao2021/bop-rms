@@ -192,7 +192,7 @@ it("renders actual Store default locale, 13 mechanical labels, with no opaque ID
     <ReceiptTemplateDraftEditor scope={scope} csrf={csrf} defaultLocale="fr-CA" />,
   );
   expect(html).toContain('value="fr-CA"');
-  expect(html).toContain("Save template draft");
+  expect(html).toContain("Save receipt draft");
   expect(html).toContain("Amount refunded");
   expect(html).not.toContain("RefundedTotal");
   expect(findInternalText([staticText(html)])).toEqual([]);
@@ -212,9 +212,15 @@ it("b28 (v15 live26): the language is a name chosen from a list, no empty date b
   // Never the code in a box to type into, nor an empty yyyy-mm-dd box for an optional end.
   expect(en).not.toMatch(/<input[^>]*value="en-CA"/u);
   expect(en).not.toContain('type="datetime-local"');
-  expect(staticText(en)).toContain("Until another receipt replaces it");
+  expect(staticText(en)).toContain("Until the store switches to another receipt template");
   expect(en).not.toContain("Refresh template list");
   expect(en).not.toContain("Refresh saved template draft");
+  // b28 review: the English is as plain as the Chinese: receipt styles and receipt drafts.
+  expect(staticText(en)).not.toMatch(
+    /preset|template draft|Authored template fields|Template activation/u,
+  );
+  expect(staticText(en)).toContain("Receipt drafts");
+  expect(staticText(en)).toContain("Save receipt draft");
   setLanguageForTest("zh-Hans");
   try {
     const zh = staticText(render());
@@ -222,7 +228,11 @@ it("b28 (v15 live26): the language is a name chosen from a list, no empty date b
     expect(zh).toContain("法语（加拿大）");
     expect(zh).not.toMatch(/en-CA|yyyy|预设|模板草稿/u);
     expect(zh).toContain("收据草稿");
-    expect(zh).toContain("直到被新的收据替换");
+    expect(zh).toContain("直到本店换用别的收据模板");
+    // b28 review: one word per thing on this screen: 收据样式, 收据草稿, and the template it becomes.
+    expect(zh).not.toMatch(/已填写的模板字段|模板启用|下一批模板|直到被新的收据替换/u);
+    expect(zh).toContain("草稿内容");
+    expect(zh).toContain("开始使用");
     expect(zh).toContain("重新读取列表");
     expect(zh).toContain("重新读取已保存的草稿");
   } finally {

@@ -1107,7 +1107,7 @@ export function ReceiptTemplateDraftEditor({
         setReady(true);
         setNotice(
           result.receipt.outcome === "Committed"
-            ? t("Saved template draft confirmed. Publication has not been evaluated.")
+            ? t("Saved receipt draft confirmed. Publication has not been evaluated.")
             : t("Earlier save did not commit. You can save a new draft."),
         );
         setSubject(result.current.templateReference);
@@ -1173,22 +1173,22 @@ export function ReceiptTemplateDraftEditor({
       review?.lifecycle?.state === "Published" &&
       review.submission?.versionReference === selected?.content.versionReference;
   return (
-    <section hidden={hidden} aria-label={t("Receipt template drafts")}>
-      <h4>{t("Receipt template drafts")}</h4>
+    <section hidden={hidden} aria-label={t("Receipt drafts")}>
+      <h4>{t("Receipt drafts")}</h4>
       <p>
         {t(
           "Write a receipt template and preview the standard fields it shows. Saving keeps it as a draft: customer receipts do not change until it is published and chosen for this store under Published receipt template in Store setup. Saving does not mean a tax or legal professional has checked it.",
         )}
       </p>
       <label>
-        {t("Receipt template")}
+        {t("Receipt draft")}
         <select
-          aria-label={t("Receipt template")}
+          aria-label={t("Receipt draft")}
           value={subject ?? ""}
           disabled={locked || listing}
           onChange={(e) => setSubject(e.target.value || null)}
         >
-          <option value="">{t("New template draft")}</option>
+          <option value="">{t("New receipt draft")}</option>
           {subject && !rows.some((r) => r.content.templateReference === subject) && (
             <option value={subject}>
               {selected
@@ -1237,7 +1237,7 @@ export function ReceiptTemplateDraftEditor({
           }
           onClick={() => void refreshRoster(roster?.nextAfter ?? null)}
         >
-          {t("Next templates")}
+          {t("More drafts")}
         </button>
       </div>
       {selected && (
@@ -1464,7 +1464,7 @@ export function ReceiptTemplateDraftEditor({
           )}
         </div>
       )}
-      {busy && <p role="status">{t("Loading template draft…")}</p>}
+      {busy && <p role="status">{t("Loading receipt draft…")}</p>}
       {notice && <p role="status">{notice}</p>}
       {error && (
         <p role="alert">
@@ -1476,7 +1476,7 @@ export function ReceiptTemplateDraftEditor({
               ? t("Permission denied. An earlier save remains protected.")
               : error === "Invalid"
                 ? t(
-                    "Check the language, saved receipt presets and the start and end times. An earlier save remains protected.",
+                    "Check the language, saved receipt styles and the start and end times. An earlier save remains protected.",
                   )
                 : error === "Conflict"
                   ? t(
@@ -1499,7 +1499,7 @@ export function ReceiptTemplateDraftEditor({
                           // service is sent again by staff.
                           !ready || roster === null
                           ? t(
-                              "The template draft could not be loaded. It is read again by itself once the connection is back; an earlier save remains protected.",
+                              "The receipt draft could not be loaded. It is read again by itself once the connection is back; an earlier save remains protected.",
                             )
                           : t(
                               "Could not connect just now. Try again once connected; an earlier save remains protected.",
@@ -1521,12 +1521,12 @@ export function ReceiptTemplateDraftEditor({
       {pending && (
         <p role="status">
           {t(
-            "An earlier template draft save must be recovered before another save or template selection.",
+            "An earlier receipt draft save must be recovered before another save or template selection.",
           )}
         </p>
       )}
       <fieldset disabled={locked || frozenReview}>
-        <legend>{t("Authored template fields")}</legend>
+        <legend>{t("Draft details")}</legend>
         <label>
           {t("Receipt language")}
           {/* b28 (v15 live26): the languages a Store opens in, by name; a language saved
@@ -1588,12 +1588,12 @@ export function ReceiptTemplateDraftEditor({
           </select>
         </label>
         {!currentLayout || !currentCompliance ? (
-          <p>{t("Save both receipt presets above; each is offered here once it is saved.")}</p>
+          <p>{t("Save both receipt styles above; each is offered here once it is saved.")}</p>
         ) : null}
         <label>
-          {t("Template activation")}
+          {t("Starts")}
           <select
-            aria-label={t("Template activation")}
+            aria-label={t("Starts")}
             value={activation}
             onChange={(e) =>
               setActivation(e.target.value === "Scheduled" ? "Scheduled" : "Immediate")
@@ -1625,7 +1625,9 @@ export function ReceiptTemplateDraftEditor({
               if (!onDate) setEnd("");
             }}
           >
-            <option value="Replaced">{t("Until another receipt replaces it")}</option>
+            <option value="Replaced">
+              {t("Until the store switches to another receipt template")}
+            </option>
             <option value="OnDate">{t("Until a set date and time")}</option>
           </select>
         </label>
@@ -1669,7 +1671,7 @@ export function ReceiptTemplateDraftEditor({
               disabled={disabled || busy || loadedIdentity.current !== identityKey}
               onClick={() => void action("Resolve")}
             >
-              {t("Recover original template draft save")}
+              {t("Recover original receipt draft save")}
             </button>
             {original.current && (
               <button
@@ -1677,7 +1679,7 @@ export function ReceiptTemplateDraftEditor({
                 disabled={disabled || busy || loadedIdentity.current !== identityKey}
                 onClick={() => void action("Retry")}
               >
-                {t("Retry exact template draft save")}
+                {t("Retry exact receipt draft save")}
               </button>
             )}
           </>
@@ -1687,7 +1689,7 @@ export function ReceiptTemplateDraftEditor({
             disabled={locked || frozenReview || !layout || !compliance}
             onClick={() => void action("Save")}
           >
-            {t("Save template draft")}
+            {t("Save receipt draft")}
           </button>
         )}
       </div>

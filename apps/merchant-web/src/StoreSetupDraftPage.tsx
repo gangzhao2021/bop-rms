@@ -421,7 +421,7 @@ export function storeSetupInvalidText(
   // live26): the server's answer does not say which rule failed, so one sentence says where to
   // look, never every rule.
   return t(
-    "This draft was not saved: check the times, wait times and fees you changed against the services this setup offers; the last step lists anything still needed.",
+    "This draft was not saved: check the times, wait times and fees you changed; step 4, Review and publish, lists what to change under “Still needed”.",
   );
 }
 const root = (view: StoreSetupWorkspace) => ({
