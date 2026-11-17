@@ -238,6 +238,18 @@ describe("authorized tip selection application", () => {
     expect(h.stored()).toBeNull();
     expect(h.writes()).toBe(1);
   });
+  it("keeps what the authorization met for the log, never as the answer", async () => {
+    // WP-2423 batch 28: a Dining refusal behind "unavailable" (the session moved on) is logged.
+    const h = application();
+    const met = Object.assign(new Error("synthetic"), { code: "DINING_CHECKOUT_CONTEXT_CHANGED" });
+    h.ports.authorization.authorize = async () => {
+      throw met;
+    };
+    const refused = await h.service.select(h.command).catch((error: unknown) => error);
+    expect(refused).toMatchObject({ code: "PAYMENT_TIP_UNAVAILABLE" });
+    expect((refused as Record<symbol, unknown>)[Symbol.for("bop.failure.cause")]).toBe(met);
+    expect(Object.keys(refused as object)).not.toContain("cause");
+  });
   it("denies a revoked actor before lookup", async () => {
     const h = application();
     h.deny();

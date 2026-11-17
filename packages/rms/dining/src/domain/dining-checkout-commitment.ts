@@ -306,7 +306,10 @@ export function sealDiningCheckoutCommitment(
       time(linkedAt) < time(commitment.preparedAt)
     )
       return fail("DINING_CHECKOUT_CLOCK_CONFLICT");
-    current(context, commitment, observedAt);
+    // WP-2423 batch 28 (race-payment-and-signout): someone else joining (a second guest
+    // scanning, a staff round's own table guest) moves the Session's version; the round's own
+    // table, its assignment, the Session's phase and the participant are what must hold.
+    current(context, commitment, observedAt, { sameSessionVersion: false });
     if (commitment.paymentRequestedAt !== null) {
       if (commitment.paymentRequestedAt !== requestedAt || commitment.orderingLinkedAt !== linkedAt)
         return fail("DINING_CHECKOUT_CLOCK_CONFLICT");
@@ -385,7 +388,8 @@ export function assertDiningCheckoutPreparedForOrdering(
   return protect(() => {
     const commitment = parseDiningCheckoutCommitment(value);
     const observedAt = parseDiningInstant(observedAtValue);
-    current(context, commitment, observedAt);
+    // WP-2423 batch 28: as for sealing, another participant joining does not stop the round.
+    current(context, commitment, observedAt, { sameSessionVersion: false });
     if (
       commitment.state !== "Prepared" ||
       time(observedAt) >= time(commitment.preparationValidUntil)

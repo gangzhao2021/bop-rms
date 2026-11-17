@@ -222,13 +222,17 @@ describe("Dining checkout commitment", () => {
     f.context.session.version++;
     expect(assertDiningCheckoutCommitmentUsable(f.result, f.context, requested)).toEqual(f.result);
   });
-  it("still needs the same Session version before it is sealed", () => {
+  it("stays sendable and sealable when someone else joins the session before it is sealed", () => {
+    // WP-2423 batch 28: a staff round's table guest (or a second phone) joined meanwhile.
     const f = fixture(),
       prepared = prepareDiningCheckoutCommitment(f.input, f.context);
     f.context.session.version++;
-    expect(() => assertDiningCheckoutPreparedForOrdering(prepared, f.context, requested)).toThrow(
-      expect.objectContaining({ code: "DINING_CHECKOUT_CONTEXT_CHANGED" }),
+    expect(assertDiningCheckoutPreparedForOrdering(prepared, f.context, requested)).toEqual(
+      prepared,
     );
+    expect(
+      sealDiningCheckoutCommitment(prepared, f.context, f.link, requested, requested).state,
+    ).toBe("PaymentPending");
   });
   it("rejects a Participant who has left before sealing", () => {
     const f = fixture(),

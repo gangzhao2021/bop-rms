@@ -336,30 +336,40 @@ it("retains expired history but refuses it for a new Ordering submission", async
   expect((await f.service().prepare(f.input)).record).toEqual(first.record);
   expect(f.writes()).toBe(1);
 });
-it.each(["Closing", "VersionChanged"] as const)(
-  "refuses %s context for Ordering while retaining original history",
-  async (change) => {
-    const f = fixture();
-    await f.service().prepare(f.input);
-    const read = f.options.current.readCurrent;
-    f.options.current.readCurrent = async (request) => {
-      const snapshot = await read(request);
-      if (snapshot === null) throw new Error("missing fixture");
-      return {
-        ...snapshot,
-        session: {
-          ...snapshot.session,
-          version: 6,
-          phase: change === "Closing" ? "Closing" : "Active",
-        },
-      };
-    };
-    await expect(f.service().prepareForOrdering(f.input)).rejects.toMatchObject({
-      code: "DINING_CHECKOUT_DEPENDENCY_UNAVAILABLE",
-    });
-    expect(f.writes()).toBe(1);
-  },
-);
+it("refuses a Closing context for Ordering while retaining original history", async () => {
+  const f = fixture();
+  await f.service().prepare(f.input);
+  const read = f.options.current.readCurrent;
+  f.options.current.readCurrent = async (request) => {
+    const snapshot = await read(request);
+    if (snapshot === null) throw new Error("missing fixture");
+    return { ...snapshot, session: { ...snapshot.session, version: 6, phase: "Closing" } };
+  };
+  const refused = await f
+    .service()
+    .prepareForOrdering(f.input)
+    .catch((error: unknown) => error);
+  expect(refused).toMatchObject({ code: "DINING_CHECKOUT_DEPENDENCY_UNAVAILABLE" });
+  // WP-2423 batch 28: what it met is kept for the log (never as `cause`, never answered).
+  expect((refused as Record<symbol, unknown>)[Symbol.for("bop.failure.cause")]).toMatchObject({
+    code: "DINING_CHECKOUT_CONTEXT_CHANGED",
+  });
+  expect(f.writes()).toBe(1);
+});
+it("sends a prepared round after someone else joined the session (its version moved on)", async () => {
+  // WP-2423 batch 28 (race-payment-and-signout): a staff round's own table guest joined while a
+  // guest at a pay-first table was checking out; the guest's payment then never started.
+  const f = fixture();
+  const first = await f.service().prepare(f.input);
+  const read = f.options.current.readCurrent;
+  f.options.current.readCurrent = async (request) => {
+    const snapshot = await read(request);
+    if (snapshot === null) throw new Error("missing fixture");
+    return { ...snapshot, session: { ...snapshot.session, version: 6 } };
+  };
+  expect((await f.service().prepareForOrdering(f.input)).record).toEqual(first.record);
+  expect(f.writes()).toBe(1);
+});
 it("rechecks current owner context after the preparation write completes", async () => {
   const f = fixture();
   const append = f.options.repository.append;

@@ -102,8 +102,12 @@ export interface DiningCheckoutServiceOptions {
     }): Promise<AppendAuditRecordInput>;
   };
 }
-function fail(code: DiningCheckoutServiceError["code"]): never {
-  throw new DiningCheckoutServiceError(code);
+const failureCauseKey = Symbol.for("bop.failure.cause");
+function fail(code: DiningCheckoutServiceError["code"], cause?: unknown): never {
+  const error = new DiningCheckoutServiceError(code);
+  // WP-2423 batch 28: what it met stays for the log at the edge (never as `cause`, never answered).
+  if (cause !== undefined) Object.defineProperty(error, failureCauseKey, { value: cause });
+  throw error;
 }
 function closed(value: unknown, fields: readonly string[]): Record<string, unknown> {
   if (
@@ -348,7 +352,7 @@ export function createDiningCheckoutService(options: DiningCheckoutServiceOption
     } catch (error) {
       // Another participant's checkout holds this Cart version: say so, nothing was written.
       if (error instanceof DiningCheckoutServiceError || isDiningCheckoutHeld(error)) throw error;
-      return fail("DINING_CHECKOUT_DEPENDENCY_UNAVAILABLE");
+      return fail("DINING_CHECKOUT_DEPENDENCY_UNAVAILABLE", error);
     }
   }
   return Object.freeze({

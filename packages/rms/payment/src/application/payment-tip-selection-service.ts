@@ -47,8 +47,15 @@ export interface PaymentTipSelectionPorts {
     create(record: PaymentTipSelection): Promise<AppendAuditRecordInput>;
   };
 }
-const fail = (code: PaymentTipSelectionError["code"] = "PAYMENT_TIP_UNAVAILABLE"): never => {
-  throw new PaymentTipSelectionError(code);
+const failureCauseKey = Symbol.for("bop.failure.cause");
+const fail = (
+  code: PaymentTipSelectionError["code"] = "PAYMENT_TIP_UNAVAILABLE",
+  cause?: unknown,
+): never => {
+  const error = new PaymentTipSelectionError(code);
+  // WP-2423 batch 28: what it met stays for the log at the edge (never as `cause`, never answered).
+  if (cause !== undefined) Object.defineProperty(error, failureCauseKey, { value: cause });
+  throw error;
 };
 /** No Provider effects. Current authorization and an exact stored original are required on recovery. */
 export function createPaymentTipSelectionService(ports: PaymentTipSelectionPorts) {
@@ -180,7 +187,7 @@ export function createPaymentTipSelectionService(ports: PaymentTipSelectionPorts
         return Object.freeze({ status: result.status, record: stored });
       } catch (error) {
         if (error instanceof PaymentTipSelectionError) throw error;
-        return fail();
+        return fail("PAYMENT_TIP_UNAVAILABLE", error);
       }
     },
   });

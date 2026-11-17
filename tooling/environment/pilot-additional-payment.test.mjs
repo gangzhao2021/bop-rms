@@ -74,3 +74,29 @@ it("a real failure of an additional round payment is still logged as an error", 
     code: "ORDER_CREATE_DEPENDENCY_UNAVAILABLE",
   });
 });
+
+/**
+ * WP-2423 batch 28 (race-payment-and-signout): a guest's payment answered 503 for half a minute and
+ * the log line had no level or time, nor what the tip step wrapped. It is an error line (level 50,
+ * with its time) naming the codes behind it.
+ */
+it("an unexpected failure is logged at level 50 with the codes it wraps", async () => {
+  vi.spyOn(console, "log").mockImplementation(() => undefined);
+  const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+  const inner = Object.assign(new Error("dining checkout commitment is unavailable"), {
+    code: "DINING_CHECKOUT_CONTEXT_CHANGED",
+  });
+  const failure = Object.assign(new Error("payment tip selection is unavailable"), {
+    name: "PaymentTipSelectionError",
+    code: "PAYMENT_TIP_UNAVAILABLE",
+  });
+  Object.defineProperty(failure, Symbol.for("bop.failure.cause"), { value: inner });
+  await expect((await payment(failure)).create({})).rejects.toBe(failure);
+  expect(JSON.parse(error.mock.calls[0][0])).toMatchObject({
+    level: 50,
+    time: expect.any(String),
+    event: "INTERNAL_ADDITIONAL_PAYMENT_UNAVAILABLE",
+    code: "PAYMENT_TIP_UNAVAILABLE",
+    causes: ["DINING_CHECKOUT_CONTEXT_CHANGED"],
+  });
+});

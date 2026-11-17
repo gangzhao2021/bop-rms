@@ -2,6 +2,7 @@ import { isPilotPaymentProvider } from "./pilot-stripe-provider.mjs";
 import { matchesPilotEnvironment } from "./pilot-environment.mjs";
 import console from "node:console";
 import { createInternalExpiryCutoff } from "./pilot-expiry-cutoff.mjs";
+import { reportUnexpected } from "./pilot-unexpected.mjs";
 import { createHash } from "node:crypto";
 import { pilotCreateIntentIdempotencyKey } from "./pilot-open-payment-resolution.mjs";
 import { createPostgresSubmissionFinalValidationStore } from "../../packages/rms/inventory/src/index.ts";
@@ -164,18 +165,9 @@ export async function createInternalAdditionalPayment(
           console.log(refused);
           throw error;
         }
-        console.error(
-          JSON.stringify({
-            event: "INTERNAL_ADDITIONAL_PAYMENT_UNAVAILABLE",
-            code: /^[A-Z0-9_]{1,80}$/.test(error?.code ?? "") ? error.code : "UNAVAILABLE",
-            frames:
-              String(error?.stack ?? "")
-                .match(
-                  /(?:apps\/api\/dist|packages\/[a-z]+\/[a-z-]+\/src|\.local\/pilot-v4)\/[a-zA-Z0-9_./-]+:\d+:\d+/g,
-                )
-                ?.slice(0, 5) ?? [],
-          }),
-        );
+        // WP-2423 batch 28: the guest only sees "preparing payment", so the cause reaches the
+        // log at level 50 with its time and the codes of what it wrapped (codes only).
+        reportUnexpected("INTERNAL_ADDITIONAL_PAYMENT_UNAVAILABLE", error);
         throw error;
       }
     },
