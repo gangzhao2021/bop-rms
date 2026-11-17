@@ -1,6 +1,7 @@
 import {
   type TaxRegistrantSourceOptions,
   type TaxRegistrantTransaction,
+  TaxRegistrantSourceError,
   taxRegistrantSourceRequiredFields,
 } from "@bop/operating-entity";
 import { beforeEach, expect, it, vi } from "vitest";
@@ -846,6 +847,37 @@ it("denies classification reading without actual Catalog fine authority", async 
   ).rejects.toMatchObject({ code: "TAX_CONFIG_PERMISSION_DENIED" });
   expect(f.options.nextReference).not.toHaveBeenCalled();
 });
+// WP-2423 (tax-config-revocation): a membership suspended since entry, found by the Catalog
+// registry hold's own Brand read, is a refusal there too; an outage at that read stays one.
+it.each([
+  [
+    "a suspended membership",
+    () => new MembershipContractError("ACTIVE_MEMBERSHIP_NOT_FOUND"),
+    "TAX_CONFIG_PERMISSION_DENIED",
+  ],
+  [
+    "a revoked Session",
+    () => new BrowserSessionError("BROWSER_SESSION_ENDED"),
+    "TAX_CONFIG_PERMISSION_DENIED",
+  ],
+  [
+    "a lost connection",
+    () => Object.assign(new Error("Connection terminated"), { code: "08006" }),
+    "TAX_CONFIG_DEPENDENCY_UNAVAILABLE",
+  ],
+])("answers the classification read for %s at the registry hold", async (_name, error, code) => {
+  const f = fixture();
+  boundary.brand.mockImplementation(async () => {
+    throw error();
+  });
+  await expect(
+    f.service.classifications({
+      sessionCookie: "synthetic-cookie",
+      expectedStoreReference: scope.storeReference,
+    }),
+  ).rejects.toMatchObject({ code });
+  expect(f.options.nextReference).not.toHaveBeenCalled();
+});
 const basketFixture = () => ({
   profile: "TaxDraftFixtureV1",
   fixtureReference: id(90),
@@ -999,7 +1031,8 @@ function materialFixture() {
   const f = fixture();
   let profileReference = id(101),
     nullSource = false,
-    denyOrg = false;
+    denyOrg = false,
+    orgFailure: unknown;
   let saved: ReturnType<typeof parseTaxConfigMaterialOperation> | undefined;
   const materialOperations = new Map<string, ReturnType<typeof parseTaxConfigMaterialOperation>>();
   const materialVersions = new Map<string, ReturnType<typeof parseTaxConfigMaterialVersion>>();
@@ -1011,6 +1044,7 @@ function materialFixture() {
     current.authorizeAction = async (action: string) => {
       if (action === "organization.manage" && denyOrg)
         throw new TaxConfigWorkflowError("TAX_CONFIG_PERMISSION_DENIED");
+      if (action === "organization.manage" && orgFailure !== undefined) throw orgFailure;
       return authorize(action);
     };
     return current;
@@ -1023,17 +1057,23 @@ function materialFixture() {
     const initialProfile = profileReference;
     async function hold() {
       if (!tx) throw Error("missing source tx");
-      const packet = await o.authority.holdUntilTransactionCompletes(tx, {
-        ...scope,
-        actorKind: "User",
-        permission: "organization.manage",
-        purposeCode: "TAX_REGISTRANT_SOURCE",
-        businessFunction: "TaxRegistrant",
-        effectiveAt: at,
-        requiredFields: taxRegistrantSourceRequiredFields,
-        observedAt: o.clock.now(),
-        validUntil: o.originalValidUntil,
-      });
+      // As the real source's guard: its own error passes, anything else answers unavailable.
+      const packet = await o.authority
+        .holdUntilTransactionCompletes(tx, {
+          ...scope,
+          actorKind: "User",
+          permission: "organization.manage",
+          purposeCode: "TAX_REGISTRANT_SOURCE",
+          businessFunction: "TaxRegistrant",
+          effectiveAt: at,
+          requiredFields: taxRegistrantSourceRequiredFields,
+          observedAt: o.clock.now(),
+          validUntil: o.originalValidUntil,
+        })
+        .catch((error: unknown) => {
+          if (error instanceof TaxRegistrantSourceError) throw error;
+          throw new TaxRegistrantSourceError("TAX_REGISTRANT_UNAVAILABLE");
+        });
       expect(packet.permission.action).toBe("organization.manage");
     }
     return {
@@ -1322,6 +1362,9 @@ function materialFixture() {
     denyOrg: () => {
       denyOrg = true;
     },
+    failOrg: (error: unknown) => {
+      orgFailure = error;
+    },
     changeProfile: () => {
       profileReference = id(199);
     },
@@ -1417,6 +1460,48 @@ it("reads true registration source under separate owner permission and scoped gu
       expectedScope: scope,
     }),
   ).rejects.toMatchObject({ code: "TAX_CONFIG_PERMISSION_DENIED" });
+});
+// WP-2423 (tax-config-revocation): the registrant source answers anything but its own error
+// unavailable, so a revocation found at its hold must reach it as its refusal.
+it.each([
+  ["a revoked Session", () => new BrowserSessionError("BROWSER_SESSION_ENDED")],
+  [
+    "a suspended Store assignment",
+    () => new MembershipContractError("ACTIVE_STORE_ASSIGNMENT_NOT_FOUND"),
+  ],
+  ["a suspended membership", () => new MembershipContractError("ACTIVE_MEMBERSHIP_NOT_FOUND")],
+])("refuses the registrant read and its save when its hold finds %s", async (_name, error) => {
+  const read = materialFixture();
+  read.failOrg(error());
+  await expect(
+    read.service.taxRegistrant({
+      sessionCookie: request().sessionCookie,
+      expectedStoreReference: scope.storeReference,
+      expectedScope: scope,
+    }),
+  ).rejects.toMatchObject({ code: "TAX_CONFIG_PERMISSION_DENIED" });
+  const save = materialFixture();
+  save.failOrg(error());
+  await expect(
+    save.service.materialExecute({ ...request(), command: save.registration() }),
+  ).rejects.toMatchObject({ code: "TAX_CONFIG_PERMISSION_DENIED" });
+  expect(save.events).toContain("rollback");
+  expect(save.events).not.toContain("commit");
+});
+it.each([
+  ["a lost connection", () => Object.assign(new Error("Connection terminated"), { code: "08006" })],
+  ["a Session source outage", () => new BrowserSessionError("BROWSER_SESSION_UNAVAILABLE")],
+  ["an unexpected fault", () => new TypeError("x is not a function")],
+])("answers the registrant read unavailable when its hold meets %s", async (_name, error) => {
+  const f = materialFixture();
+  f.failOrg(error());
+  await expect(
+    f.service.taxRegistrant({
+      sessionCookie: request().sessionCookie,
+      expectedStoreReference: scope.storeReference,
+      expectedScope: scope,
+    }),
+  ).rejects.toMatchObject({ code: "TAX_CONFIG_DEPENDENCY_UNAVAILABLE" });
 });
 it("keeps registration freshness and late Tax permission guards active until rollback", async () => {
   const drift = materialFixture();

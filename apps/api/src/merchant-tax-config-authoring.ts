@@ -547,10 +547,28 @@ export function createMerchantTaxConfigAuthoring(options: MerchantTaxConfigAutho
                     request.validUntil > deadline
                   )
                     return fail();
-                  await fresh("Read");
-                  const actualAuthority = await bareFresh("Read", "organization.manage");
-                  checkTx();
-                  return actualAuthority;
+                  try {
+                    await fresh("Read");
+                    const actualAuthority = await bareFresh("Read", "organization.manage");
+                    checkTx();
+                    return actualAuthority;
+                  } catch (error) {
+                    // WP-2423 (tax-config-revocation): the registrant source answers anything but
+                    // its own error unavailable, so a Session revoked or an assignment suspended
+                    // since entry is handed over as its refusal. An outage stays as it is, and the
+                    // transaction runner's failure mark still turns a refusal after a failed query
+                    // back into unavailable at the boundary.
+                    if (
+                      (error instanceof TaxConfigWorkflowError &&
+                        error.code === "TAX_CONFIG_PERMISSION_DENIED") ||
+                      (!(error instanceof TaxConfigWorkflowError) && isMerchantDenial(error))
+                    )
+                      throw withCause(
+                        new TaxRegistrantSourceError("TAX_REGISTRANT_PERMISSION_DENIED"),
+                        error,
+                      );
+                    throw error;
+                  }
                 },
               },
             });
@@ -786,13 +804,10 @@ export function createMerchantTaxConfigAuthoring(options: MerchantTaxConfigAutho
                       (error instanceof TaxConfigWorkflowError &&
                         error.code === "TAX_CONFIG_PERMISSION_DENIED") ||
                       (error instanceof BrowserSessionError && isMerchantRefusal(error)) ||
-                      (error instanceof Error &&
-                        [
-                          "STORE_SERVICE_PERMISSION_DENIED",
-                          "BRAND_SERVICE_PERMISSION_DENIED",
-                        ].includes(error.message))
+                      // A membership or assignment suspended since entry, as at the Tax hold.
+                      (!(error instanceof TaxConfigWorkflowError) && isMerchantDenial(error))
                     )
-                      throw new CatalogError("CATALOG_PERMISSION_DENIED");
+                      throw withCause(new CatalogError("CATALOG_PERMISSION_DENIED"), error);
                     throw withCause(new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE"), error);
                   }
                 },
