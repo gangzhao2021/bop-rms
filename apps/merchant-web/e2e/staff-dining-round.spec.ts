@@ -1822,3 +1822,78 @@ test("@production v15 b12: the left-party choices line up at 1440, 1024 and 390"
     );
   }
 });
+
+/**
+ * WP-2423 batch 28 (race-payment-and-signout): staff signed out in another tab while sending a
+ * table round. The answer names a table round (it said "counter orders"), and the guests' cart
+ * read that is now refused is not shown as "couldn't be read just now".
+ */
+async function signedOutMidRound(page: Page, zh: boolean) {
+  if (zh)
+    await page.addInitScript(() => {
+      window.localStorage.setItem("bop.merchant.language", "zh-Hans");
+    });
+  await signIn(page, { ...table, paymentTiming: "PayLater" });
+  await page.route("**/merchant/counter/menu**", (route) => route.fulfill({ headers, json: menu }));
+  let signedOut = false;
+  const refusedReads = { count: 0 };
+  await page.route("**/merchant/dining/sessions/table-cart", (route) =>
+    signedOut
+      ? (refusedReads.count++,
+        route.fulfill({ status: 403, headers, json: { error: "request_denied" } }))
+      : route.fulfill({
+          headers,
+          json: {
+            cart: {
+              cartReference: id(70),
+              cartVersion: 4,
+              guestPaying: false,
+              lines: [guestLine(81, 11)],
+            },
+          },
+        }),
+  );
+  await page.route("**/merchant/dining/staff-rounds", (route) => {
+    signedOut = true;
+    return route.fulfill({
+      status: 403,
+      headers,
+      json: { error: "staff_round_permission_denied" },
+    });
+  });
+  await page.goto("/operations/order-entry?table=" + tableReference);
+  await page.getByRole("button", { name: zh ? "添加 Gyoza" : "Add Gyoza" }).click();
+  await page.getByRole("button", { name: zh ? "发送订单" : "Send order" }).click();
+  return refusedReads;
+}
+
+for (const zh of [false, true])
+  test(`@production batch 28: a sign-out mid-round reads as a table round, with no cart outage line${zh ? ", in Chinese" : ""}`, async ({
+    page,
+  }) => {
+    const refusedReads = await signedOutMidRound(page, zh);
+    await expect(page.getByRole("alert")).toHaveText(
+      zh
+        ? "你已退出登录，或你的角色不能为餐桌下单。请重新登录或找店长。同一轮再发送一次也不会重复下单。"
+        : "You're signed out, or your role can't send table rounds. Sign in again or ask a manager. Sending the same round again never sends it twice.",
+    );
+    // The cart is read again after the answer (refused now): never "couldn't be read just now".
+    await expect.poll(() => refusedReads.count).toBeGreaterThan(0);
+    await expect(page.locator("body")).not.toContainText(
+      zh ? "暂时读不到客人的购物车" : "The guests' cart couldn't be read just now",
+    );
+    await expect(page.locator("body")).not.toContainText("counter orders");
+    await expectNoInternalText(page);
+    await expectAccessible(page);
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      await expect(page.getByRole("alert")).toBeVisible();
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1),
+      ).toBe(false);
+      await page.screenshot({
+        path: `test-results/b28-staff-round-signed-out-${zh ? "zh-Hans" : "en"}-${width}.png`,
+        fullPage: true,
+      });
+    }
+  });

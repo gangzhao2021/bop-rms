@@ -380,6 +380,16 @@ describe("counter order (OPS-ORDER-ENTRY) — WP-2423 Q7", () => {
     );
   });
 
+  it("batch 28: a sign-out answer names a table round at a table, counter orders at the counter", () => {
+    const denied = new CounterOrderClientError("PermissionDenied");
+    expect(placeErrorText(denied, [], "Table T4")).toBe(
+      "You're signed out, or your role can't send table rounds. Sign in again or ask a manager. Sending the same round again never sends it twice.",
+    );
+    expect(placeErrorText(denied, [])).toBe(
+      "Your session can't take counter orders. Sign in again or ask a manager.",
+    );
+  });
+
   it("WP-2423: explains an item short only because other items use the same ingredients", () => {
     const menu = parseCounterMenu(counterMenuResponse()).sections[0]?.items[0];
     if (!menu) throw new Error("fixture");

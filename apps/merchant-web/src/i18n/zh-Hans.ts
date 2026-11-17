@@ -5613,6 +5613,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "你的角色不允许重做。请联系店长或后厨主管。",
   "Your session can't record payments. Sign in again or ask a manager.":
     "你的登录不能记录付款。请重新登录或找店长。",
+  "You're signed out, or your role can't send table rounds. Sign in again or ask a manager. Sending the same round again never sends it twice.":
+    "你已退出登录，或你的角色不能为餐桌下单。请重新登录或找店长。同一轮再发送一次也不会重复下单。",
   "Your session can't take counter orders. Sign in again or ask a manager.":
     "你的登录不能进行柜台点单。请重新登录或找店长。",
   "Your session ended or does not allow this. Sign in again, then verify.":

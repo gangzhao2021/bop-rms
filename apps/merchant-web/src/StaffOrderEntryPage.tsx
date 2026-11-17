@@ -14,7 +14,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStaffSessionLive } from "./staff-session-reads.js";
 import { Link, useSearchParams } from "react-router";
 import { createDiningSessionClient } from "./dining-session-client.js";
-import { createTableCartClient, type TableCart, type TableCartLine } from "./table-cart-client.js";
+import {
+  createTableCartClient,
+  TableCartError,
+  type TableCart,
+  type TableCartLine,
+} from "./table-cart-client.js";
 import { validSlipReference } from "./CardMachineRefundAction.js";
 import { orderMoney } from "./order-money.js";
 import { serviceOperationReference } from "./service-control-client.js";
@@ -706,7 +711,12 @@ export function placeErrorText(
     case "InProgress":
       return t("This order is still being sent. Wait a moment, then send again to see it.");
     case "PermissionDenied":
-      return t("Your session can't take counter orders. Sign in again or ask a manager.");
+      // WP-2423 batch 28: a table round says so (staff were told "counter orders" at a table).
+      return table !== null
+        ? t(
+            "You're signed out, or your role can't send table rounds. Sign in again or ask a manager. Sending the same round again never sends it twice.",
+          )
+        : t("Your session can't take counter orders. Sign in again or ask a manager.");
     case "OutcomeUnknown":
       return t("No answer from the system. Send again — the same order is never created twice.");
     case "NoPickupTimes":
@@ -1266,8 +1276,15 @@ export function StaffOrderEntryPage({
         setGuestCart(cart);
         setGuestCartFailed(false);
       })
-      .catch(() => {
-        if (!controller.signal.aborted) setGuestCartFailed(true);
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        // WP-2423 batch 28: signed out (or no longer allowed) is not "couldn't be read just now";
+        // the round's own answer tells staff to sign in again.
+        if (error instanceof TableCartError && error.code === "PermissionDenied") {
+          setGuestCartFailed(false);
+          return;
+        }
+        setGuestCartFailed(true);
       });
   }, [csrf, tableCartClient, tableSession]);
   useEffect(() => () => guestRead.current?.abort(), []);
