@@ -380,6 +380,9 @@ export async function createInternalCounterOrder(
       : {
           tableGuestPipeline: staffDiningRound.pipeline,
           tableGuestDetails: staffDiningRound.details,
+          // The guest's own checkout answer (INTENT_CONFLICT, a 409 to the phone), which the
+          // staff round's steps turn into its own answers; for acceptance tests, not served.
+          tableGuestCheckout: staffDiningRound.checkout,
         }),
     ...(staffDiningRound === undefined ? {} : { diningPayLaterRound: staffDiningRound.payLater }),
     // The table guest's own steps, for acceptance tests that stop between them; not served.
@@ -521,6 +524,11 @@ async function createInternalStaffDiningRound(
       return null;
     }
   };
+  // The table guest's own checkout, as the guest's phone opens it (the customer session handler).
+  const guestCheckout = Object.freeze({
+    create: (value) =>
+      createCustomerCheckoutSessionComposition(diningCheckout.checkoutSessions).create(value),
+  });
   const built = createStaffTableGuestPipeline({
     takesOrder: async (input) =>
       // Staff open tables and send rounds after last orders too (recorded as their action).
@@ -598,10 +606,7 @@ async function createInternalStaffDiningRound(
     cart,
     quote,
     details,
-    checkout: {
-      create: (value) =>
-        createCustomerCheckoutSessionComposition(diningCheckout.checkoutSessions).create(value),
-    },
+    checkout: guestCheckout,
     payment,
     nextReference: reference,
     now,
@@ -631,6 +636,7 @@ async function createInternalStaffDiningRound(
     // The table guest's own steps, for the acceptance tests that walk a guest's phone.
     pipeline,
     details,
+    checkout: guestCheckout,
     // WP-2423 item 8 ⑤: staff send a guest round that waited for them to the kitchen.
     payLater,
     command: verifiedChecksOnce(

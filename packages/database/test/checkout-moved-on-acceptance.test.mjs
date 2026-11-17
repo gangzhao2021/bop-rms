@@ -36,8 +36,14 @@ it("a checkout after another guest's add is told the cart moved on, and her Quot
         "dining.operate",
         "dining.session.close",
       ]);
-      const steps = (await store.counterFor(server)).tableGuestSteps;
+      const counter = await store.counterFor(server);
+      const steps = counter.tableGuestSteps;
       assert.ok(steps, "the pilot composes the table guest's steps");
+      // The guest's phone opens the checkout through the customer checkout composition itself:
+      // the staff round's steps turn its refusals into their own answers (staff-round-guest-race),
+      // so a refusal is asked of the phone's own path, never read through the staff steps.
+      const phoneCheckout = counter.tableGuestCheckout;
+      assert.ok(phoneCheckout, "the pilot composes the table guest's checkout");
       const counts = async () =>
         (
           await admin.query(
@@ -105,6 +111,18 @@ it("a checkout after another guest's add is told the cart moved on, and her Quot
             cartVersion: cart.cartVersion,
             quoteReference,
           });
+        // The phone's own checkout of the same request (the session handler answers 409).
+        const openOnPhone = (cart, quoteReference, createOperationReference = reference()) =>
+          phoneCheckout.create({
+            ...credentials,
+            command: {
+              createOperationReference,
+              cartReference: cart.cartReference,
+              cartVersion: cart.cartVersion,
+              quoteReference,
+              quoteVersion: 2,
+            },
+          });
         const refusedAsMovedOn = (attempt) => assert.rejects(attempt, { code: "INTENT_CONFLICT" });
 
         const selected = await steps.selectCart(credentials, {
@@ -131,14 +149,21 @@ it("a checkout after another guest's add is told the cart moved on, and her Quot
         const dadsCart = cart;
         cart = await add(cart);
         const operation = reference();
-        await refusedAsMovedOn(open(dadsCart, dadsQuote, operation));
+        await refusedAsMovedOn(openOnPhone(dadsCart, dadsQuote, operation));
 
         // Dad's phone asks again with the same key: the same fixed answer, never an outage to
         // wait out, and the same request can't go through later.
-        await refusedAsMovedOn(open(dadsCart, dadsQuote, operation));
+        await refusedAsMovedOn(openOnPhone(dadsCart, dadsQuote, operation));
 
         // A key never asked before, for a cart version that had already moved on.
-        await refusedAsMovedOn(open(dadsCart, dadsQuote));
+        await refusedAsMovedOn(openOnPhone(dadsCart, dadsQuote));
+
+        // A staff round's step meeting the same moved-on Cart is told so, never opens it.
+        assert.deepEqual(
+          await open(dadsCart, dadsQuote),
+          { status: "CartChanged" },
+          `the staff step is told the cart moved on (${round} round)`,
+        );
         assert.deepEqual(await counts(), before, `nothing was created (${round} round)`);
 
         // Dad's next tap starts from the cart as it stands, and the round is placed once.
