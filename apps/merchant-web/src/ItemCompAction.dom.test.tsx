@@ -418,3 +418,68 @@ it("b24 review: the focus back on the opener and staff moved on: a later unmount
   await later();
   expect(document.activeElement).toBe(document.body);
 });
+
+// b26 (v15 b25 live): the confirm is locked while it is on its way, and the browser drops the focus
+// to the page; after a failed confirm the panel said what to do with document.activeElement BODY.
+// The focus goes back to the confirm when it can be pressed again, else to what the panel says.
+const failingComp = (answer: () => Response) =>
+  (async (url: string, init?: RequestInit) => {
+    if (url.endsWith("/preview")) return fetcher(url, init);
+    (document.activeElement as HTMLElement | null)?.blur();
+    return answer();
+  }) as typeof fetch;
+const confirmComp = async (container: HTMLElement) => {
+  await click(buttonNamed(container, "Comp or discount"));
+  await pause();
+  await tick(container, "Smashed cucumber");
+  await click(
+    [...container.querySelectorAll('input[name="item-comp-reason"]')].find((input) =>
+      input.parentElement?.textContent?.includes("Goodwill"),
+    ),
+  );
+  const confirm = buttonNamed(container, "Comp $7.06") as HTMLButtonElement;
+  confirm.focus();
+  await click(confirm);
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 120));
+  });
+};
+it("b26: a comp whose answer was lost gives the focus back to the confirm", async () => {
+  const { container } = await mount(
+    <ItemCompAction
+      order={order}
+      lines={lines.items}
+      csrf={"a".repeat(43)}
+      fetcher={failingComp(() => {
+        throw new TypeError("Failed to fetch");
+      })}
+      onSettled={() => undefined}
+    />,
+  );
+  await confirmComp(container);
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+    "Press the button again",
+  );
+  expect(document.activeElement).toBe(buttonNamed(container, "Comp $7.06"));
+});
+it("b26: a comp refused because the table changed puts the focus on what the panel says", async () => {
+  const { container } = await mount(
+    <ItemCompAction
+      order={order}
+      lines={lines.items}
+      csrf={"a".repeat(43)}
+      fetcher={failingComp(
+        () =>
+          new Response(JSON.stringify({ error: "version_conflict" }), {
+            status: 409,
+            headers: { "Content-Type": "application/json" },
+          }),
+      )}
+      onSettled={() => undefined}
+    />,
+  );
+  await confirmComp(container);
+  const alert = container.querySelector<HTMLElement>('[role="alert"]');
+  expect(alert?.textContent).toContain("This table changed");
+  expect(document.activeElement).toBe(alert);
+});

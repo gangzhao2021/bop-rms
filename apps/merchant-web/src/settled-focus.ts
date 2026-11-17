@@ -52,8 +52,23 @@ export function useSettledFocus(selectors: readonly string[], gone: boolean) {
      * panel stays open: what staff press from now on (Cancel, by click or Enter) is a step in this
      * panel again, so Cancel still gives the focus back to the opener.
      */
-    failed() {
+    failed(panel?: HTMLElement | null) {
+      const moved = movedOn();
       box.since = null;
+      // b26 (v15 b25 live): the confirm was locked while it was on its way, and the browser dropped
+      // the focus to the page. Unless staff moved on, it goes back to the confirm once it can be
+      // pressed again, else to what the panel now says (the failure, or the sign-in it asks for).
+      if (moved || panel === undefined || panel === null) return;
+      const since = staffActions;
+      setTimeout(
+        () =>
+          whenFocusable(
+            () => failedConfirmTarget(panel),
+            undefined,
+            () => staffActions > since,
+          ),
+        0,
+      );
     },
     /** A confirm succeeded from `from` (the panel): remember its stable place. */
     settled(from: Element | null) {
@@ -144,6 +159,15 @@ export function returnSettledFocus(
   }
   focusable(place).focus();
   return true;
+}
+
+/** The panel's confirm (`data-confirm`) when it can be pressed, else what the panel says. */
+function failedConfirmTarget(panel: HTMLElement): HTMLElement | null {
+  if (!panel.isConnected) return null;
+  const confirm = panel.querySelector<HTMLElement>("[data-confirm]");
+  if (confirm !== null && !confirm.matches(":disabled")) return confirm;
+  const said = panel.querySelector<HTMLElement>('[role="alert"]');
+  return said === null ? null : focusable(said);
 }
 
 function focusable(element: HTMLElement): HTMLElement {

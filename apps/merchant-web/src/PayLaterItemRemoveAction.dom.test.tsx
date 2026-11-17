@@ -386,3 +386,45 @@ it("b24: on Tables one dish of two taken off: the focus goes back to the opener 
     });
   expect(document.activeElement).toBe(buttonNamed(container, "Take dishes off round 2"));
 });
+
+// b26 (v15 b25 live): the confirm is locked while it is on its way, and the browser drops the focus
+// to the page; when the answer was lost (the connection dropped) the panel said "Press the button
+// again" with document.activeElement BODY. The focus goes back to the confirm, where it was.
+it("b26: a take-off whose answer was lost gives the focus back to the confirm", async () => {
+  const dropped = (async (url: string, init?: RequestInit) => {
+    if (url.endsWith("/preview")) return fetcher(url, init);
+    (document.activeElement as HTMLElement | null)?.blur();
+    throw new TypeError("Failed to fetch");
+  }) as typeof fetch;
+  const { container } = await mount(
+    <PayLaterItemRemoveAction
+      order={order}
+      batch={batch}
+      lines={lines.items}
+      csrf={"a".repeat(43)}
+      roundMinor="1073"
+      fetcher={dropped}
+      onSettled={() => undefined}
+      onRefused={() => undefined}
+    />,
+  );
+  await click(buttonNamed(container, "Take dishes off round 2"));
+  await settle(10);
+  await tick(container, "Smashed cucumber");
+  const select = container.querySelector("select");
+  if (!(select instanceof HTMLSelectElement)) throw new Error("no reason");
+  await act(async () => {
+    select.value = select.options[1]?.value ?? "";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  const confirm = buttonNamed(container, "Take off $7.06") as HTMLButtonElement;
+  confirm.focus();
+  await click(confirm);
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 120));
+  });
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+    "Press the button again",
+  );
+  expect(document.activeElement).toBe(buttonNamed(container, "Take off $7.06"));
+});

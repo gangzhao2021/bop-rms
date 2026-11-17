@@ -386,7 +386,7 @@ export function ItemCompAction({
         return;
       }
       const next = failureOf(response.status, payload);
-      settledFocus.failed();
+      settledFocus.failed(panel.current);
       if (next !== "FullSignInRequired" && next !== "Unknown") attempt.current = null;
       setFailure(next);
       // v15 b16: the amount may have changed with the table: work it out again before the
@@ -398,7 +398,7 @@ export function ItemCompAction({
       }
       if (next !== "FullSignInRequired" && next !== "Unknown" && next !== "Denied") onSettled();
     } catch {
-      settledFocus.failed();
+      settledFocus.failed(panel.current);
       setFailure("Unknown");
     } finally {
       setBusy(false);
@@ -535,6 +535,7 @@ export function ItemCompAction({
       <button
         type="button"
         className="table-checkout__primary"
+        data-confirm=""
         disabled={previewFailure !== null ? busy : !ready}
         onClick={() => {
           if (previewFailure !== null) {
