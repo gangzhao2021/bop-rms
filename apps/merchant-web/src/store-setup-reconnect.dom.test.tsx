@@ -222,7 +222,8 @@ it("b23: the offline line reads in Chinese", async () => {
  */
 const conflictText =
   "The saved settings or their baseline changed. Refresh, then discard your local edits to use the latest saved version.";
-const invalidText = "This draft was not saved.";
+// b26: "This draft was not saved: 1 fee setting needs fixing first…", or ". Check the edited…".
+const invalidText = "This draft was not saved";
 const savedText = "Setup draft saved. These settings have not been validated or published.";
 const recoveryText = "An earlier save has not been cleared. A new save is blocked.";
 function snapshot(revision: number, start: string): StoreSetupSnapshot {

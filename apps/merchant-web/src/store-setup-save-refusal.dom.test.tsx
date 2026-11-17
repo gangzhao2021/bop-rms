@@ -194,6 +194,8 @@ async function open(s: ReturnType<typeof server>) {
 }
 const alerts = (container: HTMLElement) =>
   [...container.querySelectorAll("[role=alert]")].map((node) => node.textContent ?? "");
+const refusal = (container: HTMLElement) =>
+  container.querySelector("#setup-validation-error")?.textContent ?? null;
 const startField = (container: HTMLElement) =>
   [...container.querySelectorAll("label")]
     .find(
@@ -227,7 +229,8 @@ async function refusedSave(status: number) {
 }
 
 for (const [status, alert] of [
-  [400, "Check the edited settings."],
+  // b26: the general check list starts by saying the draft was not saved.
+  [400, "This draft was not saved. Check the edited settings."],
   [403, "Your current permission or selected Store does not allow this action."],
   [409, "The saved settings or their baseline changed."],
 ] as const)
@@ -282,6 +285,10 @@ it("b25: in Chinese, a refused save shows no recovery line", async () => {
   await settle(10);
   expect(container.textContent).not.toContain("之前的保存尚未清除");
   expect(buttonNamed(container, "恢复原来的保存")).toBeUndefined();
+  // b26: and says first that the draft was not saved.
+  expect(
+    alerts(container).some((text) => text.startsWith("这份草稿没有保存。请检查已编辑的设置。")),
+  ).toBe(true);
 });
 
 /** A saved draft offering dine-in only, whose tip still applies to pickup orders too. */
@@ -308,32 +315,55 @@ function tipOnPickupNotOffered(s: ReturnType<typeof server>) {
     } as StoreSetupSnapshot["content"],
   };
 }
-it("b25: a save the page refuses names the fee and the service, and where Review lists it", async () => {
+it("b26: a save the page refuses says so in one short sentence; the detail is in Review only", async () => {
   const s = server();
   tipOnPickupNotOffered(s);
   const container = await open(s);
   await click(buttonNamed(container, "Save as draft"));
   await until(() => alerts(container).length > 0);
   expect(s.commands).not.toContain("SaveDraft");
-  expect(alerts(container)).toContain(
-    "This draft was not saved. Tip applies to Pickup orders, but this setup does not offer Pickup. Untick Pickup for it in step 3, Fees, tax and payment, or offer Pickup in step 2, Services. Review lists it under “Needs fixing first”, in step 4, Review and publish.",
+  expect(refusal(container)).toBe(
+    "This draft was not saved: 1 fee setting needs fixing first, see “Needs fixing first” below.",
   );
+  expect(alerts(container).join(" ")).not.toContain("Tip applies to Pickup orders");
   expect(alerts(container).join(" ")).not.toContain("Each service interval needs valid times");
   // Review, shown now, lists the same sentence under "Needs fixing first".
   expect(container.querySelector('[aria-label="Needs fixing first"]')?.textContent).toContain(
     "Tip applies to Pickup orders, but this setup does not offer Pickup.",
   );
 });
-it("b25: the same refusal reads in Chinese", async () => {
+it("b26: in Chinese, two fees to fix read as one sentence above the steps, listed once in Review", async () => {
   setLanguageForTest("zh-Hans");
   const s = server();
   tipOnPickupNotOffered(s);
+  const saved = s.state.saved as StoreSetupSnapshot;
+  const fees = saved.content.feeContexts as { state: "Configured"; value: unknown[] };
+  s.state.saved = {
+    ...saved,
+    content: {
+      ...saved.content,
+      feeContexts: {
+        state: "Configured",
+        value: fees.value.map((fee) =>
+          (fee as { chargeType: string }).chargeType === "ServiceCharge"
+            ? {
+                ...(fee as object),
+                state: "Enabled",
+                taxClassificationReference: id(9),
+                orderTypes: ["DineIn", "Pickup"],
+              }
+            : fee,
+        ),
+      },
+    } as StoreSetupSnapshot["content"],
+  };
   const container = await open(s);
   await click(buttonNamed(container, "存为草稿"));
   await until(() => alerts(container).length > 0);
-  const text = alerts(container).join(" ");
-  expect(text).toContain("这份草稿没有保存。");
-  expect(text).toContain("小费适用于自取订单，但这份设置没有提供自取。");
-  expect(text).toContain("“需要先改正”");
-  expect(text).not.toContain("每个服务时段");
+  expect(s.commands).not.toContain("SaveDraft");
+  expect(refusal(container)).toBe("这份草稿没有保存：有 2 处要先改正，见下方“需要先改正”。");
+  const review = container.querySelector('[aria-label="需要先改正"]');
+  expect(review?.querySelectorAll("li")).toHaveLength(2);
+  expect(review?.textContent).toContain("小费适用于自取订单，但这份设置没有提供自取。");
+  expect(review?.textContent).toContain("服务费适用于自取订单");
 });

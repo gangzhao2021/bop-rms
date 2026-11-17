@@ -10104,8 +10104,11 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "营业日开始时间：设为{setup}的修改无法提交审批。已经营业的门店要保持{now}，这样过去的营业日和报表才能保持界限。请在{where}中改回{now}。",
   "Needs fixing first": "需要先改正",
   "Standard rate": "标准税率",
-  "This draft was not saved. {problems} Review lists it under “Needs fixing first”, in {review}.":
-    "这份草稿没有保存。{problems}也可在{review}的“需要先改正”中查看。",
+  "This draft was not saved: 1 fee setting needs fixing first, see “Needs fixing first” below.":
+    "这份草稿没有保存：有 1 处要先改正，见下方“需要先改正”。",
+  "This draft was not saved: {count} fee settings need fixing first, see “Needs fixing first” below.":
+    "这份草稿没有保存：有 {count} 处要先改正，见下方“需要先改正”。",
+  "This draft was not saved. {detail}": "这份草稿没有保存。{detail}",
   "Choose which orders the {fee} applies to.": "请选择{fee}适用于哪些订单。",
   "{method}: {before} → {after}": "{method}：{before} → {after}",
   "Save payment methods in {where}, choose the saved payment methods for this setup, then save as draft.":

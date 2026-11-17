@@ -397,36 +397,32 @@ const messages: Record<StoreSetupClientError["code"], string> = {
   ),
 };
 /**
- * b25 (v15 live check of b24): a save that was refused says what is wrong, in the words the fee
- * itself and Review ("Needs fixing first") already use, and where Review lists it. Only when nothing
- * specific is known (a rule only the server knows, a stale tab) is the general list of rules shown.
+ * b25 (v15 live check of b24): a save that was refused says so, and where Review lists what is
+ * wrong. b26 (v15 live check of b25): in one short sentence; what each fee needs is said once, in
+ * Review ("Needs fixing first") and at the fee itself, not again above the steps. Only when nothing
+ * specific is known (a rule only the server knows, a stale tab) is the general list of rules shown,
+ * and it too starts by saying the draft was not saved.
  */
 export function storeSetupInvalidText(
   feeProblems: readonly StoreSetupFeeProblem[],
   timesValid: boolean,
-  layout: StoreSetupLayout,
 ): string {
-  if (feeProblems.length > 0)
+  if (feeProblems.length === 1)
     return t(
-      "This draft was not saved. {problems} Review lists it under “Needs fixing first”, in {review}.",
-      {
-        problems: feeProblems
-          .map((problem) =>
-            storeSetupFeeProblemText(
-              problem,
-              storeSetupWhere(layout, "payment"),
-              storeSetupWhere(layout, "serviceModes"),
-            ),
-          )
-          .join(" "),
-        review:
-          layout === "Open"
-            ? t("step {n}, {name}", { n: 4, name: t("Review and publish") })
-            : t("step {n}, {name}", { n: 8, name: t("Review") }),
-      },
+      "This draft was not saved: 1 fee setting needs fixing first, see “Needs fixing first” below.",
+    );
+  if (feeProblems.length > 1)
+    return t(
+      "This draft was not saved: {count} fee settings need fixing first, see “Needs fixing first” below.",
+      { count: feeProblems.length },
     );
   if (!timesValid) return t("Some edited times or wait values need correction before saving.");
-  return messages.Invalid;
+  // Read when shown, so the sentence is in the page's language as the rest of it.
+  return t("This draft was not saved. {detail}", {
+    detail: t(
+      "Check the edited settings. Each service interval needs valid times and at least one service mode. Wait times are whole minutes, up to 24 hours (1,440 minutes). A service charge or delivery fee that is On needs a tax classification that is still in use, and every fee that is On needs at least one order type, chosen from the services this setup offers.",
+    ),
+  });
 }
 const root = (view: StoreSetupWorkspace) => ({
   reference: view.setup.snapshot?.setupDraftReference ?? null,
@@ -1484,7 +1480,7 @@ export function StoreSetupDraftPage({
       {error && !ownerOnly && !(error === "Unavailable" && !online) && (
         <p id="setup-validation-error" role="alert">
           {error === "Invalid"
-            ? storeSetupInvalidText(feeProblems, reviewParsed !== null, layout)
+            ? storeSetupInvalidText(feeProblems, reviewParsed !== null)
             : messages[error]}
         </p>
       )}
