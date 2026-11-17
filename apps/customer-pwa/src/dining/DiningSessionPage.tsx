@@ -230,9 +230,13 @@ function RoundNote({ round }: { readonly round: DiningRound }) {
         {round.payment === "NotCharged"
           ? // v15 2026-10-29: a table paying at the end paid nothing for it; nothing is refunded.
             t("Staff took this round off the bill. It is not charged.")
-          : round.payment === "Refunded"
-            ? t("The payment was refunded.")
-            : t("The payment is being refunded to the card that paid.")}
+          : round.payment === "OnTableBill"
+            ? // b25 final: the kitchen could not make it and no one took it off the bill yet, so
+              // the table is still charged for it; the guest is never told it is not charged.
+              t("This round is still on the table's bill. Ask staff to take it off.")
+            : round.payment === "Refunded"
+              ? t("The payment was refunded.")
+              : t("The payment is being refunded to the card that paid.")}
       </p>
     );
   if (round.status === "AwaitingPayment")
@@ -414,12 +418,11 @@ function RoundCard({
             </span>
             {item.cancelled ? (
               <span className="order-status__item-cancelled">
-                {/* b25 review: on the table's bill (paying at the end) the dish was taken off it
-                    and nobody pays for it, as Orders and checkout say; a paid round's dish was
-                    cancelled and its refund is said with the round. */}
-                {round.payment === "OnTableBill" || round.payment === "NotCharged"
-                  ? t("Taken off the bill · not charged")
-                  : t("Cancelled")}
+                {/* b25: staff took the dish off the table's bill before it was charged, as Orders
+                    and checkout say. b25 final: only the read's takenOff says so; a dish of an
+                    unpaid pay-first round, one the kitchen refused that stays on the bill, and a
+                    paid round's refunded dish read Cancelled. */}
+                {item.takenOff === true ? t("Taken off the bill · not charged") : t("Cancelled")}
               </span>
             ) : item.beingRemade ? (
               <span className="order-status__item-remake">

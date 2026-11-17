@@ -1325,6 +1325,105 @@ describe("WP-2423 D5 item prices before tax at the table", () => {
     expect(view.rounds[1]).not.toHaveProperty("refundPending");
   });
 
+  // b25 final: the guest page says "Taken off the bill · not charged" only from `takenOff`.
+  describe("b25 final: takenOff marks only a dish staff took off the table's bill", () => {
+    const bill = { owedMinor: 3900n, pointsUsedMinor: 0n, takenOffMinor: 0n, taxRoundingMinor: 0n };
+    const payLater = (order: Partial<Order>) =>
+      composeCustomerDiningSession({
+        ...facts({
+          paymentOutcomes: new Map(),
+          payments: [],
+          payLaterRounds: new Set([id(30), id(40)]),
+          tableBill: bill,
+          ...order,
+        }),
+        paymentTiming: "PayLater",
+      });
+    const flags = (view: ReturnType<typeof composeCustomerDiningSession>) =>
+      view.rounds.map((round) =>
+        round.items.map((entry) => [entry.cancelled, "takenOff" in entry ? entry.takenOff : null]),
+      );
+
+    it("a dish taken off before the table paid at the end, and a round staff cancelled unpaid", () => {
+      const view = payLater({
+        delivery: new Map([
+          [id(31), { phase: "InProgress", deliveredQuantity: 0 }],
+          [id(41), { phase: "Cancelled", deliveredQuantity: 0 }],
+        ]),
+        itemCancellations: [
+          {
+            orderItemReferences: [id(41)],
+            refunded: false,
+            refundAmount: cad(0n),
+            notCharged: true,
+          },
+        ],
+      });
+      expect(flags(view)).toEqual([[[false, null]], [[true, true]]]);
+      // Still true after the table paid the rest at the end.
+      const settled = payLater({
+        delivery: new Map([
+          [id(31), { phase: "InProgress", deliveredQuantity: 0 }],
+          [id(41), { phase: "Cancelled", deliveredQuantity: 0 }],
+        ]),
+        itemCancellations: [
+          {
+            orderItemReferences: [id(41)],
+            refunded: false,
+            refundAmount: cad(0n),
+            notCharged: true,
+          },
+        ],
+        settledRounds: new Set([id(30), id(40)]),
+      });
+      expect(flags(settled)).toEqual([[[false, null]], [[true, true]]]);
+      const round = payLater({
+        staffCancellations: new Map([
+          [id(30), { reason: "SoldOut", refundedMinor: 0n, pendingMinor: 0n }],
+        ]),
+      });
+      expect(flags(round)).toEqual([[[true, true]], [[false, null]]]);
+    });
+
+    it("a dish the kitchen refused with no take-off stays on the bill, never taken off", () => {
+      const view = payLater({
+        batches: [
+          {
+            orderBatchReference: id(30),
+            submittedAt: at,
+            items: [item(31, "Ramen", 2, 3000n), item(32, "Rice", 1, 300n)],
+          },
+          { orderBatchReference: id(40), submittedAt: at, items: [item(41, "Gyoza", 1, 900n)] },
+        ],
+        delivery: new Map([
+          [id(31), { phase: "InProgress", deliveredQuantity: 0 }],
+          [id(32), { phase: "Rejected", deliveredQuantity: 0 }],
+          [id(41), { phase: "Rejected", deliveredQuantity: 0 }],
+        ]),
+      });
+      expect(flags(view)).toEqual([
+        [
+          [false, null],
+          [true, null],
+        ],
+        [[true, null]],
+      ]);
+      // The round the kitchen refused whole is still on the table's bill, not "not charged".
+      expect(view.rounds.map((round) => [round.status, round.payment])).toEqual([
+        ["Preparing", "OnTableBill"],
+        ["StoreCancelled", "OnTableBill"],
+      ]);
+      expect(view.summary?.due).toEqual(cad(3900n));
+    });
+
+    it("a pay-first round never paid is not charged, but nothing was taken off a bill", () => {
+      const view = composeCustomerDiningSession(facts({ unpaidCancellations: new Set([id(40)]) }));
+      expect(view.rounds[1]?.status).toBe("NotPaidCancelled");
+      expect(view.rounds[1]?.payment).toBe("NotCharged");
+      expect(flags(view)).toEqual([[[false, null]], [[true, null]]]);
+    });
+  });
+
   it("v15 b19: a paid dish the kitchen refused with no refund recorded stays in Total ordered", () => {
     // Both rounds paid ($30.00 and $9.00); the kitchen refused the Gyoza, nothing went back yet.
     const view = composeCustomerDiningSession(

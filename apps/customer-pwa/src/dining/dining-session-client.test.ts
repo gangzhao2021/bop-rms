@@ -271,6 +271,27 @@ describe("WP-2423 Q8 dining session client", () => {
     }
   });
 
+  it("b25 final: decodes a dish staff took off the bill, and rejects any other value", () => {
+    const off = payload();
+    Object.assign(firstRound(off).items[0] as object, { cancelled: true, takenOff: true });
+    expect(parseDiningSessionView(off).rounds[0]?.items[0]).toMatchObject({
+      cancelled: true,
+      takenOff: true,
+    });
+    expect(parseDiningSessionView(payload()).rounds[0]?.items[0]).not.toHaveProperty("takenOff");
+    for (const change of [
+      { cancelled: true, takenOff: false },
+      { cancelled: true, takenOff: "true" },
+      { cancelled: true, takenOff: null },
+      // Only a cancelled dish can have been taken off the bill.
+      { cancelled: false, takenOff: true },
+    ]) {
+      const wrong = payload();
+      Object.assign(firstRound(wrong).items[0] as object, change);
+      expect(() => parseDiningSessionView(wrong)).toThrow(DiningSessionClientError);
+    }
+  });
+
   it("does not call the server without this browser's session", async () => {
     const request = vi.fn();
     await expect(

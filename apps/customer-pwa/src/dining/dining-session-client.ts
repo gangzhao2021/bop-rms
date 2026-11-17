@@ -81,6 +81,8 @@ export interface DiningRound {
     readonly priceBeforeTax?: DiningMoney;
     /** WP-2423 Q26: the kitchen is making this item again. */
     readonly beingRemade?: boolean;
+    /** b25 final: staff took this dish off the table's bill before it was charged. */
+    readonly takenOff?: true;
     /** M91: where the dish is (absent for a cancelled dish or a charge). */
     readonly progress?: "Waiting" | "Making" | "Ready" | "Served";
     /**
@@ -397,6 +399,8 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
       round.items.map((value: unknown) => {
         const remade =
           value !== null && typeof value === "object" && Object.hasOwn(value, "beingRemade");
+        const takenOff =
+          value !== null && typeof value === "object" && Object.hasOwn(value, "takenOff");
         const again =
           value !== null && typeof value === "object" && Object.hasOwn(value, "orderAgain");
         const progressed =
@@ -409,10 +413,13 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
           "lineTotal",
           ...(priced ? ["priceBeforeTax"] : []),
           ...(remade ? ["beingRemade"] : []),
+          ...(takenOff ? ["takenOff"] : []),
           ...(again ? ["orderAgain"] : []),
           ...(progressed ? ["progress"] : []),
         ]);
         if (remade && item.beingRemade !== true) return invalid();
+        // b25 final: only a cancelled dish can have been taken off the bill.
+        if (takenOff && (item.takenOff !== true || item.cancelled !== true)) return invalid();
         const quantity = count(item.quantity, 1);
         const servedQuantity = count(item.servedQuantity, 0);
         if (servedQuantity > quantity || typeof item.cancelled !== "boolean") return invalid();
@@ -432,6 +439,7 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
           lineTotal,
           ...(priceBeforeTax === null ? {} : { priceBeforeTax }),
           ...(remade ? { beingRemade: true } : {}),
+          ...(takenOff ? { takenOff: true as const } : {}),
           ...(again ? { orderAgain: orderAgain(item.orderAgain) } : {}),
           ...(progressed
             ? {

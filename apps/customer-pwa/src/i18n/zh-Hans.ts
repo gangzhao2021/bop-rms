@@ -1591,7 +1591,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "本店不接自取单。要在店里用餐，请扫桌上的二维码，或请店员安排桌位。",
   "Back to your table": "回到本桌",
   "Back to the menu": "回到菜单",
-  "Staff took this round off the bill. It is not charged.": "店员已从账单去掉这一轮，不收费。",
+  "Staff took this round off the bill. It is not charged.": "店员已从账单删除这一轮，不收费。",
+  "This round is still on the table's bill. Ask staff to take it off.":
+    "这一轮仍在本桌账单上，请让店员删除。",
   "Taken off the bill · not charged": "已从账单删除 · 不收费",
   "Staff took off 1 charge. It isn’t charged.": "店员撤下了 1 项收费，不收费。",
   "Staff took off {count} charges. They aren’t charged.": "店员撤下了 {count} 项收费，不收费。",

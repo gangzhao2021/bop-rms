@@ -144,6 +144,8 @@ export class CustomerDiningSessionHandler {
                 : { priceBeforeTax: money(item.priceBeforeTax) }),
               // WP-2423 Q26: only while the kitchen is making this item again (as on pickup).
               ...(item.beingRemade === true ? { beingRemade: true } : {}),
+              // b25 final: staff took this dish off the table's bill before it was charged.
+              ...(item.takenOff === true ? { takenOff: true } : {}),
               // M91: Waiting / Making / Ready / Served; absent for a cancelled dish or a charge.
               ...(item.progress === undefined ? {} : { progress: item.progress }),
               // WP-2423 item 8 ③ (decision 13): the published menu item and options "Order

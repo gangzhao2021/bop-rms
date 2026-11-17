@@ -1054,52 +1054,111 @@ describe("CUST-DINE-IN-SESSION item prices before tax (WP-2423 D5)", () => {
     );
   });
 
-  // b25 review: on a table paying at the end, Orders and checkout say a dish staff took off reads
-  // "Taken off the bill · not charged"; the guest page said only "Cancelled", as if something had
-  // gone wrong with it. A paid round's refunded dish still reads "Cancelled" (its refund is said).
-  it("b25: a dish staff took off a table's bill reads Taken off the bill, not charged, as on Orders", () => {
-    const items = [
-      { ...round().items[0], displayName: "Steamed rice", lineTotal: cad("282") },
-      {
-        displayName: "Lemon tea",
-        quantity: 1,
-        servedQuantity: 0,
-        cancelled: true,
-        lineTotal: cad("537"),
-      },
-    ] as DiningRound["items"];
-    const onBill = round({ payment: "OnTableBill", items, itemsTotal: cad("282") });
-    const state = {
-      status: "ready",
-      refreshing: false,
-      view: view({ paymentTiming: "PayLater", rounds: [onBill], summary: null }),
-    } as const;
-    const html = text(render(state));
-    expect(html).toContain("Lemon tea $5.37 Taken off the bill · not charged");
-    expect(html).not.toContain("Cancelled");
-    const zh = text(
-      renderToStaticMarkup(
-        <LanguageRoot initial="zh-Hans">
-          {() => (
-            <MemoryRouter initialEntries={["/dine-in/session"]}>
-              <DiningSessionScreen state={state} store={store} onRefresh={() => undefined} />
-            </MemoryRouter>
-          )}
-        </LanguageRoot>,
-      ),
-    );
-    renderToStaticMarkup(<LanguageRoot initial="en">{() => null}</LanguageRoot>);
-    expect(zh).toContain("已从账单删除 · 不收费");
-    expect(zh).not.toContain("已取消");
-    const paid = text(
-      render({
+  // b25: on a table paying at the end, Orders and checkout say a dish staff took off reads
+  // "Taken off the bill · not charged"; the guest page said only "Cancelled". b25 final: that
+  // wording follows the read's `takenOff` (staff took it off the bill before it was charged), not
+  // the round's payment, so a guest is never told a dish is not charged while the bill charges it.
+  describe("b25: Taken off the bill · not charged only for a dish staff took off the bill", () => {
+    const rice = { ...round().items[0], displayName: "Steamed rice", lineTotal: cad("282") };
+    const tea = {
+      displayName: "Lemon tea",
+      quantity: 1,
+      servedQuantity: 0,
+      cancelled: true,
+      lineTotal: cad("537"),
+    };
+    const both = (language: "en" | "zh-Hans", rounds: DiningRound[], timing = "PayLater") => {
+      const state = {
         status: "ready",
         refreshing: false,
-        view: view({ rounds: [round({ items, itemsTotal: cad("819"), refunded: cad("537") })] }),
-      }),
-    );
-    expect(paid).toContain("Lemon tea $5.37 Cancelled");
-    expect(paid).not.toContain("Taken off the bill");
+        view: view({
+          paymentTiming: timing as DiningSessionView["paymentTiming"],
+          rounds,
+          summary: null,
+        }),
+      } as const;
+      const html = text(
+        renderToStaticMarkup(
+          <LanguageRoot initial={language}>
+            {() => (
+              <MemoryRouter initialEntries={["/dine-in/session"]}>
+                <DiningSessionScreen state={state} store={store} onRefresh={() => undefined} />
+              </MemoryRouter>
+            )}
+          </LanguageRoot>,
+        ),
+      );
+      renderToStaticMarkup(<LanguageRoot initial="en">{() => null}</LanguageRoot>);
+      return html;
+    };
+
+    it("a dish staff took off, on the bill or after the table paid at the end, says so (en, zh)", () => {
+      const items = [rice, { ...tea, takenOff: true as const }] as DiningRound["items"];
+      for (const payment of ["OnTableBill", "Paid"] as const) {
+        const rounds = [round({ payment, items, itemsTotal: cad("282") })];
+        const en = both("en", rounds);
+        expect(en).toContain("Lemon tea $5.37 Taken off the bill · not charged");
+        expect(en).not.toContain("Cancelled");
+        const zh = both("zh-Hans", rounds);
+        expect(zh).toContain("已从账单删除 · 不收费");
+        expect(zh).not.toContain("已取消");
+      }
+    });
+
+    it("a pay-first round never paid reads Cancelled: nothing was taken off a bill (en, zh)", () => {
+      const items = [{ ...rice, cancelled: true, servedQuantity: 0 }, tea] as DiningRound["items"];
+      const rounds = [
+        round({ status: "NotPaidCancelled", payment: "NotCharged", items, itemsTotal: cad("819") }),
+      ];
+      const en = both("en", rounds, "PayFirst");
+      expect(en).toContain("Lemon tea $5.37 Cancelled");
+      expect(en).not.toContain("Taken off the bill");
+      const zh = both("zh-Hans", rounds, "PayFirst");
+      expect(zh).toContain("已取消");
+      expect(zh).not.toContain("已从账单删除");
+    });
+
+    it("a dish the kitchen refused that stays on the table's bill is never called not charged (en, zh)", () => {
+      const items = [rice, tea] as DiningRound["items"];
+      const rounds = [round({ payment: "OnTableBill", items, itemsTotal: cad("819") })];
+      const en = both("en", rounds);
+      expect(en).toContain("Lemon tea $5.37 Cancelled");
+      expect(en).not.toMatch(/not charged/iu);
+      const zh = both("zh-Hans", rounds);
+      expect(zh).toContain("已取消");
+      expect(zh).not.toContain("不收费");
+      // A round the kitchen refused whole stays on the bill: never "not charged" or "refunded".
+      const whole = [
+        round({
+          status: "StoreCancelled",
+          payment: "OnTableBill",
+          items: [tea] as DiningRound["items"],
+          itemsTotal: cad("537"),
+        }),
+      ];
+      const wholeEn = both("en", whole);
+      expect(wholeEn).toContain(
+        "This round is still on the table's bill. Ask staff to take it off.".replace("'", "&#x27;"),
+      );
+      expect(wholeEn).toContain("Lemon tea $5.37 Cancelled");
+      expect(wholeEn).not.toMatch(/not charged|refund/iu);
+      const wholeZh = both("zh-Hans", whole);
+      expect(wholeZh).toContain("这一轮仍在本桌账单上，请让店员删除。");
+      expect(wholeZh).not.toMatch(/不收费|退/u);
+    });
+
+    it("a paid round's refunded dish still reads Cancelled", () => {
+      const items = [rice, tea] as DiningRound["items"];
+      const paid = text(
+        render({
+          status: "ready",
+          refreshing: false,
+          view: view({ rounds: [round({ items, itemsTotal: cad("819"), refunded: cad("537") })] }),
+        }),
+      );
+      expect(paid).toContain("Lemon tea $5.37 Cancelled");
+      expect(paid).not.toContain("Taken off the bill");
+    });
   });
 });
 

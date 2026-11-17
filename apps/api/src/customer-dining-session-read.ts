@@ -315,6 +315,12 @@ export interface CustomerDiningSessionView {
       /** WP-2423 Q26: present (true) only while the kitchen is making this item again. */
       readonly beingRemade?: true;
       /**
+       * b25 final: present (true) only for a dish staff took off the table's bill before it was
+       * charged (with `cancelled`); the guest is told it is not charged. Absent for a dish of an
+       * unpaid pay-first round and for one the kitchen refused that stays on the bill.
+       */
+      readonly takenOff?: true;
+      /**
        * M91: where this dish is — waiting for the kitchen, being made, ready or served (all of it).
        * Absent for a cancelled dish and for a charge (tea, corkage), which the kitchen never makes.
        */
@@ -594,6 +600,13 @@ export function composeCustomerDiningSession(
     if (mine === undefined || batch.items.length === 0) return unavailable();
     const unpaidCancelled = order.unpaidCancellations.has(reference);
     const staff = order.staffCancellations.get(reference);
+    const roundRefunded = staff !== undefined && staff.refundedMinor + staff.pendingMinor > 0n;
+    // A round staff cancelled on a table paying at the end, before it paid, was never charged.
+    const roundNotCharged =
+      staff !== undefined &&
+      !roundRefunded &&
+      order.payLaterRounds?.has(reference) === true &&
+      order.settledRounds?.has(reference) !== true;
     const items = batch.items.map((item) => {
       if (item.lineTotal.currencyCode !== currency) return unavailable();
       const delivery = order.delivery.get(item.orderItemReference);
@@ -637,6 +650,11 @@ export function composeCustomerDiningSession(
             ? undefined
             : order.orderAgain?.get(item.orderItemReference),
         notCharged: itemCancellation(item.orderItemReference)?.notCharged === true,
+        // b25 final: staff took this dish off the table's bill before it was charged (a take-off
+        // record, or the whole round cancelled before the table paid at the end). Only these say
+        // "not charged" to the guest: an unpaid pay-first round was never charged but nothing was
+        // taken off a bill, and a dish the kitchen refused with no record stays on the bill.
+        takenOff: itemCancellation(item.orderItemReference)?.notCharged === true || roundNotCharged,
         // v15 b19: staff cancelled this dish with a refund recorded (confirmed or pending).
         refundRecorded:
           (itemCancellation(item.orderItemReference)?.refundAmount.amountMinor ?? 0n) > 0n,
@@ -666,13 +684,6 @@ export function composeCustomerDiningSession(
     // nor is a round or dish the store refunded (the refund is its own line, confirmed or
     // pending). A dish cancelled or refused by the kitchen with no refund recorded was charged and
     // stays on it, so paid − refunded − refund pending + still to pay is always Total ordered.
-    const roundRefunded = staff !== undefined && staff.refundedMinor + staff.pendingMinor > 0n;
-    // A round staff cancelled on a table paying at the end, before it paid, was never charged.
-    const roundNotCharged =
-      staff !== undefined &&
-      !roundRefunded &&
-      order.payLaterRounds?.has(reference) === true &&
-      order.settledRounds?.has(reference) !== true;
     // b22 (DEC-TAX-WHOLE-RECEIPT): a round on the table's bill whose lines can't be printed as the
     // bill's (an order-time discount or fee) still totals what the bill charges for it: its share
     // of the bill's tax rounding is in its tax and total, so every round card adds up to the bill.
@@ -762,6 +773,10 @@ export function composeCustomerDiningSession(
           payment = lines.every((entry) => entry?.refunded === true || entry?.notCharged === true)
             ? "Refunded"
             : "RefundPending";
+        // b25 final: a round on the table's bill the kitchen refused with a dish no one took off
+        // the bill is still charged with it, so it stays on the bill and is never "not charged".
+        else if (payment === "OnTableBill" && !lines.every((entry) => entry?.notCharged === true))
+          payment = "OnTableBill";
         else payment = "NotCharged";
       } else if (active.every((item) => item.phase === "Fulfilled")) status = "Served";
       else if (active.some((item) => item.servedQuantity > 0)) status = "Serving";
@@ -815,6 +830,7 @@ export function composeCustomerDiningSession(
               ? {}
               : { priceBeforeTax: money(item.price.subtotal.amountMinor) }),
             ...(item.beingRemade ? { beingRemade: true as const } : {}),
+            ...(item.takenOff ? { takenOff: true as const } : {}),
             ...(item.progress === undefined ? {} : { progress: item.progress }),
             ...(item.orderAgain === undefined ? {} : { orderAgain: item.orderAgain }),
           }),

@@ -246,6 +246,7 @@ it("WP-2423 Q26: tells the table which dish the kitchen is making again, and onl
         ...round,
         items: [
           { ...ramen, beingRemade: true },
+          { ...ramen, displayName: "Tea", cancelled: true, takenOff: true },
           {
             ...ramen,
             displayName: "Gyoza",
@@ -266,6 +267,10 @@ it("WP-2423 Q26: tells the table which dish the kitchen is making again, and onl
   };
   const items = body.session.rounds[0]?.items ?? [];
   expect(items[0]).toMatchObject({ displayName: "Ramen", beingRemade: true });
+  // b25 final: a dish staff took off the table's bill says so; others carry no takenOff.
+  expect(items[1]).toMatchObject({ displayName: "Tea", cancelled: true, takenOff: true });
+  expect(items[0]).not.toHaveProperty("takenOff");
+  items.splice(1, 1);
   expect(items[1]).not.toHaveProperty("beingRemade");
   // WP-2423 item 8 ③ (decision 13): "Order again" gets the public menu references only.
   expect(items[1]?.orderAgain).toEqual({
