@@ -249,11 +249,15 @@ for (const [answers, language] of [
       expect(adds).toHaveLength(2);
       expect(adds[0]).not.toBe(adds[1]);
     } else {
-      await expect(page.getByRole("status")).toContainText(
-        zh
-          ? "同桌另一位客人正在为这笔订单付款。Synthetic tea还没加入购物车，请稍后再点 +。"
-          : "Another guest at your table is paying for this order. Synthetic tea wasn’t added. Tap + again in a moment.",
-      );
+      // The menu may also show its own last-orders status near the fixture store's closing time,
+      // so the check names the add's status instead of expecting it to be the only one.
+      await expect(
+        page.getByRole("status").filter({
+          hasText: zh
+            ? "同桌另一位客人正在为这笔订单付款。Synthetic tea还没加入购物车，请稍后再点 +。"
+            : "Another guest at your table is paying for this order. Synthetic tea wasn’t added. Tap + again in a moment.",
+        }),
+      ).toBeVisible();
       expect(adds).toHaveLength(2);
     }
     expect(new URL(page.url()).pathname).toBe("/menu");
