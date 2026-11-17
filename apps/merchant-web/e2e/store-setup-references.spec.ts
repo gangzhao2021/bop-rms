@@ -528,7 +528,8 @@ test("@production Reference controls reflow at 390px and scope or CSRF denial ca
   ).toContainText("cannot access this configuration");
   expect(f.control.referenceWrites).toEqual([]);
   expect(f.versions.size).toBe(0);
-  expect(await records(page)).toHaveLength(1);
+  // b25: a refusal (403) proves nothing was written, so no original is kept to recover.
+  expect(await records(page)).toHaveLength(0);
   f.control.wrongReferenceScope = true;
   await page.reload();
   await page.getByRole("button", { name: "4. Review and publish", exact: true }).click();
@@ -538,7 +539,7 @@ test("@production Reference controls reflow at 390px and scope or CSRF denial ca
   await expect(save).toBeDisabled();
   expect(f.control.referenceWrites).toEqual([]);
   expect(f.control.draftWrites).toEqual([]);
-  expect(await records(page)).toHaveLength(1);
+  expect(await records(page)).toHaveLength(0);
   expect(f.control.errors).toEqual([]);
 });
 test("@production b20: an address typed and not saved yet makes the language switch ask first", async ({

@@ -304,7 +304,11 @@ test("@production lost receipt reply reload retains denied original then resolve
   });
   expect(state.errors).toEqual([]);
 });
-test("@production mobile keyboard conflict keeps original protected", async ({ page }) => {
+// b25: a conflict (409) proves nothing was written, so the original is let go and the preset can
+// be saved again; only an unknown outcome keeps the original protected (see the lost-reply test).
+test("@production mobile keyboard conflict is let go and the preset can be saved again", async ({
+  page,
+}) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const state = await install(page);
   await open(page);
@@ -315,17 +319,19 @@ test("@production mobile keyboard conflict keeps original protected", async ({ p
   await expect(
     page.getByRole("region", { name: "required receipt fields", exact: true }).getByRole("alert"),
   ).toContainText("changed");
-  expect((await cursors(page)).length).toBe(1);
+  expect((await cursors(page)).length).toBe(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   );
-  const recover = page.getByRole("button", {
-    name: "Recover original required receipt fields save",
-    exact: true,
-  });
-  await expect(recover).toBeVisible();
-  await recover.focus();
-  await expect(recover).toBeFocused();
+  await expect(
+    page.getByRole("button", {
+      name: "Recover original required receipt fields save",
+      exact: true,
+    }),
+  ).toHaveCount(0);
+  await expect(save).toBeVisible();
+  await save.focus();
+  await expect(save).toBeFocused();
   await page.screenshot({
     path: test.info().outputPath("wp2421-receipt-artifacts-mobile.png"),
     fullPage: true,

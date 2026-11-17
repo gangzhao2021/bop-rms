@@ -452,7 +452,8 @@ test("@production payment committed reply loss reload denies recovery then clear
   expect(f.control.resolves.map((r) => r.operationReference)).toEqual([op, op]);
   expect(f.control.errors).toEqual([]);
 });
-test("@production mobile payment keyboard controls and CSRF denial preserve original barrier", async ({
+// b25: a refusal (403) proves nothing was written, so no original is kept to recover.
+test("@production mobile payment keyboard controls and CSRF denial keep no original to recover", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
@@ -466,10 +467,8 @@ test("@production mobile payment keyboard controls and CSRF denial preserve orig
   await page.getByRole("button", { name: "Save payment methods", exact: true }).click();
   await expect(page.getByText("You cannot see this Store's payment methods.")).toBeVisible();
   expect(f.control.paymentWrites).toEqual([]);
-  expect(await records(page)).toHaveLength(1);
-  await expect(
-    page.getByRole("button", { name: "Save payment methods", exact: true }),
-  ).toBeDisabled();
+  expect(await records(page)).toHaveLength(0);
+  await expect(page.getByRole("button", { name: /Recover original payment save/u })).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   );
