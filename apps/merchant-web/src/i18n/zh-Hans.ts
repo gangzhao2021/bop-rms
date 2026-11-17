@@ -361,6 +361,14 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "1 character left": "还剩 1 个字符",
   "1 day": "1 天",
   "1 item": "1 项",
+  "1 item hasn't been served yet. Mark it served above. If the guests don't want it, the table hasn't paid and the kitchen hasn't started it, take it off its round in this table's order.":
+    "1 项尚未上桌。在上面点“已上”。如果顾客不要了，本桌还没付款，后厨也还没开始做，可在“这桌的订单”里把它从那一轮删掉。",
+  "{count} items haven't been served yet. Mark them served above. If the guests don't want a dish, the table hasn't paid and the kitchen hasn't started it, take it off its round in this table's order.":
+    "{count} 项尚未上桌。在上面点“已上”。如果顾客不要某道菜，本桌还没付款，后厨也还没开始做，可在“这桌的订单”里把它从那一轮删掉。",
+  "Some items haven't been served yet. Mark them served above. If the guests don't want a dish, the table hasn't paid and the kitchen hasn't started it, take it off its round in this table's order.":
+    "部分商品尚未上桌。在上面点“已上”。如果顾客不要某道菜，本桌还没付款，后厨也还没开始做，可在“这桌的订单”里把它从那一轮删掉。",
+  "Comps and discounts, before tax": "免单/折让（税前）",
+  "Points used, before tax": "已用积分（税前）",
   "1 item hasn't been served yet. Mark it served or cancel it on the Orders page.":
     "1 项尚未上桌。在上面点“已上”，或到订单页取消。",
   "1 item is waiting for payment or for the kitchen to accept it. Ask the guest to finish paying on their phone, or cancel the unpaid round below (if the guests left) or on the Orders page.":

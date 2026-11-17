@@ -1,3 +1,4 @@
+import { closeReasonTexts } from "./dining-close-reasons.js";
 import { expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
@@ -116,10 +117,20 @@ it("v15 batch-5: a staff round's dishes are its card-machine payment, never also
 it("v15 2026-10-28: a round paid with the table gets only its own guidance, not 'cancel on Orders'", () => {
   const cooking = { items: [item("Accepted", 1, 3)] };
   const payLater = { staffRoundsAwaitingPayment: [], paymentTiming: "PayLater" as const };
+  // b26 (live25): a table paying at the end has no Cancel on the Orders page; it names the real
+  // action, taking the dish off its round in this table's order.
   expect(tableCloseBlockers(payLater, cooking)).toEqual([
-    "1 item hasn't been served yet. Mark it served or cancel it on the Orders page.",
+    "1 item hasn't been served yet. Mark it served above. If the guests don't want it, the table hasn't paid and the kitchen hasn't started it, take it off its round in this table's order.",
+  ]);
+  expect(
+    tableCloseBlockers(payLater, { items: [item("Accepted", 1, 3), item("Ready", 1, 4)] }),
+  ).toEqual([
+    "2 items haven't been served yet. Mark them served above. If the guests don't want a dish, the table hasn't paid and the kitchen hasn't started it, take it off its round in this table's order.",
   ]);
   expect(tableCloseBlockers(payLater, cooking, { unservedExplained: true })).toEqual([]);
+  for (const code of ["EXECUTION_NOT_FINAL", "FULFILLMENT_NOT_FINAL"])
+    expect(closeReasonTexts([code], "PayLater")[0]).not.toContain("Orders page");
+  expect(closeReasonTexts(["EXECUTION_NOT_FINAL"], "PayFirst")[0]).toContain("Orders page");
 });
 
 it("WP-2423 D4: stops ordering, closes the completed order and releases the table, in order", async () => {
@@ -299,7 +310,7 @@ it("v15 batch 8: the close block counts servings, as each round's own note does"
       { items: [noodles, more] },
     ),
   ).toEqual([
-    "3 items haven't been served yet. Mark them served or cancel them on the Orders page.",
+    "3 items haven't been served yet. Mark them served above. If the guests don't want a dish, the table hasn't paid and the kitchen hasn't started it, take it off its round in this table's order.",
   ]);
   expect(tableCloseBlockers({ staffRoundsAwaitingPayment: [] }, { items: [noodles] })).toEqual([
     "2 items haven't been served yet. Mark them served or cancel them on the Orders page.",

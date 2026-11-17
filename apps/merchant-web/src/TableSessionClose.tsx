@@ -114,7 +114,20 @@ export function tableCloseBlockers(
             { count: waiting },
           ),
     );
-  if (unserved > 0 && !unservedExplained)
+  if (unserved > 0 && !unservedExplained && table.paymentTiming === "PayLater")
+    // b26 (live25): a round on the table's bill has no Cancel on the Orders page; before the
+    // table pays, a dish the kitchen hasn't started comes off its round (Take dishes off round N).
+    blockers.push(
+      unserved === 1
+        ? t(
+            "1 item hasn't been served yet. Mark it served above. If the guests don't want it, the table hasn't paid and the kitchen hasn't started it, take it off its round in this table's order.",
+          )
+        : t(
+            "{count} items haven't been served yet. Mark them served above. If the guests don't want a dish, the table hasn't paid and the kitchen hasn't started it, take it off its round in this table's order.",
+            { count: unserved },
+          ),
+    );
+  else if (unserved > 0 && !unservedExplained)
     blockers.push(
       unserved === 1
         ? t("1 item hasn't been served yet. Mark it served or cancel it on the Orders page.")

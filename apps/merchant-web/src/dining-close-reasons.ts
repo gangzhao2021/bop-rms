@@ -58,6 +58,13 @@ const payLaterTexts: Readonly<Record<string, string>> = {
   ORDER_BALANCE_UNPAID: t(
     "The table hasn't paid yet. Take the payment in Checkout above, or, if the guests left without paying, ask a manager or the owner to record it there.",
   ),
+  // b26 (live25): a table paying at the end has no Cancel for its dishes on the Orders page.
+  EXECUTION_NOT_FINAL: t(
+    "Some items haven't been served yet. Mark them served above. If the guests don't want a dish, the table hasn't paid and the kitchen hasn't started it, take it off its round in this table's order.",
+  ),
+  FULFILLMENT_NOT_FINAL: t(
+    "Some items haven't been served yet. Mark them served above. If the guests don't want a dish, the table hasn't paid and the kitchen hasn't started it, take it off its round in this table's order.",
+  ),
   // v15 b12: only a table paying at the end has Cancel checkout (it records the bill again).
   CLOSE_CHECK_UNAVAILABLE: t(
     "Couldn't check whether the table can be closed. Press Check again in a moment. If it keeps happening, press Cancel checkout, then Start checkout again.",
