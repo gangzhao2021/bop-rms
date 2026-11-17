@@ -124,6 +124,38 @@ test("@production Tables says what to do when the server fails, and comes back b
   await expect(page.getByRole("note", { name: "While Tables isn't working" })).toHaveCount(0);
 });
 
+// b26 (v15 b25 live): the Chinese notice said 您的网络没有问题; it names Wi-Fi like the English text
+// and the offline page, and says 你 like the rest of the app.
+for (const language of ["en", "zh-Hans"] as const)
+  test(`@production the server-problem notice on Tables names Wi-Fi (${language})`, async ({
+    page,
+  }) => {
+    if (language === "zh-Hans")
+      await page.addInitScript(() =>
+        window.localStorage.setItem("bop.merchant.language", "zh-Hans"),
+      );
+    await session(page, tablesNavigation);
+    await page.route("**/merchant/dining/tables", (route) => route.fulfill(retryLater));
+    await page.goto("/operations/dining");
+    const said =
+      language === "en"
+        ? words
+        : "我们的系统出了问题，你的 Wi-Fi 没有问题。请继续营业：新点的菜写纸单，付款用刷卡机。这个页面会一直重试。";
+    await expect(page.getByText(said)).toBeVisible();
+    await expect(page.getByText(/您|网络没有问题/u)).toHaveCount(0);
+    const shots = process.env.B26_SHOTS ?? "test-results-b26/shots";
+    for (const width of [1440, 1024, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      await expect(page.getByText(said)).toBeVisible();
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      await page.screenshot({
+        path: `${shots}/merchant-server-problem-${language}-${String(width)}.png`,
+      });
+    }
+  });
+
 test("@production a re-read of Tables the server failed keeps the list read-only and says why", async ({
   page,
 }) => {

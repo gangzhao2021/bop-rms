@@ -20,9 +20,17 @@ const money = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
 
 type Action = "comp" | "takeOff";
 /** How the confirm answers: held until `answer()` is called, or refused at once with a status. */
-type ConfirmAnswer = "held" | 503 | 403;
+type ConfirmAnswer = "held" | 503 | 403 | "dropped";
 
-async function tableWith(page: Page, action: Action, answerWith: ConfirmAnswer) {
+async function tableWith(
+  page: Page,
+  action: Action,
+  answerWith: ConfirmAnswer,
+  language: "en" | "zh-Hans" = "en",
+) {
+  const zh = language === "zh-Hans";
+  if (zh)
+    await page.addInitScript(() => window.localStorage.setItem("bop.merchant.language", "zh-Hans"));
   const scope = {
     brandLabel: "Synthetic Brand",
     storeLabel: "Synthetic Store",
@@ -207,6 +215,11 @@ async function tableWith(page: Page, action: Action, answerWith: ConfirmAnswer) 
     comp ? "**/merchant/orders/comp-items" : "**/merchant/orders/remove-unpaid-items",
     async (route) => {
       confirmsAsked += 1;
+      // b26: the connection dropped while the confirm was on its way (no answer at all).
+      if (answerWith === "dropped") {
+        await route.abort("internetdisconnected");
+        return;
+      }
       if (answerWith !== "held") {
         await route.fulfill({ status: answerWith, headers, json: { status: "Unavailable" } });
         return;
@@ -217,20 +230,30 @@ async function tableWith(page: Page, action: Action, answerWith: ConfirmAnswer) 
     },
   );
   await page.goto("/operations/dining");
-  await page.getByRole("button", { name: "Select T3", exact: true }).click();
-  const details = page.getByRole("complementary", { name: "Selected table details" });
-  const openerName = comp ? "Comp or discount" : "Take dishes off round 1";
+  await page.getByRole("button", { name: zh ? "选择 T3" : "Select T3", exact: true }).click();
+  const details = page.getByRole("complementary", {
+    name: zh ? "所选桌台详情" : "Selected table details",
+  });
+  const openerName = comp
+    ? zh
+      ? "免单或折让"
+      : "Comp or discount"
+    : zh
+      ? "从第 1 轮删菜"
+      : "Take dishes off round 1";
   const opener = details.getByRole("button", { name: openerName });
   await opener.click();
   const group = details.getByRole("group", { name: openerName });
   if (comp) {
     await group.getByLabel(/Synthetic boiled fish/u).check();
-    await group.getByRole("radio", { name: "Goodwill" }).check();
+    await group.getByRole("radio", { name: zh ? "致歉/好意" : "Goodwill" }).check();
   } else {
     await group.getByRole("checkbox", { name: /Synthetic boiled fish/u }).check();
     await group.getByRole("combobox").selectOption({ index: 1 });
   }
-  const confirm = group.getByRole("button", { name: comp ? "Comp $11.30" : "Take off $11.30" });
+  const confirm = group.getByRole("button", {
+    name: comp ? (zh ? "免单 $11.30" : "Comp $11.30") : zh ? "删掉 $11.30" : "Take off $11.30",
+  });
   await expect(confirm).toBeEnabled();
   return {
     opener,
@@ -328,3 +351,32 @@ for (const action of ["comp", "takeOff"] as const) {
     });
   }
 }
+
+// b26 (v15 b25 live): the confirm is locked while it is on its way and the browser drops the focus
+// to the page; when the connection dropped, the panel said "Press the button again" with
+// document.activeElement BODY. The focus goes back to the confirm, so a keyboard or screen-reader
+// user keeps their place and presses again.
+for (const action of ["comp", "takeOff"] as const)
+  for (const language of ["en", "zh-Hans"] as const)
+    test(`@production a ${action} whose answer was lost gives the focus back to the confirm (${language})`, async ({
+      page,
+    }) => {
+      const table = await tableWith(page, action, "dropped", language);
+      await table.confirm.focus();
+      await page.keyboard.press("Enter");
+      await table.asked();
+      await expect(table.group.getByRole("alert")).toBeVisible();
+      await expect(table.confirm).toBeFocused();
+      const shots = process.env.B26_SHOTS ?? "test-results-b26/shots";
+      for (const width of [1440, 1024, 390]) {
+        await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+        await table.group.scrollIntoViewIfNeeded();
+        expect(
+          await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+        ).toBe(true);
+        await page.screenshot({
+          path: `${shots}/merchant-${action}-lost-answer-focus-${language}-${String(width)}.png`,
+        });
+      }
+      await expect(table.confirm).toBeFocused();
+    });
