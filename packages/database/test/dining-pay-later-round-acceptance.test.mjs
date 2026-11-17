@@ -3896,11 +3896,11 @@ async function journey(journeyEnding) {
         assert.equal(open.sessionPhase, "Closing");
         assert.equal(open.consistent, true);
         // v15 b16: two $12.50 rounds were each charged $1.63; the whole bill's tax is $3.25, so
-        // the bill's tax rounding (−$0.01) is on round 2 (largest remainder, then round order).
-        // At $3.80 a round the +$0.01 is on round 1.
+        // the bill's tax rounding (−$0.01) is on round 2, and at $3.80 a round the +$0.01 is too
+        // (b28: on the last round, so round 1 keeps what it was charged; it was round 1 before).
         const [rounding1, rounding2] =
           centsPrice.unitPriceMinor === 380n
-            ? [1n, 0n]
+            ? [0n, 1n]
             : ending.startsWith("CompCents")
               ? [0n, -1n]
               : [0n, 0n];
