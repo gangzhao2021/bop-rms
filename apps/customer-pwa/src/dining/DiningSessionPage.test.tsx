@@ -144,6 +144,30 @@ describe("CUST-DINE-IN-SESSION (WP-2423 Q8)", () => {
     expect(html).toContain("Served");
   });
 
+  // b26 (v15 live25): on a table that paid, a round refused whole with no refund says no refund
+  // was made (never "being refunded"), and a comped $0.00 round in the kitchen has nothing to pay.
+  it("never claims a refund that does not exist, and a comped round has nothing to pay", () => {
+    const html = render({
+      status: "ready",
+      refreshing: false,
+      view: view({
+        paymentTiming: "PayLater",
+        rounds: [
+          round({ status: "StoreCancelled", payment: "Paid" }),
+          round({ roundNumber: 2, status: "Served", payment: "NotCharged" }),
+          round({ roundNumber: 3, status: "WaitingForStaff", payment: "NotCharged" }),
+        ],
+      }),
+    });
+    expect(html).toContain("This round was paid and has not been refunded. Ask a staff member.");
+    expect(html).not.toContain("being refunded");
+    expect(html).not.toContain("Refund on its way");
+    expect(html).toContain("Nothing to pay");
+    // A round still waiting for staff is not charged yet (not "nothing to pay").
+    expect(html.split("Nothing to pay").length - 1).toBe(1);
+    expect(html).toContain("Not charged");
+  });
+
   // v15 b19: two Chinese sentences built from parts meet at their 句号 with no space between.
   it("writes a refused round's reason and refund, and a held round's two notes, without a gap in Chinese", () => {
     const state: DiningSessionState = {

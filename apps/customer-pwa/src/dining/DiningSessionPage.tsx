@@ -133,6 +133,12 @@ const orderedByText: Readonly<Record<DiningRound["orderedBy"], string>> = {
     return t("Entered by staff");
   },
 };
+/** b26: statuses whose "Not charged" means the round never was (or is not yet) on the bill. */
+const settledOrWaiting: ReadonlySet<DiningRoundStatus> = new Set([
+  "NotPaidCancelled",
+  "StoreCancelled",
+  "WaitingForStaff",
+]);
 const settled: ReadonlySet<DiningRoundStatus> = new Set([
   "NotPaidCancelled",
   "StoreCancelled",
@@ -236,7 +242,10 @@ function RoundNote({ round }: { readonly round: DiningRound }) {
               t("This round is still on the table's bill. Ask staff to take it off.")
             : round.payment === "Refunded"
               ? t("The payment was refunded.")
-              : t("The payment is being refunded to the card that paid.")}
+              : round.payment === "Paid"
+                ? // b26 (live25): it was paid and no refund exists yet: never "being refunded".
+                  t("This round was paid and has not been refunded. Ask a staff member.")
+                : t("The payment is being refunded to the card that paid.")}
       </p>
     );
   if (round.status === "AwaitingPayment")
@@ -399,7 +408,13 @@ function RoundCard({
         )}
         <div>
           <dt>{t("Payment")}</dt>
-          <dd>{paymentText[round.payment]}</dd>
+          <dd>
+            {/* b26 (live25): a round in the kitchen the bill charges nothing for (comped) has
+                nothing to pay; "Not charged" stays for rounds that never went to the kitchen. */}
+            {round.payment === "NotCharged" && !settledOrWaiting.has(round.status)
+              ? t("Nothing to pay")
+              : paymentText[round.payment]}
+          </dd>
         </div>
       </dl>
       {note}

@@ -859,6 +859,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "The link has expired or was already used. Each link works once, for 30 minutes.":
     "链接已过期或已被使用。每个链接只能用一次，30 分钟内有效。",
   "The payment is being refunded to the card that paid.": "款项正在退回付款的银行卡。",
+  "This round was paid and has not been refunded. Ask a staff member.":
+    "这一轮已付款，还没有退款。请问店员。",
   "The payment result is still being confirmed.": "付款结果仍在确认中。",
   "The payment was refunded.": "款项已退回。",
   "The person who started the table can start an empty cart to continue ordering. Previous items won’t be copied.":

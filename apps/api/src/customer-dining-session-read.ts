@@ -712,6 +712,8 @@ export function composeCustomerDiningSession(
     let payment: DiningRoundPayment;
     let cancelsAt: string | null = null;
     let reason: DiningStoreCancellationReason | null = null;
+    // b26: a round on the table's bill the bill charges nothing for, with nothing left to pay.
+    let nothingToPay = false;
     if (unpaidCancelled) {
       status = "NotPaidCancelled";
       payment = "NotCharged";
@@ -748,7 +750,19 @@ export function composeCustomerDiningSession(
       // In the kitchen and on the table's bill until it pays at the end; never cancelled for
       // payment. What it owes is the bill's, below.
       if (order.tableBill === undefined) return unavailable();
-      payment = "OnTableBill";
+      // b26 (live25): a round the bill charges nothing for (comped, or what is left of it taken
+      // off) once the table paid, or when the whole bill comes to nothing, has nothing to pay:
+      // never "On the table's bill" as if it waited. Points that paid it read Paid.
+      const share = order.tableBill.rounds?.get(reference);
+      nothingToPay =
+        share !== undefined &&
+        share.totalMinor === 0n &&
+        ((order.settledRounds?.size ?? 0) > 0 || order.tableBill.owedMinor === 0n);
+      payment = !nothingToPay
+        ? "OnTableBill"
+        : (share?.pointsMinor ?? 0n) > 0n
+          ? "Paid"
+          : "NotCharged";
       status = kitchenStatus();
     } else if (outcome === undefined) {
       status = "AwaitingPayment";
@@ -769,10 +783,21 @@ export function composeCustomerDiningSession(
         // Nothing of an unpaid round was charged, so nothing is refunded.
         // v15 b20: nor is a round whose dishes were all taken off its bill before the table paid
         // at the end (the table paying the rest later refunds nothing for it).
+        // b26 (live25): a refund is said only when one exists — refunded for every dish, or one
+        // recorded for a dish (or for the order) still on its way. A paid round the kitchen
+        // refused with none stays Paid, and the guest is told no refund was made.
         if (payment === "Paid" && !lines.every((entry) => entry?.notCharged === true))
           payment = lines.every((entry) => entry?.refunded === true || entry?.notCharged === true)
             ? "Refunded"
-            : "RefundPending";
+            : lines.some(
+                  (entry) =>
+                    entry !== undefined &&
+                    entry.notCharged !== true &&
+                    !entry.refunded &&
+                    entry.refundAmount.amountMinor > 0n,
+                ) || order.refunds.pendingMinor > 0n
+              ? "RefundPending"
+              : "Paid";
         // b25 final: a round on the table's bill the kitchen refused with a dish no one took off
         // the bill is still charged with it, so it stays on the bill and is never "not charged".
         else if (payment === "OnTableBill" && !lines.every((entry) => entry?.notCharged === true))
@@ -840,7 +865,9 @@ export function composeCustomerDiningSession(
       itemsTotal: money(itemsTotal + roundShare),
       // b13: a round on the table's bill says what the bill says of it (comps taken off, the tax
       // worked out once), so the round cards add up to the Table total and the paid bill.
-      ...((payment === "OnTableBill" || order.settledRounds?.has(reference) === true) &&
+      ...((payment === "OnTableBill" ||
+        order.settledRounds?.has(reference) === true ||
+        nothingToPay) &&
       order.tableBill?.rounds?.get(reference) !== undefined
         ? { bill: billView(order.tableBill.rounds.get(reference) as CustomerTableBillLines) }
         : {}),

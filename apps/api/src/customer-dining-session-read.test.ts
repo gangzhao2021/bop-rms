@@ -1444,9 +1444,11 @@ describe("WP-2423 D5 item prices before tax at the table", () => {
         ],
       }),
     );
+    // b26 (live25): no refund exists for it, so none is claimed: it reads Paid (and the page says
+    // no refund was made), never "being refunded to the card that paid".
     expect(view.rounds.map((round) => [round.status, round.payment])).toEqual([
       ["Preparing", "Paid"],
-      ["StoreCancelled", "RefundPending"],
+      ["StoreCancelled", "Paid"],
     ]);
     // It was charged and nothing has gone back: what was paid is what the table has on order.
     expect(view.summary?.ordered).toEqual({
@@ -1458,6 +1460,44 @@ describe("WP-2423 D5 item prices before tax at the table", () => {
     expect(view.summary?.refunded).toEqual(cad(0n));
     expect(view.summary?.refundPending).toEqual(cad(0n));
     expect(view.summary?.due).toEqual(cad(0n));
+  });
+
+  it("b26 (live25): a table that paid at the end, round refused whole with no take-off or refund, reads Paid", () => {
+    const view = composeCustomerDiningSession({
+      ...facts({
+        paymentOutcomes: new Map(),
+        payments: [{ status: "Succeeded", amount: cad(3900n) }],
+        delivery: new Map([
+          [id(31), { phase: "Fulfilled", deliveredQuantity: 2 }],
+          [id(41), { phase: "Rejected", deliveredQuantity: 0 }],
+        ]),
+        payLaterRounds: new Set([id(30), id(40)]),
+        settledRounds: new Set([id(30), id(40)]),
+        tableBill: { owedMinor: 0n, pointsUsedMinor: 0n, takenOffMinor: 0n, taxRoundingMinor: 0n },
+      }),
+      paymentTiming: "PayLater",
+    });
+    expect(view.rounds.map((round) => [round.status, round.payment])).toEqual([
+      ["Served", "Paid"],
+      ["StoreCancelled", "Paid"],
+    ]);
+    // A refund the store has started on the order is said as on its way.
+    const pending = composeCustomerDiningSession({
+      ...facts({
+        paymentOutcomes: new Map(),
+        payments: [{ status: "Succeeded", amount: cad(3900n) }],
+        delivery: new Map([
+          [id(31), { phase: "Fulfilled", deliveredQuantity: 2 }],
+          [id(41), { phase: "Rejected", deliveredQuantity: 0 }],
+        ]),
+        payLaterRounds: new Set([id(30), id(40)]),
+        settledRounds: new Set([id(30), id(40)]),
+        refunds: { confirmedMinor: 0n, pendingMinor: 900n },
+        tableBill: { owedMinor: 0n, pointsUsedMinor: 0n, takenOffMinor: 0n, taxRoundingMinor: 0n },
+      }),
+      paymentTiming: "PayLater",
+    });
+    expect(pending.rounds[1]?.payment).toBe("RefundPending");
   });
 
   it("never mixes priced and unpriced items", () => {
@@ -1828,12 +1868,12 @@ describe("b23 DEC-TAX-WHOLE-RECEIPT: with a comp, what was paid and owed plus wh
    * algorithms: a comp takes its share of the bill's tax cent when it is decided, then the bill's
    * tax rounding is worked out on what stands). `paid`: the table then paid its bill in full.
    */
-  function table(steps: readonly Step[], paid = false) {
+  function table(steps: readonly Step[], paid = false, layout = tm2) {
     const removed = new Set<number>();
     const comps = new Map<number, { net: bigint; tax: bigint; share: bigint }>();
-    const dishes = tm2.flat();
+    const dishes = layout.flat();
     const roundingRounds = () =>
-      tm2.map((round, index) => ({
+      layout.map((round, index) => ({
         orderReference: id(1),
         orderBatchReference: batch(index),
         items: round
@@ -1868,7 +1908,7 @@ describe("b23 DEC-TAX-WHOLE-RECEIPT: with a comp, what was paid and owed plus wh
       rounding.lines
         .filter((line) => line.orderBatchReference === batch(index))
         .reduce((sum, line) => sum + line.amountMinor, 0n);
-    const billRounds = tm2.map((round, index) => {
+    const billRounds = layout.map((round, index) => {
       const on = round.filter((dish) => !removed.has(dish.n));
       const off = (dish: Dish) => comps.get(dish.n);
       const subtotal = on.reduce((sum, dish) => sum + dish.net - (off(dish)?.net ?? 0n), 0n);
@@ -1920,13 +1960,13 @@ describe("b23 DEC-TAX-WHOLE-RECEIPT: with a comp, what was paid and owed plus wh
       paymentTiming: "PayLater",
       order: {
         orderNumber: "1",
-        batches: tm2.map((round, index) => ({
+        batches: layout.map((round, index) => ({
           orderBatchReference: batch(index),
           submittedAt: at,
           items: round.map((dish) => item(dish.n, dish.name, 1, dish.net + dish.tax)),
         })),
-        authorship: new Map(tm2.map((_, index) => [batch(index), false])),
-        staffRounds: new Set(tm2.map((_, index) => batch(index))),
+        authorship: new Map(layout.map((_, index) => [batch(index), false])),
+        staffRounds: new Set(layout.map((_, index) => batch(index))),
         delivery: new Map(
           dishes.map((dish) => [
             id(dish.n),
@@ -1938,8 +1978,17 @@ describe("b23 DEC-TAX-WHOLE-RECEIPT: with a comp, what was paid and owed plus wh
         ),
         paymentOutcomes: new Map(),
         paymentDeadlines: new Map(),
-        payLaterRounds: new Set(tm2.map((_, index) => batch(index))),
-        ...(paid ? { settledRounds: new Set(tm2.map((_, index) => batch(index))) } : {}),
+        payLaterRounds: new Set(layout.map((_, index) => batch(index))),
+        // The table's payment lines are its rounds the bill charges for (never a $0 round).
+        ...(paid
+          ? {
+              settledRounds: new Set(
+                billRounds
+                  .filter((round) => round.totalMinor !== "0")
+                  .map((round) => round.orderBatchReference),
+              ),
+            }
+          : {}),
         unpaidCancellations: new Set(),
         staffCancellations: new Map(),
         itemCancellations: [...removed].map((n) => ({
@@ -2030,6 +2079,36 @@ describe("b23 DEC-TAX-WHOLE-RECEIPT: with a comp, what was paid and owed plus wh
     expect(after.summary?.paid).toEqual(cad(3899n));
     expect(after.summary?.due).toEqual(cad(0n));
     expect(after.summary?.ordered?.total).toEqual(cad(4605n));
+    reconciles(after);
+  });
+  // b26 (v15 live25, TM2 'L25 TCP (TEST)'): three staff rounds of Soy milk + Smashed cucumber;
+  // round 1's Soy milk and round 2 taken off, round 1's cucumber comped ($7.06), the table paid
+  // $10.74. Round 1 is $0.00 on the bill: once the table paid it has nothing to pay.
+  const live25: readonly (readonly Dish[])[] = [
+    [soy(31), cucumber(32)],
+    [soy(41), cucumber(42)],
+    [soy(51), cucumber(52)],
+  ];
+  const live25Steps: Step[] = [{ off: 31 }, { off: 41 }, { off: 42 }, { comp: 32 }];
+  it("live25: a comped $0.00 round reads nothing to pay once the table paid, never On the table's bill", () => {
+    const before = table(live25Steps, false, live25).view;
+    expect(before.summary?.due).toEqual(cad(1074n));
+    expect(before.rounds.map((round) => round.payment)).toEqual([
+      "OnTableBill",
+      "NotCharged",
+      "OnTableBill",
+    ]);
+    reconciles(before);
+    const after = table(live25Steps, true, live25).view;
+    expect(after.summary?.paid).toEqual(cad(1074n));
+    expect(after.summary?.ordered?.total).toEqual(cad(1780n));
+    expect(after.rounds.map((round) => [round.status, round.payment])).toEqual([
+      ["Queued", "NotCharged"],
+      ["StoreCancelled", "NotCharged"],
+      ["Queued", "Paid"],
+    ]);
+    // Round 1 still shows what the bill says of it: its cucumber $6.25 less the comp, $0.00.
+    expect(after.rounds[0]?.bill?.total).toEqual(cad(0n));
     reconciles(after);
   });
 });
