@@ -793,7 +793,9 @@ const b24Words = {
     taxClassName: "Standard taxable",
     tax: "Orders are taxed with the tax settings this store uses today.",
     save: "Save as draft",
-    alert: "This draft was not saved. Service charge applies to Pickup orders",
+    // b26: one short sentence; what to fix is listed in step 4 and said at the fee.
+    alert:
+      "This draft was not saved: 1 fee setting needs fixing first, see “Needs fixing first” below.",
   },
   "zh-Hans": {
     services: "2. 服务方式",
@@ -814,7 +816,7 @@ const b24Words = {
     taxClassName: "标准应税",
     tax: "订单按本店现在用的税务设置计税。",
     save: "存为草稿",
-    alert: "这份草稿没有保存。服务费适用于自取订单",
+    alert: "这份草稿没有保存：有 1 处要先改正，见下方“需要先改正”。",
   },
 } as const;
 for (const lang of ["en", "zh-Hans"] as const)
@@ -970,8 +972,11 @@ for (const lang of ["en", "zh-Hans"] as const)
     await services.getByRole("checkbox", { name: w.pickup, exact: true }).uncheck();
     await save.click();
     const alert = page.locator("#setup-validation-error");
-    await expect(alert).toContainText(w.fix);
-    await expect(alert).toContainText(zh ? "“需要先改正”" : "“Needs fixing first”");
+    // b26: the detail is in step 4 only, not repeated above the steps.
+    await expect(alert).toHaveText(w.alert);
+    await expect(
+      page.getByRole("region", { name: zh ? "需要先改正" : "Needs fixing first", exact: true }),
+    ).toContainText(w.fix);
     await expect(alert).not.toContainText(zh ? "每个服务时段" : "Each service interval");
     expect(refused).toEqual(["SaveDraft"]);
     await b25Shot(page, `save-refused-${lang}`);
@@ -1007,6 +1012,129 @@ for (const lang of ["en", "zh-Hans"] as const)
       tools.getByText(zh ? "还没有已保存的预设。" : "No saved preset yet.").first(),
     ).toBeVisible();
     await b25Shot(page, `receipts-${lang}`);
+    await expectNoInternalText(page);
+    expect(errors).toEqual([]);
+  });
+
+// b26 (v15 live check of b25): a refused save says first that the draft was not saved, in one
+// short sentence when the page knows what to fix (listed once, in step 4); step 4 says what reads
+// again by itself and why its one check button stays; the receipt tools say an outage once and that
+// they read again by themselves. Shots go to BOP_B26_SHOTS when it names a folder.
+const b26Shots = process.env.BOP_B26_SHOTS ?? "";
+async function b26Shot(page: Page, name: string) {
+  for (const [width, height] of [
+    [1440, 900],
+    [1024, 768],
+    [390, 844],
+  ] as const) {
+    await page.setViewportSize({ width, height });
+    await noOverflow(page);
+    if (b26Shots) {
+      mkdirSync(b26Shots, { recursive: true });
+      await page.screenshot({ path: `${b26Shots}/${name}-${width}.png`, fullPage: true });
+    }
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+}
+for (const lang of ["en", "zh-Hans"] as const)
+  test(`@production b26: Store setup says plainly a draft was not saved, and what reads again by itself (${lang})`, async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    const w = b24Words[lang],
+      zh = lang === "zh-Hans";
+    const errors = await install(page);
+    await language(page, lang);
+    await page.route("**/merchant/store-setup", async (route) => {
+      if (route.request().method() !== "POST") return route.fallback();
+      return respond(route, { error: "store_setup_invalid" }, 400);
+    });
+    await page.goto(setupHref + "?section=changes");
+    const step = (name: string) => page.getByRole("button", { name, exact: true }).click();
+    await step(w.services);
+    const services = page.getByRole("group", { name: w.servicesGroup, exact: true });
+    await services.getByRole("checkbox", { name: w.dineIn, exact: true }).check();
+    await services.getByRole("checkbox", { name: w.pickup, exact: true }).check();
+    await services.getByRole("checkbox", { name: w.delivery, exact: true }).uncheck();
+    const save = page.getByRole("button", { name: w.save, exact: true });
+    await save.click();
+    const alert = page.locator("#setup-validation-error");
+    await expect(alert).toContainText(
+      zh
+        ? "这份草稿没有保存。请检查已编辑的设置。"
+        : "This draft was not saved. Check the edited settings.",
+    );
+    await b26Shot(page, `server-refused-${lang}`);
+    // Two fees on a service this setup does not offer: one sentence above the steps.
+    await step(w.fees);
+    const fees = page.getByRole("region", { name: w.regions[0], exact: true });
+    await fees
+      .getByRole("combobox", { name: w.serviceCharge, exact: true })
+      .selectOption("Enabled");
+    await fees
+      .getByRole("group", { name: w.orderTypes, exact: true })
+      .getByRole("checkbox", { name: w.pickup, exact: true })
+      .check();
+    await fees
+      .getByRole("combobox", { name: w.taxClass, exact: true })
+      .selectOption({ label: w.taxClassName });
+    await fees
+      .getByRole("combobox", { name: zh ? "小费" : "Tip", exact: true })
+      .selectOption("Enabled");
+    await fees
+      .getByRole("group", { name: zh ? "小费的订单类型" : "Tip order types", exact: true })
+      .getByRole("checkbox", { name: w.pickup, exact: true })
+      .check();
+    await step(w.services);
+    await services.getByRole("checkbox", { name: w.pickup, exact: true }).uncheck();
+    await save.click();
+    await expect(alert).toHaveText(
+      zh
+        ? "这份草稿没有保存：有 2 处要先改正，见下方“需要先改正”。"
+        : "This draft was not saved: 2 fee settings need fixing first, see “Needs fixing first” below.",
+    );
+    const fixes = page.getByRole("region", {
+      name: zh ? "需要先改正" : "Needs fixing first",
+      exact: true,
+    });
+    await expect(fixes.getByRole("listitem")).toHaveCount(2);
+    await expect(fixes).toContainText(w.fix);
+    // Step 4: no "Refresh the status"; the check button says why it stays.
+    await expect(page.getByRole("button", { name: /Refresh the status|刷新状态/u })).toHaveCount(0);
+    const check = page.getByRole("button", {
+      name: zh ? "查看最新审批情况" : "Check for approval updates",
+      exact: true,
+    });
+    await expect(check).toBeVisible();
+    await expect(page.locator("#store-configuration-others-note")).toContainText(
+      zh ? "别人在其他设备上批准、拒绝或发布后" : "What someone else does on another device",
+    );
+    await b26Shot(page, `save-refused-${lang}`);
+    // Receipts: presets and the template draft cannot be read; each says so once, and that it is
+    // read again by itself.
+    await page.route("**/merchant/store-setup/receipt-artifacts**", (route) =>
+      respond(route, { error: "unavailable" }, 503),
+    );
+    await page.route("**/merchant/store-setup/receipt-template-draft**", (route) =>
+      respond(route, { error: "unavailable" }, 503),
+    );
+    await page.goto(setupHref + "?section=receipts");
+    const tools = page.locator("#receipt-templates");
+    const presets = tools.getByRole("region", {
+      name: zh ? "收据预设" : "Receipt presets",
+      exact: true,
+    });
+    await expect(presets.getByRole("alert")).toHaveCount(1);
+    await expect(presets.getByRole("alert")).toContainText(
+      zh ? "网络恢复后会自动重新读取" : "They are read again once the connection is back",
+    );
+    await expect(
+      tools.getByRole("alert").filter({ hasText: zh ? "模板草稿" : "template draft" }),
+    ).toContainText(
+      zh ? "网络恢复后会自动重新读取" : "It is read again by itself once the connection is back",
+    );
+    await expect(tools).not.toContainText(zh ? "联网后请刷新" : "Refresh when connected");
+    await b26Shot(page, `receipts-outage-${lang}`);
     await expectNoInternalText(page);
     expect(errors).toEqual([]);
   });

@@ -10881,7 +10881,8 @@ tr[data-drop-target="true"] {
 /* b20: "not saved yet" under a value: quieter than the value it qualifies (said in words). */
 .store-setup-summary__rest,
 .store-setup-summary__unsaved,
-.store-setup-publish__when {
+.store-setup-publish__when,
+.store-setup-publish__note {
   color: var(--bop-color-text-muted);
   font-size: 14px;
 }

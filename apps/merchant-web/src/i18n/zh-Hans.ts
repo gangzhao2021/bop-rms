@@ -9950,7 +9950,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Withdraw this change? It stays in the history and can no longer be approved or published. The Store keeps running as it does today.":
     "要撤回这次修改吗？它会留在记录里，不能再批准或发布。门店继续按现在的设置运行。",
   "Check the settings again": "重新检查设置",
-  "Refresh the status": "刷新状态",
+  "Check for approval updates": "查看最新审批情况",
+  "Steps taken here, and the connection coming back, update this by themselves. What someone else does on another device, such as approving, declining or publishing, shows once you check.":
+    "在这里完成的操作和网络恢复后，这里会自动更新。别人在其他设备上批准、拒绝或发布后，按“查看最新审批情况”才会显示。",
   "Earlier changes": "以前的修改",
   "Earlier changes could not be loaded just now. Check the connection and try again.":
     "暂时无法加载以前的修改。请检查网络后再试。",

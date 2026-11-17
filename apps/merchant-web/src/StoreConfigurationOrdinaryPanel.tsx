@@ -480,10 +480,12 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
   // recover) reads the newest page again while the list is open, keeping the older rows loaded.
   const [historyAfterStep, setHistoryAfterStep] = useState(0);
   const stepRecorded = () => setHistoryAfterStep((n) => n + 1);
+  // b26: the connection coming back reads the status first, then this list (see below), so the
+  // rows carry what the status now says.
   useEffect(() => {
     if (!historyOpen || !online) return;
     void loadHistory(false, historyIdentity.current === identity && history.length > 0);
-  }, [online, historyOpen, identity, historyAfterStep]);
+  }, [historyOpen, identity, historyAfterStep]);
   async function loadHistory(more = false, keep = false) {
     if (!online || (more && (historyBusy || nextHistory === null))) return;
     historyIdentity.current = identity;
@@ -618,6 +620,18 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
       }
     }
   }
+  // b26 (v15 live check of b25): every step run here reads the status again by itself, and so does
+  // the connection coming back. Only what someone else does on another device (approve, decline,
+  // publish, or a change of their own) is not seen until it is checked, so that button stays.
+  const wasOnline = useRef(online),
+    refreshLatest = useRef(refresh);
+  refreshLatest.current = refresh;
+  useEffect(() => {
+    const back = online && !wasOnline.current;
+    wasOnline.current = online;
+    // Earlier changes, when open, are read again after it, so they carry what the status now says.
+    if (back) void refreshLatest.current().then(() => setHistoryAfterStep((n) => n + 1));
+  }, [online]);
   async function act(action: StoreConfigurationOrdinaryAction, approvalMode?: "SoleOperator") {
     if (running.current || pending || freshDisabled.current || !workspace || !journal.current)
       return;
@@ -1242,10 +1256,20 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
             {t("Decline this change")}
           </button>
         )}
-        <button type="button" disabled={busy || !!pending} onClick={() => void refresh()}>
-          {t("Refresh the status")}
+        <button
+          type="button"
+          disabled={busy || !!pending || !online}
+          aria-describedby="store-configuration-others-note"
+          onClick={() => void refresh()}
+        >
+          {t("Check for approval updates")}
         </button>
       </div>
+      <p id="store-configuration-others-note" className="store-setup-publish__note">
+        {t(
+          "Steps taken here, and the connection coming back, update this by themselves. What someone else does on another device, such as approving, declining or publishing, shows once you check.",
+        )}
+      </p>
       <details
         className="store-setup-publish__history"
         onToggle={(event) => {

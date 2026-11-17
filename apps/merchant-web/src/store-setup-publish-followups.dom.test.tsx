@@ -629,7 +629,7 @@ it("b22 review: a kept older row of the latest configuration shows its withdrawa
       latestWithdrawal: { kind: "Withdrawn", withdrawnAt: at, byYou: false },
     }) as never,
   );
-  await click(buttonNamed(container, "刷新状态"));
+  // b26: coming back online reads the status again by itself (no button needed).
   await act(async () => {
     root.render(view(true));
   });
@@ -638,4 +638,46 @@ it("b22 review: a kept older row of the latest configuration shows its withdrawa
   // 23..4 newest, then kept 3, the withdrawal of step 2's configuration, 2 and 1.
   expect(rows).toHaveLength(24);
   expect(rows[21]).toMatch(/^已撤回/u);
+});
+
+// b26 (v15 live check of b25): step 4's status reads again by itself after each step and when the
+// connection comes back; its one check button says what it is for (someone else's action on
+// another device), in plain words, and waits while offline.
+it("b26: the approval status is read again when the connection comes back; the check button says why it stays", async () => {
+  setLanguageForTest("zh-Hans");
+  const client = clientOf(workspaceOf({ latest: configuration("PendingApproval") }));
+  const view = (online: boolean) => (
+    <MemoryRouter>
+      <StoreConfigurationOrdinaryPanel
+        scope={scope}
+        csrf={csrf}
+        saved={saved as never}
+        setupLayout="Open"
+        client={client as never}
+        journalFactory={journal as never}
+        online={online}
+      />
+    </MemoryRouter>
+  );
+  const { container, root } = await mount(view(true));
+  await settle();
+  expect(container.textContent).not.toContain("刷新状态");
+  const check = buttonNamed(container, "查看最新审批情况");
+  expect(check?.hasAttribute("disabled")).toBe(false);
+  expect(
+    document.getElementById(check?.getAttribute("aria-describedby") ?? "")?.textContent,
+  ).toContain("别人在其他设备上批准、拒绝或发布后");
+  expect(client.load).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    root.render(view(false));
+  });
+  await settle();
+  expect(buttonNamed(container, "查看最新审批情况")?.hasAttribute("disabled")).toBe(true);
+  expect(client.load).toHaveBeenCalledTimes(1);
+  client.load.mockResolvedValue(workspaceOf({ latest: configuration("Approved") }) as never);
+  await act(async () => {
+    root.render(view(true));
+  });
+  await settle();
+  expect(client.load).toHaveBeenCalledTimes(2);
 });
