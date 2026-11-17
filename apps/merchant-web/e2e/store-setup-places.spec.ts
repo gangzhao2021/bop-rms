@@ -931,7 +931,8 @@ for (const lang of ["en", "zh-Hans"] as const)
     const save = page.getByRole("button", { name: w.save, exact: true });
     await save.click();
     await expect(page.locator("#setup-validation-error")).toContainText(
-      zh ? "请检查已编辑的设置。" : "Check the edited settings.",
+      // b28 (v15 live26): one sentence saying where to look, never every rule.
+      zh ? "检查你改过的时间、等待时间和费用" : "check the times, wait times and fees you changed",
     );
     expect(refused).toEqual(["SaveDraft"]);
     await expect(
