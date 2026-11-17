@@ -368,6 +368,20 @@ describe("staff table guest pipeline", () => {
     });
   });
 
+  it("WP-2423 (staff-round-guest-race): a refused join is logged with its reason", async () => {
+    const { options, pipeline } = setup();
+    options.join.join.mockResolvedValueOnce({
+      status: "Refused",
+      reason: "CodeNotAccepted",
+    } as never);
+    await expect(
+      pipeline.join(credentials, { joinCredential: "123456", operationReference: id(44) }),
+    ).rejects.toMatchObject({
+      message: "TABLE_GUEST_PIPELINE_UNAVAILABLE",
+      cause: { code: "RefusedCodeNotAccepted" },
+    });
+  });
+
   it("refuses a pickup QR answer and reads the table cart's unsent items", async () => {
     const { options, pipeline } = setup();
     options.entry.establish.mockResolvedValueOnce({

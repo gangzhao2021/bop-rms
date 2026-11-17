@@ -364,13 +364,22 @@ export function createGuestOrderSteps(options: {
       };
     },
     async saveDetails(credentials, input) {
-      const saved = readClosedRecord(
-        await options.details.save({
+      let answer: unknown;
+      try {
+        answer = await options.details.save({
           ...credentials,
           command: counterCheckoutDetailsCommand(input),
-        }),
-        ["status", "snapshot"],
-      );
+        });
+      } catch (error) {
+        // WP-2423 (staff-round-guest-race): someone at the table changed or checked out the
+        // shared Cart since it was priced; nothing was saved.
+        // By name: the pilot's entry and this build can load Ordering as two copies.
+        const { name, code } = (error ?? {}) as { name?: unknown; code?: unknown };
+        if (name === "CartError" && code === "CART_VERSION_CONFLICT")
+          return { status: "CartChanged" as const };
+        throw error;
+      }
+      const saved = readClosedRecord(answer, ["status", "snapshot"]);
       const snapshot = saved.snapshot as {
         cartReference?: unknown;
         cartVersion?: unknown;
@@ -383,6 +392,7 @@ export function createGuestOrderSteps(options: {
         String(snapshot?.quoteReference) !== input.quoteReference
       )
         return failed();
+      return undefined;
     },
     async startCheckout(credentials, input) {
       try {
@@ -410,6 +420,16 @@ export function createGuestOrderSteps(options: {
         // An owner listed between pricing and checkout: nothing was created; staff press again.
         if (error instanceof CheckoutSessionServiceError && error.code === "REQUOTE_REQUIRED")
           return { status: "RequoteRequired" as const };
+        // WP-2423 (staff-round-guest-race): the shared Cart moved on since it was priced (someone
+        // at the table changed it, or its dishes were ordered), or a guest is paying for it now;
+        // nothing was created.
+        if (
+          error instanceof CheckoutSessionServiceError &&
+          (error.code === "INTENT_CONFLICT" || error.code === "ALREADY_ORDERED")
+        )
+          return { status: "CartChanged" as const };
+        if (error instanceof CheckoutSessionServiceError && error.code === "CHECKOUT_IN_PROGRESS")
+          return { status: "CheckoutInProgress" as const };
         // WP-2423: which item the Store's stock can't make (and how many it can); nothing created.
         if (error instanceof CheckoutSessionServiceError && error.code === "ITEM_SHORT")
           return {

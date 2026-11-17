@@ -1687,13 +1687,34 @@ export function createMerchantStaffDiningRound(options: {
           if (quoted.status === "TableCheckingOut") return fail("STAFF_ROUND_TABLE_UNAVAILABLE");
           if (quoted.status !== "Quoted") return fail("STAFF_ROUND_NOT_PRICED");
           const tip = counterTipMinor(command.tip, quoted.subtotalMinor);
-          await options.pipeline.saveDetails(credentials, {
+          /**
+           * WP-2423 (staff-round-guest-race): a guest at the table changed the table's Cart, or sent
+           * it, after this round priced it, so nothing of this round was saved or ordered. Once the
+           * round's own lines are out, staff see the guests' unsent items as they are now, or are
+           * told a guest is ordering on their phone; they send again (never "a system problem").
+           */
+          const cartMovedOn = async (removed: "Removed" | "Kept" | "Gone"): Promise<never> => {
+            if (removed !== "Removed") return fail("STAFF_ROUND_NOT_WITHDRAWN");
+            const fresh = await selectAgain();
+            if (fresh.status !== "Selected") return fail("STAFF_ROUND_TABLE_CHECKOUT_IN_PROGRESS");
+            const own = new Set(ownLines());
+            const guests = fresh.pendingItems.filter((item) => !own.has(item.cartItemReference));
+            if (guests.length === 0) return fail("STAFF_ROUND_TABLE_CHECKOUT_IN_PROGRESS");
+            throw await tableCartRefusal(guests, fresh.cartVersion);
+          };
+          const saved = await options.pipeline.saveDetails(credentials, {
             operationReference: options.nextReference(),
             detailsReference: options.nextReference(),
             cartReference: cart.cartReference,
             cartVersion,
             quoteReference: quoted.quoteReference,
           });
+          if (saved?.status === "CartChanged") {
+            // This round's own lines come out here (not again in the catch below).
+            const remove = removeRoundItems;
+            removeRoundItems = null;
+            return await cartMovedOn(remove === null ? "Removed" : await remove());
+          }
           // From here the round may exist (checkout, submission): the session is never closed for it.
           const tableStarted = startedTable;
           startedTable = null;
@@ -1731,6 +1752,9 @@ export function createMerchantStaffDiningRound(options: {
                   sharedStock: checkout.status === "ItemShort" && checkout.sharedStock,
                 });
           }
+          // Nothing was created: the round's lines come out, as before its checkout.
+          if (checkout.status === "CartChanged" || checkout.status === "CheckoutInProgress")
+            return await cartMovedOn(await withdraw());
           // An owner listed between pricing and checkout: nothing was ordered; staff press again.
           if (checkout.status === "RequoteRequired") {
             const removed = await withdraw();

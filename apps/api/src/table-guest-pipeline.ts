@@ -272,18 +272,27 @@ export function createStaffTableGuestPipeline(options: {
       });
     },
     async join(credentials, input) {
-      const joined = readClosedRecord(
-        await options.join.join(
-          {
-            sessionCredential: credentials.sessionCredential,
-            csrfCredential: credentials.csrfCredential,
-            joinCredential: input.joinCredential,
-            operationReference: input.operationReference,
-          },
-          await options.joinRequest(),
-        ),
-        ["status", "operationReference", "admissionReference"],
+      const answer = await options.join.join(
+        {
+          sessionCredential: credentials.sessionCredential,
+          csrfCredential: credentials.csrfCredential,
+          joinCredential: input.joinCredential,
+          operationReference: input.operationReference,
+        },
+        await options.joinRequest(),
       );
+      // WP-2423 (staff-round-guest-race): a refused join is logged with its reason (such as
+      // `RefusedCodeNotAccepted`), not as an answer of the wrong shape.
+      const { status, reason } = (answer ?? {}) as { status?: unknown; reason?: unknown };
+      if (status !== "Joined")
+        return failed(
+          typeof status === "string" && typeof reason === "string" ? status + reason : status,
+        );
+      const joined = readClosedRecord(answer, [
+        "status",
+        "operationReference",
+        "admissionReference",
+      ]);
       if (
         joined.status !== "Joined" ||
         joined.operationReference !== input.operationReference ||

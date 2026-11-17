@@ -136,8 +136,9 @@ function setup(clock = { at: "2026-10-13T18:00:00.000Z" }) {
         totalMinor: 1130n,
       };
     }),
-    saveDetails: vi.fn(async () => {
+    saveDetails: vi.fn(async (): Promise<{ readonly status: "CartChanged" } | undefined> => {
       calls.push("saveDetails");
+      return undefined;
     }),
     startCheckout: vi.fn(async () => {
       calls.push("startCheckout");

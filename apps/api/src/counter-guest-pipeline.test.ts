@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { CheckoutSessionServiceError } from "@rms/ordering";
+import { CartError, CheckoutSessionServiceError } from "@rms/ordering";
 import {
   counterEntryOperatingReader,
   createCounterGuestPipeline,
@@ -354,6 +354,39 @@ describe("counter guest pipeline — WP-2423 Q7", () => {
       snapshot: { cartReference: id(6), cartVersion: 1, quoteReference: id(7) },
     });
     await expect(p.saveDetails(guest, input)).rejects.toThrow();
+    // WP-2423 (staff-round-guest-race): someone at the table moved the shared Cart on; nothing
+    // was saved. Any other failure is still a failure.
+    options.details.save.mockRejectedValueOnce(new CartError("CART_VERSION_CONFLICT"));
+    expect(await p.saveDetails(guest, input)).toEqual({ status: "CartChanged" });
+    options.details.save.mockRejectedValueOnce(new CartError("CART_DEPENDENCY_UNAVAILABLE"));
+    await expect(p.saveDetails(guest, input)).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
+  });
+
+  it("WP-2423 (staff-round-guest-race): a shared Cart moved on, or being paid, is said so at checkout", async () => {
+    const { pipeline: p, options } = pipeline();
+    const checkout = {
+      createOperationReference: id(13),
+      cartReference: id(6),
+      cartVersion: 2,
+      quoteReference: id(7),
+    };
+    for (const code of ["INTENT_CONFLICT", "ALREADY_ORDERED"] as const) {
+      options.checkout.create.mockRejectedValueOnce(new CheckoutSessionServiceError(code));
+      expect(await p.startCheckout(guest, checkout)).toEqual({ status: "CartChanged" });
+    }
+    options.checkout.create.mockRejectedValueOnce(
+      new CheckoutSessionServiceError("CHECKOUT_IN_PROGRESS"),
+    );
+    expect(await p.startCheckout(guest, checkout)).toEqual({ status: "CheckoutInProgress" });
+    // A real outage is still a failure.
+    options.checkout.create.mockRejectedValueOnce(
+      new CheckoutSessionServiceError("DEPENDENCY_UNAVAILABLE"),
+    );
+    await expect(p.startCheckout(guest, checkout)).rejects.toMatchObject({
+      code: "DEPENDENCY_UNAVAILABLE",
+    });
   });
 });
 

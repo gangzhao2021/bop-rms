@@ -285,8 +285,9 @@ function setup(
         totalMinor: 2260n,
       };
     }),
-    saveDetails: vi.fn(async () => {
+    saveDetails: vi.fn(async (): Promise<{ readonly status: "CartChanged" } | undefined> => {
       calls.push("saveDetails");
+      return undefined;
     }),
     startCheckout: vi.fn(async () => {
       calls.push("startCheckout");
@@ -2084,6 +2085,70 @@ describe("two staff send a round for the same table — v15 b12 staff-round-conc
     });
     expect(f.calls).not.toContain("quote");
     expect(state.turnLog).toEqual(["taken", "end:NotSent"]);
+  });
+
+  // WP-2423 (staff-round-guest-race): a guest at the table changed or sent the table's Cart after
+  // the round priced it. Nothing of the round was saved or ordered: never "a system problem".
+  const guestMovedCart = (
+    f: ReturnType<typeof setup>,
+    pendingItems: { cartItemReference: string }[],
+  ) => {
+    withOwnLine(f);
+    const removeItems = vi.fn(async () => "Removed" as const);
+    Object.assign(f.pipeline, { removeItems });
+    f.pipeline.selectCart
+      .mockResolvedValueOnce({
+        status: "Selected",
+        cartReference: id(6),
+        cartVersion: 3,
+        pendingItems: [],
+      })
+      .mockResolvedValueOnce({
+        status: "Selected",
+        cartReference: id(6),
+        cartVersion: 6,
+        pendingItems: pendingItems.map((item) => ({
+          ...item,
+          name: "Rice",
+          quantity: 1,
+          standing: "Available" as const,
+        })),
+      });
+    return removeItems;
+  };
+  it("a guest's dish added after the round was priced: the round's line out, staff see the guest's dish", async () => {
+    const f = setup();
+    const removeItems = guestMovedCart(f, [{ cartItemReference: id(41) }]);
+    f.pipeline.saveDetails.mockResolvedValueOnce({ status: "CartChanged" });
+    await expect(f.send()).rejects.toMatchObject({
+      code: "STAFF_ROUND_TABLE_CART_HAS_ITEMS",
+      pendingItems: [{ cartItemReference: id(41), name: "Rice", quantity: 1 }],
+      tableCart: { cartVersion: 6 },
+    });
+    expect(removeItems).toHaveBeenCalledTimes(1);
+    expect(f.calls).not.toContain("startCheckout");
+    expect(state.turnLog).toEqual(["taken", "end:NotSent"]);
+  });
+  it.each(["CartChanged", "CheckoutInProgress"] as const)(
+    "a checkout refused as %s after a guest's change: a guest is ordering, send again",
+    async (status) => {
+      const f = setup();
+      const removeItems = guestMovedCart(f, []);
+      f.pipeline.startCheckout.mockResolvedValueOnce({ status } as never);
+      await expect(f.send()).rejects.toMatchObject({
+        code: "STAFF_ROUND_TABLE_CHECKOUT_IN_PROGRESS",
+      });
+      expect(removeItems).toHaveBeenCalledTimes(1);
+      expect(f.calls).not.toContain("preparePayment");
+      expect(state.turnLog).toEqual(["taken", "end:NotSent"]);
+    },
+  );
+  it("a guest's change whose round took the round's dish: dishes left at the table", async () => {
+    const f = setup();
+    guestMovedCart(f, []);
+    Object.assign(f.pipeline, { removeItems: vi.fn(async () => "Kept" as const) });
+    f.pipeline.startCheckout.mockResolvedValueOnce({ status: "CartChanged" } as never);
+    await expect(f.send()).rejects.toMatchObject({ code: "STAFF_ROUND_NOT_WITHDRAWN" });
   });
 
   // v15 b12 review: from the checkout on, an unexpected failure with no round behind it.

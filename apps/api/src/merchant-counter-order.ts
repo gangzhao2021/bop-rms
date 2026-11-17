@@ -321,7 +321,14 @@ export interface CounterGuestPipeline {
       readonly cartVersion: number;
       readonly quoteReference: string;
     },
-  ): Promise<void>;
+  ): Promise<
+    | undefined
+    /**
+     * WP-2423 (staff-round-guest-race): someone at the table changed or checked out the shared
+     * Cart since it was priced; nothing was saved (dine-in only).
+     */
+    | { readonly status: "CartChanged" }
+  >;
   startCheckout(
     credentials: CounterGuestCredentials,
     input: {
@@ -334,6 +341,12 @@ export interface CounterGuestPipeline {
     | { readonly status: "Started"; readonly checkoutSessionReference: string }
     | { readonly status: "StoreNotTakingOrders" }
     | { readonly status: "RequoteRequired" }
+    /**
+     * WP-2423 (staff-round-guest-race): someone at the table changed or checked out the shared
+     * Cart since it was priced, or a guest is paying for it now; nothing was created (dine-in only).
+     */
+    | { readonly status: "CartChanged" }
+    | { readonly status: "CheckoutInProgress" }
     /** WP-2423: the Store's stock can't make the Cart as it stands, or an item can't be sold now;
      * nothing was created or charged. */
     | CounterCheckoutItemRefusal
@@ -889,19 +902,27 @@ export function createMerchantCounterOrder(options: {
       }
       if (quoted.status !== "Quoted") return fail("COUNTER_ORDER_NOT_PRICED");
       const tip = counterTipMinor(command.tip, quoted.subtotalMinor);
-      await options.pipeline.saveDetails(credentials, {
+      // Only staff hold a walk-up guest's Cart, so it never moves on under them: as before, an
+      // answer that can't come here is a failure.
+      const unexpectedAnswer = (status: string): never => {
+        throw new Error("COUNTER_GUEST_PIPELINE_UNAVAILABLE", { cause: { code: status } });
+      };
+      const saved = await options.pipeline.saveDetails(credentials, {
         operationReference: options.nextReference(),
         detailsReference: options.nextReference(),
         cartReference: bound.cartReference,
         cartVersion,
         quoteReference: quoted.quoteReference,
       });
+      if (saved !== undefined) return unexpectedAnswer(saved.status);
       const checkout = await options.pipeline.startCheckout(credentials, {
         createOperationReference: options.nextReference(),
         cartReference: bound.cartReference,
         cartVersion,
         quoteReference: quoted.quoteReference,
       });
+      if (checkout.status === "CartChanged" || checkout.status === "CheckoutInProgress")
+        return unexpectedAnswer(checkout.status);
       if (checkout.status === "ItemShort" || checkout.status === "ItemUnavailable")
         return refusedAtCheckout(checkout, cartLines);
       if (checkout.status === "RequoteRequired") return fail("COUNTER_ORDER_NOT_PRICED");
