@@ -793,7 +793,7 @@ const b24Words = {
     taxClassName: "Standard taxable",
     tax: "Orders are taxed with the tax settings this store uses today.",
     save: "Save as draft",
-    alert: "Check the edited settings.",
+    alert: "This draft was not saved. Service charge applies to Pickup orders",
   },
   "zh-Hans": {
     services: "2. 服务方式",
@@ -814,7 +814,7 @@ const b24Words = {
     taxClassName: "标准应税",
     tax: "订单按本店现在用的税务设置计税。",
     save: "存为草稿",
-    alert: "请检查已编辑的设置。",
+    alert: "这份草稿没有保存。服务费适用于自取订单",
   },
 } as const;
 for (const lang of ["en", "zh-Hans"] as const)
@@ -879,6 +879,134 @@ for (const lang of ["en", "zh-Hans"] as const)
     await orders.getByRole("checkbox", { name: w.pickup, exact: true }).click();
     await expect(fees.getByText(w.notOffered)).toHaveCount(0);
     await expect(orders.getByRole("checkbox")).toHaveCount(1);
+    await expectNoInternalText(page);
+    expect(errors).toEqual([]);
+  });
+
+// b25 (v15 live check of b24): a save the server refuses outright never happened, so staff are not
+// blocked behind "An earlier save has not been cleared"; a save the page refuses names the fee and
+// the service; payment methods read as what guests and cashiers do; the receipt template tools have
+// no Refresh buttons. Shots go to BOP_B25_SHOTS when it names a folder.
+const b25Shots = process.env.BOP_B25_SHOTS ?? "";
+async function b25Shot(page: Page, name: string) {
+  for (const [width, height] of [
+    [1440, 900],
+    [1024, 768],
+    [390, 844],
+  ] as const) {
+    await page.setViewportSize({ width, height });
+    await noOverflow(page);
+    if (b25Shots) {
+      mkdirSync(b25Shots, { recursive: true });
+      await page.screenshot({ path: `${b25Shots}/${name}-${width}.png`, fullPage: true });
+    }
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+}
+for (const lang of ["en", "zh-Hans"] as const)
+  test(`@production b25: a refused Store setup save can be put right and saved again, and says what is wrong (${lang})`, async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    const w = b24Words[lang],
+      zh = lang === "zh-Hans";
+    const errors = await install(page);
+    await language(page, lang);
+    // The server refuses the save outright (a rule only it knows): 400, nothing written.
+    const refused: string[] = [];
+    await page.route("**/merchant/store-setup", async (route) => {
+      if (route.request().method() !== "POST") return route.fallback();
+      refused.push(String((route.request().postDataJSON() as { command?: unknown }).command));
+      return respond(route, { error: "store_setup_invalid" }, 400);
+    });
+    await page.goto(setupHref + "?section=changes");
+    const step = (name: string) => page.getByRole("button", { name, exact: true }).click();
+    await step(w.services);
+    const services = page.getByRole("group", { name: w.servicesGroup, exact: true });
+    await services.getByRole("checkbox", { name: w.dineIn, exact: true }).check();
+    await services.getByRole("checkbox", { name: w.pickup, exact: true }).check();
+    await services.getByRole("checkbox", { name: w.delivery, exact: true }).uncheck();
+    const save = page.getByRole("button", { name: w.save, exact: true });
+    await save.click();
+    await expect(page.locator("#setup-validation-error")).toContainText(
+      zh ? "请检查已编辑的设置。" : "Check the edited settings.",
+    );
+    expect(refused).toEqual(["SaveDraft"]);
+    await expect(
+      page.getByText(zh ? "之前的保存尚未清除" : "An earlier save has not been cleared"),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: zh ? "恢复原来的保存" : "Recover original save" }),
+    ).toHaveCount(0);
+    await expect(save).toBeEnabled();
+    await expect(
+      page.getByRole("button", { name: zh ? "放弃未保存的修改" : "Discard unsaved changes" }),
+    ).toBeEnabled();
+    await b25Shot(page, `server-refused-${lang}`);
+    // Payment methods in plain words.
+    await step(w.fees);
+    const payment = page.getByRole("region", { name: w.regions[2], exact: true });
+    for (const name of zh
+      ? ["顾客在线刷卡", "门店刷卡机刷卡", "门店刷卡机 Interac"]
+      : [
+          "Guests pay online by card",
+          "Card on the store terminal",
+          "Interac on the store terminal",
+        ])
+      await expect(payment.getByRole("checkbox", { name, exact: true })).toBeVisible();
+    await expect(payment).not.toContainText(/Staff terminal|Customer online|员工终端/u);
+    await b25Shot(page, `fees-step-${lang}`);
+    // A fee on a service this setup does not offer: the page refuses it and says which.
+    const fees = page.getByRole("region", { name: w.regions[0], exact: true });
+    await fees
+      .getByRole("combobox", { name: w.serviceCharge, exact: true })
+      .selectOption("Enabled");
+    const orders = fees.getByRole("group", { name: w.orderTypes, exact: true });
+    await orders.getByRole("checkbox", { name: w.pickup, exact: true }).check();
+    await fees
+      .getByRole("combobox", { name: w.taxClass, exact: true })
+      .selectOption({ label: w.taxClassName });
+    await step(w.services);
+    await services.getByRole("checkbox", { name: w.pickup, exact: true }).uncheck();
+    await save.click();
+    const alert = page.locator("#setup-validation-error");
+    await expect(alert).toContainText(w.fix);
+    await expect(alert).toContainText(zh ? "“需要先改正”" : "“Needs fixing first”");
+    await expect(alert).not.toContainText(zh ? "每个服务时段" : "Each service interval");
+    expect(refused).toEqual(["SaveDraft"]);
+    await b25Shot(page, `save-refused-${lang}`);
+    // The receipt template tools: no Refresh buttons of their own.
+    // No preset saved yet (the presets' own spec covers saving them).
+    await page.route("**/merchant/store-setup/receipt-artifacts**", (route) => {
+      const observedAt = new Date().toISOString();
+      return respond(route, {
+        profile: "DigitalReceiptTemplateArtifactsCurrentV1",
+        tenantReference: id(1),
+        brandReference: id(2),
+        storeReference: store,
+        actorReference: id(4),
+        layout: null,
+        compliance: null,
+        observedAt,
+        validUntil: new Date(Date.parse(observedAt) + 5000).toISOString(),
+        sourceQualification: "NotEvaluated",
+      });
+    });
+    await page.goto(setupHref + "?section=receipts");
+    const tools = page.locator("#receipt-templates");
+    await expect(tools).toBeVisible();
+    // The presets read again by themselves; only the template list and the saved template draft
+    // keep a way to read what another person or device did meanwhile (approved, saved elsewhere).
+    await expect(
+      tools
+        .getByRole("region", { name: zh ? "收据预设" : "Receipt presets", exact: true })
+        .getByRole("button", { name: /Refresh|刷新/u }),
+    ).toHaveCount(0);
+    await expect(tools.getByRole("button", { name: /Refresh|刷新/u })).toHaveCount(2);
+    await expect(
+      tools.getByText(zh ? "还没有已保存的预设。" : "No saved preset yet.").first(),
+    ).toBeVisible();
+    await b25Shot(page, `receipts-${lang}`);
     await expectNoInternalText(page);
     expect(errors).toEqual([]);
   });
