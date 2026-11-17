@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   isDatabaseContention,
   isExpectedContention,
+  isMerchantDenial,
   isMerchantRefusal,
   keepingCause,
   merchantFailureCode,
@@ -232,6 +233,30 @@ describe("every code a service throws today", () => {
       }
     }
     expect([...unlisted]).toEqual([]);
+  });
+});
+
+describe("a refusal of the person", () => {
+  it.each([
+    new BrowserSessionError("BROWSER_SESSION_ENDED"),
+    coded("SESSION_REVOKED"),
+    new MembershipContractError("ACTIVE_STORE_ASSIGNMENT_NOT_FOUND"),
+    new MembershipContractError("ACTIVE_MEMBERSHIP_NOT_FOUND"),
+    new Error("STORE_SERVICE_PERMISSION_DENIED"),
+    withCause(new Error("STORE_SERVICE_UNAVAILABLE"), coded("SESSION_REVOKED")),
+  ])("is a denial: %s", (error) => {
+    expect(isMerchantDenial(error)).toBe(true);
+  });
+  it.each([
+    new BrowserSessionError("BROWSER_SESSION_INPUT_INVALID"),
+    coded("ACTOR_REFERENCE_INVALID"),
+    new BrowserSessionError("BROWSER_SESSION_UNAVAILABLE"),
+    coded("57014"),
+    new TypeError("x is not a function"),
+    afterFailedQuery(new Error("STORE_SERVICE_PERMISSION_DENIED"), "08006"),
+    missingGrant(),
+  ])("is no denial: %s", (error) => {
+    expect(isMerchantDenial(error)).toBe(false);
   });
 });
 

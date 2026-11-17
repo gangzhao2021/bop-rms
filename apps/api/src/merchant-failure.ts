@@ -175,6 +175,18 @@ export function isMerchantRefusal(error: unknown): boolean {
 }
 
 /**
+ * A refusal of the person (an ended or revoked sign-in, no active membership or Store assignment, a
+ * denied permission or selection), as opposed to a malformed value or an outage: what a check of
+ * current authority found when the person may no longer act.
+ */
+export function isMerchantDenial(error: unknown): boolean {
+  if (!isMerchantRefusal(error)) return false;
+  // Refused for a malformed value of its own is no denial; behind a rewrite it is the person's.
+  const code = merchantFailureCode(error);
+  return code === null || !(malformedCodes.has(code) || malformedEnding.test(code));
+}
+
+/**
  * For a service that turns the failure of a session or scope read into its own refusal:
  * `.catch(onlyRefusal(() => fail("PermissionDenied")))`. A real refusal becomes the service's;
  * anything else carries on as itself, so a lock timeout never reads as "no permission".

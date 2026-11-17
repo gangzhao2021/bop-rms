@@ -73,7 +73,12 @@ import {
 } from "./merchant-tax-config-authoring-command.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
-import { isMerchantRefusal, withCause } from "./merchant-failure.js";
+import {
+  isMerchantDenial,
+  isMerchantRefusal,
+  keepingCause,
+  withCause,
+} from "./merchant-failure.js";
 
 export interface MerchantTaxConfigAuthoringOptions {
   readonly persistence: PersistentMerchantBffOptions;
@@ -107,7 +112,13 @@ function reference(value: unknown) {
 const same = (left: unknown, right: unknown) =>
   canonicalizeRfc8785(left) === canonicalizeRfc8785(right);
 function bounded(error: unknown): never {
-  if (error instanceof TaxConfigWorkflowError) throw error;
+  if (error instanceof TaxConfigWorkflowError) {
+    // A refusal that left a transaction after one of its queries failed was not decided on what
+    // was read (the transaction runner marks it): it is the outage, never "no permission".
+    if (error.code === "TAX_CONFIG_PERMISSION_DENIED" && !isMerchantRefusal(error))
+      return keepingCause(fail)(error);
+    throw error;
+  }
   if (error instanceof TaxRegistrantSourceError) {
     return fail(
       error.code === "TAX_REGISTRANT_PERMISSION_DENIED"
@@ -415,8 +426,19 @@ export function createMerchantTaxConfigAuthoring(options: MerchantTaxConfigAutho
             )
               return fail();
             tighten(request.validUntil);
-            const hold = pendingHold,
+            const hold = pendingHold;
+            let authority: Awaited<ReturnType<typeof bareFresh>>;
+            try {
               authority = await bareFresh(hold?.mode ?? "Read");
+            } catch (error) {
+              // WP-2423 (tax-config-revocation): a Session revoked, a Store assignment suspended
+              // or a selection refused since entry is the same refusal the route gives at entry,
+              // not an outage. Anything else (a lost connection, a timeout) carries on as itself
+              // and the capability answers it unavailable.
+              if (!(error instanceof TaxConfigWorkflowError) && isMerchantDenial(error))
+                throw withCause(new TaxConfigWorkflowError("TAX_CONFIG_PERMISSION_DENIED"), error);
+              throw error;
+            }
             if (hold) hold.authority = authority;
             return authority;
           },

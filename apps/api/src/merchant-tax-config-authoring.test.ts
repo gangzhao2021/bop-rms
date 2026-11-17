@@ -6,6 +6,7 @@ import {
 import { beforeEach, expect, it, vi } from "vitest";
 import { createFeatureControlAdministrationDefinition } from "@bop/feature-control";
 import { BrowserSessionError } from "@bop/identity";
+import { MembershipContractError } from "@bop/membership";
 import { canonicalizeRfc8785, sha256Hex, validateAuditRecord } from "@bop/audit";
 import { createBrand, createStore, createTenantContext, parseCanonicalInstant } from "@bop/tenant";
 import {
@@ -158,6 +159,9 @@ function fixture() {
     withdrawAfterApply: false,
     featureDisabled: false,
     featureAbsent: false,
+    /** Thrown by every Session/scope read after the tentative write (a mid-save change). */
+    scopeFailureAfterApply: undefined as unknown,
+    scopeFailure: undefined as unknown,
   };
   const brand = createBrand({
     brandReference: scope.brandReference,
@@ -229,6 +233,7 @@ function fixture() {
   }
   boundary.store.mockImplementation(async (_tx, _cookie, action) => {
     events.push("store:" + action);
+    if (state.scopeFailure !== undefined) throw state.scopeFailure;
     const result = {
       selected: { tenantReference: scope.tenantReference },
       context: context(),
@@ -491,6 +496,8 @@ function fixture() {
       });
       validateAuditRecord(audit, Date.parse(at));
       if (state.withdrawAfterApply) allow = false;
+      if (state.scopeFailureAfterApply !== undefined)
+        state.scopeFailure = state.scopeFailureAfterApply;
       return parseTaxConfigAuthoringOperation({
         profile: "TaxConfigAuthoringOperationV1",
         ...scope,
@@ -743,6 +750,65 @@ it("rolls back a tentative fresh write when real fine authority withdraws before
   });
   expect(f.events).toContain("rollback");
   expect(f.events).not.toContain("commit");
+});
+
+// WP-2423 (tax-config-revocation): a Session revoked or a Store assignment suspended in the middle
+// of a save is found by the next source hold's fresh authority check. It answers what the route
+// answers at entry (no permission), not "unavailable", and nothing is written; a database outage
+// at that same check still answers "unavailable".
+it.each([
+  ["a revoked Session", () => new BrowserSessionError("BROWSER_SESSION_ENDED")],
+  [
+    "a suspended Store assignment",
+    () => new MembershipContractError("ACTIVE_STORE_ASSIGNMENT_NOT_FOUND"),
+  ],
+  ["a refused selection", () => new Error("STORE_SERVICE_PERMISSION_DENIED")],
+])("refuses a save when the next fresh authority check finds %s", async (_name, error) => {
+  const f = fixture();
+  f.state.scopeFailureAfterApply = error();
+  await expect(f.service.execute(request())).rejects.toMatchObject({
+    code: "TAX_CONFIG_PERMISSION_DENIED",
+  });
+  expect(f.events).toContain("rollback");
+  expect(f.events).not.toContain("commit");
+});
+it.each([
+  ["a lost connection", () => Object.assign(new Error("Connection terminated"), { code: "08006" })],
+  ["a statement timeout", () => Object.assign(new Error("canceling statement"), { code: "57014" })],
+  ["an unexpected fault", () => new TypeError("x is not a function")],
+  ["a Session source outage", () => new BrowserSessionError("BROWSER_SESSION_UNAVAILABLE")],
+])("answers unavailable when the next fresh authority check meets %s", async (_name, error) => {
+  const f = fixture();
+  f.state.scopeFailureAfterApply = error();
+  await expect(f.service.execute(request())).rejects.toMatchObject({
+    code: "TAX_CONFIG_DEPENDENCY_UNAVAILABLE",
+  });
+  expect(f.events).toContain("rollback");
+  expect(f.events).not.toContain("commit");
+});
+it("answers unavailable for a refusal decided after a query of the save failed", async () => {
+  const f = fixture();
+  f.state.scopeFailureAfterApply = new BrowserSessionError("BROWSER_SESSION_ENDED");
+  const run = f.options.persistence.transactions.run as unknown as ReturnType<
+    typeof vi.fn<(work: unknown) => Promise<unknown>>
+  >;
+  const inner = run.getMockImplementation();
+  if (inner === undefined) throw new Error("Controlled transaction runner missing");
+  // The production transaction runner marks what leaves a transaction after one of its queries
+  // failed: nothing was read correctly to decide a refusal with.
+  run.mockImplementation(async (work) => {
+    try {
+      return await inner(work);
+    } catch (error) {
+      Object.defineProperty(error, Symbol.for("bop.database.failure"), {
+        value: { sqlState: "08006", constraint: null, table: null, closed: true },
+      });
+      throw error;
+    }
+  });
+  await expect(f.service.execute(request())).rejects.toMatchObject({
+    code: "TAX_CONFIG_DEPENDENCY_UNAVAILABLE",
+  });
 });
 
 it("returns actual registry definitions with truthful lifecycle and retained real child guards", async () => {

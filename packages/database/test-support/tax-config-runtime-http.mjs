@@ -78,6 +78,10 @@ export async function exerciseTaxConfigRuntimeHttp(context) {
     lateCandidateFineRole = null,
     /** Another same-transaction authority change injected like the grant withdrawal below. */
     lateMutation = null,
+    /** Armed by an outage case: the next Session read fails in the database. */
+    lateOutage = false,
+    /** Failures the router reports for the error log (level 50), by stage. */
+    reportedFailures = [],
     lateCandidateGuardCode = "NONE",
     lateCandidateGuardSite = "NONE",
     lateCandidateSourceStep = "NONE",
@@ -147,6 +151,15 @@ export async function exerciseTaxConfigRuntimeHttp(context) {
               if (sql.startsWith("SELECT set_config(")) settingStatements++;
               else if (sql.includes("pg_advisory_xact_lock")) advisoryLockStatements++;
               if (queryDelayMs > 0) await delay(queryDelayMs);
+              if (lateOutage && sql.includes("FROM bop_identity.authentication_session WHERE")) {
+                lateOutage = false;
+                lateCandidateSourceStep = "SessionReadCancelled";
+                // A real database failure at the next source hold's Session read: Postgres
+                // cancels the statement at its time limit (57014) and the transaction aborts.
+                await client.query("SET LOCAL statement_timeout='20ms'");
+                await client.query("SELECT pg_sleep(1)");
+                assert.fail("the cancelled statement returned");
+              }
               const sentAt = performance.now();
               const result = await client.query(sql, values);
               databaseMillis += performance.now() - sentAt;
@@ -160,14 +173,17 @@ export async function exerciseTaxConfigRuntimeHttp(context) {
               ) {
                 const selected = lateMutation;
                 lateMutation = null;
-                // As below: a same-transaction Session or Store assignment change after the
-                // terminal original INSERT must deny at the next source hold and roll back.
-                await client.query("RESET ROLE");
-                const mutation = await client.query(selected.sql, selected.values);
-                assert.equal(mutation.rowCount, 1);
                 lateCandidateInjected = true;
                 lateCandidateSourceStep = "TerminalOriginalInserted";
-                await client.query("SET LOCAL ROLE " + role);
+                if (selected.outage) lateOutage = true;
+                else {
+                  // As below: a same-transaction Session or Store assignment change after the
+                  // terminal original INSERT must deny at the next source hold and roll back.
+                  await client.query("RESET ROLE");
+                  const mutation = await client.query(selected.sql, selected.values);
+                  assert.equal(mutation.rowCount, 1);
+                  await client.query("SET LOCAL ROLE " + role);
+                }
               }
               if (
                 lateCandidateFineRole !== null &&
@@ -430,7 +446,15 @@ export async function exerciseTaxConfigRuntimeHttp(context) {
     });
   async function withHttp(session, work) {
     const app = express();
-    app.use("/merchant", createMerchantBffRouter(runtimeFor(session)));
+    app.use(
+      "/merchant",
+      createMerchantBffRouter({
+        // As the server does (server.ts): every 5xx is logged at level 50 through this; a
+        // refusal (403) is only the request's own completion line (level 30).
+        onUnexpectedFailure: () => reportedFailures.push(stage),
+        ...runtimeFor(session),
+      }),
+    );
     const server = app.listen(0, "127.0.0.1");
     try {
       await new Promise((resolve, reject) => {
@@ -1509,8 +1533,9 @@ export async function exerciseTaxConfigRuntimeHttp(context) {
       assert.deepEqual(await materialCounts(), beforeLateMaterial);
       // A Session revoked, or the Store assignment suspended, inside the request after the
       // write is refused at the next source hold (each hold reads them again) and rolls back.
-      // Both answer 503 "unavailable", exactly as before the hold round trips were cut (that
-      // refusal is not classified as a permission denial; unchanged here).
+      // WP-2423 (tax-config-revocation): both answer 403, the refusal the route gives at entry,
+      // and are not logged as faults; before, they answered 503 "unavailable". A database
+      // failure at that same Session read still answers 503 and is logged as a fault.
       const authorityRows = async () =>
         (
           await admin.query(
@@ -1525,7 +1550,7 @@ export async function exerciseTaxConfigRuntimeHttp(context) {
             sql: "UPDATE bop_identity.authentication_session SET status='Revoked',revocation_reason='Administrative',revoked_at=GREATEST(now(),created_at),version=version+1 WHERE actor_id=$1 AND status='Active'",
             values: [actor],
           },
-          503,
+          403,
         ],
         [
           "MaterialLateAssignmentSuspended",
@@ -1533,8 +1558,9 @@ export async function exerciseTaxConfigRuntimeHttp(context) {
             sql: "UPDATE bop_membership.store_assignment SET lifecycle='Suspended',version=version+1 WHERE actor_id=$1 AND store_id=$2 AND lifecycle='Active'",
             values: [actor, store],
           },
-          503,
+          403,
         ],
+        ["MaterialLateSessionReadOutage", { outage: true }, 503],
       ]) {
         stage = lateStage;
         const beforeLateRows = await authorityRows(),
@@ -1545,8 +1571,18 @@ export async function exerciseTaxConfigRuntimeHttp(context) {
           operationReference: reference(),
         });
         assert.equal(lateMutation, null, lateStage + " injected");
+        assert.equal(lateOutage, false, lateStage + " outage reached");
         assert.equal(lateResponse.status, expectedStatus, lateStage);
-        assert.equal(lateResponse.body.error, "tax_config_authoring_unavailable", lateStage);
+        assert.equal(
+          lateResponse.body.error,
+          expectedStatus === 403 ? "request_denied" : "tax_config_authoring_unavailable",
+          lateStage,
+        );
+        assert.deepEqual(
+          reportedFailures.filter((reported) => reported === lateStage),
+          expectedStatus === 403 ? [] : [lateStage],
+          lateStage + " error log",
+        );
         assert.deepEqual(await authorityRows(), beforeLateRows);
         assert.deepEqual(await materialCounts(), beforeLateMaterial);
         assert.deepEqual(await materialCounts(), beforeLateCounts);
