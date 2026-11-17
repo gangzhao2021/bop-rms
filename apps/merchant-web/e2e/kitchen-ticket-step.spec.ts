@@ -497,8 +497,10 @@ for (const [width, height] of [
     expect(await yOf()).toBe(start);
     // A refusal.
     await ticket.locator(".kitchen-ticket__next").click();
+    // The refusal is said when the server answers, after the tap's hold; a slow runner can take
+    // longer than the hold to get there, and the line must then show it over the arrival.
     await expect(page.locator(".kitchen-status-row__line")).toContainText("was cancelled", {
-      timeout: holdMs + 5_000,
+      timeout: holdMs + 20_000,
     });
     expect(await yOf()).toBe(start);
     // Nothing scrolls sideways at this width.

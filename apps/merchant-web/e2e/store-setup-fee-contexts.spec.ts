@@ -655,7 +655,10 @@ test("@production Store fee contexts reject unavailable retired or foreign class
     .check();
   f.control.choiceMode = "Retired";
   await save(page).click();
-  await expect(page.locator("#setup-validation-error")).toContainText("Check the edited settings");
+  // b28: one sentence that nothing was saved, pointing to step 4.
+  await expect(page.locator("#setup-validation-error")).toContainText(
+    "This draft was not saved: check the times, wait times and fees you changed",
+  );
   expect(f.control.writes).toHaveLength(0);
   expect(await journalRecords(page)).toEqual([]);
   expect(f.control.errors).toEqual([]);

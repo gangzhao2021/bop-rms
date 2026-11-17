@@ -1613,7 +1613,9 @@ for (const language of ["en", "zh-Hans"] as const)
       route.fulfill({ headers, json: counterDetail(row("1132")) }),
     );
     await page.goto("/operations/orders");
-    const paperRow = page.locator("li.order-row").filter({ hasText: "52" });
+    const paperRow = page.locator("li.order-row").filter({
+      has: page.locator(".order-row__number", { hasText: /^52$/u }),
+    });
     await expect(paperRow).toContainText(
       zh ? "纸单已付款 · 付款还没录入" : "Paid on paper · payment not recorded",
     );
@@ -1630,7 +1632,9 @@ for (const language of ["en", "zh-Hans"] as const)
       zh ? /收款|释放|未付款|等待柜台/u : /Take payment|released|Charge|Not paid|Awaiting payment/u,
     );
     // The live order next to it still reads as one to charge.
-    const liveRow = page.locator("li.order-row").filter({ hasText: "53" });
+    const liveRow = page.locator("li.order-row").filter({
+      has: page.locator(".order-row__number", { hasText: /^53$/u }),
+    });
     await expect(liveRow.getByRole("button", { name: zh ? "收款" : "Charge" })).toBeVisible();
     await expect(liveRow).toContainText(zh ? "未付款将释放" : "released if unpaid");
     // Its detail opens on the same paper words at the top.
