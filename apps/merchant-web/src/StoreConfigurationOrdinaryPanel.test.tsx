@@ -23,6 +23,7 @@ import {
   type StoreConfigurationOriginalCursor,
 } from "./store-configuration-pending-journal.js";
 import { publicationValueDigest } from "./product-publication-command-client-v2.js";
+import { StoreSetupClientError } from "./store-setup-client.js";
 const id = (n: number) => `01902501-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const at = "2026-10-05T10:00:00.000Z",
   until = "2026-10-05T10:00:05.000Z";
@@ -634,4 +635,58 @@ it("WP-2423 store-service-controls (v15 M33): names the unconfirmed step in the 
   expect(storeConfigurationPendingText("Submit")).toBe(
     "An earlier send for approval request was not confirmed. Recover it before making another change; the saved setup is kept.",
   );
+});
+it("b25: a step the server refuses outright (Invalid, Denied, Conflict, a named refusal) lets its original go; an unknown outcome keeps it", async () => {
+  const cursor = await original(id(95), "Approve");
+  const actual = createStoreConfigurationOrdinaryClient(),
+    prepared = await actual.prepare({
+      profile: "StoreConfigurationOrdinaryCommandV1",
+      ...scope,
+      operationReference: cursor.operationReference,
+      action: "Approve",
+      expectedHead: cursor.expectedHead,
+    });
+  const run = async (code: StoreSetupClientError["code"]) => {
+    let pending: StoreConfigurationOriginalCursor | null = null;
+    const journal = {
+      load: vi.fn(async () => pending),
+      reserve: vi.fn(async () => undefined),
+      complete: vi.fn(async () => undefined),
+      release: vi.fn(async () => undefined),
+    };
+    const client = {
+      ...actual,
+      execute: vi.fn(async () => {
+        throw new StoreSetupClientError(code);
+      }),
+    };
+    await expect(
+      executeStoreConfigurationOriginal({
+        client,
+        journal,
+        prepared,
+        csrf,
+        signal: new AbortController().signal,
+        isCurrent: () => true,
+        canDispatch: () => true,
+        onReserved: (value) => {
+          pending = value;
+        },
+        onReleased: () => {
+          pending = null;
+        },
+      }),
+    ).rejects.toMatchObject({ code });
+    return { journal, pending };
+  };
+  for (const code of ["Invalid", "Denied", "Conflict", "SetupIncomplete"] as const) {
+    const { journal, pending } = await run(code);
+    expect(journal.release).toHaveBeenCalledWith(prepared.cursor);
+    expect(pending).toBeNull();
+  }
+  for (const code of ["OutcomeUnknown", "Unavailable", "ScopeChanged"] as const) {
+    const { journal, pending } = await run(code);
+    expect(journal.release).not.toHaveBeenCalled();
+    expect(pending).toEqual(prepared.cursor);
+  }
 });

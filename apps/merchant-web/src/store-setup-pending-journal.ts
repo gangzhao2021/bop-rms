@@ -13,6 +13,12 @@ import { canonicalPublicationValue as canonical } from "./product-publication-co
 export interface StoreSetupPendingJournal {
   load(): Promise<StoreSetupCursor | null>;
   reserve(cursor: StoreSetupCursor): Promise<void>;
+  /**
+   * b25: lets go of an original the server refused outright (a definite answer that nothing was
+   * written: invalid, not allowed, changed meanwhile), so staff put it right and save again. Only
+   * this same original is cleared. A journal without it keeps the recovery path.
+   */
+  release?(cursor: StoreSetupCursor): Promise<void>;
   complete(
     cursor: StoreSetupCursor,
     receipt: StoreSetupReceipt,
@@ -113,6 +119,21 @@ export function createStoreSetupPendingJournal(scope: StoreSetupScope): StoreSet
           try {
             if (request.result !== undefined && !same(request.result, cursor)) return fail();
             table.put(cursor, key);
+            set(undefined);
+          } catch {
+            fail();
+          }
+        };
+      });
+    },
+    async release(value: StoreSetupCursor) {
+      const cursor = parse(value);
+      await transaction<undefined>("readwrite", (table, set, fail) => {
+        const request = table.get(key);
+        request.onsuccess = () => {
+          try {
+            if (request.result !== undefined && !same(request.result, cursor)) return fail();
+            table.delete(key);
             set(undefined);
           } catch {
             fail();

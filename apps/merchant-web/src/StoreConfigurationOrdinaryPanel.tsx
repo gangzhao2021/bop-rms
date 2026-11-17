@@ -35,6 +35,7 @@ import {
   type StoreConfigurationSnapshot,
 } from "./store-configuration-client.js";
 import {
+  releaseOriginalWhenRefused,
   StoreSetupClientError,
   type StoreSetupScope,
   type StoreSetupSnapshot,
@@ -281,6 +282,8 @@ export async function executeStoreConfigurationOriginal(input: {
   isCurrent: () => boolean;
   canDispatch: () => boolean;
   onReserved: (cursor: StoreConfigurationOriginalCursor) => void;
+  /** b25: the server refused the step outright (or it was never sent), so its original was let go. */
+  onReleased?: (cursor: StoreConfigurationOriginalCursor) => void;
   /** WP-2423: "SoleOperator" when the Owner approves their own configuration alone. */
   approvalMode?: "SoleOperator";
 }) {
@@ -291,11 +294,18 @@ export async function executeStoreConfigurationOriginal(input: {
   await input.journal.reserve(input.prepared.cursor);
   input.onReserved(input.prepared.cursor);
   check();
-  if (!input.canDispatch()) throw new StoreSetupClientError("Conflict");
-  const receipt = await input.client.execute(
-    input.prepared,
-    { csrf: input.csrf, signal: input.signal },
-    input.approvalMode,
+  const receipt = await releaseOriginalWhenRefused(
+    input.journal,
+    input.prepared.cursor,
+    () => {
+      if (!input.canDispatch()) throw new StoreSetupClientError("Conflict");
+      return input.client.execute(
+        input.prepared,
+        { csrf: input.csrf, signal: input.signal },
+        input.approvalMode,
+      );
+    },
+    input.onReleased,
   );
   check();
   const workspace = await input.client.refreshOriginal(input.prepared.cursor, {
@@ -655,6 +665,10 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
         canDispatch: () => !freshDisabled.current,
         onReserved: (cursor) => {
           if (current()) setPending(cursor);
+        },
+        // b25: a step the server refused never happened; the Owner puts it right and tries again.
+        onReleased: () => {
+          if (current()) setPending(null);
         },
         ...(approvalMode === undefined ? {} : { approvalMode }),
       });

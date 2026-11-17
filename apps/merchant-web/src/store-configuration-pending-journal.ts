@@ -604,6 +604,12 @@ export async function parseStoreConfigurationOrdinaryWorkspace(
 export interface StoreConfigurationPendingJournal {
   load(): Promise<StoreConfigurationOriginalCursor | null>;
   reserve(cursor: StoreConfigurationOriginalCursor): Promise<void>;
+  /**
+   * b25: lets go of an original the server refused outright (a definite answer that nothing was
+   * written: invalid, not allowed, changed meanwhile), so staff put it right and save again. Only
+   * this same original is cleared. A journal without it keeps the recovery path.
+   */
+  release?(cursor: StoreConfigurationOriginalCursor): Promise<void>;
   complete(
     cursor: StoreConfigurationOriginalCursor,
     receipt: StoreConfigurationOrdinaryReceipt,
@@ -712,6 +718,21 @@ export function createStoreConfigurationPendingJournal(
           try {
             if (request.result !== undefined && !same(request.result, cursor)) return refuse();
             table.put(cursor, key);
+            set(undefined);
+          } catch {
+            refuse();
+          }
+        };
+      });
+    },
+    async release(value: StoreConfigurationOriginalCursor) {
+      const cursor = await validateStoreConfigurationOriginalCursor(parse(value));
+      await transaction<undefined>("readwrite", (table, set, refuse) => {
+        const request = table.get(key);
+        request.onsuccess = () => {
+          try {
+            if (request.result !== undefined && !same(request.result, cursor)) return refuse();
+            table.delete(key);
             set(undefined);
           } catch {
             refuse();

@@ -68,6 +68,7 @@ import {
   storeSetupFeeCharges,
   type StoreSetupFeeContext,
   parseStoreSetupContent,
+  releaseOriginalWhenRefused,
   StoreSetupClientError,
   type StoreSetupContent,
   type StoreSetupWorkspace,
@@ -286,8 +287,10 @@ export async function dispatchStoreSetupDraft(input: {
   readonly csrf: string;
   readonly signal: AbortSignal;
   readonly onReserved: (cursor: StoreSetupCursor) => void;
+  /** b25: the server refused the save outright, so its original was let go. */
+  readonly onReleased?: (cursor: StoreSetupCursor) => void;
 }) {
-  const { client, journal, baseline, content, csrf, signal, onReserved } = input;
+  const { client, journal, baseline, content, csrf, signal, onReserved, onReleased } = input;
   const fresh = await client.load({
     storeReference: baseline.scope.storeReference,
     expectedScope: baseline.scope,
@@ -306,7 +309,12 @@ export async function dispatchStoreSetupDraft(input: {
   await journal.reserve(prepared.cursor);
   onReserved(prepared.cursor);
   if (signal.aborted) throw new StoreSetupClientError("OutcomeUnknown");
-  const receipt = await client.execute(prepared, { csrf, signal });
+  const receipt = await releaseOriginalWhenRefused(
+    journal,
+    prepared.cursor,
+    () => client.execute(prepared, { csrf, signal }),
+    onReleased,
+  );
   const workspace = await client.load({
     storeReference: fresh.scope.storeReference,
     expectedScope: fresh.scope,
@@ -1138,6 +1146,10 @@ export function StoreSetupDraftPage({
         signal: request.signal,
         onReserved: (cursor) => {
           if (token === epoch.current) setPending(cursor);
+        },
+        // b25: a save the server refused never happened; staff put it right and save again.
+        onReleased: () => {
+          if (token === epoch.current) setPending(null);
         },
       });
       if (!current(token, request.signal)) return;
@@ -3244,6 +3256,10 @@ export function StoreSetupReferenceEditor({
         onReserved: (cursor) => {
           if (valid()) setPending(cursor);
         },
+        // b25: a save the server refused never happened; staff put it right and save again.
+        onReleased: () => {
+          if (valid()) setPending(null);
+        },
       });
       if (valid()) {
         setPending(null);
@@ -3390,6 +3406,8 @@ export async function dispatchStoreSetupReference(input: {
   signal: AbortSignal;
   isCurrent?: () => boolean;
   onReserved: (cursor: StoreSetupReferenceCursor) => void;
+  /** b25: the server refused the save outright, so its original was let go. */
+  onReleased?: (cursor: StoreSetupReferenceCursor) => void;
 }) {
   const check = () => {
     if (input.signal.aborted || input.isCurrent?.() === false)
@@ -3419,7 +3437,12 @@ export async function dispatchStoreSetupReference(input: {
   await input.journal.reserve(prepared.cursor);
   check();
   input.onReserved(prepared.cursor);
-  const receipt = await input.client.execute(prepared, { csrf: input.csrf, signal: input.signal }),
+  const receipt = await releaseOriginalWhenRefused(
+      input.journal,
+      prepared.cursor,
+      () => input.client.execute(prepared, { csrf: input.csrf, signal: input.signal }),
+      input.onReleased,
+    ),
     current = await input.client.load({
       storeReference: input.scope.storeReference,
       expectedScope: input.scope,
@@ -3630,6 +3653,10 @@ export function StorePaymentConfigurationEditor({
         isCurrent: valid,
         onReserved: (cursor) => {
           if (valid()) setPending(cursor);
+        },
+        // b25: a save the server refused never happened; staff put it right and save again.
+        onReleased: () => {
+          if (valid()) setPending(null);
         },
       });
       if (valid()) {
@@ -3859,6 +3886,8 @@ export async function dispatchStorePaymentConfiguration(input: {
   signal: AbortSignal;
   isCurrent?: () => boolean;
   onReserved: (cursor: StorePaymentConfigurationCursor) => void;
+  /** b25: the server refused the save outright, so its original was let go. */
+  onReleased?: (cursor: StorePaymentConfigurationCursor) => void;
 }) {
   const check = () => {
     if (input.signal.aborted || input.isCurrent?.() === false)
@@ -3887,7 +3916,12 @@ export async function dispatchStorePaymentConfiguration(input: {
   await input.journal.reserve(prepared.cursor);
   check();
   input.onReserved(prepared.cursor);
-  const receipt = await input.client.execute(prepared, { csrf: input.csrf, signal: input.signal }),
+  const receipt = await releaseOriginalWhenRefused(
+      input.journal,
+      prepared.cursor,
+      () => input.client.execute(prepared, { csrf: input.csrf, signal: input.signal }),
+      input.onReleased,
+    ),
     current = await input.client.load({
       storeReference: input.scope.storeReference,
       expectedScope: input.scope,

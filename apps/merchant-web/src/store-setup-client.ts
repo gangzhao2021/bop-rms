@@ -53,6 +53,49 @@ export class StoreSetupClientError extends Error {
     this.name = "StoreSetupClientError";
   }
 }
+/**
+ * b25 (v15 live check of b24): an answer that proves nothing was written. The server refused the
+ * command (400 invalid, 403 not allowed, 409 changed meanwhile, or a named refusal), or it was
+ * never sent. Only an outcome the page cannot know (the connection cut, a timeout, a 5xx, an
+ * answer it cannot read, the Store or sign-in changing under it) keeps the original for recovery.
+ */
+export function storeSetupRefusedOutright(error: unknown): boolean {
+  return (
+    error instanceof StoreSetupClientError &&
+    error.code !== "Unavailable" &&
+    error.code !== "OutcomeUnknown" &&
+    error.code !== "ScopeChanged" &&
+    error.code !== "Stale"
+  );
+}
+/**
+ * b25: runs a command whose original is already reserved. When it is refused outright, the
+ * original is let go (and `onReleased` told) before the refusal is passed on, so staff are not
+ * blocked behind a recovery of something that never happened. If letting go fails, the original
+ * stays reserved and recovery stays the way forward.
+ */
+export async function releaseOriginalWhenRefused<C, T>(
+  journal: { release?(cursor: C): Promise<void> },
+  cursor: C,
+  work: () => Promise<T>,
+  onReleased?: (cursor: C) => void,
+): Promise<T> {
+  try {
+    return await work();
+  } catch (error) {
+    if (storeSetupRefusedOutright(error) && journal.release) {
+      let released = false;
+      try {
+        await journal.release(cursor);
+        released = true;
+      } catch {
+        /* the original stays reserved; recovery settles it */
+      }
+      if (released) onReleased?.(cursor);
+    }
+    throw error;
+  }
+}
 const fail = (code: StoreSetupClientError["code"] = "Invalid"): never => {
   throw new StoreSetupClientError(code);
 };

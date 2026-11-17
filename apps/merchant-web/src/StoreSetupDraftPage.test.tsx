@@ -1158,6 +1158,39 @@ it("Payment Save reserves before POST and fresh current before clearing; selecti
   expect(result.current.snapshot?.configurationReference).toBe(id(70));
   expect(f.pending()).toBeNull();
 });
+it("b25: a payment save the server refuses (400) is let go, so it is saved again without a recovery", async () => {
+  const f = paymentFixture(),
+    actual = f.fetcher.getMockImplementation();
+  if (!actual) throw new Error("fixture missing");
+  f.journal.release = async () => {
+    f.calls.push("RELEASE");
+    f.journal.load = async () => null;
+  };
+  let refuse = true;
+  f.fetcher.mockImplementation(async (...args) => {
+    if (args[1]?.method === "POST" && refuse) {
+      refuse = false;
+      return new Response(JSON.stringify({ error: "store_payment_invalid" }), { status: 400 });
+    }
+    return actual(...args);
+  });
+  const released = vi.fn();
+  await expect(
+    dispatchStorePaymentConfiguration({
+      client: f.client,
+      journal: f.journal,
+      scope,
+      baseline: f.baseline,
+      content: paymentContent,
+      csrf,
+      signal: new AbortController().signal,
+      onReserved: () => undefined,
+      onReleased: released,
+    }),
+  ).rejects.toMatchObject({ code: "Invalid" });
+  expect(f.calls).toEqual(["RESERVE", "RELEASE"]);
+  expect(released).toHaveBeenCalledTimes(1);
+});
 it("Payment storage failure prevents network mutation", async () => {
   const f = paymentFixture();
   f.journal.reserve = async () => {

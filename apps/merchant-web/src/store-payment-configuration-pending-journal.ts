@@ -15,6 +15,12 @@ import {
 export interface StorePaymentConfigurationPendingJournal {
   load(): Promise<StorePaymentConfigurationCursor | null>;
   reserve(cursor: StorePaymentConfigurationCursor): Promise<void>;
+  /**
+   * b25: lets go of an original the server refused outright (a definite answer that nothing was
+   * written: invalid, not allowed, changed meanwhile), so staff put it right and save again. Only
+   * this same original is cleared. A journal without it keeps the recovery path.
+   */
+  release?(cursor: StorePaymentConfigurationCursor): Promise<void>;
   complete(
     cursor: StorePaymentConfigurationCursor,
     receipt: StorePaymentConfigurationReceipt,
@@ -118,6 +124,21 @@ export function createStorePaymentConfigurationPendingJournal(
           try {
             if (request.result !== undefined && !same(request.result, cursor)) return fail();
             table.put(cursor, key);
+            set(undefined);
+          } catch {
+            fail();
+          }
+        };
+      });
+    },
+    async release(value: StorePaymentConfigurationCursor) {
+      const cursor = parse(value);
+      await transaction<undefined>("readwrite", (table, set, fail) => {
+        const request = table.get(key);
+        request.onsuccess = () => {
+          try {
+            if (request.result !== undefined && !same(request.result, cursor)) return fail();
+            table.delete(key);
             set(undefined);
           } catch {
             fail();

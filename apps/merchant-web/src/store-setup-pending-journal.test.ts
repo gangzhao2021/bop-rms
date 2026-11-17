@@ -295,3 +295,17 @@ it("refuses cached business content or malformed scope before IDB access", async
   expect(db.factory.open).not.toHaveBeenCalled();
   expect(() => createStoreSetupPendingJournal({ ...scope, actorReference: "invalid" })).toThrow();
 });
+it("b25: a save refused outright is let go; another original is never cleared by it", async () => {
+  idb();
+  const journal = createStoreSetupPendingJournal(scope),
+    first = await original(),
+    other = await original(id(8));
+  await journal.reserve(first);
+  await expect(journal.release?.(other)).rejects.toMatchObject({ code: "Unavailable" });
+  expect(await journal.load()).toEqual(first);
+  await journal.release?.(first);
+  expect(await journal.load()).toBeNull();
+  // A new save can be reserved straight away.
+  await journal.reserve(other);
+  expect(await journal.load()).toEqual(other);
+});

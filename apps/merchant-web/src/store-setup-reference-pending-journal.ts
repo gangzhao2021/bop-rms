@@ -16,6 +16,12 @@ import {
 export interface StoreSetupReferencePendingJournal {
   load(): Promise<StoreSetupReferenceCursor | null>;
   reserve(cursor: StoreSetupReferenceCursor): Promise<void>;
+  /**
+   * b25: lets go of an original the server refused outright (a definite answer that nothing was
+   * written: invalid, not allowed, changed meanwhile), so staff put it right and save again. Only
+   * this same original is cleared. A journal without it keeps the recovery path.
+   */
+  release?(cursor: StoreSetupReferenceCursor): Promise<void>;
   complete(
     cursor: StoreSetupReferenceCursor,
     receipt: StoreSetupReferenceReceipt,
@@ -121,6 +127,21 @@ export function createStoreSetupReferencePendingJournal(
           try {
             if (request.result !== undefined && !same(request.result, cursor)) return fail();
             table.put(cursor, key);
+            set(undefined);
+          } catch {
+            fail();
+          }
+        };
+      });
+    },
+    async release(value: StoreSetupReferenceCursor) {
+      const cursor = parse(value);
+      await transaction<undefined>("readwrite", (table, set, fail) => {
+        const request = table.get(key);
+        request.onsuccess = () => {
+          try {
+            if (request.result !== undefined && !same(request.result, cursor)) return fail();
+            table.delete(key);
             set(undefined);
           } catch {
             fail();
