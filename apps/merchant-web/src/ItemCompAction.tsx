@@ -356,6 +356,8 @@ export function ItemCompAction({
     const key = JSON.stringify(body);
     if (attempt.current?.key !== key)
       attempt.current = { key, reference: serviceOperationReference() };
+    // b25: from this press on, a tap or key press by staff keeps the focus where they put it.
+    settledFocus.confirming();
     setBusy(true);
     setFailure(null);
     try {
