@@ -13,6 +13,13 @@ const codeOf = (error) => {
 };
 /** Set by the database transaction runner on an error thrown after one of its queries failed. */
 const databaseFailure = Symbol.for("bop.database.failure");
+/**
+ * b26: an owner store that answers "unavailable" for whatever it met keeps that non-enumerable
+ * under `bop.failure.cause` (never `cause`, so it is never answered); it is followed like `cause`.
+ */
+const failureCause = Symbol.for("bop.failure.cause");
+const causeOf = (at) =>
+  at === null || typeof at !== "object" ? undefined : (at.cause ?? at[failureCause]);
 const sqlStatePattern = /^[0-9A-Z]{5}$/;
 const identifierPattern = /^[a-z_][a-z0-9_]{0,62}$/;
 /**
@@ -34,7 +41,7 @@ const diagnosticOf = (error) => {
       if (found.constraint === undefined && identifierPattern.test(holder.constraint ?? ""))
         found.constraint = holder.constraint;
     }
-    at = at.cause;
+    at = causeOf(at);
   }
   return found;
 };
@@ -52,7 +59,7 @@ const ruleOf = (error) => {
   let at = error;
   for (let depth = 0; depth < 8 && at !== undefined && at !== null; depth++) {
     if (typeof at.rule === "string" && /^[A-Za-z]{1,40}$/.test(at.rule)) return at.rule;
-    at = at.cause;
+    at = causeOf(at);
   }
   return null;
 };
@@ -85,7 +92,11 @@ export function reportUnexpected(event, error, context = {}) {
   // their own failures generically), up to three levels; codes only.
   const causes = [];
   let deepest = error;
-  for (let at = error?.cause; at !== undefined && at !== null && causes.length < 3; at = at.cause) {
+  for (
+    let at = causeOf(error);
+    at !== undefined && at !== null && causes.length < 3;
+    at = causeOf(at)
+  ) {
     causes.push(codeOf(at).code);
     deepest = at;
   }

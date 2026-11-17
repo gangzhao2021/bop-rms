@@ -445,3 +445,34 @@ it("logs a sign-in that is no longer good as information (level 30); one not rea
     { level: 50, code: "BROWSER_SESSION_UNAVAILABLE", resultCode: undefined },
   ]);
 });
+
+// b26: a CI flake in staff order cancellation logged only ORDER_CREATE_DEPENDENCY_UNAVAILABLE. An
+// owner store keeps what it met under `bop.failure.cause` (never `cause`, so it is never answered);
+// the line names that code, its SQLSTATE and table, and where it happened.
+it("names what an owner store kept behind its unavailable answer (b26)", () => {
+  const lines = logged();
+  const met = Object.assign(new Error("permission denied for table order_header: guest Sam"), {
+    code: "TENANT_DATABASE_TRANSACTION_FAILED",
+    diagnostic: { sqlState: "42501", table: "order_header", constraint: null },
+  });
+  const answer = Object.defineProperty(
+    Object.assign(new Error("order creation is unavailable"), {
+      code: "ORDER_CREATE_DEPENDENCY_UNAVAILABLE",
+    }),
+    Symbol.for("bop.failure.cause"),
+    { value: met, enumerable: false },
+  );
+  createMerchantRequestReporter({ store: "stores/tea" })("/orders", answer);
+  const [line] = lines();
+  expect(line).toMatchObject({
+    event: "MERCHANT_REQUEST_UNEXPECTED",
+    route: "/orders",
+    code: "ORDER_CREATE_DEPENDENCY_UNAVAILABLE",
+    causes: ["TENANT_DATABASE_TRANSACTION_FAILED"],
+    sqlState: "42501",
+    table: "order_header",
+  });
+  expect(line.causeFrames).toBeDefined();
+  expect(JSON.stringify(lines())).not.toContain("Sam");
+  expect(JSON.stringify(lines())).not.toContain("permission denied");
+});
