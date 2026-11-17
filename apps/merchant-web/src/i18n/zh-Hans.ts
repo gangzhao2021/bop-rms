@@ -9364,6 +9364,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Can't make it": "做不了",
   "Remove from cart": "从购物车删除",
   "From the guests' phones (not sent yet)": "客人手机上还没送出的菜",
+  "From the guests' phones (sent with this round)": "客人手机上的菜（随这一轮送出）",
+  "This round includes dishes from the guests' phones: {dishes}.":
+    "这一轮包含客人手机上的菜：{dishes}。",
   "From the guests' phones": "客人手机上的",
   "Your items": "你点的",
   "Estimated subtotal": "预计小计",

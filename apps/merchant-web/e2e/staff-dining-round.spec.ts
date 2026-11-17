@@ -1897,3 +1897,106 @@ for (const zh of [false, true])
       });
     }
   });
+
+/**
+ * WP-2423 batch 28 (v15 live check, Lane Dessert): at a pay-first table staff saw the guests'
+ * unsent dishes listed before Send, but once sent the screen listed only their own dish beside
+ * "Charge $25.43 on the card machine". The guests' dishes the round took in stay listed with it,
+ * and the charge says it includes them, before the card-machine amount is confirmed.
+ */
+for (const zh of [false, true])
+  test(`@production batch 28: a pay-first round that took the guests' dishes lists them with the amount to charge${zh ? ", in Chinese" : ""}`, async ({
+    page,
+  }) => {
+    if (zh)
+      await page.addInitScript(() => {
+        window.localStorage.setItem("bop.merchant.language", "zh-Hans");
+      });
+    await signIn(page);
+    await page.route("**/merchant/counter/menu**", (route) =>
+      route.fulfill({ headers, json: menu }),
+    );
+    await page.route("**/merchant/dining/sessions/table-cart", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          cart: {
+            cartReference: id(70),
+            cartVersion: 4,
+            guestPaying: false,
+            lines: [guestLine(81, 11, { quantity: 2 })],
+          },
+        },
+      }),
+    );
+    const rounds: Record<string, unknown>[] = [];
+    await page.route("**/merchant/dining/staff-rounds", (route) => {
+      rounds.push(route.request().postDataJSON() as Record<string, unknown>);
+      return route.fulfill({
+        headers,
+        json: {
+          status: "Placed",
+          orderReference: id(20),
+          orderBatchReference: id(21),
+          orderNumber: "8",
+          orderVersion: 1,
+          tableLabel: "T4",
+          orderMinor: "2373",
+          tipMinor: "0",
+          totalMinor: "2373",
+          payBy: new Date(Date.now() + 30 * 60_000).toISOString(),
+          recordedAfterOutage: false,
+        },
+      });
+    });
+    await page.goto("/operations/order-entry?table=" + tableReference);
+    const guests = page.getByRole("list", {
+      name: zh ? "客人手机上还没送出的菜" : "From the guests' phones (not sent yet)",
+    });
+    await expect(guests.getByRole("listitem")).toHaveCount(1);
+    await page.getByRole("button", { name: zh ? "添加 Gyoza" : "Add Gyoza" }).click();
+    await page.getByRole("button", { name: zh ? "发送订单" : "Send order" }).click();
+    await expect(
+      page.getByRole("heading", {
+        name: zh ? "在刷卡机上收款 $23.73" : "Charge $23.73 on the card machine",
+      }),
+    ).toBeVisible();
+    expect(rounds[0]).toMatchObject({
+      includeTableCart: {
+        expectedCartVersion: 4,
+        lines: [{ cartItemReference: id(81), decision: "Send" }],
+      },
+    });
+    const sent = page.getByRole("list", {
+      name: zh
+        ? "客人手机上的菜（随这一轮送出）"
+        : "From the guests' phones (sent with this round)",
+    });
+    await expect(sent.getByRole("listitem")).toHaveCount(1);
+    await expect(sent.getByRole("listitem")).toContainText(
+      zh ? "2 × Gyoza · 手机 1" : "2 × Gyoza · Phone 1",
+    );
+    // The sent order counts and prices the guests' dishes with staff's own.
+    const ticket = page.locator(".counter-order__ticket-header");
+    await expect(ticket).toContainText(zh ? "3 项" : "3 items");
+    await expect(page.locator(".counter-order__totals")).toContainText(
+      zh ? "预计小计$21.00" : "Estimated subtotal$21.00",
+    );
+    await expect(page.getByRole("note").filter({ hasText: "Gyoza" })).toHaveText(
+      zh
+        ? "这一轮包含客人手机上的菜：2 × Gyoza。"
+        : "This round includes dishes from the guests' phones: 2 × Gyoza.",
+    );
+    await expectNoInternalText(page);
+    await expectAccessible(page);
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1),
+      ).toBe(false);
+      await page.screenshot({
+        path: `test-results/b28-pay-first-round-guest-dishes-${zh ? "zh-Hans" : "en"}-${width}.png`,
+        fullPage: true,
+      });
+    }
+  });

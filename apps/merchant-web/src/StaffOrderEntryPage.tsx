@@ -967,6 +967,9 @@ export function StaffOrderEntryPage({
   } | null>(null);
   // WP-2423 (staff-round-soldout): the guests' items taken off with the round sent, to tell them.
   const [removedNote, setRemovedNote] = useState<string | null>(null);
+  // WP-2423 batch 28: the guests' dishes a sent round took in, shown with it (its total and the
+  // card-machine amount include them), so staff never charge an amount they can't see.
+  const [sentGuest, setSentGuest] = useState<readonly GuestCartLine[]>([]);
   // WP-2423 M35: the table's dining session (from the Tables list), the guests' unsent lines read
   // from it before staff send, and what staff decided for each (Send unless it can't be sent).
   const [tableSession, setTableSession] = useState<string | null>(null);
@@ -1405,6 +1408,11 @@ export function StaffOrderEntryPage({
   const roundEstimate =
     estimate === null || guestEstimate === null ? null : estimate + guestEstimate;
   const roundCount = itemCount + guestSent.reduce((sum, line) => sum + line.quantity, 0);
+  // WP-2423 batch 28: once sent, the order's count includes the guests' dishes it took in.
+  const sentItemCount =
+    placed !== null && phase !== "Building" && phase !== "Sending"
+      ? itemCount + sentGuest.reduce((sum, line) => sum + line.quantity, 0)
+      : itemCount;
   const canSend =
     phase === "Building" &&
     (lines.length > 0 || (tableMode && guestSent.length > 0)) &&
@@ -1444,6 +1452,7 @@ export function StaffOrderEntryPage({
           }
         : null;
     const removedAtSend = guestRemoved;
+    const guestAtSend = guestSent;
     if (tableMode && lines.length > 0) draftParty.current ??= { session: tableSession };
     const forParty = draftParty.current?.session ?? null;
     placeOperation.current ??= serviceOperationReference();
@@ -1475,6 +1484,7 @@ export function StaffOrderEntryPage({
     setPartyChanged(false);
     setTableCartOffer(null);
     setRemovedNote(null);
+    setSentGuest([]);
     setSlipHeld(null);
     try {
       const chosen = lines.map((line) => ({
@@ -1526,8 +1536,10 @@ export function StaffOrderEntryPage({
       setAlreadyInOrderChecked(false);
       setPlaced(order);
       setPlacedCancellable(null);
-      if (decided !== null) setRemovedNote(guestRemovedNote(removedAtSend));
-      else if (includeTableCart !== null && includeTableCart.removeUnavailable.length > 0)
+      if (decided !== null) {
+        setRemovedNote(guestRemovedNote(removedAtSend));
+        setSentGuest(guestAtSend);
+      } else if (includeTableCart !== null && includeTableCart.removeUnavailable.length > 0)
         setRemovedNote(tableCartRemovedNote(includeTableCart.removeUnavailable));
       setGuestDecisions({});
       recordOrdered(
@@ -1838,6 +1850,7 @@ export function StaffOrderEntryPage({
     setProblem(null);
     setPaidNote(null);
     setRemovedNote(null);
+    setSentGuest([]);
     setPaidAtRefused(false);
     sendAnswered();
     placeOperation.current = null;
@@ -1866,6 +1879,7 @@ export function StaffOrderEntryPage({
     setProblemNeedsTableCode(false);
     setPaidNote(null);
     setRemovedNote(null);
+    setSentGuest([]);
     setPaidAtRefused(false);
     sendAnswered();
     placeOperation.current = null;
@@ -2170,9 +2184,11 @@ export function StaffOrderEntryPage({
             <h2 id="counter-ticket" ref={ticketHeading} tabIndex={-1}>
               {t("Order")}
             </h2>
-            {itemCount > 0 ? (
+            {sentItemCount > 0 ? (
               <span className="counter-order__count">
-                {itemCount === 1 ? t("1 item") : t("{itemCount} items", { itemCount: itemCount })}
+                {sentItemCount === 1
+                  ? t("1 item")
+                  : t("{itemCount} items", { itemCount: sentItemCount })}
               </span>
             ) : null}
           </header>
@@ -2369,6 +2385,34 @@ export function StaffOrderEntryPage({
               </ul>
             </section>
           ) : null}
+          {placed !== null && !ordering && sentGuest.length > 0 ? (
+            <section
+              className="counter-order__guest-lines"
+              aria-labelledby="counter-guest-sent-heading"
+            >
+              <h3 id="counter-guest-sent-heading">
+                {t("From the guests' phones (sent with this round)")}
+              </h3>
+              <ul className="counter-order__lines" aria-labelledby="counter-guest-sent-heading">
+                {sentGuest.map((line) => (
+                  <li key={line.cartItemReference}>
+                    <span className="counter-order__line-name">
+                      <span className="counter-order__guest-dish">
+                        {t("{quantity} × {name}", { quantity: line.quantity, name: line.name })}
+                        {line.options !== "" ? (
+                          <span className="bop-muted"> · {line.options}</span>
+                        ) : null}
+                      </span>
+                      <span className="bop-muted"> · {guestLineAdder(line)}</span>
+                    </span>
+                    <span className="counter-order__line-price">
+                      {line.estimateMinor !== null ? cad(line.estimateMinor.toString()) : ""}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
           <div className="counter-order__ticket-foot">
             {withdrawn.length > 0 && phase === "Building" ? (
               <p className="order-accept-by" data-tier="warning" role="alert">
@@ -2433,7 +2477,41 @@ export function StaffOrderEntryPage({
               </div>
             ) : (estimate !== null && lines.length > 0) || (placed !== null && !ordering) ? (
               <div className="counter-order__totals">
-                {estimate !== null && lines.length > 0 ? (
+                {placed !== null && !ordering && sentGuest.length > 0 ? (
+                  // WP-2423 batch 28: the sent round's parts, the guests' dishes it took in too.
+                  (() => {
+                    const fromGuests = sentGuest.reduce<bigint | null>(
+                      (sum, line) =>
+                        sum === null || line.estimateMinor === null
+                          ? null
+                          : sum + line.estimateMinor,
+                      0n,
+                    );
+                    const own = lines.length > 0 ? estimate : 0n;
+                    return (
+                      <>
+                        {lines.length > 0 && estimate !== null ? (
+                          <p className="counter-order__part">
+                            <span>{t("Your items")}</span>
+                            <span>{cad(estimate.toString())}</span>
+                          </p>
+                        ) : null}
+                        {fromGuests !== null ? (
+                          <p className="counter-order__part">
+                            <span>{t("From the guests' phones")}</span>
+                            <span>{cad(fromGuests.toString())}</span>
+                          </p>
+                        ) : null}
+                        {fromGuests !== null && own !== null ? (
+                          <p className="counter-order__subtotal">
+                            <span>{t("Estimated subtotal")}</span>
+                            <span>{cad((own + fromGuests).toString())}</span>
+                          </p>
+                        ) : null}
+                      </>
+                    );
+                  })()
+                ) : estimate !== null && lines.length > 0 ? (
                   <p className="counter-order__subtotal">
                     <span>{t("Subtotal")}</span>
                     <span>{cad(estimate.toString())}</span>
@@ -2790,6 +2868,17 @@ export function StaffOrderEntryPage({
                 {removedNote}
               </p>
             ) : null}
+            {sentGuest.length > 0 ? (
+              <p role="note">
+                {t("This round includes dishes from the guests' phones: {dishes}.", {
+                  dishes: sentGuest
+                    .map((line) =>
+                      t("{quantity} × {name}", { quantity: line.quantity, name: line.name }),
+                    )
+                    .join(listSeparator()),
+                })}
+              </p>
+            ) : null}
             <dl>
               <div>
                 <dt>{t("Order")}</dt>
@@ -2852,6 +2941,17 @@ export function StaffOrderEntryPage({
             {removedNote !== null ? (
               <p className="order-accept-by" data-tier="warning" role="note">
                 {removedNote}
+              </p>
+            ) : null}
+            {sentGuest.length > 0 ? (
+              <p role="note">
+                {t("This round includes dishes from the guests' phones: {dishes}.", {
+                  dishes: sentGuest
+                    .map((line) =>
+                      t("{quantity} × {name}", { quantity: line.quantity, name: line.name }),
+                    )
+                    .join(listSeparator()),
+                })}
               </p>
             ) : null}
             <dl>
