@@ -330,6 +330,27 @@ const viewerFields = [
   "qrReference",
   "qrRevocationVersion",
 ] as const;
+/**
+ * WP-2423 (staff-round-guest-race): the same phone of the same party, though the party's version or
+ * place moved on (a staff round seated its own guest at the table meanwhile, or staff moved the
+ * party): the cart is read again on what is current, never answered "unavailable".
+ */
+const placementKeys = [
+  "participantVersion",
+  "diningSessionVersion",
+  "tableReference",
+  "tableAssignmentVersion",
+] as const;
+function samePhone(first: DiningCartViewer | null, next: DiningCartViewer | null): boolean {
+  if (first === null || next === null) return first === next;
+  const fixed = (value: DiningCartViewer) =>
+    JSON.stringify(
+      viewerFields
+        .filter((key) => !(placementKeys as readonly string[]).includes(key))
+        .map((key) => value[key]),
+    );
+  return fixed(first) === fixed(next);
+}
 function viewer(value: unknown): DiningCartViewer {
   const raw = closed(value, viewerFields);
   const version = (key: keyof DiningCartViewer) => {
@@ -818,8 +839,10 @@ function createViewQuery(ports: ViewPorts, mode: "Pickup" | "DineIn") {
           if (
             attempt < cartMovedOnRereads &&
             final.cart.cartReference === cart.cartReference &&
-            final.cart.aggregateVersion > cart.aggregateVersion &&
-            JSON.stringify(first.viewer) === JSON.stringify(final.viewer) &&
+            (final.cart.aggregateVersion > cart.aggregateVersion ||
+              (final.cart.aggregateVersion === cart.aggregateVersion &&
+                JSON.stringify(first.viewer) !== JSON.stringify(final.viewer))) &&
+            samePhone(first.viewer, final.viewer) &&
             final.observedAt >= first.observedAt
           ) {
             loaded = reloaded;

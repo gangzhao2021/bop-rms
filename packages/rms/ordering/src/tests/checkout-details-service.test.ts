@@ -4,6 +4,7 @@ import {
   createCheckoutDetailsService,
   type CheckoutDetailsPorts,
 } from "../application/checkout-details-service.js";
+import { CartError } from "../domain/cart.js";
 import type { CheckoutDetailsSnapshot } from "../domain/checkout-details.js";
 import { fixture, id } from "./configured-cart-quote.fixture.js";
 function setup(dining = false) {
@@ -239,6 +240,21 @@ it("keeps a post-write authorization failure uncertain", async () => {
     code: "CART_DEPENDENCY_UNAVAILABLE",
   });
   expect(f.persist).toHaveBeenCalledOnce();
+});
+// WP-2423 (staff-round-guest-race): the save found the Cart moved on and wrote nothing.
+it("says the Cart changed when the save itself found it moved on", async () => {
+  const f = setup(true);
+  f.persist.mockRejectedValue(new CartError("CART_VERSION_CONFLICT"));
+  await expect(f.service.save(f.command)).rejects.toMatchObject({
+    code: "CART_VERSION_CONFLICT",
+  });
+});
+it("keeps any other failure of the save uncertain", async () => {
+  const f = setup(true);
+  f.persist.mockRejectedValue(new CartError("CART_QUOTE_INVALID"));
+  await expect(f.service.save(f.command)).rejects.toMatchObject({
+    code: "CART_DEPENDENCY_UNAVAILABLE",
+  });
 });
 it("rejects changed detail intent under the original operation", async () => {
   const f = setup();

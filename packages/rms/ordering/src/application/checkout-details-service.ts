@@ -85,6 +85,7 @@ export function createCheckoutDetailsService(ports: CheckoutDetailsPorts) {
   return Object.freeze({
     async save(value: unknown) {
       let attempted = false;
+      let definite: CartError | null = null;
       try {
         const raw = readClosedRecord(value, [
           "operationReference",
@@ -285,12 +286,22 @@ export function createCheckoutDetailsService(ports: CheckoutDetailsPorts) {
         if (now() >= validUntil || now() >= quote.quoteExpiresAt) return fail("CART_QUOTE_EXPIRED");
         const snapshot = parseCheckoutDetailsSnapshot({ ...desired, recordedAt: admission.at });
         attempted = true;
-        const result = await ports.repository.save({
-          operationReference,
-          expectedVersion: Number(raw.expectedVersion),
-          snapshot,
-          audit: admission.audit,
-        });
+        let result: Awaited<ReturnType<CheckoutDetailsPorts["repository"]["save"]>>;
+        try {
+          result = await ports.repository.save({
+            operationReference,
+            expectedVersion: Number(raw.expectedVersion),
+            snapshot,
+            audit: admission.audit,
+          });
+        } catch (error) {
+          // WP-2423 (staff-round-guest-race): the save itself found the Cart moved on (another guest
+          // at the table, or a staff round, changed or checked it out since it was read) and wrote
+          // nothing: a definite conflict to send again on, not an unknown outcome.
+          if (error instanceof CartError && error.code === "CART_VERSION_CONFLICT")
+            definite = error;
+          throw error;
+        }
         const saved = parseCheckoutDetailsSnapshot(result.snapshot);
         if (
           !["Saved", "AlreadySaved"].includes(result.status) ||
@@ -303,6 +314,7 @@ export function createCheckoutDetailsService(ports: CheckoutDetailsPorts) {
       } catch (error) {
         if (!attempted && (error instanceof CartError || error instanceof CheckoutDetailsError))
           throw error;
+        if (definite !== null && error === definite) throw error;
         return fail();
       }
     },

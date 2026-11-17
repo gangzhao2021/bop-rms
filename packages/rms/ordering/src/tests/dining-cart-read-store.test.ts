@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { DiningCartMovedOnError } from "../application/dining-cart-read-service.js";
 import { createPostgresDiningCartReadStore } from "../infrastructure/persistence/dining-cart-read-store.js";
 import type {
   CartQueryTransaction,
@@ -64,9 +65,11 @@ describe("current shared Dining Cart PostgreSQL port", () => {
       [id(1), id(2)],
       [id(1), id(2), id(3), at],
       [id(1), id(2)],
-      [id(1), id(2), id(4)],
+      [id(1), id(2), id(4), 1],
       [id(1), id(2), id(3), at],
     ]);
+    // The Cart is read at the version just selected.
+    expect(f.query.mock.calls[3]?.[0]).toContain("c.aggregate_version = $4");
     const sql = f.query.mock.calls[1]?.[0] ?? "";
     expect(sql).toContain("LIMIT 2");
     expect(sql).toContain("lifecycle_status = 'Active'");
@@ -95,11 +98,27 @@ describe("current shared Dining Cart PostgreSQL port", () => {
     { rows: [] },
     { rows: [{ ...selected, cartReference: id(9) }] },
     { rows: [{ ...selected, aggregateVersion: 2 }] },
-    { rows: [selected, selected] },
-  ])("rejects disappearance, replacement or ambiguity after aggregate read", async (last) => {
-    await expect(fixture({ last }).store.current(input)).rejects.toMatchObject({
-      code: "CART_DEPENDENCY_UNAVAILABLE",
-    });
+  ])(
+    "says the Cart moved on when it changed, ended or was replaced after its read",
+    async (last) => {
+      await expect(fixture({ last }).store.current(input)).rejects.toBeInstanceOf(
+        DiningCartMovedOnError,
+      );
+    },
+  );
+  it("rejects ambiguity after aggregate read", async () => {
+    const read = fixture({ last: { rows: [selected, selected] } }).store.current(input);
+    await expect(read).rejects.toMatchObject({ code: "CART_DEPENDENCY_UNAVAILABLE" });
+    await expect(read).rejects.not.toBeInstanceOf(DiningCartMovedOnError);
+  });
+  // WP-2423 (staff-round-guest-race): a phone at the table added a dish between the statements.
+  it.each([
+    { loaded: { rows: [] } },
+    { loaded: { rows: [{ cart: { ...cart(), updatedAt: "2026-08-02T14:02:00.000Z" } }] } },
+  ])("says the Cart moved on when it changed while it was read", async (options) => {
+    const read = fixture(options).store.current(input);
+    await expect(read).rejects.toBeInstanceOf(DiningCartMovedOnError);
+    await expect(read).rejects.toMatchObject({ code: "CART_DEPENDENCY_UNAVAILABLE" });
   });
   it.each([
     { aggregateVersion: 2 },
@@ -108,7 +127,6 @@ describe("current shared Dining Cart PostgreSQL port", () => {
     { diningSessionReference: id(9) },
     { orderType: "Pickup" },
     { sourceChannel: "Pos" },
-    { updatedAt: "2026-08-02T14:02:00.000Z" },
     { lifecycle: null },
   ])("rejects mismatched loaded aggregate", async (change) => {
     await expect(

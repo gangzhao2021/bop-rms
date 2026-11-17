@@ -425,7 +425,44 @@ describe("safe shared Dining Cart display", () => {
       purpose: "CustomerCart",
     });
   });
-  it.each(Object.keys(snapshot().viewer))(
+  /** The party's version or place: read again on what is current (WP-2423 staff-round-guest-race). */
+  const placement = [
+    "participantVersion",
+    "diningSessionVersion",
+    "tableReference",
+    "tableAssignmentVersion",
+  ];
+  it.each(placement)(
+    "reads again on what is current after %s moved on during public display lookup",
+    async (key) => {
+      const f = fixture();
+      const value = snapshot();
+      const before = value.viewer[key as keyof typeof value.viewer];
+      f.read.mockResolvedValueOnce(value).mockResolvedValue({
+        ...snapshot(),
+        viewer: {
+          ...snapshot().viewer,
+          [key]: typeof before === "number" ? before + 1 : id(99),
+        },
+      });
+      const result = await f.query.read(request);
+      expect(result?.cart.cartReference).toBe(value.cart.cartReference);
+      // Read, read again (moved on), and read the last time to check it held.
+      expect(f.read).toHaveBeenCalledTimes(3);
+    },
+  );
+  it("answers unavailable while the party keeps moving through every read", async () => {
+    const f = fixture();
+    let version = 1;
+    f.read.mockImplementation(async () => ({
+      ...snapshot(),
+      viewer: { ...snapshot().viewer, diningSessionVersion: (version += 1) },
+    }));
+    await expect(f.query.read(request)).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
+  });
+  it.each(Object.keys(snapshot().viewer).filter((key) => !placement.includes(key)))(
     "denies %s drift during public display lookup",
     async (key) => {
       const f = fixture();

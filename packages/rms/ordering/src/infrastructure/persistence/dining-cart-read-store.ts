@@ -1,8 +1,11 @@
 import { readClosedRecord } from "@bop/identity";
-import type { DiningCartReadPorts } from "../../application/dining-cart-read-service.js";
+import {
+  DiningCartMovedOnError,
+  type DiningCartReadPorts,
+} from "../../application/dining-cart-read-service.js";
 import { CartError, parseOrderingInstant, parseOrderingReference } from "../../domain/cart.js";
 import {
-  createPostgresCartQueryStore,
+  createPostgresCartVersionQueryStore,
   type CartQueryTransactionRunner,
 } from "./cart-query-store.js";
 
@@ -90,31 +93,37 @@ export function createPostgresDiningCartReadStore(
           const parameters = Object.freeze([brand, store, diningSessionReference, observedAt]);
           const first = header(await transaction.query(selectCurrent, parameters));
           if (first === null) return null;
-          const reader = createPostgresCartQueryStore(
+          const reader = createPostgresCartVersionQueryStore(
             { run: async (action) => action(transaction) },
             { brandReference: brand, storeReference: store },
           );
-          const cart = await reader.load(first.cartReference);
+          // WP-2423 (staff-round-guest-race): the Cart at the version just selected, so the two
+          // always agree, also when an earlier identical read in this request is answered again.
+          const cart = await reader.load(first.cartReference, first.aggregateVersion);
+          // It moved on from that version since (someone at the table changed or sent it).
+          if (cart === null) throw new DiningCartMovedOnError();
           if (
-            cart === null ||
-            cart.aggregateVersion !== first.aggregateVersion ||
             cart.orderType !== "DineIn" ||
             cart.diningSessionReference !== diningSessionReference ||
             !["Qr", "Web"].includes(cart.sourceChannel) ||
-            cart.updatedAt > observedAt ||
             cart.lifecycle === null
           )
             return unavailable();
+          // WP-2423 (staff-round-guest-race): someone at the table changed or checked out the Cart
+          // between this read's statements, or after the read was observed: read again.
+          if (cart.aggregateVersion !== first.aggregateVersion || cart.updatedAt > observedAt)
+            throw new DiningCartMovedOnError();
           const last = header(await transaction.query(selectCurrent, parameters));
           if (
             last === null ||
             last.cartReference !== first.cartReference ||
             last.aggregateVersion !== first.aggregateVersion
           )
-            return unavailable();
+            throw new DiningCartMovedOnError();
           return cart;
         });
-      } catch {
+      } catch (error) {
+        if (error instanceof DiningCartMovedOnError) throw error;
         return unavailable();
       }
     },
@@ -177,10 +186,11 @@ export function createPostgresDiningCartSuccessionSource(
             await transaction.query(selectUnreplaced, [brand, store, diningSessionReference]),
           );
           if (first === null) return null;
-          const cart = await createPostgresCartQueryStore(
+          // The Cart at the version just selected (see current above).
+          const cart = await createPostgresCartVersionQueryStore(
             { run: async (action) => action(transaction) },
             { brandReference: brand, storeReference: store },
-          ).load(first.cartReference);
+          ).load(first.cartReference, first.aggregateVersion);
           if (
             cart === null ||
             cart.aggregateVersion !== first.aggregateVersion ||

@@ -156,8 +156,12 @@ export function partyMoved(
     first.participation.tableReference !== next.participation.tableReference,
   );
 }
-/** How many times an action is done again while the party's table changes under it. */
-export const diningCartMovedRetries = 2;
+/**
+ * How many times an action is done again while the party's table changes under it. WP-2423
+ * (staff-round-guest-race): a staff round seats its own table guest in a few quick steps (open,
+ * join, bind), each a new version of the party, so a phone's action at that moment may meet three.
+ */
+export const diningCartMovedRetries = 4;
 
 /** Internal invocation guard. Its current observations grant no persistent write lease. */
 export function createDiningCartAuthority(ports: DiningCartAuthorityPorts) {

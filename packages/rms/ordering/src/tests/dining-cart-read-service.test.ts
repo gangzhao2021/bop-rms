@@ -2,8 +2,10 @@ import type { GuestSession } from "@bop/identity";
 import { describe, expect, it, vi } from "vitest";
 import {
   createDiningCartReadService,
+  DiningCartMovedOnError,
   type DiningCartReadPorts,
 } from "../application/dining-cart-read-service.js";
+import { diningCartMovedRetries } from "../application/dining-cart-authority.js";
 import {
   CartParticipationEndedError,
   parseCartAggregate,
@@ -158,6 +160,23 @@ function fixture() {
 }
 
 describe("current-authorized shared Dining Cart read", () => {
+  // WP-2423 (staff-round-guest-race): a phone or a staff round at the table changed the Cart
+  // between the read's statements; the read is done again, never answered "unavailable".
+  it("reads again when the table's Cart moved on while it was read", async () => {
+    const f = fixture();
+    f.current.mockRejectedValueOnce(new DiningCartMovedOnError());
+    const read = await f.service.read({ sessionCredential: credential });
+    expect(read?.cart.cartReference).toBe(ids.cart);
+    expect(f.current).toHaveBeenCalledTimes(2);
+  });
+  it("answers unavailable when the Cart keeps moving on through every read", async () => {
+    const f = fixture();
+    f.current.mockRejectedValue(new DiningCartMovedOnError());
+    await expect(f.service.read({ sessionCredential: credential })).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
+    expect(f.current).toHaveBeenCalledTimes(diningCartMovedRetries + 1);
+  });
   it("lets two current participants read the same Cart without rewriting attribution", async () => {
     const first = fixture();
     const second = fixture();

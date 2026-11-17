@@ -7,9 +7,23 @@ import {
   type OrderingInstant,
 } from "../domain/cart.js";
 import {
+  CartPartyMovedError,
   createDiningCartAuthority,
   type DiningCartAuthorityPorts,
 } from "./dining-cart-authority.js";
+
+/**
+ * WP-2423 (staff-round-guest-race): the table's Cart moved on while it was being read (a phone or
+ * a staff round at the table added a dish, or checked the Cart out, between the read's own
+ * statements). Nothing failed: the read is done again on what is current now. To any other caller
+ * it is the same "unavailable" as before.
+ */
+export class DiningCartMovedOnError extends CartError {
+  constructor() {
+    super("CART_DEPENDENCY_UNAVAILABLE");
+    this.name = "DiningCartMovedOnError";
+  }
+}
 
 export interface DiningCartReadPorts extends DiningCartAuthorityPorts {
   readonly carts: {
@@ -86,6 +100,8 @@ export function createDiningCartReadService(ports: DiningCartReadPorts) {
             );
             return source === null ? null : parseCartAggregate(source);
           } catch (error) {
+            // Read again (with a new authorization and observation), a few times at most.
+            if (error instanceof DiningCartMovedOnError) throw new CartPartyMovedError(false);
             return unavailable(error);
           }
         },

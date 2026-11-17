@@ -80,6 +80,38 @@ export function createPostgresDiningCartCommandQueryStore(
   );
 }
 
+/**
+ * WP-2423 (staff-round-guest-race): the Cart as it stood at one version, or null once it moved on
+ * from it. A Cart at one version never changes, so this read may be answered again from an earlier
+ * one (the stable-read rule) and still be true; a reader that checks the Cart's current version
+ * reads it at that version, so the version it checked and the Cart it gets always agree.
+ */
+export function createPostgresCartVersionQueryStore(
+  runner: CartQueryTransactionRunner,
+  scope: Readonly<{ brandReference: string; storeReference: string }>,
+): { load(cartReference: string, aggregateVersion: number): Promise<CartAggregate | null> } {
+  const brand = parseOrderingReference(scope.brandReference);
+  const store = parseOrderingReference(scope.storeReference);
+  return Object.freeze({
+    async load(cartReference: string, aggregateVersion: number) {
+      const reference = parseOrderingReference(cartReference);
+      if (!Number.isSafeInteger(aggregateVersion) || aggregateVersion < 1)
+        throw new CartError("CART_INPUT_INVALID");
+      const cart = await loadCart(
+        runner,
+        brand,
+        store,
+        reference,
+        " AND c.aggregate_version = $4",
+        [aggregateVersion],
+      );
+      if (cart !== null && cart.aggregateVersion !== aggregateVersion)
+        throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
+      return cart;
+    },
+  });
+}
+
 function createScopedCartQueryStore(
   runner: CartQueryTransactionRunner,
   scope: Readonly<{ brandReference: string; storeReference: string }>,
@@ -90,45 +122,68 @@ function createScopedCartQueryStore(
   return Object.freeze({
     async load(cartReference: string) {
       const reference = parseOrderingReference(cartReference);
-      try {
-        return await runner.run(async (transaction) => {
-          await transaction.query(
-            "SELECT set_config('bop.brand_id', $1, true), set_config('bop.store_id', $2, true)",
-            [brand, store],
-          );
-          const result = await transaction.query(
-            diningSessionReference === undefined
-              ? select
-              : `${select} AND c.dining_session_id = $4 AND c.order_type = 'DineIn' AND c.source_channel IN ('Qr', 'Web')`,
-            diningSessionReference === undefined
-              ? [brand, store, reference]
-              : [brand, store, reference, diningSessionReference],
-          );
-          if (
-            result === null ||
-            typeof result !== "object" ||
-            !("rows" in result) ||
-            !Array.isArray(result.rows) ||
-            result.rows.length > 1
-          )
-            throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
-          if (result.rows.length === 0) return null;
-          const cart = parseCartAggregate(result.rows[0]?.cart);
-          if (
-            cart.cartReference !== reference ||
-            cart.brandReference !== brand ||
-            cart.storeReference !== store ||
-            (diningSessionReference !== undefined &&
-              (cart.diningSessionReference !== diningSessionReference ||
-                cart.orderType !== "DineIn" ||
-                !["Qr", "Web"].includes(cart.sourceChannel)))
-          )
-            throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
-          return cart;
-        });
-      } catch {
+      const cart = await loadCart(
+        runner,
+        brand,
+        store,
+        reference,
+        diningSessionReference === undefined
+          ? ""
+          : " AND c.dining_session_id = $4 AND c.order_type = 'DineIn' AND c.source_channel IN ('Qr', 'Web')",
+        diningSessionReference === undefined ? [] : [diningSessionReference],
+      );
+      if (
+        cart !== null &&
+        diningSessionReference !== undefined &&
+        (cart.diningSessionReference !== diningSessionReference ||
+          cart.orderType !== "DineIn" ||
+          !["Qr", "Web"].includes(cart.sourceChannel))
+      )
         throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
-      }
+      return cart;
     },
   });
+}
+
+async function loadCart(
+  runner: CartQueryTransactionRunner,
+  brand: string,
+  store: string,
+  reference: string,
+  filter: string,
+  filterValues: readonly unknown[],
+): Promise<CartAggregate | null> {
+  try {
+    return await runner.run(async (transaction) => {
+      await transaction.query(
+        "SELECT set_config('bop.brand_id', $1, true), set_config('bop.store_id', $2, true)",
+        [brand, store],
+      );
+      const result = await transaction.query(`${select}${filter}`, [
+        brand,
+        store,
+        reference,
+        ...filterValues,
+      ]);
+      if (
+        result === null ||
+        typeof result !== "object" ||
+        !("rows" in result) ||
+        !Array.isArray(result.rows) ||
+        result.rows.length > 1
+      )
+        throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
+      if (result.rows.length === 0) return null;
+      const cart = parseCartAggregate(result.rows[0]?.cart);
+      if (
+        cart.cartReference !== reference ||
+        cart.brandReference !== brand ||
+        cart.storeReference !== store
+      )
+        throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
+      return cart;
+    });
+  } catch {
+    throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
+  }
 }
