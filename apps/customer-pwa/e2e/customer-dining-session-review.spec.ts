@@ -894,6 +894,142 @@ test.describe("@production CUST-DINE-IN-SESSION table view", () => {
     await expect(main).not.toContainText("refunded");
   });
 
+  // b26 (v15 live25, TM2 'L25 TCP (TEST)'): after the table paid $10.74, round 1 (Soy milk taken
+  // off, Smashed cucumber comped, $0.00) still read Payment: On the table's bill. It has nothing
+  // to pay. A paid round the kitchen refused whole with no refund said "being refunded to the
+  // card that paid" though no refund existed: it says it was paid and not refunded.
+  const shots26 = process.env.B26_SHOTS ?? "test-results-b26/shots";
+  for (const language of ["en", "zh-Hans"] as const)
+    test(`b26: a comped $0.00 round has nothing to pay and no refund is claimed that does not exist (${language})`, async ({
+      page,
+    }) => {
+      const zh = language === "zh-Hans";
+      if (zh)
+        await page.addInitScript(() => localStorage.setItem("bop.customer.language", "zh-Hans"));
+      const lines = (items: number, off: number, tax: number) => ({
+        items: cad(String(items)),
+        takenOff: cad(String(off)),
+        pointsUsed: cad("0"),
+        subtotal: cad(String(items - off)),
+        tax: cad(String(tax)),
+        total: cad(String(items - off + tax)),
+      });
+      const dish = (name: string, net: number, tax: number, off = false) => ({
+        displayName: name,
+        quantity: 1,
+        servedQuantity: 0,
+        cancelled: off,
+        lineTotal: cad(String(net + tax)),
+        priceBeforeTax: cad(String(net)),
+        ...(off ? { takenOff: true } : {}),
+      });
+      const round = (
+        roundNumber: number,
+        status: string,
+        payment: string,
+        items: ReturnType<typeof dish>[],
+        bill?: ReturnType<typeof lines>,
+      ) => ({
+        roundNumber,
+        orderedBy: "Staff",
+        submittedAt: "2026-10-13T17:40:00.000Z",
+        status,
+        payment,
+        cancelsAt: null,
+        storeCancellationReason: null,
+        items,
+        itemsTotal: cad(
+          String(items.reduce((sum, item) => sum + Number(item.lineTotal.amountMinor), 0)),
+        ),
+        subtotal: cad(
+          String(items.reduce((sum, item) => sum + Number(item.priceBeforeTax.amountMinor), 0)),
+        ),
+        tax: cad(
+          String(
+            items.reduce(
+              (sum, item) =>
+                sum + Number(item.lineTotal.amountMinor) - Number(item.priceBeforeTax.amountMinor),
+              0,
+            ),
+          ),
+        ),
+        ...(bill === undefined ? {} : { bill }),
+      });
+      const paid = {
+        schemaVersion: 1,
+        session: {
+          ...session.session,
+          paymentTiming: "PayLater",
+          rounds: [
+            round(
+              1,
+              "Queued",
+              "NotCharged",
+              [dish("Soy milk", 325, 42, true), dish("Smashed cucumber", 625, 82)],
+              lines(625, 625, 0),
+            ),
+            round(2, "StoreCancelled", "NotCharged", [
+              dish("Soy milk", 325, 42, true),
+              dish("Smashed cucumber", 625, 82, true),
+            ]),
+            round(
+              3,
+              "Queued",
+              "Paid",
+              [dish("Soy milk", 325, 42), dish("Smashed cucumber", 625, 82)],
+              lines(950, 0, 124),
+            ),
+            // Refused whole by the kitchen after the table paid, nothing refunded (yet).
+            {
+              ...round(4, "StoreCancelled", "Paid", [
+                { ...dish("Smashed cucumber", 625, 82), cancelled: true },
+              ]),
+            },
+          ],
+          summary: {
+            paid: cad("1781"),
+            refunded: cad("0"),
+            refundPending: cad("0"),
+            due: cad("0"),
+            ordered: { subtotal: cad("2200"), tax: cad("287"), total: cad("2487") },
+            takenOff: cad("706"),
+            bill: lines(2200, 625, 206),
+          },
+        },
+      };
+      await enterTable(page, () => ({ status: 200, json: paid }));
+      const main = page.getByRole("main");
+      const card = (n: number) =>
+        main.getByRole("article", {
+          name: new RegExp(`^${zh ? `第 ${n} 轮` : `Round ${n} `}`, "u"),
+        });
+      const payment = (n: number) =>
+        card(n)
+          .locator(".dining-session__round-facts > div")
+          .filter({ hasText: zh ? "付款" : "Payment" });
+      await expect(payment(1)).toContainText(zh ? "无需付款" : "Nothing to pay");
+      await expect(card(1)).not.toContainText(zh ? "记入本桌账单" : "On the table's bill");
+      await expect(payment(3)).toContainText(zh ? "已付款" : "Paid");
+      await expect(card(4)).toContainText(
+        zh
+          ? "这一轮已付款，还没有退款。请问店员。"
+          : "This round was paid and has not been refunded. Ask a staff member.",
+      );
+      await expect(main).not.toContainText(
+        zh ? "款项正在退回付款的银行卡" : "being refunded to the card that paid",
+      );
+      await expect(main).not.toContainText(zh ? "退款处理中" : "Refund on its way");
+      for (const width of [390, 1024]) {
+        await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+        await expectNoHorizontalOverflow(page);
+        await page.screenshot({
+          path: `${shots26}/guest-paid-rounds-${language}-${width}.png`,
+          fullPage: true,
+        });
+      }
+      await expectNoInternalText(page);
+    });
+
   test("v15 2026-10-29: the charge rounds staff took off show as one line", async ({ page }) => {
     const [round1] = session.session.rounds;
     if (round1 === undefined) throw new Error("fixture");

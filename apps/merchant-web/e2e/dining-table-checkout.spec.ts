@@ -2721,3 +2721,319 @@ for (const language of ["en", "zh-Hans"] as const)
     }
     await expectNoInternalText(page, ["Temporarily unavailable"]);
   });
+
+// b26 (v15 live25, TM2 'L25 TCP (TEST)'): three staff rounds of Soy milk $3.25 + Smashed cucumber
+// $6.25 ($32.21). Round 1's Soy milk came off ($3.68), round 2 whole ($10.73), then round 1's
+// cucumber was comped ($7.06): $10.74 to pay. Staff read "Taken off the bill · not charged $14.40"
+// (32.20 with Total and comp) and checkout's round 1 "Comped −$7.06" beside a $6.25 dish at a
+// $0.00 round. Now taken off is $14.41 (10.74 + 7.06 + 14.41 = 32.21), and every round reads its
+// dishes and comps before tax plus its Tax line, adding up to its total, on Tables and Orders.
+const shots26 = process.env.B26_SHOTS ?? "test-results-b26/shots";
+for (const language of ["en", "zh-Hans"] as const)
+  test(`@production b26: taken off reads what the bill went down by, and each round adds up (${language})`, async ({
+    page,
+  }) => {
+    const zh = language === "zh-Hans";
+    if (zh)
+      await page.addInitScript(() =>
+        window.localStorage.setItem("bop.merchant.language", "zh-Hans"),
+      );
+    await floor(page, { phase: "Closing", version: 7 }, { timeZone: "America/Toronto" });
+    await page.route("**/merchant/dining/table-close-plan", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          orderReference: id(3),
+          diningSessionReference: id(2),
+          orderVersion: 6,
+          observedAt: "2026-10-15T19:00:00.000Z",
+          rounds: [],
+          closeBlockers: ["ORDER_BALANCE_UNPAID"],
+          totals: { onlineMinor: "0", cardMachineMinor: "0" },
+        },
+      }),
+    );
+    const base = unpaidBill("Closing", 7);
+    const roundOf = (n: number) => ({
+      roundNumber: n,
+      orderBatchReference: id(20 + n),
+      submissionReference: id(30 + n),
+      paid: false,
+    });
+    const soy = (n: number) => ({
+      orderItemReference: id(n),
+      quantity: 1,
+      displayName: "Soy milk",
+    });
+    const cucumber = (n: number) => ({
+      orderItemReference: id(n),
+      quantity: 1,
+      displayName: "Smashed cucumber",
+    });
+    await page.route("**/merchant/dining/table-bill", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          ...base,
+          rounds: [
+            {
+              ...roundOf(1),
+              items: [
+                {
+                  ...cucumber(912),
+                  subtotalMinor: "625",
+                  totalMinor: "1",
+                  reduction: {
+                    kind: "Comp",
+                    percent: null,
+                    amountMinor: "706",
+                    netMinor: "625",
+                  },
+                },
+              ],
+              takenOffDishes: [soy(911)],
+              subtotalMinor: "0",
+              taxMinor: "0",
+              totalMinor: "0",
+              taxRoundingMinor: "-1",
+            },
+            {
+              ...roundOf(2),
+              items: [],
+              takenOffDishes: [soy(921), cucumber(922)],
+              subtotalMinor: "0",
+              taxMinor: "0",
+              totalMinor: "0",
+              taxRoundingMinor: "0",
+            },
+            {
+              ...roundOf(3),
+              items: [
+                { ...soy(931), subtotalMinor: "325", totalMinor: "367", reduction: null },
+                { ...cucumber(932), subtotalMinor: "625", totalMinor: "707", reduction: null },
+              ],
+              takenOffDishes: [],
+              subtotalMinor: "950",
+              taxMinor: "124",
+              totalMinor: "1074",
+              taxRoundingMinor: "0",
+            },
+          ],
+          owed: { subtotalMinor: "950", taxMinor: "124", totalMinor: "1074" },
+          taxRoundingMinor: "-1",
+          tips: { enabled: false, tierPercents: [12, 18, 20] },
+        },
+      }),
+    );
+    const money = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
+    const batch = (round: number, removed: string[], comped: unknown[]) => ({
+      orderBatchReference: id(20 + round),
+      sequence: round,
+      acceptanceStatus: "Accepted",
+      canRequestAcceptance: false,
+      canCancel: false,
+      staffCancellation: null,
+      canCancelItems: false,
+      unpaidRemovableItems: [],
+      unpaidRemovedItems: removed,
+      compableItems: [],
+      compedItems: comped,
+    });
+    const order = {
+      orderReference: id(3),
+      orderNumber: "ORD-3",
+      orderType: "DineIn",
+      sourceChannel: "Qr",
+      submittedAt: "2026-10-15T18:10:00.000Z",
+      observedAt: "2026-10-15T19:00:00.000Z",
+      initialBatchReference: id(21),
+      batches: [
+        batch(
+          1,
+          [id(911)],
+          [
+            {
+              orderItemReference: id(912),
+              kind: "Comp",
+              percent: null,
+              amountMinor: "706",
+              reasonCode: "GOODWILL",
+              decidedAt: "2026-10-15T18:50:00.000Z",
+              byLabel: "Li",
+            },
+          ],
+        ),
+        batch(2, [id(921), id(922)], []),
+        batch(3, [], []),
+      ],
+      canRequestAcceptance: false,
+      readyToServeItemCount: 0,
+      tableBill: {
+        totalMinor: "1074",
+        paid: null,
+        rounds: [
+          { orderBatchReference: id(21), subtotalMinor: "0", taxMinor: "0", totalMinor: "0" },
+          { orderBatchReference: id(22), subtotalMinor: "0", taxMinor: "0", totalMinor: "0" },
+          {
+            orderBatchReference: id(23),
+            subtotalMinor: "950",
+            taxMinor: "124",
+            totalMinor: "1074",
+          },
+        ],
+        removedMinor: "1441",
+      },
+      currentPhase: "Fulfilled",
+      currentVersion: 6,
+      unfulfillable: null,
+      pickupNotCollected: false,
+      acceptBy: null,
+      awaitingPayment: false,
+    };
+    const line = (n: number, round: number, name: string, net: number, tax: number) => ({
+      orderItemReference: id(n),
+      orderBatchReference: id(20 + round),
+      name,
+      options: [],
+      quantity: 1,
+      customerNote: null,
+      unitPrice: money(String(net)),
+      subtotal: money(String(net)),
+      discount: money("0"),
+      tax: money(String(tax)),
+      fee: money("0"),
+      total: money(String(net + tax)),
+      canCancel: false,
+      cancellation: null,
+    });
+    await page.route("**/merchant/orders*", (route) =>
+      route.fulfill({ headers, json: { items: [order], nextAfterOrderReference: null } }),
+    );
+    await page.route("**/merchant/orders/detail*", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          screenId: "OPS-ORDER-DETAIL",
+          pickupContact: null,
+          order,
+          lines: {
+            items: [1, 2, 3].flatMap((round) => [
+              line(900 + round * 10 + 1, round, "Soy milk", 325, 42),
+              line(900 + round * 10 + 2, round, "Smashed cucumber", 625, 82),
+            ]),
+            totals: {
+              subtotal: money("2850"),
+              discount: money("0"),
+              tax: money("372"),
+              fee: money("0"),
+              taxRounding: money("0"),
+              total: money("3222"),
+            },
+          },
+        },
+      }),
+    );
+    await page.goto("/operations/dining");
+    await page.getByRole("button", { name: zh ? "选择 T2" : "Select T2", exact: true }).click();
+    const checkout = page.getByRole("region", { name: zh ? "结账" : "Checkout" });
+    const rounds = checkout.locator(".table-checkout__rounds > li");
+    const tax = zh ? "税" : "Tax";
+    // Round 1: cucumber $6.25, comped −$6.25 before tax, Tax $0.00: the round's $0.00.
+    await expect(rounds.nth(0)).toContainText("$6.25");
+    await expect(rounds.nth(0)).toContainText("−$6.25");
+    await expect(rounds.nth(0)).not.toContainText("$7.06");
+    await expect(rounds.nth(0).locator(".table-checkout__round-tax")).toHaveText(`${tax}$0.00`);
+    // Round 3: $3.25 + $6.25 + Tax $1.24 = $10.74.
+    await expect(rounds.nth(2).locator(".table-checkout__round-tax")).toHaveText(`${tax}$1.24`);
+    await expect(rounds.nth(2)).toContainText("$10.74");
+    // A round taken off whole has no Tax line: nothing on it is charged.
+    await expect(rounds.nth(1).locator(".table-checkout__round-tax")).toHaveCount(0);
+    // The table's order: Total $10.74, comp −$7.06, taken off $14.41 — $32.21 as ordered.
+    const tableOrder = page.getByRole("region", { name: zh ? "这桌的订单" : "This table's order" });
+    await expect(tableOrder).toContainText("$14.41");
+    await expect(tableOrder).not.toContainText("$14.40");
+    await expect(tableOrder).toContainText("$7.06");
+    await expect(tableOrder).toContainText(
+      zh ? "免单/折让（税前）" : "Comps and discounts, before tax",
+    );
+    for (const width of [1440, 1024, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+          ),
+        )
+        .toBe(true);
+      await page.screenshot({
+        path: `${shots26}/tables-round-lines-${language}-${width}.png`,
+        fullPage: true,
+      });
+      // The panel scrolls on its own: checkout and the comps under the table's order, as staff
+      // scroll to them.
+      await checkout.scrollIntoViewIfNeeded();
+      await checkout.screenshot({ path: `${shots26}/tables-checkout-${language}-${width}.png` });
+      await tableOrder.screenshot({
+        path: `${shots26}/tables-order-${language}-${width}.png`,
+      });
+    }
+    await expectNoInternalText(page, ["Temporarily unavailable"]);
+    // The Orders page reads the same figures.
+    await page.route("**/merchant/session", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          authenticated: true,
+          csrf,
+          workspace: {
+            screenId: "HOME-OVERVIEW",
+            selectedScope: {
+              brandLabel: "Synthetic Brand",
+              storeLabel: "Synthetic Store",
+              storeReference: id(99),
+              timeZone: "America/Toronto",
+            },
+            authorizedStores: [
+              {
+                brandLabel: "Synthetic Brand",
+                storeLabel: "Synthetic Store",
+                storeReference: id(99),
+              },
+            ],
+            businessDate: "2026-10-15",
+            storeStatus: "Open",
+            freshness: "Current",
+            dashboardAvailability: "UnavailableUntilWP1905",
+            navigation: [
+              {
+                screenId: "OPS-ORDER-QUEUE",
+                label: "Orders",
+                href: "/operations/orders",
+                permission: "ordering.operate",
+              },
+              {
+                screenId: "DIN-FLOOR-BOARD",
+                label: "Tables",
+                href: "/operations/dining",
+                permission: "dining.operate",
+              },
+            ],
+          },
+        },
+      }),
+    );
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/operations/orders/" + id(3));
+    const lines = page.getByRole("region", { name: zh ? "所点商品" : "Items ordered" }).first();
+    await expect(lines).toContainText("$14.41");
+    await expect(lines).not.toContainText("$14.40");
+    await expect(lines).toContainText(zh ? "免单/折让（税前）" : "Comps and discounts, before tax");
+    for (const width of [1440, 1024, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      await page.screenshot({
+        path: `${shots26}/orders-round-lines-${language}-${width}.png`,
+        fullPage: true,
+      });
+    }
+    await expectNoInternalText(page, ["Temporarily unavailable"]);
+  });
