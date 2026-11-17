@@ -2603,6 +2603,86 @@ for (const language of ["en", "zh-Hans"] as const)
         },
       }),
     );
+    // b25 review: the table's order is answered too, the same as the bill (round 1 taken off
+    // whole), so the evidence shows a normal checkout, never the order's outage line beside it.
+    const money = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
+    const batch = (round: number, removed: string[]) => ({
+      orderBatchReference: id(20 + round),
+      sequence: round,
+      acceptanceStatus: "Accepted",
+      canRequestAcceptance: false,
+      canCancel: false,
+      staffCancellation: null,
+      canCancelItems: false,
+      unpaidRemovableItems: [],
+      unpaidRemovedItems: removed,
+      compableItems: [],
+      compedItems: [],
+    });
+    const order = {
+      orderReference: id(3),
+      orderNumber: "ORD-3",
+      orderType: "DineIn",
+      sourceChannel: "Qr",
+      submittedAt: "2026-10-15T18:10:00.000Z",
+      observedAt: "2026-10-15T19:00:00.000Z",
+      initialBatchReference: id(21),
+      batches: [batch(1, [id(901), id(903)]), batch(2, [])],
+      canRequestAcceptance: false,
+      readyToServeItemCount: 0,
+      tableBill: { totalMinor: "1130", paid: null },
+      currentPhase: "Fulfilled",
+      currentVersion: 4,
+      unfulfillable: null,
+      pickupNotCollected: false,
+      acceptBy: null,
+      awaitingPayment: false,
+    };
+    const line = (n: number, round: number, name: string, quantity: number, minor: number) => ({
+      orderItemReference: id(n),
+      orderBatchReference: id(20 + round),
+      name,
+      options: [],
+      quantity,
+      customerNote: null,
+      unitPrice: money(String(minor)),
+      subtotal: money(String(minor * quantity)),
+      discount: money("0"),
+      tax: money(String(Math.round(minor * quantity * 0.13))),
+      fee: money("0"),
+      total: money(String(minor * quantity + Math.round(minor * quantity * 0.13))),
+      canCancel: false,
+      cancellation: null,
+    });
+    await page.route("**/merchant/orders*", (route) =>
+      route.fulfill({ headers, json: { items: [order], nextAfterOrderReference: null } }),
+    );
+    await page.route("**/merchant/orders/detail*", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          screenId: "OPS-ORDER-DETAIL",
+          pickupContact: null,
+          order,
+          lines: {
+            items: [
+              line(901, 1, "Shoyu Ramen", 1, 2003),
+              line(903, 1, "Edamame", 2, 500),
+              line(902, 2, "Gyoza", 1, 1000),
+            ],
+            // The order's lines as ordered; the page takes round 1's off the bill itself.
+            totals: {
+              subtotal: money("4003"),
+              discount: money("0"),
+              tax: money("520"),
+              fee: money("0"),
+              taxRounding: money("0"),
+              total: money("4523"),
+            },
+          },
+        },
+      }),
+    );
     await page.goto("/operations/dining");
     const zh = language === "zh-Hans";
     await page.getByRole("button", { name: zh ? "选择 T2" : "Select T2", exact: true }).click();
@@ -2617,6 +2697,20 @@ for (const language of ["en", "zh-Hans"] as const)
     // Not charged: no amount beside them, and the total is round 2's alone.
     await expect(round1.getByRole("listitem").first()).not.toContainText("$");
     await expect(checkout).toContainText(zh ? "含税合计$11.30" : "Total with tax$11.30");
+    // The table's order above reads normally, with the same words for round 1.
+    const tableOrder = page.getByRole("region", { name: zh ? "这桌的订单" : "This table's order" });
+    await expect(tableOrder).toContainText(zh ? "第 2 轮" : "Round 2");
+    await expect(tableOrder).toContainText(zh ? "已从账单删除" : "Taken off the bill");
+    // The table's order adds up to the same bill as checkout: never a negative total.
+    await expect(tableOrder).not.toContainText("−$");
+    await expect(tableOrder).toContainText("$11.30");
+    await expect(
+      page.getByText(
+        zh
+          ? /读不到这桌的订单/u
+          : "The table's order could not be read. It is read again with the table.",
+      ),
+    ).toHaveCount(0);
     for (const width of [1440, 1024, 390]) {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
       await round1.scrollIntoViewIfNeeded();
