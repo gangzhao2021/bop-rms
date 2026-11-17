@@ -22,13 +22,19 @@ export const billTaxRoundingRule = Object.freeze({ code: "DEC_TAX_WHOLE_RECEIPT"
  */
 
 /**
- * b28 (2026-11-17, v15 live26): the whole bill's rounding sits on one round (the last that can
- * take it) and every other round keeps the tax it was charged, so a round's figure does not move
- * by a cent when another round changes. Same bill, same tax and same charge as before; only which
- * round shows the cent differs. The rule version stays 2 (the database allows 1 and 2); the
- * sharing is named in the basis, so the version recorded for an unpaid bill is superseded.
+ * b28 (2026-11-17, v15 live26): the whole bill's rounding sits on the last round that can take it
+ * and every other round keeps the tax it was charged, so a round's figure does not move by a cent
+ * when another round changes. A round takes at most what its own dishes could have caused (half a
+ * cent a dish, rounded up, plus one for the bill's own rounding: billTaxRoundingRoundLimitMinor);
+ * the rest goes back a round at a time. Same bill, same tax and same charge as before; only which
+ * round shows the cent differs. The rule version stays 2 (the database allows 1 and 2, and nothing
+ * reads the sharing back from the version: every recorded line names its round); the sharing is
+ * named in the basis, so the version recorded for an unpaid bill is superseded.
  */
-export const billTaxRoundingAllocation = "LastRound";
+export const billTaxRoundingAllocation = "LastRoundBounded";
+/** b28: the most of the bill's rounding a round with `dishes` taxed dishes takes, per tax type. */
+export const billTaxRoundingRoundLimitMinor = (dishes: number): bigint =>
+  BigInt(Math.ceil(dishes / 2) + 1);
 
 export interface BillTaxRoundingItem {
   readonly orderItemReference: string;
@@ -131,7 +137,7 @@ export function computeBillTaxRounding(
     denominator: bigint;
     readonly perRound: Map<
       number,
-      { numerator: bigint; denominator: bigint; charged: bigint; given: bigint }
+      { numerator: bigint; denominator: bigint; charged: bigint; given: bigint; dishes: number }
     >;
   }
   const groups = new Map<string, Group>();
@@ -184,13 +190,19 @@ export function computeBillTaxRounding(
             perRound: new Map(),
           } satisfies Group);
         groups.set(key, group);
-        const entry: { numerator: bigint; denominator: bigint; charged: bigint; given: bigint } =
-          group.perRound.get(roundIndex) ?? {
-            numerator: 0n,
-            denominator: 1n,
-            charged: 0n,
-            given: 0n,
-          };
+        const entry: {
+          numerator: bigint;
+          denominator: bigint;
+          charged: bigint;
+          given: bigint;
+          dishes: number;
+        } = group.perRound.get(roundIndex) ?? {
+          numerator: 0n,
+          denominator: 1n,
+          charged: 0n,
+          given: 0n,
+          dishes: 0,
+        };
         // Exact sum of fractions with power-of-ten denominators: keep the largest denominator.
         const denominator =
           ratio.denominator > entry.denominator ? ratio.denominator : entry.denominator;
@@ -200,6 +212,7 @@ export function computeBillTaxRounding(
         entry.denominator = denominator;
         entry.charged += charged;
         entry.given += givenBack[index] ?? 0n;
+        if (numerator > 0n) entry.dishes += 1;
         group.perRound.set(roundIndex, entry);
         if (denominator > group.denominator) group.denominator = denominator;
         priorCharged += charged;
@@ -251,29 +264,37 @@ export function computeBillTaxRounding(
     };
     // b28 (docs/spec/design/tax-whole-receipt.md "b28"): each round keeps the tax it was charged,
     // so a round staff did not touch reads the same before and after a dish comes off another
-    // round; the whole bill's rounding sits on one round, the last of the carrier's rounds taxed at
-    // this tax type that can take it without its tax going below nothing (then earlier ones, then
-    // any round of the bill). A comp's cent (b16) is already on the comped round's charged tax, so
-    // the comped round goes down by exactly the comp. A round with nothing taxable left, or charged
-    // below nothing by a comp's cent, keeps that cent given back (it comes to nothing).
+    // round; the whole bill's rounding sits on the last of the carrier's rounds taxed at this tax
+    // type, up to what that round's own dishes could have caused (billTaxRoundingRoundLimitMinor)
+    // and never taking its tax below nothing; what it can't take goes to the round before it, and
+    // so on (then the same over every round of the bill). A comp's cent (b16) is already on the
+    // comped round's charged tax, so the comped round goes down by exactly the comp. A round with
+    // nothing taxable left, or charged below nothing by a comp's cent, keeps that cent given back
+    // (it comes to nothing).
     const stays = indexes.map((_, position) => {
       const own = charged[position] ?? 0n;
       return carries[position] && (scaled[position] ?? 0n) > 0n && own >= 0n
         ? own
         : (kept[position] ?? 0n);
     });
-    const onOneRound = (candidates: readonly boolean[]) => {
-      const others = stays.reduce((sum, value) => sum + value, 0n);
-      for (let position = indexes.length - 1; position >= 0; position -= 1) {
+    const fromTheLast = (candidates: readonly boolean[]) => {
+      const result = [...stays];
+      let left = whole - stays.reduce((sum, value) => sum + value, 0n);
+      for (let position = indexes.length - 1; position >= 0 && left !== 0n; position -= 1) {
         if (!candidates[position] || (scaled[position] ?? 0n) <= 0n) continue;
-        const share = whole - (others - (stays[position] ?? 0n));
-        if (share >= 0n)
-          return indexes.map((_, other) => (other === position ? share : (stays[other] ?? 0n)));
+        const own = result[position] ?? 0n;
+        const limit = billTaxRoundingRoundLimitMinor(
+          (group.perRound.get(indexes[position] as number) as { dishes: number }).dishes,
+        );
+        const most = left > 0n ? (left < limit ? left : limit) : left > -limit ? left : -limit;
+        const take = own + most < 0n ? -own : most;
+        result[position] = own + take;
+        left -= take;
       }
-      return null;
+      return left === 0n ? result : null;
     };
     const everyRound = indexes.map(() => true);
-    const shares = onOneRound(carries) ?? onOneRound(everyRound) ?? sharesOver(everyRound);
+    const shares = fromTheLast(carries) ?? fromTheLast(everyRound) ?? sharesOver(everyRound);
     indexes.forEach((index, position) => {
       const amount = (shares[position] ?? 0n) - (charged[position] ?? 0n);
       if (amount === 0n) return;

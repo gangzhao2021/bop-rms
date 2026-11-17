@@ -32,9 +32,9 @@ describe("WP-2423 DEC-TAX-WHOLE-RECEIPT: the bill's tax rounding", () => {
   // 2026-11-02): amounts and the digest kept on the receipt must never change with a move. Rule
   // version 2 (v15 batch 9: a merged bill's rounding on the Order holding it) changed the basis
   // (it names the rule and the carrier); version 1 gave sha256:f860907f…be457ae. The amounts of a
-  // bill with no carrier named are those of version 1. b28 put the rounding on the last round
-  // (b2, which can take it) and named that sharing in the basis; it gave b1 and
-  // sha256:42307906…49163847 before.
+  // bill with no carrier named are those of version 1. b28 put the rounding on the last round, at
+  // most what its dishes could have caused (b2, one dish: 2¢ per tax type), the rest on b1, and
+  // named that sharing in the basis; it gave all on b1 and sha256:42307906…49163847 before.
   it("gives the recorded result for two taxes, a compound and a comp", () => {
     const tax = (code: string, rate: string, order: number, taxAmountMinor: bigint) => ({
       taxComponentCode: code,
@@ -81,19 +81,31 @@ describe("WP-2423 DEC-TAX-WHOLE-RECEIPT: the bill's tax rounding", () => {
       totalMinor: -7n,
       lines: [
         {
+          orderReference: "o1",
+          orderBatchReference: "b1",
+          taxComponentCode: "GST",
+          amountMinor: -1n,
+        },
+        {
           orderReference: "o2",
           orderBatchReference: "b2",
           taxComponentCode: "GST",
-          amountMinor: -3n,
+          amountMinor: -2n,
+        },
+        {
+          orderReference: "o1",
+          orderBatchReference: "b1",
+          taxComponentCode: "PST",
+          amountMinor: -2n,
         },
         {
           orderReference: "o2",
           orderBatchReference: "b2",
           taxComponentCode: "PST",
-          amountMinor: -4n,
+          amountMinor: -2n,
         },
       ],
-      basisDigest: "sha256:bfc5e0d921b769f7c0a7bbcc4af5195966088d1ba313563f1cecf46fc9513cbd",
+      basisDigest: "sha256:d41315508d4b4f9472e714ed30b8f53fa8db19c746868d34a320e0b0a7412193",
     });
   });
 
@@ -553,5 +565,44 @@ describe("b28: a round staff did not touch keeps its figure (v15 live26 TM2 exam
         (rounds) => computeBillTaxRounding(rounds, { carrierOrderReference: id(1) }).totalMinor,
       ),
     ).toEqual([-1n, -2n, -1n, -1n, -1n]);
+  });
+  it("moves the cent to a round just sent: round 2 reads $10.73, then $10.74 once round 3 is sent", () => {
+    // Adding a round changes the whole bill's tax, so its rounding moves to the new last round.
+    // The figures before are those the table read before round 3 existed (docs b28).
+    const rounds = [1, 2, 3].map((n) => roundOf(n, [soy(n), cucumber(n)]));
+    expect(figures(rounds.slice(0, 2))).toEqual([1074n, 1073n]);
+    expect(figures(rounds)).toEqual([1074n, 1074n, 1073n]);
+  });
+  it("puts no more on a round than its own dishes could have caused, and goes back from there", () => {
+    // Four rounds of two dishes: the bill's −2¢ fits on the last round (at most 2¢ for two dishes).
+    const four = [1, 2, 3, 4].map((n) => roundOf(n, [soy(n), cucumber(n)]));
+    expect(figures(four)).toEqual([1074n, 1074n, 1074n, 1072n]);
+    // Ten rounds and then one Jasmine tea $2.00 (tax 26¢): the bill's tax is 5¢ less than the
+    // rounds were charged. The tea's round takes 2¢ (one dish), round 10 takes 2¢, round 9 1¢.
+    const tea = roundOf(11, [
+      { orderItemReference: id(500), netMinor: 200n, taxComponents: [hst(26n)], reduction: null },
+    ]);
+    const many = [
+      ...[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => roundOf(n, [soy(n), cucumber(n)])),
+      tea,
+    ];
+    const result = computeBillTaxRounding(many, { carrierOrderReference: id(1) });
+    expect(result.totalMinor).toBe(-5n);
+    expect(figures(many)).toEqual([
+      1074n,
+      1074n,
+      1074n,
+      1074n,
+      1074n,
+      1074n,
+      1074n,
+      1074n,
+      1073n,
+      1072n,
+      224n,
+    ]);
+    expect(result.lines.every((line) => line.amountMinor >= -2n && line.amountMinor <= 2n)).toBe(
+      true,
+    );
   });
 });
