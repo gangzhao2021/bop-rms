@@ -179,6 +179,15 @@
 .customer-page.customer-page .checkout-tip__choices button[aria-pressed="true"] span {
   color: inherit;
 }
+/* b25 review: a locked tip row (the order being sent) reads muted, never the usable look; the
+   chosen tip stays accent. */
+.customer-page.customer-page .checkout-tip__choices button:disabled:not([aria-pressed="true"]),
+.customer-page.customer-page
+  .checkout-tip__choices
+  button:disabled:not([aria-pressed="true"])
+  span {
+  color: var(--bop-color-text-muted);
+}
 .customer-page.customer-page .store-info h2 {
   font-size: 20px;
 }

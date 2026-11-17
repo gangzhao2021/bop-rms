@@ -345,6 +345,28 @@ for (const screen of [
             path: `${shots}/customer-checkout-tip-${language}-${String(width)}.png`,
           });
         }
+        // b25 review: while the order is being sent the row is locked; the choices that were not
+        // chosen then read muted (never the usable look), the chosen one stays accent. The lock is
+        // set here directly: only the look of a locked row is asked.
+        const locked = await tips.getByRole("button").evaluateAll((buttons) =>
+          buttons.map((button) => {
+            button.setAttribute("disabled", "");
+            const style = getComputedStyle(button);
+            const look = {
+              pressed: button.getAttribute("aria-pressed"),
+              color: style.color,
+              cursor: style.cursor,
+            };
+            button.removeAttribute("disabled");
+            return look;
+          }),
+        );
+        for (const choice of locked)
+          expect(choice).toEqual(
+            choice.pressed === "true"
+              ? { pressed: "true", color: accent, cursor: "not-allowed" }
+              : { pressed: choice.pressed, color: "rgb(102, 102, 102)", cursor: "not-allowed" },
+          );
       });
 
     test("typed details survive a reconnect and its new quote", async ({ page, context }) => {
