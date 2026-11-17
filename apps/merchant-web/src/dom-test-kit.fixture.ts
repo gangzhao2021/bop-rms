@@ -7,10 +7,25 @@ import { createRoot, type Root } from "react-dom/client";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+const mounted = new Set<Root>();
+
+/**
+ * Unmounts every root `mount` made and lets React finish its scheduled work while the test
+ * environment still exists, so no render runs after jsdom is torn down ("window is not defined").
+ */
+export async function unmountMounted(): Promise<void> {
+  const roots = [...mounted];
+  mounted.clear();
+  await act(async () => {
+    for (const root of roots) root.unmount();
+  });
+}
+
 export async function mount(node: ReactNode): Promise<{ container: HTMLElement; root: Root }> {
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
+  mounted.add(root);
   await act(async () => {
     root.render(node);
   });

@@ -11,7 +11,15 @@ import {
 import type { StoreSetupPendingJournal } from "./store-setup-pending-journal.js";
 import { publicationValueDigest } from "./product-publication-command-client-v2.js";
 import { setLanguageForTest } from "./i18n/i18n.js";
-import { buttonNamed, click, mount, settle, typeInto, until } from "./dom-test-kit.fixture.js";
+import {
+  buttonNamed,
+  click,
+  mount,
+  settle,
+  typeInto,
+  unmountMounted,
+  until,
+} from "./dom-test-kit.fixture.js";
 
 vi.mock("./store-configuration-pending-journal.js", async (original) => ({
   ...(await original<typeof import("./store-configuration-pending-journal.js")>()),
@@ -210,7 +218,8 @@ beforeEach(() => {
   vi.spyOn(Date, "now").mockReturnValue(Date.parse(at));
   vi.spyOn(navigator, "onLine", "get").mockReturnValue(true);
 });
-afterEach(() => {
+afterEach(async () => {
+  await unmountMounted();
   setLanguageForTest("en");
   document.body.replaceChildren();
   vi.restoreAllMocks();
