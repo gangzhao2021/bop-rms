@@ -34,6 +34,7 @@ import {
   type StoreSetupEditorInputs,
   type StoreSetupHourInput,
   savedWaitText,
+  taxClassificationName,
   waitMinutesText,
 } from "./StoreSetupDraftPage.js";
 import {
@@ -1818,4 +1819,23 @@ it("b21 review: a time zone id change within one zone reads apart", () => {
     value: ["Eastern time (Toronto, Ottawa, Montréal)"],
     now: "Eastern time (Toronto, Ottawa, Montréal), older setting (Montréal)",
   });
+});
+it("b25: the standard tax class reads 标准税率 on a Chinese page when the brand named it in English only", () => {
+  setLanguageForTest("zh-Hans");
+  try {
+    expect(taxClassificationName({ "en-CA": "Standard" }, "en-CA", "STANDARD")).toBe("标准税率");
+    // A name the brand gave in Chinese is shown as stored.
+    expect(
+      taxClassificationName({ "en-CA": "Standard", "zh-Hans": "一般税" }, "en-CA", "STANDARD"),
+    ).toBe("一般税");
+    // Any other class keeps the brand's own name, and a code is never shown.
+    expect(taxClassificationName({ "en-CA": "Prepared food" }, "en-CA", "PREPARED")).toBe(
+      "Prepared food",
+    );
+    expect(taxClassificationName({}, "en-CA", "PREPARED")).not.toContain("PREPARED");
+  } finally {
+    setLanguageForTest("en");
+  }
+  expect(taxClassificationName({ "en-CA": "Standard" }, "en-CA", "STANDARD")).toBe("Standard");
+  expect(taxClassificationName({ "zh-Hans": "标准" }, "zh-Hans", "STANDARD")).toBe("Standard rate");
 });

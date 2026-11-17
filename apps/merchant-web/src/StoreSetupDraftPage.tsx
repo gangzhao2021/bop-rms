@@ -4017,6 +4017,8 @@ export function validateStoreSetupFeeSelections(
 export function taxClassificationName(
   names: Readonly<Record<string, string>>,
   defaultLocale: string,
+  /** b25: the built-in standard class (code STANDARD) has a name in the page language of its own. */
+  code?: string,
 ): string {
   const named = (value: string | undefined) => (value?.trim() ? value : undefined);
   const language = currentLanguage() === "zh-Hans" ? "zh" : "en";
@@ -4024,6 +4026,9 @@ export function taxClassificationName(
     named(
       Object.entries(names).find(([locale, v]) => locale.startsWith(language) && named(v))?.[1],
     ) ??
+    // b25 (v15 live check of b24): a brand that named the standard class in English only shows
+    // 标准税率 on a Chinese page; a name the brand gave in this language is shown as stored.
+    (code === "STANDARD" ? t("Standard rate") : undefined) ??
     named(names[defaultLocale]) ??
     named(Object.values(names).find((v) => named(v))) ??
     t("Unnamed tax classification")
@@ -4334,7 +4339,11 @@ export function StoreSetupFeeContextEditor({
                           value={choice.classificationReference}
                           disabled={choice.lifecycle !== "Active"}
                         >
-                          {taxClassificationName(choice.localizedNames, choices.defaultLocale)}
+                          {taxClassificationName(
+                            choice.localizedNames,
+                            choices.defaultLocale,
+                            choice.code,
+                          )}
                           {choice.lifecycle === "Active" ? "" : t(" (no longer in use)")}
                         </option>
                       ))}
