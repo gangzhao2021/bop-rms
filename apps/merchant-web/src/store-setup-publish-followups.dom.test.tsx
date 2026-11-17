@@ -681,3 +681,49 @@ it("b26: the approval status is read again when the connection comes back; the c
   await settle();
   expect(client.load).toHaveBeenCalledTimes(2);
 });
+
+it("b28 (v15 live26): the result of a step stays when the connection comes back and nothing moved", async () => {
+  const ws = workspaceOf({ latest: configuration("Draft") });
+  const client = clientOf(ws);
+  const view = (online: boolean) => (
+    <MemoryRouter>
+      <StoreConfigurationOrdinaryPanel
+        scope={scope}
+        csrf={csrf}
+        saved={saved as never}
+        setupLayout="Open"
+        client={client as never}
+        journalFactory={journal as never}
+        online={online}
+      />
+    </MemoryRouter>
+  );
+  const { container, root } = await mount(view(true));
+  await settle();
+  const status = () => container.querySelector(".store-setup-publish__status")?.textContent ?? "";
+  await click(buttonNamed(container, "Check the settings again"));
+  await settle();
+  expect(status()).toBe("Settings checked, not yet sent for approval.");
+  const rerender = async (online: boolean) => {
+    await act(async () => {
+      root.render(view(online));
+    });
+    await settle();
+  };
+  // Offline, then back: the status is read again by itself and finds the change where it was.
+  await rerender(false);
+  const reads = client.load.mock.calls.length;
+  await rerender(true);
+  expect(client.load.mock.calls.length).toBe(reads + 1);
+  expect(status()).toBe("Settings checked, not yet sent for approval.");
+  // Someone else moved it on (a new head) while offline: the result no longer applies.
+  client.load.mockResolvedValue(
+    workspaceOf({
+      latest: configuration("Draft", { configurationVersion: 2 }),
+      expectedHead: { ...head, configurationVersion: 2 },
+    }),
+  );
+  await rerender(false);
+  await rerender(true);
+  expect(status()).not.toContain("Settings checked");
+});
