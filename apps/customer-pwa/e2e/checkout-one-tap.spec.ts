@@ -369,6 +369,59 @@ for (const screen of [
           );
       });
 
+    // b26 (v15 b25 live): on a phone the order summary sits above the tip row, and the first tip
+    // chosen added a Tip line to it, so the whole row moved down about 28 px under the guest's
+    // finger. The summary keeps its Tip line from the start ("Not chosen"), so the row stays still.
+    for (const language of ["en", "zh-Hans"] as const)
+      test(`choosing the first tip keeps the tip row still (${language})`, async ({ page }) => {
+        if (language === "zh-Hans")
+          await page.addInitScript(() => localStorage.setItem("bop.customer.language", "zh-Hans"));
+        const zh = language === "zh-Hans";
+        await stubCheckout(page, { quoteReference: () => id(5) });
+        await page.goto("/#qr=aaa.bbb.ccc");
+        await expect(
+          page.getByRole("heading", { name: "Synthetic One Tap Store", exact: true }),
+        ).toBeVisible();
+        await page.evaluate(() => {
+          history.pushState(null, "", "/checkout");
+          window.dispatchEvent(new PopStateEvent("popstate"));
+        });
+        const tips = page.locator(".checkout-tip__choices");
+        await expect(tips.getByRole("button")).toHaveCount(5);
+        const fifteen = page.getByRole("button", { name: /^15%/u });
+        await expect(fifteen).toContainText("$");
+        const totals = page.locator(".checkout-totals dl");
+        // Nothing is chosen for the guest: the line says so, with no amount.
+        await expect.soft(totals).toContainText(zh ? "小费未选择" : "TipNot chosen");
+        const rowTop = () =>
+          tips.evaluate((row) => Math.round(row.getBoundingClientRect().top + window.scrollY));
+        const shots = process.env.B26_SHOTS ?? "test-results-b26/shots";
+        await page.setViewportSize({ width: screen.width, height: screen.height });
+        await page.screenshot({
+          path: `${shots}/customer-checkout-tip-not-chosen-${language}-${String(screen.width)}.png`,
+          fullPage: true,
+        });
+        for (const width of [390, 1024, screen.width]) {
+          await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+          const before = await rowTop();
+          await fifteen.click();
+          await expect(fifteen).toHaveAttribute("aria-pressed", "true");
+          await expect(totals).toContainText(/\$/u);
+          expect(await rowTop()).toBe(before);
+          await page.getByRole("button", { name: zh ? "不加小费" : "No tip", exact: true }).click();
+          await expect(totals).toContainText(zh ? "小费$0.00" : "Tip$0.00");
+          expect(await rowTop()).toBe(before);
+          expect(
+            await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+          ).toBe(true);
+          await fifteen.click();
+          await page.screenshot({
+            path: `${shots}/customer-checkout-tip-still-${language}-${String(width)}.png`,
+            fullPage: true,
+          });
+        }
+      });
+
     test("typed details survive a reconnect and its new quote", async ({ page, context }) => {
       const failures: string[] = [];
       page.on("pageerror", () => failures.push("page error"));

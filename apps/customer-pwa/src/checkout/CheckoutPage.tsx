@@ -819,10 +819,17 @@ export function CheckoutPage({
                     <dd>{formatCartMoney(quote.fee)}</dd>
                   </div>
                 ) : null}
-                {tipAmount !== null && tipAmount !== "0" ? (
+                {/* b26 (v15 b25 live): asked for, the Tip line is there from the start, so on a
+                    phone (the summary above the tip row) the first choice never moves the row
+                    under the guest's finger. Nothing is chosen for them until they choose. */}
+                {asksTip ? (
                   <div>
                     <dt>{checkoutText.tip}</dt>
-                    <dd>{formatMoney(tipAmount, quote.total.currency)}</dd>
+                    <dd>
+                      {tipAmount === null
+                        ? checkoutText.tipNotChosen
+                        : formatMoney(tipAmount, quote.total.currency)}
+                    </dd>
                   </div>
                 ) : null}
                 <div className="checkout-totals__total">

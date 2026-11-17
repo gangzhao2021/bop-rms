@@ -467,6 +467,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "没有提交任何请求或订单。请恢复网络后重试。",
   "No tip": "不加小费",
   "Not charged": "未扣款",
+  "Not chosen": "未选择",
   "Not collected": "未取餐",
   "Not enough left": "剩余不足",
   "Not found": "未找到",

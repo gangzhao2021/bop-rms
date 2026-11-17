@@ -901,6 +901,10 @@ export const checkoutText = Object.freeze({
   get tip() {
     return t("Tip");
   },
+  /** b26: the summary's Tip line before the guest chooses (nothing is chosen for them). */
+  get tipNotChosen() {
+    return t("Not chosen");
+  },
   get pricesExpired() {
     return t(
       "We’ve stopped keeping your price. Tap Refresh prices: any price that changed is shown before you pay. Your details are kept.",
