@@ -152,6 +152,18 @@ vi.mock("@rms/ordering", async (importOriginal) => {
         const turn = state.turns.find((entry) => entry.turn === input.turnReference);
         if (turn !== undefined && turn.outcome === null) turn.outcome = input.outcome;
       },
+      // WP-2423 batch 28: ended by the request's own turn, without the staff member's authority.
+      release: async (
+        _tx: unknown,
+        input: { turnReference: string; operationReference: string; outcome: string },
+      ) => {
+        state.turnLog.push("end:" + input.outcome);
+        const turn = state.turns.find(
+          (entry) =>
+            entry.turn === input.turnReference && entry.operation === input.operationReference,
+        );
+        if (turn !== undefined && turn.outcome === null) turn.outcome = input.outcome;
+      },
       outcomeOf: async (_tx: unknown, operation: string) => {
         const own = state.turns.filter((entry) => entry.operation === operation);
         if (own.some((entry) => entry.outcome === "DishesLeftAtTable")) return "DishesLeftAtTable";
@@ -1992,6 +2004,20 @@ describe("two staff send a round for the same table — v15 b12 staff-round-conc
     } as never);
     await expect(f.send()).rejects.toMatchObject({ code: "STAFF_ROUND_STOCK_SHORT" });
     expect(state.turnLog).toEqual(["taken", "end:NotSent"]);
+  });
+
+  it("ends its own turn when its staff member signed out mid-round, without their authority", async () => {
+    // WP-2423 batch 28 (v15 18:08): a sign-out mid-round kept the table's turn until its lease
+    // ran out (other staff waited and were refused for two minutes), logged at level 50.
+    const f = setup();
+    f.pipeline.join.mockImplementationOnce(async () => {
+      state.allowed = false;
+      throw Object.assign(new Error("signed out"), { code: "STORE_SERVICE_PERMISSION_DENIED" });
+    });
+    await expect(f.send()).rejects.toMatchObject({ code: "STAFF_ROUND_PERMISSION_DENIED" });
+    expect(state.turnLog).toEqual(["taken", "end:NotSent"]);
+    expect(f.onUnexpected).not.toHaveBeenCalled();
+    state.allowed = true;
   });
 
   it("never says nothing was sent while its dish could not be taken back out of the cart", async () => {

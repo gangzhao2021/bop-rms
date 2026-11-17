@@ -896,8 +896,11 @@ export function createMerchantStaffDiningRound(options: {
         storeReference: scope.selected.storeReference,
         authorize: allowed,
       });
-    // DEC-STAFF-ROUND-ONE-AT-A-TIME: this round's turn at the table, once taken.
+    // DEC-STAFF-ROUND-ONE-AT-A-TIME: this round's turn at the table, once taken, and the Store
+    // and staff member it was taken for (to end it even when they can't be authorized any more).
     let turnReference: string | null = null;
+    let turnHolder: { readonly scope: StaffScope["selected"]; readonly actor: string } | null =
+      null;
     /** The round of a recorded staff entry, from owner records only. */
     const finished = async (
       status: StaffDiningRoundResult["status"],
@@ -1194,7 +1197,9 @@ export function createMerchantStaffDiningRound(options: {
         // its turn; while another round holds it, this one waits a little, then is refused as busy
         // with nothing sent.
         const turn = String(parseOrderingReference(options.nextReference()));
-        const waitMs = options.tableTurnWaitMs ?? 10_000;
+        // WP-2423 batch 28: a round takes about a second, so a turn still held after a short wait
+        // is answered at once as busy (staff never wait ten seconds to be told so).
+        const waitMs = options.tableTurnWaitMs ?? 3_000;
         const sleep =
           options.sleep ??
           ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
@@ -1222,6 +1227,8 @@ export function createMerchantStaffDiningRound(options: {
               operationReference: command.operationReference,
               actorReference: scope.actorReference,
             });
+            if (taken.status === "Taken")
+              turnHolder = { scope: scope.selected, actor: scope.actorReference };
             return { found: null, busy: taken.status === "Busy" };
           });
           if (!step.busy) {
@@ -1911,14 +1918,28 @@ export function createMerchantStaffDiningRound(options: {
     // DEC-STAFF-ROUND-ONE-AT-A-TIME: ends this round's turn, so the next staff round for the table
     // can go now. When this can't be written, the turn ends by itself after its lease (or once its
     // round is found), and the answer is never changed for it.
+    // WP-2423 batch 28 (race-payment-and-signout): ended by this request's own turn, without the
+    // staff member's authority, so a round refused because they signed out mid-round never keeps
+    // the table from the next staff member's round (it waited out the two-minute lease).
     const endTurn = async (
       outcome: "Placed" | "NotSent" | "DishesLeftAtTable" | "Unknown",
     ): Promise<void> => {
       const held: string | null = turnReference;
-      if (held === null) return;
+      const holder = turnHolder;
+      if (held === null || holder === null) return;
       try {
-        await inScope((tx, scope, allowed) =>
-          turns(scope, allowed).end(tx, { turnReference: held, outcome }),
+        await options.persistence.transactions.run((tx) =>
+          createPostgresStaffDiningRoundTableTurnStore({
+            brandReference: holder.scope.brandReference,
+            storeReference: holder.scope.storeReference,
+            // Never asked: `release` ends only this request's own turn.
+            authorize: async () => false,
+          }).release(tx as never, {
+            turnReference: held,
+            operationReference: command.operationReference,
+            actorReference: holder.actor,
+            outcome,
+          }),
         );
       } catch (ending) {
         try {

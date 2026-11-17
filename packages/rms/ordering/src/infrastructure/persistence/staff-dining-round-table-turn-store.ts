@@ -152,6 +152,41 @@ export function createPostgresStaffDiningRoundTableTurnStore(options: {
       if (row.undecided === true) return "Undecided";
       return row.turns > 0 ? "NotSent" : "None";
     },
+    /**
+     * WP-2423 batch 28 (race-payment-and-signout): ends a turn for the request that took it, by
+     * that turn's own reference, command and staff member, without asking for the staff member's
+     * authority again: a round refused because its staff member signed out (or lost access)
+     * mid-round can't be authorized any more, and its turn kept every other staff member's round
+     * at the table waiting for its lease. Only that one turn, and only when it is still that
+     * command's and that staff member's; nothing else is read or written. Once; a repeat changes
+     * nothing.
+     */
+    async release(
+      tx: AuditTransaction,
+      input: {
+        readonly turnReference: string;
+        readonly operationReference: string;
+        readonly actorReference: string;
+        readonly outcome: StaffDiningRoundTurnOutcome;
+      },
+    ): Promise<void> {
+      const turn = parseOrderingReference(input.turnReference);
+      const operation = parseOrderingReference(input.operationReference);
+      const actor = parseOrderingReference(input.actorReference);
+      if (!outcomes.includes(input.outcome)) return fail();
+      await tx.query(
+        "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+        [brand, store],
+      );
+      await tx.query(
+        `INSERT INTO rms_ordering.staff_dining_round_table_turn_end (turn_id,brand_id,store_id,ended_at,outcome)
+ SELECT t.turn_id,t.brand_id,t.store_id,date_trunc('milliseconds',clock_timestamp()),$6
+ FROM rms_ordering.staff_dining_round_table_turn t
+ WHERE t.turn_id=$1 AND t.brand_id=$2 AND t.store_id=$3 AND t.operation_id=$4 AND t.actor_id=$5
+ ON CONFLICT (turn_id) DO NOTHING`,
+        [turn, brand, store, operation, actor, input.outcome],
+      );
+    },
     /** Ends this round's turn with how it ended (once; a repeat changes nothing). */
     async end(
       tx: AuditTransaction,

@@ -261,3 +261,72 @@ it("pay-first table: a staff Send refused because a guest is checking out leaves
     }
   });
 });
+
+it("a staff member signs out mid-round: their round ends its own turn and the next staff round at the table goes at once", async () => {
+  await withIsolatedDatabase({ caseId: "wp2423_race_signout" }, async (context) => {
+    const admin = new Client(context.clientConfig);
+    await admin.connect();
+    vi.stubEnv("NODE_ENV", "development");
+    const api = await createPilotApiRole(admin, context, "wp2423_rso");
+    let store = null;
+    const unexpected = watchUnexpected();
+    try {
+      store = await prepareRealStaffRoundStore({ admin, context, api, paymentTiming: "PayLater" });
+      const host = await store.staff(id(0x740), roundPermissions);
+      const leaving = await store.staff(id(0x741), roundPermissions);
+      const next = await store.staff(id(0x742), roundPermissions);
+      const round = (counter, who) =>
+        answerOf(() =>
+          counter.staffDiningRound({
+            sessionCookie: who.sessionCookie,
+            csrf: who.csrf,
+            command: roundCommand(store),
+          }),
+        );
+      assert.equal((await round(await store.counterFor(host), host)).status, "Placed");
+      // The leaving member's round: they sign out in another tab while it is joining the table.
+      const signedOutCounter = await store.counterFor(leaving, {
+        decorateStaffRoundPipeline: (real) => ({
+          ...real,
+          join: async (...values) => {
+            await signOut(store, leaving);
+            return real.join(...values);
+          },
+        }),
+      });
+      const refused = await round(signedOutCounter, leaving);
+      assert.deepEqual(refused, { status: "Refused", code: "STAFF_ROUND_PERMISSION_DENIED" });
+      // Its turn ended with it: nothing was sent.
+      const turns = (
+        await admin.query(
+          `SELECT t.actor_id::text AS actor, e.outcome FROM rms_ordering.staff_dining_round_table_turn t
+           LEFT JOIN rms_ordering.staff_dining_round_table_turn_end e ON e.turn_id=t.turn_id
+           WHERE t.actor_id=$1`,
+          [id(0x741)],
+        )
+      ).rows;
+      assert.deepEqual(turns, [{ actor: id(0x741), outcome: "NotSent" }]);
+      // Another staff member's round at the same table goes at once (it waited ten seconds and was
+      // told another staff member was sending a round, for two minutes).
+      const started = performance.now();
+      const placed = await round(await store.counterFor(next), next);
+      const ms = performance.now() - started;
+      assert.equal(placed.status, "Placed", JSON.stringify(placed));
+      assert.ok(ms < 5_000, `the next round went at once (${Math.round(ms)} ms)`);
+      assert.deepEqual(
+        unexpected.lines.filter((line) => /"level":50/u.test(line)),
+        [],
+        "the sign-out is not logged as an unexpected failure",
+      );
+    } finally {
+      unexpected.restore();
+      vi.unstubAllEnvs();
+      if (store !== null) await store.close();
+      for (const name of [api, api + "_w"]) {
+        await admin.query("DROP OWNED BY " + name).catch(() => undefined);
+        await admin.query("DROP ROLE " + name).catch(() => undefined);
+      }
+      await admin.end();
+    }
+  });
+});
