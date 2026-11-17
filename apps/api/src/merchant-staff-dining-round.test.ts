@@ -838,6 +838,18 @@ describe("staff dine-in round command — WP-2423 Q7 slice 2", () => {
     blocked.pipeline.openTable.mockResolvedValueOnce({ status: "TableUnavailable" } as never);
     await expect(blocked.send()).rejects.toMatchObject({ code: "STAFF_ROUND_TABLE_UNAVAILABLE" });
     expect(blocked.pipeline.join).not.toHaveBeenCalled();
+    // Staff-round-fewer-tx review: the member signed out meanwhile (the table refused their
+    // authority too): told they are signed out, not that the table can't be seated.
+    state.entries.clear();
+    const signedOut = setup();
+    signedOut.pipeline.openTable.mockImplementationOnce(async () => {
+      state.allowed = false;
+      return { status: "TableUnavailable" } as never;
+    });
+    await expect(signedOut.send()).rejects.toMatchObject({
+      code: "STAFF_ROUND_PERMISSION_DENIED",
+    });
+    state.allowed = true;
     // WP-2423 item 13 ②: a free table while the platform paused new guests says so.
     state.entries.clear();
     const paused = setup();

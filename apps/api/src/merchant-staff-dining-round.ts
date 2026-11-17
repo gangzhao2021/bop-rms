@@ -1261,7 +1261,12 @@ export function createMerchantStaffDiningRound(options: {
           );
           if (table.status === "PartyChanged") return fail("STAFF_ROUND_TABLE_PARTY_CHANGED");
           if (table.status === "NewGuestsPaused") return fail("STAFF_ROUND_NEW_GUESTS_PAUSED");
-          if (table.status !== "Opened") return fail("STAFF_ROUND_TABLE_UNAVAILABLE");
+          if (table.status !== "Opened") {
+            // A member signed out (or whose access ended) since the round began is refused by
+            // Dining's table authority too: told so (403), not that the table can't be seated.
+            await inScope(async () => undefined);
+            return fail("STAFF_ROUND_TABLE_UNAVAILABLE");
+          }
           if (table.started)
             startedTable = {
               diningSessionReference: table.diningSessionReference,
