@@ -402,7 +402,11 @@ function RoundCard({
             <dd>
               {round.status === "Ready" && collectOrderNumber !== null
                 ? t("Ready · collect order {number} at the counter", { number: collectOrderNumber })
-                : statusText[round.status]}
+                : round.status === "StoreCancelled" && round.payment === "NotCharged"
+                  ? // b28 (v15 live26): staff took it off a table's bill before it paid, as its
+                    // note says; "Cancelled by the store" read as the restaurant refusing it.
+                    t("Taken off the bill")
+                  : statusText[round.status]}
             </dd>
           </div>
         )}

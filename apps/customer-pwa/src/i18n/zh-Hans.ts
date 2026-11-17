@@ -1601,6 +1601,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "This round is still on the table's bill. Ask staff to take it off.":
     "这一轮仍在本桌账单上，请让店员删除。",
   "Taken off the bill · not charged": "已从账单删除 · 不收费",
+  "Taken off the bill": "已从账单删除",
   "Staff took off 1 charge. It isn’t charged.": "店员撤下了 1 项收费，不收费。",
   "Staff took off {count} charges. They aren’t charged.": "店员撤下了 {count} 项收费，不收费。",
   "Your table moved to table {table}": "您这桌已换到 {table} 桌",
@@ -1619,7 +1620,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这家店还在准备中。请询问店员，或稍后再试。",
   // WP-2423 取舍 18 DEC-MEMBER-POINTS
   "The points for this order are still yours. Open this receipt on this phone before {time} to finish.":
-    "这单的积分还是您的。在 {time} 之前用这部手机打开这张收据，就可以继续。",
+    "这单的积分还是你的。在 {time} 之前用这部手机打开这张收据，就可以继续。",
   "Enter a 10-digit Canadian or US mobile number.": "请输入 10 位加拿大或美国手机号码。",
   "That code isn’t right. Check the text and try again.": "验证码不对。请看一下短信再试。",
   "That code has ended. Ask for a new one.": "验证码已失效，请重新获取。",
@@ -1628,25 +1629,25 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "We can’t send a code right now.": "现在发不了验证码。",
   "We couldn’t do that. Check your connection and try again.": "没有成功。请检查网络后再试。",
   "We use your phone number only to text you a sign-in code and to tell you before your points expire. You can leave and delete it any time.":
-    "手机号只用来发登录验证码，以及在积分过期前通知您。您可以随时退出并删除。",
+    "手机号只用来发登录验证码，以及在积分过期前通知你。你可以随时退出并删除。",
   "Also text me offers from this restaurant. Optional; you can stop any time.":
     "也给我发这家餐厅的优惠短信（可选，随时可以取消）。",
   "Code from the text": "短信里的验证码",
   "Text me a code": "发验证码给我",
   "Send another code": "再发一次验证码",
-  "You’re a member": "您已是会员",
+  "You’re a member": "你已是会员",
   "{points} points added for this order.": "这单已加 {points} 分。",
-  "You’re signed in.": "您已登录。",
+  "You’re signed in.": "你已登录。",
   "See your points": "查看我的积分",
   "No problem. You can still add this order’s points on this phone until {time}.":
-    "没关系。在 {time} 之前，您还可以用这部手机加上这单的积分。",
+    "没关系。在 {time} 之前，你还可以用这部手机加上这单的积分。",
   "Join now": "现在加入",
   "Add {points} points for this order": "给这单加 {points} 分",
   "Join and earn {points} points on this order": "加入会员，这单可以积 {points} 分",
   "Add {points} points for this order (after the refund)": "给这单加 {points} 分（已扣除退款部分）",
   "Join and earn {points} points on this order (after the refund)":
     "加入会员，这单可积 {points} 分（已扣除退款部分）",
-  "Which part did you pay?": "您付的是哪一份？",
+  "Which part did you pay?": "你付的是哪一份？",
   "Part {number} · {points} points": "第 {number} 份 · {points} 分",
   "Add my points": "加上我的积分",
   "Join and add my points": "加入并加上积分",
@@ -1656,16 +1657,16 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{points} points used on this bill.": "这张账单已用 {points} 分。",
   "The bill has been split. Ask a staff member to put it back on one bill to use points.":
     "账单已经分开了。要用积分，请店员改回一张账单。",
-  "You don’t have that many points any more.": "您的积分已经不够了。",
+  "You don’t have that many points any more.": "你的积分已经不够了。",
   "This bill is already settled.": "这张账单已经结清。",
   "Someone at your table is paying now. Try again if they stop.":
     "同桌有人正在付款。如果对方没有付，可以再试。",
-  "You have {points} points": "您有 {points} 分",
+  "You have {points} points": "你有 {points} 分",
   "Confirm using points": "确认使用积分",
   "Use {points} points for {amount} off the dishes? Tax is worked out on what’s left. You can’t undo this yourself.":
-    "用 {points} 分抵菜品 {amount}？税按剩下的金额计算。确认后您不能自己撤销。",
+    "用 {points} 分抵菜品 {amount}？税按剩下的金额计算。确认后你不能自己撤销。",
   "Use {points} points to get {dish} free? You can’t undo this yourself.":
-    "用 {points} 分免费换 {dish}？确认后您不能自己撤销。",
+    "用 {points} 分免费换 {dish}？确认后你不能自己撤销。",
   "Use my points": "使用积分",
   "Keep my points": "先不用",
   "Points to use": "要用的积分",
@@ -1681,24 +1682,24 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Returned after a refund": "退款后退回",
   "Gone when you left": "退出时作废",
   Expired: "已过期",
-  "Loading your points": "正在读取您的积分",
+  "Loading your points": "正在读取你的积分",
   "Scan the QR code at your table to see your points.": "请扫桌上的二维码查看积分。",
   "We couldn’t load your points. Check your connection and try again.":
     "读取不到积分。请检查网络后再试。",
-  "You’ve left. Your phone number is deleted.": "您已退出，手机号已删除。",
+  "You’ve left. Your phone number is deleted.": "你已退出，手机号已删除。",
   "Sign in or join with your mobile number.": "用手机号登录或加入。",
   "This restaurant doesn’t offer points right now. If you’re a member, sign in to see your points or leave.":
-    "这家餐厅目前没有积分活动。如果您是会员，可以登录查看积分或退出。",
+    "这家餐厅目前没有积分活动。如果你是会员，可以登录查看积分或退出。",
   "{points} points": "{points} 分",
   "Number ending in {last4}": "手机尾号 {last4}",
   "{points} points are owed from a refunded order. New points pay this off first.":
     "因退款欠 {points} 分。之后获得的积分会先抵这部分。",
   "Your points expire on {date}. Earn or use any before then to keep them.":
-    "您的积分将于 {date} 过期。在此之前积分或使用即可保留。",
+    "你的积分将于 {date} 过期。在此之前积分或使用即可保留。",
   "Your points expire on {date} if you don’t earn or use any before then.":
     "如果在 {date} 之前没有积分或使用，积分将过期。",
   "This restaurant doesn’t offer points right now. Your points stay yours.":
-    "这家餐厅目前没有积分活动。您的积分还在。",
+    "这家餐厅目前没有积分活动。你的积分还在。",
   "How points work": "积分怎么用",
   "{earn} points for every $1 of dishes you pay for. {redeem} points take $1 off dishes, from {minimum} points. Tax, tips and discounted dishes don’t earn.":
     "菜品每付 $1 得 {earn} 分。{redeem} 分抵 $1 菜品，满 {minimum} 分可用。税、小费和免单或打折的部分不积分。",
@@ -1712,7 +1713,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Leave and delete my details": "退出会员并删除资料",
   "Confirm leaving": "确认退出",
   "Your phone number is deleted right away and your {points} points are gone. If you join again you start at 0. This can’t be undone.":
-    "手机号会马上删除，您的 {points} 分会作废。再次加入从 0 分开始。这一步不能撤销。",
+    "手机号会马上删除，你的 {points} 分会作废。再次加入从 0 分开始。这一步不能撤销。",
   "Leave and delete": "退出并删除",
   "Stay a member": "继续做会员",
   "Your points": "我的积分",

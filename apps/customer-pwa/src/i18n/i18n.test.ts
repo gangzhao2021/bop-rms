@@ -24,10 +24,10 @@ function sources(dir: string): string[] {
   });
 }
 /** Every English text the customer app passes to t(), and any call whose text is not literal. */
-function translatedTexts() {
+function translatedTexts(under: string = root) {
   const keys = new Set<string>();
   const dynamic: string[] = [];
-  for (const file of sources(root)) {
+  for (const file of sources(under)) {
     if (file.includes(`${join("src", "i18n")}`)) continue;
     const source = ts.createSourceFile(
       file,
@@ -124,4 +124,16 @@ it("Owner 2026-10-23: asks the Store's item names in Chinese only while Chinese 
     renderToStaticMarkup(createElement(LanguageRoot, { initial: "en", children: () => null }));
   }
   expect(withNameLocale("/bff/customer/cart")).toBe("/bff/customer/cart");
+});
+
+it("b28 (v15 live26): the points and sign-up texts say 你, as the rest of the guest page does", () => {
+  const { keys } = translatedTexts(join(root, "member"));
+  expect(keys.size).toBeGreaterThan(40);
+  const formal = [...keys].filter((key) => (zhHans[key] ?? "").includes("您"));
+  expect(formal).toEqual([]);
+  expect(
+    zhHans[
+      "We use your phone number only to text you a sign-in code and to tell you before your points expire. You can leave and delete it any time."
+    ],
+  ).toBe("手机号只用来发登录验证码，以及在积分过期前通知你。你可以随时退出并删除。");
 });

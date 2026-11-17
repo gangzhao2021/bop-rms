@@ -1018,6 +1018,9 @@ describe("CUST-DINE-IN-SESSION item prices before tax (WP-2423 D5)", () => {
       }),
     );
     expect(html).toContain("Staff took this round off the bill. It is not charged.");
+    // b28 (v15 live26): its status says the same, never "Cancelled by the store".
+    expect(html).toContain("Status Taken off the bill");
+    expect(html).not.toContain("Cancelled by the store");
     expect(html).toContain("Round total Not charged");
     expect(html).not.toContain("$1.63");
     expect(html).not.toContain("$14.13");
@@ -1042,6 +1045,8 @@ describe("CUST-DINE-IN-SESSION item prices before tax (WP-2423 D5)", () => {
     );
     renderToStaticMarkup(<LanguageRoot initial="en">{() => null}</LanguageRoot>);
     expect(zh).toContain("本轮合计 未扣款");
+    expect(zh).toContain("状态 已从账单删除");
+    expect(zh).not.toContain("门店取消");
     expect(zh).not.toContain("$14.13");
   });
 
