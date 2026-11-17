@@ -7785,6 +7785,13 @@ body:has(.product-complete-draft) .bop-shell__header,
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
+/* b26 (live25): a round's comps and Tax under its dishes: plain secondary rows, so the dishes,
+   comps and tax read as adding up to the round's total. */
+.order-lines li.order-line-bill .order-line-name,
+.order-lines li.order-line-bill .order-line-amount {
+  font-weight: 400;
+  color: var(--bop-color-text-muted);
+}
 .order-workbench-detail .order-lines-totals {
   display: grid;
   gap: 4px;

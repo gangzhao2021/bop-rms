@@ -213,6 +213,28 @@ export function cashQuickAmounts(due: bigint): readonly bigint[] {
   return [due, ...distinct.slice(0, 4)];
 }
 
+/** b26 (live25): a comp beside its dish, before tax as the dish (tax included from an older server). */
+export function checkoutCompMinor(
+  reduction: NonNullable<TableBill["rounds"][number]["items"][number]["reduction"]>,
+): string {
+  return reduction.netMinor ?? reduction.amountMinor;
+}
+
+/**
+ * b26 (live25): a round's lines as staff read them — dishes before tax, less each comp before tax,
+ * plus its Tax line — add up to the round's total. Shown only when they do (an older server sends
+ * no comp before tax; an order-time discount or fee leaves the dishes apart from the bill's).
+ */
+export function roundTaxLine(round: TableBill["rounds"][number]): boolean {
+  if (round.items.length === 0) return false;
+  let sum = BigInt(round.taxMinor);
+  for (const item of round.items) {
+    if (item.reduction !== null && item.reduction.netMinor === null) return false;
+    sum += BigInt(item.subtotalMinor) - BigInt(item.reduction?.netMinor ?? "0");
+  }
+  return sum === BigInt(round.totalMinor);
+}
+
 export function TableCheckout({
   table,
   session,
@@ -756,7 +778,9 @@ export function TableCheckout({
                               ? t("Points used")
                               : compedText(item.reduction.kind, item.reduction.percent)}{" "}
                             <span className="table-checkout__comp-amount">
-                              −{cad(item.reduction.amountMinor)}
+                              {/* b26 (live25): before tax, like the dish's price beside it, so
+                                  the round's dishes, comps and Tax line add up to its total. */}
+                              −{cad(checkoutCompMinor(item.reduction))}
                             </span>
                           </span>
                         ) : null}
@@ -764,6 +788,14 @@ export function TableCheckout({
                       <span>{cad(item.subtotalMinor)}</span>
                     </li>
                   ))}
+                  {roundTaxLine(round) ? (
+                    // b26 (live25): the dishes are before tax; the round's tax (its share of the
+                    // bill's) is its own line, so what staff read adds up to the round's total.
+                    <li className="table-checkout__round-tax">
+                      <span>{t("Tax")}</span>
+                      <span>{cad(round.taxMinor)}</span>
+                    </li>
+                  ) : null}
                   {/* b25 (live24): a dish taken off the bill reads as on Orders, with no amount:
                       it is not charged and in none of the round's figures. */}
                   {round.takenOffDishes.map((item) => (

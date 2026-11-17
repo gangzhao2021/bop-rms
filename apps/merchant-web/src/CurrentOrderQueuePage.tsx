@@ -318,6 +318,48 @@ export function orderSoldOutNowText(
         : t("Has dishes sold out or off the menu now");
 }
 
+/**
+ * b26 (live25): a round on the table's bill as staff read it on Orders and Tables — its dishes
+ * before tax, then what comps (or points) took off them before tax, then its Tax — so the lines add
+ * up to the round's total (the bill's figure, tax and the bill's cent included). Nothing when the
+ * dishes can't be read that way (an order-time discount or fee): the round's total alone stands.
+ */
+export function roundBillLines(
+  batch: QueuedOrder["batches"][number],
+  charged: CurrentOrderDetail["lines"]["items"],
+  bill: OrderBillRound | undefined,
+  currencyCode: string,
+): React.ReactNode {
+  if (bill === undefined || charged.length === 0) return null;
+  const dishes = charged.reduce((sum, item) => sum + BigInt(item.subtotal.amountMinor), 0n);
+  const off = dishes - BigInt(bill.subtotalMinor);
+  const comped = batch.compedItems.length > 0;
+  if (comped ? off <= 0n : off !== 0n) return null;
+  if (BigInt(bill.subtotalMinor) + BigInt(bill.taxMinor) !== BigInt(bill.totalMinor)) return null;
+  const money = (amountMinor: bigint) =>
+    orderMoney({ amountMinor: amountMinor.toString(), currencyCode });
+  return (
+    <>
+      {comped ? (
+        <li className="order-line-bill">
+          <span className="order-line-quantity" />
+          <span className="order-line-name">
+            {batch.compedItems.every((comp) => comp.reasonCode === "POINTS_REDEMPTION")
+              ? t("Points used, before tax")
+              : t("Comps and discounts, before tax")}
+          </span>
+          <span className="order-line-amount">−{money(off)}</span>
+        </li>
+      ) : null}
+      <li className="order-line-bill">
+        <span className="order-line-quantity" />
+        <span className="order-line-name">{t("Tax")}</span>
+        <span className="order-line-amount">{money(BigInt(bill.taxMinor))}</span>
+      </li>
+    </>
+  );
+}
+
 export function CurrentOrderLines({
   lines,
   refundCheck,
@@ -608,7 +650,24 @@ export function CurrentOrderLines({
                       </span>
                     </header>
                     {rounds.head?.(batch)}
-                    {members.length === 0 ? null : <ul>{members.map(lineItem)}</ul>}
+                    {members.length === 0 ? null : (
+                      <ul>
+                        {members.map(lineItem)}
+                        {roundBillLines(
+                          batch,
+                          members.filter(
+                            (item) =>
+                              item.cancellation === null &&
+                              !cancelledBatches?.has(item.orderBatchReference) &&
+                              !unpaidLine(item) &&
+                              !removedLine(item) &&
+                              !waitingLine(item),
+                          ),
+                          billRounds?.get(batch.orderBatchReference),
+                          lines.totals.total.currencyCode,
+                        )}
+                      </ul>
+                    )}
                     <DiningRoundServeAll sequence={batch.sequence} />
                     {rounds.action?.(batch)}
                   </section>
