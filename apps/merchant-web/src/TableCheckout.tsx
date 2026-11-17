@@ -788,14 +788,6 @@ export function TableCheckout({
                       <span>{cad(item.subtotalMinor)}</span>
                     </li>
                   ))}
-                  {roundTaxLine(round) ? (
-                    // b26 (live25): the dishes are before tax; the round's tax (its share of the
-                    // bill's) is its own line, so what staff read adds up to the round's total.
-                    <li className="table-checkout__round-tax">
-                      <span>{t("Tax")}</span>
-                      <span>{cad(round.taxMinor)}</span>
-                    </li>
-                  ) : null}
                   {/* b25 (live24): a dish taken off the bill reads as on Orders, with no amount:
                       it is not charged and in none of the round's figures. */}
                   {round.takenOffDishes.map((item) => (
@@ -810,6 +802,14 @@ export function TableCheckout({
                       </span>
                     </li>
                   ))}
+                  {roundTaxLine(round) ? (
+                    // b26 (live25): the dishes are before tax; the round's tax (its share of the
+                    // bill's) is its own last line, so what staff read adds up to its total.
+                    <li className="table-checkout__round-tax">
+                      <span>{t("Tax")}</span>
+                      <span>{cad(round.taxMinor)}</span>
+                    </li>
+                  ) : null}
                 </ul>
               </li>
             ))}
