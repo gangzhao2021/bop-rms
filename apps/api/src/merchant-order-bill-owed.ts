@@ -89,11 +89,40 @@ export function orderBillOwedMinor(
 }
 
 /**
+ * v15 b26 (DEC-TAX-WHOLE-RECEIPT): what the dishes taken off a bill took off it in all — the bill
+ * as ordered (every dish sent, nothing comped) less the bill now and less what each comp, discount
+ * and points redemption took off as recorded (DEC-COMP-BILL-CENT: its record is what the bill went
+ * down by when it was made). Each take-off took off what the bill went down by when it was made,
+ * so this is their sum whatever came first, and Total + comps + taken off = ordered, to the cent.
+ * Worked out again with today's comps it can be a cent off: $14.40 for $3.68 + $10.73 taken off
+ * before a $7.06 comp (v15 live25).
+ */
+function billTakenOffMinor(
+  carrierOrderReference: string,
+  rounds: readonly OrderBillRoundOf[],
+  prices: readonly OrderBillPrice[],
+  reduced: ReadonlyMap<string, OrderBillReduction>,
+  off: ReadonlySet<string>,
+): bigint {
+  const kept = prices.filter((price) => !off.has(String(price.orderItemReference)));
+  return (
+    billOwedMinor(carrierOrderReference, rounds, prices, new Map()) -
+    billOwedMinor(carrierOrderReference, rounds, kept, reduced) -
+    kept.reduce(
+      (sum, price) => sum + (reduced.get(String(price.orderItemReference))?.totalMinor ?? 0n),
+      0n,
+    )
+  );
+}
+
+/**
  * v15 b19 (DEC-TAX-WHOLE-RECEIPT): on a bill of several Orders (tables merged into one), what one
  * Order's dishes taken off it took off, to the cent of the merged bill. The Orders are taken in the
  * bill's order (`removedByOrder`: each Order's dishes taken off): each Order's share is what the
  * bill went down by when its dishes came off after the earlier Orders', so the shares add up to
- * what the bill went down by in all. Null when the Order had none taken off.
+ * what the bill went down by in all. Null when the Order had none taken off. b26: the last Order
+ * with dishes taken off holds what the shares, worked out with today's comps, are short of the
+ * total taken off (billTakenOffMinor), so they still add up to it to the cent.
  */
 export function billRemovedMinor(
   carrierOrderReference: string,
@@ -103,23 +132,38 @@ export function billRemovedMinor(
   removedByOrder: readonly (readonly [string, ReadonlySet<string>])[],
   orderReference: string,
 ): bigint | null {
+  const has = (lines: ReadonlySet<string>) =>
+    prices.some((price) => lines.has(String(price.orderItemReference)));
   const at = removedByOrder.findIndex(([order]) => order === orderReference);
   const here = removedByOrder[at]?.[1];
-  if (here === undefined || !prices.some((price) => here.has(String(price.orderItemReference))))
-    return null;
-  const before = new Set(removedByOrder.slice(0, at).flatMap(([, lines]) => [...lines]));
+  if (here === undefined || !has(here)) return null;
   const kept = (off: ReadonlySet<string>) =>
     prices.filter((price) => !off.has(String(price.orderItemReference)));
+  const share = (index: number) => {
+    const before = new Set(removedByOrder.slice(0, index).flatMap(([, lines]) => [...lines]));
+    const lines = removedByOrder[index]?.[1] ?? new Set<string>();
+    return (
+      billOwedMinor(carrierOrderReference, rounds, kept(before), reduced) -
+      billOwedMinor(carrierOrderReference, rounds, kept(new Set([...before, ...lines])), reduced)
+    );
+  };
+  const last = removedByOrder.reduce((found, [, lines], index) => (has(lines) ? index : found), -1);
+  if (at !== last) return share(at);
+  const all = new Set(removedByOrder.flatMap(([, lines]) => [...lines]));
   return (
-    billOwedMinor(carrierOrderReference, rounds, kept(before), reduced) -
-    billOwedMinor(carrierOrderReference, rounds, kept(new Set([...before, ...here])), reduced)
+    billTakenOffMinor(carrierOrderReference, rounds, prices, reduced, all) -
+    removedByOrder.reduce(
+      (sum, [, lines], index) => (index === last || !has(lines) ? sum : sum + share(index)),
+      0n,
+    )
   );
 }
 
 /**
- * v15 b19 (DEC-TAX-WHOLE-RECEIPT): the bill now, and what the dishes taken off it took off: the
- * bill with them less the bill now, so it equals the bill they were on to the cent (their own
- * prices added up can be a cent off it). `removedMinor` is null when none was taken off.
+ * v15 b19 (DEC-TAX-WHOLE-RECEIPT): the bill now, and what the dishes taken off it took off, to the
+ * cent of the bill they were on (their own prices added up can be a cent off it). b26: what the
+ * bill went down by when they came off (billTakenOffMinor), never worked out again with a later
+ * comp. `removedMinor` is null when none was taken off.
  */
 export function orderBillWithRemoved(
   orderReference: string,
@@ -135,6 +179,12 @@ export function orderBillWithRemoved(
     removedMinor:
       kept.length === prices.length
         ? null
-        : orderBillOwedMinor(orderReference, rounds, prices, reduced) - owedMinor,
+        : billTakenOffMinor(
+            orderReference,
+            rounds.map((orderBatchReference) => ({ orderReference, orderBatchReference })),
+            prices,
+            reduced,
+            removed,
+          ),
   });
 }

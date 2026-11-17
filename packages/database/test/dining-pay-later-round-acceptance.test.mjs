@@ -2473,6 +2473,56 @@ async function journey(journeyEnding) {
               orderReference: mOrder,
             });
             assert.equal(Object.hasOwn(merged.items[0].tableBill, "removedMinor"), false);
+            // v15 b26 (live25): a manager then comps T-M's dish in full. The merged bill goes from
+            // $28.25 to $14.13 ($14.12 comped). What the host's take-off took off stays the $14.13
+            // the bill went down by then; worked out again with the comp it read $14.12, and the
+            // figures staff see (Total + comps + taken off) were a cent short of the $42.38 ordered.
+            // A comp is for a dish the kitchen has: T-M's round is cooked and served first.
+            await cookAndServeRound1([
+              {
+                c: mSent.confirmation,
+                event: mEvent,
+                batch: M.batch,
+                items: mItems,
+                orderReference: mOrder,
+              },
+            ]);
+            const mComp = await createMerchantDiningItemComp({
+              persistence: persistenceOf(manager),
+              authentication: manager.authentication,
+              nextReference: fresh,
+              installContext: async (tx, selected) => {
+                await tx.query(
+                  "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
+                  [selected.tenantReference, selected.brandReference, selected.storeReference],
+                );
+              },
+            })({
+              ...as(manager),
+              command: {
+                orderReference: mOrder,
+                orderItemReferences: [String(mItems[0].orderItemReference)],
+                kind: "Comp",
+                percent: null,
+                amountOffMinor: null,
+                reasonCode: "GOODWILL",
+                operationReference: fresh(),
+              },
+            });
+            assert.equal(mComp.status, "Recorded");
+            const mCompMinor = mComp.reductions.reduce(
+              (sum, entry) => sum + BigInt(entry.amountMinor),
+              0n,
+            );
+            assert.equal(mCompMinor, 1412n);
+            const hostAfterComp = (await orderDetail()).items[0].tableBill;
+            assert.equal(hostAfterComp.totalMinor, (await bill()).owed.totalMinor);
+            assert.equal(hostAfterComp.totalMinor, "1413");
+            assert.equal(hostAfterComp.removedMinor, "1413");
+            assert.equal(
+              BigInt(hostAfterComp.totalMinor) + mCompMinor + BigInt(hostAfterComp.removedMinor),
+              before,
+            );
             return;
           }
           // ── The table eats, pays once and closes: both Orders' rounds cooked and served at this
