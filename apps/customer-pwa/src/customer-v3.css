@@ -158,13 +158,26 @@
   outline-offset: 2px;
 }
 
-/* A chosen tip is a selected filter: accent outline and accent words on white. */
-.customer-page .checkout-tip__choices button[aria-pressed="true"],
-.customer-page.checkout-page .checkout-tip__choices button[aria-pressed="true"] {
-  border: 2px solid var(--bop-color-accent);
-  background: var(--bop-color-surface-canvas);
+/* b25 (brief §2 v3, as merchant Tables checkout): a tip is plain words; the chosen one is accent
+   words with an accent underline — no box, no fill. Every choice keeps the same 2px bottom line
+   (transparent until chosen), so choosing one moves nothing; each stays a 44px target. */
+.customer-page.customer-page .checkout-tip__choices button,
+.customer-page.customer-page .checkout-tip__choices button:disabled {
+  min-height: 44px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--bop-color-text-default);
+  font-weight: 400;
+}
+.customer-page.customer-page .checkout-tip__choices button[aria-pressed="true"] {
+  border-bottom-color: var(--bop-color-accent);
   color: var(--bop-color-accent);
   font-weight: 600;
+}
+.customer-page.customer-page .checkout-tip__choices button[aria-pressed="true"] span {
+  color: inherit;
 }
 .customer-page.customer-page .store-info h2 {
   font-size: 20px;

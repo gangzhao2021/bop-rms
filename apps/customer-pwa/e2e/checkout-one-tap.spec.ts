@@ -48,7 +48,8 @@ async function stubCheckout(
       },
     }),
   );
-  await page.route("**/bff/customer/cart", (route) =>
+  // The cart read, also with the guest's language asked (zh-Hans).
+  await page.route(/\/bff\/customer\/cart(\?.*)?$/u, (route) =>
     route.fulfill({
       status: 200,
       json: {
@@ -264,6 +265,87 @@ for (const screen of [
       await expect(page.getByRole("button", { name: /Continue to payment/u })).toBeEnabled();
       await expect(page.locator("#checkout-tip-heading")).toHaveCount(0);
     });
+
+    // b25 (brief §2 v3, as merchant Tables checkout): the chosen tip is accent words with an
+    // accent underline, never a filled or outlined box; every choice keeps a 44 px target and
+    // choosing one moves nothing, in English and Chinese.
+    for (const language of ["en", "zh-Hans"] as const)
+      test(`the chosen tip is accent words, not a box (${language})`, async ({ page }) => {
+        if (language === "zh-Hans")
+          await page.addInitScript(() => localStorage.setItem("bop.customer.language", "zh-Hans"));
+        const zh = language === "zh-Hans";
+        await stubCheckout(page, { quoteReference: () => id(5) });
+        await page.goto("/#qr=aaa.bbb.ccc");
+        await expect(
+          page.getByRole("heading", { name: "Synthetic One Tap Store", exact: true }),
+        ).toBeVisible();
+        await page.evaluate(() => {
+          history.pushState(null, "", "/checkout");
+          window.dispatchEvent(new PopStateEvent("popstate"));
+        });
+        const tips = page.locator(".checkout-tip__choices");
+        await expect(tips.getByRole("button")).toHaveCount(5);
+        const look = () =>
+          tips.getByRole("button").evaluateAll((buttons) =>
+            buttons.map((button) => {
+              const style = getComputedStyle(button);
+              const box = button.getBoundingClientRect();
+              const group = button.parentElement?.getBoundingClientRect() ?? box;
+              return {
+                pressed: button.getAttribute("aria-pressed"),
+                background: style.backgroundColor,
+                color: style.color,
+                weight: style.fontWeight,
+                sides: [style.borderTopWidth, style.borderLeftWidth, style.borderRightWidth],
+                line: `${style.borderBottomWidth} ${style.borderBottomStyle} ${style.borderBottomColor}`,
+                radius: style.borderTopLeftRadius,
+                place: [box.x - group.x, box.y - group.y, box.width, box.height].map((value) =>
+                  Math.round(value * 4),
+                ),
+                height: box.height,
+              };
+            }),
+          );
+        const accent = "rgb(31, 99, 224)";
+        const shots = process.env.B25_SHOTS ?? "test-results-b25/shots";
+        for (const width of [390, 1024, screen.width]) {
+          await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+          await page.getByRole("button", { name: zh ? "不加小费" : "No tip", exact: true }).click();
+          const fifteen = page.getByRole("button", { name: /^15%/u });
+          // Measured once the amounts are in (they arrive with the price).
+          await expect(fifteen).toContainText("$");
+          const before = await look();
+          await fifteen.click();
+          await expect(fifteen).toHaveAttribute("aria-pressed", "true");
+          await expect(fifteen).toContainText("$");
+          const after = await look();
+          // Choosing another tip moves nothing.
+          expect(after.map((choice) => choice.place)).toEqual(before.map((choice) => choice.place));
+          for (const choice of after) {
+            expect(choice.height).toBeGreaterThanOrEqual(44);
+            expect(choice.background).toBe("rgba(0, 0, 0, 0)");
+            expect(choice.sides).toEqual(["0px", "0px", "0px"]);
+            expect(choice.radius).toBe("0px");
+            if (choice.pressed === "true") {
+              expect(choice.color).toBe(accent);
+              expect(choice.weight).toBe("600");
+              expect(choice.line).toBe(`2px solid ${accent}`);
+            } else {
+              expect(choice.color).not.toBe(accent);
+              expect(choice.weight).toBe("400");
+              expect(choice.line).toBe("2px solid rgba(0, 0, 0, 0)");
+            }
+          }
+          expect(after.filter((choice) => choice.pressed === "true")).toHaveLength(1);
+          expect(
+            await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+          ).toBe(true);
+          await page.locator(".checkout-tip").scrollIntoViewIfNeeded();
+          await page.screenshot({
+            path: `${shots}/customer-checkout-tip-${language}-${String(width)}.png`,
+          });
+        }
+      });
 
     test("typed details survive a reconnect and its new quote", async ({ page, context }) => {
       const failures: string[] = [];
