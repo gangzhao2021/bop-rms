@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { withVerifiedChecks } from "../../packages/database/dist/request-check-memo.js";
+import { runConsecutive } from "../../packages/database/dist/transaction-runner.js";
 import {
   GuestSessionService,
   createPostgresGuestSessionEntryStore,
@@ -642,6 +643,8 @@ async function createInternalStaffDiningRound(
         // DEC-DINE-IN-PAY-LATER: rounds of a table opened pay later go to the kitchen unpaid, through
         // the dining workflow's Accept for the System (only this pilot Store).
         payLater,
+        // WP-2423 M35 (DEC-STAFF-ROUND-FEWER-TRANSACTIONS): the round's steps in fewer transactions.
+        consecutive: runConsecutive,
       }),
     ),
     /** The online payment admission of the round's kind, under this staff member's authority. */

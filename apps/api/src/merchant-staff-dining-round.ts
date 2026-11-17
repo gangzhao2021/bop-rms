@@ -596,8 +596,17 @@ export function createMerchantStaffDiningRound(options: {
    */
   tableTurnWaitMs?: number;
   sleep?(ms: number): Promise<void>;
+  /**
+   * WP-2423 M35 (DEC-STAFF-ROUND-FEWER-TRANSACTIONS): runs the round's steps after it took the
+   * table's turn (opening the table, its guest, the dishes, the quote, checkout and submission)
+   * as consecutive steps of fewer transactions, each step still making every check it makes on its
+   * own (the pilot composes `runConsecutive`); by default each runs on its own.
+   */
+  consecutive?<T>(work: () => Promise<T>): Promise<T>;
 }) {
   const resolveScope = createMerchantStoreScope(options.persistence);
+  const consecutive = <T>(work: () => Promise<T>): Promise<T> =>
+    options.consecutive === undefined ? work() : options.consecutive(work);
   const now = () => options.persistence.now();
   /** The guests' unsent items as the Cart stands now, for staff to decide again. */
   const tableCartRefusal = async (
@@ -1226,593 +1235,599 @@ export function createMerchantStaffDiningRound(options: {
           waited += pause;
         }
         if (prior !== null) return await earlier(prior);
-        if (
-          !(await options.pipeline.takesOrder({ recordedAfterOutage: command.recordedAfterOutage }))
-        )
-          return fail("STAFF_ROUND_STORE_NOT_TAKING_ORDERS");
-        // DEC-STAFF-DINE-IN-ROUND (2026-10-15): a table without a code is refused with nothing changed.
-        if (!(await options.pipeline.tableHasQr({ tableReference: command.tableReference })))
-          return fail("STAFF_ROUND_TABLE_QR_MISSING");
-        // WP-2423 M35: guests' unsent lines staff haven't decided on (or a cart that moved on since
-        // they did) are refused here, read only, before the table is opened, a table guest joins or
-        // the round is recorded: the refusal is quick and leaves nothing behind.
-        const stale = await inScope((tx, scope) => tableCartMoved(tx, scope));
-        if (stale !== null) throw await tableCartRefusal(stale.items, stale.cartVersion);
-        const table = await options.pipeline.openTable(
-          { sessionCookie: input.sessionCookie, csrf: input.csrf },
-          {
-            tableReference: command.tableReference,
-            ...(command.expectedDiningSessionReference === null
-              ? {}
-              : { expectedDiningSessionReference: command.expectedDiningSessionReference }),
-          },
-        );
-        if (table.status === "PartyChanged") return fail("STAFF_ROUND_TABLE_PARTY_CHANGED");
-        if (table.status === "NewGuestsPaused") return fail("STAFF_ROUND_NEW_GUESTS_PAUSED");
-        if (table.status !== "Opened") return fail("STAFF_ROUND_TABLE_UNAVAILABLE");
-        if (table.started)
-          startedTable = {
-            diningSessionReference: table.diningSessionReference,
-            generation: table.generation,
-          };
-        // v15 2026-11-03: entered after opening, since a table no party is seated at takes no entry.
-        // A refusal here closes the table this request started: never an empty session on the floor.
-        const entered = await options.pipeline.enter({
-          tableReference: command.tableReference,
-          requestedAt: now(),
-        });
-        if (entered.status === "NoTableQr") return fail("STAFF_ROUND_TABLE_QR_MISSING");
-        if (entered.status !== "Established") return fail("STAFF_ROUND_STORE_NOT_TAKING_ORDERS");
-        const joined = await options.pipeline.join(entered.credentials, {
-          joinCredential: table.joinCredential,
-          operationReference: options.nextReference(),
-        });
-        const bound = await options.pipeline.bind(entered.credentials, {
-          operationReference: options.nextReference(),
-          admissionReference: joined.admissionReference,
-        });
-        const credentials = bound.credentials;
-        const tipSelectionReference = String(parseOrderingReference(options.nextReference()));
-        const entry = await inScope(async (tx, scope, allowed) =>
-          entries(scope, allowed).record(
-            tx,
-            {
-              brandReference: parseOrderingReference(scope.selected.brandReference),
-              storeReference: parseOrderingReference(scope.selected.storeReference),
-              operationReference: parseOrderingReference(command.operationReference),
-              intentHash,
-              actorReference: parseOrderingReference(scope.actorReference),
-              tableReference: parseOrderingReference(command.tableReference),
-              diningSessionReference: parseOrderingReference(table.diningSessionReference),
-              guestSessionReference: parseOrderingReference(bound.guestSessionReference),
-              tipSelectionReference: parseOrderingReference(tipSelectionReference),
+        return await consecutive(async () => {
+          if (
+            !(await options.pipeline.takesOrder({
               recordedAfterOutage: command.recordedAfterOutage,
-              createdAt: parseOrderingInstant(now()),
-              auditReference: parseOrderingReference(options.nextReference()),
+            }))
+          )
+            return fail("STAFF_ROUND_STORE_NOT_TAKING_ORDERS");
+          // DEC-STAFF-DINE-IN-ROUND (2026-10-15): a table without a code is refused with nothing changed.
+          if (!(await options.pipeline.tableHasQr({ tableReference: command.tableReference })))
+            return fail("STAFF_ROUND_TABLE_QR_MISSING");
+          // WP-2423 M35: guests' unsent lines staff haven't decided on (or a cart that moved on since
+          // they did) are refused here, read only, before the table is opened, a table guest joins or
+          // the round is recorded: the refusal is quick and leaves nothing behind.
+          const stale = await inScope((tx, scope) => tableCartMoved(tx, scope));
+          if (stale !== null) throw await tableCartRefusal(stale.items, stale.cartVersion);
+          const table = await options.pipeline.openTable(
+            { sessionCookie: input.sessionCookie, csrf: input.csrf },
+            {
+              tableReference: command.tableReference,
+              ...(command.expectedDiningSessionReference === null
+                ? {}
+                : { expectedDiningSessionReference: command.expectedDiningSessionReference }),
             },
-            joined.admissionReference,
-          ),
-        );
-        // A concurrent retry recorded the same command first: it owns its own table guest (and
-        // the table session, which this attempt then never closes).
-        if (entry.status === "AlreadyRecorded") {
-          startedTable = null;
-          return await earlier(entry.record);
-        }
-        const cart = await options.pipeline.selectCart(credentials, {
-          operationReference: options.nextReference(),
-          requestedAt: now(),
-        });
-        if (cart.status !== "Selected") return fail("STAFF_ROUND_TABLE_CHECKOUT_IN_PROGRESS");
-        const report = (error: unknown) => {
-          try {
-            options.onUnexpected?.(error);
-          } catch {
-            // Reporting never changes the answer.
+          );
+          if (table.status === "PartyChanged") return fail("STAFF_ROUND_TABLE_PARTY_CHANGED");
+          if (table.status === "NewGuestsPaused") return fail("STAFF_ROUND_NEW_GUESTS_PAUSED");
+          if (table.status !== "Opened") return fail("STAFF_ROUND_TABLE_UNAVAILABLE");
+          if (table.started)
+            startedTable = {
+              diningSessionReference: table.diningSessionReference,
+              generation: table.generation,
+            };
+          // v15 2026-11-03: entered after opening, since a table no party is seated at takes no entry.
+          // A refusal here closes the table this request started: never an empty session on the floor.
+          const entered = await options.pipeline.enter({
+            tableReference: command.tableReference,
+            requestedAt: now(),
+          });
+          if (entered.status === "NoTableQr") return fail("STAFF_ROUND_TABLE_QR_MISSING");
+          if (entered.status !== "Established") return fail("STAFF_ROUND_STORE_NOT_TAKING_ORDERS");
+          const joined = await options.pipeline.join(entered.credentials, {
+            joinCredential: table.joinCredential,
+            operationReference: options.nextReference(),
+          });
+          const bound = await options.pipeline.bind(entered.credentials, {
+            operationReference: options.nextReference(),
+            admissionReference: joined.admissionReference,
+          });
+          const credentials = bound.credentials;
+          const tipSelectionReference = String(parseOrderingReference(options.nextReference()));
+          const entry = await inScope(async (tx, scope, allowed) =>
+            entries(scope, allowed).record(
+              tx,
+              {
+                brandReference: parseOrderingReference(scope.selected.brandReference),
+                storeReference: parseOrderingReference(scope.selected.storeReference),
+                operationReference: parseOrderingReference(command.operationReference),
+                intentHash,
+                actorReference: parseOrderingReference(scope.actorReference),
+                tableReference: parseOrderingReference(command.tableReference),
+                diningSessionReference: parseOrderingReference(table.diningSessionReference),
+                guestSessionReference: parseOrderingReference(bound.guestSessionReference),
+                tipSelectionReference: parseOrderingReference(tipSelectionReference),
+                recordedAfterOutage: command.recordedAfterOutage,
+                createdAt: parseOrderingInstant(now()),
+                auditReference: parseOrderingReference(options.nextReference()),
+              },
+              joined.admissionReference,
+            ),
+          );
+          // A concurrent retry recorded the same command first: it owns its own table guest (and
+          // the table session, which this attempt then never closes).
+          if (entry.status === "AlreadyRecorded") {
+            startedTable = null;
+            return await earlier(entry.record);
           }
-        };
-        const selectAgain = () =>
-          options.pipeline.selectCart(credentials, {
+          const cart = await options.pipeline.selectCart(credentials, {
             operationReference: options.nextReference(),
             requestedAt: now(),
           });
-        // Items guests put in the table's shared Cart and haven't sent yet would be sent and charged
-        // with this round. Staff either ask the guests to send or remove them (while guests can
-        // still send), or add them to this round, as they saw them: only that same Cart version is
-        // taken in (one checkout of the Cart, recorded as this staff round, so a guest's phone
-        // retrying its send finds the Cart already sent and adds nothing).
-        let cartVersion = cart.cartVersion;
-        let pending = cart.pendingItems;
-        const include = command.includeTableCart;
-        if (pending.length > 0) {
-          if (include === null || include.expectedCartVersion !== cart.cartVersion)
-            throw await tableCartRefusal(pending, cart.cartVersion);
-          // WP-2423 M35: the lines staff take out, and why. Per line, as staff decided each one; in
-          // the earlier form, the lines they were shown as not sellable now (the kitchen can't
-          // make them).
-          const removals =
-            include.decisions === null
-              ? include.removeUnavailable.map((cartItemReference) => ({
-                  cartItemReference,
-                  reason: "CantMake" as StaffCartRemovalReason,
-                }))
-              : include.decisions
-                  .filter((line) => line.decision === "Remove")
-                  .map((line) => ({
-                    cartItemReference: line.cartItemReference,
-                    reason: line.reason ?? ("GuestAsked" as StaffCartRemovalReason),
-                  }));
-          const out = new Set(removals.map((line) => line.cartItemReference));
-          const decided =
-            include.decisions === null
-              ? null
-              : new Set(include.decisions.map((line) => line.cartItemReference));
-          // WP-2423 (staff-round-soldout): a guest line that can't be sold now is never sent, so
-          // staff decide on each one they were shown; one they didn't see (or one gone) is refused.
-          if (
-            pending.some(
-              (item) => item.standing !== "Available" && !out.has(item.cartItemReference),
-            ) ||
-            [...out].some(
-              (reference) => !pending.some((item) => item.cartItemReference === reference),
-            ) ||
-            (decided !== null &&
-              (decided.size !== pending.length ||
-                pending.some((item) => !decided.has(item.cartItemReference))))
-          )
-            throw await tableCartRefusal(pending, cart.cartVersion);
-          if (out.size > 0) {
-            // WP-2423 M06/M35: taken out before any line of this round goes in, all at once as the
-            // staff member's own removals (who, why, the dish, whose phone added it; each audited),
-            // or none at all when the cart moved on. Never put back if the round then fails: that
-            // was the staff member's decision, and every phone at the table is told.
-            const keep = pending
-              .map((item) => item.cartItemReference)
-              .filter((reference) => !out.has(reference));
+          if (cart.status !== "Selected") return fail("STAFF_ROUND_TABLE_CHECKOUT_IN_PROGRESS");
+          const report = (error: unknown) => {
             try {
-              await inScope((tx, scope, allowed) =>
-                removeGuestLines(tx, scope, allowed, {
-                  diningSessionReference: table.diningSessionReference,
-                  cartReference: cart.cartReference,
-                  expectedCartVersion: cart.cartVersion,
-                  keep,
-                  removals,
-                }),
-              );
-            } catch (error) {
-              if (error instanceof StaffDiningRoundError) throw error;
-              const code = error instanceof CartError ? error.code : null;
-              if (code === "CART_CHECKOUT_IN_PROGRESS")
-                return fail("STAFF_ROUND_TABLE_CHECKOUT_IN_PROGRESS");
-              if (
-                code === "CART_VERSION_CONFLICT" ||
-                code === "CART_ITEM_NOT_FOUND" ||
-                code === "CART_PERMISSION_DENIED" ||
-                code === "CART_UNAVAILABLE"
-              ) {
-                const fresh = await selectAgain();
-                if (fresh.status !== "Selected")
-                  return fail("STAFF_ROUND_TABLE_CHECKOUT_IN_PROGRESS");
-                throw await tableCartRefusal(fresh.pendingItems, fresh.cartVersion);
-              }
-              throw error;
+              options.onUnexpected?.(error);
+            } catch {
+              // Reporting never changes the answer.
             }
-            const after = await selectAgain();
-            if (after.status !== "Selected") return fail("STAFF_ROUND_TABLE_CHECKOUT_IN_PROGRESS");
-            const kept = pending.filter((item) => !out.has(item.cartItemReference));
-            // Only the rest exactly as staff saw it, every item still sellable, is taken in.
-            const asSeen =
-              after.cartReference === cart.cartReference &&
-              after.pendingItems.length === kept.length &&
-              after.pendingItems.every(
-                (item) =>
-                  item.standing === "Available" &&
-                  kept.some(
-                    (seen) =>
-                      seen.cartItemReference === item.cartItemReference &&
-                      seen.quantity === item.quantity,
-                  ),
-              );
-            if (!asSeen) throw await tableCartRefusal(after.pendingItems, after.cartVersion);
-            cartVersion = after.cartVersion;
-            pending = after.pendingItems;
-          }
-        }
-        // A round of only the guests' lines whose lines are gone (sent from a phone meanwhile):
-        // nothing to send; staff see the cart as it is now.
-        if (command.lines.length === 0 && pending.length === 0)
-          throw await tableCartRefusal(pending, cartVersion);
-        /** The guests' lines this round takes in (never removed when the round fails). */
-        const guestLines = new Set(pending.map((item) => item.cartItemReference));
-        /** The guests' lines as the round took them in, to tell a line it may have added. */
-        const guestQuantities = new Map(
-          pending.map((item) => [item.cartItemReference, item.quantity] as const),
-        );
-        /**
-         * v15 b12 review: an addItem that failed without an answer may still have put its dish in
-         * the cart (the answer was lost after it committed), so that line is not known.
-         */
-        let addUnanswered = false;
-        // The Cart line each round line went to, to name a line the checkout finds short.
-        const cartLines: (string | undefined)[] = [];
-        // The Cart as it stands before this round's lines (the guests' lines it takes in), so each
-        // added line is told apart from theirs.
-        let lines: readonly CounterCartLine[] = pending.map((item) => ({
-          cartItemReference: item.cartItemReference,
-          quantity: item.quantity,
-        }));
-        const ownLines = () =>
-          [...new Set(cartLines)].filter(
-            (reference): reference is string => reference !== undefined,
-          );
-        // The round's own lines, never a guest's.
-        const removeKnownItems = async (): Promise<"Removed" | "Kept" | "Gone"> => {
-          const references = ownLines();
-          const removeItems = options.pipeline.removeItems;
-          // A round of only the guests' lines put nothing of its own in the cart, and nor did a
-          // round none of whose lines went in.
-          if (command.lines.length === 0 || cartLines.length === 0) return "Removed";
-          // The lines this round itself took out (one call may take some out before it stops).
-          const ours = new Set<string>();
-          const onRemoved = (reference: string) => ours.add(reference);
-          try {
-            // Only when every line sent so far is known to its Cart line.
-            if (
-              removeItems !== undefined &&
-              references.length > 0 &&
-              cartLines.every((reference) => reference !== undefined)
-            ) {
-              const removed = await removeItems(credentials, {
-                cartReference: cart.cartReference,
-                cartVersion,
-                cartItemReferences: references,
-                onRemoved,
-              });
-              if (removed === "Removed") return removed;
-              // A guest changed the Cart after this round's lines went in: read it again and take
-              // what is left of them out once more at its current version, so no staff line stays
-              // in the guests' Cart (a later attempt is a new table guest, who could not remove it).
-              const current = await selectAgain();
-              if (current.status !== "Selected" || current.cartVersion === cartVersion)
-                return "Kept";
-              const left = references.filter((reference) =>
-                current.pendingItems.some((item) => item.cartItemReference === reference),
-              );
-              // v15 b12: a line of this round that left the cart without this round taking it out
-              // went with someone else's send (or someone took it out): never "nothing was sent".
-              const gone = references.some(
-                (reference) => !left.includes(reference) && !ours.has(reference),
-              );
-              if (left.length > 0) {
-                const again = await removeItems(credentials, {
-                  cartReference: cart.cartReference,
-                  cartVersion: current.cartVersion,
-                  cartItemReferences: left,
-                  onRemoved,
-                });
-                if (again !== "Removed") return "Kept";
-              }
-              return gone ? "Gone" : "Removed";
-            }
-          } catch (error) {
-            report(error);
-          }
-          return "Kept";
-        };
-        removeRoundItems = async () => {
-          const removed = await removeKnownItems();
-          if (removed !== "Removed" || !addUnanswered) return removed;
-          // v15 b12 review: a dish whose adding was not answered may be in the cart. Only a cart
-          // holding nothing but the guests' lines as the round took them in says it is not; any
-          // other line (it can't be told from a guest's new one, so it is never taken out) means
-          // staff are told the round's dishes may still be at the table.
-          try {
-            const fresh = await selectAgain();
-            if (fresh.status !== "Selected") return "Kept";
-            return fresh.pendingItems.every(
-              (item) => item.quantity <= (guestQuantities.get(item.cartItemReference) ?? 0),
-            )
-              ? "Removed"
-              : "Kept";
-          } catch (error) {
-            report(error);
-            return "Kept";
-          }
-        };
-        /**
-         * WP-2423 (staff-round-soldout): the quote or checkout found one of the guests' lines can't
-         * be sold (it sold out a moment ago, or the Cart's marks could not be read). Once this
-         * round's own lines are out, staff see the guests' Cart again with that line marked and
-         * decide as before; nothing was ordered or charged.
-         */
-        const guestLineRefusal = async (
-          removed: "Removed" | "Kept" | "Gone",
-          reference: string,
-          mark: Pick<StaffRoundPendingItem, "standing" | "available">,
-          otherwise: () => StaffDiningRoundError,
-        ): Promise<StaffDiningRoundError> => {
-          if (removed !== "Removed") return unlessLeftAtTable(removed, otherwise);
-          const fresh = await selectAgain();
-          if (fresh.status !== "Selected")
-            return new StaffDiningRoundError("STAFF_ROUND_TABLE_CHECKOUT_IN_PROGRESS");
-          const own = new Set(ownLines());
-          return tableCartRefusal(
-            fresh.pendingItems
-              .filter((item) => !own.has(item.cartItemReference))
-              .map((item) =>
-                item.cartItemReference === reference
-                  ? Object.freeze({
-                      cartItemReference: item.cartItemReference,
-                      name: item.name,
-                      quantity: item.quantity,
-                      standing: mark.standing,
-                      ...(mark.available === undefined ? {} : { available: mark.available }),
-                    })
-                  : item,
-              ),
-            fresh.cartVersion,
-          );
-        };
-        for (const [index, line] of command.lines.entries()) {
-          let added: Awaited<ReturnType<CounterGuestPipeline["addItem"]>>;
-          try {
-            added = await options.pipeline.addItem(credentials, {
+          };
+          const selectAgain = () =>
+            options.pipeline.selectCart(credentials, {
               operationReference: options.nextReference(),
-              cartReference: cart.cartReference,
-              expectedCartVersion: cartVersion,
-              sellableReference: line.sellableReference,
-              quantity: line.quantity,
-              optionSelections: line.optionSelections,
-              customerNote: line.note,
               requestedAt: now(),
             });
-          } catch (error) {
-            addUnanswered = true;
-            throw error;
+          // Items guests put in the table's shared Cart and haven't sent yet would be sent and charged
+          // with this round. Staff either ask the guests to send or remove them (while guests can
+          // still send), or add them to this round, as they saw them: only that same Cart version is
+          // taken in (one checkout of the Cart, recorded as this staff round, so a guest's phone
+          // retrying its send finds the Cart already sent and adds nothing).
+          let cartVersion = cart.cartVersion;
+          let pending = cart.pendingItems;
+          const include = command.includeTableCart;
+          if (pending.length > 0) {
+            if (include === null || include.expectedCartVersion !== cart.cartVersion)
+              throw await tableCartRefusal(pending, cart.cartVersion);
+            // WP-2423 M35: the lines staff take out, and why. Per line, as staff decided each one; in
+            // the earlier form, the lines they were shown as not sellable now (the kitchen can't
+            // make them).
+            const removals =
+              include.decisions === null
+                ? include.removeUnavailable.map((cartItemReference) => ({
+                    cartItemReference,
+                    reason: "CantMake" as StaffCartRemovalReason,
+                  }))
+                : include.decisions
+                    .filter((line) => line.decision === "Remove")
+                    .map((line) => ({
+                      cartItemReference: line.cartItemReference,
+                      reason: line.reason ?? ("GuestAsked" as StaffCartRemovalReason),
+                    }));
+            const out = new Set(removals.map((line) => line.cartItemReference));
+            const decided =
+              include.decisions === null
+                ? null
+                : new Set(include.decisions.map((line) => line.cartItemReference));
+            // WP-2423 (staff-round-soldout): a guest line that can't be sold now is never sent, so
+            // staff decide on each one they were shown; one they didn't see (or one gone) is refused.
+            if (
+              pending.some(
+                (item) => item.standing !== "Available" && !out.has(item.cartItemReference),
+              ) ||
+              [...out].some(
+                (reference) => !pending.some((item) => item.cartItemReference === reference),
+              ) ||
+              (decided !== null &&
+                (decided.size !== pending.length ||
+                  pending.some((item) => !decided.has(item.cartItemReference))))
+            )
+              throw await tableCartRefusal(pending, cart.cartVersion);
+            if (out.size > 0) {
+              // WP-2423 M06/M35: taken out before any line of this round goes in, all at once as the
+              // staff member's own removals (who, why, the dish, whose phone added it; each audited),
+              // or none at all when the cart moved on. Never put back if the round then fails: that
+              // was the staff member's decision, and every phone at the table is told.
+              const keep = pending
+                .map((item) => item.cartItemReference)
+                .filter((reference) => !out.has(reference));
+              try {
+                await inScope((tx, scope, allowed) =>
+                  removeGuestLines(tx, scope, allowed, {
+                    diningSessionReference: table.diningSessionReference,
+                    cartReference: cart.cartReference,
+                    expectedCartVersion: cart.cartVersion,
+                    keep,
+                    removals,
+                  }),
+                );
+              } catch (error) {
+                if (error instanceof StaffDiningRoundError) throw error;
+                const code = error instanceof CartError ? error.code : null;
+                if (code === "CART_CHECKOUT_IN_PROGRESS")
+                  return fail("STAFF_ROUND_TABLE_CHECKOUT_IN_PROGRESS");
+                if (
+                  code === "CART_VERSION_CONFLICT" ||
+                  code === "CART_ITEM_NOT_FOUND" ||
+                  code === "CART_PERMISSION_DENIED" ||
+                  code === "CART_UNAVAILABLE"
+                ) {
+                  const fresh = await selectAgain();
+                  if (fresh.status !== "Selected")
+                    return fail("STAFF_ROUND_TABLE_CHECKOUT_IN_PROGRESS");
+                  throw await tableCartRefusal(fresh.pendingItems, fresh.cartVersion);
+                }
+                throw error;
+              }
+              const after = await selectAgain();
+              if (after.status !== "Selected")
+                return fail("STAFF_ROUND_TABLE_CHECKOUT_IN_PROGRESS");
+              const kept = pending.filter((item) => !out.has(item.cartItemReference));
+              // Only the rest exactly as staff saw it, every item still sellable, is taken in.
+              const asSeen =
+                after.cartReference === cart.cartReference &&
+                after.pendingItems.length === kept.length &&
+                after.pendingItems.every(
+                  (item) =>
+                    item.standing === "Available" &&
+                    kept.some(
+                      (seen) =>
+                        seen.cartItemReference === item.cartItemReference &&
+                        seen.quantity === item.quantity,
+                    ),
+                );
+              if (!asSeen) throw await tableCartRefusal(after.pendingItems, after.cartVersion);
+              cartVersion = after.cartVersion;
+              pending = after.pendingItems;
+            }
           }
-          if (added.status === "CheckoutInProgress")
-            return fail("STAFF_ROUND_TABLE_CHECKOUT_IN_PROGRESS");
-          if (added.status === "CartChanged") {
-            // v15 b12: someone at the table changed the cart since staff saw it. This round's own
-            // lines come out first (not again in the catch below); staff then see the guests'
-            // cart as it is now and decide again. Nothing was sent or charged.
-            const remove = removeRoundItems;
-            removeRoundItems = null;
-            const removed = remove === null ? "Removed" : await remove();
-            if (removed !== "Removed") return fail("STAFF_ROUND_NOT_WITHDRAWN");
+          // A round of only the guests' lines whose lines are gone (sent from a phone meanwhile):
+          // nothing to send; staff see the cart as it is now.
+          if (command.lines.length === 0 && pending.length === 0)
+            throw await tableCartRefusal(pending, cartVersion);
+          /** The guests' lines this round takes in (never removed when the round fails). */
+          const guestLines = new Set(pending.map((item) => item.cartItemReference));
+          /** The guests' lines as the round took them in, to tell a line it may have added. */
+          const guestQuantities = new Map(
+            pending.map((item) => [item.cartItemReference, item.quantity] as const),
+          );
+          /**
+           * v15 b12 review: an addItem that failed without an answer may still have put its dish in
+           * the cart (the answer was lost after it committed), so that line is not known.
+           */
+          let addUnanswered = false;
+          // The Cart line each round line went to, to name a line the checkout finds short.
+          const cartLines: (string | undefined)[] = [];
+          // The Cart as it stands before this round's lines (the guests' lines it takes in), so each
+          // added line is told apart from theirs.
+          let lines: readonly CounterCartLine[] = pending.map((item) => ({
+            cartItemReference: item.cartItemReference,
+            quantity: item.quantity,
+          }));
+          const ownLines = () =>
+            [...new Set(cartLines)].filter(
+              (reference): reference is string => reference !== undefined,
+            );
+          // The round's own lines, never a guest's.
+          const removeKnownItems = async (): Promise<"Removed" | "Kept" | "Gone"> => {
+            const references = ownLines();
+            const removeItems = options.pipeline.removeItems;
+            // A round of only the guests' lines put nothing of its own in the cart, and nor did a
+            // round none of whose lines went in.
+            if (command.lines.length === 0 || cartLines.length === 0) return "Removed";
+            // The lines this round itself took out (one call may take some out before it stops).
+            const ours = new Set<string>();
+            const onRemoved = (reference: string) => ours.add(reference);
+            try {
+              // Only when every line sent so far is known to its Cart line.
+              if (
+                removeItems !== undefined &&
+                references.length > 0 &&
+                cartLines.every((reference) => reference !== undefined)
+              ) {
+                const removed = await removeItems(credentials, {
+                  cartReference: cart.cartReference,
+                  cartVersion,
+                  cartItemReferences: references,
+                  onRemoved,
+                });
+                if (removed === "Removed") return removed;
+                // A guest changed the Cart after this round's lines went in: read it again and take
+                // what is left of them out once more at its current version, so no staff line stays
+                // in the guests' Cart (a later attempt is a new table guest, who could not remove it).
+                const current = await selectAgain();
+                if (current.status !== "Selected" || current.cartVersion === cartVersion)
+                  return "Kept";
+                const left = references.filter((reference) =>
+                  current.pendingItems.some((item) => item.cartItemReference === reference),
+                );
+                // v15 b12: a line of this round that left the cart without this round taking it out
+                // went with someone else's send (or someone took it out): never "nothing was sent".
+                const gone = references.some(
+                  (reference) => !left.includes(reference) && !ours.has(reference),
+                );
+                if (left.length > 0) {
+                  const again = await removeItems(credentials, {
+                    cartReference: cart.cartReference,
+                    cartVersion: current.cartVersion,
+                    cartItemReferences: left,
+                    onRemoved,
+                  });
+                  if (again !== "Removed") return "Kept";
+                }
+                return gone ? "Gone" : "Removed";
+              }
+            } catch (error) {
+              report(error);
+            }
+            return "Kept";
+          };
+          removeRoundItems = async () => {
+            const removed = await removeKnownItems();
+            if (removed !== "Removed" || !addUnanswered) return removed;
+            // v15 b12 review: a dish whose adding was not answered may be in the cart. Only a cart
+            // holding nothing but the guests' lines as the round took them in says it is not; any
+            // other line (it can't be told from a guest's new one, so it is never taken out) means
+            // staff are told the round's dishes may still be at the table.
+            try {
+              const fresh = await selectAgain();
+              if (fresh.status !== "Selected") return "Kept";
+              return fresh.pendingItems.every(
+                (item) => item.quantity <= (guestQuantities.get(item.cartItemReference) ?? 0),
+              )
+                ? "Removed"
+                : "Kept";
+            } catch (error) {
+              report(error);
+              return "Kept";
+            }
+          };
+          /**
+           * WP-2423 (staff-round-soldout): the quote or checkout found one of the guests' lines can't
+           * be sold (it sold out a moment ago, or the Cart's marks could not be read). Once this
+           * round's own lines are out, staff see the guests' Cart again with that line marked and
+           * decide as before; nothing was ordered or charged.
+           */
+          const guestLineRefusal = async (
+            removed: "Removed" | "Kept" | "Gone",
+            reference: string,
+            mark: Pick<StaffRoundPendingItem, "standing" | "available">,
+            otherwise: () => StaffDiningRoundError,
+          ): Promise<StaffDiningRoundError> => {
+            if (removed !== "Removed") return unlessLeftAtTable(removed, otherwise);
             const fresh = await selectAgain();
-            if (fresh.status !== "Selected") return fail("STAFF_ROUND_TABLE_CHECKOUT_IN_PROGRESS");
+            if (fresh.status !== "Selected")
+              return new StaffDiningRoundError("STAFF_ROUND_TABLE_CHECKOUT_IN_PROGRESS");
             const own = new Set(ownLines());
-            throw await tableCartRefusal(
-              fresh.pendingItems.filter((item) => !own.has(item.cartItemReference)),
+            return tableCartRefusal(
+              fresh.pendingItems
+                .filter((item) => !own.has(item.cartItemReference))
+                .map((item) =>
+                  item.cartItemReference === reference
+                    ? Object.freeze({
+                        cartItemReference: item.cartItemReference,
+                        name: item.name,
+                        quantity: item.quantity,
+                        standing: mark.standing,
+                        ...(mark.available === undefined ? {} : { available: mark.available }),
+                      })
+                    : item,
+                ),
               fresh.cartVersion,
             );
-          }
-          if (added.status !== "Applied") return fail("STAFF_ROUND_ITEM_UNAVAILABLE", index);
-          cartVersion = added.cartVersion;
-          cartLines.push(addedCartLine(lines, added.lines));
-          lines = added.lines ?? lines;
-        }
-        /**
-         * WP-2423: the round can't be made as entered (found before anything was ordered or
-         * charged). Its items come back out of the table's Cart (guests' items were never in it) and
-         * a table session this request started is closed again, so staff change the round and send
-         * it again.
-         */
-        const withdraw = async (): Promise<"Removed" | "Kept" | "Gone"> => {
-          const removed =
-            cartLines.length === command.lines.length && removeRoundItems !== null
-              ? await removeRoundItems()
-              : "Kept";
-          if (removed === "Removed") startedTable = tableStarted;
-          await abandonStartedTable();
-          return removed;
-        };
-        /**
-         * WP-2423 DEC-MERCHANT-LOCK-SCOPE: a step from the checkout on failed, so the round may exist.
-         * The owner's records say whether it does. If it does, it stands. If not, its items come back
-         * out of the table's Cart, so sending again is not refused for them and they are never sent
-         * twice; taking them out waits for any submission still holding that Cart, so the records
-         * are read once more before staff are told nothing was sent.
-         */
-        const roundExists = () =>
-          inScope(
-            async (tx, scope, allowed) =>
-              (await entries(scope, allowed).loadBatch(
-                tx,
-                String(entry.record.guestSessionReference),
-              )) !== null,
-          );
-        settleAfterFailure = async () => {
-          if (await roundExists()) return finished("Placed", entry.record);
-          const removed = await withdraw();
-          if (await roundExists()) return finished("Placed", entry.record);
-          // v15 b12 review: no round exists. Items gone from the cart some other way went out (or
-          // were taken out) with someone else's; items that could not be taken out are still in
-          // the table's cart. Either way staff are told so and the order is cleared: never "still
-          // being sent", whose retry would later answer "didn't go through, send it again".
-          return fail(
-            removed === "Removed" ? "STAFF_ROUND_UNAVAILABLE" : "STAFF_ROUND_NOT_WITHDRAWN",
-          );
-        };
-        const quoted = await options.pipeline.quote(credentials, {
-          operationReference: options.nextReference(),
-          cartReference: cart.cartReference,
-          cartVersion,
-          requestedAt: now(),
-        });
-        if (quoted.status === "ItemUnavailable") {
-          const own = cartLines.indexOf(quoted.cartItemReference);
-          if (own < 0 && guestLines.has(quoted.cartItemReference)) {
-            // This round's own lines come out here (not again in the catch below).
-            const remove = removeRoundItems;
-            removeRoundItems = null;
-            throw await guestLineRefusal(
-              remove === null ? "Kept" : await remove(),
-              quoted.cartItemReference,
-              { standing: quoted.reason },
-              () => new StaffDiningRoundError("STAFF_ROUND_UNAVAILABLE"),
-            );
-          }
-          // One of this round's lines: named; the catch below takes the round's lines back out.
-          const refused = new StaffDiningRoundError(
-            "STAFF_ROUND_ITEM_UNAVAILABLE",
-            own < 0 ? null : own,
-          );
-          refused.optionsChanged = quoted.reason === "OptionsChanged";
-          throw refused;
-        }
-        // A guest phone started paying for the table's Cart meanwhile; the round's lines come out.
-        if (quoted.status === "CheckoutInProgress")
-          return fail("STAFF_ROUND_TABLE_CHECKOUT_IN_PROGRESS");
-        if (quoted.status === "TableCheckingOut") return fail("STAFF_ROUND_TABLE_UNAVAILABLE");
-        if (quoted.status !== "Quoted") return fail("STAFF_ROUND_NOT_PRICED");
-        const tip = counterTipMinor(command.tip, quoted.subtotalMinor);
-        await options.pipeline.saveDetails(credentials, {
-          operationReference: options.nextReference(),
-          detailsReference: options.nextReference(),
-          cartReference: cart.cartReference,
-          cartVersion,
-          quoteReference: quoted.quoteReference,
-        });
-        // From here the round may exist (checkout, submission): the session is never closed for it.
-        const tableStarted = startedTable;
-        startedTable = null;
-        roundMayExist = true;
-        const checkout = await options.pipeline.startCheckout(credentials, {
-          createOperationReference: options.nextReference(),
-          cartReference: cart.cartReference,
-          cartVersion,
-          quoteReference: quoted.quoteReference,
-        });
-        if (checkout.status === "ItemShort" || checkout.status === "ItemUnavailable") {
-          const removed = await withdraw();
-          const lineIndex = checkoutRefusalLineIndex(checkout, cartLines);
-          const reference = checkout.cartItemReference;
-          // WP-2423 (staff-round-soldout): one of the guests' lines. Not sellable now: staff may
-          // remove it. Too few in stock (even none left, while the dish is not marked sold out):
-          // only the guests lower or remove it, or staff mark it sold out first.
-          if (lineIndex === null && reference !== null && guestLines.has(reference))
-            throw await guestLineRefusal(
-              removed,
-              reference,
-              checkout.status === "ItemShort"
-                ? { standing: "Short", available: checkout.available }
-                : { standing: "Unavailable" },
-              () => new StaffDiningRoundError("STAFF_ROUND_ITEM_UNAVAILABLE"),
-            );
-          if (removed !== "Removed") return fail("STAFF_ROUND_NOT_WITHDRAWN");
-          return checkout.status === "ItemShort" && checkout.available > 0
-            ? fail("STAFF_ROUND_STOCK_SHORT", lineIndex, [], {
-                available: checkout.available,
-                sharedStock: checkout.sharedStock,
-              })
-            : fail("STAFF_ROUND_ITEM_UNAVAILABLE", lineIndex, [], {
-                available: null,
-                sharedStock: checkout.status === "ItemShort" && checkout.sharedStock,
+          };
+          for (const [index, line] of command.lines.entries()) {
+            let added: Awaited<ReturnType<CounterGuestPipeline["addItem"]>>;
+            try {
+              added = await options.pipeline.addItem(credentials, {
+                operationReference: options.nextReference(),
+                cartReference: cart.cartReference,
+                expectedCartVersion: cartVersion,
+                sellableReference: line.sellableReference,
+                quantity: line.quantity,
+                optionSelections: line.optionSelections,
+                customerNote: line.note,
+                requestedAt: now(),
               });
-        }
-        // An owner listed between pricing and checkout: nothing was ordered; staff press again.
-        if (checkout.status === "RequoteRequired") {
-          const removed = await withdraw();
-          throw unlessLeftAtTable(
-            removed,
-            () => new StaffDiningRoundError("STAFF_ROUND_NOT_PRICED"),
-          );
-        }
-        if (checkout.status !== "Started") return fail("STAFF_ROUND_STORE_NOT_TAKING_ORDERS");
-        /**
-         * WP-2423: stock ran out, a dish came off sale, or an owner listed, between checkout and
-         * submission; the submission's checks refused it (v15 b17: also the later round's
-         * pre-check, which answers the checkout's own CHECKOUT_ITEM_UNAVAILABLE or
-         * CHECKOUT_STOCK_SHORT, naming the dish). Nothing was ordered or charged and the round's
-         * items come back out of the table's Cart; staff are told which dish can't be sold now.
-         * Anything else is not a refusal and goes on as before.
-         */
-        const refusedAtSubmission = async (error: unknown): Promise<never> => {
-          const { code, line } = (error ?? {}) as { code?: unknown; line?: unknown };
-          const checked = code === "CHECKOUT_ITEM_UNAVAILABLE" || code === "CHECKOUT_STOCK_SHORT";
-          if (
-            code !== "ORDER_CREATE_STOCK_SHORT" &&
-            code !== "CHECKOUT_REQUOTE_REQUIRED" &&
-            !checked
-          )
-            throw error;
-          const removed = await withdraw();
-          const refused = (checked ? line : null) as {
-            readonly cartItemReference?: unknown;
-            readonly available?: unknown;
-            readonly sharedStock?: unknown;
-          } | null;
-          const reference =
-            typeof refused?.cartItemReference === "string" ? refused.cartItemReference : null;
-          const available = typeof refused?.available === "number" ? refused.available : null;
-          const sharedStock = refused?.sharedStock === true;
-          const own = reference === null ? -1 : cartLines.indexOf(reference);
-          const lineIndex = own < 0 ? null : own;
-          const refusal =
-            // One of the guests' lines: staff see the table's cart again with it marked.
-            lineIndex === null && reference !== null && guestLines.has(reference)
-              ? await guestLineRefusal(
-                  removed,
-                  reference,
-                  code === "CHECKOUT_STOCK_SHORT"
-                    ? { standing: "Short", available: available ?? 0 }
-                    : { standing: "Unavailable" },
-                  () => new StaffDiningRoundError("STAFF_ROUND_ITEM_UNAVAILABLE"),
-                )
-              : unlessLeftAtTable(removed, () =>
-                  code === "CHECKOUT_REQUOTE_REQUIRED"
-                    ? new StaffDiningRoundError("STAFF_ROUND_NOT_PRICED")
-                    : code === "CHECKOUT_STOCK_SHORT" && available !== null && available > 0
-                      ? new StaffDiningRoundError("STAFF_ROUND_STOCK_SHORT", lineIndex, [], {
-                          available,
-                          sharedStock,
-                        })
-                      : new StaffDiningRoundError("STAFF_ROUND_ITEM_UNAVAILABLE", lineIndex, [], {
-                          available: null,
-                          sharedStock: code === "CHECKOUT_STOCK_SHORT" && sharedStock,
-                        }),
-                );
-          return keepingCause((): never => {
-            throw refusal;
-          })(error);
-        };
-        const submitPayLater = options.pipeline.submitPayLater;
-        const payLaterRound = options.payLater;
-        const payLater =
-          payLaterRound !== undefined &&
-          submitPayLater !== undefined &&
-          (await inScope(async (tx, scope) =>
-            payLaterRound(scope.selected).isPayLater(tx, table.diningSessionReference),
-          ));
-        if (payLater) {
-          // DEC-DINE-IN-PAY-LATER: no tip and no charge now; the table pays once at the end.
+            } catch (error) {
+              addUnanswered = true;
+              throw error;
+            }
+            if (added.status === "CheckoutInProgress")
+              return fail("STAFF_ROUND_TABLE_CHECKOUT_IN_PROGRESS");
+            if (added.status === "CartChanged") {
+              // v15 b12: someone at the table changed the cart since staff saw it. This round's own
+              // lines come out first (not again in the catch below); staff then see the guests'
+              // cart as it is now and decide again. Nothing was sent or charged.
+              const remove = removeRoundItems;
+              removeRoundItems = null;
+              const removed = remove === null ? "Removed" : await remove();
+              if (removed !== "Removed") return fail("STAFF_ROUND_NOT_WITHDRAWN");
+              const fresh = await selectAgain();
+              if (fresh.status !== "Selected")
+                return fail("STAFF_ROUND_TABLE_CHECKOUT_IN_PROGRESS");
+              const own = new Set(ownLines());
+              throw await tableCartRefusal(
+                fresh.pendingItems.filter((item) => !own.has(item.cartItemReference)),
+                fresh.cartVersion,
+              );
+            }
+            if (added.status !== "Applied") return fail("STAFF_ROUND_ITEM_UNAVAILABLE", index);
+            cartVersion = added.cartVersion;
+            cartLines.push(addedCartLine(lines, added.lines));
+            lines = added.lines ?? lines;
+          }
+          /**
+           * WP-2423: the round can't be made as entered (found before anything was ordered or
+           * charged). Its items come back out of the table's Cart (guests' items were never in it) and
+           * a table session this request started is closed again, so staff change the round and send
+           * it again.
+           */
+          const withdraw = async (): Promise<"Removed" | "Kept" | "Gone"> => {
+            const removed =
+              cartLines.length === command.lines.length && removeRoundItems !== null
+                ? await removeRoundItems()
+                : "Kept";
+            if (removed === "Removed") startedTable = tableStarted;
+            await abandonStartedTable();
+            return removed;
+          };
+          /**
+           * WP-2423 DEC-MERCHANT-LOCK-SCOPE: a step from the checkout on failed, so the round may exist.
+           * The owner's records say whether it does. If it does, it stands. If not, its items come back
+           * out of the table's Cart, so sending again is not refused for them and they are never sent
+           * twice; taking them out waits for any submission still holding that Cart, so the records
+           * are read once more before staff are told nothing was sent.
+           */
+          const roundExists = () =>
+            inScope(
+              async (tx, scope, allowed) =>
+                (await entries(scope, allowed).loadBatch(
+                  tx,
+                  String(entry.record.guestSessionReference),
+                )) !== null,
+            );
+          settleAfterFailure = async () => {
+            if (await roundExists()) return finished("Placed", entry.record);
+            const removed = await withdraw();
+            if (await roundExists()) return finished("Placed", entry.record);
+            // v15 b12 review: no round exists. Items gone from the cart some other way went out (or
+            // were taken out) with someone else's; items that could not be taken out are still in
+            // the table's cart. Either way staff are told so and the order is cleared: never "still
+            // being sent", whose retry would later answer "didn't go through, send it again".
+            return fail(
+              removed === "Removed" ? "STAFF_ROUND_UNAVAILABLE" : "STAFF_ROUND_NOT_WITHDRAWN",
+            );
+          };
+          const quoted = await options.pipeline.quote(credentials, {
+            operationReference: options.nextReference(),
+            cartReference: cart.cartReference,
+            cartVersion,
+            requestedAt: now(),
+          });
+          if (quoted.status === "ItemUnavailable") {
+            const own = cartLines.indexOf(quoted.cartItemReference);
+            if (own < 0 && guestLines.has(quoted.cartItemReference)) {
+              // This round's own lines come out here (not again in the catch below).
+              const remove = removeRoundItems;
+              removeRoundItems = null;
+              throw await guestLineRefusal(
+                remove === null ? "Kept" : await remove(),
+                quoted.cartItemReference,
+                { standing: quoted.reason },
+                () => new StaffDiningRoundError("STAFF_ROUND_UNAVAILABLE"),
+              );
+            }
+            // One of this round's lines: named; the catch below takes the round's lines back out.
+            const refused = new StaffDiningRoundError(
+              "STAFF_ROUND_ITEM_UNAVAILABLE",
+              own < 0 ? null : own,
+            );
+            refused.optionsChanged = quoted.reason === "OptionsChanged";
+            throw refused;
+          }
+          // A guest phone started paying for the table's Cart meanwhile; the round's lines come out.
+          if (quoted.status === "CheckoutInProgress")
+            return fail("STAFF_ROUND_TABLE_CHECKOUT_IN_PROGRESS");
+          if (quoted.status === "TableCheckingOut") return fail("STAFF_ROUND_TABLE_UNAVAILABLE");
+          if (quoted.status !== "Quoted") return fail("STAFF_ROUND_NOT_PRICED");
+          const tip = counterTipMinor(command.tip, quoted.subtotalMinor);
+          await options.pipeline.saveDetails(credentials, {
+            operationReference: options.nextReference(),
+            detailsReference: options.nextReference(),
+            cartReference: cart.cartReference,
+            cartVersion,
+            quoteReference: quoted.quoteReference,
+          });
+          // From here the round may exist (checkout, submission): the session is never closed for it.
+          const tableStarted = startedTable;
+          startedTable = null;
+          roundMayExist = true;
+          const checkout = await options.pipeline.startCheckout(credentials, {
+            createOperationReference: options.nextReference(),
+            cartReference: cart.cartReference,
+            cartVersion,
+            quoteReference: quoted.quoteReference,
+          });
+          if (checkout.status === "ItemShort" || checkout.status === "ItemUnavailable") {
+            const removed = await withdraw();
+            const lineIndex = checkoutRefusalLineIndex(checkout, cartLines);
+            const reference = checkout.cartItemReference;
+            // WP-2423 (staff-round-soldout): one of the guests' lines. Not sellable now: staff may
+            // remove it. Too few in stock (even none left, while the dish is not marked sold out):
+            // only the guests lower or remove it, or staff mark it sold out first.
+            if (lineIndex === null && reference !== null && guestLines.has(reference))
+              throw await guestLineRefusal(
+                removed,
+                reference,
+                checkout.status === "ItemShort"
+                  ? { standing: "Short", available: checkout.available }
+                  : { standing: "Unavailable" },
+                () => new StaffDiningRoundError("STAFF_ROUND_ITEM_UNAVAILABLE"),
+              );
+            if (removed !== "Removed") return fail("STAFF_ROUND_NOT_WITHDRAWN");
+            return checkout.status === "ItemShort" && checkout.available > 0
+              ? fail("STAFF_ROUND_STOCK_SHORT", lineIndex, [], {
+                  available: checkout.available,
+                  sharedStock: checkout.sharedStock,
+                })
+              : fail("STAFF_ROUND_ITEM_UNAVAILABLE", lineIndex, [], {
+                  available: null,
+                  sharedStock: checkout.status === "ItemShort" && checkout.sharedStock,
+                });
+          }
+          // An owner listed between pricing and checkout: nothing was ordered; staff press again.
+          if (checkout.status === "RequoteRequired") {
+            const removed = await withdraw();
+            throw unlessLeftAtTable(
+              removed,
+              () => new StaffDiningRoundError("STAFF_ROUND_NOT_PRICED"),
+            );
+          }
+          if (checkout.status !== "Started") return fail("STAFF_ROUND_STORE_NOT_TAKING_ORDERS");
+          /**
+           * WP-2423: stock ran out, a dish came off sale, or an owner listed, between checkout and
+           * submission; the submission's checks refused it (v15 b17: also the later round's
+           * pre-check, which answers the checkout's own CHECKOUT_ITEM_UNAVAILABLE or
+           * CHECKOUT_STOCK_SHORT, naming the dish). Nothing was ordered or charged and the round's
+           * items come back out of the table's Cart; staff are told which dish can't be sold now.
+           * Anything else is not a refusal and goes on as before.
+           */
+          const refusedAtSubmission = async (error: unknown): Promise<never> => {
+            const { code, line } = (error ?? {}) as { code?: unknown; line?: unknown };
+            const checked = code === "CHECKOUT_ITEM_UNAVAILABLE" || code === "CHECKOUT_STOCK_SHORT";
+            if (
+              code !== "ORDER_CREATE_STOCK_SHORT" &&
+              code !== "CHECKOUT_REQUOTE_REQUIRED" &&
+              !checked
+            )
+              throw error;
+            const removed = await withdraw();
+            const refused = (checked ? line : null) as {
+              readonly cartItemReference?: unknown;
+              readonly available?: unknown;
+              readonly sharedStock?: unknown;
+            } | null;
+            const reference =
+              typeof refused?.cartItemReference === "string" ? refused.cartItemReference : null;
+            const available = typeof refused?.available === "number" ? refused.available : null;
+            const sharedStock = refused?.sharedStock === true;
+            const own = reference === null ? -1 : cartLines.indexOf(reference);
+            const lineIndex = own < 0 ? null : own;
+            const refusal =
+              // One of the guests' lines: staff see the table's cart again with it marked.
+              lineIndex === null && reference !== null && guestLines.has(reference)
+                ? await guestLineRefusal(
+                    removed,
+                    reference,
+                    code === "CHECKOUT_STOCK_SHORT"
+                      ? { standing: "Short", available: available ?? 0 }
+                      : { standing: "Unavailable" },
+                    () => new StaffDiningRoundError("STAFF_ROUND_ITEM_UNAVAILABLE"),
+                  )
+                : unlessLeftAtTable(removed, () =>
+                    code === "CHECKOUT_REQUOTE_REQUIRED"
+                      ? new StaffDiningRoundError("STAFF_ROUND_NOT_PRICED")
+                      : code === "CHECKOUT_STOCK_SHORT" && available !== null && available > 0
+                        ? new StaffDiningRoundError("STAFF_ROUND_STOCK_SHORT", lineIndex, [], {
+                            available,
+                            sharedStock,
+                          })
+                        : new StaffDiningRoundError("STAFF_ROUND_ITEM_UNAVAILABLE", lineIndex, [], {
+                            available: null,
+                            sharedStock: code === "CHECKOUT_STOCK_SHORT" && sharedStock,
+                          }),
+                  );
+            return keepingCause((): never => {
+              throw refusal;
+            })(error);
+          };
+          const submitPayLater = options.pipeline.submitPayLater;
+          const payLaterRound = options.payLater;
+          const payLater =
+            payLaterRound !== undefined &&
+            submitPayLater !== undefined &&
+            (await inScope(async (tx, scope) =>
+              payLaterRound(scope.selected).isPayLater(tx, table.diningSessionReference),
+            ));
+          if (payLater) {
+            // DEC-DINE-IN-PAY-LATER: no tip and no charge now; the table pays once at the end.
+            try {
+              await submitPayLater(credentials, {
+                checkoutSessionReference: checkout.checkoutSessionReference,
+                selectionReference: tipSelectionReference,
+                recordedAfterOutage: command.recordedAfterOutage,
+              });
+            } catch (error) {
+              return await refusedAtSubmission(error);
+            }
+            return await finished("Placed", entry.record);
+          }
+          let preparation: OrderPaymentPreparationEvidence;
           try {
-            await submitPayLater(credentials, {
+            preparation = await options.pipeline.preparePayment(credentials, {
               checkoutSessionReference: checkout.checkoutSessionReference,
               selectionReference: tipSelectionReference,
+              tip: { amountMinor: tip, currencyCode: "CAD" } as Money,
               recordedAfterOutage: command.recordedAfterOutage,
             });
           } catch (error) {
             return await refusedAtSubmission(error);
           }
+          // The round was submitted with another tip: the same command reads back what it holds.
+          if (preparation.tip.amountMinor !== tip) return fail("STAFF_ROUND_IN_PROGRESS");
           return await finished("Placed", entry.record);
-        }
-        let preparation: OrderPaymentPreparationEvidence;
-        try {
-          preparation = await options.pipeline.preparePayment(credentials, {
-            checkoutSessionReference: checkout.checkoutSessionReference,
-            selectionReference: tipSelectionReference,
-            tip: { amountMinor: tip, currencyCode: "CAD" } as Money,
-            recordedAfterOutage: command.recordedAfterOutage,
-          });
-        } catch (error) {
-          return await refusedAtSubmission(error);
-        }
-        // The round was submitted with another tip: the same command reads back what it holds.
-        if (preparation.tip.amountMinor !== tip) return fail("STAFF_ROUND_IN_PROGRESS");
-        return await finished("Placed", entry.record);
+        });
       } catch (error) {
         // WP-2423: failed before its checkout, so nothing was ordered: the round's items leave the
         // table's Cart, so sending it again (a new attempt) is not refused for them.

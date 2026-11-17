@@ -5,7 +5,7 @@ import { chmod, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pg from "pg";
-import { createTenantTransactionRunner } from "../src/index.ts";
+import { createTenantTransactionRunner, settleConsecutive } from "../src/index.ts";
 import {
   acquirePilotConnection,
   holdingPilotConnection,
@@ -195,10 +195,13 @@ export async function prepareRealStaffRoundStore({
       ),
     // As the pilot's own `acquire` (pilot-connections acquirePilotConnection) when the test sizes
     // the pool like the pilot's: short pool waits with jitter until the request's budget is spent.
-    acquire: () =>
-      apiPool.acquireBudgetMs === undefined
-        ? restrictedPool.connect()
-        : acquirePilotConnection(restrictedPool, { budgetMs: apiPool.acquireBudgetMs }),
+    // WP-2423 M35: as the pilot's, a staff round's step transaction of this pool ends first.
+    acquire: async () => {
+      if (apiPool.acquireBudgetMs !== undefined)
+        return acquirePilotConnection(restrictedPool, { budgetMs: apiPool.acquireBudgetMs });
+      await settleConsecutive(restrictedPool);
+      return restrictedPool.connect();
+    },
     hold: (work) => holdingPilotConnection(restrictedPool, work),
     close: () => pool.end(),
   };

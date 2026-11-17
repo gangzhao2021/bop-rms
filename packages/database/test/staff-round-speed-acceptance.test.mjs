@@ -19,7 +19,7 @@ const id = (n) => "01a0ff00-0000-7000-8000-" + n.toString(16).padStart(12, "0");
  * Every statement this process sends to PostgreSQL while one staff round is sent (the
  * per-connection SET ROLE this test's pool adds is not counted: the pilot logs in as its role).
  */
-const counting = { on: false, count: 0 };
+const counting = { on: false, count: 0, transactions: 0 };
 /**
  * A test's step run once inside a later round's write transaction, before that transaction's own
  * current checks: it is the transaction that takes the Order's disposition fence and then reads the
@@ -42,8 +42,11 @@ const fenced = new WeakMap();
 const clientQuery = pg.Client.prototype.query;
 pg.Client.prototype.query = function (config, ...rest) {
   const text = typeof config === "string" ? config : config?.text;
-  if (counting.on && !(typeof text === "string" && text.startsWith("SET ROLE ")))
+  if (counting.on && !(typeof text === "string" && text.startsWith("SET ROLE "))) {
     counting.count += 1;
+    // Each transaction (ordinary or read snapshot) begins with its BEGIN round trip.
+    if (typeof text === "string" && /^\s*BEGIN\b/u.test(text)) counting.transactions += 1;
+  }
   const values = Array.isArray(rest[0]) ? rest[0] : config?.values;
   if (typeof text === "string") {
     if (/^\s*BEGIN\b/u.test(text)) fenced.set(this, false);
@@ -106,13 +109,18 @@ pg.Client.prototype.query = function (config, ...rest) {
  * and the staff member's Session runs on the pilot's runner as the pilot's does (it ran on a
  * connection of its own opened for each transaction): 2,162 statements the opening round, 1,765
  * a later one (from 2,479 / 2,090 here).
+ * Staff round fewer transactions (CI measured 2,078 / 2,002 ms, 248 / 186 transactions): the round's
+ * steps after its table turn run as consecutive steps of fewer transactions (runConsecutive,
+ * docs/spec/design/table-round-states-batch5.md, fourth step), every check still made: 1,372
+ * statements in 55 transactions the opening round, 1,398 in 55 a later one.
  *
  * Under the restricted NOBYPASSRLS pilot role, on the pilot's own transaction runner
  * (createTenantTransactionRunner) and the pilot's staff round composition: twelve rounds on one
  * pay-each-round table, each charged on the card machine and accepted, as a real Store does; and
  * the opening round on another Store's free table once the process is warm.
- * - Statement guard: each round is held to 2,000 statements (4,136 before), and from the third
- *   round on every round costs the same (before: 3 more a round).
+ * - Statement guard: each round is held to 1,500 statements (4,136 before) and 80 transactions
+ *   (read snapshots included; 248 before), and from the third round on every round costs the same
+ *   (before: 3 more a round).
  * - Time: every round, Send to the card machine's amount, is under 2 s on this machine (the
  *   slowest round, not the median). This times the pilot's command, not the HTTP route and the
  *   browser up to the Charge heading; v15's live check times that whole path.
@@ -133,13 +141,19 @@ const reviewedGuestChecks = [
   "SELECT 1 FROM rms_dining.dining_participant_readmission WHERE brand_id=$1 AND store_id=$2 AND from_guest_session_id=$3",
   "SELECT s.session_snapshot AS session,p.participant_snapshot AS participant,t.table_snapshot AS table FROM rms_dining.din",
 ].sort();
-const roundBudget = 2000;
-/** The opening round seats the party and sends two dishes: about 280 statements a dish. */
-const openingBudget = 2300;
+const roundBudget = 1500;
+/** The opening round seats the party and sends two dishes. */
+const openingBudget = 1500;
+/**
+ * WP-2423 M35 (DEC-STAFF-ROUND-FEWER-TRANSACTIONS): the transactions (ordinary and read
+ * snapshots) one round begins, the opening round and every later one: 248 / 186 before.
+ */
+const transactionBudget = 80;
 const roundMs = 2000;
 /** One staff round as one request (the pilot's own wrapper joins this one), timed and counted. */
 async function timedRound(counter, as, command) {
   counting.count = 0;
+  counting.transactions = 0;
   counting.on = true;
   const started = performance.now();
   let unverified = null;
@@ -157,6 +171,7 @@ async function timedRound(counter, as, command) {
     result,
     cost: {
       statements: counting.count,
+      transactions: counting.transactions,
       ms: Math.round(performance.now() - started),
       unverified,
     },
@@ -244,6 +259,17 @@ it("twelve staff rounds on one table each reach the card machine's amount under 
             roundBudget +
             ")",
         );
+      for (const cost of rounds)
+        assert.ok(
+          cost.transactions <= transactionBudget,
+          "round " +
+            cost.round +
+            " began " +
+            cost.transactions +
+            " transactions (budget " +
+            transactionBudget +
+            ")",
+        );
       // O(1) in the rounds already on the table.
       const later = rounds.slice(2).map((cost) => cost.statements);
       assert.ok(
@@ -323,6 +349,7 @@ it("the opening round on a free table reaches the card machine's amount under th
         ["Placed", false, "1469"],
       );
       assert.ok(cost.statements <= openingBudget, "opening round " + JSON.stringify(cost));
+      assert.ok(cost.transactions <= transactionBudget, "opening round " + JSON.stringify(cost));
       assert.ok(cost.ms < roundMs, "opening round " + JSON.stringify(cost));
       assert.deepEqual(
         [...cost.unverified].sort(),

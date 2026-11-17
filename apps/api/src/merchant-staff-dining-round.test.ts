@@ -211,6 +211,7 @@ function setup(
     confirmed: string[];
     confirm?: () => Promise<void>;
   } | null = null,
+  options: { readonly consecutive?: boolean } = {},
 ) {
   let sequence = 0x100;
   const calls: string[] = [];
@@ -334,6 +335,19 @@ function setup(
     // DEC-STAFF-ROUND-ONE-AT-A-TIME: waits for another round's turn without real time passing.
     tableTurnWaitMs: 1000,
     sleep: async () => undefined,
+    // WP-2423 M35: the pilot composes runConsecutive; here its call is marked where it begins and ends.
+    ...(options.consecutive === true
+      ? {
+          consecutive: async <T>(work: () => Promise<T>) => {
+            calls.push("consecutive:begin");
+            try {
+              return await work();
+            } finally {
+              calls.push("consecutive:end");
+            }
+          },
+        }
+      : {}),
     ...(payLater === null
       ? {}
       : {
@@ -839,6 +853,42 @@ describe("staff dine-in round command — WP-2423 Q7 slice 2", () => {
     // No dining session is started or code issued for a round that can't be entered.
     expect(pipeline.openTable).not.toHaveBeenCalled();
     expect(pipeline.join).not.toHaveBeenCalled();
+  });
+
+  it("WP-2423 M35: the steps after the table's turn run as one consecutive call; the clean-up after it", async () => {
+    const placed = setup(undefined, null, { consecutive: true });
+    await placed.send();
+    expect(placed.calls).toEqual([
+      "consecutive:begin",
+      "takesOrder",
+      "openTable",
+      "enter",
+      "join",
+      "bind",
+      "selectCart",
+      "addItem",
+      "quote",
+      "saveDetails",
+      "startCheckout",
+      "preparePayment",
+      "consecutive:end",
+    ]);
+    // The turn is taken before the call (it may wait), never inside it.
+    expect(state.turns).toHaveLength(1);
+    const refused = setup(undefined, null, { consecutive: true });
+    refused.pipeline.openTable.mockResolvedValueOnce({
+      status: "Opened",
+      diningSessionReference: id(31),
+      joinCredential: "join",
+      started: true,
+      generation: 1,
+    } as never);
+    refused.pipeline.enter.mockResolvedValueOnce({ status: "NotAccepting" } as never);
+    await expect(refused.send({ operationReference: id(0x502) })).rejects.toMatchObject({
+      code: "STAFF_ROUND_STORE_NOT_TAKING_ORDERS",
+    });
+    // The table it started is closed again once the call's steps have ended.
+    expect(refused.calls.slice(-2)).toEqual(["consecutive:end", "abandonTable"]);
   });
 
   it("closes the table it started when the entry is then refused: no empty session on the floor", async () => {
