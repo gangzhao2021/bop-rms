@@ -1,6 +1,6 @@
 import { t } from "./i18n/i18n.js";
 import { useReadAgainWhenOnline } from "./reconnect-read.js";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   releaseOriginalWhenRefused,
   StoreSetupClientError,
@@ -131,6 +131,21 @@ export interface ReceiptTemplateArtifactEditorProps {
   ) => ReceiptTemplateArtifactPendingJournal;
 }
 export function ReceiptTemplateArtifactEditor(props: ReceiptTemplateArtifactEditorProps) {
+  // b26 (v15 live check of b25): both presets come from one read of the same service, so a read
+  // cut off by the connection is said once here, not once per preset. Both are read again by
+  // themselves once the connection is back, or with Try again here.
+  const [unread, setUnread] = useState<ReadonlySet<ReceiptTemplateArtifactKind>>(() => new Set()),
+    [retry, setRetry] = useState(0);
+  const readFailed = useCallback(
+    (kind: ReceiptTemplateArtifactKind, failed: boolean) =>
+      setUnread((old) =>
+        old.has(kind) === failed
+          ? old
+          : new Set(failed ? [...old, kind] : [...old].filter((k) => k !== kind)),
+      ),
+    [],
+  );
+  const online = useReadAgainWhenOnline(unread.size > 0, () => setRetry((n) => n + 1));
   return (
     <section hidden={props.hidden} aria-label={t("Receipt presets")}>
       <h4>{t("Receipt presets")}</h4>
@@ -139,8 +154,27 @@ export function ReceiptTemplateArtifactEditor(props: ReceiptTemplateArtifactEdit
           "Save the receipt layout and the fields every receipt must show; receipt templates are built from these presets. Saving them does not change customer receipts and does not mean a legal professional has approved them.",
         )}
       </p>
+      {unread.size > 0 && (
+        <p role="alert">
+          {t(
+            "Receipt presets could not be loaded. They are read again once the connection is back; an earlier save remains protected.",
+          )}
+          {online ? (
+            <>
+              {" "}
+              <button
+                type="button"
+                className="store-setup-inline-action"
+                onClick={() => setRetry((n) => n + 1)}
+              >
+                {t("Try again")}
+              </button>
+            </>
+          ) : null}
+        </p>
+      )}
       {(["Layout", "Compliance"] as const).map((kind) => (
-        <Preset key={kind} {...props} kind={kind} />
+        <Preset key={kind} {...props} kind={kind} retry={retry} onReadFailed={readFailed} />
       ))}
     </section>
   );
@@ -153,7 +187,14 @@ function Preset({
   journalFactory = createReceiptTemplateArtifactPendingJournal,
   onSaved,
   kind,
-}: ReceiptTemplateArtifactEditorProps & { kind: ReceiptTemplateArtifactKind }) {
+  retry,
+  onReadFailed,
+}: ReceiptTemplateArtifactEditorProps & {
+  kind: ReceiptTemplateArtifactKind;
+  /** b26: the section's Try again, or the connection coming back, reads this preset again. */
+  retry: number;
+  onReadFailed: (kind: ReceiptTemplateArtifactKind, failed: boolean) => void;
+}) {
   const client = useMemo(() => injected ?? createReceiptTemplateArtifactClient(), [injected]);
   const [view, setView] = useState<ReceiptTemplateArtifactsCurrent | null>(null),
     [pending, setPending] = useState<ReceiptTemplateArtifactCursor | null>(null),
@@ -167,8 +208,6 @@ function Preset({
     journal = useRef<ReceiptTemplateArtifactPendingJournal | null>(null);
   const label = kind === "Layout" ? t("receipt layout") : t("required receipt fields"),
     scopeKey = JSON.stringify(scope);
-  // b24 (v15 live check of b23): a read that failed with the connection is made again once back.
-  const [readAgain, setReadAgain] = useState(0);
   useEffect(() => {
     const e = ++epoch.current,
       c = new AbortController();
@@ -204,10 +243,10 @@ function Preset({
       active.current?.abort();
       c.abort();
     };
-  }, [client, scopeKey, csrf, journalFactory, kind, readAgain]);
-  const online = useReadAgainWhenOnline(!ready && !busy && error === "Unavailable", () =>
-    setReadAgain((n) => n + 1),
-  );
+  }, [client, scopeKey, csrf, journalFactory, kind, retry]);
+  // b26: a read cut off by the connection is said once, by the section above.
+  const readFailed = !ready && !busy && error === "Unavailable";
+  useEffect(() => onReadFailed(kind, readFailed), [onReadFailed, kind, readFailed]);
   useEffect(() => {
     if (disabled && running.current) active.current?.abort();
   }, [disabled]);
@@ -299,7 +338,7 @@ function Preset({
       {saved ? <p>{t("Saved.")}</p> : ready ? <p>{t("No saved preset yet.")}</p> : null}
       {busy && <p role="status">{t("Loading {label}…", { label: label })}</p>}
       {notice && <p role="status">{notice}</p>}
-      {error && (
+      {error && !readFailed && (
         <p role="alert">
           {error === "Denied"
             ? t("You do not have permission to manage this receipt preset.")
@@ -313,24 +352,13 @@ function Preset({
                   )
                 : error === "Invalid"
                   ? t("This preset could not be saved as it is.")
-                  : t(
-                      "Receipt presets could not be loaded. They are read again once the connection is back; an earlier save remains protected.",
-                    )}
-          {/* b25: read again by itself once back online; a read that failed while online can be
-              tried again here (no separate Refresh). */}
-          {!ready && online && error === "Unavailable" ? (
-            <>
-              {" "}
-              <button
-                type="button"
-                className="store-setup-inline-action"
-                disabled={busy}
-                onClick={() => setReadAgain((n) => n + 1)}
-              >
-                {t("Try again")}
-              </button>
-            </>
-          ) : null}
+                  : !ready
+                    ? t(
+                        "Receipt presets could not be loaded. They are read again once the connection is back; an earlier save remains protected.",
+                      )
+                    : t(
+                        "Could not connect just now. Try again once connected; an earlier save remains protected.",
+                      )}
         </p>
       )}
       {pending && (

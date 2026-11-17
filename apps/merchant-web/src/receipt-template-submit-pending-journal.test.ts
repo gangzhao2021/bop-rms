@@ -333,3 +333,17 @@ it("malformed persisted payload remains refused and retained instead of cleared"
   await expect(j.load()).rejects.toMatchObject({ code: "Invalid" });
   expect(db.data.size).toBe(1);
 });
+it("b26: release lets go of only the same original, so a refused first send can be sent again", async () => {
+  const db = idb(),
+    p = await prepared(),
+    q = await prepared(id(20)),
+    journal = createReceiptTemplateSubmitPendingJournal(scope, id(8));
+  await journal.reserve(p.cursor);
+  await expect(journal.release?.(q.cursor)).rejects.toThrow();
+  expect(await journal.load()).toEqual(p.cursor);
+  await journal.release?.(p.cursor);
+  expect(await journal.load()).toBeNull();
+  expect(db.data.size).toBe(0);
+  await journal.reserve(q.cursor);
+  expect(await journal.load()).toEqual(q.cursor);
+});

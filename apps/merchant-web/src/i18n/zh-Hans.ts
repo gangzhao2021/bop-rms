@@ -4038,8 +4038,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     '"独立经营者"目前对你不生效（已关闭，或这里还有其他人拥有店主权限），因此需由另一位有店主权限的人批准。请恢复请求，然后刷新。',
   "Sole operator is not in effect for you now, so another person with Owner access must approve this.":
     '"独立经营者"目前对你不生效，因此需由另一位有店主权限的人批准。',
-  "Sole operator is off, so another person with Owner access must approve this template. If you run the business on your own, the brand owner can turn on Sole operator in Store setup. Recover the request, then refresh.":
-    '"独立经营者"已关闭，因此需要另一位有店主权限的人批准此模板。如果你独自经营，品牌所有者可以在门店设置中开启"独立经营者"。请恢复请求，然后刷新。',
+  "Sole operator is off, so another person with Owner access must approve this template. If you run the business on your own, the brand owner can turn on Sole operator in Store setup; then approve it again.":
+    '"独立经营者"已关闭，因此需要另一位有店主权限的人批准此模板。如果你独自经营，品牌所有者可以在门店设置中开启"独立经营者"，然后再批准一次。',
   "Sole operator is off, so another person with Owner access must approve this. If you run this business on your own, turn on Sole operator in Store setup, then approve again.":
     '"独立经营者"已关闭，因此需由另一位有店主权限的人批准。如果你独自经营，请在门店设置中开启"独立经营者"，然后再次批准。',
   "Sole operator is off, so another person with Owner access must approve this. Recover the request. If you run this business on your own, turn on Sole operator in Store setup, then approve again.":
@@ -4074,8 +4074,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Someone else": "其他人",
   "Someone else also holds Owner access at this Store, so they must approve this change.":
     "本门店还有其他人拥有店主权限，因此需要由其批准此更改。",
-  "Someone else also holds Owner access to this Store, so they must approve this template. Recover the request, then refresh.":
-    "本门店还有其他人拥有店主权限，因此需要由其批准此模板。请恢复请求，然后刷新。",
+  "Someone else also holds Owner access to this Store, so they must approve this template. Your approval was not recorded.":
+    "本门店还有其他人拥有店主权限，因此需要由其批准此模板。你的批准没有记录。",
   "Someone else can now approve": "现在有其他人可以批准",
   "Someone else changed the list. Reload to see the latest list, then try again.":
     "有人更改了列表。请重新加载以查看最新列表，然后重试。",
@@ -4869,8 +4869,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "本店对每件商品在自取和堂食时收取的税。税率只能通过附带登记和专业审核证明的税务配置更改。数据截至",
   "The template changed or the original save conflicts. Refresh or recover the original save; no version has been silently substituted.":
     "模板已变更，或原来的保存有冲突。请刷新或恢复原来的保存；没有任何版本被悄悄替换。",
-  "The template draft could not be loaded or saved. Refresh when connected; an earlier save remains protected.":
-    "无法加载或保存模板草稿。联网后请刷新；之前的保存仍受保护。",
+  "The template draft could not be loaded. It is read again by itself once the connection is back; an earlier save remains protected.":
+    "无法加载模板草稿。网络恢复后会自动重新读取；之前的保存仍受保护。",
+  "Could not connect just now. Try again once connected; an earlier save remains protected.":
+    "暂时无法连接。联网后请再试一次；之前的保存仍受保护。",
   "The ticket changed on another screen. The board has been refreshed — check it again.":
     "票据在另一块屏幕上已变更。看板已刷新 — 请再核对一次。",
   "The time to pay this order ended at {at}. It is released and its items go back to stock. If you charged the card machine, refund it on the machine.":

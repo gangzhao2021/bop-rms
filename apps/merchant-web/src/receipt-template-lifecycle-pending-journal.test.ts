@@ -469,3 +469,17 @@ it("lower current head or a foreign current scope cannot corroborate a committed
   ).rejects.toMatchObject({ code: "ScopeChanged" });
   expect(await j.load()).toEqual(p.cursor);
 });
+it("b26: release lets go of only the same original, so a refused first send can be sent again", async () => {
+  const db = idb(),
+    p = await prepared(),
+    q = await prepared("Publish", id(40)),
+    journal = createReceiptTemplateLifecyclePendingJournal(scope, id(8));
+  await journal.reserve(p.cursor);
+  await expect(journal.release?.(q.cursor)).rejects.toThrow();
+  expect(await journal.load()).toEqual(p.cursor);
+  await journal.release?.(p.cursor);
+  expect(await journal.load()).toBeNull();
+  expect(db.data.size).toBe(0);
+  await journal.reserve(q.cursor);
+  expect(await journal.load()).toEqual(q.cursor);
+});

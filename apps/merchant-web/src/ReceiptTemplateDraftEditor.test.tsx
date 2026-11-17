@@ -69,6 +69,10 @@ function fixture() {
       if (state.cleanup) throw new StoreSetupClientError("Unavailable");
       pending = null;
     },
+    release: async () => {
+      sequence.push("release");
+      pending = null;
+    },
   };
   const client = createReceiptTemplateDraftClient(
     vi.fn(async (url: RequestInfo | URL, options?: RequestInit) => {
@@ -269,6 +273,10 @@ async function submitFixture() {
     complete: async () => {
       sequence.push("complete");
       if (state.cleanup) throw new StoreSetupClientError("Unavailable");
+      pending = null;
+    },
+    release: async () => {
+      sequence.push("release");
       pending = null;
     },
   };
@@ -668,6 +676,10 @@ async function lifecycleFixture(initialState: "InReview" | "Approved" = "InRevie
       pending = null;
       return { historical: false };
     },
+    release: async () => {
+      order.push("release");
+      pending = null;
+    },
   };
   const input = {
     client,
@@ -889,4 +901,108 @@ it("scope change after lifecycle reserve suppresses dispatch while retaining the
   ).rejects.toMatchObject({ code: "ScopeChanged" });
   expect(f.pending()).not.toBeNull();
   expect(f.bodies).toHaveLength(0);
+});
+
+// b26 (v15 live check of b25): a first send the server refuses outright (403 here; 400 and 409
+// alike) never happened, so its original is let go and staff are not locked behind a recovery.
+// A retry of the exact original, a recovery, or an answer that never came keeps it.
+it("b26: a template draft save refused on its first send lets go of its original", async () => {
+  const f = fixture(),
+    released = vi.fn();
+  f.state.deny = true;
+  await expect(
+    saveReceiptTemplateDraft({ ...common(f), baseline: await f.current(), onReleased: released }),
+  ).rejects.toMatchObject({ code: "Denied" });
+  expect(f.pending()).toBeNull();
+  expect(released).toHaveBeenCalledTimes(1);
+  expect(f.sequence).toContain("release");
+});
+it("b26: a lost template draft save keeps its original, and its exact retry refused keeps it too", async () => {
+  const f = fixture(),
+    released = vi.fn();
+  let prepared: Parameters<typeof finishReceiptTemplateDraftOriginal>[0]["prepared"];
+  f.state.lose = true;
+  await expect(
+    saveReceiptTemplateDraft({
+      ...common(f),
+      baseline: await f.current(),
+      onReleased: released,
+      onReserved: (value) => {
+        prepared = value;
+      },
+    }),
+  ).rejects.toMatchObject({ code: "OutcomeUnknown" });
+  const cursor = f.pending();
+  if (!cursor || !prepared) throw new Error("retained original missing");
+  f.state.lose = false;
+  f.state.deny = true;
+  await expect(
+    finishReceiptTemplateDraftOriginal({ ...common(f), cursor, prepared }),
+  ).rejects.toMatchObject({ code: "Denied" });
+  expect(f.pending()).toEqual(cursor);
+  expect(released).not.toHaveBeenCalled();
+  expect(f.sequence).not.toContain("release");
+});
+it("b26: a template submission refused on its first send lets go of its original", async () => {
+  const f = await submitFixture(),
+    released = vi.fn();
+  f.state.deny = true;
+  await expect(
+    submitReceiptTemplateDraft({
+      ...f.input,
+      scope,
+      baseline: f.saved.current,
+      fields,
+      onReserved: () => undefined,
+      onReleased: released,
+    }),
+  ).rejects.toMatchObject({ code: "Denied" });
+  expect(f.pending()).toBeNull();
+  expect(released).toHaveBeenCalledTimes(1);
+});
+it("b26: an approval refused on its first send lets go; its exact retry refused keeps it", async () => {
+  const f = await lifecycleFixture(),
+    released = vi.fn();
+  f.controls.deny = true;
+  await expect(
+    advanceReceiptTemplateLifecycle({
+      ...f.input,
+      scope: f.scope,
+      baseline: f.current,
+      review: f.review,
+      fields,
+      action: "Approve",
+      onReserved: () => undefined,
+      onReleased: released,
+    }),
+  ).rejects.toMatchObject({ code: "Denied" });
+  expect(f.pending()).toBeNull();
+  expect(released).toHaveBeenCalledTimes(1);
+  // A lost reply, then its exact retry refused: the original stays for recovery.
+  f.controls.deny = false;
+  f.controls.lose = true;
+  let prepared: Parameters<typeof finishReceiptTemplateLifecycleOriginal>[0]["prepared"];
+  await expect(
+    advanceReceiptTemplateLifecycle({
+      ...f.input,
+      scope: f.scope,
+      baseline: f.current,
+      review: f.review,
+      fields,
+      action: "Approve",
+      onReserved: (value) => {
+        prepared = value;
+      },
+      onReleased: released,
+    }),
+  ).rejects.toMatchObject({ code: "OutcomeUnknown" });
+  const cursor = f.pending();
+  if (!cursor || !prepared) throw new Error("retained original missing");
+  f.controls.lose = false;
+  f.controls.deny = true;
+  await expect(
+    finishReceiptTemplateLifecycleOriginal({ ...f.input, cursor, prepared }),
+  ).rejects.toMatchObject({ code: "Denied" });
+  expect(f.pending()).toEqual(cursor);
+  expect(released).toHaveBeenCalledTimes(1);
 });

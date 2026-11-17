@@ -187,3 +187,90 @@ it("b25: a saved preset tells the template draft below, which offers it without 
   expect(draft).not.toContain("Refresh available presets");
   expect(draft).not.toContain("then refresh");
 });
+
+// b26 (v15 live check of b25): both presets come from one read, so an outage is said once, in the
+// page's language, saying it is read again by itself; Try again reads both presets again.
+it("b26: a preset read cut off by the connection shows one alert, and Try again reads both again", async () => {
+  for (const language of ["en", "zh-Hans"] as const) {
+    setLanguageForTest(language);
+    const s = server();
+    let down = true;
+    const reads = vi.fn();
+    const client = createReceiptTemplateArtifactClient(
+      vi.fn(async (_url: RequestInfo | URL, options?: RequestInit) => {
+        if (options?.method !== "POST") reads();
+        if (down) return new Response("{}", { status: 503 });
+        return json({
+          profile: "DigitalReceiptTemplateArtifactsCurrentV1",
+          ...scope,
+          layout: null,
+          compliance: null,
+          observedAt: at,
+          validUntil: "2026-11-16T10:00:05.000Z",
+          sourceQualification: "NotEvaluated",
+        });
+      }),
+    );
+    const { container } = await mount(
+      <ReceiptTemplateArtifactEditor
+        scope={scope}
+        csrf={csrf}
+        client={client}
+        journalFactory={() => s.journal}
+      />,
+    );
+    await until(() => container.querySelectorAll("[role=alert]").length > 0);
+    await settle(10);
+    const alerts = [...container.querySelectorAll("[role=alert]")].map((n) => n.textContent ?? "");
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toContain(
+      language === "en"
+        ? "Receipt presets could not be loaded. They are read again once the connection is back"
+        : "无法加载收据预设。网络恢复后会自动重新读取",
+    );
+    expect(alerts[0]).not.toContain(language === "en" ? "Refresh" : "刷新");
+    down = false;
+    const before = reads.mock.calls.length;
+    await click(
+      [...container.querySelectorAll("button")].find(
+        (b) => b.textContent === (language === "en" ? "Try again" : "重试"),
+      ),
+    );
+    await until(() => reads.mock.calls.length >= before + 2);
+    await settle(10);
+    expect(container.querySelectorAll("[role=alert]")).toHaveLength(0);
+    document.body.replaceChildren();
+  }
+});
+
+it("b26: the template draft read cut off says it is read again by itself, never to refresh", async () => {
+  for (const language of ["en", "zh-Hans"] as const) {
+    setLanguageForTest(language);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("{}", { status: 503 })),
+    );
+    try {
+      const { container } = await mount(
+        <ReceiptTemplateDraftEditor scope={scope} csrf={csrf} defaultLocale="en-CA" />,
+      );
+      await until(() => container.querySelector("[role=alert]") !== null);
+      await settle(10);
+      const text = container.querySelector("[role=alert]")?.textContent ?? "";
+      expect(text).toContain(
+        language === "en"
+          ? "The template draft could not be loaded. It is read again by itself once the connection is back"
+          : "无法加载模板草稿。网络恢复后会自动重新读取",
+      );
+      expect(text).not.toContain(language === "en" ? "Refresh when connected" : "联网后请刷新");
+      expect(
+        [...container.querySelectorAll("button")].some(
+          (b) => b.textContent === (language === "en" ? "Try again" : "重试"),
+        ),
+      ).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+      document.body.replaceChildren();
+    }
+  }
+});

@@ -8,7 +8,11 @@ import {
   storeLocalInputValue,
 } from "./StoreTime.js";
 import { languageName, receiptFieldLabels, receiptTemplateStateLabel } from "./staff-text.js";
-import { StoreSetupClientError, type StoreSetupScope } from "./store-setup-client.js";
+import {
+  releaseOriginalWhenRefused,
+  StoreSetupClientError,
+  type StoreSetupScope,
+} from "./store-setup-client.js";
 import { canonicalPublicationValue as canonical } from "./product-publication-command-client-v2.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import {
@@ -62,6 +66,21 @@ interface Operation {
   isCurrent: () => boolean;
   beforeComplete?: (current: ReceiptTemplateDraftCurrent) => Promise<void>;
 }
+/**
+ * b26 (v15 live check of b25): only the first send of a new save, submission, approval or
+ * publication lets go of its original when the server refuses it outright (400, 403, 409 or a named
+ * refusal): nothing was written, so staff put it right and send again. A retry of the exact
+ * original, or a recovery, keeps it whatever the answer, since the first send may have been
+ * recorded; an answer that never came keeps it for recovery too.
+ */
+function firstSend<C, T>(
+  journal: { release?(cursor: C): Promise<void> },
+  cursor: C,
+  work: () => Promise<T>,
+  onReleased: ((cursor: C) => void) | undefined,
+): Promise<T> {
+  return onReleased ? releaseOriginalWhenRefused(journal, cursor, work, onReleased) : work();
+}
 const check = (input: Operation) => {
   if (input.signal.aborted || !input.isCurrent()) throw new StoreSetupClientError("ScopeChanged");
 };
@@ -69,13 +88,21 @@ export async function finishReceiptTemplateDraftOriginal(
   input: Operation & {
     cursor: ReceiptTemplateDraftCursor;
     prepared?: PreparedReceiptTemplateDraft;
+    /** b26: set only on the first send; a definite refusal then lets go of the original. */
+    onReleased?: (cursor: ReceiptTemplateDraftCursor) => void;
   },
 ) {
   check(input);
   if (input.prepared && canonical(input.prepared.cursor) !== canonical(input.cursor))
     throw new StoreSetupClientError("Conflict");
-  const receipt = input.prepared
-    ? await input.client.execute(input.prepared, { csrf: input.csrf, signal: input.signal })
+  const prepared = input.prepared;
+  const receipt = prepared
+    ? await firstSend(
+        input.journal,
+        input.cursor,
+        () => input.client.execute(prepared, { csrf: input.csrf, signal: input.signal }),
+        input.onReleased,
+      )
     : await input.client.resolve(input.cursor, { csrf: input.csrf, signal: input.signal });
   check(input);
   const current = await input.client.load({
@@ -98,6 +125,7 @@ export async function saveReceiptTemplateDraft(
     baseline: ReceiptTemplateDraftCurrent;
     fields: ReceiptTemplateDraftFields;
     onReserved: (p: PreparedReceiptTemplateDraft) => void;
+    onReleased?: (cursor: ReceiptTemplateDraftCursor) => void;
   },
 ) {
   check(input);
@@ -153,13 +181,21 @@ export async function finishReceiptTemplateSubmitOriginal(
   input: SubmitOperation & {
     cursor: ReceiptTemplateSubmitCursor;
     prepared?: PreparedReceiptTemplateSubmit;
+    /** b26: set only on the first send; a definite refusal then lets go of the original. */
+    onReleased?: (cursor: ReceiptTemplateSubmitCursor) => void;
   },
 ) {
   submitCheck(input);
   if (input.prepared && canonical(input.prepared.cursor) !== canonical(input.cursor))
     throw new StoreSetupClientError("Conflict");
-  const receipt = input.prepared
-    ? await input.submitClient.execute(input.prepared, { csrf: input.csrf, signal: input.signal })
+  const prepared = input.prepared;
+  const receipt = prepared
+    ? await firstSend(
+        input.journal,
+        input.cursor,
+        () => input.submitClient.execute(prepared, { csrf: input.csrf, signal: input.signal }),
+        input.onReleased,
+      )
     : await input.submitClient.resolve(input.cursor, { csrf: input.csrf, signal: input.signal });
   submitCheck(input);
   const current = await input.client.load({
@@ -194,6 +230,7 @@ export async function submitReceiptTemplateDraft(
     baseline: ReceiptTemplateDraftCurrent;
     fields: ReceiptTemplateDraftFields;
     onReserved: (prepared: PreparedReceiptTemplateSubmit) => void;
+    onReleased?: (cursor: ReceiptTemplateSubmitCursor) => void;
   },
 ) {
   submitCheck(input);
@@ -297,16 +334,25 @@ export async function finishReceiptTemplateLifecycleOriginal(
     prepared?: PreparedReceiptTemplateLifecycle;
     /** WP-2423: "SoleOperator" when the author or sender approves their own version alone. */
     approvalMode?: "SoleOperator";
+    /** b26: set only on the first send; a definite refusal then lets go of the original. */
+    onReleased?: (cursor: ReceiptTemplateLifecycleCursor) => void;
   },
 ) {
   lifecycleCheck(input);
   if (input.prepared && canonical(input.prepared.cursor) !== canonical(input.cursor))
     throw new StoreSetupClientError("Conflict");
-  const receipt = input.prepared
-    ? await input.lifecycleClient.execute(
-        input.prepared,
-        { csrf: input.csrf, signal: input.signal },
-        input.approvalMode,
+  const prepared = input.prepared;
+  const receipt = prepared
+    ? await firstSend(
+        input.journal,
+        input.cursor,
+        () =>
+          input.lifecycleClient.execute(
+            prepared,
+            { csrf: input.csrf, signal: input.signal },
+            input.approvalMode,
+          ),
+        input.onReleased,
       )
     : await input.lifecycleClient.resolve(input.cursor, { csrf: input.csrf, signal: input.signal });
   lifecycleCheck(input);
@@ -344,6 +390,7 @@ export async function advanceReceiptTemplateLifecycle(
     fields: ReceiptTemplateDraftFields;
     action: "Approve" | "Publish";
     onReserved: (prepared: PreparedReceiptTemplateLifecycle) => void;
+    onReleased?: (cursor: ReceiptTemplateLifecycleCursor) => void;
     approvalMode?: "SoleOperator";
   },
 ) {
@@ -673,8 +720,9 @@ export function ReceiptTemplateDraftEditor({
     };
   }, [rosterClient, artifactClient, scopeKey, csrf, readAgain]);
   // b24 (v15 live check of b23): reads that failed with the connection are made again once back.
-  useReadAgainWhenOnline(!busy && error === "Unavailable" && (!ready || roster === null), () =>
-    setReadAgain((n) => n + 1),
+  const online = useReadAgainWhenOnline(
+    !busy && error === "Unavailable" && (!ready || roster === null),
+    () => setReadAgain((n) => n + 1),
   );
   useEffect(() => {
     if (disabled && running.current) active.current?.abort();
@@ -827,6 +875,14 @@ export function ReceiptTemplateDraftEditor({
                 setLifecyclePending(prepared.cursor);
               }
             },
+            // b26: refused outright, so it never happened; the Owner puts it right and sends again.
+            onReleased: () => {
+              if (valid()) {
+                lifecycleOriginal.current = null;
+                lifecycleMode.current = undefined;
+                setLifecyclePending(null);
+              }
+            },
           });
         } else {
           if (!lp || (mode === "LifecycleRetry" && !lifecycleOriginal.current))
@@ -903,6 +959,12 @@ export function ReceiptTemplateDraftEditor({
               if (valid()) {
                 submitOriginal.current = prepared;
                 setSubmitPending(prepared.cursor);
+              }
+            },
+            onReleased: () => {
+              if (valid()) {
+                submitOriginal.current = null;
+                setSubmitPending(null);
               }
             },
           });
@@ -1009,6 +1071,12 @@ export function ReceiptTemplateDraftEditor({
             if (valid()) {
               original.current = prepared;
               setPending(prepared.cursor);
+            }
+          },
+          onReleased: () => {
+            if (valid()) {
+              original.current = null;
+              setPending(null);
             }
           },
         });
@@ -1407,19 +1475,38 @@ export function ReceiptTemplateDraftEditor({
                     )
                   : error === "SoleOperatorOff"
                     ? t(
-                        "Sole operator is off, so another person with Owner access must approve this template. If you run the business on your own, the brand owner can turn on Sole operator in Store setup. Recover the request, then refresh.",
+                        "Sole operator is off, so another person with Owner access must approve this template. If you run the business on your own, the brand owner can turn on Sole operator in Store setup; then approve it again.",
                       )
                     : error === "SoleOperatorNotInEffect"
                       ? t(
-                          "Someone else also holds Owner access to this Store, so they must approve this template. Recover the request, then refresh.",
+                          "Someone else also holds Owner access to this Store, so they must approve this template. Your approval was not recorded.",
                         )
                       : error === "SoleOperatorNeedsVerification"
                         ? t(
-                            "Your verification is more than 15 minutes old, so the approval was not recorded. Recover the request, verify again, then approve.",
+                            "Your verification is more than 15 minutes old, so the approval was not recorded. Verify again, then approve.",
                           )
-                        : t(
-                            "The template draft could not be loaded or saved. Refresh when connected; an earlier save remains protected.",
-                          )}
+                        : // b26: a read that failed is made again by itself once the connection
+                          // is back (and can be tried again here); a step that could not reach the
+                          // service is sent again by staff.
+                          !ready || roster === null
+                          ? t(
+                              "The template draft could not be loaded. It is read again by itself once the connection is back; an earlier save remains protected.",
+                            )
+                          : t(
+                              "Could not connect just now. Try again once connected; an earlier save remains protected.",
+                            )}
+          {error === "Unavailable" && (!ready || roster === null) && online && !busy ? (
+            <>
+              {" "}
+              <button
+                type="button"
+                className="store-setup-inline-action"
+                onClick={() => setReadAgain((n) => n + 1)}
+              >
+                {t("Try again")}
+              </button>
+            </>
+          ) : null}
         </p>
       )}
       {pending && (
