@@ -139,19 +139,21 @@ it("uses the accepted product, exact binding/options and target quantity with cu
 it("WP-2423 M35 (staff round round trips): one validation's reads run inside `together`, each still read, its answer and failure its own", async () => {
   const inside: string[] = [];
   let open = false;
-  const together = vi.fn(async <T>(work: () => Promise<T>) => {
+  const calls = vi.fn();
+  const together = async <T>(work: () => Promise<T>): Promise<T> => {
+    calls();
     open = true;
     try {
       return await work();
     } finally {
       open = false;
     }
-  });
+  };
   f.resolve.mockImplementation(async () => (inside.push("catalog:" + open), snapshot()));
   f.observe.mockImplementation(async () => (inside.push("stock:" + open), { status: "Available" }));
   const { service } = setup(together);
   expect((await service.validateSelection(input, context)).status).toBe("Accepted");
-  expect(together).toHaveBeenCalledTimes(1);
+  expect(calls).toHaveBeenCalledTimes(1);
   expect(inside).toEqual(["catalog:true", "stock:true"]);
   // A read that failed fails the validation with its own error.
   f.observe.mockRejectedValueOnce(new Error("unavailable"));
