@@ -10,6 +10,7 @@ import {
   appendStoreConfigurationHistory,
   storeConfigurationPendingText,
   storeConfigurationNextStep,
+  storeConfigurationResultStands,
 } from "./StoreConfigurationOrdinaryPanel.js";
 import { setLanguageForTest } from "./i18n/i18n.js";
 import {
@@ -689,4 +690,17 @@ it("b25: a step the server refuses outright (Invalid, Denied, Conflict, a named 
     expect(journal.release).not.toHaveBeenCalled();
     expect(pending).toEqual(prepared.cursor);
   }
+});
+
+it("b28 (v15 live26): a re-read that finds the same change keeps the result just shown; a moved one drops it", async () => {
+  const cursor = await original(id(96)),
+    created = await workspace(cursor),
+    again = await workspace(cursor),
+    moved = await workspace(cursor, false, true);
+  // The connection came back and the status was read again: nothing changed, so
+  // "Change created from the saved setup, not yet sent for approval." still describes it.
+  expect(storeConfigurationResultStands(created, again)).toBe(true);
+  // Someone else's change (or a step on another device) moved it on: the result no longer applies.
+  expect(storeConfigurationResultStands(created, moved)).toBe(false);
+  expect(storeConfigurationResultStands(null, again)).toBe(false);
 });

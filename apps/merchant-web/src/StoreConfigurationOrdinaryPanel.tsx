@@ -405,6 +405,17 @@ const messages: Record<StoreSetupClientError["code"], string> = {
     "This setup offers pickup, and pickup guests call the store about allergies or their order, so it was not sent. Add the store's phone number in Store details, or take pickup out of the services this setup offers, then send it again.",
   ),
 };
+/**
+ * b28 (v15 live26): a re-read (the connection coming back, or "check the latest approval") finds
+ * the change where the last step left it, so that step's result still describes it and stays on
+ * screen; once the change moved on (someone approved it, or changed it elsewhere) it is dropped.
+ */
+export function storeConfigurationResultStands(
+  before: Pick<StoreConfigurationOrdinaryWorkspace, "expectedHead"> | null,
+  after: Pick<StoreConfigurationOrdinaryWorkspace, "expectedHead">,
+): boolean {
+  return before !== null && canonical(before.expectedHead) === canonical(after.expectedHead);
+}
 /** WP-2423 (v15 D6): the latest configuration was created from exactly this saved setup (its
  * setup revision), so step 8 says what became of it rather than "the configuration changed after
  * this setup was saved". */
@@ -605,12 +616,18 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
     running.current = true;
     setBusy(true);
     setError(null);
-    // WP-2423 (v15 D6): an earlier action's result no longer describes the refreshed state.
-    setNotice(null);
-    setDone(null);
+    const before = workspace;
     try {
       const next = await client.load(props.scope, { signal: c.signal });
-      if (epoch === generation.current && !c.signal.aborted) setWorkspace(next);
+      if (epoch === generation.current && !c.signal.aborted) {
+        // WP-2423 (v15 D6): an earlier action's result no longer describes a state that moved on;
+        // b28: one the re-read finds unchanged still does, so it stays.
+        if (!storeConfigurationResultStands(before, next)) {
+          setNotice(null);
+          setDone(null);
+        }
+        setWorkspace(next);
+      }
     } catch (e) {
       if (epoch === generation.current && !c.signal.aborted) setError(message(e));
     } finally {
