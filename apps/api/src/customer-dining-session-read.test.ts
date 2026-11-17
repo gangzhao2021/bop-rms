@@ -1737,11 +1737,11 @@ describe("b22 DEC-TAX-WHOLE-RECEIPT: what the guest's page says adds up to the b
       tax: cad(449n),
       total: cad(3899n),
     });
-    // The bill's cent sits on one round (largest remainder of the whole-bill tax).
+    // The bill's cent sits on one round: the last (b28; largest remainder put it on round 2).
     expect(view.rounds.map((round) => round.bill?.total.amountMinor)).toEqual([
       1413n,
-      1073n,
-      1413n,
+      1074n,
+      1412n,
     ]);
     reconciles(view);
   });
@@ -1753,13 +1753,13 @@ describe("b22 DEC-TAX-WHOLE-RECEIPT: what the guest's page says adds up to the b
     reconciles(view);
   });
 
-  it("four rounds, round 3 taken off: the round totals ($14.12 / $10.74 / $3.67) add up to the bill", () => {
+  it("four rounds, round 3 taken off: the round totals ($14.13 / $10.74 / $3.66) add up to the bill", () => {
     const view = table([[beef(31)], [soy(41), cucumber(42)], [beef(51)], [soy(61)]], new Set([51]));
     expect(view.rounds.map((round) => round.bill?.total.amountMinor)).toEqual([
-      1412n,
+      1413n,
       1074n,
       undefined,
-      367n,
+      366n,
     ]);
     // Round 3 reads "Not charged" (nothing of it is on the bill).
     expect(view.rounds[2]?.payment).toBe("NotCharged");
@@ -1768,13 +1768,14 @@ describe("b22 DEC-TAX-WHOLE-RECEIPT: what the guest's page says adds up to the b
   });
 
   it("a round whose lines can't be printed as the bill's still totals the bill's share", () => {
-    const view = table([[beef(31)], [soy(41), cucumber(42)], [beef(51)]], new Set(), 1);
+    const view = table([[beef(31)], [soy(41), cucumber(42)], [beef(51)]], new Set(), 2);
     expect(view.summary?.bill).toBeUndefined();
-    // Round 2's card: its dishes before tax, its tax with its share of the bill's rounding.
-    expect(view.rounds[1]?.bill).toBeUndefined();
-    expect(view.rounds[1]?.subtotal).toEqual(cad(950n));
-    expect(view.rounds[1]?.tax).toEqual(cad(123n));
-    expect(view.rounds[1]?.itemsTotal).toEqual(cad(1073n));
+    // Round 3's card (it carries the bill's cent, b28): its dishes before tax, its tax with its
+    // share of the bill's rounding.
+    expect(view.rounds[2]?.bill).toBeUndefined();
+    expect(view.rounds[2]?.subtotal).toEqual(cad(1250n));
+    expect(view.rounds[2]?.tax).toEqual(cad(162n));
+    expect(view.rounds[2]?.itemsTotal).toEqual(cad(1412n));
     expect(view.summary?.ordered?.total).toEqual(cad(3899n));
     expect(view.summary?.taxRounding).toBeUndefined();
     const cards = view.rounds.reduce(

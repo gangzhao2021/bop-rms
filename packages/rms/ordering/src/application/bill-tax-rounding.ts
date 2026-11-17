@@ -21,6 +21,15 @@ export const billTaxRoundingRule = Object.freeze({ code: "DEC_TAX_WHOLE_RECEIPT"
  * differ by a cent from what its Order said it ordered. A bill of one Order allocates as before.
  */
 
+/**
+ * b28 (2026-11-17, v15 live26): the whole bill's rounding sits on one round (the last that can
+ * take it) and every other round keeps the tax it was charged, so a round's figure does not move
+ * by a cent when another round changes. Same bill, same tax and same charge as before; only which
+ * round shows the cent differs. The rule version stays 2 (the database allows 1 and 2); the
+ * sharing is named in the basis, so the version recorded for an unpaid bill is superseded.
+ */
+export const billTaxRoundingAllocation = "LastRound";
+
 export interface BillTaxRoundingItem {
   readonly orderItemReference: string;
   /** Price before tax (subtotal less any discount on the dish's own snapshot). */
@@ -226,7 +235,8 @@ export function computeBillTaxRounding(
         (rounds[index] as BillTaxRoundingRound).orderReference === options.carrierOrderReference,
     );
     // The rounds that do not carry keep what they were charged; the carrier's rounds take the rest
-    // of the whole-bill tax, by largest remainder of their exact shares.
+    // of the whole-bill tax, by largest remainder of their exact shares (rule v1/v2; now only the
+    // fallback when no round can carry it on its own).
     const sharesOver = (carried: readonly boolean[]) => {
       const left =
         whole - kept.reduce((sum, value, position) => (carried[position] ? sum : sum + value), 0n);
@@ -239,15 +249,31 @@ export function computeBillTaxRounding(
         carried[position] ? (carrierShares[next++] ?? 0n) : (kept[position] ?? 0n),
       );
     };
+    // b28 (docs/spec/design/tax-whole-receipt.md "b28"): each round keeps the tax it was charged,
+    // so a round staff did not touch reads the same before and after a dish comes off another
+    // round; the whole bill's rounding sits on one round, the last of the carrier's rounds taxed at
+    // this tax type that can take it without its tax going below nothing (then earlier ones, then
+    // any round of the bill). A comp's cent (b16) is already on the comped round's charged tax, so
+    // the comped round goes down by exactly the comp. A round with nothing taxable left, or charged
+    // below nothing by a comp's cent, keeps that cent given back (it comes to nothing).
+    const stays = indexes.map((_, position) => {
+      const own = charged[position] ?? 0n;
+      return carries[position] && (scaled[position] ?? 0n) > 0n && own >= 0n
+        ? own
+        : (kept[position] ?? 0n);
+    });
+    const onOneRound = (candidates: readonly boolean[]) => {
+      const others = stays.reduce((sum, value) => sum + value, 0n);
+      for (let position = indexes.length - 1; position >= 0; position -= 1) {
+        if (!candidates[position] || (scaled[position] ?? 0n) <= 0n) continue;
+        const share = whole - (others - (stays[position] ?? 0n));
+        if (share >= 0n)
+          return indexes.map((_, other) => (other === position ? share : (stays[other] ?? 0n)));
+      }
+      return null;
+    };
     const everyRound = indexes.map(() => true);
-    const onCarrier = sharesOver(carries);
-    // A carrier with nothing taxable at this tax type, or too little to take the rounding without
-    // its tax going below nothing, can't carry it: it is shared over every round (rule version 1).
-    const shares =
-      carries.some((carries, position) => carries && (scaled[position] ?? 0n) > 0n) &&
-      onCarrier.every((share) => share >= 0n)
-        ? onCarrier
-        : sharesOver(everyRound);
+    const shares = onOneRound(carries) ?? onOneRound(everyRound) ?? sharesOver(everyRound);
     indexes.forEach((index, position) => {
       const amount = (shares[position] ?? 0n) - (charged[position] ?? 0n);
       if (amount === 0n) return;
@@ -268,6 +294,9 @@ export function computeBillTaxRounding(
       .update(
         JSON.stringify([
           billTaxRoundingRule,
+          // b28: how the rounding is shared out over the rounds is part of the basis, so a bill
+          // recorded with the earlier sharing records a new version before it is paid.
+          billTaxRoundingAllocation,
           options.carrierOrderReference ?? null,
           rounds.map((round) => [
             round.orderReference,
