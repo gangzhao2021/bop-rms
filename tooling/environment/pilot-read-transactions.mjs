@@ -152,6 +152,11 @@ export function createInternalReadTransactions(resources) {
         /**
          * Begins the snapshot (once). `settings`: the scope settings the first statement is sent
          * after; returned when they still have to be sent, null when they went with BEGIN.
+         * Review of the staff round round trips: when BEGIN cannot carry them (a scope that is not
+         * a checked UUIDv7, a value the checked text refuses), they are sent right after BEGIN as
+         * part of the opening, and every statement waits for the whole opening: a second statement
+         * sent while BEGIN is in flight still goes after the first statement's settings, as it did
+         * when the snapshot was begun before the work.
          */
         const open = async (settings) => {
           if (opening !== null) {
@@ -174,10 +179,11 @@ export function createInternalReadTransactions(resources) {
                 "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
                 [resources.scope.brandReference, resources.scope.storeReference],
               );
+            if (settings === null) return;
+            if (folded === null) await connection.query(settings.sql, [...settings.values]);
+            memo.observe(settings.sql, settings.values);
           })();
           await opening;
-          if (folded === null) return settings;
-          memo.observe(settings.sql, settings.values);
           return null;
         };
         state.own = async (sql) => {
@@ -207,10 +213,9 @@ export function createInternalReadTransactions(resources) {
           try {
             // A nested read's settings are sent after its savepoint, never with BEGIN: rolled back
             // to that savepoint, the snapshot keeps the scope it had before the nested read.
-            if (opening === null) {
-              if (state.beforeSend === null) settings = await open(settings);
-              else await open(null);
-            }
+            // Every statement waits for the opening (BEGIN and the first statement's settings).
+            if (state.beforeSend === null) settings = await open(settings);
+            else await open(null);
             if (state.beforeSend !== null) await state.beforeSend();
             if (settings !== null) {
               await connection.query(settings.sql, [...settings.values]);

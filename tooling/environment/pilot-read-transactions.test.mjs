@@ -399,3 +399,44 @@ it("WP-2423 M35 (staff round round trips): reads made together share one snapsho
     reads.together(async () => reads.run((tx) => tx.query("SELECT broken", []))),
   ).rejects.toThrow(/^INTERNAL_INVENTORY_READ_UNAVAILABLE$/);
 });
+
+it.each([
+  [
+    "a scope that is not a checked UUIDv7",
+    "synthetic-store",
+    "01a0ff00-0000-7000-8000-000000000004",
+  ],
+  ["a settings value BEGIN cannot carry", "01a0ff00-0000-7000-8000-000000000003", "x', true); --"],
+])(
+  "WP-2423 M35 (review of staff round round trips): with %s, a second statement sent while BEGIN is in flight goes after the first statement's settings",
+  async (_case, store, value) => {
+    let opened = () => undefined;
+    const begun = new Promise((resolve) => (opened = resolve));
+    const connection = {
+      query: vi.fn((sql) =>
+        typeof sql === "string" && sql.startsWith("BEGIN")
+          ? begun.then(() => ({ rows: [] }))
+          : Promise.resolve({ rows: [], rowCount: 0 }),
+      ),
+      release: vi.fn(),
+    };
+    const reads = createInternalReadTransactions({
+      database: { acquire: async () => connection },
+      scope: { brandReference: "01a0ff00-0000-7000-8000-000000000002", storeReference: store },
+    });
+    await reads.run(async (tx) => {
+      await tx.query("SELECT set_config('bop.store_id',$1,true)", [value]);
+      const first = tx.query("SELECT first_value", []);
+      const second = tx.query("SELECT second_value", []);
+      await Promise.resolve();
+      opened();
+      await Promise.all([first, second]);
+    });
+    const sent = connection.query.mock.calls.map(([sql]) => sql);
+    const settings = sent.indexOf("SELECT set_config('bop.store_id',$1,true)");
+    expect(settings).toBeGreaterThan(0);
+    expect(sent.indexOf("SELECT second_value")).toBeGreaterThan(settings);
+    expect(sent.indexOf("SELECT first_value")).toBeGreaterThan(settings);
+    expect(sent.at(-1)).toBe("COMMIT");
+  },
+);
