@@ -1139,7 +1139,11 @@ function newConsecutiveSlot(hold: ConnectionHold): ConsecutiveSlot {
     async join(pool, joinSegment, alone) {
       // A run on another pool, or one started while another of this call is in flight (work that
       // runs its reads concurrently), is a transaction of its own as before.
-      if (inFlight > 0 || (segment !== null && segment.slot.pool !== pool)) return alone();
+      if (
+        inFlight > 0 ||
+        (segment !== null && segment.slot.pool !== null && segment.slot.pool !== pool)
+      )
+        return alone();
       let retried = false;
       for (;;) {
         segment ??= newTogetherSlot(hold);
