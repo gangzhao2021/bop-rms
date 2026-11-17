@@ -3,7 +3,11 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createTenantTransactionRunner,
   isRetryableTransactionConflict,
+  parkConsecutiveSnapshot,
+  runConsecutive,
   runTogether,
+  settleConsecutive,
+  takeConsecutiveSnapshot,
   type DatabaseTransaction,
 } from "./transaction-runner.js";
 import { currentRequestChecks, withVerifiedChecks } from "./request-check-memo.js";
@@ -988,5 +992,216 @@ describe("logs-and-transaction-time snapshot repeats", () => {
     });
     expect(f.query.mock.calls.filter(([sql]) => sql === read)).toHaveLength(2);
     expect(f.query.mock.calls.filter(([sql]) => sql === mode)).toHaveLength(2);
+  });
+});
+
+// WP-2423 M35 (DEC-STAFF-ROUND-FEWER-TRANSACTIONS): a staff round's consecutive steps in fewer
+// transactions, each step checked as its own transaction would be.
+describe("WP-2423 M35 runConsecutive (DEC-STAFF-ROUND-FEWER-TRANSACTIONS)", () => {
+  const sent = (f: ReturnType<typeof fixture>) => f.query.mock.calls.map(([sql]) => sql);
+  const write = "INSERT INTO rms_ordering.order_batch VALUES ($1)";
+  it("read steps share one transaction; a step that wrote commits as it ends; the next begins anew", async () => {
+    const f = fixture();
+    await runConsecutive(async () => {
+      await f.runner.run((t) => t.query("SELECT a", []));
+      await f.runner.run((t) => t.query("SELECT b", []));
+      await f.runner.run((t) => t.query(write, ["b1"]));
+      // Committed before the write's answer is returned.
+      expect(sent(f)).toEqual([setup, "SELECT a", "SELECT b", write, "COMMIT"]);
+      await f.runner.run((t) => t.query("SELECT c", []));
+    });
+    expect(sent(f)).toEqual([
+      setup,
+      "SELECT a",
+      "SELECT b",
+      write,
+      "COMMIT",
+      setup,
+      "SELECT c",
+      "COMMIT",
+    ]);
+    expect(f.connect).toHaveBeenCalledTimes(2);
+    // Outside a call every run is its own transaction again.
+    await f.runner.run((t) => t.query("SELECT d", []));
+    expect(f.connect).toHaveBeenCalledTimes(3);
+  });
+  it("a step that took a lock only it may hold ends the transaction; a shared fence does not", async () => {
+    const f = fixture();
+    const shared = "SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))";
+    const exclusive = "SELECT pg_advisory_xact_lock(hashtextextended($1,0))";
+    await runConsecutive(async () => {
+      await f.runner.run((t) => t.query(shared, ["fence"]));
+      await f.runner.run((t) => t.query(exclusive, ["order"]));
+      await f.runner.run((t) => t.query("SELECT * FROM s.t WHERE id=$1 FOR UPDATE", ["x"]));
+      await f.runner.run((t) => t.query("SELECT a", []));
+    });
+    expect(sent(f)).toEqual([
+      setup,
+      shared,
+      exclusive,
+      "COMMIT",
+      setup,
+      "SELECT * FROM s.t WHERE id=$1 FOR UPDATE",
+      "COMMIT",
+      setup,
+      "SELECT a",
+      "COMMIT",
+    ]);
+  });
+  it("a failed step is rolled back with the reads before it; the next step begins anew", async () => {
+    const f = fixture("SELECT broken");
+    await runConsecutive(async () => {
+      await f.runner.run((t) => t.query("SELECT a", []));
+      await expect(f.runner.run((t) => t.query("SELECT broken", []))).rejects.toMatchObject({
+        code: "TENANT_DATABASE_TRANSACTION_FAILED",
+      });
+      await f.runner.run((t) => t.query("SELECT c", []));
+    });
+    expect(sent(f)).toEqual([
+      setup,
+      "SELECT a",
+      "SELECT broken",
+      "ROLLBACK",
+      setup,
+      "SELECT c",
+      "COMMIT",
+    ]);
+  });
+  it("a step's own refusal undoes what it wrote, as its own transaction's would", async () => {
+    const f = fixture();
+    const refused = new Error("refused");
+    await runConsecutive(async () => {
+      await f.runner.run((t) => t.query("SELECT a", []));
+      await expect(
+        f.runner.run(async (t) => {
+          await t.query(write, ["b1"]);
+          throw refused;
+        }),
+      ).rejects.toBe(refused);
+      // A refusal that sent nothing leaves the transaction to the next step.
+      await expect(
+        f.runner.run(async () => {
+          throw refused;
+        }),
+      ).rejects.toBe(refused);
+      await f.runner.run((t) => t.query("SELECT c", []));
+    });
+    expect(sent(f)).toEqual([setup, "SELECT a", write, "ROLLBACK", setup, "SELECT c", "COMMIT"]);
+  });
+  it("ends the open transaction before a snapshot read or another connection of the pool is taken", async () => {
+    const f = fixture();
+    await runConsecutive(async () => {
+      await f.runner.run((t) => t.query("SELECT a", []));
+      await f.runner.runSnapshot((t) => t.query("SELECT s", []));
+      await f.runner.run((t) => t.query("SELECT b", []));
+      await settleConsecutive(f.pool);
+      expect(sent(f).at(-1)).toBe("COMMIT");
+    });
+    const statements = sent(f);
+    expect(statements.indexOf("COMMIT")).toBeLessThan(statements.indexOf("SELECT s"));
+    expect(statements.filter((sql) => sql === "COMMIT")).toHaveLength(3);
+    expect(f.connect).toHaveBeenCalledTimes(3);
+  });
+  it("a step's own read-only holds for that step: answered there, its write refused, the next may write", async () => {
+    const f = fixture();
+    await runConsecutive(async () => {
+      await f.runner.run(async (t) => {
+        await t.query("SET TRANSACTION READ ONLY", []);
+        return t.query("SELECT a", []);
+      });
+      await expect(
+        f.runner.run(async (t) => {
+          await t.query("SET TRANSACTION READ ONLY", []);
+          return t.query(write, ["b1"]);
+        }),
+      ).rejects.toMatchObject({ code: "TENANT_DATABASE_TRANSACTION_FAILED" });
+      await f.runner.run((t) => t.query(write, ["b2"]));
+    });
+    expect(sent(f).filter((sql) => sql.startsWith("SET TRANSACTION"))).toEqual([]);
+    expect(sent(f).filter((sql) => sql === write)).toHaveLength(1);
+    // Outside a call it is sent as it always was.
+    await f.runner.run((t) => t.query("SET TRANSACTION READ ONLY", []));
+    expect(sent(f)).toContain("SET TRANSACTION READ ONLY");
+  });
+  it("a plain read a later step repeats answers as it did, until a lock or a write; never the clock", async () => {
+    const f = fixture();
+    const clock = "SELECT clock_timestamp() AS at";
+    await runConsecutive(async () => {
+      await f.runner.run((t) => t.query("SELECT a FROM rms_dining.t WHERE id=$1", ["x"]));
+      await f.runner.run((t) => t.query("SELECT a FROM rms_dining.t WHERE id=$1", ["x"]));
+      await f.runner.run((t) => t.query(clock, []));
+      await f.runner.run((t) => t.query(clock, []));
+      await f.runner.run((t) =>
+        t.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", ["fence"]),
+      );
+      await f.runner.run((t) => t.query("SELECT a FROM rms_dining.t WHERE id=$1", ["x"]));
+    });
+    expect(sent(f).filter((sql) => sql.startsWith("SELECT a FROM"))).toHaveLength(2);
+    expect(sent(f).filter((sql) => sql === clock)).toHaveLength(2);
+    // An ordinary transaction outside a call still sends every read its owner did not mark.
+    await f.runner.run(async (t) => {
+      await t.query("SELECT a FROM rms_dining.t WHERE id=$1", ["x"]);
+      await t.query("SELECT a FROM rms_dining.t WHERE id=$1", ["x"]);
+    });
+    expect(sent(f).filter((sql) => sql.startsWith("SELECT a FROM"))).toHaveLength(4);
+  });
+  it("runs started at once inside the call are transactions of their own", async () => {
+    const f = fixture();
+    await runConsecutive(async () => {
+      await Promise.all([
+        f.runner.run((t) => t.query("SELECT a", [])),
+        f.runner.run((t) => t.query("SELECT b", [])),
+      ]);
+    });
+    expect(f.connect).toHaveBeenCalledTimes(2);
+  });
+  it("a read step's borrowed check stays unverified as its own transaction's; a writing step's is sent again", async () => {
+    const f = fixture();
+    const check = "-- bop:stable-read\nSELECT * FROM rms_dining.dining_table WHERE table_id=$1";
+    const plain = check.slice(19);
+    f.query.mockImplementation(async (sql: string) => ({
+      rows: sql === plain ? [{ table: 1 }] : [],
+    }));
+    await withVerifiedChecks(async () => {
+      await f.runner.run((t) => t.query(check, ["t1"]));
+      const before = f.query.mock.calls.length;
+      await runConsecutive(async () => {
+        await f.runner.run((t) => t.query(check, ["t1"]));
+        await f.runner.run((t) => t.query(write, ["b1"]));
+        await f.runner.run(async (t) => {
+          await t.query(check, ["t1"]);
+          return t.query(write, ["b2"]);
+        });
+      });
+      expect(sent(f).slice(before)).toEqual([
+        setup,
+        write,
+        "COMMIT",
+        setup,
+        plain,
+        write,
+        "COMMIT",
+      ]);
+      expect(currentRequestChecks()?.unverifiedChecks()).toEqual([plain]);
+    });
+  });
+  it("keeps a finished read snapshot for the call's next read until a connection is taken", async () => {
+    const f = fixture();
+    const release = vi.fn(async () => undefined);
+    expect(await parkConsecutiveSnapshot({ owner: "a", release })).toBe(false);
+    await runConsecutive(async () => {
+      expect(await parkConsecutiveSnapshot({ owner: "a", release })).toBe(true);
+      expect(takeConsecutiveSnapshot((owner) => owner === "b")).toBeNull();
+      expect(takeConsecutiveSnapshot((owner) => owner === "a")?.owner).toBe("a");
+      expect(await parkConsecutiveSnapshot({ owner: "a", release })).toBe(true);
+      // A step that sends a statement takes a connection: the kept snapshot ends first.
+      await f.runner.run(async (t) => {
+        expect(release).toHaveBeenCalledTimes(1);
+        return t.query("SELECT a", []);
+      });
+      expect(await parkConsecutiveSnapshot({ owner: "a", release })).toBe(true);
+    });
+    // And when the call ends.
+    expect(release).toHaveBeenCalledTimes(2);
   });
 });

@@ -128,6 +128,11 @@ export interface TransactionStatementMemo {
   /** Forgets everything (a failed statement, or anything the memo cannot reason about). */
   forget(): void;
   /**
+   * Forgets the stable read remembered under `key` (`JSON.stringify([scope values in the order
+   * scope() gives them, trimmed SQL, values])`, as the read was keyed); settings and locks stay.
+   */
+  forgetRead(key: string): void;
+  /**
    * WP-2423 M35 (third step): the scope settings the next statement runs under (written last, or
    * held), in a fixed order; a name never set is null.
    */
@@ -414,6 +419,9 @@ export function createTransactionStatementMemo(
     },
     pending: pendingSettings,
     forget,
+    forgetRead: (key: string) => {
+      reads.delete(key);
+    },
     scope: () =>
       Object.freeze(
         [...scopeSettings].map((name): readonly [string, string | null] =>

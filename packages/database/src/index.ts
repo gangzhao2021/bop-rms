@@ -56,7 +56,9 @@ export {
 export {
   createTenantTransactionRunner,
   isRetryableTransactionConflict,
+  runConsecutive,
   runTogether,
+  settleConsecutive,
   type DatabaseTransaction,
   type DatabaseTransactionRunner,
 } from "./transaction-runner.ts";

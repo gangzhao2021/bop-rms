@@ -144,11 +144,15 @@ export function createTenantTransactionRunner(
   // WP-2423 (rush-connection-hold): work that already holds a connection of this pool never waits
   // for a second one (see connection-hold).
   const connections = Object.freeze({
-    connect: () =>
-      acquireTenantConnection(pool, {
+    connect: async () => {
+      // runConsecutive: a read snapshot kept open for the next read ends before this connection
+      // is taken (one connection a request at a time).
+      await releaseParkedSnapshot();
+      return acquireTenantConnection(pool, {
         budgetMs,
         ...(holdsConnectionOf(pool) ? { holding: true } : {}),
-      }),
+      });
+    },
   }) as Pick<Pool, "connect">;
   const run = <T>(
     mode: "ReadWrite" | "Snapshot",
@@ -253,15 +257,34 @@ export function createTenantTransactionRunner(
     mode: "ReadWrite" | "Snapshot",
     action: (transaction: DatabaseTransaction) => Promise<T>,
   ): Promise<T> => {
-    const shared = mode === "ReadWrite" ? together.getStore() : undefined;
+    const found = together.getStore();
+    if (found !== undefined && found.kind === "Consecutive" && !found.closed) {
+      // runConsecutive: a snapshot read takes a connection of its own, so the step transaction
+      // ends first (when no run is in flight) and holds none while it does.
+      if (mode === "Snapshot") return found.settle(pool).then(() => run(mode, action));
+      return found.join(
+        pool,
+        (slot, step) => joinShared(slot, action, step),
+        () => run(mode, action),
+      );
+    }
+    const shared = mode === "ReadWrite" && found?.kind === "Together" ? found : undefined;
     if (shared === undefined || shared.closed || (shared.pool !== null && shared.pool !== pool))
       return run(mode, action);
+    return joinShared(shared, action);
+  };
+  const joinShared = <T>(
+    shared: TogetherSlot,
+    action: (transaction: DatabaseTransaction) => Promise<T>,
+    step?: ConsecutiveStep,
+  ): Promise<T> => {
     const checks = currentRequestChecks();
     return shared.join(
       pool,
       fixedScope,
       () => (checks === undefined ? openShared(shared) : openSharedWhenNeeded(shared, checks)),
       action,
+      step,
     );
   };
   /** As openShared, begun only with its first statement that must reach the database. */
@@ -361,6 +384,25 @@ interface TransactionState {
   /** While true, a statement that may write is refused and fails the transaction. */
   refuseWrites(refuse: boolean): void;
   /**
+   * runConsecutive: the next run's statements are one step of this transaction, checked as a
+   * transaction of their own would be (request checks borrowed until the step's own write fence).
+   */
+  beginStep(): void;
+  /** Whether the step sent a statement, and whether one failed (the transaction is aborted). */
+  stepSent(): boolean;
+  stepFailed(): boolean;
+  /**
+   * Whether a statement the step sent may have written, or took a lock only one transaction may
+   * hold (an exclusive advisory lock, a row lock for update, a table lock): a step that did ends
+   * its transaction, as it did on its own.
+   */
+  stepEndsTransaction(): boolean;
+  /**
+   * The step ended: the request checks it was answered from and never sent again (it never
+   * reached a write fence), no longer remembered by this transaction.
+   */
+  endStep(): readonly { readonly sql: string; readonly values: readonly unknown[] }[];
+  /**
    * v15 2026-11-12: sends the scope settings the caller wrote after the last statement that ran,
    * before COMMIT. A deferred constraint trigger (such as the batch cancellation's revision
    * binding, 1300_036) runs at COMMIT under the scope the transaction then holds, and reads
@@ -373,6 +415,18 @@ interface TransactionState {
   /** The action's error, as the runner reports a failed transaction. */
   report(error: unknown): never;
   close(): void;
+}
+
+/**
+ * runConsecutive: a lock statement whose lock another transaction can never hold beside this one
+ * (an exclusive advisory lock, a row lock for update, a table lock); a shared fence is not one.
+ */
+function exclusiveLock(sql: string): boolean {
+  return (
+    /\bpg_(?:try_)?advisory_xact_lock\s*\(/iu.test(sql) ||
+    /\bFOR\s+(?:NO\s+KEY\s+)?UPDATE\b/iu.test(sql) ||
+    /^\s*LOCK\b/iu.test(sql)
+  );
 }
 
 const runnerSettingsStatement =
@@ -518,6 +572,14 @@ function transactionState(
   // earlier check (`borrowed`); before that statement each borrowed read is sent again for real.
   let fenced = mode !== "ReadWrite" || checks === undefined;
   let writes = 0;
+  // runConsecutive: the current step (the whole transaction unless `beginStep` was called).
+  let stepWrites = 0;
+  let stepUnclassified = false;
+  let stepSentAny = false;
+  let stepLockedAlone = false;
+  /** Whether a step began (runConsecutive), and whether it asked to be read-only. */
+  let inStep = false;
+  let stepReadOnly = false;
   // A statement sent while another was in flight is not classified: it may have written.
   let unclassified = false;
   let writesRefused = false;
@@ -585,7 +647,15 @@ function transactionState(
       // transaction's earlier identical read; the marker itself is not sent.
       const marked = stableReadStatement(sql);
       let statement = marked.sql;
-      let stable = marked.stable;
+      // runConsecutive (DEC-STAFF-ROUND-FEWER-TRANSACTIONS): inside a step, a plain read repeated
+      // in this transaction under the same scope, with no lock taken and nothing of its schemas
+      // written since, answers as it did: the check made once covers the steps after it in the
+      // same transaction. Never a read whose answer changes by itself (the clock), and never one
+      // answered from the request's earlier checks (only owner-marked reads are).
+      let stable =
+        mode === "ReadWrite" && inStep && !marked.stable
+          ? snapshotStableRead(statement, values)
+          : marked.stable;
       let modeRead = false;
       if (mode === "Snapshot") {
         const planned = snapshotReadStatement(statement);
@@ -598,6 +668,19 @@ function transactionState(
         const known = modeRead ? snapshotModes.get(statement.trim()) : undefined;
         if (known !== undefined) return deepCopy(known);
       }
+      // runConsecutive: a step's own "read only" (an owner's read-only query run) holds for that
+      // step, not for the steps after it in this transaction: it is answered here, and the step
+      // can no longer write (refused as a read-only transaction refuses it).
+      if (
+        inStep &&
+        mode === "ReadWrite" &&
+        stepWrites === 0 &&
+        !stepUnclassified &&
+        /^\s*SET\s+TRANSACTION\s+READ\s+ONLY\s*;?\s*$/iu.test(statement)
+      ) {
+        stepReadOnly = true;
+        return Object.freeze({ command: "SET", rowCount: null, rows: [], fields: [] });
+      }
       const implicit = stable && !marked.stable;
       let settings: { readonly sql: string; readonly values: readonly string[] } | null = null;
       let kind: ReturnType<typeof statementKind> | null = null;
@@ -609,7 +692,7 @@ function transactionState(
         if (planned.kind === "Answer") return implicit ? deepCopy(planned.result) : planned.result;
         settings = planned.settings;
         kind = statementKind(statement, values, stable);
-        if (kind === "Write" && writesRefused) {
+        if (kind === "Write" && (writesRefused || stepReadOnly)) {
           // runTogether: another runner's scope already wrote in this one transaction.
           failed = true;
           throw new TenantContextDatabaseError("TENANT_DATABASE_TRANSACTION_FAILED");
@@ -645,17 +728,22 @@ function transactionState(
         noteRequestShed();
         throw new TenantContextDatabaseError("TENANT_DATABASE_TRANSACTION_FAILED", answerTimeSpent);
       }
-      if (kind === null) unclassified = true;
+      if (kind === null) {
+        unclassified = true;
+        stepUnclassified = true;
+      }
       const narrowedMs =
         answerLeft !== undefined && answerLeft < statementLimit - statementLimitStepMs
           ? Math.max(statementLimitFloorMs, Math.floor(answerLeft))
           : null;
       pending += 1;
       try {
+        stepSentAny = true;
         if (narrowedMs !== null) {
           await client.query("SELECT set_config('statement_timeout',$1,true)", [`${narrowedMs}ms`]);
           statementLimit = narrowedMs;
         }
+        if (exclusiveLock(statement)) stepLockedAlone = true;
         if (kind === "Lock" || kind === "Write" || locksRows) {
           // The write fence: borrowed reads are sent again for real before it.
           if (!fenced) {
@@ -668,6 +756,7 @@ function transactionState(
           // The request never answers what this statement may have changed.
           if (kind === "Write") {
             writes += 1;
+            stepWrites += 1;
             checks?.wrote(statement);
           }
         }
@@ -679,7 +768,7 @@ function transactionState(
         const result = await client.query(statement, [...values]);
         memo.observe(statement, values, result, stable);
         if (modeRead) snapshotModes.set(statement.trim(), deepCopy(result as object));
-        if (recordAs !== null && writes === 0) checks?.record(recordAs, statement, result);
+        if (recordAs !== null && stepWrites === 0) checks?.record(recordAs, statement, result);
         return result;
       } catch (error) {
         memo.forget();
@@ -737,6 +826,29 @@ function transactionState(
       ),
     refuseWrites: (refuse) => {
       writesRefused = refuse;
+    },
+    beginStep() {
+      inStep = true;
+      stepLockedAlone = false;
+      stepReadOnly = false;
+      stepSentAny = false;
+      stepWrites = 0;
+      stepUnclassified = false;
+      checkChanged = false;
+      // As a transaction of its own: its checks may be answered from the request's until its own
+      // write fence (the request already forgot what any earlier step wrote).
+      if (mode === "ReadWrite" && checks !== undefined) fenced = false;
+    },
+    stepSent: () => stepSentAny,
+    stepFailed: () => failed || openFailure !== null,
+    stepEndsTransaction: () => stepWrites > 0 || stepUnclassified || stepLockedAlone,
+    endStep() {
+      if (fenced || borrowed.length === 0) return [];
+      const taken = borrowed.splice(0);
+      // What it answered from the request's checks was never read here: a later step reads it
+      // again (or borrows it again), never this transaction's memory of the borrowed answer.
+      for (const read of taken) memo.forgetRead(read.key);
+      return taken.map((read) => ({ sql: read.sql, values: read.values }));
     },
     async beforeCommit() {
       // A read-only snapshot fires no trigger; a failed or busy transaction is settled as such.
@@ -801,6 +913,7 @@ function transactionState(
  * the call's work has finished, or rolls back when the work fails.
  */
 interface TogetherSlot {
+  readonly kind: "Together";
   pool: object | null;
   /** The call's one connection, held from its transaction's start until the call ends. */
   readonly hold: ConnectionHold;
@@ -822,14 +935,19 @@ interface TogetherSlot {
     scope: TenantDatabaseScope,
     open: () => Promise<void>,
     action: (transaction: DatabaseTransaction) => Promise<T>,
+    step?: ConsecutiveStep,
   ): Promise<T>;
 }
+/** runConsecutive: one run joined as a step of the current transaction. */
+type ConsecutiveStep = Readonly<Record<string, never>>;
 // One store for every copy of this module in the process (the pilot loads the built runner while
 // some compositions load the source), so a call is shared whichever copy began it.
 const togetherKey = Symbol.for("bop.database.runTogether");
-const together: AsyncLocalStorage<TogetherSlot> = ((globalThis as Record<symbol, unknown>)[
-  togetherKey
-] ??= new AsyncLocalStorage<TogetherSlot>()) as AsyncLocalStorage<TogetherSlot>;
+const together: AsyncLocalStorage<TogetherSlot | ConsecutiveSlot> = ((
+  globalThis as Record<symbol, unknown>
+)[togetherKey] ??= new AsyncLocalStorage<TogetherSlot | ConsecutiveSlot>()) as AsyncLocalStorage<
+  TogetherSlot | ConsecutiveSlot
+>;
 
 /**
  * WP-2423 M35 (DEC-STAFF-ROUND-SPEED): runs `work` so that its ordinary transactions on one pool
@@ -872,10 +990,39 @@ async function runTogetherOnce<T>(
   work: () => Promise<T>,
   attempt?: { slot: TogetherSlot | null },
 ): Promise<T> {
+  const { slot, end } = newTogetherSlot(newConnectionHold());
+  if (attempt !== undefined) attempt.slot = slot;
+  return runHoldingConnection(slot.hold, () =>
+    together.run(slot, async () => {
+      let failure: { readonly error: unknown } | undefined;
+      let value: T | undefined;
+      try {
+        value = await work();
+      } catch (error) {
+        failure = { error };
+      }
+      // The work's own failure is the answer; a commit failure only when the work succeeded.
+      await end(failure);
+      if (failure !== undefined) throw failure.error;
+      return value as T;
+    }),
+  );
+}
+
+/**
+ * One transaction shared by the ordinary runs that join it (see runTogether), held under `hold`.
+ * `end` closes it: it commits once its runs are done, or rolls back with `failure`, and waits for
+ * that; a commit failure is thrown only when no failure was given.
+ */
+function newTogetherSlot(hold: ConnectionHold): {
+  readonly slot: TogetherSlot;
+  end(failure?: { readonly error: unknown }): Promise<void>;
+} {
   let finish: (failure?: { readonly error: unknown }) => void = () => undefined;
   const slot: TogetherSlot = {
+    kind: "Together",
     pool: null,
-    hold: newConnectionHold(),
+    hold,
     state: null,
     writer: null,
     beforeCommit() {
@@ -887,7 +1034,7 @@ async function runTogetherOnce<T>(
     done: new Promise<void>((resolve, reject) => {
       finish = (failure) => (failure === undefined ? resolve() : reject(failure.error));
     }),
-    async join(pool, scope, open, action) {
+    async join(pool, scope, open, action, step) {
       if (slot.pool === null) {
         slot.pool = pool;
         slot.opening = open();
@@ -897,7 +1044,8 @@ async function runTogetherOnce<T>(
       if (state === null || slot.closed)
         throw new TenantContextDatabaseError("TENANT_DATABASE_TRANSACTION_FAILED");
       state.useScope(scope);
-      const key = JSON.stringify([scope.brandId, scope.storeId ?? null]);
+      if (step !== undefined) state.beginStep();
+      const key = scopeKey(scope);
       const before = state.writes();
       state.refuseWrites(slot.writer !== null && slot.writer.key !== key);
       try {
@@ -914,7 +1062,183 @@ async function runTogetherOnce<T>(
     },
   };
   slot.done.catch(() => undefined);
-  if (attempt !== undefined) attempt.slot = slot;
+  return {
+    slot,
+    async end(failure) {
+      slot.closed = true;
+      finish(failure);
+      if (slot.finished === null) return;
+      try {
+        await slot.finished;
+      } catch (error) {
+        if (failure === undefined) throw error;
+      }
+    },
+  };
+}
+const scopeKey = (scope: TenantDatabaseScope) =>
+  JSON.stringify([scope.brandId, scope.storeId ?? null]);
+
+/**
+ * WP-2423 M35 (DEC-STAFF-ROUND-FEWER-TRANSACTIONS): one `runConsecutive` call. Its ordinary runs
+ * on one pool are steps of one transaction (a segment) instead of one transaction each, until the
+ * segment ends: before a snapshot read or another connection of that pool is taken (`settle`),
+ * before a run under another Brand/Store scope than the one that wrote in it, after a step that
+ * failed, and when the call's work ends.
+ */
+interface ConsecutiveSlot {
+  readonly kind: "Consecutive";
+  readonly hold: ConnectionHold;
+  closed: boolean;
+  join<T>(
+    pool: object,
+    joinSegment: (segment: TogetherSlot, step: ConsecutiveStep) => Promise<T>,
+    alone: () => Promise<T>,
+  ): Promise<T>;
+  /**
+   * Ends the open segment of `pool` (commits it) unless a run of it is in flight, and a read
+   * snapshot kept open for the next read.
+   */
+  settle(pool: object): Promise<void>;
+  /** Keeps a finished read snapshot open for the call's next read (false: end it now). */
+  park(snapshot: ParkedSnapshot): Promise<boolean>;
+  /** The read snapshot kept open, when `matches` it (it is the caller's from then on). */
+  takeParked(matches: (owner: unknown) => boolean): ParkedSnapshot | null;
+  /** Ends a read snapshot kept open. */
+  releaseParked(): Promise<void>;
+  end(): Promise<void>;
+}
+/**
+ * runConsecutive: a read snapshot (pilot read transactions) whose reads ended while nothing else
+ * of the call has taken a connection since: the call's next read of the same database and scope
+ * goes on in it; anything that takes a connection ends it first (`release`, which never fails).
+ */
+export interface ParkedSnapshot {
+  readonly owner: unknown;
+  release(): Promise<void>;
+}
+
+function newConsecutiveSlot(hold: ConnectionHold): ConsecutiveSlot {
+  let segment: ReturnType<typeof newTogetherSlot> | null = null;
+  let inFlight = 0;
+  let parked: ParkedSnapshot | null = null;
+  const releaseParked = async () => {
+    const open = parked;
+    parked = null;
+    if (open !== null) await open.release();
+  };
+  const endSegment = async (failure?: { readonly error: unknown }) => {
+    const open = segment;
+    segment = null;
+    if (open !== null) await open.end(failure);
+  };
+  const slot: ConsecutiveSlot = {
+    kind: "Consecutive",
+    hold,
+    closed: false,
+    async join(pool, joinSegment, alone) {
+      // A run on another pool, or one started while another of this call is in flight (work that
+      // runs its reads concurrently), is a transaction of its own as before.
+      if (inFlight > 0 || (segment !== null && segment.slot.pool !== pool)) return alone();
+      let retried = false;
+      for (;;) {
+        segment ??= newTogetherSlot(hold);
+        const open = segment;
+        const checks = currentRequestChecks();
+        const writesBefore = checks?.writes() ?? 0;
+        inFlight += 1;
+        let failure: unknown;
+        let value: Awaited<ReturnType<typeof joinSegment>> | undefined;
+        let ended = false;
+        try {
+          value = await joinSegment(open.slot, {});
+          ended = true;
+        } catch (error) {
+          failure = error;
+        } finally {
+          inFlight -= 1;
+        }
+        const state = open.slot.state;
+        if (ended) {
+          const borrowed = state?.endStep() ?? [];
+          if (borrowed.length > 0) checks?.unverified(borrowed);
+          // A step that may have written (or took a lock no other transaction may hold beside it)
+          // commits now, as its own transaction would: every step in a segment before it only
+          // read, and nothing is ever undone after it returned.
+          if (state?.stepEndsTransaction() === true) await endSegment();
+          return value as Awaited<ReturnType<typeof joinSegment>>;
+        }
+        const changed = state?.checkChanged() === true;
+        // Undone as its own transaction would be: only reads ran before it in this segment, so
+        // the segment ends with it (also a conflict: its locks are let go before a retry).
+        if (state !== null && (state.stepSent() || state.stepFailed()))
+          await endSegment({ error: failure });
+        // As runWhenNeeded: a check answered from earlier in the request changed before the step
+        // wrote or locked anything, and nothing else of the request wrote since: run it again.
+        if (!changed || retried || checks === undefined || checks.writes() !== writesBefore)
+          throw failure;
+        retried = true;
+      }
+    },
+    async settle(pool) {
+      await releaseParked();
+      if (
+        inFlight > 0 ||
+        segment === null ||
+        (segment.slot.pool !== null && segment.slot.pool !== pool)
+      )
+        return;
+      await endSegment();
+    },
+    async park(snapshot) {
+      // Only between steps: a snapshot read inside a step holds a second connection already.
+      // (Between steps no step transaction holds a connection: taking one ends a kept snapshot,
+      // and the snapshot's own connection was taken after the last one ended, see settle.)
+      if (slot.closed || inFlight > 0) return false;
+      await releaseParked();
+      parked = snapshot;
+      return true;
+    },
+    takeParked(matches) {
+      if (parked === null || !matches(parked.owner)) return null;
+      const taken = parked;
+      parked = null;
+      return taken;
+    },
+    releaseParked,
+    async end() {
+      slot.closed = true;
+      await releaseParked();
+      await endSegment();
+    },
+  };
+  return slot;
+}
+
+/**
+ * WP-2423 M35 (DEC-STAFF-ROUND-FEWER-TRANSACTIONS): runs one request's consecutive steps (`work`)
+ * so that its ordinary transactions on a pool are steps of fewer transactions: each run still
+ * reads and checks everything it does on its own, in order, but a run joins the transaction the
+ * previous one left open instead of beginning one, so the reads before a step that writes are
+ * made in that step's transaction. As separate transactions would be:
+ * - a step that may have written commits when it ends (before its answer is returned), so every
+ *   step before it in its transaction only read, and nothing that returned is ever undone;
+ * - a step that fails rolls its transaction back (the reads before it with it) and the next step
+ *   begins a new one; a conflict so lets go of every lock before anything is tried again;
+ * - each step's request checks are answered and verified as its own transaction's would be (up to
+ *   its own write fence), and one that changed at the fence runs again once (runWhenNeeded);
+ * - nothing waits for a second connection of the pool while one is held: the transaction ends
+ *   before a snapshot read or a connection taken outside the runner (`settleConsecutive`), when
+ *   no step is in flight.
+ * A transaction left open by read-only steps commits when `work` ends, before its answer.
+ *
+ * Restrictions the caller keeps: `work` holds no step open across a wait (a sleep, another
+ * service): the transaction stays open between its steps; runs started concurrently run as
+ * transactions of their own.
+ */
+export async function runConsecutive<T>(work: () => Promise<T>): Promise<T> {
+  if (together.getStore() !== undefined) return work();
+  const slot = newConsecutiveSlot(newConnectionHold());
   return runHoldingConnection(slot.hold, () =>
     together.run(slot, async () => {
       let failure: { readonly error: unknown } | undefined;
@@ -924,18 +1248,45 @@ async function runTogetherOnce<T>(
       } catch (error) {
         failure = { error };
       }
-      slot.closed = true;
-      finish(failure);
-      if (slot.finished !== null) {
-        try {
-          await slot.finished;
-        } catch (error) {
-          // The work's own failure is the answer; a commit failure only when the work succeeded.
-          if (failure === undefined) throw error;
-        }
+      try {
+        await slot.end();
+      } catch (error) {
+        if (failure === undefined) throw error;
       }
       if (failure !== undefined) throw failure.error;
       return value as T;
     }),
   );
+}
+
+/**
+ * runConsecutive: before work of the current call takes a connection of `pool` outside the
+ * runner (a read snapshot, a join), the step transaction it holds open ends, unless one of its
+ * runs is in flight (then the connection is taken as before, as a second one).
+ */
+export async function settleConsecutive(pool: object): Promise<void> {
+  const found = together.getStore();
+  if (found?.kind === "Consecutive" && !found.closed) await found.settle(pool);
+}
+
+/**
+ * runConsecutive: keeps the finished read snapshot `snapshot` open for the call's next read of
+ * the same database and scope; false (the caller ends it) outside a call, inside a step, or when
+ * the call's transaction is open.
+ */
+export function parkConsecutiveSnapshot(snapshot: ParkedSnapshot): Promise<boolean> {
+  const found = together.getStore();
+  return found?.kind === "Consecutive" ? found.park(snapshot) : Promise.resolve(false);
+}
+/** runConsecutive: the read snapshot kept open for this read, if `matches` it. */
+export function takeConsecutiveSnapshot(
+  matches: (owner: unknown) => boolean,
+): ParkedSnapshot | null {
+  const found = together.getStore();
+  return found?.kind === "Consecutive" && !found.closed ? found.takeParked(matches) : null;
+}
+/** runConsecutive: ends a read snapshot kept open (before a connection is taken). */
+export async function releaseParkedSnapshot(): Promise<void> {
+  const found = together.getStore();
+  if (found?.kind === "Consecutive") await found.releaseParked();
 }
