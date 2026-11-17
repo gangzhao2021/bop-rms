@@ -88,13 +88,13 @@ jobs:
           pnpm exec turbo run test
 
   database:
-    name: database ${{ matrix.shard }}/8
+    name: database ${{ matrix.shard }}/10
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     steps:
       - name: Check out repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
@@ -111,7 +111,7 @@ jobs:
       - name: PostgreSQL acceptance shard
         env:
           SHARD: ${{ matrix.shard }}
-          SHARDS: "8"
+          SHARDS: "10"
         run: |
           node -e 'const s=require("./package.json").scripts["test:database"]; const c=[...s.matchAll(/--config (\S+)/g)].map((m)=>m[1]); const mine=c.filter((_,i)=>i%Number(process.env.SHARDS)===Number(process.env.SHARD)-1); if(!c.length||!mine.length) process.exit(1); console.log(mine.join("\n"))' > "$RUNNER_TEMP/configs.txt"
           echo "$(wc -l < "$RUNNER_TEMP/configs.txt") configs in this shard"
