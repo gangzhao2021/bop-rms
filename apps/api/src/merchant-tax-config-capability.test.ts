@@ -14,6 +14,7 @@ import { TaxConfigWorkflowError, parseTaxConfigAuthoringScope } from "@rms/prici
 import {
   createMerchantTaxConfigCapability,
   MerchantTaxConfigFeatureDisabled,
+  MerchantTaxConfigNotOffered,
   type MerchantTaxConfigCapabilityOptions,
 } from "./merchant-tax-config-capability.js";
 const id = (n: number) => "01902421-1215-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -242,12 +243,25 @@ it("preserves an actual Disabled outcome as the bounded Tax subtype", async () =
   await expect(f.guard.holdUntilCommit()).rejects.toBeInstanceOf(MerchantTaxConfigFeatureDisabled);
   expect(() => f.guard.assertFinalized()).toThrow();
 });
-it("does not treat an absent definition as Disabled or Enabled", async () => {
+// b26 (v15 b25 live): the pilot publishes no Tax authoring control (Tax configuration waits on the
+// Owner's evidence), so every owner's authoring scope read answered "unavailable" and logged a
+// fault. Nothing published for the Store or its Brand is "not offered here": neither Enabled nor an
+// actual Disabled decision, and no outage. A definition that exists but cannot be used now (expired,
+// dependencies not met) is still unavailable.
+it("does not treat an absent definition as Disabled or Enabled: it is not offered here", async () => {
   const f = setup([]);
-  await expect(f.guard.holdUntilCommit()).rejects.toMatchObject({
-    code: "TAX_CONFIG_DEPENDENCY_UNAVAILABLE",
-    name: "TaxConfigWorkflowError",
-  });
+  const error: unknown = await f.guard.holdUntilCommit().catch((failure: unknown) => failure);
+  expect(error).toBeInstanceOf(MerchantTaxConfigNotOffered);
+  expect(error).not.toBeInstanceOf(MerchantTaxConfigFeatureDisabled);
+  expect(error).toMatchObject({ code: "TAX_CONFIG_DEPENDENCY_UNAVAILABLE" });
+  expect(() => f.guard.assertFinalized()).toThrow();
+  const expired = setup([definition({ effectiveFrom: after(-60000), effectiveUntil: at })]);
+  const unusable: unknown = await expired.guard
+    .holdUntilCommit()
+    .catch((failure: unknown) => failure);
+  expect(unusable).toMatchObject({ code: "TAX_CONFIG_DEPENDENCY_UNAVAILABLE" });
+  expect(unusable).not.toBeInstanceOf(MerchantTaxConfigNotOffered);
+  expect(unusable).not.toBeInstanceOf(MerchantTaxConfigFeatureDisabled);
 });
 it.each(["pricing.price-book.manage", "catalog.manage"])(
   "refuses another permission %s",

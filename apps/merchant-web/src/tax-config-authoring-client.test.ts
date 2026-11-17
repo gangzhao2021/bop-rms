@@ -336,7 +336,7 @@ it.each([
   [403, "full_sign_in_required", "FullSignInRequired"],
   [400, "tax_config_authoring_invalid", "Invalid"],
   [409, "tax_config_authoring_conflict", "Conflict"],
-  [503, "tax_config_authoring_feature_disabled", "FeatureDisabled"],
+  [409, "tax_config_authoring_feature_disabled", "FeatureDisabled"],
 ])("maps only finite closed rejection %s", async (status, error, code) => {
   const p = await prepared(),
     f = vi.fn<typeof fetch>().mockResolvedValue(response({ error }, Number(status)));

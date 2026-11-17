@@ -52,6 +52,18 @@ export class MerchantTaxConfigFeatureDisabled extends TaxConfigWorkflowError {
     this.name = "MerchantTaxConfigFeatureDisabled";
   }
 }
+/**
+ * b26 (v15 b25 live): no Tax authoring control has ever been written for this Store or its Brand,
+ * so authoring is not offered here (the pilot publishes none while Tax configuration waits on the
+ * Owner's evidence). Neither Enabled nor an actual Disabled decision, and not an outage: the merchant
+ * BFF answers it as turned off. A control that exists but cannot be used now stays unavailable.
+ */
+export class MerchantTaxConfigNotOffered extends TaxConfigWorkflowError {
+  constructor() {
+    super("TAX_CONFIG_DEPENDENCY_UNAVAILABLE");
+    this.name = "MerchantTaxConfigNotOffered";
+  }
+}
 const key = "pricing.taxconfig.authoring",
   capability = "pricing.tax_config",
   purpose = "STORE_CAPABILITY_EVALUATION";
@@ -286,7 +298,8 @@ export function createMerchantTaxConfigCapability(options: MerchantTaxConfigCapa
   );
   async function evaluate() {
     let source: FeatureControlAdministrationSource | undefined,
-      disabled = false;
+      disabled = false,
+      notOffered = false;
     try {
       const heldContext = await current();
       let firstClock = true,
@@ -344,6 +357,15 @@ export function createMerchantTaxConfigCapability(options: MerchantTaxConfigCapa
           throw new MerchantTaxConfigFeatureDisabled();
         }
         if (
+          decision.reason === "Unavailable" &&
+          decision.controlReference === null &&
+          source !== undefined &&
+          source.definitions.length === 0
+        ) {
+          notOffered = true;
+          throw new MerchantTaxConfigNotOffered();
+        }
+        if (
           decision.reason !== "Enabled" ||
           decision.backendExecution !== "Allow" ||
           decision.frontendVisibility !== "Show" ||
@@ -375,6 +397,7 @@ export function createMerchantTaxConfigCapability(options: MerchantTaxConfigCapa
       failed = true;
       if (authorityFailure) throw authorityFailure;
       if (disabled) throw new MerchantTaxConfigFeatureDisabled();
+      if (notOffered) throw new MerchantTaxConfigNotOffered();
       if (error instanceof TaxConfigWorkflowError) throw error;
       return keepingCause(fail)(error);
     }

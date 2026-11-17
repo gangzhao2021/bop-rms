@@ -139,7 +139,7 @@ async function fixture(page: Page, reader = () => scope) {
     if (!path.startsWith(prefix)) return route.abort();
     if (state.deny) return respond(route, { error: "request_denied" }, 403);
     if (state.disabled)
-      return respond(route, { error: "tax_config_authoring_feature_disabled" }, 503);
+      return respond(route, { error: "tax_config_authoring_feature_disabled" }, 409);
     const current = (configurationReference: string | null) =>
       parseTaxConfigAuthoringCurrent({
         profile: "TaxConfigAuthoringCurrentV1",

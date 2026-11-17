@@ -1,6 +1,9 @@
 /** Merchant BFF routes: tax configuration authoring. Registered by createMerchantBffRouter (merchant-bff.ts). */
 import express, { type Router } from "express";
-import { MerchantTaxConfigFeatureDisabled } from "./merchant-tax-config-capability.js";
+import {
+  MerchantTaxConfigFeatureDisabled,
+  MerchantTaxConfigNotOffered,
+} from "./merchant-tax-config-capability.js";
 import {
   parsePricingReference,
   parseTaxConfigAuthoringCommand,
@@ -52,14 +55,19 @@ export function installMerchantTaxConfigRoutes(
   options: MerchantBffRouterOptions,
 ): void {
   const taxConfigAuthoringFailure = (response: express.Response, error: unknown): void => {
-    noteFailure(response, error);
-    if (error instanceof MerchantTaxConfigFeatureDisabled) {
+    // b26 (v15 b25 live): turned off, or not offered at this Store, is a closed feature, not an
+    // outage: answered 409 like the other merchant features that are off, and never reported.
+    if (
+      error instanceof MerchantTaxConfigFeatureDisabled ||
+      error instanceof MerchantTaxConfigNotOffered
+    ) {
       response
-        .status(503)
+        .status(409)
         .set("Cache-Control", NO_STORE)
         .json({ error: "tax_config_authoring_feature_disabled" });
       return;
     }
+    noteFailure(response, error);
     const code = error instanceof TaxConfigWorkflowError ? error.code : undefined;
     const invalid = code === "TAX_CONFIG_INPUT_INVALID";
     const forbidden = code === "TAX_CONFIG_PERMISSION_DENIED";

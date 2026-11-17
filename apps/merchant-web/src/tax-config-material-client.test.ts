@@ -337,7 +337,7 @@ it.each([
   [403, "full_sign_in_required", "FullSignInRequired"],
   [409, "tax_config_authoring_conflict", "Conflict"],
   [400, "tax_config_authoring_invalid", "Invalid"],
-  [503, "tax_config_authoring_feature_disabled", "FeatureDisabled"],
+  [409, "tax_config_authoring_feature_disabled", "FeatureDisabled"],
 ])("maps finite %s errors without source echo", async (status, error, code) => {
   const p = await createTaxConfigMaterialClient().prepare(scope, command);
   await expect(

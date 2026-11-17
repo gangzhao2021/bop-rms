@@ -634,11 +634,12 @@ export async function exerciseTaxConfigRuntimeHttp(context) {
     );
     stage = "MissingFeature";
     const beforeFeature = await counts();
+    // b26 (v15 b25 live): no Tax authoring control written for the Store or its Brand (the pilot
+    // publishes none) is "not offered here": answered as turned off, never as an outage.
     await withHttp(author, async (send) => {
-      assert.equal(
-        (await send("scope", undefined, { query: "?storeReference=" + store })).status,
-        503,
-      );
+      const missing = await send("scope", undefined, { query: "?storeReference=" + store });
+      assert.equal(missing.status, 409);
+      assert.equal(missing.body.error, "tax_config_authoring_feature_disabled");
     });
     assert.deepEqual(await counts(), beforeFeature);
     stage = "FeatureDefinition";
@@ -1702,7 +1703,8 @@ export async function exerciseTaxConfigRuntimeHttp(context) {
       });
       const disabledCounts = await counts();
       const disabled = await send("scope", undefined, { query: "?storeReference=" + store });
-      assert.equal(disabled.status, 503);
+      // b26: turned off is a closed feature, not an outage.
+      assert.equal(disabled.status, 409);
       assert.equal(disabled.body.error, "tax_config_authoring_feature_disabled");
       assert.deepEqual(await counts(), disabledCounts);
       stage = "FinePermissionWithdrawn";

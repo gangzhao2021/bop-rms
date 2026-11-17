@@ -1160,7 +1160,7 @@ export function createTaxConfigAuthoringClient(fetcher: typeof fetch = fetch) {
           definitive = true;
           return fail("Conflict");
         }
-        if (response.status === 503 && error === "tax_config_authoring_feature_disabled") {
+        if (response.status === 409 && error === "tax_config_authoring_feature_disabled") {
           definitive = true;
           return fail("FeatureDisabled");
         }

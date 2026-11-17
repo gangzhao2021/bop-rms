@@ -1,4 +1,7 @@
-import { MerchantTaxConfigFeatureDisabled } from "./merchant-tax-config-capability.js";
+import {
+  MerchantTaxConfigFeatureDisabled,
+  MerchantTaxConfigNotOffered,
+} from "./merchant-tax-config-capability.js";
 import {
   parseTaxConfigClassificationChoices,
   parseTaxConfigAuthoringSimulation,
@@ -322,7 +325,7 @@ function endpoints() {
     resolve: vi.fn<Port["resolve"]>(async () => receipt(true)),
   };
 }
-async function serve(port?: Port) {
+async function serve(port?: Port, onUnexpectedFailure?: (route: string, error: unknown) => void) {
   const unused = async (): Promise<never> => {
     throw new Error("Unconfigured unrelated transport service");
   };
@@ -370,6 +373,7 @@ async function serve(port?: Port) {
         exactOrigin: "https://merchant.invalid",
         acceptedHost: "merchant.invalid",
         ...(port ? { taxConfigAuthoring: port } : {}),
+        ...(onUnexpectedFailure ? { onUnexpectedFailure } : {}),
       },
     }),
     server = app.listen(0, "127.0.0.1");
@@ -676,8 +680,47 @@ it("preserves actual Disabled capability distinctly from an unavailable definiti
     query: "?storeReference=" + id(3),
     customHeaders,
   });
-  expect(reply.status).toBe(503);
+  expect(reply.status).toBe(409);
   expect(reply.body).toEqual({ error: "tax_config_authoring_feature_disabled" });
+});
+// b26 (v15 b25 live): owners at Stores where Tax authoring is not offered got 503
+// tax_config_authoring_unavailable and a level-50 line per read. Not offered answers as turned off:
+// a closed feature, not an outage, and nothing is reported as a failure.
+it("answers a Store where Tax authoring is not offered as turned off, never as an outage", async () => {
+  for (const closed of [
+    new MerchantTaxConfigNotOffered(),
+    new MerchantTaxConfigFeatureDisabled(),
+  ]) {
+    const port = endpoints();
+    port.current.mockRejectedValue(closed);
+    const unexpected = vi.fn();
+    const reply = await send(await serve(port, unexpected), {
+      method: "GET",
+      route: "scope",
+      query: "?storeReference=" + id(3),
+      customHeaders: Object.fromEntries(
+        Object.entries(headers).filter(([name]) => name !== "X-BOP-Store-Setup-Scope"),
+      ),
+    });
+    expect(reply.status).toBe(409);
+    expect(reply.body).toEqual({ error: "tax_config_authoring_feature_disabled" });
+    expect(unexpected).not.toHaveBeenCalled();
+  }
+  // A real dependency failure is still the outage it is, and is reported.
+  const port = endpoints();
+  port.current.mockRejectedValue(new TaxConfigWorkflowError("TAX_CONFIG_DEPENDENCY_UNAVAILABLE"));
+  const unexpected = vi.fn();
+  const reply = await send(await serve(port, unexpected), {
+    method: "GET",
+    route: "scope",
+    query: "?storeReference=" + id(3),
+    customHeaders: Object.fromEntries(
+      Object.entries(headers).filter(([name]) => name !== "X-BOP-Store-Setup-Scope"),
+    ),
+  });
+  expect(reply.status).toBe(503);
+  expect(reply.body).toEqual({ error: "tax_config_authoring_unavailable" });
+  expect(unexpected).toHaveBeenCalledTimes(1);
 });
 
 it("shows Tax navigation only after actual current admission and removes refused configured entries", async () => {
