@@ -306,3 +306,19 @@ it("keeps the failed-payment reason and never reads Payment starts for it", asyn
   expect(result.record.reasonCode).toBe("CHECKOUT_DEADLINE_REACHED");
   expect(mocks.intent).not.toHaveBeenCalled();
 });
+
+it("WP-2423 batch 28: takes Ordering's disposition fence before Payment's Order fence (v15 40P01)", async () => {
+  const f = composition();
+  await f.service.cancel(f.input);
+  const calls = f.tx.query.mock.calls as unknown as [string, unknown[]][];
+  const disposition = calls.findIndex(
+    ([text, values]) =>
+      /pg_advisory_xact_lock/u.test(text) &&
+      String(values?.[0]).startsWith("OrderingOrderDisposition:") &&
+      String(values?.[0]).endsWith(":" + f.f.expiry.orderReference),
+  );
+  expect(disposition).toBeGreaterThanOrEqual(0);
+  expect(f.tx.query.mock.invocationCallOrder[disposition]).toBeLessThan(
+    mocks.fence.mock.invocationCallOrder[0] ?? 0,
+  );
+});

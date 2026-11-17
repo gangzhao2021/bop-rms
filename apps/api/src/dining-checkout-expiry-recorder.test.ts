@@ -227,3 +227,19 @@ it("WP-2423 item 3: fails closed when Ordering has no Dining window for the roun
   );
   expect(mocks.append).not.toHaveBeenCalled();
 });
+
+it("WP-2423 batch 28: takes Ordering's disposition fence before Payment's Order fence (v15 40P01)", async () => {
+  const f = fixture();
+  await f.recorder.record(f.input);
+  const calls = f.tx.query.mock.calls as unknown as [string, unknown[]][];
+  const disposition = calls.findIndex(
+    ([text, values]) =>
+      /pg_advisory_xact_lock/u.test(text) &&
+      String(values?.[0]).startsWith("OrderingOrderDisposition:") &&
+      String(values?.[0]).endsWith(":" + id(5)),
+  );
+  expect(disposition).toBeGreaterThanOrEqual(0);
+  expect(f.tx.query.mock.invocationCallOrder[disposition]).toBeLessThan(
+    mocks.acquire.mock.invocationCallOrder[0] ?? 0,
+  );
+});

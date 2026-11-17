@@ -4,6 +4,7 @@ import { canonicalizeRfc8785 } from "@bop/audit";
 import { readClosedRecord } from "@bop/identity";
 import { createPostgresPaymentOperationFence } from "@rms/payment";
 import {
+  acquireOrderDispositionFence,
   parseCheckoutSessionAllocation,
   parseOrderingReference,
   parseOrderBatchCheckoutExpiry,
@@ -51,6 +52,14 @@ export function createDiningCheckoutExpiryRecorder(options: {
           const authorize = async (tx: ConsumerTransaction) =>
             tx === transaction && (await options.authorize(tx, identity));
           if (!(await authorize(transaction))) return fail();
+          // WP-2423 batch 28 (v15 18:35:17, 40P01): Ordering's disposition fence before Payment's
+          // Order fence, as on every other path of one Order (Ordering, then Payment); a close
+          // check holding the first while this took the second first deadlocked.
+          await acquireOrderDispositionFence(transaction, {
+            brandReference: scope.brandReference,
+            storeReference: scope.storeReference,
+            orderReference: identity.orderReference,
+          });
           const fence = createPostgresPaymentOperationFence({
             brandReference: scope.brandReference,
             storeReference: scope.storeReference,

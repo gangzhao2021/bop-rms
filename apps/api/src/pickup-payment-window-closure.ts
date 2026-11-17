@@ -7,6 +7,7 @@ import {
   parsePaymentIntentCreationRecord,
 } from "@rms/payment";
 import {
+  acquireOrderDispositionFence,
   createPostgresPickupPaymentWindowCandidates,
   createPostgresPickupPaymentWindowClosure,
   loadPickupPaymentWindowClosure,
@@ -166,6 +167,13 @@ export function createPickupPaymentWindowClosure(options: {
           tx === transaction && (await options.authorize(tx, identity)) === true;
         if (!(await allowed(transaction))) return fail();
         const started = parseOrderingInstant(options.now());
+        // WP-2423 batch 28 (v15 40P01): Ordering's disposition fence before Payment's Order fence,
+        // as on every other path of one Order (Ordering, then Payment).
+        await acquireOrderDispositionFence(transaction, {
+          brandReference: scope.brandReference,
+          storeReference: scope.storeReference,
+          orderReference: identity.orderReference,
+        });
         await createPostgresPaymentOperationFence({
           brandReference: scope.brandReference,
           storeReference: scope.storeReference,

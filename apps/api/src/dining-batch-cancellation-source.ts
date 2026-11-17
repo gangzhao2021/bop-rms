@@ -6,6 +6,7 @@ import {
   parseDiningCheckoutCommitment,
 } from "@rms/dining";
 import {
+  acquireOrderDispositionFence,
   createPostgresOrderBatchCheckoutExpiryStore,
   diningCheckoutPaymentWindowMinutes,
   loadDiningBatchPaymentWindowStart,
@@ -53,6 +54,13 @@ export function createDiningBatchCancellationSource(options: {
         if (!(await allowed(transaction))) return unavailable();
         const round = await loadDiningRoundPaymentIdentity(transaction, scope, identity);
         if (round === null) return null;
+        // WP-2423 batch 28 (v15 40P01): Ordering's disposition fence before Payment's Order fence,
+        // as on every other path of one Order (Ordering, then Payment).
+        await acquireOrderDispositionFence(transaction, {
+          brandReference: scope.brandReference,
+          storeReference: scope.storeReference,
+          orderReference: identity.orderReference,
+        });
         await createPostgresPaymentOperationFence({
           ...scope,
           now: options.now,
@@ -136,6 +144,13 @@ export function createDiningBatchCancellationSource(options: {
           !(await allowed(transaction))
         )
           return unavailable();
+        // WP-2423 batch 28 (v15 40P01): Ordering's disposition fence before Payment's Order fence,
+        // as on every other path of one Order (Ordering, then Payment).
+        await acquireOrderDispositionFence(transaction, {
+          brandReference: scope.brandReference,
+          storeReference: scope.storeReference,
+          orderReference: expiry.orderReference,
+        });
         await createPostgresPaymentOperationFence({
           ...scope,
           now: options.now,
