@@ -789,7 +789,7 @@ const b24Words = {
       "This store does not offer Pickup. Untick it here, or offer it in step 2, Services.",
     fix: "Service charge applies to Pickup orders, but this setup does not offer Pickup.",
     regions: ["Fees", "Tax", "Payment methods", "Receipts"],
-    known: "Customer online card",
+    known: "Guests pay online by card",
     taxClassName: "Standard taxable",
     tax: "Orders are taxed with the tax settings this store uses today.",
     save: "Save as draft",
@@ -914,7 +914,7 @@ for (const lang of ["en", "zh-Hans"] as const)
       .getByRole("button", { name: zh ? "3. 费用、税务和付款" : "3. Fees, tax and payment" })
       .click();
     await expect(
-      page.getByRole("checkbox", { name: zh ? "顾客在线刷卡" : "Customer online card" }),
+      page.getByRole("checkbox", { name: zh ? "顾客在线刷卡" : "Guests pay online by card" }),
     ).toBeChecked();
     await expect(page.locator(".store-setup-step-content")).not.toContainText(failures, {
       useInnerText: true,

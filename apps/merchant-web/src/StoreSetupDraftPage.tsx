@@ -3726,9 +3726,10 @@ export function StorePaymentConfigurationEditor({
     }
   };
   const labels: readonly [keyof StorePaymentConfigurationContent, string][] = [
-    ["customerOnlineCardEnabled", t("Customer online card")],
-    ["staffTerminalCardPresentEnabled", t("Staff terminal card present")],
-    ["staffTerminalInteracEnabled", t("Staff terminal Interac")],
+    // b25 (v15 live check of b24): what a guest or a cashier does, never the channel's name.
+    ["customerOnlineCardEnabled", t("Guests pay online by card")],
+    ["staffTerminalCardPresentEnabled", t("Card on the store terminal")],
+    ["staffTerminalInteracEnabled", t("Interac on the store terminal")],
   ];
   // b22: what differs from the saved payment methods (none saved yet: every method is off).
   const savedFields = view?.snapshot?.content ?? noPaymentChannels;

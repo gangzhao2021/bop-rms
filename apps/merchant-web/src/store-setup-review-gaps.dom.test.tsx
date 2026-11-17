@@ -306,6 +306,46 @@ it("b22: unticking a payment method reports it as unsaved, Discard puts it back,
   expect(reports.at(-1)).toEqual([]);
 });
 
+it("b25: payment methods read as plain business words in English and Chinese", async () => {
+  vi.spyOn(Date, "now").mockReturnValue(Date.parse(at));
+  const saved = parseStorePaymentConfigurationCurrent(
+    {
+      profile: "StorePaymentConfigurationCurrentV1",
+      ...scope,
+      snapshot: null,
+      observedAt: at,
+      validUntil: "2026-11-15T17:32:05.000Z",
+      providerReadiness: "NotEvaluated",
+    },
+    id(3),
+    scope,
+  );
+  const labels = async (language: "en" | "zh-Hans") => {
+    setLanguageForTest(language);
+    const { container } = await mount(
+      <StorePaymentConfigurationEditor
+        scope={scope}
+        csrf={csrf}
+        onSelect={vi.fn()}
+        client={{ load: vi.fn(async () => saved) } as never}
+        journalFactory={() => ({ load: async () => null }) as never}
+      />,
+    );
+    await settle();
+    const found = [...container.querySelectorAll("label")]
+      .filter((label) => label.querySelector('input[type="checkbox"]'))
+      .map((label) => label.textContent);
+    document.body.replaceChildren();
+    return found;
+  };
+  expect(await labels("en")).toEqual([
+    "Guests pay online by card",
+    "Card on the store terminal",
+    "Interac on the store terminal",
+  ]);
+  expect(await labels("zh-Hans")).toEqual(["顾客在线刷卡", "门店刷卡机刷卡", "门店刷卡机 Interac"]);
+});
+
 it("b22: Review lists unsaved payment methods as a change not saved yet, never as Payment unchanged", () => {
   setLanguageForTest("zh-Hans");
   const content = setup({ paymentConfigurationReference: { state: "Configured", value: id(10) } });

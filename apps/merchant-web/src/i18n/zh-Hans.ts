@@ -1596,7 +1596,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Customer no longer wants it": "顾客不想要了",
   "Customer not coming? If they told you, choose Customer request. If they just never came, keep the order: once it is ready and the one-hour pickup hold has passed, close it as not collected in":
     '顾客不来了？如果顾客告诉你了，请选择"顾客要求"。如果只是一直没来，请保留订单：做好且超过一小时取餐保留时间后，在以下位置作为未取餐关闭：',
-  "Customer online card": "顾客在线刷卡",
+  "Guests pay online by card": "顾客在线刷卡",
   "Customer ordering app": "顾客点单应用",
   "Customer receipts show no GST/HST registration number. If the business is registered for GST/HST (or QST/PST), the Owner adds the number so receipts can be used as tax receipts.":
     "顾客收据不显示 GST/HST 登记号。如果商家已登记 GST/HST（或 QST/PST），请店主添加号码，以便收据可作为税务收据使用。",
@@ -4164,8 +4164,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "之后员工可以在这里用 6 位 PIN 换成自己。退款、价格和员工更改仍需要完整登录。请在共享平板本身上操作，不要在个人手机或电脑上操作。",
   "Staff member": "员工",
   "Staff sign-in": "员工登录",
-  "Staff terminal Interac": "员工终端 Interac",
-  "Staff terminal card present": "员工终端刷卡（实体卡）",
+  "Interac on the store terminal": "门店刷卡机 Interac",
+  "Card on the store terminal": "门店刷卡机刷卡",
   "Staff unavailable": "员工暂不可用",
   "Stale data · refresh before relying on operational status.":
     "数据可能已过时 · 依赖运营状态前请先刷新。",

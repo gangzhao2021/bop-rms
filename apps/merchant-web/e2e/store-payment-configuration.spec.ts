@@ -365,8 +365,8 @@ test("@production Store payment rules save, explicit selection, setup resume ret
 }) => {
   const f = await install(page);
   await open(page);
-  await page.getByRole("checkbox", { name: "Staff terminal card present", exact: true }).check();
-  await page.getByRole("checkbox", { name: "Staff terminal Interac", exact: true }).check();
+  await page.getByRole("checkbox", { name: "Card on the store terminal", exact: true }).check();
+  await page.getByRole("checkbox", { name: "Interac on the store terminal", exact: true }).check();
   await page.getByRole("button", { name: "Save payment methods", exact: true }).click();
   // b24: saving them here means this setup uses them; Save as draft keeps that.
   await expect(
@@ -396,7 +396,7 @@ test("@production Store payment rules save, explicit selection, setup resume ret
     page.getByText("This setup still uses the store's earlier payment methods."),
   ).toBeVisible();
   await expect(
-    page.getByRole("checkbox", { name: "Customer online card", exact: true }),
+    page.getByRole("checkbox", { name: "Guests pay online by card", exact: true }),
   ).toBeChecked();
   await expect(
     page.getByRole("button", { name: "Use the current payment methods", exact: true }),
@@ -414,7 +414,7 @@ test("@production payment committed reply loss reload denies recovery then clear
   const f = await install(page);
   f.control.losePayment = true;
   await open(page);
-  await page.getByRole("checkbox", { name: "Customer online card", exact: true }).check();
+  await page.getByRole("checkbox", { name: "Guests pay online by card", exact: true }).check();
   await page.getByRole("button", { name: "Save payment methods", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "Recover original payment save", exact: true }),
@@ -458,7 +458,7 @@ test("@production mobile payment keyboard controls and CSRF denial preserve orig
   await page.setViewportSize({ width: 390, height: 844 });
   const f = await install(page);
   await open(page);
-  const toggle = page.getByRole("checkbox", { name: "Customer online card", exact: true });
+  const toggle = page.getByRole("checkbox", { name: "Guests pay online by card", exact: true });
   await toggle.focus();
   await page.keyboard.press("Space");
   await expect(toggle).toBeChecked();
@@ -501,13 +501,13 @@ test("@production b22: an unticked payment method counts as unsaved in Discard, 
   await open(page);
   const discard = page.getByRole("button", { name: "Discard unsaved changes", exact: true });
   await expect(discard).toBeDisabled();
-  const online = page.getByRole("checkbox", { name: "Customer online card", exact: true });
+  const online = page.getByRole("checkbox", { name: "Guests pay online by card", exact: true });
   await online.check();
   await expect(discard).toBeEnabled();
   await b22Shots(page, "step3-payment-method-unsaved-en");
   await page.getByRole("button", { name: /^4\. Review and publish$/u }).click();
   const row = page.locator(".store-setup-summary__rows > div").filter({ hasText: "Payment" });
-  await expect(row).toContainText("Customer online card: Off → On");
+  await expect(row).toContainText("Guests pay online by card: Off → On");
   await expect(row).toContainText("Not saved yet");
   await expect(page.locator(".store-setup-summary")).not.toContainText(
     /Staying as they are:.*Payment/u,
