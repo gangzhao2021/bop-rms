@@ -279,3 +279,16 @@ it("b21: a language switch that cannot keep an unsaved edit asks before reloadin
     vi.unstubAllGlobals();
   }
 });
+
+// b26 (b25 live): the server-problem notice said 您的网络 while the en text and the offline page
+// say Wi-Fi, and the rest of the app says 你.
+it("b26: the server-problem notice names Wi-Fi and says 你, like the offline page", () => {
+  const notices = Object.entries(zhHans).filter(([english]) =>
+    english.startsWith("Our system has a problem; your Wi-Fi is fine."),
+  );
+  expect(notices).toHaveLength(4);
+  for (const [, chinese] of notices) {
+    expect(chinese).toContain("你的 Wi-Fi 没有问题");
+    expect(chinese).not.toMatch(/您|网络/u);
+  }
+});
