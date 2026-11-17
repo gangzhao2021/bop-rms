@@ -2549,3 +2549,81 @@ for (const language of ["en", "zh-Hans"] as const)
         .map((v) => v.id),
     ).toEqual([]);
   });
+
+// b25 (live24): a round taken off the bill whole read "Round 1 $0.00" with no dishes and no word,
+// while the table above said "Taken off the bill · not charged". Checkout names its dishes with
+// the same words as Orders; the money is unchanged (the round owes nothing, the bill is round 2).
+const shots25 = process.env.B25_SHOTS ?? "test-results-b25/shots";
+for (const language of ["en", "zh-Hans"] as const)
+  test(`@production checkout names the dishes of a round taken off the bill whole (${language})`, async ({
+    page,
+  }) => {
+    if (language === "zh-Hans")
+      await page.addInitScript(() =>
+        window.localStorage.setItem("bop.merchant.language", "zh-Hans"),
+      );
+    await floor(page, { phase: "Closing", version: 7 });
+    await page.route("**/merchant/dining/table-close-plan", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          orderReference: id(3),
+          diningSessionReference: id(2),
+          orderVersion: 4,
+          observedAt: "2026-10-15T19:00:00.000Z",
+          rounds: [],
+          closeBlockers: ["ORDER_BALANCE_UNPAID"],
+          totals: { onlineMinor: "0", cardMachineMinor: "0" },
+        },
+      }),
+    );
+    const bill = unpaidBill("Closing", 7);
+    const [first, second] = bill.rounds;
+    await page.route("**/merchant/dining/table-bill", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          ...bill,
+          rounds: [
+            {
+              ...first,
+              items: [],
+              takenOffDishes: [
+                { orderItemReference: id(901), quantity: 1, displayName: "Shoyu Ramen" },
+                { orderItemReference: id(903), quantity: 2, displayName: "Edamame" },
+              ],
+              subtotalMinor: "0",
+              taxMinor: "0",
+              totalMinor: "0",
+            },
+            second,
+          ],
+          owed: { subtotalMinor: "1000", taxMinor: "130", totalMinor: "1130" },
+          tips: { enabled: false, tierPercents: [12, 18, 20] },
+        },
+      }),
+    );
+    await page.goto("/operations/dining");
+    const zh = language === "zh-Hans";
+    await page.getByRole("button", { name: zh ? "选择 T2" : "Select T2", exact: true }).click();
+    const checkout = page.getByRole("region", { name: zh ? "结账" : "Checkout" });
+    const round1 = checkout.locator(".table-checkout__rounds > li").first();
+    const off = zh ? "已从账单删除 · 不收费" : "Taken off the bill · not charged";
+    await expect(round1).toContainText(zh ? "第 1 轮" : "Round 1");
+    await expect(round1).toContainText("$0.00");
+    await expect(round1.getByRole("listitem")).toHaveCount(2);
+    await expect(round1.getByRole("listitem").first()).toContainText(`Shoyu Ramen · ${off}`);
+    await expect(round1.getByRole("listitem").nth(1)).toContainText(`2 × Edamame · ${off}`);
+    // Not charged: no amount beside them, and the total is round 2's alone.
+    await expect(round1.getByRole("listitem").first()).not.toContainText("$");
+    await expect(checkout).toContainText(zh ? "含税合计$11.30" : "Total with tax$11.30");
+    for (const width of [1440, 1024, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      await round1.scrollIntoViewIfNeeded();
+      await page.screenshot({
+        path: `${shots25}/tables-checkout-taken-off-${language}-${width}.png`,
+        fullPage: true,
+      });
+    }
+    await expectNoInternalText(page, ["Temporarily unavailable"]);
+  });

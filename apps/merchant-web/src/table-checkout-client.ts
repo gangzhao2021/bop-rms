@@ -66,6 +66,15 @@ export interface TableBill {
         readonly points?: boolean;
       };
     }[];
+    /**
+     * b25 (live24): the round's dishes taken off the bill before the table paid; not charged, in
+     * none of the amounts (older server: none).
+     */
+    readonly takenOffDishes: readonly {
+      readonly orderItemReference: string;
+      readonly quantity: number;
+      readonly displayName: string;
+    }[];
     readonly subtotalMinor: string;
     /** Includes the round's share of the bill's tax rounding. */
     readonly taxMinor: string;
@@ -267,6 +276,27 @@ export function parseTableBill(value: unknown): TableBill {
               }),
             ),
           ),
+          takenOffDishes:
+            round.takenOffDishes === undefined
+              ? Object.freeze([])
+              : Array.isArray(round.takenOffDishes) && round.takenOffDishes.length <= 200
+                ? Object.freeze(
+                    round.takenOffDishes.map((item: Record<string, unknown>) =>
+                      Object.freeze({
+                        orderItemReference:
+                          typeof item.orderItemReference === "string" &&
+                          reference.test(item.orderItemReference)
+                            ? item.orderItemReference
+                            : invalid(),
+                        quantity:
+                          Number.isSafeInteger(item.quantity) && (item.quantity as number) >= 1
+                            ? (item.quantity as number)
+                            : invalid(),
+                        displayName: text(item.displayName),
+                      }),
+                    ),
+                  )
+                : invalid(),
           subtotalMinor: amount(round.subtotalMinor),
           taxMinor: amount(round.taxMinor),
           totalMinor: amount(round.totalMinor),

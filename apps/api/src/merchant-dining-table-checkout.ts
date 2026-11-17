@@ -188,6 +188,16 @@ export interface DiningTableBill {
         readonly points?: true;
       };
     }[];
+    /**
+     * b25 (live24): the round's dishes taken off the bill before the table paid (rule 2), so a
+     * round taken off whole never reads as an empty "Round 1 $0.00". Not charged: they are in
+     * none of the amounts.
+     */
+    readonly takenOffDishes?: readonly {
+      readonly orderItemReference: string;
+      readonly quantity: number;
+      readonly displayName: string;
+    }[];
     readonly subtotalMinor: string;
     /** Includes the round's share of the bill's tax rounding (`taxRoundingMinor`). */
     readonly taxMinor: string;
@@ -630,7 +640,7 @@ export async function readDiningTableBill(
     ).flatMap((record) => record.orderItemReferences),
   );
   // One query at a time on the transaction (the pilot's runner refuses overlapping queries).
-  const billPrices = [];
+  const billPrices: Awaited<ReturnType<typeof listOrderItemPrices>>[number][] = [];
   for (const order of billOrders)
     billPrices.push(...(await listOrderItemPrices(tx, owner, order, input.displayLocales ?? "")));
   const prices = billPrices.filter((item) => !removed.has(String(item.orderItemReference)));
@@ -845,6 +855,21 @@ export async function readDiningTableBill(
                   }),
           }),
         ),
+      ),
+      takenOffDishes: Object.freeze(
+        billPrices
+          .filter(
+            (item) =>
+              String(item.orderBatchReference) === batch &&
+              removed.has(String(item.orderItemReference)),
+          )
+          .map((item) =>
+            Object.freeze({
+              orderItemReference: String(item.orderItemReference),
+              quantity: item.quantity,
+              displayName: item.displayName,
+            }),
+          ),
       ),
       subtotalMinor: subtotal.toString(),
       taxMinor: tax.toString(),

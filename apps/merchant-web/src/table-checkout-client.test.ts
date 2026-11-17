@@ -104,3 +104,41 @@ describe("WP-2423 item 8 ⑤: rounds waiting for staff OK at checkout", () => {
     expect(calls[0]?.body).toMatchObject({ owedMinor: "9596", recordedAfterOutage: false });
   });
 });
+
+describe("b25 (live24): dishes taken off the bill, named at checkout", () => {
+  const ref = (n: number) => "01909969-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const round = {
+    roundNumber: 1,
+    items: [],
+    subtotalMinor: "0",
+    taxMinor: "0",
+    totalMinor: "0",
+    paid: false,
+  };
+  const bill = (rounds: unknown[]) => ({
+    diningSessionReference: ref(2),
+    sessionPhase: "Closing",
+    sessionVersion: 7,
+    paymentTiming: "PayLater",
+    tableLabel: "T5",
+    orderReference: ref(3),
+    rounds,
+    owed: { subtotalMinor: "0", taxMinor: "0", totalMinor: "0" },
+    consistent: true,
+    settlement: null,
+  });
+  it("reads them strictly, and none from an older server", () => {
+    expect(parseTableBill(bill([round])).rounds[0]?.takenOffDishes).toEqual([]);
+    const dish = { orderItemReference: ref(9), quantity: 2, displayName: "Edamame" };
+    expect(
+      parseTableBill(bill([{ ...round, takenOffDishes: [dish] }])).rounds[0]?.takenOffDishes,
+    ).toEqual([dish]);
+    for (const broken of [
+      { ...dish, quantity: 0 },
+      { ...dish, orderItemReference: "nine" },
+      { ...dish, displayName: 7 },
+    ])
+      expect(() => parseTableBill(bill([{ ...round, takenOffDishes: [broken] }]))).toThrow();
+    expect(() => parseTableBill(bill([{ ...round, takenOffDishes: "Edamame" }]))).toThrow();
+  });
+});

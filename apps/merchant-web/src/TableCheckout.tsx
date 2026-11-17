@@ -764,6 +764,20 @@ export function TableCheckout({
                       <span>{cad(item.subtotalMinor)}</span>
                     </li>
                   ))}
+                  {/* b25 (live24): a dish taken off the bill reads as on Orders, with no amount:
+                      it is not charged and in none of the round's figures. */}
+                  {round.takenOffDishes.map((item) => (
+                    <li key={item.orderItemReference}>
+                      <span>
+                        {item.quantity > 1 ? `${String(item.quantity)} × ` : ""}
+                        {item.displayName}
+                        <span className="table-checkout__comp">
+                          {" · "}
+                          {t("Taken off the bill · not charged")}
+                        </span>
+                      </span>
+                    </li>
+                  ))}
                 </ul>
               </li>
             ))}

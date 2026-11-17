@@ -3861,6 +3861,20 @@ async function journey(journeyEnding) {
             [2, (round2Minor + rounding2).toString(), false],
           ],
         );
+        // b25 (live24): round 2 taken off whole names its dish (not charged) instead of an empty
+        // "Round 2 $0.00"; a comped dish stays among the charged items instead.
+        assert.deepEqual(open.rounds[0].takenOffDishes, []);
+        assert.deepEqual(
+          open.rounds[1].takenOffDishes.map((dish) => [dish.orderItemReference, dish.quantity]),
+          removedMinor === 0n
+            ? []
+            : [[String(items2[0].orderItemReference), items2[0].quantity ?? 1]],
+        );
+        if (removedMinor !== 0n) {
+          assert.deepEqual(open.rounds[1].items, []);
+          assert.equal(typeof open.rounds[1].takenOffDishes[0].displayName, "string");
+          assert.ok(open.rounds[1].takenOffDishes[0].displayName.length > 0);
+        }
         assert.equal(
           open.owed.totalMinor,
           (round1Minor + round2Minor + rounding1 + rounding2).toString(),
