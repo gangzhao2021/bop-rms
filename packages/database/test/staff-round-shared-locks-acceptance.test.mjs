@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import { AsyncLocalStorage } from "node:async_hooks";
 import nodeConsole from "node:console";
 import { performance } from "node:perf_hooks";
 import { stdout } from "node:process";
+import { setImmediate } from "node:timers";
 import { setTimeout as sleep } from "node:timers/promises";
 import pg from "pg";
 import { it, vi } from "vitest";
@@ -36,10 +38,36 @@ const foldedSteps = [
 ];
 
 /**
- * Every statement this process sends while recording is on, per connection, with when it was
- * sent and when its answer came: to tell which transactions committed after a writer's commit.
+ * Which request sent a statement: the staff round (`round`), the other writer or guest phone
+ * started inside it (`other`, with the backends it used and a hook for its first statement), or
+ * this test's own watchers (`watch`, never recorded). Each runs in its own async context.
  */
-const recording = { on: false, statements: [], lockFailures: [] };
+const side = new AsyncLocalStorage();
+const asRound = (work) => side.run({ name: "round" }, work);
+const watching = (work) => side.run({ name: "watch" }, work);
+/** A statement that takes a shared lock its transaction then holds: FOR SHARE, shared fences. */
+const sharedLock = /\bFOR (KEY )?SHARE\b|pg_advisory_xact_lock_shared|pg_advisory_lock_shared/u;
+const writes = /^\s*(INSERT|UPDATE|DELETE)\b/iu;
+/** Which shared lock a statement takes: the fence's name, or the table read FOR SHARE. */
+function sharedLockName(text, values) {
+  if (/advisory_(xact_)?lock_shared/u.test(text))
+    return "fence:" + String(values?.[0] ?? "").split(":")[0];
+  return "share:" + (/\bFROM\s+([a-z_]+\.[a-z_]+)/u.exec(text)?.[1] ?? "?");
+}
+/**
+ * Every statement this process sends while recording is on, per connection, with who sent it,
+ * when it was sent and when its answer came: to tell which transactions committed after a
+ * writer's commit. `open` follows each connection's open transaction as it is sent (whose, and
+ * whether it took a shared lock); `landed` counts the other side's write commits, and those sent
+ * while a transaction of the round held shared locks.
+ */
+const recording = {
+  on: false,
+  statements: [],
+  lockFailures: [],
+  open: new Map(),
+  landed: { all: 0, shared: 0 },
+};
 /** Deadlock, lock time limit, idle-in-transaction end, statement time limit. */
 const lockStates = new Set(["40P01", "55P03", "25P03", "57014"]);
 const clientQuery = pg.Client.prototype.query;
@@ -48,10 +76,41 @@ let connectionCount = 0;
 pg.Client.prototype.query = function (config, ...rest) {
   const result = clientQuery.call(this, config, ...rest);
   const text = typeof config === "string" ? config : config?.text;
-  if (recording.on && typeof text === "string" && typeof result?.then === "function") {
+  const who = side.getStore();
+  if (
+    recording.on &&
+    who?.name !== "watch" &&
+    typeof text === "string" &&
+    typeof result?.then === "function"
+  ) {
     if (!connections.has(this)) connections.set(this, (connectionCount += 1));
-    const entry = { connection: connections.get(this), text, sentAt: performance.now() };
+    const connection = connections.get(this);
+    const entry = { connection, who: who?.name ?? null, text, sentAt: performance.now() };
     recording.statements.push(entry);
+    if (who?.name === "other") {
+      who.pids.add(this.processID);
+      const first = who.firstSent;
+      who.firstSent = null;
+      first?.();
+    }
+    const head = text.trimStart();
+    const open = recording.open.get(connection);
+    if (/^BEGIN\b/iu.test(head))
+      recording.open.set(connection, { who: entry.who, shared: false, wrote: false, locks: [] });
+    else if (open !== undefined) {
+      if (sharedLock.test(text)) {
+        open.shared = true;
+        open.locks.push(sharedLockName(text, typeof config === "string" ? rest[0] : config.values));
+      }
+      if (writes.test(head)) open.wrote = true;
+      if (/^(COMMIT|ROLLBACK)\b/iu.test(head)) {
+        if (/^COMMIT\b/iu.test(head) && open.wrote && open.who === "other") {
+          recording.landed.all += 1;
+          if (roundHolds(connection).shared) recording.landed.shared += 1;
+        }
+        recording.open.delete(connection);
+      }
+    }
     result.then(
       () => (entry.doneAt = performance.now()),
       (error) => {
@@ -65,6 +124,17 @@ pg.Client.prototype.query = function (config, ...rest) {
   }
   return result;
 };
+/** Whether the round has a transaction open now (on another connection), and one holding shared locks. */
+function roundHolds(except = null) {
+  const held = [...recording.open].filter(
+    ([connection, open]) => connection !== except && open.who === "round",
+  );
+  return {
+    open: held.length > 0,
+    shared: held.some(([, open]) => open.shared),
+    locks: [...new Set(held.flatMap(([, open]) => open.locks))].sort(),
+  };
+}
 /** Each committed transaction's statements, in the order its connection sent them. */
 function committedTransactions(statements) {
   const open = new Map();
@@ -123,7 +193,7 @@ async function deadlocks(admin) {
 async function sampleIdleInTransaction(context, applicationName, work) {
   let sampling = true;
   let longestMs = 0;
-  const sampler = (async () => {
+  const sampler = watching(async () => {
     const watcher = new Client(context.clientConfig);
     await watcher.connect();
     try {
@@ -140,7 +210,7 @@ async function sampleIdleInTransaction(context, applicationName, work) {
     } finally {
       await watcher.end();
     }
-  })();
+  });
   try {
     return { value: await work(), longestIdleMs: () => longestMs };
   } finally {
@@ -151,15 +221,19 @@ async function sampleIdleInTransaction(context, applicationName, work) {
 
 /**
  * Another request's `work`, begun when `go` is first called: created here, outside the staff
- * round's own work, so its transactions are its own. `inside` says it began inside the round.
+ * round's own work, so its transactions are its own. `inside` says it began inside the round;
+ * `sent` settles once it sent its first statement (or ended); `pids` are the backends it used.
  */
 function startedLater(work) {
+  const own = { name: "other", pids: new Set(), firstSent: null };
   const state = { done: false, at: null, ms: null, failed: null, inside: false, began: null };
+  state.pids = own.pids;
+  const sent = new Promise((resolve) => (own.firstSent = resolve));
   let go = () => undefined;
   state.promise = new Promise((resolve) => (go = resolve))
     .then(() => {
       state.began = performance.now();
-      return work();
+      return side.run(own, work);
     })
     .catch((error) => {
       state.failed = error?.code ?? String(error);
@@ -169,6 +243,7 @@ function startedLater(work) {
       state.at = performance.now();
       state.ms = state.at - state.began;
     });
+  state.sent = Promise.race([sent, state.promise]);
   let called = false;
   state.go = (inside = false) => {
     if (called) return;
@@ -179,20 +254,47 @@ function startedLater(work) {
   return state;
 }
 
-/** Waits until a statement of `pool` waits for a lock, or `writer` ended, at most `ms`. */
-async function untilWaitingOrDone(admin, applicationName, done, ms = 400) {
-  const until = performance.now() + ms;
-  while (performance.now() < until && !done()) {
-    const [{ waiting }] = (
-      await admin.query(
-        "SELECT count(*)::int AS waiting FROM pg_locks l JOIN pg_stat_activity a ON a.pid=l.pid WHERE NOT l.granted AND a.datname=current_database() AND a.application_name LIKE $1",
-        [applicationName],
-      )
-    ).rows;
-    if (waiting > 0) return true;
-    await sleep(5);
-  }
-  return false;
+/**
+ * The locks any backend `writer` used waited for (pg_locks, as kind and mode), sampled without
+ * pause on a connection of its own from now until the writer ended.
+ */
+function watchWaits(context, writer) {
+  return watching(async () => {
+    const watcher = new Client(context.clientConfig);
+    await watcher.connect();
+    const on = new Set();
+    try {
+      while (!writer.done) {
+        if (writer.pids.size === 0) {
+          await new Promise((resolve) => setImmediate(resolve));
+          continue;
+        }
+        const { rows } = await watcher.query(
+          "SELECT l.locktype || ':' || l.mode || ' ' || regexp_replace(left(a.query, 60), '\\s+', ' ', 'g') AS lock FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid WHERE l.pid = ANY($1::int[]) AND NOT l.granted",
+          [[...writer.pids]],
+        );
+        for (const { lock } of rows) on.add(lock);
+      }
+    } finally {
+      await watcher.end();
+    }
+    return [...on].sort();
+  });
+}
+
+/**
+ * Starts `writer` inside the round's step: records whether the round held an open transaction
+ * (and one with shared locks) at that moment, and lets the round go on once the writer sent its
+ * first statement, so both run at the same time.
+ */
+async function fireInside(context, writer, record) {
+  const held = roundHolds();
+  record.heldOpen = held.open;
+  record.heldShared = held.shared;
+  record.heldLocks = held.locks;
+  writer.go(true);
+  record.waited = watchWaits(context, writer);
+  await writer.sent;
 }
 
 /**
@@ -253,6 +355,13 @@ const answerOf = (settled) =>
  * pay-at-end table, a staff sign-out and a dish selling out, each started inside one of the
  * round's folded steps, all end in a true answer, without a deadlock, a lock timeout, a second
  * query on the round's connection or a transaction left idle, and with the bill right to the cent.
+ * Each also records, and asserts a floor for, the overlap it claims: the round's transaction holding
+ * shared locks while the other side writes, and a writer that waited on them.
+ *
+ * WP-2423 (staff-round-guest-race): a guest at the table who changes or sends the table's Cart
+ * between the round's pricing and its checkout gets staff a plain answer (the guests' unsent items,
+ * or "a guest is ordering on their phone, send again"), never 503 "a system problem"; the phone's
+ * own Cart read in that moment is read again, never "unavailable".
  *
  * Everything runs through the pilot's real compositions (staff round, customer API, Session
  * sign-out, menu availability) under the restricted NOBYPASSRLS API role holding the rendered
@@ -279,11 +388,13 @@ it("a guest phone sends its own round at the same pay-at-end table while a staff
         decorateStaffRoundPipeline: (real) => triggered(real, trigger, counts),
       });
       const staffRound = () =>
-        counter.staffDiningRound({
-          sessionCookie: server.sessionCookie,
-          csrf: server.csrf,
-          command: roundCommand(store),
-        });
+        asRound(() =>
+          counter.staffDiningRound({
+            sessionCookie: server.sessionCookie,
+            csrf: server.csrf,
+            command: roundCommand(store),
+          }),
+        );
       // The guest's phone: the table guest path (QR entry, join with the table code, binding,
       // the table's Cart, quote, details, checkout) and the customer API's own "Send to kitchen".
       const guests = (await store.counterFor(host)).tableGuestPipeline;
@@ -412,15 +523,19 @@ it("a guest phone sends its own round at the same pay-at-end table while a staff
         status: "Refused",
         code: error?.code ?? error?.name ?? String(error),
         message: String(error?.message ?? "").slice(0, 160),
+        // The owner's answer behind an unexpected one, as its status word only.
+        cause: error?.cause?.code ?? null,
       });
       /** The guest adds a soup on the phone and sends the table's Cart. */
       const guestRound = async () => {
+        let at = "selectCart";
         try {
           const cart = await guests.selectCart(phone, {
             operationReference: reference(),
             requestedAt: now(),
           });
           if (cart.status !== "Selected") return { status: "CartBusy", cart: cart.status };
+          at = "addItem";
           const added = await guests.addItem(phone, {
             operationReference: reference(),
             cartReference: cart.cartReference,
@@ -433,17 +548,22 @@ it("a guest phone sends its own round at the same pay-at-end table while a staff
           });
           if (added.status !== "Applied") return { status: "NotAdded", at: added.status };
           guestAdded += 1;
+          at = "send";
           return await guestSend();
         } catch (error) {
-          return refusal(error);
+          return { ...refusal(error), at };
         }
       };
 
       const deadlocksBefore = await deadlocks(admin);
       recording.lockFailures = [];
+      recording.landed = { all: 0, shared: 0 };
+      /** The phone is its own request: its statements are told from the round's. */
+      const asPhone = (work) => side.run({ name: "other", pids: new Set(), firstSent: null }, work);
       const delays = [0, 20, 60];
       const results = [];
       recording.statements = [];
+      recording.open.clear();
       recording.on = true;
       const sampled = await sampleIdleInTransaction(context, store.apiApplicationName, async () => {
         for (const [index, step] of [...foldedSteps, ...foldedSteps].entries()) {
@@ -451,7 +571,7 @@ it("a guest phone sends its own round at the same pay-at-end table while a staff
           // started inside it would be one of the round's steps).
           let go = () => undefined;
           let started = false;
-          const guest = new Promise((resolve) => (go = resolve)).then(() => guestRound());
+          const guest = new Promise((resolve) => (go = resolve)).then(() => asPhone(guestRound));
           trigger.current = {
             step,
             fire: async () => {
@@ -468,7 +588,7 @@ it("a guest phone sends its own round at the same pay-at-end table while a staff
           // refusal), until nothing of it is left to send.
           const settled = [];
           for (let again = 0; again < 4; again += 1) {
-            const sent = await guestSend().catch(refusal);
+            const sent = await asPhone(guestSend).catch(refusal);
             settled.push(sent.status === "Refused" ? sent : sent.status);
             if (sent.status === "Nothing") break;
             await sleep(100);
@@ -493,55 +613,45 @@ it("a guest phone sends its own round at the same pay-at-end table while a staff
       recording.statements = [];
 
       // Every answer is true: staff were told it was placed, or one of the round's own refusals
-      // (the guests' lines in the cart, the cart in checkout, or "it may still go out"); the phone
-      // was told it was sent, or a conflict it already gives.
-      //
-      // KNOWN, NOT FROM THIS CHANGE (WP-2423 staff-round-guest-race): when the phone changes or
-      // checks out the table's Cart between the round's quote and its checkout, the round's
-      // checkout details save (CART_VERSION_CONFLICT, which checkout-details-service reports as
-      // CART_DEPENDENCY_UNAVAILABLE once it tried to write) or checkout create (INTENT_CONFLICT)
-      // is refused, and staff are told STAFF_ROUND_UNAVAILABLE with nothing sent; the phone's own
-      // cart read during the round's checkout answers "Unavailable". The same answers come with
-      // the round's steps each in a transaction of its own (runConsecutive off). Allowed here
-      // only with those owner causes, and never with a database lock, deadlock or timeout.
-      const knownRaceCodes = new Set([
-        "INTENT_CONFLICT",
-        "CART_DEPENDENCY_UNAVAILABLE",
-        "TABLE_GUEST_PIPELINE_UNAVAILABLE",
-        "COUNTER_GUEST_PIPELINE_UNAVAILABLE",
-      ]);
+      // (the guests' unsent items in the cart, a guest ordering or paying on their phone now, or
+      // "its dishes are still at the table, or went out with another round"); the phone was told
+      // it was sent, or a conflict it already gives. WP-2423 (staff-round-guest-race): a guest who
+      // changed or sent the table's Cart between the round's quote and its checkout is never
+      // "a system problem" (STAFF_ROUND_UNAVAILABLE), and the phone's Cart read is never
+      // "unavailable", since nothing is down here.
       const staffRefusals = new Set([
         "STAFF_ROUND_TABLE_CART_HAS_ITEMS",
         "STAFF_ROUND_TABLE_CHECKOUT_IN_PROGRESS",
         "STAFF_ROUND_NOT_WITHDRAWN",
       ]);
-      const knownRaces = results.filter(
-        (result) =>
-          result.code === "STAFF_ROUND_UNAVAILABLE" ||
-          /_GUEST_PIPELINE_UNAVAILABLE$/u.test(result.phoneAnswer.message ?? ""),
-      ).length;
+      // KNOWN, NOT FROM THIS CHANGE (WP-2423 staff-round-join-race, recorded): rarely, the round's
+      // own table guest's join with the table's code is refused while the phone sends at the
+      // table; staff are told the round did not go out (nothing was sent) and the log names the
+      // join's refusal. Allowed only as that, at most once a run, and never for the Cart race.
+      const faults = unexpected.faults();
+      const joinRefusals = faults.filter(
+        (line) =>
+          /"code":"TABLE_GUEST_PIPELINE_UNAVAILABLE"/u.test(line) &&
+          /"causes":\["Refused[A-Za-z]+"\]/u.test(line) &&
+          !/sqlState/u.test(line),
+      );
+      assert.deepEqual(
+        faults.filter((line) => !joinRefusals.includes(line)),
+        [],
+        "an unexpected failure was logged",
+      );
+      const unavailable = results.filter((result) => result.code === "STAFF_ROUND_UNAVAILABLE");
+      assert.ok(
+        unavailable.length <= Math.min(1, joinRefusals.length),
+        "a staff round was told a system problem: " + JSON.stringify(unavailable) + faults,
+      );
       for (const result of results)
         assert.ok(
           result.staff === "Placed" ||
             staffRefusals.has(result.code) ||
-            result.code === "STAFF_ROUND_UNAVAILABLE",
+            unavailable.includes(result),
           "a staff round answered " + JSON.stringify(result),
         );
-      const faults = unexpected.faults();
-      for (const line of faults) {
-        let logged = {};
-        try {
-          logged = JSON.parse(line);
-        } catch {
-          assert.fail("an unexpected failure was logged: " + line);
-        }
-        assert.ok(
-          logged.sqlState === undefined &&
-            knownRaceCodes.has(logged.code) &&
-            (logged.causes ?? []).every((cause) => /^(Unavailable|UNAVAILABLE)$/u.test(cause)),
-          "an unexpected failure was logged: " + line,
-        );
-      }
       assert.ok(
         results.filter((result) => result.staff === "Placed").length >= 4,
         "staff rounds were placed beside the phone: " + summary,
@@ -557,23 +667,45 @@ it("a guest phone sends its own round at the same pay-at-end table while a staff
             answer.status === 409,
           "the phone was answered " + JSON.stringify(answer) + " in " + summary,
         );
+      // KNOWN, NOT FROM THIS CHANGE (WP-2423 guest-add-cart-moved, recorded): a dish the phone
+      // adds just as the round changes the table's Cart can be answered "couldn't add this right
+      // now" (the menu's check of the Cart found it a version on); nothing was added and the guest
+      // adds it again. Allowed only at that step and with that cause; the phone's Cart reads
+      // (choosing the Cart, sending it) are never "unavailable".
+      const phoneAddRaces = results.filter(
+        (result) =>
+          result.phoneAnswer.status === "Refused" &&
+          result.phoneAnswer.at === "addItem" &&
+          result.phoneAnswer.message === "COUNTER_GUEST_PIPELINE_UNAVAILABLE" &&
+          result.phoneAnswer.cause === "Unavailable",
+      );
       for (const result of results) {
         const phoneAnswer = result.phoneAnswer;
         assert.ok(
           phoneAnswer.status !== "Refused" ||
+            phoneAddRaces.includes(result) ||
             /^(CART_VERSION_CONFLICT|CART_CHECKOUT_IN_PROGRESS|CHECKOUT_IN_PROGRESS|INTENT_CONFLICT|REQUOTE_REQUIRED)$/u.test(
               phoneAnswer.code,
-            ) ||
-            /_GUEST_PIPELINE_UNAVAILABLE$/u.test(phoneAnswer.message ?? ""),
+            ),
           "the phone's own steps answered " + JSON.stringify(result),
         );
         assert.equal(result.settled.at(-1), "Nothing", "the table's Cart was sent: " + summary);
       }
-      // Reported for the WP line: how often the known race came up in this run.
+      // The overlap this test claims: the phone's writes landed while a transaction of the round
+      // held its shared locks (the staff Session, Brand and Store FOR SHARE, the shared fences).
+      const landed = recording.landed;
+      assert.ok(
+        landed.shared >= 5,
+        `the phone's writes landed beside the round's shared locks: ${JSON.stringify(landed)}`,
+      );
+      // Reported for the WP line.
       stdout.write(
         `staff-round-shared-locks: ${results.length} rounds beside the phone, ` +
           `${results.filter((result) => result.staff === "Placed").length} placed, ` +
-          `${sentByPhone.length} phone rounds sent, ${knownRaces} met the known race\n`,
+          `${sentByPhone.length + heldForStaff.length} phone rounds sent, ` +
+          `${landed.shared} of ${landed.all} phone write commits beside the round's shared locks, ` +
+          `${unavailable.length} join refusals, ${phoneAddRaces.length} phone adds met the Cart moving, ` +
+          `answers ${JSON.stringify(results.map((result) => result.code ?? result.staff))}\n`,
       );
 
       // Nothing written twice, nothing lost: every cart line went out once at most; the dishes
@@ -674,14 +806,13 @@ it("a guest phone sends its own round at the same pay-at-end table while a staff
  * and committed after `at`, and whether one of them had read a staff Session to authorize.
  */
 function committedAfter(statements, at) {
-  const writes = (transaction) =>
+  const wrote = (transaction) =>
     transaction.some(
-      ({ text }) =>
-        /^\s*(INSERT|UPDATE|DELETE)\b/iu.test(text) &&
-        !/bop_identity\.authentication_session/u.test(text),
+      ({ text }) => writes.test(text) && !/bop_identity\.authentication_session/u.test(text),
     );
   const late = committedTransactions(statements).filter(
-    (transaction) => transaction.at(-1).doneAt > at && writes(transaction),
+    (transaction) =>
+      transaction[0].who === "round" && transaction.at(-1).doneAt > at && wrote(transaction),
   );
   return {
     staff: late.filter((transaction) =>
@@ -704,7 +835,6 @@ it("a staff sign-out and a dish selling out inside a staff round's folded steps:
     const applications = "wp2423_rsr_api%";
     try {
       const results = [];
-      let waited = 0;
       const counts = { added: 0, removed: 0 };
       const deadlocksBefore = await deadlocks(admin);
       recording.lockFailures = [];
@@ -723,13 +853,13 @@ it("a staff sign-out and a dish selling out inside a staff round's folded steps:
           open.add(store);
           const trigger = { current: null };
           const host = await store.staff(id(0x800 + index * 4), roundPermissions);
-          const opening = await (
-            await store.counterFor(host)
-          ).staffDiningRound({
-            sessionCookie: host.sessionCookie,
-            csrf: host.csrf,
-            command: roundCommand(store),
-          });
+          const opening = await asRound(async () =>
+            (await store.counterFor(host)).staffDiningRound({
+              sessionCookie: host.sessionCookie,
+              csrf: host.csrf,
+              command: roundCommand(store),
+            }),
+          );
           assert.equal(opening.status, "Placed");
           const who = await store.staff(id(0x801 + index * 4), roundPermissions);
           const counter = await store.counterFor(who, {
@@ -738,25 +868,23 @@ it("a staff sign-out and a dish selling out inside a staff round's folded steps:
           // The sign-out is another request: it starts outside the round's own work (a run
           // started inside it would be one of the round's steps).
           const writer = startedLater(() => signOut(store, who));
-          trigger.current = {
-            step,
-            fire: async () => {
-              writer.go(true);
-              if (await untilWaitingOrDone(admin, applications, () => writer.done)) waited += 1;
-            },
-          };
+          const fired = { heldOpen: null, heldShared: null, heldLocks: [], waited: null };
+          trigger.current = { step, fire: () => fireInside(context, writer, fired) };
           recording.statements = [];
+          recording.open.clear();
           recording.on = true;
           let round;
           try {
             round = answerOf(
               (
                 await Promise.allSettled([
-                  counter.staffDiningRound({
-                    sessionCookie: who.sessionCookie,
-                    csrf: who.csrf,
-                    command: roundCommand(store),
-                  }),
+                  asRound(() =>
+                    counter.staffDiningRound({
+                      sessionCookie: who.sessionCookie,
+                      csrf: who.csrf,
+                      command: roundCommand(store),
+                    }),
+                  ),
                 ])
               )[0],
             );
@@ -773,6 +901,10 @@ it("a staff sign-out and a dish selling out inside a staff round's folded steps:
             round: round.status,
             code: round.code,
             inside: writer.inside,
+            heldOpen: fired.heldOpen,
+            heldShared: fired.heldShared,
+            heldLocks: fired.heldLocks,
+            waitedOn: (await fired.waited) ?? [],
             writerMs: Math.round(writer.ms),
             writerFailed: writer.failed,
             session: (
@@ -808,11 +940,13 @@ it("a staff sign-out and a dish selling out inside a staff round's folded steps:
           decorateStaffRoundPipeline: (real) => triggered(real, trigger, counts),
         });
         const round = () =>
-          counter.staffDiningRound({
-            sessionCookie: manager.sessionCookie,
-            csrf: manager.csrf,
-            command: roundCommand(store),
-          });
+          asRound(() =>
+            counter.staffDiningRound({
+              sessionCookie: manager.sessionCookie,
+              csrf: manager.csrf,
+              command: roundCommand(store),
+            }),
+          );
         const availability = createMerchantAvailability({
           persistence: store.persistenceOf(manager),
           authentication: manager.authentication,
@@ -833,14 +967,10 @@ it("a staff sign-out and a dish selling out inside a staff round's folded steps:
         assert.equal((await round()).status, "Placed");
         for (const step of foldedSteps) {
           const sold = startedLater(() => mark("SoldOut"));
-          trigger.current = {
-            step,
-            fire: async () => {
-              sold.go(true);
-              if (await untilWaitingOrDone(admin, applications, () => sold.done)) waited += 1;
-            },
-          };
+          const fired = { heldOpen: null, heldShared: null, heldLocks: [], waited: null };
+          trigger.current = { step, fire: () => fireInside(context, sold, fired) };
           recording.statements = [];
+          recording.open.clear();
           recording.on = true;
           let answer;
           try {
@@ -854,6 +984,7 @@ it("a staff sign-out and a dish selling out inside a staff round's folded steps:
           // A round placed only if its order was written before the dish sold out.
           const placedAfter = committedTransactions(recording.statements).filter(
             (transaction) =>
+              transaction[0].who === "round" &&
               transaction.at(-1).doneAt > sold.at &&
               transaction.some(({ text }) => /INSERT INTO rms_ordering\.order_batch\b/u.test(text)),
           ).length;
@@ -863,6 +994,10 @@ it("a staff sign-out and a dish selling out inside a staff round's folded steps:
             round: answer.status,
             code: answer.code,
             inside: sold.inside,
+            heldOpen: fired.heldOpen,
+            heldShared: fired.heldShared,
+            heldLocks: fired.heldLocks,
+            waitedOn: (await fired.waited) ?? [],
             writerMs: Math.round(sold.ms),
             writerFailed: sold.failed,
             placedAfter,
@@ -880,11 +1015,44 @@ it("a staff sign-out and a dish selling out inside a staff round's folded steps:
         assert.equal(twice, 0);
       });
       const summary = JSON.stringify(results);
+      const waited = results.filter((result) => result.waitedOn.length > 0).length;
       stdout.write(
-        `staff-round-shared-locks writers: ${results.filter((r) => r.inside).length} of ${results.length} inside a round, ${waited} waited for a lock\n` +
+        `staff-round-shared-locks writers: ${results.filter((r) => r.inside).length} of ${results.length} inside a round, ` +
+          `${results.filter((r) => r.heldShared).length} beside the round's shared locks, ${waited} waited for a lock\n` +
           results.map((result) => "  " + JSON.stringify(result)).join("\n") +
           "\n",
       );
+      // The overlap this test claims, as a floor: where a folded step holds the round's shared
+      // locks (the staff Session, Brand and Store FOR SHARE, the shared fences) open into the next
+      // step, each writer fired while they were held, and a sign-out really waited on them.
+      for (const writer of ["SignOut", "SoldOut"])
+        for (const step of ["openTable", "addItem", "submitPayLater"])
+          assert.ok(
+            results.find((result) => result.writer === writer && result.step === step)
+              ?.heldShared === true,
+            `the ${writer} at ${step} fired while the round held shared locks: ${summary}`,
+          );
+      assert.ok(
+        results.some((result) => result.writer === "SignOut" && result.waitedOn.length > 0),
+        "a sign-out waited for the round's locks: " + summary,
+      );
+      // A sold-out mark records an availability rule, whose trigger takes the Catalog availability
+      // fence (CatalogAvailabilityReferenceV1) exclusively. The round takes that fence shared
+      // only inside the Catalog's own availability read, which ends at once: none of its folded
+      // step transactions holds it (checked at each fire below). So no sold-out case can contend
+      // on the Catalog's shared fences, and this test does not claim one: the mark never waits on
+      // a fence (an advisory lock). It may wait on a row the round is writing (its audit chain),
+      // as any two writers of one Brand do.
+      for (const result of results.filter((result) => result.writer === "SoldOut")) {
+        assert.ok(
+          !result.heldLocks.includes("fence:CatalogAvailabilityReferenceV1"),
+          "a folded step held the availability fence: " + JSON.stringify(result),
+        );
+        assert.ok(
+          result.waitedOn.every((lock) => !lock.startsWith("advisory:")),
+          "a sold-out mark waited on a fence: " + JSON.stringify(result),
+        );
+      }
       for (const result of results) {
         // Each writer began inside its round's folded step, ended within its bound (the round's
         // step transaction never holds it past the lock limit) and never failed.
