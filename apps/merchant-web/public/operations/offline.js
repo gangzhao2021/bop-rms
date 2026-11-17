@@ -8,7 +8,7 @@
       title: "现在连不上系统",
       back: "连上后这一页会自动回到系统。",
       offlineTitle: "这台设备没有联网",
-      offlineBack: "请检查无线网络。网络恢复后这一页会自己重新打开。",
+      offlineBack: "请检查 Wi-Fi。网络恢复后这一页会自己重新打开。",
       retry: "再试一次",
       guide: "断网期间怎么做",
       steps: [
@@ -31,7 +31,7 @@
       title: "Can't reach the system right now",
       back: "This page returns to the system by itself once connected.",
       offlineTitle: "This device is offline",
-      offlineBack: "Check the wifi. The page opens again by itself when the network is back.",
+      offlineBack: "Check the Wi-Fi. The page opens again by itself when the network is back.",
       retry: "Try again",
       guide: "While the connection is down",
       steps: [
@@ -171,7 +171,7 @@
         }
       },
       function () {
-        // Nothing answered: this device has no way to the system (wifi off, or no internet).
+        // Nothing answered: this device has no way to the system (Wi-Fi off, or no internet).
         if (!unreachable) {
           unreachable = true;
           state();

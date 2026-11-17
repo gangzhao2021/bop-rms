@@ -8640,13 +8640,13 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "我们这边出了问题。如果刚才在保存，请打开看看是否已经存上，然后再试一次。",
   "This screen isn't working": "这个页面暂时用不了",
   "Showing the last update.": "显示的是最后一次更新。",
-  "Our system has a problem; your wifi is fine. Keep serving: paper slips for new rounds, card machine for payment. This screen keeps trying.":
+  "Our system has a problem; your Wi-Fi is fine. Keep serving: paper slips for new rounds, card machine for payment. This screen keeps trying.":
     "我们的系统出了问题，您的网络没有问题。请继续营业：新点的菜写纸单，付款用刷卡机。这个页面会一直重试。",
-  "Our system has a problem; your wifi is fine. Cook from the paper slips the floor brings. This screen keeps trying.":
+  "Our system has a problem; your Wi-Fi is fine. Cook from the paper slips the floor brings. This screen keeps trying.":
     "我们的系统出了问题，您的网络没有问题。请按前厅送来的纸单做菜。这个页面会一直重试。",
-  "Our system has a problem; your wifi is fine. Hand over by checking the order number and items on the guest's phone or slip. This screen keeps trying.":
+  "Our system has a problem; your Wi-Fi is fine. Hand over by checking the order number and items on the guest's phone or slip. This screen keeps trying.":
     "我们的系统出了问题，您的网络没有问题。交餐时请核对客人手机或小票上的单号和菜品。这个页面会一直重试。",
-  "Our system has a problem; your wifi is fine.": "我们的系统出了问题，您的网络没有问题。",
+  "Our system has a problem; your Wi-Fi is fine.": "我们的系统出了问题，您的网络没有问题。",
   "If the guest has already paid or been charged, do not charge them again; check the bill.":
     "如果客人已经付款或已被扣款，请不要再收一次；请查看账单。",
   "We couldn't confirm the result. Press again: it is never recorded twice.":
@@ -8981,8 +8981,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Retrying on its own. This page opens as soon as the system answers. Orders already sent stay in the system. Keep serving with paper slips if it takes more than a few minutes.":
     "正在自动重试，系统一回应这一页就会自己打开。已经发出的订单都还在系统里。如果几分钟还连不上，先用纸质点单继续营业。",
   "This device is offline": "这台设备没有联网",
-  "Check the wifi. The page opens again by itself when the network is back.":
-    "请检查无线网络。网络恢复后这一页会自己重新打开。",
+  "Check the Wi-Fi. The page opens again by itself when the network is back.":
+    "请检查 Wi-Fi。网络恢复后这一页会自己重新打开。",
   "Paid orders that nobody accepts in time may be refunded automatically, and this screen can't warn you while it is reconnecting. Check new orders on a screen that is still connected; if none is, follow the paper-slip steps in the store runbook.":
     "已付款的订单如果没人及时接单，可能会被自动退款，而这块屏幕在重连期间无法提醒你。请在仍然连得上的屏幕上查看新订单；如果都连不上，请按门店手册里的纸质点单步骤处理。",
   "Try now": "立即重试",

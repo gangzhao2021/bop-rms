@@ -652,7 +652,7 @@ test("@production WP-2423 Q1: new orders and acceptance deadlines surface withou
   await page.clock.fastForward(10_000);
   // WP-2423 item 10: the server answered and failed: not the wifi, and what is shown is said.
   await expect(
-    page.getByText("Our system has a problem; your wifi is fine.", { exact: false }),
+    page.getByText("Our system has a problem; your Wi-Fi is fine.", { exact: false }),
   ).toBeVisible();
   await expect(page.getByText("Showing the last update.", { exact: false })).toBeVisible();
   await expect(page.getByRole("heading", { name: "ORD-21", exact: true })).toBeVisible();

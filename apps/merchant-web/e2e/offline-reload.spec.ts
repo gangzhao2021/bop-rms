@@ -58,7 +58,7 @@ for (const width of [390, 1024, 1440])
     await expect(
       page.getByRole("heading", { name: "This device is offline", level: 1 }),
     ).toBeVisible();
-    await expect(page.getByText("Check the wifi.", { exact: false })).toBeVisible();
+    await expect(page.getByText("Check the Wi-Fi.", { exact: false })).toBeVisible();
     await expect(page.getByRole("heading", { name: "While the connection is down" })).toBeVisible();
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),

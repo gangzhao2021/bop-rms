@@ -6,7 +6,8 @@
 // v5 (b18): a page is never blank. When the offline page is not in the cache (cleared storage, a
 // worker that never finished installing) the store system's own answer is shown, and with no
 // answer at all a short built-in page says what to do.
-const CACHE = "bop-merchant-offline-v5";
+// v6 (b25): the offline page says "Wi-Fi" as the app does; a new cache makes tablets fetch it again.
+const CACHE = "bop-merchant-offline-v6";
 const OFFLINE = "/operations/offline.html";
 const FILES = [OFFLINE, "/operations/offline.js", "/operations/offline.css"];
 

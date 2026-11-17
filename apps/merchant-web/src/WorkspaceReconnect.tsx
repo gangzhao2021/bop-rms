@@ -60,7 +60,7 @@ export function WorkspaceReconnectPanel({ reconnect }: { readonly reconnect: Wor
       <div className="workspace-reconnect__body" role="status" data-reconnect={reconnect.gate}>
         <p>
           {offline
-            ? t("Check the wifi. The page opens again by itself when the network is back.")
+            ? t("Check the Wi-Fi. The page opens again by itself when the network is back.")
             : t(
                 "Retrying on its own. This page opens as soon as the system answers. Orders already sent stay in the system. Keep serving with paper slips if it takes more than a few minutes.",
               )}

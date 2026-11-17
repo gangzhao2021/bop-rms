@@ -13,11 +13,11 @@ const scope = {
   storeReference: id(99),
 };
 const words =
-  "Our system has a problem; your wifi is fine. Keep serving: paper slips for new rounds, card machine for payment. This screen keeps trying.";
+  "Our system has a problem; your Wi-Fi is fine. Keep serving: paper slips for new rounds, card machine for payment. This screen keeps trying.";
 const kitchenWords =
-  "Our system has a problem; your wifi is fine. Cook from the paper slips the floor brings. This screen keeps trying.";
+  "Our system has a problem; your Wi-Fi is fine. Cook from the paper slips the floor brings. This screen keeps trying.";
 const pickupWords =
-  "Our system has a problem; your wifi is fine. Hand over by checking the order number and items on the guest's phone or slip. This screen keeps trying.";
+  "Our system has a problem; your Wi-Fi is fine. Hand over by checking the order number and items on the guest's phone or slip. This screen keeps trying.";
 const retryLater = { status: 503, headers, json: { error: "retry_later" } };
 const pickupQueue = {
   source: "CurrentFulfillment",
