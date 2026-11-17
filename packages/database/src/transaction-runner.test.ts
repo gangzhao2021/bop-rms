@@ -1185,6 +1185,36 @@ describe("WP-2423 M35 runConsecutive (DEC-STAFF-ROUND-FEWER-TRANSACTIONS)", () =
       expect(currentRequestChecks()?.unverifiedChecks()).toEqual([plain]);
     });
   });
+  it("a step of another pool never joins an open transaction; one that never began gives way", async () => {
+    const f = fixture();
+    const g = fixture();
+    const check = "-- bop:stable-read\nSELECT * FROM rms_dining.dining_table WHERE table_id=$1";
+    const plain = check.slice(19);
+    f.query.mockImplementation(async (sql: string) => ({
+      rows: sql === plain ? [{ table: 1 }] : [],
+    }));
+    await withVerifiedChecks(async () => {
+      await f.runner.run((t) => t.query(check, ["t1"]));
+      const before = f.query.mock.calls.length;
+      await runConsecutive(async () => {
+        // Answered in full from the request's check: its transaction never begins.
+        await f.runner.run((t) => t.query(check, ["t1"]));
+        // So the other pool's steps are one transaction of their own pool.
+        await g.runner.run((t) => t.query("SELECT a", []));
+        await g.runner.run((t) => t.query("SELECT b", []));
+        // While that one is open, a step of the first pool is a transaction of its own.
+        await f.runner.run((t) => t.query("SELECT c", []));
+        expect(sent(g)).toEqual([setup, "SELECT a", "SELECT b"]);
+      });
+      expect(f.query.mock.calls.slice(before).map(([sql]) => sql)).toEqual([
+        setup,
+        "SELECT c",
+        "COMMIT",
+      ]);
+      expect(sent(g)).toEqual([setup, "SELECT a", "SELECT b", "COMMIT"]);
+      expect(g.connect).toHaveBeenCalledTimes(1);
+    });
+  });
   it("keeps a finished read snapshot for the call's next read until a connection is taken", async () => {
     const f = fixture();
     const release = vi.fn(async () => undefined);

@@ -294,6 +294,7 @@ export function createTenantTransactionRunner(
     );
     const state = transactionState(opening.client, "ReadWrite", fixedScope, checks);
     shared.state = state;
+    shared.began = opening.began;
     shared.finished = (async () => {
       let failure: { readonly error: unknown } | undefined;
       try {
@@ -320,6 +321,8 @@ export function createTenantTransactionRunner(
   const openShared = (shared: TogetherSlot): Promise<void> =>
     new Promise<void>((opened, failedToOpen) => {
       let begun = false;
+      // Its connection is asked for at once.
+      shared.began = () => true;
       shared.finished = withTenantContextTransaction(
         connections,
         fixedScope,
@@ -477,6 +480,8 @@ function openWhenNeeded(
   mayHaveWritten: () => boolean,
 ): {
   readonly client: { query(sql: string, values?: unknown[]): Promise<unknown> };
+  /** Whether its transaction began (its first statement was sent). */
+  began(): boolean;
   finish(failure?: { readonly error: unknown }): Promise<void>;
 } {
   let begun: Promise<{ query(sql: string, values?: unknown[]): Promise<unknown> }> | null = null;
@@ -530,6 +535,7 @@ function openWhenNeeded(
         return (await begun).query(sql, values);
       },
     }),
+    began: () => begun !== null,
     async finish(failure?: { readonly error: unknown }) {
       end(failure);
       if (finished === null) return;
@@ -915,6 +921,11 @@ function transactionState(
 interface TogetherSlot {
   readonly kind: "Together";
   pool: object | null;
+  /**
+   * runConsecutive: whether its transaction began (a connection was taken for it). One answered
+   * in full from the request's checks never did, and holds nothing of its pool.
+   */
+  began: () => boolean;
   /** The call's one connection, held from its transaction's start until the call ends. */
   readonly hold: ConnectionHold;
   state: TransactionState | null;
@@ -1022,6 +1033,7 @@ function newTogetherSlot(hold: ConnectionHold): {
   const slot: TogetherSlot = {
     kind: "Together",
     pool: null,
+    began: () => false,
     hold,
     state: null,
     writer: null,
@@ -1137,13 +1149,19 @@ function newConsecutiveSlot(hold: ConnectionHold): ConsecutiveSlot {
     hold,
     closed: false,
     async join(pool, joinSegment, alone) {
-      // A run on another pool, or one started while another of this call is in flight (work that
-      // runs its reads concurrently), is a transaction of its own as before.
-      if (
-        inFlight > 0 ||
-        (segment !== null && segment.slot.pool !== null && segment.slot.pool !== pool)
-      )
-        return alone();
+      // A run started while another of this call is in flight (work that runs its reads
+      // concurrently) is a transaction of its own as before.
+      if (inFlight > 0) return alone();
+      // A step of another pool never joins this pool's transaction (it would run on this pool's
+      // connection). While that transaction is open it is one of its own as before; a segment
+      // whose transaction never began (its steps were answered in full from the request's checks)
+      // holds nothing, so it ends and the step begins the next segment, of its own pool.
+      if (segment !== null && segment.slot.pool !== null && segment.slot.pool !== pool) {
+        if (segment.slot.began()) return alone();
+        await endSegment();
+        // Another run of this call began meanwhile: this one is a transaction of its own.
+        if (inFlight > 0 || segment !== null) return alone();
+      }
       let retried = false;
       for (;;) {
         segment ??= newTogetherSlot(hold);
