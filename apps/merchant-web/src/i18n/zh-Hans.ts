@@ -3327,8 +3327,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Receipt language": "收据语言",
   "Receipt layout selection": "收据版式选择",
   "Receipt presets": "收据预设",
-  "Receipt presets could not be loaded. Refresh when connected; an earlier save remains protected.":
-    "无法加载收据预设。联网后请刷新；之前的保存仍受保护。",
+  "Receipt presets could not be loaded. They are read again once the connection is back; an earlier save remains protected.":
+    "无法加载收据预设。网络恢复后会自动重新读取；之前的保存仍受保护。",
   "Receipt required fields selection": "收据必备字段选择",
   "Receipt settings": "收据设置",
   "Receipt template": "收据模板",
@@ -3412,7 +3412,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "再次写入或选择模板前，请先恢复原来的批准或发布。",
   Refresh: "刷新",
   "Refresh Store configuration": "刷新门店配置",
-  "Refresh available presets": "刷新可用预设",
   "Refresh before confirming a handoff.": "确认交付前请先刷新。",
   "Refresh before relying on operational results.": "依赖运营结果前请先刷新。",
   "Refresh before taking an action.": "操作前请先刷新。",
@@ -3427,13 +3426,11 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Refresh saved setup": "刷新已保存的设置",
   "Refresh saved template draft": "刷新已保存的模板草稿",
   "Refresh saved templates": "刷新已保存的模板",
-  "Refresh saved {label}": "刷新已保存的{label}",
   "Refresh saved {value}": "刷新已保存的{value}",
   "Refresh service status": "刷新服务状态",
   "Refresh serving progress": "刷新上桌进度",
   "Refresh tables": "刷新桌台",
   "Refresh template list": "刷新模板列表",
-  "Refresh template review": "刷新模板审核",
   "Refresh the authoritative Store version before attempting another change.":
     "再做其他更改前，请先刷新门店的权威版本。",
   "Refresh the authorized Store and filter scope.": "刷新已授权的门店和筛选范围。",
@@ -3727,8 +3724,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "保存草稿后，由两位审核人核对成本和食品安全，之后才能发布。",
   "Save an address below, then choose it for this draft.": "请在下方保存地址，然后为此草稿选择它。",
   "Save and submit for posting": "保存并提交过账",
-  "Save both receipt presets above, then refresh available presets.":
-    "请先保存上面的两个收据预设，然后刷新可用预设。",
+  "Save both receipt presets above; each is offered here once it is saved.":
+    "请先保存上面的两个收据预设；保存后会自动出现在这里供选择。",
   "Save change": "保存更改",
   "Save changes": "保存更改",
   "Save changes for review. Published hours remain active until a new configuration is published.":
@@ -4816,7 +4813,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "The save result could not be confirmed. Recover the original save before making another change.":
     "无法确认保存结果。再做其他更改前，请先恢复原来的保存。",
   "The saved draft has not been submitted for review.": "已保存的草稿尚未提交审核。",
-  "The saved preset changed. Refresh before saving.": "已保存的预设已变更。保存前请先刷新。",
+  "The saved preset was changed elsewhere. What is saved now is shown; save again if you still need to.":
+    "已保存的预设在别处被改过。现在显示的是已保存的内容；如仍需要，请再保存一次。",
+  "This preset could not be saved as it is.": "这个预设无法按现在的内容保存。",
   "The saved settings or their baseline changed. Refresh, then discard your local edits to use the latest saved version.":
     "已保存的设置或其基准已变更。请刷新，然后放弃本地编辑以使用最新保存的版本。",
   "The saved setup still has settings that are not set (see the list in this step). Finish them, save the setup, then create the configuration.":

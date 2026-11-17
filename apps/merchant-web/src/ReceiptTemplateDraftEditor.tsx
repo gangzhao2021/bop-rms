@@ -416,6 +416,8 @@ export interface ReceiptTemplateDraftEditorProps {
   readonly submitJournalFactory?: typeof createReceiptTemplateSubmitPendingJournal;
   /** WP-2423 DEC-SOLE-OPERATOR-APPROVAL: the server's sole-operator view for this person. */
   readonly soleOperatorGateLoader?: typeof loadReceiptTemplateSoleOperatorGate;
+  /** b25: counts receipt presets saved above; each one is offered here without a refresh. */
+  readonly presetsSaved?: number;
 }
 /** Authoring and mechanical preview only. A Draft is never a Published Store template. */
 export function ReceiptTemplateDraftEditor({
@@ -433,6 +435,7 @@ export function ReceiptTemplateDraftEditor({
   submitClient: injectedSubmit,
   submitJournalFactory = createReceiptTemplateSubmitPendingJournal,
   soleOperatorGateLoader = loadReceiptTemplateSoleOperatorGate,
+  presetsSaved = 0,
 }: ReceiptTemplateDraftEditorProps) {
   const lifecycleClient = useMemo(
     () => injectedLifecycle ?? createReceiptTemplateLifecycleClient(),
@@ -732,6 +735,13 @@ export function ReceiptTemplateDraftEditor({
       if (valid()) setListing(false);
     }
   };
+  // b25: a preset saved above is read here by itself (no "Refresh available presets").
+  const presetsSeen = useRef(presetsSaved);
+  useEffect(() => {
+    if (presetsSeen.current === presetsSaved) return;
+    presetsSeen.current = presetsSaved;
+    void refreshArtifacts();
+  }, [presetsSaved]);
   const action = async (
     mode:
       | "Save"
@@ -1357,23 +1367,6 @@ export function ReceiptTemplateDraftEditor({
       {selected && dirty && !submitPending && (
         <p>{t("Save the changed template fields before submitting for review.")}</p>
       )}
-      {selected && (
-        <button
-          type="button"
-          disabled={
-            disabled ||
-            busy ||
-            !ready ||
-            Boolean(pending) ||
-            Boolean(submitPending) ||
-            Boolean(lifecyclePending) ||
-            loadedIdentity.current !== identityKey
-          }
-          onClick={() => void action("Refresh")}
-        >
-          {t("Refresh template review")}
-        </button>
-      )}
       {submitPending && (
         <div className="store-setup-actions">
           <button
@@ -1485,11 +1478,8 @@ export function ReceiptTemplateDraftEditor({
           </select>
         </label>
         {!currentLayout || !currentCompliance ? (
-          <p>{t("Save both receipt presets above, then refresh available presets.")}</p>
+          <p>{t("Save both receipt presets above; each is offered here once it is saved.")}</p>
         ) : null}
-        <button type="button" onClick={() => void refreshArtifacts()}>
-          {t("Refresh available presets")}
-        </button>
         <label>
           {t("Template activation")}
           <select

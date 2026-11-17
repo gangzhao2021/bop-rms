@@ -498,6 +498,7 @@ function StoreReceiptTemplateTools({
   readonly locale: string;
   readonly disabled: boolean;
 }) {
+  const [presetsSaved, setPresetsSaved] = useState(0);
   return (
     <section
       id="receipt-templates"
@@ -510,8 +511,14 @@ function StoreReceiptTemplateTools({
           "What a receipt shows and how it is laid out. A template you save here reaches guests once it is chosen in Settings that need approval, step 3, and published.",
         )}
       </p>
-      <ReceiptTemplateArtifactEditor scope={scope} csrf={csrf} disabled={disabled} />
+      <ReceiptTemplateArtifactEditor
+        scope={scope}
+        csrf={csrf}
+        disabled={disabled}
+        onSaved={() => setPresetsSaved((n) => n + 1)}
+      />
       <ReceiptTemplateDraftEditor
+        presetsSaved={presetsSaved}
         scope={scope}
         csrf={csrf}
         defaultLocale={locale}

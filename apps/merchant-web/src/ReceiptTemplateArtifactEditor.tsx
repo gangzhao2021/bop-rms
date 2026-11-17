@@ -1,7 +1,11 @@
 import { t } from "./i18n/i18n.js";
 import { useReadAgainWhenOnline } from "./reconnect-read.js";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { StoreSetupClientError, type StoreSetupScope } from "./store-setup-client.js";
+import {
+  releaseOriginalWhenRefused,
+  StoreSetupClientError,
+  type StoreSetupScope,
+} from "./store-setup-client.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import {
   createReceiptTemplateArtifactClient,
@@ -32,6 +36,8 @@ export async function dispatchReceiptTemplateArtifact(
     artifactKind: ReceiptTemplateArtifactKind;
     baseline: ReceiptTemplateArtifactsCurrent;
     onReserved: (cursor: ReceiptTemplateArtifactCursor) => void;
+    /** b25: the server refused the save outright, so its original was let go. */
+    onReleased?: (cursor: ReceiptTemplateArtifactCursor) => void;
   },
 ) {
   const fresh = await input.client.load({
@@ -76,7 +82,12 @@ export async function dispatchReceiptTemplateArtifact(
   await input.journal.reserve(prepared.cursor);
   input.onReserved(prepared.cursor);
   check(input);
-  const receipt = await input.client.execute(prepared, { csrf: input.csrf, signal: input.signal });
+  const receipt = await releaseOriginalWhenRefused(
+    input.journal,
+    prepared.cursor,
+    () => input.client.execute(prepared, { csrf: input.csrf, signal: input.signal }),
+    input.onReleased,
+  );
   check(input);
   const current = await input.client.load({
     storeReference: input.scope.storeReference,
@@ -111,6 +122,8 @@ export interface ReceiptTemplateArtifactEditorProps {
   readonly csrf: string;
   readonly hidden?: boolean;
   readonly disabled?: boolean;
+  /** b25: a preset was saved, so the template draft below offers it without a refresh. */
+  readonly onSaved?: () => void;
   readonly client?: Client;
   readonly journalFactory?: (
     scope: StoreSetupScope,
@@ -138,6 +151,7 @@ function Preset({
   disabled = false,
   client: injected,
   journalFactory = createReceiptTemplateArtifactPendingJournal,
+  onSaved,
   kind,
 }: ReceiptTemplateArtifactEditorProps & { kind: ReceiptTemplateArtifactKind }) {
   const client = useMemo(() => injected ?? createReceiptTemplateArtifactClient(), [injected]);
@@ -191,7 +205,7 @@ function Preset({
       c.abort();
     };
   }, [client, scopeKey, csrf, journalFactory, kind, readAgain]);
-  useReadAgainWhenOnline(!ready && !busy && error === "Unavailable", () =>
+  const online = useReadAgainWhenOnline(!ready && !busy && error === "Unavailable", () =>
     setReadAgain((n) => n + 1),
   );
   useEffect(() => {
@@ -204,7 +218,7 @@ function Preset({
     window.addEventListener("offline", offline);
     return () => window.removeEventListener("offline", offline);
   }, []);
-  const action = async (mode: "Save" | "Refresh" | "Resolve") => {
+  const action = async (mode: "Save" | "Resolve") => {
     if (running.current || disabled || !navigator.onLine) return;
     running.current = true;
     setBusy(true);
@@ -221,18 +235,6 @@ function Preset({
       const p = await j.load();
       if (!valid()) return;
       setPending(p);
-      if (mode === "Refresh") {
-        const v = await client.load({
-          storeReference: scope.storeReference,
-          expectedScope: scope,
-          signal: c.signal,
-        });
-        if (valid()) {
-          setView(v);
-          setReady(true);
-        }
-        return;
-      }
       if (mode === "Save" && (p || !view || !ready)) throw new StoreSetupClientError("Conflict");
       if (mode === "Resolve" && !p) throw new StoreSetupClientError("Conflict");
       const common = { client, journal: j, csrf, signal: c.signal, isCurrent: valid };
@@ -248,12 +250,17 @@ function Preset({
                 onReserved: (cursor) => {
                   if (valid()) setPending(cursor);
                 },
+                // b25: a save the server refused never happened; it can be saved again.
+                onReleased: () => {
+                  if (valid()) setPending(null);
+                },
               })
             : null;
       if (result && valid()) {
         setView(result.current);
         setPending(null);
         setReady(true);
+        if (result.receipt.outcome === "Committed") onSaved?.();
         setNotice(
           result.receipt.outcome === "Committed"
             ? t("Saved preset confirmed.")
@@ -261,8 +268,16 @@ function Preset({
         );
       }
     } catch (v) {
-      if (e === epoch.current)
-        setError(v instanceof StoreSetupClientError ? v.code : "Unavailable");
+      const code = v instanceof StoreSetupClientError ? v.code : "Unavailable";
+      if (e === epoch.current) setError(code);
+      // b25: changed elsewhere meanwhile: what is saved now is read and shown by itself.
+      if (e === epoch.current && code === "Conflict" && mode === "Save")
+        void client
+          .load({ storeReference: scope.storeReference, expectedScope: scope, signal: c.signal })
+          .then((v) => {
+            if (e === epoch.current && !c.signal.aborted) setView(v);
+          })
+          .catch(() => undefined);
     } finally {
       if (e === epoch.current) {
         running.current = false;
@@ -289,27 +304,38 @@ function Preset({
           {error === "Denied"
             ? t("You do not have permission to manage this receipt preset.")
             : error === "Conflict"
-              ? t("The saved preset changed. Refresh before saving.")
+              ? t(
+                  "The saved preset was changed elsewhere. What is saved now is shown; save again if you still need to.",
+                )
               : error === "OutcomeUnknown"
                 ? t(
                     "The save could not be confirmed. Recover the original save before saving again.",
                   )
-                : t(
-                    "Receipt presets could not be loaded. Refresh when connected; an earlier save remains protected.",
-                  )}
+                : error === "Invalid"
+                  ? t("This preset could not be saved as it is.")
+                  : t(
+                      "Receipt presets could not be loaded. They are read again once the connection is back; an earlier save remains protected.",
+                    )}
+          {/* b25: read again by itself once back online; a read that failed while online can be
+              tried again here (no separate Refresh). */}
+          {!ready && online && error === "Unavailable" ? (
+            <>
+              {" "}
+              <button
+                type="button"
+                className="store-setup-inline-action"
+                disabled={busy}
+                onClick={() => setReadAgain((n) => n + 1)}
+              >
+                {t("Try again")}
+              </button>
+            </>
+          ) : null}
         </p>
       )}
       {pending && (
         <p role="status">{t("An earlier save must be recovered before another save.")}</p>
       )}
-      <button
-        style={{ minHeight: 44 }}
-        type="button"
-        disabled={disabled || busy}
-        onClick={() => void action("Refresh")}
-      >
-        {t("Refresh saved {label}", { label: label })}
-      </button>
       {pending ? (
         <button
           style={{ minHeight: 44 }}

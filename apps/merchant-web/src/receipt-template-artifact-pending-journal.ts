@@ -16,6 +16,11 @@ import {
 export interface ReceiptTemplateArtifactPendingJournal {
   load(): Promise<ReceiptTemplateArtifactCursor | null>;
   reserve(cursor: ReceiptTemplateArtifactCursor): Promise<void>;
+  /**
+   * b25: lets go of an original the server refused outright (a definite answer that nothing was
+   * written), so staff save again. Only this same original is cleared.
+   */
+  release?(cursor: ReceiptTemplateArtifactCursor): Promise<void>;
   complete(
     cursor: ReceiptTemplateArtifactCursor,
     receipt: ReceiptTemplateArtifactReceipt,
@@ -121,6 +126,21 @@ export function createReceiptTemplateArtifactPendingJournal(
           try {
             if (request.result !== undefined && !same(request.result, cursor)) return fail();
             table.put(cursor, key);
+            set(undefined);
+          } catch {
+            fail();
+          }
+        };
+      });
+    },
+    async release(value: ReceiptTemplateArtifactCursor) {
+      const cursor = parse(value);
+      await transaction<undefined>("readwrite", (table, set, fail) => {
+        const request = table.get(key);
+        request.onsuccess = () => {
+          try {
+            if (request.result !== undefined && !same(request.result, cursor)) return fail();
+            table.delete(key);
             set(undefined);
           } catch {
             fail();
