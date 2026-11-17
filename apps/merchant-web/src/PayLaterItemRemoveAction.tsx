@@ -463,6 +463,7 @@ export function PayLaterItemRemoveAction({
         return;
       }
       const next = failureOf(response.status, payload);
+      settledFocus.failed();
       // A refusal that changed nothing keeps the attempt for the retry after signing in.
       if (next !== "FullSignInRequired" && next !== "Unknown") attempt.current = null;
       setFailure(next);
@@ -485,6 +486,7 @@ export function PayLaterItemRemoveAction({
       )
         onSettled();
     } catch {
+      settledFocus.failed();
       setFailure("Unknown");
     } finally {
       setBusy(false);

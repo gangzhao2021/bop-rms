@@ -47,6 +47,14 @@ export function useSettledFocus(selectors: readonly string[], gone: boolean) {
       trackStaffActions();
       box.since = staffActions;
     },
+    /**
+     * b25 review: the confirm failed (an outage, a refusal, a change, a sign-in asked for) and the
+     * panel stays open: what staff press from now on (Cancel, by click or Enter) is a step in this
+     * panel again, so Cancel still gives the focus back to the opener.
+     */
+    failed() {
+      box.since = null;
+    },
     /** A confirm succeeded from `from` (the panel): remember its stable place. */
     settled(from: Element | null) {
       box.place = movedOn() ? null : (from?.closest<HTMLElement>("[data-focus-return]") ?? null);

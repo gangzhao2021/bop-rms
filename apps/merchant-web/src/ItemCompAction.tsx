@@ -386,6 +386,7 @@ export function ItemCompAction({
         return;
       }
       const next = failureOf(response.status, payload);
+      settledFocus.failed();
       if (next !== "FullSignInRequired" && next !== "Unknown") attempt.current = null;
       setFailure(next);
       // v15 b16: the amount may have changed with the table: work it out again before the
@@ -397,6 +398,7 @@ export function ItemCompAction({
       }
       if (next !== "FullSignInRequired" && next !== "Unknown" && next !== "Denied") onSettled();
     } catch {
+      settledFocus.failed();
       setFailure("Unknown");
     } finally {
       setBusy(false);
