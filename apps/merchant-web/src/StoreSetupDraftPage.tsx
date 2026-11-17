@@ -396,6 +396,38 @@ const messages: Record<StoreSetupClientError["code"], string> = {
     "This setup offers pickup, and pickup guests call the store about allergies or their order, so it was not sent. Add the store's phone number in Store details, or take pickup out of the services this setup offers, then send it again.",
   ),
 };
+/**
+ * b25 (v15 live check of b24): a save that was refused says what is wrong, in the words the fee
+ * itself and Review ("Needs fixing first") already use, and where Review lists it. Only when nothing
+ * specific is known (a rule only the server knows, a stale tab) is the general list of rules shown.
+ */
+export function storeSetupInvalidText(
+  feeProblems: readonly StoreSetupFeeProblem[],
+  timesValid: boolean,
+  layout: StoreSetupLayout,
+): string {
+  if (feeProblems.length > 0)
+    return t(
+      "This draft was not saved. {problems} Review lists it under “Needs fixing first”, in {review}.",
+      {
+        problems: feeProblems
+          .map((problem) =>
+            storeSetupFeeProblemText(
+              problem,
+              storeSetupWhere(layout, "payment"),
+              storeSetupWhere(layout, "serviceModes"),
+            ),
+          )
+          .join(" "),
+        review:
+          layout === "Open"
+            ? t("step {n}, {name}", { n: 4, name: t("Review and publish") })
+            : t("step {n}, {name}", { n: 8, name: t("Review") }),
+      },
+    );
+  if (!timesValid) return t("Some edited times or wait values need correction before saving.");
+  return messages.Invalid;
+}
 const root = (view: StoreSetupWorkspace) => ({
   reference: view.setup.snapshot?.setupDraftReference ?? null,
   revision: view.setup.snapshot?.revision ?? 0,
@@ -1444,7 +1476,9 @@ export function StoreSetupDraftPage({
       {/* b23: a read cut off by the connection going is said by the offline line alone. */}
       {error && !ownerOnly && !(error === "Unavailable" && !online) && (
         <p id="setup-validation-error" role="alert">
-          {messages[error]}
+          {error === "Invalid"
+            ? storeSetupInvalidText(feeProblems, reviewParsed !== null, layout)
+            : messages[error]}
         </p>
       )}
       {notice && <p role="status">{notice}</p>}

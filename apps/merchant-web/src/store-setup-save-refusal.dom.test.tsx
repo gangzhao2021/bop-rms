@@ -283,3 +283,57 @@ it("b25: in Chinese, a refused save shows no recovery line", async () => {
   expect(container.textContent).not.toContain("之前的保存尚未清除");
   expect(buttonNamed(container, "恢复原来的保存")).toBeUndefined();
 });
+
+/** A saved draft offering dine-in only, whose tip still applies to pickup orders too. */
+function tipOnPickupNotOffered(s: ReturnType<typeof server>) {
+  const base = snapshot(1, "04:00:00");
+  s.state.saved = {
+    ...base,
+    content: {
+      ...base.content,
+      enabledServiceModes: { state: "Configured", value: ["DineIn"] },
+      feeContexts: {
+        state: "Configured",
+        value: [
+          { chargeType: "ServiceCharge", state: "Disabled" },
+          { chargeType: "DeliveryFee", state: "Disabled" },
+          {
+            chargeType: "Tip",
+            state: "Enabled",
+            taxClassificationReference: null,
+            orderTypes: ["DineIn", "Pickup"],
+          },
+        ],
+      },
+    } as StoreSetupSnapshot["content"],
+  };
+}
+it("b25: a save the page refuses names the fee and the service, and where Review lists it", async () => {
+  const s = server();
+  tipOnPickupNotOffered(s);
+  const container = await open(s);
+  await click(buttonNamed(container, "Save as draft"));
+  await until(() => alerts(container).length > 0);
+  expect(s.commands).not.toContain("SaveDraft");
+  expect(alerts(container)).toContain(
+    "This draft was not saved. Tip applies to Pickup orders, but this setup does not offer Pickup. Untick Pickup for it in step 3, Fees, tax and payment, or offer Pickup in step 2, Services. Review lists it under “Needs fixing first”, in step 4, Review and publish.",
+  );
+  expect(alerts(container).join(" ")).not.toContain("Each service interval needs valid times");
+  // Review, shown now, lists the same sentence under "Needs fixing first".
+  expect(container.querySelector('[aria-label="Needs fixing first"]')?.textContent).toContain(
+    "Tip applies to Pickup orders, but this setup does not offer Pickup.",
+  );
+});
+it("b25: the same refusal reads in Chinese", async () => {
+  setLanguageForTest("zh-Hans");
+  const s = server();
+  tipOnPickupNotOffered(s);
+  const container = await open(s);
+  await click(buttonNamed(container, "存为草稿"));
+  await until(() => alerts(container).length > 0);
+  const text = alerts(container).join(" ");
+  expect(text).toContain("这份草稿没有保存。");
+  expect(text).toContain("小费适用于自取订单，但这份设置没有提供自取。");
+  expect(text).toContain("“需要先改正”");
+  expect(text).not.toContain("每个服务时段");
+});
