@@ -227,7 +227,7 @@ export function guestsLeftRoundText(
     case "OnTableBill":
       // v15 2026-10-28: a round of a table that pays at the end, not paid yet.
       return t(
-        "{name}: {openItemCount} not served yet. Serve them when they're ready (Serve all on the table). Dishes the kitchen hasn't marked started can come off the bill before the table pays.",
+        "{name}: {openItemCount} not served yet. Serve them when they're ready (Serve all on the table). Dishes the kitchen hasn't marked started can be taken off their round before the table pays.",
         { name: name, openItemCount: items(round.openItemCount) },
       );
     case "PaidWithTable":

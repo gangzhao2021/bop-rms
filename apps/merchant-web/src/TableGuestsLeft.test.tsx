@@ -437,3 +437,18 @@ it("WP-2423 M123 (v15 live check): the close-out summary is whole sentences, in 
     setLanguageForTest("en");
   }
 });
+
+it("b28 (v15 live26): a round still on the table's bill says take off (删掉), as the close sentence does", () => {
+  const now = Date.parse("2026-10-28T01:00:00.000Z");
+  const text = () =>
+    guestsLeftRoundText(round({ state: "OnTableBill", refund: null, sequence: 1 }), undefined, now);
+  expect(text()).toContain("can be taken off their round before the table pays");
+  expect(text()).not.toContain("come off the bill");
+  setLanguageForTest("zh-Hans");
+  try {
+    expect(text()).toContain("可以在这桌付款前从那一轮删掉");
+    expect(text()).not.toContain("取消");
+  } finally {
+    setLanguageForTest("en");
+  }
+});
