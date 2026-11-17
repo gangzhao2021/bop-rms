@@ -573,6 +573,8 @@ export function composeCustomerDiningSession(
       tax: money(lines.taxMinor),
       total: money(lines.totalMinor),
     });
+  // b26: a refund on its way on the order (for a round the kitchen refused, read in kitchenStatus).
+  const orderRefundPending = order.refunds.pendingMinor > 0n;
   const itemCancellation = (orderItemReference: string) =>
     order.itemCancellations.find((entry) => entry.orderItemReferences.includes(orderItemReference));
   let due = 0n;
@@ -795,7 +797,7 @@ export function composeCustomerDiningSession(
                     entry.notCharged !== true &&
                     !entry.refunded &&
                     entry.refundAmount.amountMinor > 0n,
-                ) || order.refunds.pendingMinor > 0n
+                ) || orderRefundPending
               ? "RefundPending"
               : "Paid";
         // b25 final: a round on the table's bill the kitchen refused with a dish no one took off
