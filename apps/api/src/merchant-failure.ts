@@ -301,3 +301,29 @@ export function refusalsStayReal<
       : { runSnapshot: guard(transactions.runSnapshot.bind(transactions)) }),
   }) as H;
 }
+
+const failureCauseKey = Symbol.for("bop.failure.cause");
+const loggedCode = /^[A-Z][A-Z0-9_]{0,44}$/u;
+const loggedSqlState = /^[0-9A-Z]{5}$/u;
+
+/**
+ * b26: what the merchant failure log line names. A service that answers "unavailable" for whatever
+ * it met keeps that behind it (`bop.failure.cause` or `cause`); the line names the innermost safe
+ * UPPER_SNAKE code and the failed statement's SQLSTATE, so a dependency fault can be told from a
+ * lock or a stored row that did not parse. Never a message, reference or row value. Undefined when
+ * nothing safe is known.
+ */
+export function merchantFailureLogCode(error: unknown): string | undefined {
+  let code: string | undefined;
+  let sqlState: string | undefined;
+  let current: unknown = error;
+  for (let depth = 0; depth < 8 && current !== null && typeof current === "object"; depth += 1) {
+    const named = merchantFailureCode(current);
+    if (named !== null && loggedCode.test(named)) code = named;
+    const state = failedStatementState(current);
+    if (typeof state === "string" && loggedSqlState.test(state)) sqlState = state;
+    current = own(current, failureCauseKey) ?? own(current, "cause");
+  }
+  if (code === undefined && sqlState === undefined) return undefined;
+  return (code ?? "DATABASE_FAILURE") + (sqlState === undefined ? "" : "_SQL_" + sqlState);
+}

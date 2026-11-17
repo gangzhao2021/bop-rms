@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { createPostgresOrderCreationQueryStore } from "../index.js";
+import { createPostgresOrderCreationQueryStore, OrderCreationError } from "../index.js";
 import { orderQueryFixture } from "./order-creation-query.fixture.js";
 function required<T>(value: T | undefined): T {
   if (value === undefined) throw new Error("fixture");
@@ -208,5 +208,46 @@ describe("current Order fence", () => {
       await x.store.withCurrentSubmission(x.fixture.record.submissionReference, work),
     ).toBeNull();
     expect(work).not.toHaveBeenCalled();
+  });
+  // b26: a CI flake in staff-order-cancellation read only ORDER_CREATE_DEPENDENCY_UNAVAILABLE, with
+  // nothing behind it. What the database or the work met is now kept for the log line, and the
+  // store's own Order creation answer goes through as it is.
+  it("keeps what a current read met behind its unavailable answer", async () => {
+    const x = setup({ rows: [] });
+    const met = Object.assign(new Error("lock"), { code: "TENANT_DATABASE_TRANSACTION_FAILED" });
+    x.query.mockRejectedValue(met);
+    const error: unknown = await x.store
+      .withCurrentSubmission(x.fixture.record.submissionReference, vi.fn())
+      .catch((failure: unknown) => failure);
+    expect(error).toBeInstanceOf(OrderCreationError);
+    expect(error).toMatchObject({ code: "ORDER_CREATE_DEPENDENCY_UNAVAILABLE" });
+    expect(Object.getOwnPropertyDescriptor(error, Symbol.for("bop.failure.cause"))?.value).toBe(
+      met,
+    );
+    expect(JSON.stringify(error)).not.toContain("TENANT_DATABASE");
+    const read: unknown = await x.store
+      .resolveSubmission(x.fixture.record.submissionReference)
+      .catch((failure: unknown) => failure);
+    expect(Object.getOwnPropertyDescriptor(read, Symbol.for("bop.failure.cause"))?.value).toBe(met);
+  });
+  it("passes its own unavailable answer through unchanged, and keeps any other behind it", async () => {
+    const f = orderQueryFixture(),
+      x = setup({ rows: [{ history: f.history }] });
+    const own = new OrderCreationError("ORDER_CREATE_DEPENDENCY_UNAVAILABLE");
+    await expect(
+      x.store.withCurrentSubmission(f.record.submissionReference, async () => {
+        throw own;
+      }),
+    ).rejects.toBe(own);
+    const moved = new OrderCreationError("ORDER_CREATE_TABLE_MOVED");
+    const error: unknown = await x.store
+      .withCurrentSubmission(f.record.submissionReference, async () => {
+        throw moved;
+      })
+      .catch((failure: unknown) => failure);
+    expect(error).toMatchObject({ code: "ORDER_CREATE_DEPENDENCY_UNAVAILABLE" });
+    expect(Object.getOwnPropertyDescriptor(error, Symbol.for("bop.failure.cause"))?.value).toBe(
+      moved,
+    );
   });
 });

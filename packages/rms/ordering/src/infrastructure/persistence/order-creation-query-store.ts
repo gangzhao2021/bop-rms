@@ -98,6 +98,12 @@ function keepingFailure<T extends object>(target: T, failure: unknown): T {
     Object.defineProperty(target, failureCauseKey, { value: failure, enumerable: false });
   return target;
 }
+/** The store's own "unavailable" as it is; anything else becomes it, with what was met kept behind. */
+function currentReadFailure(error: unknown): OrderCreationError {
+  if (error instanceof OrderCreationError && error.code === "ORDER_CREATE_DEPENDENCY_UNAVAILABLE")
+    return error;
+  return keepingFailure(new OrderCreationError("ORDER_CREATE_DEPENDENCY_UNAVAILABLE"), error);
+}
 function unavailable(): never {
   throw new OrderCreationError("ORDER_CREATE_DEPENDENCY_UNAVAILABLE");
 }
@@ -337,8 +343,11 @@ export function createPostgresOrderCreationQueryStore<V extends 1 | 2 = 1>(
             return unavailable();
           return work(transaction, record);
         });
-      } catch {
-        return unavailable();
+      } catch (error) {
+        // b26: a CI flake behind this answer could not be told apart. What was met (a database
+        // failure, a stored row that did not parse, the work's own failure) is kept behind it for
+        // the log line; the answer stays "unavailable", and the store's own one goes through as is.
+        throw currentReadFailure(error);
       }
     },
     async resolveSubmission(value: string): Promise<OrderCreationRecord<V> | null> {
@@ -357,8 +366,8 @@ export function createPostgresOrderCreationQueryStore<V extends 1 | 2 = 1>(
             quoteVersion,
           );
         });
-      } catch {
-        return unavailable();
+      } catch (error) {
+        throw currentReadFailure(error);
       }
     },
   });

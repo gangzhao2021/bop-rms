@@ -19,6 +19,7 @@ import type { CustomerPaymentIntentHandler } from "./customer-payment-intent.js"
 import { loadApiProcessConfiguration } from "./process-configuration.js";
 import type { CustomerOrderSubmissionHandler } from "./customer-order-submission.js";
 import type { CustomerCheckoutDetailsHandler } from "./customer-checkout-details.js";
+import { merchantFailureLogCode } from "./merchant-failure.js";
 import { createMerchantRuntime, type MerchantRuntimeOptions } from "./merchant-runtime.js";
 import {
   createMerchantBrandAdministrationRuntime,
@@ -349,7 +350,8 @@ export function createApiServerRuntime({
             logger.error({
               event: "merchant_request_unexpected",
               error: { code: "INTERNAL_ERROR", value: error },
-              resultCode: "INTERNAL_ERROR",
+              // b26: the safe code of what the service met behind its "unavailable" answer.
+              resultCode: merchantFailureLogCode(error) ?? "INTERNAL_ERROR",
             });
           },
           ...composedMerchant,

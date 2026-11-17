@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { OrderCreationError } from "@rms/ordering";
 import {
   authorizationCookie,
   platformAuthorizationCookie,
@@ -628,6 +629,57 @@ describe("WP-2207 runtime dependency wiring", () => {
     expect(failures[0]?.resultCode).toBe("INTERNAL_ERROR");
     expect(output.records.join("")).not.toContain("synthetic private detail");
     expect(output.records.join("")).not.toContain("synthetic-session");
+  });
+
+  it("b26: names what the Orders list met behind its unavailable answer, never the detail", async () => {
+    const met = [
+      [new Error("MERCHANT_ORDER_QUEUE_UNAVAILABLE"), "MERCHANT_ORDER_QUEUE_UNAVAILABLE"],
+      [
+        Object.assign(new Error("permission denied for table order_header"), {
+          code: "TENANT_DATABASE_TRANSACTION_FAILED",
+          diagnostic: { sqlState: "42501" },
+        }),
+        "TENANT_DATABASE_TRANSACTION_FAILED_SQL_42501",
+      ],
+    ] as const;
+    for (const [cause, expected] of met) {
+      const answer = new OrderCreationError("ORDER_CREATE_DEPENDENCY_UNAVAILABLE");
+      Object.defineProperty(answer, Symbol.for("bop.failure.cause"), { value: cause });
+      const orderQueue = vi.fn(async (): Promise<never> => {
+        throw answer;
+      });
+      const output = logger();
+      const runtime = createApiServerRuntime({
+        port: 0,
+        logger: output.logger,
+        merchantBff: {
+          exactOrigin: syntheticOrigin,
+          acceptedHost: "merchant.invalid",
+          service: {} as MerchantBffService,
+          orderQueue: orderQueue as never,
+        },
+      });
+      runtimes.push(runtime);
+      await runtime.listen();
+      const list = await merchantRequest(
+        origin(runtime),
+        {
+          host: "merchant.invalid",
+          origin: syntheticOrigin,
+          "sec-fetch-site": "same-origin",
+          cookie: "__Host-bop-merchant=synthetic-session",
+        },
+        "/merchant/orders",
+      );
+      expect(list.status).toBe(503);
+      expect(orderQueue).toHaveBeenCalled();
+      const failures = output.records
+        .map((record) => JSON.parse(record) as { event?: string; resultCode?: string })
+        .filter((record) => record.event === "merchant_request_unexpected");
+      expect(failures.map((failure) => failure.resultCode)).toEqual([expected]);
+      expect(output.records.join("")).not.toContain("order_header");
+      expect(output.records.join("")).not.toContain("synthetic-session");
+    }
   });
 });
 
