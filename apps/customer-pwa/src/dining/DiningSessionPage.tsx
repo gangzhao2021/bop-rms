@@ -413,7 +413,14 @@ function RoundCard({
               {money(item.priceBeforeTax ?? item.lineTotal)}
             </span>
             {item.cancelled ? (
-              <span className="order-status__item-cancelled">{t("Cancelled")}</span>
+              <span className="order-status__item-cancelled">
+                {/* b25 review: on the table's bill (paying at the end) the dish was taken off it
+                    and nobody pays for it, as Orders and checkout say; a paid round's dish was
+                    cancelled and its refund is said with the round. */}
+                {round.payment === "OnTableBill" || round.payment === "NotCharged"
+                  ? t("Taken off the bill · not charged")
+                  : t("Cancelled")}
+              </span>
             ) : item.beingRemade ? (
               <span className="order-status__item-remake">
                 {collectOrderNumber !== null

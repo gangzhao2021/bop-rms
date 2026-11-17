@@ -1053,6 +1053,54 @@ describe("CUST-DINE-IN-SESSION item prices before tax (WP-2423 D5)", () => {
       "Refunded $",
     );
   });
+
+  // b25 review: on a table paying at the end, Orders and checkout say a dish staff took off reads
+  // "Taken off the bill · not charged"; the guest page said only "Cancelled", as if something had
+  // gone wrong with it. A paid round's refunded dish still reads "Cancelled" (its refund is said).
+  it("b25: a dish staff took off a table's bill reads Taken off the bill, not charged, as on Orders", () => {
+    const items = [
+      { ...round().items[0], displayName: "Steamed rice", lineTotal: cad("282") },
+      {
+        displayName: "Lemon tea",
+        quantity: 1,
+        servedQuantity: 0,
+        cancelled: true,
+        lineTotal: cad("537"),
+      },
+    ] as DiningRound["items"];
+    const onBill = round({ payment: "OnTableBill", items, itemsTotal: cad("282") });
+    const state = {
+      status: "ready",
+      refreshing: false,
+      view: view({ paymentTiming: "PayLater", rounds: [onBill], summary: null }),
+    } as const;
+    const html = text(render(state));
+    expect(html).toContain("Lemon tea $5.37 Taken off the bill · not charged");
+    expect(html).not.toContain("Cancelled");
+    const zh = text(
+      renderToStaticMarkup(
+        <LanguageRoot initial="zh-Hans">
+          {() => (
+            <MemoryRouter initialEntries={["/dine-in/session"]}>
+              <DiningSessionScreen state={state} store={store} onRefresh={() => undefined} />
+            </MemoryRouter>
+          )}
+        </LanguageRoot>,
+      ),
+    );
+    renderToStaticMarkup(<LanguageRoot initial="en">{() => null}</LanguageRoot>);
+    expect(zh).toContain("已从账单删除 · 不收费");
+    expect(zh).not.toContain("已取消");
+    const paid = text(
+      render({
+        status: "ready",
+        refreshing: false,
+        view: view({ rounds: [round({ items, itemsTotal: cad("819"), refunded: cad("537") })] }),
+      }),
+    );
+    expect(paid).toContain("Lemon tea $5.37 Cancelled");
+    expect(paid).not.toContain("Taken off the bill");
+  });
 });
 
 it("WP-2423 D5: a round from another day shows its date, today's only its time", () => {
