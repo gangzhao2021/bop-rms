@@ -46,8 +46,12 @@ function failure(
   throw new OrderPaymentOutcomeError(code);
 }
 
-function dependency(): never {
-  return failure("ORDER_PAYMENT_OUTCOME_DEPENDENCY_UNAVAILABLE");
+const failureCauseKey = Symbol.for("bop.failure.cause");
+/** `cause`: what the step met, kept for the log at the edge (never as `cause`, never answered). */
+function dependency(cause?: unknown): never {
+  const error = new OrderPaymentOutcomeError("ORDER_PAYMENT_OUTCOME_DEPENDENCY_UNAVAILABLE");
+  if (cause !== undefined) Object.defineProperty(error, failureCauseKey, { value: cause });
+  throw error;
 }
 
 function exact(value: unknown, fields: readonly string[]): Readonly<Record<string, unknown>> {
@@ -282,8 +286,8 @@ export function createOrderPaymentOutcomeConsumerService(ports: OrderPaymentOutc
         paymentEventReference: parseOrderingReference(event.eventId),
         observedAt: parseOrderingInstant(event.occurredAt),
       });
-    } catch {
-      return dependency();
+    } catch (error) {
+      return dependency(error);
     }
     if (authorized !== true) return failure("ORDER_PAYMENT_OUTCOME_PERMISSION_DENIED");
   }
@@ -394,8 +398,9 @@ export function createOrderPaymentOutcomeConsumerService(ports: OrderPaymentOutc
         paymentEventReference: parseOrderingReference(event.eventId),
         paymentEvent: event,
       });
-    } catch {
-      return dependency();
+    } catch (error) {
+      // WP-2423 batch 28: the delivery's log names what the source met.
+      return dependency(error);
     }
     if (sourceValue === null)
       return {

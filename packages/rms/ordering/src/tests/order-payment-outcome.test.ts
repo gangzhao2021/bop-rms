@@ -491,6 +491,23 @@ describe("WP-1310 Ordering payment outcome", () => {
     expect(state.calls.source).toBe(0);
   });
 
+  it("keeps what the payment source met for the delivery's log, never as the answer", async () => {
+    // WP-2423 batch 28 (v15 18:13:55): the level-50 line said only DEPENDENCY_UNAVAILABLE.
+    const event = succeeded();
+    const state = fixture({});
+    const met = Object.assign(new Error("synthetic"), {
+      code: "ORDER_PAYMENT_OUTCOME_SOURCE_UNAVAILABLE",
+    });
+    state.ports.source.loadExact = async () => {
+      throw met;
+    };
+    const refused = await state.service
+      .consume(transaction(), event)
+      .catch((error: unknown) => error);
+    expect(refused).toMatchObject({ code: "ORDER_PAYMENT_OUTCOME_DEPENDENCY_UNAVAILABLE" });
+    expect((refused as Record<symbol, unknown>)[Symbol.for("bop.failure.cause")]).toBe(met);
+  });
+
   it("rejects a Created commit that swaps the exact attempted branch", async () => {
     const event = succeeded();
     const attempted = disposition(event, "Confirmed");

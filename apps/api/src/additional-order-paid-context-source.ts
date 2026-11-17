@@ -9,9 +9,16 @@ import {
 import { createOrderCapturedPaymentSource } from "./order-captured-payment-source.js";
 import { readOrderPaidCapacity } from "./order-paid-capacity-source.js";
 
-const unavailable = (): never => {
-  throw new OrderPaymentOutcomeError("ORDER_PAYMENT_OUTCOME_SOURCE_UNAVAILABLE");
+const failureCauseKey = Symbol.for("bop.failure.cause");
+const unavailable = (cause?: unknown): never => {
+  const error = new OrderPaymentOutcomeError("ORDER_PAYMENT_OUTCOME_SOURCE_UNAVAILABLE");
+  // WP-2423 batch 28: what it met stays for the log (never as `cause`, never answered).
+  if (cause !== undefined) Object.defineProperty(error, failureCauseKey, { value: cause });
+  throw error;
 };
+/** The Additional batch history's refusal of a state it can't read as consistent (by its code). */
+const batchStateUnsettled = (error: unknown) =>
+  (error as { code?: unknown } | null)?.code === "ADDITIONAL_DINING_BATCH_STORE_UNAVAILABLE";
 
 /** Exact Additional payment facts under caller-owned transaction fences.
  * Does not reinterpret the snapshot as an Initial Order or infer full Order payment.
@@ -45,11 +52,24 @@ export function createAdditionalOrderPaidContextSource(
         const startedAt = parseOrderingInstant(options.now());
         const paymentFacts = await captured.resolve(transaction, event);
         const p = paymentFacts.payment.intent.preparation;
-        const execution = await executionReader.loadBySubmission({
-          transaction,
-          submissionReference: p.submissionReference,
-          observedAt: parseOrderingInstant(options.now()),
-        });
+        const readExecution = () =>
+          executionReader.loadBySubmission({
+            transaction,
+            submissionReference: p.submissionReference,
+            observedAt: parseOrderingInstant(options.now()),
+          });
+        let execution: Awaited<ReturnType<typeof readExecution>>;
+        try {
+          execution = await readExecution();
+        } catch (error) {
+          // WP-2423 batch 28 (v15 18:13:55): staff record a round's card-machine payment and then
+          // accept it in the next transaction. This payment's consumer can read the round just as
+          // that acceptance lands (accepted after the time this read began with): read it once
+          // more at a fresh time, now that the acceptance is committed, instead of failing the
+          // delivery for its retry.
+          if (!batchStateUnsettled(error)) throw error;
+          execution = await readExecution();
+        }
         if (!execution) return unavailable();
         const s = execution.snapshot,
           b = s.batch;
@@ -101,8 +121,9 @@ export function createAdditionalOrderPaidContextSource(
         );
         if (!inventory || parseOrderingInstant(options.now()) < observedAt) return unavailable();
         return Object.freeze({ ...paymentFacts, execution, capacity, inventory, observedAt });
-      } catch {
-        return unavailable();
+      } catch (error) {
+        if (error instanceof OrderPaymentOutcomeError) throw error;
+        return unavailable(error);
       }
     },
   });
