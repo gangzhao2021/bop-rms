@@ -812,13 +812,15 @@ async function open(page: Page) {
   await openStoreSetupPlace(page, "Receipts and tax numbers");
   const region = page.getByRole("region", { name: "Receipt template drafts", exact: true });
   await expect(
-    region.getByRole("textbox", { name: "Receipt language", exact: true }),
+    region.getByRole("combobox", { name: "Receipt language", exact: true }),
   ).toBeEnabled();
   return region;
 }
 async function fill(page: Page, locale = "fr-CA") {
   const region = page.getByRole("region", { name: "Receipt template drafts", exact: true });
-  await region.getByRole("textbox", { name: "Receipt language", exact: true }).fill(locale);
+  await region
+    .getByRole("combobox", { name: "Receipt language", exact: true })
+    .selectOption(locale);
   await region
     .getByRole("combobox", { name: "Receipt layout selection", exact: true })
     .selectOption({ label: "Saved layout revision 1" });
@@ -836,7 +838,7 @@ test("@production ordinary template draft save, actual generated current and ros
   await region.getByRole("button", { name: "Save template draft", exact: true }).click();
   await expect(
     region.getByText(
-      "Saved Canadian French template, draft 1. Publication has not been evaluated.",
+      "Saved French (Canada) template, draft 1. Publication has not been evaluated.",
     ),
   ).toBeVisible();
   expect(await cursors(page)).toEqual([]);
@@ -844,17 +846,19 @@ test("@production ordinary template draft save, actual generated current and ros
   await page.reload();
   await region
     .getByRole("combobox", { name: "Receipt template", exact: true })
-    .selectOption({ label: "Canadian French · draft 1" });
-  await expect(region.getByRole("textbox", { name: "Receipt language", exact: true })).toHaveValue(
+    .selectOption({ label: "French (Canada) · draft 1" });
+  await expect(region.getByRole("combobox", { name: "Receipt language", exact: true })).toHaveValue(
     "fr-CA",
   );
+  // b28: the end is asked for only once staff choose to end it on a date.
   await region
-    .getByLabel("Ends at (Store time, optional)", { exact: true })
-    .fill("2026-10-07T00:00");
+    .getByRole("combobox", { name: "In use until", exact: true })
+    .selectOption({ label: "Until a set date and time" });
+  await region.getByLabel("Ends at (Store time)", { exact: true }).fill("2026-10-07T00:00");
   await region.getByRole("button", { name: "Save template draft", exact: true }).click();
   await expect(
     region.getByText(
-      "Saved Canadian French template, draft 2. Publication has not been evaluated.",
+      "Saved French (Canada) template, draft 2. Publication has not been evaluated.",
     ),
   ).toBeVisible();
   expect(state.posts.filter((p) => p.command === "SaveDraft")).toHaveLength(2);
@@ -904,7 +908,7 @@ test("@production 390px keyboard preview, and a conflicting first save is let go
   const state = await install(page),
     region = await open(page);
   await fill(page);
-  const locale = region.getByRole("textbox", { name: "Receipt language", exact: true });
+  const locale = region.getByRole("combobox", { name: "Receipt language", exact: true });
   await locale.focus();
   await page.keyboard.press("Tab");
   await expect(
@@ -952,9 +956,13 @@ test("@production ordinary template review submission reloads real state and fre
   await region.getByRole("button", { name: "Save template draft", exact: true }).click();
   const submit = region.getByRole("button", { name: "Submit template for review", exact: true });
   await expect(submit).toBeEnabled();
-  await region.getByRole("textbox", { name: "Receipt language", exact: true }).fill("en-CA");
+  await region
+    .getByRole("combobox", { name: "Receipt language", exact: true })
+    .selectOption("en-CA");
   await expect(submit).toBeDisabled();
-  await region.getByRole("textbox", { name: "Receipt language", exact: true }).fill("fr-CA");
+  await region
+    .getByRole("combobox", { name: "Receipt language", exact: true })
+    .selectOption("fr-CA");
   await expect(submit).toBeEnabled();
   const submitBox = await submit.boundingBox();
   expect(submitBox?.height).toBeGreaterThanOrEqual(44);
@@ -963,7 +971,7 @@ test("@production ordinary template review submission reloads real state and fre
   await expect(submit).toBeFocused();
   await submit.press("Enter");
   await expect(
-    region.getByRole("textbox", { name: "Receipt language", exact: true }),
+    region.getByRole("combobox", { name: "Receipt language", exact: true }),
   ).toBeDisabled();
   await expect(
     region.getByRole("button", { name: "Save template draft", exact: true }),
@@ -975,9 +983,9 @@ test("@production ordinary template review submission reloads real state and fre
   await page.reload();
   await region
     .getByRole("combobox", { name: "Receipt template", exact: true })
-    .selectOption({ label: "Canadian French · draft 1" });
+    .selectOption({ label: "French (Canada) · draft 1" });
   await expect(
-    region.getByRole("textbox", { name: "Receipt language", exact: true }),
+    region.getByRole("combobox", { name: "Receipt language", exact: true }),
   ).toBeDisabled();
   expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(
     false,
@@ -1008,7 +1016,7 @@ test("@production lost template submission survives reload and denied recovery w
   await page.reload();
   await region
     .getByRole("combobox", { name: "Receipt template", exact: true })
-    .selectOption({ label: "Canadian French · draft 1" });
+    .selectOption({ label: "French (Canada) · draft 1" });
   state.denySubmit = true;
   await region
     .getByRole("button", { name: "Recover earlier template submission", exact: true })
@@ -1053,7 +1061,7 @@ test("@production template submission recovery restores readiness after initial 
   state.failReview = 1;
   await region
     .getByRole("combobox", { name: "Receipt template", exact: true })
-    .selectOption({ label: "Canadian French · draft 1" });
+    .selectOption({ label: "French (Canada) · draft 1" });
   await expect(region.getByRole("alert")).toContainText("could not be loaded");
   await expect(
     region.getByRole("combobox", { name: "Receipt template", exact: true }),
@@ -1069,7 +1077,7 @@ test("@production template submission recovery restores readiness after initial 
     region.getByRole("region", { name: "Receipt template review status", exact: true }),
   ).toContainText("Waiting for approval");
   await expect(
-    region.getByRole("textbox", { name: "Receipt language", exact: true }),
+    region.getByRole("combobox", { name: "Receipt language", exact: true }),
   ).toBeDisabled();
   expect(state.submitPosts.at(-1)?.command).toBe("ResolveOriginal");
   expect(state.errors).toEqual([]);
@@ -1102,7 +1110,7 @@ async function independentReview(
   state.selectActor(id(40));
   await page.reload();
   await region.getByRole("combobox", { name: "Receipt template", exact: true }).selectOption({
-    label: `${locale === "en-CA" ? "Canadian English" : "Canadian French"} · draft 1`,
+    label: `${locale === "en-CA" ? "English (Canada)" : "French (Canada)"} · draft 1`,
   });
   await expect(
     region.getByRole("button", { name: "Approve receipt template", exact: true }),
@@ -1136,9 +1144,9 @@ test("@production 390px independent template approval and publication refresh re
   ).toContainText("Published");
   await expect(
     region.getByRole("region", { name: "Original template publication", exact: true }),
-  ).toContainText("Canadian French · Published");
+  ).toContainText("French (Canada) · Published");
   await expect(
-    region.getByText("Saved Canadian French template, draft 1. Publication recorded.", {
+    region.getByText("Saved French (Canada) template, draft 1. Publication recorded.", {
       exact: true,
     }),
   ).toBeVisible();
@@ -1154,7 +1162,7 @@ test("@production 390px independent template approval and publication refresh re
   await page.reload();
   await region
     .getByRole("combobox", { name: "Receipt template", exact: true })
-    .selectOption({ label: "Canadian French · draft 1" });
+    .selectOption({ label: "French (Canada) · draft 1" });
   await expect(
     region.getByRole("region", { name: "Receipt template review status", exact: true }),
   ).toContainText("Published");
@@ -1190,7 +1198,7 @@ test("@production lost template publication survives denied reload recovery and 
   await page.reload();
   await region
     .getByRole("combobox", { name: "Receipt template", exact: true })
-    .selectOption({ label: "Canadian French · draft 1" });
+    .selectOption({ label: "French (Canada) · draft 1" });
   await expect(recover).toBeEnabled();
   await expect(
     region.getByRole("button", { name: "Save template draft", exact: true }),

@@ -30,6 +30,7 @@ import {
 } from "./receipt-template-lifecycle-client.js";
 import type { ReceiptTemplateLifecyclePendingJournal } from "./receipt-template-lifecycle-pending-journal.js";
 import { StoreSetupClientError } from "./store-setup-client.js";
+import { setLanguageForTest } from "./i18n/i18n.js";
 import { receiptTemplateArtifactRequiredFields } from "./receipt-template-artifact-client.js";
 import { publicationValueDigest } from "./product-publication-command-client-v2.js";
 const id = (n: number) => `01902501-0000-7000-8000-${n.toString(16).padStart(12, "0")}`,
@@ -198,6 +199,35 @@ it("renders actual Store default locale, 13 mechanical labels, with no opaque ID
   expect(html).toContain("No actual order or payment details");
   expect(html).not.toContain(scope.storeReference);
   expect(html).not.toContain("Use saved template");
+});
+it("b28 (v15 live26): the language is a name chosen from a list, no empty date box, plain words", () => {
+  const render = () =>
+    renderToStaticMarkup(
+      <ReceiptTemplateDraftEditor scope={scope} csrf={csrf} defaultLocale="en-CA" />,
+    );
+  const en = render();
+  expect(en).toMatch(/<select aria-label="Receipt language"/u);
+  expect(staticText(en)).toContain("English (Canada)");
+  expect(staticText(en)).toContain("French (Canada)");
+  // Never the code in a box to type into, nor an empty yyyy-mm-dd box for an optional end.
+  expect(en).not.toMatch(/<input[^>]*value="en-CA"/u);
+  expect(en).not.toContain('type="datetime-local"');
+  expect(staticText(en)).toContain("Until another receipt replaces it");
+  expect(en).not.toContain("Refresh template list");
+  expect(en).not.toContain("Refresh saved template draft");
+  setLanguageForTest("zh-Hans");
+  try {
+    const zh = staticText(render());
+    expect(zh).toContain("英语（加拿大）");
+    expect(zh).toContain("法语（加拿大）");
+    expect(zh).not.toMatch(/en-CA|yyyy|预设|模板草稿/u);
+    expect(zh).toContain("收据草稿");
+    expect(zh).toContain("直到被新的收据替换");
+    expect(zh).toContain("重新读取列表");
+    expect(zh).toContain("重新读取已保存的草稿");
+  } finally {
+    setLanguageForTest("en");
+  }
 });
 it("reserves before first POST and clears only after reading actual allocated template", async () => {
   const f = fixture(),

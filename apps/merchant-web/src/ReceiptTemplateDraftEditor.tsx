@@ -7,7 +7,12 @@ import {
   storeLocalInstant,
   storeLocalInputValue,
 } from "./StoreTime.js";
-import { languageName, receiptFieldLabels, receiptTemplateStateLabel } from "./staff-text.js";
+import {
+  languageWithRegionName,
+  receiptFieldLabels,
+  receiptTemplateStateLabel,
+} from "./staff-text.js";
+import { storeOpeningLocales } from "./store-opening-client.js";
 import {
   releaseOriginalWhenRefused,
   StoreSetupClientError,
@@ -529,7 +534,10 @@ export function ReceiptTemplateDraftEditor({
     [compliance, setCompliance] = useState(""),
     [activation, setActivation] = useState<"Immediate" | "Scheduled">("Immediate"),
     [start, setStart] = useState(""),
-    [end, setEnd] = useState("");
+    [end, setEnd] = useState(""),
+    // b28 (v15 live26): an end date is asked for only once staff choose to end it on one, so an
+    // optional field never shows an empty yyyy-mm-dd box.
+    [endsOnDate, setEndsOnDate] = useState(false);
   // Staff enter Store wall-clock times; the draft keeps the exact instant they name.
   const timeZone = useContext(StoreTimeZoneContext);
   const localInput = (instant: string) =>
@@ -592,6 +600,7 @@ export function ReceiptTemplateDraftEditor({
     setActivation(c?.activation.mode ?? "Immediate");
     setStart(c?.activation.mode === "Scheduled" ? c.activation.effectiveFrom : "");
     setEnd(c?.effectiveUntil ?? "");
+    setEndsOnDate(Boolean(c?.effectiveUntil));
   };
   useEffect(() => {
     setSubject(null);
@@ -1184,7 +1193,7 @@ export function ReceiptTemplateDraftEditor({
             <option value={subject}>
               {selected
                 ? t("{locale} · draft {revision}", {
-                    locale: languageName(selected.content.locale),
+                    locale: languageWithRegionName(selected.content.locale),
                     revision: selected.revision,
                   })
                 : t("Selected saved template")}
@@ -1193,7 +1202,7 @@ export function ReceiptTemplateDraftEditor({
           {rows.map((r) => (
             <option key={r.content.templateReference} value={r.content.templateReference}>
               {t("{locale} · draft {revision}", {
-                locale: languageName(r.content.locale),
+                locale: languageWithRegionName(r.content.locale),
                 revision: r.revision,
               })}
             </option>
@@ -1213,7 +1222,7 @@ export function ReceiptTemplateDraftEditor({
           }
           onClick={() => void refreshRoster(null)}
         >
-          {t("Refresh template list")}
+          {t("Read the list again")}
         </button>
         <button
           type="button"
@@ -1234,7 +1243,7 @@ export function ReceiptTemplateDraftEditor({
       {selected && (
         <p>
           {t("Saved {locale} template, draft {revision}. {value}", {
-            locale: languageName(selected.content.locale),
+            locale: languageWithRegionName(selected.content.locale),
             revision: selected.revision,
             value: publicationRecorded
               ? t("Publication recorded.")
@@ -1320,7 +1329,7 @@ export function ReceiptTemplateDraftEditor({
                     {t(
                       "{locale} receipt template, draft {draftRevision}, as checked when it was sent for approval.",
                       {
-                        locale: languageName(selected.content.locale),
+                        locale: languageWithRegionName(selected.content.locale),
                         draftRevision: review.submission?.draftRevision,
                       },
                     )}
@@ -1353,7 +1362,7 @@ export function ReceiptTemplateDraftEditor({
           <h5>{t("Original publication receipt")}</h5>
           <p>
             {t("{locale} · Published {publishedAt}", {
-              locale: languageName(publishedHistory.locale),
+              locale: languageWithRegionName(publishedHistory.locale),
               publishedAt: friendlyStoreTime(publishedHistory.publishedAt, timeZone),
             })}
           </p>
@@ -1520,11 +1529,25 @@ export function ReceiptTemplateDraftEditor({
         <legend>{t("Authored template fields")}</legend>
         <label>
           {t("Receipt language")}
-          <input
+          {/* b28 (v15 live26): the languages a Store opens in, by name; a language saved
+              before stays offered as it was. */}
+          <select
             aria-label={t("Receipt language")}
             value={locale}
             onChange={(e) => setLocale(e.target.value)}
-          />
+          >
+            {[
+              ...new Set<string>([
+                ...storeOpeningLocales,
+                ...(defaultLocale ? [defaultLocale] : []),
+                ...(locale ? [locale] : []),
+              ]),
+            ].map((code) => (
+              <option key={code} value={code}>
+                {languageWithRegionName(code)}
+              </option>
+            ))}
+          </select>
         </label>
         <label>
           {t("Receipt layout selection")}
@@ -1592,14 +1615,31 @@ export function ReceiptTemplateDraftEditor({
           </label>
         )}
         <label>
-          {t("Ends at (Store time, optional)")}
-          <input
-            type="datetime-local"
-            aria-label={t("Ends at (Store time, optional)")}
-            value={localInput(end)}
-            onChange={(e) => setEnd(instantInput(e.target.value))}
-          />
+          {t("In use until")}
+          <select
+            aria-label={t("In use until")}
+            value={endsOnDate ? "OnDate" : "Replaced"}
+            onChange={(e) => {
+              const onDate = e.target.value === "OnDate";
+              setEndsOnDate(onDate);
+              if (!onDate) setEnd("");
+            }}
+          >
+            <option value="Replaced">{t("Until another receipt replaces it")}</option>
+            <option value="OnDate">{t("Until a set date and time")}</option>
+          </select>
         </label>
+        {endsOnDate && (
+          <label>
+            {t("Ends at (Store time)")}
+            <input
+              type="datetime-local"
+              aria-label={t("Ends at (Store time)")}
+              value={localInput(end)}
+              onChange={(e) => setEnd(instantInput(e.target.value))}
+            />
+          </label>
+        )}
       </fieldset>
       <section aria-label={t("Receipt field preview")}>
         <h5>{t("Standard receipt field preview")}</h5>
@@ -1620,7 +1660,7 @@ export function ReceiptTemplateDraftEditor({
           disabled={disabled || busy || loadedIdentity.current !== identityKey}
           onClick={() => void action("Refresh")}
         >
-          {t("Refresh saved template draft")}
+          {t("Read the saved draft again")}
         </button>
         {pending ? (
           <>

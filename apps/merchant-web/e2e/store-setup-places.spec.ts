@@ -1004,12 +1004,20 @@ for (const lang of ["en", "zh-Hans"] as const)
     // keep a way to read what another person or device did meanwhile (approved, saved elsewhere).
     await expect(
       tools
-        .getByRole("region", { name: zh ? "收据预设" : "Receipt presets", exact: true })
+        .getByRole("region", { name: zh ? "收据样式" : "Receipt presets", exact: true })
         .getByRole("button", { name: /Refresh|刷新/u }),
     ).toHaveCount(0);
-    await expect(tools.getByRole("button", { name: /Refresh|刷新/u })).toHaveCount(2);
+    await expect(tools.getByRole("button", { name: /Refresh|刷新/u })).toHaveCount(0);
+    // b28 (v15 live26): in plain words.
     await expect(
-      tools.getByText(zh ? "还没有已保存的预设。" : "No saved preset yet.").first(),
+      tools.getByRole("button", {
+        name: zh
+          ? /^(重新读取列表|重新读取已保存的草稿)$/u
+          : /^(Read the list again|Read the saved draft again)$/u,
+      }),
+    ).toHaveCount(2);
+    await expect(
+      tools.getByText(zh ? "还没有已保存的样式。" : "No saved preset yet.").first(),
     ).toBeVisible();
     await b25Shot(page, `receipts-${lang}`);
     await expectNoInternalText(page);
@@ -1121,7 +1129,7 @@ for (const lang of ["en", "zh-Hans"] as const)
     await page.goto(setupHref + "?section=receipts");
     const tools = page.locator("#receipt-templates");
     const presets = tools.getByRole("region", {
-      name: zh ? "收据预设" : "Receipt presets",
+      name: zh ? "收据样式" : "Receipt presets",
       exact: true,
     });
     await expect(presets.getByRole("alert")).toHaveCount(1);
@@ -1129,7 +1137,7 @@ for (const lang of ["en", "zh-Hans"] as const)
       zh ? "网络恢复后会自动重新读取" : "They are read again once the connection is back",
     );
     await expect(
-      tools.getByRole("alert").filter({ hasText: zh ? "模板草稿" : "template draft" }),
+      tools.getByRole("alert").filter({ hasText: zh ? "收据草稿" : "template draft" }),
     ).toContainText(
       zh ? "网络恢复后会自动重新读取" : "It is read again by itself once the connection is back",
     );

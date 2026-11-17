@@ -13,6 +13,25 @@ export function languageName(locale: string): string {
   }
 }
 
+/**
+ * b28 (v15 live26): a language with its country, as staff read it in a list: "en-CA" as "English
+ * (Canada)", 英语（加拿大）; never the code, nor the browser's run-together "加拿大英语".
+ */
+export function languageWithRegionName(locale: string): string {
+  const [language = locale, ...rest] = locale.split("-");
+  const region = rest.find((part) => /^[A-Z]{2}$/u.test(part));
+  try {
+    const languageText =
+      new Intl.DisplayNames([displayLocale()], { type: "language" }).of(language) ?? locale;
+    if (region === undefined) return languageText;
+    const regionText =
+      new Intl.DisplayNames([displayLocale()], { type: "region" }).of(region) ?? region;
+    return t("{language} ({region})", { language: languageText, region: regionText });
+  } catch {
+    return locale;
+  }
+}
+
 /** b18: the language alone ("English", 英语), never the browser's region form ("加拿大英语"). */
 export function plainLanguageName(locale: string): string {
   return languageName(locale.split("-")[0] ?? locale);
