@@ -10115,7 +10115,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这份草稿没有保存：有 1 处要先改正，见下方“需要先改正”。",
   "This draft was not saved: {count} fee settings need fixing first, see “Needs fixing first” below.":
     "这份草稿没有保存：有 {count} 处要先改正，见下方“需要先改正”。",
-  "This draft was not saved. {detail}": "这份草稿没有保存。{detail}",
+  "This draft was not saved: check the times, wait times and fees you changed against the services this setup offers; the last step lists anything still needed.":
+    "这份草稿没有保存：请对照这份设置提供的服务方式，检查你改过的时间、等待时间和费用；最后一步会列出还需要改的地方。",
   "Choose which orders the {fee} applies to.": "请选择{fee}适用于哪些订单。",
   "{method}: {before} → {after}": "{method}：{before} → {after}",
   "Save payment methods in {where}, choose the saved payment methods for this setup, then save as draft.":

@@ -400,8 +400,8 @@ const messages: Record<StoreSetupClientError["code"], string> = {
  * b25 (v15 live check of b24): a save that was refused says so, and where Review lists what is
  * wrong. b26 (v15 live check of b25): in one short sentence; what each fee needs is said once, in
  * Review ("Needs fixing first") and at the fee itself, not again above the steps. Only when nothing
- * specific is known (a rule only the server knows, a stale tab) is the general list of rules shown,
- * and it too starts by saying the draft was not saved.
+ * specific is known (a rule only the server knows, a stale tab) one sentence says the draft was
+ * not saved and where to look (b28: no longer the general list of rules).
  */
 export function storeSetupInvalidText(
   feeProblems: readonly StoreSetupFeeProblem[],
@@ -417,12 +417,12 @@ export function storeSetupInvalidText(
       { count: feeProblems.length },
     );
   if (!timesValid) return t("Some edited times or wait values need correction before saving.");
-  // Read when shown, so the sentence is in the page's language as the rest of it.
-  return t("This draft was not saved. {detail}", {
-    detail: t(
-      "Check the edited settings. Each service interval needs valid times and at least one service mode. Wait times are whole minutes, up to 24 hours (1,440 minutes). A service charge or delivery fee that is On needs a tax classification that is still in use, and every fee that is On needs at least one order type, chosen from the services this setup offers.",
-    ),
-  });
+  // Read when shown, so the sentence is in the page's language as the rest of it. b28 (v15
+  // live26): the server's answer does not say which rule failed, so one sentence says where to
+  // look, never every rule.
+  return t(
+    "This draft was not saved: check the times, wait times and fees you changed against the services this setup offers; the last step lists anything still needed.",
+  );
 }
 const root = (view: StoreSetupWorkspace) => ({
   reference: view.setup.snapshot?.setupDraftReference ?? null,

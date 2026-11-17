@@ -230,13 +230,18 @@ async function refusedSave(status: number) {
 
 for (const [status, alert] of [
   // b26: the general check list starts by saying the draft was not saved.
-  [400, "This draft was not saved. Check the edited settings."],
+  // b28 (v15 live26): the server does not say which rule failed: one sentence, never every rule.
+  [
+    400,
+    "This draft was not saved: check the times, wait times and fees you changed against the services this setup offers; the last step lists anything still needed.",
+  ],
   [403, "Your current permission or selected Store does not allow this action."],
   [409, "The saved settings or their baseline changed."],
 ] as const)
   it(`b25: a save refused with ${status} is let go: no recovery, Save and Discard stay usable`, async () => {
     const { s, container } = await refusedSave(status);
     expect(alerts(container).some((text) => text.startsWith(alert))).toBe(true);
+    expect(alerts(container).join(" ")).not.toContain("1,440");
     expect(container.textContent).not.toContain(recoveryText);
     expect(buttonNamed(container, "Recover original save")).toBeUndefined();
     expect(s.journal.release).toHaveBeenCalledTimes(1);
@@ -286,9 +291,9 @@ it("b25: in Chinese, a refused save shows no recovery line", async () => {
   expect(container.textContent).not.toContain("之前的保存尚未清除");
   expect(buttonNamed(container, "恢复原来的保存")).toBeUndefined();
   // b26: and says first that the draft was not saved.
-  expect(
-    alerts(container).some((text) => text.startsWith("这份草稿没有保存。请检查已编辑的设置。")),
-  ).toBe(true);
+  expect(alerts(container)).toContain(
+    "这份草稿没有保存：请对照这份设置提供的服务方式，检查你改过的时间、等待时间和费用；最后一步会列出还需要改的地方。",
+  );
 });
 
 /** A saved draft offering dine-in only, whose tip still applies to pickup orders too. */

@@ -1061,8 +1061,8 @@ for (const lang of ["en", "zh-Hans"] as const)
     const alert = page.locator("#setup-validation-error");
     await expect(alert).toContainText(
       zh
-        ? "这份草稿没有保存。请检查已编辑的设置。"
-        : "This draft was not saved. Check the edited settings.",
+        ? "这份草稿没有保存：请对照这份设置提供的服务方式，检查你改过的时间、等待时间和费用；最后一步会列出还需要改的地方。"
+        : "This draft was not saved: check the times, wait times and fees you changed against the services this setup offers; the last step lists anything still needed.",
     );
     await b26Shot(page, `server-refused-${lang}`);
     // Two fees on a service this setup does not offer: one sentence above the steps.
