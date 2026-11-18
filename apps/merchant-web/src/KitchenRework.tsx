@@ -44,6 +44,8 @@ export function useKitchenRework(input: {
   const [board, setBoard] = useState<KitchenReworkBoard | null>(null);
   const [readFailed, setReadFailed] = useState(false);
   const [offered, setOffered] = useState(true);
+  // The first read has answered (any way): the bar knows whether Recently finished joins it.
+  const [answered, setAnswered] = useState(false);
   const [state, setState] = useState<CommandState>({ kind: "Idle" });
   const inFlight = useRef(false);
   const { csrf, storeReference, revision, onChanged } = input;
@@ -57,9 +59,11 @@ export function useKitchenRework(input: {
           if (!current) return;
           setBoard(next);
           setReadFailed(false);
+          setAnswered(true);
         },
         (error: unknown) => {
           if (!current) return;
+          setAnswered(true);
           if (error instanceof KitchenReworkClientError && error.code === "NotOffered") {
             setOffered(false);
             setBoard(null);
@@ -93,6 +97,8 @@ export function useKitchenRework(input: {
   return {
     board: offered ? board : null,
     readFailed: offered && readFailed,
+    /** Whether the bar's remakes are known yet (nothing is read without a sign-in or Store). */
+    settled: answered || !offered || !csrf || !storeReference,
     state,
     busy: state.kind === "Submitting",
     create(item: KitchenBoardItem, choice: RemakeChoice) {
@@ -554,6 +560,28 @@ export function KitchenRecentlyFinished({
           </li>
         ))}
       </ul>
+    </details>
+  );
+}
+
+/**
+ * The place Recently finished takes in the bar, kept empty and unseen while it is not offered: the
+ * same words at the same size, so nothing in the bar moves when it arrives or leaves.
+ */
+export function KitchenRecentlyFinishedPlace({
+  items,
+  observedAt,
+}: {
+  readonly items: readonly KitchenBoardItem[];
+  readonly observedAt: string;
+}) {
+  return (
+    <details className="kitchen-recent-finished" data-place-kept="true" aria-hidden="true">
+      <summary tabIndex={-1}>
+        {t("Recently finished · {length}", {
+          length: recentlyFinishedKitchenItems(items, observedAt).length,
+        })}
+      </summary>
     </details>
   );
 }

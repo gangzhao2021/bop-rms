@@ -268,41 +268,54 @@ test("@production the next ticket does not move during the hold", async ({ page 
   await expect(first.locator(".kitchen-ticket__next")).toBeDisabled();
 });
 
-test("@production a ticket that moved when a line above it left ignores a tap for a moment", async ({
-  page,
-}) => {
-  // Three dishes on the first ticket and five more tickets: the second row sits under the first.
-  const table = { orderNumber: "7", orderType: "DineIn", tableLabel: "T5" };
-  const others = [11, 12, 13, 14, 15].map((n, index) =>
-    dish(n, "TEST order " + n, {
-      ticketReference: id(100 + n),
-      orderReference: id(200 + n),
-      orderLabel: { orderNumber: String(n), orderType: "Pickup", tableLabel: null },
-      workItemCreatedAt: `2026-10-26T22:13:${String(10 + index).padStart(2, "0")}.000Z`,
-    }),
-  );
-  await page.setViewportSize({ width: 1024, height: 900 });
-  const { taps } = await mockBoard(page, [
-    ...[1, 2, 3].map((n) => dish(n, "TEST dish " + n, { orderLabel: table })),
-    ...others,
-  ]);
-  await page.goto("/operations/kitchen");
-  const first = page.locator(".kitchen-ticket").filter({ hasText: "TEST dish 1" });
-  const below = page.locator(".kitchen-ticket").filter({ hasText: "TEST order 13" });
-  const before = await below.boundingBox();
-  await first.getByRole("button", { name: "Mark TEST dish 1 finished" }).click();
-  // When the hold ends the dish leaves and the row below moves up under the cook's finger.
-  await expect
-    .poll(async () => (await below.boundingBox())?.y, { timeout: holdMs + 8_000, intervals: [20] })
-    .toBeLessThan(before?.y ?? 0);
-  await below.locator(".kitchen-ticket__next").click();
-  await expect(below.locator(".kitchen-work-item")).not.toHaveAttribute("data-pending", /./u);
-  // A moment later the same tap is taken.
-  await page.waitForTimeout(700);
-  await below.locator(".kitchen-ticket__next").click();
-  await expect(below.locator(".kitchen-work-item")).toHaveAttribute("data-pending", "Holding");
-  expect(taps.map((tap) => tap.lines.map((line) => line.workItemReference))).toEqual([[id(1)]]);
-});
+for (const width of [1024, 390] as const)
+  test(`@production a ticket that moved when a line above it left ignores a tap for a moment and says so, at ${width} wide`, async ({
+    page,
+  }) => {
+    // Three dishes on the first ticket and five more tickets: the second row sits under the first.
+    const table = { orderNumber: "7", orderType: "DineIn", tableLabel: "T5" };
+    const others = [11, 12, 13, 14, 15].map((n, index) =>
+      dish(n, "TEST order " + n, {
+        ticketReference: id(100 + n),
+        orderReference: id(200 + n),
+        orderLabel: { orderNumber: String(n), orderType: "Pickup", tableLabel: null },
+        workItemCreatedAt: `2026-10-26T22:13:${String(10 + index).padStart(2, "0")}.000Z`,
+      }),
+    );
+    await page.setViewportSize({ width, height: 900 });
+    const { taps } = await mockBoard(page, [
+      ...[1, 2, 3].map((n) => dish(n, "TEST dish " + n, { orderLabel: table })),
+      ...others,
+    ]);
+    await page.goto("/operations/kitchen");
+    const first = page.locator(".kitchen-ticket").filter({ hasText: "TEST dish 1" });
+    const below = page.locator(".kitchen-ticket").filter({ hasText: "TEST order 13" });
+    // Where the card sits on the page, and its size (a phone scrolls for each tap).
+    const place = () =>
+      below.evaluate((card) => {
+        const box = card.getBoundingClientRect();
+        return [box.top + window.scrollY, box.height] as const;
+      });
+    const [before] = await place();
+    await first.getByRole("button", { name: "Mark TEST dish 1 finished" }).click();
+    // When the hold ends the dish leaves and the row below moves up under the cook's finger.
+    await expect
+      .poll(async () => (await place())[0], { timeout: holdMs + 8_000, intervals: [20] })
+      .toBeLessThan(before);
+    const moved = await place();
+    await below.locator(".kitchen-ticket__next").click();
+    await expect(below.locator(".kitchen-work-item")).not.toHaveAttribute("data-pending", /./u);
+    // The ignored tap is said on the card, so the cook knows to tap again.
+    await expect(below.locator(".kitchen-ticket__top")).toContainText("Moved. Tap again.");
+    // Said in the card's own top row: the card keeps its place and size.
+    expect(await place()).toEqual(moved);
+    await page.screenshot({ path: `test-results/kitchen-moved-tap-again-${width}.png` });
+    // A moment later the same tap is taken.
+    await page.waitForTimeout(700);
+    await below.locator(".kitchen-ticket__next").click();
+    await expect(below.locator(".kitchen-work-item")).toHaveAttribute("data-pending", "Holding");
+    expect(taps.map((tap) => tap.lines.map((line) => line.workItemReference))).toEqual([[id(1)]]);
+  });
 
 test("@production a tap that could not be recorded keeps the ticket's name whole, at every width", async ({
   page,
@@ -690,4 +703,59 @@ for (const [width, height] of [
     await expect(line).not.toContainText(slowWaitText);
     await page.locator(".kitchen-status-row__more").click();
     await expect(page.locator(".kitchen-status-row__detail")).toContainText(slowWaitText);
+  });
+
+for (const when of ["soon", "late"] as const)
+  test(`@production on a phone with wide type, Recently finished answering ${when} moves no ticket and the next tap is taken`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const finished = dish(9, "TEST done", {
+      ticketReference: id(80),
+      orderReference: id(81),
+      orderLabel: { orderNumber: "2", orderType: "Pickup", tableLabel: null },
+      status: "Completed",
+      completedQuantity: 1,
+      acceptedAt: at,
+      orderItemReadyAt: at,
+      workItemCreatedAt: "2026-10-26T22:00:00.000Z",
+    });
+    const { taps } = await mockBoard(page, [dish(1, "TEST latte"), finished]);
+    // The remakes answer after the board: soon (the board waits for them), or late (past that
+    // wait, so the board opens first and keeps Recently finished's place).
+    let answer: () => void = () => undefined;
+    const answered = new Promise<void>((resolve) => (answer = resolve));
+    await page.route("**/merchant/kitchen/rework/query", async (route) => {
+      if (when === "soon") setTimeout(answer, 800);
+      await answered;
+      await route.fallback();
+    });
+    await page.goto("/operations/kitchen");
+    // Wider type, as the Linux runner's sans: the bar's actions no longer fit one 358 px row.
+    await page.addStyleTag({ content: "body { letter-spacing: 0.08em; }" });
+    const ticket = page.locator(".kitchen-ticket").filter({ hasText: "TEST latte" });
+    await expect(ticket).toBeVisible();
+    const start = (await ticket.boundingBox())?.y;
+    if (when === "late") {
+      await page.waitForTimeout(slotSettleMs);
+      expect((await ticket.boundingBox())?.y).toBe(start);
+      await page.screenshot({ path: "test-results/kitchen-recent-finished-390-before.png" });
+      answer();
+    }
+    await expect(page.getByText("Recently finished · 1")).toBeVisible();
+    expect((await ticket.boundingBox())?.y).toBe(start);
+    // A tap right after is taken: nothing moved, so nothing is ignored.
+    await ticket.locator(".kitchen-ticket__next").click();
+    await expect(ticket.locator(".kitchen-ticket__top")).toContainText("Marked done");
+    expect((await ticket.boundingBox())?.y).toBe(start);
+    await expect.poll(() => taps.length, { timeout: holdMs + 3_000 }).toBe(1);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
+    await page.screenshot({
+      path: `test-results/kitchen-recent-finished-390-${when}.png`,
+      fullPage: true,
+    });
   });

@@ -627,6 +627,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "New order: {list}": "新订单：{list}",
   "{count} new orders: {list}": "有 {count} 个新订单：{list}",
   "Marked done": "已做好",
+  "Moved. Tap again.": "刚移动，请再点",
   "Marked started": "已开始",
   "Not recorded yet": "还没记上",
   "Never mind": "不用了",

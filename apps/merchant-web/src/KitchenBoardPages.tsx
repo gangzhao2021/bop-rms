@@ -8,6 +8,7 @@ import type { KitchenStepKind } from "./kitchen-step-client.js";
 import { useKitchenClock } from "./kitchen-clock.js";
 import {
   KitchenRecentlyFinished,
+  KitchenRecentlyFinishedPlace,
   KitchenRemakeCancelDialog,
   KitchenRemakeDialog,
   KitchenRemakeLane,
@@ -879,6 +880,10 @@ export function KitchenAllergenLine({ item }: { readonly item: KitchenBoardItem 
 
 /** A slot ignores taps this long after what is in it changes. */
 export const kitchenSlotSettleMs = 600;
+/** The board opens without its remakes if they have not answered by then. */
+export const kitchenRemakesWaitMs = 2_000;
+/** How long a card says a tap was not taken because the order had just moved. */
+export const kitchenMovedNoticeMs = 2_500;
 /** A new line rings once and keeps its mark this long; the kitchen no longer accepts anything. */
 export const kitchenArrivalFreshMs = 60_000;
 /** One reminder while nobody has touched this screen since the ticket appeared (WP-2423 Q33). */
@@ -1435,10 +1440,13 @@ function KitchenTapStatus({
   taps,
   readOnly,
   steps,
+  moved = false,
   children,
 }: {
   readonly taps: readonly KitchenTap<KitchenStepTarget>[];
   readonly readOnly: boolean;
+  /** A tap on this card was just not taken because the order had moved under it. */
+  readonly moved?: boolean;
   readonly steps:
     | {
         readonly onUndo: (taps: readonly number[]) => void;
@@ -1478,6 +1486,10 @@ function KitchenTapStatus({
         </>
       ) : sending ? (
         <span className="kitchen-ticket__top-text">{t("Recording…")}</span>
+      ) : moved ? (
+        <span className="kitchen-ticket__top-text" data-tone="moved">
+          {t("Moved. Tap again.")}
+        </span>
       ) : (
         children
       )}
@@ -1900,6 +1912,7 @@ export function KitchenBoardScreen({
   soldOutHref,
   setupHref,
   remakes,
+  remakesPending = false,
   earlierDays,
   headerStatus,
   statusEntries = [],
@@ -1910,6 +1923,8 @@ export function KitchenBoardScreen({
   readonly view: KitchenBoardView;
   /** A counter or office sign-in: the app's workspace frame instead of the kitchen display's. */
   readonly workspaceFrame?: KitchenWorkspaceFrame | undefined;
+  /** The remakes have not answered yet, so the bar does not know if Recently finished is in it. */
+  readonly remakesPending?: boolean;
   /** What happened to the last kitchen step, remake or ticket close, newest first. */
   readonly statusEntries?: readonly KitchenStatusEntry[];
   /** What those need beyond one line (a retry, a dismiss), shown on a tap. */
@@ -2062,6 +2077,24 @@ export function KitchenBoardScreen({
   const slotsSeeded = useRef(false);
   const slotSettled = (key: string) =>
     performance.now() - (slots.current.get(key)?.changedAt ?? -Infinity) >= kitchenSlotSettleMs;
+  // A tap the guard did not take is said on its card, so the cook taps again instead of walking
+  // away thinking the order was marked.
+  const [movedSlot, setMovedSlot] = useState<{ readonly slot: string; readonly at: number } | null>(
+    null,
+  );
+  useEffect(() => {
+    if (movedSlot === null || typeof window === "undefined") return;
+    const timer = window.setTimeout(() => setMovedSlot(null), kitchenMovedNoticeMs);
+    return () => window.clearTimeout(timer);
+  }, [movedSlot]);
+  const takenIn = (slot: string) => {
+    if (slotSettled(slot)) {
+      setMovedSlot((current) => (current?.slot === slot ? null : current));
+      return true;
+    }
+    setMovedSlot({ slot, at: performance.now() });
+    return false;
+  };
   const pendingLines = steps?.pendingLines;
   // merchant-outage-recovery M68: a tap the server is slow to answer says so. The tap's own hold is
   // no wait (its card says Marked done, with Undo), and the line sits in the status row: a notice
@@ -2079,7 +2112,7 @@ export function KitchenBoardScreen({
     step: KitchenBoardStep,
   ): void => {
     const first = lines[0];
-    if (first === undefined || steps === undefined || !slotSettled(slot)) return;
+    if (first === undefined || steps === undefined || !takenIn(slot)) return;
     guarded(first, stepLabels[step], () => {
       pendingFocus.current = kitchenFocusIntent(workspaceRef.current, kitchenLineKey(first));
       if (step === "MarkReady") {
@@ -2097,7 +2130,7 @@ export function KitchenBoardScreen({
     });
   };
   const tapDish = (slot: string, item: KitchenBoardItem, part: ComboPartView) => {
-    if (steps === undefined || !slotSettled(slot)) return;
+    if (steps === undefined || !takenIn(slot)) return;
     guarded(item, stepLabels.Finish, () =>
       steps.onStep(
         [
@@ -2114,6 +2147,11 @@ export function KitchenBoardScreen({
   const onRemake = remakes?.canRework
     ? (item: KitchenBoardItem) => guarded(item, t("Remake"), () => setRemakeTarget(item))
     : undefined;
+  // DEC-KITCHEN-ONE-TAP: once the bar has, or may yet have, Recently finished, its place is kept
+  // (empty and unseen when it is not offered), so it arriving late or leaving never takes the bar
+  // to another row and moves every ticket under the cook's tap.
+  const recentPlaceKept = useRef(false);
+  if (remakesPending || (remakes && onRemake)) recentPlaceKept.current = true;
   const board = kitchenBoardSearch({
     items: view.items,
     reworks: remakes?.items ?? [],
@@ -2663,6 +2701,8 @@ export function KitchenBoardScreen({
                 onRemake={onRemake}
                 orderLabel={dayLabel}
               />
+            ) : recentPlaceKept.current ? (
+              <KitchenRecentlyFinishedPlace items={board.items} observedAt={view.projectedAt} />
             ) : null}
             {sectionFilterAvailable && !workspaceFrame ? (
               // WP-2423 item 8 ⑧: the section this kitchen screen shows, kept on this device.
@@ -2938,6 +2978,7 @@ export function KitchenBoardScreen({
                         taps={kitchenCardTaps(ticket.items, pendingLines)}
                         readOnly={readOnly || actionsBlocked || stale !== undefined}
                         steps={steps}
+                        moved={movedSlot?.slot === ticket.ticketReference}
                       />
                       {canCloseEarlier ? (
                         <button
@@ -3146,6 +3187,7 @@ export function KitchenBoardScreen({
                               taps={cardTaps}
                               readOnly={ticketReadOnly}
                               steps={steps}
+                              moved={movedSlot?.slot === slot}
                             >
                               {start !== null && steps !== undefined ? (
                                 <button
@@ -3615,6 +3657,17 @@ function KitchenBoardContent(
     revision,
     onChanged: useCallback(() => setRevision((value) => value + 1), []),
   });
+  // DEC-KITCHEN-ONE-TAP: Recently finished joins the bar when the remakes answer, and on a phone
+  // that can take the bar to a second row. The board opens once they have answered (or after a
+  // short wait, so a slow remakes read never keeps new orders off the screen), so nothing above the
+  // tickets moves under the cook's first tap.
+  const [remakesWaitOver, setRemakesWaitOver] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const timer = window.setTimeout(() => setRemakesWaitOver(true), kitchenRemakesWaitMs);
+    return () => window.clearTimeout(timer);
+  }, []);
+  const boardShown = state.kind === "Found" && (rework.settled || remakesWaitOver);
   // DEC-KITCHEN-STALE-TICKETS: a manager closes an earlier business day's ticket.
   const staleClose = useKitchenStaleClose({
     csrf: props.csrf,
@@ -3806,7 +3859,7 @@ function KitchenBoardContent(
     props.csrf !== undefined && props.storeReference !== undefined && props.csrf !== "" ? (
       <PauseOrderingControl csrf={props.csrf} storeReference={props.storeReference} />
     ) : null;
-  return state.kind === "Found" ? (
+  return state.kind === "Found" && boardShown ? (
     <KitchenBoardScreen
       view={actions.view ?? state.view}
       statusEntries={statusEntries}
@@ -3852,6 +3905,7 @@ function KitchenBoardContent(
             }
           : undefined
       }
+      remakesPending={!rework.settled}
       remakes={
         rework.board
           ? {
@@ -3874,8 +3928,8 @@ function KitchenBoardContent(
       headerStatus={headerStatus}
     >
       {workspaceFrame ? <h1 className="kitchen-workspace-title">{t("Kitchen")}</h1> : null}
-      <KitchenBoardStatePanel state={state.kind} />
-      {state.kind !== "Loading" ? (
+      <KitchenBoardStatePanel state={state.kind === "Found" ? "Loading" : state.kind} />
+      {state.kind !== "Loading" && state.kind !== "Found" ? (
         <button ref={refreshButtonRef} onClick={refresh}>
           {t("Refresh")}
         </button>

@@ -177,6 +177,10 @@
   padding: 0;
   border: 0;
 }
+.kitchen-board-heading__actions .kitchen-recent-finished[data-place-kept] {
+  visibility: hidden;
+  pointer-events: none;
+}
 .kitchen-board-heading__actions .kitchen-recent-finished > summary::before {
   display: none;
 }
@@ -1161,6 +1165,12 @@
 .kitchen-ticket__top-text {
   color: var(--bop-color-text-muted);
   font-size: 14px;
+}
+/* A tap not taken because the order had just moved: said plainly, in the card's top row. */
+.kitchen-ticket__top-text[data-tone="moved"] {
+  color: var(--bop-color-text-default);
+  font-weight: 600;
+  white-space: nowrap;
 }
 .kitchen-ticket__top-text[data-tone="problem"] {
   color: var(--bop-color-danger-text);

@@ -1366,6 +1366,20 @@ describe("WP-2423 Q26 kitchen remakes (Handoff Section 26.6)", () => {
       </MemoryRouter>,
     );
     expect(none).not.toContain("Remake");
+    // While the remakes have not answered, the bar keeps Recently finished's place, unseen and
+    // out of reach, so its arrival moves nothing; the list itself is still not there.
+    const pending = renderToStaticMarkup(
+      <MemoryRouter>
+        <KitchenBoardScreen
+          view={parseKitchenBoardView({ ...kitchenBoardFixture(), items: [finished] })}
+          remakesPending
+        />
+      </MemoryRouter>,
+    );
+    expect(pending).toContain('data-place-kept="true" aria-hidden="true"');
+    expect(pending).toContain('<summary tabindex="-1">Recently finished · 1</summary>');
+    expect(pending).not.toContain("Remake");
+    expect(denied).not.toContain("data-place-kept");
   });
 });
 
