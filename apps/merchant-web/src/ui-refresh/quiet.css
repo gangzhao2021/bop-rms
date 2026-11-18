@@ -632,15 +632,20 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px 16px;
-  margin: 0;
+  margin: 0 0 16px;
   padding: 0;
   border: 0;
   min-width: 0;
 }
+/* Read as one more field of the form: the same type as the labels above it, never a heading. */
 .store-date-time > legend {
   width: 100%;
   padding: 0;
   margin-bottom: 4px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  color: inherit;
 }
 .store-date-time .store-date-time__part {
   display: inline-flex;

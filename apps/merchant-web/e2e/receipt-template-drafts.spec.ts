@@ -1407,4 +1407,40 @@ for (const lang of ["en", "zh-Hans"] as const)
       }
     }
     await expectNoInternalText(page);
+    // WP-2423 batch 29: an end on a set date is chosen from selects in the page's language, never
+    // the browser's own "yyyy-mm-dd, --:-- --" box.
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await region
+      .getByRole("combobox", { name: zh ? "使用到" : "In use until", exact: true })
+      .selectOption({ index: 1 });
+    const ends = region.getByRole("group", {
+      name: zh ? "结束时间（门店时间）" : "Ends at (Store time)",
+    });
+    await expect(ends).toBeVisible();
+    await expect(region.locator('input[type="datetime-local"]')).toHaveCount(0);
+    await expect(ends).not.toContainText(/yyyy|mm|dd/u);
+    for (const part of zh
+      ? ["年", "月", "日", "时", "分"]
+      : ["Year", "Month", "Day", "Hour of day", "Minute"])
+      await expect(ends.getByText(part, { exact: true })).toBeVisible();
+    await ends
+      .getByRole("combobox", {
+        name: (zh ? "结束时间（门店时间）：" : "Ends at (Store time): ") + (zh ? "年" : "Year"),
+      })
+      .selectOption({ index: 1 });
+    const endShots = process.env.B29_SHOTS ?? "";
+    for (const [width, height] of [
+      [1440, 900],
+      [390, 844],
+    ] as const) {
+      await page.setViewportSize({ width, height });
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
+      ).toBe(true);
+      if (endShots) {
+        mkdirSync(endShots, { recursive: true });
+        await ends.scrollIntoViewIfNeeded();
+        await page.screenshot({ path: `${endShots}/receipt-draft-end-date-${lang}-${width}.png` });
+      }
+    }
   });
