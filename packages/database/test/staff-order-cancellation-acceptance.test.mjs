@@ -1847,9 +1847,12 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
         try {
           const paid = pickup.batches[0];
           const captured = { amountMinor: BigInt(paid.totalMinor), currencyCode: "CAD" };
-          const now = () => new Date().toISOString();
+          // WP-2423 b30: as in the pilot, the application clock follows the database's from
+          // below, so a lease the database just stamped reads as slightly ahead of it.
+          const now = () => new Date(Date.now() - 200).toISOString();
           let refunded = 0n,
-            refundCalls = 0;
+            refundCalls = 0,
+            overlap = null;
           const snapshot = (request) =>
             createPaymentProviderSnapshot({
               kind: "Snapshot",
@@ -1867,41 +1870,69 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
               evidenceDigest: sha("synthetic staff refund observation:" + refunded),
             });
           const identity = createInternalCompensationIdentity(source, now);
-          const runtime = await createPaymentCompensationComposition({
-            disposition: source,
-            tenantReference: tenant,
-            transactions: transactions(),
-            scope: {
-              brandReference: brand,
-              storeReference: store,
-              providerAccountReference: provider,
-              environment: "Test",
-            },
-            clock: { now },
-            references: identity.references,
-            audit: identity.audit,
-            provider: {
-              retrieveIntent: async (request) => snapshot(request),
-              refundPayment: async (request) => {
-                assert.equal(request.amount.amountMinor, captured.amountMinor);
-                refundCalls++;
-                refunded = request.amount.amountMinor;
-                throw new Error("synthetic refund response lost after effect");
+          const leaseRows = async () =>
+            Number(
+              (
+                await admin.query(
+                  "SELECT count(*)::int AS n FROM rms_payment.payment_compensation_lease_history WHERE payment_attempt_id=$1",
+                  [paid.attempt],
+                )
+              ).rows[0].n,
+            );
+          const compose = (retrieveIntent) =>
+            createPaymentCompensationComposition({
+              disposition: source,
+              tenantReference: tenant,
+              transactions: transactions(),
+              scope: {
+                brandReference: brand,
+                storeReference: store,
+                providerAccountReference: provider,
+                environment: "Test",
               },
-            },
-            authorize: async () => true,
-            otherRefunds: async () => ({ confirmedMinor: 0n, pendingMinor: 0n, version: 1 }),
-            lease: { leaseDurationMs: 30000, newFenceReference: fresh },
-            newObservationReference: fresh,
-            operations: { authorize: async () => true, validateEvidence: async () => false },
-            authorizeOperations: async () => false,
+              clock: { now },
+              references: identity.references,
+              audit: identity.audit,
+              provider: {
+                retrieveIntent,
+                refundPayment: async (request) => {
+                  assert.equal(request.amount.amountMinor, captured.amountMinor);
+                  refundCalls++;
+                  refunded = request.amount.amountMinor;
+                  throw new Error("synthetic refund response lost after effect");
+                },
+              },
+              authorize: async () => true,
+              otherRefunds: async () => ({ confirmedMinor: 0n, pendingMinor: 0n, version: 1 }),
+              lease: { leaseDurationMs: 30000, newFenceReference: fresh },
+              newObservationReference: fresh,
+              operations: { authorize: async () => true, validateEvidence: async () => false },
+              authorizeOperations: async () => false,
+            });
+          // A second worker (the one being replaced during an update) runs the same payment.
+          const other = await compose(async (request) => snapshot(request));
+          const runtime = await compose(async (request) => {
+            // While this worker holds the lease, the other one finds it held: a normal skip,
+            // nothing done, never an outage.
+            if (overlap === null)
+              overlap = await other.execute(source).then(
+                () => "executed",
+                (error) => error?.code ?? "UNKNOWN",
+              );
+            return snapshot(request);
           });
           // The lost refund response is resolved by retrieving the Provider's state (no second refund).
           let outcome = await runtime.execute(source);
           if (outcome.status === "AwaitingProviderConfirmation")
             outcome = await runtime.execute(source);
           assert.equal(outcome.status, "AwaitingOperationsReconciliation");
+          assert.equal(overlap, "PAYMENT_COMPENSATION_LEASE_HELD");
+          // Refunded and waiting for the Store's reconciliation: rechecking it (the worker does,
+          // every cycle and after every restart) claims no lease and appends nothing.
+          const claimed = await leaseRows();
           assert.equal((await runtime.execute(source)).status, "AwaitingOperationsReconciliation");
+          assert.equal((await other.execute(source)).status, "AwaitingOperationsReconciliation");
+          assert.equal(await leaseRows(), claimed);
           assert.equal(refundCalls, 1);
           assert.equal(captured.amountMinor, 1380n); // 1200 order allocation + 180 tip
           const cases = (
