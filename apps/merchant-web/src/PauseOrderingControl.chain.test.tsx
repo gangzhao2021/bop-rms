@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { PauseOrderingControl, pauseChain } from "./PauseOrderingControl.js";
-import { buttonNamed, click, mount, settle } from "./dom-test-kit.fixture.js";
+import { PauseOrderingControl, pauseChain, pauseOrderingReadMs } from "./PauseOrderingControl.js";
+import { act } from "react";
+import { buttonNamed, click, deferred, mount, settle } from "./dom-test-kit.fixture.js";
 
 const id = (n: number) => "01a4d700-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const now = "2026-11-06T23:00:00.000Z";
@@ -120,4 +121,48 @@ it("WP-2423 M30 review: the chain is every pause overlapping from now, to the la
   const pickup = { ...extension, serviceModes: ["Pickup"] as const };
   const dineIn = { ...first, serviceModes: ["DineIn"] as const };
   expect(pauseChain([pickup, dineIn], at)?.serviceModes).toEqual(["DineIn", "Pickup"]);
+});
+
+it("WP-2423 batch 31: keeps its place hidden until the read answers, and a later failed read never hides it", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    const first = deferred<Response>();
+    let reads = 0;
+    const fetcher = (async () => {
+      reads += 1;
+      if (reads === 1) return first.promise;
+      throw new TypeError("network down");
+    }) as typeof fetch;
+    const { container } = await mount(
+      <PauseOrderingControl csrf={"a".repeat(43)} storeReference={id(3)} fetcher={fetcher} />,
+    );
+    // Not answered yet: the place is kept, hidden from screen readers, never focusable or tappable.
+    const kept = container.querySelector<HTMLElement>('.pause-ordering[data-place-kept="true"]');
+    expect(kept?.getAttribute("aria-hidden")).toBe("true");
+    expect(kept?.querySelector("button")?.disabled).toBe(true);
+    expect(kept?.querySelector("button")?.tabIndex).toBe(-1);
+    first.resolve(json(state([], 2)));
+    await settle();
+    expect(container.querySelector("[data-place-kept]")).toBeNull();
+    expect(buttonNamed(container, "Pause ordering")).toBeDefined();
+    // The next read fails (a network blip): the control stays as it was, so nothing under it moves.
+    await act(async () => {
+      vi.advanceTimersByTime(pauseOrderingReadMs);
+    });
+    await settle();
+    expect(reads).toBe(2);
+    expect(buttonNamed(container, "Pause ordering")).toBeDefined();
+    expect(container.querySelector("[data-place-kept]")).toBeNull();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("WP-2423 batch 31: says nothing to someone who may not pause", async () => {
+  const fetcher = (async () => new Response(null, { status: 403 })) as typeof fetch;
+  const { container } = await mount(
+    <PauseOrderingControl csrf={"a".repeat(43)} storeReference={id(3)} fetcher={fetcher} />,
+  );
+  await settle();
+  expect(container.innerHTML).toBe("");
 });

@@ -259,7 +259,7 @@ import { slowWaitText, useSlowWait } from "./slow-wait.js";
 import { playKitchenChime } from "./alert-chime.js";
 export { playKitchenChime };
 import { KitchenPaidOrderNotices } from "./KitchenPaidOrderNotices.js";
-import { PauseOrderingControl } from "./PauseOrderingControl.js";
+import { PauseOrderingControl, usePauseOrderingRead } from "./PauseOrderingControl.js";
 
 /** WP-2423 Q2: "Table T4 · Order 14", "Pickup · Order 5"; never a Customer's name. */
 export function kitchenOrderLabel(item: KitchenBoardItem): string {
@@ -878,6 +878,20 @@ export function KitchenAllergenLine({ item }: { readonly item: KitchenBoardItem 
   );
 }
 
+/**
+ * Where a ticket sits on the page: its offsets added up its offset parents, so scrolling the page or
+ * a lane is never a move, and anything above it that grows, shrinks or appears is (WP-2423 batch
+ * 31: measured against its own offset parent only, Pause ordering arriving above the board was not).
+ */
+export function kitchenSlotPlace(element: HTMLElement): string {
+  let left = 0,
+    top = 0;
+  for (let at: Element | null = element; at instanceof HTMLElement; at = at.offsetParent) {
+    left += at.offsetLeft;
+    top += at.offsetTop;
+  }
+  return `${left},${top}`;
+}
 /** A slot ignores taps this long after what is in it changes. */
 export const kitchenSlotSettleMs = 600;
 /** The board opens without its remakes if they have not answered by then. */
@@ -2636,11 +2650,11 @@ export function KitchenBoardScreen({
     if (element) slotElements.current.set(key, element);
     else slotElements.current.delete(key);
   };
-  useLayoutEffect(() => {
+  const measureSlots = useCallback(() => {
     const now = performance.now();
     const places = new Map<string, string>();
     for (const [key, element] of slotElements.current) {
-      const place = `${element.offsetLeft},${element.offsetTop}`;
+      const place = kitchenSlotPlace(element);
       places.set(key, place);
       const before = slotPlaces.current.get(key);
       if (before !== undefined && before !== place)
@@ -2650,6 +2664,20 @@ export function KitchenBoardScreen({
         });
     }
     slotPlaces.current = places;
+  }, []);
+  useLayoutEffect(measureSlots);
+  // WP-2423 batch 31: anything above the tickets that grows or shrinks on its own (Pause ordering
+  // answering late, a notice, a banner) moves them without this board rendering. The board's area is
+  // watched for size changes, and every tap measures again first, so a tap on a ticket that just
+  // moved, for whatever reason, says "Moved. Tap again." instead of landing on another order.
+  useEffect(() => {
+    const root = workspaceRef.current;
+    if (root === null || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => measureSlots());
+    observer.observe(root);
+    for (const child of root.children) observer.observe(child);
+    if (root.ownerDocument.body) observer.observe(root.ownerDocument.body);
+    return () => observer.disconnect();
   });
   return (
     <KitchenFrame
@@ -2661,6 +2689,7 @@ export function KitchenBoardScreen({
       <div
         className={`kitchen-board-workspace${workspaceFrame ? " orders-page" : ""}`}
         ref={workspaceRef}
+        onPointerDownCapture={measureSlots}
         data-view-only={view.operatorStatus === "Unverified" ? "true" : undefined}
       >
         <header
@@ -3667,7 +3696,16 @@ function KitchenBoardContent(
     const timer = window.setTimeout(() => setRemakesWaitOver(true), kitchenRemakesWaitMs);
     return () => window.clearTimeout(timer);
   }, []);
-  const boardShown = state.kind === "Found" && (rework.settled || remakesWaitOver);
+  // WP-2423 batch 31: the same for Pause ordering, read here once for the board's whole life (it
+  // was read again when the board replaced the loading screen, and on a phone the control then
+  // arrived above the tickets and moved every ticket 68 px under the cook's finger).
+  const pauseOffered =
+    props.csrf !== undefined && props.storeReference !== undefined && props.csrf !== "";
+  const pauseRead = usePauseOrderingRead(pauseOffered ? props.storeReference : undefined);
+  // A failed read does not hold the board back: its place stays kept until it answers.
+  const pauseSettled = !pauseOffered || pauseRead.status !== "Pending";
+  const boardShown =
+    state.kind === "Found" && ((rework.settled && pauseSettled) || remakesWaitOver);
   // DEC-KITCHEN-STALE-TICKETS: a manager closes an earlier business day's ticket.
   const staleClose = useKitchenStaleClose({
     csrf: props.csrf,
@@ -3856,8 +3894,12 @@ function KitchenBoardContent(
   const headerStatus = props.headerStatus?.(operator);
   // DEC-PAID-ORDER-AUTO-ACCEPT: the Store's Pause, for whoever may pause.
   const pauseOrdering =
-    props.csrf !== undefined && props.storeReference !== undefined && props.csrf !== "" ? (
-      <PauseOrderingControl csrf={props.csrf} storeReference={props.storeReference} />
+    pauseOffered && props.csrf !== undefined && props.storeReference !== undefined ? (
+      <PauseOrderingControl
+        csrf={props.csrf}
+        storeReference={props.storeReference}
+        read={pauseRead}
+      />
     ) : null;
   return state.kind === "Found" && boardShown ? (
     <KitchenBoardScreen

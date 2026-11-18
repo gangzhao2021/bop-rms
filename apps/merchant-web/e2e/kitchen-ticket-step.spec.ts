@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { notPausedServiceControl } from "./service-control-state";
 
 /**
  * DEC-KITCHEN-ONE-TAP: one tap per dish. A new ticket offers Done, the server records Accept, Start
@@ -759,3 +760,94 @@ for (const when of ["soon", "late"] as const)
       fullPage: true,
     });
   });
+
+/**
+ * WP-2423 batch 31 (v15 live check of b30): Pause ordering sits above the tickets. It answered after
+ * the board opened and, on a phone, pushed every ticket 68 px down under the cook's finger, and the
+ * tap guard did not notice (the move was the control's, not the board's).
+ */
+async function slowPause(page: Page, delayMs: number, answer: "Allowed" | "Denied" = "Allowed") {
+  await page.route("**/merchant/service-control", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    await (answer === "Denied"
+      ? route.fulfill({ status: 403, headers, json: { error: "PERMISSION_DENIED" } })
+      : route.fulfill({ headers, json: notPausedServiceControl(scope.storeReference) }));
+  });
+}
+for (const delayMs of [1_500, 3_000] as const)
+  test(`@production on a phone with wide type, Pause ordering answering after ${delayMs} ms moves no ticket and the next tap is taken`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const { taps } = await mockBoard(page, [dish(1, "TEST latte")]);
+    await slowPause(page, delayMs);
+    await page.goto("/operations/kitchen");
+    await page.addStyleTag({ content: "body { letter-spacing: 0.08em; }" });
+    const ticket = page.locator(".kitchen-ticket").filter({ hasText: "TEST latte" });
+    await expect(ticket).toBeVisible();
+    const start = (await ticket.boundingBox())?.y;
+    // Its place is kept while it has not answered: hidden, and out of reach of keyboard and taps.
+    if (delayMs === 3_000) {
+      const kept = page.locator('.pause-ordering[data-place-kept="true"]');
+      await expect(kept).toHaveAttribute("aria-hidden", "true");
+      await expect(kept).toBeHidden();
+      await expect(kept.locator("button")).toBeDisabled();
+    }
+    const pause = page.getByRole("button", { name: "Pause ordering" });
+    await expect(pause).toBeVisible({ timeout: delayMs + 3_000 });
+    expect((await ticket.boundingBox())?.y).toBe(start);
+    await ticket.locator(".kitchen-ticket__next").click();
+    await expect(ticket.locator(".kitchen-ticket__top")).toContainText("Marked done");
+    await expect.poll(() => taps.length, { timeout: holdMs + 3_000 }).toBe(1);
+    await page.screenshot({ path: `test-results/kitchen-pause-late-${delayMs}-390.png` });
+  });
+
+test("@production a ticket moved by something above the board ignores a tap for a moment and says so", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const { taps } = await mockBoard(page, [dish(1, "TEST latte")]);
+  // Someone who may not pause: once the read says so, the kept place goes and the tickets move up.
+  await slowPause(page, 3_000, "Denied");
+  await page.goto("/operations/kitchen");
+  const ticket = page.locator(".kitchen-ticket").filter({ hasText: "TEST latte" });
+  await expect(ticket).toBeVisible();
+  const start = (await ticket.boundingBox())?.y ?? 0;
+  await expect(page.locator(".pause-ordering")).toHaveCount(0, { timeout: 6_000 });
+  expect((await ticket.boundingBox())?.y).toBeLessThan(start);
+  await ticket.locator(".kitchen-ticket__next").click();
+  await expect(ticket.locator(".kitchen-ticket__top")).toContainText("Moved. Tap again.");
+  // A moment later the same tap is taken.
+  await page.waitForTimeout(slotSettleMs + 100);
+  await ticket.locator(".kitchen-ticket__next").click();
+  await expect(ticket.locator(".kitchen-ticket__top")).toContainText("Marked done");
+  await expect.poll(() => taps.length, { timeout: holdMs + 3_000 }).toBe(1);
+});
+
+test("@production a ticket moved by anything appearing above the tickets ignores a tap and says so", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const { taps } = await mockBoard(page, [dish(1, "TEST latte")]);
+  await page.route("**/merchant/service-control", (route) =>
+    route.fulfill({ headers, json: notPausedServiceControl(scope.storeReference) }),
+  );
+  await page.goto("/operations/kitchen");
+  const ticket = page.locator(".kitchen-ticket").filter({ hasText: "TEST latte" });
+  await expect(ticket).toBeVisible();
+  await page.waitForTimeout(slotSettleMs + 100);
+  // Something the board did not render (a banner, a notice) pushes the tickets down.
+  await page.evaluate(() => {
+    const notice = document.createElement("p");
+    notice.style.height = "68px";
+    notice.textContent = "TEST notice";
+    document.querySelector(".kitchen-board-workspace")?.prepend(notice);
+  });
+  await ticket.locator(".kitchen-ticket__next").click();
+  await expect(ticket.locator(".kitchen-ticket__top")).toContainText("Moved. Tap again.");
+  // A moment later the same tap is taken.
+  await page.waitForTimeout(slotSettleMs + 100);
+  await ticket.locator(".kitchen-ticket__next").click();
+  await expect(ticket.locator(".kitchen-ticket__top")).toContainText("Marked done");
+  await expect.poll(() => taps.length, { timeout: holdMs + 3_000 }).toBe(1);
+});

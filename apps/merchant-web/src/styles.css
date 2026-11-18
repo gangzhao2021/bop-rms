@@ -1563,6 +1563,11 @@
   font-size: 14px;
   color: var(--bop-color-text-muted);
 }
+/* WP-2423 batch 31: its place is kept until the pause read answers, so nothing under it moves. */
+.pause-ordering[data-place-kept] {
+  visibility: hidden;
+  pointer-events: none;
+}
 /* The choices on their own line, so an open order panel never hides them. */
 .pause-ordering[data-asking="true"] > span:first-child,
 .pause-ordering__choices,

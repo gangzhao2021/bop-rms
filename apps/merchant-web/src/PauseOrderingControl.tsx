@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { t } from "./i18n/i18n.js";
 import {
   createServiceControlClient,
@@ -129,39 +129,89 @@ export function pauseLineText(
  * answers no to anyone else); it uses the Store's own pause, so every other page and guests see
  * the same thing. From 5 minutes before a pause ends it says so and offers 15 more minutes.
  */
-export function PauseOrderingControl({
-  csrf,
-  storeReference,
-  fetcher,
-}: {
-  readonly csrf: string;
-  readonly storeReference: string;
-  readonly fetcher?: typeof fetch | undefined;
-}) {
-  const offered = true;
+/**
+ * What the control knows of the Store's pause. "Pending": not answered yet (its place is kept, so
+ * the page under it does not move when it answers). "Denied": this person may not pause (nothing
+ * shown). "Unknown": the read failed before it ever answered (its place stays kept; it is read again
+ * on the usual cycle). A later failed read keeps the last answer instead of hiding the control, so
+ * a network blip never moves the page under it (WP-2423 batch 31: a phone kitchen's tickets jumped
+ * 68 px when it appeared after the board, and again on every failed read).
+ */
+export interface PauseOrderingRead {
+  readonly status: "Pending" | "Denied" | "Unknown" | "Known";
+  readonly view: ServiceControlState | null;
+  /** When the last answer came, for the pause line's countdown. */
+  readonly answeredAt: number;
+  readonly reload: () => void;
+}
+
+/** The Store's pause, read now and every `pauseOrderingReadMs`; `storeReference` undefined: none. */
+export function usePauseOrderingRead(
+  storeReference: string | undefined,
+  fetcher?: typeof fetch,
+): PauseOrderingRead {
   const client = useMemo(() => createServiceControlClient(fetcher ?? fetch), [fetcher]);
-  const [view, setView] = useState<ServiceControlState | null>(null);
-  const [asking, setAsking] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [failed, setFailed] = useState(false);
+  const [answer, setAnswer] = useState<{
+    readonly status: PauseOrderingRead["status"];
+    readonly view: ServiceControlState | null;
+    readonly answeredAt: number;
+  }>(() => ({ status: "Pending", view: null, answeredAt: Date.now() }));
   const [revision, setRevision] = useState(0);
-  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    if (!offered) return;
+    if (storeReference === undefined) return;
     const controller = new AbortController();
     client
       .load(storeReference, controller.signal)
-      .then((next) => {
-        setView(next);
-        setNow(Date.now());
-      })
-      .catch(() => setView(null));
+      .then((next) => setAnswer({ status: "Known", view: next, answeredAt: Date.now() }))
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        // The client's answer to 403: this person may not pause.
+        if (error instanceof Error && error.message.startsWith("Permission denied"))
+          setAnswer({ status: "Denied", view: null, answeredAt: Date.now() });
+        else
+          setAnswer((current) =>
+            current.status === "Known" ? current : { ...current, status: "Unknown" },
+          );
+      });
     const timer = setTimeout(() => setRevision((value) => value + 1), pauseOrderingReadMs);
     return () => {
       controller.abort();
       clearTimeout(timer);
     };
-  }, [client, offered, storeReference, revision]);
+  }, [client, storeReference, revision]);
+  const reload = useCallback(() => setRevision((value) => value + 1), []);
+  return useMemo(() => ({ ...answer, reload }), [answer, reload]);
+}
+
+/**
+ * WP-2423 DEC-PAID-ORDER-AUTO-ACCEPT: the busy-night brake where staff work (Home, Orders, Pickup
+ * and the kitchen board). WP-2423 store-service-controls (v15 M30): at every Store, not only one
+ * sending paid orders straight to the kitchen. Shown to whoever may pause ordering (the read
+ * answers no to anyone else); it uses the Store's own pause, so every other page and guests see
+ * the same thing. From 5 minutes before a pause ends it says so and offers 15 more minutes.
+ * `read`: the page's own read of the pause (the kitchen board waits for it before it opens).
+ */
+export function PauseOrderingControl({
+  csrf,
+  storeReference,
+  fetcher,
+  read,
+}: {
+  readonly csrf: string;
+  readonly storeReference: string;
+  readonly fetcher?: typeof fetch | undefined;
+  readonly read?: PauseOrderingRead | undefined;
+}) {
+  const client = useMemo(() => createServiceControlClient(fetcher ?? fetch), [fetcher]);
+  const own = usePauseOrderingRead(read === undefined ? storeReference : undefined, fetcher);
+  const current = read ?? own;
+  const view = current.view;
+  const reload = current.reload;
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => setNow(Date.now()), [current.answeredAt]);
   // A pause whose time has passed is over, whatever the last read said.
   const chain = view === null ? null : pauseChain(view.activePauses, now);
   const paused = chain ?? undefined;
@@ -174,13 +224,22 @@ export function PauseOrderingControl({
     const timer = setTimeout(
       () => {
         setNow(Date.now());
-        setRevision((value) => value + 1);
+        reload();
       },
       Math.max(0, Math.min(warnIn > 0 ? warnIn : left, pauseOrderingReadMs)) + 500,
     );
     return () => clearTimeout(timer);
-  }, [pausedUntil]);
-  if (!offered || view === null) return null;
+  }, [pausedUntil, reload]);
+  if (current.status === "Pending" || current.status === "Unknown")
+    // Its place is kept, hidden and out of reach, until the first answer.
+    return (
+      <div className="pause-ordering" data-place-kept="true" aria-hidden="true">
+        <button type="button" tabIndex={-1} disabled>
+          {t("Pause ordering")}
+        </button>
+      </div>
+    );
+  if (view === null) return null;
   // Several commands (Resume of a chain) run one after another, each on the version before it.
   const run = async (...commands: Parameters<typeof client.execute>[0][]) => {
     setBusy(true);
@@ -189,11 +248,11 @@ export function PauseOrderingControl({
       for (const command of commands)
         await client.execute(command, csrf, new AbortController().signal);
       setAsking(false);
-      setRevision((value) => value + 1);
+      reload();
     } catch {
       // Often it changed on another screen (a pause ended or was set): show it as it is now.
       setFailed(true);
-      setRevision((value) => value + 1);
+      reload();
     } finally {
       setBusy(false);
     }
