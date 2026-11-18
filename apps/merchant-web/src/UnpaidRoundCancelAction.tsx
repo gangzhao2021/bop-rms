@@ -187,7 +187,7 @@ export function UnpaidRoundCancelAction({
             </p>
             <p>
               {t(
-                "Cancelling means it never goes to the kitchen and its items go back to stock. If the card machine was charged for it, refund it on the machine.",
+                "Cancelling means it never goes to the kitchen and its items go back to stock. If the card machine was charged for it, don't cancel: choose “Keep round”, then “Record card-machine payment”, so the kitchen makes it.",
               )}
             </p>
           </>

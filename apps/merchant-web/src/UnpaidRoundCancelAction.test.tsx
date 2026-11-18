@@ -84,7 +84,10 @@ it("WP-2423 batch 29: a staff round paid on the card machine is worded for the m
     />,
   ).replaceAll("<!-- -->", "");
   expect(html).toContain("nobody recorded its card-machine payment");
-  expect(html).toContain("refund it on the machine");
+  // A machine charge is recorded so the round is cooked, never cancelled and refunded off the books.
+  expect(html).toContain("don&#x27;t cancel");
+  expect(html).toContain("Record card-machine payment");
+  expect(html).not.toContain("refund");
   expect(html).toContain("Cancel round 15");
   expect(html).not.toContain("card provider");
   expect(html).not.toContain("guest");

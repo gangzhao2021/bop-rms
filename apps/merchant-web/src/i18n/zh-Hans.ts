@@ -4537,8 +4537,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "The change is not valid. Check the amounts.": "更改无效。请检查数量。",
   "This round was entered by staff, and nobody recorded its card-machine payment.":
     "这一轮是店员录入的，还没有人记录它的刷卡机收款。",
-  "Cancelling means it never goes to the kitchen and its items go back to stock. If the card machine was charged for it, refund it on the machine.":
-    "取消后这一轮不会送去厨房，菜品退回库存。如果刷卡机已经为它收过款，请在刷卡机上退款。",
+  "Cancelling means it never goes to the kitchen and its items go back to stock. If the card machine was charged for it, don't cancel: choose “Keep round”, then “Record card-machine payment”, so the kitchen makes it.":
+    "取消后这一轮不会送去厨房，菜品退回库存。如果刷卡机已经为它收过款，请不要取消：点“保留这一轮”，再点“记录刷卡机付款”记下这笔收款，后厨才会制作。",
   "The change was declined. The next change starts from the published hours.":
     "更改已被拒绝。下一项更改将基于已发布的营业时间。",
   "The change was refused because the input is invalid.": "输入无效，更改被拒绝。",

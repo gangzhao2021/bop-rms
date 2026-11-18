@@ -132,7 +132,7 @@ test("@production WP-2423: a manager cancels an unpaid dine-in round from the Or
 });
 
 // WP-2423 batch 29: a staff round paid on the card machine nobody recorded. Its cancel dialog is
-// about the card machine (refund it on the machine), never the guest's card provider.
+// about the card machine (record its payment so the round is cooked), never the guest's card provider.
 for (const lang of ["en", "zh-Hans"] as const)
   test(`@production a staff card-machine round's cancel dialog is worded for the machine (${lang})`, async ({
     page,
@@ -233,7 +233,11 @@ for (const lang of ["en", "zh-Hans"] as const)
         ? "这一轮是店员录入的，还没有人记录它的刷卡机收款。"
         : "This round was entered by staff, and nobody recorded its card-machine payment.",
     );
-    await expect(dialog).toContainText(zh ? "请在刷卡机上退款" : "refund it on the machine");
+    // Charged on the machine: record it so the kitchen makes it, never cancel and refund it there.
+    await expect(dialog).toContainText(
+      zh ? "请不要取消：点“保留这一轮”，再点“记录刷卡机付款”" : "don't cancel: choose “Keep round”",
+    );
+    await expect(dialog).not.toContainText(zh ? "退款" : "refund");
     await expect(dialog).not.toContainText(zh ? "发卡方" : "card provider");
     await expectNoInternalText(page);
     const shots = process.env.B29_SHOTS ?? "test-results/b29-shots";
