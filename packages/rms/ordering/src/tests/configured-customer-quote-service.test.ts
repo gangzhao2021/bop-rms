@@ -203,20 +203,61 @@ describe("configured credential-bound customer entry", () => {
     await expect(s.service.attach(s.command)).rejects.toMatchObject({ code: "CART_UNAVAILABLE" });
     expect(s.attach).not.toHaveBeenCalled();
   });
+  // WP-2423 batch 29 (guest-race-text): v15 22:28:17Z, a phone's quote met a staff round's table
+  // guest joining the table (a new version of the party) and was answered 404 "not found".
   it.each(["tableAssignmentVersion", "diningSessionVersion", "participantVersion"] as const)(
-    "rejects changed Dining %s across Pricing",
+    "prices again on the table as it is now when its %s moves on during Pricing",
     async (field) => {
       const s = setup(true);
       s.pricing.quoteCart.mockImplementationOnce(async () => {
         s.participation.resolve.mockResolvedValue({ ...s.originalParticipation, [field]: 2 });
         return s.f.quote;
       });
-      await expect(s.service.attach(s.command)).rejects.toMatchObject({
-        code: "CART_PERMISSION_DENIED",
-      });
-      expect(s.attach).not.toHaveBeenCalled();
+      const priced = await s.service.attach(s.command);
+      expect(priced.status).toBe("Attached");
+      expect(s.attach).toHaveBeenCalledOnce();
     },
   );
+  it("says a table that keeps changing as a plain conflict, never as not found", async () => {
+    const s = setup(true);
+    // Each guest check reads the party twice; every check after that meets a newer version.
+    let reads = 0;
+    s.participation.resolve.mockImplementation(async () => ({
+      ...s.originalParticipation,
+      diningSessionVersion: 1 + Math.floor(reads++ / 2),
+    }));
+    await expect(s.service.attach(s.command)).rejects.toMatchObject({
+      code: "CART_VERSION_CONFLICT",
+    });
+    expect(s.attach).not.toHaveBeenCalled();
+  });
+  it("says a party moved to another table as such", async () => {
+    const s = setup(true);
+    let reads = 0;
+    s.participation.resolve.mockImplementation(async () => ({
+      ...s.originalParticipation,
+      tableReference: id(0x100 + Math.floor(reads++ / 2)),
+    }));
+    await expect(s.service.attach(s.command)).rejects.toMatchObject({
+      code: "CART_PARTICIPATION_ENDED",
+      reason: "Changed",
+    });
+    expect(s.attach).not.toHaveBeenCalled();
+  });
+  it("still refuses another participant's answer during Pricing", async () => {
+    const s = setup(true);
+    s.pricing.quoteCart.mockImplementationOnce(async () => {
+      s.participation.resolve.mockResolvedValue({
+        ...s.originalParticipation,
+        participantReference: id(0x77),
+      });
+      return s.f.quote;
+    });
+    await expect(s.service.attach(s.command)).rejects.toMatchObject({
+      code: "CART_PERMISSION_DENIED",
+    });
+    expect(s.attach).not.toHaveBeenCalled();
+  });
   it("denies absent current Dining participation before reading Pricing", async () => {
     const s = setup(true);
     s.participation.resolve.mockResolvedValue(null);

@@ -8,6 +8,7 @@ import {
 import {
   assertDiningCartNotHeld,
   CartError,
+  CartParticipationEndedError,
   type DiningCartCheckoutHoldPort,
   parseCartAggregate,
   parseOrderingInstant,
@@ -19,7 +20,10 @@ import {
   type ConfiguredCartQuotePorts,
 } from "./configured-cart-quote-service.js";
 import {
+  CartPartyMovedError,
   createDiningCartAuthority,
+  diningCartMovedRetries,
+  partyMoved,
   type DiningCartAuthorityPorts,
   type DiningCartAuthoritySnapshot,
 } from "./dining-cart-authority.js";
@@ -111,6 +115,12 @@ export function createConfiguredCustomerQuoteService(options: ConfiguredCustomer
             const { authority } = await dining.run(credential, async (current) => current);
             if (firstDining !== undefined) {
               if (!sameSession(firstDining.session, authority.session)) return denied();
+              // WP-2423 batch 29 (guest-race-text): the same guest at the same table, at a newer
+              // version of its party (a staff round seated its table guest a moment ago: v15
+              // 22:28:17Z, each 404 met a join). Priced again on the table as it is now, never
+              // "not found".
+              const moved = partyMoved(firstDining, authority);
+              if (moved !== null) throw moved;
               for (const key of [
                 "brandReference",
                 "storeReference",
@@ -163,50 +173,67 @@ export function createConfiguredCustomerQuoteService(options: ConfiguredCustomer
           if (bound.updatedAt > checkedAt) return unavailable();
           return current;
         }
-        return await createConfiguredCartQuoteService({
-          repository: options.repository,
-          pricing: options.pricing,
-          catalog: options.catalog,
-          ...(options.evidence === undefined ? {} : { evidence: options.evidence }),
-          pricingChannelCode: options.pricingChannelCode,
-          references: options.references,
-          now,
-          authorization: {
-            async authorize(input) {
-              const guestSession = await currentGuest();
-              if (
-                options.orderType === "DineIn" &&
-                firstDining !== undefined &&
-                typeof raw.expectedCartVersion === "number" &&
-                Number.isSafeInteger(raw.expectedCartVersion)
-              )
-                await assertDiningCartNotHeld(options.checkoutHold, {
-                  diningSessionReference: String(firstDining.participation.diningSessionReference),
-                  participantReference: String(firstDining.participation.participantReference),
-                  cartReference,
-                  cartVersion: raw.expectedCartVersion,
-                  observedAt: input.observedAt,
-                });
-              return {
-                guestSession,
-                audit: options.audit({
-                  action: "AttachQuote",
-                  brandReference: brand,
-                  storeReference: store,
-                  sessionReference: parseOrderingReference(guestSession.sessionReference),
-                  cartReference,
-                  operationReference,
-                  observedAt: input.observedAt,
-                }),
-              };
+        const priceOnce = () =>
+          createConfiguredCartQuoteService({
+            repository: options.repository,
+            pricing: options.pricing,
+            catalog: options.catalog,
+            ...(options.evidence === undefined ? {} : { evidence: options.evidence }),
+            pricingChannelCode: options.pricingChannelCode,
+            references: options.references,
+            now,
+            authorization: {
+              async authorize(input) {
+                const guestSession = await currentGuest();
+                if (
+                  options.orderType === "DineIn" &&
+                  firstDining !== undefined &&
+                  typeof raw.expectedCartVersion === "number" &&
+                  Number.isSafeInteger(raw.expectedCartVersion)
+                )
+                  await assertDiningCartNotHeld(options.checkoutHold, {
+                    diningSessionReference: String(
+                      firstDining.participation.diningSessionReference,
+                    ),
+                    participantReference: String(firstDining.participation.participantReference),
+                    cartReference,
+                    cartVersion: raw.expectedCartVersion,
+                    observedAt: input.observedAt,
+                  });
+                return {
+                  guestSession,
+                  audit: options.audit({
+                    action: "AttachQuote",
+                    brandReference: brand,
+                    storeReference: store,
+                    sessionReference: parseOrderingReference(guestSession.sessionReference),
+                    cartReference,
+                    operationReference,
+                    observedAt: input.observedAt,
+                  }),
+                };
+              },
             },
-          },
-        }).attach({
-          cartReference,
-          operationReference,
-          expectedCartVersion: raw.expectedCartVersion,
-          requestedAt,
-        });
+          }).attach({
+            cartReference,
+            operationReference,
+            expectedCartVersion: raw.expectedCartVersion,
+            requestedAt,
+          });
+        // The same operation again on the table as it is now (its history answers a write that
+        // already happened). A table that kept changing is said as the plain conflict it is (the
+        // phone reads the table again), or as "your party's table changed" when it moved.
+        for (let attempt = 0; ; attempt += 1) {
+          try {
+            return await priceOnce();
+          } catch (error) {
+            if (!(error instanceof CartPartyMovedError)) throw error;
+            firstDining = undefined;
+            if (attempt < diningCartMovedRetries) continue;
+            if (error.tableChanged) throw new CartParticipationEndedError("Changed");
+            throw new CartError("CART_VERSION_CONFLICT");
+          }
+        }
       } catch (error) {
         if (error instanceof CartError) throw error;
         return unavailable();
