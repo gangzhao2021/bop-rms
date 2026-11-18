@@ -137,6 +137,11 @@ async function mockBoard(
   return { taps, items, setItems: (next: readonly ReturnType<typeof dish>[]) => (items = next) };
 }
 const holdMs = 5_000;
+/** kitchenSlotSettleMs: a ticket ignores taps this long after it moved. */
+const slotSettleMs = 600;
+/** SLOW_WAIT_MS: a tap the server has not answered by then is said to be still working. */
+const slowWaitMs = 3_000;
+const slowWaitText = "Still working; the system is busy.";
 
 test("@production a new ticket offers Finished and a quiet Start, with Accept nowhere", async ({
   page,
@@ -468,6 +473,12 @@ for (const [width, height] of [
     await page.goto("/operations/kitchen");
     const ticket = page.locator(".kitchen-ticket").filter({ hasText: "TEST latte" });
     await expect(ticket).toBeVisible();
+    // The remakes are read beside the board, and Recently finished joins the bar when they answer.
+    // On a phone with wider type (the Linux runner's) that bar takes a second row and the tickets
+    // move down once as the board opens; the moved ticket then ignores a tap for a moment, by
+    // design. What this test watches starts once the board has opened and settled.
+    await expect(page.getByText("Recently finished · 1")).toBeVisible();
+    await page.waitForTimeout(slotSettleMs);
     // The sound reminder leaves at the first tap anywhere: no ticket moves when it does.
     const yOf = async () => (await ticket.boundingBox())?.y;
     const start = await yOf();
@@ -497,6 +508,12 @@ for (const [width, height] of [
     expect(await yOf()).toBe(start);
     // A refusal.
     await ticket.locator(".kitchen-ticket__next").click();
+    await expect(ticket.locator(".kitchen-ticket__top")).toContainText("Marked done");
+    // The hold is the cook's moment to undo, not a wait on the system: nothing says the system is
+    // busy, and nothing moves the tickets while it runs.
+    await page.waitForTimeout(slowWaitMs + 500);
+    expect(await yOf()).toBe(start);
+    expect(await page.getByText(slowWaitText).count()).toBe(0);
     // The refusal is said when the server answers, after the tap's hold; a slow runner can take
     // longer than the hold to get there, and the line must then show it over the arrival.
     await expect(page.locator(".kitchen-status-row__line")).toContainText("was cancelled", {
@@ -511,6 +528,44 @@ for (const [width, height] of [
     ).toBe(true);
     await page.screenshot({ path: `test-results/kitchen-one-tap-${width}.png`, fullPage: true });
   });
+
+test("@production a slow answer to a tap is said in the status row and moves no ticket, at 390 wide", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 1400 });
+  await mockBoard(page, [
+    dish(1, "TEST latte"),
+    dish(2, "TEST mocha", {
+      ticketReference: id(60),
+      orderReference: id(61),
+      orderLabel: { orderNumber: "6", orderType: "Pickup", tableLabel: null },
+    }),
+  ]);
+  // Registered last, so it answers first: the server takes a while before it answers.
+  await page.route("**/merchant/kitchen/step", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, slowWaitMs + 2_000));
+    await route.fallback();
+  });
+  await page.goto("/operations/kitchen");
+  const latte = page.locator(".kitchen-ticket").filter({ hasText: "TEST latte" });
+  const mocha = page.locator(".kitchen-ticket").filter({ hasText: "TEST mocha" });
+  await expect(mocha).toBeVisible();
+  await page.waitForTimeout(slotSettleMs);
+  const start = (await mocha.boundingBox())?.y;
+  await latte.locator(".kitchen-ticket__next").click();
+  // Past the hold and the slow-wait time: the board says it is still working, in its one line.
+  await expect(page.locator(".kitchen-status-row__line")).toContainText(slowWaitText, {
+    timeout: holdMs + slowWaitMs + 1_500,
+  });
+  expect((await mocha.boundingBox())?.y).toBe(start);
+  // The other ticket takes its tap at once: nothing above it moved.
+  await mocha.locator(".kitchen-ticket__next").click();
+  await expect(mocha.locator(".kitchen-ticket__top")).toContainText("Marked done");
+  // The answer came: the line goes.
+  await expect(page.locator(".kitchen-status-row__line")).not.toContainText(slowWaitText, {
+    timeout: 4_000,
+  });
+});
 
 test("@production the kitchen's own targets are large enough for wet fingers", async ({ page }) => {
   await mockBoard(page, [dish(1, "TEST latte"), dish(2, "TEST mocha")]);

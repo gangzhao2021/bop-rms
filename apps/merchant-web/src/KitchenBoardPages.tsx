@@ -254,7 +254,7 @@ export function kitchenTicketState(
 }
 
 import { useRememberedAlertSound } from "./alert-sound.js";
-import { SlowWaitNotice } from "./slow-wait.js";
+import { slowWaitText, useSlowWait } from "./slow-wait.js";
 import { playKitchenChime } from "./alert-chime.js";
 export { playKitchenChime };
 import { KitchenPaidOrderNotices } from "./KitchenPaidOrderNotices.js";
@@ -2052,6 +2052,16 @@ export function KitchenBoardScreen({
   const slotSettled = (key: string) =>
     performance.now() - (slots.current.get(key)?.changedAt ?? -Infinity) >= kitchenSlotSettleMs;
   const pendingLines = steps?.pendingLines;
+  // merchant-outage-recovery M68: a tap the server is slow to answer says so. The tap's own hold is
+  // no wait (its card says Marked done, with Undo), and the line sits in the status row: a notice
+  // above the tickets moved every ticket under the cook's next tap, and made the board ignore it.
+  const tapsAwaitingServer = [...(pendingLines?.values() ?? [])].some(
+    (tap) => tap.phase !== "Holding" && tap.phase !== "Failed",
+  );
+  const slowTaps = useSlowWait(tapsAwaitingServer);
+  const slowTapsSince = useRef<number | null>(null);
+  if (!slowTaps) slowTapsSince.current = null;
+  else slowTapsSince.current ??= performance.now();
   const tapLines = (
     slot: string,
     lines: readonly KitchenBoardItem[],
@@ -2726,6 +2736,16 @@ export function KitchenBoardScreen({
                   ]
                 : []),
             ...statusEntries,
+            ...(slowTapsSince.current === null
+              ? []
+              : [
+                  {
+                    key: "slow-taps",
+                    tone: "Info" as const,
+                    at: slowTapsSince.current,
+                    text: slowWaitText,
+                  },
+                ]),
             ...(arrivalLabels.length === 0
               ? []
               : [
@@ -2811,8 +2831,6 @@ export function KitchenBoardScreen({
           onRing={() => onRing?.()}
         />
         {pauseOrdering}
-        {/* merchant-outage-recovery M68: a tap still waiting after a few seconds says so. */}
-        <SlowWaitNotice busy={(pendingLines?.size ?? 0) > 0} />
         {workspaceFrame ? null : filterToggle}
         {!stale && readOnly && !(view.operatorStatus === "Named") ? (
           <KitchenBoardLock
