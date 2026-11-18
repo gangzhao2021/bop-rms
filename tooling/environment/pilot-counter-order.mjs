@@ -48,6 +48,7 @@ import {
 import { createMerchantCardMachineCancellationRefund } from "../../apps/api/dist/merchant-card-machine-refund.js";
 import { createMerchantStaffDiningRound } from "../../apps/api/dist/merchant-staff-dining-round.js";
 import { createDiningPayLaterRound } from "../../apps/api/dist/dining-pay-later-round.js";
+import { createDiningRefusedRoundTableClose } from "../../apps/api/dist/dining-refused-round-table-close.js";
 import {
   createStaffTableAbandonment,
   createStaffTableCode,
@@ -64,7 +65,11 @@ import { createKitchenGatedOperatingStatusReader } from "../../apps/api/dist/sto
 import { createInternalPaymentPreparation } from "./pilot-payment-preparation.mjs";
 import { reportUnexpected } from "./pilot-merchant-pickup.mjs";
 import { createInternalExpiryCutoff } from "./pilot-expiry-cutoff.mjs";
-import { matchesPilotEnvironment, pilotProviderEnvironment } from "./pilot-environment.mjs";
+import {
+  isPilotRuntime,
+  matchesPilotEnvironment,
+  pilotProviderEnvironment,
+} from "./pilot-environment.mjs";
 
 /**
  * WP-2423 Q7 slice 1 (DEC-COUNTER-PAYMENT-RECORD): staff take a pickup order at the counter for a
@@ -102,6 +107,7 @@ export async function createInternalCounterOrder(
     loadPickupQrToken,
     expectedDatabaseName,
     diningClosing,
+    providerAccountReference,
     issueRefundReceipt,
     decorateStaffRoundPipeline,
   },
@@ -306,6 +312,7 @@ export async function createInternalCounterOrder(
           loadDiningWorkflow,
           expectedDatabaseName,
           diningClosing,
+          providerAccountReference,
           decorateStaffRoundPipeline,
         });
   return {
@@ -421,6 +428,7 @@ async function createInternalStaffDiningRound(
     loadDiningWorkflow,
     expectedDatabaseName,
     diningClosing,
+    providerAccountReference,
     decorateStaffRoundPipeline,
   },
 ) {
@@ -572,6 +580,24 @@ async function createInternalStaffDiningRound(
             close: (staff, command) => diningClosing({ ...staff, command, nothingOrdered: true }),
             nextReference: reference,
           }),
+    // WP-2423 batch 30: a member signed out mid-round can't close the table their round opened;
+    // the System closes it when nothing and nobody else is on it.
+    ...(typeof providerAccountReference !== "string"
+      ? {}
+      : {
+          closeRefusedOpening: createDiningRefusedRoundTableClose({
+            scope: fullScope,
+            providerAccountReference,
+            environment: pilotProviderEnvironment(),
+            transactions,
+            authorize: async () =>
+              isPilotRuntime() && now() < resources.publicProfile.binding.validUntil,
+            now,
+            newReference: reference,
+            retentionPolicyCode: "AUDIT_DEFAULT",
+            retentionPolicyVersion: 1,
+          }),
+        }),
     // The table's printed QR, as a guest scanning it would enter; null when it has none (the
     // staff command then refuses before opening the table).
     tableQrToken: async (tableReference) => {

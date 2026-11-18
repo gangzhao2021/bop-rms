@@ -25,7 +25,7 @@ import {
   finalizeDiningClosing,
   unresolvedDiningOrders,
 } from "../domain/dining-closing.js";
-import { guestTableCloseReasons } from "../domain/dining-guest-table-start.js";
+import { systemTableCloseReasons } from "../domain/dining-guest-table-start.js";
 import type {
   DiningClosingAuthorityEvidence,
   DiningClosingPorts,
@@ -91,7 +91,8 @@ function authority(
         throw new Error("denied");
       actorReference = context.actor.actorReference;
     } else if (value.kind === "System") {
-      // WP-2423 DEC-DINING-GUEST-TABLE-START: only these two reasons, only as the System. It can
+      // WP-2423 DEC-DINING-GUEST-TABLE-START (and batch 30: a staff round refused after a sign-out
+      // left the table it opened empty): only these reasons, only as the System. It can
       // begin and finalize a table; bringing one back to ordering stays with staff.
       if (
         operation === "Cancel" ||
@@ -99,7 +100,7 @@ function authority(
         value.storeReference !== session.storeReference ||
         value.observedAt !== observedAt ||
         audit.actor.type !== "System" ||
-        !(guestTableCloseReasons as readonly string[]).includes(String(audit.reasonCode)) ||
+        !(systemTableCloseReasons as readonly string[]).includes(String(audit.reasonCode)) ||
         audit.dataClassification !== "Restricted"
       )
         throw new Error("denied");

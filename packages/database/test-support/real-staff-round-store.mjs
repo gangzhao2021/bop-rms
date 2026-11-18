@@ -510,6 +510,8 @@ export async function prepareRealStaffRoundStore({
         loadDiningWorkflow: () => installation.loadWorkflow("DineIn"),
         loadPickupQrToken: async () => (await qr.loadInternalPickupQr(profile)).token(),
         expectedDatabaseName: database,
+        // As the pilot composes it (batch 30: the System's close of a refused round's table).
+        providerAccountReference: config.providerAccountReference,
         ...extra,
       },
     );

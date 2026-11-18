@@ -39,6 +39,17 @@ export const guestTableCloseReasons = Object.freeze([
   "GUEST_NEW_PARTY",
 ] as const);
 export type GuestTableCloseReason = (typeof guestTableCloseReasons)[number];
+/**
+ * WP-2423 batch 30: a table a staff round opened, closed again by the System because the round was
+ * refused once the staff member had signed out, before anything was ordered, and nobody else is at
+ * it. The staff member can no longer close it under their own authority.
+ */
+export const staffRoundNotSentCloseReason = "STAFF_ROUND_NOT_SENT";
+/** Every reason the System may begin and finalize a table's Session for. */
+export const systemTableCloseReasons = Object.freeze([
+  ...guestTableCloseReasons,
+  staffRoundNotSentCloseReason,
+] as const);
 
 const minutes = 60_000;
 const at = (value: string) => {

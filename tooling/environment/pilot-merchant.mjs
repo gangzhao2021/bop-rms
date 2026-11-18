@@ -1113,6 +1113,8 @@ export async function createInternalMerchant(
       ? undefined
       : await createInternalCounterOrder(resources, persistence, service, {
           diningClosing,
+          // WP-2423 batch 30: the System's close of a table a signed-out member's round opened.
+          providerAccountReference,
           // WP-2423 (v15 3cd0f8dd M4): a machine refund of a cancelled round is on the receipt.
           issueRefundReceipt: issueOrderRefundReceipt,
         });

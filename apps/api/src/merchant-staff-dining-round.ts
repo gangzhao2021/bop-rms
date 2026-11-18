@@ -271,6 +271,19 @@ export interface StaffTableGuestPipeline extends Pick<
     },
   ): Promise<"Closed" | "Kept">;
   /**
+   * WP-2423 batch 30: the System closes a table this request opened when the round was refused
+   * because the staff member signed out (or lost the right to send rounds) before anything was
+   * ordered, and the staff member's own close was refused for the same reason. Only while the
+   * table's Session was started by that staff member, has no order, an empty cart, no open call,
+   * and nobody joined it but this round's own table guest; otherwise `Kept`.
+   */
+  closeRefusedOpening?(input: {
+    readonly tableReference: string;
+    readonly diningSessionReference: string;
+    readonly actorReference: string;
+    readonly admissionReference: string;
+  }): Promise<"Closed" | "Kept">;
+  /**
    * Enters with the table's printed QR, as a guest scanning it would. `NoTableQr`: the table has
    * no current code (never created, or turned off), so no guest can join it this way.
    */
@@ -1206,15 +1219,40 @@ export function createMerchantStaffDiningRound(options: {
       readonly diningSessionReference: string;
       readonly generation: number | null;
     } | null = null;
-    const abandonStartedTable = async () => {
+    /**
+     * WP-2423 batch 30: who opened the table this request started, and the admission its table
+     * guest joined with, once both are known (the System may then close it for a signed-out member).
+     */
+    let openedBy: { readonly actorReference: string; readonly admissionReference: string } | null =
+      null;
+    const abandonStartedTable = async (signedOut = false) => {
       const started = startedTable;
       startedTable = null;
       if (started === null) return;
+      let kept = true;
       try {
-        await options.pipeline.abandonTable(
-          { sessionCookie: input.sessionCookie, csrf: input.csrf },
-          { tableReference: command.tableReference, ...started },
-        );
+        kept =
+          (await options.pipeline.abandonTable(
+            { sessionCookie: input.sessionCookie, csrf: input.csrf },
+            { tableReference: command.tableReference, ...started },
+          )) !== "Closed";
+      } catch (error) {
+        try {
+          options.onUnexpected?.(error);
+        } catch {
+          // Reporting never changes the answer.
+        }
+      }
+      // Signed out mid-round: their own close is refused too, so the System closes the table the
+      // round opened when nothing and nobody else is on it. Never a second answer to staff.
+      const opener = openedBy;
+      if (!kept || !signedOut || opener === null || !options.pipeline.closeRefusedOpening) return;
+      try {
+        await options.pipeline.closeRefusedOpening({
+          tableReference: command.tableReference,
+          diningSessionReference: started.diningSessionReference,
+          ...opener,
+        });
       } catch (error) {
         try {
           options.onUnexpected?.(error);
@@ -1379,6 +1417,11 @@ export function createMerchantStaffDiningRound(options: {
             startedTable = null;
             return await earlier(entry.record);
           }
+          if (startedTable !== null)
+            openedBy = {
+              actorReference: String(entry.record.actorReference),
+              admissionReference: String(joined.admissionReference),
+            };
           const cart = await options.pipeline.selectCart(credentials, {
             operationReference: options.nextReference(),
             requestedAt: now(),
@@ -1957,7 +2000,11 @@ export function createMerchantStaffDiningRound(options: {
         // Nothing of this round is left at a table it opened: the table is closed again too.
         if (signedOutBeforeSubmission && removed === "Removed")
           startedTable = startedBeforeCheckout;
-        await abandonStartedTable();
+        await abandonStartedTable(
+          removed === "Removed" &&
+            error instanceof StaffDiningRoundError &&
+            error.code === "STAFF_ROUND_PERMISSION_DENIED",
+        );
         if (removed !== "Removed")
           return keepingCause(() => fail("STAFF_ROUND_NOT_WITHDRAWN"))(error);
         if (error instanceof StaffDiningRoundError) throw error;

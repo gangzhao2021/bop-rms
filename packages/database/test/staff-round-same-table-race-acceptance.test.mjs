@@ -526,3 +526,99 @@ it("pay-at-end: a staff member signs out just after their round was submitted; i
     }
   });
 });
+
+/** The table's dining sessions, oldest first: phase and who started each. */
+async function tableSessions(admin, store) {
+  return (
+    await admin.query(
+      `SELECT session_id::text AS session, phase FROM rms_dining.dining_session
+       WHERE store_id=$1 AND table_id=$2 ORDER BY session_id`,
+      [store.scope.storeReference, store.tableReference],
+    )
+  ).rows;
+}
+
+it("batch 30: an empty table a round opened is closed again by the System when its staff member signed out mid-round, and the next round opens it at once", async () => {
+  await withIsolatedDatabase({ caseId: "wp2423_race_so_open" }, async (context) => {
+    const admin = new Client(context.clientConfig);
+    await admin.connect();
+    vi.stubEnv("NODE_ENV", "development");
+    const api = await createPilotApiRole(admin, context, "wp2423_rso");
+    let store = null;
+    const unexpected = watchUnexpected();
+    try {
+      store = await prepareRealStaffRoundStore({ admin, context, api, paymentTiming: "PayLater" });
+      const leaving = await store.staff(id(0x770), roundPermissions);
+      const next = await store.staff(id(0x771), roundPermissions);
+      const round = (counter, who) =>
+        answerOf(() =>
+          counter.staffDiningRound({
+            sessionCookie: who.sessionCookie,
+            csrf: who.csrf,
+            command: roundCommand(store),
+          }),
+        );
+      // The table is free. The leaving member's round opens it, then they sign out in another
+      // tab just after its checkout started (the live 450 ms case): refused, nothing ordered.
+      assert.deepEqual(await tableSessions(admin, store), []);
+      const signedOutCounter = await store.counterFor(leaving, {
+        decorateStaffRoundPipeline: (real) => ({
+          ...real,
+          startCheckout: async (...values) => {
+            const started = await real.startCheckout(...values);
+            await signOut(store, leaving);
+            return started;
+          },
+        }),
+      });
+      const refused = await round(signedOutCounter, leaving);
+      assert.deepEqual(refused, { status: "Refused", code: "STAFF_ROUND_PERMISSION_DENIED" });
+      // The table it opened is not left seated with nothing ordered: closed by the System.
+      const sessions = await tableSessions(admin, store);
+      assert.equal(sessions.length, 1);
+      assert.equal(sessions[0].phase, "Closed", "the table the refused round opened is closed");
+      const orders = await admin.query(
+        "SELECT count(*)::int AS n FROM rms_ordering.order_header WHERE store_id=$1",
+        [store.scope.storeReference],
+      );
+      assert.equal(orders.rows[0].n, 0, "nothing was ordered");
+      const audits = (
+        await admin.query(
+          `SELECT action_code, reason_code, actor_type FROM platform_audit.audit_record
+           WHERE target_id=$1 AND action_code LIKE 'DINING_SESSION_CLOSING_%' ORDER BY occurred_at, action_code`,
+          [sessions[0].session],
+        )
+      ).rows;
+      assert.deepEqual(
+        audits.map((row) => [row.action_code, row.reason_code, row.actor_type]),
+        [
+          ["DINING_SESSION_CLOSING_BEGIN", "STAFF_ROUND_NOT_SENT", "System"],
+          ["DINING_SESSION_CLOSING_FINALIZE", "STAFF_ROUND_NOT_SENT", "System"],
+        ],
+      );
+      // The next staff member sends a round for the table at once: it opens it again.
+      const placed = await round(await store.counterFor(next), next);
+      assert.equal(placed.status, "Placed", JSON.stringify(placed));
+      const after = await tableSessions(admin, store);
+      assert.deepEqual(
+        after.map((row) => row.phase),
+        ["Closed", "Active"],
+      );
+      assert.equal(await roundsNotSentToKitchen(admin, store), 0);
+      assert.deepEqual(
+        unexpected.lines.filter((line) => /"level":50/u.test(line)),
+        [],
+        "nothing unexpected was logged",
+      );
+    } finally {
+      unexpected.restore();
+      vi.unstubAllEnvs();
+      if (store !== null) await store.close();
+      for (const name of [api, api + "_w"]) {
+        await admin.query("DROP OWNED BY " + name).catch(() => undefined);
+        await admin.query("DROP ROLE " + name).catch(() => undefined);
+      }
+      await admin.end();
+    }
+  });
+});

@@ -378,6 +378,28 @@ export async function loadDiningGuestTableActivity(
   return found;
 }
 
+/**
+ * WP-2423 batch 30: the admission every phone at this table's Session joined with (null for a
+ * participant with none), so the System can tell that only a refused staff round's own table guest
+ * ever joined the table it opened. At most 50 listed; more means someone else is surely there.
+ */
+export async function listDiningSessionJoinAdmissions(
+  tx: DiningTableTransaction,
+  scope: Pick<DiningTableStoreScope, "brandReference" | "storeReference">,
+  sessionReference: string,
+): Promise<readonly (string | null)[]> {
+  const { brand, store } = scoped(scope);
+  const session = String(parseDiningReference(sessionReference));
+  await contextOf(tx, brand, store);
+  return rows(
+    await tx.query(
+      "SELECT a.admission_id::text AS admission FROM rms_dining.dining_participant p LEFT JOIN rms_dining.dining_identity_admission a ON a.tenant_id=p.tenant_id AND a.brand_id=p.brand_id AND a.store_id=p.store_id AND a.session_id=p.session_id AND a.participant_id=p.participant_id WHERE p.brand_id=$1 AND p.store_id=$2 AND p.session_id=$3 ORDER BY p.participant_id LIMIT 51",
+      [brand, store, session],
+    ),
+    51,
+  ).map((row) => (row.admission === null ? null : String(parseDiningReference(row.admission))));
+}
+
 export type DiningGuestTableStartResult =
   /** The switch is off, the table isn't one a guest can start: the caller answers as before. */
   | { readonly status: "NotApplicable" }

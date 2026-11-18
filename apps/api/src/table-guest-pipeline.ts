@@ -190,6 +190,8 @@ export function createStaffTableGuestPipeline(options: {
   guestsCanSend?(): Promise<boolean>;
   openTable: StaffTableGuestPipeline["openTable"];
   abandonTable: StaffTableGuestPipeline["abandonTable"];
+  /** WP-2423 batch 30: the System's close of a table a round refused after a sign-out opened. */
+  closeRefusedOpening?: StaffTableGuestPipeline["closeRefusedOpening"];
   /** The table's current printed QR token (as a guest scans it); null when it has none. */
   tableQrToken(tableReference: string): Promise<string | null>;
   entry: CustomerEntryPort;
@@ -239,6 +241,9 @@ export function createStaffTableGuestPipeline(options: {
     ...(options.guestsCanSend === undefined ? {} : { guestsCanSend: options.guestsCanSend }),
     openTable: (staff, input) => options.openTable(staff, input),
     abandonTable: (staff, input) => options.abandonTable(staff, input),
+    ...(options.closeRefusedOpening === undefined
+      ? {}
+      : { closeRefusedOpening: options.closeRefusedOpening }),
     tableHasQr: async (input) => (await options.tableQrToken(input.tableReference)) !== null,
     async enter(input) {
       const qrToken = await options.tableQrToken(input.tableReference);

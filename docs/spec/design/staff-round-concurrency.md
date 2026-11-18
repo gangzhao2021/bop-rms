@@ -113,8 +113,14 @@ sending it alone answered 503 (`CART_QUOTE_INVALID`).
   answered `order_not_priced` (send again), with the round's own lines out.
 - **A table this round opened** is closed again once its lines are out, as for any round refused
   before an order. Closing uses the staff member's own closing authority: after a sign-out it is
-  refused, so the session stays open with the party seated, and the next staff round for the
-  table uses it (narrower than asked: nothing closes it without staff).
+  refused. **Batch 30:** the System then closes it (Begin and Finalize recorded as the System, reason
+  `STAFF_ROUND_NOT_SENT`, no cleaning step: nothing was served), in one transaction that checks it
+  is still all this round's doing: the Session is Active and was started by that staff member, no
+  order exists for it, its cart is empty, no call is open, nothing was merged into it, and nobody
+  but this round's own table guest joined it. Otherwise it stays open for staff, as before. No
+  grant or catalog change: the System reason is allowed in Dining's closing checks
+  (`systemTableCloseReasons`), the writes are those staff closing already uses. Acceptance:
+  `staff-round-same-table-race` case "batch 30".
 - **"Not found" during the race** (v15 `quote_not_found` at 22:28:17Z, 22:28:40Z, 22:30:17Z): each
   phone quote met a staff round's table guest joining the table (join records at 22:28:17.822Z,
   22:28:40.676Z, 22:30:17.420Z), which moves the party to a new version; the quote compared party
