@@ -45,6 +45,7 @@ import {
   handoverReady,
   orderAmountNote,
   batchesRefundedEarlier,
+  acceptRoundNumber,
 } from "./CurrentOrderQueuePage.js";
 import {
   ordersAwaitingAcceptance,
@@ -335,6 +336,18 @@ it("tells someone who can't read payments who refunds a paid order, and says not
   setLanguageForTest("zh-Hans");
   try {
     expect(render({ canViewPayments: false, paidOnline: paid })).toContain("退款请找店长或店主。");
+  } finally {
+    setLanguageForTest("en");
+  }
+});
+
+it("WP-2423 batch 31: a later round's Accept button names its round in the staff's language", () => {
+  expect(acceptRoundNumber("12", 1)).toBe("12");
+  expect(acceptRoundNumber("12", 2)).toBe("12 · round 2");
+  setLanguageForTest("zh-Hans");
+  try {
+    expect(acceptRoundNumber("12", 1)).toBe("12");
+    expect(acceptRoundNumber("12", 3)).toBe("12 · 第 3 轮");
   } finally {
     setLanguageForTest("en");
   }

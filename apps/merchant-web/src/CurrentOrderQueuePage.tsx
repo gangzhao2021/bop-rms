@@ -3800,6 +3800,14 @@ export function PickupHourNoticeLine({
   );
 }
 
+/**
+ * The order number an Accept button names for one round: the order itself for round 1, else the
+ * order and its round in the staff's language (WP-2423 batch 31: it was built in English only).
+ */
+export function acceptRoundNumber(orderNumber: string, sequence: number): string {
+  return sequence === 1 ? orderNumber : orderNumber + t(" · round {round}", { round: sequence });
+}
+
 export function CurrentOrderQueuePage({
   storeLabel,
   csrf,
@@ -4566,9 +4574,7 @@ export function CurrentOrderQueuePage({
       resumeUnknown={unknownOutcomes.current.has(batch.orderBatchReference)}
       csrf={csrf}
       closeWith={acceptanceCloseControl(batch)}
-      orderNumber={
-        batch.sequence === 1 ? order.orderNumber : order.orderNumber + " · round " + batch.sequence
-      }
+      orderNumber={acceptRoundNumber(order.orderNumber, batch.sequence)}
       paused={offline}
       held={acceptAll.running}
       accepted={acceptedByAll.has(batch.orderBatchReference)}
@@ -5378,11 +5384,7 @@ export function CurrentOrderQueuePage({
                               accepted={acceptedByAll.has(batch.orderBatchReference)}
                               csrf={csrf}
                               closeWith="RefundInstead"
-                              orderNumber={
-                                batch.sequence === 1
-                                  ? order.orderNumber
-                                  : order.orderNumber + " · round " + batch.sequence
-                              }
+                              orderNumber={acceptRoundNumber(order.orderNumber, batch.sequence)}
                               operation={() => {
                                 let operation = operations.current.get(batch.orderBatchReference);
                                 if (!operation) {
