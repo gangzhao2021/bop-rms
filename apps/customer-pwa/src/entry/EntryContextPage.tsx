@@ -34,7 +34,11 @@ import type {
   CustomerEntryIntent,
   CustomerEntryScreenState,
 } from "./types.js";
-import { tableWaitCheckDelaysSeconds, watchTableOpening } from "./table-open-recheck.js";
+import {
+  tableWaitCheckDelaysSeconds,
+  tableWaitLimitedEntryGapSeconds,
+  watchTableOpening,
+} from "./table-open-recheck.js";
 import type { MenuClosedStore } from "../menu/types.js";
 import { createMenuTableJoiner } from "./menu-table-joiner.js";
 
@@ -268,18 +272,39 @@ export function EntryContextPage({
     // WP-2423 (guest-waits-and-refund-lock): the cheap "is it open now?" every few seconds; the
     // entry is asked once it says the table changed. A client without it enters again, rarely.
     const probe = owner.waitForTable;
+    // Review (batch 32): once the waiting checks' own budget is spent (a busy room on one Wi-Fi),
+    // the page asks the entry instead, on the entry's budget, at most once a minute until that
+    // budget's Retry-After has passed; "We've been seated" always asks the entry at once.
+    let limitedUntil = Number.NEGATIVE_INFINITY;
+    let lastEntry = Number.NEGATIVE_INFINITY;
+    const entryGapMs = tableWaitLimitedEntryGapSeconds * 1000;
+    const limited = () => performance.now() < limitedUntil;
     const watcher = watchTableOpening({
-      check: async () => {
+      check: async ({ manual }) => {
         setWaitStopped(false);
-        if (probe !== undefined) {
-          const answer = await probe();
-          if (clientRef.current !== owner) return false;
-          if (answer.kind === "Waiting") return true;
-          if (answer.kind === "Busy")
-            return answer.retryAfterSeconds === undefined
-              ? true
-              : { waitSeconds: answer.retryAfterSeconds };
+        if (probe !== undefined && !manual) {
+          if (!limited()) {
+            const answer = await probe();
+            if (clientRef.current !== owner) return false;
+            if (answer.kind === "Waiting") return true;
+            if (answer.kind === "Busy")
+              return answer.retryAfterSeconds === undefined
+                ? true
+                : { waitSeconds: answer.retryAfterSeconds };
+            if (answer.kind === "Limited")
+              limitedUntil =
+                performance.now() +
+                (answer.retryAfterSeconds ?? tableWaitLimitedEntryGapSeconds) * 1000;
+          }
+          const sinceEntry = performance.now() - lastEntry;
+          if (limited() && sinceEntry < entryGapMs)
+            return { waitSeconds: Math.ceil((entryGapMs - sinceEntry) / 1000) };
         }
+        lastEntry = performance.now();
+        const stillWaiting = () =>
+          probe !== undefined && limited()
+            ? { waitSeconds: tableWaitLimitedEntryGapSeconds }
+            : true;
         const next = await owner.retry();
         if (clientRef.current !== owner) return false;
         // Still waiting, or a passing failure: keep the page as it is and ask again later.
@@ -289,7 +314,7 @@ export function EntryContextPage({
           next.kind === "Offline" ||
           next.kind === "ServiceUnavailable"
         )
-          return true;
+          return stillWaiting();
         if (next.kind === "RateLimited") return { waitSeconds: next.retryAfterSeconds };
         setResult({ client: owner, state: next });
         if (

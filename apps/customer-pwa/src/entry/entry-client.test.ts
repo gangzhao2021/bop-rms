@@ -1144,7 +1144,10 @@ describe("waiting for a table to open", () => {
         status: 429,
         headers: { "content-type": "application/json", "retry-after": "40" },
       }),
-      response(503, { code: "entry_service_unavailable" }),
+      new Response(JSON.stringify({ code: "entry_service_unavailable" }), {
+        status: 503,
+        headers: { "content-type": "application/json", "retry-after": "30" },
+      }),
       response(410, { code: "entry_qr_retired" }),
     ];
     const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -1156,8 +1159,9 @@ describe("waiting for a table to open", () => {
     const entry = client(fetch);
     expect(await entry.waitForTable?.()).toEqual({ kind: "Waiting" });
     expect(await entry.waitForTable?.()).toEqual({ kind: "Changed" });
-    expect(await entry.waitForTable?.()).toEqual({ kind: "Busy", retryAfterSeconds: 40 });
-    expect(await entry.waitForTable?.()).toEqual({ kind: "Busy" });
+    // Review (batch 32): the waiting checks' own budget spent is not an outage: the page enters.
+    expect(await entry.waitForTable?.()).toEqual({ kind: "Limited", retryAfterSeconds: 40 });
+    expect(await entry.waitForTable?.()).toEqual({ kind: "Busy", retryAfterSeconds: 30 });
     // The code changed: the entry gives the guest its answer.
     expect(await entry.waitForTable?.()).toEqual({ kind: "Changed" });
     // The check never touches this page's visit.

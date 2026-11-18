@@ -118,10 +118,14 @@ describe("M02 a table not open yet continues by itself, sparing the entry budget
     h.watcher.checkNow();
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(h.check).toHaveBeenCalledTimes(1);
+    // Review (batch 32): the page is told the guest asked, so it asks the entry itself.
+    expect(h.check).toHaveBeenLastCalledWith({ manual: true });
+    await h.advance(20);
+    expect(h.check).toHaveBeenLastCalledWith({ manual: false });
     h.watcher.stop();
     h.watcher.checkNow();
     await h.advance(3600);
-    expect(h.check).toHaveBeenCalledTimes(1);
+    expect(h.check).toHaveBeenCalledTimes(2);
   });
 });
 

@@ -72,6 +72,8 @@ interface Installation {
   waitChecks: unknown[];
   /** A busy answer for the next checks (seconds to wait), when set. */
   waitBusy: number | null;
+  /** That answer: 503 (the store can't say) or 429 (the waiting checks' own budget is spent). */
+  waitBusyStatus: 429 | 503;
 }
 
 /** Two merchants on one installation; the bare pickup address names neither of them. */
@@ -83,6 +85,7 @@ async function installation(page: Page, setup: Partial<Installation> = {}) {
     pickupRequests: [],
     waitChecks: [],
     waitBusy: null,
+    waitBusyStatus: 503,
     ...setup,
   };
   await page.route("**/bff/customer/entry/table-wait", (route) => {
@@ -90,9 +93,11 @@ async function installation(page: Page, setup: Partial<Installation> = {}) {
     state.waitChecks.push(body);
     if (state.waitBusy !== null)
       return route.fulfill({
-        status: 429,
+        status: state.waitBusyStatus,
         headers: { ...json, "retry-after": String(state.waitBusy) },
-        body: JSON.stringify({ code: "entry_rate_limited" }),
+        body: JSON.stringify({
+          code: state.waitBusyStatus === 429 ? "entry_rate_limited" : "entry_service_unavailable",
+        }),
       });
     const answer = state.waiting?.(undefined);
     return route.fulfill({
@@ -346,6 +351,46 @@ test.describe("@production M02 a phone stays at the Store and table it scanned",
       fullPage: true,
     });
     expect(state.entries).toEqual([{ qrToken: laneTable }]);
+  });
+
+  // Review (batch 32): a busy room on one Wi-Fi spends the waiting checks' own budget (429 with a
+  // Retry-After of up to ten minutes). The page then asks the entry, on the entry's budget, at once
+  // and at most once a minute, and "We've been seated" always asks the entry at once.
+  test("the waiting checks' budget spent: the page asks the entry instead of waiting minutes", async ({
+    page,
+  }) => {
+    await page.clock.install();
+    let open = false;
+    const state = await installation(page, {
+      waiting: () =>
+        open ? { status: 201, body: established("DineIn") } : { status: 409, body: notOpen },
+      waitBusy: 600,
+      waitBusyStatus: 429,
+    });
+    await page.goto("/#qr=" + laneTable);
+    const main = page.getByRole("main");
+    await expect(main.getByRole("heading", { name: /isn’t open yet$/u })).toBeVisible();
+    // The first check is refused: the page enters once at once instead.
+    await page.clock.runFor(3_000);
+    await expect.poll(() => state.waitChecks.length).toBe(1);
+    await expect.poll(() => state.entries.length).toBe(2);
+    // Not again within the minute, and no more waiting checks before the Retry-After.
+    await page.clock.runFor(30_000);
+    expect(state.waitChecks.length).toBe(1);
+    expect(state.entries.length).toBe(2);
+    // "We've been seated" asks the entry at once, whatever the waiting checks' budget says.
+    await main.getByRole("button", { name: "We’ve been seated" }).click();
+    await expect.poll(() => state.entries.length).toBe(3);
+    await expect(main.getByRole("heading", { name: /isn’t open yet$/u })).toBeVisible();
+    // Staff open the table: the page goes on by itself within the minute.
+    open = true;
+    const welcome = main.getByRole("heading", { name: "Welcome to Lane Dessert" });
+    for (let step = 0; step < 14 && !(await welcome.isVisible()); step += 1)
+      await page.clock.runFor(5_000);
+    await expect(welcome).toBeVisible();
+    expect(state.waitChecks.length).toBe(1);
+    expect(state.entries.length).toBe(4);
+    await expectNoInternalText(page);
   });
 
   test("'We've been seated' checks again at once", async ({ page }) => {

@@ -17,6 +17,12 @@ export const tableWaitCheckDelaysSeconds: readonly number[] = Object.freeze([
   ...Array<number>(20).fill(30),
 ]);
 /**
+ * Review (batch 32): once the waiting checks' own budget answers 429 (a busy room on one Wi-Fi),
+ * the page asks the entry instead, on the entry's budget, at most once this often (10 in ten
+ * minutes per phone), until that 429's Retry-After has passed.
+ */
+export const tableWaitLimitedEntryGapSeconds = 60;
+/**
  * A client with no cheap check (a demo entry) checks by entering again, on the entry's budget:
  * after 20 s, backing off to every 2 minutes, at most 6 checks in any ten minutes.
  */
@@ -33,7 +39,8 @@ export const tableOpenRecheckMinimumGapSeconds = 20;
 export type TableOpenCheckResult = boolean | { readonly waitSeconds: number };
 
 export interface TableOpenRecheckBoundary {
-  readonly check: () => Promise<TableOpenCheckResult>;
+  /** `manual`: the guest tapped "We've been seated" (the page asks the entry itself). */
+  readonly check: (request: { readonly manual: boolean }) => Promise<TableOpenCheckResult>;
   readonly visible: () => boolean;
   /** Calls back when the page comes to the front; returns the unsubscribe. */
   readonly onVisible: (listener: () => void) => () => void;
@@ -71,13 +78,13 @@ export function watchTableOpening(boundary: TableOpenRecheckBoundary): {
     unsubscribe();
   };
   /** Checks once; resolves true while still waiting. */
-  const check = async (): Promise<boolean> => {
+  const check = async (manual = false): Promise<boolean> => {
     if (stopped || busy) return !stopped;
     busy = true;
     missed = false;
     lastCheck = boundary.now();
     try {
-      const result = await boundary.check();
+      const result = await boundary.check({ manual });
       if (result === false) {
         stop();
         return false;
@@ -120,7 +127,7 @@ export function watchTableOpening(boundary: TableOpenRecheckBoundary): {
       if (stopped) return;
       // The guest asked: at once, and if the schedule had run out, it starts again.
       const ranOut = timer === null && index >= delays.length;
-      void check().then((waiting) => {
+      void check(true).then((waiting) => {
         if (!waiting || !ranOut) return;
         index = 0;
         schedule();

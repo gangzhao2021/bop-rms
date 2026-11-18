@@ -811,9 +811,16 @@ export function createCustomerEntryClient(
         return Object.freeze({ kind: "Busy" });
       }
       void response.body?.cancel().catch(() => undefined);
-      // Busy or limited: wait (as long as asked). Anything else (the code changed, the waiting scan
-      // is gone): the entry gives the guest its answer.
-      if (response.status === 429 || response.status === 503)
+      // Limited: the waiting checks' budget is spent, so the page asks the entry instead. Busy: wait
+      // (as long as asked). Anything else (the code changed, the waiting scan is gone): the entry
+      // gives the guest its answer.
+      if (response.status === 429)
+        return Object.freeze(
+          seconds === undefined
+            ? { kind: "Limited" }
+            : { kind: "Limited", retryAfterSeconds: seconds },
+        );
+      if (response.status === 503)
         return Object.freeze(
           seconds === undefined ? { kind: "Busy" } : { kind: "Busy", retryAfterSeconds: seconds },
         );
