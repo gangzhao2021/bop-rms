@@ -4,6 +4,7 @@
  */
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { afterEach } from "vitest";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -20,6 +21,10 @@ export async function unmountMounted(): Promise<void> {
     for (const root of roots) root.unmount();
   });
 }
+
+// Every test file that mounts through this kit unmounts after each test, so a request a page started
+// (a preview, a re-read) is aborted with it instead of setting state after jsdom is gone.
+afterEach(unmountMounted);
 
 export async function mount(node: ReactNode): Promise<{ container: HTMLElement; root: Root }> {
   const container = document.createElement("div");
