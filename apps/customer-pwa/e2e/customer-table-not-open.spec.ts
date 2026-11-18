@@ -126,7 +126,7 @@ test.describe("@production CUST-ENTRY table not open", () => {
     ).toBeVisible();
     // M02: the page continues by itself once staff open the table (entry-stays-at-store.spec).
     await expect(main).toContainText(
-      "Ask staff to seat you. This page continues by itself once the table is open.",
+      "Ask staff to seat you. This page goes on by itself a few seconds after staff open the table.",
     );
     await expect(main).not.toContainText("Ready to order");
     await expect(main).not.toContainText("is confirmed for dine-in");
@@ -136,7 +136,7 @@ test.describe("@production CUST-ENTRY table not open", () => {
 
     await page.getByRole("button", { name: "切换到中文" }).click();
     await expect(main.getByRole("heading", { name: "这桌还没开台" })).toBeVisible();
-    await expect(main).toContainText("请让店员带位，开台后这里会自动继续。");
+    await expect(main).toContainText("请让店员带位。店员开台后几秒内，这里会自动继续。");
     await page.screenshot({
       path: "test-results/customer-table-not-open-zh-390.png",
       fullPage: true,

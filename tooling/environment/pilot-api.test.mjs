@@ -53,7 +53,8 @@ function dependencies() {
     store: { displayName: "Store" },
     credentials: { pickup: port("pickup"), reference: () => "reference" },
     transactions,
-    requestAdmission: port("admission"),
+    // WP-2423 (guest-waits-and-refund-lock): the waiting-table checks have their own budget.
+    requestAdmission: { ...port("admission"), tableWait: port("tableWait") },
     database: { probe: port("probe") },
     stores: port("stores"),
     // WP-2423: the published operating reader the entry gate uses (start/menu store identity).

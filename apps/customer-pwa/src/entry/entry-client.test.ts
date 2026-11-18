@@ -1123,3 +1123,53 @@ describe("WP-2423 shared-table-checkout (b): a re-scan on a phone already at the
     expect((await client.start()).kind).toBe("CommandFailed");
   });
 });
+
+// WP-2423 (guest-waits-and-refund-lock): the cheap "is the table open now?" check.
+describe("waiting for a table to open", () => {
+  const client = (fetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>) =>
+    createCustomerEntryClient({
+      fetch,
+      hash: "#qr=aaa.bbb.ccc",
+      pathname: "/",
+      search: "",
+      replaceState: () => undefined,
+      online: () => true,
+    });
+  it("asks with the scanned code, starts nothing, and reads Waiting, Changed and busy answers", async () => {
+    setCustomerCsrfCredential("K".repeat(43));
+    const answers = [
+      response(200, { schemaVersion: 1, status: "Waiting" }),
+      response(200, { schemaVersion: 1, status: "Changed" }),
+      new Response(JSON.stringify({ code: "entry_rate_limited" }), {
+        status: 429,
+        headers: { "content-type": "application/json", "retry-after": "40" },
+      }),
+      response(503, { code: "entry_service_unavailable" }),
+      response(410, { code: "entry_qr_retired" }),
+    ];
+    const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(input)).toBe("/bff/customer/entry/table-wait");
+      expect(init).toMatchObject({ method: "POST", credentials: "same-origin", cache: "no-store" });
+      expect(JSON.parse(String(init?.body))).toEqual({ qrToken: "aaa.bbb.ccc" });
+      return answers.shift() as Response;
+    });
+    const entry = client(fetch);
+    expect(await entry.waitForTable?.()).toEqual({ kind: "Waiting" });
+    expect(await entry.waitForTable?.()).toEqual({ kind: "Changed" });
+    expect(await entry.waitForTable?.()).toEqual({ kind: "Busy", retryAfterSeconds: 40 });
+    expect(await entry.waitForTable?.()).toEqual({ kind: "Busy" });
+    // The code changed: the entry gives the guest its answer.
+    expect(await entry.waitForTable?.()).toEqual({ kind: "Changed" });
+    // The check never touches this page's visit.
+    expect(getCustomerCsrfCredential()).toBe("K".repeat(43));
+    setCustomerCsrfCredential(null);
+  });
+  it("a lost connection is busy, never 'open'", async () => {
+    const entry = client(
+      vi.fn(async () => {
+        throw new TypeError("network");
+      }),
+    );
+    expect(await entry.waitForTable?.()).toEqual({ kind: "Busy" });
+  });
+});

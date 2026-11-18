@@ -218,6 +218,12 @@ export function createCustomerStartClient(input: CustomerStartClientInput): Cust
     enter(intent: CustomerEntryIntent) {
       return active?.enter?.(intent) ?? Promise.resolve(missing);
     },
+    // WP-2423 (guest-waits-and-refund-lock): the scanned code's "is the table open now?".
+    waitForTable() {
+      return (
+        active?.waitForTable?.() ?? Promise.resolve(Object.freeze({ kind: "Changed" as const }))
+      );
+    },
     async startNew() {
       if (source.kind === "Code") {
         const token = await source.load();

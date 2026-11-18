@@ -27,6 +27,7 @@ import type {
   CustomerEntryPort,
   CustomerEntryPortInput,
   CustomerEntryPresentedTable,
+  CustomerEntryWaitInput,
 } from "./customer-entry.js";
 
 export interface CustomerEntryAdmissionInput extends Omit<CustomerEntryPortInput, "qrToken"> {
@@ -586,6 +587,59 @@ export function createCustomerEntryComposition(
         if (error instanceof CustomerEntryServiceUnavailableError) throw error;
         return unavailable;
       }
+    },
+    /**
+     * WP-2423 (guest-waits-and-refund-lock): is the scanned table still not open? Only the code and
+     * the table's state are read (no profile, hours, visit or admission). Anything the entry would
+     * answer otherwise is "Changed", and the phone asks the entry once. The table's state that
+     * can't be read is an outage (the phone waits a little), never "not open".
+     */
+    async tableWaiting(input: CustomerEntryWaitInput) {
+      const requestedAt = parseCanonicalInstant(input.requestedAt);
+      const captured: { evidence: QrTableContextEvidence | null } = { evidence: null };
+      const qr = await createQrTableContextService({
+        ...options.qr,
+        contexts: {
+          async resolve(payload) {
+            const raw = await options.qr.contexts.resolve(payload);
+            if (raw === null) return null;
+            captured.evidence = parseQrTableContextEvidence(raw);
+            return captured.evidence;
+          },
+        },
+      })
+        .resolveQrTableContext({
+          qrToken: input.qrToken,
+          evaluatedAt: requestedAt,
+          purpose: "CustomerEntry",
+        })
+        .catch(() => null);
+      const evidence = captured.evidence;
+      const tableReference = evidence?.tableReference;
+      if (
+        qr === null ||
+        qr.status !== "Verified" ||
+        evidence === null ||
+        qr.context.channel !== "DineIn" ||
+        tableReference === null ||
+        tableReference === undefined ||
+        options.table === undefined
+      )
+        return "Changed" as const;
+      const where = {
+        brandReference: String(evidence.brandReference),
+        storeReference: String(evidence.storeReference),
+        tableReference: String(tableReference),
+      };
+      const open = await options.table.isOpen(where).catch(() => {
+        throw new CustomerEntryServiceUnavailableError();
+      });
+      if (open) return "Changed" as const;
+      // A free table a guest may start (or one being cleaned) is answered by the entry, not here.
+      const offer = await (
+        options.table.guestStart?.({ ...where, at: requestedAt }) ?? Promise.resolve("No" as const)
+      ).catch(() => "No" as const);
+      return offer === "No" ? ("Waiting" as const) : ("Changed" as const);
     },
   });
 }

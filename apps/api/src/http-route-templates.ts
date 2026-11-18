@@ -1,3 +1,4 @@
+import { customerEntryTableWaitRoute } from "./customer-entry.js";
 import { customerSessionBootstrapRoute } from "./customer-session-bootstrap.js";
 import { customerStoreProfileRoute } from "./customer-store-profile.js";
 import { customerPickupCodeRoute } from "./customer-pickup-code.js";
@@ -58,6 +59,7 @@ export const apiRouteTemplates = Object.freeze([
   paymentProviderWebhookRoute,
   "/__acceptance/request-command-event",
   "/bff/customer/entry",
+  customerEntryTableWaitRoute,
   ...Object.values(customerCartBindingRoutes),
   customerDiningJoinRoute,
   customerDiningQrJoinRoute,

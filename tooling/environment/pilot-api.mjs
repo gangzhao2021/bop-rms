@@ -184,6 +184,9 @@ export async function createRuntime(
       scope: resources.scope,
       entry,
       entryRequestAdmission: resources.requestAdmission,
+      ...(resources.requestAdmission?.tableWait === undefined
+        ? {}
+        : { entryWaitAdmission: resources.requestAdmission.tableWait }),
       ...(createInternalEntryCodeCheck === undefined
         ? {}
         : { entryCodeCheck: await createInternalEntryCodeCheck() }),

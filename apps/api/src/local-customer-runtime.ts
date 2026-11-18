@@ -137,6 +137,10 @@ export interface LocalCustomerRuntimeOptions {
   readonly entryRequestAdmission?: ConstructorParameters<
     typeof CustomerEntryHandler
   >[0]["requestAdmission"];
+  /** WP-2423 (guest-waits-and-refund-lock): the waiting-table checks' own budget. */
+  readonly entryWaitAdmission?: ConstructorParameters<
+    typeof CustomerEntryHandler
+  >[0]["waitAdmission"];
   readonly entryCodeCheck?: (qrToken: string) => Promise<boolean>;
   readonly merchantRuntime?: ApiServerRuntimeOptions["merchantRuntime"];
   readonly orderSubmission?: CustomerOrderSubmissionPort;
@@ -995,6 +999,9 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
       ...(options.entryRequestAdmission === undefined
         ? {}
         : { requestAdmission: options.entryRequestAdmission }),
+      ...(options.entryWaitAdmission === undefined
+        ? {}
+        : { waitAdmission: options.entryWaitAdmission }),
       // WP-2423 shared-table-checkout (b): a re-scan on a phone already seated at that table.
       ...(options.diningAdmission === undefined
         ? {}

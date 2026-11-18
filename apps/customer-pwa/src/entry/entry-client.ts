@@ -12,6 +12,7 @@ import type {
   CustomerEntryIntent,
   CustomerEntryScreenState,
   CustomerEntryServiceMode,
+  CustomerTableWaitAnswer,
 } from "./types.js";
 import {
   captureCustomerCsrfContext,
@@ -778,7 +779,53 @@ export function createCustomerEntryClient(
     });
     return pending;
   }
+  /**
+   * WP-2423 (guest-waits-and-refund-lock): "is the table open now?", the same code as the scan (in
+   * the page, or this browser's waiting scan). Never changes this page's visit or its CSRF.
+   */
+  async function waitForTable(): Promise<CustomerTableWaitAnswer> {
+    if ((token === null && !replay) || !online()) return Object.freeze({ kind: "Busy" });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10_000);
+    try {
+      const response = await fetcher("/bff/customer/entry/table-wait", {
+        method: "POST",
+        mode: "cors",
+        credentials: "same-origin",
+        cache: "no-store",
+        redirect: "error",
+        referrerPolicy: "no-referrer",
+        signal: controller.signal,
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(replay ? { resume: true } : { qrToken: token }),
+      });
+      const retryAfter = response.headers.get("retry-after");
+      const seconds =
+        retryAfter !== null && /^[1-9][0-9]{0,4}$/u.test(retryAfter) && Number(retryAfter) <= 3600
+          ? Number(retryAfter)
+          : undefined;
+      if (response.status === 200) {
+        const body: unknown = await response.json();
+        const status = (body as { status?: unknown } | null)?.status;
+        if (status === "Waiting" || status === "Changed") return Object.freeze({ kind: status });
+        return Object.freeze({ kind: "Busy" });
+      }
+      void response.body?.cancel().catch(() => undefined);
+      // Busy or limited: wait (as long as asked). Anything else (the code changed, the waiting scan
+      // is gone): the entry gives the guest its answer.
+      if (response.status === 429 || response.status === 503)
+        return Object.freeze(
+          seconds === undefined ? { kind: "Busy" } : { kind: "Busy", retryAfterSeconds: seconds },
+        );
+      return Object.freeze({ kind: "Changed" });
+    } catch {
+      return Object.freeze({ kind: "Busy" });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
   return Object.freeze({
+    waitForTable,
     hasEntry: token !== null || replay,
     start() {
       if (retryUntil !== null) return Promise.resolve(cooldown());

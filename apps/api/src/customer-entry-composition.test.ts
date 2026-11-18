@@ -865,3 +865,48 @@ describe("M104/M105: a rescan goes on with this phone's visit", () => {
     expect(f.create).toHaveBeenCalledOnce();
   });
 });
+
+// WP-2423 (guest-waits-and-refund-lock): the waiting-table check reads only the code and the table.
+describe("waiting-table check", () => {
+  const pickupFixture = () => {
+    const f = fixture();
+    f.payload.channel = f.context.channel = "Pickup";
+    f.payload.publicTableReference =
+      f.context.publicTableReference =
+      f.context.tableReference =
+        null;
+    f.context.tableLifecycle = f.context.assignmentState = null;
+    return f;
+  };
+  const wait = (f: ReturnType<typeof fixture>, table: object | undefined) => {
+    const port = createCustomerEntryComposition({
+      ...f.options,
+      ...(table === undefined ? {} : { table: table as never }),
+    });
+    const input = f.input();
+    if (port.tableWaiting === undefined) throw new Error("no waiting-table check");
+    return port.tableWaiting({ qrToken: input.qrToken, requestedAt: input.requestedAt });
+  };
+  it("not open: Waiting; open, or a guest may start it: Changed; nothing is started", async () => {
+    const f = fixture();
+    expect(await wait(f, { isOpen: vi.fn(async () => false) })).toBe("Waiting");
+    expect(await wait(f, { isOpen: vi.fn(async () => true) })).toBe("Changed");
+    expect(
+      await wait(f, {
+        isOpen: vi.fn(async () => false),
+        guestStart: vi.fn(async () => "MayStart" as const),
+      }),
+    ).toBe("Changed");
+    expect(f.create).not.toHaveBeenCalled();
+    expect(f.admission).not.toHaveBeenCalled();
+  });
+  it("a table state that can't be read is an outage, never 'not open'", async () => {
+    await expect(
+      wait(fixture(), { isOpen: vi.fn(async () => Promise.reject(new Error("read"))) }),
+    ).rejects.toMatchObject({ code: "CUSTOMER_ENTRY_SERVICE_UNAVAILABLE" });
+  });
+  it("a pickup code or no table reader: Changed (the entry answers it)", async () => {
+    expect(await wait(pickupFixture(), { isOpen: vi.fn(async () => false) })).toBe("Changed");
+    expect(await wait(fixture(), undefined)).toBe("Changed");
+  });
+});

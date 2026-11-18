@@ -68,6 +68,10 @@ interface Installation {
   waiting: ((intent: unknown) => { status: number; body: unknown }) | null;
   entries: unknown[];
   pickupRequests: string[];
+  /** WP-2423: the "is the table open now?" checks (their bodies), answered from `waiting`. */
+  waitChecks: unknown[];
+  /** A busy answer for the next checks (seconds to wait), when set. */
+  waitBusy: number | null;
 }
 
 /** Two merchants on one installation; the bare pickup address names neither of them. */
@@ -77,8 +81,28 @@ async function installation(page: Page, setup: Partial<Installation> = {}) {
     waiting: null,
     entries: [],
     pickupRequests: [],
+    waitChecks: [],
+    waitBusy: null,
     ...setup,
   };
+  await page.route("**/bff/customer/entry/table-wait", (route) => {
+    const body = JSON.parse(route.request().postData() ?? "null") as Record<string, unknown>;
+    state.waitChecks.push(body);
+    if (state.waitBusy !== null)
+      return route.fulfill({
+        status: 429,
+        headers: { ...json, "retry-after": String(state.waitBusy) },
+        body: JSON.stringify({ code: "entry_rate_limited" }),
+      });
+    const answer = state.waiting?.(undefined);
+    return route.fulfill({
+      headers: json,
+      body: JSON.stringify({
+        schemaVersion: 1,
+        status: answer !== undefined && answer.status === 409 ? "Waiting" : "Changed",
+      }),
+    });
+  });
   await page.route("**/bff/customer/payment-configuration", (route) =>
     route.fulfill({
       headers: json,
@@ -230,15 +254,98 @@ test.describe("@production M02 a phone stays at the Store and table it scanned",
     await expect(
       main.getByRole("heading", { name: /^This table at .+ isn’t open yet$/u }),
     ).toBeVisible();
-    await expect(main).toContainText("This page continues by itself once the table is open.");
+    await expect(main).toContainText(
+      "This page goes on by itself a few seconds after staff open the table.",
+    );
     await expect(page.getByText("DEMO Café")).toHaveCount(0);
     // Staff seat the party; the page checks again by itself and goes on.
     open = true;
-    await page.clock.fastForward(20_000);
+    await page.clock.fastForward(3_000);
     await expect(main.getByRole("heading", { name: "Welcome to Lane Dessert" })).toBeVisible();
+    // The checks start nothing; the one entry after the table opened does.
     expect(state.entries).toEqual([{ qrToken: laneTable }, { resume: true }, { resume: true }]);
+    expect(state.waitChecks).toEqual([{ resume: true }]);
     expect(state.pickupRequests).toEqual([]);
     await noHorizontalOverflow(page);
+  });
+
+  // WP-2423 (guest-waits-and-refund-lock, v15 batch 31): after staff pressed Open table the guest's
+  // page still said "not open" 20 s and 50 s later and moved on only after about a minute.
+  test("staff open the table while the guest waits: the page goes on within a few seconds", async ({
+    page,
+  }) => {
+    await page.clock.install();
+    let open = false;
+    const state = await installation(page, {
+      waiting: () =>
+        open ? { status: 201, body: established("DineIn") } : { status: 409, body: notOpen },
+    });
+    await page.goto("/#qr=" + laneTable);
+    const main = page.getByRole("main");
+    await expect(
+      main.getByRole("heading", { name: /^This table at .+ isn’t open yet$/u }),
+    ).toBeVisible();
+    await expect(main.getByRole("status")).toContainText(
+      "This page goes on by itself a few seconds after staff open the table.",
+    );
+    // The guest waits half a minute; the page asks every 3 s, entering nothing. (Each check is
+    // answered before the page clock moves on, so the count never depends on the machine's speed.)
+    for (let check = 1; check <= 10; check += 1) {
+      await page.clock.runFor(3_000);
+      await expect.poll(() => state.waitChecks.length).toBe(check);
+    }
+    // No check between them.
+    await page.clock.runFor(2_000);
+    expect(state.waitChecks.length).toBe(10);
+    expect(state.entries).toEqual([{ qrToken: laneTable }]);
+    await expect(main.getByRole("heading", { name: /isn’t open yet$/u })).toBeVisible();
+    await page.screenshot({ path: "test-results/b32-table-wait-390.png", fullPage: true });
+    // Staff press Open table: at the next check, at most 3 s later, the guest is at the table.
+    open = true;
+    await page.clock.runFor(1_000);
+    await expect(main.getByRole("heading", { name: "Welcome to Lane Dessert" })).toBeVisible();
+    expect(state.entries).toEqual([{ qrToken: laneTable }, { qrToken: laneTable }]);
+    await expectNoInternalText(page);
+  });
+
+  test("a busy store's Retry-After is respected, and after 15 minutes the page says it stopped", async ({
+    page,
+  }) => {
+    await page.clock.install();
+    const state = await installation(page, { waiting: () => ({ status: 409, body: notOpen }) });
+    await page.goto("/#qr=" + laneTable);
+    const main = page.getByRole("main");
+    await expect(main.getByRole("heading", { name: /isn’t open yet$/u })).toBeVisible();
+    state.waitBusy = 40;
+    await page.clock.runFor(3_000);
+    await expect.poll(() => state.waitChecks.length).toBe(1);
+    // Nothing is sent before the 40 seconds the store asked for.
+    await page.clock.runFor(39_000);
+    expect(state.waitChecks.length).toBe(1);
+    state.waitBusy = null;
+    await page.clock.runFor(2_000);
+    await expect.poll(() => state.waitChecks.length).toBe(2);
+    // Still not open after 15 minutes: the page stops and says how to go on.
+    const stopped = main.getByText("This page has stopped checking.", { exact: false });
+    for (let step = 0; step < 1200 && !(await stopped.isVisible()); step += 1)
+      await page.clock.runFor(3_000);
+    await expect(main.getByRole("status")).toContainText(
+      "This page has stopped checking. Once staff have seated you, tap “We’ve been seated”.",
+    );
+    const total = state.waitChecks.length;
+    expect(total).toBeLessThanOrEqual(80);
+    await page.clock.runFor(10 * 60_000);
+    expect(state.waitChecks.length).toBe(total);
+    await page.screenshot({ path: "test-results/b32-table-wait-stopped-390.png", fullPage: true });
+    await page.getByRole("button", { name: "切换到中文" }).click();
+    await expect(main.getByRole("status")).toContainText(
+      "这里已停止自动查看。店员带位后，请点“我们已入座”。",
+    );
+    await page.screenshot({
+      path: "test-results/b32-table-wait-stopped-zh-390.png",
+      fullPage: true,
+    });
+    expect(state.entries).toEqual([{ qrToken: laneTable }]);
   });
 
   test("'We've been seated' checks again at once", async ({ page }) => {
@@ -253,7 +360,7 @@ test.describe("@production M02 a phone stays at the Store and table it scanned",
       main.getByRole("heading", { name: /^This table at .+ isn’t open yet$/u }),
     ).toBeVisible();
     await page.getByRole("button", { name: "切换到中文" }).click();
-    await expect(main).toContainText("请让店员带位，开台后这里会自动继续。");
+    await expect(main).toContainText("请让店员带位。店员开台后几秒内，这里会自动继续。");
     await page.getByRole("button", { name: "English" }).click();
     open = true;
     await main.getByRole("button", { name: "We’ve been seated" }).click();

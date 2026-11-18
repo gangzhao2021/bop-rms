@@ -126,6 +126,7 @@ import {
   sendInvalidCustomerEntryRequest,
   type CustomerEntryHandler,
   unavailableCustomerEntryHandler,
+  customerEntryTableWaitRoute,
 } from "./customer-entry.js";
 import {
   type CustomerCartHandler,
@@ -243,7 +244,8 @@ function createErrorHandler(errorLogger: RequestErrorLogger | undefined): ErrorR
     void next;
     const candidate = error as { status?: number; type?: string };
     if (
-      request.originalUrl === "/bff/customer/entry" &&
+      (request.originalUrl === "/bff/customer/entry" ||
+        request.originalUrl === customerEntryTableWaitRoute) &&
       (candidate.type === "entity.too.large" || candidate.status === 400)
     ) {
       sendInvalidCustomerEntryRequest(response);
@@ -373,6 +375,10 @@ export function createApp({
   });
   app.get("/bff/realtime", realtime?.handler() ?? unavailableRealtimeHandler);
   app.post("/bff/customer/entry", customerEntry?.handler() ?? unavailableCustomerEntryHandler);
+  app.post(
+    customerEntryTableWaitRoute,
+    customerEntry?.waitHandler() ?? unavailableCustomerEntryHandler,
+  );
   app.post(
     customerCartBindingRoutes.prepare,
     customerCartBinding?.prepare() ?? unavailableCustomerCartBindingHandler,

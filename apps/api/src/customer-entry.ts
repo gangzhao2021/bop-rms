@@ -14,6 +14,11 @@ const rawCredentialPattern = /^[A-Za-z0-9_-]{43}$/u;
 const uuidV7Pattern = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const canonicalInstantPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const entryRoute = "/bff/customer/entry";
+/**
+ * WP-2423 (guest-waits-and-refund-lock): a phone at a table not open yet asks here whether it is
+ * open now. Its own budget, no visit, no admission; "Changed" sends the phone to the entry once.
+ */
+export const customerEntryTableWaitRoute = "/bff/customer/entry/table-wait";
 const expectedGuestSessionCookie: GuestSessionCookieDescriptor = Object.freeze({
   name: "__Host-bop-guest",
   secure: true,
@@ -198,8 +203,17 @@ export type CustomerEntryPortResult =
   | { readonly status: "InvalidRequest" }
   | { readonly status: "EntryUnavailable" };
 
+export type CustomerEntryWaitInput = Pick<CustomerEntryPortInput, "qrToken" | "requestedAt">;
+/**
+ * "Waiting": the scanned table is still not open (the entry would answer TableNotOpen again).
+ * "Changed": anything else (open now, a guest may start it, the code changed): the phone asks the
+ * entry. A read the database can't answer rejects, and the phone is told to wait a little.
+ */
+export type CustomerEntryWaitAnswer = "Waiting" | "Changed";
+
 export interface CustomerEntryPort {
   establish(input: Readonly<CustomerEntryPortInput>): Promise<CustomerEntryPortResult>;
+  tableWaiting?(input: Readonly<CustomerEntryWaitInput>): Promise<CustomerEntryWaitAnswer>;
 }
 
 export interface CustomerEntryRequestAdmission {
@@ -214,6 +228,11 @@ export interface CustomerEntryRequestAdmission {
 
 export interface CustomerEntryHandlerOptions {
   readonly requestAdmission?: CustomerEntryRequestAdmission;
+  /**
+   * WP-2423 (guest-waits-and-refund-lock): the waiting-table checks' own budget. Absent: they
+   * spend the entry's (`requestAdmission`), so they are never unbounded.
+   */
+  readonly waitAdmission?: CustomerEntryRequestAdmission;
   /** WP-2423: a code's signature, checked first so a made-up code can't spend the Store's budget. */
   readonly codeCheck?: (qrToken: string) => Promise<boolean>;
   readonly allowedOrigin: string;
@@ -898,6 +917,7 @@ export class CustomerEntryHandler {
   readonly #port: CustomerEntryPort;
   readonly #uuidV7Factory: () => string;
   readonly #requestAdmission: CustomerEntryRequestAdmission | undefined;
+  readonly #waitAdmission: CustomerEntryRequestAdmission | undefined;
   readonly #codeCheck: ((qrToken: string) => Promise<boolean>) | undefined;
   readonly #presentedTable: CustomerEntryHandlerOptions["presentedTable"];
   readonly #continuity: CustomerEntryHandlerOptions["continuity"];
@@ -908,6 +928,7 @@ export class CustomerEntryHandler {
     port,
     uuidV7Factory,
     requestAdmission,
+    waitAdmission,
     codeCheck,
     presentedTable,
     continuity,
@@ -917,9 +938,93 @@ export class CustomerEntryHandler {
     this.#port = port;
     this.#uuidV7Factory = uuidV7Factory;
     this.#requestAdmission = requestAdmission;
+    this.#waitAdmission = waitAdmission ?? requestAdmission;
     this.#codeCheck = codeCheck;
     this.#presentedTable = presentedTable;
     this.#continuity = continuity;
+  }
+
+  /**
+   * WP-2423 (guest-waits-and-refund-lock): whether the scanned table is open now. The same code as
+   * the entry (this browser's waiting scan, or the code in the page), the same refusals; 200
+   * `{status:"Waiting"|"Changed"}`, 429 with Retry-After when its budget is spent, 503 when the
+   * database can't say (never "not open", never "can't be used"). Starts and remembers nothing.
+   */
+  waitHandler(): RequestHandler {
+    return async (request, response) => {
+      setResponseControls(response);
+      if (
+        request.originalUrl !== customerEntryTableWaitRoute ||
+        request.get("origin") !== this.#allowedOrigin ||
+        request.get("sec-fetch-site") !== "same-origin" ||
+        request.get("sec-fetch-mode") !== "cors" ||
+        request.is("application/json") !== "application/json"
+      ) {
+        sendError(response, "entry_request_invalid");
+        return;
+      }
+      let qrToken: string;
+      try {
+        const body = parseBody(request.body);
+        if (body.intent !== undefined || body.continuity !== undefined)
+          throw new TypeError("invalid wait request");
+        if ("resume" in body) {
+          const remembered = scannedCode(request.get("cookie"));
+          if (remembered === null) {
+            response.status(404).json({
+              schemaVersion: 1,
+              code: "entry_scan_missing",
+              messageKey: "customer.entry.scan_missing",
+              recovery: { action: "Rescan", storeSelection: "Hidden" },
+            });
+            return;
+          }
+          qrToken = remembered;
+        } else qrToken = body.qrToken;
+      } catch {
+        sendError(response, "entry_request_invalid");
+        return;
+      }
+      try {
+        const requestedAt = parseCanonicalInstant(this.#now());
+        const codeValid = await this.#codeCheck?.(qrToken).catch(() => undefined);
+        const admission = await this.#waitAdmission?.consume(
+          Object.freeze({
+            remoteAddress: trustedClientAddress(request),
+            requestedAt,
+            ...(codeValid === undefined ? {} : { codeValid }),
+          }),
+        );
+        if (admission?.status === "RateLimited") {
+          const decision = closedRecord(admission, ["status", "retryAfterSeconds"]);
+          if (
+            !Number.isSafeInteger(decision.retryAfterSeconds) ||
+            Number(decision.retryAfterSeconds) < 1 ||
+            Number(decision.retryAfterSeconds) > 86400
+          )
+            throw new TypeError("admission unavailable");
+          response.setHeader("Retry-After", String(decision.retryAfterSeconds));
+          sendError(response, "entry_rate_limited");
+          return;
+        }
+        // No budget configured at all (or it can't answer): never an unbounded read.
+        if (admission?.status !== "Allowed" || this.#port.tableWaiting === undefined) {
+          sendError(response, "entry_service_unavailable");
+          return;
+        }
+        closedRecord(admission, ["status"]);
+        if (codeValid === false) {
+          sendError(response, "entry_unavailable");
+          return;
+        }
+        const answer = await this.#port.tableWaiting(Object.freeze({ qrToken, requestedAt }));
+        if (answer !== "Waiting" && answer !== "Changed") throw new TypeError("wait answer");
+        response.status(200).json({ schemaVersion: 1, status: answer });
+      } catch (error) {
+        markRequestFailure(request, customerFailureCode(error));
+        sendError(response, "entry_service_unavailable");
+      }
+    };
   }
 
   handler(): RequestHandler {

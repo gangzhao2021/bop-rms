@@ -34,7 +34,14 @@ export function canonicalPeer(address: string): string {
 }
 
 /** Dedicated server-held pepper. Never retain or emit raw address/device values. */
-export function createGuestSessionAbuseKeys(pepper: Uint8Array): GuestSessionAbuseKeys {
+/**
+ * `purpose`: the entry's buckets ("entry"), or the waiting-table check's own ("table-wait"), so one
+ * never spends the other's budget.
+ */
+export function createGuestSessionAbuseKeys(
+  pepper: Uint8Array,
+  purpose: "entry" | "table-wait" = "entry",
+): GuestSessionAbuseKeys {
   if (!(pepper instanceof Uint8Array) || pepper.byteLength !== 32)
     throw new Error("ABUSE_KEY_UNAVAILABLE");
   const copied = Buffer.from(pepper);
@@ -42,7 +49,13 @@ export function createGuestSessionAbuseKeys(pepper: Uint8Array): GuestSessionAbu
   copied.fill(0);
   const digest = (dimension: string, value: string) =>
     createHmac("sha256", key)
-      .update("bop-rms:guest-session-abuse:v1:" + dimension + "\0", "utf8")
+      .update(
+        "bop-rms:guest-session-abuse:v1:" +
+          (purpose === "entry" ? "" : purpose + ":") +
+          dimension +
+          "\0",
+        "utf8",
+      )
       .update(value, "utf8")
       .digest();
   return Object.freeze({

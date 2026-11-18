@@ -20,6 +20,8 @@ import type {
   CustomerEntryAlreadyAtTable,
   CustomerEntryPort,
   CustomerEntryPortInput,
+  CustomerEntryWaitAnswer,
+  CustomerEntryWaitInput,
 } from "./customer-entry.js";
 import {
   createPersistentPublicStoreProfilePorts,
@@ -55,7 +57,8 @@ export interface PersistentCustomerEntryOptions {
    */
   sources(
     tx: Transaction,
-    input: CustomerEntryPortInput,
+    /** A waiting-table check passes only the code and its instant. */
+    input: CustomerEntryPortInput | CustomerEntryWaitInput,
   ): Promise<
     Pick<CustomerEntryCompositionOptions, "qr" | "admission"> &
       (
@@ -80,11 +83,93 @@ export function createPersistentCustomerEntryComposition(
     const instant = clock();
     return instant > input.requestedAt ? instant : input.requestedAt;
   };
-  const guestStartOffer = (decision: { readonly kind: string }) => {
-    if (decision.kind === "Spent") options.guestTables?.startsSpent?.();
+  const guestStartOffer = (quiet: boolean, decision: { readonly kind: string }) => {
+    if (decision.kind === "Spent" && !quiet) options.guestTables?.startsSpent?.();
     return decision.kind === "MayStart" || decision.kind === "BeingCleaned"
       ? decision.kind
       : ("No" as const);
+  };
+  /** The entry's owners in this transaction (the table's state read under a rolled-back savepoint). */
+  const composeIn = (
+    tx: Transaction,
+    sources: Awaited<ReturnType<PersistentCustomerEntryOptions["sources"]>>,
+    requestedAt: ReturnType<typeof parseCanonicalInstant>,
+    notes: {
+      readonly contextRefused?: () => void;
+      readonly askAt?: (table: string) => void;
+      /** A waiting-table check: nothing worth a line in the log. */
+      readonly quiet?: boolean;
+    },
+  ) => {
+    const qr = sources.qr;
+    const readOnly = async <T>(work: () => Promise<T>): Promise<T> => {
+      await tx.query("SAVEPOINT customer_entry_table_open", []);
+      try {
+        return await work();
+      } finally {
+        await tx.query("ROLLBACK TO SAVEPOINT customer_entry_table_open", []);
+        await tx.query("RELEASE SAVEPOINT customer_entry_table_open", []);
+      }
+    };
+    return createCustomerEntryComposition({
+      ...sources,
+      qr: {
+        ...qr,
+        contexts: {
+          async resolve(payload) {
+            const evidence = await qr.contexts.resolve(payload);
+            if (evidence === null && String(payload.channel) === "DineIn") notes.contextRefused?.();
+            return evidence !== null &&
+              evidence.brandReference === scope.brandReference &&
+              evidence.storeReference === scope.storeReference
+              ? evidence
+              : null;
+          },
+        },
+      },
+      profile: createPersistentPublicStoreProfilePorts(tx, options.profile, {
+        evaluatedAt: requestedAt,
+        purpose: "CustomerEntry",
+      }),
+      session: {
+        ...options.session,
+        binding: sources.binding,
+        store: createPostgresGuestSessionEntryStore({ run: async (work) => work(tx) }, scope),
+      },
+      // Coordinator 2026-10-30: the scanned table's public state, read in this transaction
+      // under a savepoint that is always rolled back (read only; it also restores the scope
+      // settings the read sets, and a failed read leaves the entry usable).
+      table: {
+        isOpen: (where) =>
+          readOnly(() => loadDiningTableOpen(tx as never, scope, where.tableReference)),
+        label: (where) =>
+          readOnly(() => loadDiningTablePublicLabel(tx as never, scope, where.tableReference)),
+        guestStart: (where) =>
+          readOnly(async () =>
+            guestStartOffer(
+              notes.quiet === true,
+              await loadDiningGuestTableOffer(tx as never, scope, where.tableReference, where.at),
+            ),
+          ),
+        ...(options.guestTables === undefined
+          ? {}
+          : {
+              // Only the cheap fact here, so any other open table pays one read. A guest-started
+              // table ends this transaction first: the owners' facts need a connection of their
+              // own, and a scan holding one while it waits for another could use up the pool.
+              asksNewParty: async (where: { tableReference: string }) => {
+                if (
+                  (await readOnly(() =>
+                    loadDiningGuestStartedSessionAtTable(tx as never, scope, where.tableReference),
+                  )) === null
+                )
+                  return false;
+                notes.askAt?.(where.tableReference);
+                return true;
+              },
+            }),
+      },
+    });
   };
   /** One entry, in one transaction, and what it leaves to be decided with nothing held. */
   const once = async (
@@ -116,82 +201,12 @@ export function createPersistentCustomerEntryComposition(
           if (error instanceof RetiredTableQrError) retired = error;
           throw error;
         });
-        const qr = sources.qr;
-        const readOnly = async <T>(work: () => Promise<T>): Promise<T> => {
-          await tx.query("SAVEPOINT customer_entry_table_open", []);
-          try {
-            return await work();
-          } finally {
-            await tx.query("ROLLBACK TO SAVEPOINT customer_entry_table_open", []);
-            await tx.query("RELEASE SAVEPOINT customer_entry_table_open", []);
-          }
-        };
-        const result = await createCustomerEntryComposition({
-          ...sources,
-          qr: {
-            ...qr,
-            contexts: {
-              async resolve(payload) {
-                const evidence = await qr.contexts.resolve(payload);
-                if (evidence === null && String(payload.channel) === "DineIn")
-                  contextRefused = true;
-                return evidence !== null &&
-                  evidence.brandReference === scope.brandReference &&
-                  evidence.storeReference === scope.storeReference
-                  ? evidence
-                  : null;
-              },
-            },
+        const result = await composeIn(tx, sources, requestedAt, {
+          contextRefused: () => {
+            contextRefused = true;
           },
-          profile: createPersistentPublicStoreProfilePorts(tx, options.profile, {
-            evaluatedAt: requestedAt,
-            purpose: "CustomerEntry",
-          }),
-          session: {
-            ...options.session,
-            binding: sources.binding,
-            store: createPostgresGuestSessionEntryStore({ run: async (work) => work(tx) }, scope),
-          },
-          // Coordinator 2026-10-30: the scanned table's public state, read in this transaction
-          // under a savepoint that is always rolled back (read only; it also restores the scope
-          // settings the read sets, and a failed read leaves the entry usable).
-          table: {
-            isOpen: (where) =>
-              readOnly(() => loadDiningTableOpen(tx as never, scope, where.tableReference)),
-            label: (where) =>
-              readOnly(() => loadDiningTablePublicLabel(tx as never, scope, where.tableReference)),
-            guestStart: (where) =>
-              readOnly(async () =>
-                guestStartOffer(
-                  await loadDiningGuestTableOffer(
-                    tx as never,
-                    scope,
-                    where.tableReference,
-                    where.at,
-                  ),
-                ),
-              ),
-            ...(options.guestTables === undefined
-              ? {}
-              : {
-                  // Only the cheap fact here, so any other open table pays one read. A guest-started
-                  // table ends this transaction first: the owners' facts need a connection of their
-                  // own, and a scan holding one while it waits for another could use up the pool.
-                  asksNewParty: async (where: { tableReference: string }) => {
-                    if (
-                      (await readOnly(() =>
-                        loadDiningGuestStartedSessionAtTable(
-                          tx as never,
-                          scope,
-                          where.tableReference,
-                        ),
-                      )) === null
-                    )
-                      return false;
-                    askAt = where.tableReference;
-                    return true;
-                  },
-                }),
+          askAt: (table) => {
+            askAt = table;
           },
         }).establish(input);
         if (
@@ -257,6 +272,31 @@ export function createPersistentCustomerEntryComposition(
         }
         return answer;
       }
+    },
+    /**
+     * WP-2423 (guest-waits-and-refund-lock): the waiting-table check, in one transaction that is
+     * always rolled back. A database that can't answer is a retry, as for the entry; anything else
+     * that stops the check (a code not recognised, retired, another Store's) is "Changed", and the
+     * phone's entry gives the guest its answer.
+     */
+    async tableWaiting(input: CustomerEntryWaitInput) {
+      const requestedAt = parseCanonicalInstant(input.requestedAt);
+      let answer: CustomerEntryWaitAnswer = "Changed";
+      const rollback = new Error("CUSTOMER_ENTRY_WAIT_ROLLBACK");
+      try {
+        await options.transactions.run(async (tx) => {
+          const sources = await options.sources(tx, input);
+          const port = composeIn(tx, sources, requestedAt, { quiet: true });
+          answer = (await port.tableWaiting?.(input)) ?? "Changed";
+          throw rollback;
+        });
+      } catch (error) {
+        if (error === rollback) return answer;
+        const failed = (error as { code?: unknown } | null)?.code;
+        if (typeof failed === "string" && failed.startsWith("TENANT_DATABASE_")) throw error;
+        if (error instanceof CustomerEntryServiceUnavailableError) throw error;
+      }
+      return "Changed";
     },
   });
 }

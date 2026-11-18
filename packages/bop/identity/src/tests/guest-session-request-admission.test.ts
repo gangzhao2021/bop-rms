@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createGuestSessionRequestAdmission,
   createGuestSessionAbuseKeys,
+  guestTableWaitPolicy,
   type GuestSessionAbuseBudget,
 } from "../index.js";
 const scope = {
@@ -129,22 +130,12 @@ describe("Guest abuse keyed scopes", () => {
   });
 });
 
-// M02 (v15 07b7a1b7): a phone at a table not open yet checks again by itself, and every check is an
-// entry attempt. The customer app's schedule (apps/customer-pwa tableOpenRecheckDelaysSeconds,
-// which its own test holds to at most 6 checks in any ten minutes) must leave a busy room's new
-// scans room to get in, on the restaurant's Wi-Fi (one address) and at the Store.
+// M02 (v15 07b7a1b7), WP-2423 (guest-waits-and-refund-lock): a phone at a table not open yet asks
+// "is it open now?" every few seconds (apps/customer-pwa tableWaitCheckDelaysSeconds, which its own
+// test holds to at most 70 checks in any ten minutes). Those checks have their own budget, with
+// their own keys; the entry's budget pays only the scan and, once the table is open, one entry.
 describe("waiting phones leave room for new guests", () => {
-  const recheckDelaysSeconds = [20, 40, 80, 120, 120, 120, 120, 120, 120, 120];
-  /** One phone's attempts in the first ten minutes: its scan, then the checks. */
-  const attemptsPerWaitingPhone = (() => {
-    let at = 0;
-    let count = 1;
-    for (const seconds of recheckDelaysSeconds) {
-      at += seconds;
-      if (at < 600) count += 1;
-    }
-    return count;
-  })();
+  const waitChecksPerPhone = 70;
   function windowBudget(): GuestSessionAbuseBudget["consume"] {
     const used = new Map<string, number>();
     return async ({ keyHash, limitCount }) => {
@@ -155,24 +146,60 @@ describe("waiting phones leave room for new guests", () => {
       return { allowed: true, remaining: limitCount - count - 1, retry_after_seconds: 0 };
     };
   }
-  it("four parties waiting on the Wi-Fi and twenty on their own phones: a full room still gets in", async () => {
-    expect(attemptsPerWaitingPhone).toBe(7);
-    const admission = setup(windowBudget());
+  it("eight parties waiting on the Wi-Fi and twenty-two on their own phones: a full room still gets in", async () => {
+    const consume = windowBudget();
+    const pepper = new Uint8Array(32).fill(1);
+    const entry = createGuestSessionRequestAdmission({
+      scope,
+      keys: createGuestSessionAbuseKeys(pepper),
+      now: () => at,
+      budget: { consume },
+    });
+    const waiting = createGuestSessionRequestAdmission({
+      scope,
+      keys: createGuestSessionAbuseKeys(pepper, "table-wait"),
+      now: () => at,
+      budget: { consume },
+      policy: guestTableWaitPolicy,
+    });
     const wifi = "198.51.100.7";
+    const phones = [
+      ...Array.from({ length: 8 }, () => wifi),
+      ...Array.from({ length: 22 }, (_, phone) => `203.0.113.${phone + 1}`),
+    ];
     const answers: string[] = [];
-    for (let phone = 0; phone < 4; phone += 1)
-      for (let attempt = 0; attempt < attemptsPerWaitingPhone; attempt += 1)
-        answers.push((await admission.consume({ ...request, remoteAddress: wifi })).status);
-    for (let phone = 0; phone < 20; phone += 1)
-      for (let attempt = 0; attempt < attemptsPerWaitingPhone; attempt += 1)
-        answers.push(
-          (await admission.consume({ ...request, remoteAddress: `203.0.113.${phone + 1}` })).status,
-        );
+    for (const address of phones) {
+      answers.push((await entry.consume({ ...request, remoteAddress: address })).status);
+      for (let check = 0; check < waitChecksPerPhone; check += 1)
+        answers.push((await waiting.consume({ ...request, remoteAddress: address })).status);
+      // Staff open the table: one ordinary entry.
+      answers.push((await entry.consume({ ...request, remoteAddress: address })).status);
+    }
     expect(answers.every((status) => status === "Allowed")).toBe(true);
-    // Sixty new guests scanning on the same Wi-Fi in the same ten minutes all get in.
-    for (let guest = 0; guest < 60; guest += 1)
-      expect(await admission.consume({ ...request, remoteAddress: wifi })).toEqual({
+    // A hundred new guests scanning on the same Wi-Fi in the same ten minutes all get in.
+    for (let guest = 0; guest < 100; guest += 1)
+      expect(await entry.consume({ ...request, remoteAddress: wifi })).toEqual({
         status: "Allowed",
       });
+    // The checks are still bounded: a phone asking without end is told to wait.
+    const alone = createGuestSessionRequestAdmission({
+      scope,
+      keys: createGuestSessionAbuseKeys(pepper, "table-wait"),
+      now: () => at,
+      budget: { consume: windowBudget() },
+      policy: guestTableWaitPolicy,
+    });
+    let allowed = 0;
+    while ((await alone.consume({ ...request, remoteAddress: "192.0.2.99" })).status === "Allowed")
+      allowed += 1;
+    expect(allowed).toBe(guestTableWaitPolicy.ipLimit);
+  });
+  it("keeps the waiting checks' keys apart from the entry's", () => {
+    const pepper = new Uint8Array(32).fill(1);
+    const entry = createGuestSessionAbuseKeys(pepper);
+    const waiting = createGuestSessionAbuseKeys(pepper, "table-wait");
+    expect(waiting.ip("192.0.2.1", scope)).not.toEqual(entry.ip("192.0.2.1", scope));
+    expect(waiting.store(scope)).not.toEqual(entry.store(scope));
+    expect(waiting.ip("192.0.2.1", scope)).toHaveLength(32);
   });
 });

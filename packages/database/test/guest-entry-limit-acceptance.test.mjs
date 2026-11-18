@@ -17,6 +17,7 @@ const express = createRequire(new URL("../../../apps/api/package.json", import.m
 const id = (n) => "0190ab20-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const origin = "https://guest.invalid";
 const ENTRY = "/bff/customer/entry";
+const WAIT = "/bff/customer/entry/table-wait";
 
 /**
  * v15 three-Store rush 2026-11-02: 18 guests across three Stores, then 2 more, then 429 for everyone:
@@ -142,6 +143,117 @@ it("twenty scans at one Store don't turn away guests at another or at the same S
       assert.equal(forged.at(-1), 429);
     } finally {
       for (const server of servers) await new Promise((resolve) => server.close(resolve));
+      await pool.end();
+      await admin.end();
+    }
+  });
+});
+
+/**
+ * WP-2423 (guest-waits-and-refund-lock): a guest who scanned before staff opened the table waited a
+ * minute after staff opened it, because each check was an entry attempt and so checked rarely. The
+ * page now asks "is it open now?" every few seconds on a budget of its own: a room of waiting phones
+ * never spends the entry budget new scans need, and the checks are still bounded per address.
+ * Real HTTP requests through the real handler and the real limit, as the restricted role.
+ */
+it("waiting-table checks have their own bounded budget and leave the entry's untouched", async () => {
+  vi.stubEnv("NODE_ENV", "development");
+  await withIsolatedDatabase({ caseId: "guest_table_wait" }, async (context) => {
+    const admin = new pg.Client(context.clientConfig);
+    await admin.connect();
+    const role = await createPilotApiRole(admin, context, "table_wait");
+    const pool = new pg.Pool({ ...context.clientConfig, max: 3 });
+    const database = {
+      acquire: async () => {
+        const client = await pool.connect();
+        await client.query("SET ROLE " + role);
+        return client;
+      },
+    };
+    const requestAdmission = await createCustomerRequestAdmission(
+      { database, scope: { brandReference: id(1), storeReference: id(6) } },
+      { loadSecret: async () => Buffer.from(randomBytes(32)) },
+    );
+    assert.equal(typeof requestAdmission.tableWait?.consume, "function");
+    let open = false;
+    const handler = new CustomerEntryHandler({
+      allowedOrigin: origin,
+      port: {
+        establish: async () => ({ status: "EntryUnavailable" }),
+        tableWaiting: async () => (open ? "Changed" : "Waiting"),
+      },
+      uuidV7Factory: () => id(100),
+      requestAdmission,
+      waitAdmission: requestAdmission.tableWait,
+    });
+    const app = express();
+    app.use(express.json());
+    app.post(ENTRY, handler.handler());
+    app.post(WAIT, handler.waitHandler());
+    const server = createServer(app);
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = server.address().port;
+    const send = (path, address) =>
+      new Promise((resolve, reject) => {
+        const body = JSON.stringify({
+          qrToken: "aaaa.bbbb." + Buffer.alloc(64, 7).toString("base64url"),
+        });
+        const req = request(
+          {
+            hostname: "127.0.0.1",
+            port,
+            path,
+            method: "POST",
+            headers: {
+              origin,
+              "sec-fetch-site": "same-origin",
+              "sec-fetch-mode": "cors",
+              "content-type": "application/json",
+              "content-length": Buffer.byteLength(body),
+              "x-bop-client-address": address,
+            },
+          },
+          (response) => {
+            let text = "";
+            response.on("data", (chunk) => (text += chunk));
+            response.on("end", () =>
+              resolve({
+                status: response.statusCode,
+                retryAfter: response.headers["retry-after"],
+                body: text === "" ? null : JSON.parse(text),
+              }),
+            );
+          },
+        );
+        req.on("error", reject);
+        req.end(body);
+      });
+    try {
+      const wifi = "198.51.100.40";
+      const answers = [];
+      for (let n = 0; n < 600; n += 1) answers.push(await send(WAIT, wifi));
+      assert.deepEqual(
+        [...new Set(answers.map((answer) => answer.status + ":" + answer.body?.status))],
+        ["200:Waiting"],
+      );
+      // Bounded: the 601st check from this address waits, and says for how long.
+      const spent = await send(WAIT, wifi);
+      assert.equal(spent.status, 429);
+      assert.match(String(spent.retryAfter), /^[1-9][0-9]*$/u);
+      // The entry's own budget at this address was not touched by those 601 checks.
+      const scans = [];
+      for (let n = 0; n < 120; n += 1) scans.push((await send(ENTRY, wifi)).status);
+      assert.equal(scans.includes(429), false, scans.join());
+      assert.equal((await send(ENTRY, wifi)).status, 429);
+      // Another phone sees the table open as soon as staff open it.
+      assert.equal((await send(WAIT, "198.51.100.41")).body.status, "Waiting");
+      open = true;
+      assert.deepEqual((await send(WAIT, "198.51.100.41")).body, {
+        schemaVersion: 1,
+        status: "Changed",
+      });
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
       await pool.end();
       await admin.end();
     }

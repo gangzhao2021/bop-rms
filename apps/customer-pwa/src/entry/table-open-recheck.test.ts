@@ -2,15 +2,21 @@ import { describe, expect, it, vi } from "vitest";
 import {
   tableOpenRecheckDelaysSeconds,
   tableOpenRecheckMinimumGapSeconds,
+  tableWaitCheckDelaysSeconds,
   watchTableOpening,
+  type TableOpenCheckResult,
 } from "./table-open-recheck.js";
 
-function harness(results: boolean[] = []) {
+function harness(
+  results: TableOpenCheckResult[] = [],
+  options: { delaysSeconds?: readonly number[]; minimumGapSeconds?: number } = {},
+) {
   let now = 0;
   let visible = true;
   const timers: { at: number; callback: () => void }[] = [];
   let listener: (() => void) | null = null;
-  const check = vi.fn(async () => results.shift() ?? true);
+  const check = vi.fn(async (): Promise<TableOpenCheckResult> => results.shift() ?? true);
+  const exhausted = vi.fn();
   const watcher = watchTableOpening({
     check,
     visible: () => visible,
@@ -27,6 +33,8 @@ function harness(results: boolean[] = []) {
       return timer;
     },
     clearTimer: (timer) => timers.splice(timers.indexOf(timer as never), 1),
+    onExhausted: exhausted,
+    ...options,
   });
   const advance = async (seconds: number) => {
     const until = now + seconds * 1000;
@@ -44,6 +52,7 @@ function harness(results: boolean[] = []) {
   return {
     watcher,
     check,
+    exhausted,
     advance,
     hide: () => {
       visible = false;
@@ -113,5 +122,76 @@ describe("M02 a table not open yet continues by itself, sparing the entry budget
     h.watcher.checkNow();
     await h.advance(3600);
     expect(h.check).toHaveBeenCalledTimes(1);
+  });
+});
+
+// WP-2423 (guest-waits-and-refund-lock, v15 batch 31): staff pressed Open table and the guest's page
+// still said "not open" 20 s and 50 s later. With the cheap check it goes on within seconds.
+describe("a table not open yet: the cheap check every few seconds, bounded", () => {
+  const wait = { delaysSeconds: tableWaitCheckDelaysSeconds, minimumGapSeconds: 3 };
+  it("checks every 3 s, backs off to 10 s and 30 s, at most 70 in ten minutes, stops at 15 minutes", async () => {
+    const at: number[] = [];
+    let total = 0;
+    for (const seconds of tableWaitCheckDelaysSeconds) at.push((total += seconds));
+    expect(total).toBe(900);
+    for (const start of at)
+      expect(at.filter((t) => t >= start && t < start + 600).length).toBeLessThanOrEqual(70);
+    const h = harness([], wait);
+    await h.advance(3);
+    expect(h.check).toHaveBeenCalledTimes(1);
+    await h.advance(120 - 3);
+    expect(h.check).toHaveBeenCalledTimes(40);
+    await h.advance(900 - 120);
+    expect(h.check).toHaveBeenCalledTimes(tableWaitCheckDelaysSeconds.length);
+    expect(h.exhausted).toHaveBeenCalledTimes(1);
+    await h.advance(3600);
+    expect(h.check).toHaveBeenCalledTimes(tableWaitCheckDelaysSeconds.length);
+    expect(h.pending()).toBe(0);
+  });
+
+  it("staff open the table: the page goes on at the next check, a few seconds later", async () => {
+    const h = harness([true, true, false], wait);
+    await h.advance(9);
+    expect(h.check).toHaveBeenCalledTimes(3);
+    await h.advance(600);
+    expect(h.check).toHaveBeenCalledTimes(3);
+    expect(h.subscribed()).toBe(false);
+    expect(h.exhausted).not.toHaveBeenCalled();
+  });
+
+  it("a busy answer's Retry-After is respected, then the checks go on", async () => {
+    const h = harness([{ waitSeconds: 30 }], wait);
+    await h.advance(3);
+    expect(h.check).toHaveBeenCalledTimes(1);
+    await h.advance(29);
+    expect(h.check).toHaveBeenCalledTimes(1);
+    await h.advance(1);
+    expect(h.check).toHaveBeenCalledTimes(2);
+    await h.advance(3);
+    expect(h.check).toHaveBeenCalledTimes(3);
+  });
+
+  it("hidden: nothing is sent; back in front it checks at once, not sooner than 3 s apart", async () => {
+    const h = harness([], wait);
+    h.hide();
+    await h.advance(60);
+    expect(h.check).not.toHaveBeenCalled();
+    await h.show();
+    expect(h.check).toHaveBeenCalledTimes(1);
+    h.hide();
+    await h.show();
+    expect(h.check).toHaveBeenCalledTimes(1);
+  });
+
+  it("after it stopped, 'We've been seated' checks now and starts the checks again", async () => {
+    const h = harness([], wait);
+    await h.advance(900);
+    expect(h.exhausted).toHaveBeenCalledTimes(1);
+    const before = h.check.mock.calls.length;
+    h.watcher.checkNow();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(h.check).toHaveBeenCalledTimes(before + 1);
+    await h.advance(3);
+    expect(h.check).toHaveBeenCalledTimes(before + 2);
   });
 });

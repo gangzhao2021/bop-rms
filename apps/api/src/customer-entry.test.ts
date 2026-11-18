@@ -1089,3 +1089,112 @@ describe("M104/M105: a rescan goes on with this phone's visit", () => {
     }
   });
 });
+
+// WP-2423 (guest-waits-and-refund-lock): a phone at a table not open yet asks here whether it is
+// open now, on its own budget; nothing is started, remembered or forgotten.
+describe("waiting-table check", () => {
+  const WAIT = "/bff/customer/entry/table-wait";
+  class WaitPort extends MutablePort {
+    readonly waits: { qrToken: string; requestedAt: string }[] = [];
+    answer: "Waiting" | "Changed" | Error = "Waiting";
+    async tableWaiting(input: { qrToken: string; requestedAt: string }) {
+      this.waits.push({ ...input });
+      if (this.answer instanceof Error) throw this.answer;
+      return this.answer;
+    }
+  }
+  const waitHandler = (
+    port: CustomerEntryPort,
+    budgets: {
+      entry?: CustomerEntryRequestAdmission["consume"];
+      wait?: CustomerEntryRequestAdmission["consume"];
+    } = {},
+  ) =>
+    new CustomerEntryHandler({
+      requestAdmission: { consume: budgets.entry ?? (async () => ({ status: "Allowed" })) },
+      ...(budgets.wait === undefined ? {} : { waitAdmission: { consume: budgets.wait } }),
+      allowedOrigin: ORIGIN,
+      now: () => "2026-07-30T05:00:00.000Z",
+      port,
+      uuidV7Factory: referenceFactory(),
+    });
+
+  it("answers Waiting, then Changed, from the scanned code or the waiting scan, starting nothing", async () => {
+    const port = new WaitPort();
+    let waitSpent = 0;
+    let entrySpent = 0;
+    const listening = await listen(
+      waitHandler(port, {
+        entry: async () => {
+          entrySpent += 1;
+          return { status: "Allowed" };
+        },
+        wait: async () => {
+          waitSpent += 1;
+          return { status: "Allowed" };
+        },
+      }),
+    );
+    const first = await post(listening, { qrToken: TOKEN }, requestHeaders(), WAIT);
+    expect(first.status).toBe(200);
+    expect(first.headers.get("cache-control")).toBe("no-store");
+    expect(first.headers.getSetCookie()).toEqual([]);
+    expect(await first.json()).toEqual({ schemaVersion: 1, status: "Waiting" });
+    port.answer = "Changed";
+    const second = await post(
+      listening,
+      { resume: true },
+      requestHeaders({ cookie: `__Secure-bop-scan=${TOKEN}` }),
+      WAIT,
+    );
+    expect(await second.json()).toEqual({ schemaVersion: 1, status: "Changed" });
+    expect(port.waits.map((wait) => wait.qrToken)).toEqual([TOKEN, TOKEN]);
+    expect(port.calls).toEqual([]);
+    expect([waitSpent, entrySpent]).toEqual([2, 0]);
+  });
+
+  it("its budget spent: 429 with Retry-After; the database can't say: 503, never 'not open'", async () => {
+    const port = new WaitPort();
+    const listening = await listen(
+      waitHandler(port, {
+        wait: async () => ({ status: "RateLimited", retryAfterSeconds: 40 }),
+      }),
+    );
+    const limited = await post(listening, { qrToken: TOKEN }, requestHeaders(), WAIT);
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get("retry-after")).toBe("40");
+    expect(port.waits).toEqual([]);
+    const busyPort = new WaitPort();
+    busyPort.answer = new Error("TENANT_DATABASE_UNAVAILABLE");
+    const busy = await post(
+      await listen(waitHandler(busyPort)),
+      { qrToken: TOKEN },
+      requestHeaders(),
+      WAIT,
+    );
+    expect(busy.status).toBe(503);
+    expect(((await busy.json()) as { code: string }).code).toBe("entry_service_unavailable");
+  });
+
+  it("refuses what the entry refuses: another origin, an intent, no waiting scan, no port", async () => {
+    const port = new WaitPort();
+    const listening = await listen(waitHandler(port));
+    expect(
+      (
+        await post(
+          listening,
+          { qrToken: TOKEN },
+          requestHeaders({ origin: "https://x.invalid" }),
+          WAIT,
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (await post(listening, { qrToken: TOKEN, intent: "Start" }, requestHeaders(), WAIT)).status,
+    ).toBe(400);
+    expect((await post(listening, { resume: true }, requestHeaders(), WAIT)).status).toBe(404);
+    expect(port.waits).toEqual([]);
+    const plain = await listen(waitHandler(new MutablePort()));
+    expect((await post(plain, { qrToken: TOKEN }, requestHeaders(), WAIT)).status).toBe(503);
+  });
+});

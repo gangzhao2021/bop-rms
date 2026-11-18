@@ -144,4 +144,14 @@ export interface CustomerEntryClient {
    * this phone restored. Its order stays on the phone; the scanned place opens at once.
    */
   readonly leavesPickupVisit?: boolean;
+  /**
+   * WP-2423 (guest-waits-and-refund-lock): at a table not open yet, whether it is open now: a cheap
+   * check on its own budget that starts nothing. "Changed": ask the entry (`retry()`) once.
+   * "Busy": the store couldn't say, or asked this phone to wait `retryAfterSeconds`.
+   */
+  waitForTable?(): Promise<CustomerTableWaitAnswer>;
 }
+export type CustomerTableWaitAnswer =
+  | { readonly kind: "Waiting" }
+  | { readonly kind: "Changed" }
+  | { readonly kind: "Busy"; readonly retryAfterSeconds?: number };

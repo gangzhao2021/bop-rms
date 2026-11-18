@@ -386,8 +386,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "{storeDisplayName} 的桌号 {table} 还没开台",
   "Not sitting at table {table}? Tell staff, so they can give you the code for your table.":
     "您坐的不是桌号 {table}？请告诉店员，换成您这桌的二维码。",
-  "Ask staff to seat you. This page continues by itself once the table is open.":
-    "请让店员带位，开台后这里会自动继续。",
+  "Ask staff to seat you. This page goes on by itself a few seconds after staff open the table.":
+    "请让店员带位。店员开台后几秒内，这里会自动继续。",
+  "This page has stopped checking. Once staff have seated you, tap “We’ve been seated”.":
+    "这里已停止自动查看。店员带位后，请点“我们已入座”。",
   "We’ve been seated": "我们已入座",
   "Continue ordering": "继续点单",
   "New party? Ask staff to seat you, then scan again.":

@@ -34,7 +34,7 @@ import type {
   CustomerEntryIntent,
   CustomerEntryScreenState,
 } from "./types.js";
-import { watchTableOpening } from "./table-open-recheck.js";
+import { tableWaitCheckDelaysSeconds, watchTableOpening } from "./table-open-recheck.js";
 import type { MenuClosedStore } from "../menu/types.js";
 import { createMenuTableJoiner } from "./menu-table-joiner.js";
 
@@ -256,16 +256,30 @@ export function EntryContextPage({
     });
   }, [state.kind]);
 
-  // M02: while a table isn't open, the page checks again by itself (rarely, only in front) and
+  // M02: while a table isn’t open, the page checks again by itself (only in front) and
   // when the guest says they're seated, and continues as soon as staff open it. A guest whose own
   // table was just settled is not moved into the next party's visit.
   const [recheckNow, setRecheckNow] = useState<(() => void) | null>(null);
+  const [waitStopped, setWaitStopped] = useState(false);
   const waitingAtTable = state.kind === "TableNotOpen" && getSettledTableLabel() === null;
   useEffect(() => {
     if (!waitingAtTable || typeof document === "undefined") return;
     const owner = client;
+    // WP-2423 (guest-waits-and-refund-lock): the cheap "is it open now?" every few seconds; the
+    // entry is asked once it says the table changed. A client without it enters again, rarely.
+    const probe = owner.waitForTable;
     const watcher = watchTableOpening({
       check: async () => {
+        setWaitStopped(false);
+        if (probe !== undefined) {
+          const answer = await probe();
+          if (clientRef.current !== owner) return false;
+          if (answer.kind === "Waiting") return true;
+          if (answer.kind === "Busy")
+            return answer.retryAfterSeconds === undefined
+              ? true
+              : { waitSeconds: answer.retryAfterSeconds };
+        }
         const next = await owner.retry();
         if (clientRef.current !== owner) return false;
         // Still waiting, or a passing failure: keep the page as it is and ask again later.
@@ -276,6 +290,7 @@ export function EntryContextPage({
           next.kind === "ServiceUnavailable"
         )
           return true;
+        if (next.kind === "RateLimited") return { waitSeconds: next.retryAfterSeconds };
         setResult({ client: owner, state: next });
         if (
           next.kind === "Established" ||
@@ -297,11 +312,16 @@ export function EntryContextPage({
       now: () => performance.now(),
       setTimer: (callback, milliseconds) => setTimeout(callback, milliseconds),
       clearTimer: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
+      ...(probe === undefined
+        ? {}
+        : { delaysSeconds: tableWaitCheckDelaysSeconds, minimumGapSeconds: 3 }),
+      onExhausted: () => setWaitStopped(true),
     });
     setRecheckNow(() => watcher.checkNow);
     return () => {
       watcher.stop();
       setRecheckNow(null);
+      setWaitStopped(false);
     };
   }, [waitingAtTable, client]);
 
@@ -405,6 +425,7 @@ export function EntryContextPage({
       onRetryNow={() => void client.retry()}
       onAnswer={client.enter === undefined ? undefined : answer}
       onSeated={recheckNow ?? undefined}
+      waitStopped={waitStopped}
       autoJoin={answered !== null}
       starting={answered === "Start" || answered === "NewParty"}
       state={state}
@@ -584,6 +605,8 @@ export interface EntryContextViewProps {
   readonly onAnswer?: ((intent: CustomerEntryIntent) => void) | undefined;
   /** M02: at a table not open yet, the guest says staff seated them (checks again now). */
   readonly onSeated?: (() => void) | undefined;
+  /** WP-2423: the page stopped checking whether the table is open (it waited 15 minutes). */
+  readonly waitStopped?: boolean | undefined;
   /** The guest already answered; the join follows with no second tap. */
   readonly autoJoin?: boolean | undefined;
   /** They answered that they came to start this table. */
@@ -616,6 +639,7 @@ export function EntryContextView({
   onRetry,
   onAnswer,
   onSeated,
+  waitStopped = false,
   autoJoin,
   starting,
   state,
@@ -671,6 +695,7 @@ export function EntryContextView({
           onRetry={onRetry}
           onAnswer={onAnswer}
           onSeated={onSeated}
+          waitStopped={waitStopped}
           autoJoin={autoJoin}
           starting={starting}
           state={state}
@@ -908,6 +933,7 @@ function EntryState({
   onRetry,
   onAnswer,
   onSeated,
+  waitStopped = false,
   autoJoin,
   starting,
   state,
@@ -1044,8 +1070,15 @@ function EntryState({
                     storeDisplayName: state.context.storeDisplayName,
                   })}
             </StateHeading>
-            <p className="entry-context">
-              {t("Ask staff to seat you. This page continues by itself once the table is open.")}
+            {/* WP-2423 (guest-waits-and-refund-lock): what the page waits for, and when it stopped. */}
+            <p className="entry-context" role="status">
+              {waitStopped
+                ? t(
+                    "This page has stopped checking. Once staff have seated you, tap “We’ve been seated”.",
+                  )
+                : t(
+                    "Ask staff to seat you. This page goes on by itself a few seconds after staff open the table.",
+                  )}
             </p>
             {state.tableLabel === undefined ? null : (
               <p className="entry-context">

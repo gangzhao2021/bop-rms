@@ -8,6 +8,25 @@ export const guestSessionAbusePolicy = Object.freeze({
   ipLimit: 120,
   storeLimit: 300,
 });
+/**
+ * WP-2423 (guest-waits-and-refund-lock): a phone at a table not open yet asks "is it open now?"
+ * every few seconds, backing off, for at most 15 minutes (apps/customer-pwa
+ * tableWaitCheckDelaysSeconds: at most 70 in any ten minutes). That read is a cheap one (the code
+ * and the table's state, no visit, no admission) and has its own budget, so a room of waiting
+ * phones never takes the entry budget new scans need: about eight waiting phones on one Wi-Fi and
+ * thirty at the Store. Once the table is open the phone's entry is one ordinary entry attempt.
+ */
+export const guestTableWaitPolicy = Object.freeze({
+  version: "GUEST_TABLE_WAIT_V1",
+  windowSeconds: 600,
+  ipLimit: 600,
+  storeLimit: 2400,
+});
+export type GuestSessionAbusePolicy = Readonly<{
+  windowSeconds: number;
+  ipLimit: number;
+  storeLimit: number;
+}>;
 export interface GuestSessionAbuseKeys {
   ip(
     address: string,
@@ -38,6 +57,8 @@ export function createGuestSessionRequestAdmission(options: {
   keys: GuestSessionAbuseKeys;
   budget: GuestSessionAbuseBudget;
   now: () => string;
+  /** The limits this admission applies (with keys of its own); the entry's when absent. */
+  policy?: GuestSessionAbusePolicy;
 }) {
   const scope = Object.freeze({
     brandReference: String(
@@ -48,11 +69,12 @@ export function createGuestSessionRequestAdmission(options: {
     ),
   });
   const { keys, budget, now } = options;
+  const policy = options.policy ?? guestSessionAbusePolicy;
   async function consume(hash: Uint8Array, limit: number, at: string) {
     if (!(hash instanceof Uint8Array) || hash.byteLength !== 32) throw new Error("unavailable");
     const result = await budget.consume({
       keyHash: Uint8Array.from(hash),
-      windowSeconds: guestSessionAbusePolicy.windowSeconds,
+      windowSeconds: policy.windowSeconds,
       limitCount: limit,
       observedAt: at,
     });
@@ -89,16 +111,12 @@ export function createGuestSessionRequestAdmission(options: {
         // one key shared by everyone.
         if (input.remoteAddress !== null) {
           if (typeof input.remoteAddress !== "string") return { status: "Unavailable" };
-          const ip = await consume(
-            keys.ip(input.remoteAddress, scope),
-            guestSessionAbusePolicy.ipLimit,
-            at,
-          );
+          const ip = await consume(keys.ip(input.remoteAddress, scope), policy.ipLimit, at);
           if (!ip.allowed)
             return { status: "RateLimited", retryAfterSeconds: ip.retry_after_seconds };
         }
         if (input.codeValid === false) return { status: "Allowed" };
-        const store = await consume(keys.store(scope), guestSessionAbusePolicy.storeLimit, at);
+        const store = await consume(keys.store(scope), policy.storeLimit, at);
         return store.allowed
           ? { status: "Allowed" }
           : { status: "RateLimited", retryAfterSeconds: store.retry_after_seconds };

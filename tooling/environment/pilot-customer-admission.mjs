@@ -4,6 +4,7 @@ import { Buffer } from "node:buffer";
 import {
   createGuestSessionRequestAdmission,
   createGuestSessionAbuseKeys,
+  guestTableWaitPolicy,
 } from "../../packages/bop/identity/src/index.ts";
 import { createAbuseBudgetConsumer } from "../../packages/database/src/index.ts";
 import { isPilotRuntime } from "./pilot-environment.mjs";
@@ -19,13 +20,19 @@ export async function createCustomerRequestAdmission(
   if (!(secret instanceof Buffer) || secret.length !== 32)
     throw new Error("LOCAL_GUEST_ADMISSION_UNAVAILABLE");
   const keys = createGuestSessionAbuseKeys(secret);
+  const waitKeys = createGuestSessionAbuseKeys(secret, "table-wait");
   secret.fill(0);
-  return createGuestSessionRequestAdmission({
+  const budget = { consume: (input) => consumeBudget(database, input) };
+  const entry = createGuestSessionRequestAdmission({ scope, now, keys, budget });
+  // WP-2423 (guest-waits-and-refund-lock): "is the table open now?" checks, their own budget.
+  const tableWait = createGuestSessionRequestAdmission({
     scope,
     now,
-    keys,
-    budget: { consume: (input) => consumeBudget(database, input) },
+    keys: waitKeys,
+    budget,
+    policy: guestTableWaitPolicy,
   });
+  return Object.freeze({ consume: entry.consume, tableWait });
 }
 /** InternalTest: the generated local pepper file (0600, own, not a link). */
 async function readLocalPepper(file) {

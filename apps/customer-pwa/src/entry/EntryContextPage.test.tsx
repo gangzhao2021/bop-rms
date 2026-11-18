@@ -155,7 +155,7 @@ describe("CUST-ENTRY-CONTEXT", () => {
     // WP-2423 live minor 27: the guest is told which restaurant's table it is.
     expect(html).toContain(`This table at ${context.storeDisplayName} isn’t open yet`);
     expect(html).toContain(
-      "Ask staff to seat you. This page continues by itself once the table is open.",
+      "Ask staff to seat you. This page goes on by itself a few seconds after staff open the table.",
     );
     expect(html).toContain("Look at the menu first");
     expect(html).not.toContain("Ready to order");
@@ -646,9 +646,14 @@ describe("M02 resumed visit", () => {
   it("in Chinese", () => {
     expect(zh["Continue ordering"]).toBe("继续点单");
     expect(zh["We’ve been seated"]).toBe("我们已入座");
-    expect(zh["Ask staff to seat you. This page continues by itself once the table is open."]).toBe(
-      "请让店员带位，开台后这里会自动继续。",
-    );
+    expect(
+      zh["This page has stopped checking. Once staff have seated you, tap “We’ve been seated”."],
+    ).toBe("这里已停止自动查看。店员带位后，请点“我们已入座”。");
+    expect(
+      zh[
+        "Ask staff to seat you. This page goes on by itself a few seconds after staff open the table."
+      ],
+    ).toBe("请让店员带位。店员开台后几秒内，这里会自动继续。");
   });
   it("a table not open yet offers 'We've been seated' while it waits, not after a settled visit", () => {
     const notOpen: CustomerEntryScreenState = {
@@ -661,6 +666,16 @@ describe("M02 resumed visit", () => {
       </MemoryRouter>,
     );
     expect(html).toContain("We’ve been seated");
+    // WP-2423: after 15 minutes the page says it stopped checking, and how to go on.
+    const stopped = renderToStaticMarkup(
+      <MemoryRouter>
+        <EntryContextView onContinue={vi.fn()} onSeated={vi.fn()} waitStopped state={notOpen} />
+      </MemoryRouter>,
+    );
+    expect(stopped).toContain(
+      "This page has stopped checking. Once staff have seated you, tap “We’ve been seated”.",
+    );
+    expect(stopped).not.toContain("goes on by itself");
     setSettledTable({ tableLabel: "DEMO-03", csrfToken: "C".repeat(43) });
     try {
       const settled = renderToStaticMarkup(
