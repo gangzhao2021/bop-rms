@@ -68,21 +68,17 @@ export async function synchronizeProcessClock(query, report) {
 /**
  * Follows the database's clock in this process from now on. A failed read keeps the last difference
  * (the database being away is reported by the readiness checks) and is read again next time.
- * `resync: false` (tests whose connection ends after this call) measures once and reads nothing
- * later; the caller measures again with `synchronizeProcessClock` on a connection it holds.
  */
 export async function alignProcessClockToDatabase(
   query,
-  { report = (entry) => console.error(JSON.stringify(entry)), resync = true } = {},
+  { report = (entry) => console.error(JSON.stringify(entry)) } = {},
 ) {
   if (timer !== null) return;
   globalThis.Date = AlignedDate;
-  if (resync) {
-    timer = setInterval(() => {
-      synchronizeProcessClock(query, report).catch(() => undefined);
-    }, syncIntervalMs);
-    timer.unref();
-  }
+  timer = setInterval(() => {
+    synchronizeProcessClock(query, report).catch(() => undefined);
+  }, syncIntervalMs);
+  timer.unref();
   await synchronizeProcessClock(query, report).catch(() => undefined);
 }
 

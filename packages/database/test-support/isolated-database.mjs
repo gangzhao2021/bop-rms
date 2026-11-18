@@ -7,13 +7,10 @@ import path from "node:path";
 import process from "node:process";
 import { clearTimeout, setTimeout } from "node:timers";
 import { tmpdir } from "node:os";
+import { performance } from "node:perf_hooks";
 import pg from "pg";
 import { readMigrationCatalog } from "../src/catalog.ts";
 import { runMigrationCommand } from "../src/runner.ts";
-import {
-  alignProcessClockToDatabase,
-  synchronizeProcessClock,
-} from "../../../tooling/environment/pilot-database-clock.mjs";
 
 const { Client } = pg;
 const owner = "wp-0024-isolated-database";
@@ -256,24 +253,65 @@ async function projectResources(project, root, childEnvironment) {
 /**
  * WP-2423 (guest-waits-and-refund-lock): the database clock is the one time authority (2026-11-03),
  * and the pilot's processes follow it. A test that composes its own connections stamps instants
- * with this process's clock and the owners compare them with `clock_timestamp()`; on a Mac the
- * Docker VM's clock drifts from the host's, so a refund was refused at random as "source changed"
- * (ordinary-refund-operation-execution-source, ordinary-refund-request-store). The test process
- * follows its database's clock the same way, from before the fixture. A run that asks the pilot
- * composition to align it (`PILOT_CLOCK_FROM_DATABASE=1`, vitest.clock-skew) is left to do so.
+ * with this process's clock and the owners compare them with the database's clock both ways: the
+ * refund execution and kitchen queue sources refuse an instant after `clock_timestamp()`, the
+ * catalog, recipe and inventory reference sources one before the `statement_timestamp()` they just
+ * read. On a Mac the Docker VM's clock drifts from the host's (both ways), so the test process
+ * follows its database's clock from before each fixture and must land between the two. The pilot's
+ * whole-millisecond lower bound does not (up to a millisecond behind, while a statement's reply
+ * arrives within a quarter of one: the catalog configs failed at random), so this measures to the
+ * microsecond and takes the middle of the quickest of a few reads. A run that asks the pilot
+ * composition to align it (`PILOT_CLOCK_FROM_DATABASE=1`, vitest.clock-skew) is left to do so, as
+ * is a clock someone else installed (the pilot's alignment, fake timers).
  */
+const HostDate = globalThis.Date;
+const clockSamples = 5;
+let hostAnchorMs = 0,
+  databaseOffsetMs = 0,
+  latestFollowedMs = 0;
+const preciseHostNow = () => performance.timeOrigin + performance.now() + hostAnchorMs;
+function followedNow() {
+  latestFollowedMs = Math.max(latestFollowedMs, Math.floor(preciseHostNow() + databaseOffsetMs));
+  return latestFollowedMs;
+}
+const FollowedDate = new Proxy(HostDate, {
+  construct: (target, args, newTarget) =>
+    Reflect.construct(target, args.length === 0 ? [followedNow()] : args, newTarget),
+  apply: () => new HostDate(followedNow()).toString(),
+  get: (target, key, receiver) =>
+    key === "now"
+      ? followedNow
+      : Reflect.get(target, key, receiver === FollowedDate ? target : receiver),
+});
+/** This host's clock to the microsecond: where its millisecond turns, on the monotonic clock. */
+function anchorHostClock() {
+  const first = HostDate.now(),
+    giveUp = performance.now() + 5;
+  let turned = first;
+  while (turned === first && performance.now() < giveUp) turned = HostDate.now();
+  hostAnchorMs = turned - (performance.timeOrigin + performance.now());
+}
 async function followDatabaseClock(clientConfig) {
   if (process.env.PILOT_CLOCK_FROM_DATABASE === "1") return;
+  if (globalThis.Date !== HostDate && globalThis.Date !== FollowedDate) return;
   const client = new Client(clientConfig);
   await client.connect();
   try {
-    const query = (sql) => client.query(sql);
-    const quiet = () => undefined;
-    // Review (batch 32): no timer reading again later, as this connection ends below; each
-    // fixture measures again on its own database instead.
-    await alignProcessClockToDatabase(query, { report: quiet, resync: false });
-    // Already following an earlier test's database: measure against this one.
-    await synchronizeProcessClock(query, quiet);
+    anchorHostClock();
+    let best = null;
+    for (let sample = 0; sample < clockSamples; sample += 1) {
+      const sent = preciseHostNow();
+      const result = await client.query(
+        "SELECT (extract(epoch FROM clock_timestamp()) * 1000)::float8::text AS now",
+      );
+      const received = preciseHostNow();
+      const database = Number(result.rows[0]?.now);
+      assert.ok(Number.isFinite(database), "database clock is unreadable");
+      if (best === null || received - sent < best.roundTrip)
+        best = { roundTrip: received - sent, offset: database - (sent + received) / 2 };
+    }
+    databaseOffsetMs = best.offset;
+    globalThis.Date = FollowedDate;
   } finally {
     await client.end();
   }

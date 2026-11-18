@@ -1,5 +1,4 @@
 import { afterEach, expect, it, vi } from "vitest";
-import * as timers from "node:timers";
 import {
   alignProcessClockToDatabase,
   measureDatabaseClockOffset,
@@ -7,10 +6,6 @@ import {
   synchronizeProcessClock,
 } from "./pilot-database-clock.mjs";
 
-vi.mock("node:timers", async (original) => {
-  const actual = await original();
-  return { ...actual, setInterval: vi.fn(actual.setInterval) };
-});
 const SystemDate = globalThis.Date;
 const databaseAt = (differenceMs) => async () => ({
   rows: [{ now: String(SystemDate.now() + differenceMs) }],
@@ -58,17 +53,4 @@ it("keeps working when the database can't be read", async () => {
     throw new Error("down");
   });
   expect(Math.abs(Date.now() - SystemDate.now())).toBeLessThan(100);
-});
-
-// Review (batch 32): a test whose connection ends after aligning installs no timer that would go on
-// reading through that closed connection.
-it("reads again every minute, unless asked to measure once", async () => {
-  vi.mocked(timers.setInterval).mockClear();
-  const once = vi.fn(databaseAt(-500));
-  await alignProcessClockToDatabase(once, { resync: false });
-  expect(timers.setInterval).not.toHaveBeenCalled();
-  expect(Date.now() - SystemDate.now()).toBeLessThanOrEqual(-400);
-  resetProcessClockForTest();
-  await alignProcessClockToDatabase(databaseAt(0));
-  expect(timers.setInterval).toHaveBeenCalledOnce();
 });
