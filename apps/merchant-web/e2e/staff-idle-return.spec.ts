@@ -64,8 +64,12 @@ async function tablet(page: Page) {
   await page.route("**/merchant/sign-in-entry", (route) =>
     route.fulfill({ headers, json: { path: "/operations/switch-staff", testOnly: false } }),
   );
+  // The page's installed clock; a read that lands while the page navigates (Back) keeps the last
+  // time it answered instead of failing the route.
+  let lastAt = T0;
   const deadlines = async () => {
-    const at = await page.evaluate(() => Date.now());
+    const at = await page.evaluate(() => Date.now()).catch(() => lastAt);
+    lastAt = at;
     return {
       idleExpiresAt: new Date(at + 30 * minute).toISOString(),
       absoluteExpiresAt: new Date(T0 + 12 * 60 * minute).toISOString(),
