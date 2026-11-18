@@ -1773,6 +1773,25 @@ async function executeClaimed(
   });
 }
 
+/**
+ * WP-2423 b30: the lease is stamped by the database clock, which is the time authority; the
+ * application clock only follows it from below and can trail it by a millisecond or two, so a
+ * lease claimed just now could read as claimed "in the future" and the run was refused at random
+ * (v15: level 50 PAYMENT_COMPENSATION_LEASE_UNAVAILABLE right after a successful claim). A clock
+ * that trails by at most `leaseClockAllowanceMs` is waited out; a larger gap is still refused.
+ */
+const leaseClockAllowanceMs = 1000;
+async function notBefore(ports: PaidWithoutFulfillableOrderPorts, at: string): Promise<string> {
+  let now = parsePaymentInstant(ports.clock.now());
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const behind = Date.parse(at) - Date.parse(now);
+    if (behind <= 0 || behind > leaseClockAllowanceMs) return now;
+    await new Promise((resolve) => setTimeout(resolve, behind));
+    now = parsePaymentInstant(ports.clock.now());
+  }
+  return now;
+}
+
 export function createPaidWithoutFulfillableOrderService(ports: PaidWithoutFulfillableOrderPorts) {
   return Object.freeze({
     async execute(value: unknown): Promise<PaymentCompensationResult> {
@@ -1856,6 +1875,21 @@ export function createPaidWithoutFulfillableOrderService(ports: PaidWithoutFulfi
           ports,
         );
         if (replay.result.status === "Closed") return replay.result;
+        // WP-2423 b30 (v15 lease churn): a refunded case waits only for the Store to record its
+        // operations reconciliation. Until that receipt exists, executing it again would decide
+        // exactly the recorded result, so it is answered from the record by a read, without a
+        // lease: no claim is appended to the lease history for nothing.
+        if (replay.result.status === "AwaitingOperationsReconciliation") {
+          let receipt;
+          try {
+            receipt = await ports.operations.resolve({
+              compensationCaseReference: replay.result.caseReference,
+            });
+          } catch {
+            return dependency();
+          }
+          if (receipt === null) return replay.result;
+        }
       }
 
       let lease;
@@ -1868,11 +1902,12 @@ export function createPaidWithoutFulfillableOrderService(ports: PaidWithoutFulfi
       } catch {
         return fail("PAYMENT_COMPENSATION_LEASE_UNAVAILABLE");
       }
-      if (lease === null) return fail("PAYMENT_COMPENSATION_LEASE_UNAVAILABLE");
+      // Another run holds this payment's lease and is doing the work: nothing was done here.
+      if (lease === null) return fail("PAYMENT_COMPENSATION_LEASE_HELD");
       let parsedLease: ReturnType<typeof parsePaymentCompensationLeaseReceipt> | null = null;
       try {
         parsedLease = parsePaymentCompensationLeaseReceipt(lease);
-        const now = parsePaymentInstant(ports.clock.now());
+        const now = await notBefore(ports, parsedLease.claimedAt);
         if (
           String(parsedLease.paymentAttemptReference) !==
             String(disposition.paymentAttemptReference) ||

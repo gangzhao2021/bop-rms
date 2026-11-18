@@ -711,6 +711,7 @@ function serviceHarness(options: ServiceHarnessOptions = {}) {
 
   return {
     service: createPaidWithoutFulfillableOrderService(ports),
+    ports,
     calls,
     providerKeys,
     refundAmounts,
@@ -1227,6 +1228,54 @@ describe("WP-1310 paid-without-fulfillable compensation service", () => {
     expect(value.calls).toEqual(["authorize", "resolveIdentity", "resolveOperation"]);
   });
 
+  it("answers a refunded case that still waits for the Store from its record, without a lease", async () => {
+    const value = serviceHarness();
+    expect((await value.service.execute(disposition())).status).toBe(
+      "AwaitingOperationsReconciliation",
+    );
+    value.calls.length = 0;
+    expect((await value.service.execute(disposition())).status).toBe(
+      "AwaitingOperationsReconciliation",
+    );
+    expect(value.calls).toEqual([
+      "authorize",
+      "resolveIdentity",
+      "resolveOperation",
+      "operations.resolve",
+    ]);
+    // The Store recorded it: the next run claims the lease and closes the case.
+    value.state.setOperations(true);
+    value.calls.length = 0;
+    expect((await value.service.execute(disposition())).status).toBe("Closed");
+    expect(value.calls).toContain("lease.claim");
+  });
+
+  it("waits out an application clock a few milliseconds behind the lease's database time", async () => {
+    const value = serviceHarness();
+    const claimedAt = now;
+    const behind = new Date(Date.parse(now) - 3).toISOString();
+    // The lease is stamped with the database time; the application clock reaches it shortly.
+    let reads = 0;
+    const service = createPaidWithoutFulfillableOrderService({
+      ...value.ports,
+      clock: {
+        now: () => {
+          reads++;
+          return reads === 1 ? behind : claimedAt;
+        },
+      },
+      lease: {
+        ...value.ports.lease,
+        claim: async (input) => {
+          const lease = await value.ports.lease.claim(input);
+          return lease === null ? null : ({ ...lease, claimedAt } as never);
+        },
+      },
+    });
+    expect((await service.execute(disposition())).status).toBe("AwaitingOperationsReconciliation");
+    expect(reads).toBeGreaterThan(1);
+  });
+
   it("closes when Operations evidence arrives before Provider-confirmed refund truth", async () => {
     const value = serviceHarness({
       operations: true,
@@ -1422,10 +1471,10 @@ describe("WP-1310 paid-without-fulfillable compensation service", () => {
     expect(value.counts.refund).toBe(0);
   });
 
-  it("returns a bounded lease error without reading the clock when no lease is claimed", async () => {
+  it("answers a lease another run holds as held, without reading the clock", async () => {
     const value = serviceHarness({ lease: null });
     await expect(compensationCode(value.service.execute(disposition()))).resolves.toBe(
-      "PAYMENT_COMPENSATION_LEASE_UNAVAILABLE",
+      "PAYMENT_COMPENSATION_LEASE_HELD",
     );
     expect(value.calls).not.toContain("clock");
     expect(value.calls).not.toContain("lease.release");
@@ -1619,6 +1668,13 @@ describe("WP-1310 paid-without-fulfillable compensation service", () => {
       ...exact,
       fact: { ...exact.fact, evidenceDigest: digest("changed-existing-refund") as never },
     });
+    // b30: while it only waits for the Store the case is answered from its record; the anchored
+    // composition is checked again by the run that the Store's receipt starts, before it closes.
+    value.state.setOperations(
+      value.state.makeOperationsReceipt({
+        refundEvidenceDigest: digest("changed-existing-refund"),
+      }),
+    );
     await expect(compensationCode(value.service.execute(disposition()))).resolves.toBe(
       "PAYMENT_COMPENSATION_OPERATION_CONFLICT",
     );
@@ -1739,6 +1795,7 @@ describe("WP-1310 paid-without-fulfillable compensation service", () => {
         fact,
         event: createPaymentRefundedEnvelope({ fact }),
       });
+      value.state.setOperations(true);
       await expect(compensationCode(value.service.execute(disposition()))).resolves.toBe(
         "PAYMENT_COMPENSATION_OPERATION_CONFLICT",
       );
