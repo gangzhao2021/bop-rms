@@ -805,12 +805,16 @@ test("@production a table's paper paid-at is checked against when it ordered, an
     }),
   );
   const minute = 60_000;
-  const lastRoundAt = Date.now() - 20 * minute;
+  // A fixed afternoon in the Store's zone: minutes before it are the same business day, so the
+  // check never meets midnight (a run just after 00:00 read "not today" on 2026-11-18).
+  const now = Date.parse("2026-10-15T19:00:00.000Z");
+  await page.clock.install({ time: new Date(now) });
+  const lastRoundAt = now - 20 * minute;
   const bill = unpaidBill("Closing", 7);
   const liveBill = {
     ...bill,
     rounds: [
-      { ...bill.rounds[0], liveOrderedAt: new Date(Date.now() - 50 * minute).toISOString() },
+      { ...bill.rounds[0], liveOrderedAt: new Date(now - 50 * minute).toISOString() },
       { ...bill.rounds[1], liveOrderedAt: new Date(lastRoundAt).toISOString() },
     ],
   };
@@ -848,7 +852,7 @@ test("@production a table's paper paid-at is checked against when it ordered, an
     .check();
   const paidAt = checkout.getByLabel("Paid at (store time)");
   // A slip from yesterday: the date is asked to be checked (it counts on the day it was paid).
-  await paidAt.fill(storeLocal(Date.now() - 26 * 60 * minute));
+  await paidAt.fill(storeLocal(now - 26 * 60 * minute));
   await expect(checkout.getByRole("note").filter({ hasText: "is not today" })).toBeVisible();
   // A typo well before the table ordered: the server refuses it, and the field says so.
   await checkout.getByRole("button", { name: /^Paid on card machine · /u }).click();
