@@ -1132,6 +1132,90 @@ test.describe("@production Pay-later table, the round just placed", () => {
       }
     });
 
+  // WP-2423 batch 30 (v15 live29): the table already had staff's round 1 with this phone's earlier
+  // dish; the guest added another and tapped Place order as staff pressed Send. For about a second
+  // the phone said "Staff sent your dishes to the kitchen in round 1" above dishes not sent yet.
+  // While it checks it now says only the wait text, then round 2 once that round is read.
+  for (const language of ["en", "zh-Hans"] as const)
+    test(`batch 30: while staff's round is being placed no earlier round is named above unsent dishes (${language})`, async ({
+      page,
+    }) => {
+      const zh = language === "zh-Hans";
+      if (zh)
+        await page.addInitScript(() => localStorage.setItem("bop.customer.language", "zh-Hans"));
+      await page.clock.install();
+      const table: Table = await stubTable(page, [], {
+        quote: (route, call) => {
+          if (call < 2) return undefined;
+          return route.fulfill({
+            status: 409,
+            json: {
+              schemaVersion: 1,
+              error: {
+                code: "quote_version_conflict",
+                messageKey: "customer.quote.version_conflict",
+              },
+            },
+          });
+        },
+      });
+      // Staff's round 1 took this phone's earlier dish; the guest has added another since.
+      table.staffRound(1);
+      table.addDish("Synthetic beef noodles");
+      await openCart(page);
+      const main = page.getByRole("main");
+      await expect(main.getByRole("article", { name: "Synthetic beef noodles" })).toBeVisible();
+      await expect.poll(() => table.calls.filter((call) => call === "quote").length).toBe(1);
+      await page.clock.pauseAt((await page.evaluate(() => Date.now())) + 100);
+      await page.getByRole("button", { name: zh ? "下单" : "Place order", exact: true }).click();
+      await expect(
+        main.getByText(
+          zh
+            ? "你这桌的购物车刚刚有变化，可能有人正在为这桌下单。请稍等，页面正在核对。"
+            : "Your table’s cart just changed, maybe because a round is being sent for your table. Wait a moment while this page checks.",
+        ),
+      ).toBeVisible();
+      // The dish is still on screen, and no earlier round is named as the one that took it.
+      await expect(main.getByRole("article", { name: "Synthetic beef noodles" })).toBeVisible();
+      await expect(main).not.toContainText(zh ? "第 1 轮" : "round 1");
+      // One read later (the page reads again within a second), still only the wait text.
+      await page.clock.runFor(500);
+      await expect(main).not.toContainText(zh ? "第 1 轮" : "round 1");
+      await expectNoInternalText(page);
+      const shots = process.env.B30_SHOTS ?? "test-results/b30-shots";
+      for (const width of [1440, 390]) {
+        await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+        expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+          width,
+        );
+        await page.screenshot({
+          path: `${shots}/guest-waits-no-old-round-${language}-${width}.png`,
+          fullPage: true,
+        });
+      }
+      await page.setViewportSize({ width: 1440, height: 900 });
+      // Staff's round 2 is placed with the dish: the page's next read names it.
+      table.staffRound(2);
+      await page.clock.runFor(1_000);
+      await expect(
+        main.getByText(
+          zh
+            ? "店员已把你的菜放在第 2 轮送去厨房。"
+            : "Staff sent your dishes to the kitchen in round 2.",
+        ),
+      ).toBeVisible();
+      await expect(main).not.toContainText(zh ? "第 1 轮" : "round 1");
+      expect(table.sent).toEqual([]);
+      await page.clock.resume();
+      for (const width of [1440, 390]) {
+        await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+        await page.screenshot({
+          path: `${shots}/guest-staff-sent-round-2-${language}-${width}.png`,
+          fullPage: true,
+        });
+      }
+    });
+
   // WP-2423 batch 29 (v15 live28): staff's round takes a second to be placed. Meanwhile the phone
   // says the cart just changed and it is checking (never "nothing was placed" or "we couldn't
   // place your order"), then which round took its dishes.

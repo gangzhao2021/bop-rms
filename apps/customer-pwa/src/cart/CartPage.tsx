@@ -314,7 +314,10 @@ function TableRoundNotes({
   /**
    * WP-2423 batch 29: whether a round someone else already sent is said. Above dishes added since,
    * "Staff sent your dishes … in round N" reads as if they were sent too, so a cart that holds
-   * dishes says it only right after this phone's own tap ran into that round.
+   * dishes says only a round that came in while this page was open (this phone's tap ran into
+   * it). Batch 30: also while the page checks right after the tap: until the round that took the
+   * dishes is read, the table's newest round is still the one before it, and naming it would tell
+   * the guest an earlier round took dishes that are still here; only the wait text is said.
    */
   readonly keepSent?: boolean;
 }) {
@@ -1176,12 +1179,7 @@ function CartContent({
           {cartText.quoteExpired}
         </div>
       ) : null}
-      <TableRoundNotes
-        cart={cart}
-        payLater={payLater}
-        className="cart-stale"
-        keepSent={round.status === "cart-changed" || round.status === "busy"}
-      />
+      <TableRoundNotes cart={cart} payLater={payLater} className="cart-stale" keepSent={false} />
       {(() => {
         const own = withdrawableOwnRound(cart, payLater);
         return own === null ? null : (
