@@ -69,3 +69,23 @@ it("WP-2423 abandoned payment: hands a payment the card provider can't confirm t
   expect(html).toContain("refunded to the guest automatically");
   expect(html).not.toContain("Nobody has paid for this round");
 });
+
+it("WP-2423 batch 29: a staff round paid on the card machine is worded for the machine, never the guest's card provider", () => {
+  const html = renderToStaticMarkup(
+    <UnpaidRoundCancelAction
+      orderReference={id(1)}
+      orderBatchReference={id(2)}
+      roundNumber={15}
+      orderLabel="order 2"
+      csrf="c"
+      paymentUnconfirmed
+      cardMachine
+      onSettled={() => undefined}
+    />,
+  ).replaceAll("<!-- -->", "");
+  expect(html).toContain("nobody recorded its card-machine payment");
+  expect(html).toContain("refund it on the machine");
+  expect(html).toContain("Cancel round 15");
+  expect(html).not.toContain("card provider");
+  expect(html).not.toContain("guest");
+});

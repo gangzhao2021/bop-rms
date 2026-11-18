@@ -4528,6 +4528,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "The change could not be sent. Check your connection and try again.":
     "无法发送更改。请检查网络后重试。",
   "The change is not valid. Check the amounts.": "更改无效。请检查数量。",
+  "This round was entered by staff, and nobody recorded its card-machine payment.":
+    "这一轮是店员录入的，还没有人记录它的刷卡机收款。",
+  "Cancelling means it never goes to the kitchen and its items go back to stock. If the card machine was charged for it, refund it on the machine.":
+    "取消后这一轮不会送去厨房，菜品退回库存。如果刷卡机已经为它收过款，请在刷卡机上退款。",
   "The change was declined. The next change starts from the published hours.":
     "更改已被拒绝。下一项更改将基于已发布的营业时间。",
   "The change was refused because the input is invalid.": "输入无效，更改被拒绝。",
@@ -9372,6 +9376,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "From the guests' phones (sent with this round)": "客人手机上的菜（随这一轮送出）",
   "This round includes dishes from the guests' phones: {dishes}.":
     "这一轮包含客人手机上的菜：{dishes}。",
+  "A guest is sending these dishes from their phone now.": "客人正在用手机送出这些菜。",
+  "A guest is sending these dishes from their phone now. Send when they finish, or ask them.":
+    "客人正在用手机送出这些菜。等客人送完再发送，或问一下客人。",
   "From the guests' phones": "客人手机上的",
   "Your items": "你点的",
   "Estimated subtotal": "预计小计",

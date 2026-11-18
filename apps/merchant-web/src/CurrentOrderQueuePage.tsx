@@ -5459,6 +5459,7 @@ export function CurrentOrderQueuePage({
                       orderLabel={"order " + order.orderNumber}
                       csrf={csrf}
                       fetcher={fetcher}
+                      cardMachine={batch.staffRound != null}
                       paymentUnconfirmed={
                         batch.staffRound == null &&
                         batch.paymentDue?.status === "Awaiting" &&

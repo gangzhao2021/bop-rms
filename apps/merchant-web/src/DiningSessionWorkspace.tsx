@@ -2034,6 +2034,7 @@ function TablePanel({
             locked={locked}
             refreshKey={refreshKey + ":" + String(checkoutRevision)}
             timeZone={timeZone}
+            payLater={table.paymentTiming === "PayLater"}
           />
         ) : null}
         <section className="table-panel__more" aria-label={t("More for this table")}>

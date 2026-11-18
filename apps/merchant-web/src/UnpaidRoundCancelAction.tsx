@@ -82,6 +82,7 @@ export function UnpaidRoundCancelAction({
   csrf,
   onSettled,
   paymentUnconfirmed = false,
+  cardMachine = false,
   fetcher = fetch,
 }: {
   readonly orderReference: string;
@@ -96,6 +97,11 @@ export function UnpaidRoundCancelAction({
    * deadline (see `isPaymentUnconfirmed`): the manager checks with the guest before cancelling.
    */
   readonly paymentUnconfirmed?: boolean | undefined;
+  /**
+   * WP-2423 batch 29: staff entered the round and take its payment on the Store's card machine:
+   * there is no guest card payment to ask about, staff check the machine.
+   */
+  readonly cardMachine?: boolean | undefined;
   readonly fetcher?: typeof fetch | undefined;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -119,7 +125,7 @@ export function UnpaidRoundCancelAction({
           orderReference,
           orderBatchReference,
           operationReference: operation.current,
-          ...(paymentUnconfirmed ? { acknowledgeUnconfirmedPayment: true } : {}),
+          ...(paymentUnconfirmed && !cardMachine ? { acknowledgeUnconfirmedPayment: true } : {}),
         }),
       });
       let error: string | null = null;
@@ -174,7 +180,18 @@ export function UnpaidRoundCancelAction({
             orderLabel: orderLabel,
           })}
         </h2>
-        {paymentUnconfirmed ? (
+        {cardMachine ? (
+          <>
+            <p>
+              {t("This round was entered by staff, and nobody recorded its card-machine payment.")}
+            </p>
+            <p>
+              {t(
+                "Cancelling means it never goes to the kitchen and its items go back to stock. If the card machine was charged for it, refund it on the machine.",
+              )}
+            </p>
+          </>
+        ) : paymentUnconfirmed ? (
           <>
             <p>
               {t(
@@ -208,7 +225,7 @@ export function UnpaidRoundCancelAction({
               ? t("Retry same cancellation")
               : outcome === "Pending"
                 ? t("Cancelling…")
-                : paymentUnconfirmed
+                : paymentUnconfirmed && !cardMachine
                   ? t("Not charged: cancel round {roundNumber}", { roundNumber: roundNumber })
                   : t("Cancel round {roundNumber}", { roundNumber: roundNumber })}
           </button>

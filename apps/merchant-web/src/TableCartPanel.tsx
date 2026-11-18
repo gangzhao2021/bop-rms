@@ -56,6 +56,7 @@ export function TableCartPanel({
   locked,
   refreshKey,
   timeZone,
+  payLater = false,
   fetcher,
 }: {
   readonly diningSessionReference: string;
@@ -64,6 +65,8 @@ export function TableCartPanel({
   readonly refreshKey: string;
   /** The store's IANA zone: "until 8:05" is the store's clock, never the device's. */
   readonly timeZone: string | undefined;
+  /** WP-2423 batch 29: the table pays at the end, so a phone holding the cart is sending it. */
+  readonly payLater?: boolean;
   readonly fetcher?: typeof fetch | undefined;
 }) {
   const client = useMemo(() => createTableCartClient(fetcher), [fetcher]);
@@ -73,6 +76,9 @@ export function TableCartPanel({
   const [busy, setBusy] = useState(false);
   const [choosing, setChoosing] = useState<string | null>(null);
   const [reads, setReads] = useState(0);
+  const sendingText = payLater
+    ? t("A guest is sending these dishes from their phone now.")
+    : t("A guest is paying for these dishes now.");
   // One reference per intended removal, kept until it is answered (pressing again never repeats it).
   const pending = useRef<{ readonly key: string; readonly reference: string } | null>(null);
   useEffect(() => {
@@ -123,7 +129,7 @@ export function TableCartPanel({
         code === "OutcomeUnknown"
           ? t("We couldn't confirm the result. Press the button again: it is never recorded twice.")
           : code === "GuestPaying"
-            ? t("A guest is paying for these dishes now.")
+            ? sendingText
             : code === "Changed"
               ? t("The cart changed. Here it is as it stands now.")
               : t("That didn't go through. Read the table again and retry."),
@@ -140,7 +146,7 @@ export function TableCartPanel({
       </header>
       {cart.guestPaying ? (
         <p className="table-phones__mode" role="note">
-          {t("A guest is paying for these dishes now.")}
+          {sendingText}
         </p>
       ) : cart.guestChoosing !== null ? (
         // v15 batch 7: a phone chose what it pays and hasn't paid yet. Staff may still take a

@@ -2327,9 +2327,15 @@ export function StaffOrderEntryPage({
               ) : null}
               {guestCart?.guestPaying === true && guestLines.length > 0 ? (
                 <p className="order-accept-by" data-tier="warning" role="status">
-                  {t(
-                    "A guest is paying for these dishes on their phone now. Send when they finish, or ask them.",
-                  )}
+                  {/* WP-2423 batch 29: at a table that pays at the end nobody pays for a round:
+                      a phone is sending these dishes. */}
+                  {tablePaysLater
+                    ? t(
+                        "A guest is sending these dishes from their phone now. Send when they finish, or ask them.",
+                      )
+                    : t(
+                        "A guest is paying for these dishes on their phone now. Send when they finish, or ask them.",
+                      )}
                 </p>
               ) : null}
               <ul className="counter-order__lines" aria-labelledby="counter-guest-lines-heading">

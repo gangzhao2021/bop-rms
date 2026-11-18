@@ -134,6 +134,29 @@ describe("Table cart: staff see the unsent dishes and remove one with a reason",
     expect(container.textContent).toContain("Mapo tofu");
   });
 
+  it("WP-2423 batch 29: at a table that pays at the end, a phone holding the cart is sending it, never paying", async () => {
+    const { fetcher } = server([() => json({ error: "dining_table_cart_guest_paying" }, 409)]);
+    const { container } = await mount(
+      <TableCartPanel
+        diningSessionReference={id(1)}
+        csrf={csrf}
+        locked={false}
+        refreshKey="1"
+        timeZone="America/Toronto"
+        payLater
+        fetcher={fetcher}
+      />,
+    );
+    await settle();
+    await click(buttonNamed(container, "Remove from cart"));
+    await click(buttonNamed(container, "Can't make it"));
+    await settle();
+    expect(container.textContent).toContain(
+      "A guest is sending these dishes from their phone now.",
+    );
+    expect(container.textContent).not.toContain("paying");
+  });
+
   it("an empty cart shows nothing", async () => {
     const fetcher = vi.fn<typeof fetch>(async () => json({ cart: null }));
     const { container } = await mount(panel(fetcher));
