@@ -125,7 +125,8 @@ async function tablet(page: Page) {
   await page.route("**/merchant/staff-switch/refund-recheck", async (route) => {
     const { orderNumbers } = route.request().postDataJSON() as { orderNumbers: string[] };
     state.asked.push(orderNumbers);
-    const at = await page.evaluate(() => Date.now());
+    const at = await page.evaluate(() => Date.now()).catch(() => lastAt);
+    lastAt = at;
     return route.fulfill({
       headers,
       json: {
