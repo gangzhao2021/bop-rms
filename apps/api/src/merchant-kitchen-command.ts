@@ -110,6 +110,7 @@ export function createMerchantKitchenCommand(options: {
               value.storeReference === scope.store.storeReference;
             if (!matches(command)) return denied();
             const observedAt = options.persistence.now();
+            const started = performance.now();
             const tx: ConsumerTransaction = {
               async query<Row = Record<string, unknown>>(sql: string, values: readonly unknown[]) {
                 const result = await transaction.query(sql, values);
@@ -150,7 +151,17 @@ export function createMerchantKitchenCommand(options: {
                 authorize: async (candidate) => matches(candidate) && (await authority.guard()),
               },
               transactions: { withTransaction: async (work) => work(tx) },
-              clock: { now: () => observedAt },
+              // WP-2423 (CI 9094ba5d): the step is recorded at the time it is recorded. Its clock
+              // runs on from its authority's `observedAt`, which is taken before the idempotency
+              // fence and the ticket lock. A frozen clock answered a double tap whose copy took
+              // the fence second, and a tap that waited on another tap of the same ticket, as 503
+              // "busy". It never runs backwards and never reads earlier than its authority.
+              clock: {
+                now: () =>
+                  new Date(
+                    Date.parse(observedAt) + Math.max(0, Math.floor(performance.now() - started)),
+                  ).toISOString(),
+              },
               repository: createPostgresKitchenWorkLifecycleStore({
                 ...options.lifecycle,
                 brandReference: scope.context.brand.brandReference,

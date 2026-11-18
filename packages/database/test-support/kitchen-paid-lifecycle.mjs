@@ -1,5 +1,6 @@
 import { appendFile } from "node:fs/promises";
 import process from "node:process";
+import { setTimeout as delay } from "node:timers/promises";
 import { createKitchenMerchantBrowser } from "./kitchen-merchant-browser.mjs";
 import { exerciseKitchenQueueReadModel } from "./kitchen-queue-read-model.mjs";
 import { createKitchenMerchantHttp } from "./kitchen-merchant-http.mjs";
@@ -49,6 +50,7 @@ export async function exercisePaidKitchenLifecycle({
   const queryFailures = [];
   let next = 30000;
   let allowed = true;
+  let fenceHold = null;
   const clockStart = Date.parse(ticket.createdAt);
   let step = 0;
   const nextTime = () => kitchenNow?.() ?? new Date(clockStart + ++step * 1000).toISOString();
@@ -104,6 +106,14 @@ export async function exercisePaidKitchenLifecycle({
       },
       idempotency: {
         acquireFence: async ({ transaction, idempotencyKey }) => {
+          // A duplicate held here (after its time was taken, before the fence) until the other copy
+          // commits: a double tap whose first copy reaches the fence last (CI 9094ba5d).
+          const hold = fenceHold;
+          fenceHold = null;
+          if (hold) {
+            hold.reached();
+            await hold.released;
+          }
           await transaction.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
             scope.brandReference + ":" + scope.storeReference + ":" + idempotencyKey,
           ]);
@@ -325,6 +335,31 @@ export async function exercisePaidKitchenLifecycle({
         const winner = race.findIndex((r) => r.status === "fulfilled");
         accept = winner === 0 ? accept : competing;
         accepted = race[winner].value;
+      } else if (http) {
+        // WP-2423 (CI 9094ba5d): a double tap. The first copy takes its time, then waits before the
+        // idempotency fence while the second copy, a few milliseconds later, takes the fence and
+        // commits. The first then finds the original, recorded after its own time: the same
+        // result, never "busy" (it answered 503 KITCHEN_WORK_DEPENDENCY_UNAVAILABLE).
+        let reached, release;
+        const reachedFence = new Promise((resolve) => (reached = resolve));
+        const released = new Promise((resolve) => (release = resolve));
+        fenceHold = { reached, released };
+        const first = execute(accept, at).then(
+          (value) => ({ value }),
+          (error) => ({ error }),
+        );
+        await reachedFence;
+        await delay(5);
+        const second = await execute(accept, at);
+        release();
+        const outcome = await first;
+        assert.equal(
+          outcome.error?.code,
+          undefined,
+          "double tap: " + outcome.error?.status + " " + outcome.error?.code,
+        );
+        assert.deepEqual(outcome.value, second);
+        accepted = second;
       } else {
         const duplicate = await Promise.all([execute(accept, at), execute(accept, at)]);
         assert.deepEqual(duplicate[0], duplicate[1]);

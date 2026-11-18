@@ -125,7 +125,10 @@ it("binds trusted authority; owner callbacks take the run's guard and end with i
     storeReference: id(4),
     observedAt: "2026-09-19T12:00:00.000Z",
   });
-  expect(service.clock.now()).toBe((await service.trustedContext.resolveAuthority()).observedAt);
+  // The step's clock starts at its authority's time and never reads earlier.
+  expect(Date.parse(service.clock.now())).toBeGreaterThanOrEqual(
+    Date.parse((await service.trustedContext.resolveAuthority()).observedAt),
+  );
   expect(doubles.execute).toHaveBeenCalledWith(command);
   // WP-2423: the caller is resolved in full exactly twice (start and before the commit).
   expect(doubles.scope).toHaveBeenCalledOnce();
@@ -145,6 +148,32 @@ it("WP-2423: a permission withdrawn or Session ended during the command refuses 
   expect(s.allowed).toHaveBeenCalledTimes(2);
 });
 
+it("WP-2423 (CI 9094ba5d): the step's clock runs on from its authority while the step waits", async () => {
+  const s = setup();
+  const ticks = [1000, 1007.6, 1007.9];
+  const performanceNow = vi
+    .spyOn(performance, "now")
+    .mockImplementation(() => ticks.shift() ?? 1009);
+  const seen: string[] = [];
+  doubles.execute.mockImplementation(async () => {
+    const service = doubles.service.mock.calls[0]?.[0];
+    seen.push((await service.trustedContext.resolveAuthority()).observedAt);
+    // A double tap's copy that took the fence second, or a tap that waited on the ticket's lock.
+    seen.push(service.clock.now());
+    seen.push(service.clock.now());
+    return { outcome: "Accepted" };
+  });
+  try {
+    await expect(s.operation(s.input)).resolves.toEqual({ outcome: "Accepted" });
+  } finally {
+    performanceNow.mockRestore();
+  }
+  expect(seen).toEqual([
+    "2026-09-19T12:00:00.000Z",
+    "2026-09-19T12:00:00.007Z",
+    "2026-09-19T12:00:00.007Z",
+  ]);
+});
 it("binds browser intent to current named Actor and Brand while preserving its Store and idempotency", async () => {
   const s = setup();
   const { actorReference: _actor, brandReference: _brand, ...intent } = command;
