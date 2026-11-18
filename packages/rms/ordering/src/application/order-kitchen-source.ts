@@ -429,10 +429,12 @@ export function createOrderKitchenSourceQueryService(ports: OrderKitchenSourceQu
       try {
         source = await ports.source.loadExact(input);
       } catch (error) {
-        // A round cancelled after its confirmation is the source's answer, not a failure.
+        // A round cancelled after its confirmation, or issued work its Order moved on from, is the
+        // source's answer, not a failure.
         if (
           error instanceof OrderKitchenSourceError &&
-          error.code === "ORDER_KITCHEN_SOURCE_ROUND_CANCELLED"
+          (error.code === "ORDER_KITCHEN_SOURCE_ROUND_CANCELLED" ||
+            error.code === "ORDER_KITCHEN_SOURCE_ISSUED_NOT_CURRENT")
         )
           throw error;
         return dependencyFrom(error);

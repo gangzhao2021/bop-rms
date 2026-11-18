@@ -135,14 +135,41 @@ async function runChunk(
 
   // The Order's fence and row lock stay held to the end of the transaction. A source that no longer
   // stands is a refusal staff can act on, never "busy, try again" forever.
-  if ((await ports.validateTicketSource(tx, ticketReference)) !== true)
-    return refusedAll("OrderChanged", ports.now());
+  const sourceHolds = (await ports.validateTicketSource(tx, ticketReference)) === true;
 
   const locked = await lockKitchenWorkStepTicket(tx, scope, ticketReference);
   if (locked === null) return refusedAll("NotFound", ports.now());
   if ((await listClosedKitchenTickets(tx, scope, [ticketReference])).size > 0)
     return refusedAll("Closed", ports.now());
   if (locked.status !== "Open") return refusedAll("Closed", ports.now());
+  if (!sourceHolds) {
+    // WP-2423 batch 31: the Order moved on (Orders cancelled it whole, or it ended). Its cancelled
+    // dishes say "was cancelled" (the cancellation's own Kitchen fact, read under the Order's fence
+    // and the ticket's lock); any other line says the order changed. Nothing is recorded.
+    const known = new Map(locked.items.map((item) => [item.workItemReference, item]));
+    return {
+      occurredAt: ports.now(),
+      lines: Object.freeze(
+        lines.map((line) => {
+          const item = known.get(line.workItemReference);
+          if (
+            item === undefined ||
+            item.orderItemReference !== line.orderItemReference ||
+            item.status !== "Cancelled"
+          )
+            return refused(line, "OrderChanged");
+          return Object.freeze({
+            ...refused(line, "Cancelled"),
+            ticketVersion: locked.version,
+            workItemVersion: item.version,
+            workItemStatus: "Cancelled" as const,
+            completedQuantity: item.completedQuantity,
+            requiredQuantity: item.requiredQuantity,
+          });
+        }),
+      ),
+    };
+  }
   // A tap that waited on the lock is recorded no earlier than the fact it waited for.
   const sampled = ports.now();
   const observedAt = earlier(sampled, locked.updatedAt) ? locked.updatedAt : sampled;

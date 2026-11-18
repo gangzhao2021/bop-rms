@@ -170,13 +170,33 @@ export function createInternalKitchenCommand(resources, persistence, authenticat
     lifecycle,
     validateCurrentSource: async (transaction, command) => {
       if (!allowed(command)) return false;
-      const ticket = await ticketSourceHolds(transaction, command.ticketReference);
+      let ticket;
+      try {
+        ticket = await ticketSourceHolds(transaction, command.ticketReference);
+      } catch (error) {
+        if (issuedSourceRefused(error)) return false;
+        throw error;
+      }
       return (
         ticket !== null &&
         ticket.workItems.some((item) => item.orderItemReference === command.orderItemReference)
       );
     },
   });
+}
+
+/**
+ * The Order moved on since this work was issued (cancelled whole from Orders, its round cancelled,
+ * ended, or its source no longer matches): a refusal staff can act on. Anything else (a lock wait, a
+ * lost connection) stays "busy, try again". WP-2423 batch 31: ISSUED_NOT_CURRENT was a plain Error
+ * answered as unavailable, so a tap on a dish cancelled from Orders was retried as busy forever.
+ */
+export function issuedSourceRefused(error) {
+  return (
+    error?.code === "ORDER_KITCHEN_SOURCE_CONFLICT" ||
+    error?.code === "ORDER_KITCHEN_SOURCE_NOTHING_TO_PREPARE" ||
+    error?.code === "ORDER_KITCHEN_SOURCE_ISSUED_NOT_CURRENT"
+  );
 }
 
 /** DEC-KITCHEN-ONE-TAP: one tap on the board (POST /merchant/kitchen/step). */
@@ -190,13 +210,7 @@ export function createInternalKitchenStep(resources, persistence, authentication
       try {
         return (await ticketSourceHolds(transaction, ticketReference)) !== null;
       } catch (error) {
-        // The Order moved on since this work was issued: a refusal staff can act on. Anything else
-        // (a lock wait, a lost connection) stays "busy, try again".
-        if (
-          error?.code === "ORDER_KITCHEN_SOURCE_CONFLICT" ||
-          error?.code === "ORDER_KITCHEN_SOURCE_NOTHING_TO_PREPARE"
-        )
-          return false;
+        if (issuedSourceRefused(error)) return false;
         throw error;
       }
     },

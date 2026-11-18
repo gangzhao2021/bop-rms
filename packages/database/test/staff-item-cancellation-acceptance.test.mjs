@@ -61,6 +61,10 @@ import { createMerchantOrderItemStaffCancellation } from "../../../apps/api/src/
 import { createPaymentCompensationComposition } from "../../../apps/api/src/payment-compensation-composition.ts";
 import { createInternalCompensationIdentity } from "../../../tooling/environment/pilot-compensation-identity.mjs";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
+import {
+  assertTapAfterOrdersCancelled,
+  pilotTicketSourceCheck,
+} from "../test-support/kitchen-tap-after-orders-cancel.mjs";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 import { snapshotBegin, snapshotQuery } from "../test-support/snapshot-read-runner.mjs";
 import { ensureSyntheticStockPlace } from "../test-support/stock-place.mjs";
@@ -1810,11 +1814,26 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
           [{ phase: "Cancelled", previous_phase: "Accepted", terminated_order_version: 4 }],
         );
         assert.deepEqual(await itemStatuses(pickup.batch.ticket), ["Cancelled", "Cancelled"]);
-        // A whole cancellation (termination) ends the issued kitchen work: no longer current.
+        // WP-2423 batch 31 (v15 orders 1, 7, 11, 21): the cook taps the ticket still on the board
+        // after Orders cancelled the order whole. The tap is answered at once, line by line, "was
+        // cancelled": no "busy, try again" (503 and retries), nothing recorded, ticket unchanged.
+        await assertTapAfterOrdersCancelled({
+          admin,
+          run: scoped,
+          brand,
+          store,
+          actor: cook,
+          // The seeded lines carry quote version 1 snapshots, as `kitchenSource` above.
+          validateTicketSource: pilotTicketSourceCheck({ brand, store, sha, quoteVersion: 1 }),
+          ticket: pickup.batch.ticket,
+          next: fresh,
+        });
+        // A whole cancellation (termination) ends the issued kitchen work: no longer current, a
+        // refusal (WP-2423 batch 31: it was answered as unavailable).
         await assert.rejects(
           scoped((tx) => issuedSourceIsCurrent(tx, pickup)),
           {
-            code: "ORDER_KITCHEN_SOURCE_DEPENDENCY_UNAVAILABLE",
+            code: "ORDER_KITCHEN_SOURCE_ISSUED_NOT_CURRENT",
           },
         );
         // The remaining line's stock is released per line (line A's was already released).

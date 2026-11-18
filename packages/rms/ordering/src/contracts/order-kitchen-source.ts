@@ -85,6 +85,13 @@ export const orderKitchenSourceErrorCodes = [
    * refunded it) before the kitchen took it. A refusal, never an outage: the kitchen makes nothing.
    */
   "ORDER_KITCHEN_SOURCE_ROUND_CANCELLED",
+  /**
+   * WP-2423 batch 31: kitchen work already issued is no longer current: the Order was cancelled
+   * whole from Orders, its round cancelled, or the Order ended after the work reached the kitchen.
+   * Only `resolveIssued` answers it. A refusal staff can act on, never an outage (it was answered as
+   * unavailable, and a kitchen tap on a dish cancelled from Orders was retried as "busy" forever).
+   */
+  "ORDER_KITCHEN_SOURCE_ISSUED_NOT_CURRENT",
 ] as const;
 
 export type OrderKitchenSourceErrorCode = (typeof orderKitchenSourceErrorCodes)[number];

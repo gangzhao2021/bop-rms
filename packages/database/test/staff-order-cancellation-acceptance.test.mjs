@@ -47,6 +47,10 @@ import { createRoundCancellationRefundSource } from "../../../apps/api/src/merch
 import { withoutCardMachinePayments } from "../../../tooling/environment/pilot-compensation-candidates.mjs";
 import { createInternalCompensationIdentity } from "../../../tooling/environment/pilot-compensation-identity.mjs";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
+import {
+  assertTapAfterOrdersCancelled,
+  pilotTicketSourceCheck,
+} from "../test-support/kitchen-tap-after-orders-cancel.mjs";
 import { createPersistentMerchantOrderQueue } from "../../../apps/api/src/persistent-merchant-order-queue.ts";
 import {
   parseCurrentOrderDetail,
@@ -1300,6 +1304,15 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
         kitchenTicket: false,
         shift: minutes(27),
       });
+      // WP-2423 batch 31: a table's paid, accepted round of two dishes on the kitchen board, with
+      // real Pricing line snapshots so the pilot's kitchen source check reads it (scenario at the end).
+      const tableOnBoard = await seedOrder(19000, {
+        type: "DineIn",
+        batches: [2],
+        quantity: "1",
+        realSnapshots: true,
+        shift: minutes(28),
+      });
       await admin.query(
         "INSERT INTO rms_ordering.order_termination_record (termination_id,operation_id,brand_id,store_id,order_id,order_batch_id,expected_order_version,terminated_order_version,expected_source_checkpoint,previous_phase,phase,actor_type,actor_id,purpose_code,permission_code,reason_code,workflow_version_id,transition_id,source_digest,terminated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'Accepted','Cancelled','System',NULL,'SyntheticLegacy','order.synthetic','SYNTHETIC_TEST',$10,$11,$12,$13)",
         [
@@ -1318,7 +1331,8 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
           time(-minutes(5)),
         ],
       );
-      assert.deepEqual(await stock(), { onHand: "20", reserved: "17" });
+      // Batch 31's table on the board holds 1 of these until Orders cancels it at the end.
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "18" });
       const nextDay = new Date(Date.parse(businessDate + "T12:00:00.000Z") + minutes(24 * 60))
         .toISOString()
         .slice(0, 10);
@@ -1407,7 +1421,7 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
         status: "Released",
         entryCount: 1,
       });
-      assert.deepEqual(await stock(), { onHand: "20", reserved: "16" });
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "17" });
       const releaseAudit = (
         await admin.query(
           "SELECT action_code,actor_type,actor_reference AS actor,reason_code,target_id::text AS target FROM platform_audit.audit_record WHERE audit_id=$1",
@@ -1433,7 +1447,7 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
       held = await holding();
       assert.equal(held.has(legacy.batches[0].batch), false);
       assert.equal(held.get(pickup.batches[0].batch)?.state, "Open");
-      assert.deepEqual(await stock(), { onHand: "20", reserved: "16" });
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "17" });
 
       // The kitchen accepted the first item of the pickup Order (still Queued, not started).
       assert.equal((await kitchen(pickup).accept(0)).outcome, "Accepted");
@@ -1625,7 +1639,7 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
       assert.equal(releases.length, 1);
       assert.equal(releases[0].performedBy, staff);
       assert.equal(releases[0].reasonCode, "STAFF_CANCELLED_BEFORE_PREPARATION");
-      assert.deepEqual(await stock(), { onHand: "20", reserved: "14" });
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "15" });
 
       // Payment's compensation source: the CancelledByStaff disposition, discovered only by the
       // refund workload (includeStaffCancellations).
@@ -1679,7 +1693,7 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
         code: "ORDER_CANCELLATION_NOT_CANCELLABLE",
       });
       assert.deepEqual(await counts(), before);
-      assert.deepEqual(await stock(), { onHand: "20", reserved: "14" });
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "15" });
 
       // ── Scenario 2: one item already started (In Progress): refused, nothing written.
       const startedKitchen = kitchen(started);
@@ -1705,7 +1719,7 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
         [[started.batches[0].batch, "InProgress"]],
       );
       assert.deepEqual(await counts(), before);
-      assert.deepEqual(await stock(), { onHand: "20", reserved: "14" });
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "15" });
 
       // ── Scenario 3a: the kitchen starts first and holds its row locks; the cancellation waits,
       // then sees the started item and is refused.
@@ -1781,7 +1795,7 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
           0,
         );
       }
-      assert.deepEqual(await stock(), { onHand: "20", reserved: "13" });
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "14" });
 
       // ── Scenario 6: dine-in Order with an initial and an additional Batch; staff cancel the
       // additional Batch only. The Order stays open; the first Batch is unaffected.
@@ -1809,7 +1823,7 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
       ]);
       assert.deepEqual(await itemStatuses(dineIn.batches[0].ticket), ["Queued"]);
       assert.deepEqual(await itemStatuses(dineIn.batches[1].ticket), ["Cancelled", "Cancelled"]);
-      assert.deepEqual(await stock(), { onHand: "20", reserved: "11.5" });
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "12.5" });
       const diningState = await scoped((tx) =>
         createPostgresDiningOrderItemStateReader({
           brandReference: brand,
@@ -1835,7 +1849,7 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
       dineIn.version = 5;
       assert.equal((await cancel(dineIn, 0)).status, "Cancelled");
       assert.deepEqual(await itemStatuses(dineIn.batches[0].ticket), ["Cancelled"]);
-      assert.deepEqual(await stock(), { onHand: "20", reserved: "10" });
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "11" });
 
       // ── Scenario 7: the refund workload opens one compensation case for the staff-cancelled
       // payment attempt and refunds the whole capture including tip, through Payment's runtime
@@ -2808,6 +2822,29 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
       assert.equal(named.length, 1);
       assert.equal(named[0].reason, "CancelledByStaff");
       assert.notEqual(named[0].dispositionReference, lateDisposition);
+
+      // WP-2423 batch 31 (v15 orders 1, 7, 11, 21): Orders cancels the table's round whole while its
+      // ticket is on the kitchen board ("Cancel order and refund"). A tap on the ticket is answered
+      // "was cancelled" at once, never "busy, try again" (503, retried by the board), and records
+      // nothing. The pilot's current-source check runs over the real Ordering kitchen source.
+      assert.equal(
+        (await cancel(tableOnBoard, 0, { reasonCode: "CUSTOMER_REQUEST" })).status,
+        "Cancelled",
+      );
+      assert.deepEqual(await itemStatuses(tableOnBoard.batches[0].ticket), [
+        "Cancelled",
+        "Cancelled",
+      ]);
+      await assertTapAfterOrdersCancelled({
+        admin,
+        run: scoped,
+        brand,
+        store,
+        actor: cook,
+        validateTicketSource: pilotTicketSourceCheck({ brand, store, sha, quoteVersion: 1 }),
+        ticket: tableOnBoard.batches[0].ticket,
+        next: fresh,
+      });
     } finally {
       for (const name of [role, other]) {
         await admin.query("DROP OWNED BY " + name);

@@ -41,11 +41,14 @@ function notGiven(
 /**
  * A round confirmed (paid and accepted, or sent to the kitchen on a pay-later table) and then
  * cancelled by staff before the kitchen took it: the kitchen makes nothing for it. Only for the
- * kitchen's current read; work already issued keeps its own rule (`resolveIssued`).
+ * kitchen's current read. Work already issued (`resolveIssued`) whose Order moved on (cancelled
+ * whole from Orders, its round cancelled, the Order ended) is answered as no longer current, a
+ * refusal: the kitchen tap says so at once instead of "busy, try again" forever (WP-2423 batch 31).
  */
 function cancelledOrNotCurrent(revision: "Exact" | "Issued", cancelled: boolean): never {
-  if (cancelled && revision === "Exact")
-    throw new OrderKitchenSourceError("ORDER_KITCHEN_SOURCE_ROUND_CANCELLED");
+  if (revision === "Issued")
+    throw new OrderKitchenSourceError("ORDER_KITCHEN_SOURCE_ISSUED_NOT_CURRENT");
+  if (cancelled) throw new OrderKitchenSourceError("ORDER_KITCHEN_SOURCE_ROUND_CANCELLED");
   return notGiven("ORDER_KITCHEN_SOURCE_ROUND_NOT_CURRENT");
 }
 
