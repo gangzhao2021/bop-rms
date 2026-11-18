@@ -2650,14 +2650,21 @@ export function KitchenBoardScreen({
     if (element) slotElements.current.set(key, element);
     else slotElements.current.delete(key);
   };
+  // The screen's own size: a turned tablet or a resized window lays every ticket out again, which
+  // the person holding it sees happen, so it is a new starting point and not a move.
+  const slotViewport = useRef("");
   const measureSlots = useCallback(() => {
     const now = performance.now();
+    const viewport =
+      typeof window === "undefined" ? "" : `${window.innerWidth}x${window.innerHeight}`;
+    const resized = slotViewport.current !== "" && slotViewport.current !== viewport;
+    slotViewport.current = viewport;
     const places = new Map<string, string>();
     for (const [key, element] of slotElements.current) {
       const place = kitchenSlotPlace(element);
       places.set(key, place);
       const before = slotPlaces.current.get(key);
-      if (before !== undefined && before !== place)
+      if (!resized && before !== undefined && before !== place)
         slots.current.set(key, {
           signature: slots.current.get(key)?.signature ?? "",
           changedAt: now,
