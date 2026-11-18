@@ -1,6 +1,11 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { PauseOrderingControl, pauseChain, pauseOrderingReadMs } from "./PauseOrderingControl.js";
+import {
+  PauseOrderingControl,
+  PauseOrderingShownContext,
+  pauseChain,
+  pauseOrderingReadMs,
+} from "./PauseOrderingControl.js";
 import { act } from "react";
 import { buttonNamed, click, deferred, mount, settle } from "./dom-test-kit.fixture.js";
 
@@ -165,4 +170,30 @@ it("WP-2423 batch 31: says nothing to someone who may not pause", async () => {
   );
   await settle();
   expect(container.innerHTML).toBe("");
+});
+
+it("WP-2423 batch 32: when the workspace says Pause ordering is not shown, nothing is read and no place is kept", async () => {
+  const fetcher = vi.fn(async () => new Response(null, { status: 403 })) as unknown as typeof fetch;
+  const { container } = await mount(
+    <PauseOrderingShownContext.Provider value={false}>
+      <PauseOrderingControl csrf={"a".repeat(43)} storeReference={id(3)} fetcher={fetcher} />
+    </PauseOrderingShownContext.Provider>,
+  );
+  // Nothing at all from the first render: no hidden place that later collapses under a tap.
+  expect(container.querySelector(".pause-ordering")).toBeNull();
+  await settle();
+  expect(fetcher).not.toHaveBeenCalled();
+  expect(container.innerHTML).toBe("");
+});
+
+it("WP-2423 batch 32: when the workspace says it is shown, the place is kept until the read answers", async () => {
+  const fetcher = (async () => json(state([], 2))) as typeof fetch;
+  const { container } = await mount(
+    <PauseOrderingShownContext.Provider value={true}>
+      <PauseOrderingControl csrf={"a".repeat(43)} storeReference={id(3)} fetcher={fetcher} />
+    </PauseOrderingShownContext.Provider>,
+  );
+  await settle();
+  expect(buttonNamed(container, "Pause ordering")).toBeDefined();
+  expect(container.querySelector("[data-place-kept]")).toBeNull();
 });

@@ -6003,6 +6003,19 @@ it("protects reconciliation assignee directory and bounds public output", async 
   );
 });
 
+it("WP-2423 batch 32: keeps whether Pause ordering is shown, a boolean or absent", () => {
+  expect(parseMerchantWorkspaceSnapshot(workspace)).not.toHaveProperty("pauseOrderingShown");
+  for (const shown of [true, false])
+    expect(
+      parseMerchantWorkspaceSnapshot({ ...workspace, pauseOrderingShown: shown })
+        .pauseOrderingShown,
+    ).toBe(shown);
+  for (const value of ["true", null, 1])
+    expect(() =>
+      parseMerchantWorkspaceSnapshot({ ...workspace, pauseOrderingShown: value }),
+    ).toThrow("MERCHANT_WORKSPACE_DENIED");
+});
+
 it("admits canonical Product navigation without treating a parsed candidate as a grant", () => {
   const item = {
     screenId: "CAT-PRODUCT-LIST",

@@ -254,6 +254,13 @@ export interface MerchantWorkspaceSnapshot {
   readonly freshness: "Current" | "Stale";
   readonly dashboardAvailability: "UnavailableUntilWP1905";
   readonly navigation: readonly MerchantNavigationItem[];
+  /**
+   * WP-2423 batch 32: whether this person sees Pause ordering on Home, Orders, Pickup and the
+   * kitchen board (they may read or pause the Store's ordering: the service-control read's own
+   * rule). Known with the workspace, so a page never keeps a place for a control that then goes
+   * away and moves the page under a tap. Absent from an older server: the page asks the read.
+   */
+  readonly pauseOrderingShown?: boolean;
 }
 
 export const merchantNavigation = Object.freeze({

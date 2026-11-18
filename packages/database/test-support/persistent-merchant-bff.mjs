@@ -1824,6 +1824,9 @@ export async function verifyPersistentMerchantBff({
   };
   await assert.rejects(control(controlRequest), /STORE_SERVICE_PERMISSION_DENIED/u);
   await assert.rejects(control.read(gateCookie.value));
+  // WP-2423 batch 32: the workspace already says Pause ordering is not shown to this person, so
+  // the staff pages keep no place for it (the read above refuses them).
+  assert.equal(controlBootstrap.workspace.pauseOrderingShown, false);
   for (const [code, number] of [
     ["store.service.pause", 3110],
     ["store.service.read", 3140],
@@ -1860,6 +1863,8 @@ export async function verifyPersistentMerchantBff({
     /STORE_SERVICE_COMMAND_INVALID/u,
   );
   const beforeControl = await control.read(gateCookie.value);
+  // Now they may pause and read: the workspace says so, with the read.
+  assert.equal((await service().bootstrap(gateCookie.value)).workspace.pauseOrderingShown, true);
   assert.equal(beforeControl.configurationReference, f.uuid("910"));
   assert.equal(beforeControl.expectedVersion, 0);
   assert.deepEqual(beforeControl.activePauses, []);

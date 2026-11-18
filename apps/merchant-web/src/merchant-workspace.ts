@@ -17,6 +17,12 @@ export interface MerchantWorkspaceSnapshot {
   readonly freshness: "Current" | "Stale";
   readonly dashboardAvailability: "UnavailableUntilWP1905";
   readonly navigation: readonly MerchantNavigationItem[];
+  /**
+   * WP-2423 batch 32: whether this person sees Pause ordering (they may read or pause the Store's
+   * ordering). Known with the workspace, so the staff pages render the control or nothing, and
+   * never keep a place for it that collapses when the read is refused. Absent: the page asks.
+   */
+  readonly pauseOrderingShown?: boolean;
 }
 
 export interface MerchantNavigationItem {
@@ -270,6 +276,8 @@ function navigationItem(value: unknown, selectedStoreReference: string): Merchan
 }
 
 export function parseMerchantWorkspace(value: unknown): MerchantWorkspaceSnapshot {
+  const decided =
+    value !== null && typeof value === "object" && Object.hasOwn(value, "pauseOrderingShown");
   const input = record(value, [
     "screenId",
     "selectedScope",
@@ -279,7 +287,10 @@ export function parseMerchantWorkspace(value: unknown): MerchantWorkspaceSnapsho
     "freshness",
     "dashboardAvailability",
     "navigation",
+    ...(decided ? ["pauseOrderingShown"] : []),
   ]);
+  if (decided && typeof input.pauseOrderingShown !== "boolean")
+    throw new Error("MERCHANT_WORKSPACE_INVALID");
   const parsedBusinessDate =
     typeof input.businessDate === "string"
       ? Date.parse(`${input.businessDate}T00:00:00.000Z`)
@@ -320,6 +331,7 @@ export function parseMerchantWorkspace(value: unknown): MerchantWorkspaceSnapsho
     freshness: input.freshness,
     dashboardAvailability: "UnavailableUntilWP1905",
     navigation,
+    ...(decided ? { pauseOrderingShown: input.pauseOrderingShown as boolean } : {}),
   });
 }
 

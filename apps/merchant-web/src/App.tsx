@@ -37,6 +37,7 @@ import { StaffSignInPage } from "./StaffSignInPage.js";
 import { StepUpCompletePage } from "./StepUpCompletePage.js";
 import { pilotHiddenRedirect, unknownAddressTarget } from "./pilot-routes.js";
 import { StoreTimeZoneContext } from "./StoreTime.js";
+import { PauseOrderingShownContext } from "./PauseOrderingControl.js";
 import { StoreBusinessDayProvider } from "./StoreBusinessDay.js";
 import { MerchantShell } from "./MerchantShell.js";
 import { StoreOverview } from "./StoreOverview.js";
@@ -2471,8 +2472,11 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
     !pathname.startsWith("/app/organization/brands") &&
     (pathname.startsWith("/operations/") || /^\/app\/./u.test(pathname));
   return (
-    <StoreTimeZoneContext.Provider
-      value={state.kind === "Ready" ? state.workspace.selectedScope.timeZone : keptFrame?.timeZone}
+    <WorkspaceContexts
+      timeZone={
+        state.kind === "Ready" ? state.workspace.selectedScope.timeZone : keptFrame?.timeZone
+      }
+      pauseOrderingShown={state.kind === "Ready" ? state.workspace.pauseOrderingShown : undefined}
     >
       <StoreBusinessDayProvider
         initialBusinessDate={state.kind === "Ready" ? state.workspace.businessDate : null}
@@ -2558,6 +2562,28 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           />
         ) : null}
       </StoreBusinessDayProvider>
+    </WorkspaceContexts>
+  );
+}
+
+/**
+ * What every screen knows from the workspace: the Store's time zone, and (WP-2423 batch 32) whether
+ * this person sees Pause ordering, so its place is decided before a page renders.
+ */
+function WorkspaceContexts({
+  timeZone,
+  pauseOrderingShown,
+  children,
+}: {
+  readonly timeZone: string | undefined;
+  readonly pauseOrderingShown: boolean | undefined;
+  readonly children: ReactNode;
+}) {
+  return (
+    <StoreTimeZoneContext.Provider value={timeZone}>
+      <PauseOrderingShownContext.Provider value={pauseOrderingShown}>
+        {children}
+      </PauseOrderingShownContext.Provider>
     </StoreTimeZoneContext.Provider>
   );
 }

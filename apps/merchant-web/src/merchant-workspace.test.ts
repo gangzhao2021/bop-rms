@@ -42,6 +42,20 @@ const workspace = Object.freeze({
 });
 
 describe("Merchant workspace client boundary", () => {
+  it("WP-2423 batch 32: keeps whether Pause ordering is shown, and nothing else new", () => {
+    expect(parseMerchantWorkspace(workspace)).not.toHaveProperty("pauseOrderingShown");
+    expect(
+      parseMerchantWorkspace({ ...workspace, pauseOrderingShown: false }).pauseOrderingShown,
+    ).toBe(false);
+    expect(
+      parseMerchantWorkspace({ ...workspace, pauseOrderingShown: true }).pauseOrderingShown,
+    ).toBe(true);
+    for (const value of ["false", null, 0, undefined])
+      expect(() => parseMerchantWorkspace({ ...workspace, pauseOrderingShown: value })).toThrow(
+        "MERCHANT_WORKSPACE_INVALID",
+      );
+  });
+
   it("accepts one canonical Brand detail entry without extending the selected scope", () => {
     const item = {
       screenId: "ORG-BRAND-DETAIL",

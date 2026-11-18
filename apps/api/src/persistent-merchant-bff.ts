@@ -337,7 +337,9 @@ export function createPersistentMerchantBffService(
             !(item.screenId === "CAT-PRODUCT-LIST" && (currentNavigation || legacyNavigation)) &&
             item.permission !== "merchant.access",
         )
-        .flatMap((item) => merchantNavigationActions(item)),
+        .flatMap((item) => merchantNavigationActions(item))
+        // Pause ordering's place (below), in the same policy read.
+        .concat(["store.service.read", "store.service.pause"]),
     );
     for (const item of result.navigation) {
       if (item.screenId === "ORG-BRAND-DETAIL") {
@@ -511,9 +513,15 @@ export function createPersistentMerchantBffService(
           }),
         );
     }
+    // WP-2423 batch 32: Pause ordering's place on the staff pages is decided with the workspace
+    // (the service-control read's rule: read, or pause), so a page never keeps a place for it that
+    // then collapses under a tap when the read is refused.
+    const pauseOrderingShown =
+      (await allowed("store.service.read")) || (await allowed("store.service.pause"));
     reuse = false;
     return Object.freeze({
       ...result,
+      pauseOrderingShown,
       businessDate: operating.businessDate.businessDate,
       storeStatus: operating.state === "TemporarilyClosed" ? "Paused" : operating.state,
       freshness: "Current",

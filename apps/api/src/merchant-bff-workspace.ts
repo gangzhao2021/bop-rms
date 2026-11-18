@@ -179,7 +179,11 @@ function navigationItem(value: unknown, selectedStoreReference: string): Merchan
 }
 
 export function parseMerchantWorkspaceSnapshot(value: unknown): MerchantWorkspaceSnapshot {
-  const input = closed(value, workspaceKeys);
+  const decided =
+    value !== null && typeof value === "object" && Object.hasOwn(value, "pauseOrderingShown");
+  const input = closed(value, decided ? [...workspaceKeys, "pauseOrderingShown"] : workspaceKeys);
+  if (decided && typeof input.pauseOrderingShown !== "boolean")
+    throw new Error("MERCHANT_WORKSPACE_DENIED");
   const parsedBusinessDate =
     typeof input.businessDate === "string"
       ? Date.parse(`${input.businessDate}T00:00:00.000Z`)
@@ -221,5 +225,6 @@ export function parseMerchantWorkspaceSnapshot(value: unknown): MerchantWorkspac
     freshness: input.freshness,
     dashboardAvailability: "UnavailableUntilWP1905",
     navigation,
+    ...(decided ? { pauseOrderingShown: input.pauseOrderingShown as boolean } : {}),
   });
 }

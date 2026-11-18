@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { t } from "./i18n/i18n.js";
 import {
   createServiceControlClient,
@@ -145,20 +145,29 @@ export interface PauseOrderingRead {
   readonly reload: () => void;
 }
 
+/**
+ * WP-2423 batch 32: whether the workspace says this person sees Pause ordering (undefined: it did
+ * not say, so the read decides). False: no read and no kept place, so Home, Orders, Pickup and the
+ * kitchen board never move when a refused read would have collapsed the place (52 px, 1.4-2.9 s
+ * after opening, under a tap aimed at a row).
+ */
+export const PauseOrderingShownContext = createContext<boolean | undefined>(undefined);
+
 /** The Store's pause, read now and every `pauseOrderingReadMs`; `storeReference` undefined: none. */
 export function usePauseOrderingRead(
   storeReference: string | undefined,
   fetcher?: typeof fetch,
 ): PauseOrderingRead {
+  const notShown = useContext(PauseOrderingShownContext) === false;
   const client = useMemo(() => createServiceControlClient(fetcher ?? fetch), [fetcher]);
   const [answer, setAnswer] = useState<{
     readonly status: PauseOrderingRead["status"];
     readonly view: ServiceControlState | null;
     readonly answeredAt: number;
-  }>(() => ({ status: "Pending", view: null, answeredAt: Date.now() }));
+  }>(() => ({ status: notShown ? "Denied" : "Pending", view: null, answeredAt: Date.now() }));
   const [revision, setRevision] = useState(0);
   useEffect(() => {
-    if (storeReference === undefined) return;
+    if (storeReference === undefined || notShown) return;
     const controller = new AbortController();
     client
       .load(storeReference, controller.signal)
@@ -178,9 +187,15 @@ export function usePauseOrderingRead(
       controller.abort();
       clearTimeout(timer);
     };
-  }, [client, storeReference, revision]);
+  }, [client, storeReference, revision, notShown]);
   const reload = useCallback(() => setRevision((value) => value + 1), []);
-  return useMemo(() => ({ ...answer, reload }), [answer, reload]);
+  return useMemo(
+    () =>
+      notShown
+        ? { status: "Denied" as const, view: null, answeredAt: answer.answeredAt, reload }
+        : { ...answer, reload },
+    [answer, reload, notShown],
+  );
 }
 
 /**
