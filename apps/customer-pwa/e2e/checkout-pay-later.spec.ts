@@ -1132,6 +1132,89 @@ test.describe("@production Pay-later table, the round just placed", () => {
       }
     });
 
+  // WP-2423 batch 29 (v15 live28): staff's round takes a second to be placed. Meanwhile the phone
+  // says the cart just changed and it is checking (never "nothing was placed" or "we couldn't
+  // place your order"), then which round took its dishes.
+  for (const language of ["en", "zh-Hans"] as const)
+    test(`while staff's round is being placed the phone waits, then names the round (${language})`, async ({
+      page,
+    }) => {
+      const zh = language === "zh-Hans";
+      if (zh)
+        await page.addInitScript(() => localStorage.setItem("bop.customer.language", "zh-Hans"));
+      const table: Table = await stubTable(page, [], {
+        quote: (route, call) => {
+          if (call < 2) return undefined;
+          setTimeout(() => table.staffRound(2), 1_200);
+          return route.fulfill({
+            status: 409,
+            json: {
+              schemaVersion: 1,
+              error: {
+                code: "quote_version_conflict",
+                messageKey: "customer.quote.version_conflict",
+              },
+            },
+          });
+        },
+      });
+      await openCart(page);
+      await expect.poll(() => table.calls.filter((call) => call === "quote").length).toBe(1);
+      await page.getByRole("button", { name: zh ? "下单" : "Place order", exact: true }).click();
+      const main = page.getByRole("main");
+      await expect(
+        main.getByText(
+          zh
+            ? "你这桌的购物车刚刚有变化，可能有人正在为这桌下单。请稍等，页面正在核对。"
+            : "Your table’s cart just changed, maybe because a round is being sent for your table. Wait a moment while this page checks.",
+        ),
+      ).toBeVisible();
+      await expect(main).not.toContainText(zh ? "还没有下单" : "nothing was placed");
+      await expect(main).not.toContainText(zh ? "无法下单" : "couldn’t place");
+      await expectNoInternalText(page);
+      const shots = process.env.B29_SHOTS ?? "test-results/b29-shots";
+      for (const width of [1440, 390]) {
+        await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+        expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+          width,
+        );
+        await page.screenshot({
+          path: `${shots}/guest-waits-for-staff-round-${language}-${width}.png`,
+        });
+      }
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await expect(
+        main.getByText(
+          zh
+            ? "店员已把你的菜放在第 2 轮送去厨房。"
+            : "Staff sent your dishes to the kitchen in round 2.",
+        ),
+      ).toBeVisible({ timeout: 2_500 });
+      await expect(main).not.toContainText(zh ? "还没有下单" : "nothing was placed");
+      expect(table.sent).toEqual([]);
+      for (const width of [1440, 390]) {
+        await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+        await page.screenshot({
+          path: `${shots}/guest-staff-sent-round-${language}-${width}.png`,
+          fullPage: true,
+        });
+      }
+      // WP-2423 batch 29: a dish added afterwards, on the cart opened again: no "Staff sent your
+      // dishes … in round 2" above it, which read as if it had been sent too.
+      table.addDish("Added later");
+      await goTo(page, "/menu");
+      await goTo(page, "/cart");
+      await expect(main.getByRole("article", { name: "Added later" })).toBeVisible();
+      await expect(main).not.toContainText(zh ? "第 2 轮" : "round 2");
+      for (const width of [1440, 390]) {
+        await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+        await page.screenshot({
+          path: `${shots}/guest-new-dish-after-staff-round-${language}-${width}.png`,
+          fullPage: true,
+        });
+      }
+    });
+
   test("a lost checkout whose cart moved on is no longer a retry: another guest's dish", async ({
     page,
   }) => {
