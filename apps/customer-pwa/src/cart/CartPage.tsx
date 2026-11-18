@@ -12,7 +12,14 @@ import {
   isGuestTableQuestion,
   isUnseatedTableScan,
 } from "../session/customer-transaction-context.js";
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { Link, useNavigate } from "react-router";
 import { createBrowserCustomerCartClient } from "./cart-client.js";
 import {
@@ -24,6 +31,7 @@ import {
   checkoutInProgressMessage,
   orderProcessingMessage,
   type CartItemView,
+  type CartRecentRound,
   type CartView,
 } from "./types.js";
 import { formatCartMoney } from "./format-money.js";
@@ -297,15 +305,34 @@ function TableRoundNotes({
   cart,
   payLater,
   className,
+  keepSent = true,
 }: {
   readonly cart: CartView;
   readonly payLater: boolean;
   readonly className?: string;
+  /**
+   * WP-2423 batch 29: whether a round someone else already sent is said. Above dishes added since,
+   * "Staff sent your dishes … in round N" reads as if they were sent too, so a cart that holds
+   * dishes says it only right after this phone's own tap ran into that round.
+   */
+  readonly keepSent?: boolean;
 }) {
+  const { roundsAtLoad } = useContext(TableSettling);
+  // A round that came in while this page was open (this phone's tap ran into it) is still said.
+  const sentAlready = (round: CartRecentRound) =>
+    (round.paymentState === null ||
+      round.paymentState === "Paid" ||
+      round.paymentState === "PayLater") &&
+    (roundsAtLoad === null || roundsAtLoad.has(round.roundNumber));
+  const others = [tableRoundByOther(cart), tableOpenRoundByOther(cart)];
+  const own = tableOwnRound(cart, payLater);
+  // Only rounds already sent before this page opened, and nothing open beside them: not said.
+  const quiet =
+    !keepSent && own === null && others.every((round) => round === null || sentAlready(round));
   const notes = [
-    tableOwnRound(cart, payLater),
-    ...[tableRoundByOther(cart), tableOpenRoundByOther(cart)].map((round) =>
-      round === null
+    own,
+    ...others.map((round) =>
+      round === null || quiet
         ? null
         : {
             roundNumber: round.roundNumber,
@@ -631,7 +658,12 @@ function ErrorState({
  * WP-2423 item 6: what a stopped send says, under the button. Nothing here repeats an unknown answer:
  * that one has its own panel, above everything, because the cart it was about may be gone.
  */
-function sendRoundMessage(round: SendRoundState, cart: CartView, onRetry: () => void) {
+export function sendRoundMessage(
+  round: SendRoundState,
+  cart: CartView,
+  onRetry: () => void,
+  settling = false,
+) {
   switch (round.status) {
     case "confirm-total": {
       const total = formatCartMoney(round.total);
@@ -701,28 +733,48 @@ function sendRoundMessage(round: SendRoundState, cart: CartView, onRetry: () => 
       );
     case "session-ended":
       return <p role="alert">{checkoutText.sessionEnded}</p>;
+    // WP-2423 batch 29: right after the tap ran into a change at the table (often staff or another
+    // phone sending a round this very second), the page checks for a moment before it says
+    // anything was stopped: never a failure while that round is being placed.
     case "cart-changed":
-      return <p role="alert">{checkoutText.tableCartChanged}</p>;
+      return settling ? (
+        <p role="status">{checkoutText.tableRoundMaybeBeingSent}</p>
+      ) : (
+        <p role="alert">{checkoutText.tableCartChanged}</p>
+      );
     default:
       return null;
   }
 }
+
+/**
+ * WP-2423 batch 29: `settling`: the page is reading the table again right after a change it ran
+ * into. `roundsAtLoad`: the table's rounds already sent when this page opened (null until read).
+ */
+const TableSettling = createContext<{
+  readonly settling: boolean;
+  readonly roundsAtLoad: ReadonlySet<number> | null;
+}>({ settling: false, roundsAtLoad: null });
 
 /** The button can be at the bottom of a long cart: a stop is said where the guest is looking. */
 function SendRoundMessage({
   round,
   cart,
   onRetry,
+  settling = false,
 }: {
   readonly round: SendRoundState;
   readonly cart: CartView;
   readonly onRetry: () => void;
+  /** The page is still reading the table again after that change (batch 29). */
+  readonly settling?: boolean;
 }) {
   const said = useRef<HTMLDivElement>(null);
   useEffect(() => {
     said.current?.scrollIntoView?.({ block: "nearest" });
   }, [round.status, cart.cart.version]);
-  const message = sendRoundMessage(round, cart, onRetry);
+  const reading = useContext(TableSettling).settling;
+  const message = sendRoundMessage(round, cart, onRetry, settling || reading);
   return message === null ? null : <div ref={said}>{message}</div>;
 }
 
@@ -1122,7 +1174,12 @@ function CartContent({
           {cartText.quoteExpired}
         </div>
       ) : null}
-      <TableRoundNotes cart={cart} payLater={payLater} className="cart-stale" />
+      <TableRoundNotes
+        cart={cart}
+        payLater={payLater}
+        className="cart-stale"
+        keepSent={round.status === "cart-changed" || round.status === "busy"}
+      />
       {(() => {
         const own = withdrawableOwnRound(cart, payLater);
         return own === null ? null : (
@@ -1327,7 +1384,9 @@ export function busyRetryDelayMs(retryAfterSeconds: number): number {
 /** Cart prices come from a full menu read; an ordinary guest gets one tap once it's in. */
 const menuPriceWaitMs = 2_000;
 /** WP-2423 batch 28: reads after a stop caused by a round being sent for the table right now. */
-const soonAfterTableChange = [600, 1_500, 3_000] as const;
+// WP-2423 batch 29: the round it ran into is placed in about a second, so the page reads again
+// within half a second and keeps checking for about three.
+const soonAfterTableChange = [400, 900, 1_500, 2_300, 3_200] as const;
 
 /** What a stop says holds for the cart as it stood: any later change to the cart ends it. */
 const aboutThisCart = (round: SendRoundState) =>
@@ -1571,6 +1630,19 @@ function OpenCartPage({
   };
   // What the send's answer means for this page, once.
   const acted = useRef<SendRoundState | null>(null);
+  // WP-2423 batch 29: reading the table again right after a change the tap ran into.
+  const [settling, setSettling] = useState(false);
+  // WP-2423 batch 29: the table's rounds sent before this page opened. Above dishes added since,
+  // their "sent" lines would read as if those dishes were sent too.
+  const [roundsAtLoad, setRoundsAtLoad] = useState<ReadonlySet<number> | null>(null);
+  const loadedCart = state.status === "ready" ? state.cart : null;
+  useEffect(() => {
+    if (roundsAtLoad !== null || loadedCart === null) return;
+    setRoundsAtLoad(
+      new Set((loadedCart.cart.recentRounds ?? []).map((round) => round.roundNumber)),
+    );
+  }, [loadedCart, roundsAtLoad]);
+  const tableSettling = { settling, roundsAtLoad };
   /** The cart as read right after a stop: the stop is about that one. */
   const stoppedAt = useRef<{ readonly version: number | null } | null>(null);
   useEffect(() => {
@@ -1625,13 +1697,20 @@ function OpenCartPage({
       roundState.status === "cart-changed" ||
       (roundState.status === "busy" && roundState.wait === "checkout-in-progress")
     ) {
-      const timers = soonAfterTableChange.map((ms) =>
-        window.setTimeout(() => {
-          if (acted.current === roundState) void controller.refresh();
-        }, ms),
-      );
+      setSettling(true);
+      const last = soonAfterTableChange[soonAfterTableChange.length - 1] ?? 0;
+      const timers = [
+        ...soonAfterTableChange.map((ms) =>
+          window.setTimeout(() => {
+            if (acted.current === roundState) void controller.refresh();
+          }, ms),
+        ),
+        // The last read had its answer: whatever still stands is said as it is.
+        window.setTimeout(() => setSettling(false), last + 600),
+      ];
       return () => {
         for (const timer of timers) window.clearTimeout(timer);
+        setSettling(false);
       };
     }
   }, [controller, navigate, round, roundState]);
@@ -1681,21 +1760,23 @@ function OpenCartPage({
         {cart?.tablePay !== undefined && timing !== "PayLater" ? (
           <TableWaitingDishes tablePay={cart.tablePay} />
         ) : null}
-        <CartContent
-          state={state}
-          controller={controller}
-          now={now}
-          menu={menu}
-          timing={timing}
-          round={roundState}
-          menuSettled={settled || menuWaitOver}
-          onPlace={place}
-          service={service}
-          confirmedChanges={confirmedChanges}
-          onConfirmChanges={setConfirmedChanges}
-          viewQuote={viewQuote}
-          changesMenu={changesMenu}
-        />
+        <TableSettling.Provider value={tableSettling}>
+          <CartContent
+            state={state}
+            controller={controller}
+            now={now}
+            menu={menu}
+            timing={timing}
+            round={roundState}
+            menuSettled={settled || menuWaitOver}
+            onPlace={place}
+            service={service}
+            confirmedChanges={confirmedChanges}
+            onConfirmChanges={setConfirmedChanges}
+            viewQuote={viewQuote}
+            changesMenu={changesMenu}
+          />
+        </TableSettling.Provider>
       </div>
       <div className="sr-only" role="status" aria-live="polite">
         {roundState.status === "cart-changed" && cart !== null && cart.items.length === 0

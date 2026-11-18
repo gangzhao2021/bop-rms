@@ -1565,6 +1565,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这一单没有扣款。请在本桌页面付款。",
   "Tips were turned off while you were checking out, so this order hasn’t been charged. Pay for it from your table page, without a tip.":
     "你结账时门店关闭了小费，这一单没有扣款。请在本桌页面付款，不加小费。",
+  "Your table’s cart just changed, maybe because a round is being sent for your table. Wait a moment while this page checks.":
+    "你这桌的购物车刚刚有变化，可能有人正在为这桌下单。请稍等，页面正在核对。",
   "Your table’s cart changed, so nothing was placed yet. Check it, then tap Place order.":
     "同桌的购物车有变化，还没有下单。请看一下再点“下单”。",
   "We can’t show this payment on this phone": "这台手机无法显示这笔付款",

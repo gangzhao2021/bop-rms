@@ -2,7 +2,13 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it } from "vitest";
-import { busyRetryDelayMs, CartPage, cartPollIntervalMs, cartPollShouldRead } from "./CartPage.js";
+import {
+  busyRetryDelayMs,
+  CartPage,
+  cartPollIntervalMs,
+  cartPollShouldRead,
+  sendRoundMessage,
+} from "./CartPage.js";
 import type { CartState, CartStateController } from "./cart-state.js";
 import { checkoutInProgressMessage, type CartView } from "./types.js";
 import type { SendRoundController, SendRoundState } from "../checkout/send-round.js";
@@ -930,6 +936,29 @@ describe("WP-2423 item 6: a table that pays at the end", () => {
       "Round 1 from someone at your table is waiting for staff to send it to the kitchen.",
     );
     expect(html).not.toMatch(/paying for round/u);
+    // WP-2423 batch 29: dishes added after staff sent a round. Above them, "Staff sent your dishes
+    // … in round 5" would read as if they were sent too: a round sent before this page opened,
+    // with nothing open beside it, is not said above a cart that holds dishes.
+    const later = page({
+      status: "ready",
+      cart: tableCart({
+        recentRounds: [{ ...sent(5, "PayLater"), enteredByStaff: true, withThisPhoneDishes: true }],
+      }),
+    });
+    expect(later).not.toContain("Staff sent your dishes");
+    expect(later).not.toContain("round 5");
+    // The cart it emptied still says which round took the dishes.
+    expect(
+      page({
+        status: "ready",
+        cart: tableCart({
+          items: [],
+          recentRounds: [
+            { ...sent(5, "PayLater"), enteredByStaff: true, withThisPhoneDishes: true },
+          ],
+        }),
+      }),
+    ).toContain("Staff sent your dishes to the kitchen in round 5.");
     // This phone's own newest round: an older open round of another phone is still said.
     const own = page({
       status: "ready",
@@ -1220,5 +1249,26 @@ describe("M116: the cart while only looking at a closed Store's menu", () => {
     expect(html).not.toContain("Couldn’t update your cart");
     // No visit, so the journey offers no cart to go to.
     expect(html).not.toContain('href="/cart"');
+  });
+});
+
+describe("WP-2423 batch 29: a tap that ran into a round being sent for the table", () => {
+  it("says to wait while the page checks, never that nothing was placed, then what stands", () => {
+    const say = (settling: boolean) =>
+      renderToStaticMarkup(
+        createElement(
+          "div",
+          null,
+          sendRoundMessage({ status: "cart-changed" }, cart(), () => undefined, settling),
+        ),
+      );
+    expect(say(true)).toContain(
+      "Your table’s cart just changed, maybe because a round is being sent for your table. Wait a moment while this page checks.",
+    );
+    expect(say(true)).not.toMatch(/nothing was placed|couldn’t place/u);
+    expect(say(true)).toContain('role="status"');
+    expect(say(false)).toContain(
+      "Your table’s cart changed, so nothing was placed yet. Check it, then tap Place order.",
+    );
   });
 });
