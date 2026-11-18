@@ -269,7 +269,9 @@ async function followDatabaseClock(clientConfig) {
   try {
     const query = (sql) => client.query(sql);
     const quiet = () => undefined;
-    await alignProcessClockToDatabase(query, { report: quiet });
+    // Review (batch 32): no timer reading again later, as this connection ends below; each
+    // fixture measures again on its own database instead.
+    await alignProcessClockToDatabase(query, { report: quiet, resync: false });
     // Already following an earlier test's database: measure against this one.
     await synchronizeProcessClock(query, quiet);
   } finally {
