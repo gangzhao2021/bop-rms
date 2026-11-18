@@ -142,6 +142,42 @@ it("names a failed outbox consumer and the codes its error wraps (v15 2026-11-01
   expect(JSON.stringify(lines())).not.toContain("Sam");
 });
 
+it("names the check inside the kitchen's Ordering source read that stopped a delivery (v15 2026-11-17)", () => {
+  const lines = logged();
+  // As the kitchen delivery fails: its step, the Ordering source's plain answer, and what that
+  // answer keeps behind it (`bop.failure.cause`), down to the Order's own history read.
+  const history = Object.assign(new Error("order termination is unavailable"), {
+    code: "ORDER_TERMINATION_UNAVAILABLE",
+  });
+  const check = new Error("ORDER_ITEM_STATE_UNAVAILABLE", { cause: history });
+  const answer = Object.assign(new Error("order kitchen source is unavailable"), {
+    code: "ORDER_KITCHEN_SOURCE_DEPENDENCY_UNAVAILABLE",
+  });
+  Object.defineProperty(answer, Symbol.for("bop.failure.cause"), { value: check });
+  const step = Object.assign(new Error("KITCHEN_ORDER_SOURCE_UNAVAILABLE", { cause: answer }), {
+    code: "KITCHEN_ORDER_SOURCE_UNAVAILABLE",
+  });
+  reportUnexpected(
+    "OUTBOX_CONSUMER_FAILED",
+    Object.assign(new Error("CONSUMER_TEMPORARY_FAILURE", { cause: step }), {
+      code: "CONSUMER_TEMPORARY_FAILURE",
+    }),
+    { step: "OrderConfirmed", consumer: "kitchen.confirmed-order:v1" },
+  );
+  expect(lines().map(({ code, causes }) => ({ code, causes }))).toEqual([
+    {
+      code: "CONSUMER_TEMPORARY_FAILURE",
+      causes: [
+        "KITCHEN_ORDER_SOURCE_UNAVAILABLE",
+        "ORDER_KITCHEN_SOURCE_DEPENDENCY_UNAVAILABLE",
+        "ORDER_ITEM_STATE_UNAVAILABLE",
+        "ORDER_TERMINATION_UNAVAILABLE",
+      ],
+    },
+  ]);
+  expect(JSON.stringify(lines())).not.toContain("is unavailable");
+});
+
 it("names the Workflow rule from anywhere in the wrapped chain, never other text (2026-11-05)", () => {
   const lines = logged();
   // The order path as it fails: Ordering wraps Inventory, which wraps Workflow.

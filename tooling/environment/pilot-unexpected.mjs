@@ -89,12 +89,13 @@ export function reportUnexpected(event, error, context = {}) {
   const { code, codeMessage } = codeOf(error);
   const rule = ruleOf(error);
   // v15 2026-11-01: a wrapped error names the code of what it wraps (owner services rewrite
-  // their own failures generically), up to three levels; codes only.
+  // their own failures generically), up to four levels (batch 29: a kitchen delivery's own step,
+  // the Ordering source's answer, and the check inside it that stopped it); codes only.
   const causes = [];
   let deepest = error;
   for (
     let at = causeOf(error);
-    at !== undefined && at !== null && causes.length < 3;
+    at !== undefined && at !== null && causes.length < 4;
     at = causeOf(at)
   ) {
     causes.push(codeOf(at).code);
