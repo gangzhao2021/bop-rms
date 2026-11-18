@@ -269,9 +269,18 @@ function sourceMatchesReceipt(
   );
 }
 
+/**
+ * The round's Ordering source as it is when the kitchen takes it (`observedAt`, the kitchen's own
+ * clock), never as of its confirmation: by the time a confirmed round is consumed, the Order may
+ * already hold later facts (another round accepted or sent, a line taken off), and a read as of the
+ * earlier instant fails on them every time (v15 2026-11-17, batch 29: four paid rounds of one
+ * table never reached the kitchen because the next round's acceptance landed before the consumer
+ * ran). The source still proves this round's own confirmation and acceptance are the current ones.
+ */
 async function resolveSource(
   ports: KitchenTicketCreationPorts,
   receipt: ConfirmedOrderIntakeReceipt,
+  observedAt: string,
 ): Promise<ConfirmedOrderKitchenSourceEvidence> {
   let value: unknown;
   try {
@@ -284,7 +293,7 @@ async function resolveSource(
       sourceEventReference: parseOrderingReference(receipt.sourceEventReference),
       sourceAggregateVersion: receipt.sourceAggregateVersion,
       sourceSnapshotDigest: parseOrderingHash(receipt.sourceSnapshotDigest),
-      observedAt: parseOrderingInstant(receipt.confirmedAt),
+      observedAt: parseOrderingInstant(observedAt),
     });
   } catch (error) {
     return mapOrderingFailure(error);
@@ -1084,14 +1093,17 @@ export function createKitchenTicketCreationService(ports: KitchenTicketCreationP
         return result("AlreadyCreated", prior.effect);
       }
 
-      const source = await resolveSource(ports, receipt);
-      const planned = await resolvePlan(ports, receipt, source);
+      // The instant the kitchen takes the round: its Ordering source is read as of it, and the
+      // ticket is created at it. A clock behind the confirmation is retried, never read.
       let createdAt;
       try {
         createdAt = parseKitchenTicketInstant(await ports.clock.now());
       } catch {
         return dependency();
       }
+      if (Date.parse(createdAt) < Date.parse(receipt.confirmedAt)) return dependency();
+      const source = await resolveSource(ports, receipt, createdAt);
+      const planned = await resolvePlan(ports, receipt, source);
       if (
         Date.parse(createdAt) < Date.parse(receipt.confirmedAt) ||
         Date.parse(createdAt) < Date.parse(source.capturedAt) ||

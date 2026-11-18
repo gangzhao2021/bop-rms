@@ -447,6 +447,7 @@ const transaction: ConsumerTransaction = {
 };
 
 interface HarnessOptions {
+  readonly observeSourceQuery?: (query: unknown) => void;
   readonly hideFirstResolution?: boolean;
   readonly resolveConflict?: boolean;
   readonly resolveStatusFlip?: boolean;
@@ -476,7 +477,8 @@ function harness(inputReceipt: ConfirmedOrderIntakeReceipt, options: HarnessOpti
   const calls = { source: 0, plan: 0, clock: 0, resolve: 0, commit: 0 };
   const ports: KitchenTicketCreationPorts = {
     orderingSource: {
-      resolve: async () => {
+      resolve: async (query) => {
+        options.observeSourceQuery?.(query);
         calls.source += 1;
         const source = sourceFor(inputReceipt);
         return options.mutateSource?.(source) ?? source;
@@ -817,7 +819,8 @@ describe("WP-1401 Kitchen Ticket aggregate", () => {
           !String(error).includes("private"),
       );
       expect(test.durable(), scenario.name).toBeUndefined();
-      expect(test.calls.clock, scenario.name).toBe(0);
+      // The clock is read once, as the instant the kitchen takes the round (batch 29).
+      expect(test.calls.clock, scenario.name).toBe(1);
       expect(test.calls.commit, scenario.name).toBe(0);
       expect(planner.calls, scenario.name).toMatchObject(scenario.expected);
       expect(planner.calls.reference, scenario.name).toBe(0);
@@ -872,7 +875,8 @@ describe("WP-1401 Kitchen Ticket aggregate", () => {
     await expect(
       withProducerDigest.service.create({ receipt: input, transaction }),
     ).rejects.toSatisfy((error: unknown) => code(error) === "KITCHEN_TICKET_CONFLICT");
-    expect(withProducerDigest.calls.clock).toBe(0);
+    expect(withProducerDigest.calls.clock).toBe(1);
+    expect(withProducerDigest.calls.commit).toBe(0);
   });
 
   it("persists descriptor-safe Audit and minimal causally exact Outbox content with no note narrative", async () => {
@@ -1100,7 +1104,32 @@ describe("WP-1401 Kitchen Ticket aggregate", () => {
     }
   });
 
-  it("fails closed before plan/time/mutation for changed Ordering evidence", async () => {
+  it("reads the round's Ordering source as of the instant the kitchen takes it, not its confirmation", async () => {
+    // v15 2026-11-17 (batch 29): a later round's acceptance landed between this round's
+    // confirmation and the kitchen's delivery; read as of the confirmation, the Order's later facts
+    // failed the read on every retry, and four paid rounds never reached the kitchen.
+    const input = receipt();
+    const queries: unknown[] = [];
+    const test = harness(input, {
+      now: at.later,
+      observeSourceQuery: (query) => queries.push(query),
+    });
+    const created = await test.service.create({ receipt: input, transaction });
+    expect(created.status).toBe("Created");
+    expect(queries).toHaveLength(1);
+    expect((queries[0] as { observedAt: string }).observedAt).toBe(at.later);
+    expect(test.durable()?.ticket.createdAt).toBe(at.later);
+    expect(test.calls).toEqual({ source: 1, plan: 1, clock: 1, resolve: 1, commit: 1 });
+
+    // A kitchen clock behind the confirmation never reads the source; the delivery is retried.
+    const behind = harness(input, { now: at.captured });
+    await expect(behind.service.create({ receipt: input, transaction })).rejects.toSatisfy(
+      (error: unknown) => code(error) === "KITCHEN_TICKET_DEPENDENCY_UNAVAILABLE",
+    );
+    expect(behind.calls).toEqual({ source: 0, plan: 0, clock: 1, resolve: 1, commit: 0 });
+  });
+
+  it("fails closed before plan/mutation for changed Ordering evidence", async () => {
     const input = receipt();
     const test = harness(input, {
       mutateSource: (source) => ({ ...source, storeReference: id(300) }),
@@ -1108,11 +1137,11 @@ describe("WP-1401 Kitchen Ticket aggregate", () => {
     await expect(test.service.create({ receipt: input, transaction })).rejects.toSatisfy(
       (error: unknown) => code(error) === "KITCHEN_TICKET_CONFLICT",
     );
-    expect(test.calls).toEqual({ source: 1, plan: 0, clock: 0, resolve: 1, commit: 0 });
+    expect(test.calls).toEqual({ source: 1, plan: 0, clock: 1, resolve: 1, commit: 0 });
     expect(test.durable()).toBeUndefined();
   });
 
-  it("fails closed before time/mutation for missing, incomplete or changed plans", async () => {
+  it("fails closed before mutation for missing, incomplete or changed plans", async () => {
     const input = receipt();
     const cases = [
       harness(input, { mutatePlan: () => null }),
@@ -1125,7 +1154,7 @@ describe("WP-1401 Kitchen Ticket aggregate", () => {
       await expect(test.service.create({ receipt: input, transaction })).rejects.toBeInstanceOf(
         Error,
       );
-      expect(test.calls.clock).toBe(0);
+      expect(test.calls.clock).toBe(1);
       expect(test.calls.commit).toBe(0);
       expect(test.durable()).toBeUndefined();
     }
@@ -1139,7 +1168,7 @@ describe("WP-1401 Kitchen Ticket aggregate", () => {
     await expect(test.service.create({ receipt: input, transaction })).rejects.toSatisfy(
       (error: unknown) => code(error) === "KITCHEN_TICKET_CONFLICT",
     );
-    expect(test.calls.clock).toBe(0);
+    expect(test.calls.clock).toBe(1);
     expect(test.calls.commit).toBe(0);
   });
 
