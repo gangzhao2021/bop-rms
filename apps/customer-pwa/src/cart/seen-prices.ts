@@ -17,6 +17,11 @@ export interface SeenLinePrice {
   readonly amountMinor: bigint;
   readonly quantity: number;
   readonly currency: string;
+  /**
+   * WP-2423 batch 30: the Store priced the cart for this line at this price (a quote, or its own
+   * record of the cart's first price), rather than the page showing a menu price meanwhile.
+   */
+  readonly priced?: true;
 }
 
 export interface PricedLine {
@@ -99,6 +104,33 @@ export function recordStoreFirstPrices(cartReference: string, lines: readonly Pr
         amountMinor: line.amountMinor,
         quantity: line.quantity,
         currency: line.currency,
+        priced: true,
+      });
+}
+
+/**
+ * WP-2423 batch 30 (DEC-PRICE-HOLD rule 2): the quote on screen is the first price the Store put
+ * on these lines for this cart (it names no earlier one). Another phone at the table may have
+ * confirmed it before the menu changed: this phone is held that price although its menu, read
+ * since, shows the new one. What this guest is asked to pay is then the price the cart was first
+ * given, so a menu price the page showed only while the cart was being priced is not a change:
+ * the guest is told of a change only when what they saw differs from what they will pay. A price
+ * the Store already gave the line here, or one the guest accepted, is kept.
+ */
+export function recordHeldFirstPrices(cartReference: string, lines: readonly PricedLine[]): void {
+  const prices = cartPrices(cartReference);
+  const kept = accepted.get(cartReference);
+  for (const line of lines)
+    if (
+      valid(line) &&
+      kept?.has(line.cartItemReference) !== true &&
+      prices.get(line.cartItemReference)?.priced !== true
+    )
+      prices.set(line.cartItemReference, {
+        amountMinor: line.amountMinor,
+        quantity: line.quantity,
+        currency: line.currency,
+        priced: true,
       });
 }
 

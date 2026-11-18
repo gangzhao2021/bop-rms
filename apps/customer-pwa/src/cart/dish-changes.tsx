@@ -3,7 +3,11 @@ import { allergensForChoice, compactAllergenLine } from "../menu/menu-families.j
 import type { MenuView } from "../menu/types.js";
 import type { CheckoutQuote, DishRename } from "../checkout/types.js";
 import type { CartItemView } from "./types.js";
-import { recordStoreFirstPrices, type PricedLine } from "./seen-prices.js";
+import {
+  recordHeldFirstPrices as recordHeld,
+  recordStoreFirstPrices,
+  type PricedLine,
+} from "./seen-prices.js";
 
 /**
  * WP-2423 price-hold-dish-changes (DEC-PRICE-HOLD §3): a dish the restaurant renamed, or whose
@@ -87,6 +91,29 @@ export function recordFirstPricedLines(
     currency: line.subtotal.currency,
   }));
   if (lines.length > 0) recordStoreFirstPrices(cartReference, lines);
+}
+
+/**
+ * WP-2423 batch 30: the lines the quote on screen is the cart's first price for (the Store names no
+ * earlier one, `sinceAdded` lists them not): that price is what the guest pays for them, so a menu
+ * price shown only while the cart was being priced is not said as a change. Only for a quote that
+ * says what came before (a server that answers `sinceAdded`).
+ */
+export function recordHeldFirstPrices(
+  cartReference: string,
+  quote: Pick<CheckoutQuote, "lines" | "sinceAdded"> | null,
+): void {
+  if (quote === null || !Array.isArray(quote.sinceAdded) || quote.lines === undefined) return;
+  const earlier = new Set(quote.sinceAdded.map((line) => line.cartItemReference));
+  const lines: PricedLine[] = quote.lines
+    .filter((line) => !earlier.has(line.cartItemReference))
+    .map((line) => ({
+      cartItemReference: line.cartItemReference,
+      quantity: line.quantity,
+      amountMinor: BigInt(line.subtotal.amountMinor),
+      currency: line.subtotal.currency,
+    }));
+  if (lines.length > 0) recordHeld(cartReference, lines);
 }
 
 /** Whether a menu language is the one the guest reads the menu in. */

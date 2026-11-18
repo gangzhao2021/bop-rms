@@ -80,6 +80,7 @@ import {
   hasDishChanges,
   quoteDishChanges,
   recordFirstPricedLines,
+  recordHeldFirstPrices,
 } from "./dish-changes.js";
 import type { CheckoutQuote } from "../checkout/types.js";
 import { createCheckoutClient } from "../checkout/checkout-client.js";
@@ -890,6 +891,7 @@ function cartScreenPrices(
   shown: CheckoutQuote | null,
 ): ReadonlyMap<string, CartLinePrice | null> {
   recordFirstPricedLines(cart.cartReference, shown);
+  recordHeldFirstPrices(cart.cartReference, shown);
   if (shown?.lines !== undefined && shown.lines.length === cart.items.length)
     return new Map(
       shown.lines.map((line) => [

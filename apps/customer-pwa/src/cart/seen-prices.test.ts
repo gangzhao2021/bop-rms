@@ -3,6 +3,8 @@ import {
   acceptSeenPrices,
   clearSeenPrices,
   recordFirstSeenPrices,
+  recordHeldFirstPrices,
+  recordStoreFirstPrices,
   seenPriceChanges,
 } from "./seen-prices.js";
 
@@ -54,4 +56,26 @@ it("WP-2423 M74: a decrease is listed too; a line never seen, another cart or cu
       { ...line(100n), cartItemReference: "018f7a00-0000-7000-8000-00000000000a" },
     ]),
   ).toEqual([]);
+});
+
+it("WP-2423 batch 30: the price a table's cart was first given replaces a menu price shown meanwhile, never a priced or accepted one", () => {
+  // Phone B showed the menu's $13.00 while the Store priced the cart; it holds $12.50 (phone A).
+  recordFirstSeenPrices(cart, [line(1300n)]);
+  recordHeldFirstPrices(cart, [line(1250n)]);
+  expect(seenPriceChanges(cart, [line(1250n)])).toEqual([]);
+  // Once given, a later first-price answer does not move it: a real rise is still said.
+  recordHeldFirstPrices(cart, [line(1300n)]);
+  expect(seenPriceChanges(cart, [line(1300n)])).toMatchObject([
+    { beforeMinor: 1250n, afterMinor: 1300n, direction: "up" },
+  ]);
+  // The Store's record of an earlier first price is kept too.
+  clearSeenPrices();
+  recordStoreFirstPrices(cart, [line(1000n)]);
+  recordHeldFirstPrices(cart, [line(1050n)]);
+  expect(seenPriceChanges(cart, [line(1050n)])).toMatchObject([{ direction: "up" }]);
+  // A price the guest accepted here stays what they saw.
+  clearSeenPrices();
+  acceptSeenPrices(cart, [line(1100n)]);
+  recordHeldFirstPrices(cart, [line(1050n)]);
+  expect(seenPriceChanges(cart, [line(1050n)])).toMatchObject([{ direction: "down" }]);
 });

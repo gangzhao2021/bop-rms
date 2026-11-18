@@ -28,7 +28,7 @@ interface Dish {
   nameZh?: string;
 }
 
-function menu(dish: Dish) {
+function menu(dish: Dish, locale = "en-CA") {
   const at = new Date().toISOString();
   return {
     status: "Found",
@@ -54,7 +54,7 @@ function menu(dish: Dish) {
       menuReference: id(41),
       menuVersionReference: id(42),
       releaseReference: id(43),
-      locale: "en-CA",
+      locale,
       name: "Synthetic menu",
       effectiveFrom: at,
       effectiveUntil: null,
@@ -111,6 +111,13 @@ interface Table {
   soldOut: boolean;
   /** The subtotal of the quote the checkout (the round) was started on. */
   sessionSubtotal: bigint | null;
+  /**
+   * WP-2423 batch 30: another phone at the table confirmed this subtotal and the Store holds it
+   * for the cart (DEC-PRICE-HOLD rule 2): every quote answers it, as the cart's first quote.
+   */
+  heldByOtherPhone?: bigint;
+  /** Batch 30: the quote is answered only once this resolves (the menu is on screen first). */
+  quoteGate?: Promise<void>;
 }
 
 async function stubTable(page: Page, timing: "PayLater" | "PayFirst", dish: Dish) {
@@ -164,7 +171,11 @@ async function stubTable(page: Page, timing: "PayLater" | "PayFirst", dish: Dish
     }),
   );
   await page.route(`**/api/v1/public/stores/${publicStore}/menu**`, (route) =>
-    route.fulfill({ status: 200, json: menu(table.dish) }),
+    route.fulfill({
+      status: 200,
+      // The menu in the language the page asks for (batch 30: a Chinese reader sees its prices).
+      json: menu(table.dish, new URL(route.request().url()).searchParams.get("locale") ?? "en-CA"),
+    }),
   );
   await page.route(/\/bff\/customer\/cart(?:\?.*)?$/u, (route) =>
     route.fulfill({
@@ -198,8 +209,45 @@ async function stubTable(page: Page, timing: "PayLater" | "PayFirst", dish: Dish
       },
     }),
   );
-  await page.route("**/api/v1/carts/*/quote", (route) => {
+  await page.route("**/api/v1/carts/*/quote", async (route) => {
     table.quotes += 1;
+    if (table.quoteGate !== undefined) await table.quoteGate;
+    // Batch 30: the quote another phone confirmed, answered to this phone too. It is the cart's
+    // first quote for the line, so the Store names no earlier price (sinceAdded is empty).
+    if (table.heldByOtherPhone !== undefined) {
+      const subtotal = table.heldByOtherPhone;
+      const tax = (subtotal * 13n + 50n) / 100n;
+      issued.set(id(99), subtotal);
+      return route.fulfill({
+        status: 200,
+        json: {
+          schemaVersion: 1,
+          quote: {
+            quoteReference: id(99),
+            quoteVersion: 2,
+            cartVersion: 3,
+            currency: "CAD",
+            subtotal: { amountMinor: String(subtotal), currency: "CAD" },
+            discount: { amountMinor: "0", currency: "CAD" },
+            tax: { amountMinor: String(tax), currency: "CAD" },
+            fee: { amountMinor: "0", currency: "CAD" },
+            total: { amountMinor: String(subtotal + tax), currency: "CAD" },
+            expiresAt,
+            warnings: [],
+            blockingReasons: [],
+            lines: [
+              {
+                cartItemReference: id(2),
+                quantity: 2,
+                subtotal: { amountMinor: String(subtotal), currency: "CAD" },
+              },
+            ],
+            sinceAdded: [],
+            priceChange: null,
+          },
+        },
+      });
+    }
     // As on v15: staff marked the dish "Sold out today" while the guest was at checkout.
     if (table.soldOut)
       return route.fulfill({
@@ -525,6 +573,56 @@ for (const screen of [
       expect(table.sent).toBe(1);
       expect(failures).toEqual([]);
     });
+
+    for (const language of ["en", "zh-Hans"] as const)
+      test(`batch 30: a second phone at a table whose price is held is told of no price change (${language})`, async ({
+        page,
+      }) => {
+        const zh = language === "zh-Hans";
+        if (zh)
+          await page.addInitScript(() => localStorage.setItem("bop.customer.language", "zh-Hans"));
+        const failures: string[] = [];
+        page.on("pageerror", () => failures.push("page error"));
+        // Phone A confirmed 2 × $12.50; the owner then listed $13.00. This phone (B) opens the
+        // shared cart: its menu says $13.00, the Store holds $12.50 for the cart.
+        const table = await stubTable(page, "PayLater", {
+          name: "Synthetic noodles",
+          priceDollars: "13.00",
+          mayContain: [],
+        });
+        let release: () => void = () => undefined;
+        table.quoteGate = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        table.heldByOtherPhone = 2500n;
+        await openAtTable(page, "/cart");
+        const main = page.getByRole("main");
+        // The menu's price is on screen while the Store is still answering the cart's price.
+        await expect(main.getByText("$26.00", { exact: true }).first()).toBeVisible();
+        await expect.poll(() => table.quotes).toBe(1);
+        release();
+        // What this phone pays is the held price, and it is told of no change it never had.
+        await expect(main.getByText("$25.00", { exact: true }).first()).toBeVisible();
+        await expect(main.locator(".cart-price-changes")).toHaveCount(0);
+        await expect(
+          page.getByText(
+            zh ? "以下菜品在你加入后改了价：" : "Prices changed since you added these:",
+          ),
+        ).toHaveCount(0);
+        const place = main.getByRole("button", { name: zh ? "下单" : "Place order", exact: true });
+        await expect(place).toBeEnabled();
+        await noSideScroll(page);
+        await expectNoInternalText(page);
+        if (process.env.B30_SHOTS)
+          await page.screenshot({
+            path: `${process.env.B30_SHOTS}/price-hold-second-phone-${language}-${String(screen.width)}.png`,
+            fullPage: true,
+          });
+        await place.click();
+        await expect(page).toHaveURL(/\/dine-in\/session$/u);
+        expect(table.sessionSubtotal).toBe(2500n);
+        expect(failures).toEqual([]);
+      });
 
     test("a price cut listed while the table cart is open is what the round is placed at", async ({
       page,
