@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { notPausedServiceControl } from "./service-control-state";
 
 /**
@@ -137,6 +137,14 @@ async function mockBoard(
   );
   return { taps, items, setItems: (next: readonly ReturnType<typeof dish>[]) => (items = next) };
 }
+/**
+ * Where a ticket sits on the page (not in the window). A click scrolls a button that is not wholly
+ * in view into it; that scroll moves the window, not the ticket under the cook's finger (CI
+ * 9094ba5d: on the Linux runner the Finished button ended below a 844 px phone, the click scrolled
+ * 20 px and a window position read as a 20 px move).
+ */
+const pageYOf = (locator: Locator) =>
+  locator.evaluate((element) => element.getBoundingClientRect().y + window.scrollY);
 const holdMs = 5_000;
 /** kitchenSlotSettleMs: a ticket ignores taps this long after it moved. */
 const slotSettleMs = 600;
@@ -736,19 +744,19 @@ for (const when of ["soon", "late"] as const)
     await page.addStyleTag({ content: "body { letter-spacing: 0.08em; }" });
     const ticket = page.locator(".kitchen-ticket").filter({ hasText: "TEST latte" });
     await expect(ticket).toBeVisible();
-    const start = (await ticket.boundingBox())?.y;
+    const start = await pageYOf(ticket);
     if (when === "late") {
       await page.waitForTimeout(slotSettleMs);
-      expect((await ticket.boundingBox())?.y).toBe(start);
+      expect(await pageYOf(ticket)).toBe(start);
       await page.screenshot({ path: "test-results/kitchen-recent-finished-390-before.png" });
       answer();
     }
     await expect(page.getByText("Recently finished · 1")).toBeVisible();
-    expect((await ticket.boundingBox())?.y).toBe(start);
+    expect(await pageYOf(ticket)).toBe(start);
     // A tap right after is taken: nothing moved, so nothing is ignored.
     await ticket.locator(".kitchen-ticket__next").click();
     await expect(ticket.locator(".kitchen-ticket__top")).toContainText("Marked done");
-    expect((await ticket.boundingBox())?.y).toBe(start);
+    expect(await pageYOf(ticket)).toBe(start);
     await expect.poll(() => taps.length, { timeout: holdMs + 3_000 }).toBe(1);
     expect(
       await page.evaluate(
@@ -785,7 +793,7 @@ for (const delayMs of [1_500, 3_000] as const)
     await page.addStyleTag({ content: "body { letter-spacing: 0.08em; }" });
     const ticket = page.locator(".kitchen-ticket").filter({ hasText: "TEST latte" });
     await expect(ticket).toBeVisible();
-    const start = (await ticket.boundingBox())?.y;
+    const start = await pageYOf(ticket);
     // Its place is kept while it has not answered: hidden, and out of reach of keyboard and taps.
     if (delayMs === 3_000) {
       const kept = page.locator('.pause-ordering[data-place-kept="true"]');
@@ -795,7 +803,7 @@ for (const delayMs of [1_500, 3_000] as const)
     }
     const pause = page.getByRole("button", { name: "Pause ordering" });
     await expect(pause).toBeVisible({ timeout: delayMs + 3_000 });
-    expect((await ticket.boundingBox())?.y).toBe(start);
+    expect(await pageYOf(ticket)).toBe(start);
     await ticket.locator(".kitchen-ticket__next").click();
     await expect(ticket.locator(".kitchen-ticket__top")).toContainText("Marked done");
     await expect.poll(() => taps.length, { timeout: holdMs + 3_000 }).toBe(1);
