@@ -1783,7 +1783,7 @@ function TablePanel({
               orderReference={round.orderReference}
               orderBatchReference={round.orderBatchReference}
               roundNumber={round.roundNumber}
-              orderLabel={"table " + table.stableLabel}
+              orderLabel={t("table {stableLabel}", { stableLabel: table.stableLabel })}
               csrf={csrf}
               paymentUnconfirmed={isPaymentUnconfirmed(round.payBy, now)}
               onSettled={onChanged}

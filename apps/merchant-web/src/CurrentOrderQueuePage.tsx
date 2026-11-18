@@ -5456,7 +5456,7 @@ export function CurrentOrderQueuePage({
                       orderReference={order.orderReference}
                       orderBatchReference={batch.orderBatchReference}
                       roundNumber={batch.sequence}
-                      orderLabel={"order " + order.orderNumber}
+                      orderLabel={t("order {orderNumber}", { orderNumber: order.orderNumber })}
                       csrf={csrf}
                       fetcher={fetcher}
                       cardMachine={batch.staffRound != null}

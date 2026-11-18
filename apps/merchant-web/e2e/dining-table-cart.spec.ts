@@ -12,7 +12,7 @@ const id = (n: number) => "0190996b-0000-7000-8000-" + n.toString(16).padStart(1
 const headers = { "cache-control": "no-store" };
 const csrf = "b".repeat(43);
 
-async function openTable(page: Page) {
+async function openTable(page: Page, paymentTiming: "PayFirst" | "PayLater" = "PayFirst") {
   const scope = {
     brandLabel: "Synthetic Brand",
     storeLabel: "Synthetic Store",
@@ -64,7 +64,7 @@ async function openTable(page: Page) {
             currentDiningSessionReference: id(2),
             elapsedMinutes: 40,
             qrCodeValidUntil: "2027-04-12T13:00:00.000Z",
-            paymentTiming: "PayFirst",
+            paymentTiming,
             session: { phase: "Active", version: 3, orderReference: null },
             staffRoundsAwaitingPayment: [],
           },
@@ -236,6 +236,57 @@ test("@production while a guest is paying, staff can't take dishes out and are t
   await panel.screenshot({ path: "test-results/table-cart-paying-390.png" });
   expect(sent.every((body) => body.action === "Read")).toBe(true);
 });
+
+// WP-2423 batch 29: at a table that pays at the end nobody pays for a round; a phone holding the
+// cart is sending these dishes, and staff are told so in their language.
+for (const lang of ["en", "zh-Hans"] as const)
+  test(`@production pay at the end: a phone holding the cart is sending it, never paying (${lang})`, async ({
+    page,
+  }) => {
+    if (lang === "zh-Hans")
+      await page.addInitScript(() => {
+        window.localStorage.setItem("bop.merchant.language", "zh-Hans");
+      });
+    await openTable(page, "PayLater");
+    await page.route("**/merchant/dining/sessions/table-cart", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          cart: {
+            cartReference: id(3),
+            cartVersion: 4,
+            guestPaying: true,
+            lines: [line(21, { "en-CA": "Mapo tofu", "zh-Hans-CA": "麻婆豆腐" })],
+          },
+        },
+      }),
+    );
+    await page.goto("/operations/dining");
+    await page
+      .getByRole("button", { name: lang === "en" ? "Select T6" : "选择 T6", exact: true })
+      .click();
+    await page.locator("details.table-panel__manage").evaluate((node) => {
+      (node as HTMLDetailsElement).open = true;
+    });
+    const panel = page.getByRole("region", {
+      name: lang === "en" ? "In the cart (not ordered yet)" : "购物车（还没下单）",
+    });
+    await expect(panel.getByRole("note")).toHaveText(
+      lang === "en"
+        ? "A guest is sending these dishes from their phone now."
+        : "客人正在用手机送出这些菜。",
+    );
+    await expect(panel).not.toContainText(lang === "en" ? "paying" : "付款");
+    const shots = process.env.B29_SHOTS ?? "test-results/b29-shots";
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      await panel.scrollIntoViewIfNeeded();
+      await page.screenshot({ path: `${shots}/table-cart-pay-at-end-${lang}-${width}.png` });
+    }
+  });
 
 // v15 batch 7 (DEC-DINING-PAY-CHOICE-STAFF-REMOVAL): phone 1 chose which dishes it pays and hasn't
 // paid. Staff see who is choosing and until when, and may still take a dish out; that ends the

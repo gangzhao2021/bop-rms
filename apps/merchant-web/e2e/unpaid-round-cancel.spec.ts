@@ -130,3 +130,118 @@ test("@production WP-2423: a manager cancels an unpaid dine-in round from the Or
   ]);
   await page.screenshot({ path: "test-results/orders-unpaid-round-cancelled.png", fullPage: true });
 });
+
+// WP-2423 batch 29: a staff round paid on the card machine nobody recorded. Its cancel dialog is
+// about the card machine (refund it on the machine), never the guest's card provider.
+for (const lang of ["en", "zh-Hans"] as const)
+  test(`@production a staff card-machine round's cancel dialog is worded for the machine (${lang})`, async ({
+    page,
+  }) => {
+    const zh = lang === "zh-Hans";
+    if (zh)
+      await page.addInitScript(() => {
+        window.localStorage.setItem("bop.merchant.language", "zh-Hans");
+      });
+    const id = (n: number) => "0190996a-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+    const scope = {
+      brandLabel: "Synthetic Brand",
+      storeLabel: "Synthetic Store",
+      storeReference: id(99),
+    };
+    const headers = { "cache-control": "no-store" };
+    await page.route("**/merchant/session", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          authenticated: true,
+          csrf: "a".repeat(43),
+          workspace: {
+            screenId: "HOME-OVERVIEW",
+            selectedScope: { ...scope, timeZone: "America/Toronto" },
+            authorizedStores: [scope],
+            businessDate: "2026-10-16",
+            storeStatus: "Open",
+            freshness: "Current",
+            dashboardAvailability: "UnavailableUntilWP1905",
+            navigation: [
+              {
+                screenId: "OPS-ORDER-QUEUE",
+                label: "Orders",
+                href: "/operations/orders",
+                permission: "ordering.operate",
+              },
+            ],
+          },
+        },
+      }),
+    );
+    // Past its time to pay, long enough that a guest's card payment would count as unconfirmed.
+    const cancelsAt = new Date(Date.now() - 10 * 60_000).toISOString();
+    const order = {
+      orderReference: id(1),
+      orderNumber: "2",
+      orderType: "DineIn",
+      sourceChannel: "Qr",
+      submittedAt: new Date(Date.now() - 40 * 60_000).toISOString(),
+      observedAt: new Date().toISOString(),
+      initialBatchReference: id(2),
+      batches: [
+        {
+          orderBatchReference: id(2),
+          sequence: 1,
+          acceptanceStatus: "NotAccepted",
+          canRequestAcceptance: false,
+          canCancel: false,
+          staffCancellation: null,
+          canCancelItems: false,
+          canCancelUnpaid: true,
+          paymentDue: { status: "Awaiting", cancelsAt },
+          staffRound: {
+            recordedAfterOutage: false,
+            paidOnCardMachine: null,
+            amountDueMinor: "735",
+          },
+        },
+      ],
+      canRequestAcceptance: false,
+      currentPhase: "Submitted",
+      currentVersion: 1,
+      unfulfillable: null,
+      pickupNotCollected: false,
+      acceptBy: null,
+      awaitingPayment: true,
+    };
+    await page.route("**/merchant/orders?*", (route) => route.fallback());
+    await page.route("**/merchant/orders", (route) =>
+      route.fulfill({ headers, json: { items: [order], nextAfterOrderReference: null } }),
+    );
+    await page.goto("/operations/orders");
+    const heading = page.getByRole("heading", { name: "2", exact: true });
+    await expect(heading).toBeVisible();
+    const open = page.getByRole("button", {
+      name: zh ? "取消未付款的第 1 轮" : "Cancel unpaid round 1",
+    });
+    if (!(await open.isVisible())) await heading.click();
+    await open.click();
+    // The order is named in the page's language (it read "取消 order 2 未付款…" in Chinese).
+    const dialog = page.getByRole("dialog", {
+      name: zh ? "订单 2：取消未付款的第 1 轮？" : "Cancel unpaid round 1 of order 2?",
+    });
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText(
+      zh
+        ? "这一轮是店员录入的，还没有人记录它的刷卡机收款。"
+        : "This round was entered by staff, and nobody recorded its card-machine payment.",
+    );
+    await expect(dialog).toContainText(zh ? "请在刷卡机上退款" : "refund it on the machine");
+    await expect(dialog).not.toContainText(zh ? "发卡方" : "card provider");
+    await expectNoInternalText(page);
+    const shots = process.env.B29_SHOTS ?? "test-results/b29-shots";
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      await page.screenshot({ path: `${shots}/cancel-card-machine-round-${lang}-${width}.png` });
+    }
+  });

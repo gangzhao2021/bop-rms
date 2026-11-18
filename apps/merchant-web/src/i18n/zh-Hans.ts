@@ -1173,8 +1173,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Cancel round {sequence} of order {orderNumber}": "取消订单 {orderNumber} 的第 {sequence} 轮",
   "Cancel the round and refund": "取消这一轮并退款",
   "Cancel unpaid round {roundNumber}": "取消未付款的第 {roundNumber} 轮",
+  "order {orderNumber}": "订单 {orderNumber}",
+  "table {stableLabel}": "{stableLabel} 桌",
   "Cancel unpaid round {roundNumber} of {orderLabel}?":
-    "取消{orderLabel}未付款的第 {roundNumber} 轮？",
+    "{orderLabel}：取消未付款的第 {roundNumber} 轮？",
   "Cancel {count} items and refund": "取消 {count} 项并退款",
   "Cancel {length} rounds and refund": "取消 {length} 轮并退款",
   Cancelled: "已取消",
