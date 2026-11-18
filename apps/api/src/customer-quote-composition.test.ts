@@ -324,6 +324,18 @@ describe("authorized Quote HTTP bridge", () => {
       expect(f.attach).toHaveBeenCalledTimes(2);
     },
   );
+  it.each([
+    ["CART_VERSION_CONFLICT", { status: "VersionConflict" }],
+    ["CART_TABLE_CHECKING_OUT", { status: "TableCheckingOut" }],
+  ] as const)(
+    "WP-2423 batch 29: a cart that moved on while its price was read back (%s) is a plain conflict, never an outage",
+    async (code, answer) => {
+      const f = fixture();
+      f.attach.mockResolvedValueOnce({ status: "Attached", attachment: f.attachment });
+      f.attach.mockRejectedValueOnce(new Ordering.CartError(code));
+      expect(await f.port.quoteCart(f.input)).toEqual(answer);
+    },
+  );
   it.each(["revoked", "changed"])(
     "preserves uncertainty when final authorization is %s",
     async (kind) => {

@@ -338,6 +338,11 @@ export function createConfiguredCartQuoteService(ports: ConfiguredCartQuotePorts
             latest.brandReference === cart.brandReference &&
             latest.storeReference === cart.storeReference &&
             latest.cartVersion === expectedCartVersion &&
+            // WP-2423 batch 29: a held price is this participant's own. The checkout's details and
+            // session take only the Quote the paying participant attached, so another phone at
+            // the table (or a staff round's table guest) handed someone else's was refused
+            // (CART_QUOTE_INVALID) until the hold ended; it prices the Cart for itself instead.
+            String(latest.guestSessionReference) === String(first.session.sessionReference) &&
             latest.attachedAt >= cart.updatedAt &&
             now() < latest.quoteExpiresAt &&
             latest.lines.length === cart.items.length &&

@@ -54,3 +54,10 @@ v15 实测发现四处与上面决定不符，按真实门店定下：
 - 文案：`apps/customer-pwa/src/journey/messages.ts`、`zh-Hans.ts`、`CartPage.tsx`、`CheckoutPage.tsx`。
 - 菜的内容比较（第 10、12 条）：`packages/rms/catalog/src/infrastructure/persistence/published-menu-query-store.ts`（`listPublishedDishChanges`）、`current-selection-facts-store.ts`（`dishChanges`）；栅栏在 `configured-cart-quote-service.ts`、`configured-checkout-validation-service.ts`、`order-submission-source.ts`。降价（第 11 条）：`configured-cart-quote-service.ts`（`pricing.estimate`）、`customer-configured-quote-composition.ts`；客人端第二次点按 `send-round.ts`。第一次报价（第 12 条）：`cart-quote-store.ts`（`createPostgresCartLineFirstQuoteReader`）、`customer-configured-quote-composition.ts`（`sinceAdded`）、`customer-quote.ts`；客人端 `dish-changes.tsx`、`seen-prices.ts`、`CartPage.tsx`、`CheckoutPage.tsx`。验收 `packages/database/test/price-hold-dish-changes-acceptance.test.mjs`（受限角色：改名、改过敏原、降价、保留期后列出第一次的价格），浏览器 `apps/customer-pwa/e2e/price-hold-dish-changes.spec.ts`（390/1024/1440）。
 - 验收：`packages/database/test/price-hold-acceptance.test.mjs`（受限角色：后付桌保留期内改价、保留期后改价、重放；先付桌结账后、付款前改价上架，订单和应付金额按确认价到分）；`listing-crosses-open-cart-acceptance.test.mjs`（结账开始后、送单前上架，直接送出、只送一次）。
+
+## 批次 29 修正：保留价只属于报价的那个参与者
+
+同桌另一部手机（或店员一轮的桌边客人）在保留期内对同一购物车版本再报价，原来直接拿到第一部手机的报价；
+但结账详情和结账只接受付款这一方自己挂接的报价，于是被拒（`CART_QUOTE_INVALID`），保留期 5 分钟内反复要求重新报价，
+店员单独送出这道菜时答 503。现在保留价只对报价的那个参与者有效，别的参与者按现在的价格为自己报价（结账前照常看到总价）。
+比第 2 条“同桌别的手机返回原报价”窄；触发重审：门店反映同桌两部手机看到的价格不同。

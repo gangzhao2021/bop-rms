@@ -330,3 +330,199 @@ it("a staff member signs out mid-round: their round ends its own turn and the ne
     }
   });
 });
+
+/** The table's cart as a phone at it reads it: its unsent lines. */
+async function tableCartLines(store, guests, phone) {
+  const cart = await guests.selectCart(phone, {
+    operationReference: store.reference(),
+    requestedAt: store.now(),
+  });
+  assert.equal(cart.status, "Selected");
+  return cart;
+}
+
+/** Rounds of the table's Order that never reached the kitchen (no pay-later confirmation). */
+async function roundsNotSentToKitchen(admin, store) {
+  return Number(
+    (
+      await admin.query(
+        `SELECT count(*)::int AS n FROM rms_ordering.order_batch b
+         WHERE b.store_id=$1 AND NOT EXISTS (
+           SELECT 1 FROM rms_ordering.order_pay_later_confirmation c WHERE c.order_batch_id=b.order_batch_id)`,
+        [store.scope.storeReference],
+      )
+    ).rows[0].n,
+  );
+}
+
+it("pay-at-end: a staff member signs out once their round's checkout started; the round takes its own dish back out, the next round goes at once, and a dish left alone sends", async () => {
+  await withIsolatedDatabase({ caseId: "wp2423_race_so_left" }, async (context) => {
+    const admin = new Client(context.clientConfig);
+    await admin.connect();
+    vi.stubEnv("NODE_ENV", "development");
+    const api = await createPilotApiRole(admin, context, "wp2423_rsl");
+    let store = null;
+    const unexpected = watchUnexpected();
+    try {
+      store = await prepareRealStaffRoundStore({ admin, context, api, paymentTiming: "PayLater" });
+      const { soup, reference, now } = store;
+      const host = await store.staff(id(0x750), roundPermissions);
+      const leaving = await store.staff(id(0x751), roundPermissions);
+      const next = await store.staff(id(0x752), roundPermissions);
+      const hostCounter = await store.counterFor(host);
+      const guests = hostCounter.tableGuestPipeline;
+      const round = (counter, who, includeTableCart = null, lines = 1) =>
+        answerOf(() =>
+          counter.staffDiningRound({
+            sessionCookie: who.sessionCookie,
+            csrf: who.csrf,
+            command: {
+              ...roundCommand(store, lines),
+              ...(includeTableCart === null ? {} : { includeTableCart }),
+            },
+          }),
+        );
+      assert.equal((await round(hostCounter, host)).status, "Placed");
+      const phone = await joinPhone(store, guests, {
+        sessionCookie: host.sessionCookie,
+        csrf: host.csrf,
+      });
+
+      // (1) The leaving member's round: they sign out in another tab just after its checkout
+      // started (the live 450-600 ms case). Refused as signed out, and its soup is not left in the
+      // table's cart as someone else's dish.
+      const signedOutCounter = await store.counterFor(leaving, {
+        decorateStaffRoundPipeline: (real) => ({
+          ...real,
+          startCheckout: async (...values) => {
+            const started = await real.startCheckout(...values);
+            await signOut(store, leaving);
+            return started;
+          },
+        }),
+      });
+      const refused = await round(signedOutCounter, leaving);
+      assert.deepEqual(refused, { status: "Refused", code: "STAFF_ROUND_PERMISSION_DENIED" });
+      const after = await tableCartLines(store, guests, phone);
+      assert.deepEqual(after.pendingItems, [], "the signed-out member's soup came back out");
+      // The next staff member's round goes at once, never refused for a leftover dish.
+      const placed = await round(await store.counterFor(next), next);
+      assert.equal(placed.status, "Placed", JSON.stringify(placed));
+
+      // (2) A dish a phone added and priced (the phone's cart page quoted it) is sent by staff on
+      // its own (no dish of theirs): placed, never a 503.
+      const cart = await tableCartLines(store, guests, phone);
+      const added = await guests.addItem(phone, {
+        operationReference: reference(),
+        cartReference: cart.cartReference,
+        expectedCartVersion: cart.cartVersion,
+        sellableReference: soup.skuReference,
+        quantity: 1,
+        optionSelections: [],
+        customerNote: null,
+        requestedAt: now(),
+      });
+      assert.equal(added.status, "Applied");
+      const priced = await guests.quote(phone, {
+        operationReference: reference(),
+        cartReference: cart.cartReference,
+        cartVersion: added.cartVersion,
+        requestedAt: now(),
+      });
+      assert.equal(priced.status, "Quoted");
+      const seen = await tableCartLines(store, guests, phone);
+      const alone = await round(
+        await store.counterFor(next),
+        next,
+        {
+          expectedCartVersion: seen.cartVersion,
+          lines: seen.pendingItems.map((item) => ({
+            cartItemReference: item.cartItemReference,
+            decision: "Send",
+          })),
+        },
+        0,
+      );
+      assert.equal(alone.status, "Placed", JSON.stringify(alone));
+      assert.deepEqual((await tableCartLines(store, guests, phone)).pendingItems, []);
+      assert.equal(await roundsNotSentToKitchen(admin, store), 0);
+      assert.deepEqual(
+        unexpected.lines.filter((line) => /"level":50/u.test(line)),
+        [],
+        "nothing unexpected was logged",
+      );
+    } finally {
+      unexpected.restore();
+      vi.unstubAllEnvs();
+      if (store !== null) await store.close();
+      for (const name of [api, api + "_w"]) {
+        await admin.query("DROP OWNED BY " + name).catch(() => undefined);
+        await admin.query("DROP ROLE " + name).catch(() => undefined);
+      }
+      await admin.end();
+    }
+  });
+});
+
+it("pay-at-end: a staff member signs out just after their round was submitted; it still reaches the kitchen and is answered as placed", async () => {
+  await withIsolatedDatabase({ caseId: "wp2423_race_so_sub" }, async (context) => {
+    const admin = new Client(context.clientConfig);
+    await admin.connect();
+    vi.stubEnv("NODE_ENV", "development");
+    const api = await createPilotApiRole(admin, context, "wp2423_rss");
+    let store = null;
+    const unexpected = watchUnexpected();
+    try {
+      store = await prepareRealStaffRoundStore({ admin, context, api, paymentTiming: "PayLater" });
+      const host = await store.staff(id(0x760), roundPermissions);
+      const leaving = await store.staff(id(0x761), roundPermissions);
+      const round = (counter, who) =>
+        answerOf(() =>
+          counter.staffDiningRound({
+            sessionCookie: who.sessionCookie,
+            csrf: who.csrf,
+            command: roundCommand(store),
+          }),
+        );
+      assert.equal((await round(await store.counterFor(host), host)).status, "Placed");
+      const signedOutCounter = await store.counterFor(leaving, {
+        decorateStaffRoundPipeline: (real) => ({
+          ...real,
+          submitPayLater: async (...values) => {
+            const submitted = await real.submitPayLater(...values);
+            await signOut(store, leaving);
+            return submitted;
+          },
+        }),
+      });
+      const answer = await round(signedOutCounter, leaving);
+      assert.equal(answer.status, "Placed", JSON.stringify(answer));
+      assert.equal(answer.value.payLater, true);
+      // Both rounds were sent to the kitchen: none is left submitted but never cooked.
+      assert.equal(await roundsNotSentToKitchen(admin, store), 0);
+      const ended = (
+        await admin.query(
+          `SELECT e.outcome FROM rms_ordering.staff_dining_round_table_turn t
+           LEFT JOIN rms_ordering.staff_dining_round_table_turn_end e ON e.turn_id=t.turn_id
+           WHERE t.actor_id=$1`,
+          [id(0x761)],
+        )
+      ).rows;
+      assert.deepEqual(ended, [{ outcome: "Placed" }]);
+      assert.deepEqual(
+        unexpected.lines.filter((line) => /"level":50/u.test(line)),
+        [],
+        "nothing unexpected was logged",
+      );
+    } finally {
+      unexpected.restore();
+      vi.unstubAllEnvs();
+      if (store !== null) await store.close();
+      for (const name of [api, api + "_w"]) {
+        await admin.query("DROP OWNED BY " + name).catch(() => undefined);
+        await admin.query("DROP ROLE " + name).catch(() => undefined);
+      }
+      await admin.end();
+    }
+  });
+});

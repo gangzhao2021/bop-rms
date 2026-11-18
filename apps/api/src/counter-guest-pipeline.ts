@@ -377,6 +377,13 @@ export function createGuestOrderSteps(options: {
         const { name, code } = (error ?? {}) as { name?: unknown; code?: unknown };
         if (name === "CartError" && code === "CART_VERSION_CONFLICT")
           return { status: "CartChanged" as const };
+        // WP-2423 batch 29: the Cart's current price is not the one quoted (another participant
+        // priced this Cart version, or the price ran out); nothing was saved, price it again.
+        if (
+          name === "CartError" &&
+          (code === "CART_QUOTE_INVALID" || code === "CART_QUOTE_EXPIRED")
+        )
+          return { status: "PriceMovedOn" as const };
         throw error;
       }
       const saved = readClosedRecord(answer, ["status", "snapshot"]);

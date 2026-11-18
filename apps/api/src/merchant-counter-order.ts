@@ -328,6 +328,11 @@ export interface CounterGuestPipeline {
      * Cart since it was priced; nothing was saved (dine-in only).
      */
     | { readonly status: "CartChanged" }
+    /**
+     * WP-2423 batch 29: the price this round was quoted at is no longer the shared Cart's current
+     * one (another participant priced the same Cart version, or it ran out); nothing was saved.
+     */
+    | { readonly status: "PriceMovedOn" }
   >;
   startCheckout(
     credentials: CounterGuestCredentials,

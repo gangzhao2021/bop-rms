@@ -355,8 +355,16 @@ export function createCustomerQuotePort(options: {
         status: record.quoteOutcome === "Created" && !held ? "Created" : "Current",
         quote,
       });
-    } catch {
-      return unavailable;
+    } catch (error) {
+      // WP-2423 batch 29 (guest-race-text): the Cart moved on while its price was being read back
+      // (staff or another phone at the table added, sent or started paying for it a moment ago).
+      // Nothing was priced for this version: said as the plain conflict it is, never an outage.
+      const moved = initialFailure(error);
+      return moved.status === "VersionConflict" ||
+        moved.status === "CheckoutInProgress" ||
+        moved.status === "TableCheckingOut"
+        ? moved
+        : unavailable;
     }
   }
 }

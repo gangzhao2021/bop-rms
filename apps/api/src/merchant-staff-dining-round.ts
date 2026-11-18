@@ -901,36 +901,83 @@ export function createMerchantStaffDiningRound(options: {
     let turnReference: string | null = null;
     let turnHolder: { readonly scope: StaffScope["selected"]; readonly actor: string } | null =
       null;
+    /**
+     * WP-2423 batch 29 (signout-leftover): this request submitted its round (its own table guest
+     * sent the checkout to Ordering). From then on the round exists whatever happens to the staff
+     * member's sign-in, so it is finished (sent to the kitchen when the table pays at the end) and
+     * read back even when they signed out meanwhile.
+     */
+    let submitted = false;
     /** The round of a recorded staff entry, from owner records only. */
+    const readAndEnd = async (
+      tx: ConsumerTransaction,
+      scope: StaffScope,
+      allowed: () => Promise<boolean>,
+      status: StaffDiningRoundResult["status"],
+      entry: StaffDiningRoundEntryRecord,
+    ): Promise<StaffDiningRoundResult> => {
+      const result = await readFinished(tx, scope, allowed, status, entry);
+      // v15 b12 review: placed, so this round's turn ends with a row, in the transaction that
+      // read the round back (no extra round trip): the next round's check never looks for it
+      // among the Store's sent rounds. When the row can't be written, the answer stands and the
+      // turn is still over, found by its round.
+      const held = turnReference;
+      if (status === "Placed" && held !== null) {
+        await tx.query("SAVEPOINT staff_round_turn_end", []);
+        try {
+          await turns(scope, allowed).end(tx, { turnReference: held, outcome: "Placed" });
+          await tx.query("RELEASE SAVEPOINT staff_round_turn_end", []);
+          turnReference = null;
+        } catch (ending) {
+          await tx.query("ROLLBACK TO SAVEPOINT staff_round_turn_end", []);
+          await tx.query("RELEASE SAVEPOINT staff_round_turn_end", []);
+          try {
+            options.onUnexpected?.(ending);
+          } catch {
+            // Reporting never changes the answer.
+          }
+        }
+      }
+      return result;
+    };
     const finished = async (
       status: StaffDiningRoundResult["status"],
       entry: StaffDiningRoundEntryRecord,
-    ): Promise<StaffDiningRoundResult> =>
-      inScope(async (tx, scope, allowed) => {
-        const result = await readFinished(tx, scope, allowed, status, entry);
-        // v15 b12 review: placed, so this round's turn ends with a row, in the transaction that
-        // read the round back (no extra round trip): the next round's check never looks for it
-        // among the Store's sent rounds. When the row can't be written, the answer stands and the
-        // turn is still over, found by its round.
-        const held = turnReference;
-        if (status === "Placed" && held !== null) {
-          await tx.query("SAVEPOINT staff_round_turn_end", []);
-          try {
-            await turns(scope, allowed).end(tx, { turnReference: held, outcome: "Placed" });
-            await tx.query("RELEASE SAVEPOINT staff_round_turn_end", []);
-            turnReference = null;
-          } catch (ending) {
-            await tx.query("ROLLBACK TO SAVEPOINT staff_round_turn_end", []);
-            await tx.query("RELEASE SAVEPOINT staff_round_turn_end", []);
-            try {
-              options.onUnexpected?.(ending);
-            } catch {
-              // Reporting never changes the answer.
-            }
-          }
-        }
-        return result;
-      });
+    ): Promise<StaffDiningRoundResult> => {
+      try {
+        return await inScope((tx, scope, allowed) => readAndEnd(tx, scope, allowed, status, entry));
+      } catch (error) {
+        const holder = turnHolder;
+        if (
+          !submitted ||
+          status !== "Placed" ||
+          holder === null ||
+          !(error instanceof StaffDiningRoundError) ||
+          error.code !== "STAFF_ROUND_PERMISSION_DENIED"
+        )
+          throw error;
+        // WP-2423 batch 29: the staff member signed out after this request submitted the round.
+        // It was authorized when it was sent, and it exists: it is finished as this request's own
+        // round (the Store and staff member it took the table's turn for, every read and write
+        // limited to this entry's round), so it is never left submitted but not sent to the
+        // kitchen, and staff are told it was placed.
+        const own = async () => true;
+        return options.persistence.transactions.run(async (transaction) => {
+          const tx = transaction as unknown as ConsumerTransaction;
+          await tx.query(
+            "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+            [holder.scope.brandReference, holder.scope.storeReference],
+          );
+          return readAndEnd(
+            tx,
+            { selected: holder.scope, actorReference: holder.actor },
+            own,
+            status,
+            entry,
+          );
+        });
+      }
+    };
     const readFinished = async (
       tx: ConsumerTransaction,
       scope: StaffScope,
@@ -1716,6 +1763,16 @@ export function createMerchantStaffDiningRound(options: {
             cartVersion,
             quoteReference: quoted.quoteReference,
           });
+          if (saved?.status === "PriceMovedOn") {
+            // WP-2423 batch 29: nothing was saved; this round's own lines come out (not again in
+            // the catch below) and staff send again, never "a problem on our side".
+            const remove = removeRoundItems;
+            removeRoundItems = null;
+            throw unlessLeftAtTable(
+              remove === null ? "Removed" : await remove(),
+              () => new StaffDiningRoundError("STAFF_ROUND_NOT_PRICED"),
+            );
+          }
           if (saved?.status === "CartChanged") {
             // This round's own lines come out here (not again in the catch below).
             const remove = removeRoundItems;
@@ -1838,6 +1895,7 @@ export function createMerchantStaffDiningRound(options: {
             ));
           if (payLater) {
             // DEC-DINE-IN-PAY-LATER: no tip and no charge now; the table pays once at the end.
+            submitted = true;
             try {
               await submitPayLater(credentials, {
                 checkoutSessionReference: checkout.checkoutSessionReference,
@@ -1850,6 +1908,7 @@ export function createMerchantStaffDiningRound(options: {
             return await finished("Placed", entry.record);
           }
           let preparation: OrderPaymentPreparationEvidence;
+          submitted = true;
           try {
             preparation = await options.pipeline.preparePayment(credentials, {
               checkoutSessionReference: checkout.checkoutSessionReference,
@@ -1867,7 +1926,17 @@ export function createMerchantStaffDiningRound(options: {
       } catch (error) {
         // WP-2423: failed before its checkout, so nothing was ordered: the round's items leave the
         // table's Cart, so sending it again (a new attempt) is not refused for them.
-        const remove = roundMayExist ? null : removeRoundItems;
+        // WP-2423 batch 29 (signout-leftover): so too when the staff member signed out after the
+        // round's checkout started but before it was submitted (nothing can exist then). Taken
+        // out by the round's own table guest, never under the signed-out member's authority, and
+        // only this round's own lines: otherwise they stayed in the table's cart as a guest's
+        // dish, held by this round's checkout, and the next staff member was refused for them.
+        const signedOutBeforeSubmission =
+          roundMayExist &&
+          !submitted &&
+          error instanceof StaffDiningRoundError &&
+          error.code === "STAFF_ROUND_PERMISSION_DENIED";
+        const remove = roundMayExist && !signedOutBeforeSubmission ? null : removeRoundItems;
         // v15 b12: whether this round's own dishes are out of the table's cart; until they are,
         // staff are never told that nothing was sent.
         let removed: "Removed" | "Kept" | "Gone" = "Removed";

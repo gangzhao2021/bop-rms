@@ -88,3 +88,27 @@ after the row locks of the business write.
   switch, dishes and choices named in the new language, for the same party).
 - Chinese staff text sets a table's own name or a number off with spaces where it meets a Chinese
   character (为 B10 SRS Q (TEST) 点单, 员工录入的 5 轮).
+
+## A staff member signs out mid-round (v15 batch 29)
+
+Live finding `.local/integ-tools/b25/b28live-result.json` (race-payment-and-signout, new finding 2):
+signed out 450-600 ms after Send, the round was refused 403 after its checkout had started, and
+its dish stayed in the table's cart, held by that checkout, shown to staff under the guests'
+phones and to guests as "Added by another guest". The next staff member was refused for it, and
+sending it alone answered 503 (`CART_QUOTE_INVALID`).
+
+- **Before submission** (its checkout started, nothing submitted): the round takes its own lines
+  back out with its own table guest (never the signed-out member's authority, only this round's
+  lines), then answers 403 as before. Lines it can't take out are answered
+  `staff_round_not_withdrawn`, as for any other failure.
+- **After submission** the round exists: it is finished as this request's own round (the Store
+  and staff member it took the table's turn for, every read and write limited to this entry's
+  round): a pay-at-end round is sent to the kitchen and the answer is Placed. Before, it was left
+  submitted but never sent to the kitchen, answered 403.
+- **A quote held for someone else** (DEC-PRICE-HOLD): the held price is now the participant's own;
+  another phone or a staff round's table guest prices the Cart for itself. Before, it was handed
+  the other participant's Quote, which its details refused (`CART_QUOTE_INVALID`, the 503). A price
+  that moved on before the details are saved is answered `order_not_priced` (send again), with the
+  round's own lines out.
+- On a pay-at-end table the staff screen never says a guest is paying: it says a guest is sending
+  these dishes from their phone.

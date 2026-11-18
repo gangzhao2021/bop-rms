@@ -2278,3 +2278,82 @@ describe("two staff send a round for the same table — v15 b12 staff-round-conc
     expect(state.turnLog).toEqual(["taken", "end:NotSent"]);
   });
 });
+
+describe("WP-2423 batch 29 (signout-leftover): a round refused because staff signed out", () => {
+  beforeEach(() => {
+    state.entries.clear();
+    state.batches.clear();
+    state.tablePermission = "Allow";
+    state.allowed = true;
+    state.tips = { enabled: true, tierPercents: [10, 15, 18] };
+    state.tableCart = null;
+    state.staffRemovals = [];
+    state.staffRemovalError = null;
+    state.onStaffRemoval = null;
+    state.waitsForPayment = true;
+    state.paid = null;
+    state.takenOff = false;
+    state.turnBusy = 0;
+    state.turnLog = [];
+    state.turns = [];
+  });
+  it("pay at the end, signed out after its checkout started: its own dish comes back out of the table's cart", async () => {
+    const f = setup(undefined, { sessions: new Set([id(31)]), confirmed: [] });
+    f.pipeline.addItem.mockResolvedValue({
+      status: "Applied",
+      cartVersion: 4,
+      lines: [{ cartItemReference: id(40), quantity: 2 }],
+    } as never);
+    f.pipeline.startCheckout.mockImplementationOnce(async () => {
+      state.allowed = false;
+      return { status: "Started" as const, checkoutSessionReference: id(8) };
+    });
+    const removeItems = vi.fn(async () => "Removed" as const);
+    Object.assign(f.pipeline, { removeItems });
+    try {
+      await expect(f.send()).rejects.toMatchObject({ code: "STAFF_ROUND_PERMISSION_DENIED" });
+    } finally {
+      state.allowed = true;
+    }
+    // Taken out by the round's own table guest, only its own line.
+    expect(removeItems).toHaveBeenCalledWith(
+      guest,
+      expect.objectContaining({ cartItemReferences: [id(40)] }),
+    );
+    expect(f.pipeline.submitPayLater).not.toHaveBeenCalled();
+    expect(f.onUnexpected).not.toHaveBeenCalled();
+  });
+
+  it("pay at the end, signed out once it was submitted: still sent to the kitchen and answered placed", async () => {
+    const payLater = { sessions: new Set([id(31)]), confirmed: [] as string[] };
+    const f = setup(undefined, payLater);
+    const submit = f.pipeline.submitPayLater.getMockImplementation();
+    f.pipeline.submitPayLater.mockImplementationOnce(async (...values: never[]) => {
+      const submitted = await (submit as (...v: never[]) => Promise<unknown>)(...values);
+      state.allowed = false;
+      return submitted as never;
+    });
+    try {
+      await expect(f.send()).resolves.toMatchObject({ status: "Placed", payLater: true });
+    } finally {
+      state.allowed = true;
+    }
+    expect(payLater.confirmed).toHaveLength(1);
+  });
+
+  it("the shared cart's price moved on before its details were saved: send again, never a 503", async () => {
+    const f = setup();
+    f.pipeline.addItem.mockResolvedValue({
+      status: "Applied",
+      cartVersion: 4,
+      lines: [{ cartItemReference: id(40), quantity: 1 }],
+    } as never);
+    f.pipeline.saveDetails.mockResolvedValueOnce({ status: "PriceMovedOn" } as never);
+    const removeItems = vi.fn(async () => "Removed" as const);
+    Object.assign(f.pipeline, { removeItems });
+    await expect(f.send()).rejects.toMatchObject({ code: "STAFF_ROUND_NOT_PRICED" });
+    expect(removeItems).toHaveBeenCalledTimes(1);
+    expect(f.pipeline.startCheckout).not.toHaveBeenCalled();
+    expect(f.onUnexpected).not.toHaveBeenCalled();
+  });
+});
