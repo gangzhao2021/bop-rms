@@ -10,6 +10,10 @@ import { tmpdir } from "node:os";
 import pg from "pg";
 import { readMigrationCatalog } from "../src/catalog.ts";
 import { runMigrationCommand } from "../src/runner.ts";
+import {
+  alignProcessClockToDatabase,
+  synchronizeProcessClock,
+} from "../../../tooling/environment/pilot-database-clock.mjs";
 
 const { Client } = pg;
 const owner = "wp-0024-isolated-database";
@@ -246,6 +250,30 @@ async function projectResources(project, root, childEnvironment) {
     return outputs.flatMap((output) => (output.trim() === "" ? [] : output.trim().split("\n")));
   } catch {
     return [];
+  }
+}
+
+/**
+ * WP-2423 (guest-waits-and-refund-lock): the database clock is the one time authority (2026-11-03),
+ * and the pilot's processes follow it. A test that composes its own connections stamps instants
+ * with this process's clock and the owners compare them with `clock_timestamp()`; on a Mac the
+ * Docker VM's clock drifts from the host's, so a refund was refused at random as "source changed"
+ * (ordinary-refund-operation-execution-source, ordinary-refund-request-store). The test process
+ * follows its database's clock the same way, from before the fixture. A run that asks the pilot
+ * composition to align it (`PILOT_CLOCK_FROM_DATABASE=1`, vitest.clock-skew) is left to do so.
+ */
+async function followDatabaseClock(clientConfig) {
+  if (process.env.PILOT_CLOCK_FROM_DATABASE === "1") return;
+  const client = new Client(clientConfig);
+  await client.connect();
+  try {
+    const query = (sql) => client.query(sql);
+    const quiet = () => undefined;
+    await alignProcessClockToDatabase(query, { report: quiet });
+    // Already following an earlier test's database: measure against this one.
+    await synchronizeProcessClock(query, quiet);
+  } finally {
+    await client.end();
   }
 }
 
@@ -529,6 +557,7 @@ export async function withIsolatedDatabase(options, testBody) {
         "migration",
         "isolated database bootstrap failed",
       );
+    await followDatabaseClock(clientConfig);
     injected("duringFixture", options.failureAt);
     if (options.fixture) await options.fixture({ clientConfig, databaseName, fixtureRoot, runId });
     injected("duringBody", options.failureAt);
