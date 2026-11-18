@@ -2324,6 +2324,41 @@ describe("WP-2423 batch 29 (signout-leftover): a round refused because staff sig
     expect(f.onUnexpected).not.toHaveBeenCalled();
   });
 
+  it("pay at the end, signed out after its checkout started on a table it opened: the table is closed again", async () => {
+    const f = setup(undefined, { sessions: new Set([id(31)]), confirmed: [] });
+    f.pipeline.openTable.mockResolvedValueOnce({
+      status: "Opened" as const,
+      diningSessionReference: id(31),
+      joinCredential: "123456",
+      started: true,
+      generation: 1,
+    });
+    f.pipeline.addItem.mockResolvedValue({
+      status: "Applied",
+      cartVersion: 4,
+      lines: [{ cartItemReference: id(40), quantity: 2 }],
+    } as never);
+    f.pipeline.startCheckout.mockImplementationOnce(async () => {
+      state.allowed = false;
+      return { status: "Started" as const, checkoutSessionReference: id(8) };
+    });
+    const removeItems = vi.fn(async () => "Removed" as const);
+    Object.assign(f.pipeline, { removeItems });
+    try {
+      await expect(f.send()).rejects.toMatchObject({ code: "STAFF_ROUND_PERMISSION_DENIED" });
+    } finally {
+      state.allowed = true;
+    }
+    expect(removeItems).toHaveBeenCalledTimes(1);
+    expect(f.pipeline.abandonTable).toHaveBeenCalledTimes(1);
+    expect(f.pipeline.abandonTable).toHaveBeenCalledWith(
+      { sessionCookie: "cookie", csrf: "csrf" },
+      { tableReference: table, diningSessionReference: id(31), generation: 1 },
+    );
+    expect(f.pipeline.submitPayLater).not.toHaveBeenCalled();
+    expect(f.onUnexpected).not.toHaveBeenCalled();
+  });
+
   it("pay at the end, signed out once it was submitted: still sent to the kitchen and answered placed", async () => {
     const payLater = { sessions: new Set([id(31)]), confirmed: [] as string[] };
     const f = setup(undefined, payLater);

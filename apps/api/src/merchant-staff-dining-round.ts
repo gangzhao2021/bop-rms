@@ -1197,6 +1197,15 @@ export function createMerchantStaffDiningRound(options: {
       readonly diningSessionReference: string;
       readonly generation: number | null;
     } | null = null;
+    /**
+     * WP-2423 batch 29 (signout-leftover): the session this request started, kept once its checkout
+     * started (`startedTable` is cleared then), so a round refused by a sign-out before it was
+     * submitted closes it again with its own dishes out, as any round that failed before an order.
+     */
+    let startedBeforeCheckout: {
+      readonly diningSessionReference: string;
+      readonly generation: number | null;
+    } | null = null;
     const abandonStartedTable = async () => {
       const started = startedTable;
       startedTable = null;
@@ -1781,6 +1790,7 @@ export function createMerchantStaffDiningRound(options: {
           }
           // From here the round may exist (checkout, submission): the session is never closed for it.
           const tableStarted = startedTable;
+          startedBeforeCheckout = tableStarted;
           startedTable = null;
           roundMayExist = true;
           const checkout = await options.pipeline.startCheckout(credentials, {
@@ -1944,6 +1954,9 @@ export function createMerchantStaffDiningRound(options: {
           removeRoundItems = null;
           removed = await remove();
         }
+        // Nothing of this round is left at a table it opened: the table is closed again too.
+        if (signedOutBeforeSubmission && removed === "Removed")
+          startedTable = startedBeforeCheckout;
         await abandonStartedTable();
         if (removed !== "Removed")
           return keepingCause(() => fail("STAFF_ROUND_NOT_WITHDRAWN"))(error);
