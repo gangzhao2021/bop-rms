@@ -626,3 +626,28 @@
   font-weight: 600;
   cursor: pointer;
 }
+
+/* WP-2423 batch 29: a Store date and time from plain selects, labelled in the page's language. */
+.store-date-time {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.store-date-time > legend {
+  width: 100%;
+  padding: 0;
+  margin-bottom: 4px;
+}
+.store-date-time .store-date-time__part {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.store-date-time .store-date-time__part select {
+  width: auto;
+  min-width: 4.5em;
+}

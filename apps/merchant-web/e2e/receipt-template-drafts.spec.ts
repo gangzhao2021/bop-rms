@@ -855,7 +855,18 @@ test("@production ordinary template draft save, actual generated current and ros
   await region
     .getByRole("combobox", { name: "In use until", exact: true })
     .selectOption({ label: "Until a set date and time" });
-  await region.getByLabel("Ends at (Store time)", { exact: true }).fill("2026-10-07T00:00");
+  // WP-2423 batch 29: the date and time are chosen from selects in the page's language.
+  // The first year offered is this year, whatever the date the test runs on.
+  for (const [part, value] of [
+    ["Year", { index: 1 }],
+    ["Month", "12"],
+    ["Day", "31"],
+    ["Hour of day", "23"],
+    ["Minute", "55"],
+  ] as const)
+    await region
+      .getByRole("combobox", { name: `Ends at (Store time): ${part}`, exact: true })
+      .selectOption(value);
   await region.getByRole("button", { name: "Save receipt draft", exact: true }).click();
   await expect(
     region.getByText(

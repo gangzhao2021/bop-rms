@@ -1,4 +1,5 @@
 import { t } from "./i18n/i18n.js";
+import { StoreDateTimeSelects } from "./StoreDateTimeSelects.js";
 import { useReadAgainWhenOnline } from "./reconnect-read.js";
 import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -1603,16 +1604,14 @@ export function ReceiptTemplateDraftEditor({
             <option value="Scheduled">{t("From a set date and time")}</option>
           </select>
         </label>
+        {/* WP-2423 batch 29: selects in the page's language, never the browser's own
+            "yyyy-mm-dd" box on a Chinese page. */}
         {activation === "Scheduled" && (
-          <label>
-            {t("Starts at (Store time)")}
-            <input
-              type="datetime-local"
-              aria-label={t("Starts at (Store time)")}
-              value={localInput(start)}
-              onChange={(e) => setStart(instantInput(e.target.value))}
-            />
-          </label>
+          <StoreDateTimeSelects
+            label={t("Starts at (Store time)")}
+            value={localInput(start)}
+            onChange={(local) => setStart(instantInput(local))}
+          />
         )}
         <label>
           {t("In use until")}
@@ -1632,15 +1631,11 @@ export function ReceiptTemplateDraftEditor({
           </select>
         </label>
         {endsOnDate && (
-          <label>
-            {t("Ends at (Store time)")}
-            <input
-              type="datetime-local"
-              aria-label={t("Ends at (Store time)")}
-              value={localInput(end)}
-              onChange={(e) => setEnd(instantInput(e.target.value))}
-            />
-          </label>
+          <StoreDateTimeSelects
+            label={t("Ends at (Store time)")}
+            value={localInput(end)}
+            onChange={(local) => setEnd(instantInput(local))}
+          />
         )}
       </fieldset>
       <section aria-label={t("Receipt field preview")}>
