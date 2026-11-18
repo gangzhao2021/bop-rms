@@ -971,6 +971,17 @@ export interface KitchenStatusEntry {
   readonly at?: number;
 }
 /**
+ * When the board's "still working" line counts as said: never after a problem still on the row (a
+ * refusal such as "was cancelled"), so a slow or retrying later tap never covers it on the one
+ * visible line, where it could run out unseen.
+ */
+export function kitchenSlowTapsAt(since: number, entries: readonly KitchenStatusEntry[]): number {
+  const problems = entries
+    .filter((entry) => entry.tone === "Problem" && entry.at !== undefined)
+    .map((entry) => entry.at as number);
+  return Math.min(since, ...problems.map((at) => at - 1));
+}
+/**
  * DEC-KITCHEN-ONE-TAP: nothing above the tickets changes height during service, so a message arriving
  * as a finger lands never puts that finger on another order's button. This row always keeps its
  * height. It says the newest thing in one line, and more on a tap, laid over the board.
@@ -2742,7 +2753,7 @@ export function KitchenBoardScreen({
                   {
                     key: "slow-taps",
                     tone: "Info" as const,
-                    at: slowTapsSince.current,
+                    at: kitchenSlowTapsAt(slowTapsSince.current, statusEntries),
                     text: slowWaitText,
                   },
                 ]),

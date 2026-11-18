@@ -622,3 +622,72 @@ test("@production a board read that fails during the hold keeps the Done on its 
   expect(taps[0]?.step).toBe("Finish");
   expect(taps[0]?.lines.map((line) => line.workItemReference)).toEqual([id(1)]);
 });
+
+for (const [width, height] of [
+  [1440, 900],
+  [390, 1400],
+] as const)
+  test(`@production a refusal stays on the status line while a later tap is slow, at ${width} wide`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height });
+    await mockBoard(page, [
+      dish(1, "TEST latte"),
+      dish(2, "TEST mocha", {
+        ticketReference: id(60),
+        orderReference: id(61),
+        orderLabel: { orderNumber: "6", orderType: "Pickup", tableLabel: null },
+      }),
+    ]);
+    // Registered last, so it answers first: the latte was cancelled, and the mocha's answer is slow.
+    await page.route("**/merchant/kitchen/step", async (route) => {
+      const body = route.request().postDataJSON() as StepBody;
+      if (body.lines.some((line) => line.workItemReference === id(1)))
+        return route.fulfill({
+          headers,
+          json: {
+            projectionName: "kitchen_work_queue_v1",
+            projectionPending: true,
+            occurredAt: at,
+            lines: body.lines.map((line) => ({
+              workItemReference: line.workItemReference,
+              orderItemReference: line.orderItemReference,
+              ticketReference: line.ticketReference,
+              outcome: "Refused",
+              refusedReason: "Cancelled",
+              ticketVersion: null,
+              workItemVersion: null,
+              workItemStatus: null,
+              completedQuantity: null,
+              requiredQuantity: null,
+              acceptedAt: null,
+              readyAt: null,
+              dishesDone: null,
+            })),
+          },
+        });
+      await new Promise((resolve) => setTimeout(resolve, slowWaitMs + 6_000));
+      return route.fallback();
+    });
+    await page.goto("/operations/kitchen");
+    const latte = page.locator(".kitchen-ticket").filter({ hasText: "TEST latte" });
+    const mocha = page.locator(".kitchen-ticket").filter({ hasText: "TEST mocha" });
+    await expect(mocha).toBeVisible();
+    await page.waitForTimeout(slotSettleMs);
+    const line = page.locator(".kitchen-status-row__line");
+    await latte.locator(".kitchen-ticket__next").click();
+    await expect(latte.locator(".kitchen-ticket__top")).toContainText("Marked done");
+    await expect(line).toContainText("was cancelled", { timeout: holdMs + 8_000 });
+    await page.waitForTimeout(slotSettleMs + 100);
+    await mocha.locator(".kitchen-ticket__next").click();
+    await expect(mocha.locator(".kitchen-ticket__top")).toContainText("Marked done");
+    // The mocha's hold ends and its answer is slow: the board says so, but under the refusal.
+    await expect(mocha.locator(".kitchen-ticket__top")).toContainText("Recording", {
+      timeout: holdMs + 3_000,
+    });
+    await page.waitForTimeout(slowWaitMs + 700);
+    await expect(line).toContainText("was cancelled");
+    await expect(line).not.toContainText(slowWaitText);
+    await page.locator(".kitchen-status-row__more").click();
+    await expect(page.locator(".kitchen-status-row__detail")).toContainText(slowWaitText);
+  });

@@ -27,6 +27,7 @@ import {
   kitchenWarningMinutes,
   isActiveKitchenWork,
   kitchenArrivalsUnattended,
+  kitchenSlowTapsAt,
   kitchenComboDishNote,
   kitchenLineKey,
   kitchenScreenLines,
@@ -2073,5 +2074,24 @@ describe("WP-2423 (M93): a dish with alcohol tells the kitchen to check ID", () 
     expect(view(true).items[0]?.checkId).toBe(true);
     expect(() => view(false)).toThrow("KITCHEN_BOARD_INVALID");
     expect(parseKitchenBoardView(kitchenBoardFixture()).items[0]?.checkId).toBeUndefined();
+  });
+});
+
+describe("kitchenSlowTapsAt", () => {
+  it("never puts the still-working line over a refusal still on the row", () => {
+    const refusal = { key: "step-1", tone: "Problem" as const, text: "was cancelled", at: 1_000 };
+    const done = { key: "step-2", tone: "Info" as const, text: "done", at: 2_000 };
+    expect(kitchenSlowTapsAt(4_000, [refusal, done])).toBeLessThan(refusal.at);
+    // A later refusal stays above a line that turned on earlier.
+    expect(kitchenSlowTapsAt(500, [refusal])).toBe(500);
+    // Nothing to stay under: the line is said when it turned on.
+    expect(kitchenSlowTapsAt(4_000, [done])).toBe(4_000);
+    // A standing problem (no time, or the board's own state) does not push it down.
+    expect(
+      kitchenSlowTapsAt(4_000, [
+        { key: "more", tone: "Problem", text: "more" },
+        { key: "stale", tone: "Problem", text: "stale", at: Infinity },
+      ]),
+    ).toBe(4_000);
   });
 });
