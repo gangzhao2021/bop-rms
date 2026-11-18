@@ -175,6 +175,62 @@ export function createPostgresOrderAcceptanceReader(options: {
   });
 }
 
+/**
+ * WP-2423 batch 30: whether every change the Order took after the version staff saw left this
+ * Batch alone: each is another round sent (`AdditionalBatch`) or another round accepted
+ * (`Acceptance`), never this Batch's own. Any other change (a cancellation, a dish taken off, the
+ * Order closed or fulfilled) or a gap in the history answers false, so the acceptance stays a
+ * conflict to refresh. Reads only, under the caller's Store scope; at most 50 changes are read.
+ */
+export async function orderChangesLeaveBatchAlone(
+  transaction: ConsumerTransaction,
+  scope: Readonly<{ brandReference: string; storeReference: string }>,
+  input: Readonly<{
+    orderReference: string;
+    orderBatchReference: string;
+    seenOrderVersion: number;
+    currentOrderVersion: number;
+  }>,
+): Promise<boolean> {
+  const brand = parseOrderingReference(scope.brandReference);
+  const store = parseOrderingReference(scope.storeReference);
+  const order = parseOrderingReference(input.orderReference);
+  const batch = parseOrderingReference(input.orderBatchReference);
+  const { seenOrderVersion: seen, currentOrderVersion: current } = input;
+  if (
+    !Number.isSafeInteger(seen) ||
+    !Number.isSafeInteger(current) ||
+    seen < 1 ||
+    current <= seen ||
+    current - seen > 50
+  )
+    return false;
+  await transaction.query(
+    "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+    [brand, store],
+  );
+  const result = await transaction.query(
+    "SELECT r.version,r.kind," +
+      "CASE r.kind WHEN 'Acceptance' THEN (SELECT a.order_batch_id::text FROM rms_ordering.order_acceptance_record a " +
+      "WHERE a.brand_id=r.brand_id AND a.store_id=r.store_id AND a.order_id=r.order_id AND a.acceptance_id=r.revision_id) " +
+      "WHEN 'AdditionalBatch' THEN (SELECT b.order_batch_id::text FROM rms_ordering.order_batch b " +
+      "WHERE b.brand_id=r.brand_id AND b.store_id=r.store_id AND b.order_id=r.order_id AND b.submission_id=r.revision_id) END AS batch " +
+      "FROM rms_ordering.order_revision r WHERE r.brand_id=$1 AND r.store_id=$2 AND r.order_id=$3 " +
+      "AND r.version>$4 AND r.version<=$5 ORDER BY r.version LIMIT 51",
+    [brand, store, order, seen, current],
+  );
+  if (result.rows.length !== current - seen) return false;
+  return result.rows.every((row, index) => {
+    const value = row as Record<string, unknown>;
+    return (
+      Number(value.version) === seen + index + 1 &&
+      (value.kind === "Acceptance" || value.kind === "AdditionalBatch") &&
+      typeof value.batch === "string" &&
+      value.batch !== batch
+    );
+  });
+}
+
 /** Caller owns commit/rollback. Every owner gate must retain its fences through that commit. */
 export function createPostgresOrderAcceptanceStore(options: {
   brandReference: string;

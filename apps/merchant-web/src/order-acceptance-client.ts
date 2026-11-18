@@ -133,7 +133,12 @@ export function createOrderAcceptanceClient(fetcher: typeof fetch = fetch) {
             const result = value as Record<string, unknown>;
             if (
               (result.status !== "Created" && result.status !== "AlreadyCommitted") ||
-              result.acceptedOrderVersion !== snapshot.expectedOrderVersion + 1
+              // WP-2423 batch 30: another round of the same order accepted or sent a moment
+              // before is no change to this one, so the server may accept it at the version the
+              // order is at now: later than the one seen, never earlier.
+              typeof result.acceptedOrderVersion !== "number" ||
+              !Number.isSafeInteger(result.acceptedOrderVersion) ||
+              result.acceptedOrderVersion <= snapshot.expectedOrderVersion
             )
               throw new OrderAcceptanceClientError("OutcomeUnknown");
             return Object.freeze({

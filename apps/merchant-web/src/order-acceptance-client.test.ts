@@ -48,8 +48,17 @@ it("rejects extra authority fields before sending", () => {
   ).toThrow();
   expect(fetcher).not.toHaveBeenCalled();
 });
+it("batch 30: confirms an acceptance the server made at a later version (another round moved the order on)", async () => {
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValue(response({ status: "Created", acceptedOrderVersion: 4 }));
+  await expect(
+    createOrderAcceptanceClient(fetcher).prepare(command).execute(csrf),
+  ).resolves.toEqual({ status: "Created", acceptedOrderVersion: 4 });
+});
 it.each([
-  { status: "Created", acceptedOrderVersion: 3 },
+  { status: "Created", acceptedOrderVersion: 1 },
+  { status: "Created", acceptedOrderVersion: "3" },
   { status: "Created", acceptedOrderVersion: 2, sourceDigest: "private" },
   { status: "Pending", acceptedOrderVersion: 2 },
 ])("never confirms an invalid server result", async (value) => {

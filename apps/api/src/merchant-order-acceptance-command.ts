@@ -8,7 +8,7 @@ import {
 import type { ConsumerTransaction } from "@bop/eventing";
 import type { AppendAuditRecordInput } from "@bop/audit";
 import { readClosedRecord, parseOpaqueUuidV7 } from "@bop/identity";
-import { OrderAcceptanceRecordError } from "@rms/ordering";
+import { OrderAcceptanceRecordError, orderChangesLeaveBatchAlone } from "@rms/ordering";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import { createMerchantPaidOrderAcceptance } from "./merchant-paid-order-acceptance.js";
@@ -244,13 +244,34 @@ export function createMerchantOrderAcceptanceCommand(options: {
               };
             throw new MerchantOrderAcceptanceError("ORDER_ACCEPTANCE_ALREADY_ACCEPTED");
           }
+          // WP-2423 batch 30: at a busy table another round is accepted, or another round is sent,
+          // a moment after the list was read. When every change since the version staff saw was
+          // such another round, this round's own facts are as staff saw them: it is accepted at
+          // the version the Order is at now. Any change to this round (or the Order) stays a
+          // conflict to refresh.
+          const movedOnByOtherRounds =
+            mode === "SeenVersion" &&
+            current.acceptance === null &&
+            current.orderVersion > named.expectedOrderVersion &&
+            (await orderChangesLeaveBatchAlone(businessTransaction, scope, {
+              orderReference: named.orderReference,
+              orderBatchReference: named.orderBatchReference,
+              seenOrderVersion: named.expectedOrderVersion,
+              currentOrderVersion: current.orderVersion,
+            }));
           const expectedOrderVersion =
             current.acceptance !== null
               ? current.acceptance.acceptedOrderVersion - 1
-              : mode === "CurrentVersion"
+              : mode === "CurrentVersion" || movedOnByOtherRounds
                 ? current.orderVersion
                 : named.expectedOrderVersion;
-          if (mode === "SeenVersion" && expectedOrderVersion !== named.expectedOrderVersion)
+          if (
+            mode === "SeenVersion" &&
+            !movedOnByOtherRounds &&
+            // A retry of this very acceptance reads back what it recorded (at the version then).
+            !(replay && expectedOrderVersion >= named.expectedOrderVersion) &&
+            expectedOrderVersion !== named.expectedOrderVersion
+          )
             throw new MerchantOrderAcceptanceError("ORDER_ACCEPTANCE_VERSION_CONFLICT");
           if (current.acceptance === null && expectedOrderVersion !== current.orderVersion)
             throw new MerchantOrderAcceptanceError("ORDER_ACCEPTANCE_VERSION_CONFLICT");
