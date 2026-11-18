@@ -1142,10 +1142,12 @@ test.describe("@production Pay-later table, the round just placed", () => {
       const zh = language === "zh-Hans";
       if (zh)
         await page.addInitScript(() => localStorage.setItem("bop.customer.language", "zh-Hans"));
+      // The page's clock is the test's: staff's round lands only once the waiting text has been
+      // checked, never on a wall-clock race with a slow runner.
+      await page.clock.install();
       const table: Table = await stubTable(page, [], {
         quote: (route, call) => {
           if (call < 2) return undefined;
-          setTimeout(() => table.staffRound(2), 1_200);
           return route.fulfill({
             status: 409,
             json: {
@@ -1160,6 +1162,7 @@ test.describe("@production Pay-later table, the round just placed", () => {
       });
       await openCart(page);
       await expect.poll(() => table.calls.filter((call) => call === "quote").length).toBe(1);
+      await page.clock.pauseAt((await page.evaluate(() => Date.now())) + 100);
       await page.getByRole("button", { name: zh ? "下单" : "Place order", exact: true }).click();
       const main = page.getByRole("main");
       await expect(
@@ -1183,15 +1186,19 @@ test.describe("@production Pay-later table, the round just placed", () => {
         });
       }
       await page.setViewportSize({ width: 1440, height: 900 });
+      // Staff's round is placed now; the page's next read (within a second) names it.
+      table.staffRound(2);
+      await page.clock.runFor(1_000);
       await expect(
         main.getByText(
           zh
             ? "店员已把你的菜放在第 2 轮送去厨房。"
             : "Staff sent your dishes to the kitchen in round 2.",
         ),
-      ).toBeVisible({ timeout: 2_500 });
+      ).toBeVisible();
       await expect(main).not.toContainText(zh ? "还没有下单" : "nothing was placed");
       expect(table.sent).toEqual([]);
+      await page.clock.resume();
       for (const width of [1440, 390]) {
         await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
         await page.screenshot({

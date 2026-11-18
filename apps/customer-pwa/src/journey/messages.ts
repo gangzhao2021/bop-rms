@@ -1132,13 +1132,13 @@ export const checkoutText = Object.freeze({
       "Your cart changed while you were checking out, so nothing was placed. Check it, then continue.",
     );
   },
-  /** WP-2423 item 6: at a shared table the change is usually another guest's, and nothing went out. */
   /** WP-2423 batch 29: said while the page checks what that change was (often a round being sent). */
   get tableRoundMaybeBeingSent() {
     return t(
       "Your table’s cart just changed, maybe because a round is being sent for your table. Wait a moment while this page checks.",
     );
   },
+  /** WP-2423 item 6: at a shared table the change is usually another guest's, and nothing went out. */
   get tableCartChanged() {
     return t(
       "Your table’s cart changed, so nothing was placed yet. Check it, then tap Place order.",
