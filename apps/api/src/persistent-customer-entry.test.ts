@@ -437,3 +437,43 @@ describe("DEC-DINING-GUEST-TABLE-START: a scan at a table a guest started", () =
     expect(f.create).not.toHaveBeenCalled();
   });
 });
+
+// Review (batch 32): the waiting-table check turns only a definite refusal of the code into
+// "Changed"; a read that failed is an outage (503), so waiting phones don't spend the entry budget.
+describe("waiting-table check: outage versus answer", () => {
+  const wait = (x: ReturnType<typeof setup>) => {
+    const input = x.f.input();
+    if (x.service.tableWaiting === undefined) throw new Error("no waiting-table check");
+    return x.service.tableWaiting({ qrToken: input.qrToken, requestedAt: input.requestedAt });
+  };
+  it("a table not open is Waiting and the transaction is always rolled back", async () => {
+    const x = setup();
+    owner.open.mockResolvedValue(false);
+    owner.offer.mockResolvedValue({ kind: "No" });
+    expect(await wait(x)).toBe("Waiting");
+    expect(x.events).toEqual(["begin", "sources", "rollback"]);
+    expect(x.f.create).not.toHaveBeenCalled();
+  });
+  it("a replaced, turned-off or unknown code is Changed (the entry gives the answer)", async () => {
+    for (const refusal of [new RetiredTableQrError("Replaced"), new Error("ENTRY_UNAVAILABLE")]) {
+      const x = setup();
+      x.sources.mockRejectedValueOnce(refusal);
+      expect(await wait(x)).toBe("Changed");
+    }
+  });
+  it("a statement or lock timeout reading the code is busy, never Changed", async () => {
+    for (const code of ["57014", "55P03"]) {
+      const x = setup();
+      x.sources.mockRejectedValueOnce(Object.assign(new Error("timeout"), { code }));
+      await expect(wait(x)).rejects.toBeInstanceOf(CustomerEntryServiceUnavailableError);
+    }
+  });
+  it("a QR context read that failed is busy, never Changed", async () => {
+    const x = setup();
+    vi.mocked(x.f.options.qr.contexts.resolve).mockRejectedValueOnce(
+      Object.assign(new Error("canceling statement due to lock timeout"), { code: "55P03" }),
+    );
+    owner.open.mockResolvedValue(false);
+    await expect(wait(x)).rejects.toBeInstanceOf(CustomerEntryServiceUnavailableError);
+  });
+});

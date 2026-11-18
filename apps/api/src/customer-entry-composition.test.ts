@@ -905,6 +905,42 @@ describe("waiting-table check", () => {
       wait(fixture(), { isOpen: vi.fn(async () => Promise.reject(new Error("read"))) }),
     ).rejects.toMatchObject({ code: "CUSTOMER_ENTRY_SERVICE_UNAVAILABLE" });
   });
+  // Review (batch 32): a failed QR read is an outage, not "Changed" (which would send the phone to
+  // the Store's entry budget every few seconds in a rush of timeouts).
+  it("a key, signature or QR context read that failed is an outage, never 'Changed'", async () => {
+    const outage = Object.assign(new Error("canceling statement due to statement timeout"), {
+      code: "57014",
+    });
+    const table = () => ({ isOpen: vi.fn(async () => false) });
+    const keys = fixture();
+    vi.mocked(keys.options.qr.keys.load).mockRejectedValueOnce(outage);
+    await expect(wait(keys, table())).rejects.toMatchObject({
+      code: "CUSTOMER_ENTRY_SERVICE_UNAVAILABLE",
+    });
+    const context = fixture();
+    vi.mocked(context.options.qr.contexts.resolve).mockRejectedValueOnce(outage);
+    await expect(wait(context, table())).rejects.toMatchObject({
+      code: "CUSTOMER_ENTRY_SERVICE_UNAVAILABLE",
+    });
+    const verifier = fixture();
+    vi.mocked(verifier.options.qr.verifier.verify).mockRejectedValueOnce(outage);
+    await expect(wait(verifier, table())).rejects.toMatchObject({
+      code: "CUSTOMER_ENTRY_SERVICE_UNAVAILABLE",
+    });
+  });
+  it("a code the QR context refuses (another Store's, turned off) is 'Changed'", async () => {
+    const f = fixture();
+    vi.mocked(f.options.qr.contexts.resolve).mockResolvedValueOnce(null);
+    expect(await wait(f, { isOpen: vi.fn(async () => false) })).toBe("Changed");
+  });
+  it("a guest-start offer that can't be read is an outage, never 'Waiting'", async () => {
+    await expect(
+      wait(fixture(), {
+        isOpen: vi.fn(async () => false),
+        guestStart: vi.fn(async () => Promise.reject(new Error("read"))),
+      }),
+    ).rejects.toMatchObject({ code: "CUSTOMER_ENTRY_SERVICE_UNAVAILABLE" });
+  });
   it("a pickup code or no table reader: Changed (the entry answers it)", async () => {
     expect(await wait(pickupFixture(), { isOpen: vi.fn(async () => false) })).toBe("Changed");
     expect(await wait(fixture(), undefined)).toBe("Changed");

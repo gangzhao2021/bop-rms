@@ -38,6 +38,18 @@ export class RetiredTableQrError extends Error {
     this.name = "RetiredTableQrError";
   }
 }
+/**
+ * `sources` refused the presented code itself: one this Store replaced or turned off, or one it
+ * never issued (`ENTRY_UNAVAILABLE`, the sources' plain refusal). Never a read that failed.
+ */
+function isCodeRefusal(error: unknown): boolean {
+  return (
+    error instanceof RetiredTableQrError ||
+    (error instanceof Error &&
+      error.message === "ENTRY_UNAVAILABLE" &&
+      (error as { code?: unknown }).code === undefined)
+  );
+}
 export interface PersistentCustomerEntryOptions {
   profile: PersistentPublicStoreProfileOptions;
   transactions: { run<T>(work: (tx: Transaction) => Promise<T>): Promise<T> };
@@ -292,11 +304,17 @@ export function createPersistentCustomerEntryComposition(
         });
       } catch (error) {
         if (error === rollback) return answer;
+        // Review (batch 32): only a definite refusal of the code is "Changed" (the entry then gives
+        // the guest its answer). Anything else (a statement or lock timeout, a lost connection) is
+        // an outage the phone waits out, so a rush of timeouts never sends every waiting phone to
+        // the Store's entry budget that new scans need.
+        if (isCodeRefusal(error)) return "Changed";
         const failed = (error as { code?: unknown } | null)?.code;
         if (typeof failed === "string" && failed.startsWith("TENANT_DATABASE_")) throw error;
         if (error instanceof CustomerEntryServiceUnavailableError) throw error;
+        throw new CustomerEntryServiceUnavailableError();
       }
-      return "Changed";
+      return answer;
     },
   });
 }

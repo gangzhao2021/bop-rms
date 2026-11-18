@@ -597,11 +597,28 @@ export function createCustomerEntryComposition(
     async tableWaiting(input: CustomerEntryWaitInput) {
       const requestedAt = parseCanonicalInstant(input.requestedAt);
       const captured: { evidence: QrTableContextEvidence | null } = { evidence: null };
+      // Review (batch 32): Dining answers "QrUnavailable" both for a code it refuses and for a key
+      // or context read that failed. A read that failed is an outage (503, the phone waits a
+      // little), never "Changed": in a rush of timeouts every waiting phone would otherwise spend
+      // the Store's entry budget that new scans need. Only a definite refusal is "Changed".
+      let readFailed = false;
+      const failing =
+        <A extends unknown[], R>(read: (...args: A) => Promise<R>) =>
+        async (...args: A): Promise<R> => {
+          try {
+            return await read(...args);
+          } catch (error) {
+            readFailed = true;
+            throw error;
+          }
+        };
       const qr = await createQrTableContextService({
         ...options.qr,
+        keys: { load: failing(() => options.qr.keys.load()) },
+        verifier: { verify: failing((request) => options.qr.verifier.verify(request)) },
         contexts: {
           async resolve(payload) {
-            const raw = await options.qr.contexts.resolve(payload);
+            const raw = await failing(() => options.qr.contexts.resolve(payload))();
             if (raw === null) return null;
             captured.evidence = parseQrTableContextEvidence(raw);
             return captured.evidence;
@@ -613,7 +630,11 @@ export function createCustomerEntryComposition(
           evaluatedAt: requestedAt,
           purpose: "CustomerEntry",
         })
-        .catch(() => null);
+        .catch(() => {
+          readFailed = true;
+          return null;
+        });
+      if (readFailed) throw new CustomerEntryServiceUnavailableError();
       const evidence = captured.evidence;
       const tableReference = evidence?.tableReference;
       if (
@@ -638,7 +659,9 @@ export function createCustomerEntryComposition(
       // A free table a guest may start (or one being cleaned) is answered by the entry, not here.
       const offer = await (
         options.table.guestStart?.({ ...where, at: requestedAt }) ?? Promise.resolve("No" as const)
-      ).catch(() => "No" as const);
+      ).catch(() => {
+        throw new CustomerEntryServiceUnavailableError();
+      });
       return offer === "No" ? ("Waiting" as const) : ("Changed" as const);
     },
   });
