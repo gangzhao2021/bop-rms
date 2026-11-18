@@ -49,6 +49,12 @@ it("requires complete actual callbacks before enabling and forwards lifecycle ob
   });
   expect(service.execute).not.toHaveBeenCalled();
   expect(service.recoverProjectionPage).not.toHaveBeenCalled();
+  // WP-2423 b30: a lease another worker holds is a quiet skip; only cases needing a person wait
+  // up to ten minutes between full rechecks.
+  expect(opts.skipped({ code: "PAYMENT_COMPENSATION_LEASE_HELD" })).toBe(true);
+  expect(opts.skipped({ code: "PAYMENT_COMPENSATION_LEASE_UNAVAILABLE" })).toBe(false);
+  expect(opts.unchangedBackoffMaxMsFor({ status: "ReconciliationRequired" })).toBe(600_000);
+  expect(opts.unchangedBackoffMaxMsFor({ status: "AwaitingProviderConfirmation" })).toBe(undefined);
   await opts.discover({ limit: 5, afterDispositionReference: null });
   expect(service.recoverProjectionPage).toHaveBeenCalledTimes(1);
   expect(service.discover).toHaveBeenCalledTimes(1);

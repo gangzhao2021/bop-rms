@@ -36,6 +36,11 @@ export function createPaymentCompensationWorkload<
   readonly stillWaiting?: (candidate: T, result: unknown) => Promise<boolean>;
   /** Longest time a waiting candidate goes without a full execution; default one hour. */
   readonly fullRecheckMs?: number;
+  /** Longest unchanged delay for this result, when it differs from `unchangedBackoffMaxMs`. */
+  readonly unchangedBackoffMaxMsFor?: (result: unknown) => number | undefined;
+  /** True when the execution did nothing because another run is doing it: no failure is recorded,
+   * no delay is added, and the candidate is looked at again on the next poll. */
+  readonly skipped?: (error: unknown) => boolean;
   /** Test seam: the clock (milliseconds). */
   readonly now?: () => number;
 }) {
@@ -109,9 +114,14 @@ export function createPaymentCompensationWorkload<
             const result = await options.execute(candidate);
             await options.afterExecute?.(candidate, result);
             const key = resultKey(result);
+            const custom = options.unchangedBackoffMaxMsFor?.(result);
+            const cap =
+              custom !== undefined && Number.isSafeInteger(custom) && custom >= 0
+                ? custom
+                : backoffMax;
             const waitMs =
               prior?.result === key
-                ? Math.min(Math.max(prior.waitMs * 2, options.pollIntervalMs), backoffMax)
+                ? Math.min(Math.max(prior.waitMs * 2, options.pollIntervalMs), cap)
                 : 0;
             settled.set(reference, {
               result: key,
@@ -121,7 +131,8 @@ export function createPaymentCompensationWorkload<
               executedAt: now(),
             });
             failed.delete(reference);
-          } catch {
+          } catch (error) {
+            if (options.skipped?.(error) === true) continue;
             settled.delete(reference);
             const waitMs = Math.min(
               Math.max((failure?.waitMs ?? 0) * 2, options.pollIntervalMs),

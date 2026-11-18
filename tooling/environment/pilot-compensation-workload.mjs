@@ -44,6 +44,14 @@ export async function createOptionalCompensationWorkloads({
       ...(typeof service.stillWaiting === "function"
         ? { stillWaiting: (candidate, result) => service.stillWaiting(candidate, result) }
         : {}),
+      // WP-2423 b30: a payment whose lease another worker holds is skipped quietly: no failure
+      // audit, no back-off; the next cycle looks again.
+      skipped: (error) => error?.code === "PAYMENT_COMPENSATION_LEASE_HELD",
+      // WP-2423 b30 (v15 lease churn): a case that needs a person to reconcile it changes only
+      // when the Provider's record or another refund changes; it is rechecked (with a lease) at
+      // least every ten minutes, not every minute.
+      unchangedBackoffMaxMsFor: (result) =>
+        result?.status === "ReconciliationRequired" ? 600_000 : undefined,
       pageSize: 5,
       pollIntervalMs: 5000,
       // An unchanged open case is rechecked at least every minute, so a case closes within a minute

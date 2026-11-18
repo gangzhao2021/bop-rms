@@ -226,6 +226,12 @@ export function createInternalCompensationService({
       try {
         return await runtime.execute(disposition);
       } catch (error) {
+        // WP-2423 b30: another worker (for example the one being replaced during an update) holds
+        // this payment's lease and is doing the work. A normal skip, retried next cycle: level 30.
+        if (error?.code === "PAYMENT_COMPENSATION_LEASE_HELD") {
+          reportUnexpected("INTERNAL_COMPENSATION_SKIPPED", error, { level: 30 });
+          throw error;
+        }
         const code = [
           "PAYMENT_COMPENSATION_INPUT_INVALID",
           "PAYMENT_COMPENSATION_PERMISSION_DENIED",

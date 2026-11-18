@@ -264,3 +264,68 @@ it("retries a failing candidate with a doubling delay, and records each failure"
   await workload.stop();
   vi.useRealTimers();
 });
+
+it("skips a candidate another run is doing without recording a failure or backing off", async () => {
+  vi.useFakeTimers();
+  let clock = 0;
+  const held = Object.assign(new Error("held"), { code: "PAYMENT_COMPENSATION_LEASE_HELD" });
+  let busy = true;
+  const execute = vi.fn(async () => {
+    if (busy) throw held;
+    return { status: "AwaitingProviderConfirmation" };
+  });
+  const recordFailure = vi.fn(async () => undefined);
+  const workload = createPaymentCompensationWorkload({
+    discover: async () => ({
+      candidates: [{ dispositionReference: "a" }],
+      nextAfterDispositionReference: null,
+    }),
+    execute,
+    recordFailure,
+    skipped: (error) => (error as { code?: string }).code === "PAYMENT_COMPENSATION_LEASE_HELD",
+    pageSize: 5,
+    pollIntervalMs: 10,
+    drainDeadlineMs: 100,
+    unchangedBackoffMaxMs: 80,
+    now: () => clock,
+  });
+  await workload.start();
+  for (clock = 10; clock <= 50; clock += 10) await vi.advanceTimersByTimeAsync(10);
+  // Looked at again on every poll: no doubling delay for a skip.
+  expect(execute.mock.calls.length).toBeGreaterThanOrEqual(5);
+  expect(recordFailure).not.toHaveBeenCalled();
+  busy = false;
+  const before = execute.mock.calls.length;
+  await vi.advanceTimersByTimeAsync(10);
+  expect(execute.mock.calls.length).toBe(before + 1);
+  expect(recordFailure).not.toHaveBeenCalled();
+  await workload.stop();
+  vi.useRealTimers();
+});
+
+it("caps the unchanged delay per result", async () => {
+  vi.useFakeTimers();
+  let clock = 0;
+  const execute = vi.fn(async () => ({ status: "ReconciliationRequired" }));
+  const workload = createPaymentCompensationWorkload({
+    discover: async () => ({
+      candidates: [{ dispositionReference: "a" }],
+      nextAfterDispositionReference: null,
+    }),
+    execute,
+    recordFailure: async () => undefined,
+    unchangedBackoffMaxMsFor: (result) =>
+      (result as { status?: string }).status === "ReconciliationRequired" ? 640 : undefined,
+    pageSize: 5,
+    pollIntervalMs: 10,
+    drainDeadlineMs: 100,
+    unchangedBackoffMaxMs: 40,
+    now: () => clock,
+  });
+  await workload.start();
+  for (clock = 10; clock <= 2000; clock += 10) await vi.advanceTimersByTimeAsync(10);
+  // Capped at 40 ms this would run about 50 times; capped at 640 ms it runs about 10 times.
+  expect(execute.mock.calls.length).toBeLessThanOrEqual(12);
+  await workload.stop();
+  vi.useRealTimers();
+});

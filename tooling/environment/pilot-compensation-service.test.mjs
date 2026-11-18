@@ -221,3 +221,29 @@ it("reports only bounded execution codes once and preserves the original failure
     log.mockRestore();
   }
 });
+
+it("logs a lease held by another worker as a normal skip (level 30), never as a failure", async () => {
+  const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+  try {
+    const service = createInternalCompensationService(setup().options);
+    const held = Object.assign(Error("payment compensation is unavailable"), {
+      code: "PAYMENT_COMPENSATION_LEASE_HELD",
+    });
+    mocks.execute.mockRejectedValue(held);
+    await expect(service.execute(d)).rejects.toBe(held);
+    await expect(service.execute(d)).rejects.toBe(held);
+    const lines = log.mock.calls.map(([line]) => line);
+    expect(lines.every((line) => line.startsWith("{"))).toBe(true);
+    expect(lines.map((line) => JSON.parse(line))).toEqual([
+      expect.objectContaining({
+        level: 30,
+        event: "INTERNAL_COMPENSATION_SKIPPED",
+        code: "PAYMENT_COMPENSATION_LEASE_HELD",
+        resultCode: "REFUSED",
+      }),
+      expect.objectContaining({ level: 30, code: "PAYMENT_COMPENSATION_LEASE_HELD" }),
+    ]);
+  } finally {
+    log.mockRestore();
+  }
+});
