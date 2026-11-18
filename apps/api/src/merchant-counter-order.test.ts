@@ -728,6 +728,14 @@ describe("counter order command — WP-2423 Q7", () => {
       expect(onUnexpected).not.toHaveBeenCalled();
     });
 
+    it("WP-2423 batch 29: a price that ran out before the details were saved asks staff to send again", async () => {
+      const { pipeline, send, onUnexpected } = setup();
+      pipeline.saveDetails.mockResolvedValueOnce({ status: "PriceMovedOn" } as never);
+      await expect(send()).rejects.toMatchObject({ code: "COUNTER_ORDER_NOT_PRICED" });
+      expect(pipeline.startCheckout).not.toHaveBeenCalled();
+      expect(onUnexpected).not.toHaveBeenCalled();
+    });
+
     it("never hides the refusal when the stock cannot be read", async () => {
       const { pipeline, send } = setup();
       Object.assign(pipeline, {

@@ -919,6 +919,9 @@ export function createMerchantCounterOrder(options: {
         cartVersion,
         quoteReference: quoted.quoteReference,
       });
+      // WP-2423 batch 29: the price ran out between pricing and the details (nothing was saved):
+      // staff send again, never "a problem on our side".
+      if (saved?.status === "PriceMovedOn") return fail("COUNTER_ORDER_NOT_PRICED");
       if (saved !== undefined) return unexpectedAnswer(saved.status);
       const checkout = await options.pipeline.startCheckout(credentials, {
         createOperationReference: options.nextReference(),
