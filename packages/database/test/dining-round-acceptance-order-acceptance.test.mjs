@@ -1009,8 +1009,10 @@ it.each(["Unpaid", "Cancelled", "PaidFirst"])(
 
           // ── Staff accept round 1 from the Orders page at the Order's current version.
           const version = (await queued()).currentVersion;
-          // A page read before a later round changed the Order is told to refresh.
-          await assert.rejects(
+          // A page read before a later round changed the Order: WP-2423 batch 30, when the only
+          // changes since were round 2 sent (and accepted), round 1 is accepted at the version
+          // the Order is at now; round 2 cancelled since is a change the page must see first.
+          const fromOldPage = () =>
             accept({
               ...session,
               command: {
@@ -1020,10 +1022,12 @@ it.each(["Unpaid", "Cancelled", "PaidFirst"])(
                 orderBatchReference: R1.batch.orderBatchReference,
                 expectedOrderVersion: 1,
               },
-            }),
-            { code: "ORDER_ACCEPTANCE_VERSION_CONFLICT" },
-          );
-          const result1 = await acceptFromOrders(R1.batch);
+            });
+          let result1;
+          if (variant === "Cancelled") {
+            await assert.rejects(fromOldPage(), { code: "ORDER_ACCEPTANCE_VERSION_CONFLICT" });
+            result1 = await acceptFromOrders(R1.batch);
+          } else result1 = await fromOldPage();
           assert.deepEqual(result1, { status: "Created", acceptedOrderVersion: version + 1 });
           assert.deepEqual(await accepted(R1.batch), { expected: version, accepted: version + 1 });
           const afterOne = await queued();
@@ -1075,7 +1079,9 @@ it.each(["Unpaid", "Cancelled", "PaidFirst"])(
           // Measured 2026-10-16: 235 (round 1 from Orders) and 275 (round 2 after the card machine);
           // re-resolving the caller in every owner check cost 1,590 and 2,554.
           assert.ok(
-            acceptStatements.every((count) => count <= 300),
+            // Batch 30: 309 for round 1 accepted from a page read before round 2 (its
+            // configuration is read again at the version the Order is at now).
+            acceptStatements.every((count) => count <= 320),
             "acceptance statements " + JSON.stringify(acceptStatements),
           );
 
