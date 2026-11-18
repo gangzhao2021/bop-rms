@@ -398,6 +398,25 @@ export async function exercisePersistentProfileEntry({
         },
         body: JSON.stringify({ qrToken: f.token() }),
       });
+    // WP-2423 (guest-waits-and-refund-lock): the waiting phone's "is the table open now?".
+    const waitCheck = async () => {
+      const response = await globalThis.fetch(
+        "http://127.0.0.1:" + address.port + "/bff/customer/entry/table-wait",
+        {
+          method: "POST",
+          headers: {
+            origin: "https://customer.invalid",
+            "content-type": "application/json",
+            "sec-fetch-site": "same-origin",
+            "sec-fetch-mode": "cors",
+          },
+          body: JSON.stringify({ qrToken: f.token() }),
+        },
+      );
+      assert.equal(response.status, 200);
+      assert.deepEqual(response.headers.getSetCookie(), []);
+      return (await response.json()).status;
+    };
     if (onGuestsWelcome !== undefined) {
       await onGuestsWelcome({ base: "http://127.0.0.1:" + address.port, request });
       return { close: () => runtime.shutdown("SIGTERM") };
@@ -827,6 +846,10 @@ export async function exercisePersistentProfileEntry({
     assert.deepEqual(notOpenBody.table, { label: "T01" });
     assert.equal(Object.hasOwn(notOpenBody, "csrfToken"), false);
     assert.deepEqual(await count(), saved);
+    // The waiting phone's check reads the table under the pilot api role: still not open, and
+    // nothing recorded.
+    assert.equal(await waitCheck(), "Waiting");
+    assert.deepEqual(await count(), saved);
     const diningContextOptions = {
       transactions: { run },
       binding: publicOptions.binding,
@@ -865,6 +888,8 @@ export async function exercisePersistentProfileEntry({
       });
     // Staff seated the party: the first phone's scan now starts its visit at the open table.
     const enterFirst = async () => {
+      // The waiting phone's next check sees the table open, and the phone enters once.
+      assert.equal(await waitCheck(), "Changed");
       const diningResponse = await request();
       assert.equal(diningResponse.status, 201);
       const diningBody = await diningResponse.json();
