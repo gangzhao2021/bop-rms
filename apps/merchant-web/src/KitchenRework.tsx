@@ -46,6 +46,10 @@ export function useKitchenRework(input: {
   const [offered, setOffered] = useState(true);
   // The first read has answered (any way): the bar knows whether Recently finished joins it.
   const [answered, setAnswered] = useState(false);
+  // WP-2423 batch 32: a read has said whether this person has remakes (a failed read does not), so
+  // the bar keeps Recently finished's place until then: after a failed first read, a later answer
+  // added it mid-service and could move every ticket.
+  const [known, setKnown] = useState(false);
   const [state, setState] = useState<CommandState>({ kind: "Idle" });
   const inFlight = useRef(false);
   const { csrf, storeReference, revision, onChanged } = input;
@@ -60,6 +64,7 @@ export function useKitchenRework(input: {
           setBoard(next);
           setReadFailed(false);
           setAnswered(true);
+          setKnown(true);
         },
         (error: unknown) => {
           if (!current) return;
@@ -67,9 +72,14 @@ export function useKitchenRework(input: {
           if (error instanceof KitchenReworkClientError && error.code === "NotOffered") {
             setOffered(false);
             setBoard(null);
-          } else if (error instanceof KitchenReworkClientError && error.code === "PermissionDenied")
+            setKnown(true);
+          } else if (
+            error instanceof KitchenReworkClientError &&
+            error.code === "PermissionDenied"
+          ) {
             setBoard(null);
-          else setReadFailed(true);
+            setKnown(true);
+          } else setReadFailed(true);
         },
       );
     return () => {
@@ -99,6 +109,8 @@ export function useKitchenRework(input: {
     readFailed: offered && readFailed,
     /** Whether the bar's remakes are known yet (nothing is read without a sign-in or Store). */
     settled: answered || !offered || !csrf || !storeReference,
+    /** Whether a read has said if this person has remakes (a failed read has not). */
+    known: known || !offered || !csrf || !storeReference,
     state,
     busy: state.kind === "Submitting",
     create(item: KitchenBoardItem, choice: RemakeChoice) {

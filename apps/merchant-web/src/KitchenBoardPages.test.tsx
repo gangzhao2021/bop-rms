@@ -28,6 +28,8 @@ import {
   isActiveKitchenWork,
   kitchenArrivalsUnattended,
   kitchenSlowTapsAt,
+  kitchenSlotMoved,
+  kitchenStatusOrder,
   kitchenComboDishNote,
   kitchenLineKey,
   kitchenScreenLines,
@@ -2107,5 +2109,56 @@ describe("kitchenSlowTapsAt", () => {
         { key: "stale", tone: "Problem", text: "stale", at: Infinity },
       ]),
     ).toBe(4_000);
+  });
+});
+
+describe("kitchenStatusOrder (WP-2423 batch 32)", () => {
+  it("keeps a refusal on the one line above a later tap that went through, for its lifetime", () => {
+    const refusal = { key: "step-1", tone: "Problem" as const, text: "was cancelled", at: 1_000 };
+    const done = { key: "step-2", tone: "Info" as const, text: "Order 5 · done.", at: 2_000 };
+    const arrival = { key: "arrivals", tone: "New" as const, text: "New order", at: 3_000 };
+    const sound = { key: "sound", tone: "Info" as const, text: "Sound is off." };
+    // A new order is said by time against a refusal, as before; information never covers either.
+    expect(kitchenStatusOrder([done, sound, refusal, arrival]).map((entry) => entry.key)).toEqual([
+      "arrivals",
+      "step-1",
+      "step-2",
+      "sound",
+    ]);
+    expect(kitchenStatusOrder([done, sound, refusal]).map((entry) => entry.key)).toEqual([
+      "step-1",
+      "step-2",
+      "sound",
+    ]);
+    // Without a refusal, the newest is said; a standing problem (no time) never takes the line.
+    const more = { key: "more", tone: "Problem" as const, text: "More orders are waiting." };
+    expect(kitchenStatusOrder([more, done, arrival]).map((entry) => entry.key)).toEqual([
+      "arrivals",
+      "step-2",
+      "more",
+    ]);
+    // Two refusals: the newer one first; the board's own lost connection stays above both.
+    const later = { ...refusal, key: "step-3", at: 4_000 };
+    const stale = { key: "stale", tone: "Problem" as const, text: "Read-only", at: Infinity };
+    expect(kitchenStatusOrder([refusal, later, stale]).map((entry) => entry.key)).toEqual([
+      "stale",
+      "step-3",
+      "step-1",
+    ]);
+  });
+});
+
+describe("kitchenSlotMoved (WP-2423 batch 32)", () => {
+  const at = (page: string, screen: string) => ({ page, screen });
+  it("refuses a tap only on a ticket that moved on the screen because the page moved it", () => {
+    // Content added above a scrolled board, kept in view by scroll anchoring: never a move.
+    expect(kitchenSlotMoved(at("16,433", "16,285"), at("16,501", "16,285"))).toBe(false);
+    // The cook scrolled: never a move.
+    expect(kitchenSlotMoved(at("16,433", "16,285"), at("16,433", "16,120"))).toBe(false);
+    // Content added above at the top of the board pushed the ticket down under the finger.
+    expect(kitchenSlotMoved(at("16,433", "16,433"), at("16,501", "16,501"))).toBe(true);
+    // A ticket before it closed and this one took its place.
+    expect(kitchenSlotMoved(at("374,200", "374,200"), at("16,200", "16,200"))).toBe(true);
+    expect(kitchenSlotMoved(at("16,433", "16,285"), at("16,433", "16,285"))).toBe(false);
   });
 });

@@ -892,6 +892,29 @@ export function kitchenSlotPlace(element: HTMLElement): string {
   }
   return `${left},${top}`;
 }
+/** Where a ticket sits: on the board (see kitchenSlotPlace) and on the screen (under a finger). */
+export interface KitchenSlotPosition {
+  readonly page: string;
+  readonly screen: string;
+}
+export function kitchenSlotPosition(element: HTMLElement): KitchenSlotPosition {
+  const box = element.getBoundingClientRect();
+  return {
+    page: kitchenSlotPlace(element),
+    screen: `${Math.round(box.left)},${Math.round(box.top)}`,
+  };
+}
+/**
+ * WP-2423 batch 32: whether a ticket moved under the cook's finger. Only a change of where it is on
+ * the screen can put a finger on another order's button, and only one that comes with a change of
+ * its place on the board is the page moving it: scrolling (the page or a lane) changes the screen
+ * position alone, and content added above a scrolled board, which the browser keeps in view by
+ * scrolling as much (scroll anchoring), changes the board place alone. Before, the board place
+ * alone decided, and such a ticket said "Moved. Tap again." though it never moved on screen.
+ */
+export function kitchenSlotMoved(before: KitchenSlotPosition, now: KitchenSlotPosition): boolean {
+  return before.page !== now.page && before.screen !== now.screen;
+}
 /** A slot ignores taps this long after what is in it changes. */
 export const kitchenSlotSettleMs = 600;
 /** The board opens without its remakes if they have not answered by then. */
@@ -1001,6 +1024,20 @@ export function kitchenSlowTapsAt(since: number, entries: readonly KitchenStatus
   return Math.min(since, ...problems.map((at) => at - 1));
 }
 /**
+ * The order the status row says things in, the first on its one line: the newest first, a standing
+ * fact (no time) last. WP-2423 batch 32: a dated problem (a refused tap such as "was cancelled")
+ * or a new order comes before any information, however new, for as long as it is kept, so a later
+ * tap that went through ("Order N · X done.") never covers a refusal on the one visible line, where
+ * it could run out unseen.
+ */
+export function kitchenStatusOrder(
+  entries: readonly KitchenStatusEntry[],
+): readonly KitchenStatusEntry[] {
+  const rank = (entry: KitchenStatusEntry) =>
+    entry.at === undefined ? 0 : entry.tone === "Info" ? 1 : 2;
+  return [...entries].sort((a, b) => rank(b) - rank(a) || (b.at ?? -1) - (a.at ?? -1));
+}
+/**
  * DEC-KITCHEN-ONE-TAP: nothing above the tickets changes height during service, so a message arriving
  * as a finger lands never puts that finger on another order's button. This row always keeps its
  * height. It says the newest thing in one line, and more on a tap, laid over the board.
@@ -1014,7 +1051,7 @@ export function KitchenStatusRow({
   readonly details?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
-  const sorted = [...entries].sort((a, b) => (b.at ?? -1) - (a.at ?? -1));
+  const sorted = kitchenStatusOrder(entries);
   const [first] = sorted;
   const hasMore = entries.length > 1 || details !== undefined;
   const opened = open && hasMore;
@@ -1937,7 +1974,10 @@ export function KitchenBoardScreen({
   readonly view: KitchenBoardView;
   /** A counter or office sign-in: the app's workspace frame instead of the kitchen display's. */
   readonly workspaceFrame?: KitchenWorkspaceFrame | undefined;
-  /** The remakes have not answered yet, so the bar does not know if Recently finished is in it. */
+  /**
+   * No remakes read has said yet whether this person has remakes (none answered, or only failed),
+   * so the bar does not know if Recently finished is in it and keeps its place.
+   */
   readonly remakesPending?: boolean;
   /** What happened to the last kitchen step, remake or ticket close, newest first. */
   readonly statusEntries?: readonly KitchenStatusEntry[];
@@ -2642,9 +2682,9 @@ export function KitchenBoardScreen({
   });
   slotsSeeded.current = true;
   // A ticket that moved is a changed slot too (a line of the ticket above it left, or a ticket before
-  // it closed): the finger that was over its Done may now be over another order's. Measured from
-  // its place on the board, so scrolling is never a move.
-  const slotPlaces = useRef(new Map<string, string>());
+  // it closed): the finger that was over its Done may now be over another order's. Judged by where
+  // it is on the screen as well as on the board (kitchenSlotMoved), so scrolling is never a move.
+  const slotPlaces = useRef(new Map<string, KitchenSlotPosition>());
   const slotElements = useRef(new Map<string, HTMLElement>());
   const slotRef = (key: string) => (element: HTMLElement | null) => {
     if (element) slotElements.current.set(key, element);
@@ -2659,12 +2699,12 @@ export function KitchenBoardScreen({
       typeof window === "undefined" ? "" : `${window.innerWidth}x${window.innerHeight}`;
     const resized = slotViewport.current !== "" && slotViewport.current !== viewport;
     slotViewport.current = viewport;
-    const places = new Map<string, string>();
+    const places = new Map<string, KitchenSlotPosition>();
     for (const [key, element] of slotElements.current) {
-      const place = kitchenSlotPlace(element);
+      const place = kitchenSlotPosition(element);
       places.set(key, place);
       const before = slotPlaces.current.get(key);
-      if (!resized && before !== undefined && before !== place)
+      if (!resized && before !== undefined && kitchenSlotMoved(before, place))
         slots.current.set(key, {
           signature: slots.current.get(key)?.signature ?? "",
           changedAt: now,
@@ -2673,6 +2713,14 @@ export function KitchenBoardScreen({
     slotPlaces.current = places;
   }, []);
   useLayoutEffect(measureSlots);
+  // Scrolling (the page or a lane) is the cook's own: where each ticket is on the screen is taken
+  // again then, so a later change above a scrolled board is judged from where it was last seen.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const scrolled = () => measureSlots();
+    window.addEventListener("scroll", scrolled, { capture: true, passive: true });
+    return () => window.removeEventListener("scroll", scrolled, { capture: true });
+  }, [measureSlots]);
   // WP-2423 batch 31: anything above the tickets that grows or shrinks on its own (Pause ordering
   // answering late, a notice, a banner) moves them without this board rendering. The board's area is
   // watched for size changes, and every tap measures again first, so a tap on a ticket that just
@@ -3954,7 +4002,7 @@ function KitchenBoardContent(
             }
           : undefined
       }
-      remakesPending={!rework.settled}
+      remakesPending={!rework.known}
       remakes={
         rework.board
           ? {

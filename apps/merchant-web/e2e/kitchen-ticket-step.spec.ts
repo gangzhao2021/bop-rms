@@ -305,13 +305,28 @@ for (const width of [1024, 390] as const)
         const box = card.getBoundingClientRect();
         return [box.top + window.scrollY, box.height] as const;
       });
+    // Where it is on the screen, under the finger.
+    const onScreen = () => below.evaluate((card) => Math.round(card.getBoundingClientRect().top));
     const [before] = await place();
     await first.getByRole("button", { name: "Mark TEST dish 1 finished" }).click();
-    // When the hold ends the dish leaves and the row below moves up under the cook's finger.
+    const screenBefore = await onScreen();
+    // When the hold ends the dish leaves and the row below moves up on the board.
     await expect
       .poll(async () => (await place())[0], { timeout: holdMs + 8_000, intervals: [20] })
       .toBeLessThan(before);
     const moved = await place();
+    // WP-2423 batch 32: a board the click scrolled is kept in view by the browser (scroll
+    // anchoring), and a ticket that stayed under the finger takes its tap at once.
+    if ((await onScreen()) === screenBefore) {
+      expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+      await below.locator(".kitchen-ticket__next").click();
+      await expect(below.locator(".kitchen-work-item").first()).toHaveAttribute(
+        "data-pending",
+        "Holding",
+      );
+      await expect(below.locator(".kitchen-ticket__top")).not.toContainText("Moved. Tap again.");
+      return;
+    }
     await below.locator(".kitchen-ticket__next").click();
     await expect(below.locator(".kitchen-work-item")).not.toHaveAttribute("data-pending", /./u);
     // The ignored tap is said on the card, so the cook knows to tap again.
@@ -858,4 +873,207 @@ test("@production a ticket moved by anything appearing above the tickets ignores
   await ticket.locator(".kitchen-ticket__next").click();
   await expect(ticket.locator(".kitchen-ticket__top")).toContainText("Marked done");
   await expect.poll(() => taps.length, { timeout: holdMs + 3_000 }).toBe(1);
+});
+
+/** Six tickets, so a phone's board scrolls and a lower ticket is tapped with the board scrolled. */
+const sixTickets = () =>
+  [1, 2, 3, 4, 5, 6].map((n) =>
+    dish(n, `TEST dish ${n}`, {
+      ticketReference: id(100 + n),
+      orderReference: id(120 + n),
+      orderLabel: { orderNumber: String(10 + n), orderType: "Pickup", tableLabel: null },
+    }),
+  );
+/** Content the board did not render arrives above the tickets (a banner, a notice). */
+const insertAbove = (page: Page) =>
+  page.evaluate(() => {
+    const notice = document.createElement("p");
+    notice.style.height = "68px";
+    notice.style.margin = "0";
+    notice.textContent = "TEST notice";
+    document.querySelector(".kitchen-board-workspace")?.prepend(notice);
+  });
+const screenYOf = (locator: Locator) =>
+  locator.evaluate((element) => element.getBoundingClientRect().y);
+
+/**
+ * WP-2423 batch 32 (v15 live check of batch 31): with the board scrolled, content added above the
+ * tickets is kept out of the way by the browser (scroll anchoring), so the ticket stays where it is
+ * on the screen, yet the guard measured the board's page offsets and refused the tap with "Moved.
+ * Tap again.". It now judges where the ticket is under the finger.
+ */
+test("@production with the board scrolled, content added above a ticket that stays put on screen does not refuse its tap", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const { taps } = await mockBoard(page, sixTickets());
+  await page.route("**/merchant/service-control", (route) =>
+    route.fulfill({ headers, json: notPausedServiceControl(scope.storeReference) }),
+  );
+  await page.goto("/operations/kitchen");
+  // Wider type, as the Linux runner's sans.
+  await page.addStyleTag({ content: "body { letter-spacing: 0.08em; }" });
+  const ticket = page.locator(".kitchen-ticket").filter({ hasText: "TEST dish 5" });
+  await expect(ticket).toBeVisible();
+  await ticket.locator(".kitchen-ticket__next").scrollIntoViewIfNeeded();
+  await page.evaluate(() => window.scrollBy(0, 40));
+  expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+  await page.waitForTimeout(slotSettleMs + 100);
+  const onScreen = await screenYOf(ticket);
+  await insertAbove(page);
+  // The browser kept it in place on the screen (its place on the page moved down 68 px).
+  expect(await screenYOf(ticket)).toBe(onScreen);
+  await ticket.locator(".kitchen-ticket__next").click();
+  await expect(ticket.locator(".kitchen-ticket__top")).toContainText("Marked done");
+  await expect(ticket.locator(".kitchen-ticket__top")).not.toContainText("Moved. Tap again.");
+  await expect.poll(() => taps.length, { timeout: holdMs + 3_000 }).toBe(1);
+  await page.screenshot({ path: "test-results/kitchen-scrolled-anchored-390.png" });
+});
+
+test("@production with the board scrolled, content added above that does move the ticket on screen still refuses its tap", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const { taps } = await mockBoard(page, sixTickets());
+  await page.route("**/merchant/service-control", (route) =>
+    route.fulfill({ headers, json: notPausedServiceControl(scope.storeReference) }),
+  );
+  await page.goto("/operations/kitchen");
+  // A browser that does not keep it in place: the ticket moves down under the finger.
+  await page.addStyleTag({ content: "html, body { overflow-anchor: none; }" });
+  const ticket = page.locator(".kitchen-ticket").filter({ hasText: "TEST dish 5" });
+  await expect(ticket).toBeVisible();
+  await ticket.locator(".kitchen-ticket__next").scrollIntoViewIfNeeded();
+  await page.evaluate(() => window.scrollBy(0, 40));
+  await page.waitForTimeout(slotSettleMs + 100);
+  const onScreen = await screenYOf(ticket);
+  await insertAbove(page);
+  expect(await screenYOf(ticket)).toBeGreaterThan(onScreen);
+  await ticket.locator(".kitchen-ticket__next").click();
+  await expect(ticket.locator(".kitchen-ticket__top")).toContainText("Moved. Tap again.");
+  await page.waitForTimeout(slotSettleMs + 100);
+  await ticket.locator(".kitchen-ticket__next").click();
+  await expect(ticket.locator(".kitchen-ticket__top")).toContainText("Marked done");
+  await expect.poll(() => taps.length, { timeout: holdMs + 3_000 }).toBe(1);
+});
+
+/**
+ * WP-2423 batch 32 (batch 30 review): a later tap that went through took the one status line from
+ * an earlier refusal, which then ran out behind "N more" unseen.
+ */
+for (const [width, height] of [
+  [1440, 900],
+  [390, 1400],
+] as const)
+  test(`@production a refusal keeps the status line when a later tap goes through, at ${width} wide`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height });
+    const { taps } = await mockBoard(page, [
+      dish(1, "TEST latte"),
+      dish(2, "TEST mocha", {
+        ticketReference: id(60),
+        orderReference: id(61),
+        orderLabel: { orderNumber: "6", orderType: "Pickup", tableLabel: null },
+      }),
+    ]);
+    // Registered last, so it answers first: the latte was cancelled; the mocha goes through.
+    await page.route("**/merchant/kitchen/step", async (route) => {
+      const body = route.request().postDataJSON() as StepBody;
+      if (!body.lines.some((line) => line.workItemReference === id(1))) return route.fallback();
+      return route.fulfill({
+        headers,
+        json: {
+          projectionName: "kitchen_work_queue_v1",
+          projectionPending: true,
+          occurredAt: at,
+          lines: body.lines.map((line) => ({
+            workItemReference: line.workItemReference,
+            orderItemReference: line.orderItemReference,
+            ticketReference: line.ticketReference,
+            outcome: "Refused",
+            refusedReason: "Cancelled",
+            ticketVersion: null,
+            workItemVersion: null,
+            workItemStatus: null,
+            completedQuantity: null,
+            requiredQuantity: null,
+            acceptedAt: null,
+            readyAt: null,
+            dishesDone: null,
+          })),
+        },
+      });
+    });
+    await page.goto("/operations/kitchen");
+    const latte = page.locator(".kitchen-ticket").filter({ hasText: "TEST latte" });
+    const mocha = page.locator(".kitchen-ticket").filter({ hasText: "TEST mocha" });
+    await expect(mocha).toBeVisible();
+    await page.waitForTimeout(slotSettleMs);
+    const line = page.locator(".kitchen-status-row__line");
+    await latte.locator(".kitchen-ticket__next").click();
+    await expect(line).toContainText("was cancelled", { timeout: holdMs + 4_000 });
+    await page.waitForTimeout(slotSettleMs + 100);
+    await mocha.locator(".kitchen-ticket__next").click();
+    await expect(mocha.locator(".kitchen-ticket__top")).toContainText("Marked done");
+    // The mocha's tap is recorded and said, under the refusal, which keeps the one line.
+    await expect.poll(() => taps.length, { timeout: holdMs + 3_000 }).toBe(1);
+    await page.locator(".kitchen-status-row__more").click();
+    await expect(
+      page
+        .locator('.kitchen-status-row__detail li[data-tone="Info"]')
+        .filter({ hasText: /mocha/iu }),
+    ).toBeVisible({ timeout: 4_000 });
+    // Read once, while the done notice is still kept (a retrying check would wait for it to go).
+    expect(await line.textContent()).toContain("was cancelled");
+    await page.screenshot({ path: `test-results/kitchen-refusal-kept-${width}.png` });
+  });
+
+/**
+ * WP-2423 batch 32 (batch 30 review): when the first remakes read failed, the board opened without
+ * Recently finished and without its place; a later read that answered added it mid-service, and on
+ * a phone with wide type the bar took a second row and every ticket moved under the cook's finger.
+ */
+test("@production on a phone with wide type, Recently finished arriving after a failed first read moves no ticket", async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  await page.setViewportSize({ width: 390, height: 844 });
+  const finished = dish(9, "TEST done", {
+    ticketReference: id(80),
+    orderReference: id(81),
+    orderLabel: { orderNumber: "2", orderType: "Pickup", tableLabel: null },
+    status: "Completed",
+    completedQuantity: 1,
+    acceptedAt: at,
+    orderItemReadyAt: at,
+    workItemCreatedAt: "2026-10-26T22:00:00.000Z",
+  });
+  const { taps } = await mockBoard(page, [dish(1, "TEST latte"), finished]);
+  await page.route("**/merchant/service-control", (route) =>
+    route.fulfill({ headers, json: notPausedServiceControl(scope.storeReference) }),
+  );
+  let remakeReads = 0;
+  await page.route("**/merchant/kitchen/rework/query", async (route) => {
+    remakeReads += 1;
+    // The first read fails (an outage); the next ones answer.
+    if (remakeReads === 1)
+      return route.fulfill({ status: 503, headers, json: { error: "unavailable" } });
+    return route.fallback();
+  });
+  await page.goto("/operations/kitchen");
+  await page.addStyleTag({ content: "body { letter-spacing: 0.08em; }" });
+  const ticket = page.locator(".kitchen-ticket").filter({ hasText: "TEST latte" });
+  await expect(ticket).toBeVisible();
+  await page.waitForTimeout(slotSettleMs);
+  const start = await pageYOf(ticket);
+  await page.screenshot({ path: "test-results/kitchen-recent-after-failed-read-390-before.png" });
+  // The board's next read brings the remakes; Recently finished takes the place kept for it.
+  await expect(page.getByText("Recently finished · 1")).toBeVisible({ timeout: 25_000 });
+  expect(remakeReads).toBeGreaterThan(1);
+  expect(await pageYOf(ticket)).toBe(start);
+  await ticket.locator(".kitchen-ticket__next").click();
+  await expect(ticket.locator(".kitchen-ticket__top")).toContainText("Marked done");
+  await expect.poll(() => taps.length, { timeout: holdMs + 3_000 }).toBe(1);
+  await page.screenshot({ path: "test-results/kitchen-recent-after-failed-read-390.png" });
 });
