@@ -1,4 +1,5 @@
 import { appendEventInTransaction, type ConsumerTransaction } from "@bop/eventing";
+import { OrderKitchenSourceError } from "@rms/ordering";
 import { parseConfirmedOrderIntakeReceipt } from "./confirmed-order-intake.js";
 import { createKitchenReadyEventBundle } from "./kitchen-ready-events.js";
 import type { ConfirmedOrderConsumerPorts } from "./ports/confirmed-order-consumer-ports.js";
@@ -199,7 +200,20 @@ export function createKitchenNotPreparedIntakeAdapter(options: {
           receipt: receiptFromStore(decided.intakeReceipt),
         });
       }
-      const lines = await options.allLines(input.transaction, input.receipt);
+      let lines: readonly KitchenRoundLine[];
+      try {
+        lines = await options.allLines(input.transaction, input.receipt);
+      } catch (error) {
+        // WP-2423 batch 29: staff took this paid round off (and refunded it) before it reached the
+        // kitchen. Nothing is made and nothing is recorded; the confirmed round is consumed once
+        // (the consumer's inbox), so it never holds the Order's later updates behind it.
+        if (
+          error instanceof OrderKitchenSourceError &&
+          error.code === "ORDER_KITCHEN_SOURCE_ROUND_CANCELLED"
+        )
+          return Object.freeze({ status: "Created" as const, receipt: input.receipt });
+        throw error;
+      }
       const chosen = [...new Set(lines.flatMap((line) => line.optionReferences ?? []))];
       const dishOf =
         options.comboChoices === undefined || chosen.length === 0

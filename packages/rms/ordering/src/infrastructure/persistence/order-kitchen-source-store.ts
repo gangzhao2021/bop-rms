@@ -23,6 +23,32 @@ import {
   type OrderKitchenSourceQueryPorts,
 } from "../../contracts/order-kitchen-source.js";
 
+/**
+ * WP-2423 batch 29 (v15 2026-11-17): why the round's source was not given, by name. Each is still
+ * answered as the source being unavailable (and retried), but the worker's failure line names
+ * which check stopped it instead of only DEPENDENCY_UNAVAILABLE.
+ */
+function notGiven(
+  code:
+    | "ORDER_KITCHEN_SOURCE_CONFIRMATION_NOT_FOUND"
+    | "ORDER_KITCHEN_SOURCE_CONFIRMATION_CHANGED"
+    | "ORDER_KITCHEN_SOURCE_SUBMISSION_NOT_FOUND"
+    | "ORDER_KITCHEN_SOURCE_ROUND_NOT_FOUND"
+    | "ORDER_KITCHEN_SOURCE_ROUND_NOT_CURRENT",
+): never {
+  throw new Error(code);
+}
+/**
+ * A round confirmed (paid and accepted, or sent to the kitchen on a pay-later table) and then
+ * cancelled by staff before the kitchen took it: the kitchen makes nothing for it. Only for the
+ * kitchen's current read; work already issued keeps its own rule (`resolveIssued`).
+ */
+function cancelledOrNotCurrent(revision: "Exact" | "Issued", cancelled: boolean): never {
+  if (cancelled && revision === "Exact")
+    throw new OrderKitchenSourceError("ORDER_KITCHEN_SOURCE_ROUND_CANCELLED");
+  return notGiven("ORDER_KITCHEN_SOURCE_ROUND_NOT_CURRENT");
+}
+
 /** Public owner Query bound to caller transaction; no foreign table access or reconstructed current catalog. */
 export function createPostgresOrderKitchenSourceStore(options: {
   brandReference: string;
@@ -153,14 +179,14 @@ export function createPostgresOrderKitchenSourceStore(options: {
             ],
           );
           const stored = await confirmedSource(tx, request, found.rows);
+          if (!stored) return notGiven("ORDER_KITCHEN_SOURCE_CONFIRMATION_NOT_FOUND");
           if (
-            !stored ||
             stored.record.confirmationReference !== request.confirmationReference ||
             stored.record.sourceSnapshotDigest !== request.sourceSnapshotDigest ||
             stored.orderConfirmedEvent.eventId !== request.sourceEventReference ||
             stored.orderConfirmedEvent.occurredAt > request.observedAt
           )
-            return null;
+            return notGiven("ORDER_KITCHEN_SOURCE_CONFIRMATION_CHANGED");
           const kind = await tx.query(
             "SELECT submission_kind FROM rms_ordering.order_submission_record WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 AND submission_id=$4",
             [
@@ -170,7 +196,7 @@ export function createPostgresOrderKitchenSourceStore(options: {
               stored.record.submissionReference,
             ],
           );
-          if (kind.rows.length !== 1) return null;
+          if (kind.rows.length !== 1) return notGiven("ORDER_KITCHEN_SOURCE_SUBMISSION_NOT_FOUND");
           if (kind.rows[0]?.submission_kind === "Additional") {
             const additional = await createPostgresAdditionalDiningExecutionReader({
               ...scope,
@@ -185,15 +211,23 @@ export function createPostgresOrderKitchenSourceStore(options: {
               submissionReference: stored.record.submissionReference,
               observedAt: request.observedAt,
             });
+            if (!additional) return notGiven("ORDER_KITCHEN_SOURCE_ROUND_NOT_FOUND");
             if (
-              !additional ||
               additional.batchPhase !== "Accepted" ||
               additional.snapshot.batch.orderBatchReference !== request.orderBatchReference ||
               BigInt(additional.batchVersion) !== request.sourceAggregateVersion ||
               additional.batchCheckpoint !== stored.record.sourceCheckpoint ||
               additional.batchOccurredAt > request.observedAt
             )
-              return null;
+              return cancelledOrNotCurrent(
+                revision,
+                additional.batchPhase === "Cancelled" &&
+                  additional.staffCancellation !== null &&
+                  additional.acceptance !== null &&
+                  additional.acceptance.acceptanceReference === stored.record.sourceCheckpoint &&
+                  BigInt(additional.acceptance.acceptedOrderVersion) ===
+                    request.sourceAggregateVersion,
+              );
             return createOrderKitchenSourceFromSnapshot({
               order: additional.snapshot,
               submissionKind: "Additional",
@@ -202,15 +236,22 @@ export function createPostgresOrderKitchenSourceStore(options: {
               sha256: options.sha256,
             });
           }
-          if (kind.rows[0]?.submission_kind !== "Initial") return null;
+          if (kind.rows[0]?.submission_kind !== "Initial")
+            return notGiven("ORDER_KITCHEN_SOURCE_SUBMISSION_NOT_FOUND");
           const sourceCheckpoint = stored.record.sourceCheckpoint;
-          return createPostgresOrderCreationQueryStore(
+          // The work below runs inside the Order's own read, which answers any failure of it as
+          // unavailable; what stopped it is kept here and answered after.
+          let stopped: "NotCurrent" | "Cancelled" | null = null;
+          const initial = await createPostgresOrderCreationQueryStore(
             { run: async (work) => work(tx) },
             scope,
             quoteVersion,
           ).withCurrentSubmission(stored.record.submissionReference, async (_, order) => {
             if (order.order.orderType === "DineIn") {
-              if (!order.order.diningSessionReference) return null;
+              if (!order.order.diningSessionReference) {
+                stopped = "NotCurrent";
+                return null;
+              }
               const current = await createPostgresDiningOrderItemStateReader({
                 ...scope,
                 authorize: (transaction) =>
@@ -231,18 +272,25 @@ export function createPostgresOrderKitchenSourceStore(options: {
                 (value) => value.orderBatchReference === request.orderBatchReference,
               );
               const acceptance = batch?.acceptance;
+              const acceptanceCurrent =
+                !!acceptance &&
+                BigInt(acceptance.acceptedOrderVersion) === request.sourceAggregateVersion &&
+                acceptance.acceptanceReference === sourceCheckpoint &&
+                acceptance.acceptedAt <= request.observedAt;
               if (
                 !current ||
                 !batch ||
                 batch.sequence !== 1 ||
                 batch.cancellation !== null ||
                 batch.staffCancellation !== null ||
-                !acceptance ||
-                BigInt(acceptance.acceptedOrderVersion) !== request.sourceAggregateVersion ||
-                acceptance.acceptanceReference !== sourceCheckpoint ||
-                acceptance.acceptedAt > request.observedAt
-              )
+                !acceptanceCurrent
+              ) {
+                stopped =
+                  batch?.staffCancellation && batch.cancellation === null && acceptanceCurrent
+                    ? "Cancelled"
+                    : "NotCurrent";
                 return null;
+              }
             } else {
               const { execution: current, revisions } =
                 await createPostgresOrderInitialExecutionReader({
@@ -258,8 +306,10 @@ export function createPostgresOrderKitchenSourceStore(options: {
                   orderReference: request.orderReference,
                   orderBatchReference: request.orderBatchReference,
                 });
-              if (current.phase !== "Accepted" || current.occurredAt > request.observedAt)
+              if (current.phase !== "Accepted" || current.occurredAt > request.observedAt) {
+                stopped = "NotCurrent";
                 return null;
+              }
               if (
                 !initialRevisionIsCurrent(
                   revisions,
@@ -267,8 +317,10 @@ export function createPostgresOrderKitchenSourceStore(options: {
                   sourceCheckpoint,
                   revision,
                 )
-              )
+              ) {
+                stopped = "NotCurrent";
                 return null;
+              }
             }
             return createOrderKitchenSourceFromSnapshot({
               order,
@@ -277,6 +329,9 @@ export function createPostgresOrderKitchenSourceStore(options: {
               sha256: options.sha256,
             });
           });
+          if (initial !== null) return initial;
+          if (stopped === null) return notGiven("ORDER_KITCHEN_SOURCE_ROUND_NOT_FOUND");
+          return cancelledOrNotCurrent(revision, stopped === "Cancelled");
         },
       },
     });

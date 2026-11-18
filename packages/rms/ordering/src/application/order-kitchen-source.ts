@@ -32,6 +32,19 @@ function dependency(): never {
   return fail("ORDER_KITCHEN_SOURCE_DEPENDENCY_UNAVAILABLE");
 }
 
+/**
+ * WP-2423 batch 29 (v15 2026-11-17): the plain "unavailable" keeps what it met behind it under
+ * `bop.failure.cause` (never enumerated, never answered), so the worker's failure line names the
+ * real cause (its code and source frames only) instead of only DEPENDENCY_UNAVAILABLE.
+ */
+const failureCauseKey = Symbol.for("bop.failure.cause");
+function dependencyFrom(cause: unknown): never {
+  const error = new OrderKitchenSourceError("ORDER_KITCHEN_SOURCE_DEPENDENCY_UNAVAILABLE");
+  if (cause !== null && cause !== undefined)
+    Object.defineProperty(error, failureCauseKey, { value: cause, enumerable: false });
+  throw error;
+}
+
 function exact(value: unknown, fields: readonly string[]): Readonly<Record<string, unknown>> {
   try {
     if (
@@ -415,8 +428,14 @@ export function createOrderKitchenSourceQueryService(ports: OrderKitchenSourceQu
       let source: unknown | null;
       try {
         source = await ports.source.loadExact(input);
-      } catch {
-        return dependency();
+      } catch (error) {
+        // A round cancelled after its confirmation is the source's answer, not a failure.
+        if (
+          error instanceof OrderKitchenSourceError &&
+          error.code === "ORDER_KITCHEN_SOURCE_ROUND_CANCELLED"
+        )
+          throw error;
+        return dependencyFrom(error);
       }
       if (source === null) return dependency();
 
