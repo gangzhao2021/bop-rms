@@ -29,6 +29,8 @@ import {
   kitchenArrivalsUnattended,
   kitchenSlowTapsAt,
   kitchenSlotMoved,
+  kitchenScrollOffsets,
+  kitchenScrollPulledBack,
   kitchenStatusOrder,
   kitchenComboDishNote,
   kitchenLineKey,
@@ -2160,5 +2162,44 @@ describe("kitchenSlotMoved (WP-2423 batch 32)", () => {
     // A ticket before it closed and this one took its place.
     expect(kitchenSlotMoved(at("374,200", "374,200"), at("16,200", "16,200"))).toBe(true);
     expect(kitchenSlotMoved(at("16,433", "16,285"), at("16,433", "16,285"))).toBe(false);
+  });
+  it("counts a ticket the page pulled down the screen as moved, though its place on the page stayed", () => {
+    expect(kitchenSlotMoved(at("16,433", "16,21"), at("16,433", "16,157"), true)).toBe(true);
+    expect(kitchenSlotMoved(at("16,433", "16,157"), at("16,501", "16,157"), true)).toBe(false);
+  });
+});
+
+describe("kitchenScrollPulledBack (WP-2423 batch 32 review)", () => {
+  // The board's scroller and a ticket in it, as far as the guard reads them (no DOM here).
+  const scroller = (scrollTop: number) => {
+    const board = {
+      parentElement: null,
+      isConnected: true,
+      scrollTop,
+      scrollLeft: 0,
+      scrollHeight: 1200,
+      clientHeight: 800,
+      scrollWidth: 390,
+      clientWidth: 390,
+    };
+    const ticket = { parentElement: board } as unknown as HTMLElement;
+    return {
+      board: board as unknown as Element,
+      ticket,
+      shorten: (to: number) => (board.scrollHeight = to),
+      remove: () => (board.isConnected = false),
+    };
+  };
+  it("is true only when a scroller was further than it can now go", () => {
+    const { board, ticket, shorten, remove } = scroller(400);
+    const before = kitchenScrollOffsets([ticket]);
+    expect(before.get(board)?.top).toBe(400);
+    // The cook scrolling, or content growing: not pulled back.
+    expect(kitchenScrollPulledBack(before)).toBe(false);
+    // The board got 120 px shorter while scrolled to its end.
+    shorten(1080);
+    expect(kitchenScrollPulledBack(before)).toBe(true);
+    remove();
+    expect(kitchenScrollPulledBack(before)).toBe(false);
   });
 });

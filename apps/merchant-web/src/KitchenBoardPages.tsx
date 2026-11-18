@@ -910,10 +910,51 @@ export function kitchenSlotPosition(element: HTMLElement): KitchenSlotPosition {
  * its place on the board is the page moving it: scrolling (the page or a lane) changes the screen
  * position alone, and content added above a scrolled board, which the browser keeps in view by
  * scrolling as much (scroll anchoring), changes the board place alone. Before, the board place
- * alone decided, and such a ticket said "Moved. Tap again." though it never moved on screen.
+ * alone decided, and such a ticket said "Moved. Tap again." though it never moved on screen. When
+ * the page pulled the scroll back (kitchenScrollPulledBack), the screen change was not the cook's,
+ * and it alone decides.
  */
-export function kitchenSlotMoved(before: KitchenSlotPosition, now: KitchenSlotPosition): boolean {
+export function kitchenSlotMoved(
+  before: KitchenSlotPosition,
+  now: KitchenSlotPosition,
+  scrollPulled = false,
+): boolean {
+  if (scrollPulled) return before.screen !== now.screen;
   return before.page !== now.page && before.screen !== now.screen;
+}
+/** How far a scroller (the page or a lane) was scrolled when the tickets were last measured. */
+export interface KitchenScrollOffset {
+  readonly top: number;
+  readonly left: number;
+}
+/** The scroll offsets of every element around the tickets, the page's own included. */
+export function kitchenScrollOffsets(
+  elements: Iterable<HTMLElement>,
+): Map<Element, KitchenScrollOffset> {
+  const offsets = new Map<Element, KitchenScrollOffset>();
+  for (const element of elements)
+    for (let at = element.parentElement; at !== null && !offsets.has(at); at = at.parentElement)
+      offsets.set(at, { top: at.scrollTop, left: at.scrollLeft });
+  return offsets;
+}
+/**
+ * WP-2423 batch 32 review: whether the browser pulled a scroller back since the last measurement,
+ * because what it scrolls got shorter than where it was scrolled to (on a phone scrolled to the
+ * bottom, the last ticket closing). The cook never scrolls past the end, so a scroller that was
+ * further than it can now go was moved by the page, not by the cook: every ticket then moves down
+ * the screen with no change of its place on the page, and a finger aimed at the old spot lands on
+ * the ticket above.
+ */
+export function kitchenScrollPulledBack(
+  before: ReadonlyMap<Element, KitchenScrollOffset>,
+): boolean {
+  for (const [scroller, offset] of before) {
+    if (!scroller.isConnected) continue;
+    const maxTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+    const maxLeft = Math.max(0, scroller.scrollWidth - scroller.clientWidth);
+    if (offset.top > maxTop + 1 || offset.left > maxLeft + 1) return true;
+  }
+  return false;
 }
 /** A slot ignores taps this long after what is in it changes. */
 export const kitchenSlotSettleMs = 600;
@@ -2683,7 +2724,8 @@ export function KitchenBoardScreen({
   slotsSeeded.current = true;
   // A ticket that moved is a changed slot too (a line of the ticket above it left, or a ticket before
   // it closed): the finger that was over its Done may now be over another order's. Judged by where
-  // it is on the screen as well as on the board (kitchenSlotMoved), so scrolling is never a move.
+  // it is on the screen as well as on the board (kitchenSlotMoved), so the cook's scrolling is never
+  // a move, and the page pulling a scrolled board back down the screen is (kitchenScrollPulledBack).
   const slotPlaces = useRef(new Map<string, KitchenSlotPosition>());
   const slotElements = useRef(new Map<string, HTMLElement>());
   const slotRef = (key: string) => (element: HTMLElement | null) => {
@@ -2693,18 +2735,23 @@ export function KitchenBoardScreen({
   // The screen's own size: a turned tablet or a resized window lays every ticket out again, which
   // the person holding it sees happen, so it is a new starting point and not a move.
   const slotViewport = useRef("");
+  const slotScrolls = useRef<ReadonlyMap<Element, KitchenScrollOffset>>(new Map());
   const measureSlots = useCallback(() => {
     const now = performance.now();
     const viewport =
       typeof window === "undefined" ? "" : `${window.innerWidth}x${window.innerHeight}`;
     const resized = slotViewport.current !== "" && slotViewport.current !== viewport;
     slotViewport.current = viewport;
+    // A scroll the page forced (it got shorter than where it was scrolled to) is not the cook's:
+    // then where a ticket is on the screen alone decides.
+    const pulled = kitchenScrollPulledBack(slotScrolls.current);
+    slotScrolls.current = kitchenScrollOffsets(slotElements.current.values());
     const places = new Map<string, KitchenSlotPosition>();
     for (const [key, element] of slotElements.current) {
       const place = kitchenSlotPosition(element);
       places.set(key, place);
       const before = slotPlaces.current.get(key);
-      if (!resized && before !== undefined && kitchenSlotMoved(before, place))
+      if (!resized && before !== undefined && kitchenSlotMoved(before, place, pulled))
         slots.current.set(key, {
           signature: slots.current.get(key)?.signature ?? "",
           changedAt: now,

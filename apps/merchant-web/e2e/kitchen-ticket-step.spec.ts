@@ -958,6 +958,52 @@ test("@production with the board scrolled, content added above that does move th
 });
 
 /**
+ * WP-2423 batch 32 review: with the board scrolled to the bottom, the content below the tickets got
+ * shorter (on a phone, the last ticket closing at another station). The browser pulled the scroll
+ * back (clamping), so every ticket moved down the screen though none moved on the page, and a tap
+ * aimed at the old spot landed on the ticket above and was taken.
+ */
+test("@production with the board scrolled to the bottom, a ticket the shortened page pulls down the screen refuses its tap", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const { taps } = await mockBoard(page, sixTickets());
+  await page.route("**/merchant/service-control", (route) =>
+    route.fulfill({ headers, json: notPausedServiceControl(scope.storeReference) }),
+  );
+  await page.goto("/operations/kitchen");
+  await page.addStyleTag({ content: "body { letter-spacing: 0.08em; }" });
+  const ticket = page.locator(".kitchen-ticket").filter({ hasText: "TEST dish 5" });
+  await expect(ticket).toBeVisible();
+  // Content below the tickets that will get shorter (as a closing last ticket does).
+  await page.evaluate(() => {
+    const below = document.createElement("div");
+    below.id = "test-below";
+    below.style.height = "200px";
+    document.querySelector(".kitchen-board-workspace")?.append(below);
+  });
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+  await page.waitForTimeout(slotSettleMs + 100);
+  const onScreen = await screenYOf(ticket);
+  const onPage = await pageYOf(ticket);
+  await page.evaluate(() => {
+    const below = document.getElementById("test-below");
+    if (below) below.style.height = "80px";
+  });
+  // Pulled down the screen, not moved on the page.
+  await expect.poll(() => screenYOf(ticket)).toBeGreaterThan(onScreen + 60);
+  expect(await pageYOf(ticket)).toBe(onPage);
+  await ticket.locator(".kitchen-ticket__next").click();
+  await expect(ticket.locator(".kitchen-ticket__top")).toContainText("Moved. Tap again.");
+  await page.waitForTimeout(holdMs + 500);
+  expect(taps.length).toBe(0);
+  await ticket.locator(".kitchen-ticket__next").click();
+  await expect(ticket.locator(".kitchen-ticket__top")).toContainText("Marked done");
+  await expect.poll(() => taps.length, { timeout: holdMs + 3_000 }).toBe(1);
+});
+
+/**
  * WP-2423 batch 32 (batch 30 review): a later tap that went through took the one status line from
  * an earlier refusal, which then ran out behind "N more" unseen.
  */
