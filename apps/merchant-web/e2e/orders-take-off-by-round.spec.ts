@@ -278,8 +278,8 @@ for (const zh of [false, true]) {
     ).toBeVisible();
     await expect(group.locator(".pay-later-remove__note")).toHaveText(
       zh
-        ? "税按整张账单算一次，所以账单减 $10.74。"
-        : "Tax is worked out once on the whole bill, so the bill goes down $10.74.",
+        ? "第 2 轮在账单上是 $10.73；整轮删掉，账单减 $10.74，因为税按整张账单算一次。"
+        : "Round 2 reads $10.73 on the bill; taking it all off takes $10.74 off, because tax is worked out once on the whole bill.",
     );
     await shoot(page, `orders-page-round2-whole-${lang}`);
     // b23: with a reason, the confirm is the filled primary (as on Tables), with room above the
@@ -395,8 +395,8 @@ for (const zh of [false, true]) {
     await group.getByRole("checkbox").check();
     await expect(group.locator(".pay-later-remove__note")).toHaveText(
       zh
-        ? "税按整张账单算一次，所以账单减 $14.12。"
-        : "Tax is worked out once on the whole bill, so the bill goes down $14.12.",
+        ? "第 3 轮在账单上是 $14.13；整轮删掉，账单减 $14.12，因为税按整张账单算一次。"
+        : "Round 3 reads $14.13 on the bill; taking it all off takes $14.12 off, because tax is worked out once on the whole bill.",
     );
     await shoot(page, `orders-arrival-round3-${lang}`);
     // Reloading does not open it again.

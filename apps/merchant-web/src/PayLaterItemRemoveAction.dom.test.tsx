@@ -165,8 +165,9 @@ it("each dish says what the bill goes down by, and the button says the same for 
   // Both: the bill goes down $10.74, a cent more than $3.67 + $7.06 and than the round's $10.73.
   await tick(container, "Soy milk");
   expect(buttonNamed(container, "Take the whole round off · $10.74")).toBeDefined();
+  // WP-2423 batch 29: the round's own figure and the button's, named together in one line.
   expect(container.querySelector(".pay-later-remove__note")?.textContent).toBe(
-    "Tax is worked out once on the whole bill, so the bill goes down $10.74.",
+    "Round 2 reads $10.73 on the bill; taking it all off takes $10.74 off, because tax is worked out once on the whole bill.",
   );
   // Each dish was asked about once; the one ticked dish was not asked again.
   expect(asked.filter((items) => items.length === 1 && items[0] === id(202))).toHaveLength(1);

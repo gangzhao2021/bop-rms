@@ -217,6 +217,8 @@ export function payLaterRemoveTogetherNote(input: {
   readonly dishMinors: readonly (string | null | undefined)[];
   /** What the round reads on the bill, when the whole round is ticked. */
   readonly roundMinor?: string | undefined;
+  /** The round's number at the table, to name it when the whole round is ticked. */
+  readonly sequence?: number | undefined;
   readonly currencyCode: string;
 }): string | null {
   if (input.previewMinor === null || input.dishMinors.length === 0) return null;
@@ -229,8 +231,24 @@ export function payLaterRemoveTogetherNote(input: {
     (dishes !== null && dishes !== preview) ||
     (input.roundMinor !== undefined && BigInt(input.roundMinor) !== preview);
   if (!differs) return null;
+  const amount = orderMoney({ amountMinor: input.previewMinor, currencyCode: input.currencyCode });
+  // WP-2423 batch 29: the whole round reads one cent apart from what taking it off takes off the
+  // bill: both figures are named in one line, so staff see why they differ.
+  if (
+    input.roundMinor !== undefined &&
+    input.sequence !== undefined &&
+    BigInt(input.roundMinor) !== preview
+  )
+    return t(
+      "Round {sequence} reads {round} on the bill; taking it all off takes {amount} off, because tax is worked out once on the whole bill.",
+      {
+        sequence: input.sequence,
+        round: orderMoney({ amountMinor: input.roundMinor, currencyCode: input.currencyCode }),
+        amount,
+      },
+    );
   return t("Tax is worked out once on the whole bill, so the bill goes down {amount}.", {
-    amount: orderMoney({ amountMinor: input.previewMinor, currencyCode: input.currencyCode }),
+    amount,
   });
 }
 
@@ -506,6 +524,7 @@ export function PayLaterItemRemoveAction({
     previewMinor,
     dishMinors: chosen.map((line) => previews.get(keyFor([line.orderItemReference]) as string)),
     roundMinor: wholeRound ? roundMinor : undefined,
+    sequence: batch.sequence,
     currencyCode,
   });
   if (!open)

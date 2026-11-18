@@ -316,7 +316,14 @@ it("b22: when dishes together take a cent more or less off than their figures, t
     previewMinor: string | null,
     dishMinors: (string | null | undefined)[],
     roundMinor?: string,
-  ) => payLaterRemoveTogetherNote({ previewMinor, dishMinors, roundMinor, currencyCode: "CAD" });
+  ) =>
+    payLaterRemoveTogetherNote({
+      previewMinor,
+      dishMinors,
+      roundMinor,
+      sequence: 3,
+      currencyCode: "CAD",
+    });
   // Soy milk alone $3.67 + Smashed cucumber alone $7.06; the whole round takes $10.74 off.
   expect(note("1074", ["367", "706"])).toBe(
     "Tax is worked out once on the whole bill, so the bill goes down $10.74.",
@@ -324,8 +331,9 @@ it("b22: when dishes together take a cent more or less off than their figures, t
   // One dish: its figure is the button's.
   expect(note("706", ["706"])).toBeNull();
   // The whole round reads $14.13 on the bill; taking it off takes $14.12 off.
+  // WP-2423 batch 29: both figures named in one line.
   expect(note("1412", ["1412"], "1413")).toBe(
-    "Tax is worked out once on the whole bill, so the bill goes down $14.12.",
+    "Round 3 reads $14.13 on the bill; taking it all off takes $14.12 off, because tax is worked out once on the whole bill.",
   );
   expect(note("1413", ["1413"], "1413")).toBeNull();
   // Not known yet: nothing said.

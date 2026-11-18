@@ -6537,6 +6537,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Take dishes off round {sequence}": "从第 {sequence} 轮删菜",
   "Choose dishes to take off round {sequence}": "请选要从第 {sequence} 轮删的菜",
   "bill goes down {amount} with tax": "账单减 {amount}（含税）",
+  "Round {sequence} reads {round} on the bill; taking it all off takes {amount} off, because tax is worked out once on the whole bill.":
+    "第 {sequence} 轮在账单上是 {round}；整轮删掉，账单减 {amount}，因为税按整张账单算一次。",
   "Tax is worked out once on the whole bill, so the bill goes down {amount}.":
     "税按整张账单算一次，所以账单减 {amount}。",
   "Tick the dishes the table won't be charged for. The kitchen stops them.":
