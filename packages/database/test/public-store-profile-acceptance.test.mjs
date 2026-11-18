@@ -634,6 +634,9 @@ it.each([
           idleTimeoutMillis: 5000,
         });
         pool.on("connect", (c) => void c.query("SET ROLE " + role));
+        // An idle pooled connection is closed (57P01) when the isolated database stops after the
+        // test; the pool reports that only for idle connections, so queries still fail on their own.
+        pool.on("error", () => undefined);
         let peakWaiting = 0,
           acquired = 0,
           heldTotal = 0,
