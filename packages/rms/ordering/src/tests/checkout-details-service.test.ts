@@ -230,6 +230,23 @@ it("rejects a foreign Guest on the attached Quote", async () => {
   await expect(f.service.save(f.command)).rejects.toMatchObject({ code: "CART_QUOTE_INVALID" });
   expect(f.persist).not.toHaveBeenCalled();
 });
+// Owner #26 / M165 (DEC-PRICE-HOLD rule 2): another phone at the table, or a staff round's table
+// guest, confirmed the held price for this Cart version; this participant checks out on it.
+it("saves a table Cart's details on the Quote another participant at the table confirmed", async () => {
+  const f = setup(true);
+  f.loadQuote.mockResolvedValue({ ...f.attachment, guestSessionReference: id(99) });
+  const saved = await f.service.save(f.command);
+  expect(saved.status).toBe("Saved");
+  expect(saved.snapshot.guestSessionReference).toBe(String(f.guest.sessionReference));
+  expect(saved.snapshot.quoteReference).toBe(f.q.quoteReference);
+  // Another Quote (not the one asked for) is still refused for a table Cart.
+  const g = setup(true);
+  g.loadQuote.mockResolvedValue({ ...g.attachment, guestSessionReference: id(99) });
+  await expect(g.service.save({ ...g.command, quoteReference: id(98) })).rejects.toMatchObject({
+    code: "CART_QUOTE_INVALID",
+  });
+  expect(g.persist).not.toHaveBeenCalled();
+});
 it("keeps a post-write authorization failure uncertain", async () => {
   const f = setup();
   f.persist.mockImplementation(async (input) => {

@@ -234,7 +234,9 @@ export function createPostgresCheckoutSessionStore(
             quote?.quote_id !== v.quoteReference ||
             quote?.quote_version !== v.quoteVersion ||
             quote?.quote_input_digest !== v.quoteInputDigest ||
-            quote?.guest_session_id !== v.guestSessionReference ||
+            // DEC-PRICE-HOLD rule 2: a table's Cart checks out on the Quote any phone at the
+            // table (or a staff round's table guest) confirmed for this version.
+            (v.orderType !== "DineIn" && quote?.guest_session_id !== v.guestSessionReference) ||
             quote?.valid !== true
           )
             return fail("INTENT_CONFLICT");

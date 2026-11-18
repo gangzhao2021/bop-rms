@@ -364,3 +364,198 @@ it(
     );
   },
 );
+
+/**
+ * Owner #26 / M165 (DEC-PRICE-HOLD rule 2), WP-2423 batch 29: the confirmed price belongs to the
+ * table's Cart, not to the phone that priced it. Same restricted NOBYPASSRLS role and pilot
+ * compositions as above, pay-at-end table:
+ * 1. phone A is quoted a soup at $6.50, the Owner raises it to $8.00 and lists it; phone B at the
+ *    same table prices the same Cart (the held quote), saves its details, checks out and sends:
+ *    the round is ordered at $6.50, to the cent;
+ * 2. phone A is quoted another soup at $8.00, the Owner raises it to $9.00 and lists it; staff send
+ *    A's soup on its own from the merchant app (the live 503 case): placed at $8.00.
+ * Fails before the fix: B (and staff's table guest) was priced at today's price instead, or its
+ * details were refused (CART_QUOTE_INVALID) because the held quote was A's.
+ */
+it(
+  "another phone at the table, or a staff round, pays the price a phone confirmed while it is held",
+  { timeout: 900_000 },
+  async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    await withIsolatedDatabase(
+      { caseId: "wp2423_ph_other", timeoutMs: 800_000 },
+      async (context) => {
+        const admin = new Client(context.clientConfig);
+        await admin.connect();
+        let store = null;
+        try {
+          const api = await createPilotApiRole(admin, context, "wp2423_pho");
+          store = await prepareRealStaffRoundStore({ admin, context, api });
+          const { reference: fresh, now, soup, owner, tableReference } = store;
+          const server = await store.staff(id(0x720), [
+            "ordering.order.create_staff",
+            "dining.operate",
+            "dining.session.close",
+          ]);
+          const counter = await store.counterFor(server);
+          const guests = counter.tableGuestPipeline;
+          const staff = { sessionCookie: server.sessionCookie, csrf: server.csrf };
+          const joinPhone = async () => {
+            const table = await guests.openTable(staff, { tableReference });
+            assert.equal(table.status, "Opened");
+            const entered = await guests.enter({ tableReference, requestedAt: now() });
+            assert.equal(entered.status, "Established");
+            const joined = await guests.join(entered.credentials, {
+              joinCredential: table.joinCredential,
+              operationReference: fresh(),
+            });
+            return (
+              await guests.bind(entered.credentials, {
+                operationReference: fresh(),
+                admissionReference: joined.admissionReference,
+              })
+            ).credentials;
+          };
+          const tableCart = async (phone) => {
+            const cart = await guests.selectCart(phone, {
+              operationReference: fresh(),
+              requestedAt: now(),
+            });
+            assert.equal(cart.status, "Selected");
+            return cart;
+          };
+          const addSoup = async (phone) => {
+            const cart = await tableCart(phone);
+            const added = await guests.addItem(phone, {
+              operationReference: fresh(),
+              cartReference: cart.cartReference,
+              expectedCartVersion: cart.cartVersion,
+              sellableReference: soup.skuReference,
+              quantity: 1,
+              optionSelections: [],
+              customerNote: null,
+              requestedAt: now(),
+            });
+            assert.equal(added.status, "Applied");
+            return { cartReference: cart.cartReference, version: added.cartVersion };
+          };
+          const price = (phone, cart) =>
+            guests.quote(phone, {
+              operationReference: fresh(),
+              cartReference: cart.cartReference,
+              cartVersion: cart.version,
+              requestedAt: now(),
+            });
+          const orderedLines = async (quoteReference) =>
+            (
+              await admin.query(
+                `SELECT transaction_snapshot_json->'pricing'->'unitPrice'->>'amountMinor' AS unit,
+                      transaction_snapshot_json->'pricing'->'total'->>'amountMinor' AS total
+                 FROM rms_ordering.order_item
+                WHERE store_id=$1 AND transaction_snapshot_json->'pricing'->>'quoteReference'=$2
+                ORDER BY ordinal`,
+                [store.scope.storeReference, quoteReference],
+              )
+            ).rows;
+          const raise = async (priceMinor) => {
+            await owner.saveDish(
+              "Hot and sour soup (TEST)",
+              "酸辣汤",
+              priceMinor,
+              soup.productReference,
+              null,
+            );
+            await owner.listAll();
+          };
+          const phoneA = await joinPhone();
+          const phoneB = await joinPhone();
+
+          // 1. A confirms a soup at $6.50; the Owner raises it; B sends the table's Cart.
+          const first = await addSoup(phoneA);
+          const confirmed = await price(phoneA, first);
+          assert.equal(confirmed.status, "Quoted");
+          assert.equal(BigInt(confirmed.subtotalMinor), 650n, "one soup at $6.50");
+          await raise("800");
+          const seenByB = await price(phoneB, first);
+          assert.equal(seenByB.status, "Quoted");
+          assert.equal(seenByB.quoteReference, confirmed.quoteReference, "the held quote");
+          assert.equal(seenByB.totalMinor, confirmed.totalMinor, "same total, to the cent");
+          const saved = await counter.tableGuestDetails.save({
+            ...phoneB,
+            command: {
+              operationReference: fresh(),
+              detailsReference: fresh(),
+              expectedVersion: 0,
+              cartReference: first.cartReference,
+              cartVersion: first.version,
+              quoteReference: seenByB.quoteReference,
+              quoteVersion: 2,
+              pickupContact: null,
+              receipt: { choice: "InSession", email: null },
+              policies: [],
+            },
+          });
+          assert.equal(saved.status, "Saved", "B checks out on the held quote");
+          const started = await guests.startCheckout(phoneB, {
+            createOperationReference: fresh(),
+            cartReference: first.cartReference,
+            cartVersion: first.version,
+            quoteReference: seenByB.quoteReference,
+          });
+          assert.equal(started.status, "Started");
+          const sent = await guests.submitPayLater(phoneB, {
+            checkoutSessionReference: started.checkoutSessionReference,
+            selectionReference: fresh(),
+            recordedAfterOutage: false,
+          });
+          assert.ok(sent.submissionReference, "B's round reached the kitchen");
+          assert.deepEqual(
+            (await orderedLines(confirmed.quoteReference)).map((line) => [line.unit, line.total]),
+            [["650", String(confirmed.totalMinor)]],
+            "ordered at the $6.50 A confirmed, with the tax as quoted",
+          );
+
+          // 2. A confirms another soup at $8.00; the Owner raises it; staff send A's soup alone.
+          const second = await addSoup(phoneA);
+          const again = await price(phoneA, second);
+          assert.equal(again.status, "Quoted");
+          assert.equal(BigInt(again.subtotalMinor), 800n, "one soup at the listed $8.00");
+          await raise("900");
+          const seen = await tableCart(phoneA);
+          assert.equal(seen.cartVersion, second.version);
+          const placed = await counter.staffDiningRound({
+            ...staff,
+            command: {
+              operationReference: fresh(),
+              tableReference,
+              tip: { kind: "None" },
+              recordedAfterOutage: false,
+              lines: [],
+              includeTableCart: {
+                expectedCartVersion: seen.cartVersion,
+                lines: seen.pendingItems.map((item) => ({
+                  cartItemReference: item.cartItemReference,
+                  decision: "Send",
+                })),
+              },
+            },
+          });
+          assert.equal(placed.status, "Placed", JSON.stringify(placed));
+          assert.deepEqual(
+            (await orderedLines(again.quoteReference)).map((line) => [line.unit, line.total]),
+            [["800", String(again.totalMinor)]],
+            "staff's round is ordered at the $8.00 A confirmed",
+          );
+          const counted = await admin.query(
+            "SELECT count(*)::int AS rounds FROM rms_ordering.order_submission_record WHERE store_id=$1",
+            [store.scope.storeReference],
+          );
+          assert.equal(counted.rows[0].rounds, 2, "two rounds, each once");
+        } finally {
+          await store?.close().catch(() => undefined);
+          await admin.end();
+        }
+      },
+    );
+  },
+);

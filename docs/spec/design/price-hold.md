@@ -55,9 +55,12 @@ v15 实测发现四处与上面决定不符，按真实门店定下：
 - 菜的内容比较（第 10、12 条）：`packages/rms/catalog/src/infrastructure/persistence/published-menu-query-store.ts`（`listPublishedDishChanges`）、`current-selection-facts-store.ts`（`dishChanges`）；栅栏在 `configured-cart-quote-service.ts`、`configured-checkout-validation-service.ts`、`order-submission-source.ts`。降价（第 11 条）：`configured-cart-quote-service.ts`（`pricing.estimate`）、`customer-configured-quote-composition.ts`；客人端第二次点按 `send-round.ts`。第一次报价（第 12 条）：`cart-quote-store.ts`（`createPostgresCartLineFirstQuoteReader`）、`customer-configured-quote-composition.ts`（`sinceAdded`）、`customer-quote.ts`；客人端 `dish-changes.tsx`、`seen-prices.ts`、`CartPage.tsx`、`CheckoutPage.tsx`。验收 `packages/database/test/price-hold-dish-changes-acceptance.test.mjs`（受限角色：改名、改过敏原、降价、保留期后列出第一次的价格），浏览器 `apps/customer-pwa/e2e/price-hold-dish-changes.spec.ts`（390/1024/1440）。
 - 验收：`packages/database/test/price-hold-acceptance.test.mjs`（受限角色：后付桌保留期内改价、保留期后改价、重放；先付桌结账后、付款前改价上架，订单和应付金额按确认价到分）；`listing-crosses-open-cart-acceptance.test.mjs`（结账开始后、送单前上架，直接送出、只送一次）。
 
-## 批次 29 修正：保留价只属于报价的那个参与者
+## 批次 29 修正：同桌别的手机和店员一轮照付保留价（第 2 条照旧）
 
-同桌另一部手机（或店员一轮的桌边客人）在保留期内对同一购物车版本再报价，原来直接拿到第一部手机的报价；
-但结账详情和结账只接受付款这一方自己挂接的报价，于是被拒（`CART_QUOTE_INVALID`），保留期 5 分钟内反复要求重新报价，
-店员单独送出这道菜时答 503。现在保留价只对报价的那个参与者有效，别的参与者按现在的价格为自己报价（结账前照常看到总价）。
-比第 2 条“同桌别的手机返回原报价”窄；触发重审：门店反映同桌两部手机看到的价格不同。
+同桌另一部手机，或店员一轮的桌边客人，在保留期内为同一购物车版本报价时，拿到的是第一部手机确认的那张报价（第 2 条）。
+原来结账详情和结账只接受付款这一方自己挂接的报价，于是被拒（`CART_QUOTE_INVALID`）：店员单独送出这道菜时答 503，
+手机反复重新报价后显示“没能下单”。现在堂食桌（按桌共享的购物车）的结账详情（`checkout-details-service.ts`）和结账
+（`checkout-session-store.ts`）接受这一购物车版本上任何参与者挂接的那张报价，报价号、购物车版本和有效期仍须一致；
+自取和柜台单只有一位客人，仍只认自己挂接的报价。订单项的金额、税和价格来源都取自这张报价，按分计。
+验收：`price-hold-acceptance.test.mjs` 第 3 例（受限角色：手机 A 报价 $6.50，店主改为 $8.00 并上架后，手机 B 结账送出，按 $6.50 建单；
+A 报价 $8.00，改为 $9.00 后店员单独送出 A 的菜，按 $8.00 建单）。

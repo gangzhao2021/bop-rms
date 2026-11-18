@@ -234,7 +234,12 @@ export function createCheckoutDetailsService(ports: CheckoutDetailsPorts) {
           if (
             quote.brandReference !== desired.brandReference ||
             quote.storeReference !== desired.storeReference ||
-            quote.guestSessionReference !== desired.guestSessionReference ||
+            // Owner #26 / M165 (DEC-PRICE-HOLD rule 2): a table's shared Cart is priced once for
+            // the table while its hold lasts. Another phone at the table, or a staff round's table
+            // guest, checks out on the Quote the first one confirmed (same Cart version, same
+            // Quote); only a walk-up or pickup Cart, which one guest owns, needs its own.
+            (desired.orderType !== "DineIn" &&
+              quote.guestSessionReference !== desired.guestSessionReference) ||
             quote.cartReference !== cartReference ||
             quote.cartVersion !== desired.cartVersion ||
             quote.quoteReference !== desired.quoteReference

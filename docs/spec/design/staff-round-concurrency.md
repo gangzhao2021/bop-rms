@@ -105,10 +105,21 @@ sending it alone answered 503 (`CART_QUOTE_INVALID`).
   and staff member it took the table's turn for, every read and write limited to this entry's
   round): a pay-at-end round is sent to the kitchen and the answer is Placed. Before, it was left
   submitted but never sent to the kitchen, answered 403.
-- **A quote held for someone else** (DEC-PRICE-HOLD): the held price is now the participant's own;
-  another phone or a staff round's table guest prices the Cart for itself. Before, it was handed
-  the other participant's Quote, which its details refused (`CART_QUOTE_INVALID`, the 503). A price
-  that moved on before the details are saved is answered `order_not_priced` (send again), with the
-  round's own lines out.
+- **A quote held for another participant** (DEC-PRICE-HOLD rule 2): a staff round's table guest,
+  or another phone, is answered the Quote the first phone confirmed for that Cart version, and the
+  details and checkout of a table's Cart now accept it (same Quote, same Cart version, still in
+  its hold). Before, they accepted only a Quote the payer attached itself, so the round was
+  refused `CART_QUOTE_INVALID` (the 503). A price that ran out before the details are saved is
+  answered `order_not_priced` (send again), with the round's own lines out.
+- **A table this round opened** is closed again once its lines are out, as for any round refused
+  before an order. Closing uses the staff member's own closing authority: after a sign-out it is
+  refused, so the session stays open with the party seated, and the next staff round for the
+  table uses it (narrower than asked: nothing closes it without staff).
+- **"Not found" during the race** (v15 `quote_not_found` at 22:28:17Z, 22:28:40Z, 22:30:17Z): each
+  phone quote met a staff round's table guest joining the table (join records at 22:28:17.822Z,
+  22:28:40.676Z, 22:30:17.420Z), which moves the party to a new version; the quote compared party
+  versions across its checks and refused. It now prices again on the table as it is now (up to
+  four times), then answers a 409 conflict the phone reads the table again on; a different
+  participant is still refused.
 - On a pay-at-end table the staff screen never says a guest is paying: it says a guest is sending
   these dishes from their phone.

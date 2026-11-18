@@ -351,7 +351,7 @@ describe("Owner #26 (DEC-PRICE-HOLD): the confirmed price is kept until its hold
     expect(s.quoteCart).toHaveBeenCalledTimes(1);
     expect(s.attach).toHaveBeenCalledTimes(1);
   });
-  it("WP-2423 batch 29: another participant at the table prices the Cart for itself, never handed the held Quote", async () => {
+  it("Owner #26 rule 2: another phone at the table (or a staff round's table guest) is answered the held Quote, never today's price", async () => {
     let latest: unknown = null;
     const s = setup(true, undefined, undefined, async () => latest);
     const first = await s.service.attach(s.command);
@@ -361,12 +361,15 @@ describe("Owner #26 (DEC-PRICE-HOLD): the confirmed price is kept until its hold
     s.resolveOperation.mockImplementation(async (reference?: unknown) =>
       reference === attached.operationReference ? attached : null,
     );
-    // A staff round's table guest (or another phone) at the same table, same Cart version.
+    // Another participant at the same table, same Cart version, inside the hold.
     s.replaceGuest({ sessionReference: id(66), diningParticipantReference: id(69) });
     const other = await s.service.attach({ ...s.command, operationReference: id(93) });
-    expect(other.status).toBe("Attached");
-    expect(other.attachment.guestSessionReference).toBe(id(66));
-    expect(s.quoteCart).toHaveBeenCalledTimes(2);
+    expect(other.status).toBe("Held");
+    expect(other.attachment.quoteReference).toBe(attached.quoteReference);
+    expect(other.attachment.quoteExpiresAt).toBe(attached.quoteExpiresAt);
+    expect(other.attachment.total).toEqual(attached.total);
+    expect(s.quoteCart).toHaveBeenCalledTimes(1);
+    expect(s.attach).toHaveBeenCalledTimes(1);
   });
   it("prices again once the hold has ended", async () => {
     const s = await held();

@@ -338,11 +338,6 @@ export function createConfiguredCartQuoteService(ports: ConfiguredCartQuotePorts
             latest.brandReference === cart.brandReference &&
             latest.storeReference === cart.storeReference &&
             latest.cartVersion === expectedCartVersion &&
-            // WP-2423 batch 29: a held price is this participant's own. The checkout's details and
-            // session take only the Quote the paying participant attached, so another phone at
-            // the table (or a staff round's table guest) handed someone else's was refused
-            // (CART_QUOTE_INVALID) until the hold ended; it prices the Cart for itself instead.
-            String(latest.guestSessionReference) === String(first.session.sessionReference) &&
             latest.attachedAt >= cart.updatedAt &&
             now() < latest.quoteExpiresAt &&
             latest.lines.length === cart.items.length &&
@@ -622,7 +617,10 @@ export function createConfiguredCartQuoteService(ports: ConfiguredCartQuotePorts
         if (now() >= saved.idempotencyExpiresAt) return fail();
         return Object.freeze({ status: "Attached" as const, attachment: saved });
       } catch (error) {
-        if (writeAttempted) return fail();
+        // WP-2423 batch 29 (guest-race-text): the party's table moved on (a staff round seated its
+        // table guest) after the write; the same operation is answered again from its history.
+        if (writeAttempted && !(error instanceof CartError && error.name === "CartPartyMovedError"))
+          return fail();
         if (error instanceof CartError) throw error;
         return fail();
       }
