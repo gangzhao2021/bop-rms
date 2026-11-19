@@ -113,7 +113,10 @@ function exact(
   return Object.freeze(result);
 }
 
-function parseEnvelope(value: unknown, topicArn: string): Envelope {
+const topicPattern = /^arn:aws:sns:ca-central-1:[0-9]{12}:[A-Za-z0-9_-]{1,256}$/u;
+
+/** `topicArn` null: any well-formed SNS topic (the installation's router chooses the Store). */
+function parseEnvelope(value: unknown, topicArn: string | null): Envelope {
   if (value === null || typeof value !== "object" || Array.isArray(value))
     return fail("SES_SNS_INPUT_INVALID");
   const typeDescriptor = Object.getOwnPropertyDescriptor(value, "Type");
@@ -152,7 +155,9 @@ function parseEnvelope(value: unknown, topicArn: string): Envelope {
     return fail("SES_SNS_INPUT_INVALID");
   if (
     (raw.Type !== "Notification" && raw.Type !== "SubscriptionConfirmation") ||
-    raw.TopicArn !== topicArn
+    (topicArn === null
+      ? typeof raw.TopicArn !== "string" || !topicPattern.test(raw.TopicArn)
+      : raw.TopicArn !== topicArn)
   )
     return fail("SES_SNS_TOPIC_DENIED");
   if (
@@ -264,10 +269,7 @@ export function createSesSnsEventService(
   ports: SesSnsEventPorts,
 ) {
   const rawConfig = exact(config, ["topicArn", "retentionPolicyReference"]);
-  if (
-    typeof rawConfig.topicArn !== "string" ||
-    !/^arn:aws:sns:ca-central-1:[0-9]{12}:[A-Za-z0-9_-]{1,256}$/u.test(rawConfig.topicArn)
-  )
+  if (typeof rawConfig.topicArn !== "string" || !topicPattern.test(rawConfig.topicArn))
     return fail("SES_SNS_TOPIC_DENIED");
   const topicArn = rawConfig.topicArn;
   const retentionPolicyReference = parseNotificationReference(rawConfig.retentionPolicyReference);
@@ -339,4 +341,55 @@ export function createSesSnsEventService(
       return Object.freeze({ outcome, event });
     },
   });
+}
+
+/**
+ * WP-2423 batch 34: which Store's feedback an SNS delivery is, at an installation of several
+ * Stores. The SNS signature is verified first (the same rules as `accept`); only then are the
+ * signed topic and, for a Notification, the SES configuration set the sending Store named
+ * (`mail.tags["ses:configuration-set"]`, null when the event carries none) read. Nothing is
+ * stored; the chosen Store's own endpoint verifies and records the delivery again.
+ */
+export async function readVerifiedSesFeedbackRoute(
+  value: unknown,
+  signatures: SesSnsEventPorts["signatures"],
+): Promise<{
+  readonly type: "Notification" | "SubscriptionConfirmation";
+  readonly topicArn: string;
+  readonly configurationSetName: string | null;
+}> {
+  const envelope = parseEnvelope(value, null);
+  let verified: boolean;
+  try {
+    verified = await signatures.verifyVersion2({
+      signingCertificateUrl: envelope.SigningCertURL,
+      canonicalMessage: canonical(envelope),
+      signature: envelope.Signature,
+    });
+  } catch {
+    return fail("SES_SNS_SIGNATURE_INVALID");
+  }
+  if (!verified) return fail("SES_SNS_SIGNATURE_INVALID");
+  return Object.freeze({
+    type: envelope.Type,
+    topicArn: envelope.TopicArn,
+    configurationSetName:
+      envelope.Type === "Notification" ? configurationSetOf(envelope.Message) : null,
+  });
+}
+
+function configurationSetOf(message: string): string | null {
+  try {
+    const tags: unknown = (JSON.parse(message) as { mail?: { tags?: unknown } })?.mail?.tags;
+    if (tags === null || typeof tags !== "object" || Array.isArray(tags)) return null;
+    const named: unknown = Object.getOwnPropertyDescriptor(tags, "ses:configuration-set")?.value;
+    return Array.isArray(named) &&
+      named.length === 1 &&
+      typeof named[0] === "string" &&
+      /^[A-Za-z0-9_-]{1,64}$/u.test(named[0])
+      ? named[0]
+      : null;
+  } catch {
+    return null;
+  }
 }
