@@ -105,12 +105,16 @@ describe("WP-2423 Q21: the day turns over at the Store's business-day start", ()
       .mockRejectedValueOnce(new TypeError("offline"))
       .mockResolvedValueOnce(day)
       .mockResolvedValue(next);
+    const failed = vi.fn();
     const tracker = trackStoreBusinessDay({
       load,
       onDay: (value) => seen.push(value.businessDate),
+      onFailed: failed,
     });
     await vi.advanceTimersByTimeAsync(0);
     expect(seen).toEqual([]);
+    // Batch 34: a failed read says so (a screen waiting for the day's hours stops waiting).
+    expect(failed).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(60_000);
     expect(seen).toEqual(["2026-10-14"]);
     tracker.recheck(); // the day has not ended: nothing is read

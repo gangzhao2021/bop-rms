@@ -119,6 +119,19 @@ export function useStoreBusinessDay(): StoreBusinessDay | null {
   return useContext(StoreBusinessDayContext);
 }
 
+/**
+ * Batch 34 (v15 b33 live): true once the Store's first business-day read has answered or failed
+ * (or after BUSINESS_DAY_SETTLE_MS), so a screen whose controls depend on the day's hours (Pickup's
+ * "Mark all not collected") can show them in the same pass as its list instead of inserting them
+ * a moment later and pushing the list down. True outside a Store workspace.
+ */
+export const StoreBusinessDaySettledContext = createContext(true);
+export function useStoreBusinessDaySettled(): boolean {
+  return useContext(StoreBusinessDaySettledContext);
+}
+/** A first read that hangs no longer holds a screen back than this. */
+export const BUSINESS_DAY_SETTLE_MS = 2_000;
+
 /** Re-read at most this long after the last answer even when the day has not ended. */
 export const BUSINESS_DAY_RECHECK_MS = 15 * 60_000;
 /** After a failed read, try again this soon. */
@@ -139,6 +152,8 @@ export function trackStoreBusinessDay(options: {
     closedToday?: boolean;
   }>;
   onDay(day: StoreBusinessDay): void;
+  /** A read failed (it is tried again after BUSINESS_DAY_RETRY_MS). */
+  onFailed?: () => void;
   now?: () => number;
 }) {
   const now = options.now ?? Date.now;
@@ -176,7 +191,10 @@ export function trackStoreBusinessDay(options: {
       const untilEnd = Date.parse(value.endsAt) - now();
       schedule(untilEnd <= 0 ? BUSINESS_DAY_RETRY_MS : untilEnd + 1_000);
     } catch {
-      if (active && !current.signal.aborted) schedule(BUSINESS_DAY_RETRY_MS);
+      if (active && !current.signal.aborted) {
+        options.onFailed?.();
+        schedule(BUSINESS_DAY_RETRY_MS);
+      }
     }
   };
   void read();
@@ -213,12 +231,18 @@ export function StoreBusinessDayProvider({
   readonly children: ReactNode;
 }) {
   const [day, setDay] = useState<StoreBusinessDay | null>(null);
+  // The scope whose first read has settled; another scope is unsettled from its first render.
+  const [settledScope, setSettledScope] = useState<string | null>(null);
   useEffect(() => {
     setDay(null);
     if (!enabled) return;
+    const settle = () => setSettledScope(scopeKey);
+    const settleTimer = setTimeout(settle, BUSINESS_DAY_SETTLE_MS);
     const tracker = trackStoreBusinessDay({
       load: (signal) => loadStoreBusinessDay(fetcher, signal),
-      onDay: (value) =>
+      onFailed: settle,
+      onDay: (value) => {
+        settle();
         setDay((previous) =>
           previous !== null &&
           previous.businessDate === value.businessDate &&
@@ -228,7 +252,8 @@ export function StoreBusinessDayProvider({
           previous.closedToday === value.closedToday
             ? previous
             : value,
-        ),
+        );
+      },
     });
     const onVisible = () => {
       if (document.visibilityState === "visible") tracker.recheck();
@@ -236,6 +261,7 @@ export function StoreBusinessDayProvider({
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("online", onVisible);
     return () => {
+      clearTimeout(settleTimer);
       tracker.stop();
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("online", onVisible);
@@ -247,7 +273,11 @@ export function StoreBusinessDayProvider({
       ? null
       : { businessDate: initialBusinessDate, startsAt: null, endsAt: null });
   return (
-    <StoreBusinessDayContext.Provider value={value}>{children}</StoreBusinessDayContext.Provider>
+    <StoreBusinessDayContext.Provider value={value}>
+      <StoreBusinessDaySettledContext.Provider value={!enabled || settledScope === scopeKey}>
+        {children}
+      </StoreBusinessDaySettledContext.Provider>
+    </StoreBusinessDayContext.Provider>
   );
 }
 

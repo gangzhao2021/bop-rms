@@ -9,7 +9,11 @@ import {
   pickupHoldMinutes,
   storeClosingNow,
 } from "./PickupNotCollectedAction.js";
-import { businessDateText, useStoreBusinessDay } from "./StoreBusinessDay.js";
+import {
+  businessDateText,
+  useStoreBusinessDay,
+  useStoreBusinessDaySettled,
+} from "./StoreBusinessDay.js";
 import { StatePanel } from "@bop-rms/ui";
 import { Freshness } from "./StoreTime.js";
 import { WorkspacePage } from "./WorkspacePage.js";
@@ -835,7 +839,11 @@ export function PickupQueuePage(props: {
     focusAfterLoad.current = true;
     setRevision((value) => value + 1);
   };
-  if (state.kind !== "Found")
+  // Batch 34 (v15 b33 live): "Mark all not collected" depends on the Store's hours for the day;
+  // the first list waits for that read (a moment, at most BUSINESS_DAY_SETTLE_MS) so the control
+  // and the list arrive together and nothing moves once the list shows.
+  const daySettled = useStoreBusinessDaySettled();
+  if (state.kind !== "Found" || !daySettled)
     return (
       <WorkspacePage
         className="pickup-queue"
@@ -849,7 +857,7 @@ export function PickupQueuePage(props: {
           ) : null
         }
       >
-        <PickupStatePanel state={state.kind} />
+        <PickupStatePanel state={state.kind === "Found" ? "Loading" : state.kind} />
       </WorkspacePage>
     );
   const next = state.view.nextAfterFulfillmentReference;
