@@ -654,6 +654,15 @@ describe("M02 resumed visit", () => {
         "Ask staff to seat you. This page goes on by itself a few seconds after staff open the table."
       ],
     ).toBe("请让店员带位。店员开台后几秒内，这里会自动继续。");
+    expect(zh["This QR code can’t be used"]).toBe("这个二维码用不了");
+    expect(zh["Ask staff for help. Once staff have seated you, tap “We’ve been seated”."]).toBe(
+      "请找店员帮忙；店员带位后，请点“我们已入座”。",
+    );
+    expect(
+      zh[
+        "This page is having trouble checking whether the table is open. Once staff have seated you, tap “We’ve been seated”."
+      ],
+    ).toBe("这里暂时查不到是否已开台。店员带位后，请点“我们已入座”。");
   });
   it("a table not open yet offers 'We've been seated' while it waits, not after a settled visit", () => {
     const notOpen: CustomerEntryScreenState = {
@@ -676,6 +685,35 @@ describe("M02 resumed visit", () => {
       "This page has stopped checking. Once staff have seated you, tap “We’ve been seated”.",
     );
     expect(stopped).not.toContain("goes on by itself");
+    // Batch 34 (v15 b33 live): a check failing says so, never "goes on by itself".
+    const trouble = renderToStaticMarkup(
+      <MemoryRouter>
+        <EntryContextView onContinue={vi.fn()} onSeated={vi.fn()} waitTrouble state={notOpen} />
+      </MemoryRouter>,
+    );
+    expect(trouble).toContain(
+      "This page is having trouble checking whether the table is open. Once staff have seated you, tap “We’ve been seated”.",
+    );
+    expect(trouble).not.toContain("goes on by itself");
+    expect(trouble).toContain("We’ve been seated");
+    // A refused check: the heading is neutral, so it doesn't contradict the line.
+    const refused = renderToStaticMarkup(
+      <MemoryRouter>
+        <EntryContextView
+          onContinue={vi.fn()}
+          onSeated={vi.fn()}
+          waitRefused
+          waitTrouble
+          state={{ ...notOpen, tableLabel: "T3" }}
+        />
+      </MemoryRouter>,
+    );
+    expect(refused).toContain("This QR code can’t be used");
+    expect(refused).toContain(
+      "Ask staff for help. Once staff have seated you, tap “We’ve been seated”.",
+    );
+    expect(refused).not.toContain("isn’t open yet");
+    expect(refused).not.toContain("having trouble");
     setSettledTable({ tableLabel: "DEMO-03", csrfToken: "C".repeat(43) });
     try {
       const settled = renderToStaticMarkup(

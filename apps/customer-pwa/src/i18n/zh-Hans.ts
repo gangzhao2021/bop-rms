@@ -388,8 +388,11 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "您坐的不是桌号 {table}？请告诉店员，换成您这桌的二维码。",
   "Ask staff to seat you. This page goes on by itself a few seconds after staff open the table.":
     "请让店员带位。店员开台后几秒内，这里会自动继续。",
-  "This link doesn’t work for this table. Ask staff for help. Once staff have seated you, tap “We’ve been seated”.":
-    "这个链接打不开这张桌子。请找店员帮忙；店员带位后，请点“我们已入座”。",
+  "This QR code can’t be used": "这个二维码用不了",
+  "Ask staff for help. Once staff have seated you, tap “We’ve been seated”.":
+    "请找店员帮忙；店员带位后，请点“我们已入座”。",
+  "This page is having trouble checking whether the table is open. Once staff have seated you, tap “We’ve been seated”.":
+    "这里暂时查不到是否已开台。店员带位后，请点“我们已入座”。",
   "This page has stopped checking. Once staff have seated you, tap “We’ve been seated”.":
     "这里已停止自动查看。店员带位后，请点“我们已入座”。",
   "We’ve been seated": "我们已入座",

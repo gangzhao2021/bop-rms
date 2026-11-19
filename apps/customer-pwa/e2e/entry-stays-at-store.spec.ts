@@ -426,8 +426,11 @@ test.describe("@production M02 a phone stays at the Store and table it scanned",
     await expect(main.getByRole("heading", { name: /isn’t open yet$/u })).toBeVisible();
     await page.clock.runFor(3_000);
     await expect.poll(() => state.waitChecks.length).toBe(1);
-    await expect(main.getByRole("status")).toContainText(
-      "This link doesn’t work for this table. Ask staff for help. Once staff have seated you, tap “We’ve been seated”.",
+    // Batch 34 (v15 b33 live): heading and line agree; the heading no longer says "not open yet".
+    await expect(main.getByRole("heading", { name: "This QR code can’t be used" })).toBeVisible();
+    await expect(main.getByRole("heading", { name: /isn’t open yet$/u })).toHaveCount(0);
+    await expect(main.getByRole("status")).toHaveText(
+      "Ask staff for help. Once staff have seated you, tap “We’ve been seated”.",
     );
     // Nothing more is asked by itself: no check and, above all, no entry.
     await page.clock.runFor(5 * 60_000);
@@ -437,8 +440,10 @@ test.describe("@production M02 a phone stays at the Store and table it scanned",
     await noHorizontalOverflow(page);
     await page.screenshot({ path: "test-results/b33-table-wait-refused.png", fullPage: true });
     await page.getByRole("button", { name: "切换到中文" }).click();
-    await expect(main.getByRole("status")).toContainText(
-      "这个链接打不开这张桌子。请找店员帮忙；店员带位后，请点“我们已入座”。",
+    await expect(main.getByRole("heading", { name: "这个二维码用不了" })).toBeVisible();
+    await expect(main).not.toContainText("还没开台");
+    await expect(main.getByRole("status")).toHaveText(
+      "请找店员帮忙；店员带位后，请点“我们已入座”。",
     );
     await page.screenshot({
       path: "test-results/b33-table-wait-refused-zh.png",
@@ -485,9 +490,29 @@ test.describe("@production M02 a phone stays at the Store and table it scanned",
         await expect.poll(() => state.waitChecks.length).toBe(count);
       }
       expect(state.entries).toEqual([{ qrToken: laneTable }]);
-      await expect(main.getByRole("status")).toContainText(
-        "This page goes on by itself a few seconds after staff open the table.",
+      // Batch 34 (v15 b33 live): while checks fail the page no longer promises to go on by
+      // itself; it says it is having trouble and to tap "We've been seated" once seated.
+      const status = main.getByRole("status");
+      await expect(status).toHaveText(
+        "This page is having trouble checking whether the table is open. Once staff have seated you, tap “We’ve been seated”.",
       );
+      await expect(main.getByRole("button", { name: "We’ve been seated" })).toBeVisible();
+      await noHorizontalOverflow(page);
+      const shot = what.startsWith("an outage") ? "outage" : "unreadable";
+      await page.screenshot({ path: `test-results/b34-table-wait-${shot}.png`, fullPage: true });
+      await page.getByRole("button", { name: "切换到中文" }).click();
+      await expect(status).toHaveText("这里暂时查不到是否已开台。店员带位后，请点“我们已入座”。");
+      await page.screenshot({ path: `test-results/b34-table-wait-${shot}-zh.png`, fullPage: true });
+      await page.getByRole("button", { name: "English" }).click();
+      // A check answers again: the normal line is back.
+      state.waitAnswer = null;
+      await page.clock.runFor(48_000);
+      await expect.poll(() => state.waitChecks.length).toBe(5);
+      await expect(status).toHaveText(
+        "Ask staff to seat you. This page goes on by itself a few seconds after staff open the table.",
+      );
+      expect(state.entries).toEqual([{ qrToken: laneTable }]);
+      await expectNoInternalText(page);
     });
 
   // Batch 33 (v15 b32 live minor): shown again, the page checked at +50 ms and again at +328 ms.

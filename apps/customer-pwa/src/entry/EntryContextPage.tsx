@@ -267,6 +267,9 @@ export function EntryContextPage({
   const [recheckNow, setRecheckNow] = useState<(() => void) | null>(null);
   const [waitStopped, setWaitStopped] = useState(false);
   const [waitRefused, setWaitRefused] = useState(false);
+  // Batch 34 (v15 b33 live): a check failed (no answer, the Store busy, an answer the page can't
+  // read); the page says it is having trouble checking until a check answers again.
+  const [waitTrouble, setWaitTrouble] = useState(false);
   const waitingAtTable = state.kind === "TableNotOpen" && getSettledTableLabel() === null;
   useEffect(() => {
     if (!waitingAtTable || typeof document === "undefined") return;
@@ -293,10 +296,12 @@ export function EntryContextPage({
             if (clientRef.current !== owner) return false;
             if (answer.kind === "Waiting") {
               failures = 0;
+              setWaitTrouble(false);
               return true;
             }
             if (answer.kind === "Busy") {
               failures += 1;
+              setWaitTrouble(true);
               return {
                 waitSeconds:
                   answer.retryAfterSeconds ??
@@ -324,8 +329,21 @@ export function EntryContextPage({
           probe !== undefined && limited()
             ? { waitSeconds: tableWaitLimitedEntryGapSeconds }
             : true;
-        const next = await owner.retry();
+        let next: Awaited<ReturnType<typeof owner.retry>>;
+        try {
+          next = await owner.retry();
+        } catch (error) {
+          setWaitTrouble(true);
+          throw error;
+        }
         if (clientRef.current !== owner) return false;
+        if (next.kind === "TableNotOpen") setWaitTrouble(false);
+        else if (
+          next.kind === "CommandFailed" ||
+          next.kind === "Offline" ||
+          next.kind === "ServiceUnavailable"
+        )
+          setWaitTrouble(true);
         // Still waiting, or a passing failure: keep the page as it is and ask again later.
         if (
           next.kind === "TableNotOpen" ||
@@ -367,6 +385,7 @@ export function EntryContextPage({
       setRecheckNow(null);
       setWaitStopped(false);
       setWaitRefused(false);
+      setWaitTrouble(false);
     };
   }, [waitingAtTable, client]);
 
@@ -472,6 +491,7 @@ export function EntryContextPage({
       onSeated={recheckNow ?? undefined}
       waitStopped={waitStopped}
       waitRefused={waitRefused}
+      waitTrouble={waitTrouble}
       autoJoin={answered !== null}
       starting={answered === "Start" || answered === "NewParty"}
       state={state}
@@ -655,6 +675,8 @@ export interface EntryContextViewProps {
   readonly waitStopped?: boolean | undefined;
   /** Batch 33: the check was refused: this link doesn't open the table (staff can help). */
   readonly waitRefused?: boolean | undefined;
+  /** Batch 34: a check failed in passing; the page says it can't tell and how to go on. */
+  readonly waitTrouble?: boolean | undefined;
   /** The guest already answered; the join follows with no second tap. */
   readonly autoJoin?: boolean | undefined;
   /** They answered that they came to start this table. */
@@ -689,6 +711,7 @@ export function EntryContextView({
   onSeated,
   waitStopped = false,
   waitRefused = false,
+  waitTrouble = false,
   autoJoin,
   starting,
   state,
@@ -746,6 +769,7 @@ export function EntryContextView({
           onSeated={onSeated}
           waitStopped={waitStopped}
           waitRefused={waitRefused}
+          waitTrouble={waitTrouble}
           autoJoin={autoJoin}
           starting={starting}
           state={state}
@@ -985,6 +1009,7 @@ function EntryState({
   onSeated,
   waitStopped = false,
   waitRefused = false,
+  waitTrouble = false,
   autoJoin,
   starting,
   state,
@@ -1111,31 +1136,37 @@ function EntryState({
           <>
             {/* WP-2423 live minor 27: which restaurant's table, as the entry answer names it; and
                 which table (guest-table-open-and-busy-reads), so a card on the wrong table shows. */}
+            {/* Batch 34 (v15 b33 live): a refused check is not "not open yet": the heading
+                says the code can't be used, so heading and line agree. */}
             <StateHeading headingRef={headingRef}>
-              {state.tableLabel === undefined
-                ? t("This table at {storeDisplayName} isn’t open yet", {
-                    storeDisplayName: state.context.storeDisplayName,
-                  })
-                : t("Table {table} at {storeDisplayName} isn’t open yet", {
-                    table: saidTable(state.tableLabel),
-                    storeDisplayName: state.context.storeDisplayName,
-                  })}
+              {waitRefused
+                ? t("This QR code can’t be used")
+                : state.tableLabel === undefined
+                  ? t("This table at {storeDisplayName} isn’t open yet", {
+                      storeDisplayName: state.context.storeDisplayName,
+                    })
+                  : t("Table {table} at {storeDisplayName} isn’t open yet", {
+                      table: saidTable(state.tableLabel),
+                      storeDisplayName: state.context.storeDisplayName,
+                    })}
             </StateHeading>
             {/* WP-2423 (guest-waits-and-refund-lock): what the page waits for, and when it stopped. */}
             <p className="entry-context" role="status">
               {waitRefused
-                ? t(
-                    "This link doesn’t work for this table. Ask staff for help. Once staff have seated you, tap “We’ve been seated”.",
-                  )
+                ? t("Ask staff for help. Once staff have seated you, tap “We’ve been seated”.")
                 : waitStopped
                   ? t(
                       "This page has stopped checking. Once staff have seated you, tap “We’ve been seated”.",
                     )
-                  : t(
-                      "Ask staff to seat you. This page goes on by itself a few seconds after staff open the table.",
-                    )}
+                  : waitTrouble
+                    ? t(
+                        "This page is having trouble checking whether the table is open. Once staff have seated you, tap “We’ve been seated”.",
+                      )
+                    : t(
+                        "Ask staff to seat you. This page goes on by itself a few seconds after staff open the table.",
+                      )}
             </p>
-            {state.tableLabel === undefined ? null : (
+            {state.tableLabel === undefined || waitRefused ? null : (
               <p className="entry-context">
                 {t(
                   "Not sitting at table {table}? Tell staff, so they can give you the code for your table.",
