@@ -32,6 +32,12 @@ const localePattern = /^[a-z]{2,3}(?:-[A-Z][a-z]{3})?(?:-[A-Z]{2}|\d{3})?$/u;
 const instantPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const credentialPattern = /^[A-Za-z0-9_-]{43}$/u;
 const publicLabelForbidden = /[\p{Cc}\p{Cf}<>{}[\]`*_#]/u;
+/**
+ * Batch 33: the waiting check's refusals. 400 the request or code is malformed, 404 no Store of the
+ * installation has this code or this browser's waiting scan is gone, 410 the code was retired, 422
+ * the Store refuses the code. Each means the link doesn't work, never that the table opened.
+ */
+const refusedTableWait: ReadonlySet<number> = new Set([400, 404, 410, 422]);
 
 export interface CustomerEntryBrowserBoundary {
   readonly fetch: typeof globalThis.fetch;
@@ -812,19 +818,19 @@ export function createCustomerEntryClient(
       }
       void response.body?.cancel().catch(() => undefined);
       // Limited: the waiting checks' budget is spent, so the page asks the entry instead. Busy: wait
-      // (as long as asked). Anything else (the code changed, the waiting scan is gone): the entry
-      // gives the guest its answer.
+      // (as long as asked). Batch 33 (v15 b32 live): a refusal (an unknown Store or code, a code no
+      // longer this table's, the waiting scan gone) is "this link doesn't work", never "changed":
+      // the page stops checking and never enters on it. Anything else is a passing failure.
+      if (refusedTableWait.has(response.status)) return Object.freeze({ kind: "Refused" });
       if (response.status === 429)
         return Object.freeze(
           seconds === undefined
             ? { kind: "Limited" }
             : { kind: "Limited", retryAfterSeconds: seconds },
         );
-      if (response.status === 503)
-        return Object.freeze(
-          seconds === undefined ? { kind: "Busy" } : { kind: "Busy", retryAfterSeconds: seconds },
-        );
-      return Object.freeze({ kind: "Changed" });
+      return Object.freeze(
+        seconds === undefined ? { kind: "Busy" } : { kind: "Busy", retryAfterSeconds: seconds },
+      );
     } catch {
       return Object.freeze({ kind: "Busy" });
     } finally {

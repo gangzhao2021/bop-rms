@@ -159,4 +159,9 @@ export type CustomerTableWaitAnswer =
    * Review (batch 32): the waiting checks' own budget is spent (429). Not an outage: the page asks
    * the entry, on the entry's budget, instead of waiting out `retryAfterSeconds`.
    */
-  | { readonly kind: "Limited"; readonly retryAfterSeconds?: number };
+  | { readonly kind: "Limited"; readonly retryAfterSeconds?: number }
+  /**
+   * Batch 33: the check was refused (an unknown Store or code, or the waiting scan is gone): the
+   * link doesn't work. The page stops checking and says so; it never enters on this answer.
+   */
+  | { readonly kind: "Refused" };

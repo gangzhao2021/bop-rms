@@ -1162,11 +1162,38 @@ describe("waiting for a table to open", () => {
     // Review (batch 32): the waiting checks' own budget spent is not an outage: the page enters.
     expect(await entry.waitForTable?.()).toEqual({ kind: "Limited", retryAfterSeconds: 40 });
     expect(await entry.waitForTable?.()).toEqual({ kind: "Busy", retryAfterSeconds: 30 });
-    // The code changed: the entry gives the guest its answer.
-    expect(await entry.waitForTable?.()).toEqual({ kind: "Changed" });
+    // Batch 33: a retired code is a refusal (the link doesn't work), never "changed".
+    expect(await entry.waitForTable?.()).toEqual({ kind: "Refused" });
     // The check never touches this page's visit.
     expect(getCustomerCsrfCredential()).toBe("K".repeat(43));
     setCustomerCsrfCredential(null);
+  });
+  // Batch 33 (v15 b32 live): the installation's 404 CUSTOMER_STORE_NOT_FOUND was read as "changed"
+  // and every waiting phone entered every 3 s, on the Store's entry budget.
+  it("only an explicit Changed is 'changed': refusals are refused, anything else is busy", async () => {
+    const json = (status: number, body: unknown, headers: Record<string, string> = {}) =>
+      new Response(typeof body === "string" ? body : JSON.stringify(body), {
+        status,
+        headers: { "content-type": "application/json", ...headers },
+      });
+    const answers: [Response, unknown][] = [
+      [json(404, { code: "CUSTOMER_STORE_NOT_FOUND" }), { kind: "Refused" }],
+      [json(404, { schemaVersion: 1, code: "entry_scan_missing" }), { kind: "Refused" }],
+      [json(422, { schemaVersion: 1, code: "entry_unavailable" }), { kind: "Refused" }],
+      [json(400, { schemaVersion: 1, code: "entry_request_invalid" }), { kind: "Refused" }],
+      [json(502, { code: "INTERNAL_API_UNAVAILABLE" }), { kind: "Busy" }],
+      [
+        json(503, { code: "CUSTOMER_STORE_UNAVAILABLE" }, { "retry-after": "5" }),
+        { kind: "Busy", retryAfterSeconds: 5 },
+      ],
+      [json(409, { code: "something_new" }), { kind: "Busy" }],
+      [json(200, "not json"), { kind: "Busy" }],
+      [json(200, { schemaVersion: 1, status: "Open" }), { kind: "Busy" }],
+      [json(200, { schemaVersion: 1, status: "Changed" }), { kind: "Changed" }],
+    ];
+    const queue = answers.map(([answer]) => answer);
+    const entry = client(vi.fn(async () => queue.shift() as Response));
+    for (const [, expected] of answers) expect(await entry.waitForTable?.()).toEqual(expected);
   });
   it("a lost connection is busy, never 'open'", async () => {
     const entry = client(

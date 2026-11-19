@@ -23,6 +23,12 @@ export const tableWaitCheckDelaysSeconds: readonly number[] = Object.freeze([
  */
 export const tableWaitLimitedEntryGapSeconds = 60;
 /**
+ * Batch 33: a waiting check that failed in passing (no answer, the Store busy without a Retry-After,
+ * an answer the page can't read) waits twice as long each time it fails in a row, from 6 s up to
+ * this, so a Store having trouble isn't asked every 3 s by every waiting phone.
+ */
+export const tableWaitBusyLongestWaitSeconds = 60;
+/**
  * A client with no cheap check (a demo entry) checks by entering again, on the entry's budget:
  * after 20 s, backing off to every 2 minutes, at most 6 checks in any ten minutes.
  */
@@ -34,9 +40,11 @@ export const tableOpenRecheckMinimumGapSeconds = 20;
 
 /**
  * What a check found: true, still waiting; false, anything else answered (stop); `{ waitSeconds }`,
- * still waiting and the store asked this phone not to ask again before then.
+ * still waiting and the store asked this phone not to ask again before then; "Paused" (batch 33),
+ * the check was refused (the link doesn't work): no more checks by themselves, but the guest's
+ * "We've been seated" still asks.
  */
-export type TableOpenCheckResult = boolean | { readonly waitSeconds: number };
+export type TableOpenCheckResult = boolean | { readonly waitSeconds: number } | "Paused";
 
 export interface TableOpenRecheckBoundary {
   /** `manual`: the guest tapped "We've been seated" (the page asks the entry itself). */
@@ -65,6 +73,7 @@ export function watchTableOpening(boundary: TableOpenRecheckBoundary): {
   let stopped = false;
   let busy = false;
   let missed = false;
+  let paused = false;
   let lastCheck = boundary.now();
   /** Not before this instant (a busy answer's Retry-After). */
   let notBefore = 0;
@@ -89,7 +98,10 @@ export function watchTableOpening(boundary: TableOpenRecheckBoundary): {
         stop();
         return false;
       }
-      if (typeof result === "object")
+      if (result === "Paused") {
+        paused = true;
+        clear();
+      } else if (typeof result === "object")
         notBefore = boundary.now() + Math.max(0, result.waitSeconds) * 1000;
     } catch {
       /* Still waiting: the next check asks again. */
@@ -99,7 +111,7 @@ export function watchTableOpening(boundary: TableOpenRecheckBoundary): {
     return !stopped;
   };
   const schedule = () => {
-    if (stopped || timer !== null) return;
+    if (stopped || paused || timer !== null) return;
     if (index >= delays.length) {
       boundary.onExhausted?.();
       return;
@@ -117,16 +129,22 @@ export function watchTableOpening(boundary: TableOpenRecheckBoundary): {
       }
     }, wait);
   };
+  // Batch 33 (v15 b32 live): back in front, one check, and the schedule goes on from it (the timer
+  // that ran while hidden would otherwise check again a moment later).
   const unsubscribe = boundary.onVisible(() => {
-    if (stopped || boundary.now() < notBefore) return;
-    if (missed || boundary.now() - lastCheck >= minimumGapMs) void check();
+    if (stopped || paused || busy || boundary.now() < notBefore) return;
+    if (!missed && boundary.now() - lastCheck < minimumGapMs) return;
+    clear();
+    void check().then(schedule);
   });
   schedule();
   return Object.freeze({
     checkNow: () => {
       if (stopped) return;
-      // The guest asked: at once, and if the schedule had run out, it starts again.
-      const ranOut = timer === null && index >= delays.length;
+      // The guest asked: at once, and if the schedule had run out (or a refusal paused it), it
+      // starts again.
+      const ranOut = paused || (timer === null && index >= delays.length);
+      paused = false;
       void check(true).then((waiting) => {
         if (!waiting || !ranOut) return;
         index = 0;

@@ -220,9 +220,8 @@ export function createCustomerStartClient(input: CustomerStartClientInput): Cust
     },
     // WP-2423 (guest-waits-and-refund-lock): the scanned code's "is the table open now?".
     waitForTable() {
-      return (
-        active?.waitForTable?.() ?? Promise.resolve(Object.freeze({ kind: "Changed" as const }))
-      );
+      // Batch 33: no scan to ask about is "can't say now", never "the table changed".
+      return active?.waitForTable?.() ?? Promise.resolve(Object.freeze({ kind: "Busy" as const }));
     },
     async startNew() {
       if (source.kind === "Code") {

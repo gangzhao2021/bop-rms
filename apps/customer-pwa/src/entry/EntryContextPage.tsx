@@ -36,6 +36,7 @@ import type {
 } from "./types.js";
 import {
   tableWaitCheckDelaysSeconds,
+  tableWaitBusyLongestWaitSeconds,
   tableWaitLimitedEntryGapSeconds,
   watchTableOpening,
 } from "./table-open-recheck.js";
@@ -265,6 +266,7 @@ export function EntryContextPage({
   // table was just settled is not moved into the next party's visit.
   const [recheckNow, setRecheckNow] = useState<(() => void) | null>(null);
   const [waitStopped, setWaitStopped] = useState(false);
+  const [waitRefused, setWaitRefused] = useState(false);
   const waitingAtTable = state.kind === "TableNotOpen" && getSettledTableLabel() === null;
   useEffect(() => {
     if (!waitingAtTable || typeof document === "undefined") return;
@@ -279,18 +281,35 @@ export function EntryContextPage({
     let lastEntry = Number.NEGATIVE_INFINITY;
     const entryGapMs = tableWaitLimitedEntryGapSeconds * 1000;
     const limited = () => performance.now() < limitedUntil;
+    // Batch 33: passing failures in a row; each waits longer (6, 12, 24, 48, then 60 s).
+    let failures = 0;
     const watcher = watchTableOpening({
       check: async ({ manual }) => {
         setWaitStopped(false);
+        setWaitRefused(false);
         if (probe !== undefined && !manual) {
           if (!limited()) {
             const answer = await probe();
             if (clientRef.current !== owner) return false;
-            if (answer.kind === "Waiting") return true;
-            if (answer.kind === "Busy")
-              return answer.retryAfterSeconds === undefined
-                ? true
-                : { waitSeconds: answer.retryAfterSeconds };
+            if (answer.kind === "Waiting") {
+              failures = 0;
+              return true;
+            }
+            if (answer.kind === "Busy") {
+              failures += 1;
+              return {
+                waitSeconds:
+                  answer.retryAfterSeconds ??
+                  Math.min(tableWaitBusyLongestWaitSeconds, 3 * 2 ** failures),
+              };
+            }
+            // Batch 33 (v15 b32 live): refused (the link doesn't work), never "changed": the page
+            // says so and asks nothing more by itself; "We've been seated" still asks the entry.
+            if (answer.kind === "Refused") {
+              setWaitRefused(true);
+              return "Paused";
+            }
+            failures = 0;
             if (answer.kind === "Limited")
               limitedUntil =
                 performance.now() +
@@ -347,6 +366,7 @@ export function EntryContextPage({
       watcher.stop();
       setRecheckNow(null);
       setWaitStopped(false);
+      setWaitRefused(false);
     };
   }, [waitingAtTable, client]);
 
@@ -451,6 +471,7 @@ export function EntryContextPage({
       onAnswer={client.enter === undefined ? undefined : answer}
       onSeated={recheckNow ?? undefined}
       waitStopped={waitStopped}
+      waitRefused={waitRefused}
       autoJoin={answered !== null}
       starting={answered === "Start" || answered === "NewParty"}
       state={state}
@@ -632,6 +653,8 @@ export interface EntryContextViewProps {
   readonly onSeated?: (() => void) | undefined;
   /** WP-2423: the page stopped checking whether the table is open (it waited 15 minutes). */
   readonly waitStopped?: boolean | undefined;
+  /** Batch 33: the check was refused: this link doesn't open the table (staff can help). */
+  readonly waitRefused?: boolean | undefined;
   /** The guest already answered; the join follows with no second tap. */
   readonly autoJoin?: boolean | undefined;
   /** They answered that they came to start this table. */
@@ -665,6 +688,7 @@ export function EntryContextView({
   onAnswer,
   onSeated,
   waitStopped = false,
+  waitRefused = false,
   autoJoin,
   starting,
   state,
@@ -721,6 +745,7 @@ export function EntryContextView({
           onAnswer={onAnswer}
           onSeated={onSeated}
           waitStopped={waitStopped}
+          waitRefused={waitRefused}
           autoJoin={autoJoin}
           starting={starting}
           state={state}
@@ -959,6 +984,7 @@ function EntryState({
   onAnswer,
   onSeated,
   waitStopped = false,
+  waitRefused = false,
   autoJoin,
   starting,
   state,
@@ -1097,13 +1123,17 @@ function EntryState({
             </StateHeading>
             {/* WP-2423 (guest-waits-and-refund-lock): what the page waits for, and when it stopped. */}
             <p className="entry-context" role="status">
-              {waitStopped
+              {waitRefused
                 ? t(
-                    "This page has stopped checking. Once staff have seated you, tap “We’ve been seated”.",
+                    "This link doesn’t work for this table. Ask staff for help. Once staff have seated you, tap “We’ve been seated”.",
                   )
-                : t(
-                    "Ask staff to seat you. This page goes on by itself a few seconds after staff open the table.",
-                  )}
+                : waitStopped
+                  ? t(
+                      "This page has stopped checking. Once staff have seated you, tap “We’ve been seated”.",
+                    )
+                  : t(
+                      "Ask staff to seat you. This page goes on by itself a few seconds after staff open the table.",
+                    )}
             </p>
             {state.tableLabel === undefined ? null : (
               <p className="entry-context">

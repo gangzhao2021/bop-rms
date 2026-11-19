@@ -74,6 +74,8 @@ interface Installation {
   waitBusy: number | null;
   /** That answer: 503 (the store can't say) or 429 (the waiting checks' own budget is spent). */
   waitBusyStatus: 429 | 503;
+  /** Batch 33: a fixed answer to every check (a refusal, a passing failure), when set. */
+  waitAnswer: { status: number; body: string } | null;
 }
 
 /** Two merchants on one installation; the bare pickup address names neither of them. */
@@ -86,11 +88,18 @@ async function installation(page: Page, setup: Partial<Installation> = {}) {
     waitChecks: [],
     waitBusy: null,
     waitBusyStatus: 503,
+    waitAnswer: null,
     ...setup,
   };
   await page.route("**/bff/customer/entry/table-wait", (route) => {
     const body = JSON.parse(route.request().postData() ?? "null") as Record<string, unknown>;
     state.waitChecks.push(body);
+    if (state.waitAnswer !== null)
+      return route.fulfill({
+        status: state.waitAnswer.status,
+        headers: json,
+        body: state.waitAnswer.body,
+      });
     if (state.waitBusy !== null)
       return route.fulfill({
         status: state.waitBusyStatus,
@@ -190,6 +199,12 @@ async function installation(page: Page, setup: Partial<Installation> = {}) {
 
 const scannedEntries = (state: Installation) =>
   state.entries.filter((body) => (body as { resume?: unknown }).resume !== true);
+
+/**
+ * Batch 33: a check the page clock just fired reaches the routes a moment later; "none was sent"
+ * is read after that moment (a quarter second, which the page clock also moves on).
+ */
+const requestsSettle = (page: Page) => page.waitForTimeout(250);
 
 async function noHorizontalOverflow(page: Page) {
   expect(
@@ -391,6 +406,121 @@ test.describe("@production M02 a phone stays at the Store and table it scanned",
     expect(state.waitChecks.length).toBe(1);
     expect(state.entries.length).toBe(4);
     await expectNoInternalText(page);
+  });
+
+  // Batch 33 (v15 b32 live): the installation answered every waiting check 404
+  // CUSTOMER_STORE_NOT_FOUND, the page read that as "the table changed" and entered every 3 s,
+  // spending the Store's entry budget (enough waiting phones lock real guests out).
+  test("a refused check: the page says the link doesn't work, enters nothing, and 'seated' still asks", async ({
+    page,
+  }) => {
+    await page.clock.install();
+    let open = false;
+    const state = await installation(page, {
+      waiting: () =>
+        open ? { status: 201, body: established("DineIn") } : { status: 409, body: notOpen },
+      waitAnswer: { status: 404, body: JSON.stringify({ code: "CUSTOMER_STORE_NOT_FOUND" }) },
+    });
+    await page.goto("/#qr=" + laneTable);
+    const main = page.getByRole("main");
+    await expect(main.getByRole("heading", { name: /isn’t open yet$/u })).toBeVisible();
+    await page.clock.runFor(3_000);
+    await expect.poll(() => state.waitChecks.length).toBe(1);
+    await expect(main.getByRole("status")).toContainText(
+      "This link doesn’t work for this table. Ask staff for help. Once staff have seated you, tap “We’ve been seated”.",
+    );
+    // Nothing more is asked by itself: no check and, above all, no entry.
+    await page.clock.runFor(5 * 60_000);
+    await requestsSettle(page);
+    expect(state.waitChecks.length).toBe(1);
+    expect(state.entries).toEqual([{ qrToken: laneTable }]);
+    await noHorizontalOverflow(page);
+    await page.screenshot({ path: "test-results/b33-table-wait-refused.png", fullPage: true });
+    await page.getByRole("button", { name: "切换到中文" }).click();
+    await expect(main.getByRole("status")).toContainText(
+      "这个链接打不开这张桌子。请找店员帮忙；店员带位后，请点“我们已入座”。",
+    );
+    await page.screenshot({
+      path: "test-results/b33-table-wait-refused-zh.png",
+      fullPage: true,
+    });
+    await page.getByRole("button", { name: "English" }).click();
+    // Staff seat them: "We've been seated" asks the entry once and the guest is at the table.
+    open = true;
+    await main.getByRole("button", { name: "We’ve been seated" }).click();
+    await expect(main.getByRole("heading", { name: "Welcome to Lane Dessert" })).toBeVisible();
+    expect(state.entries).toEqual([{ qrToken: laneTable }, { qrToken: laneTable }]);
+    await expectNoInternalText(page);
+  });
+
+  for (const [what, answer] of [
+    [
+      "an outage of the installation",
+      { status: 502, body: JSON.stringify({ code: "INTERNAL_API_UNAVAILABLE" }) },
+    ],
+    ["an answer the page can't read", { status: 200, body: "<html>proxy</html>" }],
+  ] as const)
+    test(`a check failing in passing (${what}) waits longer each time and enters nothing`, async ({
+      page,
+    }) => {
+      await page.clock.install();
+      const state = await installation(page, {
+        waiting: () => ({ status: 409, body: notOpen }),
+        waitAnswer: answer,
+      });
+      await page.goto("/#qr=" + laneTable);
+      const main = page.getByRole("main");
+      await expect(main.getByRole("heading", { name: /isn’t open yet$/u })).toBeVisible();
+      // At 3 s, then 6, 12 and 24 s after each failure.
+      for (const [quiet, count] of [
+        [3_000, 1],
+        [6_000, 2],
+        [12_000, 3],
+        [24_000, 4],
+      ] as const) {
+        await page.clock.runFor(quiet - 1_000);
+        await requestsSettle(page);
+        expect(state.waitChecks.length).toBe(count - 1);
+        await page.clock.runFor(1_000);
+        await expect.poll(() => state.waitChecks.length).toBe(count);
+      }
+      expect(state.entries).toEqual([{ qrToken: laneTable }]);
+      await expect(main.getByRole("status")).toContainText(
+        "This page goes on by itself a few seconds after staff open the table.",
+      );
+    });
+
+  // Batch 33 (v15 b32 live minor): shown again, the page checked at +50 ms and again at +328 ms.
+  test("back in front after a while hidden: one check, then the next one a full step later", async ({
+    page,
+  }) => {
+    await page.clock.install();
+    const state = await installation(page, { waiting: () => ({ status: 409, body: notOpen }) });
+    await page.goto("/#qr=" + laneTable);
+    const main = page.getByRole("main");
+    await expect(main.getByRole("heading", { name: /isn’t open yet$/u })).toBeVisible();
+    const visibility = (shown: boolean) =>
+      page.evaluate((visible) => {
+        Object.defineProperty(document, "visibilityState", {
+          configurable: true,
+          get: () => (visible ? "visible" : "hidden"),
+        });
+        document.dispatchEvent(new Event("visibilitychange"));
+      }, shown);
+    await page.clock.runFor(3_000);
+    await expect.poll(() => state.waitChecks.length).toBe(1);
+    await visibility(false);
+    await page.clock.runFor(20_000);
+    expect(state.waitChecks.length).toBe(1);
+    await visibility(true);
+    await expect.poll(() => state.waitChecks.length).toBe(2);
+    // (Hidden for 20 s, the old timer was due about 1 s after the page came back.)
+    await page.clock.runFor(2_000);
+    await requestsSettle(page);
+    expect(state.waitChecks.length).toBe(2);
+    await page.clock.runFor(1_500);
+    await expect.poll(() => state.waitChecks.length).toBe(3);
+    expect(state.entries).toEqual([{ qrToken: laneTable }]);
   });
 
   test("'We've been seated' checks again at once", async ({ page }) => {

@@ -198,4 +198,39 @@ describe("a table not open yet: the cheap check every few seconds, bounded", () 
     await h.advance(3);
     expect(h.check).toHaveBeenCalledTimes(before + 2);
   });
+
+  // Batch 33 (v15 b32 live): shown again, checks came at +50 ms and +328 ms (the visible check and
+  // the timer that ran while hidden).
+  it("back in front after a while hidden: one check, and the next a full step later", async () => {
+    const h = harness([], wait);
+    await h.advance(3.1);
+    expect(h.check).toHaveBeenCalledTimes(1);
+    h.hide();
+    await h.advance(19.7);
+    await h.show();
+    expect(h.check).toHaveBeenCalledTimes(2);
+    await h.advance(2.9);
+    expect(h.check).toHaveBeenCalledTimes(2);
+    await h.advance(0.2);
+    expect(h.check).toHaveBeenCalledTimes(3);
+    expect(h.pending()).toBe(1);
+  });
+
+  it("a refused check pauses the checks; 'We've been seated' asks and starts them again", async () => {
+    const h = harness([true, "Paused"], wait);
+    await h.advance(6);
+    expect(h.check).toHaveBeenCalledTimes(2);
+    expect(h.pending()).toBe(0);
+    await h.advance(600);
+    h.hide();
+    await h.show();
+    expect(h.check).toHaveBeenCalledTimes(2);
+    expect(h.exhausted).not.toHaveBeenCalled();
+    h.watcher.checkNow();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(h.check).toHaveBeenCalledTimes(3);
+    expect(h.check).toHaveBeenLastCalledWith({ manual: true });
+    await h.advance(3);
+    expect(h.check).toHaveBeenCalledTimes(4);
+  });
 });
