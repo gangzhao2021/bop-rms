@@ -449,6 +449,14 @@ test.describe("@production M02 a phone stays at the Store and table it scanned",
       path: "test-results/b33-table-wait-refused-zh.png",
       fullPage: true,
     });
+    // Batch 34: the same at 1440.
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await noHorizontalOverflow(page);
+    await page.screenshot({ path: "test-results/b34-table-wait-refused-1440-zh.png" });
+    await page.getByRole("button", { name: "English" }).click();
+    await page.screenshot({ path: "test-results/b34-table-wait-refused-1440.png" });
+    await page.getByRole("button", { name: "切换到中文" }).click();
+    await page.setViewportSize({ width: 390, height: 844 });
     await page.getByRole("button", { name: "English" }).click();
     // Staff seat them: "We've been seated" asks the entry once and the guest is at the table.
     open = true;
@@ -503,7 +511,12 @@ test.describe("@production M02 a phone stays at the Store and table it scanned",
       await page.getByRole("button", { name: "切换到中文" }).click();
       await expect(status).toHaveText("这里暂时查不到是否已开台。店员带位后，请点“我们已入座”。");
       await page.screenshot({ path: `test-results/b34-table-wait-${shot}-zh.png`, fullPage: true });
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await noHorizontalOverflow(page);
+      await page.screenshot({ path: `test-results/b34-table-wait-${shot}-1440-zh.png` });
       await page.getByRole("button", { name: "English" }).click();
+      await page.screenshot({ path: `test-results/b34-table-wait-${shot}-1440.png` });
+      await page.setViewportSize({ width: 390, height: 844 });
       // A check answers again: the normal line is back.
       state.waitAnswer = null;
       await page.clock.runFor(48_000);
