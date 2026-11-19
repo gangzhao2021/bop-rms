@@ -61,7 +61,11 @@ import {
   unfinishedGuestPayment,
   type SettlementView,
 } from "./settlement-client.js";
-import { businessDateText, useStoreBusinessDay } from "./StoreBusinessDay.js";
+import {
+  businessDateText,
+  useStoreBusinessDay,
+  useStoreBusinessDaySettled,
+} from "./StoreBusinessDay.js";
 import { floorServerProblemText, isServerProblem } from "./failure-words.js";
 
 /** WP-2423 P2: what the Store is dealing with right now, from the pilot projections. */
@@ -1442,6 +1446,11 @@ export function StoreOverview({
   // WP-2423 Q13: store system alerts. The server decides who may read them (Owner, Store Manager);
   // for other roles it answers "not permitted" and neither the rows nor the line appear.
   const system = useOperationsAlerts(fetcher);
+  // Batch 34 (v15 b33 live, Pickup's pattern): the evening reminder at the top depends on the
+  // Store's hours for the day; Home waits for that read (a moment, at most BUSINESS_DAY_SETTLE_MS)
+  // so the reminder arrives with the rest and nothing below it moves.
+  const daySettled = useStoreBusinessDaySettled();
+  if (!daySettled) return <p role="status">{t("Reading…")}</p>;
   return (
     <>
       {/* WP-2423 item 13 ②: the platform paused this merchant's new guests (shown only then). */}
