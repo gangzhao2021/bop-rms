@@ -1,12 +1,20 @@
 import { systemText, countOf, t } from "./i18n/i18n.js";
-import { PauseOrderingControl } from "./PauseOrderingControl.js";
+import { PauseOrderingControl, PauseOrderingShownContext } from "./PauseOrderingControl.js";
 import {
   useApprovalsWaiting,
   useStaffRolesWaiting,
   type ApprovalsWaiting,
   type StaffRolesWaiting,
 } from "./approvals-waiting.js";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { OpeningList } from "./OpeningList.js";
 import { GuestIntakeNotice } from "./GuestIntakeNotice.js";
 import { createStoreKitchenSetupClient } from "./store-kitchen-setup-client.js";
@@ -1276,10 +1284,14 @@ export function StoreOverview({
       live = false;
     };
   }, [csrf, fetcher, storeReference, permitted.kitchenSetup]);
-  // M109: told only to the owner who can fix it; a failed read says nothing here.
+  // M109: told only to the owner who can fix it; a failed read says nothing here. It needs the
+  // Store's services from the service-control read, which the server refuses to whoever the
+  // workspace says is not shown Pause ordering (the same rule): for them it is not sent at all
+  // (WP-2423 batch 33: Home still sent it and got 403).
+  const serviceReadRefused = useContext(PauseOrderingShownContext) === false;
   const [storePhoneHref, setStorePhoneHref] = useState<string | null>(null);
   useEffect(() => {
-    if (!permitted.kitchenSetup) return;
+    if (!permitted.kitchenSetup || serviceReadRefused) return;
     let live = true;
     const controller = new AbortController();
     void Promise.all([
@@ -1305,7 +1317,7 @@ export function StoreOverview({
       live = false;
       controller.abort();
     };
-  }, [csrf, fetcher, storeReference, permitted.kitchenSetup]);
+  }, [csrf, fetcher, storeReference, permitted.kitchenSetup, serviceReadRefused]);
   useEffect(() => {
     const view = pickupView.current;
     if (view !== null)

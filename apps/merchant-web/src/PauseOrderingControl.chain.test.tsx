@@ -197,3 +197,44 @@ it("WP-2423 batch 32: when the workspace says it is shown, the place is kept unt
   expect(buttonNamed(container, "Pause ordering")).toBeDefined();
   expect(container.querySelector("[data-place-kept]")).toBeNull();
 });
+
+it("WP-2423 batch 33: when the workspace says it is shown but the read is refused, the place stays kept", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    // The permission is taken away during the session: the first read answers, the next is refused.
+    let reads = 0;
+    const fetcher = (async () => {
+      reads += 1;
+      return reads === 1 ? json(state([], 2)) : new Response(null, { status: 403 });
+    }) as typeof fetch;
+    const { container } = await mount(
+      <PauseOrderingShownContext.Provider value={true}>
+        <PauseOrderingControl csrf={"a".repeat(43)} storeReference={id(3)} fetcher={fetcher} />
+      </PauseOrderingShownContext.Provider>,
+    );
+    await settle();
+    expect(buttonNamed(container, "Pause ordering")).toBeDefined();
+    await act(async () => {
+      vi.advanceTimersByTime(pauseOrderingReadMs);
+    });
+    await settle();
+    expect(reads).toBe(2);
+    // Not collapsed under the page: the same place, hidden and out of reach.
+    const kept = container.querySelector<HTMLElement>('.pause-ordering[data-place-kept="true"]');
+    expect(kept?.getAttribute("aria-hidden")).toBe("true");
+    expect(kept?.querySelector("button")?.disabled).toBe(true);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("WP-2423 batch 33: a first read refused after the workspace said shown keeps the place too", async () => {
+  const fetcher = (async () => new Response(null, { status: 403 })) as typeof fetch;
+  const { container } = await mount(
+    <PauseOrderingShownContext.Provider value={true}>
+      <PauseOrderingControl csrf={"a".repeat(43)} storeReference={id(3)} fetcher={fetcher} />
+    </PauseOrderingShownContext.Provider>,
+  );
+  await settle();
+  expect(container.querySelector('.pause-ordering[data-place-kept="true"]')).not.toBeNull();
+});

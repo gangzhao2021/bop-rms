@@ -24,7 +24,11 @@ const widths = [
 /** The refusal comes this late, as in the live check (1.4-2.9 s). */
 const refusalMs = 1_500;
 
-async function signIn(page: Page, navigation: readonly Record<string, string>[]) {
+async function signIn(
+  page: Page,
+  navigation: readonly Record<string, string>[],
+  pauseOrderingShown = false,
+) {
   await page.addInitScript(() => localStorage.setItem("bop.kitchen.sound", "off"));
   await page.route("**/merchant/session", (route) =>
     route.fulfill({
@@ -41,7 +45,7 @@ async function signIn(page: Page, navigation: readonly Record<string, string>[])
           freshness: "Current",
           dashboardAvailability: "UnavailableUntilWP1905",
           navigation,
-          pauseOrderingShown: false,
+          pauseOrderingShown,
         },
       },
     }),
@@ -59,7 +63,7 @@ async function signIn(page: Page, navigation: readonly Record<string, string>[])
     }),
   );
   const reads = { count: 0 };
-  // The server's own refusal, late: never asked for on the fixed build.
+  // The server's own refusal, late: never asked for on the fixed build when not shown.
   await page.route("**/merchant/service-control", async (route) => {
     reads.count += 1;
     await new Promise((resolve) => setTimeout(resolve, refusalMs));
@@ -69,16 +73,16 @@ async function signIn(page: Page, navigation: readonly Record<string, string>[])
 }
 
 /** Where the element sits on the screen now, and again after the late refusal would have landed. */
-async function staysPut(page: Page, target: Locator, name: string) {
+async function staysPut(page: Page, target: Locator, name: string, kept = 0) {
   // Wider type, as the Linux runner's sans.
   await page.addStyleTag({ content: "body { letter-spacing: 0.08em; }" });
   await expect(target).toBeVisible();
   const before = await target.boundingBox();
-  await expect(page.locator(".pause-ordering")).toHaveCount(0);
+  await expect(page.locator(".pause-ordering")).toHaveCount(kept);
   await page.waitForTimeout(refusalMs + 1_500);
   const after = await target.boundingBox();
   expect(after?.y, name).toBe(before?.y);
-  await expect(page.locator(".pause-ordering")).toHaveCount(0);
+  await expect(page.locator(".pause-ordering")).toHaveCount(kept);
 }
 
 const acceptable = (n: number) => ({
@@ -213,3 +217,76 @@ for (const [width, height] of widths)
     expect(reads.count).toBe(0);
     await page.screenshot({ path: `test-results/b32-home-no-pause-${width}.png` });
   });
+
+/** WP-2423 batch 33 (v15 live check of batch 32): an owner, whose Home also checks the store phone. */
+const ownerHome = [
+  { screenId: "HOME-OVERVIEW", label: "Overview", href: "/app", permission: "merchant.access" },
+  {
+    screenId: "STORE-SETUP",
+    label: "Store setup",
+    href: "/app/organization/stores/" + scope.storeReference + "/setup",
+    permission: "organization.manage",
+  },
+  {
+    screenId: "OPS-ORDER-QUEUE",
+    label: "Orders",
+    href: "/operations/orders",
+    permission: "ordering.operate",
+  },
+];
+
+test("@production Home for someone with Store setup but not shown Pause ordering sends no service-control read", async ({
+  page,
+}) => {
+  const reads = await signIn(page, ownerHome);
+  await page.route("**/merchant/orders*", (route) =>
+    route.fulfill({ headers, json: { items: [], nextAfterOrderReference: null } }),
+  );
+  await page.goto("/app");
+  await staysPut(page, page.locator(".overview-needs, .overview-now").first(), "Home summary");
+  expect(reads.count).toBe(0);
+});
+
+for (const [width, height] of widths)
+  test(`@production Orders when Pause ordering is shown but its read is refused (permission withdrawn): nothing moves, at ${width} wide`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height });
+    const reads = await signIn(
+      page,
+      [
+        {
+          screenId: "OPS-ORDER-QUEUE",
+          label: "Orders",
+          href: "/operations/orders",
+          permission: "ordering.operate",
+        },
+      ],
+      true,
+    );
+    await page.route("**/merchant/orders*", (route) =>
+      route.fulfill({
+        headers,
+        json: { items: [acceptable(22), acceptable(21)], nextAfterOrderReference: null },
+      }),
+    );
+    await page.goto("/operations/orders");
+    await expect(page.getByRole("button", { name: /Accept/u }).first()).toBeVisible();
+    await staysPut(page, page.getByRole("group", { name: "Show orders" }), "order tabs", 1);
+    await staysPut(page, page.getByRole("button", { name: "Accept 21" }), "Accept", 1);
+    expect(reads.count).toBeGreaterThan(0);
+    // The kept place is hidden and out of reach: nobody can press a Pause they may not use.
+    await expect(page.getByRole("button", { name: "Pause ordering" })).toHaveCount(0);
+    await page.screenshot({ path: `test-results/b33-orders-pause-withdrawn-${width}.png` });
+  });
+
+test("@production Home when Pause ordering is shown but its read is refused: nothing moves", async ({
+  page,
+}) => {
+  await signIn(page, ownerHome, true);
+  await page.route("**/merchant/orders*", (route) =>
+    route.fulfill({ headers, json: { items: [], nextAfterOrderReference: null } }),
+  );
+  await page.goto("/app");
+  await staysPut(page, page.locator(".overview-needs, .overview-now").first(), "Home summary", 1);
+});

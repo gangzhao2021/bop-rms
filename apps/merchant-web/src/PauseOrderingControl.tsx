@@ -135,10 +135,13 @@ export function pauseLineText(
  * shown). "Unknown": the read failed before it ever answered (its place stays kept; it is read again
  * on the usual cycle). A later failed read keeps the last answer instead of hiding the control, so
  * a network blip never moves the page under it (WP-2423 batch 31: a phone kitchen's tickets jumped
- * 68 px when it appeared after the board, and again on every failed read).
+ * 68 px when it appeared after the board, and again on every failed read). "Withdrawn": the
+ * workspace said this person sees it, but the read is now refused (the permission was taken away
+ * during the session): its place stays kept, hidden and out of reach, so the page does not jump
+ * 52 px (WP-2423 batch 33); it is read again on the usual cycle.
  */
 export interface PauseOrderingRead {
-  readonly status: "Pending" | "Denied" | "Unknown" | "Known";
+  readonly status: "Pending" | "Denied" | "Withdrawn" | "Unknown" | "Known";
   readonly view: ServiceControlState | null;
   /** When the last answer came, for the pause line's countdown. */
   readonly answeredAt: number;
@@ -158,7 +161,8 @@ export function usePauseOrderingRead(
   storeReference: string | undefined,
   fetcher?: typeof fetch,
 ): PauseOrderingRead {
-  const notShown = useContext(PauseOrderingShownContext) === false;
+  const shown = useContext(PauseOrderingShownContext);
+  const notShown = shown === false;
   const client = useMemo(() => createServiceControlClient(fetcher ?? fetch), [fetcher]);
   const [answer, setAnswer] = useState<{
     readonly status: PauseOrderingRead["status"];
@@ -176,7 +180,11 @@ export function usePauseOrderingRead(
         if (controller.signal.aborted) return;
         // The client's answer to 403: this person may not pause.
         if (error instanceof Error && error.message.startsWith("Permission denied"))
-          setAnswer({ status: "Denied", view: null, answeredAt: Date.now() });
+          setAnswer({
+            status: shown === true ? "Withdrawn" : "Denied",
+            view: null,
+            answeredAt: Date.now(),
+          });
         else
           setAnswer((current) =>
             current.status === "Known" ? current : { ...current, status: "Unknown" },
@@ -187,7 +195,7 @@ export function usePauseOrderingRead(
       controller.abort();
       clearTimeout(timer);
     };
-  }, [client, storeReference, revision, notShown]);
+  }, [client, storeReference, revision, notShown, shown]);
   const reload = useCallback(() => setRevision((value) => value + 1), []);
   return useMemo(
     () =>
@@ -245,8 +253,13 @@ export function PauseOrderingControl({
     );
     return () => clearTimeout(timer);
   }, [pausedUntil, reload]);
-  if (current.status === "Pending" || current.status === "Unknown")
-    // Its place is kept, hidden and out of reach, until the first answer.
+  if (
+    current.status === "Pending" ||
+    current.status === "Unknown" ||
+    current.status === "Withdrawn"
+  )
+    // Its place is kept, hidden and out of reach, until the first answer (or while a read the
+    // workspace promised is refused).
     return (
       <div className="pause-ordering" data-place-kept="true" aria-hidden="true">
         <button type="button" tabIndex={-1} disabled>
