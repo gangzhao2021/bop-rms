@@ -43,6 +43,7 @@ it("passes all existing customer routes and configured resources to the API runt
             "createInternalTestResources",
             "createInternalCustomerEntry",
             // DEC-STRIPE-PILOT-WIRING: the Stripe webhook receiver (null with the simulator).
+            "createPaymentWebhookClaim",
             "createPaymentWebhookReceiver",
             "providerAccountReference",
             "paymentChannel",

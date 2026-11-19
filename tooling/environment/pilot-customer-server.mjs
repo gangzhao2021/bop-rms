@@ -17,6 +17,14 @@ import {
   isBodyRouted,
   routingFailureAnswer,
 } from "./pilot-customer-store-routing.mjs";
+import {
+  callbackBodyLimit,
+  createCustomerCallbackRouting,
+} from "./pilot-customer-callback-routing.mjs";
+import {
+  createHttpsSnsCertificateFetch,
+  createSnsSignatureVerifier,
+} from "../../packages/bop/notification/src/index.ts";
 import { servedScopeOf } from "./pilot-served-stores.mjs";
 import {
   createMerchantSessionStoreResolver,
@@ -226,6 +234,16 @@ export async function startInternalCustomerServer({
   additionalStores = [],
   // M02 (v15 07b7a1b7): whether stores.json names more than one Store, whichever of them started.
   multiStore = additionalStores.length > 0,
+  // Batch 34: how many other Stores stores.json names (served or not), so a provider callback or
+  // order link no served Store claims waits for one that is down instead of being dropped.
+  configuredAdditionalStores = additionalStores.length,
+  // Batch 34: this Store's Stripe webhook claim (null in simulation mode).
+  createPaymentWebhookClaim = async () => null,
+  // Batch 34: the SNS signature verifier for SES feedback (tests pass a local one).
+  snsSignatures = createSnsSignatureVerifier({
+    fetchCertificate: createHttpsSnsCertificateFetch(),
+    clock: { now: () => new Date().toISOString() },
+  }),
   loadInternalPickupQr,
   diningEntries = [],
   createInternalTestResources,
@@ -336,7 +354,8 @@ export async function startInternalCustomerServer({
   const additionalResources = [],
     additionalSimulators = [];
   // One Store: every guest request goes to the local customer API as before.
-  let customerStore = null;
+  let customerStore = null,
+    callbackStore = null;
   try {
     resources = await createInternalTestResources();
     simulator = await createInternalSimulatedProvider();
@@ -380,6 +399,28 @@ export async function startInternalCustomerServer({
       clientAddress: entryAddress,
     });
     const storePayments = new Map();
+    // Batch 34: each Store's Stripe webhook claim, made from its own configured Provider. One that
+    // cannot be made is logged; that Store's events then wait (503) instead of being refused.
+    const stripeClaims = new Map();
+    const unavailableClaim = Object.freeze({
+      verifies: async () => {
+        throw new Error("PILOT_STRIPE_WEBHOOK_CLAIM_UNAVAILABLE");
+      },
+      holdsOperation: async () => {
+        throw new Error("PILOT_STRIPE_WEBHOOK_CLAIM_UNAVAILABLE");
+      },
+    });
+    const claimFor = async (create, storeResources, provider) => {
+      // One Store: its API takes every Stripe event itself, as before.
+      if (!multiStore) return null;
+      try {
+        return (await create?.(storeResources, provider)) ?? null;
+      } catch (error) {
+        reportUnexpected("PILOT_STRIPE_WEBHOOK_CLAIM_UNAVAILABLE", error);
+        return unavailableClaim;
+      }
+    };
+    stripeClaims.set(resources, await claimFor(createPaymentWebhookClaim, resources, simulator));
     // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: each Store this installation serves has its own staff
     // composition (its own Store facts); every one may select the others. One Store: as before.
     // v15 2026-10-31: a Store whose resources or staff composition fail to start is logged and not
@@ -392,6 +433,14 @@ export async function startInternalCustomerServer({
         if (store.customer !== undefined) {
           const storeSimulator = await store.customer.createInternalSimulatedProvider();
           additionalSimulators.push(storeSimulator);
+          stripeClaims.set(
+            storeResources,
+            await claimFor(
+              store.customer.createPaymentWebhookClaim,
+              storeResources,
+              storeSimulator,
+            ),
+          );
           const stack = await paymentStack(store.customer, storeResources, storeSimulator);
           storePayments.set(
             store.storeReference,
@@ -460,11 +509,23 @@ export async function startInternalCustomerServer({
       transactions: storeResources.transactions,
       hashSession: (credential) =>
         storeResources.credentials.sessions.hashCredential("Session", credential),
+      // Batch 34: what this Store answers for among the callbacks that name no Store.
+      issuedOrderLink: storeResources.orderMessaging?.issuedOrderLink,
+      feedbackRoute: storeResources.orderMessaging?.feedbackRoute ?? null,
+      stripeWebhook: stripeClaims.get(storeResources) ?? null,
     });
+    const callbackRouting = (stores) =>
+      createCustomerCallbackRouting({
+        stores,
+        everyStoreServed: served.length === configuredAdditionalStores,
+        snsSignatures,
+      });
     // M02 (v15 07b7a1b7): every other Store in stores.json failed to start, so only this one is
     // served; a scan of one of the others is still a retryable outage, never this Store's refusal.
-    if (served.length === 0 && multiStore)
+    if (served.length === 0 && multiStore) {
       customerStore = createStoreRouting({ stores: [routedStore(resources)], multiStore });
+      callbackStore = callbackRouting([routedStore(resources)]);
+    }
     if (served.length > 0) {
       routers.set(resources.scope.storeReference, merchantRouter);
       ports.set(resources.scope.storeReference, apiPort);
@@ -474,6 +535,7 @@ export async function startInternalCustomerServer({
         stores: [resources, ...additionalResources].map(routedStore),
         multiStore,
       });
+      callbackStore = callbackRouting([resources, ...additionalResources].map(routedStore));
       // A request goes to the composition of the Store its Session is bound to (server-side).
       const reportRouting = createMerchantRequestReporter({
         event: "PILOT_MERCHANT_STORE_ROUTING_UNAVAILABLE",
@@ -539,7 +601,38 @@ export async function startInternalCustomerServer({
       // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: the Store's own customer API.
       let port = apiPort,
         body;
-      if (customerStore !== null) {
+      const callbackLimit = callbackStore === null ? null : callbackBodyLimit(req.method, req.url);
+      if (callbackLimit !== null) {
+        // Batch 34: the order link and the providers' callbacks go to the Store that claims them.
+        const chunks = [];
+        let size = 0;
+        for await (const chunk of req) {
+          size += chunk.length;
+          if (size > callbackLimit)
+            return res
+              .status(413)
+              .set("Cache-Control", "no-store")
+              .json({ code: "REQUEST_TOO_LARGE" });
+          chunks.push(chunk);
+        }
+        body = Buffer.concat(chunks);
+        let routed;
+        try {
+          routed = await callbackStore({ url: req.url, headers: req.headers, body });
+        } catch (error) {
+          reportUnexpected("PILOT_CALLBACK_ROUTING_UNAVAILABLE", error);
+          return res
+            .status(503)
+            .set("Cache-Control", "no-store")
+            .json({ code: "INTERNAL_API_UNAVAILABLE" });
+        }
+        if (routed.answer !== undefined)
+          return res
+            .status(routed.answer.status)
+            .set(routed.answer.headers)
+            .json(routed.answer.body);
+        port = routed.store.port;
+      } else if (customerStore !== null) {
         if (isBodyRouted(req.method, req.url)) {
           const chunks = [];
           let size = 0;

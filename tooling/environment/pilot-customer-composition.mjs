@@ -15,7 +15,10 @@ import { registerInternalDiningTablePayment } from "./pilot-dining-table-payment
 import { createInternalChannelPayment } from "./pilot-channel-payment.mjs";
 import { createPilotPaymentProvider, isStripeProvider } from "./pilot-stripe-provider.mjs";
 import { loadPilotPaymentConfig } from "./pilot-payment-config.mjs";
-import { createPilotStripeWebhookReceiver } from "./pilot-stripe-webhook.mjs";
+import {
+  createPilotStripeWebhookClaim,
+  createPilotStripeWebhookReceiver,
+} from "./pilot-stripe-webhook.mjs";
 import { currentPilotEnvironment, matchesPilotEnvironment } from "./pilot-environment.mjs";
 import { createCustomerDiningPayLaterRound } from "../../apps/api/dist/customer-dining-pay-later-round.js";
 import { createInternalBatchCancellation } from "./pilot-batch-cancellation.mjs";
@@ -209,6 +212,9 @@ export function composeCustomerDependencies(directory, installation, config, hos
     // Stripe mode only: the webhook receiver of the API runtime.
     createPaymentWebhookReceiver: (resources, provider) =>
       createPaymentWebhookReceiver(directory, resources, provider, account),
+    // WP-2423 batch 34: whether a Stripe event is this Store's (installation of several Stores).
+    createPaymentWebhookClaim: (resources, provider) =>
+      createPaymentWebhookClaim(directory, resources, provider),
     // DEC-DINE-IN-PAY-LATER: a guest's round at a pay-later table goes to the kitchen unpaid,
     // through the dining workflow's Accept for the System.
     createInternalPayLaterRound: async (resources, configuredEntry, submitRound) => {
@@ -324,4 +330,14 @@ async function createPaymentWebhookReceiver(directory, resources, provider, acco
         JSON.stringify({ event: "payment_webhook_rejected", reasonCode }) + "\n",
       ),
   });
+}
+
+/** WP-2423 batch 34: this Store's Stripe webhook claim, or null in simulation mode. */
+async function createPaymentWebhookClaim(directory, resources, provider) {
+  if (!isStripeProvider(provider)) return null;
+  const config = await loadPilotPaymentConfig(directory, {
+    environment: currentPilotEnvironment(),
+  });
+  if (config.provider !== "stripe") return null;
+  return createPilotStripeWebhookClaim(resources, { directory, stripe: config.stripe });
 }

@@ -189,6 +189,16 @@ export async function createPilotOrderMessaging({
     sending,
     availability,
     recovery: (input) => recovery.consume(input),
+    // WP-2423 batch 34: an installation of several Stores sends the one-time link, and the SES
+    // feedback, to the Store that issued it (pilot-customer-callback-routing.mjs).
+    issuedOrderLink: (token) => recovery.issued(token),
+    feedbackRoute:
+      feedback === undefined
+        ? null
+        : Object.freeze({
+            topicArn: settings.email.feedbackTopicArn,
+            configurationSetName: settings.email.configurationSetName,
+          }),
     mintOrderLink,
     feedback,
     notification: Object.freeze({

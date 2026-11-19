@@ -159,6 +159,8 @@ export async function startConfiguredPilotHttps(
     additionalStores,
     // M02: several Stores in stores.json, even when one of them was refused or could not load.
     multiStore: (await configuredStoreDirectories(directory)).length > 0,
+    // Batch 34: every other Store stores.json names, served or not.
+    configuredAdditionalStores: (await configuredStoreDirectories(directory)).length,
     createInternalMerchant: merchant,
     loadInternalPickupQr: qr.loadInternalPickupQr,
     diningEntries,

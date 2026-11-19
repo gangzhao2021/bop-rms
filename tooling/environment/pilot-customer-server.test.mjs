@@ -683,3 +683,317 @@ test("batch 33: the entry and the waiting check both reach the scanned Store's o
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+// WP-2423 batch 34: at an installation of several merchants, the one-time order link (its token
+// names no Store), SES feedback and the Stripe webhook (provider callbacks) reached no merchant:
+// 404 CUSTOMER_STORE_NOT_FOUND. Each must reach the Store that issued it, from that Store's own
+// facts and only after the provider's signature verifies.
+test("batch 34: the order link, SES feedback and Stripe webhook each reach their own Store", async () => {
+  vi.stubEnv("NODE_ENV", "development");
+  const directory = await mkdtemp(join(tmpdir(), "bop-callback-route-"));
+  const { createTestCertificates } = await import("./pilot-test-certificates.mjs");
+  const { createServer } = await import("node:http");
+  const { chmod } = await import("node:fs/promises");
+  const { createHmac, createSign, generateKeyPairSync, randomBytes } = await import("node:crypto");
+  const { createSnsSignatureVerifier } =
+    await import("../../packages/bop/notification/src/index.ts");
+  const { createPilotStripeWebhookClaim } = await import("./pilot-stripe-webhook.mjs");
+  const certificates = await createTestCertificates(directory, { hostname: "localhost" });
+  const origin = "https://localhost";
+  const reached = [];
+  const api = async (name) => {
+    const upstream = createServer((req, res) => {
+      const chunks = [];
+      req.on("data", (chunk) => chunks.push(chunk));
+      req.on("end", () => {
+        reached.push({ store: name, path: req.url, body: Buffer.concat(chunks).toString("utf8") });
+        res.writeHead(200, { "content-type": "application/json" }).end('{"store":"' + name + '"}');
+      });
+    });
+    await new Promise((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+    return upstream;
+  };
+  const apis = [await api("store-1"), await api("store-2")];
+  // Each merchant's own facts: the links it issued, its SES topic and configuration set, and its
+  // own Stripe account's webhook endpoint secret (a 0600 file in its own runtime directory).
+  const linkOf = (n) => String(n).repeat(43);
+  const topicOf = (n) => "arn:aws:sns:ca-central-1:12345678901" + n + ":store-" + n + "-events";
+  const secretOf = (n) => "whsec_" + "synthetic" + n + "SECRET0000000000";
+  for (const n of [1, 2]) {
+    const file = join(directory, "stripe-webhook-secret-" + n);
+    await writeFile(file, secretOf(n), { mode: 0o600 });
+    await chmod(file, 0o600);
+  }
+  const resourcesOf = (n) => ({
+    scope: {
+      storeReference: "0190aa21-0000-7000-8000-00000000000" + n,
+      brandReference: "0190aa21-0000-7000-8000-00000000002" + n,
+    },
+    publicProfile: {
+      binding: {
+        tenantReference: "0190aa21-0000-7000-8000-00000000003" + n,
+        publicStoreReference: "0190aa21-0000-7000-8000-00000000010" + n,
+      },
+    },
+    credentials: { sessions: { hashCredential: () => "selector" }, reference: () => "unused" },
+    transactions: {},
+    now: () => new Date().toISOString(),
+    orderMessaging: {
+      issuedOrderLink: vi.fn(async (token) => token === linkOf(n)),
+      feedbackRoute: { topicArn: topicOf(n), configurationSetName: "store-" + n },
+    },
+    close: vi.fn(async () => undefined),
+  });
+  const stack = {
+    createInternalSimulatedProvider: async () => ({ close: vi.fn() }),
+    createInternalCustomerEntry: async () => ({ dining: {} }),
+    createInternalTestItems: async () => ({ catalogCartItems: [] }),
+    createInternalCheckout: () => ({ preparation: {}, accessOptions: {} }),
+    createInternalOrder: async () => ({}),
+    createInternalDiningCheckout: () => ({ preparation: {} }),
+    createInternalChannelPayment: async () => ({}),
+    createInternalPaymentTerminal: () => ({}),
+  };
+  const claimOf = (n) => async (resources) =>
+    createPilotStripeWebhookClaim(resources, {
+      directory,
+      stripe: { webhookSecretFile: "stripe-webhook-secret-" + n, nextWebhookSecret: null },
+    });
+  const merchant = async () => ({
+    staffSignInMode: "cognito",
+    persistence: { transactions: {}, identity: { hasher: {} }, now: () => "" },
+    bff: { exactOrigin: origin, acceptedHost: "localhost" },
+  });
+  // A local SNS signing key stands in for AWS's certificate (no provider is called).
+  const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const snsSignatures = createSnsSignatureVerifier({
+    fetchCertificate: async () => "PEM",
+    clock: { now: () => "2026-11-19T12:00:00.000Z" },
+    parseCertificate: () => ({
+      subject: "CN=sns.amazonaws.com",
+      validFrom: "Jan  1 00:00:00 2026 GMT",
+      validTo: "Jan  1 00:00:00 2027 GMT",
+      publicKey,
+    }),
+  });
+  const lines = [];
+  const log = vi.spyOn(console, "log").mockImplementation((line) => lines.push(String(line)));
+  let server;
+  try {
+    server = await startInternalCustomerServer({
+      publicOrigin: origin,
+      listenPort: 0,
+      apiPort: apis[0].address().port,
+      keyFile: certificates.keyFile,
+      certificateFile: certificates.certificateFile,
+      loadProfile: async () => ({ environment: "InternalTest" }),
+      loadInternalPickupQr: async () => ({ token: () => "synthetic.pickup.token" }),
+      diningEntries: [],
+      createInternalTestResources: async () => resourcesOf(1),
+      createInternalMerchant: merchant,
+      createPaymentWebhookClaim: claimOf(1),
+      snsSignatures,
+      ...stack,
+      additionalStores: [
+        {
+          storeReference: "0190aa21-0000-7000-8000-000000000002",
+          apiPort: apis[1].address().port,
+          customer: { ...stack, createPaymentWebhookClaim: claimOf(2) },
+          createInternalTestResources: async () => resourcesOf(2),
+          createInternalMerchant: merchant,
+        },
+      ],
+    });
+    if (!server.listening) await new Promise((resolve) => server.once("listening", resolve));
+    const { request } = await import("node:https");
+    const post = (path, body, headers = {}) =>
+      new Promise((resolve, reject) => {
+        const call = request(
+          {
+            host: "127.0.0.1",
+            port: server.address().port,
+            path,
+            method: "POST",
+            servername: "localhost",
+            ca: [certificates.root],
+            headers: {
+              host: "localhost",
+              "content-length": Buffer.byteLength(body),
+              ...headers,
+            },
+          },
+          (response) => {
+            let text = "";
+            response.on("data", (chunk) => (text += String(chunk)));
+            response.on("end", () => resolve({ status: response.statusCode, text }));
+          },
+        );
+        call.on("error", reject);
+        call.end(body);
+      });
+    const expectReached = async (path, body, headers, store) => {
+      reached.length = 0;
+      const answer = await post(path, body, headers);
+      expect(answer.status, path + " " + store).toBe(200);
+      // That Store's own API answered, with the bytes exactly as they were sent.
+      expect(reached, path + " " + store).toEqual([{ store, path, body }]);
+    };
+
+    // 1. The one-time order link: the Store whose records hold it, with or without a guest cookie.
+    const link = "/api/v1/customer/order-recovery";
+    const guest = {
+      origin,
+      "sec-fetch-site": "same-origin",
+      "content-type": "application/json",
+    };
+    for (const n of [2, 1])
+      await expectReached(link, JSON.stringify({ token: linkOf(n) }), guest, "store-" + n);
+    // A link no Store issued: the installation's own first Store answers it on its own budget.
+    await expectReached(link, JSON.stringify({ token: "Z".repeat(43) }), guest, "store-1");
+
+    // 2. SES feedback: signature first, then the signed topic names the Store.
+    const sns = (fields) => {
+      const pairs = [
+        "Message",
+        "MessageId",
+        "SubscribeURL",
+        "Timestamp",
+        "Token",
+        "TopicArn",
+        "Type",
+      ]
+        .filter((key) => fields[key] !== undefined)
+        .map((key) => key + "\n" + fields[key] + "\n")
+        .join("");
+      const signer = createSign("RSA-SHA256");
+      signer.update(pairs);
+      return JSON.stringify({
+        ...fields,
+        SignatureVersion: "2",
+        Signature: signer.sign(privateKey, "base64"),
+        SigningCertURL:
+          "https://sns.ca-central-1.amazonaws.com/SimpleNotificationService-" +
+          "a".repeat(32) +
+          ".pem",
+      });
+    };
+    const bounce = (topic, set) =>
+      sns({
+        Type: "Notification",
+        MessageId: "018faa00-0000-4000-8000-000000000001",
+        TopicArn: topic,
+        Message: JSON.stringify({
+          eventType: "Bounce",
+          mail: {
+            messageId: "synthetic-provider-message-1",
+            timestamp: "2026-11-19T11:59:00.000Z",
+            destination: ["synthetic-recipient@example.test"],
+            tags: { "ses:configuration-set": [set] },
+          },
+          bounce: { bounceType: "Permanent" },
+        }),
+        Timestamp: "2026-11-19T12:00:00.000Z",
+      });
+    const feedback = "/api/v1/provider/ses-feedback";
+    const snsHeaders = (type) => ({
+      "content-type": "text/plain; charset=UTF-8",
+      "x-amz-sns-message-type": type,
+    });
+    await expectReached(
+      feedback,
+      bounce(topicOf(2), "store-2"),
+      snsHeaders("Notification"),
+      "store-2",
+    );
+    await expectReached(
+      feedback,
+      sns({
+        Type: "SubscriptionConfirmation",
+        MessageId: "018faa00-0000-4000-8000-000000000002",
+        TopicArn: topicOf(1),
+        Message: "You have chosen to subscribe.",
+        Timestamp: "2026-11-19T12:00:00.000Z",
+        Token: "T".repeat(43),
+        SubscribeURL: "https://sns.ca-central-1.amazonaws.com/?Action=ConfirmSubscription",
+      }),
+      snsHeaders("SubscriptionConfirmation"),
+      "store-1",
+    );
+    // Verified, but no served Store subscribes this topic: acknowledged, logged, nothing reached.
+    reached.length = 0;
+    const stranger = await post(
+      feedback,
+      bounce("arn:aws:sns:ca-central-1:999999999999:someone-else", "store-1"),
+      snsHeaders("Notification"),
+    );
+    expect([stranger.status, JSON.parse(stranger.text)]).toEqual([200, { outcome: "Ignored" }]);
+    // Forged (signed for another topic): refused before any Store is chosen.
+    const forged = JSON.parse(bounce(topicOf(1), "store-1"));
+    const refused = await post(
+      feedback,
+      JSON.stringify({ ...forged, TopicArn: topicOf(2) }),
+      snsHeaders("Notification"),
+    );
+    expect([refused.status, JSON.parse(refused.text)]).toEqual([403, { outcome: "rejected" }]);
+    expect(reached).toEqual([]);
+
+    // 3. The Stripe webhook: the Store whose own account's endpoint secret signed it.
+    const webhook = "/api/v1/payment-provider/stripe/webhook";
+    const event = JSON.stringify({
+      id: "evt_SYNTHETIC",
+      object: "event",
+      type: "payment_intent.succeeded",
+      created: Math.floor(Date.now() / 1000),
+      data: { object: { id: "pi_SYNTHETIC", object: "payment_intent", metadata: {} } },
+    });
+    const signed = (secret) => {
+      const t = Math.floor(Date.now() / 1000);
+      return {
+        "content-type": "application/json",
+        "stripe-signature":
+          "t=" +
+          t +
+          ",v1=" +
+          createHmac("sha256", secret)
+            .update(t + "." + event)
+            .digest("hex"),
+      };
+    };
+    for (const n of [2, 1]) await expectReached(webhook, event, signed(secretOf(n)), "store-" + n);
+    reached.length = 0;
+    const unsigned = await post(webhook, event, signed("whsec_" + randomBytes(16).toString("hex")));
+    expect(unsigned.status).toBe(400);
+    expect(JSON.parse(unsigned.text).error.code).toBe("webhook_rejected");
+    expect(reached).toEqual([]);
+
+    // Level 40 with a code, never a token, signature, topic or body.
+    const logged = lines.filter((line) => line.includes("customer_callback_routing"));
+    expect(
+      logged
+        .map((line) => JSON.parse(line))
+        .map(({ level, code, provider, reason }) => ({
+          level,
+          code,
+          provider,
+          reason,
+        })),
+    ).toEqual([
+      { level: 40, code: "PILOT_CALLBACK_UNCLAIMED", provider: "ses", reason: "NoStore" },
+      {
+        level: 40,
+        code: "PILOT_CALLBACK_REFUSED",
+        provider: "ses",
+        reason: "SES_SNS_SIGNATURE_INVALID",
+      },
+      { level: 40, code: "PILOT_CALLBACK_REFUSED", provider: "stripe", reason: "NoStoreSecret" },
+    ]);
+    for (const line of logged)
+      for (const secret of [linkOf(1), "someone-else", "v1=", "synthetic-recipient", "whsec_"])
+        expect(line).not.toContain(secret);
+  } finally {
+    log.mockRestore();
+    await new Promise((resolve) => (server ? server.close(resolve) : resolve()));
+    for (const upstream of apis) await new Promise((resolve) => upstream.close(resolve));
+    await rm(directory, { recursive: true, force: true });
+  }
+});

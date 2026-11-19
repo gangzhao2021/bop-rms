@@ -20,7 +20,9 @@ import {
   parsePaymentInstant,
   parsePaymentIntentCreationRecord,
   parseStripeWebhookPaymentEvent,
+  parseWebhookInstant,
   PaymentTerminalError,
+  ProviderWebhookVerificationError,
   verifyStripeWebhookSignature,
 } from "../../packages/rms/payment/src/index.ts";
 import { readStripeWebhookSecrets } from "./pilot-payment-config.mjs";
@@ -263,6 +265,49 @@ export function createPilotStripeWebhookReceiver(
         requestedAt: parsePaymentInstant(now()),
       });
       return Object.freeze({ accepted: accepted.status, processed: processed.status });
+    },
+  });
+}
+
+/**
+ * WP-2423 batch 34: what an installation of several Stores asks each Stripe Store before it sends
+ * a Stripe event on (pilot-customer-callback-routing.mjs). Each Store's Stripe account posts to the
+ * same address, signed with that account's own webhook endpoint secret:
+ * - `verifies`: whether this Store's secret (current, or next within its window) signed these exact
+ *   bytes at this time. A refusal is false; a secret that cannot be read throws (an outage).
+ * - `holdsOperation`: whether this Store's own Payment records hold the payment operation that
+ *   Stripe's event names in the metadata this Store set on the intent (`bop_payment_operation`),
+ *   for Stores that share one Stripe account and secret. A read failure throws.
+ * Nothing is recorded; the chosen Store's own receiver verifies and records the event.
+ */
+export function createPilotStripeWebhookClaim(resources, { directory, stripe }) {
+  const { scope, transactions, now, credentials } = resources;
+  const history = createPostgresPaymentIntentCreationStore(transactions, scope, {
+    now,
+    generateObservationReference: credentials.reference,
+  });
+  return Object.freeze({
+    async verifies({ signatureHeader, rawBody, receivedAt }) {
+      const configuration = await readStripeWebhookSecrets(directory, stripe);
+      try {
+        verifyStripeWebhookSignature({
+          rawBody,
+          signatureHeader,
+          receivedAt: parseWebhookInstant(receivedAt),
+          configuration,
+        });
+        return true;
+      } catch (error) {
+        if (
+          error instanceof ProviderWebhookVerificationError &&
+          error.code !== "PROVIDER_WEBHOOK_CONFIGURATION_INVALID"
+        )
+          return false;
+        throw error;
+      }
+    },
+    async holdsOperation(paymentOperationReference) {
+      return (await history.resolveOperation(paymentOperationReference)) !== null;
     },
   });
 }

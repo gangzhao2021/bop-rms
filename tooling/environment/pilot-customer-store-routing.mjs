@@ -27,11 +27,9 @@ import { createPostgresGuestSessionEntryStore } from "../../packages/bop/identit
  *
  * Batch 33 audit of the guest paths that carry no Session and name no Store in the path: the CSRF
  * token and payment configuration (BEFORE_ANY_STORE), the menu, the entry and its waiting check are
- * routed above; the pickup poster's code is answered by this server itself. Not routed yet, and
- * not reachable at an installation of several Stores until their gates open: the one-time order
- * link (`/api/v1/customer/order-recovery`, sent only once notification.json names providers; its
- * token names no Store), and the providers' own callbacks (SES feedback, the Stripe webhook),
- * which a live provider account would post to the installation.
+ * routed above; the pickup poster's code is answered by this server itself. Batch 34: the one-time
+ * order link (`/api/v1/customer/order-recovery`; its token names no Store) and the providers' own
+ * callbacks (SES feedback, the Stripe webhook) are routed by pilot-customer-callback-routing.mjs.
  */
 const GUEST_COOKIE = "__Host-bop-guest";
 const SCAN_COOKIE = "__Secure-bop-scan";

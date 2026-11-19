@@ -57,6 +57,8 @@ describe("DEC-PILOT-NOTIFICATIONS pilot composition", () => {
     expect(messaging.availability()).toEqual({ sms: false, email: false });
     expect(messaging.sending).toBe(false);
     expect(messaging.feedback).toBeUndefined();
+    // Batch 34: no feedback endpoint, so no SES feedback is routed to this Store.
+    expect(messaging.feedbackRoute).toBeNull();
     expect(
       createInternalCustomerOrderMessageConsumers(resources, {
         orderMessaging: messaging,
@@ -81,6 +83,11 @@ describe("DEC-PILOT-NOTIFICATIONS pilot composition", () => {
     });
     expect(messaging.availability()).toEqual({ sms: false, email: true });
     expect(messaging.feedback).toBeDefined();
+    // Batch 34: the signed topic and configuration set this Store's mail goes out with.
+    expect(messaging.feedbackRoute).toEqual({
+      topicArn: sesConfig.email.feedbackTopicArn,
+      configurationSetName: "bop-transactional",
+    });
     expect(readSecret).toHaveBeenCalledWith(expect.any(String), "notification-contact-digest-key");
     const createTrigger = vi.fn(() => ({
       onPaymentSucceeded: vi.fn(),
