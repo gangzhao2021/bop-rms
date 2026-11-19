@@ -129,6 +129,22 @@ describe("DEC-PILOT-NOTIFICATIONS R1: one-time order recovery", () => {
     ).rejects.toBeInstanceOf(OrderRecoveryError);
   });
 
+  it("batch 34: says whether this Store issued a token, spending no budget and changing nothing", async () => {
+    const h = harness();
+    const minted = await mint(h);
+    expect(await h.service.issued(minted?.token)).toBe(true);
+    // Expired or used: still this Store's link (it answers "expired" itself).
+    h.advance("2026-10-20T12:30:00.000Z");
+    expect(await h.service.issued(minted?.token)).toBe(true);
+    for (const token of ["Z".repeat(43), "short", 7, undefined])
+      expect(await h.service.issued(token)).toBe(false);
+    expect(h.budget.consume).not.toHaveBeenCalled();
+    expect(h.store.consumeAndRekey).not.toHaveBeenCalled();
+    // A read that fails is an outage, never "not this Store's".
+    vi.mocked(h.store.peekOrder).mockRejectedValueOnce(new Error("down"));
+    await expect(h.service.issued(minted?.token)).rejects.toThrow("down");
+  });
+
   it("refuses an expired, unknown or malformed token with the same error", async () => {
     const h = harness();
     const minted = await mint(h);

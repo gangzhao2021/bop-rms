@@ -351,6 +351,36 @@ it("DEC-PILOT-NOTIFICATIONS: order messages, one-time order link and bounce supp
         }),
         (error) => error.code === "ORDER_RECOVERY_UNAVAILABLE",
       );
+      // WP-2423 batch 34: an installation of several Stores asks each Store whether it issued a
+      // link, under the API role: only the issuing Store says yes (a used or expired one included),
+      // and asking spends no budget and changes nothing.
+      const before = await admin.query(
+        "SELECT (SELECT count(*) FROM security.abuse_bucket)::int AS buckets, (SELECT count(*) FROM bop_identity.order_recovery_consumption)::int AS consumed",
+      );
+      assert.equal(await recovery.issued(fresh.token), true);
+      assert.equal(await recovery.issued(firstToken), true, "a used link is still this Store's");
+      assert.equal(
+        await recovery.issued(late.token),
+        true,
+        "an expired link is still this Store's",
+      );
+      assert.equal(
+        await recoveryFor({ brandReference: brand, storeReference: otherStore }).issued(
+          fresh.token,
+        ),
+        false,
+        "another Store never claims this Store's link",
+      );
+      assert.equal(await recovery.issued("Z".repeat(43)), false);
+      assert.equal(await recovery.issued("short"), false);
+      assert.deepEqual(
+        (
+          await admin.query(
+            "SELECT (SELECT count(*) FROM security.abuse_bucket)::int AS buckets, (SELECT count(*) FROM bop_identity.order_recovery_consumption)::int AS consumed",
+          )
+        ).rows,
+        before.rows,
+      );
 
       // 5. The abuse budget: 5 tries per hour per Order and peer, then 429-equivalent.
       for (let attempt = 0; attempt < 5; attempt += 1)

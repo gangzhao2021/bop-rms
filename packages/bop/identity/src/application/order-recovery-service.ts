@@ -130,6 +130,21 @@ export function createOrderRecoveryService(ports: {
 }) {
   return Object.freeze({
     /**
+     * WP-2423 batch 34: whether this Store issued the link token (expired or used ones included),
+     * so an installation of several Stores can send the guest to the Store that answers for it.
+     * Reads only the keyed hash; spends no budget and changes nothing. A malformed token is no
+     * Store's; a read failure throws (an outage, never "not ours").
+     */
+    async issued(token: unknown): Promise<boolean> {
+      let candidates;
+      try {
+        candidates = ports.hasher.candidates(token as string);
+      } catch {
+        return false;
+      }
+      return (await ports.store.peekOrder({ candidates })) !== null;
+    },
+    /**
      * Mints a link token for one notification attempt. Returns null when the sibling limit is
      * reached (the message is then sent without a link).
      */
