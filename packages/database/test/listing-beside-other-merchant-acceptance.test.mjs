@@ -218,6 +218,8 @@ it("a listing stops nobody: not another merchant, and not its own guests and sta
     await admin.connect();
     const monitor = new Client(context.clientConfig);
     await monitor.connect();
+    const probe = new Client(context.clientConfig);
+    await probe.connect();
     let listing = null,
       other = null;
     try {
@@ -282,20 +284,45 @@ it("a listing stops nobody: not another merchant, and not its own guests and sta
         await during(0, name, work);
       assert.deepEqual(failures, [], "every action works with nothing beside it");
 
-      /** Whether the held step holds the audit chain of the listing merchant's Store. */
+      /**
+       * Whether the held step itself holds the audit chain of the listing merchant's Store. A probe
+       * asks for the chain's head row and the answer is who it waits for: the held step, or nobody
+       * (or a write of the same Store that finishes and lets it through). A NOWAIT refusal alone
+       * cannot tell these apart: after the price assignment's COMMIT, that Store's guest round and
+       * sold-out marks run on beside the next steps and briefly hold the head row themselves, so a
+       * later step that writes nothing there was counted as writing it (CI `cdba8c46`: 3 !== 1).
+       */
       const holdsStoreAudit = async () => {
-        await monitor.query("BEGIN");
+        await probe.query("BEGIN");
         try {
-          await monitor.query(
-            "SELECT 1 FROM platform_audit.audit_chain_head WHERE brand_id=$1 AND store_id=$2 FOR UPDATE NOWAIT",
-            [listing.scope.brandReference, listing.scope.storeReference],
-          );
-          return false;
-        } catch (error) {
-          if (error.code === "55P03") return true;
-          throw error;
+          await probe.query("SET LOCAL lock_timeout = '10s'");
+          const locking = probe
+            .query(
+              "SELECT 1 FROM platform_audit.audit_chain_head WHERE brand_id=$1 AND store_id=$2 FOR UPDATE",
+              [listing.scope.brandReference, listing.scope.storeReference],
+            )
+            .then(
+              () => null,
+              (error) => error,
+            );
+          for (;;) {
+            const settled = await Promise.race([locking, sleep(10).then(() => "waiting")]);
+            if (settled === null) return false;
+            if (settled !== "waiting") throw settled;
+            const { rows } = await monitor.query(
+              "SELECT $2::int = ANY(pg_blocking_pids($1)) AS held",
+              [probe.processID, held],
+            );
+            if (rows[0].held) {
+              await monitor.query("SELECT pg_cancel_backend($1)", [probe.processID]);
+              const cancelled = await locking;
+              if (cancelled?.code !== "57014")
+                throw cancelled ?? new Error("the probe got the row while the held step had it");
+              return true;
+            }
+          }
         } finally {
-          await monitor.query("ROLLBACK");
+          await probe.query("ROLLBACK");
         }
       };
 
@@ -414,6 +441,7 @@ it("a listing stops nobody: not another merchant, and not its own guests and sta
     } finally {
       await listing?.close().catch(() => undefined);
       await other?.close().catch(() => undefined);
+      await probe.end();
       await monitor.end();
       await admin.end();
     }
