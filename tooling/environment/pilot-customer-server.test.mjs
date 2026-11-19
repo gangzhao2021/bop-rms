@@ -536,3 +536,150 @@ test("WP-2423 取舍 18: a guest's member request reaches their own Store's hand
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+// WP-2423 batch 33 (v15 b32 live): at an installation of several merchants, the waiting page's
+// "is the table open now?" answered 404 CUSTOMER_STORE_NOT_FOUND at every table: the server's real
+// Store routing read the Store from the body of the entry only.
+test("batch 33: the entry and the waiting check both reach the scanned Store's own customer API", async () => {
+  vi.stubEnv("NODE_ENV", "development");
+  const directory = await mkdtemp(join(tmpdir(), "bop-table-wait-route-"));
+  const { createTestCertificates } = await import("./pilot-test-certificates.mjs");
+  const { createServer } = await import("node:http");
+  const certificates = await createTestCertificates(directory, { hostname: "localhost" });
+  const origin = "https://localhost";
+  const reached = [];
+  // Each Store's own customer API: a stand-in on a real local port that says which Store it is.
+  const api = async (name) => {
+    const upstream = createServer((req, res) => {
+      let text = "";
+      req.on("data", (chunk) => (text += String(chunk)));
+      req.on("end", () => {
+        reached.push({ store: name, path: req.url, body: text });
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ schemaVersion: 1, status: "Waiting" }));
+      });
+    });
+    await new Promise((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+    return upstream;
+  };
+  const apis = [await api("store-1"), await api("store-2")];
+  const publicOf = (n) => "0190aa21-0000-7000-8000-00000000010" + n;
+  // Two merchants (two Tenants): nothing that names no Store goes to either.
+  const resourcesOf = (n) => ({
+    scope: {
+      storeReference: "0190aa21-0000-7000-8000-00000000000" + n,
+      brandReference: "0190aa21-0000-7000-8000-00000000002" + n,
+    },
+    publicProfile: {
+      binding: {
+        tenantReference: "0190aa21-0000-7000-8000-00000000003" + n,
+        publicStoreReference: publicOf(n),
+      },
+    },
+    credentials: { sessions: { hashCredential: () => "selector" } },
+    transactions: {},
+    close: vi.fn(async () => undefined),
+  });
+  const stack = {
+    createInternalSimulatedProvider: async () => ({ close: vi.fn() }),
+    createInternalCustomerEntry: async () => ({ dining: {} }),
+    createInternalTestItems: async () => ({ catalogCartItems: [] }),
+    createInternalCheckout: () => ({ preparation: {}, accessOptions: {} }),
+    createInternalOrder: async () => ({}),
+    createInternalDiningCheckout: () => ({ preparation: {} }),
+    createInternalChannelPayment: async () => ({}),
+    createInternalPaymentTerminal: () => ({}),
+  };
+  const merchant = async () => ({
+    staffSignInMode: "cognito",
+    persistence: { transactions: {}, identity: { hasher: {} }, now: () => "" },
+    bff: { exactOrigin: origin, acceptedHost: "localhost" },
+  });
+  let server;
+  try {
+    server = await startInternalCustomerServer({
+      publicOrigin: origin,
+      listenPort: 0,
+      apiPort: apis[0].address().port,
+      keyFile: certificates.keyFile,
+      certificateFile: certificates.certificateFile,
+      loadProfile: async () => ({ environment: "InternalTest" }),
+      loadInternalPickupQr: async () => ({ token: () => "synthetic.pickup.token" }),
+      diningEntries: [],
+      createInternalTestResources: async () => resourcesOf(1),
+      createInternalMerchant: merchant,
+      ...stack,
+      additionalStores: [
+        {
+          storeReference: "0190aa21-0000-7000-8000-000000000002",
+          apiPort: apis[1].address().port,
+          createInternalTestResources: async () => resourcesOf(2),
+          createInternalMerchant: merchant,
+        },
+      ],
+    });
+    if (!server.listening) await new Promise((resolve) => server.once("listening", resolve));
+    const { request } = await import("node:https");
+    const post = (path, payload, cookie) =>
+      new Promise((resolve, reject) => {
+        const body = JSON.stringify(payload);
+        const call = request(
+          {
+            host: "127.0.0.1",
+            port: server.address().port,
+            path,
+            method: "POST",
+            servername: "localhost",
+            ca: [certificates.root],
+            headers: {
+              host: "localhost",
+              origin,
+              "sec-fetch-site": "same-origin",
+              "content-type": "application/json",
+              "content-length": Buffer.byteLength(body),
+              ...(cookie === undefined ? {} : { cookie }),
+            },
+          },
+          (response) => {
+            let text = "";
+            response.on("data", (chunk) => (text += String(chunk)));
+            response.on("end", () => resolve({ status: response.statusCode, text }));
+          },
+        );
+        call.on("error", reject);
+        call.end(body);
+      });
+    const code = (n) =>
+      "x." +
+      Buffer.from(JSON.stringify({ publicStoreReference: publicOf(n) })).toString("base64url") +
+      ".y";
+    for (const path of ["/bff/customer/entry", "/bff/customer/entry/table-wait"])
+      for (const n of [1, 2]) {
+        for (const [payload, cookie] of [
+          [{ qrToken: code(n) }, undefined],
+          [{ resume: true }, "__Secure-bop-scan=" + code(n)],
+        ]) {
+          reached.length = 0;
+          const answer = await post(path, payload, cookie);
+          const at = path + " store-" + n + " " + JSON.stringify(payload);
+          expect(answer.status, at).toBe(200);
+          // The Store's own API answered, with the body exactly as the phone sent it.
+          expect(reached, at).toEqual([
+            { store: "store-" + n, path, body: JSON.stringify(payload) },
+          ]);
+        }
+      }
+    // A code naming no Store of this installation reaches no merchant, on either path.
+    for (const path of ["/bff/customer/entry", "/bff/customer/entry/table-wait"]) {
+      reached.length = 0;
+      const answer = await post(path, { qrToken: "a.b.c" });
+      expect(answer.status, path).toBe(404);
+      expect(JSON.parse(answer.text), path).toEqual({ code: "CUSTOMER_STORE_NOT_FOUND" });
+      expect(reached, path).toEqual([]);
+    }
+  } finally {
+    await new Promise((resolve) => (server ? server.close(resolve) : resolve()));
+    for (const upstream of apis) await new Promise((resolve) => upstream.close(resolve));
+    await rm(directory, { recursive: true, force: true });
+  }
+});

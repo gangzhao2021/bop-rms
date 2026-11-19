@@ -8,8 +8,10 @@ import { createPostgresGuestSessionEntryStore } from "../../packages/bop/identit
  * installation does):
  *
  * - the public menu: the Store whose public Store reference is in the path;
- * - the table or pickup entry: the public Store reference in the signed QR token (decoded only to
- *   choose the Store; that Store's runtime verifies the signature and the table); for a replay of a
+ * - the table or pickup entry, and the waiting page's "is the table open now?" (table-wait, batch
+ *   33: the same code or replay as the entry): the public Store reference in the signed QR token
+ *   (decoded only to choose the Store; that Store's runtime verifies the signature and the
+ *   table); for a replay of a
  *   scan that started no visit yet (`{resume:true}`, M02), the token in the `__Secure-bop-scan`
  *   cookie. At an installation whose stores.json names several Stores (`multiStore`, even when
  *   only one of them is served now), a scan or replay naming a Store not served right now (it
@@ -22,12 +24,27 @@ import { createPostgresGuestSessionEntryStore } from "../../packages/bop/identit
  *   answers as a single-Store installation would (a refusal for anything not its own). With Stores
  *   of more than one Tenant (DEC-MULTI-MERCHANT-ONE-INSTALLATION) no merchant answers for a request
  *   that isn't its own: null, and the entry refuses it without reaching any Store.
+ *
+ * Batch 33 audit of the guest paths that carry no Session and name no Store in the path: the CSRF
+ * token and payment configuration (BEFORE_ANY_STORE), the menu, the entry and its waiting check are
+ * routed above; the pickup poster's code is answered by this server itself. Not routed yet, and
+ * not reachable at an installation of several Stores until their gates open: the one-time order
+ * link (`/api/v1/customer/order-recovery`, sent only once notification.json names providers; its
+ * token names no Store), and the providers' own callbacks (SES feedback, the Stripe webhook),
+ * which a live provider account would post to the installation.
  */
 const GUEST_COOKIE = "__Host-bop-guest";
 const SCAN_COOKIE = "__Secure-bop-scan";
 const UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const MENU = /^\/api\/v1\/public\/stores\/([^/?]+)\/menu(?:[?].*)?$/u;
 const ENTRY = /^\/bff\/customer\/entry(?:[?].*)?$/u;
+/**
+ * WP-2423 batch 33 (v15 b32 live): the waiting page's check carries the entry's own code (or its
+ * replay), and nothing else names its Store: a guest waiting at a table has no Session yet. Not
+ * routed by its body, it reached no Store at an installation of several merchants (404
+ * CUSTOMER_STORE_NOT_FOUND) and the page fell back to full entries on the entry's budget.
+ */
+const TABLE_WAIT = /^\/bff\/customer\/entry\/table-wait(?:[?].*)?$/u;
 /**
  * What a fresh browser reads before it belongs to any Store: its CSRF token and how the app takes
  * payment (the public mode and publishable key). They name no merchant's data.
@@ -36,7 +53,10 @@ const BEFORE_ANY_STORE =
   /^\/(?:api\/v1\/customer\/session\/csrf|bff\/customer\/payment-configuration)(?:[?].*)?$/u;
 /** Requests whose Store is in their body (read before forwarding, at most this many bytes). */
 export const bodyRoutedLimit = 16 * 1024;
-export const isBodyRouted = (method, url) => method === "POST" && ENTRY.test(url);
+export const isBodyRouted = (method, url) =>
+  method === "POST" && (ENTRY.test(url) || TABLE_WAIT.test(url));
+/** Only the entry itself keeps a scan (the waiting check starts and remembers nothing). */
+const isEntry = (method, url) => method === "POST" && ENTRY.test(url);
 
 function guestCookie(header) {
   if (typeof header !== "string" || header.length > 8192) return null;
@@ -126,7 +146,7 @@ export function routingFailureAnswer(error, { method, url, body }) {
     return { code: "INTERNAL_API_UNAVAILABLE", setCookie: null };
   return {
     code: "CUSTOMER_STORE_UNAVAILABLE",
-    setCookie: isBodyRouted(method, url) ? outageScanCookie(body) : null,
+    setCookie: isEntry(method, url) ? outageScanCookie(body) : null,
   };
 }
 

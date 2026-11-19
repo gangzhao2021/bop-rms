@@ -278,3 +278,30 @@ it("a Store whose guest records can't be read is an outage to retry, never 'no S
   // Every Store answered and none has it: nobody's.
   expect(await at([])(lost)).toBeNull();
 });
+
+// WP-2423 batch 33 (v15 b32 live): the waiting page's "is the table open now?" carries the entry's
+// own code (or its replay) and no Session; it answered 404 CUSTOMER_STORE_NOT_FOUND at every table.
+const tableWait = (request) => ({ ...request, url: "/bff/customer/entry/table-wait" });
+it("batch 33: the waiting check goes to the scanned Store, by its code or its replay, like the entry", async () => {
+  const a = store(1, 1),
+    b = store(2, 2);
+  const storeOf = routing([a, b]);
+  expect(await storeOf(tableWait(entry(b.publicStoreReference)))).toBe(b);
+  expect(await storeOf(tableWait(entry(a.publicStoreReference)))).toBe(a);
+  const waiting = "__Secure-bop-scan=" + token(b.publicStoreReference);
+  expect(await storeOf(tableWait(resume(waiting)))).toBe(b);
+  // A code naming no Store is still no merchant's; one of a Store not served now is an outage.
+  expect(await storeOf(tableWait(entry("not-a-reference")))).toBeNull();
+  await expect(storeOf(tableWait(entry(ref(103))))).rejects.toThrow("CUSTOMER_STORE_UNAVAILABLE");
+  // Other paths under the entry are not routed by a body they don't have.
+  expect(await storeOf({ ...entry(b.publicStoreReference), url: "/bff/customer/entry/x" })).toBe(
+    null,
+  );
+});
+it("batch 33: a waiting check of a Store not served now keeps nothing (only the entry keeps a scan)", () => {
+  const code = framed(ref(103));
+  expect(routingFailureAnswer(unavailable, tableWait(scan(code)))).toEqual({
+    code: "CUSTOMER_STORE_UNAVAILABLE",
+    setCookie: null,
+  });
+});
