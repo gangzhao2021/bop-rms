@@ -8002,6 +8002,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{open} open": "{open} 个未解决",
   "The store system could not be checked": "没能检查门店系统",
   "Not checked": "没检查到",
+  "The store system was checked again": "门店系统已重新检查",
+  "Nothing from the store system needs attention.": "门店系统没有需要处理的问题。",
   "Store system problems are not being checked": "门店系统的问题现在没人在查",
   "Store system: could not be checked": "门店系统：没能检查",
   "Store system: problems are not being checked": "门店系统：问题现在没人在查",

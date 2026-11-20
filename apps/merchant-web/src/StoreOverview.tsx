@@ -503,6 +503,8 @@ export interface AttentionItem {
   readonly backlog?: boolean;
   /** Who to call about it, when the row sends them to BOP support. */
   readonly call?: { readonly phone: string; readonly testOnly: boolean };
+  /** Batch 36 review: the row keeps the height the same row had before, so nothing below moves. */
+  readonly keepHeight?: boolean;
 }
 /**
  * M109: where Home asks the owner for the Store's phone, or null. Only a Store that takes pickup
@@ -812,8 +814,22 @@ function AttentionRow({
   readonly onCheckSystem?: (() => void) | undefined;
 }) {
   const retry = item.retry === "system" ? onCheckSystem : onRefresh;
+  // Batch 36 review: the height this row had, kept by a row that takes its place (`keepHeight`).
+  const row = useRef<HTMLLIElement>(null);
+  const height = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    if (item.keepHeight !== true && row.current !== null)
+      height.current = row.current.getBoundingClientRect().height;
+  });
   return (
-    <li>
+    <li
+      ref={row}
+      style={
+        item.keepHeight === true && height.current !== null
+          ? { minHeight: height.current, boxSizing: "border-box" }
+          : undefined
+      }
+    >
       <div className="overview-attention__text">
         <strong>{item.title}</strong>
         <p>
@@ -869,9 +885,15 @@ export function NeedsAttention({
   dayStartsAt,
   reminder = null,
   stillReading = [],
+  systemRecovered = false,
   onRefresh,
   onCheckSystem,
 }: {
+  /**
+   * Batch 36 review: the store system's read answered after Home had said it could not be
+   * checked. Its row then says it was checked, in the same place and height, until the next read.
+   */
+  readonly systemRecovered?: boolean;
   readonly state: OverviewTodayState;
   readonly approvals?: ApprovalsWaiting | null;
   readonly staffRoles?: StaffRolesWaiting;
@@ -893,11 +915,28 @@ export function NeedsAttention({
 }) {
   const reads = [state.orders, state.pickups, state.exceptions, state.tables];
   const businessDay = useStoreBusinessDay();
-  const { urgent, later } = systemAttentionItems(
+  const listed = systemAttentionItems(
     system,
     timeZone,
     dayStartsAt ?? businessDay?.startsAt ?? null,
   );
+  const urgent = listed.urgent;
+  // Same key as the "could not be checked" row, so the same row takes the answer in its place.
+  const later: readonly AttentionItem[] =
+    systemRecovered && system.kind === "Ready" && listed.later.length === 0
+      ? [
+          {
+            key: "system-unread",
+            title: t("The store system was checked again"),
+            detail: t("Nothing from the store system needs attention."),
+            state: t("Checked"),
+            tone: "progress",
+            href: null,
+            action: null,
+            keepHeight: true,
+          },
+        ]
+      : listed.later;
   if (
     kitchenSetupHref === null &&
     storePhoneHref === null &&
@@ -1523,6 +1562,16 @@ export function StoreOverview({
   // WP-2423 Q13: store system alerts. The server decides who may read them (Owner, Store Manager);
   // for other roles it answers "not permitted" and neither the rows nor the line appear.
   const system = useOperationsAlerts(fetcher);
+  // Batch 36 review: whether this answer came after Home said the store system could not be
+  // checked (two failed reads, then the background retry answered). Kept from render to render
+  // without an effect, so no frame shows the list without that row.
+  const [systemSeen, setSystemSeen] = useState({ read: system.read, recovered: false });
+  const systemRecovered =
+    systemSeen.read === system.read
+      ? systemSeen.recovered
+      : systemSeen.read.kind === "Unavailable" && system.read.kind === "Ready";
+  if (systemSeen.read !== system.read)
+    setSystemSeen({ read: system.read, recovered: systemRecovered });
   // Batch 34 (v15 b33 live, Pickup's pattern): the evening reminder at the top depends on the
   // Store's hours for the day; Home waits for that read (a moment, at most BUSINESS_DAY_SETTLE_MS)
   // so the reminder arrives with the rest and nothing below it moves.
@@ -1590,6 +1639,7 @@ export function StoreOverview({
             </>
           }
           stillReading={settleExpired ? unanswered : []}
+          systemRecovered={systemRecovered}
           onRefresh={() => void load(true)}
           onCheckSystem={() => void system.refresh()}
         />
