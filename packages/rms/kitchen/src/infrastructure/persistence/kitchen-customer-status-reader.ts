@@ -1,9 +1,9 @@
-import type { ConsumerTransaction } from "@bop/eventing";
 import {
   createSnapshotPointReads,
   pointReadReference,
+  type ConsumerTransaction,
   type SnapshotPointRead,
-} from "@rms/ordering";
+} from "@bop/eventing";
 import { KitchenWorkLifecycleError } from "../../contracts/kitchen-work-lifecycle.js";
 import {
   parseKitchenTicketInstant,
@@ -45,7 +45,7 @@ const workItemsByTicketStatement =
 /**
  * Batch 37 (v15 b36): the kitchen status point reads of the listed Orders on the merchant Orders
  * list — each Order's tickets and each ticket's work items — answered from one read each in the
- * list's read-only snapshot (Ordering's createSnapshotPointReads). The reader is unchanged.
+ * list's read-only snapshot (Eventing's createSnapshotPointReads). The reader is unchanged.
  */
 export function createKitchenCustomerStatusPointReads(
   transaction: ConsumerTransaction,

@@ -99,3 +99,8 @@ export {
 
 export { createManualOutboxRecoveryRegistry } from "./infrastructure/messaging/manual-outbox-recovery-registry.js";
 export { createManualOutboxRecoveryExecution } from "./infrastructure/messaging/manual-outbox-recovery-execution.js";
+export {
+  createSnapshotPointReads,
+  pointReadReference,
+  type SnapshotPointRead,
+} from "./infrastructure/persistence/snapshot-point-reads.js";

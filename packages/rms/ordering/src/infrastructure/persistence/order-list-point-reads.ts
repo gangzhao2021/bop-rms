@@ -1,4 +1,9 @@
-import type { ConsumerTransaction } from "@bop/eventing";
+import {
+  createSnapshotPointReads,
+  pointReadReference,
+  type ConsumerTransaction,
+  type SnapshotPointRead,
+} from "@bop/eventing";
 import { parseOrderingReference } from "../../domain/cart.js";
 import {
   orderAcceptanceByBatchStatement,
@@ -9,11 +14,6 @@ import {
   orderCreationInitialStatement,
 } from "./order-creation-query-store.js";
 import { orderInitialPointStatements } from "./order-termination-store.js";
-import {
-  createSnapshotPointReads,
-  pointReadReference,
-  type SnapshotPointRead,
-} from "./snapshot-point-reads.js";
 
 /** One listed Order: what its readers read it by. */
 export interface OrderListPointReadOrder {
@@ -67,7 +67,7 @@ function storePointRead(
  * its initial Batch's acceptance, its creation history (read twice: for its Quote version and its
  * current state), its initial window (submission, acceptance, staff item cancellations,
  * termination) and its pickup completion — answered for every listed Order from one read each in
- * the list's read-only snapshot (snapshot-point-reads.ts). The readers and their checks are
+ * the list's read-only snapshot (@bop/eventing createSnapshotPointReads). The readers and their checks are
  * unchanged; anything else they read runs as before.
  */
 export function createOrderListPointReads(

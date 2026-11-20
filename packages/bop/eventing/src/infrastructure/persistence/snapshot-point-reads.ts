@@ -1,4 +1,4 @@
-import type { ConsumerTransaction } from "@bop/eventing";
+import type { ConsumerTransaction } from "../../contracts/consumer-inbox.js";
 
 /**
  * Batch 37 (v15 b36, merchant Home ~2 s): a list read (the merchant Orders list) runs each listed
@@ -14,7 +14,9 @@ import type { ConsumerTransaction } from "@bop/eventing";
  * of the listed keys, are answered; every other statement runs as before. A batch read that
  * returns more rows than it may (`maximumRows`) answers nothing (its point reads run as before).
  *
- * Only for a read-only snapshot transaction; never across transactions.
+ * Only for a read-only snapshot transaction; never across transactions. A transaction utility, so
+ * it lives here beside the consumer transaction contract, not in a business Domain (batch 37
+ * review); Ordering and Kitchen register their own point reads.
  */
 export interface SnapshotPointRead {
   /** The point read exactly as its owner sends it, without a trailing row-locking clause. */
