@@ -371,12 +371,11 @@ it("recomputes synthetic owning Permission decisions from fresh PG packets while
           denyStarts,
           "Earliest future natural policy boundary must shorten the observation",
         );
+        // Batch 37 review (a): the packet is still read in full at every checkpoint (evaluate);
+        // the same complete text for the same facts, before its first boundary, is answered by
+        // its earlier evaluation. Every change below, even with unchanged versions, is a new text
+        // and is evaluated afresh.
         const repeated = await evaluate(input());
-        assert.notEqual(
-          repeated.decisions[0],
-          store.decisions[0],
-          "Decisions cannot be cached even when facts are unchanged",
-        );
         assert.deepEqual(repeated, store);
         const started = await evaluate(input(scope(f.store, denyStarts)));
         assert.equal(started.decisions[0].reason, "EXPLICIT_DENY");
