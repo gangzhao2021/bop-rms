@@ -145,3 +145,56 @@ it("denies scope mismatch and expiry before acquiring a connection", async () =>
     }),
   ).toThrow();
 });
+it("batch 37: answers a read repeated with the same values once, and forgets on a failure", async () => {
+  const f = fixture();
+  let n = 0;
+  f.client.query.mockImplementation(async (sql) => ({ rows: [{ n: ++n, sql }], rowCount: 1 }));
+  const read =
+    "SELECT configuration_json FROM rms_store.store_configuration_version WHERE brand_id=$1";
+  const locked = "SELECT * FROM bop_tenant.store WHERE brand_id=$1 FOR SHARE";
+  const day =
+    "WITH RECURSIVE published AS (SELECT 1) SELECT configuration_id FROM rms_store.store_configuration_version WHERE effective_from <= $1";
+  const answers = await f.runner.run(async (tx) => {
+    const first = await tx.query(read, ["brand"]);
+    // Each instant's own read in between (a WITH read that passed the read-only rule).
+    await tx.query(day, ["2026-09-20T00:00:00.000Z"]);
+    const again = await tx.query(read, ["brand"]);
+    const other = await tx.query(read, ["another"]);
+    await tx.query(locked, ["brand"]);
+    await tx.query(locked, ["brand"]);
+    // The same scope settings again, and the shared lock again: answered here.
+    await tx.query(
+      "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
+      ["tenant", "brand", "store"],
+    );
+    await tx.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", ["Fence"]);
+    await tx.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", ["Fence"]);
+    return { first, again, other };
+  });
+  expect(answers.again.rows).toEqual(answers.first.rows);
+  // Its own copy: changing one answer never changes another.
+  expect(answers.again.rows[0]).not.toBe(answers.first.rows[0]);
+  expect(answers.other.rows[0].n).not.toBe(answers.first.rows[0].n);
+  const sent = f.client.query.mock.calls.map(([sql]) => sql);
+  expect(sent.filter((sql) => sql === read)).toHaveLength(2);
+  expect(sent.filter((sql) => sql === locked)).toHaveLength(1);
+  expect(sent.filter((sql) => sql.includes("set_config('bop.tenant_id'"))).toHaveLength(1);
+  expect(sent.filter((sql) => sql.includes("pg_advisory_xact_lock_shared"))).toHaveLength(1);
+
+  // A failed statement makes it forget everything: the read runs again.
+  const g = fixture();
+  let fail = false;
+  g.client.query.mockImplementation(async (sql) => {
+    if (fail && sql === "SELECT broken") throw Object.assign(new Error("x"), { code: "42P01" });
+    return { rows: [{ sql }], rowCount: 1 };
+  });
+  await g.runner
+    .run(async (tx) => {
+      await tx.query(read, ["brand"]);
+      fail = true;
+      await tx.query("SELECT broken", []).catch(() => undefined);
+      await tx.query(read, ["brand"]);
+    })
+    .catch(() => undefined);
+  expect(g.client.query.mock.calls.filter(([sql]) => sql === read)).toHaveLength(2);
+});

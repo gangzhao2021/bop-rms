@@ -2,7 +2,13 @@ import {
   TenantContextDatabaseError,
   tenantContextDatabaseDiagnostic,
 } from "../../packages/database/dist/tenant-context.js";
-import { stableReadStatement } from "../../packages/database/dist/transaction-statement-memo.js";
+import {
+  createTransactionStatementMemo,
+  deepCopiedAnswer,
+  snapshotStableRead,
+  stableReadStatement,
+  withoutRowLock,
+} from "../../packages/database/dist/transaction-statement-memo.js";
 import { isPilotRuntime } from "./pilot-environment.mjs";
 
 /** Read by merchantFailureKind and the request reporter, as the transaction runner sets it. */
@@ -82,6 +88,16 @@ export function createInternalExceptionSnapshotTransactions(resources) {
           [binding.tenantReference, binding.brandReference, binding.storeReference],
         );
         open = true;
+        // Batch 37 (v15 b36: Home waited ~0.8 s for this read): in this snapshot, which only
+        // reads, a statement repeated with the same values under the same scope settings answers
+        // as it did, as in the shared snapshot reads (snapshotStableRead): the scope settings and
+        // shared locks the owners take again for every case, and their identical reads. Never a
+        // read whose answer changes by itself; any failure forgets everything.
+        const memo = createTransactionStatementMemo({
+          "bop.tenant_id": binding.tenantReference,
+          "bop.brand_id": binding.brandReference,
+          "bop.store_id": binding.storeReference,
+        });
         const tx = Object.freeze({
           query: async (sql, values) => {
             // WP-2423 M35: an owner's stable read starts with its marker comment; the statement
@@ -104,10 +120,31 @@ export function createInternalExceptionSnapshotTransactions(resources) {
               failed = true;
               return fail();
             }
+            // A read with a trailing row lock too: this snapshot only reads, so once this
+            // transaction holds the rows' locks a repeat reads the same rows.
+            const stable = snapshotStableRead(
+              withoutRowLock(statement),
+              values,
+              stableReadStatement(sql).stable,
+            );
+            if (pending === 0) {
+              const answered = memo.answer(statement, values, stable);
+              if (answered !== null) return deepCopiedAnswer(answered);
+            }
             pending++;
             try {
-              return await client.query(sql, [...values]);
+              const result = await client.query(sql, [...values]);
+              // A WITH query passed the guard above, so it writes nothing; unless it names a
+              // setting or a lock it changes nothing the memo holds (the memo itself would forget
+              // its reads on any WITH, which is right where a WITH may write).
+              if (
+                !/^\s*WITH\b/iu.test(statement) ||
+                /set_config|advisory|\block\b/iu.test(statement)
+              )
+                memo.observe(statement, values, result, stable);
+              return result;
             } catch (error) {
+              memo.forget();
               failed = true;
               diagnostic ??= tenantContextDatabaseDiagnostic(error);
               throw databaseError(tenantContextDatabaseDiagnostic(error));

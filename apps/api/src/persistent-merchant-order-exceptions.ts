@@ -362,6 +362,36 @@ export function createPersistentMerchantOrderExceptions(options: {
           error instanceof Error &&
           (error.message === "MERCHANT_ORDER_EXCEPTION_UNAVAILABLE" ||
             error.message === "MERCHANT_ORDER_EXCEPTION_DENIED");
+        // Batch 37 (v15 b36: Home waited ~0.8 s for this read, ~30 statements per case): every
+        // case's day first in one short read-only transaction, where the scope settings, locks and
+        // identical reads the business-day owner repeats for each instant are answered once. Each
+        // instant is still resolved by the configuration in force at it. If anything in it fails,
+        // each day is read again in a transaction of its own below, as before, so one day that
+        // can't be read leaves the others readable.
+        try {
+          return await dayTransactions.run(async (tx) => {
+            const days = createMerchantBusinessDayWindows({
+              persistence,
+              scope,
+              timeZone,
+              authorize: async (t) => t === tx && (await own(t)),
+            });
+            const current = await days.dayOf(tx, persistence.now());
+            const all = new Map<string, string>();
+            for (const source of sources) {
+              if (Date.parse(source.createdAt) >= Date.parse(current.startsAt)) {
+                all.set(source.sourceReference, current.endsAt);
+                continue;
+              }
+              const endsAt = (await days.dayOf(tx, source.createdAt)).endsAt;
+              if (Date.parse(endsAt) > Date.parse(source.createdAt))
+                all.set(source.sourceReference, endsAt);
+            }
+            return all;
+          });
+        } catch (error) {
+          if (ownRefusal(error)) throw error;
+        }
         const due = new Map<string, string>();
         let today: Awaited<ReturnType<typeof dayOf>>;
         try {

@@ -102,8 +102,10 @@ it("lists every open exception past 500 lifetime cases and pages resolved histor
        * REPEATABLE READ transaction under the api role with the runner's limits, accepting only
        * read statements.
        */
+      let runs = 0;
       const transactions = {
         async run(work) {
+          runs++;
           const client = new Client(context.clientConfig);
           await client.connect();
           try {
@@ -273,7 +275,11 @@ it("lists every open exception past 500 lifetime cases and pages resolved histor
         }),
       });
       queryLog.length = 0;
+      runs = 0;
       const first = await read(session.sessionCookie);
+      // Batch 37 (v15 b36: ~30 statements and a transaction of its own per confirmed refund's
+      // day): the cases, their order causes, and every confirmed refund's day in one transaction.
+      assert.equal(runs, 3);
       const firstQueries = queryLog.length;
       const openItems = first.items.filter((item) => item.status !== "Resolved");
       assert.deepEqual(
