@@ -71,7 +71,8 @@ test("@production in the evening Home shows its reminder with its sections, not 
     const samples: { today: boolean; reminder: boolean }[] = [];
     (window as unknown as { homeSamples: typeof samples }).homeSamples = samples;
     const sample = () => {
-      if (document.querySelector("main .overview-now") !== null)
+      // Shown, that is (batch 35: Home keeps its sections hidden while it holds them back).
+      if ((document.querySelector("main .overview-now")?.getClientRects().length ?? 0) > 0)
         samples.push({
           today: true,
           reminder: document.querySelector("main .closing-reminder") !== null,

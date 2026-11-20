@@ -50,12 +50,24 @@ export function useApprovalsWaiting(
   enabled: boolean,
   fetcher?: typeof fetch,
 ): ApprovalsWaiting | null {
+  return useApprovalsWaitingRead(enabled, fetcher).value;
+}
+/**
+ * Batch 35: the same, with whether the first read has answered (or failed, or is not sent), so
+ * Home can show its rows in one pass instead of adding this one a moment later.
+ */
+export function useApprovalsWaitingRead(
+  enabled: boolean,
+  fetcher?: typeof fetch,
+): { readonly value: ApprovalsWaiting | null; readonly settled: boolean } {
   const client = useMemo(() => createRefundApprovalClient(fetcher), [fetcher]);
   const live = useStaffSessionLive();
   const [waiting, setWaiting] = useState<ApprovalsWaiting | null>(null);
+  const [settled, setSettled] = useState(false);
   useEffect(() => {
     if (!enabled || !live || typeof window === "undefined") {
       setWaiting(null);
+      setSettled(true);
       return;
     }
     let controller: AbortController | null = null;
@@ -66,11 +78,16 @@ export function useApprovalsWaiting(
       client
         .approvals(current.signal)
         .then((view) => {
-          if (!current.signal.aborted)
+          if (!current.signal.aborted) {
             setWaiting(summarizeApprovalsWaiting(view.entries, view.canSend));
+            setSettled(true);
+          }
         })
         .catch(() => {
-          if (!current.signal.aborted) setWaiting(null);
+          if (!current.signal.aborted) {
+            setWaiting(null);
+            setSettled(true);
+          }
         });
     };
     read();
@@ -82,7 +99,7 @@ export function useApprovalsWaiting(
       controller?.abort();
     };
   }, [client, enabled, live]);
-  return waiting;
+  return { value: waiting, settled };
 }
 
 /**
@@ -124,11 +141,21 @@ export function useStaffRolesWaiting(
   enabled: boolean,
   fetcher?: typeof fetch,
 ): StaffRolesWaiting {
+  return useStaffRolesWaitingRead(csrf, enabled, fetcher).value;
+}
+/** Batch 35: the same, with whether the first read has answered (see useApprovalsWaitingRead). */
+export function useStaffRolesWaitingRead(
+  csrf: string | null,
+  enabled: boolean,
+  fetcher?: typeof fetch,
+): { readonly value: StaffRolesWaiting; readonly settled: boolean } {
   const live = useStaffSessionLive();
   const [waiting, setWaiting] = useState<StaffRolesWaiting>(null);
+  const [settled, setSettled] = useState(false);
   useEffect(() => {
     if (!enabled || csrf === null || !live || typeof window === "undefined") {
       setWaiting(null);
+      setSettled(true);
       return;
     }
     const client = createStaffPageClient(csrf, fetcher ?? fetch);
@@ -152,7 +179,10 @@ export function useStaffRolesWaiting(
               : "Unavailable",
         ),
       ]).then((parts) => {
-        if (current) setWaiting(combineRolesWaiting(parts));
+        if (current) {
+          setWaiting(combineRolesWaiting(parts));
+          setSettled(true);
+        }
       });
     };
     read();
@@ -164,7 +194,7 @@ export function useStaffRolesWaiting(
       window.clearInterval(timer);
     };
   }, [csrf, enabled, live, fetcher]);
-  return waiting;
+  return { value: waiting, settled };
 }
 
 /**

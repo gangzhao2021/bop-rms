@@ -643,9 +643,7 @@ describe("WP-2423 Q11 follow-up: Home reads only what the role's screens permit"
 });
 
 describe("v15 finding: the store system card follows the server's answer, not the navigation", () => {
-  it("mounts the alerts card for a pilot Owner or Store Manager navigation without an exceptions entry", () => {
-    // The pilot navigation before this fix carried no OPS-ORDER-EXCEPTION entry, so the card never
-    // rendered although the alerts route answers 200 for these roles. A 403 hides it instead.
+  it("holds its first render until its reads answer (batch 35: the alerts card is checked in StoreOverview.settle.dom.test)", () => {
     const html = renderToStaticMarkup(
       <MemoryRouter>
         <StoreOverview
@@ -657,8 +655,10 @@ describe("v15 finding: the store system card follows the server's answer, not th
         />
       </MemoryRouter>,
     );
-    expect(html).toContain("Store system");
-    expect(html).toContain("Checking the store system");
+    // Its sections are there to read for themselves, but hidden until Home shows them together.
+    expect(
+      html.startsWith('<p role="status">Reading…</p><div class="overview-body" hidden="">'),
+    ).toBe(true);
   });
   it("words a paid round's wait for staff: plain, then warning at 3 min, urgent at 5 (Owner default 12)", () => {
     const paidAt = "2026-10-16T14:50:00.000Z";

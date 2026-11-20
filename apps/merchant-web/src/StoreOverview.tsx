@@ -1,8 +1,8 @@
 import { systemText, countOf, t } from "./i18n/i18n.js";
 import { PauseOrderingControl, PauseOrderingShownContext } from "./PauseOrderingControl.js";
 import {
-  useApprovalsWaiting,
-  useStaffRolesWaiting,
+  useApprovalsWaitingRead,
+  useStaffRolesWaitingRead,
   type ApprovalsWaiting,
   type StaffRolesWaiting,
 } from "./approvals-waiting.js";
@@ -192,6 +192,12 @@ export interface ExceptionsSummary {
 }
 /** WP-2423 Q1: the home page re-reads its summaries this often. */
 export const OVERVIEW_REFRESH_MS = 30_000;
+/**
+ * Batch 35 (v15 b34 live): Home's first view waits this long at most for its reads, so "Needs
+ * attention" arrives whole with the sections below it instead of gaining a row as each read
+ * answers and pushing "Right now" down. A read still unanswered then is listed as still checking.
+ */
+export const OVERVIEW_SETTLE_MS = 3_000;
 const openPhases = new Set(["Submitted", "Accepted", "InProgress", "Ready"]);
 /**
  * WP-2423 (b9): Home's sold-out row counts orders waiting to be accepted and unpaid ones apart —
@@ -861,6 +867,7 @@ export function NeedsAttention({
   timeZone,
   dayStartsAt,
   reminder = null,
+  stillReading = [],
   onRefresh,
   onCheckSystem,
 }: {
@@ -878,6 +885,8 @@ export function NeedsAttention({
   readonly dayStartsAt?: string | null | undefined;
   /** The evening reminder, which reads for itself: a row above the rest when it shows. */
   readonly reminder?: ReactNode;
+  /** Batch 35: what Home stopped waiting for (OVERVIEW_SETTLE_MS) and has not answered yet. */
+  readonly stillReading?: readonly string[];
   readonly onRefresh?: (() => void) | undefined;
   readonly onCheckSystem?: (() => void) | undefined;
 }) {
@@ -904,8 +913,24 @@ export function NeedsAttention({
     staffRoles,
     storePhoneHref,
   );
+  // Batch 35: said, never left out — the rows these reads would add are not known yet.
+  const checking: readonly AttentionItem[] =
+    stillReading.length === 0
+      ? []
+      : [
+          {
+            key: "still-reading",
+            title: t("Still checking"),
+            detail: t("Not answered yet: {value}", { value: stillReading.join(" · ") }),
+            state: t("Reading…"),
+            tone: "progress",
+            href: null,
+            action: null,
+          },
+        ];
   const items = [
     ...urgent,
+    ...checking,
     ...work.filter((item) => item.backlog !== true),
     ...later,
     ...work.filter((item) => item.backlog === true),
@@ -1268,6 +1293,9 @@ export function StoreOverview({
   // WP-2423 item 11: told only to those who can fix it; a failed read says nothing here (the
   // Store setup section and the listing refusal still say it).
   const [kitchenSetupHref, setKitchenSetupHref] = useState<string | null>(null);
+  // Batch 35: whether that read (and the phone's below) has answered, so its row arrives with the
+  // rest; one that is not sent counts as answered.
+  const [kitchenSettled, setKitchenSettled] = useState(!permitted.kitchenSetup);
   useEffect(() => {
     if (!permitted.kitchenSetup) return;
     let live = true;
@@ -1283,7 +1311,10 @@ export function StoreOverview({
             );
         },
         () => undefined,
-      );
+      )
+      .finally(() => {
+        if (live) setKitchenSettled(true);
+      });
     return () => {
       live = false;
     };
@@ -1294,29 +1325,37 @@ export function StoreOverview({
   // (WP-2423 batch 33: Home still sent it and got 403).
   const serviceReadRefused = useContext(PauseOrderingShownContext) === false;
   const [storePhoneHref, setStorePhoneHref] = useState<string | null>(null);
+  const [phoneSettled, setPhoneSettled] = useState(false);
   useEffect(() => {
-    if (!permitted.kitchenSetup || serviceReadRefused) return;
+    if (!permitted.kitchenSetup || serviceReadRefused) {
+      setPhoneSettled(true);
+      return;
+    }
     let live = true;
     const controller = new AbortController();
     void Promise.all([
       createStoreFeaturesClient(csrf, fetcher ?? fetch).read(),
       createStorePublicProfileClient({ csrf, ...(fetcher ? { fetcher } : {}) }).load(),
       createServiceControlClient(fetcher ?? fetch).load(storeReference, controller.signal),
-    ]).then(
-      ([features, profile, service]) => {
-        if (live)
-          setStorePhoneHref(
-            storePhoneStepHref({
-              pickupFeature: features.modules.pickup,
-              serviceModes: service.enabledServiceModes,
-              canChangeProfile: profile.canChange,
-              businessPhone: profile.current?.businessPhone ?? null,
-              storeReference,
-            }),
-          );
-      },
-      () => undefined,
-    );
+    ])
+      .then(
+        ([features, profile, service]) => {
+          if (live)
+            setStorePhoneHref(
+              storePhoneStepHref({
+                pickupFeature: features.modules.pickup,
+                serviceModes: service.enabledServiceModes,
+                canChangeProfile: profile.canChange,
+                businessPhone: profile.current?.businessPhone ?? null,
+                storeReference,
+              }),
+            );
+        },
+        () => undefined,
+      )
+      .finally(() => {
+        if (live) setPhoneSettled(true);
+      });
     return () => {
       live = false;
       controller.abort();
@@ -1339,16 +1378,32 @@ export function StoreOverview({
       const controller = new AbortController();
       active.current = controller;
       setBusy(true);
+      // Batch 35 (v15 b34 live): each read used to set its own result as it answered, so "Needs
+      // attention" gained a row per read over two seconds and pushed everything below it down.
+      // The answers are now kept and shown together once every read has answered, or after
+      // OVERVIEW_SETTLE_MS with what is known (a slow read then shows when it answers).
+      const held: (() => void)[] = [];
+      let together = true;
+      const show = (update: () => void) => {
+        if (controller.signal.aborted) return;
+        if (together) held.push(update);
+        else update();
+      };
+      const release = () => {
+        if (!together) return;
+        together = false;
+        if (!controller.signal.aborted) held.splice(0).forEach((update) => update());
+      };
+      const cap = setTimeout(release, OVERVIEW_SETTLE_MS);
       const read = async <T,>(
         run: () => Promise<T>,
         apply: (read: OverviewRead<T>) => void,
       ): Promise<void> => {
         try {
           const value = await run();
-          if (!controller.signal.aborted) apply({ kind: "Ready", value });
+          show(() => apply({ kind: "Ready", value }));
         } catch (error) {
-          if (!controller.signal.aborted)
-            apply({ kind: "Unavailable", server: isServerProblem(error) });
+          show(() => apply({ kind: "Unavailable", server: isServerProblem(error) }));
         }
       };
       await Promise.all([
@@ -1389,18 +1444,20 @@ export function StoreOverview({
           ? clients.settlement
               .load(null, controller.signal)
               .then((view) => {
-                if (!controller.signal.aborted)
+                show(() =>
                   setSettlement({
                     kind: "Ready",
                     value: { businessDate: view.businessDate, ...settlementStatus(view) },
-                  });
+                  }),
+                );
               })
               .catch((error: unknown) => {
-                if (controller.signal.aborted) return;
-                setSettlement(
-                  error instanceof SettlementClientError && error.code === "NotCovered"
-                    ? { kind: "Hidden" }
-                    : { kind: "Unavailable" },
+                show(() =>
+                  setSettlement(
+                    error instanceof SettlementClientError && error.code === "NotCovered"
+                      ? { kind: "Hidden" }
+                      : { kind: "Unavailable" },
+                  ),
                 );
               })
           : null,
@@ -1414,6 +1471,8 @@ export function StoreOverview({
             )
           : null,
       ]);
+      clearTimeout(cap);
+      release();
       if (!controller.signal.aborted) {
         setState((s) => ({ ...s, updatedAt: new Date().toISOString() }));
         setBusy(false);
@@ -1423,12 +1482,17 @@ export function StoreOverview({
   );
   // v15 cbff9d6f: no reads once this screen's sign-in has ended; again at once if it is live.
   const live = useStaffSessionLive();
-  const approvals = useApprovalsWaiting(screenKey.split("|").includes("APPROVAL-INBOX"), fetcher);
-  const staffRoles = useStaffRolesWaiting(
+  const approvalsRead = useApprovalsWaitingRead(
+    screenKey.split("|").includes("APPROVAL-INBOX"),
+    fetcher,
+  );
+  const staffRolesRead = useStaffRolesWaitingRead(
     csrf,
     screenKey.split("|").includes("APPROVAL-INBOX"),
     fetcher,
   );
+  const approvals = approvalsRead.value;
+  const staffRoles = staffRolesRead.value;
   useEffect(() => {
     if (!live) return;
     if (!permitted.orders && !permitted.pickups && !permitted.exceptions && !permitted.tables)
@@ -1450,58 +1514,83 @@ export function StoreOverview({
   // Store's hours for the day; Home waits for that read (a moment, at most BUSINESS_DAY_SETTLE_MS)
   // so the reminder arrives with the rest and nothing below it moves.
   const daySettled = useStoreBusinessDaySettled();
-  if (!daySettled) return <p role="status">{t("Reading…")}</p>;
+  // Batch 35: likewise for every read that adds a row to "Needs attention" — at most
+  // OVERVIEW_SETTLE_MS, after which what has not answered is listed as still checking.
+  const [settleExpired, setSettleExpired] = useState(false);
+  const [reminderSettled, setReminderSettled] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setSettleExpired(true), OVERVIEW_SETTLE_MS);
+    return () => clearTimeout(timer);
+  }, []);
+  const unanswered = [
+    ...(state.orders.kind === "Loading" ? [t("Orders")] : []),
+    ...(state.pickups.kind === "Loading" ? [t("Pickup")] : []),
+    ...(state.tables.kind === "Loading" ? [t("Tables")] : []),
+    ...(state.exceptions.kind === "Loading" ? [t("Exceptions")] : []),
+    ...(settlement.kind === "Loading" ? [t("Settlement")] : []),
+    ...(approvalsRead.settled && staffRolesRead.settled ? [] : [t("Approvals")]),
+    ...(system.read.kind === "Loading" ? [t("Store system")] : []),
+    ...(kitchenSettled && phoneSettled ? [] : [t("Store setup")]),
+    ...(reminderSettled ? [] : [t("Today's summary")]),
+  ];
+  // Everything below is mounted while held (hidden), so the parts that read for themselves (the
+  // evening reminder, Pause ordering) read at the same time and show with the rest.
+  const held = !daySettled || (unanswered.length > 0 && !settleExpired);
   return (
     <>
-      {/* WP-2423 item 13 ②: the platform paused this merchant's new guests (shown only then). */}
-      <GuestIntakeNotice fetcher={fetcher} />
-      {/* WP-2423 store-service-controls (v15 M30): the Store's own pause, on Home as well. */}
-      <PauseOrderingControl csrf={csrf} storeReference={storeReference} fetcher={fetcher} />
-      <NeedsAttention
-        state={state}
-        approvals={approvals}
-        staffRoles={staffRoles}
-        kitchenSetupHref={kitchenSetupHref}
-        storePhoneHref={storePhoneHref}
-        settlement={settlement}
-        system={system.read}
-        timeZone={timeZone}
-        // WP-2423 item 8 ②: in the evening, what is still open before closing. Staff with no row of
-        // store system alerts here hear of ordering's last day as on their other screens.
-        reminder={
-          <>
-            {system.read.kind === "NotPermitted" ? (
-              <OrderingEndingNotice fetcher={fetcher} />
-            ) : null}
-            <ClosingReminder screens={screens} fetcher={fetcher} />
-          </>
-        }
-        onRefresh={() => void load(true)}
-        onCheckSystem={() => void system.refresh()}
-      />
-      {permitted.kitchenSetup ? (
-        <OpeningList csrf={csrf} storeReference={storeReference} fetcher={fetcher} />
-      ) : null}
-      <OverviewToday
-        state={state}
-        timeZone={timeZone}
-        busy={busy}
-        onRefresh={() => void load(true)}
-        reportsHref={permitted.reports ? "/app/reports/operations" : null}
-      />
-      <DayChecklist
-        state={state}
-        settlement={settlement}
-        serviceHref={
-          permitted.service ? `/app/organization/stores/${storeReference}/service` : null
-        }
-      />
-      <StoreSystemLine
-        read={system.read}
-        timeZone={timeZone}
-        busy={system.busy}
-        onRefresh={() => void system.refresh()}
-      />
+      {held ? <p role="status">{t("Reading…")}</p> : null}
+      <div className="overview-body" hidden={held}>
+        {/* WP-2423 item 13 ②: the platform paused this merchant's new guests (shown only then). */}
+        <GuestIntakeNotice fetcher={fetcher} />
+        {/* WP-2423 store-service-controls (v15 M30): the Store's own pause, on Home as well. */}
+        <PauseOrderingControl csrf={csrf} storeReference={storeReference} fetcher={fetcher} />
+        <NeedsAttention
+          state={state}
+          approvals={approvals}
+          staffRoles={staffRoles}
+          kitchenSetupHref={kitchenSetupHref}
+          storePhoneHref={storePhoneHref}
+          settlement={settlement}
+          system={system.read}
+          timeZone={timeZone}
+          // WP-2423 item 8 ②: in the evening, what is still open before closing. Staff with no row of
+          // store system alerts here hear of ordering's last day as on their other screens.
+          reminder={
+            <>
+              {system.read.kind === "NotPermitted" ? (
+                <OrderingEndingNotice fetcher={fetcher} />
+              ) : null}
+              <ClosingReminder screens={screens} fetcher={fetcher} onSettled={setReminderSettled} />
+            </>
+          }
+          stillReading={held ? [] : unanswered}
+          onRefresh={() => void load(true)}
+          onCheckSystem={() => void system.refresh()}
+        />
+        {permitted.kitchenSetup ? (
+          <OpeningList csrf={csrf} storeReference={storeReference} fetcher={fetcher} />
+        ) : null}
+        <OverviewToday
+          state={state}
+          timeZone={timeZone}
+          busy={busy}
+          onRefresh={() => void load(true)}
+          reportsHref={permitted.reports ? "/app/reports/operations" : null}
+        />
+        <DayChecklist
+          state={state}
+          settlement={settlement}
+          serviceHref={
+            permitted.service ? `/app/organization/stores/${storeReference}/service` : null
+          }
+        />
+        <StoreSystemLine
+          read={system.read}
+          timeZone={timeZone}
+          busy={system.busy}
+          onRefresh={() => void system.refresh()}
+        />
+      </div>
     </>
   );
 }

@@ -63,9 +63,16 @@ export function closingReminderPhase(
 export function ClosingReminder({
   screens,
   fetcher,
+  onSettled,
 }: {
   readonly screens: readonly string[];
   readonly fetcher?: typeof fetch | undefined;
+  /**
+   * Batch 35: told whether the reminder is in its final shape — not shown, or its figures read
+   * (or the read failed) — so Home shows it with its other sections instead of the reminder
+   * gaining its figures, or appearing, a moment after them.
+   */
+  readonly onSettled?: ((settled: boolean) => void) | undefined;
 }) {
   const day = useStoreBusinessDay();
   const live = useStaffSessionLive();
@@ -73,6 +80,7 @@ export function ClosingReminder({
   const client = useMemo(() => createStoreReportsClient(fetcher), [fetcher]);
   const [now, setNow] = useState(() => Date.now());
   const [summary, setSummary] = useState<TonightSummary | null>(null);
+  const [answered, setAnswered] = useState(false);
   const allowed = screens.includes(closingReminderScreen);
   const phase = allowed ? closingReminderPhase(day, now) : "Hidden";
   const show = phase !== "Hidden";
@@ -91,10 +99,14 @@ export function ClosingReminder({
       client
         .tonight(signal)
         .then((value) => {
-          if (!signal.aborted) setSummary(value);
+          if (!signal.aborted) {
+            setSummary(value);
+            setAnswered(true);
+          }
         })
         .catch(() => {
           /* The reminder keeps its last figures; the summary page says when it can't read. */
+          if (!signal.aborted) setAnswered(true);
         });
     };
     read();
@@ -104,6 +116,10 @@ export function ClosingReminder({
       controller.abort();
     };
   }, [show, live, client]);
+  const settled = !show || !live || answered;
+  useEffect(() => {
+    onSettled?.(settled);
+  }, [onSettled, settled]);
   if (!show) return null;
   const stuck = paidOrdersStuck(watch, now);
   const cantMake = watch?.cantMakeRefunds ?? 0;

@@ -91,6 +91,14 @@
 }
 
 /* ---- The sections: only space between them ------------------------------------------------- */
+/* Batch 35: Home's sections are read while held back and shown together; until then the wrapper
+   takes no room, and once shown it adds no box of its own (its sections stay the grid's items). */
+.overview-body {
+  display: contents;
+}
+.overview-body[hidden] {
+  display: none;
+}
 .workspace-page--overview.workspace-page--overview .overview-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr);

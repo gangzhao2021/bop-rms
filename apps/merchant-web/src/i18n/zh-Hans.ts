@@ -3324,6 +3324,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Reading the order…": "正在读取订单…",
   "Reading the store's sales…": "正在读取门店的销售…",
   "Reading…": "正在读取…",
+  "Still checking": "仍在查看",
+  "Not answered yet: {value}": "尚未读到：{value}",
   Ready: "已做好",
   "Ready for collection": "可以取餐",
   "Ready for pickup": "可以取餐",
