@@ -511,6 +511,8 @@ export async function startInternalCustomerServer({
         storeResources.credentials.sessions.hashCredential("Session", credential),
       // Batch 34: what this Store answers for among the callbacks that name no Store.
       issuedOrderLink: storeResources.orderMessaging?.issuedOrderLink,
+      // Batch 35: an order link answered without a Store looking it up spends this budget.
+      spendOrderLinkAttempt: storeResources.orderMessaging?.spendOrderLinkAttempt,
       feedbackRoute: storeResources.orderMessaging?.feedbackRoute ?? null,
       stripeWebhook: stripeClaims.get(storeResources) ?? null,
     });
@@ -519,6 +521,7 @@ export async function startInternalCustomerServer({
         stores,
         everyStoreServed: served.length === configuredAdditionalStores,
         snsSignatures,
+        orderLinkOrigin: origin,
       });
     // M02 (v15 07b7a1b7): every other Store in stores.json failed to start, so only this one is
     // served; a scan of one of the others is still a retryable outage, never this Store's refusal.
@@ -618,7 +621,13 @@ export async function startInternalCustomerServer({
         body = Buffer.concat(chunks);
         let routed;
         try {
-          routed = await callbackStore({ url: req.url, headers: req.headers, body });
+          routed = await callbackStore({
+            url: req.url,
+            headers: req.headers,
+            body,
+            // The address the Store's own route keys its budget by (unknown: one shared bucket).
+            peerAddress: entryAddress(req) ?? "127.0.0.1",
+          });
         } catch (error) {
           reportUnexpected("PILOT_CALLBACK_ROUTING_UNAVAILABLE", error);
           return res

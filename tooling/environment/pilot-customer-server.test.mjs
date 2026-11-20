@@ -997,3 +997,225 @@ test("batch 34: the order link, SES feedback and Stripe webhook each reach their
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+// WP-2423 batch 35 (v15 b34 live): at an installation of several merchants a malformed order link,
+// or one asked while a Store's records can't be read, was answered without any Store's per-address
+// budget being spent, so guessing links there was not limited as at one Store.
+test("batch 35: guessing order links at two merchants spends the same per-address budget", async () => {
+  vi.stubEnv("NODE_ENV", "development");
+  const directory = await mkdtemp(join(tmpdir(), "bop-link-budget-"));
+  const { createTestCertificates } = await import("./pilot-test-certificates.mjs");
+  const { createServer } = await import("node:http");
+  const { createApp } = await import("../../apps/api/dist/app.js");
+  const { createCustomerOrderRecoveryHandler } =
+    await import("../../apps/api/dist/customer-order-messaging-http.js");
+  const {
+    createGuestSessionCredentialProvider,
+    createOrderRecoveryService,
+    createOrderRecoveryTokenHasher,
+  } = await import("../../packages/bop/identity/src/index.ts");
+  const certificates = await createTestCertificates(directory, { hostname: "localhost" });
+  const origin = "https://localhost";
+  const id = (n) => "0190aa21-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  // Each merchant's own Identity order-link service: its own pepper, its own records and its own
+  // per-address budget (§87.4.2: 5 an hour per Order or, with no Order, per address).
+  const merchants = [1, 2].map((n) => {
+    const records = [];
+    const buckets = new Map();
+    const spent = [];
+    let next = 100 * n;
+    const service = createOrderRecoveryService({
+      hasher: createOrderRecoveryTokenHasher([{ version: 1, key: new Uint8Array(32).fill(n) }]),
+      store: {
+        appendAuthorization: async (input) => (records.push(input), "Created"),
+        peekOrder: async ({ candidates }) =>
+          records.find((r) => candidates.some((c) => c.tokenHash === r.tokenHash))
+            ?.orderReference ?? null,
+        consumeAndRekey: async ({ candidates }) => {
+          const found = records.find(
+            (r) => !r.consumed && candidates.some((c) => c.tokenHash === r.tokenHash),
+          );
+          if (found === undefined) return null;
+          found.consumed = true;
+          return { orderReference: found.orderReference };
+        },
+      },
+      budget: {
+        consume: async ({ orderReference, peerAddress }) => {
+          const bucket = (orderReference ?? "unknown") + "|" + peerAddress;
+          const count = (buckets.get(bucket) ?? 0) + 1;
+          buckets.set(bucket, count);
+          spent.push(bucket);
+          return count <= 5
+            ? { status: "Allowed" }
+            : { status: "RateLimited", retryAfterSeconds: 1800 };
+        },
+      },
+      credentials: createGuestSessionCredentialProvider(new Uint8Array(32).fill(10 + n)),
+      references: { generate: () => id(next++) },
+      clock: { now: () => new Date().toISOString() },
+    });
+    return { n, service, spent, unreadable: false };
+  });
+  const mint = (merchant) =>
+    merchant.service.mint({
+      orderReference: id(10 + merchant.n),
+      guestSessionReference: id(20 + merchant.n),
+      notificationAttemptReference: id(30 + merchant.n),
+    });
+  const links = [await mint(merchants[0]), await mint(merchants[1])].map((m) => m.token);
+  // Each Store's real customer API answers the link (the same handler a single Store runs).
+  const apis = [];
+  for (const merchant of merchants) {
+    const upstream = createServer(
+      createApp({
+        customerOrderRecovery: createCustomerOrderRecoveryHandler({
+          allowedOrigin: origin,
+          port: (input) => merchant.service.consume(input),
+        }),
+      }),
+    );
+    await new Promise((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+    apis.push(upstream);
+  }
+  const resourcesOf = (merchant) => ({
+    scope: { storeReference: id(merchant.n), brandReference: id(40 + merchant.n) },
+    publicProfile: {
+      // Two merchants: two Tenants.
+      binding: { tenantReference: id(50 + merchant.n), publicStoreReference: id(60 + merchant.n) },
+    },
+    credentials: { sessions: { hashCredential: () => "selector" }, reference: () => "unused" },
+    transactions: {},
+    now: () => new Date().toISOString(),
+    orderMessaging: {
+      issuedOrderLink: async (token) => {
+        if (merchant.unreadable) throw new Error("records unreadable");
+        return merchant.service.issued(token);
+      },
+      spendOrderLinkAttempt: (input) => merchant.service.spendUnclaimed(input),
+      feedbackRoute: null,
+    },
+    close: vi.fn(async () => undefined),
+  });
+  const stack = {
+    createInternalSimulatedProvider: async () => ({ close: vi.fn() }),
+    createInternalCustomerEntry: async () => ({ dining: {} }),
+    createInternalTestItems: async () => ({ catalogCartItems: [] }),
+    createInternalCheckout: () => ({ preparation: {}, accessOptions: {} }),
+    createInternalOrder: async () => ({}),
+    createInternalDiningCheckout: () => ({ preparation: {} }),
+    createInternalChannelPayment: async () => ({}),
+    createInternalPaymentTerminal: () => ({}),
+  };
+  const merchant = async () => ({
+    staffSignInMode: "cognito",
+    persistence: { transactions: {}, identity: { hasher: {} }, now: () => "" },
+    bff: { exactOrigin: origin, acceptedHost: "localhost" },
+  });
+  let server;
+  try {
+    server = await startInternalCustomerServer({
+      publicOrigin: origin,
+      listenPort: 0,
+      apiPort: apis[0].address().port,
+      keyFile: certificates.keyFile,
+      certificateFile: certificates.certificateFile,
+      loadProfile: async () => ({ environment: "InternalTest" }),
+      loadInternalPickupQr: async () => ({ token: () => "synthetic.pickup.token" }),
+      diningEntries: [],
+      createInternalTestResources: async () => resourcesOf(merchants[0]),
+      createInternalMerchant: merchant,
+      ...stack,
+      additionalStores: [
+        {
+          storeReference: id(2),
+          apiPort: apis[1].address().port,
+          customer: stack,
+          createInternalTestResources: async () => resourcesOf(merchants[1]),
+          createInternalMerchant: merchant,
+        },
+      ],
+    });
+    if (!server.listening) await new Promise((resolve) => server.once("listening", resolve));
+    const { request } = await import("node:https");
+    const browser = { origin, "sec-fetch-site": "same-origin", "content-type": "application/json" };
+    const post = (body, headers = browser) =>
+      new Promise((resolve, reject) => {
+        const call = request(
+          {
+            host: "127.0.0.1",
+            port: server.address().port,
+            path: "/api/v1/customer/order-recovery",
+            method: "POST",
+            servername: "localhost",
+            ca: [certificates.root],
+            headers: { host: "localhost", "content-length": Buffer.byteLength(body), ...headers },
+          },
+          (response) => {
+            let text = "";
+            response.on("data", (chunk) => (text += String(chunk)));
+            response.on("end", () =>
+              resolve({
+                status: response.statusCode,
+                retryAfter: response.headers["retry-after"] ?? null,
+                code: JSON.parse(text).error?.code ?? null,
+              }),
+            );
+          },
+        );
+        call.on("error", reject);
+        call.end(body);
+      });
+    const link = (token) => JSON.stringify({ token });
+    const refused = { status: 400, retryAfter: null, code: "order_link_unavailable" };
+
+    // A guest's own link opens at the merchant that sent it.
+    expect((await post(link(links[1]))).status).toBe(200);
+
+    // Five guesses of every kind a page could send, from one address: each one is refused the
+    // same way and spends the first Store's budget for links no Order holds, as at one Store.
+    const guesses = [
+      link("Z".repeat(43)),
+      link("short"),
+      JSON.stringify({ token: "Y".repeat(43), extra: true }),
+      link(7),
+      link("X".repeat(43)),
+    ];
+    for (const body of guesses) expect(await post(body)).toEqual(refused);
+    expect(merchants[0].spent).toEqual(Array(5).fill("unknown|127.0.0.1"));
+    // Not JSON at all: the same budget (the Store's API names the parse failure, as at one Store).
+    const notJson = await post("{not json");
+    expect([notJson.status, notJson.retryAfter]).toEqual([429, "1800"]);
+    expect(notJson.code).toBe("order_link_rate_limited");
+    // Spent: every further guess, of any kind, is told to wait, with when.
+    for (const body of [link("W".repeat(43)), link("short")])
+      expect(await post(body)).toEqual({
+        status: 429,
+        retryAfter: "1800",
+        code: "order_link_rate_limited",
+      });
+    // While another merchant's records can't be read, the answer is a retry, but a guess there
+    // still spends the budget: once spent it is told to wait, never an unlimited "try again".
+    merchants[1].unreadable = true;
+    expect(await post(link("V".repeat(43)))).toEqual({
+      status: 429,
+      retryAfter: "1800",
+      code: "order_link_rate_limited",
+    });
+    merchants[1].unreadable = false;
+    // The second merchant's budget is its own: guesses never reached or spent it.
+    expect(merchants[1].spent).toEqual(["0190aa21-0000-7000-8000-00000000000c|127.0.0.1"]);
+    // A guest's own link from the same address still opens (its Order's own bucket, as at one Store).
+    expect((await post(link(links[0]))).status).toBe(200);
+    // A request a browser page of another site could send never asks any Store, spends nothing.
+    const before = merchants[0].spent.length;
+    expect(await post(link("U".repeat(43)), { "content-type": "application/json" })).toEqual(
+      refused,
+    );
+    expect(merchants[0].spent.length).toBe(before);
+  } finally {
+    await new Promise((resolve) => (server ? server.close(resolve) : resolve()));
+    for (const upstream of apis) await new Promise((resolve) => upstream.close(resolve));
+    await rm(directory, { recursive: true, force: true });
+  }
+});

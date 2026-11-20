@@ -192,6 +192,8 @@ export async function createPilotOrderMessaging({
     // WP-2423 batch 34: an installation of several Stores sends the one-time link, and the SES
     // feedback, to the Store that issued it (pilot-customer-callback-routing.mjs).
     issuedOrderLink: (token) => recovery.issued(token),
+    // Batch 35: what the installation answers without a Store looking it up spends this budget.
+    spendOrderLinkAttempt: (input) => recovery.spendUnclaimed(input),
     feedbackRoute:
       feedback === undefined
         ? null

@@ -1,5 +1,6 @@
 import { Buffer } from "node:buffer";
 import console from "node:console";
+import { URL } from "node:url";
 import {
   SesSnsEventError,
   readVerifiedSesFeedbackRoute,
@@ -16,9 +17,14 @@ import { parseStripeWebhookPaymentEvent } from "../../packages/rms/payment/src/i
  * - The one-time order link (`POST /api/v1/customer/order-recovery`): the Store whose own records
  *   hold the link's keyed hash (Identity's `issued`, each Store with its own pepper). Every served
  *   Store is asked, always all of them, so the answer and its timing say nothing about which
- *   Stores exist. A link no Store issued (or a malformed one) goes to the installation's own
- *   first Store, which spends its per-address budget and gives its own uniform "this link can't
- *   open your order", so guessing links is rate limited exactly as at one Store.
+ *   Stores exist. A link no Store issued goes to the installation's own first Store, which spends
+ *   its per-address budget and gives its own uniform "this link can't open your order", so
+ *   guessing links is rate limited exactly as at one Store. Batch 35 (v15 b34 live): what is
+ *   answered without a Store looking the token up (a malformed request from the app's own page,
+ *   or one asked while a Store can't be read) spends that same first-Store budget here first, and
+ *   once it is spent the answer is 429 with Retry-After; a request no page of this site sent
+ *   (wrong Origin or Sec-Fetch-Site) asks no Store and goes to the first Store, which refuses it
+ *   as one Store does.
  * - SES feedback (`POST /api/v1/provider/ses-feedback`): the SNS signature is verified first, then
  *   the signed topic names the Store whose notification.json subscribes it; Stores sharing a topic
  *   are told apart by the SES configuration set the sending Store named on the message.
@@ -36,6 +42,36 @@ const SES_FEEDBACK = /^\/api\/v1\/provider\/ses-feedback(?:[?].*)?$/u;
 const STRIPE_WEBHOOK = /^\/api\/v1\/payment-provider\/stripe\/webhook(?:[?].*)?$/u;
 const LINK_TOKEN = /^[A-Za-z0-9_-]{43}$/u;
 
+/** Sent by the app's own page (what the Store's route checks before anything else). */
+function fromOwnPage(headers, origin) {
+  return (
+    typeof origin === "string" &&
+    headers.origin === origin &&
+    headers["sec-fetch-site"] === "same-origin"
+  );
+}
+/**
+ * The token of a request the Store's route would look up (JSON, no query, exactly `{token}` with a
+ * 43-character token), or null for one it refuses unread (malformed), which spends nothing there.
+ */
+function wellFormedLinkToken(url, headers, body) {
+  const [type, ...parameters] = String(headers["content-type"] ?? "")
+    .split(";")
+    .map((part) => part.trim().toLowerCase());
+  if (type !== "application/json" || parameters.some((p) => p !== "" && p !== "charset=utf-8"))
+    return null;
+  if (new URL(url, "https://route.invalid").searchParams.size !== 0) return null;
+  const parsed = jsonBody(body);
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const keys = Object.keys(parsed);
+  return keys.length === 1 &&
+    keys[0] === "token" &&
+    typeof parsed.token === "string" &&
+    LINK_TOKEN.test(parsed.token)
+    ? parsed.token
+    : null;
+}
+
 /** How many body bytes a routed callback may carry (each route's own parser limit), or null. */
 export function callbackBodyLimit(method, url) {
   if (method !== "POST" || typeof url !== "string") return null;
@@ -47,17 +83,22 @@ export function callbackBodyLimit(method, url) {
 
 /** What the route itself would answer, so an answer given here can't be told from the Store's. */
 const answers = {
-  orderLink: (status) => ({
+  orderLink: (status, retryAfterSeconds = 30) => ({
     status,
     headers: {
       "Cache-Control": "no-store",
       "Referrer-Policy": "no-referrer",
-      ...(status === 503 ? { "Retry-After": "30" } : {}),
+      ...(status === 503 || status === 429 ? { "Retry-After": String(retryAfterSeconds) } : {}),
     },
     body: {
       schemaVersion: 1,
       error: {
-        code: status === 503 ? "order_link_service_unavailable" : "order_link_unavailable",
+        code:
+          status === 429
+            ? "order_link_rate_limited"
+            : status === 503
+              ? "order_link_service_unavailable"
+              : "order_link_unavailable",
       },
     },
   }),
@@ -120,15 +161,17 @@ function jsonBody(body) {
 
 /**
  * `stores`: the served Stores, the installation's own first, each { tenantReference, port,
- * issuedOrderLink(token) → Promise<boolean> | undefined, feedbackRoute: { topicArn,
- * configurationSetName } | null, stripeWebhook: { verifies(input), holdsOperation(reference) } |
- * null }. `everyStoreServed`: every Store stores.json names is served now. `snsSignatures`: the SNS
- * signature verifier (`verifyVersion2`).
+ * issuedOrderLink(token) → Promise<boolean> | undefined, spendOrderLinkAttempt({ peerAddress }) →
+ * Promise<{ status: "Allowed" } | { status: "RateLimited", retryAfterSeconds }> | undefined,
+ * feedbackRoute: { topicArn, configurationSetName } | null, stripeWebhook: { verifies(input),
+ * holdsOperation(reference) } | null }. `everyStoreServed`: every Store stores.json names is served now. `snsSignatures`: the SNS
+ * signature verifier (`verifyVersion2`). `orderLinkOrigin`: the customer app's exact origin.
  */
 export function createCustomerCallbackRouting({
   stores,
   everyStoreServed,
   snsSignatures,
+  orderLinkOrigin,
   now = () => new Date().toISOString(),
   log = logCallbackRouting,
 }) {
@@ -140,9 +183,30 @@ export function createCustomerCallbackRouting({
   const answer = (value) => ({ answer: value });
   const to = (store) => ({ store });
 
-  async function orderLink(body) {
-    const token = jsonBody(body)?.token;
-    if (typeof token !== "string" || !LINK_TOKEN.test(token)) return to(unowned);
+  /**
+   * Batch 35: spends the first Store's budget for links no Order holds (the bucket its own route
+   * spends for an unknown token); the 429 once spent, `otherwise` while allowed. A Store without
+   * order messaging answers every link 503 itself; a budget that can't be checked is a retry.
+   */
+  async function spendThen(peerAddress, otherwise) {
+    if (typeof unowned.spendOrderLinkAttempt !== "function") return otherwise;
+    let budget;
+    try {
+      budget = await unowned.spendOrderLinkAttempt({ peerAddress });
+    } catch {
+      return answer(answers.orderLink(503));
+    }
+    if (budget?.status === "Allowed") return otherwise;
+    if (budget?.status === "RateLimited")
+      return answer(answers.orderLink(429, budget.retryAfterSeconds ?? 3600));
+    return answer(answers.orderLink(503));
+  }
+
+  async function orderLink(url, body, headers, peerAddress) {
+    // Not sent by the app's page: the first Store refuses it before reading it, as one Store does.
+    if (!fromOwnPage(headers, orderLinkOrigin)) return to(unowned);
+    const token = wellFormedLinkToken(url, headers, body);
+    if (token === null) return spendThen(peerAddress, to(unowned));
     const { claims, unreadable } = await askAll(
       stores.filter((store) => typeof store.issuedOrderLink === "function"),
       (store) => store.issuedOrderLink(token),
@@ -150,10 +214,11 @@ export function createCustomerCallbackRouting({
     if (claims.length === 1) return to(claims[0]);
     if (claims.length > 1) {
       log({ code: "PILOT_CALLBACK_UNCLAIMED", provider: "order-link", reason: "Ambiguous" });
-      return answer(answers.orderLink(400));
+      return spendThen(peerAddress, answer(answers.orderLink(400)));
     }
     // The Store that issued it may be the one not answering now: try again, never "expired".
-    if (unreadable || !everyStoreServed) return answer(answers.orderLink(503));
+    if (unreadable || !everyStoreServed)
+      return spendThen(peerAddress, answer(answers.orderLink(503)));
     return to(unowned);
   }
 
@@ -246,8 +311,14 @@ export function createCustomerCallbackRouting({
   }
 
   /** { store } to send it to, or { answer: { status, headers, body } } to give here. */
-  return async function callbackStoreOf({ url, headers = {}, body = Buffer.alloc(0) }) {
-    if (ORDER_RECOVERY.test(url)) return orderLink(body);
+  // `peerAddress`: the guest's address as the Store's own route keys its budget.
+  return async function callbackStoreOf({
+    url,
+    headers = {},
+    body = Buffer.alloc(0),
+    peerAddress = "127.0.0.1",
+  }) {
+    if (ORDER_RECOVERY.test(url)) return orderLink(url, body, headers, peerAddress);
     if (SES_FEEDBACK.test(url)) return sesFeedback(body, headers);
     if (STRIPE_WEBHOOK.test(url)) return stripeWebhook(body, headers);
     throw new Error("CUSTOMER_CALLBACK_ROUTE_UNKNOWN");

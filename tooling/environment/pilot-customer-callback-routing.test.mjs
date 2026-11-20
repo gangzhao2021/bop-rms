@@ -19,7 +19,18 @@ const store = (n, overrides = {}) => ({
   ...overrides,
 });
 const json = (value) => Buffer.from(JSON.stringify(value));
-const orderLink = (token) => ({ url: "/api/v1/customer/order-recovery", body: json({ token }) });
+const pageOrigin = "https://order.example.test";
+const fromPage = {
+  origin: pageOrigin,
+  "sec-fetch-site": "same-origin",
+  "content-type": "application/json",
+};
+const orderLink = (token, { body = json({ token }), headers = fromPage, url = "" } = {}) => ({
+  url: "/api/v1/customer/order-recovery" + url,
+  body,
+  headers,
+  peerAddress: "203.0.113.9",
+});
 const signedSns = { verifyVersion2: vi.fn(async () => true) };
 const sesEnvelope = (topicArn, set, type = "Notification") =>
   json({
@@ -72,6 +83,7 @@ function routing(stores, { everyStoreServed = true } = {}) {
       stores,
       everyStoreServed,
       snsSignatures: signedSns,
+      orderLinkOrigin: pageOrigin,
       log,
     }),
   };
@@ -134,6 +146,63 @@ describe("batch 34: callbacks that name no Store reach the Store that claims the
       orderLink(link("Z")),
     );
     expect(missing.answer.status).toBe(503);
+  });
+
+  it("batch 35: what no Store looked up spends the first Store's per-address budget first", async () => {
+    const budget = (status) =>
+      vi.fn(async () => (status === "Allowed" ? { status } : { status, retryAfterSeconds: 1800 }));
+    const allowed = budget("Allowed");
+    const stores = [store(1, { spendOrderLinkAttempt: allowed }), store(2)];
+    const { route } = routing(stores);
+    // Malformed, as the Store's route would refuse it unread: spent here, then the first Store's
+    // own uniform refusal. Nothing asked of any Store.
+    const malformed = [
+      orderLink("short"),
+      orderLink(7),
+      orderLink(link("Z"), { body: json({ token: link("Z"), extra: 1 }) }),
+      orderLink(link("Z"), { body: Buffer.from("{not json") }),
+      orderLink(link("Z"), { body: json([link("Z")]) }),
+      orderLink(link("Z"), { headers: { ...fromPage, "content-type": "text/plain" } }),
+      orderLink(link("Z"), { url: "?t=1" }),
+    ];
+    for (const request of malformed) expect((await route(request)).store).toBe(stores[0]);
+    expect(allowed).toHaveBeenCalledTimes(malformed.length);
+    expect(allowed).toHaveBeenCalledWith({ peerAddress: "203.0.113.9" });
+    for (const each of stores) expect(each.issuedOrderLink).not.toHaveBeenCalled();
+    // Well formed: the Store that issued it, or the first Store (its own route spends the budget).
+    expect((await route(orderLink(link("2")))).store).toBe(stores[1]);
+    expect((await route(orderLink(link("Z")))).store).toBe(stores[0]);
+    expect(allowed).toHaveBeenCalledTimes(malformed.length);
+    // Not sent by the app's own page: no Store asked, nothing spent, the first Store refuses it.
+    for (const headers of [{}, { ...fromPage, origin: "https://other.example" }])
+      expect((await route(orderLink(link("2"), { headers }))).store).toBe(stores[0]);
+    expect(stores[1].issuedOrderLink).toHaveBeenCalledTimes(2);
+    expect(allowed).toHaveBeenCalledTimes(malformed.length);
+
+    // Spent: 429 with when to try again, for a malformed one and for one asked during an outage.
+    const limited = budget("RateLimited");
+    const down = store(2, { issuedOrderLink: vi.fn(async () => Promise.reject(new Error("x"))) });
+    const spent = routing([store(1, { spendOrderLinkAttempt: limited }), down]);
+    for (const request of [orderLink("short"), orderLink(link("Z"))]) {
+      const { answer } = await spent.route(request);
+      expect([answer.status, answer.headers["Retry-After"], answer.body]).toEqual([
+        429,
+        "1800",
+        { schemaVersion: 1, error: { code: "order_link_rate_limited" } },
+      ]);
+    }
+    // Still allowed during the outage: spent, and the retry.
+    const outage = await routing([store(1, { spendOrderLinkAttempt: allowed }), down]).route(
+      orderLink(link("Z")),
+    );
+    expect(outage.answer.status).toBe(503);
+    // A budget that can't be checked is a retry, never an unlimited refusal.
+    const broken = routing([
+      store(1, { spendOrderLinkAttempt: vi.fn(async () => Promise.reject(new Error("x"))) }),
+      store(2),
+    ]);
+    const failed = await broken.route(orderLink("short"));
+    expect([failed.answer.status, failed.answer.headers["Retry-After"]]).toEqual([503, "30"]);
   });
 
   it("order link with one Tenant: what no Store issued goes to the first Store, as before", async () => {
