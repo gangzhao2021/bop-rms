@@ -383,11 +383,11 @@ export function createRefundApprovalClient(fetcher: typeof fetch = fetch) {
      */
     stepUpState,
     /** Refunds at the selected Store awaiting approval, or approved and not yet sent. */
-    approvals(signal?: AbortSignal) {
+    approvals(signal?: AbortSignal, share = false) {
       // Batch 36: the Approvals badge and Home ask for this together when Home opens.
       return sharedRead(
         fetcher,
-        "GET /merchant/payments/refunds/approvals",
+        share ? "GET /merchant/payments/refunds/approvals" : null,
         signal,
         async (shared) => {
           let response: Response;

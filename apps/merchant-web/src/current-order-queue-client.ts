@@ -1981,14 +1981,19 @@ export function createCurrentOrderQueueClient(fetcher: typeof fetch = fetch) {
         }),
       }).catch(() => undefined);
     },
-    load(after: string | null, signal: AbortSignal) {
+    load(
+      after: string | null,
+      signal: AbortSignal,
+      /** Batch 36: may join the same read already on its way (opening reads only). */
+      share = false,
+    ) {
       if (after !== null) reference(after);
       const path =
         "/merchant/orders" + (after === null ? "" : "?after=" + encodeURIComponent(after));
       // Batch 36: the frame's refund warning and Home ask for the first page together.
       return sharedRead(
         fetcher,
-        "GET " + path,
+        share ? "GET " + path : null,
         signal,
         (shared) => get(fetcher, path, shared, (value) => parseCurrentOrderQueue(value, after)),
         // A cancelled read is refused as before, never shown.

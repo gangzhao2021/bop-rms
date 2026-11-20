@@ -60,19 +60,24 @@ export function createStoreKitchenSetupClient(options: {
     }
   };
   return Object.freeze({
-    async load(): Promise<StoreKitchenSetupView> {
+    async load(share = false): Promise<StoreKitchenSetupView> {
       // Batch 36: Home and its setup panels ask for this together when Home opens.
-      return sharedRead(fetcher, "GET /merchant/store/kitchen-setup", undefined, async () => {
-        let response: Response;
-        try {
-          response = await request({ method: "GET", headers: { Accept: "application/json" } });
-        } catch {
-          return fail("Unavailable");
-        }
-        if (response.status === 401 || response.status === 403) return fail("PermissionDenied");
-        if (!response.ok) return fail("Unavailable");
-        return parseStoreKitchenSetupView(await response.json().catch(() => null));
-      });
+      return sharedRead(
+        fetcher,
+        share ? "GET /merchant/store/kitchen-setup" : null,
+        undefined,
+        async () => {
+          let response: Response;
+          try {
+            response = await request({ method: "GET", headers: { Accept: "application/json" } });
+          } catch {
+            return fail("Unavailable");
+          }
+          if (response.status === 401 || response.status === 403) return fail("PermissionDenied");
+          if (!response.ok) return fail("Unavailable");
+          return parseStoreKitchenSetupView(await response.json().catch(() => null));
+        },
+      );
     },
     async apply(body: { readonly operationReference: string; readonly expectedVersion: number }) {
       let response: Response;

@@ -138,19 +138,24 @@ export function createStorePublicProfileClient(options: {
     }
   };
   return Object.freeze({
-    async load(): Promise<StorePublicProfileView> {
+    async load(share = false): Promise<StorePublicProfileView> {
       // Batch 36: Home and its setup panels ask for this together when Home opens.
-      return sharedRead(fetcher, "GET /merchant/store/public-profile", undefined, async () => {
-        let response: Response;
-        try {
-          response = await request({ method: "GET", headers: { Accept: "application/json" } });
-        } catch {
-          return fail("Unavailable");
-        }
-        if (response.status === 401 || response.status === 403) return fail("PermissionDenied");
-        if (!response.ok) return fail("Unavailable");
-        return parseStorePublicProfileView(await response.json().catch(() => null));
-      });
+      return sharedRead(
+        fetcher,
+        share ? "GET /merchant/store/public-profile" : null,
+        undefined,
+        async () => {
+          let response: Response;
+          try {
+            response = await request({ method: "GET", headers: { Accept: "application/json" } });
+          } catch {
+            return fail("Unavailable");
+          }
+          if (response.status === 401 || response.status === 403) return fail("PermissionDenied");
+          if (!response.ok) return fail("Unavailable");
+          return parseStorePublicProfileView(await response.json().catch(() => null));
+        },
+      );
     },
     async save(body: StorePublicProfileSaveBody) {
       if (!/^[A-Za-z0-9_-]{43}$/u.test(options.csrf)) return fail("Invalid");

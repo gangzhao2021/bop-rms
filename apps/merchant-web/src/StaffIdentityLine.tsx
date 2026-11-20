@@ -47,6 +47,7 @@ export class NameStore {
   };
   readonly get = () => this.snapshot;
   /** Reads the name again (it was just saved); the line keeps showing the old one meanwhile. */
+  private loaded = false;
   readonly reload = () => {
     this.read = false;
     if (this.listeners.size === 0) return;
@@ -56,8 +57,11 @@ export class NameStore {
   private load() {
     if (this.reading) return;
     this.reading = true;
+    // Batch 36: the first read joins the name prompt's; a read after saving never does.
+    const first = !this.loaded;
+    this.loaded = true;
     this.read = true;
-    void this.client.read().then(
+    void this.client.read(first).then(
       (state) => {
         this.reading = false;
         this.set({ kind: "Ready", state });

@@ -179,7 +179,7 @@ export interface StaffPageClient {
   load(actorReference: string | null): Promise<unknown>;
   command?(request: StaffCommandRequest): Promise<unknown>;
   /** WP-2423 M07: staff role requests waiting for the signed-in person. */
-  roleRequests?(): Promise<readonly StaffRoleRequestView[]>;
+  roleRequests?(share?: boolean): Promise<readonly StaffRoleRequestView[]>;
 }
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
@@ -517,10 +517,10 @@ export function createStaffPageClient(csrf: string, fetcher: typeof fetch = fetc
       post("/merchant/organization/staff/command", request),
     /** WP-2423 M07: staff role requests waiting for the signed-in person. */
     // Batch 36: the Approvals badge and Home ask for this together (a read, sent as POST).
-    roleRequests: () =>
+    roleRequests: (share = false) =>
       sharedRead(
         fetcher,
-        "POST /merchant/organization/staff/role-requests " + csrf,
+        share ? "POST /merchant/organization/staff/role-requests " + csrf : null,
         undefined,
         async () =>
           parseStaffRoleRequests(await post("/merchant/organization/staff/role-requests", {})),

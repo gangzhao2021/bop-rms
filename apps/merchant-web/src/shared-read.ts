@@ -10,6 +10,7 @@
  * read asked afterwards is always sent again. A caller that stops waiting (its signal aborts) gets
  * an abort of its own; the request itself is stopped only when every caller has stopped waiting.
  *
+ * Sharing is asked for by the caller (`key`), only for the reads a screen opens with.
  * Reads are kept apart by the fetcher they are sent with and by `key` (method, path, body and
  * anything else that changes the answer), never across sign-ins or Stores: the caller's key names
  * what it reads with.
@@ -28,32 +29,38 @@ function aborted(signal: AbortSignal): unknown {
 export function sharedRead<T>(
   /** The fetcher the read is sent with (requests of another fetcher are never shared). */
   owner: object,
-  key: string,
+  /**
+   * null: send this read on its own. Only the reads a screen opens with share; a read after a
+   * command, or one asked because something changed, never joins one sent before it.
+   */
+  key: string | null,
   signal: AbortSignal | undefined,
   run: (signal: AbortSignal) => Promise<T>,
   /** What a caller that stopped waiting is refused with (the client's own error); AbortError. */
   stopped: (signal: AbortSignal) => unknown = aborted,
 ): Promise<T> {
+  if (key === null) return run(signal ?? new AbortController().signal);
   if (signal?.aborted) return Promise.reject(stopped(signal));
+  const named = key;
   let reads = inFlight.get(owner);
   if (reads === undefined) {
     reads = new Map();
     inFlight.set(owner, reads);
   }
   const map = reads;
-  let entry = map.get(key);
+  let entry = map.get(named);
   if (entry === undefined) {
     const controller = new AbortController();
     const created: InFlight = {
       promise: Promise.resolve()
         .then(() => run(controller.signal))
         .finally(() => {
-          if (map.get(key) === created) map.delete(key);
+          if (map.get(named) === created) map.delete(named);
         }),
       controller,
       waiting: 0,
     };
-    map.set(key, created);
+    map.set(named, created);
     entry = created;
   }
   const shared = entry;
@@ -70,8 +77,8 @@ export function sharedRead<T>(
     function onAbort() {
       if (!leave()) return;
       // Nobody waits for it any more: stop it, and let the next caller send a new one.
-      if (shared.waiting === 0 && map.get(key) === shared) {
-        map.delete(key);
+      if (shared.waiting === 0 && map.get(named) === shared) {
+        map.delete(named);
         shared.controller.abort();
       }
       reject(stopped(signal as AbortSignal));

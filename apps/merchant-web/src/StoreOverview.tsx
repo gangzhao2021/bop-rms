@@ -1301,7 +1301,7 @@ export function StoreOverview({
     if (!permitted.kitchenSetup) return;
     let live = true;
     void createStoreKitchenSetupClient({ csrf, ...(fetcher ? { fetcher } : {}) })
-      .load()
+      .load(true)
       .then(
         (kitchen) => {
           if (live)
@@ -1336,8 +1336,9 @@ export function StoreOverview({
     const controller = new AbortController();
     void Promise.all([
       createStoreFeaturesClient(csrf, fetcher ?? fetch).read(),
-      createStorePublicProfileClient({ csrf, ...(fetcher ? { fetcher } : {}) }).load(),
-      createServiceControlClient(fetcher ?? fetch).load(storeReference, controller.signal),
+      // Batch 36: read with the panels below (Opening list, Pause ordering), once.
+      createStorePublicProfileClient({ csrf, ...(fetcher ? { fetcher } : {}) }).load(true),
+      createServiceControlClient(fetcher ?? fetch).load(storeReference, controller.signal, true),
     ])
       .then(
         ([features, profile, service]) => {
@@ -1410,7 +1411,7 @@ export function StoreOverview({
       await Promise.all([
         permitted.orders
           ? read(
-              async () => summarizeOrders(await clients.orders.load(null, controller.signal)),
+              async () => summarizeOrders(await clients.orders.load(null, controller.signal, true)),
               (orders) => setState((s) => ({ ...s, orders })),
             )
           : null,

@@ -654,7 +654,8 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
     if (watchOrdersHref !== null) {
       const orders = createCurrentOrderQueueClient();
       return async (signal) => {
-        const view = await orders.load(null, signal);
+        // Batch 36: Home reads this list too as it opens; one request serves both.
+        const view = await orders.load(null, signal, true);
         setPaidOrderWatch(view.paidOrderWatch ?? null);
         return [
           ...refundDeadlinesFromOrders(view),

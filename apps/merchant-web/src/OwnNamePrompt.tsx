@@ -25,7 +25,8 @@ export class OwnNameError extends Error {
   }
 }
 export interface OwnNameClient {
-  read(): Promise<OwnNameState>;
+  /** Batch 36: `share` joins the same read already on its way (a screen's first read only). */
+  read(share?: boolean): Promise<OwnNameState>;
   save(input: {
     readonly displayName: string;
     readonly operationReference: string;
@@ -136,9 +137,12 @@ export function createOwnNameClient(csrf: string, fetcher: typeof fetch = fetch)
   };
   return {
     // Batch 36: the name prompt and the staff line in the frame ask for this together.
-    read: () =>
-      sharedRead(fetcher, "POST /merchant/organization/staff/me " + csrf, undefined, async () =>
-        parseOwnNameState(await post("/merchant/organization/staff/me", {})),
+    read: (share = false) =>
+      sharedRead(
+        fetcher,
+        share ? "POST /merchant/organization/staff/me " + csrf : null,
+        undefined,
+        async () => parseOwnNameState(await post("/merchant/organization/staff/me", {})),
       ),
     save: async (input) => {
       const result = exact(
@@ -235,7 +239,7 @@ export function OwnNamePrompt({
   const idPrefix = "own-name-" + useId().replace(/[^A-Za-z0-9_-]/gu, "");
   useEffect(() => {
     let current = true;
-    source.current.read().then(
+    source.current.read(true).then(
       (result) => {
         if (current && result.name === "Missing") setState("Asking");
       },

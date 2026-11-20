@@ -30,6 +30,15 @@ it("batch 36: identical reads in flight send one request and all get its answer"
   await expect(sharedRead(owner, "GET /a", undefined, async () => "fresh")).resolves.toBe("fresh");
 });
 
+it("batch 36: a read not asked to share is sent on its own", async () => {
+  const owner = {};
+  const run = vi.fn(async () => "own");
+  const first = sharedRead(owner, "k", undefined, async () => "shared");
+  await expect(sharedRead(owner, null, undefined, run)).resolves.toBe("own");
+  expect(run).toHaveBeenCalledOnce();
+  await expect(first).resolves.toBe("shared");
+});
+
 it("batch 36: a failure reaches every caller, and the next read is sent again", async () => {
   const owner = {};
   const answer = later<string>();
@@ -86,10 +95,13 @@ it("batch 36: the frame's refund warning and Home read the Orders list once when
   const fetcher = vi.fn(async () => pending.promise);
   const watch = createCurrentOrderQueueClient(fetcher as unknown as typeof fetch);
   const home = createCurrentOrderQueueClient(fetcher as unknown as typeof fetch);
-  const a = watch.load(null, new AbortController().signal);
-  const b = home.load(null, new AbortController().signal);
+  const a = watch.load(null, new AbortController().signal, true);
+  const b = home.load(null, new AbortController().signal, true);
+  // A read asked because something changed (Orders after a new paid order, a reread after a
+  // command) never joins one sent before it.
+  const fresh = home.load(null, new AbortController().signal);
   await Promise.resolve();
-  expect(fetcher).toHaveBeenCalledOnce();
+  expect(fetcher).toHaveBeenCalledTimes(2);
   pending.resolve(
     new Response(
       JSON.stringify({ items: [], earlierDayItems: [], nextAfterOrderReference: null }),
@@ -101,5 +113,6 @@ it("batch 36: the frame's refund warning and Home read the Orders list once when
   );
   const [x, y] = await Promise.allSettled([a, b]);
   expect(x.status).toBe(y.status);
-  expect(fetcher).toHaveBeenCalledOnce();
+  await Promise.allSettled([fresh]);
+  expect(fetcher).toHaveBeenCalledTimes(2);
 });

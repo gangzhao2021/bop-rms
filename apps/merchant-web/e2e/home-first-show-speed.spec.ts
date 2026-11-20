@@ -286,5 +286,19 @@ for (const [width, height] of [
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
+    await page.screenshot({
+      path: `test-results/b36/home-first-show-${width}-en.png`,
+      fullPage: true,
+    });
+    await page.getByRole("button", { name: "切换到中文" }).first().click();
+    await expect(page.getByRole("region", { name: "需要处理" })).toBeVisible();
+    await expect(page.getByRole("region", { name: "需要处理" }).getByText("仍在查看")).toHaveCount(
+      0,
+    );
+    await page.waitForTimeout(3_500);
+    await page.screenshot({
+      path: `test-results/b36/home-first-show-${width}-zh-Hans.png`,
+      fullPage: true,
+    });
     await expectNoInternalText(page);
   });

@@ -280,11 +280,11 @@ export function createServiceControlClient(fetcher: typeof fetch = fetch) {
     }
   }
   return Object.freeze({
-    async load(store: string, signal: AbortSignal) {
+    async load(store: string, signal: AbortSignal, share = false) {
       // Batch 36: Pause ordering and Home's setup step ask for this together when Home opens.
       return sharedRead(
         fetcher,
-        "GET /merchant/service-control " + store,
+        share ? "GET /merchant/service-control " + store : null,
         signal,
         async (shared) => parseServiceControlState(await request(shared), store),
         () => new Error("Service request unavailable."),

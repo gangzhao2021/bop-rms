@@ -174,7 +174,8 @@ export function usePauseOrderingRead(
     if (storeReference === undefined || notShown) return;
     const controller = new AbortController();
     client
-      .load(storeReference, controller.signal)
+      // Batch 36: the first read joins Home's; a read after a pause or resume never does.
+      .load(storeReference, controller.signal, revision === 0)
       .then((next) => setAnswer({ status: "Known", view: next, answeredAt: Date.now() }))
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;

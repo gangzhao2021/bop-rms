@@ -215,6 +215,11 @@ for (const [width, height] of [
       page.locator("main header").first().boundingBox(),
     ]);
     expect((filters?.y ?? 0) - ((header?.y ?? 0) + (header?.height ?? 0))).toBeLessThan(44);
+    await page.screenshot({ path: `test-results/b36/pickup-day-unread-${width}-en.png` });
+    await page.getByRole("button", { name: "切换到中文" }).first().click();
+    await expect(page.locator("main article")).toHaveCount(4);
+    await expect(page.locator(".pickup-queue__tools")).toHaveCount(0);
+    await page.screenshot({ path: `test-results/b36/pickup-day-unread-${width}-zh-Hans.png` });
     await expectNoInternalText(page);
   });
 

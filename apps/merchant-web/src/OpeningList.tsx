@@ -104,8 +104,8 @@ async function loadOpeningFacts(csrf: string, fetcher: typeof fetch): Promise<Op
   const server = loadOpeningListRead(fetcher);
   const [details, kitchen, receipts, setupPublished, allergenList, menuListed, tableCode, tax] =
     await Promise.all([
-      known(createStorePublicProfileClient(clients).load(), (view) => view.current !== null),
-      known(createStoreKitchenSetupClient(clients).load(), (view) => view.version > 0),
+      known(createStorePublicProfileClient(clients).load(true), (view) => view.current !== null),
+      known(createStoreKitchenSetupClient(clients).load(true), (view) => view.version > 0),
       known(createStoreReceiptProfileClient(clients).load(), (view) => view.recordedAt !== null),
       known(server, (view) => view.setupPublished === true),
       known(server, (view) => view.allergenList === true),

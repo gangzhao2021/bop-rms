@@ -616,7 +616,7 @@ export function createRoleAdministrationPageClient(
 ): RoleAdministrationPageClient & {
   command(request: RoleCommandRequest): Promise<{ readonly roleReference: string }>;
   declineOffer(request: RolePresetOfferDeclineRequest): Promise<void>;
-  waiting(): Promise<readonly RoleChangeWaitingView[]>;
+  waiting(share?: boolean): Promise<readonly RoleChangeWaitingView[]>;
   starterSets(): Promise<StarterRoleSetsView>;
   applyStarterSet(request: StarterRoleSetApplyRequest): Promise<void>;
 } {
@@ -656,10 +656,10 @@ export function createRoleAdministrationPageClient(
       await post("/merchant/organization/roles/offer-decline", request);
     },
     // Batch 36: the Approvals badge and Home ask for this together (a read, sent as POST).
-    waiting: () =>
+    waiting: (share = false) =>
       sharedRead(
         fetcher,
-        "POST /merchant/organization/roles/waiting " + csrf,
+        share ? "POST /merchant/organization/roles/waiting " + csrf : null,
         undefined,
         async () => parseRoleChangesWaiting(await post("/merchant/organization/roles/waiting", {})),
       ),

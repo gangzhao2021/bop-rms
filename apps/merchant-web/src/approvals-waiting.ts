@@ -76,7 +76,7 @@ export function useApprovalsWaitingRead(
       const current = new AbortController();
       controller = current;
       client
-        .approvals(current.signal)
+        .approvals(current.signal, true)
         .then((view) => {
           if (!current.signal.aborted) {
             setWaiting(summarizeApprovalsWaiting(view.entries, view.canSend));
@@ -164,14 +164,14 @@ export function useStaffRolesWaitingRead(
     const read = () => {
       // WP-2423 role presets: staff role requests and role changes waiting for this person.
       void Promise.all([
-        client.roleRequests().then(
+        client.roleRequests(true).then(
           (requests): StaffRolesWaiting => requests.length,
           (error: unknown): StaffRolesWaiting =>
             error instanceof StaffPageError && error.code === "PermissionDenied"
               ? null
               : "Unavailable",
         ),
-        roles.waiting().then(
+        roles.waiting(true).then(
           (changes): StaffRolesWaiting => changes.length,
           (error: unknown): StaffRolesWaiting =>
             error instanceof RoleAdministrationPageError && error.code === "PermissionDenied"
