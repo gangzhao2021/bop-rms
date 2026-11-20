@@ -145,6 +145,26 @@ export function createOrderRecoveryService(ports: {
       return (await ports.store.peekOrder({ candidates })) !== null;
     },
     /**
+     * WP-2423 batch 35: an attempt the installation answers without any Store looking the token up
+     * (malformed, or no served Store could say it issued it) spends this Store's per-peer budget,
+     * the same bucket `consume` spends for a token no Order holds, so guessing links costs the
+     * same at several Stores as at one. Reads no token; fails closed (a budget failure throws).
+     */
+    async spendUnclaimed(input: {
+      readonly peerAddress: string;
+    }): Promise<
+      | { readonly status: "Allowed" }
+      | { readonly status: "RateLimited"; readonly retryAfterSeconds: number }
+    > {
+      const observedAt = ports.clock.now();
+      if (!instant.test(observedAt) || typeof input.peerAddress !== "string") return unavailable();
+      return ports.budget.consume({
+        orderReference: null,
+        peerAddress: input.peerAddress,
+        observedAt,
+      });
+    },
+    /**
      * Mints a link token for one notification attempt. Returns null when the sibling limit is
      * reached (the message is then sent without a link).
      */

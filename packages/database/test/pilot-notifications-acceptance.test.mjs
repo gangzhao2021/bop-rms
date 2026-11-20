@@ -391,6 +391,37 @@ it("DEC-PILOT-NOTIFICATIONS: order messages, one-time order link and bounce supp
         recovery.consume({ token: late.token, peerAddress: "198.51.100.1" }),
         (error) => error.code === "ORDER_RECOVERY_RATE_LIMITED",
       );
+      // WP-2423 batch 35: what an installation of several Stores answers without a Store looking
+      // it up (malformed, or asked during an outage) spends, under the API role, the one per-peer
+      // bucket an unknown token spends: together five an hour, then rate limited with a wait.
+      const guessesBefore = await admin.query(
+        "SELECT count(*)::int AS n FROM security.abuse_bucket WHERE bucket_class='ORDER_RESUME'",
+      );
+      for (let attempt = 0; attempt < 3; attempt += 1)
+        assert.deepEqual(await recovery.spendUnclaimed({ peerAddress: "198.51.100.2" }), {
+          status: "Allowed",
+        });
+      for (const token of ["Z".repeat(43), "short"])
+        await assert.rejects(
+          recovery.consume({ token, peerAddress: "198.51.100.2" }),
+          (error) => error.code === "ORDER_RECOVERY_UNAVAILABLE",
+        );
+      const guessLimited = await recovery.spendUnclaimed({ peerAddress: "198.51.100.2" });
+      assert.equal(guessLimited.status, "RateLimited");
+      assert.ok(guessLimited.retryAfterSeconds > 0 && guessLimited.retryAfterSeconds <= 3600);
+      await assert.rejects(
+        recovery.consume({ token: "Y".repeat(43), peerAddress: "198.51.100.2" }),
+        (error) => error.code === "ORDER_RECOVERY_RATE_LIMITED",
+      );
+      assert.equal(
+        (
+          await admin.query(
+            "SELECT count(*)::int AS n FROM security.abuse_bucket WHERE bucket_class='ORDER_RESUME'",
+          )
+        ).rows[0].n,
+        guessesBefore.rows[0].n + 1,
+        "one bucket for every attempt from this address that names no Order",
+      );
 
       // 6. The database accepts a credential change only with a Consumed recovery fact.
       await assert.rejects(

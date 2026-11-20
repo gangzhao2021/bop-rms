@@ -145,6 +145,43 @@ describe("DEC-PILOT-NOTIFICATIONS R1: one-time order recovery", () => {
     await expect(h.service.issued(minted?.token)).rejects.toThrow("down");
   });
 
+  it("batch 35: an attempt no Store looked up spends the per-peer bucket an unknown token spends", async () => {
+    const h = harness();
+    await expect(h.service.spendUnclaimed({ peerAddress: "203.0.113.9" })).resolves.toEqual({
+      status: "Allowed",
+    });
+    await expect(
+      h.service.consume({ token: "Z".repeat(43), peerAddress: "203.0.113.9" }),
+    ).rejects.toBeInstanceOf(OrderRecoveryError);
+    // The same key (no Order, this peer) both times; nothing looked up or changed.
+    expect(h.budget.consume.mock.calls).toEqual([
+      [
+        {
+          orderReference: null,
+          peerAddress: "203.0.113.9",
+          observedAt: "2026-10-20T12:00:00.000Z",
+        },
+      ],
+      [
+        {
+          orderReference: null,
+          peerAddress: "203.0.113.9",
+          observedAt: "2026-10-20T12:00:00.000Z",
+        },
+      ],
+    ]);
+    expect(h.store.consumeAndRekey).not.toHaveBeenCalled();
+    const limited = harness({ limited: true });
+    await expect(limited.service.spendUnclaimed({ peerAddress: "203.0.113.9" })).resolves.toEqual({
+      status: "RateLimited",
+      retryAfterSeconds: 600,
+    });
+    // Fails closed: a budget that can't be checked is an outage, never "allowed".
+    await expect(
+      harness({ budgetDown: true }).service.spendUnclaimed({ peerAddress: "203.0.113.9" }),
+    ).rejects.toThrow();
+  });
+
   it("refuses an expired, unknown or malformed token with the same error", async () => {
     const h = harness();
     const minted = await mint(h);
