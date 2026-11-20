@@ -1,5 +1,5 @@
 import { t } from "./i18n/i18n.js";
-import { sharedRead } from "./shared-read.js";
+import { sharedRead, type SharedReadScope } from "./shared-read.js";
 import { useEffect, useId, useRef, useState } from "react";
 import { newOperationReference } from "./operation-reference.js";
 
@@ -26,7 +26,7 @@ export class OwnNameError extends Error {
 }
 export interface OwnNameClient {
   /** Batch 36: `share` joins the same read already on its way (a screen's first read only). */
-  read(share?: boolean): Promise<OwnNameState>;
+  read(share?: SharedReadScope): Promise<OwnNameState>;
   save(input: {
     readonly displayName: string;
     readonly operationReference: string;
@@ -137,10 +137,11 @@ export function createOwnNameClient(csrf: string, fetcher: typeof fetch = fetch)
   };
   return {
     // Batch 36: the name prompt and the staff line in the frame ask for this together.
-    read: (share = false) =>
+    read: (share?: SharedReadScope) =>
       sharedRead(
         fetcher,
-        share ? "POST /merchant/organization/staff/me " + csrf : null,
+        share?.csrf === csrf ? share : undefined,
+        "POST /merchant/organization/staff/me",
         undefined,
         async () => parseOwnNameState(await post("/merchant/organization/staff/me", {})),
       ),
@@ -224,9 +225,12 @@ export function OwnNamePromptView({
 
 export function OwnNamePrompt({
   csrf,
+  storeReference,
   client,
 }: {
   readonly csrf: string;
+  /** Batch 36: the Store this prompt opened for (its first read may share the staff line's). */
+  readonly storeReference?: string;
   readonly client?: OwnNameClient;
 }) {
   const source = useRef<OwnNameClient>(client ?? createOwnNameClient(csrf));
@@ -239,7 +243,7 @@ export function OwnNamePrompt({
   const idPrefix = "own-name-" + useId().replace(/[^A-Za-z0-9_-]/gu, "");
   useEffect(() => {
     let current = true;
-    source.current.read(true).then(
+    source.current.read(storeReference === undefined ? undefined : { csrf, storeReference }).then(
       (result) => {
         if (current && result.name === "Missing") setState("Asking");
       },

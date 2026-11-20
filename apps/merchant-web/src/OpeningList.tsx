@@ -99,13 +99,19 @@ const known = async <T,>(read: Promise<T>, fact: (value: T) => boolean) => {
     return null;
   }
 };
-async function loadOpeningFacts(csrf: string, fetcher: typeof fetch): Promise<OpeningFacts> {
+async function loadOpeningFacts(
+  csrf: string,
+  storeReference: string,
+  fetcher: typeof fetch,
+): Promise<OpeningFacts> {
   const clients = { csrf, fetcher };
+  // Batch 36: read once with Home's own read of the same, for this sign-in and Store only.
+  const share = { csrf, storeReference };
   const server = loadOpeningListRead(fetcher);
   const [details, kitchen, receipts, setupPublished, allergenList, menuListed, tableCode, tax] =
     await Promise.all([
-      known(createStorePublicProfileClient(clients).load(true), (view) => view.current !== null),
-      known(createStoreKitchenSetupClient(clients).load(true), (view) => view.version > 0),
+      known(createStorePublicProfileClient(clients).load(share), (view) => view.current !== null),
+      known(createStoreKitchenSetupClient(clients).load(share), (view) => view.version > 0),
       known(createStoreReceiptProfileClient(clients).load(), (view) => view.recordedAt !== null),
       known(server, (view) => view.setupPublished === true),
       known(server, (view) => view.allergenList === true),
@@ -170,7 +176,7 @@ export function OpeningList({
   useEffect(() => {
     if (alreadyFinished(storeReference)) return;
     let active = true;
-    void loadOpeningFacts(csrf, fetcher).then((facts) => {
+    void loadOpeningFacts(csrf, storeReference, fetcher).then((facts) => {
       if (!active) return;
       const next = openingSteps(facts, storeReference);
       setSteps(next);

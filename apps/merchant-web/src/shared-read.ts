@@ -10,11 +10,18 @@
  * read asked afterwards is always sent again. A caller that stops waiting (its signal aborts) gets
  * an abort of its own; the request itself is stopped only when every caller has stopped waiting.
  *
- * Sharing is asked for by the caller (`key`), only for the reads a screen opens with.
- * Reads are kept apart by the fetcher they are sent with and by `key` (method, path, body and
- * anything else that changes the answer), never across sign-ins or Stores: the caller's key names
- * what it reads with.
+ * Sharing is asked for by the caller (`scope`), only for the reads a screen opens with. Reads are
+ * kept apart by the fetcher they are sent with, by the sign-in (its CSRF token) and Store they are
+ * read for, and by `request` (method, path and anything else that changes the answer). A Store
+ * switch happens in place with a new token, so a read still on its way for the Store being left is
+ * never joined by the screen that opens for the next one.
  */
+export interface SharedReadScope {
+  /** The sign-in's token (a Store switch gives a new one). */
+  readonly csrf: string;
+  /** The Store the read is for. */
+  readonly storeReference: string;
+}
 interface InFlight {
   readonly promise: Promise<unknown>;
   readonly controller: AbortController;
@@ -30,18 +37,21 @@ export function sharedRead<T>(
   /** The fetcher the read is sent with (requests of another fetcher are never shared). */
   owner: object,
   /**
-   * null: send this read on its own. Only the reads a screen opens with share; a read after a
+   * undefined: send this read on its own. Only the reads a screen opens with share; a read after a
    * command, or one asked because something changed, never joins one sent before it.
    */
-  key: string | null,
+  scope: SharedReadScope | undefined,
+  /** What is read: method, path and anything else that changes the answer. */
+  request: string,
   signal: AbortSignal | undefined,
   run: (signal: AbortSignal) => Promise<T>,
   /** What a caller that stopped waiting is refused with (the client's own error); AbortError. */
   stopped: (signal: AbortSignal) => unknown = aborted,
 ): Promise<T> {
-  if (key === null) return run(signal ?? new AbortController().signal);
+  if (scope === undefined || scope.csrf === "" || scope.storeReference === "")
+    return run(signal ?? new AbortController().signal);
   if (signal?.aborted) return Promise.reject(stopped(signal));
-  const named = key;
+  const named = JSON.stringify([scope.csrf, scope.storeReference, request]);
   let reads = inFlight.get(owner);
   if (reads === undefined) {
     reads = new Map();

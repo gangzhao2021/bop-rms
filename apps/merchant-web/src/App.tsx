@@ -653,9 +653,11 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
     if (watchCsrf === null || watchStoreReference === null) return null;
     if (watchOrdersHref !== null) {
       const orders = createCurrentOrderQueueClient();
+      // Batch 36: Home reads this list too as it opens; one request serves both, for this sign-in
+      // and Store only (a Store switch gives a new token).
+      const scope = { csrf: watchCsrf, storeReference: watchStoreReference };
       return async (signal) => {
-        // Batch 36: Home reads this list too as it opens; one request serves both.
-        const view = await orders.load(null, signal, true);
+        const view = await orders.load(null, signal, scope);
         setPaidOrderWatch(view.paidOrderWatch ?? null);
         return [
           ...refundDeadlinesFromOrders(view),
@@ -927,6 +929,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
     state.kind === "Ready" ? (
       <WorkspaceLayout
         csrf={demo === null ? state.csrf : null}
+        storeReference={state.workspace.selectedScope.storeReference}
         items={state.workspace.navigation}
         path={pathname}
         search={search}
@@ -988,6 +991,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                       <OwnNamePrompt
                         key={state.workspace.selectedScope.storeReference + state.csrf}
                         csrf={state.csrf}
+                        storeReference={state.workspace.selectedScope.storeReference}
                       />
                     ) : null
                   }

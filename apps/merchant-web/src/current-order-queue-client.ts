@@ -1,5 +1,5 @@
 import { t } from "./i18n/i18n.js";
-import { sharedRead } from "./shared-read.js";
+import { sharedRead, type SharedReadScope } from "./shared-read.js";
 import { parsePaidOrderWatch } from "./paid-order-watch.js";
 export class CurrentOrderQueueError extends Error {
   constructor(readonly code: "PermissionDenied" | "NotFound" | "Unavailable" | "ServerProblem") {
@@ -1985,7 +1985,7 @@ export function createCurrentOrderQueueClient(fetcher: typeof fetch = fetch) {
       after: string | null,
       signal: AbortSignal,
       /** Batch 36: may join the same read already on its way (opening reads only). */
-      share = false,
+      share?: SharedReadScope,
     ) {
       if (after !== null) reference(after);
       const path =
@@ -1993,7 +1993,8 @@ export function createCurrentOrderQueueClient(fetcher: typeof fetch = fetch) {
       // Batch 36: the frame's refund warning and Home ask for the first page together.
       return sharedRead(
         fetcher,
-        share ? "GET " + path : null,
+        share,
+        "GET " + path,
         signal,
         (shared) => get(fetcher, path, shared, (value) => parseCurrentOrderQueue(value, after)),
         // A cancelled read is refused as before, never shown.

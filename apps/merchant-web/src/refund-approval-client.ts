@@ -1,5 +1,5 @@
 import { t } from "./i18n/i18n.js";
-import { sharedRead } from "./shared-read.js";
+import { sharedRead, type SharedReadScope } from "./shared-read.js";
 import { escalationReasons, type EscalationReason } from "./ordinary-refund-client.js";
 import {
   FULL_SIGN_IN_REQUIRED,
@@ -383,11 +383,12 @@ export function createRefundApprovalClient(fetcher: typeof fetch = fetch) {
      */
     stepUpState,
     /** Refunds at the selected Store awaiting approval, or approved and not yet sent. */
-    approvals(signal?: AbortSignal, share = false) {
+    approvals(signal?: AbortSignal, share?: SharedReadScope) {
       // Batch 36: the Approvals badge and Home ask for this together when Home opens.
       return sharedRead(
         fetcher,
-        share ? "GET /merchant/payments/refunds/approvals" : null,
+        share,
+        "GET /merchant/payments/refunds/approvals",
         signal,
         async (shared) => {
           let response: Response;

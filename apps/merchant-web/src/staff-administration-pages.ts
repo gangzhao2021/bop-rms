@@ -1,5 +1,5 @@
 import { t } from "./i18n/i18n.js";
-import { sharedRead } from "./shared-read.js";
+import { sharedRead, type SharedReadScope } from "./shared-read.js";
 /** WP-2423: Section 88 IAM-USER-LIST / IAM-USER-DETAIL view contract and same-origin client. */
 import { FULL_SIGN_IN_REQUIRED, isFullSignInRequired } from "./full-sign-in.js";
 import { parseSoleOperatorGate, type SoleOperatorGateView } from "./SoleOperatorSelfApproval.js";
@@ -179,7 +179,7 @@ export interface StaffPageClient {
   load(actorReference: string | null): Promise<unknown>;
   command?(request: StaffCommandRequest): Promise<unknown>;
   /** WP-2423 M07: staff role requests waiting for the signed-in person. */
-  roleRequests?(share?: boolean): Promise<readonly StaffRoleRequestView[]>;
+  roleRequests?(share?: SharedReadScope): Promise<readonly StaffRoleRequestView[]>;
 }
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
@@ -517,10 +517,11 @@ export function createStaffPageClient(csrf: string, fetcher: typeof fetch = fetc
       post("/merchant/organization/staff/command", request),
     /** WP-2423 M07: staff role requests waiting for the signed-in person. */
     // Batch 36: the Approvals badge and Home ask for this together (a read, sent as POST).
-    roleRequests: (share = false) =>
+    roleRequests: (share?: SharedReadScope) =>
       sharedRead(
         fetcher,
-        share ? "POST /merchant/organization/staff/role-requests " + csrf : null,
+        share?.csrf === csrf ? share : undefined,
+        "POST /merchant/organization/staff/role-requests",
         undefined,
         async () =>
           parseStaffRoleRequests(await post("/merchant/organization/staff/role-requests", {})),

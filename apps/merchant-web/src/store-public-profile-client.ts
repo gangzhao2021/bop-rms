@@ -1,5 +1,5 @@
 import { t } from "./i18n/i18n.js";
-import { sharedRead } from "./shared-read.js";
+import { sharedRead, type SharedReadScope } from "./shared-read.js";
 /**
  * WP-2423 DEC-STORE-CUSTOMER-NAME: the Store's name, address and phone as customers see them
  * (menu, order page, pickup panel and new receipts). The browser sends what the Owner typed and
@@ -138,11 +138,12 @@ export function createStorePublicProfileClient(options: {
     }
   };
   return Object.freeze({
-    async load(share = false): Promise<StorePublicProfileView> {
+    async load(share?: SharedReadScope): Promise<StorePublicProfileView> {
       // Batch 36: Home and its setup panels ask for this together when Home opens.
       return sharedRead(
         fetcher,
-        share ? "GET /merchant/store/public-profile" : null,
+        share?.csrf === options.csrf ? share : undefined,
+        "GET /merchant/store/public-profile",
         undefined,
         async () => {
           let response: Response;

@@ -1301,7 +1301,7 @@ export function StoreOverview({
     if (!permitted.kitchenSetup) return;
     let live = true;
     void createStoreKitchenSetupClient({ csrf, ...(fetcher ? { fetcher } : {}) })
-      .load(true)
+      .load({ csrf, storeReference })
       .then(
         (kitchen) => {
           if (live)
@@ -1337,8 +1337,14 @@ export function StoreOverview({
     void Promise.all([
       createStoreFeaturesClient(csrf, fetcher ?? fetch).read(),
       // Batch 36: read with the panels below (Opening list, Pause ordering), once.
-      createStorePublicProfileClient({ csrf, ...(fetcher ? { fetcher } : {}) }).load(true),
-      createServiceControlClient(fetcher ?? fetch).load(storeReference, controller.signal, true),
+      createStorePublicProfileClient({ csrf, ...(fetcher ? { fetcher } : {}) }).load({
+        csrf,
+        storeReference,
+      }),
+      createServiceControlClient(fetcher ?? fetch).load(storeReference, controller.signal, {
+        csrf,
+        storeReference,
+      }),
     ])
       .then(
         ([features, profile, service]) => {
@@ -1411,7 +1417,10 @@ export function StoreOverview({
       await Promise.all([
         permitted.orders
           ? read(
-              async () => summarizeOrders(await clients.orders.load(null, controller.signal, true)),
+              async () =>
+                summarizeOrders(
+                  await clients.orders.load(null, controller.signal, { csrf, storeReference }),
+                ),
               (orders) => setState((s) => ({ ...s, orders })),
             )
           : null,
@@ -1487,11 +1496,13 @@ export function StoreOverview({
   const approvalsRead = useApprovalsWaitingRead(
     screenKey.split("|").includes("APPROVAL-INBOX"),
     fetcher,
+    { csrf, storeReference },
   );
   const staffRolesRead = useStaffRolesWaitingRead(
     csrf,
     screenKey.split("|").includes("APPROVAL-INBOX"),
     fetcher,
+    storeReference,
   );
   const approvals = approvalsRead.value;
   const staffRoles = staffRolesRead.value;

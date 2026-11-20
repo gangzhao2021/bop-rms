@@ -1,5 +1,6 @@
 import { t } from "./i18n/i18n.js";
 import { useSyncExternalStore } from "react";
+import type { SharedReadScope } from "./shared-read.js";
 import {
   createOwnNameClient,
   onOwnNameSaved,
@@ -33,7 +34,11 @@ export class NameStore {
   private readonly retryOnline = () => {
     if (this.snapshot.kind === "Failed") this.load();
   };
-  constructor(private readonly client: OwnNameClient) {}
+  constructor(
+    private readonly client: OwnNameClient,
+    /** Batch 36: the sign-in and Store the first read may share a request for. */
+    private readonly scope?: SharedReadScope,
+  ) {}
   readonly subscribe = (listener: () => void) => {
     this.listeners.add(listener);
     if (this.listeners.size === 1 && typeof window !== "undefined")
@@ -61,7 +66,7 @@ export class NameStore {
     const first = !this.loaded;
     this.loaded = true;
     this.read = true;
-    void this.client.read(first).then(
+    void this.client.read(first ? this.scope : undefined).then(
       (state) => {
         this.reading = false;
         this.set({ kind: "Ready", state });
@@ -95,7 +100,7 @@ export function staffNameStoreFor(
   const key = csrf + "|" + storeReference;
   let store = names.get(key);
   if (store === undefined) {
-    store = new NameStore(client ?? createOwnNameClient(csrf));
+    store = new NameStore(client ?? createOwnNameClient(csrf), { csrf, storeReference });
     names.clear();
     names.set(key, store);
   }

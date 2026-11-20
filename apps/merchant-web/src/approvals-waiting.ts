@@ -1,5 +1,6 @@
 import { createContext, useEffect, useMemo, useState } from "react";
 import { createRefundApprovalClient } from "./refund-approval-client.js";
+import type { SharedReadScope } from "./shared-read.js";
 import { useStaffSessionLive } from "./staff-session-reads.js";
 import { createDiningSessionClient } from "./dining-session-client.js";
 import { createStaffPageClient, StaffPageError } from "./staff-administration-pages.js";
@@ -49,8 +50,9 @@ export function summarizeApprovalsWaiting(
 export function useApprovalsWaiting(
   enabled: boolean,
   fetcher?: typeof fetch,
+  share?: SharedReadScope,
 ): ApprovalsWaiting | null {
-  return useApprovalsWaitingRead(enabled, fetcher).value;
+  return useApprovalsWaitingRead(enabled, fetcher, share).value;
 }
 /**
  * Batch 35: the same, with whether the first read has answered (or failed, or is not sent), so
@@ -59,7 +61,14 @@ export function useApprovalsWaiting(
 export function useApprovalsWaitingRead(
   enabled: boolean,
   fetcher?: typeof fetch,
+  /**
+   * Batch 36: the sign-in and Store this is read for, when the frame's badge and Home may share one
+   * request (undefined: read on its own).
+   */
+  share?: SharedReadScope,
 ): { readonly value: ApprovalsWaiting | null; readonly settled: boolean } {
+  const shareCsrf = share?.csrf;
+  const shareStore = share?.storeReference;
   const client = useMemo(() => createRefundApprovalClient(fetcher), [fetcher]);
   const live = useStaffSessionLive();
   const [waiting, setWaiting] = useState<ApprovalsWaiting | null>(null);
@@ -76,7 +85,12 @@ export function useApprovalsWaitingRead(
       const current = new AbortController();
       controller = current;
       client
-        .approvals(current.signal, true)
+        .approvals(
+          current.signal,
+          shareCsrf === undefined || shareStore === undefined
+            ? undefined
+            : { csrf: shareCsrf, storeReference: shareStore },
+        )
         .then((view) => {
           if (!current.signal.aborted) {
             setWaiting(summarizeApprovalsWaiting(view.entries, view.canSend));
@@ -98,7 +112,7 @@ export function useApprovalsWaitingRead(
       window.clearInterval(timer);
       controller?.abort();
     };
-  }, [client, enabled, live]);
+  }, [client, enabled, live, shareCsrf, shareStore]);
   return { value: waiting, settled };
 }
 
@@ -140,14 +154,17 @@ export function useStaffRolesWaiting(
   csrf: string | null,
   enabled: boolean,
   fetcher?: typeof fetch,
+  storeReference?: string,
 ): StaffRolesWaiting {
-  return useStaffRolesWaitingRead(csrf, enabled, fetcher).value;
+  return useStaffRolesWaitingRead(csrf, enabled, fetcher, storeReference).value;
 }
 /** Batch 35: the same, with whether the first read has answered (see useApprovalsWaitingRead). */
 export function useStaffRolesWaitingRead(
   csrf: string | null,
   enabled: boolean,
   fetcher?: typeof fetch,
+  /** Batch 36: the Store this is read for, when the badge and Home may share one request. */
+  storeReference?: string,
 ): { readonly value: StaffRolesWaiting; readonly settled: boolean } {
   const live = useStaffSessionLive();
   const [waiting, setWaiting] = useState<StaffRolesWaiting>(null);
@@ -161,17 +178,18 @@ export function useStaffRolesWaitingRead(
     const client = createStaffPageClient(csrf, fetcher ?? fetch);
     const roles = createRoleAdministrationPageClient(csrf, fetcher ?? fetch);
     let current = true;
+    const share = storeReference === undefined ? undefined : { csrf, storeReference };
     const read = () => {
       // WP-2423 role presets: staff role requests and role changes waiting for this person.
       void Promise.all([
-        client.roleRequests(true).then(
+        client.roleRequests(share).then(
           (requests): StaffRolesWaiting => requests.length,
           (error: unknown): StaffRolesWaiting =>
             error instanceof StaffPageError && error.code === "PermissionDenied"
               ? null
               : "Unavailable",
         ),
-        roles.waiting(true).then(
+        roles.waiting(share).then(
           (changes): StaffRolesWaiting => changes.length,
           (error: unknown): StaffRolesWaiting =>
             error instanceof RoleAdministrationPageError && error.code === "PermissionDenied"
@@ -193,7 +211,7 @@ export function useStaffRolesWaitingRead(
       current = false;
       window.clearInterval(timer);
     };
-  }, [csrf, enabled, live, fetcher]);
+  }, [csrf, enabled, live, fetcher, storeReference]);
   return { value: waiting, settled };
 }
 

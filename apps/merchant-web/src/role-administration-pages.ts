@@ -1,5 +1,5 @@
 import { t } from "./i18n/i18n.js";
-import { sharedRead } from "./shared-read.js";
+import { sharedRead, type SharedReadScope } from "./shared-read.js";
 import { FULL_SIGN_IN_REQUIRED, isFullSignInRequired } from "./full-sign-in.js";
 import { parseSoleOperatorGate, type SoleOperatorGateView } from "./SoleOperatorSelfApproval.js";
 
@@ -616,7 +616,7 @@ export function createRoleAdministrationPageClient(
 ): RoleAdministrationPageClient & {
   command(request: RoleCommandRequest): Promise<{ readonly roleReference: string }>;
   declineOffer(request: RolePresetOfferDeclineRequest): Promise<void>;
-  waiting(share?: boolean): Promise<readonly RoleChangeWaitingView[]>;
+  waiting(share?: SharedReadScope): Promise<readonly RoleChangeWaitingView[]>;
   starterSets(): Promise<StarterRoleSetsView>;
   applyStarterSet(request: StarterRoleSetApplyRequest): Promise<void>;
 } {
@@ -656,10 +656,11 @@ export function createRoleAdministrationPageClient(
       await post("/merchant/organization/roles/offer-decline", request);
     },
     // Batch 36: the Approvals badge and Home ask for this together (a read, sent as POST).
-    waiting: (share = false) =>
+    waiting: (share?: SharedReadScope) =>
       sharedRead(
         fetcher,
-        share ? "POST /merchant/organization/roles/waiting " + csrf : null,
+        share?.csrf === csrf ? share : undefined,
+        "POST /merchant/organization/roles/waiting",
         undefined,
         async () => parseRoleChangesWaiting(await post("/merchant/organization/roles/waiting", {})),
       ),

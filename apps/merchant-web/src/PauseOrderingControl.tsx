@@ -160,6 +160,8 @@ export const PauseOrderingShownContext = createContext<boolean | undefined>(unde
 export function usePauseOrderingRead(
   storeReference: string | undefined,
   fetcher?: typeof fetch,
+  /** Batch 36: the sign-in's token, when the first read may share Home's (undefined: never). */
+  csrf?: string,
 ): PauseOrderingRead {
   const shown = useContext(PauseOrderingShownContext);
   const notShown = shown === false;
@@ -175,7 +177,11 @@ export function usePauseOrderingRead(
     const controller = new AbortController();
     client
       // Batch 36: the first read joins Home's; a read after a pause or resume never does.
-      .load(storeReference, controller.signal, revision === 0)
+      .load(
+        storeReference,
+        controller.signal,
+        revision === 0 && csrf !== undefined ? { csrf, storeReference } : undefined,
+      )
       .then((next) => setAnswer({ status: "Known", view: next, answeredAt: Date.now() }))
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
@@ -196,7 +202,7 @@ export function usePauseOrderingRead(
       controller.abort();
       clearTimeout(timer);
     };
-  }, [client, storeReference, revision, notShown, shown]);
+  }, [client, storeReference, revision, notShown, shown, csrf]);
   const reload = useCallback(() => setRevision((value) => value + 1), []);
   return useMemo(
     () =>
@@ -227,7 +233,7 @@ export function PauseOrderingControl({
   readonly read?: PauseOrderingRead | undefined;
 }) {
   const client = useMemo(() => createServiceControlClient(fetcher ?? fetch), [fetcher]);
-  const own = usePauseOrderingRead(read === undefined ? storeReference : undefined, fetcher);
+  const own = usePauseOrderingRead(read === undefined ? storeReference : undefined, fetcher, csrf);
   const current = read ?? own;
   const view = current.view;
   const reload = current.reload;

@@ -1,5 +1,5 @@
 import { t } from "./i18n/i18n.js";
-import { sharedRead } from "./shared-read.js";
+import { sharedRead, type SharedReadScope } from "./shared-read.js";
 /**
  * WP-2423 item 11: the Store's kitchen setup. The browser sends only the version it saw and its
  * operation; Store, actor, time and what the line holds are decided by the server.
@@ -60,11 +60,12 @@ export function createStoreKitchenSetupClient(options: {
     }
   };
   return Object.freeze({
-    async load(share = false): Promise<StoreKitchenSetupView> {
+    async load(share?: SharedReadScope): Promise<StoreKitchenSetupView> {
       // Batch 36: Home and its setup panels ask for this together when Home opens.
       return sharedRead(
         fetcher,
-        share ? "GET /merchant/store/kitchen-setup" : null,
+        share?.csrf === options.csrf ? share : undefined,
+        "GET /merchant/store/kitchen-setup",
         undefined,
         async () => {
           let response: Response;

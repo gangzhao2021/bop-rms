@@ -226,8 +226,11 @@ export function WorkspaceLayout({
   children,
   footer = null,
   csrf = null,
+  storeReference = null,
   readsPaused = false,
 }: {
+  /** Batch 36: the selected Store, so its opening reads may share Home's (never another's). */
+  readonly storeReference?: string | null;
   /** M01: reconnecting; the waiting counts are not read (they would only fail). */
   readonly readsPaused?: boolean;
   /** WP-2423 Q28: the session's CSRF token, to count guests waiting for staff. */
@@ -246,11 +249,15 @@ export function WorkspaceLayout({
   // WP-2423 Q35: refunds waiting for an approver are counted beside "Approvals" on every page.
   const approvals = useApprovalsWaiting(
     !readsPaused && items.some((item) => item.screenId === "APPROVAL-INBOX"),
+    undefined,
+    csrf === null || storeReference === null ? undefined : { csrf, storeReference },
   );
   // WP-2423 M07: and staff roles waiting for this person.
   const staffRoles = useStaffRolesWaiting(
     csrf,
     !readsPaused && items.some((item) => item.screenId === "APPROVAL-INBOX"),
+    undefined,
+    storeReference ?? undefined,
   );
   // WP-2423 Q28: guests waiting for staff are counted beside "Tables" on every page.
   const staffCalls = useStaffCallsWaiting(
