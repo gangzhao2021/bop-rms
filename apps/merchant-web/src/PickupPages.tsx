@@ -1,5 +1,5 @@
 import { t } from "./i18n/i18n.js";
-import { PauseOrderingControl } from "./PauseOrderingControl.js";
+import { PauseOrderingControl, PauseOrderingShownContext } from "./PauseOrderingControl.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { PickupProofForm, pickupCodeLockedText } from "./PickupProofForm.js";
 import { PickupHandoffForm } from "./PickupHandoffForm.js";
@@ -17,7 +17,15 @@ import {
 import { StatePanel } from "@bop-rms/ui";
 import { Freshness } from "./StoreTime.js";
 import { WorkspacePage } from "./WorkspacePage.js";
-import { useCallback, useEffect, useState, useMemo, useRef, type RefObject } from "react";
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useState,
+  useMemo,
+  useRef,
+  type RefObject,
+} from "react";
 import { useStaffSessionLive } from "./staff-session-reads.js";
 import { createPickupClient } from "./pickup-client.js";
 import { Link } from "react-router";
@@ -438,9 +446,21 @@ export function PickupQueueScreen({
   const today = businessDay?.businessDate ?? null;
   // WP-2423 store-service-controls (v15 M46): after the day's service, every ready order nobody
   // collected can be closed for the night at once.
-  const closingItems = storeClosingNow(businessDay, Date.parse(view.projectedAt))
-    ? view.items.filter((item) => item.phase === "Ready" && item.execution !== undefined)
-    : [];
+  const closable = view.items.filter(
+    (item) => item.phase === "Ready" && item.execution !== undefined,
+  );
+  const closingItems = storeClosingNow(businessDay, Date.parse(view.projectedAt)) ? closable : [];
+  // Batch 35 (v15 b34 live): when the day's hours answer after the list has shown (a read slower
+  // than BUSINESS_DAY_SETTLE_MS), "Mark all not collected" used to be inserted above the list and
+  // push it down 44 px. It now sits on Pause ordering's line, and while the hours are not known
+  // and there are ready orders that line keeps its height even without Pause ordering, so the
+  // control taking its place there moves nothing. Once kept, the line stays for this screen.
+  const pauseShown = useContext(PauseOrderingShownContext) !== false;
+  const closingMayCome = businessDay?.startsAt == null && closable.length > 0;
+  const keepToolsLine = useRef(false);
+  if (closingMayCome) keepToolsLine.current = true;
+  const toolsLine =
+    proofContext !== undefined && (pauseShown || closingItems.length > 0 || keepToolsLine.current);
   // An order already handed over needs no checking, whichever day it was from.
   const needsChecking = (item: PickupQueueItem) =>
     fromEarlierDay(item, today) && item.phase !== "Completed";
@@ -479,21 +499,24 @@ export function PickupQueueScreen({
       }
     >
       <>
-        {/* WP-2423 store-service-controls (v15 M30): the pause, where pickup staff work. */}
-        {proofContext ? (
-          <PauseOrderingControl
-            csrf={proofContext.csrf}
-            storeReference={proofContext.storeReference}
-          />
-        ) : null}
-        {proofContext && closingItems.length > 0 ? (
-          <PickupClosingAction
-            items={closingItems}
-            paused={readOnly || stale !== undefined}
-            csrf={proofContext.csrf}
-            storeReference={proofContext.storeReference}
-            onDone={onRefresh}
-          />
+        {proofContext && toolsLine ? (
+          // Store-wide steps on one line: the pause and, after closing, closing what is left.
+          <div className="pickup-queue__tools">
+            {/* WP-2423 store-service-controls (v15 M30): the pause, where pickup staff work. */}
+            <PauseOrderingControl
+              csrf={proofContext.csrf}
+              storeReference={proofContext.storeReference}
+            />
+            {closingItems.length > 0 ? (
+              <PickupClosingAction
+                items={closingItems}
+                paused={readOnly || stale !== undefined}
+                csrf={proofContext.csrf}
+                storeReference={proofContext.storeReference}
+                onDone={onRefresh}
+              />
+            ) : null}
+          </div>
         ) : null}
         {view.guestPickupOff === true ? (
           // WP-2423 item 8 ⑦ (v15 finding v): guests can no longer order pickup here; what is
@@ -850,7 +873,9 @@ export function PickupQueuePage(props: {
         title={t("Pickup")}
         meta={props.storeLabel}
         actions={
-          state.kind !== "Loading" ? (
+          // Batch 35: no Refresh while the panel says it is loading (the list already read, held
+          // for the day's hours, is still loading as far as staff can see).
+          state.kind !== "Loading" && state.kind !== "Found" ? (
             <button ref={refreshButtonRef} onClick={refresh}>
               {t("Refresh")}
             </button>

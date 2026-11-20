@@ -27,6 +27,28 @@
   color: var(--bop-color-accent);
 }
 
+/* ---- Store-wide steps: Pause ordering and, after closing, Mark all not collected ----------- */
+/* Batch 35: one line of text actions starting at the page's edge, like Pause ordering on Orders.
+   The line keeps its height while the day's hours are not known, so the closing step arriving
+   late takes its place there instead of pushing the list down. */
+.workspace-page.pickup-queue .pickup-queue__tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 var(--bop-space-6);
+  min-height: 44px;
+  margin: 0 0 8px;
+}
+.workspace-page.pickup-queue .pickup-queue__tools > .pause-ordering {
+  margin: 0;
+}
+.workspace-page.pickup-queue .pickup-queue__tools .pickup-closing > button {
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  font-size: 14px;
+}
+
 /* ---- Filters: one compact row ------------------------------------------------------------ */
 .workspace-page.pickup-queue .pickup-queue__filters {
   display: flex;
