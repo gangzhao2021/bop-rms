@@ -306,8 +306,13 @@ it("lays the pickup schedule from the Store's published hours through the pilot 
               brandReference: storeScope.brandReference,
               storeReference: storeScope.storeReference,
             };
+            // The first run's own instant: the schedule reaches a fixed horizon from "now", so a
+            // restart in the next clock hour rightly lays that new hour. "Nothing to do" is
+            // checked at the same instant, never across a wall-clock hour boundary.
+            let firstRunAt = null;
             const worker = {
               ...resources,
+              now: () => (firstRunAt ??= resources.now()),
               scope: scheduleScope,
               publicProfile: { binding: { validUntil: "2099-01-01T00:00:00.000Z" } },
             };
