@@ -107,10 +107,12 @@ it("batch 35: a read that does not answer holds Home back no longer than OVERVIE
 
 it("v15 finding: the store system card follows the server's answer, not the navigation", async () => {
   // The pilot navigation before this fix carried no OPS-ORDER-EXCEPTION entry, so the card never
-  // rendered although the alerts route answers 200 for these roles. A 403 hides it instead. While
-  // the alerts read is still being tried again, Home shows after OVERVIEW_SETTLE_MS with the card.
+  // rendered although the alerts route answers 200 for these roles. A 403 hides it instead.
+  // Batch 36 (b35 known limit): a failed alerts read is said as failed at once (after one quick
+  // second try), so Home no longer waits OVERVIEW_SETTLE_MS and says "still checking" for it.
   const fetcher = vi.fn(async () => failed());
   vi.stubGlobal("fetch", fetcher);
+  const started = performance.now();
   const { container } = await mount(
     <MemoryRouter>
       <StoreOverview
@@ -123,6 +125,23 @@ it("v15 finding: the store system card follows the server's answer, not the navi
     </MemoryRouter>,
   );
   await until(() => shown(container) !== null, OVERVIEW_SETTLE_MS + 2_000);
-  expect(shown(container)?.textContent).toContain("Checking the store system");
+  expect(performance.now() - started).toBeLessThan(OVERVIEW_SETTLE_MS - 1_000);
+  expect(shown(container)?.textContent).toContain("Store system: could not be checked");
+  expect(shown(container)?.textContent).toContain("The store system could not be checked");
+  expect(shown(container)?.textContent).not.toContain("Still checking");
   expect(shown(container)?.querySelector('[aria-label="Store system"]')).not.toBeNull();
+}, 10_000);
+
+it("batch 36: one failed store system read is read again at once, so a blip is never listed", async () => {
+  let alerts = 0;
+  const container = await home((source, url) => {
+    if (source !== null) return Promise.resolve(failed());
+    if (!url.includes("/merchant/operations-alerts")) return Promise.resolve(notPermitted());
+    alerts += 1;
+    return Promise.resolve(alerts === 1 ? failed() : notPermitted());
+  });
+  await until(() => shown(container) !== null, OVERVIEW_SETTLE_MS + 2_000);
+  expect(alerts).toBe(2);
+  expect(container.textContent).not.toContain("could not be checked");
+  expect(container.textContent).not.toContain("Still checking");
 }, 10_000);

@@ -272,6 +272,12 @@ export function parseOperationsAlertView(value: unknown): OperationsAlertView {
 
 /** v15 batch 8: a first failed alerts read is read again after this long before it is listed. */
 export const OPERATIONS_ALERTS_RETRY_MS = 4_000;
+/**
+ * Batch 36 (v15 b35 known limit): before the first answer Home waits for this read, so a first
+ * failure is read again this soon instead (a blip still never shows as "could not be checked"),
+ * and a second one is listed at once and read again in the background after the retry above.
+ */
+export const OPERATIONS_ALERTS_FIRST_RETRY_MS = 300;
 
 export function createOperationsAlertsClient(fetcher: typeof fetch = fetch) {
   return Object.freeze({
@@ -661,6 +667,8 @@ export function useOperationsAlerts(
   const stopped = useRef(false);
   // The number to call when the alerts themselves cannot be read is the one the last read carried.
   const support = useRef<OperationsAlertView["support"]>(null);
+  // Batch 36: whether any read has answered on this screen yet (Home is held until one does).
+  const answered = useRef(false);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
   const load = useCallback(async () => {
     if (stopped.current) return;
@@ -674,6 +682,7 @@ export function useOperationsAlerts(
       const value = await client.load(controller.signal);
       if (!controller.signal.aborted) {
         failures.current = 0;
+        answered.current = true;
         support.current = value.support;
         setRead({ kind: "Ready", value });
       }
@@ -685,12 +694,20 @@ export function useOperationsAlerts(
         timer.current = null;
         setRead({ kind: "NotPermitted" });
       } else if (failures.current === 0) {
-        // What was read last stays in view meanwhile (or nothing, before the first answer).
+        // What was read last stays in view meanwhile (or nothing, before the first answer, when
+        // it is read again at once: Home waits for it).
         failures.current = 1;
-        retry.current = setTimeout(() => void loadRef.current?.(), retryMs);
+        retry.current = setTimeout(
+          () => void loadRef.current?.(),
+          answered.current ? retryMs : Math.min(retryMs, OPERATIONS_ALERTS_FIRST_RETRY_MS),
+        );
       } else {
         failures.current += 1;
         setRead({ kind: "Unavailable", support: support.current });
+        // Batch 36: said at once; before any answer it is read again in the background once more
+        // (then with the regular refresh), so a short outage clears without anyone pressing.
+        if (!answered.current && failures.current === 2)
+          retry.current = setTimeout(() => void loadRef.current?.(), retryMs);
       }
     } finally {
       if (!controller.signal.aborted) setBusy(false);

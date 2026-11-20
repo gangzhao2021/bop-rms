@@ -68,6 +68,11 @@ it("a failure that repeats is listed as not checked", async () => {
   expect(container.textContent).toBe("Loading");
   await wait(60);
   await settle();
-  expect(calls).toBe(2);
+  expect(calls).toBeGreaterThanOrEqual(2);
+  expect(container.textContent).toBe("Unavailable");
+  // Batch 36: before any answer it is read once more in the background, then only on refresh.
+  await wait(120);
+  await settle();
+  expect(calls).toBe(3);
   expect(container.textContent).toBe("Unavailable");
 });
