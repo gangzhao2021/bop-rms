@@ -7,6 +7,9 @@ import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render
 import { readProjectedExceptionReferences } from "../../../tooling/environment/pilot-exception-references.mjs";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 import { seedMerchantAcceptanceSession } from "../test-support/merchant-acceptance-session.mjs";
+import { seedOrdinaryRefundSession } from "../test-support/ordinary-refund-session.mjs";
+import { createInternalExceptionSnapshotTransactions } from "../../../tooling/environment/pilot-exception-snapshot.mjs";
+import { merchantFailureKind } from "../../../apps/api/src/merchant-failure.ts";
 import { createPersistentMerchantOrderExceptions } from "../../../apps/api/src/persistent-merchant-order-exceptions.ts";
 import { seedJourneyStorePublication } from "../test-support/dine-in-journey-seed.mjs";
 
@@ -483,6 +486,164 @@ it("lists every open exception past 500 lifetime cases and pages resolved histor
           ["RefundCheckDue", "STORE_BUSINESS_DATE_UNAVAILABLE"],
         ],
       );
+
+      // Batch 37 review: the same read through the pilot's own exception snapshot (its statement
+      // memo and the one transaction for every confirmed refund's day), under the api role: this
+      // Store's staff get the same page; another Store's and another Tenant's staff see none of
+      // this Store's cases, through their own Store's snapshot or this one; a Session of theirs
+      // selecting this Store is refused; and this Store's staff are refused once their exception
+      // permission ends. Each right after this Store's staff read it.
+      const pilotTransactions = (binding) =>
+        createInternalExceptionSnapshotTransactions({
+          publicProfile: {
+            binding: { ...binding, validUntil: new Date(Date.now() + 3_600_000).toISOString() },
+          },
+          scope: { brandReference: binding.brandReference, storeReference: binding.storeReference },
+          now,
+          database: {
+            async acquire() {
+              const client = new Client(context.clientConfig);
+              await client.connect();
+              await client.query("SET ROLE " + api);
+              return {
+                query: (sql, values) => client.query(sql, values),
+                release: () => void client.end(),
+              };
+            },
+          },
+        });
+      const pilotRead = (persistence, binding) =>
+        createPersistentMerchantOrderExceptions({
+          persistence: {
+            ...persistence,
+            transactions: pilotTransactions(binding),
+            now,
+            publication: {
+              configurationType: "STORE_CONFIGURATION",
+              purposeCode: "STORE_CONFIGURATION",
+              requiredLiveGateRequirementCodes: ["SYNTHETIC_STORE_READY"],
+            },
+          },
+          onUnexpected: (error, what) => unexpected.push([what ?? "ReconciliationDetail", error]),
+          metadata: async (_tx, { storeLabel }) => ({
+            storeLabel,
+            businessDate: "2026-10-17",
+            checkpointReference: id(400),
+            projectedAt: now(),
+            freshnessStatus: "Stale",
+          }),
+        });
+      unexpected.length = 0;
+      const thisStore = pilotRead(session.persistence, ownerScope);
+      const ours = await read(session.sessionCookie);
+      const viaPilot = await thisStore(session.sessionCookie);
+      assert.deepEqual(
+        viaPilot.items.map((item) => [item.exceptionReference, item.dueAt]),
+        ours.items.map((item) => [item.exceptionReference, item.dueAt]),
+      );
+      assert.deepEqual(unexpected, []);
+      const ourCases = new Set(ours.items.map((item) => item.exceptionReference));
+
+      const otherStoreScope = { ...ownerScope, storeReference: id(60) };
+      const otherTenantScope = {
+        tenantReference: id(70),
+        brandReference: id(71),
+        storeReference: id(72),
+      };
+      const created = new Date(Date.now() - minutes(5)).toISOString();
+      await admin.query(
+        "INSERT INTO bop_tenant.store VALUES ($1,$2,'SYNTHETIC_OTHER_STORE','Synthetic Other Store','America/Toronto','en-CA','CAD','Active',1,$3,$3)",
+        [otherStoreScope.storeReference, otherStoreScope.brandReference, created],
+      );
+      await admin.query(
+        "INSERT INTO bop_tenant.brand VALUES ($1,'SYNTHETIC_OTHER_BRAND','Synthetic Other Brand','en-CA','CAD','Active',1,$2,$2)",
+        [otherTenantScope.brandReference, created],
+      );
+      await admin.query(
+        "INSERT INTO bop_tenant.store VALUES ($1,$2,'SYNTHETIC_OTHER_TENANT_STORE','Synthetic Other Tenant Store','America/Toronto','en-CA','CAD','Active',1,$3,$3)",
+        [otherTenantScope.storeReference, otherTenantScope.brandReference, created],
+      );
+      // As the pilot composition, the association accepts every Store of a Tenant's Brand; the
+      // Session's own Membership and Store assignment decide.
+      const installation = [ownerScope, otherStoreScope, otherTenantScope];
+      const seedOther = async (otherScope, actor, prefix) => {
+        const seeded = await seedMerchantAcceptanceSession({
+          admin,
+          runner: writer,
+          scope: otherScope,
+          actor,
+          at: now(),
+          extraPermissions: ["operations.order-exception.manage"],
+          referencePrefix: prefix,
+          sessionReferencePrefix: prefix.slice(0, 7) + "1",
+        });
+        return {
+          actor,
+          scope: otherScope,
+          sessionCookie: seeded.sessionCookie,
+          persistence: {
+            ...seeded.persistence,
+            validateAssociation: async (_tx, current, selected) =>
+              current.actor.actorReference === actor &&
+              installation.some(
+                (known) =>
+                  known.tenantReference === selected.tenantReference &&
+                  known.brandReference === selected.brandReference &&
+                  known.storeReference === selected.storeReference,
+              ),
+          },
+        };
+      };
+      const others = [
+        await seedOther(otherStoreScope, id(61), "01a1e400"),
+        await seedOther(otherTenantScope, id(73), "01a1e500"),
+      ];
+      const outcome = (promise) =>
+        promise.then(
+          (page) => ({ page }),
+          (error) => ({ error }),
+        );
+      for (const [n, other] of others.entries()) {
+        await thisStore(session.sessionCookie);
+        // Through their own Store's snapshot: none of this Store's cases.
+        const own = await pilotRead(other.persistence, other.scope)(other.sessionCookie);
+        assert.deepEqual(own.items, []);
+        // Through this Store's snapshot: refused or nothing, never this Store's cases.
+        await thisStore(session.sessionCookie);
+        const crossing = await outcome(
+          pilotRead(other.persistence, ownerScope)(other.sessionCookie),
+        );
+        if ("page" in crossing)
+          assert.ok(crossing.page.items.every((item) => !ourCases.has(item.exceptionReference)));
+        // A Session of theirs selecting this Store: refused.
+        const pointed = await seedOrdinaryRefundSession({
+          client: admin,
+          runner: () => writer,
+          scope: ownerScope,
+          requester: other.actor,
+          at: now(),
+          policyCode: "WorkforceStandard",
+          referencePrefix: "01a1e60" + String(n),
+        });
+        await thisStore(session.sessionCookie);
+        const refused = await outcome(
+          pilotRead(other.persistence, ownerScope)(pointed.sessionCookie),
+        );
+        assert.ok("error" in refused);
+        assert.equal(merchantFailureKind(refused.error), "Refused");
+      }
+
+      // This Store's staff whose exception permission ended: refused on the same path.
+      await thisStore(session.sessionCookie);
+      const revoked = await admin.query(
+        "UPDATE bop_permission.permission_grant g SET lifecycle='Revoked',version=g.version+1 FROM bop_permission.role_assignment a,bop_permission.permission_definition d WHERE a.actor_id=$1 AND a.lifecycle='Active' AND g.role_id=a.role_id AND g.lifecycle='Active' AND d.permission_id=g.permission_id AND d.action_code='operations.order-exception.manage'",
+        [id(10)],
+      );
+      assert.ok(revoked.rowCount >= 1);
+      const ended = await outcome(thisStore(session.sessionCookie));
+      assert.ok("error" in ended);
+      // The route answers a refusal (403), whichever read of the page met it first.
+      assert.equal(merchantFailureKind(ended.error), "Refused");
     } finally {
       await admin.query("RESET ROLE").catch(() => undefined);
       for (const name of [api, worker])

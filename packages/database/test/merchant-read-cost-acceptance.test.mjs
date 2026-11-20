@@ -2,6 +2,8 @@ import { it } from "vitest";
 import { withAutoAcceptWorld } from "../test-support/auto-accept-world.mjs";
 import { createPersistentMerchantOrderQueue } from "../../../apps/api/src/persistent-merchant-order-queue.ts";
 import { merchantFailureKind } from "../../../apps/api/src/merchant-failure.ts";
+import { seedMerchantAcceptanceSession } from "../test-support/merchant-acceptance-session.mjs";
+import { seedOrdinaryRefundSession } from "../test-support/ordinary-refund-session.mjs";
 
 /**
  * Batch 37 (v15 b36: Home waited for GET /merchant/orders, ~1,600 statements and 1.4–2.1 s at
@@ -10,6 +12,11 @@ import { merchantFailureKind } from "../../../apps/api/src/merchant-failure.ts";
  * list answers each listed Order's owner point reads from one read each, with exactly the answer
  * the readers give when every point read is sent, and its statements no longer grow ~17 per
  * listed Order. A Session whose ordering permission ended is still refused on the same path.
+ *
+ * Batch 37 review: on that same path (the snapshot, its point reads, and the permission evaluation
+ * a read reuses), another Store's and another Tenant's staff see none of this Store's Orders, and a
+ * Session pointed at this Store without its own Membership or Store assignment is refused, each
+ * read right after this Store's staff read it.
  */
 const on = async (world) => {
   await world.setting.change({ pickup: true, dineIn: false, at: world.time(-world.minutes(240)) });
@@ -104,6 +111,106 @@ it("batch 37: the Orders list reads the listed Orders' point reads once for all,
     const perOrder = (large.statements - small.statements) / 6;
     assert.ok(perOrderAll >= 8, "every point read sent: " + perOrderAll + " per Order");
     assert.ok(perOrder <= perOrderAll / 4, "read once for all: " + perOrder + " per Order");
+
+    // Another Store of the same Brand and Tenant, and another Tenant: staff of each, with the same
+    // permissions at their own Store. As the pilot composition, the association accepts every
+    // Store of a Tenant's Brand; the Session's own Membership and Store assignment decide.
+    const otherStoreScope = {
+      ...world.ownerScope,
+      storeReference: "01a6b370-0000-7000-8000-000000000002",
+    };
+    const otherTenantScope = {
+      tenantReference: "01a6b371-0000-7000-8000-000000000900",
+      brandReference: "01a6b371-0000-7000-8000-000000000001",
+      storeReference: "01a6b371-0000-7000-8000-000000000002",
+    };
+    const installation = [world.ownerScope, otherStoreScope, otherTenantScope];
+    const seedOther = async (otherScope, prefix) => {
+      const actor = world.fresh();
+      const seeded = await seedMerchantAcceptanceSession({
+        admin: world.admin,
+        runner: world.transactions(),
+        scope: otherScope,
+        actor,
+        at: world.now(),
+        referencePrefix: prefix,
+        sessionReferencePrefix: "01a9" + prefix.slice(4),
+      });
+      return {
+        actor,
+        sessionCookie: seeded.sessionCookie,
+        persistence: {
+          ...seeded.persistence,
+          validateAssociation: async (_tx, session, selected) =>
+            session.actor.actorReference === actor &&
+            installation.some(
+              (known) =>
+                known.tenantReference === selected.tenantReference &&
+                known.brandReference === selected.brandReference &&
+                known.storeReference === selected.storeReference,
+            ),
+        },
+      };
+    };
+    // The Brand's second Store, under a code of its own (the seed names every Store alike).
+    await world.admin.query(
+      "INSERT INTO bop_tenant.store VALUES ($1,$2,'SYNTHETIC_OTHER_STORE','Synthetic Other Store','America/Toronto','en-CA','CAD','Active',1,$3,$3)",
+      [
+        otherStoreScope.storeReference,
+        otherStoreScope.brandReference,
+        new Date(Date.now() - world.minutes(5)).toISOString(),
+      ],
+    );
+    // The other Tenant's Brand and Store, under codes of their own.
+    await world.admin.query(
+      "INSERT INTO bop_tenant.brand VALUES ($1,'SYNTHETIC_OTHER_BRAND','Synthetic Other Brand','en-CA','CAD','Active',1,$2,$2)",
+      [otherTenantScope.brandReference, new Date(Date.now() - world.minutes(5)).toISOString()],
+    );
+    await world.admin.query(
+      "INSERT INTO bop_tenant.store VALUES ($1,$2,'SYNTHETIC_OTHER_TENANT_STORE','Synthetic Other Tenant Store','America/Toronto','en-CA','CAD','Active',1,$3,$3)",
+      [
+        otherTenantScope.storeReference,
+        otherTenantScope.brandReference,
+        new Date(Date.now() - world.minutes(5)).toISOString(),
+      ],
+    );
+    const otherStore = await seedOther(otherStoreScope, "01a6b372");
+    const otherTenant = await seedOther(otherTenantScope, "01a6b373");
+    const listAs = (staffMember) =>
+      createPersistentMerchantOrderQueue({
+        persistence: { ...staffMember.persistence, now: world.now },
+        quoteVersion: 1,
+        acceptanceConfigured: true,
+      })({ sessionCookie: staffMember.sessionCookie, afterOrderReference: null });
+    const refusal = (promise) =>
+      promise.then(
+        () => null,
+        (error) => error,
+      );
+    for (const staffMember of [otherStore, otherTenant]) {
+      assert.equal((await read(true)).view.items.length, 8);
+      const theirs = await listAs(staffMember);
+      assert.deepEqual(theirs.items, []);
+    }
+    // A Session of each of them selecting this Store (a selection is never changed in place; a
+    // new Session is): refused, not answered with this Store's Orders.
+    for (const [n, staffMember] of [otherStore, otherTenant].entries()) {
+      const pointed = await seedOrdinaryRefundSession({
+        client: world.admin,
+        runner: () => world.transactions(),
+        scope: world.ownerScope,
+        requester: staffMember.actor,
+        at: world.now(),
+        policyCode: "WorkforceStandard",
+        referencePrefix: "01a9b37" + String(4 + n),
+      });
+      assert.equal((await read(true)).view.items.length, 8);
+      const refused = await refusal(
+        listAs({ ...staffMember, sessionCookie: pointed.sessionCookie }),
+      );
+      assert.notEqual(refused, null);
+      assert.equal(merchantFailureKind(refused), "Refused");
+    }
 
     // A Session whose ordering permission ended is refused on the same path, before any Order.
     const revoked = await world.admin.query(
