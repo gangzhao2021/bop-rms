@@ -262,11 +262,36 @@ function tuple(value: LocalFields): number {
   return Date.UTC(value.year, value.month - 1, value.day, value.hour, value.minute, value.second);
 }
 
-function boundaryInstant(
+type Boundary = Readonly<{
+  epochMilliseconds: number;
+  kind: "Exact" | "GapForward" | "OverlapEarlier";
+}>;
+/**
+ * Batch 37 review: the instant a local date and start time name is a pure function of the time
+ * zone (one formatter each, above), the date and the time; finding it formats up to ~50 instants.
+ * It is remembered per formatter by its date and time text (bounded), as the formatter itself is;
+ * every resolution still reads its configuration and decides the day from it.
+ */
+const boundaries = new WeakMap<Intl.DateTimeFormat, Map<string, Boundary>>();
+function boundaryInstant(format: Intl.DateTimeFormat, date: LocalFields, start: string): Boundary {
+  const key = `${date.year}-${date.month}-${date.day}T${start}`;
+  let known = boundaries.get(format);
+  const remembered = known?.get(key);
+  if (remembered !== undefined) return remembered;
+  const found = findBoundaryInstant(format, date, start);
+  if (known === undefined) {
+    known = new Map();
+    boundaries.set(format, known);
+  }
+  if (known.size >= 512) known.clear();
+  known.set(key, found);
+  return found;
+}
+function findBoundaryInstant(
   format: Intl.DateTimeFormat,
   date: LocalFields,
   start: string,
-): Readonly<{ epochMilliseconds: number; kind: "Exact" | "GapForward" | "OverlapEarlier" }> {
+): Boundary {
   const [hour = 0, minute = 0, second = 0] = start.split(":").map(Number);
   const target: LocalFields = { ...date, hour, minute, second };
   const targetTuple = tuple(target);

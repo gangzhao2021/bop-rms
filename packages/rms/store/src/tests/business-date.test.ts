@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   BusinessDateError,
   defaultBusinessDayStartLocalTime,
@@ -162,5 +162,45 @@ describe("Closed Store Business Date window", () => {
       window("2026-09-20", { ...configuration(), effectiveUntil: "2026-09-21T08:00:00.000Z" })
         .endsAt,
     ).toBe("2026-09-21T08:00:00.000Z");
+  });
+});
+
+describe("Batch 37 review: a business day's boundary instant is found once per time zone and day", () => {
+  it("resolves the same day again with the same answer and without searching the zone again", () => {
+    const config = { ...configuration("03:30:00", "StoreOverride"), timeZone: "America/Halifax" };
+    const formatToParts = vi.spyOn(Intl.DateTimeFormat.prototype, "formatToParts");
+    try {
+      const first = resolveStoreBusinessDate({
+        occurredAt: "2026-09-14T15:00:00.000Z",
+        configuration: config,
+      });
+      const searched = formatToParts.mock.calls.length;
+      formatToParts.mockClear();
+      const again = resolveStoreBusinessDate({
+        occurredAt: "2026-09-14T18:30:00.000Z",
+        configuration: config,
+      });
+      expect({ ...again, occurredAt: first.occurredAt }).toEqual(first);
+      expect(searched).toBeGreaterThan(10);
+      expect(formatToParts.mock.calls.length).toBeLessThanOrEqual(2);
+      // Another day, another start or another time zone is searched on its own.
+      formatToParts.mockClear();
+      const nextDay = resolveStoreBusinessDate({
+        occurredAt: "2026-09-15T15:00:00.000Z",
+        configuration: config,
+      });
+      expect(nextDay.businessDate).toBe("2026-09-15");
+      expect(formatToParts.mock.calls.length).toBeGreaterThan(10);
+      formatToParts.mockClear();
+      const toronto = resolveStoreBusinessDate({
+        occurredAt: "2026-09-14T15:00:00.000Z",
+        configuration: { ...config, timeZone: "America/Toronto" },
+      });
+      expect(toronto.businessDateBoundaryAt).toBe("2026-09-14T07:30:00.000Z");
+      expect(first.businessDateBoundaryAt).toBe("2026-09-14T06:30:00.000Z");
+      expect(formatToParts.mock.calls.length).toBeGreaterThan(10);
+    } finally {
+      formatToParts.mockRestore();
+    }
   });
 });
