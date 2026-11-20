@@ -60,8 +60,31 @@ const tableLock =
 // semicolon (also inside a literal) can only make the memo forget more often, never less.
 const resets =
   /^(?:\s+|--[^\n]*(?:\n|$)|\/\*[\s\S]*?\*\/)*(?:ROLLBACK|ABORT|SET|RESET|DISCARD|BEGIN|START|COMMIT|END|PREPARE|DO|CALL|LOAD)\b/iu;
-const mayUndo = (sql: string) =>
-  /set_config|\/\*/iu.test(sql) || sql.split(";").some((statement) => resets.test(statement));
+/**
+ * Batch 37 (v15 b36, merchant reads CPU-bound): each statement a transaction sends is classified
+ * several times (memo plan, statement kind, observe), each a few case-insensitive Unicode regular
+ * expressions over SQL texts of up to several kilobytes; on v15 that was ~80 ms of the merchant
+ * server's time per Home load. The classifications depend on the SQL text alone, and an owner's
+ * texts are a fixed set, so each answer is kept by text (bounded; forgotten whole when full).
+ * The same function decides; only a repeat of the same text is not computed again.
+ */
+export function memoizeByText<T>(compute: (text: string) => T, limit = 2048) {
+  const known = new Map<string, T>();
+  return (text: string): T => {
+    const found = known.get(text);
+    if (found !== undefined || known.has(text)) return found as T;
+    const value = compute(text);
+    if (text.length <= 65_536) {
+      if (known.size >= limit) known.clear();
+      known.set(text, value);
+    }
+    return value;
+  };
+}
+const mayUndo = memoizeByText(
+  (sql: string) =>
+    /set_config|\/\*/iu.test(sql) || sql.split(";").some((statement) => resets.test(statement)),
+);
 
 /**
  * WP-2423 M35 (DEC-STAFF-ROUND-SPEED, staff round speed): an owner store marks a read whose answer
@@ -158,7 +181,7 @@ export function statementKind(
   const text = sql.trim();
   if (mayUndo(text)) return "Write";
   if (!mayChange(text)) return "Read";
-  if (!mayChange(text.replace(rowLockingClause, ""))) return stable ? "Read" : "Lock";
+  if (!mayChange(strippedRowLock(text))) return stable ? "Read" : "Lock";
   return /^(?:\s+|--[^\n]*(?:\n|$)|\/\*[\s\S]*?\*\/)*SELECT\s+pg_(?:try_)?advisory\w*\s*\(/iu.test(
     text,
   )
@@ -226,6 +249,8 @@ const resultOf = (column: string, value: string | null) =>
 const rowLockingClause =
   /\s+FOR\s+(?:UPDATE|NO\s+KEY\s+UPDATE|SHARE|KEY\s+SHARE)(?:\s+OF\s+[a-z_][a-z0-9_.]*(?:\s*,\s*[a-z_][a-z0-9_.]*)*)?(?:\s+(?:NOWAIT|SKIP\s+LOCKED))?\s*;?\s*$/iu;
 const leadingComments = /^(?:\s+|--[^\n]*(?:\n|$)|\/\*[\s\S]*?\*\/)*/u;
+/** The text without its trailing row-locking clause (by text, as above). */
+const strippedRowLock = memoizeByText((text: string) => text.replace(rowLockingClause, ""));
 /** WP-2423 M35 (review of the third step): the read without its trailing row-locking clause. */
 export function withoutRowLock(sql: string): string {
   return typeof sql === "string" ? sql.trim().replace(rowLockingClause, "") : "";
@@ -240,7 +265,8 @@ export function stableReadLocksRows(sql: string): boolean {
  * or a built-in that locks, writes or changes state. Anything else makes the memo forget the
  * stable reads it holds without a row lock; erring towards "may change" only costs a round trip.
  */
-function mayChange(sql: string): boolean {
+const mayChange = memoizeByText(computeMayChange);
+function computeMayChange(sql: string): boolean {
   const text = sql.replace(leadingComments, "").replace(/;\s*$/u, "");
   // A savepoint taken or released changes no data, setting or lock.
   if (/^(?:SAVEPOINT|RELEASE)\s+(?:SAVEPOINT\s+)?[a-z_][a-z0-9_]*$/iu.test(text)) return false;
@@ -385,7 +411,7 @@ export function createTransactionStatementMemo(
         // Anything else that could change a setting or release a lock: forget it all.
         if (mayUndo(sql)) return forget();
         const text = sql.trim();
-        if (stable && !mayChange(text.replace(rowLockingClause, ""))) {
+        if (stable && !mayChange(strippedRowLock(text))) {
           const key = readKey(text, values);
           const locked = rowLockingClause.test(text);
           // A first row lock may order this transaction after another: earlier reads are stale.
@@ -398,7 +424,7 @@ export function createTransactionStatementMemo(
         // change a row this transaction itself holds locked, and its own later read sees that
         // change: forget every stable read. A plain row-locking read or a new lock writes nothing,
         // so only reads taken without a row lock (now possibly older than the lock) are forgotten.
-        if (mayChange(text.replace(rowLockingClause, ""))) reads.clear();
+        if (mayChange(strippedRowLock(text))) reads.clear();
         else if (mayChange(text)) forgetUnlockedReads();
         return;
       }

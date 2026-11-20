@@ -1,6 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   createTransactionStatementMemo,
+  memoizeByText,
+  statementKind,
   snapshotModeRead,
   snapshotStableRead,
   stableReadMarker,
@@ -368,4 +370,25 @@ describe("snapshotStableRead", () => {
       false,
     );
   });
+});
+
+it("batch 37: keeps a classification by its text, the same answer as computing it", () => {
+  const compute = vi.fn((text: string) => text.length);
+  const byText = memoizeByText(compute, 2);
+  expect([byText("ab"), byText("ab"), byText("abc"), byText("ab")]).toEqual([2, 2, 3, 2]);
+  expect(compute).toHaveBeenCalledTimes(2);
+  // Bounded: full, it forgets what it kept and computes again.
+  expect(byText("abcd")).toBe(4);
+  expect(byText("ab")).toBe(2);
+  expect(compute).toHaveBeenCalledTimes(4);
+  // The statement kinds it serves stay what they were.
+  for (let n = 0; n < 2; n++) {
+    expect(statementKind("SELECT * FROM a.b WHERE x=$1", ["1"])).toBe("Read");
+    expect(statementKind("SELECT * FROM a.b WHERE x=$1 FOR SHARE", ["1"])).toBe("Lock");
+    expect(statementKind("SELECT * FROM a.b WHERE x=$1 FOR SHARE", ["1"], true)).toBe("Read");
+    expect(statementKind("WITH x AS (DELETE FROM a.b RETURNING *) SELECT * FROM x", [])).toBe(
+      "Write",
+    );
+    expect(statementKind("SELECT 1; RESET ALL", [])).toBe("Write");
+  }
 });
