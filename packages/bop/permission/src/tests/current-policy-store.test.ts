@@ -42,7 +42,11 @@ function requiredRow(rows: readonly Row[]): Row {
   if (!row) throw Error("Missing controlled packet row");
   return row;
 }
-function fixture(transactionLocal = false) {
+function fixture(
+  transactionLocal = false,
+  /** What PostgreSQL answers for the transaction's mode (none: no row, as a fake host). */
+  mode?: { readonly isolation: string; readonly read_only: "on" | "off" },
+) {
   // Only database rows are controlled. Actual owner parsers, evidence
   // materialization and permission evaluation run unchanged.
   const metadata = () => ({
@@ -127,6 +131,8 @@ function fixture(transactionLocal = false) {
       async query(sql: string, values: readonly unknown[]) {
         await queryControl.before(sql);
         calls.push({ sql, values });
+        if (sql.includes("transaction_isolation"))
+          return { rows: mode === undefined ? [] : [mode] };
         if (!sql.startsWith("SELECT jsonb_build_object(")) return { rows: [] };
         // Controlled JSONB transport, not permission decisions. Malformed Date
         // facts become malformed transport so the real owner rejects them.
@@ -796,7 +802,8 @@ it("next batch obtains fresh policy rows and does not cache an earlier Allow", a
     { effect: "Deny", source: "ExplicitDeny" },
     { effect: "Deny", source: "DefaultDeny" },
   ]);
-  expect(x.calls).toHaveLength(6);
+  // The read-write transaction is asked its mode once (no snapshot): both batches read the packet.
+  expect(x.calls.filter((call) => !call.sql.includes("transaction_isolation"))).toHaveLength(6);
 });
 it("batch keeps the earliest policy period and owner reevaluates it at the exact boundary", async () => {
   const x = fixture();
@@ -872,7 +879,7 @@ it("single-action public decisions and metadata remain equivalent to the batch o
   expect(batch.decisions).toEqual([single.decision]);
   expect(batch.activeRoleCodes).toEqual(single.activeRoleCodes);
   expect(batch.validUntil).toBe(single.validUntil);
-  expect(x.calls).toHaveLength(6);
+  expect(x.calls.filter((call) => !call.sql.includes("transaction_isolation"))).toHaveLength(6);
 });
 
 it("loads one explicit versioned packet after scope and the Brand's policy fence, with original filters and bounds", async () => {
@@ -1040,4 +1047,150 @@ it("reconstructs canonical millisecond dates without changing exact future perio
     validUntil: null,
   });
   expect(x.calls).toHaveLength(6);
+});
+
+const snapshotMode = { isolation: "repeatable read", read_only: "on" } as const;
+const packets = (x: ReturnType<typeof fixture>) =>
+  x.calls.filter((call) => call.sql.startsWith("SELECT jsonb_build_object(")).length;
+it.each([false, true])(
+  "batch 37 review (a): a READ ONLY snapshot evaluates its packet once per request (transaction source %s)",
+  async (transactionLocal) => {
+    const x = fixture(transactionLocal, snapshotMode);
+    const first = await x.source.authorizeActionsWithRoles(
+      batchInput(x, [f.ACTION, "synthetic.unknown.read"]),
+    );
+    // A committed revocation is never visible inside the snapshot; the rows are changed here only
+    // to show that the later checkpoints are answered from the first evaluation.
+    x.grant.lifecycle = "Revoked";
+    const later = await x.source.authorizeActionsWithRoles({
+      ...batchInput(x, [f.ACTION]),
+      tenantContext: createTenantContext(f.actor, f.brand, f.store, after(2000)),
+    });
+    expect(later.decisions).toEqual([first.decisions[0]]);
+    expect(later.activeRoleCodes).toEqual(first.activeRoleCodes);
+    expect(later.validUntil).toBe(first.validUntil);
+    // An action not asked before is evaluated from the same facts.
+    expect(
+      (
+        await x.source.authorizeActionsWithRoles({
+          ...batchInput(x, ["synthetic.unknown.read", f.ACTION]),
+          tenantContext: createTenantContext(f.actor, f.brand, f.store, after(2500)),
+        })
+      ).decisions.map((decision) => decision.effect),
+    ).toEqual(["Deny", "Allow"]);
+    expect(packets(x)).toBe(1);
+    expect(x.calls.filter((call) => call.sql.includes("transaction_isolation"))).toHaveLength(1);
+    // Every checkpoint still sets its own scope for the statements after it.
+    expect(x.calls.filter((call) => call.sql.includes("set_config('bop.brand_id'"))).toHaveLength(
+      3,
+    );
+  },
+);
+it("batch 37 review (a): the snapshot evaluation is not reused at its policy boundary, after a clock reversal, for other facts or in a read-write transaction", async () => {
+  const boundary = fixture(true, snapshotMode);
+  boundary.override.effect = "Deny";
+  boundary.override.effective_from = new Date(after(1000));
+  boundary.rows.permission_override = [boundary.override];
+  expect((await boundary.source.authorize(boundary.input)).effect).toBe("Allow");
+  expect(
+    (
+      await boundary.source.authorize({
+        ...boundary.input,
+        tenantContext: createTenantContext(f.actor, f.brand, f.store, after(1000)),
+      })
+    ).effect,
+  ).toBe("Deny");
+  expect(packets(boundary)).toBe(2);
+
+  const reversed = fixture(false, snapshotMode);
+  await reversed.source.authorize(reversed.input);
+  await reversed.source.authorize({
+    ...reversed.input,
+    tenantContext: createTenantContext(f.actor, f.brand, f.store, after(-1)),
+  });
+  expect(packets(reversed)).toBe(2);
+
+  const other = fixture(false, snapshotMode);
+  await other.source.authorize(other.input);
+  // The Brand without the Store: other scope facts, read and evaluated on their own.
+  await other.source.authorize({
+    ...other.input,
+    tenantContext: createTenantContext(f.actor, f.brand, null, f.AT),
+    storeAssignment: null,
+  });
+  expect(packets(other)).toBe(2);
+
+  for (const mode of [
+    { isolation: "read committed", read_only: "off" },
+    { isolation: "repeatable read", read_only: "off" },
+    { isolation: "read committed", read_only: "on" },
+  ] as const) {
+    const x = fixture(false, mode);
+    expect((await x.source.authorize(x.input)).effect).toBe("Allow");
+    x.grant.lifecycle = "Revoked";
+    expect((await x.source.authorize(x.input)).effect).toBe("Deny");
+    expect((await x.source.authorize(x.input)).effect).toBe("Deny");
+    expect(packets(x)).toBe(3);
+    expect(x.calls.filter((call) => call.sql.includes("transaction_isolation"))).toHaveLength(1);
+  }
+});
+it("batch 37 review (a): one transaction's snapshot evaluation never answers another transaction", async () => {
+  const x = fixture(false, snapshotMode);
+  await x.source.authorize(x.input);
+  const second = fixture(false, snapshotMode);
+  second.grant.lifecycle = "Revoked";
+  expect((await second.source.authorize(x.input)).effect).toBe("Deny");
+  expect(packets(second)).toBe(1);
+});
+it("batch 37 review (a): the same packet text read fresh in another request is not evaluated again until its boundary", async () => {
+  const text = (x: ReturnType<typeof fixture>) => {
+    x.transport.map = (packet) => JSON.stringify(packet);
+    return x;
+  };
+  const first = text(fixture());
+  first.grant.effective_until = new Date(after(60_000));
+  first.rows.permission_override = [];
+  const earlier = await first.source.authorizeWithRoles(first.input);
+  expect(earlier.decision.effect).toBe("Allow");
+
+  // Another request (its own transaction) reads the same current rows: the same answer, from the
+  // same evaluation, although its packet was read for real.
+  const second = text(fixture());
+  second.grant.effective_until = new Date(after(60_000));
+  const later = await second.source.authorizeWithRoles({
+    ...second.input,
+    tenantContext: createTenantContext(f.actor, f.brand, f.store, after(30_000)),
+  });
+  expect(later.decision).toBe(earlier.decision);
+  expect(later.validUntil).toBe(after(60_000));
+  expect(packets(second)).toBe(1);
+
+  // A revoked grant is a different text: evaluated afresh.
+  const revoked = text(fixture());
+  revoked.grant.effective_until = new Date(after(60_000));
+  revoked.grant.lifecycle = "Revoked";
+  expect((await revoked.source.authorize(revoked.input)).effect).toBe("Deny");
+
+  // At the boundary the same text is evaluated again.
+  const expired = text(fixture());
+  expired.grant.effective_until = new Date(after(60_000));
+  expect(
+    (
+      await expired.source.authorize({
+        ...expired.input,
+        tenantContext: createTenantContext(f.actor, f.brand, f.store, after(60_000)),
+      })
+    ).effect,
+  ).toBe("Deny");
+
+  // Other Membership or Store assignment facts with the same text are evaluated on their own.
+  const brandOnly = text(fixture());
+  brandOnly.grant.effective_until = new Date(after(60_000));
+  const brandDecision = await brandOnly.source.authorize({
+    ...brandOnly.input,
+    tenantContext: createTenantContext(f.actor, f.brand, null, after(30_000)),
+    storeAssignment: null,
+  });
+  expect(brandDecision).not.toBe(earlier.decision);
+  expect(brandDecision.scopeKind).toBe("Brand");
 });

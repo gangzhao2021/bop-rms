@@ -35,7 +35,8 @@ const unavailable = (): never => {
   throw new PermissionPolicyContractError("PERMISSION_POLICY_MATERIALIZATION_INVALID");
 };
 // Private, versioned SQL transport only: each checkpoint still obtains fresh
-// owning facts under the unchanged six-table SHARE lock. No decision is cached.
+// owning facts under the unchanged six-table SHARE lock. No decision is cached,
+// except within one READ ONLY snapshot transaction (snapshotPolicy below).
 const policyPacketSql = `SELECT jsonb_build_object(
   'profile', 'PermissionCurrentPolicyPacketV1',
   'policy_state', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
@@ -108,7 +109,7 @@ const policyPacketSql = `SELECT jsonb_build_object(
     'created_at', to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
     'updated_at', to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')) ORDER BY override_id), '[]'::jsonb)
     FROM (SELECT override_id, permission_id, actor_id, brand_id, store_id, effect, lifecycle, reason_reference, correlation_reference, effective_from, effective_until, version, created_at, updated_at FROM bop_permission.permission_override WHERE brand_id=$1 AND (store_id IS NULL OR store_id=$2) AND actor_id=$3 ORDER BY override_id LIMIT 1025) AS bounded_permission_override)
-) AS packet`;
+)::text AS packet`;
 const packetRowFields = {
   policy_state: ["brand_id", "snapshot_id", "version", "updated_at"],
   permission_definition: [
@@ -224,7 +225,16 @@ function policyPacket(value: unknown) {
   const outerRows = transportArray(descriptor.value, 1);
   if (outerRows.length !== 1) return unavailable();
   const outer = readClosedRecord(outerRows[0], ["packet"]);
-  const packet = readClosedRecord(outer.packet, ["profile", ...Object.keys(packetRowFields)]);
+  // Batch 37 review (a): the packet comes as its JSON text (the memo key, packetText).
+  let parsed: unknown = outer.packet;
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      return unavailable();
+    }
+  }
+  const packet = readClosedRecord(parsed, ["profile", ...Object.keys(packetRowFields)]);
   if (packet.profile !== "PermissionCurrentPolicyPacketV1") return unavailable();
   const normalize = (group: keyof typeof packetRowFields) => {
     const sourceRows = transportArray(packet[group], group === "policy_state" ? 1 : 1024);
@@ -452,6 +462,152 @@ function constructorDependency(value: unknown): unknown {
     return [key, field];
   });
 }
+type MaterializedPolicy = ReturnType<typeof materializePermissionEvidence>;
+type PolicyDecision = ReturnType<typeof evaluatePermission>;
+interface SnapshotPolicy {
+  latest: string;
+  readonly validUntil: string | null;
+  readonly policy: MaterializedPolicy;
+  readonly decisions: Map<string, PolicyDecision>;
+}
+interface SnapshotPolicies {
+  readonly query: unknown;
+  /** What PostgreSQL answered for this transaction's mode: a READ ONLY snapshot or not. */
+  snapshot: boolean | undefined;
+  readonly entries: Map<string, SnapshotPolicy>;
+}
+/**
+ * Batch 37 review (a): a request's checkpoints (the read's start, each owner read's confirmation,
+ * the recheck before the reply) evaluated the same ~900-row packet again each time. In a REPEATABLE
+ * READ (or SERIALIZABLE), READ ONLY transaction no committed change is ever visible, so a repeated
+ * read of the packet answers the same rows, and the evaluation of the same facts is the same until
+ * the first future boundary of any period in them (`validUntil`, which every consumer already
+ * stops at). There, a later checkpoint is answered from this transaction's first evaluation; the
+ * caller still rechecks its own Session and time limits. Nothing outlives the transaction object
+ * (WeakMap), nothing is shared between transactions, requests or users, and a read-write
+ * transaction always reads and evaluates the packet afresh.
+ */
+const snapshotPolicies = new WeakMap<object, SnapshotPolicies>();
+const snapshotModeSql =
+  "SELECT current_setting('transaction_isolation') AS isolation, current_setting('transaction_read_only') AS read_only";
+function decisionsByAction(
+  actions: readonly string[],
+  decisions: readonly PolicyDecision[],
+): Map<string, PolicyDecision> {
+  const byAction = new Map<string, PolicyDecision>();
+  actions.forEach((action, index) => {
+    const decision = decisions[index];
+    if (decision === undefined) return unavailable();
+    byAction.set(action, decision);
+  });
+  return byAction;
+}
+function snapshotPolicyKey(parts: readonly unknown[]): string | undefined {
+  try {
+    return JSON.stringify(
+      parts.map((part) =>
+        part === null || typeof part !== "object" ? part : constructorDependency(part),
+      ),
+    );
+  } catch {
+    return undefined;
+  }
+}
+function snapshotPoliciesOf(transaction: object, query: unknown): SnapshotPolicies {
+  const known = snapshotPolicies.get(transaction);
+  if (known !== undefined && known.query === query) return known;
+  const fresh: SnapshotPolicies = { query, snapshot: undefined, entries: new Map() };
+  snapshotPolicies.set(transaction, fresh);
+  return fresh;
+}
+function readOnlySnapshot(result: unknown): boolean {
+  try {
+    const rows = (result as { rows?: unknown }).rows;
+    if (!Array.isArray(rows) || rows.length !== 1) return false;
+    const mode = readClosedRecord(rows[0], ["isolation", "read_only"]);
+    return (
+      (mode.isolation === "repeatable read" || mode.isolation === "serializable") &&
+      mode.read_only === "on"
+    );
+  } catch {
+    return false;
+  }
+}
+async function snapshotPolicy(
+  transaction: object,
+  query: unknown,
+  key: string,
+  observedAt: string,
+  read: (sql: string, values: readonly unknown[]) => Promise<unknown>,
+): Promise<SnapshotPolicy | undefined> {
+  const policies = snapshotPoliciesOf(transaction, query),
+    entry = policies.entries.get(key);
+  if (entry === undefined || observedAt < entry.latest) return undefined;
+  if (entry.validUntil !== null && observedAt >= entry.validUntil) return undefined;
+  policies.snapshot ??= readOnlySnapshot(await read(snapshotModeSql, []));
+  if (!policies.snapshot) return undefined;
+  entry.latest = observedAt;
+  return entry;
+}
+/**
+ * Batch 37 review (a): the evaluation of one packet is a pure function of its complete text, the
+ * caller's frozen context, Membership and Store assignment facts, and the instant, and it changes
+ * with the instant only at the packet's first future boundary (`validUntil`). Every checkpoint
+ * still reads the complete current packet under the policy fence; only when the text it read is
+ * exactly a text evaluated before, for the same facts, at or after that earlier instant and before
+ * its boundary, is the earlier evaluation's answer given again (as a canonical instant is parsed
+ * once per text). A changed row, role, grant or override changes the text, so it is evaluated
+ * afresh. Bounded; nothing is kept per user beyond the texts' own facts.
+ */
+const packetEvaluations = new Map<string, Map<string, SnapshotPolicy>>();
+const packetEvaluationTexts = 16,
+  packetEvaluationsPerText = 32;
+function packetText(answer: unknown): string | undefined {
+  try {
+    const rows = (answer as { rows?: unknown }).rows;
+    if (!Array.isArray(rows) || rows.length !== 1) return undefined;
+    const packet = readClosedRecord(rows[0], ["packet"]).packet;
+    return typeof packet === "string" ? packet : undefined;
+  } catch {
+    return undefined;
+  }
+}
+function packetEvaluation(
+  text: string,
+  key: string,
+  observedAt: string,
+): SnapshotPolicy | undefined {
+  const entry = packetEvaluations.get(text)?.get(key);
+  if (entry === undefined || observedAt < entry.latest) return undefined;
+  if (entry.validUntil !== null && observedAt >= entry.validUntil) return undefined;
+  return entry;
+}
+function rememberPacketEvaluation(text: string, key: string, entry: SnapshotPolicy): void {
+  let byFacts = packetEvaluations.get(text);
+  if (byFacts === undefined) {
+    if (packetEvaluations.size >= packetEvaluationTexts) {
+      const oldest = packetEvaluations.keys().next();
+      if (oldest.done !== true) packetEvaluations.delete(oldest.value);
+    }
+    byFacts = new Map();
+    packetEvaluations.set(text, byFacts);
+  }
+  if (byFacts.size >= packetEvaluationsPerText && !byFacts.has(key)) {
+    const oldest = byFacts.keys().next();
+    if (oldest.done !== true) byFacts.delete(oldest.value);
+  }
+  byFacts.set(key, entry);
+}
+function rememberSnapshotPolicy(
+  transaction: object,
+  query: unknown,
+  key: string,
+  entry: SnapshotPolicy,
+): void {
+  const policies = snapshotPoliciesOf(transaction, query);
+  if (policies.snapshot === false) return;
+  policies.entries.set(key, entry);
+}
 export function createPostgresCurrentPermissionPolicySource(
   transaction: PermissionPolicyTransaction,
 ) {
@@ -596,6 +752,46 @@ function createPermissionPolicySource(
             return unavailable();
           latestObservation = context.resolvedAt;
         }
+        const decide = (
+          action: ReturnType<typeof parseBusinessAction>,
+          policy: MaterializedPolicy,
+        ) => {
+          const evaluation = {
+            action,
+            resourceScope: {
+              kind: "scopeKind" in context ? context.scopeKind : ("Brand" as const),
+              brandReference: brand,
+              storeReference: store,
+            },
+            policySnapshotReference: policy.policySnapshotReference,
+            policyVersion: policy.policyVersion,
+            evidence: policy.evidence,
+          };
+          return "profile" in context
+            ? evaluateBrandAdministrationPermission({
+                ...evaluation,
+                administrationContext: context,
+                resourceScope: { kind: "Brand", brandReference: brand, storeReference: null },
+              })
+            : evaluatePermission({ ...evaluation, tenantContext: context });
+        };
+        // Batch 37 review (a): one evaluation per request in a read-only snapshot. Only an
+        // operational checkpoint of the same scope, actor, Membership and Store assignment, at or
+        // after the first one and before its first future policy boundary, in a transaction
+        // PostgreSQL itself reports as a READ ONLY snapshot.
+        const memoKey = administrative
+          ? undefined
+          : snapshotPolicyKey([
+              brand,
+              store,
+              actor,
+              membership.membershipReference,
+              context.actor,
+              context.brand,
+              context.store,
+              membership,
+              storeAssignment,
+            ]);
         check();
         const dependencies = reuseConstructors
           ? JSON.stringify([
@@ -618,15 +814,68 @@ function createPermissionPolicySource(
           "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
           [brand, store ?? ""],
         );
+        const held =
+          memoKey === undefined
+            ? undefined
+            : await snapshotPolicy(transaction, capturedQuery, memoKey, context.resolvedAt, query);
+        if (held !== undefined) {
+          const reused = Object.freeze(
+            actions.map((action) => {
+              const known = held.decisions.get(action);
+              if (known !== undefined) return known;
+              const fresh = decide(action, held.policy);
+              held.decisions.set(action, fresh);
+              return fresh;
+            }),
+          );
+          check();
+          return Object.freeze({
+            decisions: reused,
+            activeRoleCodes: held.policy.activeRoleCodes,
+            validUntil: held.validUntil,
+          });
+        }
         if (!reuseConstructors || !shared) {
           await query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [
             "PermissionPolicyFence:" + brand,
           ]);
           if (reuseConstructors) shared = true;
         }
-        const packet = policyPacket(
-          await query(policyPacketSql, [brand, store, actor, membership.membershipReference]),
-        );
+        const answer = await query(policyPacketSql, [
+          brand,
+          store,
+          actor,
+          membership.membershipReference,
+        ]);
+        const text = memoKey === undefined ? undefined : packetText(answer);
+        const evaluated =
+          text === undefined || memoKey === undefined
+            ? undefined
+            : packetEvaluation(text, memoKey, context.resolvedAt);
+        if (evaluated !== undefined && memoKey !== undefined) {
+          const decisions = Object.freeze(
+            actions.map((action) => {
+              const known = evaluated.decisions.get(action);
+              if (known !== undefined) return known;
+              const fresh = decide(action, evaluated.policy);
+              evaluated.decisions.set(action, fresh);
+              return fresh;
+            }),
+          );
+          check();
+          rememberSnapshotPolicy(transaction, capturedQuery, memoKey, {
+            latest: context.resolvedAt,
+            validUntil: evaluated.validUntil,
+            policy: evaluated.policy,
+            decisions: decisionsByAction(actions, decisions),
+          });
+          return Object.freeze({
+            decisions,
+            activeRoleCodes: evaluated.policy.activeRoleCodes,
+            validUntil: evaluated.validUntil,
+          });
+        }
+        const packet = policyPacket(answer);
         if (reuseConstructors) {
           // Timestamp validity is current-observation dependent, even when the
           // complete SQL packet and all constructor dependencies are unchanged.
@@ -691,28 +940,7 @@ function createPermissionPolicySource(
               );
         // One fresh owning materialization for this checkpoint; every action
         // receives the canonical evaluator's complete decision in input order.
-        const decisions = Object.freeze(
-          actions.map((action) => {
-            const evaluation = {
-              action,
-              resourceScope: {
-                kind: "scopeKind" in context ? context.scopeKind : ("Brand" as const),
-                brandReference: brand,
-                storeReference: store,
-              },
-              policySnapshotReference: policy.policySnapshotReference,
-              policyVersion: policy.policyVersion,
-              evidence: policy.evidence,
-            };
-            return "profile" in context
-              ? evaluateBrandAdministrationPermission({
-                  ...evaluation,
-                  administrationContext: context,
-                  resourceScope: { kind: "Brand", brandReference: brand, storeReference: null },
-                })
-              : evaluatePermission({ ...evaluation, tenantContext: context });
-          }),
-        );
+        const decisions = Object.freeze(actions.map((action) => decide(action, policy)));
         // SQL locks prevent changes to these validated rows, but they do not
         // stop an existing period from starting or expiring. A consumer holding
         // this observation must stop at the first such future boundary, even if
@@ -738,6 +966,21 @@ function createPermissionPolicySource(
         }
         if (administrative && validUntil !== null) administrativeDeadline = validUntil;
         check();
+        if (memoKey !== undefined) {
+          rememberSnapshotPolicy(transaction, capturedQuery, memoKey, {
+            latest: context.resolvedAt,
+            validUntil,
+            policy,
+            decisions: decisionsByAction(actions, decisions),
+          });
+          if (text !== undefined)
+            rememberPacketEvaluation(text, memoKey, {
+              latest: context.resolvedAt,
+              validUntil,
+              policy,
+              decisions: decisionsByAction(actions, decisions),
+            });
+        }
         return Object.freeze({ decisions, activeRoleCodes: policy.activeRoleCodes, validUntil });
       } catch {
         if (reuseConstructors) poisoned = true;
