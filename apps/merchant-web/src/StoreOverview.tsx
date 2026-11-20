@@ -10,6 +10,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -40,7 +41,7 @@ import {
 import { createPickupClient } from "./pickup-client.js";
 import { parsePickupQueueView } from "./pickup.js";
 import { storeTime } from "./StoreTime.js";
-import { ClosingReminder, closingReminderScreen } from "./ClosingReminder.js";
+import { ClosingReminder, closingReminderScreen, closingReminderShows } from "./ClosingReminder.js";
 import { OrderingEndingNotice } from "./OrderingEndingNotice.js";
 import { formatContactPhone } from "./contact-phone.js";
 import {
@@ -1514,10 +1515,15 @@ export function StoreOverview({
   // Store's hours for the day; Home waits for that read (a moment, at most BUSINESS_DAY_SETTLE_MS)
   // so the reminder arrives with the rest and nothing below it moves.
   const daySettled = useStoreBusinessDaySettled();
+  const businessDay = useStoreBusinessDay();
   // Batch 35: likewise for every read that adds a row to "Needs attention" — at most
   // OVERVIEW_SETTLE_MS, after which what has not answered is listed as still checking.
   const [settleExpired, setSettleExpired] = useState(false);
-  const [reminderSettled, setReminderSettled] = useState(false);
+  // The evening reminder shows from the day just read; until its figures are read, Home holds.
+  const [reminderFigures, setReminderFigures] = useState(false);
+  const figuresRead = useCallback(() => setReminderFigures(true), []);
+  const reminderSettled =
+    !live || reminderFigures || !closingReminderShows(screens, businessDay, Date.now());
   useEffect(() => {
     const timer = setTimeout(() => setSettleExpired(true), OVERVIEW_SETTLE_MS);
     return () => clearTimeout(timer);
@@ -1535,7 +1541,15 @@ export function StoreOverview({
   ];
   // Everything below is mounted while held (hidden), so the parts that read for themselves (the
   // evening reminder, Pause ordering) read at the same time and show with the rest.
-  const held = !daySettled || (unanswered.length > 0 && !settleExpired);
+  const holding = !daySettled || (unanswered.length > 0 && !settleExpired);
+  // Batch 35 review: once shown, Home stays shown. A part that becomes unsettled later (the day's
+  // hours read past BUSINESS_DAY_SETTLE_MS make the evening reminder show and read its figures)
+  // takes its place when ready instead of hiding every section again.
+  const [shown, setShown] = useState(false);
+  useLayoutEffect(() => {
+    if (!holding) setShown(true);
+  }, [holding]);
+  const held = holding && !shown;
   return (
     <>
       {held ? <p role="status">{t("Reading…")}</p> : null}
@@ -1560,10 +1574,10 @@ export function StoreOverview({
               {system.read.kind === "NotPermitted" ? (
                 <OrderingEndingNotice fetcher={fetcher} />
               ) : null}
-              <ClosingReminder screens={screens} fetcher={fetcher} onSettled={setReminderSettled} />
+              <ClosingReminder screens={screens} fetcher={fetcher} onFiguresRead={figuresRead} />
             </>
           }
-          stillReading={held ? [] : unanswered}
+          stillReading={settleExpired ? unanswered : []}
           onRefresh={() => void load(true)}
           onCheckSystem={() => void system.refresh()}
         />

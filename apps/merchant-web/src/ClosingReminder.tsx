@@ -56,6 +56,19 @@ export function closingReminderPhase(
 }
 
 /**
+ * Batch 35 review: whether the reminder shows for these screens at this moment and so has figures
+ * to read. Home works this out from the same day it holds for, rather than from a report the
+ * reminder makes after rendering, which lagged a render behind a late day read.
+ */
+export function closingReminderShows(
+  screens: readonly string[],
+  day: Parameters<typeof closingReminderPhase>[0],
+  now: number,
+): boolean {
+  return screens.includes(closingReminderScreen) && closingReminderPhase(day, now) !== "Hidden";
+}
+
+/**
  * WP-2423 item 8 ② (Figma 47-2, home snippet): on Home, around the Store's closing, tell the Owner
  * or Store Manager what is still open — tables not paid yet and today's net taken — with one step:
  * see today's summary. Read once when shown and every 5 minutes while it shows.
@@ -63,16 +76,16 @@ export function closingReminderPhase(
 export function ClosingReminder({
   screens,
   fetcher,
-  onSettled,
+  onFiguresRead,
 }: {
   readonly screens: readonly string[];
   readonly fetcher?: typeof fetch | undefined;
   /**
-   * Batch 35: told whether the reminder is in its final shape — not shown, or its figures read
-   * (or the read failed) — so Home shows it with its other sections instead of the reminder
-   * gaining its figures, or appearing, a moment after them.
+   * Batch 35: told once tonight's figures have been read (or the read failed), so Home, which
+   * knows from the day whether the reminder shows (closingReminderShows), shows it with its other
+   * sections instead of the reminder appearing a moment after them. Until then it renders nothing.
    */
-  readonly onSettled?: ((settled: boolean) => void) | undefined;
+  readonly onFiguresRead?: (() => void) | undefined;
 }) {
   const day = useStoreBusinessDay();
   const live = useStaffSessionLive();
@@ -118,9 +131,11 @@ export function ClosingReminder({
   }, [show, live, client]);
   const settled = !show || !live || answered;
   useEffect(() => {
-    onSettled?.(settled);
-  }, [onSettled, settled]);
-  if (!show) return null;
+    if (answered) onFiguresRead?.();
+  }, [onFiguresRead, answered]);
+  // Shown once, with its figures: a reminder that appears after Home has shown (the day's hours
+  // read late) moves what is below it once, not again when its figures arrive.
+  if (!show || !settled) return null;
   const stuck = paidOrdersStuck(watch, now);
   const cantMake = watch?.cantMakeRefunds ?? 0;
   const open = summary?.openTables.filter((table) => table.owedMinor !== "0") ?? [];

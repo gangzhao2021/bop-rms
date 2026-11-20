@@ -56,7 +56,12 @@ function order(n: number, phase: "Submitted" | "Accepted", orderType: "Pickup" |
   };
 }
 
-async function home(page: Page, delays: Delays, withReminder: boolean) {
+async function home(
+  page: Page,
+  delays: Delays,
+  withReminder: boolean,
+  slow: { readonly day?: number; readonly tonight?: number } = {},
+) {
   if (withReminder) await page.clock.setFixedTime(new Date(evening));
   await page.route("**/merchant/session", (route) =>
     route.fulfill({
@@ -97,8 +102,9 @@ async function home(page: Page, delays: Delays, withReminder: boolean) {
       },
     }),
   );
-  await page.route("**/merchant/business-day", (route) =>
-    route.fulfill({
+  await page.route("**/merchant/business-day", async (route) => {
+    await later(slow.day ?? 0);
+    await route.fulfill({
       headers,
       json: {
         businessDate: day,
@@ -107,8 +113,8 @@ async function home(page: Page, delays: Delays, withReminder: boolean) {
         timeZone: "America/Toronto",
         observedAt: withReminder ? evening : observedAt,
       },
-    }),
-  );
+    });
+  });
   await page.route("**/merchant/service-control", (route) =>
     route.fulfill({ headers, json: notPausedServiceControl(scope.storeReference) }),
   );
@@ -126,9 +132,10 @@ async function home(page: Page, delays: Delays, withReminder: boolean) {
     }),
   );
   if (withReminder)
-    await page.route("**/merchant/reports/tonight", (route) =>
-      route.fulfill({ headers, json: tonightSummaryFixture() }),
-    );
+    await page.route("**/merchant/reports/tonight", async (route) => {
+      await later(slow.tonight ?? 0);
+      await route.fulfill({ headers, json: tonightSummaryFixture() });
+    });
   // Each read answers at its own moment, as on v15.
   await page.route("**/merchant/orders*", async (route) => {
     await later(delays.orders);
@@ -246,13 +253,16 @@ async function home(page: Page, delays: Delays, withReminder: boolean) {
   });
   // Every frame from Home's first render: where "Right now" is and how many rows the list has.
   await page.addInitScript(() => {
-    const samples: { top: number; rows: number; at: number }[] = [];
+    const samples: { reminder: number; top: number; rows: number; at: number }[] = [];
     (window as unknown as { homeSamples: typeof samples }).homeSamples = samples;
     const sample = () => {
       const now = document.querySelector("main .overview-now");
       // Shown, that is: Home keeps its sections hidden while it holds them back.
       if (now !== null && now.getClientRects().length > 0)
         samples.push({
+          // How much of the evening reminder shows: none (-1), or its text (with or without figures).
+          reminder:
+            document.querySelector("main section.closing-reminder")?.textContent?.length ?? -1,
           top: Math.round(now.getBoundingClientRect().top + window.scrollY),
           rows: document.querySelectorAll("main .overview-attention > li").length,
           at: performance.now(),
@@ -262,12 +272,19 @@ async function home(page: Page, delays: Delays, withReminder: boolean) {
     requestAnimationFrame(sample);
   });
 }
+interface Sample {
+  readonly reminder: number;
+  readonly top: number;
+  readonly rows: number;
+  readonly at: number;
+}
 const samples = (page: Page) =>
-  page.evaluate(
-    () =>
-      (window as unknown as { homeSamples: { top: number; rows: number; at: number }[] })
-        .homeSamples,
-  );
+  page.evaluate(() => (window as unknown as { homeSamples: Sample[] }).homeSamples);
+/** Each distinct [where "Right now" is, how much reminder shows], in the order they showed. */
+const steps = (seen: readonly Sample[]) =>
+  seen
+    .map((entry) => `${entry.top}/${entry.reminder}`)
+    .filter((key, index, all) => index === 0 || key !== all[index - 1]);
 const shots = "test-results/b35";
 
 for (const withReminder of [false, true])
@@ -338,3 +355,35 @@ test("@production a read slower than 3 s holds Home back no longer: what is know
   await expect(needs.getByText("Still checking")).toHaveCount(0);
   await expectNoInternalText(page);
 });
+
+// Batch 35 review: the business-day read answering last. Inside BUSINESS_DAY_SETTLE_MS (here
+// 1.5 s; tonight's figures take 0.3 s) Home showed for a frame or more with the reminder lacking
+// its figures, then moved "Right now" 44 px when they came. Past it (2.5 s) Home hid its sections
+// again while the reminder read, and the reminder could come in two steps, first without and then
+// with its figures. Now: inside the cap, one shape from the first frame; past it, the reminder
+// arrives once, whole, and Home never hides again.
+for (const dayDelay of [1_500, 2_500])
+  test(`@production the day's hours answering last (${dayDelay} ms): the evening reminder shows whole, at most one move (390)`, async ({
+    page,
+  }) => {
+    test.setTimeout(45_000);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await home(page, { orders: 100, tables: 200, pickups: 300, exceptions: 400 }, true, {
+      day: dayDelay,
+      tonight: 300,
+    });
+    await page.goto("/app");
+    const reminder = page.getByRole("region", { name: "Before closing" });
+    await expect(reminder.getByText(/Today's net taken/u)).toBeVisible({ timeout: 8_000 });
+    await page.waitForTimeout(4_000);
+    const seen = await samples(page);
+    expect(seen.length).toBeGreaterThan(100);
+    // Once shown, Home stays shown: no frame is missing between the first and the last sample.
+    const gaps = seen.slice(1).map((entry, index) => entry.at - (seen[index]?.at ?? entry.at));
+    expect(Math.max(...gaps)).toBeLessThan(250);
+    // No frame shows the reminder without its figures.
+    const whole = seen.at(-1)?.reminder;
+    expect(seen.filter((entry) => entry.reminder !== -1 && entry.reminder !== whole)).toEqual([]);
+    expect(steps(seen).length).toBe(dayDelay < 2_000 ? 1 : 2);
+    expect(seen[0]?.reminder).toBe(dayDelay < 2_000 ? whole : -1);
+  });
