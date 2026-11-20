@@ -30,6 +30,16 @@ it("moves every way of reading the time to the database's clock", async () => {
   expect(Date.parse("2026-11-03T00:00:00.000Z")).toBe(1793664000000);
   expect(Date.UTC(2026, 10, 3)).toBe(1793664000000);
   expect(typeof Date()).toBe("string");
+  // Batch 37: still the system Date in every other way, subclasses included.
+  expect(new Date(0)).toBeInstanceOf(Date);
+  expect(new Date(0).constructor).toBe(SystemDate);
+  expect(Date.name).toBe("Date");
+  expect(Date.length).toBe(7);
+  expect(new Date(2026, 10, 3, 1).getTime()).toBe(new SystemDate(2026, 10, 3, 1).getTime());
+  class Later extends Date {}
+  expect(new Later(5)).toBeInstanceOf(Later);
+  expect(new Later(5).getTime()).toBe(5);
+  expect(Math.abs(new Later().getTime() - Date.now())).toBeLessThan(100);
 });
 
 it("never goes back when the difference shrinks", async () => {

@@ -25,15 +25,24 @@ function alignedNow() {
   latest = Math.max(latest, SystemDate.now() + offsetMs);
   return latest;
 }
-const AlignedDate = new Proxy(SystemDate, {
-  construct: (target, args, newTarget) =>
-    Reflect.construct(target, args.length === 0 ? [alignedNow()] : args, newTarget),
-  apply: () => new SystemDate(alignedNow()).toString(),
-  get: (target, key, receiver) =>
-    key === "now"
-      ? alignedNow
-      : Reflect.get(target, key, receiver === AlignedDate ? target : receiver),
-});
+/**
+ * The process's Date: the database's time for `new Date()`, `Date()` and `Date.now()`; every other
+ * use is the system Date's own (its prototype, `instanceof`, `Date.parse`, `Date.UTC`, subclasses).
+ * Batch 37 (v15 b36): a plain constructor function, not a Proxy. Every `new Date(x)` in the process
+ * went through the Proxy's construct trap, about four times the cost of the date itself; on the
+ * CPU-bound merchant entry that was ~50 ms of each Home load.
+ */
+function AlignedDate(...args) {
+  if (new.target === undefined) return new SystemDate(alignedNow()).toString();
+  if (new.target === AlignedDate)
+    return args.length === 0 ? new SystemDate(alignedNow()) : new SystemDate(...args);
+  return Reflect.construct(SystemDate, args.length === 0 ? [alignedNow()] : args, new.target);
+}
+AlignedDate.prototype = SystemDate.prototype;
+Object.setPrototypeOf(AlignedDate, SystemDate);
+Object.defineProperty(AlignedDate, "name", { value: SystemDate.name });
+Object.defineProperty(AlignedDate, "length", { value: SystemDate.length });
+AlignedDate.now = alignedNow;
 
 /** The database's clock minus this host's, from the quickest of a few reads. */
 export async function measureDatabaseClockOffset(query) {
