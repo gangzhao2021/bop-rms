@@ -1,4 +1,9 @@
 import type { ConsumerTransaction } from "@bop/eventing";
+import {
+  createSnapshotPointReads,
+  pointReadReference,
+  type SnapshotPointRead,
+} from "@rms/ordering";
 import { KitchenWorkLifecycleError } from "../../contracts/kitchen-work-lifecycle.js";
 import {
   parseKitchenTicketInstant,
@@ -17,6 +22,85 @@ export interface KitchenCustomerBatchStatus {
     readonly orderItemReference: string;
     readonly status: "Queued" | "InProgress" | "Ready" | "Cancelled";
   }[];
+}
+
+/** Batch 37: an Order's tickets (its reader locks them; a snapshot reads them as they are). */
+const ticketsByOrderStatement =
+  "SELECT kitchen_ticket_id,order_batch_id,aggregate_version::text AS version,status,updated_at " +
+  "FROM rms_kitchen.kitchen_ticket WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 " +
+  "ORDER BY kitchen_ticket_id LIMIT 10001";
+const workItemColumns =
+  "w.kitchen_work_item_id,w.order_item_id,w.status,w.required_quantity,w.completed_quantity," +
+  "r.ready_result_id,r.ready_quantity,r.required_quantity AS ready_required_quantity ";
+const workItemSource =
+  "FROM rms_kitchen.kitchen_work_item w LEFT JOIN rms_kitchen.kitchen_order_item_ready_result r " +
+  "ON r.brand_id=w.brand_id AND r.store_id=w.store_id AND r.kitchen_ticket_id=w.kitchen_ticket_id AND r.order_item_id=w.order_item_id ";
+/** Batch 37: one ticket's work items and their ready results. */
+const workItemsByTicketStatement =
+  "SELECT " +
+  workItemColumns +
+  workItemSource +
+  "WHERE w.brand_id=$1 AND w.store_id=$2 AND w.kitchen_ticket_id=$3 ORDER BY w.kitchen_work_item_id LIMIT 1001";
+
+/**
+ * Batch 37 (v15 b36): the kitchen status point reads of the listed Orders on the merchant Orders
+ * list — each Order's tickets and each ticket's work items — answered from one read each in the
+ * list's read-only snapshot (Ordering's createSnapshotPointReads). The reader is unchanged.
+ */
+export function createKitchenCustomerStatusPointReads(
+  transaction: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  orderReferences: readonly string[],
+): ConsumerTransaction {
+  const brand = parseKitchenTicketReference(scope.brandReference),
+    store = parseKitchenTicketReference(scope.storeReference);
+  const point = (
+    statement: string,
+    batchStatement: string,
+    limit: number,
+    keysFromRows: boolean,
+  ): SnapshotPointRead =>
+    Object.freeze({
+      statement,
+      batchStatement,
+      keyColumns: ["prefetch_key"],
+      limit,
+      maximumRows: 10_001,
+      ...(keysFromRows ? { keysFromRows: true } : {}),
+      key: (values: readonly unknown[]) =>
+        values.length === 3 && values[0] === brand && values[1] === store
+          ? pointReadReference(values[2])
+          : null,
+      batchValues: (keys: readonly string[]) => [brand, store, [...keys]],
+    });
+  const orders = async () => orderReferences;
+  return createSnapshotPointReads(transaction, [
+    {
+      keys: orders,
+      read: point(
+        ticketsByOrderStatement,
+        "SELECT order_id::text AS prefetch_key,kitchen_ticket_id,order_batch_id,aggregate_version::text AS version,status,updated_at " +
+          "FROM rms_kitchen.kitchen_ticket WHERE brand_id=$1 AND store_id=$2 AND order_id=ANY($3::uuid[]) " +
+          "ORDER BY order_id,kitchen_ticket_id LIMIT 10001",
+        10_001,
+        false,
+      ),
+    },
+    {
+      keys: orders,
+      read: point(
+        workItemsByTicketStatement,
+        "SELECT w.kitchen_ticket_id::text AS prefetch_key," +
+          workItemColumns +
+          workItemSource +
+          "WHERE w.brand_id=$1 AND w.store_id=$2 AND w.kitchen_ticket_id IN (SELECT t.kitchen_ticket_id " +
+          "FROM rms_kitchen.kitchen_ticket t WHERE t.brand_id=$1 AND t.store_id=$2 AND t.order_id=ANY($3::uuid[])) " +
+          "ORDER BY w.kitchen_ticket_id,w.kitchen_work_item_id LIMIT 10001",
+        1001,
+        true,
+      ),
+    },
+  ]);
 }
 
 /** The rounds one table's Order may hold (Ordering's own bound): one kitchen ticket each. */
@@ -55,12 +139,11 @@ export function createPostgresKitchenCustomerStatusReader(options: {
         // Lifecycle writers lock the ticket before changing any work item or ready result.
         // One ticket per round: as many as the table's Order holds rounds (v15 b13: a table past
         // 20 rounds once lost its whole status).
-        const tickets = await input.transaction.query(
-          "SELECT kitchen_ticket_id,order_batch_id,aggregate_version::text AS version,status,updated_at " +
-            "FROM rms_kitchen.kitchen_ticket WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 " +
-            "ORDER BY kitchen_ticket_id LIMIT 10001 FOR SHARE",
-          [brandReference, storeReference, orderReference],
-        );
+        const tickets = await input.transaction.query(ticketsByOrderStatement + " FOR SHARE", [
+          brandReference,
+          storeReference,
+          orderReference,
+        ]);
         if (tickets.rows.length === 0) return null;
         if (tickets.rows.length > kitchenCustomerStatusMaximumRounds) return unavailable();
         const batches: KitchenCustomerBatchStatus[] = [];
@@ -78,14 +161,11 @@ export function createPostgresKitchenCustomerStatusReader(options: {
           const updatedAt = parseKitchenTicketInstant(
             ticket.updated_at instanceof Date ? ticket.updated_at.toISOString() : ticket.updated_at,
           );
-          const items = await input.transaction.query(
-            "SELECT w.kitchen_work_item_id,w.order_item_id,w.status,w.required_quantity,w.completed_quantity," +
-              "r.ready_result_id,r.ready_quantity,r.required_quantity AS ready_required_quantity " +
-              "FROM rms_kitchen.kitchen_work_item w LEFT JOIN rms_kitchen.kitchen_order_item_ready_result r " +
-              "ON r.brand_id=w.brand_id AND r.store_id=w.store_id AND r.kitchen_ticket_id=w.kitchen_ticket_id AND r.order_item_id=w.order_item_id " +
-              "WHERE w.brand_id=$1 AND w.store_id=$2 AND w.kitchen_ticket_id=$3 ORDER BY w.kitchen_work_item_id LIMIT 1001",
-            [brandReference, storeReference, ticketReference],
-          );
+          const items = await input.transaction.query(workItemsByTicketStatement, [
+            brandReference,
+            storeReference,
+            ticketReference,
+          ]);
           if (items.rows.length === 0 || items.rows.length > 1000) return unavailable();
           const seen = new Set<string>();
           const itemStates = new Map<

@@ -6,6 +6,7 @@ import {
 import { createHash } from "node:crypto";
 import type { ConsumerTransaction } from "@bop/eventing";
 import {
+  createKitchenCustomerStatusPointReads,
   createPostgresKitchenCustomerStatusReader,
   loadKitchenBatchPreparationDecision,
   listOpenKitchenReworkItems,
@@ -28,6 +29,7 @@ import {
   createPostgresDiningOrderPreparationSource,
   parseOrderingInstant,
   listStoreOrdersWithRoundsSince,
+  createOrderListPointReads,
 } from "@rms/ordering";
 
 type Scope = Readonly<{
@@ -55,6 +57,11 @@ export function createMerchantOrderQueueRead(options: {
     readonly businessDate: string;
     readonly startsAt: string;
   }>;
+  /**
+   * Batch 37: the transaction is a read-only snapshot (runMerchantSnapshotRead), so the listed
+   * Orders' point reads may be answered from one read each (createOrderListPointReads).
+   */
+  snapshot?: boolean;
 }) {
   return async (input: {
     sessionCookie: unknown;
@@ -202,15 +209,34 @@ export function createMerchantOrderQueueRead(options: {
         ...earlierItems.map((item) => ({ item, earlierDay: true })),
         ...index.items.map((item) => ({ item, earlierDay: false })),
       ];
+      // Batch 37 (v15 b36: ~1,600 statements for one Orders page, Home waited for it): in the
+      // read-only snapshot, the listed Orders' owner point reads are each answered from one read
+      // for every listed Order; the readers below and their checks are unchanged.
+      const pointReads =
+        options.snapshot === true
+          ? createKitchenCustomerStatusPointReads(
+              createOrderListPointReads(
+                transaction,
+                ownerScope,
+                listed.map(({ item }) => ({
+                  orderReference: String(item.orderReference),
+                  initialBatchReference: String(item.initialBatchReference),
+                  initialSubmissionReference: String(item.initialSubmissionReference),
+                })),
+              ),
+              ownerScope,
+              listed.map(({ item }) => String(item.orderReference)),
+            )
+          : transaction;
       // WP-2423: history may hold Orders priced with either Quote version; each is decoded with its own.
       const readers = {
         1: createPostgresOrderCreationQueryStore(
-          { run: (work) => work(transaction) },
+          { run: (work) => work(pointReads) },
           ownerScope,
           1,
         ),
         2: createPostgresOrderCreationQueryStore(
-          { run: (work) => work(transaction) },
+          { run: (work) => work(pointReads) },
           ownerScope,
           2,
         ),
@@ -259,13 +285,13 @@ export function createMerchantOrderQueueRead(options: {
           ...ownerScope,
           authorize: allowed,
         }).loadByBatch({
-          transaction,
+          transaction: pointReads,
           orderReference: item.orderReference,
           orderBatchReference: item.initialBatchReference,
         });
         const version =
           (await readOrderCreationQuoteVersion(
-            transaction,
+            pointReads,
             ownerScope,
             item.initialSubmissionReference,
           )) ?? options.quoteVersion;
@@ -287,7 +313,7 @@ export function createMerchantOrderQueueRead(options: {
                 authorize: allowed,
                 sha256: (value) => "sha256:" + createHash("sha256").update(value).digest("hex"),
               }).loadByBatch({
-                transaction,
+                transaction: pointReads,
                 orderReference: item.orderReference,
                 orderBatchReference: item.initialBatchReference,
               });
@@ -306,7 +332,7 @@ export function createMerchantOrderQueueRead(options: {
                   authorize: async (_tx, kitchenScope) =>
                     kitchenScope.orderReference === item.orderReference && (await allowed()),
                 })
-                  .loadByOrder({ transaction, orderReference: item.orderReference })
+                  .loadByOrder({ transaction: pointReads, orderReference: item.orderReference })
                   .catch(() => null);
                 const batch =
                   work !== null && work.batches.length === 1 ? work.batches[0] : undefined;
@@ -322,7 +348,7 @@ export function createMerchantOrderQueueRead(options: {
                   work === null &&
                   (
                     await loadKitchenBatchPreparationDecision(
-                      transaction as never,
+                      pointReads as never,
                       ownerScope,
                       item.initialBatchReference,
                     ).catch(() => null)
@@ -355,7 +381,7 @@ export function createMerchantOrderQueueRead(options: {
               ...ownerScope,
               authorize: allowed,
             }).load({
-              transaction,
+              transaction: pointReads,
               ...ownerScope,
               orderReference: item.orderReference,
               diningSessionReference: original.order.diningSessionReference,
@@ -375,7 +401,7 @@ export function createMerchantOrderQueueRead(options: {
                     authorizeKitchen: allowed,
                     authorizeDining: allowed,
                   }).load({
-                    transaction,
+                    transaction: pointReads,
                     ...ownerScope,
                     orderReference: item.orderReference,
                     diningSessionReference: original.order.diningSessionReference,
@@ -395,7 +421,7 @@ export function createMerchantOrderQueueRead(options: {
                     ...ownerScope,
                     authorize: allowed,
                   }).resolveCancelled({
-                    transaction,
+                    transaction: pointReads,
                     ...ownerScope,
                     orderReference: item.orderReference,
                     diningSessionReference: original.order.diningSessionReference,
@@ -414,7 +440,7 @@ export function createMerchantOrderQueueRead(options: {
                     authorize: allowed,
                     includeCancelled: true,
                   }).load({
-                    transaction,
+                    transaction: pointReads,
                     ...ownerScope,
                     orderReference: item.orderReference,
                     diningSessionReference: original.order.diningSessionReference,

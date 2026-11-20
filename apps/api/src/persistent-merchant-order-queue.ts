@@ -254,6 +254,8 @@ export function createPersistentMerchantOrderQueue(options: {
           const tenantReference: string | null = String(resolved.selected.tenantReference);
           const read = createMerchantOrderQueueRead({
             transactions: { run: (work) => work(businessTransaction) },
+            // Batch 37: the listed Orders' point reads in one read each, in the snapshot only.
+            snapshot: source.transactions.runSnapshot !== undefined,
             quoteVersion: options.quoteVersion,
             now: source.now,
             // WP-2423 D4: the Store's current business day, so an older table's Order with a

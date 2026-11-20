@@ -423,6 +423,7 @@ export {
 } from "./application/kitchen-work-step-service.js";
 
 export {
+  createKitchenCustomerStatusPointReads,
   createPostgresKitchenCustomerStatusReader,
   listStoreKitchenOrderProgress,
   type KitchenCustomerBatchStatus,

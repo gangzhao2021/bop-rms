@@ -41,6 +41,34 @@ const columns = {
 } as const;
 const keys = Object.keys(columns) as (keyof typeof columns)[];
 const selection = keys.map((key) => columns[key] + ' AS "' + key + '"').join(",");
+/**
+ * Batch 37: the initial window's point reads of one Order, named so a list read in a snapshot can
+ * answer them for every listed Order at once (order-list-point-reads.ts), with the same text.
+ */
+export const orderInitialPointStatements = Object.freeze({
+  original:
+    "SELECT h.aggregate_version,h.canonical_phase,b.submission_id,b.submitted_at FROM rms_ordering.order_header h " +
+    "JOIN rms_ordering.order_batch b ON b.brand_id=h.brand_id AND b.store_id=h.store_id AND b.order_id=h.order_id " +
+    "WHERE h.brand_id=$1 AND h.store_id=$2 AND h.order_id=$3 AND b.order_batch_id=$4",
+  accepted:
+    "SELECT acceptance_id,order_batch_id,expected_order_version,accepted_order_version,accepted_at FROM rms_ordering.order_acceptance_record " +
+    "WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 LIMIT 2",
+  itemCancellations:
+    "SELECT cancellation_id::text AS cancellation,order_batch_id::text AS batch,expected_order_version,cancelled_order_version," +
+    "expected_source_checkpoint::text AS checkpoint,cancelled_at FROM rms_ordering.order_item_staff_cancellation " +
+    "WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 ORDER BY cancelled_order_version LIMIT 101",
+  terminal:
+    "SELECT " +
+    selection +
+    " FROM rms_ordering.order_termination_record WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 LIMIT 2",
+  completion:
+    "SELECT completion_record_json::text AS record FROM rms_ordering.order_fulfillment_completion_record " +
+    "WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 LIMIT 2",
+  orderType:
+    "SELECT order_type FROM rms_ordering.order_header WHERE brand_id=$1 AND store_id=$2 AND order_id=$3",
+});
+/** Batch 37: the termination record columns (the batch form of `terminal` reads the same). */
+export const orderTerminationSelection = selection;
 const fail = (conflict = false): never => {
   throw new OrderTerminationError(
     conflict ? "ORDER_TERMINATION_CONFLICT" : "ORDER_TERMINATION_UNAVAILABLE",
@@ -156,9 +184,7 @@ async function initialHistoryChain(tx: ConsumerTransaction, scope: Scope) {
     scope.orderBatchReference,
   ];
   const original = await tx.query(
-    "SELECT h.aggregate_version,h.canonical_phase,b.submission_id,b.submitted_at FROM rms_ordering.order_header h " +
-      "JOIN rms_ordering.order_batch b ON b.brand_id=h.brand_id AND b.store_id=h.store_id AND b.order_id=h.order_id " +
-      "WHERE h.brand_id=$1 AND h.store_id=$2 AND h.order_id=$3 AND b.order_batch_id=$4 FOR SHARE OF h,b",
+    orderInitialPointStatements.original + " FOR SHARE OF h,b",
     values,
   );
   const row = original.rows[0];
@@ -181,11 +207,7 @@ async function initialHistoryChain(tx: ConsumerTransaction, scope: Scope) {
     ),
   });
   revisions.push({ kind: "Initial", version: state.version, checkpoint: state.checkpoint });
-  const accepted = await tx.query(
-    "SELECT acceptance_id,order_batch_id,expected_order_version,accepted_order_version,accepted_at FROM rms_ordering.order_acceptance_record " +
-      "WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 LIMIT 2",
-    values.slice(0, 3),
-  );
+  const accepted = await tx.query(orderInitialPointStatements.accepted, values.slice(0, 3));
   if (accepted.rows.length > 1) return fail(true);
   if (accepted.rows.length === 1) {
     const a = accepted.rows[0];
@@ -212,9 +234,7 @@ async function initialHistoryChain(tx: ConsumerTransaction, scope: Scope) {
   // WP-2423 Q6 step 2a: staff item cancellations after acceptance advance the Order version while
   // the Order stays Accepted with its remaining lines.
   const itemCancellations = await tx.query(
-    "SELECT cancellation_id::text AS cancellation,order_batch_id::text AS batch,expected_order_version,cancelled_order_version," +
-      "expected_source_checkpoint::text AS checkpoint,cancelled_at FROM rms_ordering.order_item_staff_cancellation " +
-      "WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 ORDER BY cancelled_order_version LIMIT 101",
+    orderInitialPointStatements.itemCancellations,
     values.slice(0, 3),
   );
   if (itemCancellations.rows.length > 100) return fail(true);
@@ -243,12 +263,7 @@ async function initialHistoryChain(tx: ConsumerTransaction, scope: Scope) {
       checkpoint: state.checkpoint,
     });
   }
-  const terminal = await tx.query(
-    "SELECT " +
-      selection +
-      " FROM rms_ordering.order_termination_record WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 LIMIT 2",
-    values.slice(0, 3),
-  );
+  const terminal = await tx.query(orderInitialPointStatements.terminal, values.slice(0, 3));
   if (terminal.rows.length > 1) return fail(true);
   if (terminal.rows.length === 1) {
     const t = bind(terminal.rows[0]);
@@ -394,11 +409,11 @@ export function createPostgresOrderExecutionReader(options: {
       if ((await options.authorize(tx, scope)) !== true) return fail();
       await fence(tx, scope);
       const initial = await initialHistory(tx, scope);
-      const saved = await tx.query(
-        "SELECT completion_record_json::text AS record FROM rms_ordering.order_fulfillment_completion_record " +
-          "WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 LIMIT 2",
-        [brand, store, scope.orderReference],
-      );
+      const saved = await tx.query(orderInitialPointStatements.completion, [
+        brand,
+        store,
+        scope.orderReference,
+      ]);
       if (saved.rows.length > 1) return fail(true);
       if (saved.rows.length === 0) return Object.freeze({ ...initial, completion: null });
       const completion = decodeOrderFulfillmentCompletionRecord(
@@ -416,10 +431,11 @@ export function createPostgresOrderExecutionReader(options: {
         completion.completedAt < initial.occurredAt
       )
         return fail(true);
-      const header = await tx.query(
-        "SELECT order_type FROM rms_ordering.order_header WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 FOR SHARE",
-        [brand, store, scope.orderReference],
-      );
+      const header = await tx.query(orderInitialPointStatements.orderType + " FOR SHARE", [
+        brand,
+        store,
+        scope.orderReference,
+      ]);
       if (header.rows.length !== 1 || header.rows[0]?.order_type !== "Pickup") return fail(true);
       return Object.freeze({
         ...scope,

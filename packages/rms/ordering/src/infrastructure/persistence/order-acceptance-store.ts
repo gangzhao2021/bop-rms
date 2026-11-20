@@ -28,6 +28,14 @@ const columns = {
 } as const;
 const keys = Object.keys(columns) as (keyof typeof columns)[];
 const selection = keys.map((key) => columns[key] + ' AS "' + key + '"').join(",");
+/** Batch 37: one Batch's acceptance (order-list-point-reads.ts answers it in a list read). */
+export const orderAcceptanceByBatchStatement =
+  "SELECT " +
+  selection +
+  " FROM rms_ordering.order_acceptance_record " +
+  "WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 AND order_batch_id=$4 LIMIT 2";
+/** Batch 37: the acceptance record columns (its batch form reads the same). */
+export const orderAcceptanceSelection = selection;
 function fail(conflict = false): never {
   throw new OrderAcceptanceRecordError(
     conflict ? "ORDER_ACCEPTANCE_RECORD_CONFLICT" : "ORDER_ACCEPTANCE_RECORD_UNAVAILABLE",
@@ -87,13 +95,7 @@ export function createPostgresOrderAcceptanceReader(options: {
       )
         return fail();
       await lockOrder(tx, brand, store, order);
-      const result = await tx.query(
-        "SELECT " +
-          selection +
-          " FROM rms_ordering.order_acceptance_record " +
-          "WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 AND order_batch_id=$4 LIMIT 2",
-        [brand, store, order, batch],
-      );
+      const result = await tx.query(orderAcceptanceByBatchStatement, [brand, store, order, batch]);
       if (result.rows.length === 0) return null;
       if (result.rows.length !== 1) return fail(true);
       const row = result.rows[0];

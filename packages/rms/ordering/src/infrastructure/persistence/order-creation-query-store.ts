@@ -18,7 +18,11 @@ export interface OrderCreationQueryTransactionRunner {
   run<T>(action: (transaction: OrderCreationQueryTransaction) => Promise<T>): Promise<T>;
 }
 
-const selectHistory = `SELECT jsonb_build_object('record', jsonb_build_object('submissionReference', s.submission_id,
+/** Batch 37: the Order of an initial submission (locked by its reader; a snapshot reads it as is). */
+export const orderCreationInitialStatement =
+  "SELECT h.order_id AS reference FROM rms_ordering.order_header h JOIN rms_ordering.order_submission_record s ON s.order_id=h.order_id AND s.brand_id=h.brand_id AND s.store_id=h.store_id WHERE h.brand_id=$1 AND h.store_id=$2 AND s.submission_id=$3 AND s.submission_kind='Initial'";
+/** Batch 37: exported so a list read in a snapshot answers it for every listed Order at once. */
+export const orderCreationHistoryStatement = `SELECT jsonb_build_object('record', jsonb_build_object('submissionReference', s.submission_id,
 'submissionIntentHash', s.intent_digest,
 'guestSessionReference', s.guest_session_id,
 'order', jsonb_build_object('orderReference', h.order_id,
@@ -323,7 +327,7 @@ export function createPostgresOrderCreationQueryStore<V extends 1 | 2 = 1>(
             [brand, store],
           );
           const result = await transaction.query(
-            "SELECT h.order_id AS reference FROM rms_ordering.order_header h JOIN rms_ordering.order_submission_record s ON s.order_id=h.order_id AND s.brand_id=h.brand_id AND s.store_id=h.store_id WHERE h.brand_id=$1 AND h.store_id=$2 AND s.submission_id=$3 AND s.submission_kind='Initial' FOR UPDATE OF h",
+            orderCreationInitialStatement + " FOR UPDATE OF h",
             [brand, store, reference],
           );
           if (result === null || typeof result !== "object") return unavailable();
@@ -383,7 +387,7 @@ export async function readOrderCreationHistory<V extends 1 | 2 = 1>(
   const brand = parseOrderingReference(scope.brandReference),
     store = parseOrderingReference(scope.storeReference),
     reference = parseOrderingReference(value);
-  const result = await transaction.query(selectHistory, [brand, store, reference]);
+  const result = await transaction.query(orderCreationHistoryStatement, [brand, store, reference]);
   if (result === null || typeof result !== "object") return unavailable();
   const d = Object.getOwnPropertyDescriptor(result, "rows");
   if (!d?.enumerable || !("value" in d)) return unavailable();
@@ -413,7 +417,7 @@ export async function readOrderCreationQuoteVersion(
   const brand = parseOrderingReference(scope.brandReference),
     store = parseOrderingReference(scope.storeReference),
     reference = parseOrderingReference(value);
-  const result = await transaction.query(selectHistory, [brand, store, reference]);
+  const result = await transaction.query(orderCreationHistoryStatement, [brand, store, reference]);
   const d = Object.getOwnPropertyDescriptor(result, "rows");
   if (!d?.enumerable || !("value" in d)) return unavailable();
   const rows = capture(d.value);
