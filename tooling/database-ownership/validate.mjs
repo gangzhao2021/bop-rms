@@ -3597,6 +3597,21 @@ async function scanUnsupported(root, module, diagnostics) {
             "order_batch",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/order-termination-store.ts";
+        // Batch 37: the Orders list's batch reads of Ordering's own point reads (each listed Order's
+        // creation, acceptance, termination and completion), only in the list's read-only snapshot.
+        const acceptedOrderListPointReadsAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          [
+            "order_acceptance_record",
+            "order_batch",
+            "order_fulfillment_completion_record",
+            "order_header",
+            "order_item_staff_cancellation",
+            "order_submission_record",
+            "order_termination_record",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/order-list-point-reads.ts";
         const acceptedOrderPaymentDispositionAsset =
           module.packageName === "@rms/ordering" &&
           module.manifest.ownedDatabase?.schema === "rms_ordering" &&
@@ -4156,6 +4171,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedOrderPaymentFailureAsset &&
           !acceptedOrderAcceptanceAsset &&
           !acceptedOrderTerminationAsset &&
+          !acceptedOrderListPointReadsAsset &&
           !acceptedOrderStatusProjectionAsset &&
           !acceptedPaymentReceiptCoverageAsset &&
           !acceptedReceiptStoreIdentityAsset &&
