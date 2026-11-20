@@ -1,4 +1,5 @@
 import { t } from "./i18n/i18n.js";
+import { sharedRead } from "./shared-read.js";
 import { escalationReasons, type EscalationReason } from "./ordinary-refund-client.js";
 import {
   FULL_SIGN_IN_REQUIRED,
@@ -382,52 +383,62 @@ export function createRefundApprovalClient(fetcher: typeof fetch = fetch) {
      */
     stepUpState,
     /** Refunds at the selected Store awaiting approval, or approved and not yet sent. */
-    async approvals(signal?: AbortSignal) {
-      let response: Response;
-      try {
-        response = await request(
-          "/merchant/payments/refunds/approvals",
-          { method: "GET", headers: { Accept: "application/json" } },
-          signal,
-        );
-      } catch {
-        throw new RefundApprovalClientError("Unavailable");
-      }
-      if (response.status === 401 || response.status === 403)
-        throw new RefundApprovalClientError("Denied");
-      if (response.status !== 200 || response.headers.get("cache-control") !== "no-store")
-        throw new RefundApprovalClientError("Unavailable");
-      const reply = await body(response);
-      const withSend =
-        reply !== null && typeof reply === "object" && Object.hasOwn(reply, "canSend");
-      const raw = record(reply, [
-        "observedAt",
-        "canApprove",
-        ...(withSend ? ["canSend"] : []),
-        "soleOperator",
-        "entries",
-      ]);
-      if (
-        (raw.soleOperator !== null &&
-          raw.soleOperator !== "Effective" &&
-          raw.soleOperator !== "NotSet" &&
-          raw.soleOperator !== "OtherApprovers") ||
-        typeof raw.canApprove !== "boolean" ||
-        (withSend && typeof raw.canSend !== "boolean") ||
-        !Array.isArray(raw.entries) ||
-        raw.entries.length > 100
-      )
-        return invalid();
-      const entries = raw.entries.map(entry);
-      if (new Set(entries.map((e) => e.requestReference)).size !== entries.length) return invalid();
-      return Object.freeze({
-        observedAt: instant(raw.observedAt),
-        canApprove: raw.canApprove,
-        /** WP-2423 M14: may send a refund nobody sent (false from an older server). */
-        canSend: withSend ? (raw.canSend as boolean) : false,
-        soleOperator: raw.soleOperator as SoleOperatorStatus | null,
-        entries: Object.freeze(entries),
-      });
+    approvals(signal?: AbortSignal) {
+      // Batch 36: the Approvals badge and Home ask for this together when Home opens.
+      return sharedRead(
+        fetcher,
+        "GET /merchant/payments/refunds/approvals",
+        signal,
+        async (shared) => {
+          let response: Response;
+          try {
+            response = await request(
+              "/merchant/payments/refunds/approvals",
+              { method: "GET", headers: { Accept: "application/json" } },
+              shared,
+            );
+          } catch {
+            throw new RefundApprovalClientError("Unavailable");
+          }
+          if (response.status === 401 || response.status === 403)
+            throw new RefundApprovalClientError("Denied");
+          if (response.status !== 200 || response.headers.get("cache-control") !== "no-store")
+            throw new RefundApprovalClientError("Unavailable");
+          const reply = await body(response);
+          const withSend =
+            reply !== null && typeof reply === "object" && Object.hasOwn(reply, "canSend");
+          const raw = record(reply, [
+            "observedAt",
+            "canApprove",
+            ...(withSend ? ["canSend"] : []),
+            "soleOperator",
+            "entries",
+          ]);
+          if (
+            (raw.soleOperator !== null &&
+              raw.soleOperator !== "Effective" &&
+              raw.soleOperator !== "NotSet" &&
+              raw.soleOperator !== "OtherApprovers") ||
+            typeof raw.canApprove !== "boolean" ||
+            (withSend && typeof raw.canSend !== "boolean") ||
+            !Array.isArray(raw.entries) ||
+            raw.entries.length > 100
+          )
+            return invalid();
+          const entries = raw.entries.map(entry);
+          if (new Set(entries.map((e) => e.requestReference)).size !== entries.length)
+            return invalid();
+          return Object.freeze({
+            observedAt: instant(raw.observedAt),
+            canApprove: raw.canApprove,
+            /** WP-2423 M14: may send a refund nobody sent (false from an older server). */
+            canSend: withSend ? (raw.canSend as boolean) : false,
+            soleOperator: raw.soleOperator as SoleOperatorStatus | null,
+            entries: Object.freeze(entries),
+          });
+        },
+        () => new RefundApprovalClientError("Unavailable"),
+      );
     },
     /**
      * Approve in person and send at once. Retry with the same approval reference after an unknown

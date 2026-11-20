@@ -1,4 +1,5 @@
 import { t } from "./i18n/i18n.js";
+import { sharedRead } from "./shared-read.js";
 /**
  * WP-2423 DEC-STORE-CUSTOMER-NAME: the Store's name, address and phone as customers see them
  * (menu, order page, pickup panel and new receipts). The browser sends what the Owner typed and
@@ -138,15 +139,18 @@ export function createStorePublicProfileClient(options: {
   };
   return Object.freeze({
     async load(): Promise<StorePublicProfileView> {
-      let response: Response;
-      try {
-        response = await request({ method: "GET", headers: { Accept: "application/json" } });
-      } catch {
-        return fail("Unavailable");
-      }
-      if (response.status === 401 || response.status === 403) return fail("PermissionDenied");
-      if (!response.ok) return fail("Unavailable");
-      return parseStorePublicProfileView(await response.json().catch(() => null));
+      // Batch 36: Home and its setup panels ask for this together when Home opens.
+      return sharedRead(fetcher, "GET /merchant/store/public-profile", undefined, async () => {
+        let response: Response;
+        try {
+          response = await request({ method: "GET", headers: { Accept: "application/json" } });
+        } catch {
+          return fail("Unavailable");
+        }
+        if (response.status === 401 || response.status === 403) return fail("PermissionDenied");
+        if (!response.ok) return fail("Unavailable");
+        return parseStorePublicProfileView(await response.json().catch(() => null));
+      });
     },
     async save(body: StorePublicProfileSaveBody) {
       if (!/^[A-Za-z0-9_-]{43}$/u.test(options.csrf)) return fail("Invalid");

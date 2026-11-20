@@ -1,5 +1,5 @@
 import { displayLocale, t } from "./i18n/i18n.js";
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useLayoutEffect, useState, type ReactNode } from "react";
 
 /**
  * WP-2423 Q21: the selected Store's current business day, from the Store owner (its published
@@ -233,7 +233,10 @@ export function StoreBusinessDayProvider({
   const [day, setDay] = useState<StoreBusinessDay | null>(null);
   // The scope whose first read has settled; another scope is unsettled from its first render.
   const [settledScope, setSettledScope] = useState<string | null>(null);
-  useEffect(() => {
+  // Batch 36 (v15 b35 live): a layout effect, so this read is sent before the reads the screen
+  // below starts in its own effects (React runs those first). It was sent last of about 29 on
+  // Home, waited about a second for a free connection, and the evening reminder waited on it.
+  useLayoutEffect(() => {
     setDay(null);
     if (!enabled) return;
     const settle = () => setSettledScope(scopeKey);

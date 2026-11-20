@@ -1,4 +1,5 @@
 import { t } from "./i18n/i18n.js";
+import { sharedRead } from "./shared-read.js";
 import { parsePaidOrderWatch } from "./paid-order-watch.js";
 export class CurrentOrderQueueError extends Error {
   constructor(readonly code: "PermissionDenied" | "NotFound" | "Unavailable" | "ServerProblem") {
@@ -1982,11 +1983,16 @@ export function createCurrentOrderQueueClient(fetcher: typeof fetch = fetch) {
     },
     load(after: string | null, signal: AbortSignal) {
       if (after !== null) reference(after);
-      return get(
+      const path =
+        "/merchant/orders" + (after === null ? "" : "?after=" + encodeURIComponent(after));
+      // Batch 36: the frame's refund warning and Home ask for the first page together.
+      return sharedRead(
         fetcher,
-        "/merchant/orders" + (after === null ? "" : "?after=" + encodeURIComponent(after)),
+        "GET " + path,
         signal,
-        (value) => parseCurrentOrderQueue(value, after),
+        (shared) => get(fetcher, path, shared, (value) => parseCurrentOrderQueue(value, after)),
+        // A cancelled read is refused as before, never shown.
+        () => new CurrentOrderQueueError("Unavailable"),
       );
     },
     /**

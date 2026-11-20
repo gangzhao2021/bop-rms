@@ -1,4 +1,5 @@
 import { t } from "./i18n/i18n.js";
+import { sharedRead } from "./shared-read.js";
 /** WP-2423: Section 88 IAM-USER-LIST / IAM-USER-DETAIL view contract and same-origin client. */
 import { FULL_SIGN_IN_REQUIRED, isFullSignInRequired } from "./full-sign-in.js";
 import { parseSoleOperatorGate, type SoleOperatorGateView } from "./SoleOperatorSelfApproval.js";
@@ -515,7 +516,14 @@ export function createStaffPageClient(csrf: string, fetcher: typeof fetch = fetc
     command: (request: StaffCommandRequest) =>
       post("/merchant/organization/staff/command", request),
     /** WP-2423 M07: staff role requests waiting for the signed-in person. */
-    roleRequests: async () =>
-      parseStaffRoleRequests(await post("/merchant/organization/staff/role-requests", {})),
+    // Batch 36: the Approvals badge and Home ask for this together (a read, sent as POST).
+    roleRequests: () =>
+      sharedRead(
+        fetcher,
+        "POST /merchant/organization/staff/role-requests " + csrf,
+        undefined,
+        async () =>
+          parseStaffRoleRequests(await post("/merchant/organization/staff/role-requests", {})),
+      ),
   } satisfies StaffPageClient;
 }

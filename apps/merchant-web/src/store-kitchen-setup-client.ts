@@ -1,4 +1,5 @@
 import { t } from "./i18n/i18n.js";
+import { sharedRead } from "./shared-read.js";
 /**
  * WP-2423 item 11: the Store's kitchen setup. The browser sends only the version it saw and its
  * operation; Store, actor, time and what the line holds are decided by the server.
@@ -60,15 +61,18 @@ export function createStoreKitchenSetupClient(options: {
   };
   return Object.freeze({
     async load(): Promise<StoreKitchenSetupView> {
-      let response: Response;
-      try {
-        response = await request({ method: "GET", headers: { Accept: "application/json" } });
-      } catch {
-        return fail("Unavailable");
-      }
-      if (response.status === 401 || response.status === 403) return fail("PermissionDenied");
-      if (!response.ok) return fail("Unavailable");
-      return parseStoreKitchenSetupView(await response.json().catch(() => null));
+      // Batch 36: Home and its setup panels ask for this together when Home opens.
+      return sharedRead(fetcher, "GET /merchant/store/kitchen-setup", undefined, async () => {
+        let response: Response;
+        try {
+          response = await request({ method: "GET", headers: { Accept: "application/json" } });
+        } catch {
+          return fail("Unavailable");
+        }
+        if (response.status === 401 || response.status === 403) return fail("PermissionDenied");
+        if (!response.ok) return fail("Unavailable");
+        return parseStoreKitchenSetupView(await response.json().catch(() => null));
+      });
     },
     async apply(body: { readonly operationReference: string; readonly expectedVersion: number }) {
       let response: Response;

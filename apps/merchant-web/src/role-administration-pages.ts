@@ -1,4 +1,5 @@
 import { t } from "./i18n/i18n.js";
+import { sharedRead } from "./shared-read.js";
 import { FULL_SIGN_IN_REQUIRED, isFullSignInRequired } from "./full-sign-in.js";
 import { parseSoleOperatorGate, type SoleOperatorGateView } from "./SoleOperatorSelfApproval.js";
 
@@ -654,8 +655,14 @@ export function createRoleAdministrationPageClient(
     async declineOffer(request) {
       await post("/merchant/organization/roles/offer-decline", request);
     },
-    waiting: async () =>
-      parseRoleChangesWaiting(await post("/merchant/organization/roles/waiting", {})),
+    // Batch 36: the Approvals badge and Home ask for this together (a read, sent as POST).
+    waiting: () =>
+      sharedRead(
+        fetcher,
+        "POST /merchant/organization/roles/waiting " + csrf,
+        undefined,
+        async () => parseRoleChangesWaiting(await post("/merchant/organization/roles/waiting", {})),
+      ),
     starterSets: async () =>
       parseStarterRoleSetsView(await post("/merchant/organization/roles/starter-sets", {})),
     async applyStarterSet(request) {

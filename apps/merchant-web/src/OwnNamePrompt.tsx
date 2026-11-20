@@ -1,4 +1,5 @@
 import { t } from "./i18n/i18n.js";
+import { sharedRead } from "./shared-read.js";
 import { useEffect, useId, useRef, useState } from "react";
 import { newOperationReference } from "./operation-reference.js";
 
@@ -134,7 +135,11 @@ export function createOwnNameClient(csrf: string, fetcher: typeof fetch = fetch)
     }) as Promise<unknown>;
   };
   return {
-    read: async () => parseOwnNameState(await post("/merchant/organization/staff/me", {})),
+    // Batch 36: the name prompt and the staff line in the frame ask for this together.
+    read: () =>
+      sharedRead(fetcher, "POST /merchant/organization/staff/me " + csrf, undefined, async () =>
+        parseOwnNameState(await post("/merchant/organization/staff/me", {})),
+      ),
     save: async (input) => {
       const result = exact(
         await post("/merchant/organization/staff/me/name", {

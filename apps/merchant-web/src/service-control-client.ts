@@ -1,3 +1,4 @@
+import { sharedRead } from "./shared-read.js";
 export type ServiceMode = "DineIn" | "Pickup" | "Delivery";
 export interface ServiceInterval {
   startLocalTime: string;
@@ -280,7 +281,14 @@ export function createServiceControlClient(fetcher: typeof fetch = fetch) {
   }
   return Object.freeze({
     async load(store: string, signal: AbortSignal) {
-      return parseServiceControlState(await request(signal), store);
+      // Batch 36: Pause ordering and Home's setup step ask for this together when Home opens.
+      return sharedRead(
+        fetcher,
+        "GET /merchant/service-control " + store,
+        signal,
+        async (shared) => parseServiceControlState(await request(shared), store),
+        () => new Error("Service request unavailable."),
+      );
     },
     async execute(command: ServiceControlCommand, csrf: string, signal: AbortSignal) {
       const result = exact(await request(signal, command, csrf), ["status", "resultingVersion"]);
