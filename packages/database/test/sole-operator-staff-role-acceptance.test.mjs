@@ -412,13 +412,20 @@ it("staff roles: a sole owner approves alone, and the two-person rule returns", 
       );
       // (d) The database refuses the requester's own approval without its mark ...
       const now = () => new Date().toISOString();
+      // One instant for both the approval and its second factor: two clock reads can differ by a
+      // millisecond, which puts the factor after the approval and trips recent_mfa instead of the
+      // rule each case is about.
+      const sameInstant = () => {
+        const at = now();
+        return [at, at];
+      };
       await assert.rejects(
         raw(() => insertDecision(toCashier, owner, now())),
         /needs an independent decision/u,
       );
       // ... and a mark while sole operator is not on.
       await assert.rejects(
-        raw(() => insertMark(toCashier, owner, now(), now())),
+        raw(() => insertMark(toCashier, owner, ...sameInstant())),
         /needs sole operator on/u,
       );
 
@@ -464,12 +471,12 @@ it("staff roles: a sole owner approves alone, and the two-person rule returns", 
       );
       // (f) ... and a mark for the subject (nobody approves a role for themselves).
       await assert.rejects(
-        raw(() => insertMark(toCashier, sam, now(), now())),
+        raw(() => insertMark(toCashier, sam, ...sameInstant())),
         /must mark its requester/u,
       );
       // (e) A mark without its approval rolls the whole transaction back at commit.
       await assert.rejects(
-        raw(() => insertMark(toCashier, owner, now(), now())),
+        raw(() => insertMark(toCashier, owner, ...sameInstant())),
         /needs its approval/u,
       );
       assert.equal(await marks(), 0);
