@@ -46,6 +46,28 @@ vi.mock("@rms/store", async (original) => ({
       return { expectedVersion: 20, activePauses: [], observedAt: at };
     },
 }));
+// Batch 36: the business-day read's owner reads (configuration and publication proof), each
+// authorizing as the real source does; a pause history's length must not matter there either.
+vi.mock("./merchant-store-business-day.js", async (original) => ({
+  ...(await original<object>()),
+  createMerchantStoreBusinessDay:
+    (options: { authorize(tx: unknown): Promise<boolean> }) => async (tx: unknown, at: string) => {
+      d.stateRead();
+      for (let check = 0; check < 6; check += 1)
+        d.ownerAuthorizations.push(await options.authorize(tx));
+      if (!d.ownerAuthorizations.every((value) => value)) throw new Error("UNAVAILABLE");
+      return {
+        businessDate: "2026-10-17",
+        startsAt: "2026-10-17T08:00:00.000Z",
+        endsAt: "2026-10-18T08:00:00.000Z",
+        timeZone: "America/Toronto",
+        observedAt: at,
+        lastOrdersAt: null,
+        closesAt: null,
+        closedToday: false,
+      };
+    },
+}));
 const { createMerchantServiceControl } = await import("./merchant-service-control.js");
 
 const id = (n: number) => "01909974-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -127,6 +149,40 @@ it("WP-2423 L1: refuses the reply when the permission or Session ends during the
     .mockResolvedValueOnce(true)
     .mockRejectedValueOnce(new Error("STORE_SERVICE_PERMISSION_DENIED"));
   await expect(ended.control.read("synthetic-cookie")).rejects.toThrow(
+    "STORE_SERVICE_PERMISSION_DENIED",
+  );
+});
+
+it("batch 36: the business day resolves the caller once at the start and once before the reply", async () => {
+  const f = setup();
+  await expect(f.control.businessDay("synthetic-cookie")).resolves.toMatchObject({
+    businessDate: "2026-10-17",
+    closesAt: null,
+  });
+  expect(d.resolve).toHaveBeenCalledOnce();
+  expect(d.resolve).toHaveBeenCalledWith(expect.anything(), "synthetic-cookie", "merchant.access");
+  // Start and final re-check only; the six owner-read checks take the run's guard.
+  expect(f.allowed).toHaveBeenCalledTimes(2);
+  expect(d.ownerAuthorizations).toEqual([true, true, true, true, true, true]);
+});
+
+it("batch 36: the business day is refused before any owner read, and when access ends during it", async () => {
+  const refused = setup();
+  refused.allowed.mockResolvedValue(false);
+  await expect(refused.control.businessDay("synthetic-cookie")).rejects.toThrow(
+    "STORE_SERVICE_PERMISSION_DENIED",
+  );
+  expect(d.stateRead).not.toHaveBeenCalled();
+  const ended = setup();
+  ended.allowed.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+  await expect(ended.control.businessDay("synthetic-cookie")).rejects.toThrow(
+    "STORE_SERVICE_PERMISSION_DENIED",
+  );
+  const signedOut = setup();
+  signedOut.allowed
+    .mockResolvedValueOnce(true)
+    .mockRejectedValueOnce(new Error("STORE_SERVICE_PERMISSION_DENIED"));
+  await expect(signedOut.control.businessDay("synthetic-cookie")).rejects.toThrow(
     "STORE_SERVICE_PERMISSION_DENIED",
   );
 });

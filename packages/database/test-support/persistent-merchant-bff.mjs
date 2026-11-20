@@ -1863,6 +1863,10 @@ export async function verifyPersistentMerchantBff({
     /STORE_SERVICE_COMMAND_INVALID/u,
   );
   const beforeControl = await control.read(gateCookie.value);
+  // Batch 36: the business-day read resolves its caller once and answers under the pilot role.
+  const controlDay = await control.businessDay(gateCookie.value);
+  assert.match(controlDay.businessDate, /^\d{4}-\d{2}-\d{2}$/u);
+  assert.ok(Date.parse(controlDay.startsAt) < Date.parse(controlDay.endsAt));
   // Now they may pause and read: the workspace says so, with the read.
   assert.equal((await service().bootstrap(gateCookie.value)).workspace.pauseOrderingShown, true);
   assert.equal(beforeControl.configurationReference, f.uuid("910"));

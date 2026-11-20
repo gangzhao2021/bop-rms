@@ -209,23 +209,40 @@ export function createMerchantServiceControl(options: {
     });
   };
   // WP-2423 Q21: the selected Store's current business day, for every staff member who may enter.
+  // Batch 36 (v15 b35 live, the L1 rule above): the caller is resolved in full once at the start
+  // and once before the reply; the owner reads in between (the business-date configuration and
+  // its publication proof) take the run's guard. Each of them re-resolved the caller (~30 queries)
+  // before, so this read cost ~180 ms of the merchant server's time on every screen that opens,
+  // and Home's evening reminder waited for it.
   const businessDay = async (sessionCookie: unknown) =>
-    source.transactions.run(async (tx) => {
-      const { selected, context, store, allowed } = await resolveScope(
-        tx,
-        sessionCookie,
-        "merchant.access",
-      );
-      const day = await createMerchantStoreBusinessDay({
-        publication: source.publication,
-        tenantReference: selected.tenantReference,
-        brandReference: context.brand.brandReference,
-        storeReference: store.storeReference,
-        timeZone: store.timeZone,
-        authorize: allowed,
-      })(tx, context.resolvedAt);
-      if (!(await allowed())) throw new Error("STORE_SERVICE_PERMISSION_DENIED");
-      return merchantBusinessDayView(day);
-    });
+    source.transactions.run((tx) =>
+      withMerchantTransactionAuthorization(
+        {
+          transaction: tx,
+          resolve: async () => {
+            const scope = await resolveScope(tx, sessionCookie, "merchant.access");
+            if ((await scope.allowed()) !== true)
+              throw new Error("STORE_SERVICE_PERMISSION_DENIED");
+            return scope;
+          },
+          recheck: async (scope) => (await scope.allowed()) === true,
+          denied: () => {
+            throw new Error("STORE_SERVICE_PERMISSION_DENIED");
+          },
+        },
+        async (authority) => {
+          const { selected, context, store } = authority.scope;
+          const day = await createMerchantStoreBusinessDay({
+            publication: source.publication,
+            tenantReference: selected.tenantReference,
+            brandReference: context.brand.brandReference,
+            storeReference: store.storeReference,
+            timeZone: store.timeZone,
+            authorize: (transaction) => authority.guard(transaction),
+          })(tx, context.resolvedAt);
+          return merchantBusinessDayView(day);
+        },
+      ),
+    );
   return Object.assign(write, { read, businessDay });
 }
