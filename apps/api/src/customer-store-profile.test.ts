@@ -2,6 +2,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GuestSessionError } from "@bop/identity";
+import { describeStoreUpcomingHours, evaluateStoreOperatingStatus } from "@rms/store";
 import { createApp } from "./app.js";
 import {
   createCustomerStoreProfileHandler,
@@ -70,6 +71,64 @@ describe("WP-2423 today's hours for the store identity", () => {
         tonight: { startLocalTime: "11:00:00", endLocalTime: "02:00:00" },
       });
     }
+  });
+  it("batch 36: the guest page follows the open gate after midnight and on a holiday", () => {
+    const interval = (start: string, end: string, endsNextDay = false) => ({
+      startLocalTime: start,
+      endLocalTime: end,
+      endsNextDay,
+      serviceModes: ["Pickup" as const],
+      orderCutoffSeconds: 0,
+    });
+    const page = (
+      intervals: ReturnType<typeof interval>[],
+      exceptions: { localDate: string; kind: "Holiday"; intervals: [] }[],
+      localDate: string,
+      localTime: string,
+      isoWeekday: number,
+    ) => {
+      const weeklySchedule = [1, 2, 3, 4, 5, 6, 7].map((weekday) => ({
+        isoWeekday: weekday,
+        intervals,
+      }));
+      const gate = evaluateStoreOperatingStatus({
+        evaluatedAt: "2026-11-20T05:49:00.000Z",
+        localDate,
+        localTime,
+        isoWeekday,
+        weeklySchedule,
+        exceptions,
+        temporaryClosures: [],
+      });
+      return describeCustomerStoreHours({
+        state: gate.state,
+        servesChannel: gate.availableServiceModes.includes("Pickup"),
+        localTime,
+        todayHours: intervals,
+        localDate,
+        upcoming: describeStoreUpcomingHours({
+          localDate,
+          localTime,
+          weeklySchedule,
+          exceptions,
+          days: 7,
+        }),
+      });
+    };
+    // Test Merchant 2 at 00:49 on Friday 2026-11-20: open, until 23:59:59, taking orders.
+    expect(page([interval("00:00:00", "23:59:59")], [], "2026-11-20", "00:49:00", 5)).toMatchObject(
+      { status: "Open", closesAt: "23:59:59", ordersStopped: false, tonight: null },
+    );
+    // Christmas Day is a holiday: Christmas Eve's 18:00-02:00 stops at midnight, as the gate says.
+    expect(
+      page(
+        [interval("18:00:00", "02:00:00", true)],
+        [{ localDate: "2026-12-25", kind: "Holiday", intervals: [] }],
+        "2026-12-25",
+        "01:00:00",
+        5,
+      ),
+    ).toMatchObject({ status: "Closed", closesAt: null, lastOrdersAt: null, tonight: null });
   });
   it("WP-2423 store-service-controls (v15 M30): a pickup pause is a pause with its end, not closed", () => {
     const input = { servesChannel: false, localTime: "18:30:00", todayHours: day };

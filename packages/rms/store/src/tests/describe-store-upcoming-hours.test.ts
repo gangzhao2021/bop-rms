@@ -124,7 +124,12 @@ describe("WP-2423 DEC-CLOSING-SUMMARY: when the Store closes on a business day",
     schedule: readonly { isoWeekday: number; intervals: ReturnType<typeof period>[] }[],
     dated: Parameters<typeof describeStoreBusinessDayClosing>[0]["exceptions"] = [],
   ) =>
-    describeStoreBusinessDayClosing({ businessDate, weeklySchedule: schedule, exceptions: dated });
+    describeStoreBusinessDayClosing({
+      businessDate,
+      businessDayStartLocalTime: "04:00:00",
+      weeklySchedule: schedule,
+      exceptions: dated,
+    });
   // 2026-12-22 is a Tuesday (2).
   it("gives a lunch-only Store's closing at the end of lunch", () => {
     expect(

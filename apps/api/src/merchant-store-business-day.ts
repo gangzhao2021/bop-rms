@@ -75,7 +75,12 @@ export function createMerchantStoreBusinessDay(options: {
     return Object.freeze({
       ...day,
       lastOrdersAt: lastOrdersInstant(published, options.timeZone, at),
-      ...businessDayClosing(published, options.timeZone, String(day.businessDate)),
+      ...businessDayClosing(
+        published,
+        options.timeZone,
+        String(day.businessDate),
+        String(day.businessDayStartLocalTime),
+      ),
     });
   };
 }
@@ -121,8 +126,9 @@ function lastOrdersInstant(
 }
 
 /**
- * WP-2423 DEC-CLOSING-SUMMARY: when this business day closes, from the same verified publication.
- * Unreadable, or nothing published: neither closesAt nor closedToday, and the screen falls back.
+ * WP-2423 DEC-CLOSING-SUMMARY: when this business day closes, from the same verified publication
+ * and the day's own business-day start (batch 36: the periods open inside the day, not the
+ * business date's weekday alone, so Home and the open gate agree after midnight). Unreadable, or nothing published: neither closesAt nor closedToday, and the screen falls back.
  */
 function businessDayClosing(
   published:
@@ -130,12 +136,14 @@ function businessDayClosing(
     | undefined,
   timeZone: string,
   businessDate: string,
+  businessDayStartLocalTime: string,
 ): { readonly closesAt: string | null; readonly closedToday: boolean } {
   const unknown = { closesAt: null, closedToday: false };
   if (published === undefined) return unknown;
   try {
     const closing = describeStoreBusinessDayClosing({
       businessDate,
+      businessDayStartLocalTime,
       weeklySchedule: published.configuration.weeklySchedule as Parameters<
         typeof describeStoreBusinessDayClosing
       >[0]["weeklySchedule"],

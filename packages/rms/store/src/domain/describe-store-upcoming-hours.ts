@@ -126,8 +126,9 @@ export function describeStoreUpcomingHours(input: StoreUpcomingHoursInput): Stor
       seconds(interval.startLocalTime) <= now &&
       (interval.endsNextDay || now < seconds(interval.endLocalTime)),
   );
+  // Batch 36: as in the open gate, today's own dated exception replaces last night's tail too.
   const fromYesterday =
-    fromToday === undefined
+    fromToday === undefined && exception(input.localDate) === undefined
       ? yesterday.find((interval) => interval.endsNextDay && now < seconds(interval.endLocalTime))
       : undefined;
   const current = fromToday ?? fromYesterday;
@@ -200,30 +201,58 @@ export type StoreBusinessDayClosing =
   | { readonly kind: "Closes"; readonly localDate: string; readonly localTime: string };
 
 /**
- * WP-2423 DEC-CLOSING-SUMMARY: when the Store closes on one business day. A dated exception
- * replaces that date's weekday hours, as in the open gate.
+ * WP-2423 DEC-CLOSING-SUMMARY: when the Store closes on one business day.
+ *
+ * Batch 36 (v15 2026-11-20): the business day runs from its start time on the business date to
+ * the same time the next date, so its periods are the ones open at some moment inside that span,
+ * whatever calendar date they are published on: last night's period still running at the start,
+ * the business date's own, and the next date's before the business day ends (00:00-02:00 written
+ * on the next date, or a Store open all day). Each ends as the open gate ends it: a period that
+ * runs past midnight stops at midnight when the next date has its own dated exception. The
+ * closing is the latest end, so the Store's own screens never say it has closed while the open
+ * gate still takes orders, and say so once it has stopped.
  */
 export function describeStoreBusinessDayClosing(
   input: Pick<StoreUpcomingHoursInput, "weeklySchedule" | "exceptions"> & {
     readonly businessDate: string;
+    /** The Store's business-day start ("HH:MM:SS"), from the same publication. */
+    readonly businessDayStartLocalTime: string;
   },
 ): StoreBusinessDayClosing {
-  if (!datePattern.test(input.businessDate)) throw new Error("STORE_UPCOMING_HOURS_INPUT_INVALID");
-  const exception = input.exceptions.find((entry) => entry.localDate === input.businessDate);
+  if (
+    !datePattern.test(input.businessDate) ||
+    !/^(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$/u.test(input.businessDayStartLocalTime)
+  )
+    throw new Error("STORE_UPCOMING_HOURS_INPUT_INVALID");
+  const exception = (localDate: string) =>
+    input.exceptions.find((entry) => entry.localDate === localDate);
   const anyHours =
-    exception !== undefined || input.weeklySchedule.some((day) => day.intervals.length > 0);
+    exception(input.businessDate) !== undefined ||
+    input.weeklySchedule.some((day) => day.intervals.length > 0);
   if (!anyHours) return Object.freeze({ kind: "NoPublishedHours" });
-  const intervals =
-    exception?.intervals ??
-    input.weeklySchedule.find((day) => day.isoWeekday === isoWeekday(input.businessDate))
-      ?.intervals ??
+  const intervalsOn = (localDate: string) =>
+    exception(localDate)?.intervals ??
+    input.weeklySchedule.find((day) => day.isoWeekday === isoWeekday(localDate))?.intervals ??
     [];
-  if (intervals.length === 0) return Object.freeze({ kind: "ClosedToday" });
-  const end = Math.max(
-    ...intervals.map(
-      (interval) => seconds(interval.endLocalTime) + (interval.endsNextDay ? 86_400 : 0),
-    ),
-  );
+  // Seconds from midnight starting the business date; the day is [dayStart, dayStart + 1 day).
+  const dayStart = seconds(input.businessDayStartLocalTime);
+  const dayEnd = dayStart + 86_400;
+  let end: number | null = null;
+  for (const offset of [-1, 0, 1]) {
+    const localDate = shiftDate(input.businessDate, offset);
+    const nextHasException = exception(shiftDate(localDate, 1)) !== undefined;
+    for (const interval of intervalsOn(localDate)) {
+      const from = offset * 86_400 + seconds(interval.startLocalTime);
+      const until =
+        offset * 86_400 +
+        (interval.endsNextDay
+          ? 86_400 + (nextHasException ? 0 : seconds(interval.endLocalTime))
+          : seconds(interval.endLocalTime));
+      if (from < dayEnd && until > dayStart && until > from && (end === null || until > end))
+        end = until;
+    }
+  }
+  if (end === null) return Object.freeze({ kind: "ClosedToday" });
   return Object.freeze({
     kind: "Closes",
     localDate: shiftDate(input.businessDate, Math.floor(end / 86_400)),

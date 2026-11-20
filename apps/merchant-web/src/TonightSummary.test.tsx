@@ -3,6 +3,7 @@ import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
 import { setLanguageForTest } from "./i18n/i18n.js";
 import { closingReminderPhase, inClosingWindow } from "./ClosingReminder.js";
+import { storeClosingNow } from "./PickupNotCollectedAction.js";
 import { parseTonightSummary } from "./store-reports-client.js";
 import { tonightProblems, TonightSummaryView } from "./TonightSummary.js";
 import { tonightSummaryFixture } from "./tonight-summary.fixtures.js";
@@ -339,6 +340,22 @@ describe("WP-2423 item 8 ② tonight's closing summary", () => {
     expect(inClosingWindow(endsAt, Date.parse("2026-10-27T23:00:00.000Z"))).toBe(false);
     expect(inClosingWindow(endsAt, Date.parse("2026-10-28T08:00:00.000Z"))).toBe(false);
     expect(inClosingWindow(null, Date.now())).toBe(false);
+  });
+  it("batch 36: keeps Home quiet after midnight while a Store open all day is still open", () => {
+    // Test Merchant 2: open 00:00-23:59:59, business day 04:00 to 04:00 (09:00Z). At 00:49 the
+    // business day still closes with Friday's period, after the day itself ends; the business day
+    // read now gives that (it used to give Thursday 23:59:59, and Home said "after closing").
+    const day = {
+      endsAt: "2026-11-20T09:00:00.000Z",
+      closesAt: "2026-11-21T04:59:59.000Z",
+      closedToday: false,
+    };
+    const at = Date.parse("2026-11-20T05:49:00.000Z");
+    expect(closingReminderPhase(day, at)).toBe("Hidden");
+    expect(storeClosingNow(day, at)).toBe(false);
+    const before = { ...day, closesAt: "2026-11-20T04:59:59.000Z" };
+    expect(closingReminderPhase(before, at)).toBe("AfterClosing");
+    expect(storeClosingNow(before, at)).toBe(true);
   });
 });
 
