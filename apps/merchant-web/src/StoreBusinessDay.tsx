@@ -129,6 +129,15 @@ export const StoreBusinessDaySettledContext = createContext(true);
 export function useStoreBusinessDaySettled(): boolean {
   return useContext(StoreBusinessDaySettledContext);
 }
+/**
+ * Batch 36 (v15 b35 known limit): true while the Store's first business-day read has neither
+ * answered nor failed (the BUSINESS_DAY_SETTLE_MS cap does not end it), so a screen keeps room
+ * only for what that answer can still bring, never after it failed. False outside a workspace.
+ */
+export const StoreBusinessDayPendingContext = createContext(false);
+export function useStoreBusinessDayPending(): boolean {
+  return useContext(StoreBusinessDayPendingContext);
+}
 /** A first read that hangs no longer holds a screen back than this. */
 export const BUSINESS_DAY_SETTLE_MS = 2_000;
 
@@ -233,6 +242,8 @@ export function StoreBusinessDayProvider({
   const [day, setDay] = useState<StoreBusinessDay | null>(null);
   // The scope whose first read has settled; another scope is unsettled from its first render.
   const [settledScope, setSettledScope] = useState<string | null>(null);
+  // The scope whose first read answered or failed (the settle timer aside).
+  const [answeredScope, setAnsweredScope] = useState<string | null>(null);
   // Batch 36 (v15 b35 live): a layout effect, so this read is sent before the reads the screen
   // below starts in its own effects (React runs those first). It was sent last of about 29 on
   // Home, waited about a second for a free connection, and the evening reminder waited on it.
@@ -240,12 +251,16 @@ export function StoreBusinessDayProvider({
     setDay(null);
     if (!enabled) return;
     const settle = () => setSettledScope(scopeKey);
+    const answered = () => {
+      settle();
+      setAnsweredScope(scopeKey);
+    };
     const settleTimer = setTimeout(settle, BUSINESS_DAY_SETTLE_MS);
     const tracker = trackStoreBusinessDay({
       load: (signal) => loadStoreBusinessDay(fetcher, signal),
-      onFailed: settle,
+      onFailed: answered,
       onDay: (value) => {
-        settle();
+        answered();
         setDay((previous) =>
           previous !== null &&
           previous.businessDate === value.businessDate &&
@@ -278,7 +293,9 @@ export function StoreBusinessDayProvider({
   return (
     <StoreBusinessDayContext.Provider value={value}>
       <StoreBusinessDaySettledContext.Provider value={!enabled || settledScope === scopeKey}>
-        {children}
+        <StoreBusinessDayPendingContext.Provider value={enabled && answeredScope !== scopeKey}>
+          {children}
+        </StoreBusinessDayPendingContext.Provider>
       </StoreBusinessDaySettledContext.Provider>
     </StoreBusinessDayContext.Provider>
   );

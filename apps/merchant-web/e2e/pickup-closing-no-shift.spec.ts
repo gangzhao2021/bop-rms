@@ -188,6 +188,37 @@ test("@production a failed read of the day's hours holds nothing back: the list 
 });
 
 /**
+ * Batch 36 (b35 known limit): for staff not shown Pause ordering, the tools line was kept as an
+ * empty 44 px gap above the list when the day's hours could not be read, although nothing could
+ * appear on it until they are read again. It is now kept only while that read is on its way.
+ */
+for (const [width, height] of [
+  [390, 844],
+  [1024, 768],
+  [1440, 900],
+] as const)
+  test(`@production staff not shown Pause ordering get no empty tools line when the day's hours could not be read (${width})`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height });
+    await pickup(page, "failed", { pauseShown: false });
+    await page.goto("/operations/pickup");
+    await expect(page.locator("main article")).toHaveCount(4);
+    await page.waitForTimeout(1_500);
+    const seen = await samples(page);
+    expect(seen.length).toBeGreaterThan(30);
+    expect(new Set(seen.map((entry) => entry.top)).size).toBe(1);
+    await expect(page.locator(".pickup-queue__tools")).toHaveCount(0);
+    // The filters follow the header directly, as on Orders.
+    const [filters, header] = await Promise.all([
+      page.locator(".pickup-queue__filters").first().boundingBox(),
+      page.locator("main header").first().boundingBox(),
+    ]);
+    expect((filters?.y ?? 0) - ((header?.y ?? 0) + (header?.height ?? 0))).toBeLessThan(44);
+    await expectNoInternalText(page);
+  });
+
+/**
  * Batch 35 (v15 b34 live minor): when the day's hours take longer than BUSINESS_DAY_SETTLE_MS
  * (2 s), the list shows first and "Mark all not collected" arrives later. It used to be inserted
  * above the list and push it from 282 to 326 px; it now takes its place on Pause ordering's line,

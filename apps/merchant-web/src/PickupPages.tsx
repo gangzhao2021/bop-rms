@@ -12,6 +12,7 @@ import {
 import {
   businessDateText,
   useStoreBusinessDay,
+  useStoreBusinessDayPending,
   useStoreBusinessDaySettled,
 } from "./StoreBusinessDay.js";
 import { StatePanel } from "@bop-rms/ui";
@@ -455,8 +456,13 @@ export function PickupQueueScreen({
   // push it down 44 px. It now sits on Pause ordering's line, and while the hours are not known
   // and there are ready orders that line keeps its height even without Pause ordering, so the
   // control taking its place there moves nothing. Once kept, the line stays for this screen.
+  // Batch 36 (b35 known limit): only while the hours read is still on its way. One that failed
+  // brings nothing until it is read again, so for staff not shown Pause ordering the line is no
+  // longer an empty 44 px gap above the list (the list shows only once that read answered, failed
+  // or took BUSINESS_DAY_SETTLE_MS, so a read answered by then never reserves it either).
   const pauseShown = useContext(PauseOrderingShownContext) !== false;
-  const closingMayCome = businessDay?.startsAt == null && closable.length > 0;
+  const dayPending = useStoreBusinessDayPending();
+  const closingMayCome = businessDay?.startsAt == null && dayPending && closable.length > 0;
   const keepToolsLine = useRef(false);
   if (closingMayCome) keepToolsLine.current = true;
   const toolsLine =
