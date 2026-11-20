@@ -1,12 +1,31 @@
 import { expect, test, type Locator, type Page, type Route } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
-import { routeStorefrontReads } from "./storefront-reads";
+import { routeStorefrontReads, syntheticStoreProfile } from "./storefront-reads";
 
 // WP-2423 DEC-DINE-IN-PAY-LATER: at a table that pays once at the end, a round is placed from the
 // cart in one tap: no tip, no payment and no review page. The table page then shows it. Item 6: the
 // four server steps run behind one button. Synthetic HTTP interception on the production PWA; the
 // server's side is the acceptance tests' (dine-in journey, pay-later round).
-test.beforeEach(({ context }) => routeStorefrontReads(context));
+// These rounds are not about the Store's hours: the synthetic Store takes last orders at 9:30 p.m.
+// Toronto, so between 9:00 and 9:30 on the runner's real clock the cart rightly shows its own
+// "Last orders" alert beside the round's. Here the Store has no last-orders time, whatever the hour.
+test.beforeEach(async ({ context }) => {
+  await routeStorefrontReads(context);
+  await context.route("**/api/v1/customer/store", (route) =>
+    route.fulfill({
+      status: 200,
+      headers: { "cache-control": "private, max-age=30" },
+      contentType: "application/json",
+      body: JSON.stringify({
+        ...syntheticStoreProfile,
+        store: {
+          ...syntheticStoreProfile.store,
+          hours: { ...syntheticStoreProfile.store.hours, lastOrdersAt: null },
+        },
+      }),
+    }),
+  );
+});
 const id = (n: number) => "018f8a00-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const publicStore = id(4);
 
