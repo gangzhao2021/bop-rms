@@ -50,12 +50,21 @@ export function parseStoreReference(value: unknown): StoreReference {
     throw new OrganizationContractError("STORE_REFERENCE_INVALID");
   return value as StoreReference;
 }
+/**
+ * Batch 37 (v15 b36, merchant reads CPU-bound): instants that passed this check, by text. The
+ * check is a pure function of the text and the same instants (the policy, session and Store rows)
+ * are checked again on every read, so a repeat is answered from here; bounded, forgotten when full.
+ */
+const canonicalInstants = new Set<string>();
 export function parseCanonicalInstant(value: unknown): CanonicalInstant {
+  if (typeof value === "string" && canonicalInstants.has(value)) return value as CanonicalInstant;
   if (typeof value !== "string" || !instantPattern.test(value))
     throw new OrganizationContractError("ORGANIZATION_INPUT_INVALID");
   const parsed = Date.parse(value);
   if (!Number.isFinite(parsed) || new Date(parsed).toISOString() !== value)
     throw new OrganizationContractError("ORGANIZATION_INPUT_INVALID");
+  if (canonicalInstants.size >= 65_536) canonicalInstants.clear();
+  canonicalInstants.add(value);
   return value as CanonicalInstant;
 }
 export function parseOrganizationVersion(value: unknown): OrganizationVersion {
@@ -77,17 +86,15 @@ function readClosedRecord(
       Object.getPrototypeOf(value) !== Object.prototype
     )
       throw new OrganizationContractError(code);
+    // Batch 37: the same check without a Set and every descriptor at once per call (~3x faster;
+    // this runs for every row of every policy packet a read evaluates).
     const ownKeys = Reflect.ownKeys(value);
-    const allowed = new Set(keys);
-    if (
-      ownKeys.length !== keys.length ||
-      ownKeys.some((key) => typeof key !== "string" || !allowed.has(key))
-    )
-      throw new OrganizationContractError(code);
-    const descriptors = Object.getOwnPropertyDescriptors(value);
+    if (ownKeys.length !== keys.length) throw new OrganizationContractError(code);
+    for (const key of ownKeys)
+      if (typeof key !== "string" || !keys.includes(key)) throw new OrganizationContractError(code);
     const output: Record<string, unknown> = {};
     for (const key of keys) {
-      const descriptor = descriptors[key];
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
       if (!descriptor || !("value" in descriptor) || !descriptor.enumerable)
         throw new OrganizationContractError(code);
       output[key] = descriptor.value;

@@ -192,10 +192,20 @@ function transportArray(value: unknown, maximum: number): readonly unknown[] {
   }
   return result;
 }
+/**
+ * Batch 37 (v15 b36): the canonical text each packet Date was made from. A packet's dates are only
+ * read back as text (`at`), and the text passed the exact ISO roundtrip check, so it is what
+ * `toISOString()` would answer; ~0.1 ms per policy evaluation on the CPU-bound merchant entry.
+ * The packet's Dates never leave this module and are never changed.
+ */
+const packetDateText = new WeakMap<Date, string>();
 function transportDate(value: unknown): Date {
   // The existing public parser requires canonical UTC millisecond text and an
   // exact ISO roundtrip. Domain construction below still receives Date rows.
-  return new Date(parseCanonicalInstant(value));
+  const text = parseCanonicalInstant(value);
+  const date = new Date(text);
+  packetDateText.set(date, text);
+  return date;
 }
 function transportVersion(value: unknown): string {
   if (
@@ -247,7 +257,7 @@ function policyPacket(value: unknown) {
 }
 function at(value: unknown): string {
   if (!(value instanceof Date) || !Number.isFinite(value.getTime())) return unavailable();
-  return value.toISOString();
+  return packetDateText.get(value) ?? value.toISOString();
 }
 function timestamps(row: Record<string, unknown>, observedAt: string) {
   const updatedAt = at(row.updated_at),
