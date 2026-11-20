@@ -151,7 +151,10 @@ export function parseStoreBusinessDateConfiguration(
   )
     return fail();
   try {
-    new Intl.DateTimeFormat("en-CA", { timeZone: raw.timeZone }).format(new Date(0));
+    if (!knownTimeZones.has(raw.timeZone)) {
+      new Intl.DateTimeFormat("en-CA", { timeZone: raw.timeZone }).format(new Date(0));
+      knownTimeZones.add(raw.timeZone);
+    }
     const effectiveFrom = instant(raw.effectiveFrom);
     const effectiveUntil = raw.effectiveUntil === null ? null : instant(raw.effectiveUntil);
     if (effectiveUntil !== null && Date.parse(effectiveUntil) <= Date.parse(effectiveFrom))
@@ -188,7 +191,24 @@ interface LocalFields {
   readonly second: number;
 }
 
+/**
+ * Batch 37 (v15 b36, merchant reads CPU-bound): a Store's business day is resolved on most merchant
+ * reads, and building an Intl.DateTimeFormat is the costly part of it (~0.1 ms, several per
+ * resolution). A formatter is immutable and depends on the time zone alone, so one is kept per
+ * time zone (and which time zones the runtime accepts); every resolution still reads the
+ * configuration and computes the day afresh.
+ */
+const formatters = new Map<string, Intl.DateTimeFormat>();
+const knownTimeZones = new Set<string>();
 function formatter(timeZone: string): Intl.DateTimeFormat {
+  const known = formatters.get(timeZone);
+  if (known !== undefined) return known;
+  const created = createFormatter(timeZone);
+  if (formatters.size >= 256) formatters.clear();
+  formatters.set(timeZone, created);
+  return created;
+}
+function createFormatter(timeZone: string): Intl.DateTimeFormat {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone,
     calendar: "iso8601",
