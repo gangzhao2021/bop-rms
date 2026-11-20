@@ -60,6 +60,33 @@ async function proveDatabase(context) {
   } finally {
     await client.end();
   }
+  // The running database owns no Docker network: it sits on the default bridge, not on a
+  // subnet carved from the shared address pool.
+  assert.equal(
+    (
+      await dockerOutput([
+        "network",
+        "ls",
+        "--quiet",
+        "--filter",
+        `label=com.docker.compose.project=bop-rms-test-${context.runId}`,
+      ])
+    ).trim(),
+    "",
+  );
+}
+
+async function dockerOutput(args) {
+  return await new Promise((resolve, reject) => {
+    const child = spawn("docker", args, { cwd: root, stdio: ["ignore", "pipe", "ignore"] });
+    let stdout = "";
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => (stdout += chunk));
+    child.once("error", reject);
+    child.once("close", (code) =>
+      code === 0 ? resolve(stdout) : reject(new Error(`docker failed (${code})`)),
+    );
+  });
 }
 
 async function signalChild() {

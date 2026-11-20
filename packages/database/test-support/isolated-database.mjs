@@ -209,6 +209,25 @@ export async function allocatePort(runId, options = {}) {
   );
 }
 
+/**
+ * WP-2423 (batch 35): compose.yaml gives the local database its own bridge network, and Docker
+ * carves every such network from a small shared address pool (Docker Desktop: about 30 subnets,
+ * shared with the pilot, the local database and any other project on the machine). Each isolated
+ * database used to take one, so a config with many files beside another config ran the pool dry
+ * ("all predefined address pools have been fully subnetted") and its databases failed to start.
+ * A test database is reached only through its published loopback port, so it joins Docker's
+ * existing default bridge instead and takes no subnet at all.
+ */
+export const isolatedComposeOverride = [
+  "services:",
+  "  postgres:",
+  "    network_mode: bridge",
+  "    networks: !reset []",
+  "networks: !reset {}",
+  "",
+].join("\n");
+const isolatedComposeOverrideName = "compose.isolated.yaml";
+
 function composeArguments(root, project, composeEnv, ...args) {
   return [
     "compose",
@@ -220,6 +239,8 @@ function composeArguments(root, project, composeEnv, ...args) {
     composeEnv,
     "--file",
     path.join(root, "compose.yaml"),
+    "--file",
+    path.join(path.dirname(composeEnv), isolatedComposeOverrideName),
     ...args,
   ];
 }
@@ -472,8 +493,11 @@ export async function withIsolatedDatabase(options, testBody) {
     controlRoot = path.join(root, ".local", `wp0024-${runId}`);
     await mkdir(controlRoot, { mode: 0o700, recursive: true });
     const secret = path.join(controlRoot, "password");
-    composeEnv = path.join(controlRoot, "compose.env");
     await writeFile(secret, password, { mode: 0o600 });
+    await writeFile(path.join(controlRoot, isolatedComposeOverrideName), isolatedComposeOverride, {
+      mode: 0o600,
+    });
+    composeEnv = path.join(controlRoot, "compose.env");
     const writeComposeEnv = async () =>
       await writeFile(
         composeEnv,

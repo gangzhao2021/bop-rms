@@ -8,6 +8,7 @@ import {
   composeStartAttempts,
   isComposePortConflict,
   isPortBindable,
+  isolatedComposeOverride,
   leasePortRange,
   shouldRetryComposeStart,
   withIsolatedDatabase,
@@ -46,6 +47,12 @@ await assert.rejects(
 // (49152-65535) ephemeral ranges, including the unbound API/web values.
 assert(leasePortRange.first >= 1_024);
 assert(leasePortRange.first + leasePortRange.count - 1 + 5_002 < 32_768);
+
+// An isolated database joins Docker's default bridge and declares no network of its own, so it
+// never takes a subnet from the shared address pool.
+assert.match(isolatedComposeOverride, /^ {4}network_mode: bridge$/mu);
+assert.match(isolatedComposeOverride, /^ {4}networks: !reset \[\]$/mu);
+assert.match(isolatedComposeOverride, /^networks: !reset \{\}$/mu);
 
 // Docker's port-conflict answers are retried with a new lease; anything else is not.
 const dockerDesktopConflict =
