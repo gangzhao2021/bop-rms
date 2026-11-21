@@ -2685,10 +2685,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "没有变化 — 这些营业时间和停业日已经保存。",
   "Nothing changed. Check the connection and try again.": "没有任何更改。请检查网络后重试。",
   "Nothing changed. Try again.": "没有任何更改。请重试。",
-  "Nothing from today for order or table “{orderSearch}”. {earlierElsewhere}: see From earlier days above.":
-    '今天没有单号或桌台为"{orderSearch}"的订单。{earlierElsewhere}：见上方"较早营业日"。',
-  "Nothing from today is waiting. Earlier days' tickets are listed above.":
-    "今天没有等待中的票据。较早营业日的票据列在上方。",
+  "Nothing from today for order or table “{orderSearch}”. {earlierElsewhere}: see Needs attention above.":
+    "今天没有单号或桌台为“{orderSearch}”的订单。{earlierElsewhere}：见上方“需要处理”。",
+  "Nothing from today is waiting. Earlier days' tickets are under Needs attention above.":
+    "今天没有等待中的票据。较早营业日的票据在上方“需要处理”中。",
   "Nothing is assumed. Refresh before trying again.": "不做任何假定。重试前请先刷新。",
   "Nothing is in stock in this Store to record as waste.": "本门店没有可记录报损的库存。",
   "Nothing is left to refund on this order. Close to refresh it.":

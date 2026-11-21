@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
-import { atTop, dishes, remake, store, workItem } from "./kitchen-tm2-fixture";
+import { atTop, dishes, finished, remake, store, workItem } from "./kitchen-tm2-fixture";
 
 /**
  * WP-2423 batch 41 (v15 batch 40 live check, Test Merchant 2, kitchen-office-remakes).
@@ -168,4 +168,61 @@ test("@production WP-2423 batch 41: a waiting remake is counted as work, and the
     }
     await page.getByRole("button", { name: "Switch to English" }).click();
   }
+});
+
+test("@production WP-2423 batch 41: earlier-day tickets have one name on both screens, and the empty board points to it", async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  for (const surface of ["back office", "display"] as const) {
+    const state = { reworks: [] as Record<string, unknown>[], commands: [] };
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+    // Nothing from today: only the 53 earlier-day tickets.
+    await store(page, surface === "back office" ? "Unverified" : "Named", state, {
+      todays: [],
+      finished: [],
+    });
+    await page.goto("/operations/kitchen");
+    const summary = page.locator(
+      ".kitchen-office-earlier > summary, .kitchen-earlier-days > summary",
+    );
+    for (const language of ["en", "zh-Hans"] as const) {
+      if (language === "zh-Hans") await page.getByRole("button", { name: "切换到中文" }).click();
+      const zh = language === "zh-Hans";
+      await expect(summary).toHaveText(
+        zh
+          ? "需要处理 · 53 张较早营业日的票据待核对并关闭"
+          : "Needs attention · 53 tickets from earlier days to check and close",
+      );
+      await expect(page.locator(".kitchen-board-empty")).toContainText(
+        zh
+          ? "今天没有等待中的票据。较早营业日的票据在上方“需要处理”中。"
+          : "Nothing from today is waiting. Earlier days' tickets are under Needs attention above.",
+      );
+      for (const [width, height] of [
+        [1440, 900],
+        [1024, 768],
+        [390, 844],
+      ] as const) {
+        await atTop(page, width, height);
+        await page.screenshot({
+          path: `test-results/b41-earlier-${surface.replaceAll(" ", "-")}-${width}-${language}.png`,
+        });
+      }
+      await expectNoInternalText(page);
+    }
+    await page.getByRole("button", { name: "Switch to English" }).click();
+  }
+});
+
+test("@production WP-2423 batch 41: a search that finds only earlier-day tickets points to Needs attention", async ({
+  page,
+}) => {
+  const state = { reworks: [] as Record<string, unknown>[], commands: [] };
+  await store(page, "Unverified", state, { finished: [finished] });
+  await page.goto("/operations/kitchen");
+  await page.getByRole("searchbox", { name: "Order number or table" }).first().fill("30");
+  await expect(page.locator(".kitchen-board-empty")).toContainText(
+    "1 ticket from an earlier day has number or table “30”: see Needs attention above.",
+  );
 });

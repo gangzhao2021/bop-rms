@@ -3152,6 +3152,9 @@ export function KitchenBoardScreen({
             <summary>
               {/* One line of attention above the day's work. Only someone who can close them is told to. */}
               <span data-action={canCloseEarlier && earlierElsewhere === null ? "true" : undefined}>
+                {/* Batch 41: named as the back office names it, so staff hear one name for it. */}
+                {t("Needs attention")}
+                {" · "}
                 {earlierElsewhere ??
                   (canCloseEarlier
                     ? earlierTickets.length === 1
@@ -3291,7 +3294,7 @@ export function KitchenBoardScreen({
                         })
                       : earlierElsewhere !== null
                         ? t(
-                            "Nothing from today for order or table “{orderSearch}”. {earlierElsewhere}: see From earlier days above.",
+                            "Nothing from today for order or table “{orderSearch}”. {earlierElsewhere}: see Needs attention above.",
                             { orderSearch: orderSearch, earlierElsewhere: earlierElsewhere },
                           )
                         : t(
@@ -3299,7 +3302,9 @@ export function KitchenBoardScreen({
                             { orderSearch: orderSearch },
                           )
                     : view.items.length > 0 && view.items.length === earlierOpen.size
-                      ? t("Nothing from today is waiting. Earlier days' tickets are listed above.")
+                      ? t(
+                          "Nothing from today is waiting. Earlier days' tickets are under Needs attention above.",
+                        )
                       : !hasFilters || view.items.length === 0
                         ? // v15 2026-10-16: an empty board with no filter set is simply quiet.
                           t("Nothing to make right now.")
