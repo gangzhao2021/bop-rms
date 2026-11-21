@@ -1,5 +1,9 @@
 import { PaidOrderSwitchLine } from "./PaidOrderSwitchLine.js";
-import { listSeparator, t, saidTable } from "./i18n/i18n.js";
+import { elapsedText } from "./elapsed-text.js";
+import { openedOnEarlierDay } from "./earlier-day-tables.js";
+import { tablesClosingAlert } from "./tables-closing-alert.js";
+import { useStoreBusinessDay } from "./StoreBusinessDay.js";
+import { countOf, listSeparator, t, saidTable } from "./i18n/i18n.js";
 import { createTableCheckoutClient } from "./table-checkout-client.js";
 import { clearLastBills, loadLastBills, saveLastBills } from "./table-last-bills.js";
 import { UnpaidRoundCancelAction, isPaymentUnconfirmed } from "./UnpaidRoundCancelAction.js";
@@ -139,19 +143,7 @@ export function listFactsOf(
   if (said === null) return kitchen.readyToServe > 0 ? { bill: null, ...kitchen } : null;
   return { ...said, ...kitchen };
 }
-/** WP-2423 follow-up: how long a session has been open, in words staff read at a glance. */
-export function elapsedText(minutes: number): string {
-  if (minutes < 60) return t("{minutes} min", { minutes: String(minutes) });
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) {
-    const rest = minutes % 60;
-    return rest === 0
-      ? t("{hours} h", { hours: String(hours) })
-      : t("{hours} h {rest} min", { hours: String(hours), rest: String(rest) });
-  }
-  const days = Math.floor(hours / 24);
-  return t("{days} day{value}", { days: String(days), value: days === 1 ? "" : "s" });
-}
+export { elapsedText };
 export { longOpenSessionMinutes };
 /** What staff see on the floor: free, blocked, seated, or seated so long the guests have likely left. */
 export type TableFloorState = "Available" | "Unavailable" | "NeedsCleaning" | "Seated" | "LongOpen";
@@ -595,6 +587,7 @@ export function DiningSessionWorkspace({
   const paused = stale !== null;
   const locked = state !== "Idle" || hostLocked;
   const [now, setNow] = useState(() => Date.now());
+  const businessDay = useStoreBusinessDay();
   const selected = tables.find((table) => table.tableReference === selectedReference) ?? null;
   const anySeated = tables.some(
     (table) =>
@@ -1148,11 +1141,26 @@ export function DiningSessionWorkspace({
         .sort(compareTables),
     [tables, orderFacts, billFacts, billUnread, queueRead, kitchenFacts, now],
   );
+  // b39: a table left open from an earlier business day is listed apart, never among today's.
+  const readAt = loadedAt.current === null ? now : Date.parse(loadedAt.current);
+  const dayStart = businessDay?.startsAt == null ? Number.NaN : Date.parse(businessDay.startsAt);
+  const fromEarlierDay = (table: StaffDiningTable) =>
+    table.currentDiningSessionReference !== null &&
+    openedOnEarlierDay(table.elapsedMinutes, readAt, dayStart);
+  const earlierRows = rows.filter((row) => fromEarlierDay(row.table));
+  const todayRows = rows.filter((row) => !fromEarlierDay(row.table));
   const counts = new Map(
     tableTabs.map((value) => [
       value,
-      rows.filter((row) => tableInTab(row.table, row.need, value)).length,
+      (value === "Needs" ? todayRows : rows).filter((row) => tableInTab(row.table, row.need, value))
+        .length,
     ]),
+  );
+  const closingAlert = tablesClosingAlert(
+    businessDay,
+    now,
+    todayRows.filter((row) => row.table.currentDiningSessionReference !== null).length,
+    timeZone,
   );
   const seatedCount = counts.get("Seated") ?? 0;
   const needCount = counts.get("Needs") ?? 0;
@@ -1321,8 +1329,10 @@ export function DiningSessionWorkspace({
       <span className="table-row__next">{stepButton(table, need)}</span>
     </li>
   );
-  const visible = rows.filter((row) => tableInTab(row.table, row.need, tab));
-  const seatedOthers = rows.filter(
+  const visible = (tab === "Needs" ? todayRows : rows).filter((row) =>
+    tableInTab(row.table, row.need, tab),
+  );
+  const seatedOthers = todayRows.filter(
     (row) => row.table.currentDiningSessionReference !== null && row.need.tone !== "action",
   );
   const freeLine =
@@ -1385,6 +1395,13 @@ export function DiningSessionWorkspace({
                 {t("{count} need you", { count: String(needCount) })}
               </span>
             ) : null}
+            {earlierRows.length > 0 ? (
+              <span data-attention="true">
+                {t("{tables} from earlier days", {
+                  tables: countOf(earlierRows.length, "table"),
+                })}
+              </span>
+            ) : null}
             {guestStarts?.startsBusy === true ? (
               <span className="dining-floor-guest-starts-busy" data-attention="true">
                 {t(
@@ -1435,6 +1452,12 @@ export function DiningSessionWorkspace({
       <PaidOrderSwitchLine csrf={csrf} />
       {/* WP-2423 item 8 ③ follow-up: guests' last orders coming, or passed (staff still can). */}
       <LastOrdersNotice timeZone={timeZone} />
+      {/* b39: warn before the day ends with tables still open (nothing closes them by itself). */}
+      {closingAlert === null ? null : (
+        <p className="last-orders-notice" role="status" data-tone={closingAlert.tone}>
+          {closingAlert.text}
+        </p>
+      )}
       {stale ? <StaleReadNotice stale={stale} /> : null}
       {/* Operating continuity: what servers do while the page can't reach the store system. */}
       {stale || firstReadFailures !== null ? (
@@ -1515,6 +1538,17 @@ export function DiningSessionWorkspace({
                 <>
                   <h2 className="table-list__group">{t("Seated")}</h2>
                   <ul className="table-rows">{seatedOthers.map(tableRow)}</ul>
+                </>
+              ) : null}
+              {earlierRows.length > 0 ? (
+                <>
+                  <h2 className="table-list__group">{t("From earlier days")}</h2>
+                  <p className="table-list__calm">
+                    {t(
+                      "These tables were opened on an earlier day and never closed. Open each one: take the payment, or record that the guests left without paying, then close it. Nothing is closed or written off by itself.",
+                    )}
+                  </p>
+                  <ul className="table-rows">{earlierRows.map(tableRow)}</ul>
                 </>
               ) : null}
               {freeLine}

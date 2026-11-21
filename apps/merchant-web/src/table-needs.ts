@@ -32,7 +32,8 @@ export function staffCallReasonText(
   return reason === "AllergyQuestion"
     ? t("Allergy question")
     : reason === "TableNeeds"
-      ? t("Something for the table")
+      ? // b39: what the guest chose, so staff bring it on the first trip.
+        t("Water, cutlery, napkins")
       : reason === "OrderProblem"
         ? t("A problem with their order")
         : reason === "ReadyToPay"
@@ -40,13 +41,16 @@ export function staffCallReasonText(
           : t("A question");
 }
 
-/** WP-2423 item 8 ⑤: why a guest's round waits for staff, in staff words. */
+/**
+ * WP-2423 item 8 ⑤: why a guest's round waits for staff, in staff words. b39: never "just now" —
+ * the row also says how long it has waited ("… · 14 days ago").
+ */
 export function heldRoundReasonText(reason: "FirstOrder" | "PhoneRapid" | "TableRapid"): string {
   return reason === "FirstOrder"
     ? t("first round from a new phone")
     : reason === "PhoneRapid"
-      ? t("many rounds from one phone just now")
-      : t("many rounds from this table just now");
+      ? t("many rounds from one phone in a short time")
+      : t("many rounds from this table in a short time");
 }
 
 /** DEC-DINING-GUEST-TABLE-START: how long staff have to clean before the next guest may start. */

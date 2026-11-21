@@ -509,6 +509,12 @@
 .tonight__section h3 .tonight__detail {
   font-size: 14px;
 }
+/* b39: tables left open from earlier days, under tonight's. */
+.tonight__subhead {
+  margin: 16px 0 4px;
+  font-size: 14px;
+  font-weight: 600;
+}
 .tonight dl {
   display: grid;
   margin: 0;

@@ -101,7 +101,7 @@ test("@production staff see guests asking for staff and mark a call handled", as
   // one step, "Handled"; urgent (in red) after 5 minutes.
   const items = page.locator(".table-row");
   await expect(items.nth(0)).toContainText("Table T1");
-  await expect(items.nth(0)).toContainText("Asked for staff7 min ago · Something for the table");
+  await expect(items.nth(0)).toContainText("Asked for staff7 min ago · Water, cutlery, napkins");
   await expect(items.nth(0)).toHaveAttribute("data-urgent", "true");
   await expect(items.nth(1)).toContainText("1 min ago · A question");
   await items.nth(0).getByRole("button", { name: "Handled" }).click();

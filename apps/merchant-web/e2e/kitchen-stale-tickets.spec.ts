@@ -365,6 +365,30 @@ for (const width of [1440, 1024, 390])
     await page.screenshot({ path: `test-results/kitchen-added-day-ago-${width}.png` });
   });
 
+test("@production b39: a table left open for days has its old tickets kept apart, not at the top of today's board", async ({
+  page,
+}) => {
+  // v15 b38 sweep: owner-hotpot's Table 5, seated on Oct 5 and never closed, had its "Overdue"
+  // tickets at the top of every day's board and in "N work items". Only a round of the day before
+  // (a late service past the day's turn) is still today's work.
+  const forgotten = item(0x60, {
+    localizedDisplayNames: { "en-CA": "Tomato pot" },
+    orderLabel: { orderNumber: "5", orderType: "DineIn", tableLabel: "5" },
+    workItemCreatedAt: "2026-10-05T23:00:00.000Z",
+    businessDate: "2026-10-05",
+    atSeatedTable: true,
+  });
+  await board(page, true, { items: [forgotten] });
+  await page.goto("/operations/kitchen");
+  const lanes = page.locator(".kitchen-board-lanes").first();
+  await expect(lanes.getByText("Beef noodle soup")).toBeVisible();
+  await expect(lanes.getByText("Tomato pot")).toHaveCount(0);
+  await expect(page.getByText("1 work item", { exact: true }).first()).toBeVisible();
+  // It waits with the Oct 9 pickup among the earlier days, for a manager to check and close.
+  await expect(page.getByText("2 tickets from earlier days to check and close")).toBeVisible();
+  await page.screenshot({ path: "test-results/b39-kitchen-forgotten-table.png", fullPage: true });
+});
+
 test("@production DEC-KITCHEN-STALE-TICKETS: kitchen staff see earlier days apart but cannot close them", async ({
   page,
 }) => {

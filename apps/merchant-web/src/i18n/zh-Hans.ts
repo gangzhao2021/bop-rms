@@ -4146,10 +4146,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{count} to approve": "{count} 项待批准",
   "{count} approved, not sent yet": "{count} 项已批准、尚未发出",
   "Review approvals": "去审批",
-  "Something for the table": "桌上需要东西",
   "Ready to pay": "可以买单",
   "A problem with their order": "所点的菜有问题",
   "A question": "有问题想问",
+  "Water, cutlery, napkins": "水、餐具、纸巾",
   "Guest asked for staff just now · {reason}": "客人刚刚请店员过去 · {reason}",
   "Guest asked for staff {minutes} min ago · {reason}":
     "客人 {minutes} 分钟前请店员过去 · {reason}",
@@ -6759,7 +6759,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Every table is paid": "桌都结完了",
   "{tables} · {amount} to take before closing": "{tables} · 打烊前要收 {amount}",
   "Checking out": "结账中",
-  "open {minutes} min": "已开 {minutes} 分钟",
   "Take each table's payment before closing. If guests left without paying, a manager or the owner records it on the table.":
     "打烊前请收款；客人已离开没付的，由店长或店主在桌台登记“客人未付离开”。",
   "not taken": "不是实收",
@@ -6869,8 +6868,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Phone {number} just joined": "手机 {number} 刚加入",
   "check it belongs to this table": "看看是不是这桌的客人",
   "first round from a new phone": "新手机的第一轮",
-  "many rounds from one phone just now": "同一台手机刚送出很多轮",
-  "many rounds from this table just now": "这桌刚送出很多轮",
+  "many rounds from one phone in a short time": "同一台手机短时间内送出很多轮",
+  "many rounds from this table in a short time": "这桌短时间内送出很多轮",
   "Rounds waiting for your OK": "等你确认的轮次",
   "{round} is waiting for your OK": "{round}等你确认",
   "It has not gone to the kitchen. Check it with the table, then send it or cancel it.":
@@ -9234,6 +9233,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Find a choice": "查找选项",
   "No choice matches.": "没有符合的选项。",
   "In: {list}": "用在：{list}",
+  "{choice} · {group}": "{choice} · {group}",
   "{item} is sold out for today in every dish.": "{item} 今天在所有菜里都已售罄。",
   "{item} is sold out in every dish until you bring it back.":
     "{item} 在所有菜里都已售罄，恢复前一直售罄。",
@@ -10244,4 +10244,23 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "只有提出这项更改的人或店主可以撤回或拒绝它。",
   "Your role can't approve this change, or you made it yourself. Someone else must approve it: the owner, or a manager who can approve changes.":
     "你的角色不能批准这项更改，或这项更改是你提出的。需要由别人批准：店主，或能批准更改的店长。",
+  // b39 (v15 b38 sweep): tables and tickets from earlier days, and the closing alert on Tables.
+  "Tables still open from earlier days": "之前营业日没关的桌",
+  "Take the payment, or record that the guests left without paying, then close the table":
+    "收款，或登记客人未付离开，然后关台",
+  "From earlier days": "之前营业日的",
+  "{tables} from earlier days": "{tables}是之前营业日的",
+  "These tables were opened on an earlier day and never closed. Open each one: take the payment, or record that the guests left without paying, then close it. Nothing is closed or written off by itself.":
+    "这些桌是之前营业日开的，一直没关。逐桌打开：收款，或登记客人未付离开，然后关台。系统不会自动关台或核销。",
+  "{tables} · not in today's figures": "{tables} · 不计入今天的数字",
+  "Opened on an earlier day and never closed. On Tables, take the payment or record that the guests left without paying, then close each one. Nothing is closed or written off by itself.":
+    "这些桌是之前营业日开的，一直没关。请在“桌台”里收款或登记客人未付离开，然后逐桌关台。系统不会自动关台或核销。",
+  "Closing at {time}: {tables} still open. Take each table's payment and close it when the guests leave.":
+    "{time} 打烊：还有 {tables}没关。请逐桌收款，客人走后关台。",
+  "Closed at {time}: {tables} still open. Take the payment, or record that the guests left without paying, and close each table before the day ends at {end}.":
+    "已于 {time} 打烊：还有 {tables}没关。请在营业日 {end} 结束前收款或登记客人未付离开，并逐桌关台。",
+  "Closed at {time}: {tables} still open. Take the payment, or record that the guests left without paying, and close each table.":
+    "已于 {time} 打烊：还有 {tables}没关。请收款或登记客人未付离开，并逐桌关台。",
+  "The business day ends at {end}: {tables} still open. Take the payment, or record that the guests left without paying, and close each table.":
+    "营业日 {end} 结束：还有 {tables}没关。请收款或登记客人未付离开，并逐桌关台。",
 });

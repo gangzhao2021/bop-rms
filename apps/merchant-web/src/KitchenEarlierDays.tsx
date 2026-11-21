@@ -22,10 +22,19 @@ export function fromEarlierKitchenDay(
   item: Pick<KitchenBoardItem, "businessDate" | "atSeatedTable">,
   today: string | null | undefined,
 ): boolean {
-  // v15 b11: a table still seated across the day's turn (late-night service) is today's work:
-  // made, marked ready and served as usual, so the table can be closed; never closed as stale.
-  if (item.atSeatedTable === true) return false;
-  return Boolean(item.businessDate && today && item.businessDate < today);
+  if (!item.businessDate || !today || item.businessDate >= today) return false;
+  // v15 b11/b12: a table still seated across the day's turn (late-night service, or guests who
+  // stayed) is today's work: made, marked ready and served as usual, so the table can be closed;
+  // never closed as stale. b39 (v15 b38 sweep): only across one turn — a round of the business day
+  // before. A table left open for two weeks kept its 15-day-old tickets at the top of every day's
+  // board; those are an earlier day's tickets to check and close, like any other.
+  return !(item.atSeatedTable === true && item.businessDate === previousBusinessDate(today));
+}
+
+/** The calendar date before a business date ("2026-10-14" → "2026-10-13"). */
+export function previousBusinessDate(businessDate: string): string {
+  const at = Date.parse(`${businessDate}T12:00:00.000Z`);
+  return Number.isFinite(at) ? new Date(at - 86_400_000).toISOString().slice(0, 10) : "";
 }
 
 /** "8 min", "2 h 5 min", "1 day", "5 days" for how long work has been waiting. */

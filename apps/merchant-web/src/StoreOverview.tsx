@@ -1,4 +1,5 @@
 import { systemText, countOf, t } from "./i18n/i18n.js";
+import { openedOnEarlierDay } from "./earlier-day-tables.js";
 import { PauseOrderingControl, PauseOrderingShownContext } from "./PauseOrderingControl.js";
 import {
   useApprovalsWaitingRead,
@@ -140,7 +141,7 @@ export interface TablesRead {
   readonly readAt?: string;
 }
 export interface TablesSummary {
-  /** Tables with a party (an open session). */
+  /** Tables with a party (an open session) seated today (b39: not those from earlier days). */
   readonly open: number;
   /**
    * Open tables to close once the guests have left: everything served and nothing waiting for
@@ -151,6 +152,7 @@ export interface TablesSummary {
   /**
    * WP-2423 (46940b76 L1): open tables whose party was seated before the Store's current business
    * day began (left open overnight). Null until the business day and the read time are known.
+   * b39: not in `open` or `toClose`; a late service past the day's turn is still today's.
    */
   readonly earlierDays: number | null;
   readonly more: boolean;
@@ -161,16 +163,15 @@ export function summarizeTables(
   /** Start of the Store's current business day (Store time zone and day start, from the shell). */
   dayStartsAt: string | null = null,
 ) {
-  const open = read.tables.filter((table) => table.currentDiningSessionReference !== null);
+  const seated = read.tables.filter((table) => table.currentDiningSessionReference !== null);
   const readAt = read.readAt === undefined ? Number.NaN : Date.parse(read.readAt);
   const dayStart = dayStartsAt === null ? Number.NaN : Date.parse(dayStartsAt);
-  const earlierDays =
-    Number.isFinite(readAt) && Number.isFinite(dayStart)
-      ? open.filter(
-          (table) =>
-            table.elapsedMinutes !== null && readAt - table.elapsedMinutes * 60_000 < dayStart,
-        ).length
-      : null;
+  const known = Number.isFinite(readAt) && Number.isFinite(dayStart);
+  // b39: a table left open from an earlier business day is counted apart, never as today's.
+  const earlier = (table: StaffDiningTable) =>
+    known && openedOnEarlierDay(table.elapsedMinutes, readAt, dayStart);
+  const earlierDays = known ? seated.filter(earlier).length : null;
+  const open = seated.filter((table) => !earlier(table));
   const toClose = open.filter(
     (table) =>
       (table.elapsedMinutes ?? 0) > longOpenSessionMinutes ||
@@ -760,6 +761,21 @@ export function attentionItems(
       action: t("View orders"),
       backlog: true,
     });
+  // b39: tables left open from earlier days, apart from tonight's, with what to do.
+  if (summary.kind === "Ready" && (summary.value.earlierDays ?? 0) > 0)
+    items.push({
+      key: "tables-earlier-days",
+      title: t("Tables still open from earlier days"),
+      detail:
+        countOf(summary.value.earlierDays ?? 0, "table") +
+        " · " +
+        t("Take the payment, or record that the guests left without paying, then close the table"),
+      state: t("To check"),
+      tone: "warning",
+      href: "/operations/dining",
+      action: t("Check and close"),
+      backlog: true,
+    });
   if (state.pickups.kind === "Ready" && state.pickups.value.earlierDays > 0)
     items.push({
       key: "pickups",
@@ -1163,7 +1179,8 @@ export function dayChecklist(
     ...item(
       "tables",
       t("Tables closed once the guests have left"),
-      readStatus(tables, (t) => left(t.open, t.more)),
+      // b39: every open table, today's and any left from earlier days.
+      readStatus(tables, (t) => left(t.open + (t.earlierDays ?? 0), t.more)),
       "/operations/dining",
       t("Tables"),
     ),

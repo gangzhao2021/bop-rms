@@ -859,7 +859,9 @@ describe("WP-2423 3cd0f8dd: tables to close, earlier-day pickups and the day che
     const tables = [
       table({ elapsedMinutes: 40 }), // seated today
       table({ elapsedMinutes: 7 * 60 }), // seated 08:00Z: the day's first minute is today
-      table({ elapsedMinutes: 7 * 60 + 1 }), // seated 07:59Z: the previous business day
+      // b39: seated 07:59Z, a late service past the day's turn, still today's (as in the kitchen)
+      table({ elapsedMinutes: 7 * 60 + 1 }),
+      table({ elapsedMinutes: 13 * 60 }), // seated 02:00Z, open 13 h: an earlier day's
       table({ currentDiningSessionReference: null, elapsedMinutes: null, session: null }),
     ];
     expect(summarizeTables({ ...read(tables), readAt }, null, dayStartsAt)).toMatchObject({
@@ -887,7 +889,13 @@ describe("WP-2423 3cd0f8dd: tables to close, earlier-day pickups and the day che
     expect(
       dayChecklist(state, hidden, null, dayStartsAt).closing.find((i) => i.key === "tables")
         ?.status,
-    ).toBe("3 left");
+    ).toBe("4 left");
+    // b39: today's "Tables to close" never counts an earlier day's table; Home lists those apart.
+    const attention = attentionItems(state, null, dayStartsAt);
+    expect(attention.find((item) => item.key === "tables-earlier-days")).toMatchObject({
+      title: "Tables still open from earlier days",
+      action: "Check and close",
+    });
   });
   it("M6: the opening and closing checklist reads the same sources and leaves out hidden ones", () => {
     const state: OverviewTodayState = {

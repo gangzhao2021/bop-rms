@@ -4,6 +4,8 @@ import { Link } from "react-router";
 import { useBrowserOffline } from "./stale-read.js";
 import { countOf, t, saidTable } from "./i18n/i18n.js";
 import { orderMoney } from "./order-money.js";
+import { elapsedText } from "./elapsed-text.js";
+import { openedOnEarlierDay } from "./earlier-day-tables.js";
 import { storeTime } from "./StoreTime.js";
 import { businessDateText, useStoreBusinessDay } from "./StoreBusinessDay.js";
 import { printRegion } from "./print-region.js";
@@ -195,14 +197,33 @@ export function TonightSummaryView({
   // v15 2026-10-28 (a) and M40: a table is listed by where its money stands. "Paid, guests still
   // seated" is only a table whose money was really taken and kept; a table that never ordered, or
   // whose rounds all came off unpaid, is listed apart, and a walkout stays with the write-offs.
-  const open = summary.openTables.filter(
+  // b39 (v15 b38 sweep): a table left open from an earlier business day is not tonight's: it is
+  // listed apart, with what to do, and its money is not in tonight's "to take before closing".
+  const earlierTables = summary.openTables.filter((table) =>
+    openedOnEarlierDay(
+      table.openedMinutes,
+      Date.parse(report.generatedAt),
+      Date.parse(report.startsAt),
+    ),
+  );
+  const tonightTables = summary.openTables.filter((table) => !earlierTables.includes(table));
+  const open = tonightTables.filter(
     (table) => table.standing === "Owes" || table.standing === "RoundUnpaid",
   );
-  const paidSeated = summary.openTables.filter((table) => table.standing === "Paid");
-  const nothingOrdered = summary.openTables.filter((table) => table.standing === "NothingOrdered");
-  const nothingToCollect = summary.openTables.filter(
-    (table) => table.standing === "NothingToCollect",
-  );
+  const openOwedMinor = open.reduce((sum, table) => sum + BigInt(table.owedMinor), 0n);
+  const paidSeated = tonightTables.filter((table) => table.standing === "Paid");
+  const nothingOrdered = tonightTables.filter((table) => table.standing === "NothingOrdered");
+  const nothingToCollect = tonightTables.filter((table) => table.standing === "NothingToCollect");
+  const standingText = (table: (typeof summary.openTables)[number]) =>
+    table.standing === "Paid"
+      ? t("Paid, guests still seated")
+      : table.standing === "NothingOrdered"
+        ? t("Seated, nothing ordered")
+        : table.standing === "NothingToCollect"
+          ? t("Cancelled, nothing to collect")
+          : table.phase === "Closing"
+            ? t("Checking out")
+            : t("Seated");
   const tableNames = (tables: typeof open) =>
     tables.map((table) => t("Table {table}", { table: saidTable(table.tableLabel) })).join(", ");
   const c = summary.cancelled;
@@ -382,7 +403,7 @@ export function TonightSummaryView({
               ? t("Every table is paid")
               : t("{tables} · {amount} to take before closing", {
                   tables: countOf(open.length, "table"),
-                  amount: money(summary.openTablesOwedMinor),
+                  amount: money(openOwedMinor.toString()),
                 })}
           </span>
         </h3>
@@ -397,7 +418,7 @@ export function TonightSummaryView({
                   detail={
                     (table.phase === "Closing" ? t("Checking out") : t("Seated")) +
                     " · " +
-                    t("open {minutes} min", { minutes: String(table.openedMinutes) }) +
+                    t("open {open}", { open: elapsedText(table.openedMinutes) }) +
                     (table.standing === "RoundUnpaid" ? " · " + t("Round waiting for payment") : "")
                   }
                   value={money(table.owedMinor)}
@@ -443,6 +464,38 @@ export function TonightSummaryView({
               muted
             />
           </dl>
+        ) : null}
+        {earlierTables.length > 0 ? (
+          <>
+            <h4 className="tonight__subhead">
+              {t("From earlier days")}{" "}
+              <span className="tonight__detail">
+                {t("{tables} · not in today's figures", {
+                  tables: countOf(earlierTables.length, "table"),
+                })}
+              </span>
+            </h4>
+            <dl>
+              {earlierTables.map((table) => (
+                <Row
+                  key={table.tableLabel}
+                  tone={table.owedMinor === "0" ? undefined : "action"}
+                  label={t("Table {table}", { table: saidTable(table.tableLabel) })}
+                  detail={
+                    standingText(table) +
+                    " · " +
+                    t("open {open}", { open: elapsedText(table.openedMinutes) })
+                  }
+                  value={money(table.owedMinor)}
+                />
+              ))}
+            </dl>
+            <p className="tonight__detail">
+              {t(
+                "Opened on an earlier day and never closed. On Tables, take the payment or record that the guests left without paying, then close each one. Nothing is closed or written off by itself.",
+              )}
+            </p>
+          </>
         ) : null}
         {s.unpaidWriteOffCount > 0 ? (
           <dl>

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, useContext } from "react";
 import { Link } from "react-router";
 import { countOf, t } from "./i18n/i18n.js";
 import { orderMoney } from "./order-money.js";
+import { openedOnEarlierDay } from "./earlier-day-tables.js";
 import { useStoreBusinessDay } from "./StoreBusinessDay.js";
 import { useStaffSessionLive } from "./staff-session-reads.js";
 import { createStoreReportsClient, type TonightSummary } from "./store-reports-client.js";
@@ -138,7 +139,18 @@ export function ClosingReminder({
   if (!show || !settled) return null;
   const stuck = paidOrdersStuck(watch, now);
   const cantMake = watch?.cantMakeRefunds ?? 0;
-  const open = summary?.openTables.filter((table) => table.owedMinor !== "0") ?? [];
+  // b39: tables left open from earlier days are not tonight's to collect (Tables and the summary
+  // list them apart).
+  const open =
+    summary?.openTables.filter(
+      (table) =>
+        table.owedMinor !== "0" &&
+        !openedOnEarlierDay(
+          table.openedMinutes,
+          Date.parse(summary.report.generatedAt),
+          Date.parse(summary.report.startsAt),
+        ),
+    ) ?? [];
   if (phase === "UnpaidTablesOnly" && open.length === 0) return null;
   const before = phase === "BeforeClosing";
   const net =
@@ -153,7 +165,10 @@ export function ClosingReminder({
     amount:
       summary === null
         ? ""
-        : orderMoney({ amountMinor: summary.openTablesOwedMinor, currencyCode: "CAD" }),
+        : orderMoney({
+            amountMinor: open.reduce((sum, table) => sum + BigInt(table.owedMinor), 0n).toString(),
+            currencyCode: "CAD",
+          }),
   };
   return (
     <section
