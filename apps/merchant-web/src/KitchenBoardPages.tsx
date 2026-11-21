@@ -2370,6 +2370,16 @@ export function KitchenBoardScreen({
         (activeException === "All" || item.exceptionStatus === activeException),
     );
   const items = itemsInStatus(status);
+  // Batch 41 (v15 b40 live): an open remake is a dish to make, so it counts as work wherever the
+  // board counts work (the header, the tabs). Shown in the Remakes lane, it was left out, and a
+  // remake waiting alone read "Today 0 work items", "To make 0" and "Nothing to make right now."
+  const remakesInStatus = (value: string) =>
+    remakes
+      ? board.openReworks.filter(
+          (rework) => value === "Active" || value === "All" || rework.status === value,
+        )
+      : [];
+  const workCount = items.length + remakesInStatus(status).length;
   const stationLaneMap = new Map<
     string,
     { key: string; stationLabel: string | null; items: KitchenBoardItem[] }
@@ -2402,8 +2412,8 @@ export function KitchenBoardScreen({
   const queueCount = (
     <span className="kitchen-queue-count" aria-live="polite">
       {t("{length} work {value}", {
-        length: items.length,
-        value: items.length === 1 ? t("item") : t("items"),
+        length: workCount,
+        value: workCount === 1 ? t("item") : t("items"),
       })}
     </span>
   );
@@ -3107,7 +3117,9 @@ export function KitchenBoardScreen({
                   onClick={() => setStatus(value)}
                 >
                   {label}
-                  <span className="order-status-filters__count">{itemsInStatus(value).length}</span>
+                  <span className="order-status-filters__count">
+                    {itemsInStatus(value).length + remakesInStatus(value).length}
+                  </span>
                 </button>
               ))}
             </div>
@@ -3251,7 +3263,8 @@ export function KitchenBoardScreen({
             {awaitingNotice}
           </p>
         ) : null}
-        {items.length === 0 ? (
+        {/* Batch 41: the board is empty only when its count is: never under a remake to make. */}
+        {workCount > 0 && items.length === 0 ? null : items.length === 0 ? (
           <div className="kitchen-board-empty">
             <StatePanel
               heading={

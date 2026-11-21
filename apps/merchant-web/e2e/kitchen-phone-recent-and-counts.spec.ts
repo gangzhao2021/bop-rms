@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
-import { atTop, dishes, store, workItem } from "./kitchen-tm2-fixture";
+import { expectNoInternalText } from "./internal-text-guard";
+import { atTop, dishes, remake, store, workItem } from "./kitchen-tm2-fixture";
 
 /**
  * WP-2423 batch 41 (v15 batch 40 live check, Test Merchant 2, kitchen-office-remakes).
@@ -109,4 +110,62 @@ test("@production WP-2423 batch 41: tapping Remake folds Recently finished, so t
   await recentList.getByRole("button", { name: "Remake 牛肉面, Pickup · Order 6" }).click();
   await expect(page.getByRole("dialog", { name: /^Remake 牛肉面/u })).toBeVisible();
   await expect(recentList).not.toHaveAttribute("open", "");
+});
+
+test("@production WP-2423 batch 41: a waiting remake is counted as work, and the board never says there is nothing to make", async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  // As live: no other ticket open today, Order 6 finished, its remake to make; 53 earlier tickets.
+  for (const surface of ["back office", "display"] as const) {
+    const state = { reworks: [remake(1, "Queued")], commands: [] };
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+    await store(page, surface === "back office" ? "Unverified" : "Named", state, {
+      todays: [],
+    });
+    await page.goto("/operations/kitchen");
+    for (const language of ["en", "zh-Hans"] as const) {
+      if (language === "zh-Hans") await page.getByRole("button", { name: "切换到中文" }).click();
+      const zh = language === "zh-Hans";
+      await expect(
+        page.getByRole("region", { name: zh ? "重做" : "Remakes" }).getByRole("article"),
+      ).toHaveCount(1);
+      await expect(page.locator(".kitchen-queue-count").first()).toHaveText(
+        zh ? "1 项工作" : "1 work item",
+      );
+      if (surface === "back office") {
+        await expect(page.locator(".workspace-page__meta")).toContainText(
+          zh ? "今天 1 项工作" : "Today 1 work item",
+        );
+        const tabs = page.getByRole("group", { name: zh ? "显示后厨工作" : "Show kitchen work" });
+        await expect(
+          tabs.getByRole("button", { name: zh ? /^进行中/u : /^Open work/u }),
+        ).toHaveText(zh ? /1$/u : "Open work1");
+        await expect(tabs.getByRole("button", { name: zh ? /^待做/u : /^To make/u })).toHaveText(
+          zh ? /1$/u : "To make1",
+        );
+        // The To make tab counts the remake, so it does not call itself empty either.
+        await tabs.getByRole("button", { name: zh ? /^待做/u : /^To make/u }).click();
+        await expect(page.locator(".kitchen-board-empty")).toHaveCount(0);
+        await tabs.getByRole("button", { name: zh ? /^进行中/u : /^Open work/u }).click();
+      }
+      await expect(page.locator(".kitchen-board-empty")).toHaveCount(0);
+      await expect(
+        page.getByText(zh ? "目前没有需要制作的。" : "Nothing to make right now."),
+      ).toHaveCount(0);
+      await expect(page.getByText(zh ? "没有进行中的工作" : "No active work")).toHaveCount(0);
+      for (const [width, height] of [
+        [1440, 900],
+        [1024, 768],
+        [390, 844],
+      ] as const) {
+        await atTop(page, width, height);
+        await page.screenshot({
+          path: `test-results/b41-counts-${surface.replaceAll(" ", "-")}-${width}-${language}.png`,
+        });
+      }
+      await expectNoInternalText(page);
+    }
+    await page.getByRole("button", { name: "Switch to English" }).click();
+  }
 });
