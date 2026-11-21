@@ -15,6 +15,7 @@ import { tableClosePlanResponse } from "./merchant-dining-table-close-plan-respo
 import { DiningServeReadyError } from "./merchant-dining-serve-ready-command.js";
 import { diningServeChangedCode, diningServeInvalidCode } from "./merchant-dining-serve-command.js";
 import { merchantFailureCode } from "./merchant-failure.js";
+import { retryTransactionConflict } from "./transaction-conflict-retry.js";
 import { DiningClosingError } from "@rms/dining";
 import { DiningCheckoutAlreadyPaidError } from "./merchant-dining-closing-command.js";
 import type { Response, Router } from "express";
@@ -1177,8 +1178,12 @@ export function installMerchantDiningRoutes(
         .json({ error: "dining_table_close_plan_invalid" });
       return;
     }
-    void options
-      .diningTableClosePlan({ sessionCookie, csrf, query: body })
+    const closePlan = options.diningTableClosePlan;
+    // Batch 42 (v15 40P01): a read that lost a lock race with another table read or command is
+    // run once more as a whole (nothing of it committed); one that loses again is "try again".
+    void retryTransactionConflict(() => closePlan({ sessionCookie, csrf, query: body }), {
+      attempts: 2,
+    })
       .then((plan) => {
         if (!plan) {
           response.status(404).json({ error: "dining_table_close_plan_not_found" });

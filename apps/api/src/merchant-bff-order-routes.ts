@@ -888,8 +888,11 @@ export function installMerchantOrderRoutes(
       response.status(503).json({ error: "table_payment_unavailable" });
       return;
     }
-    void options
-      .tablePayment({ ...auth, query: request.body })
+    const tablePayment = options.tablePayment;
+    // Batch 42: a read that lost a lock race is run once more as a whole, then "try again".
+    void retryTransactionConflict(() => tablePayment({ ...auth, query: request.body }), {
+      attempts: 2,
+    })
       .then((result) => response.set("Cache-Control", NO_STORE).json(result))
       .catch((error: unknown) => tablePaymentFailure(response, error));
   });

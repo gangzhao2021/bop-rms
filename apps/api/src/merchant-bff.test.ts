@@ -2595,6 +2595,70 @@ it("protects the table close plan and returns every round field the panel reads"
   const failed = await submit();
   expect(failed.status).toBe(503);
   expect(JSON.stringify(await failed.json())).not.toContain("private");
+  // Batch 42 (v15 2026-11-21, 40P01 while the merged table's two plans were read at once): a plan
+  // that lost a lock race is read once more as a whole; one that loses again is "try again" (503).
+  const conflict = () =>
+    Object.assign(new Error("private conflict"), { code: "TENANT_DATABASE_TRANSACTION_CONFLICT" });
+  read.mockClear();
+  read
+    .mockRejectedValueOnce(conflict())
+    .mockResolvedValueOnce(plan as unknown as Awaited<ReturnType<Reader>>);
+  expect((await submit()).status).toBe(200);
+  expect(read).toHaveBeenCalledTimes(2);
+  read.mockClear();
+  read.mockRejectedValueOnce(conflict()).mockRejectedValueOnce(conflict());
+  const busy = await submit();
+  expect(busy.status).toBe(503);
+  expect(await busy.json()).toEqual({ error: "dining_table_close_plan_unavailable" });
+  expect(read).toHaveBeenCalledTimes(2);
+});
+
+// Batch 42: the table's payment read (Orders) is run once more after a lock race, never a 500.
+it("reads a table's payment once more after a lock race, then answers try again", async () => {
+  type Reader = NonNullable<MerchantBffRouterOptions["tablePayment"]>;
+  const answer = { payment: null, parts: [], canRefund: false };
+  const conflict = () =>
+    Object.assign(new Error("private conflict"), { code: "TENANT_DATABASE_TRANSACTION_CONFLICT" });
+  const read = vi.fn<Reader>();
+  const app = express();
+  app.use(
+    "/merchant",
+    createMerchantBffRouter({
+      service: fakeService(),
+      tablePayment: read,
+      exactOrigin: "https://merchant.invalid",
+      acceptedHost: "merchant.invalid",
+    }),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  servers.push(server);
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("listener unavailable");
+  const submit = () =>
+    request(`http://127.0.0.1:${address.port}`, "/merchant/orders/table-payment", {
+      method: "POST",
+      body: JSON.stringify({ orderReference: storeReference }),
+      headers: {
+        ...safeHeaders,
+        Cookie: "__Host-bop-merchant=" + sessionCookie,
+        "X-BOP-CSRF": csrf,
+        "Content-Type": "application/json",
+      },
+    });
+  read
+    .mockRejectedValueOnce(conflict())
+    .mockResolvedValueOnce(answer as unknown as Awaited<ReturnType<Reader>>);
+  const answered = await submit();
+  expect(answered.status).toBe(200);
+  expect(await answered.json()).toEqual(answer);
+  expect(read).toHaveBeenCalledTimes(2);
+  read.mockClear();
+  read.mockRejectedValueOnce(conflict()).mockRejectedValueOnce(conflict());
+  const busy = await submit();
+  expect(busy.status).toBe(503);
+  expect(await busy.json()).toEqual({ error: "unavailable" });
+  expect(read).toHaveBeenCalledTimes(2);
 });
 
 // WP-2423 (logs-and-transaction-time, v15 2026-11-14): closing the guests-left dialog stopped its
