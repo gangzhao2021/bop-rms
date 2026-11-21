@@ -122,6 +122,37 @@ describe("M61: the order record says who did what", () => {
     ]);
   });
 
+  it("b41 (v15 b40 live): on a merged table the record names rounds by their number on the bill", () => {
+    // TM2 order 3 (merged in from H40 B): headings Round 2 and Round 4, yet the record said
+    // "Round 1 accepted" and "Round 2 accepted" (第 1 轮接单 / 第 2 轮接单).
+    const parsed = parseOrderRecordPeople({
+      ...record,
+      accepted: [
+        { round: 1, by: null, at: "2026-11-21T11:03:00.000Z" },
+        { round: 2, by: null, at: "2026-11-21T11:04:00.000Z" },
+      ],
+      handedOver: [],
+      payments: [
+        { method: "Cash", part: null, round: 2, by: "Sam", at: "2026-11-21T11:13:00.000Z" },
+      ],
+      refunds: [],
+    });
+    const onBill = (round: number) => (round === 1 ? 2 : 4);
+    const labels = (language: "en" | "zh-Hans") => {
+      setLanguageForTest(language);
+      return orderRecordRows(parsed, "DineIn", tz, "2026-11-21", true, null, onBill).map(
+        (row) => row.label,
+      );
+    };
+    expect(labels("en")).toEqual(["Round 2 accepted", "Round 4 accepted", "Round 4 paid"]);
+    expect(labels("zh-Hans").slice(0, 2)).toEqual(["第 2 轮接单", "第 4 轮接单"]);
+    // An order on its own keeps its own numbers.
+    setLanguageForTest("en");
+    expect(orderRecordRows(parsed, "DineIn", tz, "2026-11-21", true)[1]?.label).toBe(
+      "Round 2 accepted",
+    );
+  });
+
   it("v15 batch 7: a table that pays at the end says its round was accepted when sent, not when paid", () => {
     const parsed = parseOrderRecordPeople({
       ...record,

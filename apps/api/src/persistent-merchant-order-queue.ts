@@ -1400,10 +1400,39 @@ export function createPersistentMerchantOrderQueue(options: {
                     if (removedMinor !== null) removedFromBill.set(order, removedMinor);
                   }
                 }
+                // b41 (v15 b40 live): a table with tables merged into it keeps its bill's round
+                // numbers once paid, split or written off too, so Orders, the paid record and refunds
+                // never go back to each order's own numbers (the merged-in order keeps the bill's).
+                const paidBillRoundNumbers = async () => {
+                  if (
+                    tenantReference === null ||
+                    (await listOrderBillOrders(businessTransaction, scoped, order)).length <= 1
+                  )
+                    return {};
+                  const session = (
+                    await listOrderDiningSessions(businessTransaction, scoped, [order])
+                  ).get(order);
+                  if (session === undefined) return {};
+                  const bill = await readDiningTableBill(
+                    businessTransaction,
+                    { tenantReference, ...scoped },
+                    {
+                      diningSessionReference: session,
+                      observedAt: new Date(Date.parse(String(source.now()))).toISOString(),
+                      authorize: async () => stillAllowed(),
+                    },
+                  );
+                  return { billRoundNumbers: diningTableBillRoundNumbers(bill) };
+                };
                 // The guests left and it was written off: nothing is waiting to be paid.
                 const writtenOffMinor = writtenOff.get(order);
                 if (writtenOffMinor !== undefined) {
-                  tableBills.set(order, { totalMinor: "0", paid: null, writtenOffMinor });
+                  tableBills.set(order, {
+                    totalMinor: "0",
+                    paid: null,
+                    writtenOffMinor,
+                    ...(await paidBillRoundNumbers()),
+                  });
                   continue;
                 }
                 const settlement = settlements.find(
@@ -1435,6 +1464,7 @@ export function createPersistentMerchantOrderQueue(options: {
                       method: "Split",
                       ...(refunded > 0n ? { refundedMinor: refunded.toString() } : {}),
                     },
+                    ...(await paidBillRoundNumbers()),
                   });
                   continue;
                 }
@@ -1451,6 +1481,7 @@ export function createPersistentMerchantOrderQueue(options: {
                       method: settlement.method,
                       ...(refunded > 0n ? { refundedMinor: refunded.toString() } : {}),
                     },
+                    ...(await paidBillRoundNumbers()),
                   });
                   continue;
                 }

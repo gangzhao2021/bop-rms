@@ -124,6 +124,19 @@ async function mock(page: Page, zh: boolean, detailFails: boolean) {
         screenId: "OPS-ORDER-DETAIL",
         pickupContact: null,
         order: order(n),
+        // b41 (v15 b40 live): the record names each round by the order's own number; staff read
+        // it by the bill's (order 2's own rounds 1 and 2 are rounds 2 and 3 on the bill).
+        record: {
+          accepted: rounds
+            .filter((round) => round.order === n)
+            .map((round) => ({ round: round.sequence, by: null, at: "2026-11-21T06:21:00.000Z" })),
+          handedOver: [],
+          payments: [],
+          cancellations: [],
+          refunds: [],
+          writeOff: null,
+          paidOnlineByGuest: false,
+        },
         lines: {
           items: rounds
             .filter((round) => round.order === n)
@@ -175,6 +188,11 @@ for (const zh of [false, true]) {
       ).toBeVisible();
     await expect(page.getByRole("region", { name: roundName(1), exact: true })).toHaveCount(0);
     await expect(page.getByRole("button", { name: takeOff(1) })).toHaveCount(0);
+    // b41: the Record section says the same numbers as the headings.
+    const recordSection = page.getByRole("region", { name: zh ? "记录" : "Record", exact: true });
+    for (const n of [2, 3])
+      await expect(recordSection).toContainText(zh ? `第 ${n} 轮接单` : `Round ${n} accepted`);
+    await expect(recordSection).not.toContainText(zh ? "第 1 轮接单" : "Round 1 accepted");
   });
 
   test(`@production b40 review: the Orders list never shows two "round 1" take-offs for one merged bill (${lang})`, async ({

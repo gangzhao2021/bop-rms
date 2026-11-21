@@ -2678,6 +2678,11 @@ export function orderRecordRows(
    * sale is on the new order.
    */
   reenteredAsOrder: string | null = null,
+  /**
+   * b41 (v15 b40 live): the number staff see for the order's own round N — on a table with tables
+   * merged in, its number on the whole bill, as the round headings above say it.
+   */
+  roundNumber: (round: number) => number = (round) => round,
 ): readonly { readonly key: string; readonly label: string; readonly text: string }[] {
   const when = (at: string) => orderWhen(at, timeZone, today);
   const rows: { key: string; label: string; text: string }[] = [];
@@ -2685,7 +2690,9 @@ export function orderRecordRows(
   for (const accepted of record.accepted)
     rows.push({
       key: "accepted-" + accepted.round,
-      label: table ? t("Round {round} accepted", { round: accepted.round }) : t("Accepted"),
+      label: table
+        ? t("Round {round} accepted", { round: roundNumber(accepted.round) })
+        : t("Accepted"),
       text:
         accepted.by === null
           ? payLater && table
@@ -2712,7 +2719,7 @@ export function orderRecordRows(
       payment.part !== null
         ? t("Part {part} paid", { part: payment.part })
         : payment.round !== null && table
-          ? t("Round {round} paid", { round: payment.round })
+          ? t("Round {round} paid", { round: roundNumber(payment.round) })
           : t("Payment taken");
     rows.push({
       key: "payment-" + index,
@@ -3197,6 +3204,10 @@ function OrderDetailBody({
                 today,
                 order.tableBill !== null,
                 reenteredAs(order),
+                (round) => {
+                  const batch = order.batches.find((candidate) => candidate.sequence === round);
+                  return batch === undefined ? round : billRoundNumber(order, batch);
+                },
               ).map((row) => (
                 <div key={row.key}>
                   <dt>{row.label}</dt>
