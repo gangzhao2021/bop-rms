@@ -449,6 +449,161 @@ test.describe("@production a pay-at-the-end table after another phone paid, merg
     await page.screenshot({ path: "test-results/b39-merged-parts-zh-390.png" });
   });
 
+  // Batch 40 (v15 live b39): phone B kept offering Pay for about 11 s after phone A paid the whole
+  // table, until the table page's next regular read (15 s).
+  const owing = {
+    checkingOut: true,
+    owed: { subtotalMinor: "3502", taxMinor: "455", totalMinor: "3957" },
+  };
+  const paidInFull = payment({
+    checkingOut: true,
+    state: "Paid",
+    receipt: {
+      method: "Online",
+      roundsMinor: "3957",
+      pointsUsedMinor: "0",
+      tipMinor: "0",
+      roundingMinor: "0",
+      totalMinor: "3957",
+      paidAt: "2026-11-21T06:20:07.105Z",
+    },
+  });
+  test("another phone pays the whole table: this phone stops offering Pay within seconds", async ({
+    page,
+  }) => {
+    let paid = false;
+    await openTable(page, {
+      session: ok(sessionBody()),
+      tablePayment: (route) =>
+        route.fulfill({ status: 200, headers: json, json: paid ? paidInFull : payment(owing) }),
+    });
+    const pay = page.getByRole("button", { name: "Pay $39.57" });
+    await expect(pay).toBeVisible();
+    // Phone A pays now; this page is left alone (no reload, no tap).
+    paid = true;
+    const from = Date.now();
+    await expect(page.getByRole("heading", { name: "Receipt" })).toBeVisible({ timeout: 6_000 });
+    expect(Date.now() - from).toBeLessThan(6_000);
+    await expect(pay).toHaveCount(0);
+    await expect(page.getByText("Thank you! Your table is paid in full.")).toBeVisible();
+    await expect(page.getByText(outage)).toHaveCount(0);
+    await expectNoInternalText(page);
+    for (const width of [390, 1440]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      await page.screenshot({ path: `test-results/b40-paid-elsewhere-${width}.png` });
+    }
+    await page.getByRole("button", { name: "切换到中文" }).click();
+    await expect(page.getByText("谢谢！本桌已全部付清")).toBeVisible();
+    await expect(page.getByRole("button", { name: /^支付/u })).toHaveCount(0);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({ path: "test-results/b40-paid-elsewhere-zh-390.png" });
+  });
+
+  test("Pay tapped just after another phone paid shows the receipt, never an error", async ({
+    page,
+  }) => {
+    let paid = false;
+    let starts = 0;
+    await openTable(page, {
+      session: ok(sessionBody()),
+      tablePayment: (route) => {
+        if ((route.request().postData() ?? "").includes('"Start"')) {
+          starts += 1;
+          paid = true;
+          return route.fulfill({
+            status: 409,
+            headers: json,
+            json: { schemaVersion: 1, error: { code: "table_already_paid" } },
+          });
+        }
+        return route.fulfill({
+          status: 200,
+          headers: json,
+          json: paid ? paidInFull : payment(owing),
+        });
+      },
+    });
+    await page.getByRole("button", { name: "Pay $39.57" }).click();
+    await expect(page.getByRole("heading", { name: "Receipt" })).toBeVisible();
+    await expect(page.getByText("Thank you! Your table is paid in full.")).toBeVisible();
+    expect(starts).toBe(1);
+    await expect(page.getByRole("alert")).toHaveCount(0);
+    await expect(page.getByText(outage)).toHaveCount(0);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({ path: "test-results/b40-pay-after-paid-390.png" });
+  });
+
+  // Batch 40 (v15 live b39 left open): at a tips-off Store paying the whole table, or a part of a
+  // split bill, says nothing about a tip, in either language.
+  test("with tips off the whole-table and split pay say nothing about a tip (en, zh-Hans; 390, 1440)", async ({
+    page,
+  }) => {
+    let split = false;
+    const part = (partNumber: number, amountMinor: string) => ({
+      partNumber,
+      amountMinor,
+      subtotalMinor: amountMinor,
+      dishes: [],
+      status: "ToPay",
+      tables: [],
+      roundNumbers: [],
+    });
+    await openTable(page, {
+      session: ok(sessionBody()),
+      tablePayment: (route) =>
+        route.fulfill({
+          status: 200,
+          headers: json,
+          json: payment({
+            ...owing,
+            split: split
+              ? {
+                  mode: "Even",
+                  stale: false,
+                  paidInFull: false,
+                  paidParts: 0,
+                  remainingMinor: "3957",
+                  parts: [part(1, "1979"), part(2, "1978")],
+                }
+              : null,
+          }),
+        }),
+    });
+    const panel = page.locator(".dining-session__table-pay");
+    for (const stage of ["whole", "split"] as const) {
+      if (stage === "split") {
+        split = true;
+        await expect(panel).toContainText("$19.78", { timeout: 6_000 });
+      } else await expect(page.getByRole("button", { name: "Pay $39.57" })).toBeVisible();
+      for (const language of ["en", "zh-Hans"] as const) {
+        const toggle = page.getByRole("button", {
+          name: language === "en" ? "Switch to English" : "切换到中文",
+        });
+        if ((await toggle.count()) > 0) await toggle.click();
+        await expect(panel).toContainText(language === "en" ? "Pay the bill" : "结账付款");
+        if (stage === "split")
+          await expect(panel).toContainText(
+            language === "en"
+              ? "Your table split the bill evenly in 2 parts. Pay one part"
+              : "这桌平均分成 2 份。每次付一份",
+          );
+        for (const width of [390, 1440]) {
+          await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+          const text = await page.getByRole("main").innerText();
+          expect(text, `${stage} ${language} ${width}`).not.toMatch(/\btips?\b|gratuity/iu);
+          expect(text, `${stage} ${language} ${width}`).not.toContain("小费");
+          await page.screenshot({
+            path: `test-results/b40-tips-off-${stage}-${language}-${width}.png`,
+            fullPage: true,
+          });
+        }
+      }
+    }
+  });
+
   test("a table merged away says where to scan and offers no ordering from here", async ({
     page,
   }) => {

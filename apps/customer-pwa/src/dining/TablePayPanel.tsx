@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { MemberJoinPanel } from "../member/MemberJoinPanel.js";
 import { MemberPointsAtTable } from "../member/MemberPointsAtTable.js";
 import { v7 as uuidv7 } from "uuid";
-import { saidTable, t } from "../i18n/i18n.js";
+import { saidTable, t, wordGap } from "../i18n/i18n.js";
 import { parseTipAmount } from "../checkout/tip-amount.js";
 import { customTipCheck } from "../checkout/checkout-decisions.js";
 import { formatMoney } from "../journey/format.js";
@@ -30,6 +30,12 @@ const OTHER = "other";
 const confirmingTooLongMs = 60_000;
 /** b39: reads of the bill that may fail in a row, re-read by themselves, before the guest is told. */
 const transientReadFailures = 3;
+/**
+ * Batch 40 (v15 live b39): while this phone offers Pay, another phone may pay the whole table. The
+ * bill is read again this often (only while the page is in view), so Pay goes away within seconds
+ * of the table being paid, not at the table page's next regular read (15 s).
+ */
+export const tablePayOfferReadMs = 3000;
 const tipOf = (choice: TipChoice, typedMinor: string | null): TableTip =>
   choice === "0"
     ? { kind: "None" }
@@ -274,6 +280,19 @@ export function TablePayPanel({
     const timer = window.setInterval(() => void read(), 5000);
     return () => window.clearInterval(timer);
   }, [settling, read]);
+  // Batch 40: Pay is offered here; another phone (or staff) may pay the table meanwhile.
+  const offering =
+    view !== null &&
+    view.checkingOut &&
+    (view.state === "NotPaid" || view.state === "Failed") &&
+    !settling;
+  useEffect(() => {
+    if (!offering) return;
+    const timer = window.setInterval(() => {
+      if (typeof document === "undefined" || document.visibilityState === "visible") void read();
+    }, tablePayOfferReadMs);
+    return () => window.clearInterval(timer);
+  }, [offering, read]);
   // The secure card form's one-time value, once this guest's payment is open (Stripe only).
   useEffect(() => {
     if (view?.state !== "Paying" || configuration?.mode !== "stripe" || clientSecret !== null)
@@ -398,6 +417,15 @@ export function TablePayPanel({
         error instanceof TablePaymentClientError && error.code !== "unavailable"
           ? await read()
           : null;
+      // Batch 40: the table was paid in full (the read shows its receipt) or closed meanwhile (the
+      // table page reads itself again and shows how the meal ended): nothing went wrong to say.
+      if (
+        error instanceof TablePaymentClientError &&
+        (error.code === "not-found" || (error.code === "already-paid" && again?.state === "Paid"))
+      ) {
+        setProblem(null);
+        return;
+      }
       // v15 batch 7: another phone started paying some dishes, and what is left can be paid
       // now: the bill changed (read again), never "someone is paying" as if this guest must wait.
       setProblem(
@@ -658,7 +686,8 @@ export function TablePayPanel({
                       })
                     : t("Your table split the bill by rounds, in {count} parts.", {
                         count: String(view.split.parts.length),
-                      })}{" "}
+                      })}
+                {wordGap()}
                 {t("Pay one part; you can pay another one after it.")}
               </p>
               <fieldset>
