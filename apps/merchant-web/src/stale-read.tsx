@@ -2,7 +2,7 @@ import { t } from "./i18n/i18n.js";
 import { useContext, useEffect, useRef } from "react";
 import { useStaffSessionLive } from "./staff-session-reads.js";
 import { StatePanel } from "@bop-rms/ui";
-import { StoreTimeZoneContext, storeTime } from "./StoreTime.js";
+import { ClockStyleContext, StoreTimeZoneContext, storeTime } from "./StoreTime.js";
 import { floorServerProblemHeading, floorServerProblemText } from "./failure-words.js";
 
 /**
@@ -98,6 +98,11 @@ export function StaleReadNotice({
   readonly serverProblemText?: string;
 }) {
   const timeZone = useContext(StoreTimeZoneContext);
+  // b40 review: on Tables the time reads as everywhere else there ("2:05 p.m.", not "14:05").
+  const style = useContext(ClockStyleContext);
+  const lastLoaded = storeTime(stale.lastLoadedAt, timeZone, false, style);
+  // "… from 2:05 p.m. Actions …": a time ending in a period ends the sentence itself.
+  const after = (text: string) => (lastLoaded.endsWith(".") ? text.replace(/^\./u, "") : text);
   const offline = stale.reason === "Offline";
   if (stale.reason === "ServerProblem")
     return (
@@ -106,8 +111,8 @@ export function StaleReadNotice({
           <p>{serverProblemText}</p>
           <p>
             {t("Showing the last update from")}{" "}
-            <time dateTime={stale.lastLoadedAt}>{storeTime(stale.lastLoadedAt, timeZone)}</time>
-            {t(". Actions are paused until it is back.")}
+            <time dateTime={stale.lastLoadedAt}>{lastLoaded}</time>
+            {after(t(". Actions are paused until it is back."))}
           </p>
         </StatePanel>
       </div>
@@ -119,8 +124,8 @@ export function StaleReadNotice({
           {t("{value} — showing the last update from", {
             value: offline ? t("Offline") : t("Connection lost"),
           })}{" "}
-          <time dateTime={stale.lastLoadedAt}>{storeTime(stale.lastLoadedAt, timeZone)}</time>
-          {t(". Actions are paused until the connection returns.")}
+          <time dateTime={stale.lastLoadedAt}>{lastLoaded}</time>
+          {after(t(". Actions are paused until the connection returns."))}
         </p>
         <p>{t("Trying again automatically.")}</p>
       </StatePanel>

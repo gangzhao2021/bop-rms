@@ -1,4 +1,4 @@
-import { t } from "./i18n/i18n.js";
+import { t, withOneSentenceEnd } from "./i18n/i18n.js";
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { DiningOrderCloseAction } from "./DiningOrderCloseAction.js";
 import { DiningSessionCloseAction } from "./DiningSessionCloseAction.js";
@@ -18,7 +18,7 @@ import {
 import { serviceOperationReference } from "./service-control-client.js";
 import { ComboPartClientError, markComboPartServed } from "./combo-part-client.js";
 import { chaseDish, DiningChaseClientError } from "./dining-chase-client.js";
-import { SourceTime } from "./StoreTime.js";
+import { ClockStyleContext, SourceTime, StoreTimeZoneContext, storeTime } from "./StoreTime.js";
 import type { ComboPartView } from "./combo-parts.js";
 
 /**
@@ -243,6 +243,9 @@ export function DiningRoundsProvider({
   readonly fetcher?: typeof fetch | undefined;
   readonly children: ReactNode;
 }) {
+  // b40 review: times in notices are the Store's, in the screen's style (Tables: "2:05 p.m.").
+  const timeZone = useContext(StoreTimeZoneContext);
+  const clockStyle = useContext(ClockStyleContext);
   const [view, setView] = useState<DiningProgress | null>(null);
   const [unavailable, setUnavailable] = useState<DiningRoundsProgress["unavailable"]>(null);
   const [busy, setBusy] = useState(false);
@@ -448,12 +451,16 @@ export function DiningRoundsProvider({
         () => t("The kitchen was told to hurry {displayName}.", { displayName: item.displayName }),
         (error) =>
           error instanceof DiningChaseClientError && error.code === "TooSoon"
-            ? t("This round was chased a moment ago. You can chase it again at {time}.", {
-                time: new Date(error.retryAt ?? Date.now()).toLocaleTimeString([], {
-                  hour: "numeric",
-                  minute: "2-digit",
+            ? withOneSentenceEnd(
+                t("This round was chased a moment ago. You can chase it again at {time}.", {
+                  time: storeTime(
+                    error.retryAt ?? new Date().toISOString(),
+                    timeZone,
+                    false,
+                    clockStyle,
+                  ),
                 }),
-              })
+              )
             : error instanceof DiningChaseClientError && error.code === "NotBeingMade"
               ? t("The kitchen is no longer making that dish. Check whether it is ready to serve.")
               : error instanceof DiningChaseClientError && error.code === "NotOffered"

@@ -7,6 +7,7 @@ import { paymentWindowNotice } from "./counter-payment.js";
 import { compRecordText } from "./ItemCompAction.js";
 import { setLanguageForTest } from "./i18n/i18n.js";
 import { ClockStyleContext, SourceTime, StoreTimeZoneContext, storeTime } from "./StoreTime.js";
+import { StaleReadNotice, type StaleRead } from "./stale-read.js";
 
 // b40 review: Tables mixed "12:30 a.m." (notices), "Nov 21, 2026, 12:30 AM" (checkout) and
 // "01:23" (round headings). Every time on Tables reads as on the guest's phone at that table.
@@ -110,4 +111,29 @@ it("every time a Tables-only screen writes is in the guests' style", () => {
   expect(readFileSync(join(import.meta.dirname, "DiningSessionWorkspace.tsx"), "utf8")).toContain(
     '<ClockStyleContext.Provider value="Guest">',
   );
+});
+
+it("the offline and server-problem notice on Tables says its time in the guests' style", () => {
+  const html = (stale: StaleRead, style?: "Guest") => {
+    const notice = (
+      <StoreTimeZoneContext.Provider value={zone}>
+        <StaleReadNotice stale={stale} />
+      </StoreTimeZoneContext.Provider>
+    );
+    return renderToStaticMarkup(
+      style === undefined ? (
+        notice
+      ) : (
+        <ClockStyleContext.Provider value={style}>{notice}</ClockStyleContext.Provider>
+      ),
+    );
+  };
+  for (const reason of ["Offline", "ServerProblem"] as const) {
+    const stale = { reason, lastLoadedAt: halfPastMidnight, attempts: 1 };
+    expect(html(stale, "Guest")).toContain(">12:30 a.m.</time>");
+    expect(html(stale, "Guest")).not.toContain("00:30");
+    expect(html(stale, "Guest")).not.toContain("a.m.</time>.");
+    // Every other screen keeps the back office's style.
+    expect(html(stale)).toContain(">00:30</time>. Actions are paused");
+  }
 });
