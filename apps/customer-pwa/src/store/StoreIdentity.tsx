@@ -1,4 +1,4 @@
-import { currentLanguage, listSeparator, t } from "../i18n/i18n.js";
+import { currentLanguage, listSeparator, t, wordGap } from "../i18n/i18n.js";
 import { useEffect, useState } from "react";
 import { endSentence, formatLocalityLine, formatStoreLocalTime } from "../journey/format.js";
 import { formatStorePhone } from "../journey/StoreContact.js";
@@ -128,25 +128,35 @@ export function todayHoursText(hours: NonNullable<StoreProfile["hours"]>): strin
     .join(listSeparator());
 }
 
+/**
+ * The words after "Today" on the Store's hours line: today's published hours (or its holiday or
+ * special hours). Batch 40 (v15 cross-midnight): after midnight inside last night's overnight
+ * period it is already the next day, so the line says the Store is open until that period ends and
+ * then today's own hours ("until 1:00 a.m., then 12:00 p.m.–1:00 a.m. (next day)"), never
+ * "Tonight 12:00 p.m.–1:00 a.m. (next day)".
+ */
+export function storeHoursLine(hours: NonNullable<StoreProfile["hours"]>): string {
+  const today =
+    hours.todayKind === null
+      ? todayHoursText(hours)
+      : `${dayKindLabel(hours.todayKind, hours.todayHours)}${
+          hours.todayHours.length === 0 ? "" : ` · ${intervalsText(hours.todayHours)}`
+        }`;
+  const tonight = hours.tonight ?? null;
+  if (tonight === null) return today;
+  const until = formatStoreLocalTime(tonight.endLocalTime);
+  return hours.todayHours.length === 0
+    ? t("until {time}, then closed for the rest of today", { time: until })
+    : t("until {time}, then {hours}", { time: until, hours: today });
+}
+
 function StoreDetails({ profile }: { readonly profile: StoreProfile }) {
   return (
     <>
       {profile.hours === null ? null : (
         <>
           <p className="store-identity__hours">
-            {/* M117: after midnight the Store is still in last night's period: say tonight's. */}
-            <span>{profile.hours.tonight ? t("Tonight") : t("Today")}</span>{" "}
-            {profile.hours.tonight
-              ? `${formatStoreLocalTime(profile.hours.tonight.startLocalTime)}–${formatStoreLocalTime(
-                  profile.hours.tonight.endLocalTime,
-                )}${t(" (next day)")}`
-              : profile.hours.todayKind === null
-                ? todayHoursText(profile.hours)
-                : `${dayKindLabel(profile.hours.todayKind, profile.hours.todayHours)}${
-                    profile.hours.todayHours.length === 0
-                      ? ""
-                      : ` · ${intervalsText(profile.hours.todayHours)}`
-                  }`}
+            <span>{t("Today")}</span> {storeHoursLine(profile.hours)}
           </p>
           {profile.hours.upcoming.length === 0 ? null : (
             <div className="store-identity__upcoming">
@@ -212,13 +222,11 @@ export function StoreStatusStrip({ load }: { readonly load: StoreProfileLoader |
             )}
           </p>
           <p className="store-strip__line store-strip__line--more">
-            {hours.status === "Open" && hours.lastOrdersAt !== null ? (
-              <span className={hours.ordersStopped ? "store-strip__stopped" : undefined}>
-                {hours.ordersStopped
-                  ? t("Kitchen stopped taking orders at {time}", {
-                      time: formatStoreLocalTime(hours.lastOrdersAt),
-                    })
-                  : t("Last orders {time}", { time: formatStoreLocalTime(hours.lastOrdersAt) })}
+            {/* Batch 40 (v15 cross-midnight): once orders stopped, the notice just below says so
+            (with what the guest can do), so this line doesn't say it a second time. */}
+            {hours.status === "Open" && hours.lastOrdersAt !== null && !hours.ordersStopped ? (
+              <span>
+                {t("Last orders {time}", { time: formatStoreLocalTime(hours.lastOrdersAt) })}
               </span>
             ) : null}
             {hours.upcoming.length > 0 ? (
@@ -314,7 +322,12 @@ export function OrdersStoppedNotice({
     >
       <p>
         <strong>{text.headline}</strong>
-        {text.detail === null ? null : <> {text.detail}</>}
+        {text.detail === null ? null : (
+          <>
+            {wordGap()}
+            {text.detail}
+          </>
+        )}
       </p>
     </section>
   );

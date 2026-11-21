@@ -1725,7 +1725,7 @@ export const orderStatusText = Object.freeze({
     return t("Payment for your order didn’t go through. ");
   },
   cancelsAt: (time: string) =>
-    t("It will be cancelled at {time} Ask a staff member if you need help.", { time }),
+    t("It will be cancelled at {time}. Ask a staff member if you need help.", { time }),
   get roundCancelledByStore() {
     return t("This round was cancelled by the store. ");
   },

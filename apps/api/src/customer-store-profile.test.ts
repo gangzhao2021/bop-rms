@@ -188,6 +188,46 @@ describe("WP-2423 today's hours for the store identity", () => {
     expect(describeCustomerStoreHours({ ...input, state: "Open" }).ordersStopped).toBe(true);
     expect(describeCustomerStoreHours({ ...input, state: "Closed" }).ordersStopped).toBe(false);
   });
+  it("batch 40 (v15 cross-midnight): after last orders the guest is told when the Store opens next", () => {
+    // The live shape at Lane Dessert, 00:30 Toronto: last night's 12:00–01:00 period, cut-off 00:30.
+    const overnight = [{ startLocalTime: "12:00:00", endLocalTime: "01:00:00", endsNextDay: true }];
+    const upcoming = {
+      todayKind: null,
+      lastOrdersAt: "00:30:00",
+      lastOrders: { localDate: "2026-11-21", localTime: "00:30:00" },
+      pastLastOrders: true,
+      nextOpening: { localDate: "2026-11-21", startLocalTime: "12:00:00" },
+      upcoming: [],
+      currentPeriod: {
+        startLocalDate: "2026-11-20",
+        startLocalTime: "12:00:00",
+        endLocalTime: "01:00:00",
+        endsNextDay: true,
+      },
+    };
+    const input = {
+      servesChannel: true,
+      localTime: "00:31:00",
+      localDate: "2026-11-21",
+      todayHours: overnight,
+      upcoming,
+    };
+    expect(describeCustomerStoreHours({ ...input, state: "Open" })).toMatchObject({
+      status: "Open",
+      ordersStopped: true,
+      closesAt: "01:00:00",
+      nextOpening: { localDate: "2026-11-21", startLocalTime: "12:00:00" },
+    });
+    // Before last orders an open Store still says nothing about its next opening.
+    expect(
+      describeCustomerStoreHours({
+        ...input,
+        state: "Open",
+        localTime: "00:10:00",
+        upcoming: { ...upcoming, pastLastOrders: false },
+      }).nextOpening,
+    ).toBeNull();
+  });
   it("says when a closed Store opens later today, and nothing when it doesn't", () => {
     expect(
       describeCustomerStoreHours({

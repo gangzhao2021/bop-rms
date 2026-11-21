@@ -246,7 +246,8 @@ const pageMachineCodes: Readonly<Record<string, ReadonlySet<string>>> = {
   "cart/TablePayChoice.tsx": new Set(["Whole", "Mine", "Chosen"]),
   // The guest's answer to a free table (Start, Join, NewParty) and what starting it gave the menu
   // (Started, Refused, InUse): intents passed between handlers, never rendered; and what a refused
-  // waiting check tells the watcher (batch 33: Paused, never rendered).
+  // waiting check tells the watcher (batch 33: Paused, never rendered); and the service channel
+  // the store-service words are asked for (batch 40: Pickup, never rendered).
   "entry/EntryContextPage.tsx": new Set([
     "Missing",
     "Loading",
@@ -258,6 +259,7 @@ const pageMachineCodes: Readonly<Record<string, ReadonlySet<string>>> = {
     "Refused",
     "InUse",
     "Paused",
+    "Pickup",
   ]),
   "member/MemberPage.tsx": new Set(["Loading", "Ready", "Failed", "Left"]),
   // M116: how the next opening is worded inside a line (never shown).

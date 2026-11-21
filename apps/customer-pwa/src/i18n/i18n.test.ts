@@ -137,3 +137,78 @@ it("b28 (v15 live26): the points and sign-up texts say 你, as the rest of the g
     ],
   ).toBe("手机号只用来发登录验证码，以及在积分过期前通知你。你可以随时退出并删除。");
 });
+
+it("batch 40 (v15 cross-midnight): Chinese sentences end with “。”, never an ASCII period", async () => {
+  // "厨房 0:30 已停止接单." and "今天 12:00 开门." were seen live: a sentence finished in code.
+  const cjk = /[\u3400-\u9fff\u3000-\u303f\uff00-\uffef]\.(?!\.)/u;
+  const afterValue = /\}\.(?:\s|$)/u;
+  const ascii = Object.entries(zhHans).filter(
+    ([, chinese]) =>
+      cjk.test(chinese) || (afterValue.test(chinese) && /[\u3400-\u9fff]/u.test(chinese)),
+  );
+  expect(ascii).toEqual([]);
+  // A value given to t() is a part of the sentence: the sentence's own words end it.
+  const finished: string[] = [];
+  for (const file of sources(root)) {
+    if (file.includes(`${join("src", "i18n")}`)) continue;
+    const source = ts.createSourceFile(
+      file,
+      readFileSync(file, "utf8"),
+      ts.ScriptTarget.Latest,
+      true,
+      file.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+    );
+    const visit = (node: ts.Node, inValues: boolean): void => {
+      if (inValues && ts.isCallExpression(node) && node.expression.getText() === "endSentence")
+        finished.push(`${file}:${String(source.getLineAndCharacterOfPosition(node.pos).line + 1)}`);
+      const values =
+        ts.isCallExpression(node) && node.expression.getText() === "t" ? node.arguments[1] : null;
+      ts.forEachChild(node, (child) => visit(child, inValues || child === values));
+    };
+    visit(source, false);
+  }
+  expect(finished).toEqual([]);
+  const { endSentence } = await import("../journey/format.js");
+  const { storeServiceNoticeText } = await import("../store/StoreIdentity.js");
+  renderToStaticMarkup(createElement(LanguageRoot, { initial: "zh-Hans", children: () => null }));
+  try {
+    expect(endSentence("今天 12:00 开门")).toBe("今天 12:00 开门。");
+    expect(endSentence("好了！")).toBe("好了！");
+    const hours = {
+      status: "Open" as const,
+      todayHours: [{ startLocalTime: "12:00:00", endLocalTime: "01:00:00", endsNextDay: true }],
+      closesAt: "01:00:00",
+      opensAt: null,
+      localDate: "2026-11-21",
+      todayKind: null,
+      lastOrdersAt: "00:30:00",
+      pausedUntil: null,
+      ordersStopped: true,
+      nextOpening: { localDate: "2026-11-21", startLocalTime: "12:00:00" },
+      tonight: { startLocalTime: "12:00:00", endLocalTime: "01:00:00" },
+      upcoming: [],
+    };
+    const texts = [
+      storeServiceNoticeText(hours, "Stopped", null, "Pickup"),
+      storeServiceNoticeText(hours, "Stopped", null, "DineIn"),
+      storeServiceNoticeText({ ...hours, status: "Closed" }, "Closed", null, "Pickup"),
+    ].flatMap((text) => [text?.headline ?? "", text?.detail ?? ""]);
+    expect(texts[0]).toBe("厨房 0:30 已停止接单。");
+    expect(texts[4]).toBe("线上自取现已停止接单。");
+    for (const text of texts) expect(text).not.toMatch(cjk);
+    expect(t("This round will be cancelled at {value1}. ", { value1: "21:46" })).toBe(
+      "这一轮将于 21:46 取消。",
+    );
+    expect(
+      t("It will be cancelled at {time}. Ask a staff member if you need help.", { time: "21:46" }),
+    ).not.toMatch(/21:46\./u);
+  } finally {
+    renderToStaticMarkup(createElement(LanguageRoot, { initial: "en", children: () => null }));
+  }
+  expect(t("This round will be cancelled at {value1}. ", { value1: "9:46 p.m." })).toBe(
+    "This round will be cancelled at 9:46 p.m. ",
+  );
+  expect(t("This round will be cancelled at {value1}. ", { value1: "21:46" })).toBe(
+    "This round will be cancelled at 21:46. ",
+  );
+});

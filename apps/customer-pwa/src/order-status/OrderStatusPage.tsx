@@ -21,12 +21,7 @@ import { PickupCodePanel } from "../pickup-code/PickupCodePanel.js";
 import { FinishPickupPayment } from "./FinishPickupPayment.js";
 import type { PickupCodeController } from "../pickup-code/pickup-code-controller.js";
 import { CustomerPage, type CustomerStoreContext } from "../journey/CustomerPage.js";
-import {
-  describeChosenOption,
-  endSentence,
-  formatClockTime,
-  formatMoney,
-} from "../journey/format.js";
+import { describeChosenOption, formatClockTime, formatMoney } from "../journey/format.js";
 import { StoreContactCard } from "../journey/StoreContact.js";
 import { commonText, orderStatusText } from "../journey/messages.js";
 import { ContactDetailsSection } from "./ContactDetailsSection.js";
@@ -1128,7 +1123,7 @@ function StatusContent({
                     ? orderStatusText.roundPaymentFailed
                     : orderStatusText.orderPaymentFailed}
                   {orderStatusText.cancelsAt(
-                    endSentence(formatClockTime(failedPayment(batch.orderBatchReference) ?? "")),
+                    formatClockTime(failedPayment(batch.orderBatchReference) ?? ""),
                   )}
                 </p>
               ) : batchCancellation ? (

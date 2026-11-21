@@ -1,4 +1,4 @@
-import { dateLocale, t } from "../i18n/i18n.js";
+import { currentLanguage, dateLocale, t } from "../i18n/i18n.js";
 /** Customer-facing presentation of exact server amounts and instants. No binary floating point. */
 
 const wholeUnits = new Intl.NumberFormat("en-CA", { maximumFractionDigits: 0 });
@@ -89,6 +89,8 @@ export function formatDateTime(instant: string, locale = dateLocale()): string {
  * end with an abbreviation period.
  */
 export function endSentence(text: string): string {
+  // Batch 40 (v15 cross-midnight): a Chinese sentence ends with "。", never "." ("今天 12:00 开门.").
+  if (currentLanguage() === "zh-Hans") return /[。！？!?…]$/u.test(text) ? text : `${text}。`;
   return /[.!?…]$/u.test(text) ? text : `${text}.`;
 }
 

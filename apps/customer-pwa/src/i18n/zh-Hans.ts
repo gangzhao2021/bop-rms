@@ -5,6 +5,14 @@
 export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   " (included in prices)": "（价格已含）",
   " (next day)": "（次日）",
+  "until {time}, then {hours}": "营业至 {time}，之后 {hours}",
+  "The kitchen has stopped taking orders": "厨房已停止接单",
+  "Ordering from your phone is closed now": "现在不能用手机点单",
+  "The store closes at {close}.": "门店 {close} 打烊。",
+  "The store closes at {close} and opens again {day} at {time}.":
+    "门店 {close} 打烊，{day} {time} 再开门。",
+  "Look at the menu": "看看菜单",
+  "until {time}, then closed for the rest of today": "营业至 {time}，今天之后不再营业",
   " If it isn't paid by {value1}, it is cancelled and nobody is charged.":
     " 如果在 {value1} 前未付款，这一轮会被取消，不会向任何人收费。",
   " seconds.": " 秒后重试。",
@@ -327,7 +335,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Invite someone at your table": "邀请同桌的人",
   Issued: "签发时间",
   "It was a duplicate of another order.": "这是另一笔订单的重复订单。",
-  "It will be cancelled at {time} Ask a staff member if you need help.":
+  "It will be cancelled at {time}. Ask a staff member if you need help.":
     "将于 {time} 取消。需要帮助请问店员。",
   "Item amounts on this version already include tax and any fees or discounts.":
     "本版本的商品金额已包含税费以及任何费用或折扣。",
@@ -988,7 +996,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这一轮在付款前已停止，菜品已放回本桌购物车，没有向任何人收费。",
   "This round was cancelled by the store. Nobody was charged for it.":
     "这一轮已被门店取消，没有向任何人收费。",
-  "This round will be cancelled at {value1} ": "这一轮将于 {value1} 取消。",
+  "This round will be cancelled at {value1}. ": "这一轮将于 {value1} 取消。",
   "This route is safe for an explicit update.": "这个页面可以安全地进行更新。",
   "This session isn’t part of the table any more, or only the person who started the table can restart this cart. Scan the table QR code again or ask staff for help.":
     "这个会话已不属于这一桌，或只有开这桌的人可以重开购物车。请重新扫描桌上的二维码或向店员求助。",

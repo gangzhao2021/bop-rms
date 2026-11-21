@@ -53,8 +53,8 @@ export interface CustomerStoreHours {
   /**
    * WP-2423 item 8 ③ (Owner decision 16). The Store's local date now; today's holiday, special
    * hours or closure; when the kitchen stops taking orders in the current period (while open and
-   * only when the Store set a cut-off); the next opening within 7 days (while not open); and the
-   * holidays and special hours in the next 7 days.
+   * only when the Store set a cut-off); the next opening within 7 days (while not open, or once
+   * past last orders); and the holidays and special hours in the next 7 days.
    */
   readonly localDate: string | null;
   readonly todayKind: StoreUpcomingHours["todayKind"];
@@ -167,13 +167,15 @@ export function describeCustomerStoreHours(input: {
     period.startLocalDate < input.localDate
       ? Object.freeze({ startLocalTime: period.startLocalTime, endLocalTime: period.endLocalTime })
       : null;
+  const ordersStopped = status === "Open" && ahead?.pastLastOrders === true;
   const known = {
     localDate: input.localDate ?? null,
     todayKind: ahead?.todayKind ?? null,
     lastOrdersAt: status === "Open" ? (ahead?.lastOrdersAt ?? null) : null,
     pausedUntil: status === "Paused" && channelPaused ? (input.channelPausedUntil ?? null) : null,
-    ordersStopped: status === "Open" && ahead?.pastLastOrders === true,
-    nextOpening: status === "Open" ? null : (ahead?.nextOpening ?? null),
+    ordersStopped,
+    // Batch 40 (v15 cross-midnight): after last orders the guest is told when it opens next too.
+    nextOpening: status === "Open" && !ordersStopped ? null : (ahead?.nextOpening ?? null),
     upcoming: ahead?.upcoming ?? Object.freeze([]),
     tonight: carriedOver,
   };

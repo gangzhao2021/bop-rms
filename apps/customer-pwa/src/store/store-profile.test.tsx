@@ -214,8 +214,12 @@ describe("WP-2423 item 8 ③ follow-up: after last orders", () => {
     );
     expect(stopped).toContain("To add something, ask a staff member.");
     expect(renderToStaticMarkup(<OrdersStoppedNotice load={loaderOf(false)} />)).toBe("");
-    expect(renderToStaticMarkup(<StoreStatusStrip load={loaderOf(true)} />)).toContain(
-      `Kitchen stopped taking orders at ${formatStoreLocalTime("17:30:00")}`,
+    // Batch 40 (v15 cross-midnight): the notice says it; the strip above it doesn't repeat it.
+    const strip = renderToStaticMarkup(<StoreStatusStrip load={loaderOf(true)} />);
+    expect(strip).toContain("Open now");
+    expect(strip).not.toContain("stopped taking orders");
+    expect(renderToStaticMarkup(<StoreStatusStrip load={loaderOf(false)} />)).toContain(
+      `Last orders ${formatStoreLocalTime("17:30:00")}`,
     );
   });
 });
@@ -248,9 +252,35 @@ describe("M117: after midnight in last night's overnight period", () => {
     const html = renderToStaticMarkup(
       <StoreIdentityCard load={Object.assign(async () => profile, { last: () => profile })} />,
     );
-    expect(html).toContain("Tonight");
-    expect(html).toContain("(next day)");
-    expect(html).not.toContain(">Today<");
+    // Batch 40 (v15 cross-midnight): it is already the next day, so the line says until when the
+    // Store is open now and then today's own hours, never "Tonight 11:00 a.m.–2:00 a.m. (next day)".
+    const line = (markup: string) =>
+      /<p class="store-identity__hours">(.*?)<\/p>/u.exec(markup)?.[1]?.replace(/<[^>]+>/gu, "");
+    expect(line(html)).toBe(
+      `Today until ${formatStoreLocalTime("02:00:00")}, then ${formatStoreLocalTime("11:00:00")}–${formatStoreLocalTime("02:00:00")} (next day)`,
+    );
+    expect(html).not.toContain("Tonight");
+    const lateHours = profile.hours as NonNullable<StoreProfile["hours"]>;
+    const closedLater = { ...profile, hours: { ...lateHours, todayHours: [] } };
+    expect(
+      line(
+        renderToStaticMarkup(
+          <StoreIdentityCard
+            load={Object.assign(async () => closedLater, { last: () => closedLater })}
+          />,
+        ),
+      ),
+    ).toBe(`Today until ${formatStoreLocalTime("02:00:00")}, then closed for the rest of today`);
+    const zh = renderToStaticMarkup(
+      <LanguageRoot initial="zh-Hans">
+        {() => (
+          <StoreIdentityCard load={Object.assign(async () => profile, { last: () => profile })} />
+        )}
+      </LanguageRoot>,
+    );
+    renderToStaticMarkup(<LanguageRoot initial="en">{() => null}</LanguageRoot>);
+    expect(line(zh)).toBe("今天 营业至 2:00，之后 11:00–2:00（次日）");
+    expect(zh).not.toContain("今晚");
     expect(() =>
       parseStoreProfile({
         ...late(),

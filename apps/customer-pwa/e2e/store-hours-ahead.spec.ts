@@ -118,9 +118,10 @@ test.describe("@production the Store's hours ahead", () => {
     const notice = page.getByRole("alert", { name: "Last orders" });
     await expect(notice).toContainText("The kitchen stopped taking orders at 9:30 p.m.");
     await expect(notice).toContainText("You can’t place a pickup order from your phone now.");
-    await expect(page.getByRole("region", { name: "Store hours and address" })).toContainText(
-      "Kitchen stopped taking orders at 9:30 p.m.",
-    );
+    // Batch 40 (v15 cross-midnight): said once, in the notice; the strip above doesn't repeat it.
+    const strip = page.getByRole("region", { name: "Store hours and address" });
+    await expect(strip).toContainText("Open now · until 10:00 p.m.");
+    await expect(strip).not.toContainText("stopped taking orders");
     await expectNoInternalText(page);
     await page.setViewportSize({ width: 390, height: 844 });
     await page.screenshot({ path: "test-results/orders-stopped-390.png" });

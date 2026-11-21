@@ -10,7 +10,7 @@ import {
 } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
 import { CustomerPage, PageHeading, type CustomerStoreContext } from "../journey/CustomerPage.js";
-import { endSentence, formatClockTime, formatMoney } from "../journey/format.js";
+import { formatClockTime, formatMoney } from "../journey/format.js";
 import { staffCancellationReasonText } from "../order-status/OrderStatusPage.js";
 import { orderStatusText } from "../journey/messages.js";
 import {
@@ -201,8 +201,9 @@ function RoundNote({ round }: { readonly round: DiningRound }) {
     return (
       <p className="order-status__warning" role="status">
         {round.cancelsAt
-          ? t("This round will be cancelled at {value1} ", {
-              value1: endSentence(formatClockTime(round.cancelsAt)),
+          ? // The sentence's own period: a time ending "p.m." stands in for it, and Chinese has "。".
+            t("This round will be cancelled at {value1}. ", {
+              value1: formatClockTime(round.cancelsAt),
             })
           : ""}
         {t("Ask a staff member if you need help.")}

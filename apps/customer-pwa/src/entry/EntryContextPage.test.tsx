@@ -8,6 +8,7 @@ import { setSettledTable } from "../session/customer-transaction-context.js";
 import { zhHans as zh } from "../i18n/zh-Hans.js";
 import { formatStoreLocalTime } from "../journey/format.js";
 import type { StoreProfile, StoreProfileLoader } from "../store/store-profile-client.js";
+import { LanguageRoot } from "../i18n/i18n.js";
 
 const context: CustomerEntryEstablishedContext = Object.freeze({
   brandDisplayName: "BOP Test Kitchen",
@@ -871,5 +872,132 @@ describe("WP-2423 shared-table-checkout (b): already at this table", () => {
     expect(html).toContain("Continue ordering");
     expect(html).not.toContain("Join this table");
     expect(zh["You’re already at this table."]).toBe("你已在这一桌。");
+  });
+});
+
+describe("batch 40 (v15 cross-midnight): after last orders while the Store is still open", () => {
+  // The Store read seen live at Lane Dessert at 00:30 Toronto (12:00–01:00 overnight, last orders
+  // 00:30), with the next opening the server now sends once orders have stopped.
+  const hours = {
+    status: "Open" as const,
+    todayHours: [{ startLocalTime: "12:00:00", endLocalTime: "01:00:00", endsNextDay: true }],
+    closesAt: "01:00:00",
+    opensAt: null,
+    localDate: "2026-11-21",
+    todayKind: null,
+    lastOrdersAt: "00:30:00",
+    pausedUntil: null,
+    ordersStopped: true,
+    nextOpening: { localDate: "2026-11-21", startLocalTime: "12:00:00" },
+    tonight: { startLocalTime: "12:00:00", endLocalTime: "01:00:00" },
+    upcoming: [],
+  };
+  const profile = (over: Partial<typeof hours> = {}): StoreProfile => ({
+    storeDisplayName: "Lane Dessert (TEST)",
+    timeZone: "America/Toronto",
+    address: {
+      addressLines: ["202 Test Lane (TEST)"],
+      locality: "Toronto",
+      regionCode: "ON",
+      postalCode: "M5T 1R5",
+      countryCode: "CA",
+    },
+    phone: "+14165550100",
+    hours: { ...hours, ...over },
+  });
+  const loader = (value: StoreProfile): StoreProfileLoader =>
+    Object.assign(async () => value, { last: () => value });
+  const at = (state: CustomerEntryScreenState, value = profile()) =>
+    renderToStaticMarkup(
+      <MemoryRouter>
+        <EntryContextView
+          onContinue={vi.fn()}
+          onAnswer={vi.fn()}
+          storeProfile={loader(value)}
+          state={state}
+        />
+      </MemoryRouter>,
+    );
+  const pickup = { ...context, channel: "Pickup" as const, publicTableReference: null };
+  // A sentence ends once, also after "p.m." (as the page writes it).
+  const end = (text: string) => (text.endsWith(".") ? text : `${text}.`);
+  const heading = (html: string) =>
+    /<h2 id="entry-heading"[^>]*>(.*?)<\/h2>/u.exec(html)?.[1] ?? "";
+  it("a pickup guest is told the kitchen stopped, when it closes and opens, and sees the menu only", () => {
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-11-21T05:31:00.000Z"));
+    const html = at({ kind: "Established", context: pickup });
+    expect(heading(html)).toBe("The kitchen has stopped taking orders");
+    expect(html).toContain(
+      `The kitchen stopped taking orders at ${formatStoreLocalTime("00:30:00")}`,
+    );
+    expect(html).toContain("You can’t place a pickup order from your phone now.");
+    expect(html).toContain(
+      end(
+        `The store closes at ${formatStoreLocalTime("01:00:00")} and opens again today at ${formatStoreLocalTime("12:00:00")}`,
+      ),
+    );
+    expect(html).toContain(">Look at the menu</button>");
+    expect(html).not.toContain("Ready to order");
+    expect(html).not.toContain("Continue to menu");
+    expect(html).not.toContain("is selected");
+    // Before last orders it is the usual start.
+    const open = at({ kind: "Established", context: pickup }, profile({ ordersStopped: false }));
+    expect(heading(open)).toBe("Ready to order");
+    expect(open).toContain("Continue to menu");
+    vi.restoreAllMocks();
+  });
+  it("says it in Chinese with Chinese punctuation", () => {
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-11-21T05:31:00.000Z"));
+    const html = renderToStaticMarkup(
+      <LanguageRoot initial="zh-Hans">
+        {() => (
+          <MemoryRouter>
+            <EntryContextView
+              onContinue={vi.fn()}
+              storeProfile={loader(profile())}
+              state={{ kind: "Established", context: pickup }}
+            />
+          </MemoryRouter>
+        )}
+      </LanguageRoot>,
+    );
+    renderToStaticMarkup(<LanguageRoot initial="en">{() => null}</LanguageRoot>);
+    expect(heading(html)).toBe("厨房已停止接单");
+    expect(html).toContain("厨房 0:30 已停止接单。现在不能用手机下自取单。");
+    expect(html).toContain("门店 1:00 打烊，今天 12:00 再开门。");
+    expect(html).toContain(">看看菜单</button>");
+    expect(html).not.toContain("可以开始点单");
+    expect(html).not.toMatch(/[\u3400-\u9fff]\.(?!\.)/u);
+    vi.restoreAllMocks();
+  });
+  it("a table says the kitchen stopped; a new table offers the menu only", () => {
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-11-21T05:31:00.000Z"));
+    const joined = at({ kind: "Established", context });
+    expect(joined).toContain(
+      `${end(`The kitchen stopped taking orders at ${formatStoreLocalTime("00:30:00")}`)} You can’t send a new order from your phone now. To add something, ask a staff member.`,
+    );
+    const table = { ...context, channel: "DineIn" as const };
+    const start = at({ kind: "TableMayStart", context: table });
+    expect(heading(start)).toBe("The kitchen has stopped taking orders");
+    expect(start).not.toContain("Start ordering");
+    expect(start).toContain(">Look at the menu</button>");
+    const ask = at({ kind: "TableAskNewParty", context: table });
+    expect(ask).toContain("To add something, ask a staff member.");
+    expect(ask).toContain("Yes, join them");
+    const resumed = at({
+      kind: "Resumed",
+      context: {
+        publicStoreReference: pickup.publicStoreReference,
+        channel: "Pickup",
+        locale: "en-CA",
+        brandDisplayName: "Lane Dessert (TEST)",
+        storeDisplayName: "Lane Dessert (TEST)",
+        publicTableReference: null,
+        joined: false,
+      },
+    });
+    expect(heading(resumed)).toBe("The kitchen has stopped taking orders");
+    expect(resumed).not.toContain("Ready to order");
+    vi.restoreAllMocks();
   });
 });

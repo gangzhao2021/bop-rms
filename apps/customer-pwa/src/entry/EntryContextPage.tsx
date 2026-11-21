@@ -1,4 +1,4 @@
-import { listSeparator, t, saidTable } from "../i18n/i18n.js";
+import { listSeparator, t, saidTable, wordGap } from "../i18n/i18n.js";
 import {
   admissionStateForFailure,
   DiningAdmissionPanel,
@@ -21,8 +21,14 @@ import {
   createStoreProfileClient,
   type StoreProfileLoader,
 } from "../store/store-profile-client.js";
-import { StoreIdentityCard, useStoreProfile } from "../store/StoreIdentity.js";
-import { nextOpeningText } from "../store/store-hours-text.js";
+import {
+  StoreIdentityCard,
+  storeServiceNoticeText,
+  useStoreService,
+} from "../store/StoreIdentity.js";
+import type { StoreProfile } from "../store/store-profile-client.js";
+import { takesNewOrders, type StoreServicePhase } from "../store/store-service.js";
+import { nextOpeningText, storeDayName } from "../store/store-hours-text.js";
 import { endSentence, formatClockTime, formatStoreLocalTime } from "../journey/format.js";
 import { unpaidPickup } from "../order-status/OrderStatusPage.js";
 import { createHttpOrderStatusClient } from "../order-status/order-status-client.js";
@@ -688,6 +694,11 @@ export interface EntryContextViewProps {
    */
   readonly busy?: boolean | undefined;
   readonly onRetryNow?: (() => void) | undefined;
+  /**
+   * Batch 40 (v15 cross-midnight): whether a guest can order from the phone now, read live from the
+   * Store's published facts (after last orders, a pause, or closing time while the page is open).
+   */
+  readonly service?: EntryService | undefined;
   /** Shown under a started visit: the Store's hours, address and phone. */
   readonly storeProfile?: StoreProfileLoader | null | undefined;
   /** M105 (B.3): the Store where this phone still has a pickup order (null: none). */
@@ -733,11 +744,15 @@ export function EntryContextView({
       : state.kind === "NotAccepting"
         ? (state.browse ?? null)
         : null);
+  // Batch 40 (v15 cross-midnight): every page where the guest would start ordering knows, live,
+  // whether the Store takes orders from the phone now (after last orders it doesn't).
+  const deciding =
+    established ??
+    (state.kind === "TableMayStart" || state.kind === "TableAskNewParty" ? state.context : null);
+  const service = useStoreService(deciding !== null ? storeProfile : null);
   // M109: "call them" only beside the number the store card shows; a store with no published
   // phone (or one not read) is told at the counter.
-  const profile = useStoreProfile(
-    established !== null && established.channel === "Pickup" ? storeProfile : null,
-  );
+  const profile = established !== null && established.channel === "Pickup" ? service.profile : null;
   const callable = established?.channel === "Pickup" && profile !== null && profile.phone !== null;
   return (
     <CustomerPage
@@ -775,6 +790,7 @@ export function EntryContextView({
           state={state}
           busy={busy}
           onRetryNow={onRetryNow}
+          service={deciding === null ? undefined : service}
         />
       </section>
       {/* M105 (B.3): a notice, not a block: the order at the other Store is still on this phone. */}
@@ -821,6 +837,94 @@ export function EntryContextView({
         </aside>
       )}
     </CustomerPage>
+  );
+}
+
+/** The entry page's live view of whether the Store takes orders from the phone now. */
+export interface EntryService {
+  readonly profile: StoreProfile | null;
+  readonly phase: StoreServicePhase;
+  readonly minutesLeft: number | null;
+}
+
+interface NotTakingOrders {
+  readonly phase: StoreServicePhase;
+  readonly hours: NonNullable<StoreProfile["hours"]>;
+  readonly heading: string;
+}
+
+/** Batch 40: why the phone can't order now (after last orders, paused, closed); null if it can. */
+function notTakingOrders(service: EntryService | undefined): NotTakingOrders | null {
+  const hours = service?.profile?.hours ?? null;
+  if (service === undefined || hours === null || takesNewOrders(service.phase)) return null;
+  return {
+    phase: service.phase,
+    hours,
+    heading:
+      service.phase === "Stopped"
+        ? t("The kitchen has stopped taking orders")
+        : service.phase === "Paused"
+          ? t("Online ordering paused")
+          : t("Ordering from your phone is closed now"),
+  };
+}
+
+/** "The store closes at 1:00 a.m. and opens again today at 12:00 p.m." (after last orders). */
+function closesAndOpensText(hours: NonNullable<StoreProfile["hours"]>): string | null {
+  if (hours.closesAt === null) return null;
+  const close = formatStoreLocalTime(hours.closesAt);
+  if (hours.nextOpening === null) return t("The store closes at {close}.", { close });
+  return t("The store closes at {close} and opens again {day} at {time}.", {
+    close,
+    day: storeDayName(hours.nextOpening.localDate, hours.localDate),
+    time: formatStoreLocalTime(hours.nextOpening.startLocalTime),
+  });
+}
+
+/** A pickup guest who can't order from the phone now: why, until when, and when to come back. */
+function PickupNotTakingOrders({
+  stopped,
+  headingRef,
+}: {
+  readonly stopped: NotTakingOrders;
+  readonly headingRef?: React.RefObject<HTMLHeadingElement | null> | undefined;
+}) {
+  const notice = storeServiceNoticeText(stopped.hours, stopped.phase, null, "Pickup");
+  const hours = stopped.phase === "Stopped" ? closesAndOpensText(stopped.hours) : null;
+  return (
+    <div className="entry-state entry-state--warning" role="status">
+      <StateHeading headingRef={headingRef}>{stopped.heading}</StateHeading>
+      {notice === null ? null : (
+        <p>
+          {notice.headline}
+          {notice.detail === null ? null : (
+            <>
+              {wordGap()}
+              {notice.detail}
+            </>
+          )}
+        </p>
+      )}
+      {hours === null ? null : <p className="entry-state__next">{hours}</p>}
+    </div>
+  );
+}
+
+/** At a table: the kitchen stopped (or ordering is paused or closed); staff can still help. */
+function TableNotTakingOrders({ stopped }: { readonly stopped: NotTakingOrders | null }) {
+  if (stopped === null) return null;
+  const notice = storeServiceNoticeText(stopped.hours, stopped.phase, null, "DineIn");
+  if (notice === null) return null;
+  return (
+    <p className="entry-closed" role="status">
+      {notice.headline}
+      {notice.detail === null ? null : (
+        <>
+          {wordGap()}
+          {notice.detail}
+        </>
+      )}
+    </p>
   );
 }
 
@@ -1015,7 +1119,10 @@ function EntryState({
   state,
   busy = false,
   onRetryNow,
+  service,
 }: Readonly<EntryContextViewProps>) {
+  // Batch 40: null while the guest can order from the phone (or it isn't known: never blocks).
+  const stopped = notTakingOrders(service);
   if (state.kind === "Loading" && busy)
     return <EntryBusy headingRef={headingRef} onRetryNow={onRetryNow} />;
   if (state.kind === "Loading")
@@ -1207,6 +1314,17 @@ function EntryState({
   // the same code scanned again: the same Store, table and cart, and nothing new started.
   if (state.kind === "Resumed") {
     const { context } = state;
+    if (context.channel !== "DineIn" && stopped !== null)
+      return (
+        <div>
+          <PickupNotTakingOrders stopped={stopped} headingRef={headingRef} />
+          {onContinue === undefined ? null : (
+            <button className="entry-action" type="button" onClick={onContinue}>
+              {t("Continue")}
+            </button>
+          )}
+        </div>
+      );
     return (
       <div>
         <StateHeading headingRef={headingRef}>
@@ -1223,6 +1341,7 @@ function EntryState({
             })}
           </p>
         )}
+        <TableNotTakingOrders stopped={stopped} />
         {onContinue === undefined ? null : context.channel === "DineIn" && !context.joined ? (
           <EntryNextSteps
             joining
@@ -1256,25 +1375,46 @@ function EntryState({
             <SettledTableReceiptPanel />
           </>
         )}
-        {settled === null ? (
-          <StateHeading headingRef={headingRef}>{t("Order at this table")}</StateHeading>
+        {/* Batch 40: after last orders (or closing time) a new table can't order from the phone,
+        so nothing is started here; the menu is there to look at, and staff can still help. */}
+        {stopped !== null && stopped.phase !== "Paused" ? (
+          <>
+            {settled === null ? (
+              <StateHeading headingRef={headingRef}>{stopped.heading}</StateHeading>
+            ) : (
+              <h3>{stopped.heading}</h3>
+            )}
+            <TableNotTakingOrders stopped={stopped} />
+            {onContinue ? (
+              <button className="entry-action" type="button" onClick={onContinue}>
+                {t("Look at the menu")}
+              </button>
+            ) : null}
+          </>
         ) : (
-          <h3>{t("Order at this table")}</h3>
+          <>
+            {settled === null ? (
+              <StateHeading headingRef={headingRef}>{t("Order at this table")}</StateHeading>
+            ) : (
+              <h3>{t("Order at this table")}</h3>
+            )}
+            <p className="entry-context">
+              {t("You pay on your phone each time you order. No account needed.")}
+            </p>
+            <TableNotTakingOrders stopped={stopped} />
+            {settled === null ? null : (
+              <p>{t("After you start, this receipt won’t open on this phone.")}</p>
+            )}
+            <button className="entry-action" type="button" onClick={() => onAnswer?.("Start")}>
+              {t("Start ordering")}
+            </button>
+            {onContinue ? (
+              <button className="entry-secondary-action" type="button" onClick={onContinue}>
+                {t("Look at the menu first")}
+              </button>
+            ) : null}
+          </>
         )}
-        <p className="entry-context">
-          {t("You pay on your phone each time you order. No account needed.")}
-        </p>
-        {settled === null ? null : (
-          <p>{t("After you start, this receipt won’t open on this phone.")}</p>
-        )}
-        <button className="entry-action" type="button" onClick={() => onAnswer?.("Start")}>
-          {t("Start ordering")}
-        </button>
-        {onContinue ? (
-          <button className="entry-secondary-action" type="button" onClick={onContinue}>
-            {t("Look at the menu first")}
-          </button>
-        ) : null}
       </div>
     );
   }
@@ -1318,6 +1458,7 @@ function EntryState({
         ) : (
           <h3>{t("Are you with the people already at this table?")}</h3>
         )}
+        <TableNotTakingOrders stopped={stopped} />
         <div className="entry-question">
           <button className="entry-action" type="button" onClick={() => onAnswer?.("Join")}>
             {t("Yes, join them")}
@@ -1394,6 +1535,20 @@ function EntryState({
 
   const { context } = state;
   const locationOpen = context.operatingState === "Open";
+  // Batch 40 (v15 cross-midnight): after last orders a pickup guest was told "Ready to order" with
+  // "Continue to menu". They are told the kitchen stopped, when the Store closes and opens again,
+  // and are offered the menu to look at only.
+  if (context.channel !== "DineIn" && locationOpen && stopped !== null && context.resumed !== true)
+    return (
+      <div>
+        <PickupNotTakingOrders stopped={stopped} headingRef={headingRef} />
+        {onContinue ? (
+          <button className="entry-action" type="button" onClick={onContinue}>
+            {t("Look at the menu")}
+          </button>
+        ) : null}
+      </div>
+    );
   return (
     <div>
       <StateHeading headingRef={headingRef}>
@@ -1418,6 +1573,9 @@ function EntryState({
             : t("Your earlier cart here has ended, so this is a new cart.")}
         </p>
       )}
+      {locationOpen && context.channel === "DineIn" ? (
+        <TableNotTakingOrders stopped={stopped} />
+      ) : null}
       {/* Open now, today's hours and the address are stated once, in the store card below. */}
       {context.resumed === true && !locationOpen && onContinue ? (
         // M104 (Owner 2026-11-05): a visit already under way finishes as usual.
