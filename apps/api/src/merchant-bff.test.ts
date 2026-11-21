@@ -2661,6 +2661,50 @@ it("reads a table's payment once more after a lock race, then answers try again"
   expect(read).toHaveBeenCalledTimes(2);
 });
 
+// Batch 43 (v15 b41 live 15:06:47Z): the one /orders/table-payment 503 with no database error was a
+// staff session pushed out (MERCHANT_REQUEST_UNEXPECTED BROWSER_SESSION_DENIED at level 50), while
+// Orders detail answered 403 in the same millisecond. Both now refuse; a real outage stays 503.
+it("refuses a table's payment read whose staff session was refused, as Orders detail does", async () => {
+  type Reader = NonNullable<MerchantBffRouterOptions["tablePayment"]>;
+  const read = vi.fn<Reader>();
+  const app = express();
+  app.use(
+    "/merchant",
+    createMerchantBffRouter({
+      service: fakeService(),
+      tablePayment: read,
+      exactOrigin: "https://merchant.invalid",
+      acceptedHost: "merchant.invalid",
+    }),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  servers.push(server);
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("listener unavailable");
+  const submit = () =>
+    request(`http://127.0.0.1:${address.port}`, "/merchant/orders/table-payment", {
+      method: "POST",
+      body: JSON.stringify({ orderReference: storeReference }),
+      headers: {
+        ...safeHeaders,
+        Cookie: "__Host-bop-merchant=" + sessionCookie,
+        "X-BOP-CSRF": csrf,
+        "Content-Type": "application/json",
+      },
+    });
+  read.mockRejectedValueOnce(new BrowserSessionError("BROWSER_SESSION_DENIED"));
+  const refused = await submit();
+  expect(refused.status).toBe(403);
+  expect(read).toHaveBeenCalledTimes(1);
+  read.mockRejectedValueOnce(
+    Object.assign(new Error("private"), { code: "TENANT_DATABASE_ACQUIRE_FAILED" }),
+  );
+  const down = await submit();
+  expect(down.status).toBe(503);
+  expect(await down.json()).toEqual({ error: "unavailable" });
+});
+
 // WP-2423 (logs-and-transaction-time, v15 2026-11-14): closing the guests-left dialog stopped its
 // table close plan read; when the connection was gone before the body was read, the route ran on
 // an empty body and logged a level-50 IDENTITY_INPUT_INVALID fault (39 times on v15).

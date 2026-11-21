@@ -2,6 +2,7 @@
 import type { MerchantBffRouterOptions } from "./merchant-bff-contract.js";
 import { CounterCancellationError } from "./merchant-counter-order-cancellation.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
+import { merchantFailureKind } from "./merchant-failure.js";
 import {
   cookie,
   denied,
@@ -867,6 +868,13 @@ export function installMerchantOrderRoutes(
   // WP-2423 DEC-DINE-IN-PAY-LATER: a table's one payment (Orders page), and cash given back from a
   // cash payment by a manager (PIN-confirmed).
   const tablePaymentFailure = (response: ExpressResponse, error: unknown) => {
+    // Batch 43 (v15 b41 live 15:06:47Z): this route's one unexplained 503 was the staff session's
+    // own refusal (BROWSER_SESSION_DENIED, the session pushed out; Orders detail answered 403 in
+    // the same millisecond). A refused session is told to sign in again, never "try again".
+    if (!(error instanceof TablePaymentError) && merchantFailureKind(error) === "Refused") {
+      denied(response);
+      return;
+    }
     noteFailure(response, error);
     if (!(error instanceof TablePaymentError) || error.code === "TABLE_PAYMENT_UNAVAILABLE") {
       response.status(503).set("Cache-Control", NO_STORE).json({ error: "unavailable" });
