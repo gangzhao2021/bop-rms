@@ -20,7 +20,6 @@ import {
 } from "./dining-session-closing-run.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
-import { onlyRefusal } from "./merchant-failure.js";
 const fail = (): never => {
   throw new Error("DINING_CLOSING_COMMAND_UNAVAILABLE");
 };
@@ -66,7 +65,10 @@ export function createMerchantDiningClosingCommand(options: {
      */
     nothingOrdered?: true;
   }) => {
-    const authenticated = await options.authentication.authorize(input).catch(onlyRefusal(denied));
+    // Batch 44 (v15 b43 live): an ended sign-in or a stale CSRF token is the shared refusal every
+    // merchant route answers (403 request_denied), so it is passed on as itself; only a missing
+    // close permission is this command's own refusal (DINING_CLOSING_PERMISSION_DENIED).
+    const authenticated = await options.authentication.authorize(input);
     const raw = readClosedRecord(input.command, [
       "action",
       "diningSessionReference",
@@ -96,7 +98,7 @@ export function createMerchantDiningClosingCommand(options: {
               input.sessionCookie,
               "dining.session.close",
               authenticated.sessionReference,
-            ).catch(onlyRefusal(denied));
+            );
             const decisions = await current.authorizeActions([
               "dining.session.close",
               ...taskActions,

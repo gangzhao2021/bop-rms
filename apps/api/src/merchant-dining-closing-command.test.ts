@@ -58,6 +58,9 @@ vi.mock("@rms/dining", async (original) => ({
   listDiningGuestStartedSessions: (...input: unknown[]) => mock.guestStarted(...input),
   loadDiningServiceSetting: (...input: unknown[]) => mock.guestSetting(...input),
 }));
+import { BrowserSessionError } from "@bop/identity";
+import { DiningClosingError } from "@rms/dining";
+import { isMerchantRefusal } from "./merchant-failure.js";
 import { createMerchantDiningClosingCommand } from "./merchant-dining-closing-command.js";
 const id = (n: number) => "0190fad7-0000-7000-8000-" + String(n).padStart(12, "0"),
   at = "2026-09-20T00:00:00.000Z";
@@ -245,6 +248,28 @@ it("batch 44: the table's bill fences come after its Dining fences and before an
   mock.sessionOrders.mockResolvedValue(new Map());
   await f.handler({ ...f.input, command: { ...f.input.command, operationReference: id(12) } });
   expect(mock.fenceBills).not.toHaveBeenCalled();
+});
+it("batch 44: an ended sign-in or stale CSRF token is passed on as the shared refusal", async () => {
+  // v15 b43 live: /dining/closing answered 403 dining_closing_permission_denied for a bad CSRF
+  // token while table-close-plan and serve-ready answered the shared 403 request_denied.
+  for (const where of ["authenticate", "scope"] as const)
+    for (const code of ["BROWSER_SESSION_DENIED", "BROWSER_SESSION_INPUT_INVALID"] as const) {
+      const f = setup();
+      const refusal = new BrowserSessionError(code);
+      if (where === "authenticate") f.authenticate.mockRejectedValue(refusal);
+      else mock.scope.mockRejectedValue(refusal);
+      const error = await f.handler(f.input).catch((caught: unknown) => caught);
+      expect(error).toBe(refusal);
+      expect(error).not.toBeInstanceOf(DiningClosingError);
+      expect(isMerchantRefusal(error)).toBe(true);
+      expect(mock.fence).not.toHaveBeenCalled();
+    }
+  // A missing close permission stays this command's own refusal.
+  const f = setup();
+  f.authorizeActions.mockResolvedValue(new Map([["dining.session.close", { effect: "Deny" }]]));
+  await expect(f.handler(f.input)).rejects.toMatchObject({
+    code: "DINING_CLOSING_PERMISSION_DENIED",
+  });
 });
 it("WP-2423: owner callbacks take the run's guard during the close and are refused after it", async () => {
   const f = setup();
