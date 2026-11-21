@@ -854,6 +854,7 @@ describe("migration catalog", () => {
       "2000_950_create_staff_dining_round_table_turn",
       "2000_980_create_order_change_mark_index",
       "2000_996_alter_order_price_reduction_bill_tax_share",
+      "2000_997_alter_dining_staff_call_closure_paid",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
