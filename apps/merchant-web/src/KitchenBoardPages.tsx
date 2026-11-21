@@ -1,6 +1,15 @@
 import { waitedAgoText } from "./paid-round-wait.js";
 import { LanguageSwitch } from "./i18n/LanguageSwitch.js";
-import { allergenName, listSeparator, t, saidTable, systemText } from "./i18n/i18n.js";
+import {
+  allergenName,
+  forgetKeptThroughLanguageSwitch,
+  keepThroughLanguageSwitch,
+  listSeparator,
+  t,
+  saidTable,
+  systemText,
+  takeKeptThroughLanguageSwitch,
+} from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { useKitchenActions, type KitchenStepTarget } from "./use-kitchen-actions.js";
 import type { KitchenTap } from "./kitchen-step-queue.js";
@@ -1227,6 +1236,20 @@ function kitchenLineInStatus(item: KitchenBoardItem, value: string): boolean {
   return item.status === value;
 }
 
+/**
+ * Batch 43 (v15 b42 live): each work-state tab's own empty heading. Being made and Held had said
+ * "No active work" while a three-dish order waited in To make.
+ */
+function kitchenQuietEmptyHeading(status: string): string {
+  if (status === "Queued") return t("Nothing to make");
+  if (status === "In Progress") return t("Nothing being made");
+  if (status === "Held") return t("Nothing held");
+  if (status === "Completed") return t("No finished work");
+  if (status === "Cancelled") return t("No cancelled work");
+  if (status === "All") return t("No kitchen work yet today");
+  return t("No active work");
+}
+
 /** Batch 42: what an empty work-state tab says when no filter hides anything. */
 function kitchenQuietEmptyText(status: string): string {
   if (status === "In Progress") return t("Nothing is being made right now.");
@@ -1963,6 +1986,9 @@ function WorkCard({
   );
 }
 
+/** Batch 43: the kitchen board's tab and filters, kept through the language switch's reload. */
+const KITCHEN_SCOPE_KEPT_KEY = "kitchenBoardScope";
+
 interface KitchenQueueScope {
   readonly station: string;
   readonly status: string;
@@ -2121,13 +2147,28 @@ export function KitchenBoardScreen({
   // WP-2423 follow-up: ages follow the clock and each poll, not only changes to the work.
   const clockAt = useKitchenClock(view.projectedAt, checkedAt);
   const location = useLocation();
-  const restored = restoredQueueScope(location.state);
+  // Batch 43 (v15 b42 live): the language switch reloads the page; the tab and filters chosen come
+  // back with it (they had gone back to Open work). That wins over a scope the page was opened with,
+  // which the reload also brings back. The section is kept on this device already.
+  const [restored] = useState(
+    () =>
+      restoredQueueScope({
+        kitchenQueueScope: takeKeptThroughLanguageSwitch(KITCHEN_SCOPE_KEPT_KEY),
+      }) ?? restoredQueueScope(location.state),
+  );
+  useEffect(() => forgetKeptThroughLanguageSwitch(KITCHEN_SCOPE_KEPT_KEY), []);
   const [station, setStation] = useState(restored?.station ?? "All");
   const [ownSection, setOwnSection] = useState(storedKitchenSection);
   const section = chosenSection ?? ownSection;
   const [status, setStatus] = useState(restored?.status ?? "Active");
   const [allergen, setAllergen] = useState(restored?.allergen ?? "All");
   const [exception, setException] = useState(restored?.exception ?? "All");
+  const scopeNow = useRef<KitchenQueueScope | null>(null);
+  scopeNow.current =
+    station === "All" && status === "Active" && allergen === "All" && exception === "All"
+      ? null
+      : { station, status, allergen, exception };
+  useEffect(() => keepThroughLanguageSwitch(KITCHEN_SCOPE_KEPT_KEY, () => scopeNow.current), []);
   // WP-2423: staff find an order by the number on its ticket or receipt (or its table), over the
   // board already loaded; the text stays on this screen and is never sent or put in the address.
   const [orderInput, setOrderInput] = useState("");
@@ -3313,11 +3354,7 @@ export function KitchenBoardScreen({
               heading={
                 searchApplied || filtersHideWork
                   ? t("No matching work")
-                  : status === "Completed"
-                    ? t("No finished work")
-                    : status === "Cancelled"
-                      ? t("No cancelled work")
-                      : t("No active work")
+                  : kitchenQuietEmptyHeading(status)
               }
               status
             >

@@ -40,7 +40,8 @@ test("@production WP-2423 batch 42: a work-state tab with nothing in it is quiet
     const tabs = page.getByRole("group", { name: zh ? "显示后厨工作" : "Show kitchen work" });
     await tabs.getByRole("button", { name: zh ? /^待做/u : /^To make/u }).click();
     const empty = page.locator(".kitchen-board-empty");
-    await expect(empty).toContainText(zh ? "没有进行中的工作" : "No active work");
+    // Batch 43: the tab's own heading.
+    await expect(empty).toContainText(zh ? "没有待做的工作" : "Nothing to make");
     await expect(empty).toContainText(zh ? "目前没有需要制作的。" : "Nothing to make right now.");
     await expect(empty).not.toContainText(zh ? "筛选" : "filters");
     await expect(page.getByRole("button", { name: zh ? "清除筛选" : "Clear filters" })).toHaveCount(
@@ -71,9 +72,17 @@ test("@production WP-2423 batch 42: the kitchen display's work state is not a fi
     if (language === "zh-Hans") await chooseLanguage(page, language);
     const zh = language === "zh-Hans";
     await page.setViewportSize({ width: 390, height: 844 });
-    for (const [value, text] of [
-      ["Queued", zh ? "目前没有需要制作的。" : "Nothing to make right now."],
-      ["In Progress", zh ? "目前没有正在制作的。" : "Nothing is being made right now."],
+    for (const [value, text, heading] of [
+      [
+        "Queued",
+        zh ? "目前没有需要制作的。" : "Nothing to make right now.",
+        zh ? "没有待做的工作" : "Nothing to make",
+      ],
+      [
+        "In Progress",
+        zh ? "目前没有正在制作的。" : "Nothing is being made right now.",
+        zh ? "没有正在制作的工作" : "Nothing being made",
+      ],
     ] as const) {
       await page.getByRole("button", { name: zh ? /^筛选/u : /^Filters/u }).click();
       const sheet = page.getByRole("dialog", { name: zh ? "筛选后厨工作" : "Filter Kitchen work" });
@@ -82,7 +91,8 @@ test("@production WP-2423 batch 42: the kitchen display's work state is not a fi
       const empty = page.locator(".kitchen-board-empty");
       await expect(empty).toContainText(text);
       await expect(empty).not.toContainText(zh ? "筛选" : "filters");
-      await expect(empty).toContainText(zh ? "没有进行中的工作" : "No active work");
+      // Batch 43: the tab's own heading.
+      await expect(empty).toContainText(heading);
       for (const [width, height] of widths) {
         await atTop(page, width, height);
         await expect(empty).toBeVisible();
