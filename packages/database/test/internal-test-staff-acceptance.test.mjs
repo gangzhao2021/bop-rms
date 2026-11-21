@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import pg from "pg";
 import { it } from "vitest";
-import { kdsOperatorProfileAllows } from "../../../apps/api/src/merchant-kds-operator-profile.ts";
+import {
+  kdsOperatorProfileAllows,
+  limitDecisionToProfile,
+} from "../../../apps/api/src/merchant-kds-operator-profile.ts";
 import { createMerchantWorkforcePermissionSource } from "../../../apps/api/src/merchant-workforce-authority-source.ts";
 import {
   addInternalTestStaffMember,
@@ -268,7 +271,43 @@ it("a TEST cook with the Kitchen role is refused Orders and allowed the kitchen"
       );
       assert.equal(audit.rows[0].n, 1);
 
+      // ── What the merchant BFF decides for a person, as the restricted API role (the same
+      // workforce permission source every Staff page command checks with).
+      const decide = (actorReference, permissionCode) =>
+        transaction(async (tx, now) => {
+          const actor = createIdentityActor({
+            actorType: "User",
+            actorReference,
+            accountKind: "Workforce",
+            status: "Active",
+            authenticationMethod: "Oidc",
+            verificationLevel: "SingleFactor",
+            authenticatedAt: now,
+            recentMfaAt: null,
+          });
+          return (
+            await createMerchantWorkforcePermissionSource({
+              resolveContext: async () => ({
+                tenantReference: tenant,
+                context: createTenantContext(actor, brandFact, storeFact, now),
+              }),
+            })(tx, {
+              tenantReference: tenant,
+              brandReference: brand,
+              storeReference: store,
+              actorReference,
+              observedAt: now,
+              permissionCode,
+            })
+          ).decision;
+        });
+      const effect = async (actorReference, permissionCode) =>
+        (await decide(actorReference, permissionCode)).effect;
       // ── The Staff page's own commands: the Owner asks for Kitchen, the manager approves it.
+      // The rollout's people may do their step on the Staff page and in Approvals: the Owner asks
+      // (organization.staff.manage) and the Store Manager approves (identity.role.approve).
+      assert.equal(await effect(owner, "organization.staff.manage"), "Allow");
+      assert.equal(await effect(manager, "identity.role.approve"), "Allow");
       const scope = { brandReference: brand, storeReference: store };
       const change = next();
       const kitchenRole = await roleId("kitchen");
@@ -303,35 +342,6 @@ it("a TEST cook with the Kitchen role is refused Orders and allowed the kitchen"
         ),
       );
 
-      // ── What the merchant BFF decides for the cook, as the restricted API role.
-      const decide = (actorReference, permissionCode) =>
-        transaction(async (tx, now) => {
-          const actor = createIdentityActor({
-            actorType: "User",
-            actorReference,
-            accountKind: "Workforce",
-            status: "Active",
-            authenticationMethod: "Oidc",
-            verificationLevel: "SingleFactor",
-            authenticatedAt: now,
-            recentMfaAt: null,
-          });
-          return (
-            await createMerchantWorkforcePermissionSource({
-              resolveContext: async () => ({
-                tenantReference: tenant,
-                context: createTenantContext(actor, brandFact, storeFact, now),
-              }),
-            })(tx, {
-              tenantReference: tenant,
-              brandReference: brand,
-              storeReference: store,
-              actorReference,
-              observedAt: now,
-              permissionCode,
-            })
-          ).decision.effect;
-        });
       // Refused: Orders (the screen and its list), counter orders, Tables, pickup, refunds, reports.
       for (const refused of [
         "ordering.operate",
@@ -343,7 +353,7 @@ it("a TEST cook with the Kitchen role is refused Orders and allowed the kitchen"
         "reporting.sales.read",
         "operations.order-exception.manage",
       ])
-        assert.equal(await decide(cook, refused), "Deny", refused);
+        assert.equal(await effect(cook, refused), "Deny", refused);
       // Allowed: the kitchen board and its steps, remakes, sold out today, recording waste.
       for (const allowed of [
         "merchant.access",
@@ -352,14 +362,20 @@ it("a TEST cook with the Kitchen role is refused Orders and allowed the kitchen"
         "catalog.sku.sold_out.mark",
         "inventory.waste.record",
       ])
-        assert.equal(await decide(cook, allowed), "Allow", allowed);
-      // At the kitchen display the same person still operates the kitchen, and never Orders.
-      assert.equal(
-        kdsOperatorProfileAllows({ policy: { code: "NamedKdsOperator" } }, "kitchen.operate"),
-        true,
-      );
+        assert.equal(await effect(cook, allowed), "Allow", allowed);
+      // At the kitchen display (the NamedKdsOperator sign-in), the cook's own decisions limited
+      // by the display's profile: still the kitchen, never Orders. Even the manager, whose roles
+      // allow Orders, gets no Orders there.
+      const atKitchenDisplay = (decision) =>
+        limitDecisionToProfile(
+          (action) => kdsOperatorProfileAllows({ policy: { code: "NamedKdsOperator" } }, action),
+          decision,
+        ).effect;
+      assert.equal(atKitchenDisplay(await decide(cook, "kitchen.operate")), "Allow");
+      assert.equal(atKitchenDisplay(await decide(cook, "ordering.operate")), "Deny");
+      assert.equal(atKitchenDisplay(await decide(manager, "ordering.operate")), "Deny");
       // The manager the test approved with still has Orders: no existing role was weakened.
-      assert.equal(await decide(manager, "ordering.operate"), "Allow");
+      assert.equal(await effect(manager, "ordering.operate"), "Allow");
     } finally {
       await admin.end();
     }
