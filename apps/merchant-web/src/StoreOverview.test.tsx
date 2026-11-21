@@ -70,6 +70,7 @@ describe("WP-2423 P2 store overview", () => {
       more: false,
       servedDineIn: new Set(),
       settledDineIn: new Set(),
+      owingDineIn: new Set(),
     });
   });
   it("b41: a dine-in Order whose table bill is paid or owes nothing is settled; a merged-in one is not", () => {
@@ -82,16 +83,19 @@ describe("WP-2423 P2 store overview", () => {
       orderType: "DineIn" as const,
       tableBill,
     });
-    const settled = summarizeOrders({
+    const summary = summarizeOrders({
       ...queue,
       items: [
         dineIn("p", { totalMinor: "3192", paid: { amountMinor: "3192", method: "Online" } }),
         dineIn("z", { totalMinor: "0", paid: null, writtenOffMinor: "1413" }),
         dineIn("o", { totalMinor: "1780", paid: null }),
         dineIn("m", { totalMinor: "0", paid: null, mergedInto: { tableLabel: "A", paid: false } }),
+        dineIn("u", null),
       ],
-    }).settledDineIn;
-    expect([...(settled ?? [])]).toEqual(["p", "z"]);
+    });
+    expect([...(summary.settledDineIn ?? [])]).toEqual(["p", "z"]);
+    // b41 review: only a read bill that still owes is owing; an unread bill ("u") is neither.
+    expect([...(summary.owingDineIn ?? [])]).toEqual(["o"]);
   });
   it("counts a table whose later round awaits acceptance, the same way the Orders page does", () => {
     const fixture = currentOrderQueueFixture();
@@ -958,7 +962,8 @@ describe("WP-2423 3cd0f8dd: tables to close, earlier-day pickups and the day che
     const html = render(earlierTables);
     expect(html).not.toContain("Tables to close");
     expect(html).toContain("Tables still open from earlier days");
-    expect(html).toContain("8 tables · Take the payment");
+    // b41 review: the orders were not read here, so no bill is said as owing.
+    expect(html).toContain("8 tables · Check each bill on Tables");
     expect(html).toContain('<strong class="overview-count__value">0</strong>');
     expect(html).toContain("Not counted: 8 tables from earlier days");
     // A table seated tonight is still tonight's, counted and to close once long open.
@@ -993,7 +998,12 @@ describe("WP-2423 3cd0f8dd: tables to close, earlier-day pickups and the day che
       endsAt: "2026-11-22T09:00:00.000Z",
       closesAt: "2026-11-22T05:00:00.000Z",
     };
-    const render = (settled: number, language: "en" | "zh-Hans" = "en") => {
+    const render = (
+      settled: number,
+      language: "en" | "zh-Hans" = "en",
+      owing = 8 - settled,
+      more = false,
+    ) => {
       setLanguageForTest(language);
       const state: OverviewTodayState = {
         ...initialOverviewState,
@@ -1008,9 +1018,12 @@ describe("WP-2423 3cd0f8dd: tables to close, earlier-day pickups and the day che
             paidStuck: 0,
             readyToServe: 0,
             dineIn: true,
-            more: false,
+            more,
             servedDineIn: new Set(),
             settledDineIn: new Set(Array.from({ length: settled }, (_, index) => orderOf(index))),
+            owingDineIn: new Set(
+              Array.from({ length: owing }, (_, index) => orderOf(settled + index)),
+            ),
           },
         },
         pickups: { kind: "Hidden" },
@@ -1042,6 +1055,28 @@ describe("WP-2423 3cd0f8dd: tables to close, earlier-day pickups and the day che
     );
     expect(render(8, "zh-Hans")).toContain("都已付款或不用付款，客人离开后逐张关台");
     expect(render(0)).toContain("8 tables · Take the payment");
+    // b41 review: Home reads only the first Orders page (50 newest). At a busy Store an
+    // earlier-day table paid on its own day is not on it, or its bill is unread; it is never
+    // said as owing, but named to check on Tables, which reads each bill.
+    const partial = render(5, "en", 1, true);
+    expect(partial).toContain(
+      "8 tables · 5 paid, only to close · 1 still to pay: take the payment, or record that the guests left without paying · 2 to check on Tables before closing",
+    );
+    expect(partial).not.toContain("3 still to pay");
+    expect(render(5, "zh-Hans", 1, true)).toContain(
+      "8 张桌台 · 5 张已付款，只需关台 · 1 张还没付：收款，或登记客人未付离开 · 2 张要先到桌台页看账单再关",
+    );
+    expect(render(5, "en", 0, true)).toContain(
+      "8 tables · 5 paid, only to close · 3 to check on Tables before closing",
+    );
+    const none = render(0, "en", 0, true);
+    expect(none).toContain(
+      "8 tables · Check each bill on Tables: take the payment if it still owes, and close the table once its guests have left",
+    );
+    expect(none).not.toContain("Take the payment, or record");
+    expect(render(0, "zh-Hans", 0, true)).toContain(
+      "8 张桌台 · 到桌台页逐张看账单：还没付的先收款，客人离开后关台",
+    );
   });
   it("M6: the opening and closing checklist reads the same sources and leaves out hidden ones", () => {
     const state: OverviewTodayState = {

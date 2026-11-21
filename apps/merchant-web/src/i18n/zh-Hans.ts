@@ -10247,8 +10247,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Tables still open from earlier days": "之前营业日没关的桌",
   "All paid or nothing to pay; close each one when its guests have left":
     "都已付款或不用付款，客人离开后逐张关台",
-  "{settled} paid, only to close · {owing} still to pay: take the payment, or record that the guests left without paying":
-    "{settled} 张已付款，只需关台 · {owing} 张还没付：收款，或登记客人未付离开",
+  "{settled} paid, only to close": "{settled} 张已付款，只需关台",
+  "{owing} still to pay: take the payment, or record that the guests left without paying":
+    "{owing} 张还没付：收款，或登记客人未付离开",
+  "{unknown} to check on Tables before closing": "{unknown} 张要先到桌台页看账单再关",
+  "Check each bill on Tables: take the payment if it still owes, and close the table once its guests have left":
+    "到桌台页逐张看账单：还没付的先收款，客人离开后关台",
   "Take the payment, or record that the guests left without paying, then close the table":
     "收款，或登记客人未付离开，然后关台",
   "From earlier days": "之前营业日的",
