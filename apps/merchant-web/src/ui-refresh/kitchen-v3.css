@@ -476,6 +476,34 @@
   .kitchen-shell .bop-shell__main {
     padding: 0 16px 48px;
   }
+  /* b40 CI (390x844, Linux fonts): a remake's buttons must be on the first screen of a phone. The
+     language switch takes the top-right corner beside the display's name instead of a row of its
+     own, and the screen-awake note and Hand over keep the full width under them. */
+  .kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 2px 16px;
+    padding: 4px 16px;
+  }
+  .kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header-extra {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    align-self: start;
+  }
+  .kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header-status {
+    grid-column: 1 / -1;
+    margin-inline-start: 0;
+  }
+  .kitchen-shell:not(.kitchen-shell--workspace) .kitchen-display-controls {
+    justify-content: flex-start;
+  }
+  /* The board's own rows sit a little closer on a phone, for the same first screen. */
+  .kitchen-shell:not(.kitchen-shell--workspace) .kitchen-board-workspace {
+    gap: 12px;
+  }
+  .kitchen-shell:not(.kitchen-shell--workspace) .kitchen-board-workspace > .pause-ordering {
+    margin-bottom: 0;
+  }
   .kitchen-board-heading__actions {
     gap: 0 16px;
     margin-inline-start: 0;

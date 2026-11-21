@@ -379,12 +379,19 @@ test("@production WP-2423 batch 40: on a 390 px phone a remake's buttons are on 
     await atTop(page, 390, 844);
     const names =
       language === "en" ? ["Start remake", "Cancel remake"] : ["开始重做", /^取消重做/u];
-    for (const name of names)
-      await expect(
-        page
-          .getByRole("region", { name: language === "en" ? "Remakes" : "重做" })
-          .getByRole("button", { name }),
-      ).toBeInViewport({ ratio: 1 });
+    for (const name of names) {
+      const button = page
+        .getByRole("region", { name: language === "en" ? "Remakes" : "重做" })
+        .getByRole("button", { name });
+      await expect(button).toBeInViewport({ ratio: 1 });
+      // Room to spare: Linux fonts set taller than macOS ones (CI read 69% of the button in view),
+      // so the button ends at least 40 px above the fold where this runs.
+      const box = await button.boundingBox();
+      expect(
+        (box?.y ?? Infinity) + (box?.height ?? 0),
+        `${String(name)} ends 40 px above the fold`,
+      ).toBeLessThanOrEqual(844 - 40);
+    }
     await page.screenshot({ path: `test-results/b40-kds-390-${language}.png` });
   }
 });
