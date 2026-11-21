@@ -184,3 +184,82 @@ describe("invitation acceptance in the existing anonymous Brand entry", () => {
     }
   });
 });
+
+// Batch 41 (v15 b40 live): /app/organization/brands said "Brand access could not be confirmed… not
+// available in this discovery view." in English with Chinese chosen.
+it("batch 41: the Brand list and the invitation form read in Chinese, in every state", async () => {
+  const { setLanguageForTest } = await import("./i18n/i18n.js");
+  setLanguageForTest("zh-Hans");
+  try {
+    // The skip link's words are given at the app's root (main.tsx), not by the page.
+    const textOf = (html: string) =>
+      html
+        .replace(/<a class="bop-skip-link"[^>]*>[^<]*<\/a>/u, " ")
+        .replace(/<[^>]*>/gu, " ")
+        .replace(/\bBOP\b/gu, " ")
+        .replace(/&[a-z]+;/gu, " ")
+        .replace(/Synthetic Brand|BRAND|en-CA/gu, " ");
+    const failed = renderToStaticMarkup(<BrandDiscoveryView {...props} status="Unavailable" />);
+    expect(failed).toContain("暂时无法确认你的品牌权限。请刷新再试。");
+    expect(failed).toContain("这里只用来选品牌，看不到门店汇总、菜单、外观和配置概要。");
+    for (const status of [
+      "Ready",
+      "Loading",
+      "MfaRequired",
+      "AccessRequired",
+      "Offline",
+      "SelectionConflict",
+      "OutcomeUnknown",
+      "LogoutPending",
+      "Unavailable",
+    ])
+      expect(
+        textOf(renderToStaticMarkup(<BrandDiscoveryView {...props} status={status} />)),
+        status,
+      ).not.toMatch(/[A-Za-z]{3,}/u);
+    const listed = renderToStaticMarkup(
+      <BrandDiscoveryView
+        {...props}
+        page={packet([
+          {
+            brandReference: id(2),
+            code: "BRAND",
+            displayName: "Synthetic Brand",
+            lifecycle: "Draft",
+            defaultLocale: "en-CA",
+            version: 1,
+          },
+        ])}
+      />,
+    );
+    expect(listed).toContain("BRAND · 草稿");
+    expect(listed).toContain("默认语言 en-CA");
+    expect(textOf(listed)).not.toMatch(/[A-Za-z]{3,}/u);
+    for (const status of [
+      "Ready",
+      "Loading",
+      "Redirecting",
+      "Invalid",
+      "Offline",
+      "Unavailable",
+      "OutcomeUnknown",
+    ] as const)
+      expect(
+        textOf(
+          renderToStaticMarkup(
+            <BrandInvitationView
+              secret=""
+              status={status}
+              busy={status === "Loading"}
+              onChange={vi.fn()}
+              onSubmit={vi.fn()}
+              onCancel={vi.fn()}
+            />,
+          ),
+        ),
+        status,
+      ).not.toMatch(/[A-Za-z]{3,}/u);
+  } finally {
+    setLanguageForTest("en");
+  }
+});

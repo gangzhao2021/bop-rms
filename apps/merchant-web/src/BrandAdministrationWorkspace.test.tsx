@@ -100,3 +100,61 @@ it("renders lifecycle commands only within actual selected administrative identi
   expect(html).toContain("Archive Brand");
   expect(html).not.toContain("Activate Brand");
 });
+
+// Batch 41 (v15 b40 live, owner2-brand-zh-Hans-1440.png): with Chinese chosen the Brand page
+// stopped at "Brand administration unavailable / Brand access could not be confirmed…" in English.
+it("batch 41: the Brand page's frame and every state it stops at read in Chinese", async () => {
+  const { setLanguageForTest } = await import("./i18n/i18n.js");
+  setLanguageForTest("zh-Hans");
+  try {
+    // The skip link's words are given at the app's root (main.tsx), not by the page.
+    const textOf = (html: string) =>
+      html
+        .replace(/<a class="bop-skip-link"[^>]*>[^<]*<\/a>/u, " ")
+        .replace(/<[^>]*>/gu, " ")
+        .replace(/\bBOP\b/gu, " ")
+        .replace(/[0-9a-f]{8}-[0-9a-f-]{27}/gu, " ")
+        .replace(/&[a-z]+;/gu, " ");
+    const unavailable = renderToStaticMarkup(
+      <BrandAdministrationView state={{ kind: "Unavailable" }} {...actions} />,
+    );
+    expect(unavailable).toContain("暂时打不开品牌管理");
+    expect(unavailable).toContain("暂时无法确认你的品牌权限。请点“重新确认品牌权限”再试。");
+    expect(unavailable).toContain(">重新确认品牌权限</button>");
+    for (const kind of [
+      "Loading",
+      "AccessRequired",
+      "Unavailable",
+      "Offline",
+      "NotFound",
+      "ScopeChanged",
+      "OutcomeUnknown",
+    ] as const) {
+      const text = textOf(
+        renderToStaticMarkup(<BrandAdministrationView state={{ kind }} {...actions} />),
+      );
+      expect(text, kind).not.toMatch(/[A-Za-z]{3,}/u);
+    }
+    for (const kind of ["MfaRequired", "LogoutPending"] as const) {
+      const text = textOf(
+        renderToStaticMarkup(
+          <BrandAdministrationView state={{ kind, csrf: "c".repeat(43) }} {...actions} />,
+        ),
+      );
+      expect(text, kind).not.toMatch(/[A-Za-z]{3,}/u);
+    }
+    // The frame of a Brand that opened: its own name aside, the status reads in staff words.
+    const ready = renderToStaticMarkup(
+      <BrandAdministrationView state={{ kind: "Ready", value: value(false) }} {...actions} />,
+    );
+    expect(textOf(ready).replaceAll("Synthetic Brand", "")).not.toMatch(/[A-Za-z]{3,}/u);
+    const panels = renderToStaticMarkup(
+      <BrandAdministrationView state={{ kind: "Ready", value: value() }} {...actions} />,
+    );
+    expect(panels).toContain("品牌状态：有效");
+    expect(panels).toContain(">重新登录</button>");
+    expect(panels).toContain(">打开门店工作台</a>");
+  } finally {
+    setLanguageForTest("en");
+  }
+});

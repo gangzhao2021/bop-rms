@@ -12,6 +12,8 @@ import { BrandStoreTopologyDraftPanel } from "./BrandStoreTopologyDraftPanel.js"
 import { BrandConfigurationPanel } from "./BrandConfigurationPanel.js";
 import { BrandLifecyclePanel } from "./BrandLifecyclePanel.js";
 import { BrandCatalogSourcePanel } from "./BrandCatalogSourcePanel.js";
+import { t } from "./i18n/i18n.js";
+import { brandLifecycleLabel } from "./brand-lifecycle-label.js";
 
 type State =
   | {
@@ -37,30 +39,35 @@ export interface BrandAdministrationWorkspaceProps {
 const validBrand = (value: string | undefined): value is string =>
   value !== undefined &&
   /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(value);
-const messages = {
-  Loading: ["Loading Brand administration", "Checking your current Brand access…"],
-  AccessRequired: [
-    "Brand access required",
-    "Sign in with an account authorized to manage this Brand.",
-  ],
-  Unavailable: [
-    "Brand administration unavailable",
-    "Brand access could not be confirmed. Retry to load current access.",
-  ],
-  Offline: [
-    "Offline read-only",
-    "Reconnect and refresh access before continuing. Pending requests remain available for recovery.",
-  ],
-  NotFound: ["Brand not found", "This Brand address is unavailable."],
-  ScopeChanged: [
-    "Brand access changed",
-    "The current Brand or account changed. Refresh access before continuing.",
-  ],
-  OutcomeUnknown: [
-    "Session result unknown",
-    "Refresh access to determine the current session before continuing.",
-  ],
-} as const;
+// Batch 41 (v15 b40 live): the frame around the Brand panels stayed English in Chinese. Its
+// states are said in staff words; written when shown, so they follow the chosen language.
+const messages = () =>
+  ({
+    Loading: [t("Loading Brand administration"), t("Checking your current Brand access…")],
+    AccessRequired: [
+      t("Brand access required"),
+      t("Sign in with an account authorized to manage this Brand."),
+    ],
+    Unavailable: [
+      t("Brand administration unavailable"),
+      t("Brand access could not be confirmed. Retry to load current access."),
+    ],
+    Offline: [
+      t("Offline read-only"),
+      t(
+        "Reconnect and refresh access before continuing. Pending requests remain available for recovery.",
+      ),
+    ],
+    NotFound: [t("Brand not found"), t("This Brand address is unavailable.")],
+    ScopeChanged: [
+      t("Brand access changed"),
+      t("The current Brand or account changed. Refresh access before continuing."),
+    ],
+    OutcomeUnknown: [
+      t("Session result unknown"),
+      t("Refresh access to determine the current session before continuing."),
+    ],
+  }) as const;
 
 export function BrandAdministrationView({
   state,
@@ -82,8 +89,8 @@ export function BrandAdministrationView({
   return (
     <AppFrame
       className="bop-shell--brand-administration"
-      title={current?.workspace.brand.label ?? "Brand administration"}
-      description="Brand configuration and catalog source"
+      title={current?.workspace.brand.label ?? t("Brand administration")}
+      description={t("Brand configuration and catalog source")}
       navigation={
         current
           ? current.workspace.navigation.map((item) => (
@@ -97,61 +104,67 @@ export function BrandAdministrationView({
       {state.kind === "MfaRequired" || state.kind === "LogoutPending" ? (
         <StatePanel
           heading={
-            state.kind === "MfaRequired" ? "Verify your identity" : "Sign-out result unknown"
+            state.kind === "MfaRequired" ? t("Verify your identity") : t("Sign-out result unknown")
           }
           status
         >
           <p>
             {state.kind === "MfaRequired"
-              ? "Verify with a fresh sign-in and TOTP challenge before managing this Brand."
-              : "Business access is hidden. Retry sign-out with this session; its local access may already be revoked."}
+              ? t("Verify with a fresh sign-in and TOTP challenge before managing this Brand.")
+              : t(
+                  "Business access is hidden. Retry sign-out with this session; its local access may already be revoked.",
+                )}
           </p>
           {state.kind === "MfaRequired" ? (
             <button type="button" onClick={onRotate}>
-              Verify identity
+              {t("Verify identity")}
             </button>
           ) : null}
           <button type="button" onClick={onLogout}>
-            {state.kind === "LogoutPending" ? "Retry sign out" : "Sign out"}
+            {state.kind === "LogoutPending" ? t("Retry sign out") : t("Sign out")}
           </button>
         </StatePanel>
       ) : state.kind !== "Ready" ? (
         <StatePanel
-          heading={messages[state.kind][0]}
+          heading={messages()[state.kind][0]}
           tone={state.kind === "Offline" ? "offline" : "neutral"}
           status
         >
-          <p>{messages[state.kind][1]}</p>
+          <p>{messages()[state.kind][1]}</p>
           {state.kind === "AccessRequired" ? (
             <a className="shell-action" href="/merchant/organization/brands/login">
-              Sign in securely
+              {t("Sign in securely")}
             </a>
           ) : null}
           {state.kind !== "Loading" && state.kind !== "NotFound" ? (
             <button type="button" onClick={onRefresh}>
-              Refresh Brand access
+              {t("Refresh Brand access")}
             </button>
           ) : null}
         </StatePanel>
       ) : state.value.workspace.navigation.length === 0 ? (
-        <StatePanel heading="Brand administration disabled" status>
-          <p>This session has no available Brand administration entry.</p>
+        <StatePanel heading={t("Brand administration disabled")} status>
+          <p>{t("This session has no available Brand administration entry.")}</p>
           <button type="button" onClick={onRefresh}>
-            Refresh Brand access
+            {t("Refresh Brand access")}
           </button>
         </StatePanel>
       ) : (
         <>
-          <section aria-label="Brand session">
-            <p>Brand status: {state.value.workspace.brand.lifecycle}</p>
+          <section aria-label={t("Brand session")}>
+            <p>
+              {t("Brand status: {status}", {
+                status: brandLifecycleLabel(state.value.workspace.brand.lifecycle),
+              })}
+            </p>
             <button type="button" onClick={onRefresh}>
-              Refresh Brand access
+              {t("Refresh Brand access")}
             </button>{" "}
             <button type="button" onClick={onRotate}>
-              Renew session
+              {t("Renew session")}
             </button>{" "}
             <button type="button" onClick={onLogout}>
-              Sign out
+              {t("Sign out")}
             </button>
           </section>
           <BrandLifecyclePanel
@@ -177,9 +190,9 @@ export function BrandAdministrationView({
             />
           ) : (
             <section aria-labelledby="brand-store-assignments-heading">
-              <h2 id="brand-store-assignments-heading">Store assignments</h2>
-              <p>Store assignment management requires an authorized Store workspace.</p>
-              <Link to="/app">Open Store workspace</Link>
+              <h2 id="brand-store-assignments-heading">{t("Store assignments")}</h2>
+              <p>{t("Store assignment management requires an authorized Store workspace.")}</p>
+              <Link to="/app">{t("Open Store workspace")}</Link>
             </section>
           )}
         </>

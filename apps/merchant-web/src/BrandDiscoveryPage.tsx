@@ -9,6 +9,8 @@ import {
   type MerchantBrandDiscoverySession,
   type MerchantBrandDiscoveryPage,
 } from "./merchant-brand-discovery-client.js";
+import { t } from "./i18n/i18n.js";
+import { brandLifecycleLabel } from "./brand-lifecycle-label.js";
 export interface BrandDiscoveryPageProps {
   readonly client?: MerchantBrandDiscoveryClient;
 }
@@ -49,7 +51,7 @@ export function BrandInvitationView({
   const unknown = status === "OutcomeUnknown";
   return (
     <form
-      aria-label="Accept a Brand invitation"
+      aria-label={t("Accept a Brand invitation")}
       method="post"
       noValidate
       onSubmit={(event) => {
@@ -58,11 +60,11 @@ export function BrandInvitationView({
       }}
     >
       <fieldset>
-        <legend>Have an invitation?</legend>
+        <legend>{t("Have an invitation?")}</legend>
         <p id="brand-invitation-help">
-          Enter the invitation code from your administrator to continue with secure sign-in.
+          {t("Enter the invitation code from your administrator to continue with secure sign-in.")}
         </p>
-        <label htmlFor="brand-invitation-code">Invitation code</label>
+        <label htmlFor="brand-invitation-code">{t("Invitation code")}</label>
         <input
           ref={inputRef}
           id="brand-invitation-code"
@@ -82,24 +84,30 @@ export function BrandInvitationView({
           role={status === "Invalid" || status === "Unavailable" || unknown ? "alert" : "status"}
         >
           {status === "Loading"
-            ? "Starting invitation sign-in…"
+            ? t("Starting invitation sign-in…")
             : status === "Redirecting"
-              ? "Continuing to secure sign-in…"
+              ? t("Continuing to secure sign-in…")
               : status === "Invalid"
-                ? "Enter the complete 43-character invitation code."
+                ? t("Enter the complete 43-character invitation code.")
                 : status === "Offline"
-                  ? "Offline. Reconnect, then enter your invitation code again."
+                  ? t("Offline. Reconnect, then enter your invitation code again.")
                   : status === "Unavailable"
-                    ? "Invitation sign-in is unavailable. Re-enter your code to try again."
+                    ? t("Invitation sign-in is unavailable. Re-enter your code to try again.")
                     : unknown
-                      ? "The result is unknown. No retry was sent. Start again when you are ready to retry."
-                      : "Your code is cleared when you continue."}
+                      ? t(
+                          "The result is unknown. No retry was sent. Start again when you are ready to retry.",
+                        )
+                      : t("Your code is cleared when you continue.")}
         </p>
         <button type="submit" disabled={busy || unknown || secret.length === 0}>
-          Accept invitation
+          {t("Accept invitation")}
         </button>
         <button type="button" onClick={onCancel}>
-          {busy ? "Cancel invitation sign-in" : unknown ? "Start again" : "Clear invitation code"}
+          {busy
+            ? t("Cancel invitation sign-in")
+            : unknown
+              ? t("Start again")
+              : t("Clear invitation code")}
         </button>
       </fieldset>
     </form>
@@ -238,40 +246,46 @@ export function BrandDiscoveryView({
   const disabled = busy || stale || status !== "Ready";
   return (
     <AppFrame
-      title="Brands"
-      description="Choose a Brand you are currently authorized to administer."
+      title={t("Brands")}
+      description={t("Choose a Brand you are currently authorized to administer.")}
       className="bop-shell--brand-administration"
     >
-      <section aria-label="Brand access">
+      <section aria-label={t("Brand access")}>
         <p role="status">
           {status === "Ready"
             ? stale
-              ? "Brand list expired. Refresh before choosing."
-              : "Current authorized Brands"
+              ? t("Brand list expired. Refresh before choosing.")
+              : t("Current authorized Brands")
             : status === "Loading"
-              ? "Checking current Brand access…"
+              ? t("Checking current Brand access…")
               : status === "MfaRequired"
-                ? "Recent verification is required before choosing a Brand."
+                ? t("Recent verification is required before choosing a Brand.")
                 : status === "AccessRequired"
-                  ? "Sign in to load your authorized Brands."
+                  ? t("Sign in to load your authorized Brands.")
                   : status === "Offline"
-                    ? "Offline. Reconnect and refresh before choosing."
+                    ? t("Offline. Reconnect and refresh before choosing.")
                     : status === "SelectionConflict"
-                      ? "This session already has a different Brand selection. Renew your session to choose again."
+                      ? t(
+                          "This session already has a different Brand selection. Renew your session to choose again.",
+                        )
                       : status === "OutcomeUnknown"
-                        ? "Selection result unknown. Refresh to recover the actual session selection."
+                        ? t(
+                            "Selection result unknown. Refresh to recover the actual session selection.",
+                          )
                         : status === "LogoutPending"
-                          ? "Sign-out result unknown. Retry sign out; this session cannot authorize new actions."
-                          : "Brand access could not be confirmed. Refresh to retry."}
+                          ? t(
+                              "Sign-out result unknown. Retry sign out; this session cannot authorize new actions.",
+                            )
+                          : t("Brand access could not be confirmed. Refresh to retry.")}
         </p>
         {status === "AccessRequired" ? (
           <a className="shell-action" href="/merchant/organization/brands/login" onClick={onSignIn}>
-            Sign in securely
+            {t("Sign in securely")}
           </a>
         ) : null}
         {status === "AccessRequired" ? invitation : null}
         <button type="button" disabled={busy} onClick={onRefresh}>
-          Refresh Brands
+          {t("Refresh Brands")}
         </button>
         {session ? (
           <>
@@ -280,29 +294,31 @@ export function BrandDiscoveryView({
               disabled={busy || status === "LogoutPending" || status === "OutcomeUnknown"}
               onClick={onRenew}
             >
-              Renew session
+              {t("Renew session")}
             </button>
             <button type="button" disabled={busy} onClick={onLogout}>
-              Sign out
+              {t("Sign out")}
             </button>
           </>
         ) : null}
         {session?.selectedBrandReference && status === "Ready" ? (
           <p>
             <Link to={`/app/organization/brands/${session.selectedBrandReference}`}>
-              Continue with the selected Brand
+              {t("Continue with the selected Brand")}
             </Link>
           </p>
         ) : null}
       </section>
       {page && status === "Ready" ? (
-        <section aria-label="Authorized Brands">
+        <section aria-label={t("Authorized Brands")}>
           {page.items.length === 0 ? (
-            <StatePanel heading="No Brands on this page" tone="neutral">
+            <StatePanel heading={t("No Brands on this page")} tone="neutral">
               <p>
                 {page.hasMore
-                  ? "No currently authorized Brand appears in this scanned page. Continue to the next page."
-                  : "No currently authorized Brand appears on this page."}
+                  ? t(
+                      "No currently authorized Brand appears in this scanned page. Continue to the next page.",
+                    )
+                  : t("No currently authorized Brand appears on this page.")}
               </p>
             </StatePanel>
           ) : (
@@ -310,29 +326,30 @@ export function BrandDiscoveryView({
               <article key={item.brandReference} className="summary-card">
                 <h2>{item.displayName}</h2>
                 <p>
-                  {item.code} · {item.lifecycle}
+                  {item.code} · {brandLifecycleLabel(item.lifecycle)}
                 </p>
-                <p>Default locale {item.defaultLocale}</p>
+                <p>{t("Default locale {locale}", { locale: item.defaultLocale })}</p>
                 <button
                   type="button"
                   disabled={disabled}
                   onClick={() => onChoose(item.brandReference)}
                 >
-                  Choose {item.displayName}
+                  {t("Choose {name}", { name: item.displayName })}
                 </button>
               </article>
             ))
           )}
           {page.hasMore ? (
             <button type="button" disabled={disabled} onClick={onMore}>
-              More Brands
+              {t("More Brands")}
             </button>
           ) : null}
         </section>
       ) : null}
       <p>
-        Store totals, Catalogue, Theme and configuration summaries are not available in this
-        discovery view.
+        {t(
+          "Store totals, Catalogue, Theme and configuration summaries are not available in this discovery view.",
+        )}
       </p>
     </AppFrame>
   );

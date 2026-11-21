@@ -10349,4 +10349,91 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Not counted: {tables} from earlier days": "不计入：{tables}是之前营业日的",
   // b40: a dish taken off because it sold out says why, as the guest's page does.
   "Sold out · taken off the bill, not charged": "已售罄 · 已从账单删除，不收费",
+  // b41 (v15 b40 live): the Brand pages' frame and its states, in staff words.
+  "Loading Brand administration": "正在打开品牌管理",
+  "Checking your current Brand access…": "正在确认你的品牌权限…",
+  "Brand access required": "需要品牌权限",
+  "Sign in with an account authorized to manage this Brand.": "请用有权管理这个品牌的账号登录。",
+  "Brand administration unavailable": "暂时打不开品牌管理",
+  "Brand access could not be confirmed. Retry to load current access.":
+    "暂时无法确认你的品牌权限。请点“重新确认品牌权限”再试。",
+  "Reconnect and refresh access before continuing. Pending requests remain available for recovery.":
+    "请连上网络并重新确认权限后再继续。还没完成的操作会保留，可以稍后继续。",
+  "Brand not found": "找不到这个品牌",
+  "This Brand address is unavailable.": "这个品牌的地址打不开。",
+  "Brand access changed": "品牌权限有变化",
+  "The current Brand or account changed. Refresh access before continuing.":
+    "当前的品牌或账号已经变了。请重新确认权限后再继续。",
+  "Session result unknown": "不确定登录状态",
+  "Refresh access to determine the current session before continuing.":
+    "请重新确认权限，看清当前的登录状态后再继续。",
+  "Brand administration": "品牌管理",
+  "Brand configuration and catalog source": "品牌配置和菜单来源",
+  "Verify your identity": "请验证身份",
+  "Sign-out result unknown": "不确定是否已退出登录",
+  "Verify with a fresh sign-in and TOTP challenge before managing this Brand.":
+    "管理这个品牌前，请重新登录并输入验证器上的动态验证码。",
+  "Business access is hidden. Retry sign-out with this session; its local access may already be revoked.":
+    "业务内容已隐藏。请再试一次退出登录；这台设备上的访问可能已经取消。",
+  "Verify identity": "验证身份",
+  "Retry sign out": "再试一次退出登录",
+  "Sign in securely": "安全登录",
+  "Refresh Brand access": "重新确认品牌权限",
+  "Brand administration disabled": "品牌管理不可用",
+  "This session has no available Brand administration entry.":
+    "你现在的登录没有可用的品牌管理入口。",
+  "Brand session": "品牌登录",
+  "Brand status: {status}": "品牌状态：{status}",
+  "Renew session": "重新登录",
+  "Store assignments": "门店归属",
+  "Store assignment management requires an authorized Store workspace.":
+    "管理门店归属需要在有权限的门店工作台里操作。",
+  "Open Store workspace": "打开门店工作台",
+  "Accept a Brand invitation": "接受品牌邀请",
+  "Have an invitation?": "收到邀请了吗？",
+  "Enter the invitation code from your administrator to continue with secure sign-in.":
+    "输入管理员给你的邀请码，然后安全登录。",
+  "Invitation code": "邀请码",
+  "Starting invitation sign-in…": "正在用邀请码登录…",
+  "Continuing to secure sign-in…": "正在前往安全登录…",
+  "Enter the complete 43-character invitation code.": "请输入完整的 43 位邀请码。",
+  "Offline. Reconnect, then enter your invitation code again.":
+    "网络已断开。请连上网络后重新输入邀请码。",
+  "Invitation sign-in is unavailable. Re-enter your code to try again.":
+    "暂时无法用邀请码登录。请重新输入邀请码再试。",
+  "The result is unknown. No retry was sent. Start again when you are ready to retry.":
+    "不确定刚才是否成功，系统没有自动重试。准备好后请点“重新开始”。",
+  "Your code is cleared when you continue.": "继续后，输入的邀请码会被清除。",
+  "Accept invitation": "接受邀请",
+  "Cancel invitation sign-in": "取消邀请码登录",
+  "Start again": "重新开始",
+  "Clear invitation code": "清除邀请码",
+  Brands: "品牌",
+  "Choose a Brand you are currently authorized to administer.": "选择一个你现在有权管理的品牌。",
+  "Brand access": "品牌权限",
+  "Brand list expired. Refresh before choosing.": "品牌列表已过期。请先刷新再选择。",
+  "Current authorized Brands": "你现在有权管理的品牌",
+  "Checking current Brand access…": "正在确认品牌权限…",
+  "Recent verification is required before choosing a Brand.": "选择品牌前，需要先重新验证身份。",
+  "Sign in to load your authorized Brands.": "登录后才能看到你有权管理的品牌。",
+  "Offline. Reconnect and refresh before choosing.": "网络已断开。请连上网络并刷新后再选择。",
+  "This session already has a different Brand selection. Renew your session to choose again.":
+    "你这次登录已经选了另一个品牌。请重新登录后再选。",
+  "Selection result unknown. Refresh to recover the actual session selection.":
+    "不确定是否已选好品牌。请刷新，看实际选中的是哪个。",
+  "Sign-out result unknown. Retry sign out; this session cannot authorize new actions.":
+    "不确定是否已退出登录。请再试一次退出登录；这次登录已不能再做新的操作。",
+  "Brand access could not be confirmed. Refresh to retry.":
+    "暂时无法确认你的品牌权限。请刷新再试。",
+  "Refresh Brands": "刷新品牌列表",
+  "Continue with the selected Brand": "继续管理已选的品牌",
+  "Authorized Brands": "有权管理的品牌",
+  "No Brands on this page": "这一页没有品牌",
+  "No currently authorized Brand appears in this scanned page. Continue to the next page.":
+    "这一页没有你现在有权管理的品牌。请看下一页。",
+  "No currently authorized Brand appears on this page.": "这一页没有你现在有权管理的品牌。",
+  "Default locale {locale}": "默认语言 {locale}",
+  "More Brands": "更多品牌",
+  "Store totals, Catalogue, Theme and configuration summaries are not available in this discovery view.":
+    "这里只用来选品牌，看不到门店汇总、菜单、外观和配置概要。",
 });

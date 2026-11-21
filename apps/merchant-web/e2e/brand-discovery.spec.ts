@@ -556,3 +556,39 @@ test("@production invitation unavailable and lost replies clear input and requir
     await backend.close();
   }
 });
+
+// Batch 41 (v15 b40 live): /app/organization/brands said "Brand access could not be confirmed… not
+// available in this discovery view." in English with Chinese chosen.
+for (const width of [390, 1440])
+  test(`@production the Brand list says its states in Chinese, in staff words (${width})`, async ({
+    page,
+  }) => {
+    await page.addInitScript(() => window.localStorage.setItem("bop.merchant.language", "zh-Hans"));
+    await backend(page);
+    await page.setViewportSize({ width, height: 900 });
+    let unavailable = true;
+    await page.route(`**${prefix}/discovery/session`, (route) =>
+      unavailable ? reply(route, { error: "service_unavailable" }, 503) : route.fallback(),
+    );
+    await page.goto("/app/organization/brands");
+    const main = page.locator("#main-content");
+    await expect(
+      page.getByText("暂时无法确认你的品牌权限。请刷新再试。", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByText("这里只用来选品牌，看不到门店汇总、菜单、外观和配置概要。", { exact: true }),
+    ).toBeVisible();
+    await expect(main).not.toContainText("Brand access could not be confirmed");
+    await expect(main).not.toContainText("discovery view");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+    await page.screenshot({
+      path: test.info().outputPath(`brand-list-unavailable-zh-${width}.png`),
+      fullPage: true,
+    });
+    unavailable = false;
+    await page.getByRole("button", { name: "刷新品牌列表", exact: true }).click();
+    await expect(page.getByText("你现在有权管理的品牌", { exact: true })).toBeVisible();
+    await expect(main).not.toContainText("Current authorized Brands");
+  });

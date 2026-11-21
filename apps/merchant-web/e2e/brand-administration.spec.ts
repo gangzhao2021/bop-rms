@@ -534,3 +534,43 @@ test("@production lost logout reply retains retry authority only in memory", asy
   await expect(page.getByRole("link", { name: "Sign in securely", exact: true })).toBeVisible();
   expect(state.logouts).toBe(2);
 });
+
+// Batch 41 (v15 b40 live, owner2-brand-zh-Hans-1440.png): with Chinese chosen the Brand page
+// stopped at "Brand administration unavailable / Brand access could not be confirmed…" in English.
+for (const width of [390, 1440])
+  test(`@production the Brand page says its states in Chinese, in staff words (${width})`, async ({
+    page,
+  }) => {
+    await page.addInitScript(() => window.localStorage.setItem("bop.merchant.language", "zh-Hans"));
+    const state = await backend(page);
+    await page.setViewportSize({ width, height: 900 });
+    let unavailable = true;
+    await page.route(`**${prefix}/session`, (route) =>
+      unavailable ? response(route, { error: "service_unavailable" }, 503) : route.fallback(),
+    );
+    await page.goto(href);
+    const main = page.locator("#main-content");
+    await expect(page.getByText("暂时打不开品牌管理", { exact: true })).toBeVisible();
+    await expect(
+      page.getByText("暂时无法确认你的品牌权限。请点“重新确认品牌权限”再试。", { exact: true }),
+    ).toBeVisible();
+    await expect(main).not.toContainText("Brand administration unavailable");
+    await expect(main).not.toContainText("Brand access could not be confirmed");
+    // Linux CI fonts (DejaVu) are wider than macOS's: the frame still fits the screen.
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+    await page.screenshot({
+      path: test.info().outputPath(`brand-unavailable-zh-${width}.png`),
+      fullPage: true,
+    });
+    unavailable = false;
+    await page.getByRole("button", { name: "重新确认品牌权限", exact: true }).click();
+    await expect(page.getByText("品牌状态：有效", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "重新登录", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "退出登录", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "打开门店工作台", exact: true })).toBeVisible();
+    await expect(main).not.toContainText("Refresh Brand access");
+    await expect(main).not.toContainText("Brand status:");
+    expect(state.registers).toBe(0);
+  });
