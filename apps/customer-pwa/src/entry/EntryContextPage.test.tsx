@@ -1000,4 +1000,34 @@ describe("batch 40 (v15 cross-midnight): after last orders while the Store is st
     expect(resumed).not.toContain("Ready to order");
     vi.restoreAllMocks();
   });
+  it("the same pickup code scanned again with the cart still open says the same, and continues it", () => {
+    // The entry server answers 200 with resumed:true (pickup only); the page is Established.
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-11-21T05:31:00.000Z"));
+    const again = at({ kind: "Established", context: { ...pickup, resumed: true as const } });
+    expect(heading(again)).toBe("The kitchen has stopped taking orders");
+    expect(again).toContain(
+      `The kitchen stopped taking orders at ${formatStoreLocalTime("00:30:00")}`,
+    );
+    expect(again).toContain(">Continue</button>");
+    expect(again).not.toContain("Ready to order");
+    expect(again).not.toContain("Continue to menu");
+    expect(again).not.toContain("is selected");
+    const zhAgain = renderToStaticMarkup(
+      <LanguageRoot initial="zh-Hans">
+        {() => (
+          <MemoryRouter>
+            <EntryContextView
+              onContinue={vi.fn()}
+              storeProfile={loader(profile())}
+              state={{ kind: "Established", context: { ...pickup, resumed: true as const } }}
+            />
+          </MemoryRouter>
+        )}
+      </LanguageRoot>,
+    );
+    renderToStaticMarkup(<LanguageRoot initial="en">{() => null}</LanguageRoot>);
+    expect(heading(zhAgain)).toBe("厨房已停止接单");
+    expect(zhAgain).not.toContain("可以开始点单");
+    vi.restoreAllMocks();
+  });
 });

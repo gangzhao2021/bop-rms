@@ -1537,14 +1537,16 @@ function EntryState({
   const locationOpen = context.operatingState === "Open";
   // Batch 40 (v15 cross-midnight): after last orders a pickup guest was told "Ready to order" with
   // "Continue to menu". They are told the kitchen stopped, when the Store closes and opens again,
-  // and are offered the menu to look at only.
-  if (context.channel !== "DineIn" && locationOpen && stopped !== null && context.resumed !== true)
+  // and are offered the menu to look at only. The same code scanned again with this phone's cart
+  // still open (resumed) says the same as a restored visit: the kitchen stopped, and the visit
+  // already under way can be continued (M104).
+  if (context.channel !== "DineIn" && locationOpen && stopped !== null)
     return (
       <div>
         <PickupNotTakingOrders stopped={stopped} headingRef={headingRef} />
         {onContinue ? (
           <button className="entry-action" type="button" onClick={onContinue}>
-            {t("Look at the menu")}
+            {context.resumed === true ? t("Continue") : t("Look at the menu")}
           </button>
         ) : null}
       </div>
