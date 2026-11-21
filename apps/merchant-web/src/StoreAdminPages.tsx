@@ -1,4 +1,5 @@
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
+import { NoAccessNotice } from "./NoAccessNotice.js";
 import { systemText, t } from "./i18n/i18n.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useState } from "react";
@@ -90,7 +91,7 @@ export function StoreAdminStatePanel({ state }: { readonly state: StoreAdminStat
   const content = states[state];
   return (
     <StatePanel heading={content[0]} tone={content[2]} status>
-      <p>{content[1]}</p>
+      {state === "PermissionDenied" ? <NoAccessNotice /> : <p>{content[1]}</p>}
       <Link to="/app">{t("Return to overview")}</Link>
     </StatePanel>
   );

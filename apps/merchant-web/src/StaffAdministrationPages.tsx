@@ -21,7 +21,8 @@ import {
   type StaffPageErrorCode,
   type StaffPageView,
 } from "./staff-administration-pages.js";
-import { actionAccessDeniedText, noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
+import { actionAccessDeniedText, noAccessHeading } from "./access-denied.js";
+import { NoAccessNotice } from "./NoAccessNotice.js";
 import { serverProblemText } from "./failure-words.js";
 import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
 import { SoleOperatorSelfApproval } from "./SoleOperatorSelfApproval.js";
@@ -906,7 +907,7 @@ function Page({
         tone={state.kind === "Loading" ? "neutral" : "error"}
         status
       >
-        <p>{state.kind === "PermissionDenied" ? pageAccessDeniedText : copy[state.kind]}</p>
+        {state.kind === "PermissionDenied" ? <NoAccessNotice /> : <p>{copy[state.kind]}</p>}
       </StatePanel>
     );
   const view = state.view;

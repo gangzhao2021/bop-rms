@@ -744,9 +744,7 @@ test("@production lost configuration reply retains scalar original across reload
   await expect(button(page, "Recover original request")).toBeEnabled();
   f.state.denyRecovery = true;
   await button(page, "Recover original request").click();
-  await expect(panel(page).getByRole("status")).toContainText(
-    "Current session or permission refused",
-  );
+  await expect(panel(page).getByRole("status")).toContainText("Your role can't change this brand");
   expect(await originals(page)).toEqual(retained);
   f.state.denyRecovery = false;
   const originalSession = f.state.session.sessionReference;

@@ -60,7 +60,9 @@ export const unpaidRoundCancelMessage: Record<Exclude<Outcome, "Idle">, string> 
     "The guest's card payment is still being confirmed. Try again in a minute; nothing was cancelled.",
   ),
   NotCancellable: t("This round can no longer be cancelled. Close to refresh it."),
-  Denied: t("Only a store manager or owner can cancel a round. Refresh if your session changed."),
+  Denied: t(
+    "Your role can't cancel a round; only a manager or the owner can. Ask one of them, or sign in as a staff member who can.",
+  ),
   FullSignInRequired: FULL_SIGN_IN_REQUIRED_TEXT,
   Unknown: t("Result unknown. Retry the same cancellation to recover its result."),
 };

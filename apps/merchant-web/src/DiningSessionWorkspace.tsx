@@ -36,6 +36,12 @@ import {
 import { TablesGuestStarts } from "./TablesGuestStarts.js";
 import { useStaffSessionLive } from "./staff-session-reads.js";
 import { WorkspacePage } from "./WorkspacePage.js";
+import { StaffNavigationContext } from "./NoAccessNotice.js";
+import {
+  backToKitchenText,
+  kitchenOnlyAccessDeniedText,
+  kitchenOnlyNavigation,
+} from "./access-denied.js";
 import { Link } from "react-router";
 import {
   createDiningSessionClient,
@@ -519,6 +525,8 @@ function tableActionFailureText(error: unknown): string {
 
 /** M159: set when the Store has no tables at all (the empty floor says what to do next). */
 const noTablesMessage = "no-tables";
+/** Batch 38: the floor read was refused; worded at render, by who is signed in. */
+const tablesDeniedMessage = "tables-denied";
 
 export function DiningSessionWorkspace({
   csrf,
@@ -542,6 +550,8 @@ export function DiningSessionWorkspace({
   /** The Table QR codes page, when this staff member may create codes there. */
   readonly tableQrHref?: string | undefined;
 }) {
+  const staffNavigation = useContext(StaffNavigationContext);
+  const kitchenOnly = staffNavigation !== null && kitchenOnlyNavigation(staffNavigation);
   const [tables, setTables] = useState<StaffDiningTable[]>([]),
     [selectedReference, setSelectedReference] = useState<string | null>(null),
     [code, setCode] = useState<{ table: string; value: string } | null>(null),
@@ -821,9 +831,7 @@ export function DiningSessionWorkspace({
           setFirstReadFailures((prior) => (server ? (prior ?? 0) + 1 : null));
           setMessage(
             denied
-              ? t(
-                  "Your role can't use Tables. Ask the owner or a manager to give you access, or sign in as a staff member who has it.",
-                )
+              ? tablesDeniedMessage
               : server
                 ? floorServerProblemText
                 : t("Tables unavailable. Check your connection and refresh."),
@@ -1479,6 +1487,18 @@ export function DiningSessionWorkspace({
                     t("Ask the owner to add tables.")
                   )}
                 </>
+              ) : message === tablesDeniedMessage ? (
+                // Batch 38 review: a kitchen display sent here is led back to the kitchen.
+                kitchenOnly ? (
+                  <>
+                    {kitchenOnlyAccessDeniedText}{" "}
+                    <Link to="/operations/kitchen">{backToKitchenText}</Link>
+                  </>
+                ) : (
+                  t(
+                    "Your role can't use Tables. Ask the owner or a manager to give you access, or sign in as a staff member who has it.",
+                  )
+                )
               ) : (
                 message || t("No tables have been loaded.")
               )}

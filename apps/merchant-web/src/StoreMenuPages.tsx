@@ -1,5 +1,6 @@
 import { t } from "./i18n/i18n.js";
-import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
+import { noAccessHeading } from "./access-denied.js";
+import { NoAccessNotice } from "./NoAccessNotice.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { WorkspacePage } from "./WorkspacePage.js";
 import { SourceTime, StaffTime } from "./StoreTime.js";
@@ -204,7 +205,7 @@ function Failure({
         tone={code === "Loading" ? "neutral" : "error"}
         status
       >
-        <p>{code === "PermissionDenied" ? pageAccessDeniedText : menuErrorText[code]}</p>
+        {code === "PermissionDenied" ? <NoAccessNotice /> : <p>{menuErrorText[code]}</p>}
       </StatePanel>
     </WorkspacePage>
   );

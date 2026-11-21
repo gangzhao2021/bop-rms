@@ -6,7 +6,8 @@ import {
   createOrderExceptionClient,
   OrderExceptionAccessDenied,
 } from "./order-exception-client.js";
-import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
+import { noAccessHeading } from "./access-denied.js";
+import { NoAccessNotice } from "./NoAccessNotice.js";
 import { StatePanel } from "@bop-rms/ui";
 import { Freshness, SourceTime } from "./StoreTime.js";
 import { WorkspacePage } from "./WorkspacePage.js";
@@ -817,7 +818,7 @@ export function OrderExceptionLoadFailed({
     <WorkspacePage className="orders-page order-exception-page" title={t("Exceptions")}>
       {denied ? (
         <StatePanel heading={noAccessHeading} tone="error" status>
-          <p>{pageAccessDeniedText}</p>
+          <NoAccessNotice />
         </StatePanel>
       ) : (
         <StatePanel heading={t("Exceptions unavailable")} tone="error" status>

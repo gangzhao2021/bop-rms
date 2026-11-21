@@ -3,7 +3,8 @@ import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { StatePanel } from "@bop-rms/ui";
 import { WorkspacePage } from "./WorkspacePage.js";
-import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
+import { noAccessHeading } from "./access-denied.js";
+import { NoAccessNotice } from "./NoAccessNotice.js";
 import { SourceTime, StaffTime } from "./StoreTime.js";
 import { StepUpVerification } from "./StepUpVerification.js";
 import {
@@ -1148,7 +1149,7 @@ export function RefundApprovalsPage({
             </StatePanel>
           ) : state === "Denied" ? (
             <StatePanel heading={noAccessHeading} tone="error" status>
-              <p>{pageAccessDeniedText}</p>
+              <NoAccessNotice />
             </StatePanel>
           ) : state === "Unavailable" ? (
             <StatePanel heading={t("Refunds could not be loaded")} tone="error" status>

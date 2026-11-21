@@ -3,7 +3,8 @@ import { StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { formatCad } from "./order-money.js";
-import { actionAccessDeniedText, noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
+import { actionAccessDeniedText, noAccessHeading } from "./access-denied.js";
+import { NoAccessNotice } from "./NoAccessNotice.js";
 import {
   createStoreReportsClient,
   StoreReportsClientError,
@@ -807,7 +808,7 @@ export function StoreReportsPage({
             </StatePanel>
           ) : state.kind === "PermissionDenied" ? (
             <StatePanel heading={noAccessHeading} tone="error" status>
-              <p>{pageAccessDeniedText}</p>
+              <NoAccessNotice />
             </StatePanel>
           ) : state.kind === "Busy" ? (
             <StatePanel heading={t("Busy for a moment")} tone="neutral" status>

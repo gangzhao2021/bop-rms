@@ -9,6 +9,7 @@ import {
 } from "./i18n/i18n.js";
 import { SlowWaitNotice } from "./slow-wait.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
+import { NoAccessNotice } from "./NoAccessNotice.js";
 import { StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStaffSessionLive } from "./staff-session-reads.js";
@@ -716,7 +717,9 @@ export function placeErrorText(
         ? t(
             "You're signed out, or your role can't send table rounds. Sign in again or ask a manager. Sending the same round again never sends it twice.",
           )
-        : t("Your session can't take counter orders. Sign in again or ask a manager.");
+        : t(
+            "Your role can't take counter orders. Ask the owner or a manager, or sign in as a staff member who can.",
+          );
     case "OutcomeUnknown":
       return t("No answer from the system. Send again — the same order is never created twice.");
     case "NoPickupTimes":
@@ -1921,6 +1924,8 @@ export function StaffOrderEntryPage({
               <Link to={createCode}>{t("Table QR codes")}</Link>{" "}
               {t("(it can be printed later), then take the order.")}
             </p>
+          ) : menu.code === "PermissionDenied" ? (
+            <NoAccessNotice />
           ) : (
             <p>{text}</p>
           )}

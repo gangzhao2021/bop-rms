@@ -34,7 +34,9 @@ const failureMessage = (error: StepUpError): string => {
     NotSetUp: t(
       "Verification is not set up for you yet. Ask the store owner to add your authenticator app.",
     ),
-    Denied: t("Your session ended or does not allow this. Sign in again, then verify."),
+    Denied: t(
+      "You're signed out, or your role can't do this. Sign in again, or ask the owner or a manager.",
+    ),
     Unavailable: t("The code could not be checked. Check your connection and try again."),
   };
   return messages[error.code];

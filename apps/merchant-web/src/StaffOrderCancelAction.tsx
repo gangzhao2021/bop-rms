@@ -237,7 +237,7 @@ const message: Record<Exclude<Outcome, "Idle">, string> = {
   ),
   NotCancellable: t("This order can no longer be cancelled. Close to refresh it."),
   Denied: t(
-    "This cancellation was refused. Only a store manager or owner can cancel a paid order; refresh if your session changed.",
+    "Your role can't cancel a paid order; only a manager or the owner can. Ask one of them, or sign in as a staff member who can.",
   ),
   FullSignInRequired: FULL_SIGN_IN_REQUIRED_TEXT,
   Unknown: t("Result unknown. Retry the same cancellation to recover its result."),

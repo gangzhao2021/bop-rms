@@ -1,5 +1,6 @@
 import { t } from "./i18n/i18n.js";
-import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
+import { noAccessHeading } from "./access-denied.js";
+import { NoAccessNotice } from "./NoAccessNotice.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
@@ -433,7 +434,7 @@ export function TaxClassificationsPage({
         tone={loadError === "Loading" ? "neutral" : "error"}
         status
       >
-        <p>{loadError === "PermissionDenied" ? pageAccessDeniedText : loadCopy[loadError]}</p>
+        {loadError === "PermissionDenied" ? <NoAccessNotice /> : <p>{loadCopy[loadError]}</p>}
       </StatePanel>
     );
   const submit = (change: Change) => {

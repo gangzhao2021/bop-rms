@@ -386,7 +386,7 @@ describe("counter order (OPS-ORDER-ENTRY) — WP-2423 Q7", () => {
       "You're signed out, or your role can't send table rounds. Sign in again or ask a manager. Sending the same round again never sends it twice.",
     );
     expect(placeErrorText(denied, [])).toBe(
-      "Your session can't take counter orders. Sign in again or ask a manager.",
+      "Your role can't take counter orders. Ask the owner or a manager, or sign in as a staff member who can.",
     );
   });
 

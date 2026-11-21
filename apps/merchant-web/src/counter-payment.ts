@@ -53,7 +53,9 @@ export function payErrorText(
         "That paid-at time is before this store started recording sales in the system. Check when it was paid and enter it again.",
       );
     case "PermissionDenied":
-      return t("Your session can't record payments. Sign in again or ask a manager.");
+      return t(
+        "Your role can't record payments. Ask the owner or a manager, or sign in as a staff member who can.",
+      );
     case "OutcomeUnknown":
       return t(
         "No answer from the system. Record again — the same payment is never counted twice.",

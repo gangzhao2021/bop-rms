@@ -185,7 +185,7 @@ it("WP-2423 Q6 step 2: says what to do for every refusal", () => {
     "Nothing to prepare: hand it over or refund it.",
   );
   expect(itemCancelFailureText(pickup, "NotCancellable")).toContain("can no longer be cancelled");
-  expect(itemCancelFailureText(pickup, "Denied")).toContain("store manager or owner");
+  expect(itemCancelFailureText(pickup, "Denied")).toContain("only a manager or the owner can");
   expect(itemCancelFailureText(pickup, "Unknown")).toContain("Retry the same cancellation");
   expect(itemCancelFailureText(pickup, "FullSignInRequired")).toContain("You signed in with a PIN");
 });
@@ -198,10 +198,10 @@ it("WP-2423: a PIN sign-in refusal offers verification instead of a permission m
   expect(html).toContain("You signed in with a PIN");
   expect(html).toContain("Verify it&#x27;s you");
   expect(html).toContain("Sign out and sign in with your account");
-  expect(html).not.toContain("store manager or owner");
+  expect(html).not.toContain("only a manager or the owner can");
   expect(
     renderToStaticMarkup(<ItemCancelStatus order={order} outcome="Denied" csrf="synthetic" />),
-  ).toContain("store manager or owner");
+  ).toContain("only a manager or the owner can");
 });
 
 it("WP-2423 Q6 step 2: summarises a cancelled line and offers a refund check", () => {

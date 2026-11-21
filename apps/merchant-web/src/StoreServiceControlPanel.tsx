@@ -3,7 +3,8 @@ import { serviceModeText, listSeparator, currentLanguage, systemText, t } from "
 import { StatePanel } from "@bop-rms/ui";
 import { StoreConfigurationEditor } from "./StoreConfigurationEditor.js";
 import { WorkspacePage } from "./WorkspacePage.js";
-import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
+import { noAccessHeading } from "./access-denied.js";
+import { NoAccessNotice } from "./NoAccessNotice.js";
 import { createStoreConfigurationClient } from "./store-configuration-client.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router";
@@ -284,7 +285,7 @@ export function StoreServiceControlPanel({ store, csrf }: { store: string; csrf:
     return (
       <WorkspacePage title={t("Hours & ordering")}>
         <StatePanel heading={noAccessHeading} tone="error" status>
-          <p>{pageAccessDeniedText}</p>
+          <NoAccessNotice />
         </StatePanel>
       </WorkspacePage>
     );

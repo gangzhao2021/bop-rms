@@ -289,8 +289,8 @@ it("WP-2423: a PIN sign-in refusal asks the person to confirm it is them, not th
   );
   expect(html).toContain("You signed in with a PIN");
   expect(html).toContain("Verify it&#x27;s you");
-  expect(html).not.toContain("store manager or owner");
+  expect(html).not.toContain("only a manager or the owner can");
   expect(
     renderToStaticMarkup(<StaffCancelStatus outcome="Denied" csrf="synthetic-csrf" />),
-  ).toContain("Only a store manager or owner can cancel a paid order");
+  ).toContain("Your role can&#x27;t cancel a paid order");
 });

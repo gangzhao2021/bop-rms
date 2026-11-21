@@ -1,5 +1,6 @@
 import { systemText, t } from "./i18n/i18n.js";
-import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
+import { noAccessHeading } from "./access-denied.js";
+import { NoAccessNotice } from "./NoAccessNotice.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime } from "./StoreTime.js";
 import { useCallback, useEffect, useState } from "react";
@@ -78,7 +79,7 @@ function Failure({ code, onRefresh }: { code: SupplyItemErrorCode; onRefresh?: (
       tone="error"
       status
     >
-      <p>{code === "PermissionDenied" ? pageAccessDeniedText : copy[code]}</p>
+      {code === "PermissionDenied" ? <NoAccessNotice /> : <p>{copy[code]}</p>}
       {onRefresh ? <button onClick={onRefresh}>{t("Refresh")}</button> : null}
     </StatePanel>
   );

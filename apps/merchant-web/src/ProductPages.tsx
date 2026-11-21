@@ -1,6 +1,7 @@
 import { PageIntro } from "./PageIntro.js";
 import { currentLanguage, listSeparator, t } from "./i18n/i18n.js";
-import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
+import { noAccessHeading } from "./access-denied.js";
+import { NoAccessNotice } from "./NoAccessNotice.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime } from "./StoreTime.js";
 import { useCallback, useEffect, useId, useRef, useState, type Ref } from "react";
@@ -115,7 +116,7 @@ function Failure({
       tone={code === "Loading" ? "neutral" : "error"}
       status
     >
-      <p>{code === "PermissionDenied" ? pageAccessDeniedText : copy[code]}</p>
+      {code === "PermissionDenied" ? <NoAccessNotice /> : <p>{copy[code]}</p>}
     </StatePanel>
   );
 }

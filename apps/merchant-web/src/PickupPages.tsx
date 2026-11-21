@@ -1,6 +1,7 @@
 import { t } from "./i18n/i18n.js";
 import { PauseOrderingControl, PauseOrderingShownContext } from "./PauseOrderingControl.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
+import { NoAccessNotice } from "./NoAccessNotice.js";
 import { PickupProofForm, pickupCodeLockedText } from "./PickupProofForm.js";
 import { PickupHandoffForm } from "./PickupHandoffForm.js";
 import {
@@ -80,7 +81,7 @@ export function PickupStatePanel({ state }: { readonly state: Exclude<State["kin
   } as const;
   return (
     <StatePanel heading={copy[state][0]} tone={state === "Loading" ? "neutral" : "error"} status>
-      <p>{copy[state][1]}</p>
+      {state === "PermissionDenied" ? <NoAccessNotice /> : <p>{copy[state][1]}</p>}
       <Link to="/app">{t("Home")}</Link>
     </StatePanel>
   );

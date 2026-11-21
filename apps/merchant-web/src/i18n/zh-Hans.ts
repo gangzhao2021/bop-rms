@@ -2782,8 +2782,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Only a manager can cancel it, here or on the Orders page.": "只有店长可以取消，在此或在订单页。",
   "Only a manager can close an earlier day's ticket.": "只有店长可以关闭较早营业日的票据。",
   "Only a published price book can be used at a Store.": "只有已发布的价目表才能在门店使用。",
-  "Only a store manager or owner can cancel a round. Refresh if your session changed.":
-    "只有店长或店主可以取消轮次。如果你的登录有变化，请刷新。",
+  "Your role can't cancel a round; only a manager or the owner can. Ask one of them, or sign in as a staff member who can.":
+    "你的角色不能取消轮次，只有店长或店主可以。请找他们，或换有权限的员工登录。",
   "Only a store manager or owner can check this refund.": "只有店长或店主可以查看这笔退款。",
   "Only a store manager or owner can record this refund. Ask them to record it after refunding on the card machine.":
     "只有店长或店主可以记录这笔退款。请他们在刷卡机上退款后在此记录。",
@@ -3087,7 +3087,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "处理中 {pending} · 支付方状态未知 {providerUnknown} · 差异 {reconciliationDifferences}",
   "Pending {pending} · ready {ready} · in progress {inProgress} · completed {completed} · exceptions {exceptions}":
     "处理中 {pending} · 已做好 {ready} · 进行中 {inProgress} · 已完成 {completed} · 异常 {exceptions}",
-  "Permission denied. Check your session and Store access.": "没有权限。请检查登录状态和门店权限。",
   "Permission denied. Only the person who made it, or an Owner, can do this.":
     "没有权限。只有提交人或店主可以执行此操作。",
   "Permission denied. Someone other than the person who made this change, with approval access, must approve it.":
@@ -4966,10 +4965,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "此浏览器无法保持屏幕常亮 — 请将设备设为永不休眠",
   "This can no longer be accepted as it is (its time ran out or an item ran out). Refresh orders to see what to do.":
     "它已无法按原样接单（时间已过或有商品售罄）。请刷新订单查看如何处理。",
-  "This cancellation was refused. Only a store manager or owner can cancel a paid order; refresh if your session changed.":
-    "此取消被拒绝。只有店长或店主可以取消已付款的订单；如果你的登录有变化，请刷新。",
-  "This cancellation was refused. Only a store manager or owner can cancel paid items; refresh if your session changed.":
-    "此取消被拒绝。只有店长或店主可以取消已付款的商品；如果你的登录有变化，请刷新。",
+  "Your role can't cancel a paid order; only a manager or the owner can. Ask one of them, or sign in as a staff member who can.":
+    "你的角色不能取消已付款的订单，只有店长或店主可以。请找他们，或换有权限的员工登录。",
+  "Your role can't cancel paid items; only a manager or the owner can. Ask one of them, or sign in as a staff member who can.":
+    "你的角色不能取消已付款的菜品，只有店长或店主可以。请找他们，或换有权限的员工登录。",
   "This change was approved by you alone while Sole operator was off, so it cannot be published. Withdraw it, then send a new change for approval.":
     '此更改是在"独立经营者"关闭时由你单独批准的，因此不能发布。请撤回，然后重新提交更改审批。',
   "This change was withdrawn or declined. Make a new change instead.":
@@ -5571,14 +5570,14 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Your previous Store is unchanged. After you verify, switch again.":
     "你之前的门店不变。验证后请再次切换。",
   "Your prices waiting for approval": "你的价格在等待批准",
-  "Your session can't record payments. Sign in again or ask a manager.":
-    "你的登录不能记录付款。请重新登录或找店长。",
+  "Your role can't record payments. Ask the owner or a manager, or sign in as a staff member who can.":
+    "你的角色不能记录付款。请找店主或店长，或换有权限的员工登录。",
   "You're signed out, or your role can't send table rounds. Sign in again or ask a manager. Sending the same round again never sends it twice.":
     "你已退出登录，或你的角色不能为餐桌下单。请重新登录或找店长。同一轮再发送一次也不会重复下单。",
-  "Your session can't take counter orders. Sign in again or ask a manager.":
-    "你的登录不能进行柜台点单。请重新登录或找店长。",
-  "Your session ended or does not allow this. Sign in again, then verify.":
-    "你的登录已结束或不允许此操作。请重新登录后验证。",
+  "Your role can't take counter orders. Ask the owner or a manager, or sign in as a staff member who can.":
+    "你的角色不能进行柜台点单。请找店主或店长，或换有权限的员工登录。",
+  "You're signed out, or your role can't do this. Sign in again, or ask the owner or a manager.":
+    "你已退出登录，或你的角色不能做这项操作。请重新登录，或找店主或店长。",
   "Your session has ended. Sign in again, then approve.": "你的登录已结束。请重新登录后批准。",
   "This approval was refused just now. Nothing was approved and nothing was sent. Sign out and in, then try again; if it is still refused, ask the owner to check your role.":
     "这次批准被拒绝了，没有批准也没有发出。请退出再登录后重试；仍被拒绝请让店主检查你的角色。",
@@ -6774,7 +6773,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "These are the reports' figures for today so far, from the same records as the settlement made when this business day ends. Payments taken after the business day ends count on the next day.":
     "这些是报表“今天到目前为止”的数字，和营业日结束时的日结用同一来源。营业日结束后再收的款算在下一天。",
   "Reading today's figures…": "正在读取今天的数字…",
-  "Your access doesn't include the store's sales.": "你的权限不包括门店的销售数据。",
   "The store's records are busy with orders and payments. Refresh in a minute.":
     "门店记录正忙于订单和付款，请一分钟后刷新。",
   "Can't reach the store system": "连不上门店系统",
@@ -10148,6 +10146,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "本店不提供{modes}。请在这里取消勾选，或在{where}中提供{modes}。",
   "The tax class is the Brand’s own choice; it has not been checked by a tax professional.":
     "税类由品牌自行选择，未经税务专业人士核对。",
+  "Your role can't change this brand. Ask the owner, or sign in as a staff member who can. Your change is kept here until then.":
+    "你的角色不能修改这个品牌。请找店主，或换有权限的员工登录。你的修改会一直保留在这里。",
   "Your role can't change allergens. Ask the owner or a manager.":
     "你的角色不能修改过敏原，请找店主或店长。",
   "Your role can't change products. Ask the owner or a manager.":

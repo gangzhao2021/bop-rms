@@ -125,3 +125,35 @@ test("@production a kitchen sign-in on Orders is told it is kitchen work only, w
   await shoot(page, "orders-kitchen-zh");
   await page.getByRole("button", { name: "Switch to English" }).click();
 });
+
+test("@production a kitchen display on pickup, exceptions or reports is led back to the kitchen too", async ({
+  page,
+}) => {
+  // Batch 38 review: every whole-page refusal uses the one shared notice, not Orders alone. A
+  // pickup address not in the navigation opens Tables, whose refused read says the same.
+  await page.route("**/merchant/**", (route) =>
+    route.fulfill({ headers, status: 403, json: { error: "request_denied" } }),
+  );
+  await refusedOrders(page, [kitchen]);
+  for (const path of [
+    "/operations/pickup",
+    "/operations/order-exceptions",
+    "/app/reports/operations",
+  ]) {
+    await page.goto(path);
+    const main = page.getByRole("main");
+    await expect(
+      main.getByText("You're signed in for kitchen work, which doesn't include this page.", {
+        exact: false,
+      }),
+      path,
+    ).toBeVisible();
+    await expect(main.getByRole("link", { name: "Go to the kitchen" }), path).toHaveAttribute(
+      "href",
+      "/operations/kitchen",
+    );
+    await expect(main, path).not.toContainText(/Your role can't/u);
+    await expect(main, path).not.toContainText(internalWords);
+  }
+  await expectNoInternalText(page);
+});

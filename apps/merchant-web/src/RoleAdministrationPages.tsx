@@ -26,7 +26,8 @@ import {
 } from "./role-administration-pages.js";
 import { SoleOperatorSelfApproval } from "./SoleOperatorSelfApproval.js";
 import { StarterRoleSetOffer } from "./StarterRoleSets.js";
-import { actionAccessDeniedText, noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
+import { actionAccessDeniedText, noAccessHeading } from "./access-denied.js";
+import { NoAccessNotice } from "./NoAccessNotice.js";
 import { serverProblemText } from "./failure-words.js";
 import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
 type State =
@@ -96,7 +97,7 @@ function Status({
       tone={state === "Loading" ? "neutral" : "error"}
       status
     >
-      <p>{state === "PermissionDenied" ? pageAccessDeniedText : copy[state]}</p>
+      {state === "PermissionDenied" ? <NoAccessNotice /> : <p>{copy[state]}</p>}
     </StatePanel>
   );
 }

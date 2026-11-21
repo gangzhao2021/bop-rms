@@ -1,5 +1,6 @@
 import { systemText, t } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
+import { NoAccessNotice } from "./NoAccessNotice.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
@@ -61,7 +62,7 @@ export function TaskInboxStatePanel({ state }: { readonly state: PageState["kind
   if (state === "Ready") return null;
   return (
     <StatePanel heading={heading} tone={tone} status>
-      <p>{description}</p>
+      {state === "PermissionDenied" ? <NoAccessNotice /> : <p>{description}</p>}
       <Link to="/app">{t("Return to workspace")}</Link>
     </StatePanel>
   );

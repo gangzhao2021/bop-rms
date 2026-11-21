@@ -1,4 +1,5 @@
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
+import { NoAccessNotice } from "./NoAccessNotice.js";
 import { t } from "./i18n/i18n.js";
 import { Link } from "react-router";
 import { StatePanel } from "@bop-rms/ui";
@@ -65,7 +66,7 @@ export function OperationalDashboardState({
   const item = values[state];
   return (
     <StatePanel heading={item[0]} tone={item[2]} status>
-      <p>{item[1]}</p>
+      {state === "PermissionDenied" ? <NoAccessNotice /> : <p>{item[1]}</p>}
     </StatePanel>
   );
 }

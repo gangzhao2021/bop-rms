@@ -1,5 +1,6 @@
 import { allergenName, systemText, t } from "./i18n/i18n.js";
-import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
+import { noAccessHeading } from "./access-denied.js";
+import { NoAccessNotice } from "./NoAccessNotice.js";
 import { SoleOperatorSelfApproval } from "./SoleOperatorSelfApproval.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime } from "./StoreTime.js";
@@ -175,7 +176,7 @@ export function StoreOptionRecipesPage({
         tone={state.kind === "Loading" ? "neutral" : "error"}
         status
       >
-        <p>{state.kind === "PermissionDenied" ? pageAccessDeniedText : copy[state.kind]}</p>
+        {state.kind === "PermissionDenied" ? <NoAccessNotice /> : <p>{copy[state.kind]}</p>}
       </StatePanel>
     );
   const view = state.view;

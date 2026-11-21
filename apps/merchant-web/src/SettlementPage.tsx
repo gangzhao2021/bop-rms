@@ -14,7 +14,8 @@ import {
 export { unfinishedGuestPayment };
 import { orderMoney } from "./order-money.js";
 import { elapsedWords } from "./operations-alert-words.js";
-import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
+import { noAccessHeading } from "./access-denied.js";
+import { NoAccessNotice } from "./NoAccessNotice.js";
 import { businessDateLabel, businessDateText, useStoreBusinessDay } from "./StoreBusinessDay.js";
 import { Freshness, storeTime } from "./StoreTime.js";
 import { WorkspacePage } from "./WorkspacePage.js";
@@ -1112,7 +1113,7 @@ export function SettlementPage({
         </StatePanel>
       ) : state.kind === "PermissionDenied" ? (
         <StatePanel heading={noAccessHeading} tone="error" status>
-          <p>{pageAccessDeniedText}</p>
+          <NoAccessNotice />
         </StatePanel>
       ) : state.kind === "Busy" ? (
         <StatePanel heading={t("Busy for a moment")} tone="neutral" status>

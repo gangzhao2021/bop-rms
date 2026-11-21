@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { NoAccessNotice } from "./NoAccessNotice.js";
 import { Link } from "react-router";
 import { useBrowserOffline } from "./stale-read.js";
 import { countOf, t, saidTable } from "./i18n/i18n.js";
@@ -607,7 +608,8 @@ export function TonightReport({
       </p>
     );
   if (state.kind === "PermissionDenied")
-    return <p role="status">{t("Your access doesn't include the store's sales.")}</p>;
+    // Batch 38 review: the same refusal as every page, so a kitchen display is led back.
+    return <NoAccessNotice />;
   if (state.kind !== "Ready")
     return (
       <TonightOffline at={null} timeZone={undefined}>

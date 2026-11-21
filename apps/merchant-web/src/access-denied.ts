@@ -16,6 +16,10 @@ export const pageAccessDeniedText = t(
 export const actionAccessDeniedText = t(
   "Your role can't do this. Ask the owner or a manager to give you access, or sign in as a staff member who can.",
 );
+/** The brand configuration panel's refusal; the unsent change stays on this device. */
+export const brandChangeDeniedText = t(
+  "Your role can't change this brand. Ask the owner, or sign in as a staff member who can. Your change is kept here until then.",
+);
 /**
  * A kitchen display sign-in, or a cook whose role is the kitchen alone, on a page outside it: the
  * screen is only for kitchen work; the way back is the kitchen screen itself.

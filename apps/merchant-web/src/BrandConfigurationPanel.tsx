@@ -26,6 +26,7 @@ import {
   type BrandCatalogSourceCurrent,
 } from "./merchant-brand-catalog-source-client.js";
 import { serviceOperationReference } from "./service-control-client.js";
+import { brandChangeDeniedText } from "./access-denied.js";
 export interface BrandConfigurationPanelProps {
   readonly scope: BrandConfigurationScope;
   readonly csrf: string;
@@ -112,8 +113,8 @@ export async function executeBrandConfigurationOriginal(input: {
 }
 const messages: Record<BrandConfigurationClientError["code"], string> = {
   Invalid: "The request is invalid. Check the configuration fields.",
-  Denied:
-    "Current session or permission refused this request. Keep the pending original until access is restored.",
+  // Batch 38: the refusal staff can reach here is worded and translated with the others.
+  Denied: brandChangeDeniedText,
   Conflict:
     "The saved head or Brand version changed. Recover the pending original, then refresh Brand access and configuration before a new request.",
   Unavailable: "Configuration is unavailable. Refresh or recover the pending original.",
