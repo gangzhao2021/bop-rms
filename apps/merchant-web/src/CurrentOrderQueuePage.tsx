@@ -4606,7 +4606,7 @@ export function CurrentOrderQueuePage({
             check.length === 1
               ? t("{orders} changed since it was loaded: check it.", { orders: check[0] ?? "" })
               : t("{orders} changed since they were loaded: check each one.", {
-                  orders: check.join(", "),
+                  orders: check.join(listSeparator()),
                 }),
           ]),
       ...(refused.length === 0
@@ -4617,7 +4617,7 @@ export function CurrentOrderQueuePage({
                   orders: refused[0] ?? "",
                 })
               : t("{orders} could not be accepted here: open each one to see why.", {
-                  orders: refused.join(", "),
+                  orders: refused.join(listSeparator()),
                 }),
           ]),
       ...(unknown.length === 0
@@ -4630,7 +4630,7 @@ export function CurrentOrderQueuePage({
                 )
               : t(
                   "{orders}: the network dropped, so tap Accept on each one again; none will be accepted twice.",
-                  { orders: unknown.join(", ") },
+                  { orders: unknown.join(listSeparator()) },
                 ),
           ]),
     ];

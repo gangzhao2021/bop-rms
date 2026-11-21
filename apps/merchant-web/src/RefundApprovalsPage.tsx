@@ -1,4 +1,4 @@
-import { systemText, t } from "./i18n/i18n.js";
+import { systemText, t, listSeparator } from "./i18n/i18n.js";
 import { wordGap } from "./word-gap.js";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
@@ -575,7 +575,7 @@ export function ApprovalCard({
         {facts === null || facts.items.length === 0 ? null : (
           <div>
             <dt>{t("Items on the order")}</dt>
-            <dd>{facts.items.join(", ")}</dd>
+            <dd>{facts.items.join(listSeparator())}</dd>
           </div>
         )}
         {entry.note !== null ? (

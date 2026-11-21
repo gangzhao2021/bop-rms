@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { setLanguageForTest } from "./i18n/i18n.js";
 import { createTableCheckoutClient, parseTableBill } from "./table-checkout-client.js";
 import {
   byDishUnitAmounts,
@@ -480,5 +481,49 @@ describe("b41: By dish lists each dish as the bill charges it", () => {
     );
     expect(html).toContain("Soy milk · $3.66");
     expect(html).not.toContain("$3.67");
+  });
+});
+
+// Batch 42 (v15 TM2 zh-Hans): after 按菜分 each part read "牛肉面, 豆浆", with an English comma,
+// while the Orders rows of the same Store list "1× 牛肉面、1× 豆浆（热）". The en list is unchanged.
+describe("batch 42: a by-dish part lists its dishes in the screen's language", () => {
+  afterEach(() => setLanguageForTest("en"));
+  const byDish = () => {
+    const value = splitBillFixture();
+    const split = value.split as Record<string, unknown>;
+    split.mode = "ByItems";
+    split.paidParts = 0;
+    split.parts = (split.parts as Record<string, unknown>[]).map((part, index) => ({
+      ...part,
+      payment: null,
+      guestPaying: false,
+      dishes:
+        index === 0
+          ? [
+              { displayName: "牛肉面", quantity: 1, shared: false },
+              { displayName: "豆浆", quantity: 1, shared: false },
+            ]
+          : [{ displayName: "虾饺", quantity: 2, shared: false }],
+    }));
+    return renderToStaticMarkup(
+      <TableSplitControls
+        bill={parseTableBill(value)}
+        csrf={"a".repeat(43)}
+        client={createTableCheckoutClient()}
+        disabled={false}
+        selectedPart={null}
+        onSelectPart={() => undefined}
+        onBill={() => undefined}
+        onProblem={() => undefined}
+      />,
+    );
+  };
+  it("joins them with 、 in zh-Hans and with a comma in English", () => {
+    setLanguageForTest("zh-Hans");
+    const zh = byDish();
+    expect(zh).toContain("牛肉面、豆浆");
+    expect(zh).not.toContain("牛肉面, 豆浆");
+    setLanguageForTest("en");
+    expect(byDish()).toContain("牛肉面, 豆浆");
   });
 });

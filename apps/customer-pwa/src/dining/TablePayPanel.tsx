@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { MemberJoinPanel } from "../member/MemberJoinPanel.js";
 import { MemberPointsAtTable } from "../member/MemberPointsAtTable.js";
 import { v7 as uuidv7 } from "uuid";
-import { saidTable, t, wordGap } from "../i18n/i18n.js";
+import { saidTable, t, wordGap, listSeparator } from "../i18n/i18n.js";
 import { parseTipAmount } from "../checkout/tip-amount.js";
 import { customTipCheck } from "../checkout/checkout-decisions.js";
 import { formatMoney } from "../journey/format.js";
@@ -123,6 +123,28 @@ const saveTip = (choice: TipChoice | null) => {
     /* A private window may refuse storage; the guest just chooses again after a reload. */
   }
 };
+
+/**
+ * Batch 42: the dishes one split part pays for, as the guest's language lists names ("2 × Har gow,
+ * Soy milk" / "2 × 虾饺、豆浆"), with "(shared)" where asked.
+ */
+export function splitPartDishesText(
+  dishes: readonly {
+    readonly displayName: string;
+    readonly quantity: number;
+    readonly shared?: boolean;
+  }[],
+  markShared: boolean,
+): string {
+  return dishes
+    .map(
+      (dish) =>
+        (dish.quantity > 1 ? `${dish.quantity} × ` : "") +
+        dish.displayName +
+        (markShared && dish.shared === true ? ` (${t("shared")})` : ""),
+    )
+    .join(listSeparator());
+}
 
 export function TablePayPanel({
   client: provided,
@@ -715,20 +737,13 @@ export function TablePayPanel({
                       <small className="dining-session__split-dishes">
                         {t("Table {table} · rounds {rounds}", {
                           table: entry.tables.map(saidTable).join(" + "),
-                          rounds: entry.roundNumbers.join(", "),
+                          rounds: entry.roundNumbers.join(listSeparator()),
                         })}
                       </small>
                     )}
                     {entry.dishes.length === 0 ? null : (
                       <small className="dining-session__split-dishes">
-                        {entry.dishes
-                          .map(
-                            (dish) =>
-                              (dish.quantity > 1 ? `${dish.quantity} × ` : "") +
-                              dish.displayName +
-                              (dish.shared ? ` (${t("shared")})` : ""),
-                          )
-                          .join(", ")}
+                        {splitPartDishesText(entry.dishes, true)}
                       </small>
                     )}
                   </label>
@@ -914,12 +929,7 @@ function TablePayDishes({
           <ul className="dining-session__paid-parts">
             {parts.map((entry) => (
               <li key={entry.partNumber} data-status={entry.status}>
-                {entry.dishes
-                  .map(
-                    (dish) => (dish.quantity > 1 ? `${dish.quantity} × ` : "") + dish.displayName,
-                  )
-                  .join(", ")}{" "}
-                · {money(entry.amountMinor)} ·{" "}
+                {splitPartDishesText(entry.dishes, false)} · {money(entry.amountMinor)} ·{" "}
                 {entry.status === "Paid"
                   ? entry.byYou
                     ? t("you paid")

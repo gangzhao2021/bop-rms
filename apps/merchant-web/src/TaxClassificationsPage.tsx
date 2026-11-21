@@ -1,4 +1,4 @@
-import { t } from "./i18n/i18n.js";
+import { t, listSeparator } from "./i18n/i18n.js";
 import { noAccessHeading } from "./access-denied.js";
 import { NoAccessNotice } from "./NoAccessNotice.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
@@ -178,7 +178,8 @@ export function TaxClassificationsView({
                     </td>
                     {productUse !== null ? (
                       <td data-label={t("Products")}>
-                        {productsOf(entry.classificationReference).join(", ") || t("None yet")}
+                        {productsOf(entry.classificationReference).join(listSeparator()) ||
+                          t("None yet")}
                       </td>
                     ) : null}
                     {manage ? (
@@ -331,7 +332,7 @@ export function TaxClassificationsView({
                   <li key={use.classificationReference}>
                     {t("Unnamed tax class{value}: {value2}", {
                       value: notListed.length > 1 ? ` ${index + 1}` : "",
-                      value2: use.productNames.join(", "),
+                      value2: use.productNames.join(listSeparator()),
                     })}
                   </li>
                 ))}
@@ -341,7 +342,7 @@ export function TaxClassificationsView({
           {withoutClass !== undefined ? (
             <p>
               {t("No tax class yet: {value}. These products cannot be sold until each names one.", {
-                value: withoutClass.productNames.join(", "),
+                value: withoutClass.productNames.join(listSeparator()),
               })}
             </p>
           ) : null}

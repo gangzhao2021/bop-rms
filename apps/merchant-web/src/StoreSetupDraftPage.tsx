@@ -4463,7 +4463,7 @@ function intervalText(interval: ScheduleInterval, detailed: boolean): string {
     interval.endsNextDay ? t(" (next day)") : ""
   }`;
   if (!detailed) return times;
-  const services = interval.serviceModes.map(serviceModeText).join(", ");
+  const services = interval.serviceModes.map(serviceModeText).join(listSeparator());
   return t(
     "{times} ({services}; last orders {orderCutoffSeconds} min before closing; preparation {leadTimeSeconds} min)",
     {
@@ -4477,7 +4477,7 @@ function intervalText(interval: ScheduleInterval, detailed: boolean): string {
 function dayText(intervals: readonly ScheduleInterval[] | undefined, detailed: boolean): string {
   return intervals === undefined || intervals.length === 0
     ? t("closed")
-    : intervals.map((interval) => intervalText(interval, detailed)).join(", ");
+    : intervals.map((interval) => intervalText(interval, detailed)).join(listSeparator());
 }
 /**
  * WP-2423 (v15): how publishing this setup changes the live Store's opening hours, one line per

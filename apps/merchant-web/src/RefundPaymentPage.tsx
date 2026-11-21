@@ -1,5 +1,5 @@
 import { dollarsToMinor } from "./store-price-pages.js";
-import { countOf, t } from "./i18n/i18n.js";
+import { countOf, t, listSeparator } from "./i18n/i18n.js";
 import { orderMoney } from "./order-money.js";
 import { cashTotalMinor } from "./table-checkout-client.js";
 import { refundErrorText as errorMessage } from "./OrderPaymentLinks.js";
@@ -1634,7 +1634,7 @@ function RefundWizard({
                 items: lines
                   .filter((item) => !item.paymentCaptured)
                   .map((item) => item.label)
-                  .join(", "),
+                  .join(listSeparator()),
               })}
             </p>
           ) : null}
@@ -1644,7 +1644,7 @@ function RefundWizard({
                 items: lines
                   .filter((item) => item.refundedByCancellation)
                   .map((item) => item.label)
-                  .join(", "),
+                  .join(listSeparator()),
               })}
             </p>
           ) : null}

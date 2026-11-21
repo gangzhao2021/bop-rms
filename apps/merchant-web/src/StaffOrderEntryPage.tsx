@@ -441,7 +441,7 @@ export function guestCartLines(
               : option.name,
         )
         .filter((name) => name !== "")
-        .join(", "),
+        .join(listSeparator()),
       quantity: line.quantity,
       estimateMinor:
         item === undefined || unsellable
@@ -511,7 +511,7 @@ export function placeErrorText(
     case "TableCartHasItems": {
       const value =
         error.pendingItems.length > 0
-          ? ` (${error.pendingItems.map((item) => `${item.quantity} × ${item.name}`).join(", ")})`
+          ? ` (${error.pendingItems.map((item) => `${item.quantity} × ${item.name}`).join(listSeparator())})`
           : "";
       // WP-2423 (staff-round-soldout): too few left of a guest's item: only the guests change it
       // (or, with none left, staff mark it sold out, and can then remove it).
@@ -2226,7 +2226,7 @@ export function StaffOrderEntryPage({
                                 ? `${option.name} × ${option.quantity}`
                                 : option.name,
                             )
-                            .join(", ")}
+                            .join(listSeparator())}
                         </span>
                       ) : null}
                       {line.note ? (

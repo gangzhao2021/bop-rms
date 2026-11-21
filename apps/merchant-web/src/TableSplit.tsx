@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { t, saidTable } from "./i18n/i18n.js";
+import { t, saidTable, listSeparator } from "./i18n/i18n.js";
 import { orderMoney } from "./order-money.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import {
@@ -331,7 +331,7 @@ export function TableSplitControls({
                     .map(
                       (dish) => (dish.quantity > 1 ? `${dish.quantity} × ` : "") + dish.displayName,
                     )
-                    .join(", ")}
+                    .join(listSeparator())}
                 </span>
               </div>
             </li>
@@ -611,7 +611,7 @@ export function TableSplitControls({
                         ]
                           .map(saidTable)
                           .join(" + "),
-                        rounds: part.roundNumbers.join(", "),
+                        rounds: part.roundNumbers.join(listSeparator()),
                       })}
                     </span>
                   )}
@@ -624,7 +624,7 @@ export function TableSplitControls({
                             dish.displayName +
                             (dish.shared ? ` (${t("shared")})` : ""),
                         )
-                        .join(", ")}
+                        .join(listSeparator())}
                     </span>
                   )}
                 </div>

@@ -1,4 +1,4 @@
-import { serviceModeText, systemText, t } from "./i18n/i18n.js";
+import { serviceModeText, systemText, t, listSeparator } from "./i18n/i18n.js";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { timeZoneLabel } from "./time-zone-names.js";
@@ -1071,7 +1071,7 @@ export function StoreConfigurationFeeBasisView({
                 {entry.state === "Enabled" && (
                   <>
                     {" "}
-                    · {entry.orderTypes.map(serviceModeLabel).join(", ")} ·{" "}
+                    · {entry.orderTypes.map(serviceModeLabel).join(listSeparator())} ·{" "}
                     {entry.taxClassificationReference === null
                       ? t("no tax classification (tips are not taxed)")
                       : t("tax classification chosen")}

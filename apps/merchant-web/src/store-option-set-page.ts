@@ -1,4 +1,4 @@
-import { t } from "./i18n/i18n.js";
+import { t, listSeparator } from "./i18n/i18n.js";
 /** WP-2423 slice 4: CAT-OPTIONSET-LIST / CAT-OPTIONSET-EDIT view contract and same-origin client. */
 export type OptionSetErrorCode =
   | "PermissionDenied"
@@ -30,7 +30,7 @@ export interface OptionSetSaveEffect {
 }
 /** The staff words for a Save refused because of the dishes it would change. */
 export function optionSetProblemText(problem: OptionSetProblem): string {
-  const dishes = problem.productNames.join(", ");
+  const dishes = problem.productNames.join(listSeparator());
   return problem.reason === "DefaultNeeded"
     ? t(
         "{set} needs a choice guests start with on {dishes}. Tick “Default” on another offered choice, then save. Nothing was saved.",
@@ -53,10 +53,10 @@ export function optionSetSaveEffectText(effect: OptionSetSaveEffect): string[] {
     lines.push(
       choice === ""
         ? t("{dishes} now start with no choice. List the menu to show it to guests.", {
-            dishes: dishes.join(", "),
+            dishes: dishes.join(listSeparator()),
           })
         : t("{dishes} now start with {option}. List the menu to show it to guests.", {
-            dishes: dishes.join(", "),
+            dishes: dishes.join(listSeparator()),
             option: choice,
           }),
     );
@@ -68,7 +68,7 @@ export function optionSetSaveEffectText(effect: OptionSetSaveEffect): string[] {
 export function offDefaultText(option: string, dishes: readonly string[]): string {
   return t(
     "Guests start with {option} on {dishes}. While {option} isn't offered, guests choose another choice themselves, and the menu can't be listed. To list other changes meanwhile, make another option the Default. Tick Offered again when it's back.",
-    { option, dishes: dishes.join(", ") },
+    { option, dishes: dishes.join(listSeparator()) },
   );
 }
 export type OptionChoiceKind = "One" | "Any" | "Quantity";
@@ -273,5 +273,5 @@ export function optionSetStateText(set: Pick<OptionSetRow, "archived" | "product
     return t(
       "Saved, not on any product yet — customers cannot choose it until you add it to a product and publish a menu with that product.",
     );
-  return t("On {value}.", { value: set.productNames.join(", ") });
+  return t("On {value}.", { value: set.productNames.join(listSeparator()) });
 }

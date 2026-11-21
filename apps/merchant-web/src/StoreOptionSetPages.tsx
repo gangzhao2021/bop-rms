@@ -1,4 +1,4 @@
-import { t } from "./i18n/i18n.js";
+import { t, listSeparator } from "./i18n/i18n.js";
 import { noAccessHeading } from "./access-denied.js";
 import { NoAccessNotice } from "./NoAccessNotice.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
@@ -90,7 +90,7 @@ function Failure({
 }
 const offeredNames = (set: OptionSetRow) => {
   const names = set.options.filter((option) => option.offered).map((option) => option.name);
-  return names.length === 0 ? t("None offered") : names.join(", ");
+  return names.length === 0 ? t("None offered") : names.join(listSeparator());
 };
 
 export function StoreOptionSetListPage({
@@ -146,7 +146,7 @@ export function StoreOptionSetListPage({
                 <td data-label={t("Used on")}>
                   {set.productNames.length === 0
                     ? t("No product yet")
-                    : set.productNames.join(", ")}
+                    : set.productNames.join(listSeparator())}
                 </td>
               </tr>
             ))}
@@ -284,7 +284,7 @@ function OptionSetEditor({
       effects.push(
         t(
           "{dishes} will no longer start with {option}. Guests see the change after you list the menu.",
-          { dishes: dishes.join(", "), option: saved.name },
+          { dishes: dishes.join(listSeparator()), option: saved.name },
         ),
       );
   }

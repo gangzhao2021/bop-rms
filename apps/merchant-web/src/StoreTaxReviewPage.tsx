@@ -1,4 +1,4 @@
-import { t } from "./i18n/i18n.js";
+import { t, listSeparator } from "./i18n/i18n.js";
 import { noAccessHeading } from "./access-denied.js";
 import { NoAccessNotice } from "./NoAccessNotice.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
@@ -359,7 +359,7 @@ export function StoreTaxReviewPage({
                       .join(" · ")}
                   </td>
                   <td data-label={t("Products")}>
-                    {item.productNames.length === 0 ? "—" : item.productNames.join(", ")}
+                    {item.productNames.length === 0 ? "—" : item.productNames.join(listSeparator())}
                   </td>
                 </tr>
               ))}

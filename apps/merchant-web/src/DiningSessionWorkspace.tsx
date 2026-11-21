@@ -282,7 +282,9 @@ export function guestRoundPaymentNotice(
   const names =
     rounds.length === 1
       ? t("Round {roundNumber}", { roundNumber: String(first.roundNumber) })
-      : t("Rounds {value}", { value: rounds.map((round) => String(round.roundNumber)).join(", ") });
+      : t("Rounds {value}", {
+          value: rounds.map((round) => String(round.roundNumber)).join(listSeparator()),
+        });
   const remainingMs = Date.parse(first.payBy) - now;
   const at = storeTime(first.payBy, timeZone, false, "Guest");
   // WP-2423 abandoned payment: still here well after the deadline, the card provider couldn't
@@ -299,7 +301,9 @@ export function guestRoundPaymentNotice(
             unconfirmed.length === 1
               ? t("Round {roundNumber}", { roundNumber: String(firstUnconfirmed.roundNumber) })
               : t("Rounds {value}", {
-                  value: unconfirmed.map((round) => String(round.roundNumber)).join(", "),
+                  value: unconfirmed
+                    .map((round) => String(round.roundNumber))
+                    .join(listSeparator()),
                 }),
           payBy: storeTime(firstUnconfirmed.payBy, timeZone, false, "Guest"),
         },

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { NoAccessNotice } from "./NoAccessNotice.js";
 import { Link } from "react-router";
 import { useBrowserOffline } from "./stale-read.js";
-import { countOf, t, saidTable } from "./i18n/i18n.js";
+import { countOf, t, saidTable, listSeparator } from "./i18n/i18n.js";
 import { orderMoney } from "./order-money.js";
 import { elapsedText } from "./elapsed-text.js";
 import { openedOnEarlierDay } from "./earlier-day-tables.js";
@@ -225,7 +225,9 @@ export function TonightSummaryView({
             ? t("Checking out")
             : t("Seated");
   const tableNames = (tables: typeof open) =>
-    tables.map((table) => t("Table {table}", { table: saidTable(table.tableLabel) })).join(", ");
+    tables
+      .map((table) => t("Table {table}", { table: saidTable(table.tableLabel) }))
+      .join(listSeparator());
   const c = summary.cancelled;
   // Every payment taken is counted in sales and tax, and the money agrees with the settlement.
   const matches = report.reconciliation.matchesSettlement && s.unmatchedMinor === "0";

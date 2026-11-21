@@ -1,4 +1,4 @@
-import { saidTable, t } from "./i18n/i18n.js";
+import { saidTable, t, listSeparator } from "./i18n/i18n.js";
 import { useEffect, useMemo, useState } from "react";
 import {
   CurrentOrderLines,
@@ -191,7 +191,7 @@ export function TableOrderRounds({
             mergedTableLabels.length === 0
               ? t("Whole bill to pay")
               : t("Whole bill to pay, with {tables}", {
-                  tables: mergedTableLabels.map((label) => saidTable(label)).join(", "),
+                  tables: mergedTableLabels.map((label) => saidTable(label)).join(listSeparator()),
                 }),
           )}
           rounds={{
@@ -260,7 +260,9 @@ export function TableOrderRounds({
                   {mergedTableLabels.length === 0
                     ? t("Whole bill to pay after comps")
                     : t("Whole bill to pay after comps, with {tables}", {
-                        tables: mergedTableLabels.map((label) => saidTable(label)).join(", "),
+                        tables: mergedTableLabels
+                          .map((label) => saidTable(label))
+                          .join(listSeparator()),
                       })}
                 </span>
                 <span>{orderMoney({ amountMinor: bill.totalMinor, currencyCode: "CAD" })}</span>

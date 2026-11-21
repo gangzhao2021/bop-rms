@@ -1,4 +1,4 @@
-import { t } from "./i18n/i18n.js";
+import { t, listSeparator } from "./i18n/i18n.js";
 import { wordGap } from "./word-gap.js";
 import { noAccessHeading } from "./access-denied.js";
 import { NoAccessNotice } from "./NoAccessNotice.js";
@@ -432,7 +432,7 @@ function MenuCustomerViewSection({
       {view.removedFromMenu.length > 0 ? (
         <p>
           {t("Removed from the menu (customers no longer see them): {value}.", {
-            value: view.removedFromMenu.map((item) => item.name).join(", "),
+            value: view.removedFromMenu.map((item) => item.name).join(listSeparator()),
           })}
         </p>
       ) : null}
@@ -649,7 +649,7 @@ function MenuBuilder({
         ? item.productName
         : `${item.productName} — ${item.sizeName}`,
     )
-    .join(", ");
+    .join(listSeparator());
   const offerCommand = availability?.command?.bind(availability);
   const mayOffer = view.mayOfferHere === true && offerCommand !== undefined;
   const offerHidden = async () => {
@@ -810,7 +810,7 @@ function MenuBuilder({
           <p>
             {t(
               "These items have no price in the price book this Store uses; customers cannot be quoted for them: {value}.",
-              { value: unpriced.map(label).join(", ") },
+              { value: unpriced.map(label).join(listSeparator()) },
             )}
           </p>
         </StatePanel>

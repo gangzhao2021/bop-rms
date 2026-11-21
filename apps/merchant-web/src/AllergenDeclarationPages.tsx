@@ -1,4 +1,4 @@
-import { t } from "./i18n/i18n.js";
+import { t, listSeparator } from "./i18n/i18n.js";
 import { noAccessHeading } from "./access-denied.js";
 import { NoAccessNotice } from "./NoAccessNotice.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
@@ -188,7 +188,7 @@ export function AllergenListPage({
               <StoreDate value={view.registry.reviewedAt} />:{" "}
               {view.registry.entries
                 .map((entry) => allergenName(view.registry, entry.allergenReference, view.locale))
-                .join(", ")}
+                .join(listSeparator())}
             </p>
             <p>{view.registryTemplate.policyDocument}</p>
           </>
@@ -199,7 +199,7 @@ export function AllergenListPage({
                 "No allergen list is approved for the Brand. Proposed list ({jurisdictionCode}): {value}.",
                 {
                   jurisdictionCode: view.registryTemplate.jurisdictionCode,
-                  value: view.registryTemplate.allergens.map((a) => a.name).join(", "),
+                  value: view.registryTemplate.allergens.map((a) => a.name).join(listSeparator()),
                 },
               )}
             </p>

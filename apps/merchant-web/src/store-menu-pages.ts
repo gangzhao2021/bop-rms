@@ -1,4 +1,4 @@
-import { t } from "./i18n/i18n.js";
+import { t, listSeparator } from "./i18n/i18n.js";
 import { parseSoleOperatorGate, type SoleOperatorGateView } from "./SoleOperatorSelfApproval.js";
 import { newOperationReference } from "./operation-reference.js";
 // The guest app's own menu reader, so staff are told exactly what guests cannot be shown.
@@ -1012,9 +1012,9 @@ const orderTypeNames: Readonly<Record<string, string>> = {
 const plainCode = (code: string) =>
   code.charAt(0) + code.slice(1).toLowerCase().replaceAll("_", " ");
 export const channelText = (codes: readonly string[]) =>
-  codes.map((code) => channelNames[code] ?? plainCode(code)).join(", ");
+  codes.map((code) => channelNames[code] ?? plainCode(code)).join(listSeparator());
 export const orderTypeText = (codes: readonly string[]) =>
-  codes.map((code) => orderTypeNames[code] ?? plainCode(code)).join(", ");
+  codes.map((code) => orderTypeNames[code] ?? plainCode(code)).join(listSeparator());
 /** Items placed on the menu that customers at this Store cannot see because they are not offered
  * here, in menu order, without repeats. */
 export function itemsNotOfferedHere(view: MenuBuilderView): readonly MenuSellable[] {

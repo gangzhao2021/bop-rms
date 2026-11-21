@@ -1,4 +1,4 @@
-import { displayLocale, t, saidTable } from "./i18n/i18n.js";
+import { displayLocale, t, saidTable, listSeparator } from "./i18n/i18n.js";
 import { StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { serviceOperationReference } from "./service-control-client.js";
@@ -627,7 +627,7 @@ export function TableQrCodesPage({
           <StatePanel heading={t("Codes stop working soon")} tone="offline" status>
             <p>
               {t("{value}: {value2} working on {value3}. Replace and print {value4} before then.", {
-                value: expiring.map((row) => row.stableLabel).join(", "),
+                value: expiring.map((row) => row.stableLabel).join(listSeparator()),
                 value2: expiring.length === 1 ? t("this code stops") : t("these codes stop"),
                 value3: date(
                   expiring

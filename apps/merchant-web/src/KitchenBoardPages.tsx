@@ -863,15 +863,19 @@ export function KitchenAllergenLine({ item }: { readonly item: KitchenBoardItem 
           {allergens.contains.length > 0 ? (
             <strong>
               {part
-                ? t("Whole combo contains: {value}", { value: allergens.contains.join(", ") })
-                : t("Contains: {value}", { value: allergens.contains.join(", ") })}
+                ? t("Whole combo contains: {value}", {
+                    value: allergens.contains.join(listSeparator()),
+                  })
+                : t("Contains: {value}", { value: allergens.contains.join(listSeparator()) })}
             </strong>
           ) : null}
           {allergens.mayContain.length > 0 ? (
             <span>
               {part
-                ? t("Whole combo may contain: {value}", { value: allergens.mayContain.join(", ") })
-                : t("May contain: {value}", { value: allergens.mayContain.join(", ") })}
+                ? t("Whole combo may contain: {value}", {
+                    value: allergens.mayContain.join(listSeparator()),
+                  })
+                : t("May contain: {value}", { value: allergens.mayContain.join(listSeparator()) })}
             </span>
           ) : null}
         </>
