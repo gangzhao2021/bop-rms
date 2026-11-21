@@ -19,7 +19,11 @@ import {
   useKitchenRework,
   type RemakeChoice,
 } from "./KitchenRework.js";
-import type { KitchenReworkCancelReason, KitchenReworkView } from "./kitchen-rework-client.js";
+import {
+  kitchenReworkOpen,
+  type KitchenReworkCancelReason,
+  type KitchenReworkView,
+} from "./kitchen-rework-client.js";
 import {
   earlierDayText,
   earlierDayTickets,
@@ -448,6 +452,10 @@ export function kitchenBoardSearch(input: {
   const { search } = input;
   const match = (item: KitchenBoardItem) =>
     search === null || matchesKitchenOrderSearch(item, search);
+  const reworks =
+    search === null
+      ? input.reworks
+      : input.reworks.filter((rework) => matchesKitchenOrderLabel(rework.orderLabel, search));
   const earlier = earlierDayTickets(
     input.items.filter(isActiveKitchenWork),
     input.today,
@@ -480,10 +488,13 @@ export function kitchenBoardSearch(input: {
         : (input.awaitingAcceptance ?? []).filter((label) =>
             matchesKitchenOrderLabel(label, search),
           ),
-    reworks:
-      search === null
-        ? input.reworks
-        : input.reworks.filter((rework) => matchesKitchenOrderLabel(rework.orderLabel, search)),
+    reworks,
+    /**
+     * The remakes still to be made, the only ones the Remakes lane shows. Batch 39: anything that
+     * counts or announces remakes reads this, never `reworks` (which keeps finished ones for
+     * Recently finished), so a finished remake leaves no count behind.
+     */
+    openReworks: reworks.filter(kitchenReworkOpen),
     /** Board items the search finds, for the recently finished list. */
     items: search === null ? input.items : input.items.filter(match),
   };
@@ -2721,6 +2732,18 @@ export function KitchenBoardScreen({
     else if (known.signature !== signature)
       slots.current.set(group.orderReference, { signature, changedAt: performance.now() });
   });
+  // A remake card is a slot too: one that just arrived ignores taps for a moment, as a ticket does.
+  board.openReworks.forEach((rework, index) => {
+    const signature = "remake:" + index;
+    const known = slots.current.get(rework.reworkReference);
+    if (known === undefined)
+      slots.current.set(rework.reworkReference, {
+        signature,
+        changedAt: slotsSeeded.current ? performance.now() : -Infinity,
+      });
+    else if (known.signature !== signature)
+      slots.current.set(rework.reworkReference, { signature, changedAt: performance.now() });
+  });
   slotsSeeded.current = true;
   // A ticket that moved is a changed slot too (a line of the ticket above it left, or a ticket before
   // it closed): the finger that was over its Done may now be over another order's. Judged by where
@@ -2967,15 +2990,6 @@ export function KitchenBoardScreen({
                   },
                 ]
               : []),
-            ...(board.reworks.length > 0
-              ? [
-                  {
-                    key: "remakes",
-                    tone: "New" as const,
-                    text: t("Remakes below: {count}", { count: board.reworks.length }),
-                  },
-                ]
-              : []),
             // The toggle already says the sound is off; this says what that means.
             ...(onSoundToggle && !soundOn
               ? [
@@ -3044,6 +3058,30 @@ export function KitchenBoardScreen({
         ) : (
           queueBar
         )}
+        {remakes && board.openReworks.length > 0 ? (
+          // Batch 39 (sweep 38): a remake is a dish a guest is already waiting for, so open remakes
+          // lead the board, above every ticket. One arriving moves the tickets below it, which the
+          // board's slots notice (DEC-KITCHEN-ONE-TAP): a tap there is not taken and says so.
+          <div className="kitchen-board-lanes kitchen-board-remakes">
+            <KitchenRemakeLane
+              items={board.openReworks}
+              today={today}
+              readOnly={remakeReadOnly}
+              slotRef={slotRef}
+              movedReference={movedSlot?.slot ?? null}
+              onAdvance={(rework) => {
+                if (takenIn(rework.reworkReference)) remakes.onAdvance(rework);
+              }}
+              onCancel={
+                remakes.canRework && remakes.onCancel
+                  ? (rework: KitchenReworkView) => {
+                      if (takenIn(rework.reworkReference)) setCancelTarget(rework);
+                    }
+                  : undefined
+              }
+            />
+          </div>
+        ) : null}
         <dialog
           className="kitchen-filter-sheet"
           ref={filterSheetRef}
@@ -3440,19 +3478,6 @@ export function KitchenBoardScreen({
             })}
           </div>
         )}
-        {remakes ? (
-          // Below the tickets: a remake from another tablet never moves a ticket under a finger.
-          // The row at the top says it is here.
-          <div className="kitchen-board-lanes kitchen-board-remakes">
-            <KitchenRemakeLane
-              items={board.reworks}
-              today={today}
-              readOnly={remakeReadOnly}
-              onAdvance={remakes.onAdvance}
-              onCancel={remakes.canRework && remakes.onCancel ? setCancelTarget : undefined}
-            />
-          </div>
-        ) : null}
         {remakes?.canRework && remakes.onCancel ? (
           <KitchenRemakeCancelDialog
             rework={cancelTarget}

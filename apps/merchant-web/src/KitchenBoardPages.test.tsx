@@ -1582,6 +1582,19 @@ describe("DEC-KITCHEN-STALE-TICKETS earlier business days on the kitchen board",
       search: null,
     });
     expect(all.reworks).toBe(reworks);
+    // Batch 39: a finished or cancelled remake is kept for Recently finished but never counted.
+    const finished = kitchenBoardSearch({
+      items: view.items,
+      reworks: [
+        { ...remake("2"), status: "Completed" as const },
+        { ...remake("6"), status: "Cancelled" as const },
+        { ...remake("6"), reworkReference: remake("6").reworkReference + "0" },
+      ],
+      today: "2026-08-12",
+      search: null,
+    });
+    expect(finished.reworks).toHaveLength(3);
+    expect(finished.openReworks.map((rework) => rework.status)).toEqual(["Queued"]);
     expect(all.earlierShown).toHaveLength(1);
     expect(earlierDaySearchText(1, "6")).toBe(
       "1 ticket from an earlier day has number or table “6”",

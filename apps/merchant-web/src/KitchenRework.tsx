@@ -269,15 +269,24 @@ function orderText(label: KitchenReworkView["orderLabel"]): string {
   return kitchenOrderText(label);
 }
 
-/** Open remakes first in their own lane, clearly marked; finished ones stay out of the way. */
+/**
+ * Open remakes in their own lane at the top of the board, clearly marked: each is a dish a guest is
+ * already waiting for. Finished and cancelled ones stay out of the way.
+ */
 export function KitchenRemakeLane({
   items,
   readOnly,
   onAdvance,
   onCancel,
   today,
+  slotRef,
+  movedReference = null,
 }: {
   readonly items: readonly KitchenReworkView[];
+  /** DEC-KITCHEN-ONE-TAP: each card is a slot the board watches, as its tickets are. */
+  readonly slotRef?: ((key: string) => (element: HTMLElement | null) => void) | undefined;
+  /** The remake whose tap was just not taken because it had moved under the finger. */
+  readonly movedReference?: string | null | undefined;
   /** The Store's current business day: a remake for an earlier day's order says its day. */
   readonly today?: string | null | undefined;
   readonly readOnly: boolean;
@@ -297,8 +306,13 @@ export function KitchenRemakeLane({
         {open.map((rework) => (
           <article
             key={rework.reworkReference}
+            ref={slotRef?.(rework.reworkReference)}
             className="kitchen-work-item kitchen-work-item--remake"
             data-status={rework.status}
+            aria-label={t("Remake: {displayName}, {orderLabel}", {
+              displayName: rework.displayName,
+              orderLabel: orderText(rework.orderLabel),
+            })}
           >
             <header className="kitchen-ticket__header">
               <h4 className="kitchen-order-group__label">
@@ -319,7 +333,8 @@ export function KitchenRemakeLane({
             </div>
             <div className="kitchen-work-item__state">
               <strong data-status={rework.status}>
-                {rework.status === "In Progress" ? t("In progress") : rework.status}
+                {/* Staff words, never the status code (it showed "QUEUED" in Chinese too). */}
+                {rework.status === "In Progress" ? t("In progress") : t("To make")}
               </strong>
             </div>
             <div className="kitchen-work-item__facts">
@@ -349,6 +364,11 @@ export function KitchenRemakeLane({
                 </p>
               ) : null}
             </div>
+            {movedReference === rework.reworkReference ? (
+              <p className="kitchen-ticket__top-text" data-tone="moved" aria-live="polite">
+                {t("Moved. Tap again.")}
+              </p>
+            ) : null}
             <div className="kitchen-work-item__actions">
               <button type="button" disabled={readOnly} onClick={() => onAdvance(rework)}>
                 {rework.status === "Queued" ? t("Start remake") : t("Remake done")}

@@ -658,7 +658,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "More orders are waiting. They show as you finish these.": "还有订单在等，做完这些就会显示。",
   "{count} more orders are waiting. They show as you finish these.":
     "还有 {count} 张单在等，做完这些就会显示。",
-  "Remakes below: {count}": "下方有 {count} 道重做",
+  "Remake: {displayName}, {orderLabel}": "重做：{displayName}，{orderLabel}",
   "Start all": "全部开始做",
   Finished: "做好了",
   "Mark {displayName} finished": "{displayName}做好了",

@@ -160,6 +160,13 @@ async function board(page: Page) {
   return commands;
 }
 
+/**
+ * Batch 39: open remakes now lead the board, so a remake card that just arrived, or that a notice
+ * above it moved, ignores taps for a moment (DEC-KITCHEN-ONE-TAP, 600 ms) as a ticket does. A cook's
+ * tap comes after that; the test waits the same.
+ */
+const settled = (page: Page) => page.waitForTimeout(700);
+
 async function expectLayout(page: Page, name: string) {
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
@@ -222,8 +229,10 @@ test("@production WP-2423 Q26: the kitchen remakes a dropped dish and puts a dis
   await expect(lane).not.toContainText("DROPPED");
   await expectLayout(page, "kitchen-remake-lane");
 
+  await settled(page);
   await lane.getByRole("button", { name: "Start remake" }).click();
   await expect(lane.getByRole("button", { name: "Remake done" })).toBeVisible();
+  await settled(page);
   await lane.getByRole("button", { name: "Remake done" }).click();
   await expect(lane).toHaveCount(0);
   expect(commands.map((command) => [command.action, command.expectedVersion])).toEqual([
@@ -301,6 +310,7 @@ test("@production WP-2423 (2026-10-18): a remake opened by mistake or no longer 
   await page.getByRole("button", { name: "Dismiss" }).click();
 
   const lane = page.getByRole("region", { name: "Remakes" });
+  await settled(page);
   await lane
     .getByRole("button", { name: "Cancel remake of Beef noodle soup, Table T4 · Order 21" })
     .click();
@@ -371,6 +381,7 @@ test("@production WP-2423 (2026-10-18): a cancellation whose answer was lost is 
     }
     return route.fallback();
   });
+  await settled(page);
   await page
     .getByRole("region", { name: "Remakes" })
     .getByRole("button", { name: "Cancel remake of Beef noodle soup, Table T4 · Order 21" })
@@ -387,3 +398,151 @@ test("@production WP-2423 (2026-10-18): a cancellation whose answer was lost is 
   expect(cancels).toHaveLength(2);
   expect(cancels[1]).toEqual(cancels[0]);
 });
+
+/**
+ * WP-2423 batch 39 (sweep 38): a remake is a dish a guest is waiting for. Open remakes sit at the
+ * top of the board, above every ticket (days-old overdue ones included), on the kitchen display
+ * and on the back office Kitchen page; one sent from another screen shows at the next refresh; and
+ * a finished remake leaves no count or line behind.
+ */
+for (const operatorStatus of ["Named", "Unverified"] as const) {
+  test(`@production WP-2423 batch 39: open remakes lead the board and a finished one leaves no count (${operatorStatus === "Named" ? "kitchen display" : "back office"})`, async ({
+    page,
+  }) => {
+    test.setTimeout(60_000);
+    await board(page);
+    const dishes = ["Beef noodle soup", "Mapo tofu", "Fried rice", "Wonton soup", "Dumplings"];
+    const items = Array.from({ length: 12 }, (_, index) => ({
+      workItemReference: id(200 + index),
+      ticketReference: id(300 + index),
+      orderReference: id(400 + index),
+      orderItemReference: id(500 + index),
+      stationReference: id(5),
+      localizedDisplayNames: { "en-CA": dishes[index % dishes.length] },
+      allergens: { status: "Unavailable" },
+      orderLabel: {
+        orderNumber: String(index + 1),
+        orderType: "DineIn",
+        tableLabel: `T${index + 1}`,
+      },
+      customerNote: null,
+      selectedOptions: [],
+      status: "Queued",
+      requiredQuantity: 1,
+      completedQuantity: 0,
+      // The first four waited for days (seen at a test Store whose old tickets were never closed).
+      workItemCreatedAt: index < 4 ? "2026-09-29T17:40:00.000Z" : "2026-10-14T17:40:00.000Z",
+      acceptedAt: index < 4 ? "2026-09-29T17:41:00.000Z" : "2026-10-14T17:41:00.000Z",
+      orderItemReadyAt: null,
+      ticketAggregateVersion: "1",
+      workItemVersion: "1",
+    }));
+    await page.route("**/merchant/kitchen/query", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          storeReference: scope.storeReference,
+          operatorStatus,
+          projectionName: "kitchen_work_queue_v1",
+          projectionVersion: 1,
+          projectionGenerationReference: id(6),
+          projectedAt: at,
+          partial: false,
+          stale: false,
+          freshnessStatus: "Fresh",
+          items,
+          nextCursor: null,
+        },
+      }),
+    );
+    const remake = (n: number, status: string) => ({
+      reworkReference: id(600 + n),
+      originalWorkItemReference: id(1),
+      orderReference: id(3),
+      orderItemReference: id(4),
+      reasonCode: "DROPPED",
+      note: null,
+      quantity: 1,
+      wasteApplies: true,
+      status,
+      version: status === "Queued" ? 1 : 3,
+      createdAt: at,
+      startedAt: status === "Queued" ? null : at,
+      completedAt: status === "Completed" ? at : null,
+      displayName: "Hand-pulled noodles",
+      selectedOptions: [],
+      orderLabel: { orderNumber: "21", orderType: "DineIn", tableLabel: "T4" },
+      customerNote: null,
+      allergens: { status: "Unavailable" },
+    });
+    // Only a remake made earlier and finished: nothing to find, nothing to count.
+    let reworks: Record<string, unknown>[] = [remake(1, "Completed")];
+    await page.route("**/merchant/kitchen/rework/query", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          storeReference: scope.storeReference,
+          observedAt: at,
+          canRework: true,
+          items: reworks,
+        },
+      }),
+    );
+    await page.goto("/operations/kitchen");
+    const firstTicket = page.locator("section.kitchen-ticket").first();
+    await expect(firstTicket).toBeVisible();
+    await page.reload();
+    await expect(firstTicket).toBeVisible();
+    await expect(page.getByRole("region", { name: "Remakes" })).toHaveCount(0);
+    await expect(page.locator(".kitchen-status-row")).not.toContainText(/remake/iu);
+    await expect(page.getByText(/Remakes below/u)).toHaveCount(0);
+
+    // Another screen sends a remake: it shows at the next refresh, at the top, without scrolling.
+    reworks = [remake(2, "Queued"), ...reworks];
+    const lane = page.getByRole("region", { name: "Remakes" });
+    await expect(lane).toBeVisible({ timeout: 15_000 });
+    const remakeCard = lane.getByRole("article", {
+      name: "Remake: Hand-pulled noodles, Table T4 · Order 21",
+    });
+    await expect(remakeCard).toBeVisible();
+    for (const [width, height] of [
+      [1440, 900],
+      [1024, 768],
+    ] as const) {
+      await page.setViewportSize({ width, height });
+      await page.evaluate(() => window.scrollTo(0, 0));
+      await expect(
+        remakeCard.getByRole("heading", { name: "Hand-pulled noodles" }),
+      ).toBeInViewport();
+      if (operatorStatus === "Named")
+        await expect(lane.getByRole("button", { name: "Start remake" })).toBeInViewport();
+      const laneBox = await lane.boundingBox();
+      const ticketBox = await firstTicket.boundingBox();
+      expect(laneBox && ticketBox && laneBox.y < ticketBox.y).toBe(true);
+      await page.screenshot({
+        path: `test-results/kitchen-remake-top-${operatorStatus}-${width}.png`,
+      });
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await expect(page.locator(".kitchen-status-row")).not.toContainText(/remakes below/iu);
+    // The same in Chinese: the lane is named in staff words and still leads the board.
+    await page.getByRole("button", { name: "切换到中文" }).click();
+    const zhLane = page.getByRole("region", { name: "重做" });
+    await expect(
+      zhLane.getByRole("article", { name: /^重做：Hand-pulled noodles，/u }),
+    ).toBeInViewport();
+    await expect(page.locator(".kitchen-status-row")).not.toContainText("下方有");
+    await expect(zhLane).toContainText("待做");
+    await expect(zhLane).not.toContainText(/queued/iu);
+    await page.screenshot({
+      path: `test-results/kitchen-remake-top-${operatorStatus}-1440-zh.png`,
+    });
+    await page.getByRole("button", { name: "Switch to English" }).click();
+    await expect(lane).toBeVisible();
+
+    // Finished on another screen: gone at the next refresh, and no count is left behind.
+    reworks = [remake(2, "Completed"), remake(1, "Completed")];
+    await expect(lane).toHaveCount(0, { timeout: 15_000 });
+    await expect(page.locator(".kitchen-status-row")).not.toContainText(/remake/iu);
+  });
+}
