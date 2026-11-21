@@ -1,7 +1,12 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { createTableCheckoutClient, parseTableBill } from "./table-checkout-client.js";
-import { defaultRoundParts, splitRoundSender, TableSplitControls } from "./TableSplit.js";
+import {
+  byDishUnitAmounts,
+  defaultRoundParts,
+  splitRoundSender,
+  TableSplitControls,
+} from "./TableSplit.js";
 import { splitBillFixture } from "./table-split.fixtures.js";
 
 describe("WP-2423 item 8 ④ split bill at the Tables checkout", () => {
@@ -323,5 +328,157 @@ describe("b40 who sent each round on a merged bill", () => {
       "phone 4",
       "entered by staff",
     ]);
+  });
+});
+
+// b41 (v15 b40 live, TM2 H40 A with H40 B merged in): Beef noodles $12.50 on rounds 1 and 2, Soy
+// milk $3.25 on round 3 at 13 %, round 4 taken off. The bill is $31.92: round 3 carries the bill's
+// −$0.01 tax rounding ($3.66). By dish listed Soy milk at $3.67, so the dishes came to $31.93, and
+// "Split this way" made Part 1 (Beef noodles + Soy milk) $17.79, not the $17.80 the lines said.
+describe("b41: By dish lists each dish as the bill charges it", () => {
+  const id = (n: number) => "0190a441-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const dish = (item: number, name: string, subtotal: string, total: string, quantity = 1) => ({
+    orderItemReference: id(item),
+    quantity,
+    displayName: name,
+    subtotalMinor: subtotal,
+    totalMinor: total,
+    reduction: null,
+  });
+  const round = (
+    roundNumber: number,
+    items: ReturnType<typeof dish>[],
+    sums: [string, string, string, string],
+  ) => ({
+    roundNumber,
+    orderBatchReference: id(100 + roundNumber),
+    submissionReference: id(200 + roundNumber),
+    items,
+    takenOffDishes: [],
+    subtotalMinor: sums[0],
+    taxMinor: sums[1],
+    totalMinor: sums[2],
+    taxRoundingMinor: sums[3],
+    paid: false,
+    orderedBy: roundNumber === 2 || roundNumber === 4 ? null : 1,
+    fromTableLabel: roundNumber === 2 || roundNumber === 4 ? "H40 B (TEST)" : null,
+  });
+  const liveBill = (split: unknown = null) =>
+    parseTableBill({
+      ...splitBillFixture(),
+      tableLabel: "H40 A (TEST)",
+      rounds: [
+        round(1, [dish(1, "Beef noodles (TEST)", "1250", "1413")], ["1250", "163", "1413", "0"]),
+        round(2, [dish(2, "Beef noodles (TEST)", "1250", "1413")], ["1250", "163", "1413", "0"]),
+        round(3, [dish(3, "Soy milk", "325", "367")], ["325", "41", "366", "-1"]),
+        round(4, [], ["0", "0", "0", "0"]),
+      ],
+      owed: { subtotalMinor: "2825", taxMinor: "367", totalMinor: "3192" },
+      split,
+    });
+  const key = (item: number, unit = 1) => `${id(item)}:${unit}`;
+
+  it("puts the round's cent on its line, so the lines add up to the bill", () => {
+    const amounts = byDishUnitAmounts(liveBill(), () => null, 2);
+    expect([key(1), key(2), key(3)].map((k) => amounts.get(k))).toEqual([1413n, 1413n, 366n]);
+    expect([...amounts.values()].reduce((sum, value) => sum + value, 0n)).toBe(3192n);
+    // Beef noodles and Soy milk to part 1, the merged table's noodles to part 2: part 1's lines are
+    // the $17.79 the split makes.
+    const parts = new Map([
+      [key(1), 1],
+      [key(3), 1],
+      [key(2), 2],
+    ]);
+    const chosen = byDishUnitAmounts(liveBill(), (k) => parts.get(k) ?? null, 2);
+    expect((chosen.get(key(1)) ?? 0n) + (chosen.get(key(3)) ?? 0n)).toBe(1779n);
+  });
+
+  it("splits a line of several evenly, the leftover cent on the first, and the rounding on the part with most tax", () => {
+    // 3 × tea $1.00 (+13 % = $3.39) and a $6.25 cucumber ($7.06) on one round whose bill share is
+    // $10.44 (−$0.01). Part 1 takes two teas ($0.26 tax), part 2 the cucumber ($0.81 tax): part 2
+    // has most of the round's tax, so its line takes the cent.
+    const bill = parseTableBill({
+      ...splitBillFixture(),
+      rounds: [
+        round(
+          1,
+          [dish(11, "Tea", "300", "339", 3), dish(12, "Smashed cucumber", "625", "706")],
+          ["925", "119", "1044", "-1"],
+        ),
+      ],
+      owed: { subtotalMinor: "925", taxMinor: "119", totalMinor: "1044" },
+      split: null,
+    });
+    const parts = new Map([
+      [key(11, 1), 1],
+      [key(11, 2), 1],
+      [key(12), 2],
+    ]);
+    const amounts = byDishUnitAmounts(bill, (k) => parts.get(k) ?? null, 2);
+    expect([key(11, 1), key(11, 2), key(11, 3), key(12)].map((k) => amounts.get(k))).toEqual([
+      113n,
+      113n,
+      113n,
+      705n,
+    ]);
+    expect([...amounts.values()].reduce((sum, value) => sum + value, 0n)).toBe(1044n);
+    // 2 × $5.01 = $10.01: $5.01 and $5.00, never $5.00 twice.
+    const odd = parseTableBill({
+      ...splitBillFixture(),
+      rounds: [round(1, [dish(13, "Bao", "886", "1001", 2)], ["886", "115", "1001", "0"])],
+      owed: { subtotalMinor: "886", taxMinor: "115", totalMinor: "1001" },
+      split: null,
+    });
+    const halves = byDishUnitAmounts(odd, () => null, 2);
+    expect([halves.get(key(13, 1)), halves.get(key(13, 2))]).toEqual([501n, 500n]);
+  });
+
+  it("lists Soy milk at $3.66 in By dish, as checkout reads round 3", () => {
+    const html = renderToStaticMarkup(
+      <TableSplitControls
+        bill={liveBill({
+          mode: "ByItems",
+          stale: false,
+          dishChoices: [
+            { orderItemReference: id(1), unit: 1, partNumber: 1 },
+            { orderItemReference: id(3), unit: 1, partNumber: 1 },
+            { orderItemReference: id(2), unit: 1, partNumber: 2 },
+          ],
+          paidParts: 0,
+          remainingMinor: "3192",
+          parts: [
+            {
+              partNumber: 1,
+              amountMinor: "1779",
+              subtotalMinor: "1575",
+              taxMinor: "204",
+              roundNumbers: [1, 3],
+              dishes: [],
+              payment: null,
+              guestPaying: false,
+            },
+            {
+              partNumber: 2,
+              amountMinor: "1413",
+              subtotalMinor: "1250",
+              taxMinor: "163",
+              roundNumbers: [2],
+              dishes: [],
+              payment: null,
+              guestPaying: false,
+            },
+          ],
+        })}
+        csrf={"a".repeat(43)}
+        client={createTableCheckoutClient()}
+        disabled={false}
+        selectedPart={null}
+        onSelectPart={() => undefined}
+        onBill={() => undefined}
+        onProblem={() => undefined}
+      />,
+    );
+    expect(html).toContain("Soy milk · $3.66");
+    expect(html).not.toContain("$3.67");
   });
 });

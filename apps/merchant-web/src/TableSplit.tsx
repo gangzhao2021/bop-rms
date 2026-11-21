@@ -87,6 +87,82 @@ export function splitRoundSender(
   return t("phone {number}", { number: String(round.orderedBy) });
 }
 
+/** `total` over `count` equal units by largest remainder (the earlier units take the leftover). */
+function equalUnits(total: bigint, count: number): bigint[] {
+  const base = total / BigInt(count);
+  let left = total - base * BigInt(count);
+  return Array.from({ length: count }, () => {
+    if (left <= 0n) return base;
+    left -= 1n;
+    return base + 1n;
+  });
+}
+
+/**
+ * b41 (v15 b40 live: "Soy milk · $3.67" in By dish while the bill's round 3 reads $3.66, so the
+ * dishes added up to $31.93 against a $31.92 bill): each unit of each dish as "By dish" lists it,
+ * so the list adds up to the bill exactly. Each unit is its dish's own price split evenly over the
+ * units (the server's split), and each round's share of the bill's tax rounding is on one line, by
+ * the split's own rule (DEC-DINE-IN-SPLIT-BILL, ByItems): the part with most of that round's tax
+ * takes it (the first such part), and on that part's line with most tax (the first such line;
+ * a line everyone shares when the part has none of its own). So with the dishes given to parts as
+ * chosen, each part's own lines add up to the part "Split this way" makes.
+ */
+export function byDishUnitAmounts(
+  bill: Pick<TableBill, "rounds">,
+  partOf: (key: string) => number | null,
+  people: number,
+): ReadonlyMap<string, bigint> {
+  const amounts = new Map<string, bigint>();
+  const owing = bill.rounds
+    .filter((round) => round.totalMinor !== "0")
+    .sort((a, b) => a.roundNumber - b.roundNumber);
+  owing.forEach((round, roundIndex) => {
+    const units: { key: string; part: number | null; tax: bigint }[] = [];
+    let dishes = 0n;
+    for (const item of round.items) {
+      const total = BigInt(item.totalMinor);
+      const subtotal = BigInt(item.subtotalMinor) - BigInt(item.reduction?.netMinor ?? "0");
+      const totals = equalUnits(total, item.quantity);
+      const taxes = equalUnits(total - subtotal, item.quantity);
+      dishes += total;
+      totals.forEach((amount, index) => {
+        const key = `${item.orderItemReference}:${index + 1}`;
+        amounts.set(key, amount);
+        const part = partOf(key);
+        units.push({ key, part, tax: taxes[index] ?? 0n });
+      });
+    }
+    const rounding = BigInt(round.totalMinor) - dishes;
+    if (rounding === 0n || units.length === 0) return;
+    const parts = Array.from({ length: Math.max(people, 1) }, () => 0n);
+    let shared = 0n;
+    for (const unit of units)
+      if (unit.part === null || unit.part > parts.length) shared += unit.tax;
+      else parts[unit.part - 1] = (parts[unit.part - 1] ?? 0n) + unit.tax;
+    const shares = equalUnits(shared, parts.length);
+    parts.forEach((_, index) => {
+      parts[index] = (parts[index] ?? 0n) + (shares[(index + roundIndex) % parts.length] ?? 0n);
+    });
+    let most = 0;
+    parts.forEach((tax, index) => {
+      if (tax > (parts[most] ?? 0n)) most = index;
+    });
+    const largest = (candidates: typeof units) =>
+      candidates.reduce<(typeof units)[number] | undefined>(
+        (best, unit) => (best === undefined || unit.tax > best.tax ? unit : best),
+        undefined,
+      );
+    const carrier =
+      largest(units.filter((unit) => unit.part === most + 1)) ??
+      largest(units.filter((unit) => unit.part === null || unit.part > parts.length)) ??
+      largest(units);
+    if (carrier !== undefined)
+      amounts.set(carrier.key, (amounts.get(carrier.key) ?? 0n) + rounding);
+  });
+  return amounts;
+}
+
 export function TableSplitControls({
   bill,
   csrf,
@@ -127,7 +203,6 @@ export function TableSplitControls({
           unit: index + 1,
           quantity: item.quantity,
           displayName: item.displayName,
-          unitMinor: BigInt(item.totalMinor) / BigInt(item.quantity),
         })),
       ),
     );
@@ -158,6 +233,8 @@ export function TableSplitControls({
   );
   const [busy, setBusy] = useState(false);
   const owing = bill.rounds.filter((round) => round.totalMinor !== "0");
+  // b41: each line as the bill charges it, its round's tax rounding included, so they add up.
+  const unitAmounts = byDishUnitAmounts(bill, partOfUnit, people);
   const apply = async (next: "Whole" | "Even" | "ByRounds" | "ByItems", count = people) => {
     if (busy || disabled || locked) return;
     setBusy(true);
@@ -372,7 +449,7 @@ export function TableSplitControls({
               return (
                 <li key={key}>
                   <span>
-                    {name} · {cad(unit.unitMinor.toString())}
+                    {name} · {cad((unitAmounts.get(key) ?? 0n).toString())}
                   </span>
                   <label>
                     <span className="sr-only">{t("Who pays for {dish}", { dish: name })}</span>
