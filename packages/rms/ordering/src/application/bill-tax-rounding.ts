@@ -357,8 +357,12 @@ export function computeBillTaxRounding(
           // recorded with the earlier sharing records a new version before it is paid.
           billTaxRoundingAllocation,
           options.carrierOrderReference ?? null,
-          // b39: a merged Order keeps its own bill; a merged bill recorded before records anew.
-          ...(options.carrierOrderReference === undefined ? [] : [billTaxRoundingMergedOrders]),
+          // b39: a merged Order keeps its own bill; a merged bill (rounds of more than one Order)
+          // recorded before records anew. An unmerged bill keeps the digest it had.
+          ...(options.carrierOrderReference !== undefined &&
+          new Set(rounds.map((round) => round.orderReference)).size > 1
+            ? [billTaxRoundingMergedOrders]
+            : []),
           rounds.map((round) => [
             round.orderReference,
             round.orderBatchReference,

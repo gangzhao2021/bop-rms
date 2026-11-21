@@ -263,6 +263,22 @@ describe("WP-2423 DEC-TAX-WHOLE-RECEIPT: the bill's tax rounding", () => {
     expect(taxOf(h4, merged)).toBe(611n);
   });
 
+  // b39 review: the merged-Order marker is named only when the rounds span more than one Order, so
+  // an unmerged table's bill with its carrier named keeps the digest recorded before b39 (computed
+  // with the rule at 9d8c3d60) and records no new version on rollout.
+  it("keeps an unmerged bill's recorded digest when its carrier is named", () => {
+    const result = computeBillTaxRounding(
+      [round(1, 105n, 14n), round(2, 105n, 14n), round(3, 105n, 14n)],
+      { carrierOrderReference: id(1) },
+    );
+    expect(result.lines.map((line) => [line.orderBatchReference, line.amountMinor])).toEqual([
+      [id(103), -1n],
+    ]);
+    expect(result.basisDigest).toBe(
+      "sha256:63e8b7a3817e6f89aac473e2259597a5d4bee99ce34e570af170e96fffef10f1",
+    );
+  });
+
   it("charges the whole-bill tax exactly whoever holds the bill", () => {
     const prices = [105n, 299n, 1n, 1349n, 875n, 33n, 450n];
     for (let size = 1; size <= prices.length; size++)
