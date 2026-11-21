@@ -18,6 +18,8 @@ import {
   isTableOpenedWhileAway,
   setTableOpenedWhileAway,
   setUnseatedTableWait,
+  keepUnseatedTableWait,
+  forgetKeptUnseatedTableWait,
   type GuestTableStartAnswer,
 } from "../session/customer-transaction-context.js";
 import { tableNotOpenHeading, tableNotOpenWaitText } from "./table-wait-away.js";
@@ -253,6 +255,12 @@ export function EntryContextPage({
             storeDisplayName: state.context.storeDisplayName,
             tableLabel: state.kind === "TableNotOpen" ? (state.tableLabel ?? null) : null,
             check: probe === undefined ? null : () => probe.call(owner),
+            // Batch 43: kept in this tab, so a reload on Your table or Cart still waits.
+            context: {
+              publicStoreReference: state.context.publicStoreReference,
+              brandDisplayName: state.context.brandDisplayName,
+              locale: state.context.locale,
+            },
           }
         : null,
     );
@@ -328,6 +336,7 @@ export function EntryContextPage({
             if (answer.kind === "Waiting") {
               failures = 0;
               setWaitTrouble(false);
+              keepUnseatedTableWait();
               return true;
             }
             if (answer.kind === "Busy") {
@@ -343,6 +352,7 @@ export function EntryContextPage({
             // says so and asks nothing more by itself; "We've been seated" still asks the entry.
             if (answer.kind === "Refused") {
               setWaitRefused(true);
+              forgetKeptUnseatedTableWait();
               return "Paused";
             }
             failures = 0;

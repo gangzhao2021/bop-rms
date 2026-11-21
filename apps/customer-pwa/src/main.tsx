@@ -16,6 +16,7 @@ import { createBrowserDiningBindingClient } from "./dining/dining-binding-client
 import {
   captureCustomerCsrfContext,
   getCustomerCsrfCredential,
+  restoreUnseatedTableWait,
   setCustomerCsrfCredential,
 } from "./session/customer-transaction-context.js";
 import {
@@ -218,6 +219,18 @@ async function start() {
     replaceState: () => undefined,
     online: () => window.navigator.onLine,
   };
+  // Batch 43 (v15 b42 verify): a reload of Your table or Cart (or a tab the phone discarded) while
+  // staff haven't opened the table yet still waits there, with the Store's header, and asks this
+  // browser's waiting scan (its cookie, never a code kept in the page) whether the table is open.
+  let waitingScan: ReturnType<typeof createCustomerEntryClient> | null = null;
+  const waitingContext = openedAtEntry
+    ? null
+    : restoreUnseatedTableWait(() => {
+        waitingScan ??= createCustomerEntryClient(boundary, undefined, { resume: true });
+        return (
+          waitingScan.waitForTable?.() ?? Promise.resolve(Object.freeze({ kind: "Busy" as const }))
+        );
+      });
   const entryClient =
     // As it was opened (the address was cleaned above): a query on the entry page is no entry.
     !openedAtEntry || entryLocation.search === ""
@@ -255,7 +268,7 @@ async function start() {
             <App
               entryClient={entryClient}
               diningAdmission={diningAdmission}
-              initialMenuContext={initialMenuContext}
+              initialMenuContext={initialMenuContext ?? waitingContext ?? undefined}
               currentOrder={currentOrder}
             />
           </BrowserRouter>

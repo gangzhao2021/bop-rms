@@ -1,4 +1,5 @@
 import type { CustomerTableWaitAnswer } from "../entry/types.js";
+import { forgetTableWait, keepTableWait, readKeptTableWait } from "./table-wait-tab.js";
 const csrfContextListeners = new Set<() => void>();
 let csrfContext = Symbol();
 let csrfCredential: string | null = null;
@@ -123,11 +124,83 @@ export interface UnseatedTableWait {
   readonly storeDisplayName: string;
   readonly tableLabel: string | null;
   readonly check: (() => Promise<CustomerTableWaitAnswer>) | null;
+  /**
+   * Batch 43: the rest of the Store's public context (its header and menu), so the wait is kept in
+   * this tab across a reload (session/table-wait-tab.ts). Without it the wait is memory only.
+   */
+  readonly context?: Readonly<{
+    publicStoreReference: string;
+    brandDisplayName: string;
+    locale: string;
+  }>;
 }
 let unseatedTableWait: UnseatedTableWait | null = null;
 
+/** Batch 43: kept in this tab too (never its check, code or token); null forgets it there. */
 export function setUnseatedTableWait(value: UnseatedTableWait | null): void {
   unseatedTableWait = value === null ? null : Object.freeze({ ...value });
+  keepUnseatedTableWait();
+}
+
+/** The table still isn't open: the kept wait lasts as long as the checks from now would. */
+export function keepUnseatedTableWait(): void {
+  const wait = unseatedTableWait;
+  if (wait?.context === undefined) {
+    forgetTableWait();
+    return;
+  }
+  keepTableWait({
+    kind: wait.kind,
+    tableLabel: wait.tableLabel,
+    storeDisplayName: wait.storeDisplayName,
+    ...wait.context,
+  });
+}
+
+/**
+ * Batch 43: a reload (or a tab the phone discarded) of a page other than the start page, with no
+ * visit: the wait this tab kept, checked with `check` (this browser's waiting scan). Returns the
+ * Store's public context for the header and the menu, or null when nothing is kept.
+ */
+export function restoreUnseatedTableWait(
+  check: (() => Promise<CustomerTableWaitAnswer>) | null,
+): Readonly<{
+  publicStoreReference: string;
+  channel: "DineIn";
+  locale: string;
+  brandDisplayName: string;
+  storeDisplayName: string;
+}> | null {
+  if (csrfCredential !== null) {
+    forgetTableWait();
+    return null;
+  }
+  const kept = readKeptTableWait();
+  if (kept === null) return null;
+  unseatedTableScan = true;
+  unseatedTableWait = Object.freeze({
+    kind: kept.kind,
+    storeDisplayName: kept.storeDisplayName,
+    tableLabel: kept.tableLabel,
+    check: kept.kind === "NotOpen" ? check : null,
+    context: Object.freeze({
+      publicStoreReference: kept.publicStoreReference,
+      brandDisplayName: kept.brandDisplayName,
+      locale: kept.locale,
+    }),
+  });
+  return Object.freeze({
+    publicStoreReference: kept.publicStoreReference,
+    channel: "DineIn" as const,
+    locale: kept.locale,
+    brandDisplayName: kept.brandDisplayName,
+    storeDisplayName: kept.storeDisplayName,
+  });
+}
+
+/** The waiting scan can't be asked about any more: a reload no longer waits for it. */
+export function forgetKeptUnseatedTableWait(): void {
+  forgetTableWait();
 }
 
 export function getUnseatedTableWait(): UnseatedTableWait | null {
@@ -285,6 +358,9 @@ export function setCustomerCsrfCredential(value: string | null): void {
     participationEnded = null;
     settledTable = null;
     unseatedTableScan = false;
+    // Batch 43: once this phone has a visit, a reload never waits for the table again.
+    unseatedTableWait = null;
+    forgetTableWait();
     guestTableStarter = null;
     guestTableQuestion = false;
   }

@@ -2,7 +2,9 @@ import { useEffect } from "react";
 import { useNavigate } from "react-router";
 import { saidTable, t } from "../i18n/i18n.js";
 import {
+  forgetKeptUnseatedTableWait,
   getUnseatedTableWait,
+  keepUnseatedTableWait,
   setTableOpenedWhileAway,
   type UnseatedTableWait,
 } from "../session/customer-transaction-context.js";
@@ -66,6 +68,8 @@ export function useGoOnWhenTableOpens(active: boolean): void {
         if (stopped) return false;
         if (answer.kind === "Waiting") {
           failures = 0;
+          // Batch 43: still waiting, so a reload from here keeps waiting as long as the checks do.
+          keepUnseatedTableWait();
           return true;
         }
         if (answer.kind === "Changed") {
@@ -73,7 +77,11 @@ export function useGoOnWhenTableOpens(active: boolean): void {
           void navigate("/");
           return false;
         }
-        if (answer.kind === "Refused") return "Paused";
+        if (answer.kind === "Refused") {
+          // The waiting scan is gone or its code doesn't work: a reload no longer waits for it.
+          forgetKeptUnseatedTableWait();
+          return "Paused";
+        }
         failures += 1;
         return {
           waitSeconds:

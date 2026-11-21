@@ -412,6 +412,145 @@ test.describe("@production CUST-ENTRY table not open", () => {
       await page.getByRole("button", { name: "English" }).click();
     });
 
+  // Batch 43 (v15 b42 verify, v-reload-yourtable-en-390.png / v-reload-cart-zh-390.png): a reload
+  // (or iOS discarding the tab in the background) on Your table or Cart while the table wasn't open
+  // lost the wait: Your table asked for a join code with "Go to the start", the header said "Scan
+  // the location QR code to begin", Cart was empty, and neither moved on when staff opened the
+  // table. The wait (no code or token) is kept in this tab, and checks with the scan's cookie.
+  for (const width of [390, 1440])
+    test(`a reload on Your table or Cart keeps waiting for staff, and goes on once they open it (${width})`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 900 });
+      let open = false;
+      const entries: string[] = [];
+      const waits: string[] = [];
+      page.on("request", (request) => {
+        if (request.url().endsWith("/bff/customer/entry/table-wait"))
+          waits.push(request.postData() ?? "");
+      });
+      await scanNotOpenTable(page, entries, "L43 A (TEST)", () => open);
+      const main = page.getByRole("main");
+      const banner = page.getByRole("banner");
+      const nav = page.getByRole("navigation", { name: /^(Customer journey|点单步骤)$/u });
+      const check = async (language: "en" | "zh-Hans", tab: "table" | "cart") => {
+        const zh = language === "zh-Hans";
+        const heading = zh
+          ? "Synthetic Noodle Bar 的 L43 A (TEST) 还没开台"
+          : "L43 A (TEST) at Synthetic Noodle Bar isn’t open yet";
+        const back = zh ? "回到等候开台页" : "Back to the waiting page";
+        await nav
+          .getByRole("link", {
+            name: tab === "table" ? (zh ? "您的桌位" : "Your table") : zh ? "购物车" : "Cart",
+          })
+          .click();
+        await expect(page).toHaveURL(tab === "table" ? /\/dine-in\/session$/u : /\/cart$/u);
+        await expect(main.getByRole("heading", { name: heading })).toBeVisible();
+        await page.reload();
+        await expect(main.getByRole("heading", { name: heading })).toBeVisible();
+        await expect(main).toContainText(
+          zh
+            ? "请让店员带位。店员开台后几秒内，这里会自动继续。"
+            : "Ask staff to seat you. This page goes on by itself a few seconds after staff open the table.",
+        );
+        // The Store's header, as before the reload.
+        await expect(banner.getByRole("heading", { level: 1 })).toHaveText("Synthetic Noodle Bar");
+        await expect(banner).toContainText(
+          zh ? "Synthetic Brand · 堂食" : "Synthetic Brand · Dine in",
+        );
+        await expect(
+          page.getByText(zh ? "扫描门店二维码开始点单" : "Scan the location QR code to begin"),
+        ).toHaveCount(0);
+        await expect(main).not.toContainText(zh ? "入桌码" : "join code");
+        await expect(main).not.toContainText(zh ? "请先加入" : "Join your table first");
+        await expect(main).not.toContainText(zh ? "购物车是空的" : "Your cart is empty");
+        await expect(main).not.toContainText(zh ? "再扫" : "scan again");
+        await expect(
+          main.getByRole("link", { name: zh ? "回到首页" : "Go to the start" }),
+        ).toHaveCount(0);
+        const link = main.getByRole("link", { name: back });
+        await expect(link).toBeVisible();
+        // On the first screen with room for Linux CI's wider DejaVu fonts (batch 40 CI: ~40 px).
+        const box = await link.boundingBox();
+        expect(box).not.toBeNull();
+        expect((box?.y ?? 0) + (box?.height ?? 0)).toBeLessThanOrEqual(900 - 40);
+        expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(width - 16);
+        const overflow = await page.evaluate(
+          () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        );
+        expect(overflow).toBeLessThanOrEqual(0);
+        await expectNoInternalText(page);
+        await page.screenshot({
+          path: `test-results/b43-reload-${tab}-${language}-${width}.png`,
+          fullPage: true,
+        });
+      };
+      // Nothing secret is kept in the tab: not the table's code, nor any visit token.
+      const stored = () =>
+        page.evaluate(() =>
+          JSON.stringify({ session: { ...sessionStorage }, local: { ...localStorage } }),
+        );
+      await expect(
+        main.getByRole("heading", { name: "L43 A (TEST) at Synthetic Noodle Bar isn’t open yet" }),
+      ).toBeVisible();
+      await check("en", "table");
+      await check("en", "cart");
+      await page.getByRole("button", { name: "切换到中文" }).click();
+      await check("zh-Hans", "table");
+      await check("zh-Hans", "cart");
+      expect(await stored()).not.toContain("aaa.bbb.ccc");
+      expect(cartWrites).toEqual([]);
+      waits.length = 0;
+
+      // Staff open the table while the reloaded page waits: it goes on to the join by itself.
+      if (width === 390) {
+        await nav.getByRole("link", { name: "您的桌位" }).click();
+        await page.reload();
+        await expect(main).toContainText("店员开台后几秒内，这里会自动继续。");
+      }
+      open = true;
+      await expect(page).toHaveURL(/\/$/u, { timeout: 10_000 });
+      await expect(
+        main.getByRole("heading", { name: "欢迎光临 Synthetic Noodle Bar" }),
+      ).toBeVisible();
+      await expect(main).not.toContainText("还没开台");
+      // After a reload the check asks about this browser's waiting scan (its cookie), not a code.
+      expect(waits.length).toBeGreaterThan(0);
+      for (const body of waits) expect(body).toBe('{"resume":true}');
+      expect(await stored()).not.toContain("N".repeat(43));
+      expect(await stored()).not.toContain("L43 A (TEST)");
+
+      // Joined: a reload keeps the Store's header (the visit gives it back), never the old wait.
+      await page.route("**/api/v1/customer/session/csrf", (route) =>
+        route.fulfill({
+          status: 200,
+          headers: { "cache-control": "no-store" },
+          json: {
+            schemaVersion: 1,
+            csrfToken: "N".repeat(43),
+            menuContext: {
+              publicStoreReference: id(4),
+              channel: "DineIn",
+              locale: "en-CA",
+              brandDisplayName: "Synthetic Brand",
+              storeDisplayName: "Synthetic Noodle Bar",
+            },
+            visit: { publicTableReference: id(0x71), joined: true },
+          },
+        }),
+      );
+      await page.goto("/dine-in/session");
+      await expect(banner.getByRole("heading", { level: 1 })).toHaveText("Synthetic Noodle Bar");
+      await expect(banner).toContainText("Synthetic Brand · 堂食");
+      await expect(main).not.toContainText("还没开台");
+      await expect(main).not.toContainText("入桌码");
+      await page.screenshot({
+        path: `test-results/b43-reload-joined-zh-${width}.png`,
+        fullPage: true,
+      });
+      await page.getByRole("button", { name: "English" }).click();
+    });
+
   test("a guest whose table was just settled scans it again: thanked with the receipt, before and after", async ({
     page,
   }) => {
