@@ -238,6 +238,24 @@ export function displayLocale(): string {
 }
 
 /**
+ * b40 (v15 b39 cross-midnight check: staff read "12:30 AM" where guests read "12:30 a.m."): a
+ * time of day as the guest's pages write it, in the house style of the language ("12:30 a.m.",
+ * "0:30"), in the Store's time zone when given.
+ */
+export function clockTime(at: number, timeZone?: string): string {
+  return new Intl.DateTimeFormat(current === "zh-Hans" ? "zh-CN" : "en-CA", {
+    hour: "numeric",
+    minute: "2-digit",
+    ...(timeZone === undefined ? {} : { timeZone }),
+  }).format(new Date(at));
+}
+/** A clockTime that ends a sentence: its own "a.m." period ends it ("ends at 4:00 a.m."). */
+export function clockTimeEndingSentence(at: number, timeZone?: string): string {
+  const time = clockTime(at, timeZone);
+  return time.endsWith(".") ? time.slice(0, -1) : time;
+}
+
+/**
  * The locale to ask Store content in (item and option names on orders, the kitchen and pickup):
  * Chinese when chosen, else null for the Store's own language. Names without a Chinese name come
  * back in the menu language.

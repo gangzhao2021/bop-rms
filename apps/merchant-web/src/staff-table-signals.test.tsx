@@ -58,6 +58,16 @@ describe("b39 same-named choices in different groups", () => {
       "菌菇",
     ]);
   });
+  it("b40: on a Chinese screen a group with no Chinese name keeps the merchant's own name", () => {
+    // v15: Fireside Hotpot named the pot's groups only in English. Its words are the only thing
+    // that tells the two 番茄 apart; nothing is translated or invented for the merchant.
+    setLanguageForTest("zh-Hans");
+    const options = [option(1, "番茄", "Side one broth"), option(2, "番茄", "Side two broth")];
+    expect(options.map((entry) => optionLabel(entry, options))).toEqual([
+      "番茄 · Side one broth",
+      "番茄 · Side two broth",
+    ]);
+  });
 });
 
 describe("b39 earlier days are not today's", () => {
@@ -175,14 +185,15 @@ describe("b39 warn before the business day ends with tables open", () => {
     expect(tablesClosingAlert(null, Date.parse("2026-11-21T02:30:00.000Z"), 3, zone)).toBeNull();
   });
   it("warns from an hour before closing, and after closing until the day ends", () => {
-    // The time is the Store's, written as the browser writes times ("10:00 PM" or "10:00 p.m.").
+    // The time is the Store's, written as the guests' pages write it (b40: "10:00 p.m.", never
+    // "10:00 PM"), and a time that ends the sentence brings its own period.
     const soon = tablesClosingAlert(day, Date.parse("2026-11-21T02:30:00.000Z"), 3, zone);
     expect(soon?.tone).toBe("soon");
     expect(soon?.text).toMatch(
-      /^Closing at 10:00\s?(PM|p\.m\.): 3 tables still open\. Take each table's payment and close it when the guests leave\.$/u,
+      /^Closing at 10:00\sp\.m\.: 3 tables still open\. Take each table's payment and close it when the guests leave\.$/u,
     );
     expect(tablesClosingAlert(day, Date.parse("2026-11-21T05:00:00.000Z"), 1, zone)?.text).toMatch(
-      /^Closed at 10:00\s?(PM|p\.m\.): 1 table still open\. Take the payment, or record that the guests left without paying, and close each table before the day ends at 4:00\s?(AM|a\.m\.)\.$/u,
+      /^Closed at 10:00\sp\.m\.: 1 table still open\. Take the payment, or record that the guests left without paying, and close each table before the day ends at 4:00\sa\.m\.$/u,
     );
     expect(tablesClosingAlert(day, Date.parse("2026-11-21T09:00:00.000Z"), 1, zone)).toBeNull();
   });

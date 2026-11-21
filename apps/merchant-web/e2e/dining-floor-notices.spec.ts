@@ -268,8 +268,9 @@ test("@production Tables warns servers before guests' last orders and says staff
   );
   await page.goto("/operations/dining");
   const notice = page.locator(".last-orders-notice");
+  // b40: the guests' style of time, "9:30 p.m." (never "9:30 PM").
   await expect(notice).toHaveText(
-    "Last orders at 9:30 PM. After that guests can't order from their phones; you can still add a round for a table.",
+    /^Last orders at 9:30\sp\.m\. After that guests can't order from their phones; you can still add a round for a table\.$/u,
   );
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
@@ -280,7 +281,7 @@ test("@production Tables warns servers before guests' last orders and says staff
   }
   await page.clock.fastForward("21:00");
   await expect(notice).toHaveText(
-    "Guests stopped ordering from their phones at 9:30 PM (last orders). You can still add a round for a table.",
+    /^Guests stopped ordering from their phones at 9:30\sp\.m\. \(last orders\)\. You can still add a round for a table\.$/u,
   );
   await expect(notice).toHaveAttribute("data-tone", "past");
 });

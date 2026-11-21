@@ -134,7 +134,7 @@ test("@production b39: Tables keeps earlier days apart, says what a guest asked 
   // Half an hour before closing: today's two seated tables, said on this page.
   await expect(
     page.getByText(
-      /^Closing at 10:00\s?(PM|p\.m\.): 2 tables still open\. Take each table's payment and close it when the guests leave\.$/u,
+      /^Closing at 10:00\sp\.m\.: 2 tables still open\. Take each table's payment and close it when the guests leave\.$/u,
     ),
   ).toBeVisible();
   // b40 (v15 b39 live: "8 seated", Seated 8 with no table seated today): the header and every

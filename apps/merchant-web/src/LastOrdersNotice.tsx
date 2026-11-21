@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { displayLocale, t } from "./i18n/i18n.js";
+import { clockTime, clockTimeEndingSentence, t } from "./i18n/i18n.js";
 import { loadStoreBusinessDay } from "./StoreBusinessDay.js";
 import { useStaffSessionLive } from "./staff-session-reads.js";
 
@@ -20,17 +20,14 @@ export function lastOrdersText(
   if (lastOrdersAt === null) return null;
   const at = Date.parse(lastOrdersAt);
   if (!Number.isFinite(at) || now < at - lastOrdersWarningMs) return null;
-  const time = new Intl.DateTimeFormat(displayLocale(), {
-    hour: "numeric",
-    minute: "2-digit",
-    ...(timeZone === undefined ? {} : { timeZone }),
-  }).format(new Date(at));
+  // b40: the guests' style of time ("12:30 a.m."), whose period also ends the first sentence.
+  const time = clockTime(at, timeZone);
   return now < at
     ? {
         tone: "soon",
         text: t(
           "Last orders at {time}. After that guests can't order from their phones; you can still add a round for a table.",
-          { time },
+          { time: clockTimeEndingSentence(at, timeZone) },
         ),
       }
     : {
