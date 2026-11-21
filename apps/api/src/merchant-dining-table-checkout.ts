@@ -1,4 +1,5 @@
 import { loadDiningGuestPhones } from "./dining-guest-phones.js";
+import { closeReadyToPayCallWhenPaid } from "./dining-staff-call-paid.js";
 import { createHash } from "node:crypto";
 import { staffNameLocales } from "./staff-content-locale.js";
 import type { ConsumerTransaction } from "@bop/eventing";
@@ -2102,6 +2103,19 @@ export function createMerchantDiningTableSettle(options: {
               authorize: guard,
               displayLocales: staffNameLocales(options.locale ?? "en-CA"),
             });
+            // b39: the guests' "ready to pay" call closes with the payment that completed the bill.
+            await closeReadyToPayCallWhenPaid(
+              tx,
+              scope,
+              after,
+              {
+                diningSessionReference: command.diningSessionReference,
+                operationReference: command.operationReference,
+                actorReference: String(authority.scope.actorReference),
+                observedAt,
+              },
+              guard,
+            );
             return Object.freeze({ status: "Recorded" as const, bill: publicBill(after) });
           },
         ),

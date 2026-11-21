@@ -27,7 +27,11 @@ export const diningStaffCallReasons = [
 ] as const;
 export type DiningStaffCallReason = (typeof diningStaffCallReasons)[number];
 
-export type DiningStaffCallClosureKind = "Answered" | "Withdrawn";
+/**
+ * b39: "Paid" — a "ready to pay" call closed by itself in the transaction of the payment that
+ * completed the table's bill (recorded, never deleted; who took the payment, or the System).
+ */
+export type DiningStaffCallClosureKind = "Answered" | "Withdrawn" | "Paid";
 
 export interface DiningStaffCall {
   readonly callReference: DiningReference;

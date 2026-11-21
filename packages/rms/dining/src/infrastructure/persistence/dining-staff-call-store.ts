@@ -39,8 +39,9 @@ export interface DiningStaffCallGuestStatus {
   readonly seated: boolean;
   readonly open: DiningStaffCall | null;
   /** The Session's latest closed call, while it is recent and nothing is open. */
+  /** b39: a call that closed because the table was paid is not said again (the receipt is). */
   readonly recentlyClosed: {
-    readonly kind: DiningStaffCallClosureKind;
+    readonly kind: Exclude<DiningStaffCallClosureKind, "Paid">;
     readonly closedAt: DiningInstant;
   } | null;
   /** Set when the window's calls are used up: when the next call is admitted. */
@@ -108,7 +109,7 @@ function call(row: Record<string, unknown>): DiningStaffCall {
   });
 }
 const closure = (value: unknown): DiningStaffCallClosureKind =>
-  value === "Answered" || value === "Withdrawn" ? value : fail();
+  value === "Answered" || value === "Withdrawn" || value === "Paid" ? value : fail();
 
 /**
  * DEC-DINING-STAFF-CALL: a seated guest's call for staff, and its closure (staff answered, or a
@@ -320,13 +321,16 @@ export function createPostgresDiningStaffCallStore(
               [tenant, brand, store, command.diningSessionReference],
             ),
           )[0];
+          const kind = last ? closure(last.kind) : null;
           if (
             last &&
+            kind !== null &&
+            kind !== "Paid" &&
             Date.parse(command.observedAt) - Date.parse(parseDiningInstant(last.at)) <
               diningStaffCallClosureShownMs
           )
             recentlyClosed = Object.freeze({
-              kind: closure(last.kind),
+              kind,
               closedAt: parseDiningInstant(last.at),
             });
         }
@@ -473,6 +477,52 @@ export function createPostgresDiningStaffCallStore(
       await staffAllowed(authorize);
       const open = row?.open;
       return typeof open === "number" && Number.isSafeInteger(open) && open >= 0 ? open : fail();
+    },
+
+    /**
+     * b39 (v15 b38 sweep): the table's bill is now paid in full, so its open "ready to pay" call
+     * closes by itself, in the caller's payment transaction. `operationReference` is the payment's
+     * operation; `actorReference` the staff member who took it, or null when the guest paid on
+     * their phone (the System). Any other open call (a question, an allergy) stays for staff.
+     * Returns whether a call was closed.
+     */
+    async closeReadyToPayOnPaid(
+      tx: DiningTableTransaction,
+      input: {
+        readonly diningSessionReference: string;
+        readonly operationReference: string;
+        readonly actorReference: string | null;
+        readonly observedAt: string;
+      },
+      authorize: () => Promise<boolean> | boolean,
+    ): Promise<boolean> {
+      const session = parseDiningReference(input.diningSessionReference);
+      const operation = parseDiningReference(input.operationReference);
+      const actor =
+        input.actorReference === null ? null : parseDiningReference(input.actorReference);
+      const at = parseDiningInstant(input.observedAt);
+      await staffAllowed(authorize);
+      await context(tx);
+      const open = await openCall(tx, session);
+      if (open === null || open.reason !== "ReadyToPay") return false;
+      const intent = parseDiningHash(
+        options.hashIntent(
+          JSON.stringify(["DiningStaffCallPaid", open.callReference, operation, actor, at]),
+        ),
+      );
+      const result = await closeCall(tx, {
+        callReference: open.callReference,
+        operationReference: operation,
+        kind: "Paid",
+        actorReference: actor,
+        participantReference: null,
+        intent,
+        // A payment recorded after an outage may be dated before the call; the closure never is.
+        at: at < open.calledAt ? open.calledAt : at,
+        session,
+      });
+      await staffAllowed(authorize);
+      return result.status === "Closed";
     },
 
     /** Staff answered the call (at the table, or saw it was handled). */

@@ -7108,6 +7108,30 @@ async function journey(journeyEnding) {
           );
           assert.equal(other[0].n, 0);
         }
+        // b39 (v15 b38 sweep): a guest at the table asks staff "ready to pay" (TEST-only owner
+        // fixture standing in for the guest's call); the payment that completes the bill closes it
+        // in its own transaction, recorded as Paid with who took the payment (nobody: online).
+        const readyToPay = async () => {
+          const call = fresh();
+          await admin.query(
+            "INSERT INTO rms_dining.dining_staff_call (tenant_id,brand_id,store_id,call_id,session_id,participant_id,reason,intent_hash,called_at) VALUES ($1,$2,$3,$4,$5,$6,'ReadyToPay',$7,date_trunc('milliseconds',now()) - interval '1 minute')",
+            [
+              tenant,
+              scope.brandReference,
+              scope.storeReference,
+              call,
+              sessionReference,
+              dining.guest.participantReference,
+              "b".repeat(64),
+            ],
+          );
+          return call;
+        };
+        const callClosure = (call) =>
+          rows(
+            "SELECT kind,actor_id::text AS actor,participant_id::text AS participant FROM rms_dining.dining_staff_call_closure WHERE call_id=$1",
+            [call],
+          );
         async function paidOnlineEnding() {
           const { intents, stripe, created } = providerStandIn();
           const payments = createDiningTableOnlinePayments({
@@ -7268,8 +7292,12 @@ async function journey(journeyEnding) {
 
           // ── The guest comes back and pays: captured → the table's one payment, by round.
           await payments.start(me, { operationReference: fresh(), tip: fifteen });
+          const readyCall = await readyToPay();
           intents.get("pi_TEST000004").status = "Captured";
           const paidView = await payments.refresh(me);
+          assert.deepEqual(await callClosure(readyCall), [
+            { kind: "Paid", actor: null, participant: null },
+          ]);
           assert.equal(paidView.bill.settlement?.method, "Online");
           assert.equal(paidView.bill.settlement?.totalMinor, due.toString());
           assert.equal(paidView.bill.settlement?.tipMinor, tipMinor.toString());
@@ -8407,7 +8435,10 @@ async function journey(journeyEnding) {
           // The whole table is no longer one payment; each part is paid once, then no new split.
           await assert.rejects(settleWith(server, {}), { code: "TABLE_CHECKOUT_INPUT_INVALID" });
           const none = { tip: { kind: "None" }, tenderedMinor: "100000" };
+          const partsCall = await readyToPay();
           assert.equal((await settleWith(server, { ...none, partNumber: 1 })).status, "Recorded");
+          // b39: one part paid is not the table paid: the guests' call stays for staff.
+          assert.deepEqual(await callClosure(partsCall), []);
           await assert.rejects(
             splitByDish(2, (round) => round),
             {
@@ -8416,6 +8447,9 @@ async function journey(journeyEnding) {
           );
           await assert.rejects(settleWith(server, { ...none, partNumber: 1 }));
           assert.equal((await settleWith(server, { ...none, partNumber: 2 })).status, "Recorded");
+          assert.deepEqual(await callClosure(partsCall), [
+            { kind: "Paid", actor: id(0x700), participant: null },
+          ]);
           const paid = await bill();
           assert.equal(paid.split.paidParts, 2);
           assert.equal(paid.owed.totalMinor, "0");

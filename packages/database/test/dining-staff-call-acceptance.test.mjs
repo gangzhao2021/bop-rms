@@ -721,15 +721,80 @@ it("lets a seated guest call staff once at a time, within a budget, and staff an
       assert.equal(ready.status, "Called", JSON.stringify(ready));
       assert.equal(ready.call.reason, "ReadyToPay");
       assert.equal(await staff((store, tx) => store.countOpen(tx, allowed)), 1);
-      // WP-2423 (M171, Owner decision 17): a guest may ask an allergy question; only the reason is
-      // recorded (the guest tells staff in person).
+      // b39 (v15 b38 sweep): the payment that completes the bill closes the "ready to pay" call in
+      // its own transaction — recorded as kind Paid with the payment's operation, by the System
+      // when the guest paid on their phone; staff no longer see it, and the guest is not told
+      // "staff answered". A replay closes nothing more.
+      const paid = (operation, minute, actorReference = null) =>
+        staff((store, tx) =>
+          store.closeReadyToPayOnPaid(
+            tx,
+            {
+              diningSessionReference: sessionId,
+              operationReference: id(operation),
+              actorReference,
+              observedAt: at(minute),
+            },
+            allowed,
+          ),
+        );
+      await assert.rejects(
+        runner().run((tx) =>
+          calls({ run: (next) => next(tx) }).closeReadyToPayOnPaid(
+            tx,
+            {
+              diningSessionReference: sessionId,
+              operationReference: id(189),
+              actorReference: null,
+              observedAt: at(50),
+            },
+            () => false,
+          ),
+        ),
+        { code: "DINING_SESSION_PERMISSION_DENIED" },
+      );
+      assert.equal(await paid(190, 50), true);
+      assert.equal(await paid(190, 50), false);
+      assert.equal(await staff((store, tx) => store.countOpen(tx, allowed)), 0);
+      assert.deepEqual(
+        (
+          await admin.query(
+            "SELECT kind,actor_id,participant_id,operation_id FROM rms_dining.dining_staff_call_closure WHERE call_id=$1",
+            [ready.call.callReference],
+          )
+        ).rows,
+        [{ kind: "Paid", actor_id: null, participant_id: null, operation_id: id(190) }],
+      );
+      const afterPaid = await calls(runner({ readOnly: true })).status(
+        asGuest(guest, sessionId, 59, 50),
+      );
+      assert.equal(afterPaid.open, null);
+      assert.equal(afterPaid.recentlyClosed, null);
       assert.deepEqual(
         await calls().withdraw(asGuest(guest, sessionId, 97, 50), ready.call.callReference),
-        { status: "Closed", kind: "Withdrawn" },
+        { status: "AlreadyClosed", kind: "Paid" },
       );
+      // WP-2423 (M171, Owner decision 17): a guest may ask an allergy question; only the reason is
+      // recorded (the guest tells staff in person).
       const allergy = await calls().call(asGuest(guest, sessionId, 98, 50), "AllergyQuestion");
       assert.equal(allergy.status, "Called", JSON.stringify(allergy));
       assert.equal(allergy.call.reason, "AllergyQuestion");
+      // b39: a payment never closes any other call; the database refuses a Paid closure of one.
+      assert.equal(await paid(191, 50, id(8)), false);
+      assert.equal(await staff((store, tx) => store.countOpen(tx, allowed)), 1);
+      await assert.rejects(
+        runner().run(async (tx) => {
+          await tx.query(
+            "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+            [id(2), id(3)],
+          );
+          await tx.query(
+            "INSERT INTO rms_dining.dining_staff_call_closure (tenant_id,brand_id,store_id,call_id,operation_id,kind,actor_id,participant_id,intent_hash,closed_at) VALUES ($1,$2,$3,$4,$5,'Paid',NULL,NULL,$6,$7)",
+            [id(1), id(2), id(3), allergy.call.callReference, id(192), digest("z"), at(51)],
+          );
+        }),
+        /staff call closure source mismatch/u,
+      );
       assert.equal(
         (
           await admin.query("SELECT reason FROM rms_dining.dining_staff_call WHERE call_id=$1", [

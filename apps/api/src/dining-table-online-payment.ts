@@ -21,6 +21,7 @@ import {
   type DiningTableTip,
 } from "./merchant-dining-table-checkout.js";
 import { tipRefusal } from "./merchant-store-features.js";
+import { closeReadyToPayCallWhenPaid } from "./dining-staff-call-paid.js";
 
 /**
  * WP-2423 DEC-DINE-IN-PAY-LATER S4 (decisions 3-5): a guest pays the whole table on their phone.
@@ -582,6 +583,20 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
         correlationReference: attempt.operationReference,
         onlinePaymentReference: attempt.onlinePaymentReference,
       });
+      // b39: the table's "ready to pay" call closes with the payment that completed the bill
+      // (the guest paid on their phone: closed by the System, no staff member named).
+      await closeReadyToPayCallWhenPaid(
+        tx,
+        scope,
+        await bill(tx, authority),
+        {
+          diningSessionReference: attempt.diningSessionReference,
+          operationReference: attempt.operationReference,
+          actorReference: null,
+          observedAt: recordedAt,
+        },
+        () => authority.allowed(tx),
+      );
     });
     return true;
   };
