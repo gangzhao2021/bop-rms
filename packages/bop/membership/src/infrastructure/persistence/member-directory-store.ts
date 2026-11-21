@@ -584,3 +584,116 @@ export async function withdrawInvitedStoreMember(
   );
   return "Applied";
 }
+
+const SYNTHETIC_FIXTURE = /^[0-9a-f]{8}-0000-7000-8000-[0-9a-f]{12}$/u;
+const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
+/**
+ * WP-2423 batch 38, InternalTest only (a test-environment-only shortcut): one more synthetic DEMO
+ * staff member at a synthetic Store, so a real store role (Kitchen) can be tried in the product. An
+ * Active Membership whose relationship evidence is the TEST operation, and their place at the
+ * Store, both ending at the installation's common expiry like the other DEMO staff (the
+ * InternalTest renewal moves them together). Every reference must be a synthetic fixture identity
+ * (`xxxxxxxx-0000-7000-8000-…`), so no real person or Store can be written here; a real Store's
+ * staff join by invitation. No role is granted: roles follow through the Staff page's own request
+ * and approval. A rerun with the same references answers AlreadyPresent and writes nothing.
+ */
+export async function addInternalTestStoreMember(
+  tx: MemberDirectoryTransaction,
+  input: {
+    readonly brandReference: string;
+    readonly storeReference: string;
+    readonly actorReference: string;
+    readonly membershipReference: string;
+    readonly relationshipReference: string;
+    readonly storeAssignmentReference: string;
+    readonly effectiveUntil: string;
+    readonly approverReference: string;
+    readonly operationReference: string;
+    readonly auditReference: string;
+    readonly at: string;
+  },
+  appendAudit: AppendAudit,
+): Promise<"Added" | "AlreadyPresent"> {
+  const references = [
+    input.brandReference,
+    input.storeReference,
+    input.actorReference,
+    input.membershipReference,
+    input.relationshipReference,
+    input.storeAssignmentReference,
+  ];
+  if (
+    references.some((value) => typeof value !== "string" || !SYNTHETIC_FIXTURE.test(value)) ||
+    new Set(references).size !== references.length ||
+    !INSTANT.test(input.at) ||
+    !INSTANT.test(input.effectiveUntil) ||
+    input.effectiveUntil <= input.at
+  )
+    throw new MemberDirectoryError("MEMBER_DIRECTORY_INPUT_INVALID");
+  const membership = String(parseMembershipReference(input.membershipReference)),
+    assignment = String(parseStoreAssignmentReference(input.storeAssignmentReference));
+  await tx.query(scopeSql, [input.brandReference, input.storeReference]);
+  await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+    "bop_membership.internal_test_member:" + input.actorReference,
+  ]);
+  const existing = (
+    await tx.query(
+      "SELECT membership_id::text membership FROM bop_membership.membership WHERE brand_id=$1 AND actor_id=$2",
+      [input.brandReference, input.actorReference],
+    )
+  ).rows;
+  if (existing.length > 0) {
+    const placed = (
+      await tx.query(
+        "SELECT 1 FROM bop_membership.store_assignment WHERE assignment_id=$1 AND membership_id=$2 AND actor_id=$3 AND store_id=$4 AND lifecycle='Active'",
+        [assignment, membership, input.actorReference, input.storeReference],
+      )
+    ).rows;
+    if (existing.length === 1 && existing[0]?.membership === membership && placed.length === 1)
+      return "AlreadyPresent";
+    throw new MemberDirectoryError("MEMBER_DIRECTORY_IDEMPOTENCY_CONFLICT");
+  }
+  await tx.query(
+    `INSERT INTO bop_membership.membership(membership_id,actor_id,brand_id,workforce_relationship_reference,lifecycle,
+       effective_from,effective_until,version,created_at,updated_at)
+     VALUES($1,$2,$3,$4,'Active',$5,$6,1,$5,$5)`,
+    [
+      membership,
+      input.actorReference,
+      input.brandReference,
+      input.relationshipReference,
+      input.at,
+      input.effectiveUntil,
+    ],
+  );
+  await tx.query(
+    `INSERT INTO bop_membership.store_assignment(assignment_id,membership_id,actor_id,brand_id,store_id,lifecycle,
+       effective_from,effective_until,version,created_at,updated_at)
+     VALUES($1,$2,$3,$4,$5,'Active',$6,$7,1,$6,$6)`,
+    [
+      assignment,
+      membership,
+      input.actorReference,
+      input.brandReference,
+      input.storeReference,
+      input.at,
+      input.effectiveUntil,
+    ],
+  );
+  await appendAudit(tx, {
+    ...memberAudit({
+      auditReference: input.auditReference,
+      brandReference: input.brandReference,
+      storeReference: input.storeReference,
+      actorReference: input.approverReference,
+      actionCode: "INTERNAL_TEST_MEMBER_ADDED",
+      targetId: membership,
+      lifecycle: "Active",
+      correlationId: input.operationReference,
+      at: input.at,
+    }),
+    reasonCode: "INTERNAL_TEST_STAFF",
+    sourceChannel: "DEPLOYMENT",
+  });
+  return "Added";
+}
