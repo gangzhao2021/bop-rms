@@ -18,7 +18,13 @@ import {
 import { serviceOperationReference } from "./service-control-client.js";
 import { ComboPartClientError, markComboPartServed } from "./combo-part-client.js";
 import { chaseDish, DiningChaseClientError } from "./dining-chase-client.js";
-import { ClockStyleContext, SourceTime, StoreTimeZoneContext, storeTime } from "./StoreTime.js";
+import {
+  ClockStyleContext,
+  SourceTime,
+  StoreTimeZoneContext,
+  storeTime,
+  wholeMinuteAtOrAfter,
+} from "./StoreTime.js";
 import type { ComboPartView } from "./combo-parts.js";
 
 /**
@@ -454,7 +460,7 @@ export function DiningRoundsProvider({
             ? withOneSentenceEnd(
                 t("This round was chased a moment ago. You can chase it again at {time}.", {
                   time: storeTime(
-                    error.retryAt ?? new Date().toISOString(),
+                    wholeMinuteAtOrAfter(error.retryAt ?? new Date().toISOString()),
                     timeZone,
                     false,
                     clockStyle,

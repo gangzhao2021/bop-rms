@@ -9,6 +9,7 @@ import {
   formatDecimalMoney,
   formatMinutesUntil,
   formatMoney,
+  formatRetryClockTime,
   percentOfMinor,
 } from "./format.js";
 
@@ -54,6 +55,15 @@ describe("customer time presentation", () => {
     expect(clock).toMatch(/\d{1,2}:\d{2}/u);
     expect(formatDateTime("2026-09-02T17:10:00.000Z")).toMatch(/2026/u);
     expect(formatClockTime("not-a-time")).toBe("");
+  });
+  it("batch 42: a try-again time with seconds rounds up to the next minute, never down", () => {
+    expect(formatRetryClockTime("2026-11-21T15:04:47.000Z", "en-CA")).toBe(
+      formatClockTime("2026-11-21T15:05:00.000Z", "en-CA"),
+    );
+    expect(formatRetryClockTime("2026-11-21T15:04:00.000Z", "en-CA")).toBe(
+      formatClockTime("2026-11-21T15:04:00.000Z", "en-CA"),
+    );
+    expect(formatRetryClockTime("not-a-time")).toBe("");
   });
   it("ends a sentence after a formatted time exactly once", () => {
     // en-CA times end with an abbreviation period ("9:46 p.m."); appending "." doubled it on v15.

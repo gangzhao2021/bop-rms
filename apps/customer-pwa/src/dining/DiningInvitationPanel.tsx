@@ -1,6 +1,6 @@
 import { t } from "../i18n/i18n.js";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { formatClockTime } from "../journey/format.js";
+import { formatClockTime, formatRetryClockTime } from "../journey/format.js";
 import {
   createHttpDiningInvitationClient,
   DiningInvitationClientError,
@@ -281,7 +281,7 @@ export function DiningInvitationView({
           {state.retryAt
             ? t(
                 "You’ve made a lot of codes in the last few minutes. You can make another at {value1}, or ask a staff member for one.",
-                { value1: formatClockTime(state.retryAt) },
+                { value1: formatRetryClockTime(state.retryAt) },
               )
             : t(
                 "You’ve made a lot of codes in the last few minutes. Try again in a few minutes, or ask a staff member for one.",

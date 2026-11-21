@@ -1,6 +1,6 @@
 import { t } from "../i18n/i18n.js";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { formatClockTime } from "../journey/format.js";
+import { formatClockTime, formatRetryClockTime } from "../journey/format.js";
 import {
   createHttpDiningStaffCallClient,
   DiningStaffCallClientError,
@@ -190,7 +190,7 @@ export function DiningStaffCallPanel({
             <p role="status">
               {t(
                 "You’ve asked several times. You can ask again at {time}, or wave to a staff member.",
-                { time: formatClockTime(view.nextCallAt) },
+                { time: formatRetryClockTime(view.nextCallAt) },
               )}
             </p>
           ) : (

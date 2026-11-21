@@ -60,6 +60,17 @@ export function formatClockTime(instant: string, locale = dateLocale()): string 
 }
 
 /**
+ * Batch 42: {@link formatClockTime} for a "you can … again at {time}" answer. Shown to the minute,
+ * it must never name a time that is still too soon, so a time with seconds rounds up to the next
+ * minute ("6:15:47" reads "6:16"), never down.
+ */
+export function formatRetryClockTime(instant: string, locale = dateLocale()): string {
+  const ms = Date.parse(instant);
+  if (!Number.isFinite(ms)) return "";
+  return formatClockTime(new Date(Math.ceil(ms / 60_000) * 60_000).toISOString(), locale);
+}
+
+/**
  * "1:00 p.m." for a Store's own published local time ("13:00:00"), in the same style as
  * {@link formatClockTime}. No time zone conversion: it is the time on the Store's clock. End a
  * sentence with {@link endSentence}.

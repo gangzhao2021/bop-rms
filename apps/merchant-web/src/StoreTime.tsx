@@ -14,6 +14,17 @@ export type ClockStyle = "Staff" | "Guest";
 export const ClockStyleContext = createContext<ClockStyle>("Staff");
 
 /**
+ * Batch 42 (v15 chase at 10:04:10 refused, "chase it again at 10:04"): the first whole minute at
+ * or after an instant. A "you can … again at {time}" shown to the minute must never be before the
+ * instant it stands for, so a time with seconds is rounded up, never down.
+ */
+export function wholeMinuteAtOrAfter(instant: string): string {
+  const ms = Date.parse(instant);
+  if (!Number.isFinite(ms)) return instant;
+  return new Date(Math.ceil(ms / 60_000) * 60_000).toISOString();
+}
+
+/**
  * An instant as Store-local time: "14:05", or with the date "Oct 14, 2026, 2:05 PM" (never a
  * machine date such as 2026-10-14). UTC, labelled, when the Store's time zone is not known. In
  * the "Guest" style: "12:30 a.m.", or "Nov 21, 2026, 12:30 a.m.".

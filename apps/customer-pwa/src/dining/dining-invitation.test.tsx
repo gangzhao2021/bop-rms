@@ -153,6 +153,11 @@ describe("WP-2423 DEC-DINING-GUEST-INVITATION panel", () => {
       { status: "too-many", retryAt: expiresAt },
       `You can make another at ${formatClockTime(expiresAt)}, or ask a staff member for one.`,
     ],
+    // Batch 42: a try-again time with seconds is never shown as the minute before it.
+    [
+      { status: "too-many", retryAt: "2026-10-17T18:14:47.000Z" },
+      `You can make another at ${formatClockTime(expiresAt)}, or ask a staff member for one.`,
+    ],
     [{ status: "failed", offline: true }, "You’re offline, so no code was made."],
     [{ status: "failed", offline: false }, "We couldn’t make a code. Try again"],
   ] as const)("explains %o without internal codes", (state, text) => {
