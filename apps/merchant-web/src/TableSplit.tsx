@@ -51,6 +51,18 @@ export function defaultRoundParts(bill: TableBill): ReadonlyMap<number, number> 
   );
 }
 
+/**
+ * b39 review: on a merged bill, the table each round came from (this table's own label for its
+ * rounds), so staff match a round or a part to the table that ordered it; null when not merged.
+ */
+export function roundTableOf(bill: TableBill): ((roundNumber: number) => string | null) | null {
+  if (!bill.rounds.some((round) => round.fromTableLabel !== null)) return null;
+  return (roundNumber) => {
+    const round = bill.rounds.find((candidate) => candidate.roundNumber === roundNumber);
+    return round === undefined ? null : (round.fromTableLabel ?? bill.tableLabel);
+  };
+}
+
 export function TableSplitControls({
   bill,
   csrf,
@@ -71,6 +83,7 @@ export function TableSplitControls({
   readonly onProblem: (text: string | null) => void;
 }) {
   const split = bill.split;
+  const tableOfRound = roundTableOf(bill);
   const locked =
     (split?.paidParts ?? 0) > 0 ||
     split?.parts.some((part) => part.guestPaying) === true ||
@@ -390,12 +403,19 @@ export function TableSplitControls({
               <li key={round.roundNumber}>
                 <span>
                   {t("Round {number}", { number: String(round.roundNumber) })} ·{" "}
+                  {/* b39 review: a merged bill names every round's table first (this table's
+                      too), so "phone 1" of one table is never taken for another's. */}
+                  {tableOfRound === null
+                    ? null
+                    : (() => {
+                        const label = tableOfRound(round.roundNumber);
+                        return label === null
+                          ? null
+                          : t("Table {table}", { table: saidTable(label) }) + " · ";
+                      })()}
                   {round.orderedBy === null
                     ? t("entered by staff")
                     : t("phone {number}", { number: String(round.orderedBy) })}{" "}
-                  {round.fromTableLabel === null
-                    ? null
-                    : t("· from table {table}", { table: saidTable(round.fromTableLabel) }) + " "}
                   {/* DEC-TAX-WHOLE-RECEIPT: with its share of the bill's tax rounding, so the
                       parts add up to the bill (checkout lists rounds as ordered). */}
                   · {cad(round.totalMinor)}
@@ -476,6 +496,23 @@ export function TableSplitControls({
                         ? t("A guest is paying on their phone")
                         : t("To collect")}
                   </span>
+                  {split.mode !== "ByRounds" || tableOfRound === null ? null : (
+                    // b39 review: which table's rounds this part pays, as the guest's phone says.
+                    <span className="table-split__dishes">
+                      {t("Table {table} · rounds {rounds}", {
+                        table: [
+                          ...new Set(
+                            part.roundNumbers
+                              .map((number) => tableOfRound(number))
+                              .filter((label): label is string => label !== null),
+                          ),
+                        ]
+                          .map(saidTable)
+                          .join(" + "),
+                        rounds: part.roundNumbers.join(", "),
+                      })}
+                    </span>
+                  )}
                   {part.dishes.length === 0 ? null : (
                     <span className="table-split__dishes">
                       {part.dishes

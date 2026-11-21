@@ -310,6 +310,18 @@ describe("WP-2423 Q8 dining session client", () => {
     }
   });
 
+  it("b39 review: decodes the table a merged-in round was ordered at, and refuses a bad one", () => {
+    const merged = payload();
+    Object.assign(firstRound(merged), { fromTable: "H6" });
+    expect(parseDiningSessionView(merged).rounds[0]?.fromTable).toBe("H6");
+    expect(parseDiningSessionView(payload()).rounds[0]).not.toHaveProperty("fromTable");
+    for (const fromTable of ["", 6, null, "<b>H6</b>", "x".repeat(41)]) {
+      const wrong = payload();
+      Object.assign(firstRound(wrong), { fromTable });
+      expect(() => parseDiningSessionView(wrong)).toThrow(DiningSessionClientError);
+    }
+  });
+
   it("does not call the server without this browser's session", async () => {
     const request = vi.fn();
     await expect(

@@ -401,6 +401,10 @@ function RoundCard({
           : round.tea === true
             ? t("Per-person charge")
             : t("Other charge")}
+        {/* b39 review: after a merge, the table this round was ordered at. */}
+        {round.fromTable === undefined
+          ? null
+          : ` · ${t("From table {table}", { table: saidTable(round.fromTable) })}`}
       </h3>
       <dl className="dining-session__round-facts">
         <div>

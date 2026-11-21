@@ -50,6 +50,48 @@ describe("WP-2423 item 8 ④ split bill at the Tables checkout", () => {
     ]);
   });
 
+  // b39 review (v15 sweep 38): after H6 was merged into H4, the parts and rounds said only
+  // "phone 1" / "phone 3"; staff could not tell which part was which table's.
+  it("names each merged round's table and each part's table and rounds", () => {
+    const merged = () => {
+      const value = splitBillFixture();
+      const rounds = value.rounds as Record<string, unknown>[];
+      rounds.push(
+        { ...rounds[1], roundNumber: 3, orderedBy: null, fromTableLabel: null },
+        { ...rounds[1], roundNumber: 4, orderedBy: 1, fromTableLabel: "DEMO-02" },
+      );
+      const parts = (value.split as { parts: Record<string, unknown>[] }).parts;
+      value.split = {
+        ...(value.split as object),
+        mode: "ByRounds",
+        paidParts: 0,
+        parts: [
+          { ...parts[1], partNumber: 1, roundNumbers: [1, 2, 3] },
+          { ...parts[1], partNumber: 2, roundNumbers: [4] },
+        ],
+      };
+      return renderToStaticMarkup(
+        <TableSplitControls
+          bill={parseTableBill(value)}
+          csrf={"a".repeat(43)}
+          client={createTableCheckoutClient()}
+          disabled={false}
+          selectedPart={null}
+          onSelectPart={() => undefined}
+          onBill={() => undefined}
+          onProblem={() => undefined}
+        />,
+      );
+    };
+    const parts = merged();
+    expect(parts).toContain("Table 8 · rounds 1, 2, 3");
+    expect(parts).toContain("Table DEMO-02 · rounds 4");
+    // Before any part is paid the rounds can still be moved; each names its table first.
+    expect(parts).toContain("Round 1 · Table 8 · phone 1");
+    expect(parts).toContain("Round 4 · Table DEMO-02 · phone 1");
+    expect(parts).toContain("Round 3 · Table 8 · entered by staff");
+  });
+
   it("offers each paying for their own rounds only when different phones sent them", () => {
     const render = (orderedBy: readonly (number | null)[]) => {
       const value = splitBillFixture();

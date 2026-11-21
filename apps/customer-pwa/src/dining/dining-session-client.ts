@@ -62,6 +62,8 @@ export interface DiningRound {
   readonly waitingReason?: DiningWaitingReason;
   /** v15 2026-10-29: the round is only the per-head tea staff added (absent: not). */
   readonly tea?: true;
+  /** b39 review: a merged table's round — the table it was ordered at (absent: this table). */
+  readonly fromTable?: string;
   /** WP-2423 item 8b: every item of the round is a charge, not a dish (absent: not). */
   readonly charge?: true;
   /** M41: a paid round the store has not accepted yet (absent: not). */
@@ -363,6 +365,8 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
     const waiting =
       value !== null && typeof value === "object" && Object.hasOwn(value, "waitingReason");
     const tea = value !== null && typeof value === "object" && Object.hasOwn(value, "tea");
+    const fromTable =
+      value !== null && typeof value === "object" && Object.hasOwn(value, "fromTable");
     const charge = value !== null && typeof value === "object" && Object.hasOwn(value, "charge");
     const awaitingStore =
       value !== null && typeof value === "object" && Object.hasOwn(value, "awaitingStore");
@@ -382,6 +386,7 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
       ...(awaitingStore ? ["awaitingStore"] : []),
       ...(waiting ? ["waitingReason"] : []),
       ...(tea ? ["tea"] : []),
+      ...(fromTable ? ["fromTable"] : []),
       ...(charge ? ["charge"] : []),
       "roundNumber",
       "orderedBy",
@@ -493,6 +498,15 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
           }
         : {}),
       ...(tea ? { tea: round.tea === true ? (true as const) : invalid() } : {}),
+      ...(fromTable
+        ? {
+            fromTable:
+              typeof round.fromTable === "string" &&
+              /^[^\p{Cc}\p{Cf}<>{}$]{1,40}$/u.test(round.fromTable)
+                ? round.fromTable
+                : invalid(),
+          }
+        : {}),
       ...(charge ? { charge: round.charge === true ? (true as const) : invalid() } : {}),
       ...(awaitingStore
         ? { awaitingStore: round.awaitingStore === true ? (true as const) : invalid() }

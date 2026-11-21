@@ -81,6 +81,21 @@ async function setup(enabled = true) {
   };
 }
 
+it("b39 review: a merged-in round is sent with the table it was ordered at, others without", async () => {
+  const f = await setup();
+  const base = view();
+  const first = base.rounds[0] as CustomerDiningSessionView["rounds"][number];
+  f.read.mockResolvedValue({
+    ...base,
+    rounds: [first, { ...first, roundNumber: 2, fromTable: "H6" }],
+  });
+  const body = (await (await f.send()).json()) as {
+    session: { rounds: Record<string, unknown>[] };
+  };
+  expect(body.session.rounds[0]).not.toHaveProperty("fromTable");
+  expect(body.session.rounds[1]?.fromTable).toBe("H6");
+});
+
 it("v15 batch-5: a round its payer stopped before paying is sent as such, others are not", async () => {
   const f = await setup();
   const base = view();

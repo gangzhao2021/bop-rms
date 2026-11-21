@@ -174,6 +174,8 @@ export interface CustomerDiningSessionFacts {
        * the bill charges for it.
        */
       readonly roundTaxRounding?: ReadonlyMap<string, bigint>;
+      /** b39 review: a merged table's rounds, by round, with the table they were ordered at. */
+      readonly fromTables?: ReadonlyMap<string, string>;
     };
     /**
      * WP-2423 item 8 ④ (v15 2026-10-28 a): a split bill being paid part by part — how many parts
@@ -299,6 +301,8 @@ export interface CustomerDiningSessionView {
     readonly stoppedBeforePaying?: true;
     /** v15 2026-10-29: present (true) when the round is only the per-head tea staff added. */
     readonly tea?: true;
+    /** b39 review: the table a merged-in round was ordered at (absent: this table's own). */
+    readonly fromTable?: string;
     /** WP-2423 item 8b: present (true) when every item of the round is a charge, not a dish. */
     readonly charge?: true;
     /**
@@ -844,6 +848,9 @@ export function composeCustomerDiningSession(
       ...(batch.items.every((item) => order.teaLines?.has(item.orderItemReference) === true)
         ? { tea: true as const }
         : {}),
+      ...(order.tableBill?.fromTables?.get(reference) === undefined
+        ? {}
+        : { fromTable: order.tableBill.fromTables.get(reference) as string }),
       ...(batch.items.every((item) => order.chargeLines?.has(item.orderItemReference) === true)
         ? { charge: true as const }
         : {}),
@@ -1728,6 +1735,17 @@ export function customerTableBillFacts(
     roundTaxRounding: new Map(
       bill.rounds.map((round) => [round.orderBatchReference, BigInt(round.taxRoundingMinor)]),
     ),
+    ...(bill.rounds.some((round) => round.fromTableLabel !== null)
+      ? {
+          fromTables: new Map(
+            bill.rounds.flatMap((round) =>
+              round.fromTableLabel === null
+                ? []
+                : [[round.orderBatchReference, round.fromTableLabel] as const],
+            ),
+          ),
+        }
+      : {}),
   };
 }
 

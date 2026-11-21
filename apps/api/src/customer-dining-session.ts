@@ -129,6 +129,8 @@ export class CustomerDiningSessionHandler {
             ...(round.waitingReason ? { waitingReason: round.waitingReason } : {}),
             ...(round.stoppedBeforePaying === true ? { stoppedBeforePaying: true } : {}),
             ...(round.tea === true ? { tea: true } : {}),
+            // b39 review: a merged table's round says the table it was ordered at.
+            ...(round.fromTable === undefined ? {} : { fromTable: round.fromTable }),
             ...(round.charge === true ? { charge: true } : {}),
             // M41: a paid round the store has not accepted yet ("Still waiting? Let staff know").
             ...(round.awaitingStore === true ? { awaitingStore: true } : {}),

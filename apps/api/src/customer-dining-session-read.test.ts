@@ -407,6 +407,45 @@ describe("WP-2423 Q8 composeCustomerDiningSession", () => {
     expect(view.summary?.bill?.takenOff?.amountMinor).toBe(625n);
   });
 
+  // b39 review (v15 sweep 38): after H6 was merged into H4 the guest's round cards did not say
+  // which table a round came from; the table's bill knows (as staff see it).
+  it("says the table a merged-in round was ordered at, and nothing on the table's own", () => {
+    const round = (batch: number, fromTableLabel: string | null) => ({
+      roundNumber: batch,
+      orderReference: id(1),
+      orderBatchReference: id(batch),
+      submissionReference: id(batch + 1),
+      items: [],
+      subtotalMinor: "0",
+      taxMinor: "0",
+      totalMinor: "0",
+      taxRoundingMinor: "0",
+      paid: false,
+      orderedBy: null,
+      fromTableLabel,
+      liveOrderedAt: null,
+    });
+    const bill = (merged: boolean) =>
+      ({
+        rounds: [round(30, null), round(40, merged ? "H6" : null)],
+        owed: { totalMinor: "900" },
+        taxRoundingMinor: "0",
+        split: null,
+        writeOff: null,
+      }) as unknown as Parameters<typeof customerTableBillFacts>[0];
+    expect(customerTableBillFacts(bill(false)).fromTables).toBeUndefined();
+    const view = composeCustomerDiningSession({
+      ...facts({
+        paymentOutcomes: new Map(),
+        payments: [],
+        payLaterRounds: new Set([id(30), id(40)]),
+        tableBill: customerTableBillFacts(bill(true)),
+      }),
+      paymentTiming: "PayLater",
+    });
+    expect(view.rounds.map((entry) => entry.fromTable)).toEqual([undefined, "H6"]);
+  });
+
   it("b13: a split the bill outgrew says nothing of its old parts", () => {
     const base = {
       paymentOutcomes: new Map(),
