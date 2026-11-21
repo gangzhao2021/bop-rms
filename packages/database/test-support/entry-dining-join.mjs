@@ -422,7 +422,7 @@ export async function exerciseEntryDiningJoin({
         .find((v) => v.startsWith("__Host-bop-guest="))
         .split(";")[0];
       assert.notEqual(currentCookie, cookie);
-      return { currentCookie, activation };
+      return { currentCookie, activation, admissionReference: joinedBody.admissionReference };
     };
     const { currentCookie, activation } = await joinAndBind(
       cookie,
@@ -484,6 +484,58 @@ export async function exerciseEntryDiningJoin({
           assert.equal(replaced.status, "Issued");
         },
       });
+      // v15 batch 39 live check (b40): two more phones at this table, as v15 saw them, over the
+      // composed HTTP API as the restricted role. Staff hand each the table's next code.
+      const nextCode = async () => {
+        const current = await regeneration.resolveActiveJoin(
+          started.session.diningSessionReference,
+        );
+        assert.ok(current);
+        const replaced = await staff.regenerate({
+          diningSessionReference: current.session.diningSessionReference,
+          tableReference,
+          expectedAssignmentVersion: current.session.tableAssignmentVersion,
+          expectedSessionVersion: current.session.version,
+          expectedCapabilityVersion: current.capability.version,
+          expectedGeneration: current.capability.generation,
+          operationReference: reference(),
+          requestedAt: at,
+        });
+        assert.equal(replaced.status, "Issued");
+        return replaced.joinCredential;
+      };
+      const seats = async () =>
+        (
+          await admin.query(
+            "SELECT count(*)::int AS n FROM rms_dining.dining_participant WHERE session_id=$1",
+            [started.session.diningSessionReference],
+          )
+        ).rows[0].n;
+      // (1) The phone reloaded its table page before joining: it now holds the foreground CSRF its
+      // Session cookie restores (GET /api/v1/customer/session/csrf), not the one issued at entry.
+      // Before the fix the Join answered and the binding refused it (503) twice.
+      const reloaded = await enterAnother(base);
+      const restoredCsrf = session.credentials.deriveForegroundCsrf(reloaded.cookie.split("=")[1]);
+      assert.notEqual(restoredCsrf, reloaded.csrfToken);
+      const reloadedSeats = await seats();
+      await joinAndBind(reloaded.cookie, restoredCsrf, await nextCode());
+      assert.equal(await seats(), reloadedSeats + 1);
+      // (2) The phone's Join answered but its binding never finished (on v15: the refusal above).
+      // Joining again gives it back its own seat, never a refusal and never a second seat.
+      const unfinished = await enterAnother(base);
+      const first = await post(
+        "/bff/customer/dining/join",
+        reference(),
+        unfinished.cookie,
+        unfinished.csrfToken,
+        { joinCredential: await nextCode() },
+      );
+      assert.equal(first.status, 200);
+      const firstBody = await first.json();
+      const unfinishedSeats = await seats();
+      const again = await joinAndBind(unfinished.cookie, unfinished.csrfToken, await nextCode());
+      assert.equal(again.admissionReference, firstBody.admissionReference);
+      assert.equal(await seats(), unfinishedSeats);
       return { resolve };
     }
     await exerciseEntryDiningCart({

@@ -482,7 +482,12 @@ describe("scoped local Customer runtime", () => {
     const configuration: NonNullable<LocalCustomerRuntimeOptions["diningAdmission"]> = {
       join: {
         dining: {
-          store: { resolveJoinState: owner, resolveJoinOperation: owner, join: owner },
+          store: {
+            resolveJoinState: owner,
+            resolveJoinOperation: owner,
+            resolveGuestJoin: owner,
+            join: owner,
+          },
           credentials: {
             generateReference: credential,
             hashJoinCredential: credential,

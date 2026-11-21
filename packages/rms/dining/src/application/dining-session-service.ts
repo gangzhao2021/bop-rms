@@ -212,7 +212,12 @@ export type StartDiningSessionResult =
 
 export type JoinDiningSessionResult =
   | {
-      readonly status: "Joined" | "AlreadyApplied";
+      /**
+       * `Rejoined` (v15 batch 39, b40): the guest had joined this Session already and that seat
+       * was never taken up (the phone's binding never finished); it is given back, unchanged, with
+       * the admission of that earlier Join. Nothing is written.
+       */
+      readonly status: "Joined" | "AlreadyApplied" | "Rejoined";
       readonly session: ReturnType<typeof parseDiningSession>;
       readonly participant: ReturnType<typeof parseDiningParticipant>;
       readonly admission: ReturnType<typeof parseDiningIdentityAdmission>;
@@ -466,6 +471,50 @@ export function createDiningSessionService(ports: DiningSessionPorts) {
         participant: prior.participant,
         admission: prior.admission,
       });
+    }
+    // v15 batch 39 (b40): the guest presented the table's current code (or was issued it by QR)
+    // and joined this Session before, but that seat was never taken up: the Join answered and the
+    // phone's binding failed. A second seat is refused (one per guest), so before this every Join
+    // of that phone failed while a fresh phone joined at once. It gets its own seat back.
+    if (ports.store.resolveGuestJoin !== undefined) {
+      const resolveGuestJoin = ports.store.resolveGuestJoin.bind(ports.store);
+      const earlierValue = await sessionAsync(() =>
+        resolveGuestJoin({
+          diningSessionReference: session.diningSessionReference,
+          guestSessionReference,
+        }),
+      );
+      if (earlierValue !== null) {
+        const raw = captureSessionData(earlierValue) as unknown as Record<string, unknown> | null;
+        const earlierCapability = sessionPort(() => parseDiningJoinCapability(raw?.capability));
+        const earlier = parseDiningJoinRecord(earlierValue, {
+          operationReference: sessionPort(() => parseDiningReference(raw?.operationReference)),
+          session,
+          consumedCapability: earlierCapability,
+          maximumSessionVersion: session.version,
+          exactConsumedAt: true,
+          observedAt: requestedAt,
+        });
+        const earlierIntent = sessionPort(() =>
+          parseDiningHash(
+            ports.credentials.hashOperationIntent(
+              `Join:${guestSessionReference}:${earlier.capability.capabilityReference}`,
+            ),
+          ),
+        );
+        if (
+          sessionPort(() =>
+            ports.credentials.equals(earlier.operationIntentHash, earlierIntent),
+          ) !== true
+        )
+          return unavailable;
+        return Object.freeze({
+          status: "Rejoined",
+          session: earlier.session,
+          participant: earlier.participant,
+          admission: earlier.admission,
+        });
+      }
     }
     if (session.version !== expectedSessionVersion) return unavailable;
     const decision = sessionPort(() =>

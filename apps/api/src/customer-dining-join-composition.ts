@@ -20,6 +20,7 @@ import {
   type DiningSessionPorts,
   type QrTableContextEvidence,
 } from "@rms/dining";
+import { withFailureCause } from "./customer-failure-diagnostic.js";
 
 export interface CustomerDiningJoinCompositionOptions {
   readonly scope: Readonly<{ brandReference: string; storeReference: string }>;
@@ -28,7 +29,8 @@ export interface CustomerDiningJoinCompositionOptions {
     readonly store: Pick<
       DiningSessionPorts["store"],
       "resolveJoinState" | "resolveJoinOperation" | "join"
-    >;
+    > &
+      Required<Pick<DiningSessionPorts["store"], "resolveGuestJoin">>;
     readonly credentials: Pick<
       DiningSessionPorts["credentials"],
       "generateReference" | "hashJoinCredential" | "hashOperationIntent" | "equals"
@@ -85,10 +87,21 @@ export interface CustomerDiningJoinCompositionOptions {
 }
 export interface CustomerDiningJoinRequestContext {
   /** Trusted server port bound to this request's canonical abuse context; never taken from JSON. */
-  readonly abuse: DiningSessionPorts["abuse"];
+  readonly abuse: DiningSessionPorts["abuse"] & {
+    /**
+     * v15 batch 39 (b40): a QR join presents the code Dining just issued to this guest, never a
+     * guess, so it must not draw on the guest's budget for wrong codes (each tap could spend six,
+     * successes included, and lock the guest out). It still answers Cooldown where the request's
+     * own context is no longer valid. Without it a QR join draws on `admit` as before.
+     */
+    readonly admitIssued?: DiningSessionPorts["abuse"]["admit"];
+  };
 }
-function unavailable(): never {
-  throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+function unavailable(reason?: string): never {
+  const error = new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+  // v15 batch 39 (b40): the API's log line says which step refused (a code, never shown).
+  if (reason !== undefined) withFailureCause(error, Object.freeze({ code: reason }));
+  throw error;
 }
 
 /** Composition only. Identity authenticates; Dining owns context, abuse, Join and atomic effects. */
@@ -143,7 +156,10 @@ export function createCustomerDiningJoinComposition(options: CustomerDiningJoinC
         const qr = options.qr;
         if (byQr && qr === undefined) return unavailable();
         if (!byQr && typeof raw.joinCredential !== "string") return unavailable();
-        const admit = request.abuse.admit.bind(request.abuse);
+        const admit =
+          byQr && typeof request.abuse.admitIssued === "function"
+            ? request.abuse.admitIssued.bind(request.abuse)
+            : request.abuse.admit.bind(request.abuse);
         const observedAt = now();
         const authorize = async (instant: CanonicalInstant) => {
           const session = createGuestSession(
@@ -359,26 +375,31 @@ export function createCustomerDiningJoinComposition(options: CustomerDiningJoinC
         } else result = await joinWith(raw.joinCredential as string);
         // Assigned inside the turn above, which TypeScript can't follow.
         result = result as Awaited<ReturnType<typeof joinWith>> | null;
-        if (result === null) return unavailable();
+        if (result === null) return unavailable("DINING_QR_JOIN_NOT_COMPLETED");
         // A definitive Dining refusal wrote nothing; the Guest needs a new code, not a retry.
         if (result.status === "DiningJoinRefused")
           return Object.freeze({ status: "Refused" as const, reason: result.reason });
-        if (result.status === "DiningJoinUnavailable") return unavailable();
+        if (result.status === "DiningJoinUnavailable")
+          return unavailable("DINING_JOIN_UNAVAILABLE");
         const admission = parseDiningIdentityAdmission(result.admission);
         const latest = await current(initial.sessionReference, now());
         if (
-          admission.operationReference !== String(operationReference) ||
+          // v15 batch 39 (b40): a guest whose earlier seat was never taken up gets that seat back,
+          // with the admission of the earlier Join (its own operation), and binds with it.
+          (result.status !== "Rejoined" &&
+            admission.operationReference !== String(operationReference)) ||
           admission.storeReference !== scope.storeReference ||
           admission.tableReference !== parseDiningReference(latest.context.tableReference)
         )
-          return unavailable();
+          return unavailable("DINING_JOIN_ADMISSION_MISMATCH");
         return Object.freeze({
           status: "Joined" as const,
           operationReference,
           admissionReference: String(admission.admissionReference),
         });
-      } catch {
-        return unavailable();
+      } catch (failure) {
+        // The plain answer keeps what failed behind it, so the API logs its code (never shown).
+        throw withFailureCause(new GuestSessionError("GUEST_SESSION_UNAVAILABLE"), failure);
       }
     },
   });

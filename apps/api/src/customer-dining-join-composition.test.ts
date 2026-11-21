@@ -8,6 +8,7 @@ import {
   type GuestSessionRecord,
 } from "@bop/identity";
 import {
+  DiningSessionError,
   parseDiningSession,
   parseQrTableContextEvidence,
   type DiningJoinState,
@@ -17,6 +18,7 @@ import {
   createCustomerDiningJoinComposition,
   type CustomerDiningJoinCompositionOptions,
 } from "./customer-dining-join-composition.js";
+import { customerFailureCode } from "./customer-failure-diagnostic.js";
 const id = (n: number) => `01902304-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const at = (n: number) =>
   parseCanonicalInstant(new Date(Date.parse("2026-09-09T12:00:00.000Z") + n * 1000).toISOString());
@@ -93,14 +95,55 @@ function fixture(offset = 0) {
     } as unknown as DiningJoinState["capability"],
   };
   const history = new Map<string, DiningJoinRecord>();
+  // As rms_dining.dining_session_join_operation: one Join per guest and Session, whose admission
+  // stays Active until the guest's binding consumes it.
+  const joinedBy = new Map<string, string>();
+  const bound = new Set<string>();
   const store: CustomerDiningJoinCompositionOptions["dining"]["store"] = {
     resolveJoinState: vi.fn(async (key) => (key === state.capability.selectorHash ? state : null)),
     resolveJoinOperation: vi.fn(async (key) => history.get(key) ?? null),
+    resolveGuestJoin: vi.fn(async (input) => {
+      for (const [operation, guest] of joinedBy) {
+        const record = history.get(operation);
+        if (
+          record !== undefined &&
+          guest === input.guestSessionReference &&
+          record.session.diningSessionReference === input.diningSessionReference &&
+          !bound.has(String(record.admission.admissionReference))
+        )
+          return record;
+      }
+      return null;
+    }),
     join: vi.fn(async (input) => {
+      for (const [operation, guest] of joinedBy)
+        if (
+          guest === input.guestSessionReference &&
+          history.get(operation)?.session.diningSessionReference ===
+            input.record.session.diningSessionReference
+        )
+          throw new DiningSessionError("DINING_SESSION_VERSION_CONFLICT");
       state = { session: input.record.session, capability: input.record.capability };
       history.set(input.record.operationReference, input.record);
+      joinedBy.set(input.record.operationReference, input.guestSessionReference);
       return input.record;
     }),
+  };
+  /** Staff (or the next QR scan) replace the table's code. */
+  const reissue = (credential: string) => {
+    state = {
+      session: state.session,
+      capability: {
+        ...state.capability,
+        capabilityReference: id(offset + 31 + state.capability.generation),
+        selectorHash: hash(credential),
+        generation: state.capability.generation + 1,
+        status: "Active",
+        version: 1,
+        issuedAt: at(seconds),
+        consumedAt: null,
+      } as unknown as DiningJoinState["capability"],
+    };
   };
   const context = parseQrTableContextEvidence({
     publicStoreReference: id(4),
@@ -161,6 +204,8 @@ function fixture(offset = 0) {
     context,
     store,
     history,
+    bound,
+    reissue,
     input,
     request,
     tick: (value: number) => {
@@ -282,6 +327,92 @@ describe("WP-2423 item 8 ⑤ QR join composition", () => {
     });
     expect(f.store.join).not.toHaveBeenCalled();
     await expect(f.composition.join(qrInput(f), f.request)).rejects.toMatchObject(unavailable);
+  });
+});
+
+describe("v15 batch 39 (b40): a guest whose table just opened is never locked out", () => {
+  const qrInput = (
+    f: ReturnType<typeof fixture>,
+    operationReference = f.input.operationReference,
+  ) => ({
+    sessionCredential: f.input.sessionCredential,
+    csrfCredential: f.input.csrfCredential,
+    operationReference,
+  });
+  const issuing = (f: ReturnType<typeof fixture>) => {
+    let n = 0;
+    return vi.fn(async () => {
+      const joinCredential = Buffer.alloc(16, 100 + ++n).toString("base64url");
+      f.reissue(joinCredential);
+      return {
+        status: "Issued" as const,
+        diningSessionReference: id(20),
+        joinCredential: joinCredential as never,
+      };
+    });
+  };
+  it("a QR join takes nothing from the guest's wrong-code budget", async () => {
+    const f = fixture();
+    const admitIssued = vi.fn(async () => "Admitted" as const);
+    const request = { abuse: { admit: f.request.abuse.admit, admitIssued } };
+    const composition = createCustomerDiningJoinComposition({
+      ...f.options,
+      qr: { issue: issuing(f) },
+    });
+    expect(await composition.join(qrInput(f), request)).toMatchObject({ status: "Joined" });
+    expect(admitIssued).toHaveBeenCalledOnce();
+    expect(f.request.abuse.admit).not.toHaveBeenCalled();
+    // A typed code is a guess and still counts.
+    const g = fixture(1000);
+    await g.composition.join(g.input, { abuse: { admit: g.request.abuse.admit, admitIssued } });
+    expect(g.request.abuse.admit).toHaveBeenCalledOnce();
+  });
+  it("a phone whose Join answered but whose binding never finished gets its own seat back", async () => {
+    const f = fixture();
+    const issue = issuing(f);
+    const composition = createCustomerDiningJoinComposition({ ...f.options, qr: { issue } });
+    const first = await composition.join(qrInput(f), f.request);
+    expect(first).toEqual({
+      status: "Joined",
+      operationReference: f.input.operationReference,
+      admissionReference: id(22),
+    });
+    // The binding failed (v15: dining-binding/prepare 503); the guest taps "Join this table" again.
+    f.tick(30);
+    const again = await composition.join(qrInput(f, id(11)), f.request);
+    expect(again).toEqual({
+      status: "Joined",
+      operationReference: id(11),
+      admissionReference: id(22),
+    });
+    expect(f.store.join).toHaveBeenCalledOnce();
+    // The same by a typed code, after a reload.
+    f.reissue(f.input.joinCredential);
+    expect(await f.composition.join({ ...f.input, operationReference: id(12) }, f.request)).toEqual(
+      { status: "Joined", operationReference: id(12), admissionReference: id(22) },
+    );
+    expect(f.store.join).toHaveBeenCalledOnce();
+    // Once bound, the seat is taken up: a Join never hands it out again.
+    f.bound.add(id(22));
+    f.reissue(f.input.joinCredential);
+    await expect(
+      f.composition.join({ ...f.input, operationReference: id(13) }, f.request),
+    ).rejects.toMatchObject(unavailable);
+  });
+  it("a refused Join keeps its cause behind the plain answer, for the API's log", async () => {
+    const f = fixture();
+    const composition = createCustomerDiningJoinComposition({
+      ...f.options,
+      qr: { issue: issuing(f) },
+    });
+    await composition.join(qrInput(f), f.request);
+    f.bound.add(id(22));
+    const failed = await composition
+      .join(qrInput(f, id(11)), f.request)
+      .catch((error: unknown) => error);
+    expect(failed).toMatchObject(unavailable);
+    expect(customerFailureCode(failed)).toBe("DINING_SESSION_VERSION_CONFLICT");
+    expect(Object.keys(failed as object)).not.toContain("cause");
   });
 });
 
@@ -427,6 +558,8 @@ describe("current-authorized Dining Join composition", () => {
   it("returns a definitive refusal for a consumed code without a second write", async () => {
     const f = fixture();
     expect(await f.composition.join(f.input, f.request)).toMatchObject({ status: "Joined" });
+    // The seat it gave was taken up (bound); a guest whose seat was not gets it back (b40 above).
+    f.bound.add(id(22));
     const reused = await f.composition.join({ ...f.input, operationReference: id(11) }, f.request);
     expect(reused).toEqual({ status: "Refused", reason: "CodeUsed" });
     expect(Object.isFrozen(reused)).toBe(true);
@@ -538,6 +671,8 @@ describe("current-authorized Dining Join composition", () => {
           resolveJoinState: async (key) =>
             (await a.store.resolveJoinState(key)) ?? (await b.store.resolveJoinState(key)),
           resolveJoinOperation: async (key) => a.history.get(key) ?? b.history.get(key) ?? null,
+          resolveGuestJoin: async (input) =>
+            (await a.store.resolveGuestJoin(input)) ?? (await b.store.resolveGuestJoin(input)),
           join: async (input) =>
             String(input.record.session.tableReference) === String(a.context.tableReference)
               ? a.store.join(input)

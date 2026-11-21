@@ -362,10 +362,11 @@ it("consumes Join credentials and creates Participant, Host and admission atomic
       assert.equal(joined.session.version, 2);
       assert.deepEqual(await counts(), equalCounts(1));
       assert.equal((await service().join(first)).status, "AlreadyApplied");
-      assert.equal(
-        (await service().join({ ...first, operationReference: id(90) })).status,
-        "DiningJoinUnavailable",
-      );
+      // v15 batch 39 (b40): the same guest joining again before any binding took up its seat
+      // gets that seat back (nothing written), never a refusal.
+      const rejoined = await service().join({ ...first, operationReference: id(90) });
+      assert.equal(rejoined.status, "Rejoined");
+      assert.equal(rejoined.admission.admissionReference, joined.admission.admissionReference);
       // WP-2423: a second Guest reusing the consumed single-use code gets a definitive refusal.
       assert.deepEqual(
         await service().joinCurrent({
@@ -413,9 +414,15 @@ it("consumes Join credentials and creates Participant, Host and admission atomic
       assert.equal((await service().join(first)).status, "AlreadyApplied");
       const thirdCredential = await regenerate(43, 5);
       const third = joinCommand(thirdCredential.joinCredential, 82, 45, 3, 6);
-      await assert.rejects(
-        service().join({ ...third, guestSessionReference: id(80), operationReference: id(44) }),
-        (e) => e.code === "DINING_SESSION_VERSION_CONFLICT",
+      assert.equal(
+        (
+          await service().join({
+            ...third,
+            guestSessionReference: id(80),
+            operationReference: id(44),
+          })
+        ).status,
+        "Rejoined",
       );
       const before = await regenerationReader.resolveActiveJoin(sessionId);
       const broken = createPostgresDiningSessionJoinStore(

@@ -105,6 +105,15 @@ export interface DiningSessionStorePort {
   /** Current generation for an Active Session; it may already be Consumed or Expired. */
   resolveActiveJoin(diningSessionReference: DiningReference): Promise<DiningJoinState | null>;
   resolveJoinOperation(operationReference: DiningReference): Promise<DiningJoinRecord | null>;
+  /**
+   * v15 batch 39 (b40): this guest's own earlier Join of this Session whose seat was never taken
+   * up: its admission is still Active (the phone's binding never finished) and its Participant
+   * still Active. Null when there is none. Guest joins only; staff compositions leave it out.
+   */
+  resolveGuestJoin?(input: {
+    readonly diningSessionReference: DiningReference;
+    readonly guestSessionReference: DiningReference;
+  }): Promise<DiningJoinRecord | null>;
   join(input: {
     readonly record: DiningJoinRecord;
     readonly expectedSessionVersion: number;

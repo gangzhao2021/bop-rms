@@ -496,6 +496,24 @@ it("lets a guest join an open table by its QR code, with staff pause, removal an
       }
       assert.ok(!["Joined", "AlreadyApplied"].includes(repeat.status), JSON.stringify(repeat));
       assert.equal((await counts()).participants, participantsBefore);
+      // v15 batch 39 (b40): that seat was never taken up (no binding consumed its admission), so
+      // the phone gets it back, the same Participant and admission, instead of a refusal on every
+      // later tap. The restricted role reads it with the rendered pilot grants alone.
+      assert.equal(repeat.status, "Rejoined");
+      assert.equal(repeat.participant.participantReference, phone2);
+      assert.equal(repeat.admission.admissionReference, second.admission.admissionReference);
+      const seat = await joinReader.resolveGuestJoin({
+        diningSessionReference: sessionId,
+        guestSessionReference: id(81),
+      });
+      assert.equal(seat.admission.admissionReference, second.admission.admissionReference);
+      assert.equal(
+        await joinReader.resolveGuestJoin({
+          diningSessionReference: sessionId,
+          guestSessionReference: id(79),
+        }),
+        null,
+      );
       // The issued code is used once: a second join with it is refused.
       const issued = await issue(20, 82, 103, 4);
       assert.equal(issued.status, "Issued");

@@ -169,6 +169,40 @@ export function createPostgresDiningSessionJoinStore(
         return sessionDependency();
       }
     },
+    // v15 batch 39 (b40): this guest's earlier Join of the Session whose seat was never taken up:
+    // its admission still Active (never consumed by a binding) and its Participant still Active.
+    async resolveGuestJoin(value: unknown): Promise<DiningJoinRecord | null> {
+      let session, guest;
+      try {
+        const raw = closed(value, ["diningSessionReference", "guestSessionReference"]);
+        session = reference(raw.diningSessionReference);
+        guest = reference(raw.guestSessionReference);
+      } catch {
+        throw new DiningSessionError("DINING_SESSION_INPUT_INVALID");
+      }
+      try {
+        return await runner.run(async (tx) => {
+          await context(tx);
+          const found = rows(
+            await tx.query(
+              "SELECT o.record_json AS record FROM rms_dining.dining_session_join_operation o JOIN rms_dining.dining_identity_admission a ON a.tenant_id=o.tenant_id AND a.brand_id=o.brand_id AND a.store_id=o.store_id AND a.session_id=o.session_id AND a.admission_id=o.admission_id AND a.participant_id=o.participant_id JOIN rms_dining.dining_participant p ON p.tenant_id=o.tenant_id AND p.brand_id=o.brand_id AND p.store_id=o.store_id AND p.session_id=o.session_id AND p.participant_id=o.participant_id WHERE o.tenant_id=$1 AND o.brand_id=$2 AND o.store_id=$3 AND o.session_id=$4 AND o.guest_session_id=$5 AND a.status='Active' AND a.version=1 AND p.status='Active' LIMIT 2",
+              [tenant, brand, store, session, guest],
+            ),
+            2,
+          );
+          if (found.length === 0) return null;
+          // One Join per guest and Session (dining_session_join_operation_guest_unique).
+          if (found.length !== 1) return sessionDependency();
+          const record = validate(closed(found[0], ["record"]).record, guest);
+          if (record.session.diningSessionReference !== session) return sessionDependency();
+          return record;
+        });
+      } catch (error) {
+        if (error instanceof DiningSessionError && error.code === "DINING_SESSION_INPUT_INVALID")
+          throw error;
+        return sessionDependency();
+      }
+    },
     async resolveJoinState(value) {
       let selector;
       try {
