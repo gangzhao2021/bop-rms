@@ -343,11 +343,8 @@ export function KitchenRemakeLane({
                 {rework.status === "In Progress" ? t("In progress") : t("To make")}
               </strong>
             </div>
+            {/* Batch 40: how many is in the title ("1×"), as on a ticket's dish; no second line. */}
             <div className="kitchen-work-item__facts">
-              <dl className="kitchen-work-item__quantity">
-                <dt>{t("Quantity")}</dt>
-                <dd>{rework.quantity}</dd>
-              </dl>
               {rework.selectedOptions.length > 0 ? (
                 <ul className="kitchen-work-item__options" aria-label={t("Modifiers")}>
                   {rework.selectedOptions.map((option, index) => (

@@ -2431,19 +2431,33 @@ export function KitchenBoardScreen({
     ["Completed", t("Completed")],
     ["All", t("All")],
   ];
+  // Batch 40 (v15 b39 live): the back office folds its earlier-day list into one line under the
+  // remakes, as the kitchen display does. Open, 53 of them pushed a remake 3,400 px down.
+  const earlierCountText = canCloseEarlier
+    ? earlierTickets.length === 1
+      ? t("1 ticket from earlier days to check and close")
+      : t("{length} tickets from earlier days to check and close", {
+          length: earlierTickets.length,
+        })
+    : earlierTickets.length === 1
+      ? t("1 ticket from earlier days")
+      : t("{length} tickets from earlier days", { length: earlierTickets.length });
   const renderEarlierAttention = () =>
     earlierTickets.length === 0 ? null : (
-      <section className="order-attention" aria-labelledby="kitchen-attention-heading">
-        <h2 id="kitchen-attention-heading">{t("Needs attention")}</h2>
+      <details className="order-attention kitchen-office-earlier">
+        <summary>
+          <h2 id="kitchen-attention-heading">{t("Needs attention")}</h2>
+          <span>
+            {" · "}
+            {earlierElsewhere ?? earlierCountText}
+          </span>
+        </summary>
         <ul>
           {earlierTickets.map((ticket) => {
             const waited = Math.max(
               0,
               Math.floor((Date.parse(clockAt) - Date.parse(ticket.createdAt)) / 60_000),
             );
-            const dishes = ticket.items
-              .map((item) => `${item.requiredQuantity}× ${item.displayName}`)
-              .join("、");
             return (
               <li key={ticket.ticketReference}>
                 <div>
@@ -2454,7 +2468,20 @@ export function KitchenBoardScreen({
                     })}
                   </p>
                   <p className="order-attention__hint">
-                    {dishes} {t("· waiting {waited}", { waited: kitchenWaitText(waited) })}
+                    {ticket.items.map((item, index) => (
+                      <Fragment key={item.workItemReference}>
+                        {index > 0 ? "、" : null}
+                        {`${item.requiredQuantity}× ${item.displayName}`}
+                        {/* The kitchen's names rule (item 8 ③): the English name beside it. */}
+                        {item.otherName === undefined ? null : (
+                          <span className="kitchen-office-earlier__other" lang="en">
+                            {" "}
+                            {item.otherName}
+                          </span>
+                        )}
+                      </Fragment>
+                    ))}{" "}
+                    {t("· waiting {waited}", { waited: kitchenWaitText(waited) })}
                   </p>
                 </div>
                 {canCloseEarlier ? (
@@ -2477,7 +2504,7 @@ export function KitchenBoardScreen({
         {canCloseEarlier ? null : (
           <p className="order-attention__hint">{t("Ask a manager to check and close them.")}</p>
         )}
-      </section>
+      </details>
     );
   const filterToggle = (
     <button
@@ -2807,6 +2834,33 @@ export function KitchenBoardScreen({
     if (root.ownerDocument.body) observer.observe(root.ownerDocument.body);
     return () => observer.disconnect();
   });
+  // Batch 39 (sweep 38) and 40: a remake is a dish a guest is already waiting for, so open remakes
+  // lead the board, above every ticket. One arriving moves the tickets below it, which the board's
+  // slots notice (DEC-KITCHEN-ONE-TAP): a tap there is not taken and says so. On the kitchen
+  // display they come before the phone's Filters button too (filters choose tickets, never
+  // remakes), so a remake's buttons are on a 390 px phone's first screen (v15 b39 live).
+  const remakeLane =
+    remakes && board.openReworks.length > 0 ? (
+      <div className="kitchen-board-lanes kitchen-board-remakes">
+        <KitchenRemakeLane
+          items={board.openReworks}
+          today={today}
+          readOnly={remakeReadOnly}
+          slotRef={slotRef}
+          movedReference={movedSlot?.slot ?? null}
+          onAdvance={(rework) => {
+            if (takenIn(rework.reworkReference)) remakes.onAdvance(rework);
+          }}
+          onCancel={
+            remakes.canRework && remakes.onCancel
+              ? (rework: KitchenReworkView) => {
+                  if (takenIn(rework.reworkReference)) setCancelTarget(rework);
+                }
+              : undefined
+          }
+        />
+      </div>
+    ) : null;
   return (
     <KitchenFrame
       workspaceFrame={workspaceFrame}
@@ -3030,14 +3084,14 @@ export function KitchenBoardScreen({
           onRing={() => onRing?.()}
         />
         {pauseOrdering}
-        {workspaceFrame ? null : filterToggle}
         {!stale && readOnly && !(view.operatorStatus === "Named") ? (
           <KitchenBoardLock
             operatorStatus={view.operatorStatus}
             freshnessStatus={view.freshnessStatus}
           />
         ) : null}
-        {workspaceFrame ? renderEarlierAttention() : null}
+        {workspaceFrame ? null : remakeLane}
+        {workspaceFrame ? null : filterToggle}
         {workspaceFrame ? (
           <div className="order-toolbar">
             <div className="order-status-filters" role="group" aria-label={t("Show kitchen work")}>
@@ -3061,30 +3115,7 @@ export function KitchenBoardScreen({
         ) : (
           queueBar
         )}
-        {remakes && board.openReworks.length > 0 ? (
-          // Batch 39 (sweep 38): a remake is a dish a guest is already waiting for, so open remakes
-          // lead the board, above every ticket. One arriving moves the tickets below it, which the
-          // board's slots notice (DEC-KITCHEN-ONE-TAP): a tap there is not taken and says so.
-          <div className="kitchen-board-lanes kitchen-board-remakes">
-            <KitchenRemakeLane
-              items={board.openReworks}
-              today={today}
-              readOnly={remakeReadOnly}
-              slotRef={slotRef}
-              movedReference={movedSlot?.slot ?? null}
-              onAdvance={(rework) => {
-                if (takenIn(rework.reworkReference)) remakes.onAdvance(rework);
-              }}
-              onCancel={
-                remakes.canRework && remakes.onCancel
-                  ? (rework: KitchenReworkView) => {
-                      if (takenIn(rework.reworkReference)) setCancelTarget(rework);
-                    }
-                  : undefined
-              }
-            />
-          </div>
-        ) : null}
+        {workspaceFrame ? remakeLane : null}
         <dialog
           className="kitchen-filter-sheet"
           ref={filterSheetRef}
@@ -3099,6 +3130,7 @@ export function KitchenBoardScreen({
           {renderOrderSearch("mobile")}
           {renderFilters("mobile")}
         </dialog>
+        {workspaceFrame ? renderEarlierAttention() : null}
         {!workspaceFrame && earlierTickets.length > 0 ? (
           <details className="kitchen-earlier-days">
             <summary>

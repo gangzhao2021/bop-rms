@@ -415,11 +415,22 @@
 .kitchen-board-remakes {
   margin-bottom: 0;
 }
+/* Batch 40: no box around the lane. A full-width box held one card at 1440 px and cost a phone
+   its remake buttons; each card carries the warning border and the heading names the lane. */
 .kitchen-remake-lane {
-  padding: 12px;
-  border: 2px solid var(--bop-color-warning);
-  border-radius: var(--bop-radius-card);
-  background: var(--bop-color-surface-raised);
+  padding: 0;
+  border: 0;
+  background: none;
+}
+.kitchen-remake-lane .kitchen-station-lane__heading {
+  gap: 8px;
+  padding: 0 0 8px;
+}
+.kitchen-remake-lane .kitchen-station-lane__heading h3,
+.kitchen-remake-lane .kitchen-station-lane__heading > span {
+  color: var(--bop-color-text-default);
+  font-size: 16px;
+  font-weight: 600;
 }
 .kitchen-work-item.kitchen-work-item--remake {
   gap: 10px;

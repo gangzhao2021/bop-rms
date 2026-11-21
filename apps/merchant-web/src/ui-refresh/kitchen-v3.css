@@ -229,8 +229,11 @@
     gap: 24px;
   }
 }
-/* One lane (no named stations): the lane heading says nothing the bar does not. */
-.kitchen-board-lanes:not(:has(> .kitchen-station-lane + .kitchen-station-lane))
+/* One lane (no named stations): the lane heading says nothing the bar does not. The remakes keep
+   theirs (batch 40): it is what says these cards are remakes, above the tickets. */
+.kitchen-board-lanes:not(.kitchen-board-remakes):not(
+    :has(> .kitchen-station-lane + .kitchen-station-lane)
+  )
   .kitchen-station-lane__heading {
   position: absolute;
   width: 1px;
@@ -938,6 +941,44 @@
 }
 .kitchen-shell--workspace .order-attention > .order-attention__hint {
   margin-top: 12px;
+}
+/* Batch 40: the back office's earlier-day list is one line under the remakes until opened, with
+   the same arrow as the kitchen display's earlier days. */
+.kitchen-shell--workspace .kitchen-office-earlier > summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 4px;
+  min-height: 44px;
+  cursor: pointer;
+  list-style: none;
+}
+.kitchen-shell--workspace .kitchen-office-earlier > summary::-webkit-details-marker {
+  display: none;
+}
+.kitchen-shell--workspace .kitchen-office-earlier > summary::before {
+  content: "";
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-inline-end: 8px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform var(--bop-motion-fast);
+}
+.kitchen-shell--workspace .kitchen-office-earlier[open] > summary::before {
+  transform: rotate(45deg);
+}
+.kitchen-shell--workspace .kitchen-office-earlier > summary > h2 {
+  display: inline;
+  margin: 0;
+}
+.kitchen-shell--workspace .kitchen-office-earlier[open] > ul {
+  margin-top: 8px;
+}
+.kitchen-office-earlier__other {
+  color: var(--bop-color-text-muted);
 }
 .kitchen-shell--workspace .kitchen-queue-bar {
   flex-wrap: nowrap;
