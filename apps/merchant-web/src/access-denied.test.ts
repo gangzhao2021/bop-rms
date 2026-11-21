@@ -20,6 +20,33 @@ it("batch 38: a kitchen display or a Kitchen role is kitchen work only; anyone w
   expect(kitchenOnlyNavigation([])).toBe(false);
 });
 
+it("batch 40: the kitchen lists v15 really composes are kitchen work; a floor or office list is not", () => {
+  // v15 /merchant/session, TEST Cook (Kitchen role) workspace sign-in at DEMO Store.
+  const cook = ["KIT-KITCHEN-QUEUE", "CAT-AVAILABILITY", "INV-WASTE-RECORD"].map(item);
+  // v15 /merchant/session, the owner-merchant-2 kitchen display at Test Merchant 2.
+  const kitchenDisplay = ["KIT-KITCHEN-QUEUE", "CAT-AVAILABILITY"].map(item);
+  expect(kitchenOnlyNavigation(cook)).toBe(true);
+  expect(kitchenOnlyNavigation(kitchenDisplay)).toBe(true);
+  // A cook who also counts and receives stock is still kitchen work.
+  expect(kitchenOnlyNavigation([...cook, item("INV-COUNT-LIST"), item("INV-RECEIPT-LIST")])).toBe(
+    true,
+  );
+  // Item availability without the kitchen board (floor staff) is not.
+  expect(kitchenOnlyNavigation([item("CAT-AVAILABILITY"), item("INV-WASTE-RECORD")])).toBe(false);
+  // Any ordering, dining, pickup, payment, report or setup screen makes it more than the kitchen.
+  for (const other of [
+    "OPS-ORDER-QUEUE",
+    "OPS-ORDER-ENTRY",
+    "DIN-FLOOR-BOARD",
+    "FUL-PICKUP-QUEUE",
+    "PAY-RECONCILIATION",
+    "RPT-OPS-DASHBOARD",
+    "CAT-PRODUCT-LIST",
+    "IAM-USER-LIST",
+  ])
+    expect(kitchenOnlyNavigation([...cook, item(other)]), other).toBe(false);
+});
+
 it("batch 38: every refusal says what to do next, in both languages, without internal words", () => {
   for (const text of [pageAccessDeniedText, actionAccessDeniedText, kitchenOnlyAccessDeniedText]) {
     expect(text).toMatch(/owner or a manager/u);

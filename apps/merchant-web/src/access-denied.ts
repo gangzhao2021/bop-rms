@@ -29,11 +29,24 @@ export const kitchenOnlyAccessDeniedText = t(
 );
 export const backToKitchenText = t("Go to the kitchen");
 
-/** The screens a kitchen-only sign-in lists: the kitchen board and recording waste. */
-const kitchenWork: ReadonlySet<string> = new Set(["KIT-KITCHEN-QUEUE", "INV-WASTE-RECORD"]);
 /**
- * Whether the person's navigation is kitchen work alone (a kitchen display sign-in lists only the
- * kitchen; a Kitchen role adds recording waste). Presentation only: the server refused the page.
+ * Batch 40 (v15 batch 38-39 live check): the back-of-house work a kitchen sign-in lists beside the
+ * kitchen board. A kitchen display lists Item availability (marking a dish sold out); the Kitchen
+ * role adds recording waste, and may count or receive stock. None of them takes orders, runs
+ * tables or pickup, takes payments, reads reports or sets the store up.
+ */
+const kitchenWork: ReadonlySet<string> = new Set([
+  "HOME-OVERVIEW",
+  "KIT-KITCHEN-QUEUE",
+  "CAT-AVAILABILITY",
+  "INV-WASTE-RECORD",
+  "INV-COUNT-LIST",
+  "INV-RECEIPT-LIST",
+]);
+/**
+ * Whether the person's work is the kitchen: they have the kitchen board and every other screen
+ * they have is kitchen work. Anyone with a screen beyond it (orders, tables, pickup, payments,
+ * reports, setup) reads the general refusal. Presentation only: the server refused the page.
  */
 export function kitchenOnlyNavigation(items: readonly { readonly screenId: string }[]): boolean {
   return (
