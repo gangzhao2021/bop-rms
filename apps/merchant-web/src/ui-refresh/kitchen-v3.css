@@ -191,14 +191,18 @@
 .kitchen-board-heading__actions .kitchen-recent-finished > summary::before {
   display: none;
 }
-.kitchen-board-heading__actions .kitchen-recent-finished[open] > ul {
+/* Batch 42 (v15 b41 live): the list opens right under its button (top: auto keeps it where it
+   would sit in the flow, under the summary), not under the whole bar: on a phone the bar wraps and
+   the list opened about 100 px below the button. Across, it still keeps to the bar's right edge. */
+.kitchen-board-heading__actions .kitchen-recent-finished[open] > .kitchen-recent-finished__panel {
   position: absolute;
-  inset: calc(100% + 4px) 0 auto auto;
+  inset: auto 0 auto auto;
+  margin-top: 4px;
   z-index: 5;
   width: min(28rem, calc(100vw - 48px));
   box-sizing: border-box;
   max-height: 60vh;
-  margin: 0;
+  margin-bottom: 0;
   padding: 8px 16px;
   overflow: auto;
   border: 1px solid var(--bop-color-row-divider, #e5e5e5);
@@ -207,10 +211,26 @@
   box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
 }
 @media (max-width: 767px) {
-  .kitchen-board-heading__actions .kitchen-recent-finished[open] > ul {
+  .kitchen-board-heading__actions .kitchen-recent-finished[open] > .kitchen-recent-finished__panel {
     inset-inline: 0;
     width: auto;
   }
+}
+/* With none finished: one plain line where the list would be. */
+.kitchen-recent-finished__none {
+  display: flex;
+  align-items: center;
+  min-height: var(--bop-kitchen-target);
+  color: var(--bop-color-text-muted);
+  font-size: 16px;
+}
+/* Batch 42 (v15 b41 live): a row wraps its text, never its button. A longer line ("MR41 A (TEST) ·
+   Order 19 · 1 ×", "· 已重做 1×") had pushed Remake under the text at the left of the row. */
+.kitchen-recent-finished li {
+  flex-wrap: nowrap;
+}
+.kitchen-recent-finished li > .kitchen-recent-finished__name {
+  flex: 1 1 auto;
 }
 /* The phone's bar buttons share its width (flex: 1 1 0); a row's Remake keeps its own size, at the
    row's end, so the four Remakes line up under each other. */

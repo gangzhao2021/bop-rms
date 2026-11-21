@@ -57,7 +57,7 @@ import {
   parseKitchenBoardView,
   parseKitchenWorkItemDetailView,
 } from "./kitchen-board.js";
-import { KitchenRemakeLane } from "./KitchenRework.js";
+import { KitchenRecentlyFinished, KitchenRemakeLane } from "./KitchenRework.js";
 import type { KitchenReworkView } from "./kitchen-rework-client.js";
 import { StoreBusinessDayContext } from "./StoreBusinessDay.js";
 import { StoreTimeZoneContext } from "./StoreTime.js";
@@ -1886,6 +1886,65 @@ it("v15 2026-10-16: a board with only finished work and no filter set says nothi
     </MemoryRouter>,
   );
   expect(empty).toContain("Nothing to make right now.");
+});
+it("batch 42 (v15 b41 live): an empty work-state tab is quiet in its own words, never a filter to clear", () => {
+  // As live: today's work all finished, so To make and Being made are empty.
+  const view = parseKitchenBoardView({
+    ...kitchenBoardFixture(),
+    items: [{ ...kitchenItemFixture(), status: "Completed", completedQuantity: 2 }],
+  });
+  const render = (status: string, workspaceFrame: boolean) =>
+    renderToStaticMarkup(
+      <MemoryRouter
+        initialEntries={[
+          {
+            pathname: "/operations/kitchen",
+            state: {
+              kitchenQueueScope: { station: "All", status, allergen: "All", exception: "All" },
+            },
+          },
+        ]}
+      >
+        <KitchenBoardScreen
+          view={view}
+          onRefresh={() => undefined}
+          workspaceFrame={workspaceFrame ? (content: ReactNode) => content : undefined}
+        />
+      </MemoryRouter>,
+    );
+  for (const workspaceFrame of [true, false]) {
+    for (const [status, text] of [
+      ["Queued", "Nothing to make right now."],
+      ["In Progress", "Nothing is being made right now."],
+      ["Cancelled", "Nothing cancelled today."],
+    ] as const) {
+      const html = render(status, workspaceFrame);
+      expect(html).toContain(text);
+      expect(html).not.toContain("No matching work");
+      expect(html).not.toContain("Clear the filters");
+    }
+  }
+  // The back office chooses the state with its tabs: no Clear filters, nothing "Applied".
+  const office = render("Queued", true);
+  // (The phone's filter sheet keeps its Clear filters, disabled with nothing to clear.)
+  expect(office).not.toMatch(/<button type="button">Clear filters/u);
+  expect(office).toContain('<button type="button" disabled="">Clear filters</button>');
+  expect(office).not.toContain("Applied");
+});
+it("batch 42 (v15 b41 live): Recently finished · 0 opens one plain line, never an empty box", () => {
+  const html = renderToStaticMarkup(
+    <KitchenRecentlyFinished
+      items={[]}
+      reworks={[]}
+      observedAt="2026-08-12T15:00:00.000Z"
+      readOnly={false}
+      onRemake={() => undefined}
+      orderLabel={() => ""}
+    />,
+  );
+  expect(html).toContain("Recently finished · 0");
+  expect(html).toContain("Nothing finished in the last 2 hours.");
+  expect(html).not.toContain("<ul");
 });
 it("times a ticket by its longest-waiting unfinished dish and says its tier in words", () => {
   const [item] = parseKitchenBoardView(kitchenBoardFixture()).items;

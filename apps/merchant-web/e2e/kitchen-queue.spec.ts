@@ -288,8 +288,12 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
     .getByRole("group", { name: "Show kitchen work" })
     .getByRole("button", { name: /^Completed/u })
     .click();
-  await expect(clearFilters).toBeEnabled();
-  await clearFilters.click();
+  // Batch 42 (v15 b41 live): a work-state tab is not a filter, so there is nothing to clear.
+  await expect(clearFilters).toHaveCount(0);
+  await page
+    .getByRole("group", { name: "Show kitchen work" })
+    .getByRole("button", { name: /^Open work/u })
+    .click();
   await expect(page.getByRole("heading", { name: "Synthetic rice", exact: true })).toBeVisible();
   const unnamedStationLanes = page.getByRole("region", { name: /^Station \d station$/u });
   await expect(unnamedStationLanes).toHaveCount(3);
@@ -599,7 +603,11 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
       .getByRole("group", { name: "Show kitchen work" })
       .getByRole("button", { name: /^To make/u }),
   ).toHaveAttribute("aria-pressed", "true");
-  await page.getByRole("button", { name: "Clear filters" }).click();
+  // Batch 42: the tab is not a filter; staff go back to Open work with its tab.
+  await page
+    .getByRole("group", { name: "Show kitchen work" })
+    .getByRole("button", { name: /^Open work/u })
+    .click();
   denied = true;
   const keyboardRefresh = page.getByRole("button", { name: "Refresh", exact: true });
   await tabTo(page, keyboardRefresh);

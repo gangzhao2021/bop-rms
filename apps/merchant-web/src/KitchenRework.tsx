@@ -579,38 +579,45 @@ export function KitchenRecentlyFinished({
   return (
     <details className="kitchen-recent-finished" ref={listRef}>
       <summary>{t("Recently finished · {length}", { length: finished.length })}</summary>
-      <ul>
-        {finished.map((item) => (
-          <li key={item.workItemReference}>
-            <span className="kitchen-recent-finished__name">
-              <strong>{item.displayName}</strong>
-              {item.otherName === undefined ? null : (
-                <span className="kitchen-recent-finished__other" lang="en">
-                  {item.otherName}
+      {/* Batch 42 (v15 b41 live): with none, one plain line, never an empty box. */}
+      {finished.length === 0 ? (
+        <p className="kitchen-recent-finished__panel kitchen-recent-finished__none">
+          {t("Nothing finished in the last 2 hours.")}
+        </p>
+      ) : (
+        <ul className="kitchen-recent-finished__panel">
+          {finished.map((item) => (
+            <li key={item.workItemReference}>
+              <span className="kitchen-recent-finished__name">
+                <strong>{item.displayName}</strong>
+                {item.otherName === undefined ? null : (
+                  <span className="kitchen-recent-finished__other" lang="en">
+                    {item.otherName}
+                  </span>
+                )}
+                <span>
+                  {orderLabel(item)} · {item.requiredQuantity} ×
+                  {remade(item) > 0 ? t(" · Remade {item}×", { item: remade(item) }) : ""}
                 </span>
-              )}
-              <span>
-                {orderLabel(item)} · {item.requiredQuantity} ×
-                {remade(item) > 0 ? t(" · Remade {item}×", { item: remade(item) }) : ""}
               </span>
-            </span>
-            <button
-              type="button"
-              disabled={readOnly}
-              onClick={() => {
-                if (listRef.current) listRef.current.open = false;
-                onRemake(item);
-              }}
-              aria-label={t("Remake {displayName}, {item}", {
-                displayName: item.displayName,
-                item: orderLabel(item),
-              })}
-            >
-              {t("Remake")}
-            </button>
-          </li>
-        ))}
-      </ul>
+              <button
+                type="button"
+                disabled={readOnly}
+                onClick={() => {
+                  if (listRef.current) listRef.current.open = false;
+                  onRemake(item);
+                }}
+                aria-label={t("Remake {displayName}, {item}", {
+                  displayName: item.displayName,
+                  item: orderLabel(item),
+                })}
+              >
+                {t("Remake")}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </details>
   );
 }

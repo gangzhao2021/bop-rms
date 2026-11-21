@@ -1223,6 +1223,15 @@ function kitchenLineInStatus(item: KitchenBoardItem, value: string): boolean {
   return item.status === value;
 }
 
+/** Batch 42: what an empty work-state tab says when no filter hides anything. */
+function kitchenQuietEmptyText(status: string): string {
+  if (status === "In Progress") return t("Nothing is being made right now.");
+  if (status === "Held") return t("Nothing is held right now.");
+  if (status === "Completed") return t("Nothing finished yet today.");
+  if (status === "Cancelled") return t("Nothing cancelled today.");
+  return t("Nothing to make right now.");
+}
+
 /** The sections that still have something to make of this work. */
 function sectionsWithWork(item: KitchenBoardItem): readonly string[] {
   const parts = item.comboParts;
@@ -2411,12 +2420,12 @@ export function KitchenBoardScreen({
     else stationLaneMap.set(key, { key, stationLabel: item.stationLabel, items: [item] });
   }
   const stationLanes = [...stationLaneMap.values()];
-  const hasFilters =
-    activeSection !== "All" ||
-    activeStation !== "All" ||
-    status !== "Active" ||
-    activeAllergen !== "All" ||
-    activeException !== "All";
+  // Batch 42 (v15 b41 live): a work-state tab is where staff look, not a filter hiding tickets.
+  // The back office chooses it with its tabs, so there it counts only while a search it hides is
+  // open (Clear filters then shows the order); the kitchen display chooses it in its filter
+  // sheet, so the sheet still says it is applied and clears it. Either way an empty board never
+  // asks to clear filters for a tab alone (it reads ticketFilters).
+  const hasFilters = ticketFilters || (status !== "Active" && (!workspaceFrame || searchApplied));
   const openFilterSheet = () => {
     const dialog = filterSheetRef.current;
     if (!dialog) return;
@@ -3287,9 +3296,13 @@ export function KitchenBoardScreen({
           <div className="kitchen-board-empty">
             <StatePanel
               heading={
-                searchApplied || (hasFilters && view.items.length > earlierOpen.size)
+                searchApplied || (ticketFilters && view.items.length > earlierOpen.size)
                   ? t("No matching work")
-                  : t("No active work")
+                  : status === "Completed"
+                    ? t("No finished work")
+                    : status === "Cancelled"
+                      ? t("No cancelled work")
+                      : t("No active work")
               }
               status
             >
@@ -3321,9 +3334,10 @@ export function KitchenBoardScreen({
                       ? t(
                           "Nothing from today is waiting. Earlier days' tickets are under Needs attention above.",
                         )
-                      : !hasFilters || view.items.length === 0
-                        ? // v15 2026-10-16: an empty board with no filter set is simply quiet.
-                          t("Nothing to make right now.")
+                      : !ticketFilters || view.items.length === 0
+                        ? // v15 2026-10-16: an empty board with no filter set is simply quiet;
+                          // batch 42: in the words of the work-state tab chosen.
+                          kitchenQuietEmptyText(status)
                         : laneRemakes.length > 0
                           ? t(
                               "No ticket matches these filters. Remakes are shown above whatever the filters. Clear the filters to see all work.",
