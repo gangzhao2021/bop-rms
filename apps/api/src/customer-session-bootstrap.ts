@@ -34,6 +34,38 @@ export function createCustomerSessionBootstrapRead(
     publicProfile?: PersistentPublicStoreProfileOptions;
   },
 ) {
+  type Transaction = Parameters<Parameters<typeof options.transactions.run>[0]>[0];
+  const settledTableStore = async (
+    transaction: Transaction,
+    guest: { readonly publicStoreReference: unknown; readonly locale: string },
+  ): Promise<{ brandDisplayName: string; storeDisplayName: string } | null> => {
+    if (!options.publicProfile) return null;
+    const sql = transaction as unknown as {
+      query(text: string, values: unknown[]): Promise<unknown>;
+    };
+    await sql.query("SAVEPOINT settled_table_store", []);
+    try {
+      const request = parseGetPublicStoreRequest({
+        publicStoreReference: guest.publicStoreReference,
+        requestedLocale: guest.locale,
+        evaluatedAt: options.now(),
+        purpose: "CustomerCart",
+      });
+      const profile = await createPublicStoreProfileService(
+        createPersistentPublicStoreProfilePorts(transaction, options.publicProfile, request),
+      ).getPublicStore(request);
+      await sql.query("RELEASE SAVEPOINT settled_table_store", []);
+      return profile.status === "Available"
+        ? {
+            brandDisplayName: profile.profile.brandDisplayName,
+            storeDisplayName: profile.profile.storeDisplayName,
+          }
+        : null;
+    } catch {
+      await sql.query("ROLLBACK TO SAVEPOINT settled_table_store", []);
+      return null;
+    }
+  };
   return {
     async read(sessionCredential: string) {
       return options.transactions.run(async (transaction) => {
@@ -225,7 +257,11 @@ export function createCustomerSessionBootstrapRead(
         const orders = await listStoreDiningSessionOrders(transaction as never, options.scope, [
           session,
         ]);
-        return orders.has(session) ? { ...settled, ...receipt } : null;
+        if (!orders.has(session)) return null;
+        // Batch 44 (v15 b43 live): the Store's published names, so the guest's page still names
+        // the Store after a reload. Public fields only; an unreadable profile leaves them out.
+        const store = await settledTableStore(transaction, guest);
+        return { ...settled, ...receipt, ...(store === null ? {} : { store }) };
       });
     },
     /**
@@ -310,9 +346,12 @@ export function createCustomerSessionBootstrapHandler(options?: {
       receiptAvailableUntil: string;
     }>;
     /** The table this guest sat at when it was closed and settled (absent or null: not so). */
-    readSettledTable?(
-      sessionCredential: string,
-    ): Promise<{ tableLabel: string; csrfToken: string } | null>;
+    readSettledTable?(sessionCredential: string): Promise<{
+      tableLabel: string;
+      csrfToken: string;
+      /** Batch 44: the Store's published names (absent: not readable). */
+      store?: { brandDisplayName: string; storeDisplayName: string };
+    } | null>;
     /** v15 2026-10-30: the table the guest's party was moved to (absent or null: not moved). */
     readMovedTable?(
       sessionCredential: string,
@@ -408,7 +447,20 @@ export function createCustomerSessionBootstrapHandler(options?: {
       if (settled === null || !/^[^\p{Cc}\p{Cf}<>{}$]{1,40}$/u.test(settled.tableLabel))
         return null;
       const csrfToken = wellFormed(() => parseGuestRawCredential(settled.csrfToken));
-      return csrfToken === null ? null : { tableLabel: settled.tableLabel, csrfToken };
+      // Batch 44: the Store's names for the page's header, when well formed (else left out).
+      const store =
+        settled.store !== undefined &&
+        [settled.store.brandDisplayName, settled.store.storeDisplayName].every(
+          (name) => typeof name === "string" && name.trim() !== "" && name.length <= 200,
+        )
+          ? {
+              brandDisplayName: settled.store.brandDisplayName,
+              storeDisplayName: settled.store.storeDisplayName,
+            }
+          : undefined;
+      return csrfToken === null
+        ? null
+        : { tableLabel: settled.tableLabel, csrfToken, ...(store === undefined ? {} : { store }) };
     };
     /** The ended visit's receipt access, validated; null when there is none to give. */
     const readEndedVisit = async (sessionCredential: string) => {

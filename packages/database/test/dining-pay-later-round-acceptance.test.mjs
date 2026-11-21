@@ -377,10 +377,20 @@ async function settledReceiptFor({ scope, ownerScope, transactions, phone, provi
     now: () => new Date().toISOString(),
     binding: () => ({ validate: async () => "Unavailable" }),
   };
-  const settled = await createCustomerSessionBootstrapRead(access).readSettledTable(
-    phone.sessionCredential,
-  );
+  // Batch 44: the pilot reads the Store's published names with it (same transaction, as the API
+  // role). Where they can't be read the answer is the same, without them.
+  const settled = await createCustomerSessionBootstrapRead({
+    ...access,
+    publicProfile: {
+      binding: { ...ownerScope, validUntil: new Date(Date.now() + 3_600_000).toISOString() },
+      authorize: async () => true,
+    },
+  }).readSettledTable(phone.sessionCredential);
   if (settled === null) return null;
+  assert.equal(typeof settled.csrfToken, "string");
+  if (settled.store !== undefined) {
+    assert.deepEqual(Object.keys(settled.store).sort(), ["brandDisplayName", "storeDisplayName"]);
+  }
   const port = createCustomerDiningTablePayment({
     access,
     payments: createDiningTableOnlinePayments({

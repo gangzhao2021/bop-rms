@@ -175,6 +175,36 @@ it("thanks a guest whose table was settled, with the ended visit's read-only rec
     schemaVersion: 1,
     movedTable: { tableLabel: "DEMO-03" },
   });
+  // Batch 44 (v15 b43 live): the Store's published names come along for the page's header; a
+  // malformed name is left out, never the whole answer.
+  f.readSettledTable.mockResolvedValue({
+    tableLabel: "L43W A (TEST)",
+    csrfToken: "C".repeat(43),
+    store: {
+      brandDisplayName: "Test Merchant 2 - not production",
+      storeDisplayName: "Test Merchant 2 Main - not production",
+    },
+  });
+  expect(await (await f.request()).json()).toEqual({
+    schemaVersion: 1,
+    settledTable: {
+      tableLabel: "L43W A (TEST)",
+      csrfToken: "C".repeat(43),
+      store: {
+        brandDisplayName: "Test Merchant 2 - not production",
+        storeDisplayName: "Test Merchant 2 Main - not production",
+      },
+    },
+  });
+  f.readSettledTable.mockResolvedValue({
+    tableLabel: "L43W A (TEST)",
+    csrfToken: "C".repeat(43),
+    store: { brandDisplayName: " ", storeDisplayName: "x".repeat(201) },
+  });
+  expect(await (await f.request()).json()).toEqual({
+    schemaVersion: 1,
+    settledTable: { tableLabel: "L43W A (TEST)", csrfToken: "C".repeat(43) },
+  });
   f.readSettledTable.mockResolvedValue({ tableLabel: "<b>", csrfToken: "C".repeat(43) });
   expect((await f.request()).status).toBe(204);
   f.readSettledTable.mockResolvedValue({ tableLabel: "T7", csrfToken: "short" });
