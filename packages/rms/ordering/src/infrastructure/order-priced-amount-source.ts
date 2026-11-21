@@ -4,8 +4,19 @@ import { createPostgresSubmittedOrderAmountSource } from "./persistence/submitte
 import { loadOrderTaxRoundingMinor } from "./persistence/order-tax-rounding-store.js";
 import { createPostgresOrderAmendmentPosition } from "./persistence/dining-session-order-inventory.js";
 import { parseOrderingInstant, parseOrderingReference } from "../domain/cart.js";
-const fail = (): never => {
-  throw new Error("ORDER_PRICED_AMOUNT_UNAVAILABLE");
+const unavailable = "ORDER_PRICED_AMOUNT_UNAVAILABLE",
+  refusal = "ORDER_PRICED_AMOUNT_PERMISSION_DENIED";
+/** Batch 43: the failure keeps what failed under it (a safe code for the one log line). */
+const fail = (cause?: unknown): never => {
+  throw new Error(unavailable, cause === undefined ? undefined : { cause });
+};
+/**
+ * Batch 43 (v15 b42 live 18:44:18Z): the reader's authorization no longer holds, for example a
+ * guest whose table staff closed while this read waited on the Order's fence. A refusal (the
+ * guest is no longer at the table), never "unavailable, try again".
+ */
+const refused = (): never => {
+  throw Object.assign(new Error(refusal), { code: refusal });
 };
 /** Current merchandise price basis. Refund and write-off decisions
  * remain independent; this source never issues settlement or closure evidence.
@@ -50,7 +61,7 @@ export function createPostgresOrderPricedAmountSource(
           [brandReference, storeReference, query.orderReference].join(":"),
       ]);
       if ((await options.authorize(tx, { ...query, brandReference, storeReference })) !== true)
-        return fail();
+        return refused();
       const base = await submitted(tx, query),
         changes = await amendments.load(tx, query);
       for (const source of [base, changes])
@@ -129,7 +140,7 @@ export function createPostgresOrderPricedAmountSource(
           )
           .digest("hex");
       if ((await options.authorize(tx, { ...query, brandReference, storeReference })) !== true)
-        return fail();
+        return refused();
       return Object.freeze({
         brandReference,
         storeReference,
@@ -144,8 +155,10 @@ export function createPostgresOrderPricedAmountSource(
         amendments: evidence,
         snapshotDigest,
       });
-    } catch {
-      return fail();
+    } catch (error) {
+      if (error instanceof Error && (error.message === refusal || error.message === unavailable))
+        throw error;
+      return fail(error);
     }
   };
 }

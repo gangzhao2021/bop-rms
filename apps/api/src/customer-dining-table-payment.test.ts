@@ -2,6 +2,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import express from "express";
 import { afterEach, expect, it, vi } from "vitest";
+import { createPostgresOrderPricedAmountSource } from "@rms/ordering";
 import {
   CustomerDiningTablePaymentHandler,
   customerSettledTableReceiptBody,
@@ -222,6 +223,43 @@ it("says plainly when another guest is paying or the table already paid", async 
   const down = await f.send({ action: "Read" });
   expect(down.status).toBe(503);
   expect(await down.text()).not.toContain("private");
+});
+
+// Batch 43 (v15 b42 live 18:44:18Z): a guest's bill read waited on the Order's fence while staff
+// closed the table, then found the guest no longer at it. The guest got 503 "try again" and a
+// level-50 CUSTOMER_DINING_TABLE_PAYMENT_FAILED ORDER_PRICED_AMOUNT_UNAVAILABLE line; 2 s later the
+// same phone was told the table was gone (404) and read its settled receipt. Now the first answer
+// is the refusal itself.
+it("batch 43: a bill read that finds the guest's table closed under it is 'not found', not 503", async () => {
+  const f = await setup();
+  const id = (n: number) => "0190faec-0000-7000-8000-" + String(n).padStart(12, "0");
+  const closedUnderRead = await createPostgresOrderPricedAmountSource({
+    brandReference: id(1),
+    storeReference: id(2),
+    authorize: async () => false,
+  })({ query: async () => ({ rows: [] }) } as never, {
+    orderReference: id(3),
+    observedAt: "2026-11-21T18:44:17.941Z",
+  }).then(
+    () => null,
+    (error: unknown) => error,
+  );
+  const lines: string[] = [];
+  const write = vi.spyOn(process.stderr, "write").mockImplementation((line) => {
+    lines.push(String(line));
+    return true;
+  });
+  try {
+    f.port.read.mockRejectedValueOnce(closedUnderRead);
+    const answer = await f.send({ action: "Read" });
+    expect(answer.status).toBe(404);
+    expect(((await answer.json()) as { error: { code: string } }).error.code).toBe(
+      "table_not_found",
+    );
+  } finally {
+    write.mockRestore();
+  }
+  expect(lines.filter((line) => line.includes("CUSTOMER_DINING_TABLE_PAYMENT_FAILED"))).toEqual([]);
 });
 
 // WP-2423 取舍 18: the receipt says what points took off, and marks those dishes; a manager's comp

@@ -92,12 +92,39 @@ it.each(["scope", "time", "currency", "tip", "double-count", "pending", "adjustm
     await expect(f.load()).rejects.toThrow("ORDER_PRICED_AMOUNT_UNAVAILABLE");
   },
 );
-it("fails on unavailable source or revoked current authorization", async () => {
+it("fails on unavailable source, keeping what failed under it for the log line", async () => {
   const f = setup();
-  mock.amendments.mockRejectedValueOnce(new Error("private"));
-  await expect(f.load()).rejects.toThrow("ORDER_PRICED_AMOUNT_UNAVAILABLE");
-  f.authorize.mockResolvedValue(false);
-  await expect(f.load()).rejects.toThrow("ORDER_PRICED_AMOUNT_UNAVAILABLE");
+  const cause = Object.assign(new Error("private"), { code: "57014" });
+  mock.amendments.mockRejectedValueOnce(cause);
+  const error = await f.load().then(
+    () => null,
+    (failure: unknown) => failure,
+  );
+  expect(error).toBeInstanceOf(Error);
+  expect((error as Error).message).toBe("ORDER_PRICED_AMOUNT_UNAVAILABLE");
+  expect((error as Error).cause).toBe(cause);
+});
+// Batch 43 (v15 b42 live 18:44:18Z): a guest's bill read waited on the Order's fence while staff
+// closed the table (order_closure_version 18:44:17.875, release 18:44:17.952); after the wait the
+// guest's authorization no longer held. That is a refusal (the guest is not at the table any
+// more), which the guest route answers "table not found", never 503 "try again".
+it.each([
+  ["after the Order's fence", [false]],
+  ["at the final re-check", [true, false]],
+] as const)("revoked authorization %s is a refusal, not unavailable", async (_when, answers) => {
+  const f = setup();
+  for (const answer of answers) f.authorize.mockResolvedValueOnce(answer);
+  const error = await f.load().then(
+    () => null,
+    (failure: unknown) => failure,
+  );
+  expect(error).toMatchObject({
+    message: "ORDER_PRICED_AMOUNT_PERMISSION_DENIED",
+    code: "ORDER_PRICED_AMOUNT_PERMISSION_DENIED",
+  });
+  expect(f.tx.query).toHaveBeenCalledWith("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+    expect.stringMatching(/^OrderingOrderDisposition:/u),
+  ]);
 });
 it.each(["-1001", "9223372036854775807"])("rejects an invalid adjusted total %s", async (delta) => {
   const f = setup();
