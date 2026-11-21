@@ -1236,6 +1236,17 @@ function kitchenLineInStatus(item: KitchenBoardItem, value: string): boolean {
   return item.status === value;
 }
 
+/** A work state as the Filters sheet names it. */
+function kitchenWorkStateLabel(status: string): string {
+  if (status === "All") return t("All states");
+  if (status === "Queued") return t("To make");
+  if (status === "Held") return t("Held");
+  if (status === "In Progress") return t("Being made");
+  if (status === "Completed") return t("Completed");
+  if (status === "Cancelled") return t("Cancelled");
+  return t("Active work");
+}
+
 /**
  * Batch 43 (v15 b42 live): each work-state tab's own empty heading. Being made and Held had said
  * "No active work" while a three-dish order waited in To make.
@@ -2440,6 +2451,15 @@ export function KitchenBoardScreen({
       : [];
   const laneRemakes = remakesInStatus(status);
   const workCount = items.length + laneRemakes.length;
+  // Batch 44 (v15 b43 live): a tab that leaves out work still to make or being made says so in the
+  // header. Being made with three dishes waiting in To make read "0 work items", as if idle.
+  const workElsewhere = (["Queued", "In Progress"] as const)
+    .filter((value) => status !== "Active" && status !== "All" && status !== value)
+    .map((value) => ({
+      value,
+      count: itemsInStatus(value).length + remakesInStatus(value).length,
+    }))
+    .filter(({ count }) => count > 0);
   const ticketFilters =
     activeSection !== "All" ||
     activeStation !== "All" ||
@@ -2495,6 +2515,13 @@ export function KitchenBoardScreen({
         length: workCount,
         value: workCount === 1 ? t("item") : t("items"),
       })}
+      {workElsewhere
+        .map(({ value, count }) =>
+          value === "Queued"
+            ? t(" · {count} waiting in To make", { count })
+            : t(" · {count} being made", { count }),
+        )
+        .join("")}
     </span>
   );
   const boardFreshness = (
@@ -2603,8 +2630,14 @@ export function KitchenBoardScreen({
       aria-haspopup="dialog"
       onClick={openFilterSheet}
     >
+      {/* Batch 44 (v15 b43 live): the button names the work state chosen, the same on the back
+          office and the kitchen display. The back office had kept "Active work" with Held chosen,
+          the display "Applied". It says Applied once a ticket filter or a search is on too. */}
       {t("Filters{value}", {
-        value: hasFilters || searchApplied ? t(" · Applied") : t(" · Active work"),
+        value:
+          ticketFilters || searchApplied
+            ? t(" · Applied")
+            : t(" · {state}", { state: kitchenWorkStateLabel(status) }),
       })}
     </button>
   );
