@@ -95,6 +95,12 @@ test("@production receipt navigation removes inaccessible history and fits commo
   // No permanent technical notice: the receipt is the record, payment amounts are checked live.
   await expect(page.getByText(/Live receipt status|delivery and support status/u)).toHaveCount(0);
   await expect(page.getByText("$11.30", { exact: true })).toBeVisible();
+  // Batch 43 (v15 Lane Dessert, tips off): an order that took no tip has no "Tip $0.00" line.
+  const terms = await page
+    .locator(".receipt-page__version > .receipt-page__totals dt")
+    .allTextContents();
+  expect(terms).toContain("Total");
+  expect(terms).not.toContain("Tip");
   // WP-2423 Q10: no inactive email stub; printing or saving is the working way to keep a copy.
   await expect(page.getByRole("button", { name: "Request email receipt" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Print or save receipt" })).toBeVisible();
@@ -262,6 +268,10 @@ test("@production DEC-TIP-REFUND-PROPORTIONAL: a receipt states cancelled items'
   await expect(refunds).toContainText("Cancelled items");
   await expect(refunds.locator(".receipt-page__refund dl")).toContainText("Tax$0.75");
   await expect(refunds.locator(".receipt-page__refund dl")).toContainText("Tip$0.62");
+  // A tip the guest gave stays on the receipt.
+  await expect(
+    page.locator(".receipt-page__version > .receipt-page__totals").first(),
+  ).toContainText("Tip$1.24");
   await expect(refunds.locator(".receipt-page__refund dl")).toContainText("Refunded$7.12");
   await expect(refunds).toContainText("Total after refunds$7.12");
   await expectNoInternalText(page);

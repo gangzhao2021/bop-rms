@@ -778,6 +778,148 @@ test("@production a store with tips off takes the table's payment with no tip", 
   await expectNoInternalText(page, ["Temporarily unavailable"]);
 });
 
+// Batch 43 (v15 Fireside Hotpot, published Tip Off): after both guests paid their even part on
+// their phones, the staff paid summary — and the paper "Print paid bill" gives the guests — read
+// "Tip $0.00" at a store that takes no tips; so did the Cash / Card machine review. With tips off
+// and no tip taken there is no Tip line; a tip actually taken is always shown.
+for (const language of ["en", "zh-Hans"] as const)
+  test(`@production batch 43: a tips-off store's paid bill and payment review carry no Tip line (${language})`, async ({
+    page,
+  }) => {
+    const zh = language === "zh-Hans";
+    if (zh)
+      await page.addInitScript(() => {
+        try {
+          window.localStorage.setItem("bop.merchant.language", "zh-Hans");
+        } catch {
+          /* the page falls back to English */
+        }
+      });
+    const tipWord = zh ? "小费" : "Tip";
+    await floor(page, { phase: "Closing", version: 7 });
+    await page.route("**/merchant/dining/table-close-plan", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          orderReference: id(3),
+          diningSessionReference: id(2),
+          orderVersion: 4,
+          observedAt: "2026-10-15T19:00:00.000Z",
+          rounds: [],
+          closeBlockers: [],
+          totals: { onlineMinor: "4854", cardMachineMinor: "0" },
+        },
+      }),
+    );
+    // The v15 shape: split evenly in two, each part paid online with tip 0, tips off.
+    const { splitBillFixture } = await import("../src/table-split.fixtures.js");
+    const onlinePart = (partNumber: number, tipMinor: string, totalMinor: string) => ({
+      partNumber,
+      amountMinor: "2427",
+      subtotalMinor: "2148",
+      taxMinor: "279",
+      roundNumbers: [1, 2],
+      dishes: [],
+      payment: {
+        method: "Online",
+        tipMinor,
+        roundingMinor: "0",
+        totalMinor,
+        tenderedMinor: null,
+        changeMinor: null,
+        recordedAt: "2026-11-21T18:4" + partNumber + ":00.000Z",
+        recordedAfterOutage: false,
+      },
+      guestPaying: false,
+    });
+    const paidBill = (tipMinor: string) => {
+      const bill = {
+        ...splitBillFixture(),
+        diningSessionReference: id(2),
+        orderReference: id(3),
+        owed: { subtotalMinor: "0", taxMinor: "0", totalMinor: "0" },
+        tips: { enabled: false, tierPercents: [12, 18, 20] },
+      } as Record<string, unknown>;
+      bill.split = {
+        mode: "Even",
+        stale: false,
+        dishChoices: [],
+        paidParts: 2,
+        paidInFull: true,
+        remainingMinor: "0",
+        parts: [
+          onlinePart(1, "0", "2427"),
+          onlinePart(2, tipMinor, String(2427 + Number(tipMinor))),
+        ],
+      };
+      return bill;
+    };
+    let bill: Record<string, unknown> = paidBill("0");
+    await page.route("**/merchant/dining/table-bill", (route) =>
+      route.fulfill({ headers, json: bill }),
+    );
+    const receiptTerms = () =>
+      page.evaluate(() =>
+        [...document.querySelectorAll(".table-receipt dt")].map((dt) => dt.textContent ?? ""),
+      );
+    await page.goto("/operations/dining");
+    await page.getByRole("button", { name: zh ? "选择 T2" : "Select T2", exact: true }).click();
+    const checkout = page.getByRole("region", { name: zh ? "结账" : "Checkout" });
+    const print = checkout.getByRole("button", { name: zh ? "打印已付账单" : "Print paid bill" });
+    await expect(print).toBeVisible();
+    expect(await receiptTerms()).toContain(zh ? "实付合计" : "Total paid");
+    expect(await receiptTerms()).not.toContain(tipWord);
+    await page.evaluate(() => {
+      window.print = () => undefined;
+    });
+    await print.click();
+    await page.emulateMedia({ media: "print" });
+    const paper = await page.evaluate(
+      () => (document.querySelector("[data-print-root]") as HTMLElement | null)?.innerText ?? "",
+    );
+    expect(paper).toContain("$48.54");
+    expect(paper).not.toContain(tipWord);
+    await page.emulateMedia({ media: "screen" });
+    for (const width of [1440, 1024, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      await page.screenshot({
+        path: test.info().outputPath(`b43-tips-off-paid-${language}-${width}.png`),
+        fullPage: true,
+      });
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+    // A tip a guest did give (taken before tips were turned off) is still on the paper.
+    bill = paidBill("300");
+    await page.reload();
+    await page.getByRole("button", { name: zh ? "选择 T2" : "Select T2", exact: true }).click();
+    await expect(print).toBeVisible();
+    expect(await receiptTerms()).toContain(tipWord);
+    await expect(checkout.locator(".table-receipt")).toContainText("$3.00");
+    // The staff Cash / Card machine review at the same store: Table, Bill, no Tip line.
+    bill = {
+      ...unpaidBill("Closing", 7),
+      tips: { enabled: false, tierPercents: [12, 18, 20] },
+    };
+    await page.reload();
+    await page.getByRole("button", { name: zh ? "选择 T2" : "Select T2", exact: true }).click();
+    await checkout.getByRole("radio", { name: zh ? "现金" : "Cash" }).check();
+    await checkout.getByRole("textbox", { name: zh ? "实收现金" : "Cash received" }).fill("40");
+    await checkout
+      .getByRole("button", { name: zh ? "已收现金 · $33.95" : "Cash received · $33.95" })
+      .click();
+    const confirm = checkout.getByRole("alertdialog", {
+      name: zh ? "确认收款" : "Confirm the payment",
+    });
+    await expect(confirm).toBeVisible();
+    const terms = await confirm.locator("dt").allTextContents();
+    expect(terms).toContain(zh ? "账单" : "Bill");
+    expect(terms).not.toContain(tipWord);
+    await expectNoInternalText(page, ["Temporarily unavailable"]);
+  });
+
 // WP-2423 (v15 fabf0261, Hotpot PC 9): a table paid on paper is entered with its slip's time. A
 // date other than today and a time a little before the last round was ordered are warned about
 // (a card machine's clock drifts); a time well before it is refused by the server, and staff

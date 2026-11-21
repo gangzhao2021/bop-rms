@@ -422,10 +422,13 @@ function TablePaymentBlock({
           <dt>{t("Rounds")}</dt>
           <dd>{cad(payment.roundsMinor)}</dd>
         </div>
-        <div>
-          <dt>{t("Tip")}</dt>
-          <dd>{cad(payment.tipMinor)}</dd>
-        </div>
+        {/* Batch 43 (v15 Fireside Hotpot, tips off): no "Tip $0.00" when no tip was taken. */}
+        {payment.tipMinor !== "0" ? (
+          <div>
+            <dt>{t("Tip")}</dt>
+            <dd>{cad(payment.tipMinor)}</dd>
+          </div>
+        ) : null}
         {payment.roundingMinor !== "0" ? (
           <div>
             <dt>{t("Cash rounding")}</dt>

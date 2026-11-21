@@ -1184,10 +1184,13 @@ export function TableCheckout({
                           <dt>{t("Bill")}</dt>
                           <dd>{cad(owed)}</dd>
                         </div>
-                        <div>
-                          <dt>{t("Tip")}</dt>
-                          <dd>{cad(tipMinor)}</dd>
-                        </div>
+                        {/* Batch 43: a store with tips off asks for no tip and shows none. */}
+                        {bill.tips.enabled || tipMinor !== 0n ? (
+                          <div>
+                            <dt>{t("Tip")}</dt>
+                            <dd>{cad(tipMinor)}</dd>
+                          </div>
+                        ) : null}
                         {paper && paperInstant !== null ? (
                           <div>
                             <dt>{t("Paid at")}</dt>
@@ -1405,6 +1408,9 @@ function TableReceipt({
   const add = (pick: (paid: (typeof payments)[number]["paid"]) => string) =>
     payments.reduce((sum, entry) => sum + BigInt(pick(entry.paid)), 0n);
   const cashRounding = add((paid) => paid.roundingMinor);
+  // Batch 43 (v15 Fireside Hotpot): a store with tips off prints no "Tip $0.00" line; a tip that
+  // was taken (before tips were turned off) is always on the paper.
+  const tipTaken = add((paid) => paid.tipMinor);
   const subtotal = bill.rounds.reduce((sum, round) => sum + BigInt(round.subtotalMinor), 0n);
   // v15 batch 9 (DEC-TAX-WHOLE-RECEIPT): the paper is one receipt, so its tax is the bill's tax,
   // worked out once over the whole bill (each round's tax holds its share of the rounding): $2.93
@@ -1457,10 +1463,12 @@ function TableReceipt({
           <dt>{t("Tax")}</dt>
           <dd>{cad(tax)}</dd>
         </div>
-        <div>
-          <dt>{t("Tip")}</dt>
-          <dd>{cad(add((paid) => paid.tipMinor))}</dd>
-        </div>
+        {bill.tips.enabled || tipTaken !== 0n ? (
+          <div>
+            <dt>{t("Tip")}</dt>
+            <dd>{cad(tipTaken)}</dd>
+          </div>
+        ) : null}
         {cashRounding !== 0n ? (
           <div>
             <dt>{t("Cash rounding")}</dt>

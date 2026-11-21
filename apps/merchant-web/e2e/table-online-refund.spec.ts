@@ -227,6 +227,35 @@ test("@production a split bill shows each paid part with its own refund", async 
   await expect.poll(() => bodies[0]?.partNumber).toBe(1);
 });
 
+// Batch 43 (v15 Fireside Hotpot, tips off): two even parts paid on the guests' phones with no
+// tip. Each paid part lists how it was paid and its rounds, with no "Tip $0.00" line; a part that
+// did take a tip shows it.
+test("@production a paid part that took no tip has no Tip line; one that did shows it", async ({
+  page,
+}) => {
+  await orderPage(page, () => ({
+    orderReference: id(1),
+    payment: null,
+    parts: [
+      {
+        ...payment,
+        partNumber: 1,
+        roundsMinor: "2427",
+        tipMinor: "0",
+        totalMinor: "2427",
+        refundableMinor: "2427",
+      },
+      { ...payment, partNumber: 2 },
+    ],
+  }));
+  await page.goto("/operations/orders");
+  const first = page.getByRole("region", { name: /part 1$/u });
+  await expect(first).toContainText("$24.27");
+  expect(await first.locator("dt").allTextContents()).not.toContain("Tip");
+  const second = page.getByRole("region", { name: /part 2$/u });
+  await expect(second).toContainText("Tip$6.00");
+});
+
 for (const width of [1440, 1024, 390])
   test(`@production the refund form fits at ${width}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });

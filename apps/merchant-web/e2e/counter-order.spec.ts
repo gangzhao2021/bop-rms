@@ -176,6 +176,55 @@ test("@production the counter offers the Store's tip percentages, and none while
   await expect(tip).toBeHidden();
 });
 
+// Batch 43 (v15 Lane Dessert, tips off): the charge step listed "Tip $0.00" at a store that takes
+// no tips. With tips off and no tip, it lists the order total only.
+for (const language of ["en", "zh-Hans"] as const)
+  test(`@production a tips-off store's counter charge step has no Tip line (${language})`, async ({
+    page,
+  }) => {
+    const zh = language === "zh-Hans";
+    if (zh)
+      await page.addInitScript(() => {
+        try {
+          window.localStorage.setItem("bop.merchant.language", "zh-Hans");
+        } catch {
+          /* the page falls back to English */
+        }
+      });
+    await signIn(page);
+    await page.route("**/merchant/counter/menu", (route) =>
+      route.fulfill({
+        headers,
+        json: { ...menu, tips: { enabled: false, tierPercents: [12, 18, 22] } },
+      }),
+    );
+    await page.route("**/merchant/counter/orders", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          status: "Placed",
+          orderReference: id(20),
+          orderBatchReference: id(21),
+          orderNumber: "1",
+          orderVersion: 1,
+          orderMinor: "424",
+          tipMinor: "0",
+          totalMinor: "424",
+          payBy: new Date(Date.now() + 30 * 60_000).toISOString(),
+          recordedAfterOutage: false,
+        },
+      }),
+    );
+    await page.goto("/operations/order-entry");
+    await page.getByRole("button", { name: zh ? "添加 Banana Bread" : "Add Banana Bread" }).click();
+    await page.getByRole("button", { name: zh ? "发送订单" : "Send order" }).click();
+    const charge = page.locator(".counter-order__charge");
+    await expect(charge).toContainText("$4.24");
+    const terms = await charge.locator("dt").allTextContents();
+    expect(terms).toContain(zh ? "订单合计（含税）" : "Order total incl. tax");
+    expect(terms).not.toContain(zh ? "小费" : "Tip");
+  });
+
 test("@production staff take a counter pickup order, charge it on the card machine and record it", async ({
   page,
 }) => {

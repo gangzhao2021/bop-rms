@@ -2981,10 +2981,13 @@ export function StaffOrderEntryPage({
                 <dt>{t("Order total incl. tax")}</dt>
                 <dd>{cad(placed.orderMinor)}</dd>
               </div>
-              <div>
-                <dt>{t("Tip")}</dt>
-                <dd>{cad(placed.tipMinor)}</dd>
-              </div>
+              {/* Batch 43: a store with tips off shows no "Tip $0.00"; a tip taken always shows. */}
+              {tips?.enabled !== false || placed.tipMinor !== "0" ? (
+                <div>
+                  <dt>{t("Tip")}</dt>
+                  <dd>{cad(placed.tipMinor)}</dd>
+                </div>
+              ) : null}
               {counterCash ? (
                 // WP-2423 M52: cash is rounded to 5 cents; the order's amount stays as above.
                 <div>

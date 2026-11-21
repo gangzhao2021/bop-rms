@@ -287,10 +287,13 @@ function ReceiptVersion({ record }: { readonly record: ReceiptRecordView }) {
             <dd>{money(snapshot.tax)}</dd>
           </div>
         )}
-        <div>
-          <dt>{t("Tip")}</dt>
-          <dd>{money(snapshot.tip)}</dd>
-        </div>
+        {/* Batch 43 (v15 Lane Dessert, tips off): no "Tip $0.00" line when no tip was taken. */}
+        {snapshot.tip.amountMinor !== 0n ? (
+          <div>
+            <dt>{t("Tip")}</dt>
+            <dd>{money(snapshot.tip)}</dd>
+          </div>
+        ) : null}
         <div>
           <dt>{t("Total")}</dt>
           <dd>{money(snapshot.total)}</dd>
