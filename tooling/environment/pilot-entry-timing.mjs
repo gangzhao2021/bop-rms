@@ -158,6 +158,71 @@ export function createStaffRequestCompletionLog({
   };
 }
 
+const safeAnswerCode = /^(?:[a-z][a-z0-9_]{0,63}|[A-Z][A-Z0-9_]{0,63})$/u;
+/**
+ * v15 batch 39 (b40): the guest payment routes this entry answers itself (a table's bill and its
+ * payment, a checkout's reconciliation and handoff) never reached api.log, successes included,
+ * so a 503 a guest saw left no line anywhere. One line per such request when its answer is done:
+ * its route template (`template`; never an id, a cookie or a token), status, result, time, and
+ * the code of an error answer (the public code it sent, never its values).
+ */
+export function createGuestPaymentRequestCompletionLog({
+  template,
+  write = (line) => console.log(line),
+  now = Date.now,
+  arrivedAt = requestArrivedAt,
+}) {
+  return (request, response, next) => {
+    const route = template(request.method, request.path);
+    if (route === null) return next();
+    const reached = now();
+    const arrived = arrivedAt(request, reached) ?? reached;
+    let answerCode;
+    const json = response.json;
+    response.json = function (body) {
+      try {
+        const code = body?.error?.code ?? body?.code;
+        if (typeof code === "string" && safeAnswerCode.test(code)) answerCode = code;
+      } catch {
+        // No code on this line; the answer is sent all the same.
+      }
+      return Reflect.apply(json, this, [body]);
+    };
+    let done = false;
+    const complete = (left = false) => {
+      if (done) return;
+      done = true;
+      const status = left && !response.headersSent ? 499 : response.statusCode;
+      const result = left
+        ? "HTTP_CLIENT_CLOSED"
+        : status >= 500
+          ? "HTTP_SERVER_ERROR"
+          : status >= 400
+            ? "HTTP_CLIENT_ERROR"
+            : "HTTP_SUCCESS";
+      try {
+        write(
+          JSON.stringify({
+            level: status >= 500 ? 50 : 30,
+            time: new Date(now()).toISOString(),
+            event: "guest_payment_request_completed",
+            route,
+            statusCode: status,
+            resultCode: result,
+            durationMs: Math.max(0, now() - arrived),
+            ...(status >= 400 && answerCode !== undefined ? { answerCode } : {}),
+          }),
+        );
+      } catch {
+        // Observability never changes an answer.
+      }
+    };
+    response.once("finish", () => complete(false));
+    response.once("close", () => complete(response.writableFinished !== true));
+    next();
+  };
+}
+
 /**
  * WP-2423 (rush-connection-hold, v15 2026-11-14): the guest request on its way to the Store's API
  * says when its connection reached this entry (`entryArrivedAtHeader`), so the API counts the

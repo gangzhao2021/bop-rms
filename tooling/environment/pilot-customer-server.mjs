@@ -37,6 +37,7 @@ import {
   withRequestAcquireBudget,
 } from "../../apps/api/dist/request-acquire-budget.js";
 import {
+  createGuestPaymentRequestCompletionLog,
   createStaffRequestCompletionLog,
   entryReadTiming,
   logEntryGuestBusyAnswer,
@@ -79,6 +80,14 @@ const storeNotFound = (res) =>
   res.status(404).set("Cache-Control", "no-store").json({ code: "CUSTOMER_STORE_NOT_FOUND" });
 export const isStorePaymentRoute = (method, path) =>
   (method === "POST" || method === "GET") && STORE_PAYMENT_ROUTE.test(path);
+/** The route template of a Store payment request (its checkout id replaced), or null. */
+export const storePaymentRouteTemplate = (method, path) =>
+  isStorePaymentRoute(method, path)
+    ? path.replace(
+        /^\/api\/v1\/checkout-sessions\/[^/]+\//u,
+        "/api/v1/checkout-sessions/:checkout_session_id/",
+      )
+    : null;
 
 /** One Store's guest payment stack: its own checkout, orders, payment intents and terminal. */
 async function paymentStack(f, resources, simulator) {
@@ -565,6 +574,8 @@ export async function startInternalCustomerServer({
       staffRoutes,
     );
 
+    // v15 batch 39 (b40): these answers never reached api.log; each now writes its own line.
+    app.use(createGuestPaymentRequestCompletionLog({ template: storePaymentRouteTemplate }));
     app.use(async (req, res, next) => {
       // One Store served (alone, or the others failed to start): its payments, as before.
       if (customerStore === null || served.length === 0) return primaryPayments(req, res, next);

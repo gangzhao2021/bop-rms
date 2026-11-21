@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 import console from "node:console";
+import process from "node:process";
+import { setTimeout } from "node:timers";
 import { afterEach, expect, test, vi } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -1216,6 +1218,141 @@ test("batch 35: guessing order links at two merchants spends the same per-addres
   } finally {
     await new Promise((resolve) => (server ? server.close(resolve) : resolve()));
     for (const upstream of apis) await new Promise((resolve) => upstream.close(resolve));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+// v15 batch 39 (b40): the guest's table bill and its payment are answered by this entry itself,
+// never by the API, so api.log never listed /api/v1/dine-in/table-payment (successes included)
+// and the 503 a guest saw in sweep 38 left no line anywhere.
+test("batch 40: every table-payment answer writes one completion line with its route and code", async () => {
+  vi.stubEnv("NODE_ENV", "development");
+  const directory = await mkdtemp(join(tmpdir(), "bop-table-payment-log-"));
+  const { createTestCertificates } = await import("./pilot-test-certificates.mjs");
+  const { CustomerDiningTablePaymentHandler } =
+    await import("../../apps/api/dist/customer-dining-table-payment.js");
+  const certificates = await createTestCertificates(directory, { hostname: "localhost" });
+  const origin = "https://localhost";
+  const lines = [];
+  const log = vi.spyOn(console, "log").mockImplementation((line) => lines.push(String(line)));
+  const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+  let fail = true;
+  let server;
+  try {
+    server = await startInternalCustomerServer({
+      publicOrigin: origin,
+      listenPort: 0,
+      apiPort: 1,
+      keyFile: certificates.keyFile,
+      certificateFile: certificates.certificateFile,
+      loadProfile: async () => ({ environment: "InternalTest" }),
+      loadInternalPickupQr: async () => ({ token: () => "synthetic.pickup.token" }),
+      diningEntries: [],
+      createInternalTestResources: async () => ({
+        scope: { storeReference: "store-1", brandReference: "brand" },
+        publicProfile: { binding: { publicStoreReference: "public-store-1" } },
+        credentials: { sessions: { hashCredential: () => "selector" } },
+        transactions: {},
+        close: vi.fn(async () => undefined),
+      }),
+      createInternalMerchant: async () => ({
+        staffSignInMode: "cognito",
+        persistence: { transactions: {}, identity: { hasher: {} }, now: () => "" },
+        bff: { exactOrigin: origin, acceptedHost: "localhost" },
+      }),
+      createInternalSimulatedProvider: async () => ({ close: vi.fn() }),
+      createInternalCustomerEntry: async () => ({ dining: {} }),
+      createInternalTestItems: async () => ({ catalogCartItems: [] }),
+      createInternalCheckout: () => ({ preparation: {}, accessOptions: {} }),
+      createInternalOrder: async () => ({}),
+      createInternalDiningCheckout: () => ({ preparation: {} }),
+      createInternalChannelPayment: async () => ({}),
+      createInternalPaymentTerminal: () => ({}),
+      // The real handler, as pilot-dining-table-payment.mjs mounts it; only its port is a
+      // stand-in: first the bill read fails the way an owner's outage does, then it answers.
+      registerInternalDiningTablePayment: (router, options) => {
+        const handler = new CustomerDiningTablePaymentHandler({
+          allowedOrigin: options.origin,
+          port: {
+            read: async () => {
+              if (fail)
+                throw Object.assign(new Error("not logged"), {
+                  code: "DINING_TABLE_PAYMENT_DEPENDENCY_UNAVAILABLE",
+                });
+              throw Object.assign(new Error("not logged"), { code: "GUEST_SESSION_UNAVAILABLE" });
+            },
+          },
+        });
+        router.post("/api/v1/dine-in/table-payment", ...handler.handler());
+      },
+    });
+    if (!server.listening) await new Promise((resolve) => server.once("listening", resolve));
+    const { request } = await import("node:https");
+    const guest = "a".repeat(43),
+      csrf = "c".repeat(43);
+    const ask = () =>
+      new Promise((resolve, reject) => {
+        const body = JSON.stringify({ action: "Read" });
+        const call = request(
+          {
+            host: "127.0.0.1",
+            port: server.address().port,
+            path: "/api/v1/dine-in/table-payment",
+            method: "POST",
+            servername: "localhost",
+            ca: [certificates.root],
+            headers: {
+              host: "localhost",
+              origin,
+              "sec-fetch-site": "same-origin",
+              "content-type": "application/json",
+              "content-length": Buffer.byteLength(body),
+              "x-csrf-token": csrf,
+              cookie: `__Host-bop-guest=${guest}`,
+            },
+          },
+          (response) => {
+            let text = "";
+            response.on("data", (chunk) => (text += String(chunk)));
+            response.on("end", () => resolve({ status: response.statusCode, text }));
+          },
+        );
+        call.on("error", reject);
+        call.end(body);
+      });
+    const completions = () =>
+      lines
+        .filter((line) => line.includes("guest_payment_request_completed"))
+        .map((line) => JSON.parse(line));
+    expect((await ask()).status).toBe(503);
+    fail = false;
+    expect((await ask()).status).toBe(404);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(completions()).toEqual([
+      expect.objectContaining({
+        level: 50,
+        route: "/api/v1/dine-in/table-payment",
+        statusCode: 503,
+        resultCode: "HTTP_SERVER_ERROR",
+        answerCode: "table_payment_unavailable",
+      }),
+      expect.objectContaining({
+        level: 30,
+        route: "/api/v1/dine-in/table-payment",
+        statusCode: 404,
+        resultCode: "HTTP_CLIENT_ERROR",
+        answerCode: "table_not_found",
+      }),
+    ]);
+    // Never the guest's cookie or CSRF value.
+    for (const line of lines) {
+      expect(line).not.toContain(guest);
+      expect(line).not.toContain(csrf);
+    }
+  } finally {
+    log.mockRestore();
+    stderr.mockRestore();
+    await new Promise((resolve) => (server ? server.close(resolve) : resolve()));
     await rm(directory, { recursive: true, force: true });
   }
 });
