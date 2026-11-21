@@ -48,7 +48,7 @@ function view(): CustomerDiningSessionView {
     summary: { paid: cad(3390n), refunded: cad(0n), refundPending: cad(0n), due: cad(0n) },
   };
 }
-async function setup(enabled = true) {
+async function setup(enabled = true, processingRereadMs: readonly number[] = [1, 1]) {
   const read = vi.fn().mockResolvedValue(view());
   const server = createServer(
     createApp(
@@ -57,6 +57,7 @@ async function setup(enabled = true) {
             customerDiningSession: new CustomerDiningSessionHandler({
               allowedOrigin: "https://pilot.example",
               port: { read },
+              processingRereadMs,
             }),
           }
         : {},
@@ -327,6 +328,45 @@ it("v15 2026-10-27: a table whose first round's order is still being prepared wa
   expect(((await response.json()) as { error: { code: string } }).error.code).toBe(
     "dining_session_order_processing",
   );
+});
+
+// Batch 43 (v15 b42 live, Fireside Hotpot 18:31-18:50Z): 13 table reads answered 503 "order
+// processing", each 50-110 ms after its round was written (OrderCreated / OrderSubmitted outbox
+// rows), while the status view took the round 0.2-1.1 s after it was written. The read is run
+// again on the server after short waits, so the guest's read right after placing a round answers
+// the table instead of a 503.
+it("batch 43: a table read in the status view's gap is read again and answers 200", async () => {
+  const f = await setup();
+  f.read
+    .mockRejectedValueOnce(new DiningOrderStillProcessingError("ROUND_NOT_IN_STATUS_VIEW"))
+    .mockRejectedValueOnce(new DiningOrderStillProcessingError("ROUND_NOT_IN_STATUS_VIEW"))
+    .mockResolvedValueOnce(view());
+  const response = await f.send({}, "?locale=zh-CN");
+  expect(response.status).toBe(200);
+  expect(f.read).toHaveBeenCalledTimes(3);
+  // Each re-read keeps the guest's language.
+  const locale = f.read.mock.calls[0]?.[1] as unknown;
+  expect(locale).toEqual(expect.any(String));
+  expect(f.read.mock.calls.every((call) => call[1] === locale)).toBe(true);
+});
+
+it("batch 43: the default waits cover the 1.1 s seen live, then still 'order processing'", async () => {
+  const f = await setup(true, [400, 800]);
+  f.read.mockRejectedValue(new DiningOrderStillProcessingError());
+  const started = Date.now();
+  const response = await f.send();
+  expect(response.status).toBe(503);
+  expect(response.headers.get("retry-after")).toBe("2");
+  expect(f.read).toHaveBeenCalledTimes(3);
+  expect(Date.now() - started).toBeGreaterThanOrEqual(1150);
+});
+
+it("batch 43: other failures are never read again", async () => {
+  const f = await setup();
+  f.read.mockRejectedValue(new Error("TENANT_DATABASE_ACQUIRE_FAILED"));
+  const response = await f.send();
+  expect(response.status).toBe(503);
+  expect(f.read).toHaveBeenCalledTimes(1);
 });
 
 // Batch 41 (v15 b40 live): api.log had 8 table reads answering 503 HTTP_RETRY_LATER in 6-26 ms,

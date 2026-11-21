@@ -65,12 +65,47 @@ interface DiningSessionPort {
     displayLocale?: string,
   ): Promise<CustomerDiningSessionView>;
 }
+/**
+ * Batch 43 (v15 b42 live): every table read answering 503 "order processing" came 50-110 ms after
+ * a round was written, the guest page's own read right after placing it; Ordering's status view
+ * took that round 0.2-1.1 s after it was written (its event consumer). The read is a read: it is
+ * run again here after these waits (no transaction is held while waiting), so the guest gets the
+ * table with the new round instead of a 503 in that gap. Only a status view still behind after
+ * them answers "order processing" (the page reads again by itself).
+ */
+const processingRereadMs: readonly number[] = [400, 800];
 export class CustomerDiningSessionHandler {
   readonly #origin: string;
   readonly #port: DiningSessionPort;
-  constructor(options: { allowedOrigin: string; port: DiningSessionPort }) {
+  readonly #rereadMs: readonly number[];
+  constructor(options: {
+    allowedOrigin: string;
+    port: DiningSessionPort;
+    /** Waits before each re-read of a table whose order is still being written. */
+    processingRereadMs?: readonly number[];
+  }) {
     this.#origin = new URL(options.allowedOrigin).origin;
     this.#port = options.port;
+    this.#rereadMs = options.processingRereadMs ?? processingRereadMs;
+  }
+  async #read(input: CustomerDiningSessionInput, displayLocale: string | null) {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return displayLocale === null
+          ? await this.#port.read(input)
+          : await this.#port.read(input, displayLocale);
+      } catch (error) {
+        const wait = this.#rereadMs[attempt];
+        if (
+          !(error instanceof DiningOrderStillProcessingError) ||
+          wait === undefined ||
+          requestClientLeft()
+        )
+          throw error;
+        await new Promise<void>((resolve) => setTimeout(resolve, wait));
+        if (requestClientLeft()) throw error;
+      }
+    }
   }
   handler(): RequestHandler {
     return async (request, response) => {
@@ -104,10 +139,7 @@ export class CustomerDiningSessionHandler {
         return;
       }
       try {
-        const view =
-          displayLocale === null
-            ? await this.#port.read(input)
-            : await this.#port.read(input, displayLocale);
+        const view = await this.#read(input, displayLocale);
         // Explicit public-field serialization: no owner references, guest identity or codes.
         const session = {
           tableLabel: view.tableLabel,
