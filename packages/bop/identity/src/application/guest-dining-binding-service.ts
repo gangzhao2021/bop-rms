@@ -17,6 +17,7 @@ import {
   parseGuestSessionReference,
   parseGuestSelectorHash,
   type GuestRawCredential,
+  type GuestSelectorHash,
 } from "../contracts/guest-session.js";
 import {
   parseCanonicalInstant,
@@ -61,6 +62,29 @@ export function createGuestDiningBindingService(options: GuestDiningBindingServi
     parseGuestSelectorHash(options.credentials.hashCredential("Session", raw));
   const csrfHash = (raw: GuestRawCredential) =>
     parseGuestSelectorHash(options.credentials.hashCredential("Csrf", raw));
+  // v15 batch 39 live check (b40): a phone that reloaded its table page no longer holds the CSRF
+  // token issued at entry; it restores the foreground CSRF derived from its Session cookie
+  // (GET /api/v1/customer/session/csrf). Session authorization accepts both, and the Join did, but
+  // the binding asked for the issued one only: the guest was seated in Dining and never bound
+  // (two 503s here), and every later Join of that phone failed. Accept exactly the two forms
+  // Session authorization accepts, as the pickup binding does (WP-2423 D2).
+  function presentedCsrfBelongsTo(
+    issuedCsrfSelectorHash: GuestSelectorHash,
+    sessionCredential: GuestRawCredential,
+    csrfCredential: GuestRawCredential,
+  ) {
+    const presented = csrfHash(csrfCredential);
+    if (options.credentials.equals(issuedCsrfSelectorHash, presented) === true) return true;
+    if (!options.credentials.deriveForegroundCsrf) return false;
+    return (
+      options.credentials.equals(
+        csrfHash(
+          parseGuestRawCredential(options.credentials.deriveForegroundCsrf(sessionCredential)),
+        ),
+        presented,
+      ) === true
+    );
+  }
   async function authorize(
     sessionCredential: GuestRawCredential,
     csrfCredential: GuestRawCredential,
@@ -148,11 +172,13 @@ export function createGuestDiningBindingService(options: GuestDiningBindingServi
           options.credentials.equals(
             predecessor.sessionSelectorHash,
             sessionHash(sessionCredential),
-          ) !== true ||
-          options.credentials.equals(predecessor.csrfSelectorHash, csrfHash(csrfCredential)) !==
-            true
+          ) !== true
         )
           return unavailable("GUEST_BINDING_SESSION_CHANGED");
+        if (
+          !presentedCsrfBelongsTo(predecessor.csrfSelectorHash, sessionCredential, csrfCredential)
+        )
+          return unavailable("GUEST_BINDING_CSRF_NOT_CURRENT");
         const reservationAt = now();
         const target = readClosedRecord(
           await options.owner.reserveAdmission({
@@ -303,10 +329,11 @@ export function createGuestDiningBindingService(options: GuestDiningBindingServi
         if (
           acknowledged.status !== "Acknowledged" ||
           acknowledged.acknowledgedAt === null ||
-          options.credentials.equals(
+          !presentedCsrfBelongsTo(
             acknowledged.predecessor.csrfSelectorHash,
-            csrfHash(csrfCredential),
-          ) !== true ||
+            sessionCredential,
+            csrfCredential,
+          ) ||
           acknowledged.operationReference !== operationReference ||
           JSON.stringify(acknowledged.predecessor.session) !== JSON.stringify(session) ||
           options.credentials.equals(

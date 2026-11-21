@@ -301,6 +301,64 @@ describe("WP-2296 credential handoff service", () => {
     expect((failed as { cause?: unknown }).cause).toBe(owner);
   });
 
+  // v15 batch 39 live check (b40): the phone reloaded its table page before tapping "Join this
+  // table". The page restored the foreground CSRF derived from its Session cookie, as
+  // GET /api/v1/customer/session/csrf hands it back, and Session authorization (as in v15) accepts
+  // it. The Join succeeded; the binding answered 503 GUEST_BINDING_SESSION_CHANGED twice.
+  it("prepares and activates with the restored foreground CSRF of a reloaded table page", async () => {
+    const f = fixture();
+    const derive = f.options.credentials.deriveForegroundCsrf;
+    if (!derive) throw new Error("synthetic provider lacks foreground CSRF");
+    const restored = derive(f.input.sessionCredential);
+    vi.mocked(f.options.authorization.authorize).mockImplementation(async (input) => {
+      const record = f.records.get(
+        f.options.credentials.hashCredential("Session", input.sessionCredential as never),
+      );
+      const presented = f.options.credentials.hashCredential("Csrf", input.csrfCredential as never);
+      if (
+        !record ||
+        (!f.options.credentials.equals(presented, record.csrfSelectorHash) &&
+          !f.options.credentials.equals(
+            presented,
+            f.options.credentials.hashCredential(
+              "Csrf",
+              derive(input.sessionCredential as never) as never,
+            ),
+          ))
+      )
+        throw new Error("synthetic denied");
+      return assertGuestSessionUsable(record.session, input.observedAt);
+    });
+    const reloaded = { ...f.input, csrfCredential: restored };
+    const prepared = await f.service.prepare(reloaded);
+    expect(prepared.status).toBe("Prepared");
+    f.setTime(1);
+    const activated = await f.service.activate({
+      ...f.activateInput(prepared),
+      csrfCredential: restored,
+    });
+    expect(activated.status).toBe("Activated");
+    expect(f.records.get(f.predecessor.sessionSelectorHash)?.session.status).toBe("Revoked");
+  });
+
+  it("refuses a CSRF neither issued to nor derived from the Session, with its own log code", async () => {
+    const f = fixture();
+    const derive = f.options.credentials.deriveForegroundCsrf;
+    if (!derive) throw new Error("synthetic provider lacks foreground CSRF");
+    const foreign = derive(f.options.credentials.generateCredential("Session"));
+    // Even if Session authorization were to pass, the preparation itself refuses the token.
+    vi.mocked(f.options.authorization.authorize).mockImplementation(async (input) =>
+      assertGuestSessionUsable(f.predecessor.session, input.observedAt),
+    );
+    const refused = await f.service
+      .prepare({ ...f.input, csrfCredential: foreign })
+      .catch((error: unknown) => error);
+    expect(refused).toMatchObject({ code: "GUEST_SESSION_UNAVAILABLE" });
+    const inner = (refused as { cause?: { cause?: unknown } }).cause;
+    expect(inner?.cause).toEqual({ code: "GUEST_BINDING_CSRF_NOT_CURRENT" });
+    expect(f.options.owner.reserveAdmission).not.toHaveBeenCalled();
+  });
+
   it("continues after lost Identity activation acknowledgement without reusing the revoked predecessor", async () => {
     const f = fixture();
     const prepared = await f.service.prepare(f.input);
