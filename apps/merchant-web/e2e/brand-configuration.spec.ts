@@ -686,7 +686,7 @@ test("@production saved Brand configuration edits and completes independent revi
   await expect(button(page, "Save configuration draft")).toBeDisabled();
   await refresh(page);
   const deadline = await submit(page);
-  await committed(page, "PendingApproval", 3);
+  await committed(page, "Waiting for approval", 3);
   await expect(button(page, "Approve independently")).toBeDisabled();
   expect(f.submitted()?.reviewValidUntil).toBe(deadline);
   const authorSession = f.state.session.sessionReference;
@@ -710,7 +710,7 @@ test("@production saved Brand configuration edits and completes independent revi
   ]);
   expect(f.state.executions[2]?.actorReference).toBe(reviewer);
   await button(page, "Older configuration history").click();
-  await expect(panel(page).getByRole("list")).toContainText("Revision 3 · PendingApproval");
+  await expect(panel(page).getByRole("list")).toContainText("Revision 3 · Waiting for approval");
   await expect(panel(page).getByRole("list")).toContainText("Revision 2 · Draft");
   await expect(panel(page).locator(`time[datetime="${deadline}"]`)).toBeVisible();
   expect(f.state.deniedStoreBootstrapRequests).toBeGreaterThan(0);

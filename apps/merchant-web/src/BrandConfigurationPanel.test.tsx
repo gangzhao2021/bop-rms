@@ -136,6 +136,34 @@ it("renders a named configuration region and offers refresh without invented ref
   expect(html).not.toContain(id(1));
   expect(html).not.toContain('type="text"');
 });
+it("batch 40: the panel an Owner reaches at /app/organization/brands/:id reads in Chinese", async () => {
+  const { setLanguageForTest } = await import("./i18n/i18n.js");
+  const journal: BrandConfigurationPendingJournal = {
+    load: async () => null,
+    reserve: async () => undefined,
+    complete: async () => undefined,
+  };
+  setLanguageForTest("zh-Hans");
+  try {
+    const html = renderToStaticMarkup(
+      <BrandConfigurationPanel
+        scope={scope}
+        csrf={csrf}
+        brandVersion={7}
+        journalFactory={() => journal}
+        freshDisabled
+      />,
+    );
+    expect(html).toContain("品牌配置");
+    expect(html).toContain("刷新配置");
+    expect(html).toContain("载入当前已保存的配置。");
+    // No English words between the tags (attributes and references aside).
+    const text = html.replace(/<[^>]*>/gu, " ");
+    expect(text).not.toMatch(/[A-Za-z]{3,}/u);
+  } finally {
+    setLanguageForTest("en");
+  }
+});
 it("reserves before dispatch and reobserves the exact owner twice before current/history and clearing", async () => {
   const s = await setup();
   await executeBrandConfigurationOriginal(s.input);

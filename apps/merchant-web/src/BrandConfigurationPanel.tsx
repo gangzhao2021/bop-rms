@@ -27,6 +27,7 @@ import {
 } from "./merchant-brand-catalog-source-client.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import { brandChangeDeniedText } from "./access-denied.js";
+import { t } from "./i18n/i18n.js";
 export interface BrandConfigurationPanelProps {
   readonly scope: BrandConfigurationScope;
   readonly csrf: string;
@@ -112,17 +113,35 @@ export async function executeBrandConfigurationOriginal(input: {
   return recoverBrandConfigurationOriginal({ ...input, original: input.prepared.original });
 }
 const messages: Record<BrandConfigurationClientError["code"], string> = {
-  Invalid: "The request is invalid. Check the configuration fields.",
+  Invalid: t("The request is invalid. Check the configuration fields."),
   // Batch 38: the refusal staff can reach here is worded and translated with the others.
   Denied: brandChangeDeniedText,
-  Conflict:
-    "The saved head or Brand version changed. Recover the pending original, then refresh Brand access and configuration before a new request.",
-  Unavailable: "Configuration is unavailable. Refresh or recover the pending original.",
-  OutcomeUnknown:
-    "The result is unknown. Recover the original request; do not submit a replacement.",
-  ScopeChanged: "The Brand or Actor changed. Return to the original scope to recover its request.",
-  Stale: "The current observation expired. Refresh before a new request.",
+  Conflict: t(
+    "Someone else changed this brand's configuration. Recover the change still waiting here, then refresh before making a new one.",
+  ),
+  Unavailable: t(
+    "The configuration can't be read just now. Refresh, or recover the change still waiting here.",
+  ),
+  OutcomeUnknown: t(
+    "It isn't known whether your change was saved. Recover it here; don't send it again.",
+  ),
+  ScopeChanged: t(
+    "The brand or the person signed in changed. Go back to the brand and sign-in you started with to recover that change.",
+  ),
+  Stale: t("What's on screen is out of date. Refresh before making a new change."),
 };
+/** Batch 40: a configuration's state in staff words, in either language. */
+const lifecycleText = (
+  lifecycle: NonNullable<BrandConfigurationCurrent["current"]>["configuration"]["lifecycle"],
+): string =>
+  ({
+    Draft: t("Draft"),
+    PendingApproval: t("Waiting for approval"),
+    Approved: t("Approved"),
+    Published: t("Published"),
+    Superseded: t("Replaced by a newer version"),
+    Archived: t("Archived"),
+  })[lifecycle];
 const editable = (current: BrandConfigurationCurrent): BrandConfigurationEditable | null =>
   current.current
     ? parseBrandConfigurationEditable(
@@ -224,7 +243,7 @@ export function BrandConfigurationPanel({
     [draft, setDraft] = useState<BrandConfigurationEditable | null>(null),
     [pending, setPending] = useState<BrandConfigurationOriginal | null>(null),
     [busy, setBusy] = useState(false),
-    [message, setMessage] = useState("Load the current saved configuration."),
+    [message, setMessage] = useState(() => t("Load the current saved configuration.")),
     [online, setOnline] = useState(typeof navigator === "undefined" || navigator.onLine),
     [fresh, setFresh] = useState(false),
     [review, setReview] = useState(""),
@@ -301,10 +320,12 @@ export function BrandConfigurationPanel({
       if (!keep) setDraft(editable(next));
       setMessage(
         original
-          ? "An original request needs recovery before new work."
+          ? t("A change is still waiting to be confirmed. Recover it before making a new one.")
           : next.current
-            ? "Saved configuration loaded."
-            : "No configuration has been saved. A published platform template and registered catalogue are required to create one.",
+            ? t("Saved configuration loaded.")
+            : t(
+                "No configuration has been saved. A published platform template and registered catalogue are required to create one.",
+              ),
       );
     } catch (error) {
       if (epoch === generation.current && !active.signal.aborted) {
@@ -566,8 +587,8 @@ export function BrandConfigurationPanel({
       adopt(result.current, result.history);
       setMessage(
         result.receipt.outcome === "Committed"
-          ? "Configuration updated and refreshed."
-          : "The previous operation did not apply changes. Refresh before trying again.",
+          ? t("Configuration updated and refreshed.")
+          : t("The previous operation did not apply changes. Refresh before trying again."),
       );
     } catch (error) {
       if (isCurrent()) {
@@ -602,8 +623,8 @@ export function BrandConfigurationPanel({
       adopt(result.current, result.history);
       setMessage(
         result.receipt.outcome === "Committed"
-          ? "Previous operation confirmed. Current configuration refreshed."
-          : "The previous operation did not apply changes. You can try again.",
+          ? t("Previous operation confirmed. Current configuration refreshed.")
+          : t("The previous operation did not apply changes. You can try again."),
       );
     } catch (error) {
       if (epoch === generation.current && !active.signal.aborted) explain(error);
@@ -643,41 +664,43 @@ export function BrandConfigurationPanel({
     unchanged = !!current && !!draft && canonical(draft) === canonical(editable(current));
   return (
     <section aria-labelledby="brand-configuration-title">
-      <h2 id="brand-configuration-title">Brand configuration</h2>
+      <h2 id="brand-configuration-title">{t("Brand configuration")}</h2>
       <p role="status" aria-live="polite">
         {message}
       </p>
       {!online ? (
-        <p>Offline. A pending original stays on this device until it can be recovered.</p>
+        <p>
+          {t("Offline. A change still waiting stays on this device until it can be recovered.")}
+        </p>
       ) : null}
       <div className="card-actions">
         <button disabled={busy || !online} onClick={() => void load()}>
-          Refresh configuration
+          {t("Refresh configuration")}
         </button>
         {pending ? (
           <button disabled={busy || !online} onClick={() => void recover()}>
-            Recover original request
+            {t("Recover original request")}
           </button>
         ) : null}
       </div>
       {current ? (
         <fieldset disabled={busy || !!pending || freshDisabled || !online}>
-          <legend>Published platform template</legend>
+          <legend>{t("Published platform template")}</legend>
           <label>
-            Platform template
+            {t("Platform template")}
             <select
               value={draft?.platformTemplateReference ?? selectedVersion}
               onChange={(e) => chooseTemplate(e.target.value)}
             >
-              <option value="">Choose a current published template</option>
+              <option value="">{t("Choose a current published template")}</option>
               {draft && !candidate ? (
                 <option value={draft.platformTemplateReference}>
-                  Recorded template — unavailable for new selection
+                  {t("Recorded template — unavailable for new selection")}
                 </option>
               ) : null}
               {!draft && selectedVersion && !candidate ? (
                 <option value={selectedVersion}>
-                  Previously selected template — unavailable for new selection
+                  {t("Previously selected template — unavailable for new selection")}
                 </option>
               ) : null}
               {candidates?.items.map((item) => (
@@ -690,43 +713,57 @@ export function BrandConfigurationPanel({
           {candidate ? (
             <div>
               <p>
-                {candidate.code}: {candidate.name}. Content revision {candidate.revision}.
+                {t("{code}: {name}. Content revision {revision}.", {
+                  code: candidate.code,
+                  name: candidate.name,
+                  revision: candidate.revision,
+                })}
               </p>
               <p>
-                Locales: {candidate.supportedLocales.join(", ")}. Hard requirements:{" "}
-                {candidate.hardRequirementFieldCodes.join(", ") || "none"}. Allowed overrides:{" "}
-                {candidate.overrideAllowedFieldCodes.join(", ") || "none"}.
+                {t(
+                  "Locales: {locales}. Hard requirements: {required}. Allowed overrides: {overrides}.",
+                  {
+                    locales: candidate.supportedLocales.join(", "),
+                    required: candidate.hardRequirementFieldCodes.join(", ") || t("none"),
+                    overrides: candidate.overrideAllowedFieldCodes.join(", ") || t("none"),
+                  },
+                )}
               </p>
               <p>
-                Template effective from {candidate.effectiveFrom}; until{" "}
-                {candidate.effectiveUntil ?? "open"}.
+                {t("Template effective from {from}; until {until}.", {
+                  from: candidate.effectiveFrom,
+                  until: candidate.effectiveUntil ?? t("open"),
+                })}
               </p>
             </div>
           ) : (
             <p>
-              No current published template selected. A recorded historical link is preserved until
-              you explicitly choose another.
+              {t(
+                "No current published template selected. A recorded historical link is preserved until you explicitly choose another.",
+              )}
             </p>
           )}
           {candidates?.hasMore ? (
             <button type="button" onClick={() => void moreTemplates()}>
-              More published templates
+              {t("More published templates")}
             </button>
           ) : null}
         </fieldset>
       ) : null}
       {current && !saved && candidate ? (
         <fieldset disabled={busy || !!pending || freshDisabled || !online}>
-          <legend>Create configuration draft</legend>
+          <legend>{t("Create configuration draft")}</legend>
           <p>
-            Catalogue:{" "}
             {catalogue?.source
-              ? `${catalogue.source.code} — ${catalogue.source.label}`
-              : "Register a catalogue, then refresh configuration."}
-            . Theme: not configured.
+              ? t("Catalogue: {catalogue}. Theme: not configured.", {
+                  catalogue: `${catalogue.source.code} — ${catalogue.source.label}`,
+                })
+              : t(
+                  "Catalogue: register a catalogue, then refresh configuration. Theme: not configured.",
+                )}
           </p>
           <label>
-            Default locale
+            {t("Default locale")}
             <select
               value={firstLocale}
               onChange={(e) => {
@@ -768,11 +805,11 @@ export function BrandConfigurationPanel({
                   );
                 }}
               />
-              Allow override {value}
+              {t("Allow override {value}", { value })}
             </label>
           ))}
           <label>
-            Effective from (UTC)
+            {t("Effective from (UTC)")}
             <input
               type="datetime-local"
               value={firstFrom}
@@ -784,7 +821,7 @@ export function BrandConfigurationPanel({
             />
           </label>
           <label>
-            Effective until (UTC, blank means open)
+            {t("Effective until (UTC, blank means open)")}
             <input
               type="datetime-local"
               value={firstUntil}
@@ -795,7 +832,7 @@ export function BrandConfigurationPanel({
             />
           </label>
           <label>
-            Reason code
+            {t("Reason code")}
             <input
               value={firstReason}
               maxLength={64}
@@ -811,25 +848,32 @@ export function BrandConfigurationPanel({
             disabled={!canSave}
             onClick={() => void act("SaveConfigurationDraft")}
           >
-            Save configuration draft
+            {t("Save configuration draft")}
           </button>
         </fieldset>
       ) : null}
       {saved && draft ? (
         <>
           <p>
-            Recorded state: {saved.configuration.lifecycle}. Content version{" "}
-            {saved.configuration.configurationVersion}. Revision {saved.revision}.
+            {t("Recorded state: {state}. Content version {version}. Revision {revision}.", {
+              state: lifecycleText(saved.configuration.lifecycle),
+              version: saved.configuration.configurationVersion,
+              revision: saved.revision,
+            })}
           </p>
           <p>
-            Linked catalogue and platform template. Theme:{" "}
-            {draft.mediaThemeReference === null ? "not configured" : "recorded theme linked"}.
-            Publication checks run when you submit or publish.
+            {draft.mediaThemeReference === null
+              ? t(
+                  "Linked catalogue and platform template. Theme: not configured. Publication checks run when you submit or publish.",
+                )
+              : t(
+                  "Linked catalogue and platform template. Theme: recorded theme linked. Publication checks run when you submit or publish.",
+                )}
           </p>
           <fieldset disabled={busy || !!pending || freshDisabled || !online}>
-            <legend>Edit saved configuration</legend>
+            <legend>{t("Edit saved configuration")}</legend>
             <label>
-              Default locale
+              {t("Default locale")}
               <select
                 value={draft.defaultLocale}
                 onChange={(e) =>
@@ -847,8 +891,10 @@ export function BrandConfigurationPanel({
               </select>
             </label>
             <p>
-              Supported locales: {draft.supportedLocales.join(", ")}. Available locales are set by
-              the linked template.
+              {t(
+                "Supported locales: {locales}. Available locales are set by the linked template.",
+                { locales: draft.supportedLocales.join(", ") },
+              )}
             </p>
             {candidate?.supportedLocales.map((value) => (
               <label key={value} className="brand-configuration-checkbox">
@@ -880,11 +926,11 @@ export function BrandConfigurationPanel({
                     })
                   }
                 />
-                Allow override {value}
+                {t("Allow override {value}", { value })}
               </label>
             ))}
             <label>
-              Effective from (UTC)
+              {t("Effective from (UTC)")}
               <input
                 type="datetime-local"
                 value={draft.effectiveFrom.slice(0, 16)}
@@ -899,7 +945,7 @@ export function BrandConfigurationPanel({
               />
             </label>
             <label>
-              Effective until (UTC, blank means open)
+              {t("Effective until (UTC, blank means open)")}
               <input
                 type="datetime-local"
                 value={draft.effectiveUntil?.slice(0, 16) ?? ""}
@@ -913,7 +959,7 @@ export function BrandConfigurationPanel({
               />
             </label>
             <label>
-              Reason code
+              {t("Reason code")}
               <input
                 value={draft.reasonCode}
                 maxLength={64}
@@ -922,10 +968,10 @@ export function BrandConfigurationPanel({
             </label>
           </fieldset>
           <button disabled={!canSave} onClick={() => void act("SaveConfigurationDraft")}>
-            Save configuration draft
+            {t("Save configuration draft")}
           </button>
           <label>
-            Review valid until (UTC)
+            {t("Review valid until (UTC)")}
             <input
               type="datetime-local"
               value={review}
@@ -936,7 +982,9 @@ export function BrandConfigurationPanel({
               }}
             />
           </label>
-          <p>Choose a review deadline. Approval and publication must finish before this time.</p>
+          <p>
+            {t("Choose a review deadline. Approval and publication must finish before this time.")}
+          </p>
           <div className="card-actions">
             <button
               disabled={
@@ -947,7 +995,7 @@ export function BrandConfigurationPanel({
               }
               onClick={() => void act("SubmitConfiguration")}
             >
-              Submit for review
+              {t("Submit for review")}
             </button>
             <button
               disabled={
@@ -961,7 +1009,7 @@ export function BrandConfigurationPanel({
               }
               onClick={() => void act("ApproveConfiguration")}
             >
-              Approve independently
+              {t("Approve independently")}
             </button>
             <button
               disabled={
@@ -973,33 +1021,39 @@ export function BrandConfigurationPanel({
               }
               onClick={() => void act("PublishConfiguration")}
             >
-              Publish configuration
+              {t("Publish configuration")}
             </button>
           </div>
           {current?.recordedReview ? (
             <p>
-              Original review valid until (UTC):{" "}
+              {t("Original review valid until (UTC):")}{" "}
               <time dateTime={current.recordedReview.reviewValidUntil}>
                 {current.recordedReview.reviewValidUntil}
               </time>
-              .{" "}
+              {t(".")}{" "}
               {Date.now() >= Date.parse(current?.recordedReview?.reviewValidUntil ?? "")
-                ? "Review expired. New approval or publication is unavailable; original recovery remains available."
-                : "Approval and publication must finish before this deadline."}
+                ? t(
+                    "Review expired. New approval or publication is unavailable; original recovery remains available.",
+                  )
+                : t("Approval and publication must finish before this deadline.")}
             </p>
           ) : null}
         </>
       ) : null}
       {history ? (
         <>
-          <h3>Configuration history</h3>
+          <h3>{t("Configuration history")}</h3>
           {history.entries.length === 0 ? (
-            <p>No recorded configuration history.</p>
+            <p>{t("No recorded configuration history.")}</p>
           ) : (
             <ul>
               {history.entries.map((entry) => (
                 <li key={entry.revision}>
-                  Revision {entry.revision} · {entry.configuration.lifecycle} · {entry.recordedAt}
+                  {t("Revision {revision} · {state} · {recordedAt}", {
+                    revision: entry.revision,
+                    state: lifecycleText(entry.configuration.lifecycle),
+                    recordedAt: entry.recordedAt,
+                  })}
                 </li>
               ))}
             </ul>
@@ -1008,7 +1062,7 @@ export function BrandConfigurationPanel({
             disabled={busy || !online || history.nextBeforeRevision === null}
             onClick={() => void older()}
           >
-            Older configuration history
+            {t("Older configuration history")}
           </button>
         </>
       ) : null}
