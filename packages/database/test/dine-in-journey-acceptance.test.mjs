@@ -2089,9 +2089,12 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
       // v15 2026-10-28 a: round 3 is in Ordering but the projection consumer has not taken it yet
       // (it does within seconds). The table view says "still being prepared" (the page reads again)
       // — not 503 ORDER_STATUS_DEPENDENCY_UNAVAILABLE, which showed "We couldn't load your table".
+      // Batch 41: the information line names why (a later round, not yet in the status view).
       await assert.rejects(
         tableOf(tableGuestP),
-        (error) => error instanceof DiningOrderStillProcessingError,
+        (error) =>
+          error instanceof DiningOrderStillProcessingError &&
+          error.processingCause === "ROUND_NOT_IN_STATUS_VIEW",
       );
       // ── 4c. The projection consumer takes round 3 (after the cancellation revision).
       const event3 = submittedEvents.get(R3.batch.orderBatchReference);

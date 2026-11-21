@@ -421,9 +421,20 @@ export class DiningTableMovedError extends Error {
     this.name = "DiningTableMovedError";
   }
 }
+/**
+ * Batch 41 (v15 b40 live): why the table's order is still being prepared, as a safe code for the
+ * one information line. On v15 a round is written when its payment starts and Ordering's status
+ * view takes it 0.3-1.1 s later (its event consumer); a read in that gap lands here.
+ * - ORDER_STATUS_VIEW_NOT_BUILT: the table's first round; its order has no status view yet.
+ * - ROUND_NOT_IN_STATUS_VIEW: a later round the status view has not taken yet.
+ */
+export type DiningOrderProcessingCause = "ORDER_STATUS_VIEW_NOT_BUILT" | "ROUND_NOT_IN_STATUS_VIEW";
 export class DiningOrderStillProcessingError extends Error {
-  constructor() {
-    super("the table's order is still being prepared");
+  readonly code = "DINING_ORDER_STILL_PROCESSING";
+  constructor(
+    readonly processingCause: DiningOrderProcessingCause = "ORDER_STATUS_VIEW_NOT_BUILT",
+  ) {
+    super("the table's order is still being prepared", { cause: new Error(processingCause) });
     this.name = "DiningOrderStillProcessingError";
   }
 }
@@ -1202,7 +1213,7 @@ function postgresDependencies(
               error instanceof OrderStatusProjectionError &&
               error.code === "ORDER_STATUS_NOT_FOUND"
             )
-              throw new DiningOrderStillProcessingError();
+              throw new DiningOrderStillProcessingError("ORDER_STATUS_VIEW_NOT_BUILT");
             throw error;
           });
         const delivery = await createDiningOrderDeliveryProgress({
@@ -1248,7 +1259,7 @@ function postgresDependencies(
             ),
           )
         )
-          throw new DiningOrderStillProcessingError();
+          throw new DiningOrderStillProcessingError("ROUND_NOT_IN_STATUS_VIEW");
         if (
           !delivery ||
           delivery.items.length !== members.length ||

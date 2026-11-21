@@ -329,6 +329,54 @@ it("v15 2026-10-27: a table whose first round's order is still being prepared wa
   );
 });
 
+// Batch 41 (v15 b40 live): api.log had 8 table reads answering 503 HTTP_RETRY_LATER in 6-26 ms,
+// each 15-30 ms after a round's payment started, with no line saying why. Each now says, at
+// information level: the round's status view was not built yet (a first round, or a later one).
+it.each([
+  ["ORDER_STATUS_VIEW_NOT_BUILT", new DiningOrderStillProcessingError()],
+  ["ROUND_NOT_IN_STATUS_VIEW", new DiningOrderStillProcessingError("ROUND_NOT_IN_STATUS_VIEW")],
+] as const)(
+  "batch 41: a table read while the order is written logs why (%s), level 30, nothing private",
+  async (cause, error) => {
+    const f = await setup();
+    const lines: string[] = [];
+    const write = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation((line: string | Uint8Array) => {
+        lines.push(String(line));
+        return true;
+      });
+    try {
+      f.read.mockRejectedValue(error);
+      const response = await f.send();
+      expect(response.status).toBe(503);
+      expect(response.headers.get("retry-after")).toBe("2");
+    } finally {
+      write.mockRestore();
+    }
+    const found = lines
+      .filter((line) => line.includes("CUSTOMER_DINING_SESSION_ORDER_PROCESSING"))
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(found).toHaveLength(1);
+    expect(found[0]).toMatchObject({
+      level: 30,
+      event: "CUSTOMER_DINING_SESSION_ORDER_PROCESSING",
+      code: "DINING_ORDER_STILL_PROCESSING",
+      causes: [cause],
+    });
+    // A fixed event, codes and the time only: no credential, guest or table.
+    expect(Object.keys(found[0] ?? {}).sort()).toEqual([
+      "causes",
+      "code",
+      "event",
+      "level",
+      "time",
+    ]);
+    expect(lines.join("")).not.toContain("s".repeat(43));
+    expect(lines.join("")).not.toContain("c".repeat(43));
+  },
+);
+
 // v15 b17: the table changed while it was read (a staff round being written): still processing,
 // with a 5-second wait, one warning line naming what disagreed, never a server error.
 it("v15 b17: a table read busy with a round being written answers still processing, Retry-After 5", async () => {

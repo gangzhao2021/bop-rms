@@ -250,6 +250,9 @@ export class CustomerDiningSessionHandler {
         // v15 2026-10-27: the first round's Order is still being prepared — read again shortly.
         if (error instanceof DiningOrderStillProcessingError) {
           markRequestRetryLater(request);
+          // Batch 41 (v15 b40 live): these 503s had no line saying why. Information (level 30):
+          // the order is being written, nothing failed, and the page reads again by itself.
+          logGuestFailure("CUSTOMER_DINING_SESSION_ORDER_PROCESSING", error, undefined, 30);
           protect(response);
           response.setHeader("Retry-After", "2");
           response.status(503).json({

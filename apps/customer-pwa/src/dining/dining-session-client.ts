@@ -227,6 +227,45 @@ export interface DiningSessionClient {
   load(signal?: AbortSignal): Promise<DiningSessionView>;
 }
 
+/**
+ * Batch 41 (v15 b40 live): a round is written when its payment starts, and the table's order
+ * view takes it within about a second; a read in between is answered "still being prepared"
+ * (503, Retry-After). A page that reads the table once (how it pays, what it has ordered, where
+ * staff moved it) waits as asked and reads again, quietly, a few times, instead of taking that
+ * one answer as a failure. Any other answer, or an aborted read, ends it at once.
+ */
+export async function loadTableQuietly(
+  client: DiningSessionClient,
+  signal: AbortSignal,
+  tries = 5,
+): Promise<DiningSessionView> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await client.load(signal);
+    } catch (error) {
+      if (
+        attempt >= tries ||
+        signal.aborted ||
+        !(error instanceof DiningSessionClientError) ||
+        error.code !== "processing"
+      )
+        throw error;
+      const waitMs = error.retryAfterSeconds * 1000;
+      await new Promise<void>((resolve, reject) => {
+        const done = () => {
+          clearTimeout(timer);
+          reject(new DOMException("The table read was stopped.", "AbortError"));
+        };
+        const timer = setTimeout(() => {
+          signal.removeEventListener("abort", done);
+          resolve();
+        }, waitMs);
+        signal.addEventListener("abort", done, { once: true });
+      });
+    }
+  }
+}
+
 const credential = /^[A-Za-z0-9_-]{43}$/u;
 const instant = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/u;
 const safeText = /^[^\p{Cc}\p{Cf}<>]{1,200}$/u;

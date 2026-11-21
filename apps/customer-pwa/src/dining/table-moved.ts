@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   createHttpDiningSessionClient,
+  loadTableQuietly,
   type DiningSessionClient,
 } from "./dining-session-client.js";
 
@@ -19,8 +20,7 @@ export function useTableMove(dineIn: boolean, client?: DiningSessionClient): Tab
   useEffect(() => {
     if (!dineIn) return;
     const controller = new AbortController();
-    (client ?? createHttpDiningSessionClient())
-      .load(controller.signal)
+    loadTableQuietly(client ?? createHttpDiningSessionClient(), controller.signal)
       .then((view) => {
         if (controller.signal.aborted) return;
         setMove(

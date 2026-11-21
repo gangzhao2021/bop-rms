@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { getTablePaymentTiming } from "../session/customer-transaction-context.js";
 import {
   createHttpDiningSessionClient,
+  loadTableQuietly,
   type DiningSessionClient,
 } from "./dining-session-client.js";
 
@@ -25,8 +26,7 @@ export function useTablePaymentTiming(
   useEffect(() => {
     if (!dineIn || known !== null) return;
     const controller = new AbortController();
-    (client ?? createHttpDiningSessionClient())
-      .load(controller.signal)
+    loadTableQuietly(client ?? createHttpDiningSessionClient(), controller.signal)
       .then((view) => {
         if (!controller.signal.aborted) setRead(answerFor(view.paymentTiming));
       })

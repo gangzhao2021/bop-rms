@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import {
   createHttpDiningSessionClient,
+  loadTableQuietly,
   type DiningSessionClient,
   type DiningSessionView,
 } from "./dining-session-client.js";
@@ -50,8 +51,7 @@ export function TableOrderedProvider({
   useEffect(() => {
     if (!enabled) return;
     const controller = new AbortController();
-    (client ?? createHttpDiningSessionClient())
-      .load(controller.signal)
+    loadTableQuietly(client ?? createHttpDiningSessionClient(), controller.signal)
       .then((view) => {
         if (controller.signal.aborted) return;
         lastCounts = tableOrderedCounts(view);

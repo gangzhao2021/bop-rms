@@ -617,6 +617,43 @@ for (const screen of [
       expect(failures).toEqual([]);
     });
 
+    // Batch 41 (v15 b40 live): a table read just after a round was written is answered "still
+    // being prepared" (503 dining_session_order_processing, Retry-After 2) for under a second. The
+    // cart took that one answer as "this table pays first" and offered checkout and payment.
+    test("a table read answered 'still being prepared' is read again, and the cart still places the round", async ({
+      page,
+    }) => {
+      const table = await stubTable(page);
+      let processing = 0;
+      await page.route("**/api/v1/dine-in/session**", (route) => {
+        if (processing >= 1) return route.fallback();
+        processing += 1;
+        return route.fulfill({
+          status: 503,
+          headers: { "cache-control": "no-store", "retry-after": "1" },
+          json: {
+            schemaVersion: 1,
+            error: {
+              code: "dining_session_order_processing",
+              messageKey: "customer.dining.session.order_processing",
+            },
+          },
+        });
+      });
+      await openCart(page);
+      const main = page.getByRole("main");
+      await expect(placeOrder(page)).toBeEnabled();
+      expect(processing).toBe(1);
+      await expect(main).toContainText("Nothing is charged now.");
+      await expect(main.getByRole("heading", { name: "Tip", exact: true })).toHaveCount(0);
+      await expect(main).not.toContainText("Checkout");
+      await expect(main).not.toContainText("We couldn’t load your table");
+      await placeOrder(page).click();
+      await expect(page).toHaveURL(/\/dine-in\/session$/u);
+      await expect(main.getByRole("status").filter({ hasText: "Order placed." })).toBeVisible();
+      expect(table.sent).toHaveLength(1);
+    });
+
     test("a phone clock behind the server still places a round", async ({ page }) => {
       const table = await stubTable(page);
       await page.clock.install({ time: new Date(Date.now() - 3_600_000) });

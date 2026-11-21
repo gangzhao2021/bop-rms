@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createHttpDiningSessionClient,
   DiningSessionClientError,
+  loadTableQuietly,
   parseDiningSessionView,
+  type DiningSessionView,
 } from "./dining-session-client.js";
 import {
   setCustomerCsrfCredential,
@@ -524,5 +526,53 @@ describe("v15 batch 7 table-pay-by-dish: a table paying by dish after the first 
       value.session.summary.splitParts = splitParts;
       expect(() => parseDiningSessionView(value)).toThrow(DiningSessionClientError);
     }
+  });
+});
+
+// Batch 41 (v15 b40 live): the table read answers "still being prepared" (503, Retry-After 2) for
+// the second after a round is written. A page reading the table once waits and reads again.
+describe("batch 41: a one-off table read waits out 'still being prepared'", () => {
+  const view = parseDiningSessionView(payload()) as DiningSessionView;
+  const processing = () => new DiningSessionClientError("processing", null, false, 2);
+  afterEach(() => vi.useRealTimers());
+  it("reads again after the wait the server asked for, then answers the table", async () => {
+    vi.useFakeTimers();
+    const load = vi
+      .fn<() => Promise<DiningSessionView>>()
+      .mockRejectedValueOnce(processing())
+      .mockResolvedValueOnce(view);
+    const result = loadTableQuietly({ load }, new AbortController().signal);
+    await vi.advanceTimersByTimeAsync(1999);
+    expect(load).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(result).resolves.toBe(view);
+    expect(load).toHaveBeenCalledTimes(2);
+  });
+  it("any other answer ends it at once, and so does a lasting 'still being prepared'", async () => {
+    vi.useFakeTimers();
+    const unavailable = new DiningSessionClientError("unavailable");
+    const once = vi.fn<() => Promise<DiningSessionView>>().mockRejectedValue(unavailable);
+    await expect(loadTableQuietly({ load: once }, new AbortController().signal)).rejects.toBe(
+      unavailable,
+    );
+    expect(once).toHaveBeenCalledTimes(1);
+    const always = vi.fn<() => Promise<DiningSessionView>>().mockRejectedValue(processing());
+    const result = loadTableQuietly({ load: always }, new AbortController().signal, 3);
+    const settled = expect(result).rejects.toMatchObject({ code: "processing" });
+    await vi.advanceTimersByTimeAsync(4000);
+    await settled;
+    expect(always).toHaveBeenCalledTimes(3);
+  });
+  it("a page that went away stops waiting, with no further read", async () => {
+    vi.useFakeTimers();
+    const load = vi.fn<() => Promise<DiningSessionView>>().mockRejectedValue(processing());
+    const controller = new AbortController();
+    const result = loadTableQuietly({ load }, controller.signal);
+    const settled = expect(result).rejects.toMatchObject({ name: "AbortError" });
+    await vi.advanceTimersByTimeAsync(500);
+    controller.abort();
+    await settled;
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(load).toHaveBeenCalledTimes(1);
   });
 });
