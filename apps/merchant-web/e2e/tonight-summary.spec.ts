@@ -163,6 +163,62 @@ test("@production in the evening Home reminds the manager what is still open and
   await expect(page.getByRole("heading", { name: "Today's summary · Tue, Oct 27" })).toBeVisible();
 });
 
+for (const language of ["en", "zh-Hans"] as const)
+  test(`@production b39-2: the closing reminder names a table left open from an earlier day apart, in ${language}`, async ({
+    page,
+  }) => {
+    // Review of b39: tonight's owed amount leaves out a table opened two weeks ago, but the
+    // manager closing the day must still be told it is open and what to do.
+    await workspace(page);
+    if (language === "zh-Hans")
+      await page.addInitScript(() => {
+        try {
+          window.localStorage.setItem("bop.merchant.language", "zh-Hans");
+        } catch {
+          /* the page falls back to English */
+        }
+      });
+    const fixture = tonightSummaryFixture();
+    const forgotten = {
+      tableLabel: "5",
+      phase: "Closing",
+      paymentTiming: "PayLater",
+      owedMinor: "9596",
+      openedMinutes: 21_563,
+      standing: "Owes",
+    };
+    await page.route("**/merchant/reports/tonight", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          ...fixture,
+          openTables: [...(fixture.openTables as unknown[]), forgotten],
+          // The server's total of every open table, the earlier day's one included.
+          openTablesOwedMinor: String(Number(fixture.openTablesOwedMinor) + 9596),
+        },
+      }),
+    );
+    await page.goto("/app");
+    const reminder = page.getByRole("region", {
+      name: language === "en" ? "Before closing" : "打烊前",
+    });
+    if (language === "en") {
+      await expect(reminder).toContainText("Before closing: 2 tables not paid yet · $86.40");
+      await expect(reminder).toContainText(
+        "Also open from earlier days: 1 table · $95.96, not in today's figures. On Tables, take the payment or record that the guests left without paying, then close each one.",
+      );
+    } else {
+      await expect(reminder).toContainText("$86.40");
+      await expect(reminder).toContainText("之前营业日开的，还没关 · $95.96，不计入今天的数字");
+      await expect(reminder).toContainText("请在“桌台”里收款或登记客人未付离开，然后逐桌关台。");
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await reminder.screenshot({ path: `test-results/b39-2-closing-reminder-${language}-390.png` });
+  });
+
 test("@production a lunch-only Store: an unpaid table still surfaces after closing, and nothing else does", async ({
   page,
 }) => {

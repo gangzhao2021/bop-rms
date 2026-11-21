@@ -10263,4 +10263,11 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "已于 {time} 打烊：还有 {tables}没关。请收款或登记客人未付离开，并逐桌关台。",
   "The business day ends at {end}: {tables} still open. Take the payment, or record that the guests left without paying, and close each table.":
     "营业日 {end} 结束：还有 {tables}没关。请收款或登记客人未付离开，并逐桌关台。",
+  // b39-2 (review): the closing reminder names earlier days' tables apart.
+  "Before closing: today's tables are all paid": "打烊前：今天的桌都结完了",
+  "After closing: today's tables are all paid": "打烊后：今天的桌都结完了",
+  "Also open from earlier days: {tables} · {amount}, not in today's figures. On Tables, take the payment or record that the guests left without paying, then close each one.":
+    "另有 {tables}是之前营业日开的，还没关 · {amount}，不计入今天的数字。请在“桌台”里收款或登记客人未付离开，然后逐桌关台。",
+  "Also open from earlier days: {tables}, nothing owed. On Tables, close each one.":
+    "另有 {tables}是之前营业日开的，还没关，没有欠款。请在“桌台”里逐桌关台。",
 });

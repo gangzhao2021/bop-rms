@@ -140,17 +140,19 @@ export function ClosingReminder({
   const stuck = paidOrdersStuck(watch, now);
   const cantMake = watch?.cantMakeRefunds ?? 0;
   // b39: tables left open from earlier days are not tonight's to collect (Tables and the summary
-  // list them apart).
+  // list them apart). b39-2 (review): the reminder still names them, so the manager closing the
+  // day is not told every table is paid while an earlier day's table is open.
+  const fromEarlierDay = (table: TonightSummary["openTables"][number]) =>
+    summary !== null &&
+    openedOnEarlierDay(
+      table.openedMinutes,
+      Date.parse(summary.report.generatedAt),
+      Date.parse(summary.report.startsAt),
+    );
   const open =
-    summary?.openTables.filter(
-      (table) =>
-        table.owedMinor !== "0" &&
-        !openedOnEarlierDay(
-          table.openedMinutes,
-          Date.parse(summary.report.generatedAt),
-          Date.parse(summary.report.startsAt),
-        ),
-    ) ?? [];
+    summary?.openTables.filter((table) => table.owedMinor !== "0" && !fromEarlierDay(table)) ?? [];
+  const earlier = summary?.openTables.filter(fromEarlierDay) ?? [];
+  const earlierOwedMinor = earlier.reduce((sum, table) => sum + BigInt(table.owedMinor), 0n);
   if (phase === "UnpaidTablesOnly" && open.length === 0) return null;
   const before = phase === "BeforeClosing";
   const net =
@@ -185,9 +187,13 @@ export function ClosingReminder({
               ? before
                 ? t("Before closing: {tables} not paid yet · {amount}", owed)
                 : t("After closing: {tables} not paid yet · {amount}", owed)
-              : before
-                ? t("Before closing: every table is paid")
-                : t("After closing: every table is paid")}
+              : earlier.length > 0
+                ? before
+                  ? t("Before closing: today's tables are all paid")
+                  : t("After closing: today's tables are all paid")
+                : before
+                  ? t("Before closing: every table is paid")
+                  : t("After closing: every table is paid")}
         </p>
         {summary === null ? null : (
           <p className="closing-reminder__detail">
@@ -198,6 +204,27 @@ export function ClosingReminder({
               : t("Today's net taken {amount} · look over today's summary", { amount: net })}
           </p>
         )}
+        {earlier.length > 0 ? (
+          <p className="closing-reminder__detail">
+            {earlierOwedMinor > 0n
+              ? t(
+                  "Also open from earlier days: {tables} · {amount}, not in today's figures. On Tables, take the payment or record that the guests left without paying, then close each one.",
+                  {
+                    tables: countOf(earlier.length, "table"),
+                    amount: orderMoney({
+                      amountMinor: earlierOwedMinor.toString(),
+                      currencyCode: "CAD",
+                    }),
+                  },
+                )
+              : t(
+                  "Also open from earlier days: {tables}, nothing owed. On Tables, close each one.",
+                  {
+                    tables: countOf(earlier.length, "table"),
+                  },
+                )}
+          </p>
+        ) : null}
         {/* DEC-PAID-ORDER-AUTO-ACCEPT: what the shift should know before it goes home. */}
         {stuck > 0 ? (
           <p className="closing-reminder__detail">
