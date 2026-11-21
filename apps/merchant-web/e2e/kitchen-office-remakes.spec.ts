@@ -384,8 +384,8 @@ test("@production WP-2423 batch 40: on a 390 px phone a remake's buttons are on 
         .getByRole("region", { name: language === "en" ? "Remakes" : "重做" })
         .getByRole("button", { name });
       await expect(button).toBeInViewport({ ratio: 1 });
-      // Room to spare: Linux fonts set taller than macOS ones (CI read 69% of the button in view),
-      // so the button ends at least 40 px above the fold where this runs.
+      // Room to spare: a wider font (DejaVu Sans on Linux CI) takes the bar to two rows and the
+      // card's badge to a second line, so the button ends at least 40 px above the fold here.
       const box = await button.boundingBox();
       expect(
         (box?.y ?? Infinity) + (box?.height ?? 0),

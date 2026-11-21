@@ -3083,7 +3083,7 @@ export function KitchenBoardScreen({
           onSoundOn={onSoundToggle}
           onRing={() => onRing?.()}
         />
-        {pauseOrdering}
+        {workspaceFrame ? pauseOrdering : null}
         {!stale && readOnly && !(view.operatorStatus === "Named") ? (
           <KitchenBoardLock
             operatorStatus={view.operatorStatus}
@@ -3091,6 +3091,10 @@ export function KitchenBoardScreen({
           />
         ) : null}
         {workspaceFrame ? null : remakeLane}
+        {/* b40 CI: on the kitchen display Pause ordering comes after the remakes, so a remake's
+            buttons stay on a phone's first screen whatever the fonts (a wider font took the bar to
+            two rows and pushed them under the fold). The warnings above stay first. */}
+        {workspaceFrame ? null : pauseOrdering}
         {workspaceFrame ? null : filterToggle}
         {workspaceFrame ? (
           <div className="order-toolbar">
