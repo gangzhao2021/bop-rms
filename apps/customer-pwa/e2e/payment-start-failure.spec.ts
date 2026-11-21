@@ -687,7 +687,7 @@ test("@production the table move reads in Chinese, with no call for staff and no
   await expect(proceed).toBeEnabled();
   await proceed.click();
   const main = page.getByRole("main");
-  await expect(main.getByRole("heading", { name: "你们换了桌" })).toBeVisible();
+  await expect(main.getByRole("heading", { name: "您这桌换了桌" })).toBeVisible();
   await expect(main).toContainText("这次没有扣款");
   await expect(main.getByRole("link", { name: /^返回(结账|购物车)$/u })).toBeVisible();
   await expect(main).not.toContainText("请找店员");
@@ -906,7 +906,7 @@ for (const width of [390, 1024, 1440])
     await page.screenshot({ path: `test-results/time-up-${width}.png`, fullPage: true });
     await page.getByRole("button", { name: "切换到中文" }).click();
     await expect(main.getByRole("heading", { name: "付款时间已过" })).toBeVisible();
-    await expect(main).toContainText("这笔订单正在取消，你没有被扣款。");
+    await expect(main).toContainText("这笔订单正在取消，您没有被扣款。");
     // Once the Store has cancelled it, the result says so; it never read "still being confirmed".
     cancelled = true;
     await page.clock.runFor(3_100);

@@ -45,7 +45,21 @@ const namedTable = new RegExp(
 export function saidTable(label: string): string {
   return /^[A-Za-z0-9-]*[0-9][A-Za-z0-9-]*$/u.test(label) ? label : NAME_OPEN + label + NAME_CLOSE;
 }
-const said = (text: string) => (text.includes(NAME_OPEN) ? text.replace(namedTable, "$1") : text);
+// Batch 42 (v15 b41 live "…not production 的L41V A (TEST) 还没开台"): a name said as written keeps
+// a space where it meets Chinese text and it starts or ends in Latin letters or digits, as a
+// Chinese sentence writes "的 L41V A (TEST) 还没开台"; Chinese names and punctuation get none.
+const han = /\p{Script=Han}/u;
+const latinEdge = /[\p{Script=Latin}0-9]/u;
+const said = (text: string) =>
+  text.includes(NAME_OPEN)
+    ? text.replace(namedTable, (_whole, name: string, offset: number, whole: string) => {
+        const end = offset + _whole.length;
+        const before =
+          offset > 0 && han.test(whole[offset - 1] ?? "") && latinEdge.test(name[0] ?? "");
+        const after = han.test(whole[end] ?? "") && latinEdge.test(name.at(-1) ?? "");
+        return (before ? " " : "") + name + (after ? " " : "");
+      })
+    : text;
 
 /** The customer's wording of an English text, in the chosen language. */
 export function t(text: string, values?: Readonly<Record<string, string | number>>): string {

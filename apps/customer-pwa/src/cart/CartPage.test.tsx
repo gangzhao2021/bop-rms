@@ -217,9 +217,9 @@ describe("CUST-CART page contract", () => {
       renderToStaticMarkup(
         createElement(LanguageRoot, { initial: "zh-Hans", children: () => null }),
       );
-      expect(render("2026-08-02T20:02:00.000Z")).toContain("价格为你保留约 3 分钟。");
+      expect(render("2026-08-02T20:02:00.000Z")).toContain("价格为您保留约 3 分钟。");
       expect(render("2026-08-02T20:04:30.000Z")).toContain(
-        "价格只再为你保留 1 分钟。请现在继续，否则会重新核价。",
+        "价格只再为您保留 1 分钟。请现在继续，否则会重新核价。",
       );
     } finally {
       renderToStaticMarkup(createElement(LanguageRoot, { initial: "en", children: () => null }));

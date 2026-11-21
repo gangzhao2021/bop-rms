@@ -178,9 +178,9 @@ test.describe("@production CUST-ENTRY table not open", () => {
       });
       await page.getByRole("button", { name: "切换到中文" }).click();
       await expect(
-        main.getByRole("heading", { name: "Synthetic Noodle Bar 的PH 1 (TEST) 还没开台" }),
+        main.getByRole("heading", { name: "Synthetic Noodle Bar 的 PH 1 (TEST) 还没开台" }),
       ).toBeVisible();
-      await expect(main).toContainText("您坐的不是PH 1 (TEST)？请告诉店员，换成您这桌的二维码。");
+      await expect(main).toContainText("您坐的不是 PH 1 (TEST)？请告诉店员，换成您这桌的二维码。");
       await page.screenshot({
         path: `test-results/customer-table-not-open-named-zh-${width}.png`,
         fullPage: true,
@@ -204,7 +204,7 @@ test.describe("@production CUST-ENTRY table not open", () => {
         await expect(
           main.getByRole("heading", {
             name: zh
-              ? "Synthetic Noodle Bar 的L40J B (TEST) 还没开台"
+              ? "Synthetic Noodle Bar 的 L40J B (TEST) 还没开台"
               : "L40J B (TEST) at Synthetic Noodle Bar isn’t open yet",
           }),
         ).toBeVisible();
@@ -219,7 +219,7 @@ test.describe("@production CUST-ENTRY table not open", () => {
           page.getByText(zh ? "开始点单" : "Start your order", { exact: true }),
         ).toHaveCount(0);
         await expect(
-          page.getByRole("navigation").getByRole("link", { name: zh ? "你的桌位" : "Your table" }),
+          page.getByRole("navigation").getByRole("link", { name: zh ? "您的桌位" : "Your table" }),
         ).toBeVisible();
         // Linux CI fonts (DejaVu) are wider than macOS's: the header must still fit the phone.
         const overflow = await page.evaluate(

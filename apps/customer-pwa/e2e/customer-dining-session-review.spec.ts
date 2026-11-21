@@ -148,7 +148,7 @@ async function enterTable(
   });
   await page
     .getByRole("navigation", { name: /^(Customer journey|点单步骤)$/u })
-    .getByRole("link", { name: /^(Your table|你的桌位)$/u })
+    .getByRole("link", { name: /^(Your table|您的桌位)$/u })
     .click();
   await expect(page).toHaveURL(/\/dine-in\/session$/u);
 }
@@ -1308,8 +1308,8 @@ test.describe("@production CUST-DINE-IN-SESSION table view", () => {
       json: { ...session, session: { ...session.session, movedFromTableLabel: "T6" } },
     }));
     const main = page.getByRole("main");
-    await expect(main.getByRole("status").filter({ hasText: "店员已把你们" })).toHaveText(
-      "店员已把你们从 T6 桌换到 12 桌，继续用这部手机点餐和付款即可。",
+    await expect(main.getByRole("status").filter({ hasText: "店员已把您" })).toHaveText(
+      "店员已把您从 T6 桌换到 12 桌，继续用这部手机点餐和付款即可。",
     );
     await expectNoInternalText(page);
     for (const width of [390, 1440]) {

@@ -1231,7 +1231,7 @@ test.describe("@production Pay-later table, the round just placed", () => {
       await expect(
         main.getByText(
           zh
-            ? "店员已把你的菜放在第 2 轮送去厨房。"
+            ? "店员已把您的菜放在第 2 轮送去厨房。"
             : "Staff sent your dishes to the kitchen in round 2.",
         ),
       ).toBeVisible({ timeout: 2_500 });
@@ -1290,7 +1290,7 @@ test.describe("@production Pay-later table, the round just placed", () => {
       await expect(
         main.getByText(
           zh
-            ? "你这桌的购物车刚刚有变化，可能有人正在为这桌下单。请稍等，页面正在核对。"
+            ? "您这桌的购物车刚刚有变化，可能有人正在为这桌下单。请稍等，页面正在核对。"
             : "Your table’s cart just changed, maybe because a round is being sent for your table. Wait a moment while this page checks.",
         ),
       ).toBeVisible();
@@ -1319,7 +1319,7 @@ test.describe("@production Pay-later table, the round just placed", () => {
       await expect(
         main.getByText(
           zh
-            ? "店员已把你的菜放在第 2 轮送去厨房。"
+            ? "店员已把您的菜放在第 2 轮送去厨房。"
             : "Staff sent your dishes to the kitchen in round 2.",
         ),
       ).toBeVisible();
@@ -1371,7 +1371,7 @@ test.describe("@production Pay-later table, the round just placed", () => {
       await expect(
         main.getByText(
           zh
-            ? "你这桌的购物车刚刚有变化，可能有人正在为这桌下单。请稍等，页面正在核对。"
+            ? "您这桌的购物车刚刚有变化，可能有人正在为这桌下单。请稍等，页面正在核对。"
             : "Your table’s cart just changed, maybe because a round is being sent for your table. Wait a moment while this page checks.",
         ),
       ).toBeVisible();
@@ -1395,7 +1395,7 @@ test.describe("@production Pay-later table, the round just placed", () => {
       await expect(
         main.getByText(
           zh
-            ? "店员已把你的菜放在第 2 轮送去厨房。"
+            ? "店员已把您的菜放在第 2 轮送去厨房。"
             : "Staff sent your dishes to the kitchen in round 2.",
         ),
       ).toBeVisible();

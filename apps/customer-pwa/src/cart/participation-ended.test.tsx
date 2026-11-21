@@ -79,7 +79,7 @@ describe("M126 I.2: a phone whose place at the table ended is told why", () => {
     renderToStaticMarkup(createElement(LanguageRoot, { initial: "zh-Hans", children: () => null }));
     try {
       setParticipationEnded("Changed");
-      expect(participationEndedText()[0]).toBe("你们换桌了");
+      expect(participationEndedText()[0]).toBe("您这桌换桌了");
     } finally {
       renderToStaticMarkup(createElement(LanguageRoot, { initial: "en", children: () => null }));
     }

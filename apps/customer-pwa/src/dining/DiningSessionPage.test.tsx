@@ -193,7 +193,7 @@ describe("CUST-DINE-IN-SESSION (WP-2423 Q8)", () => {
       <LanguageRoot initial="zh-Hans">{() => render(state)}</LanguageRoot>,
     );
     renderToStaticMarkup(<LanguageRoot initial="en">{() => null}</LanguageRoot>);
-    expect(zh).toContain("门店已按你的要求取消。款项已退回。");
+    expect(zh).toContain("门店已按您的要求取消。款项已退回。");
     expect(zh).not.toMatch(/。 /u);
     const en = render(state);
     expect(en).toContain("The store cancelled it at your request. The payment was refunded.");

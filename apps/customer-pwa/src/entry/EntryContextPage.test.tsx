@@ -884,7 +884,7 @@ describe("WP-2423 shared-table-checkout (b): already at this table", () => {
     expect(html).toContain("You’re already at this table.");
     expect(html).toContain("Continue ordering");
     expect(html).not.toContain("Join this table");
-    expect(zh["You’re already at this table."]).toBe("你已在这一桌。");
+    expect(zh["You’re already at this table."]).toBe("您已在这一桌。");
   });
 });
 

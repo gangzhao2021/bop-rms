@@ -606,7 +606,7 @@ for (const screen of [
         await expect(main.locator(".cart-price-changes")).toHaveCount(0);
         await expect(
           page.getByText(
-            zh ? "以下菜品在你加入后改了价：" : "Prices changed since you added these:",
+            zh ? "以下菜品在您加入后改了价：" : "Prices changed since you added these:",
           ),
         ).toHaveCount(0);
         const place = main.getByRole("button", { name: zh ? "下单" : "Place order", exact: true });

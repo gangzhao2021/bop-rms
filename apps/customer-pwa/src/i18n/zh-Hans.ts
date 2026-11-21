@@ -26,12 +26,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "You can order at the counter, or come back after {time}.": "可以到柜台点单，或 {time} 后再来。",
   "Ordering from your phone is paused for a short while.": "手机点单暂停一会儿。",
   "Ordering from your phone is paused until {time}.": "手机点单暂停至 {time}。",
-  "A staff member can take your order.": "店员可以为你点单。",
+  "A staff member can take your order.": "店员可以为您点单。",
   "You can’t place a pickup order from your phone now.": "现在不能用手机下自取单。",
 
   "(opens in a new tab)": "（在新标签页打开）",
   "A refund on this order was updated.": "这笔订单的退款已更新。",
-  "A refund was made to your original payment.": "已退款到你原来的付款方式。",
+  "A refund was made to your original payment.": "已退款到您原来的付款方式。",
   "A required choice is missing for this item.": "这件商品缺少一项必选内容。",
   "Add something from the menu before checking out.": "结账前请先从菜单中加点东西。",
   "Add something from the menu to get started.": "先从菜单中加点东西吧。",
@@ -42,9 +42,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Staff removed {dishes} from the cart.": "店员已从购物车删除{dishes}。",
   "Choose again": "重新选择",
   "The cart changed, so the dishes you chose to pay for are no longer set aside. Nothing was charged. Choose again what you pay for.":
-    "购物车变了，你选要付的菜已不再保留。没有扣款。请重新选择要付哪些菜。",
+    "购物车变了，您选要付的菜已不再保留。没有扣款。请重新选择要付哪些菜。",
   "Staff removed {dishes} from the cart, so the dishes you chose to pay for are no longer set aside. Nothing was charged. Choose again what you pay for.":
-    "店员已从购物车删除{dishes}，你选要付的菜已不再保留。没有扣款。请重新选择要付哪些菜。",
+    "店员已从购物车删除{dishes}，您选要付的菜已不再保留。没有扣款。请重新选择要付哪些菜。",
   "added {dishes}": "加了 {dishes}",
   "removed {dishes}": "删了 {dishes}",
   "{dish} now ×{quantity}": "{dish} 改为 ×{quantity}",
@@ -55,18 +55,18 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "加入这一桌就能点单，也能看到这桌点了什么。",
   "Join this table first, then add the dish.": "请先加入这一桌，再加这道菜。",
   "We couldn’t join you to this table just now. Try again, or ask staff. Your choices are kept here.":
-    "暂时无法加入这一桌。请再试一次，或询问店员。你的选择会保留在这里。",
+    "暂时无法加入这一桌。请再试一次，或询问店员。您的选择会保留在这里。",
   "You’re paying for round {round}. It goes to the kitchen once it’s paid.":
-    "你正在为第 {round} 轮付款，付款后才会送到厨房。",
+    "您正在为第 {round} 轮付款，付款后才会送到厨房。",
   "Someone at your table is paying for round {round} now. Your dishes are in it.":
-    "同桌有人正在为第 {round} 轮付款，你的菜也在里面。",
+    "同桌有人正在为第 {round} 轮付款，您的菜也在里面。",
   "Someone at your table is paying for round {round} now.": "同桌有人正在为第 {round} 轮付款。",
   "Staff are taking payment for round {round} on the card machine. Your dishes are in it.":
-    "店员正在用刷卡机收第 {round} 轮的款，你的菜也在里面。",
+    "店员正在用刷卡机收第 {round} 轮的款，您的菜也在里面。",
   "Staff are taking payment for round {round} on the card machine.":
     "店员正在用刷卡机收第 {round} 轮的款。",
   "Staff are placing round {round}. Your dishes are in it.":
-    "店员正在下第 {round} 轮，你的菜也在里面。",
+    "店员正在下第 {round} 轮，您的菜也在里面。",
   "Staff are placing round {round}.": "店员正在下第 {round} 轮。",
   "Someone at your table is still placing round {round}.": "同桌有人正在下第 {round} 轮。",
   "Round {round} from someone at your table is waiting for staff to send it to the kitchen.":
@@ -80,19 +80,19 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Staff cancelled round {round}. Ask staff if you still want these dishes.":
     "店员取消了第 {round} 轮。如果还想要这些菜，请询问店员。",
   "Round {round} isn’t placed yet. If it still isn’t in a minute, ask staff to check it.":
-    "第 {round} 轮还没下单成功。如果一分钟后仍未成功，请让店员帮你查看。",
+    "第 {round} 轮还没下单成功。如果一分钟后仍未成功，请让店员帮您查看。",
   "Someone at your table is still placing round {round}. Your dishes are in it.":
-    "同桌有人正在下第 {round} 轮，你的菜也在里面。",
+    "同桌有人正在下第 {round} 轮，您的菜也在里面。",
   "Round {round} is waiting for staff to send it to the kitchen.":
     "第 {round} 轮正在等店员送到厨房。",
   "Round {round} from someone at your table is waiting for staff to send it to the kitchen. Your dishes are in it.":
-    "同桌点的第 {round} 轮正在等店员送到厨房，你的菜也在里面。",
+    "同桌点的第 {round} 轮正在等店员送到厨房，您的菜也在里面。",
   "This round hasn’t been placed yet. Tap Place order again; it won’t be ordered twice.":
     "这一轮还没下单。请再按一次“再次下单”，不会重复下单。",
   "{dish} ×{quantity}": "{dish} ×{quantity}",
   ", ": "、",
   "Check out with the new total": "用新的合计结账",
-  "You already sent these dishes (round {round}).": "这些菜你已经送出（第 {round} 轮）。",
+  "You already sent these dishes (round {round}).": "这些菜您已经送出（第 {round} 轮）。",
   "These dishes were sent to the kitchen by someone at your table (round {round}).":
     "这些菜已由同桌送去厨房（第 {round} 轮）。",
   "These dishes were paid and sent by someone at your table (round {round}).":
@@ -100,7 +100,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Dishes added since then are still in the cart.": "之后加的菜还在购物车里。",
   "Round {round} was sent by someone at your table.": "第 {round} 轮已由同桌送出。",
   "Staff sent your dishes to the kitchen in round {round}.":
-    "店员已把你的菜放在第 {round} 轮送去厨房。",
+    "店员已把您的菜放在第 {round} 轮送去厨房。",
   "Staff sent round {round} to the kitchen.": "店员已把第 {round} 轮送去厨房。",
   "Staff removed {dish} from the cart.": "店员已从购物车删除{dish}。",
   "Staff removed a dish from the cart.": "店员已从购物车删除一道菜。",
@@ -127,11 +127,11 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "An authoritative Order reference is available.": "已有可确认的订单编号。",
   "An item in your order has no current price. Ask staff for help.":
     "订单中有商品目前没有价格，请向店员求助。",
-  "An item is no longer available in the quantity you chose.": "有商品已没有你选择的数量。",
+  "An item is no longer available in the quantity you chose.": "有商品已没有您选择的数量。",
   "An item or choice in your order is no longer available.": "订单中有商品或选项已不再供应。",
-  "An item you ordered sold out.": "你点的一件商品已售罄。",
+  "An item you ordered sold out.": "您点的一件商品已售罄。",
   "An order opens only on the phone or browser that placed it. If it’s your order, give your order number to a staff member.":
-    "订单只能在下单的手机或浏览器上打开。如果这是你的订单，请把订单号告诉店员。",
+    "订单只能在下单的手机或浏览器上打开。如果这是您的订单，请把订单号告诉店员。",
   "Another guest at your table is paying for this order.": "同桌另一位客人正在为这笔订单付款。",
   "Another guest at your table placed this order": "这笔订单由同桌另一位客人下单",
   "Another guest is checking out": "另一位客人正在结账",
@@ -149,9 +149,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "如需其他点单方式，请向店员求助。点单前请告知店员过敏情况；扫码点单不会记录过敏或健康信息。",
   "Ask a staff member if you need help.": "需要帮助请问店员。",
   "Ask a staff member, or the person who joined your table first, for your table's join code and enter it after scanning the table's QR code. Then you can see what your table has ordered.":
-    "请向店员或同桌最先加入的人索取入桌码，扫描桌上的二维码后输入，即可查看你们这桌点了什么。",
+    "请向店员或同桌最先加入的人索取入桌码，扫描桌上的二维码后输入，即可查看您这桌点了什么。",
   "Ask staff before ordering. The menu never promises that an item is allergen-free, and staff can take your order another way.":
-    "点单前请先询问店员。菜单从不保证任何商品不含过敏原，店员也可以用其他方式帮你点单。",
+    "点单前请先询问店员。菜单从不保证任何商品不含过敏原，店员也可以用其他方式帮您点单。",
   "Ask staff for help continuing your order.": "请向店员求助以继续点单。",
   "Ask staff to order in person": "请向店员当面点单",
   "Ask staff, or the person who joined your table first, for the table’s join code. Scanning the table QR code alone does not join the table.":
@@ -168,9 +168,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{count} of {quantity} refunded – not provided": "{quantity} 份中 {count} 份已退款，不提供",
   "Refunded, nothing to collect": "已退款，无需取餐",
   "The store refunded everything on this order and won’t make it. The money goes back to your original payment.":
-    "店家已退回这单的全部餐品，不会再做。钱会退回你原来的付款方式。",
+    "店家已退回这单的全部餐品，不会再做。钱会退回您原来的付款方式。",
   "Being remade": "正在重做",
-  "Being remade · we'll bring it to your table shortly": "正在重做 · 很快送到你的桌上",
+  "Being remade · we'll bring it to your table shortly": "正在重做 · 很快送到您的桌上",
   "Being served": "正在上菜",
   "Browse menu": "浏览菜单",
   "Calculating your total…": "正在计算总价…",
@@ -180,13 +180,13 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Cancelled by the store. ": "已被门店取消。",
   "Cancelled items": "已取消的商品",
   "Cancelled items: a refund of {amount} to your original payment is pending (tax and their share of any tip included).":
-    "已取消的商品：{amount} 的退款正在退回你原来的付款方式（含税及相应小费）。",
+    "已取消的商品：{amount} 的退款正在退回您原来的付款方式（含税及相应小费）。",
   "Cancelled items: {amount} refunded to your original payment (tax and their share of any tip included).":
-    "已取消的商品：{amount} 已退回你原来的付款方式（含税及相应小费）。",
+    "已取消的商品：{amount} 已退回您原来的付款方式（含税及相应小费）。",
   "Cancelled items: {amount} refunded to your original payment (tax included).":
-    "已取消的商品：{amount} 已退回你原来的付款方式（含税）。",
+    "已取消的商品：{amount} 已退回您原来的付款方式（含税）。",
   "Cancelled items: {amount} refunded to your original payment, including {tip} of the tip.":
-    "已取消的商品：{amount} 已退回你原来的付款方式，其中含小费 {tip}。",
+    "已取消的商品：{amount} 已退回您原来的付款方式，其中含小费 {tip}。",
   "Cancelled · {refund}{amount}": "已取消 · {refund}{amount}",
   "Cancelled — not paid": "已取消 — 未付款",
   "Card payment isn’t set up at this location yet. Ask staff how to pay.":
@@ -210,19 +210,19 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Updating this page… It will show anything that went through before the connection dropped.":
     "正在更新本页…断网前已完成的操作会显示在这里。",
   "Check your connection and try again. A staff member can also tell you what your table has ordered.":
-    "请检查网络后重试。店员也可以告诉你这桌点了什么。",
+    "请检查网络后重试。店员也可以告诉您这桌点了什么。",
   "Check your connection, then try again.": "请检查网络后重试。",
   "Check your contact and receipt fields. Enter a mobile number such as 416 555 0123, or include the country code for numbers outside North America.":
     "请检查联系方式和收据信息。手机号请填写如 416 555 0123，北美以外的号码请加国家代码。",
-  "Check your payment": "查看你的付款",
+  "Check your payment": "查看您的付款",
   "Checking again automatically…": "正在自动重新检查…",
   "Checking the latest published items…": "正在核对最新发布的商品…",
   "Checking this location": "正在核对门店",
-  "Checking your card…": "正在核验你的银行卡…",
-  "Checking your cart…": "正在核对你的购物车…",
-  "Checking your current cart…": "正在核对你当前的购物车…",
-  "Checking your pickup code…": "正在核对你的取餐码…",
-  "Checking your table connection…": "正在确认你的桌位连接…",
+  "Checking your card…": "正在核验您的银行卡…",
+  "Checking your cart…": "正在核对您的购物车…",
+  "Checking your current cart…": "正在核对您当前的购物车…",
+  "Checking your pickup code…": "正在核对您的取餐码…",
+  "Checking your table connection…": "正在确认您的桌位连接…",
   Checkout: "结账",
   "Checkout details": "结账信息",
   "Checkout details saved.": "结账信息已保存。",
@@ -256,7 +256,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Continue to payment": "去付款",
   "Continue to payment · {total}": "去付款 · {total}",
   "Corrected receipt": "更正后的收据",
-  "Couldn’t confirm your change. Try again.": "无法确认你的修改，请重试。",
+  "Couldn’t confirm your change. Try again.": "无法确认您的修改，请重试。",
   "Couldn’t update your cart. Review this item and try again.":
     "无法更新购物车。请检查这件商品后重试。",
   "Couldn’t update your cart. Try again.": "无法更新购物车，请重试。",
@@ -296,24 +296,24 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Enter a valid amount with up to two decimal places.": "请输入有效金额，最多两位小数。",
   "Enter an amount in dollars. Your tip is fixed when you continue to payment.":
     "请输入金额（加元）。点击去付款后小费即确定。",
-  "Enter the six-digit code you were given.": "请输入你拿到的六位数代码。",
+  "Enter the six-digit code you were given.": "请输入您拿到的六位数代码。",
   "Entered by staff": "由店员录入",
   "Estimated arrival is not available yet.": "暂时无法预计送达时间。",
   "Estimated arrival {earliestUtc} – {latestUtc}": "预计送达 {earliestUtc} – {latestUtc}",
-  "Every round at your table, from you and the other guests.": "你和同桌其他客人的每一轮点单。",
+  "Every round at your table, from you and the other guests.": "您和同桌其他客人的每一轮点单。",
   "Everything at this table is served or closed.": "这桌的所有点单都已上齐或结束。",
   "Everything ordered at this table, by you and the other guests.":
-    "你和同桌其他客人在这桌点的所有东西。",
+    "您和同桌其他客人在这桌点的所有东西。",
   "Everything paid for has been served. The kitchen starts the next round once it’s paid.":
     "已付款的都已上齐。下一轮付款后厨房才会开始制作。",
   Featured: "推荐",
   Fees: "费用",
-  "Fewer of this item are available than you chose.": "这件商品的可售数量少于你选择的数量。",
+  "Fewer of this item are available than you chose.": "这件商品的可售数量少于您选择的数量。",
   "Finish or leave this sensitive flow before updating.": "请先完成或离开当前敏感操作再更新。",
   "Finish paying": "完成付款",
   "Finish paying for this round so the kitchen can start it.": "请为这一轮付款，厨房才能开始制作。",
   "For a pickup order: the store still has your order. Give your name or order number at the counter.":
-    "自取订单：门店仍保留着你的订单，请在柜台报上姓名或订单号。",
+    "自取订单：门店仍保留着您的订单，请在柜台报上姓名或订单号。",
   "For someone else after them, make a new code. A new code replaces this one.":
     "如还有其他人要加入，请生成新代码。新代码会替换这个。",
   "From {text}": "{text} 起",
@@ -327,7 +327,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "If nothing changes after a minute, give your order number to a staff member.":
     "如果一分钟后仍无变化，请把订单号告诉店员。",
   "If you already entered your card, the result shows here shortly. If you left before paying, finish paying below — you won’t be charged twice.":
-    "如果你已经输入银行卡，付款结果很快会显示在这里。如果你还没付款就离开了，请在下面完成付款——不会重复扣款。",
+    "如果您已经输入银行卡，付款结果很快会显示在这里。如果您还没付款就离开了，请在下面完成付款——不会重复扣款。",
   "In the queue": "排队中",
   "Increase quantity": "增加数量",
   "Increase {item} quantity": "增加 {item} 的数量",
@@ -348,7 +348,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Join code or invitation": "入桌码或邀请码",
   "Join table": "加入这桌",
   "Join this table": "加入这一桌",
-  "Join your table first": "请先加入你的桌位",
+  "Join your table first": "请先加入您的桌位",
   "Thank you for dining with us.": "谢谢光临",
   "Your meal at table {table} has ended.": "桌号 {table} 的用餐已结束。",
   "From table {table}": "来自 {table} 桌",
@@ -364,7 +364,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "回答之后，这部手机上就看不到刚才的收据了。",
   "This table is being cleaned. Pick another table or ask staff.":
     "这张桌正在清理，请换一张桌或找店员。",
-  "Are you with the people already at this table?": "你们和这桌的人是一起的吗？",
+  "Are you with the people already at this table?": "您和这桌的人是一起的吗？",
   "Yes, join them": "是，加入",
   "No, we just sat down": "不是，我们刚坐下",
   "People are using this table. If you’re together, join them, or ask staff.":
@@ -372,7 +372,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "This table can’t be started just now. Pick another table or ask staff.":
     "这张桌暂时不能开始。请换一张桌或找店员。",
   "First tell us if you’re with the people at this table.":
-    "请先告诉我们，你们是不是和这桌的人一起的。",
+    "请先告诉我们，您是不是和这桌的人一起的。",
   "Back to the question": "回到这个问题",
   "Start this table first": "请先开始用这张桌",
   "Add a dish from the menu to start, or go back to start this table.":
@@ -437,12 +437,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Loading receipt": "正在加载收据",
   "Loading secure card form…": "正在加载安全刷卡表单…",
   "Loading the current menu": "正在加载当前菜单",
-  "Loading your cart…": "正在加载你的购物车…",
-  "Loading your table": "正在加载你的桌位",
+  "Loading your cart…": "正在加载您的购物车…",
+  "Loading your table": "正在加载您的桌位",
   "Make a code": "生成代码",
   "Make a new code": "生成新代码",
   "Make another code": "再生成一个代码",
-  "Make it yours": "按你的口味来",
+  "Make it yours": "按您的口味来",
   "Making a code…": "正在生成代码…",
   "Matched term ·": "匹配词 ·",
   "May contain {value1}": "可能含有 {value1}",
@@ -459,7 +459,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Neither success nor failure is assumed.": "不会假定成功，也不会假定失败。",
   "Neither success nor failure is confirmed.": "尚未确认成功或失败。",
   "Next you’ll confirm a test payment. This is internal testing: no card is needed and no real money is charged.":
-    "下一步你将确认一笔测试付款。这是内部测试：不需要银行卡，也不会产生真实扣款。",
+    "下一步您将确认一笔测试付款。这是内部测试：不需要银行卡，也不会产生真实扣款。",
   "No Order confirmation is assumed.": "不会假定订单已确认。",
   "No Payment request was sent and no Order was created.": "没有发出付款请求，也没有生成订单。",
   "Allergen info was just updated. Ask staff if unsure.": "过敏原信息刚刚更新，不确定请问店员。",
@@ -477,7 +477,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "No order was submitted. Try again or ask a staff member for help.":
     "没有提交任何订单。请重试或向店员求助。",
   "No order was submitted. You can ask a staff member for help.":
-    "没有提交任何订单。你可以向店员求助。",
+    "没有提交任何订单。您可以向店员求助。",
   "No pickup code is available for this order. Ask staff for help.":
     "这笔订单没有取餐码，请向店员求助。",
   "No receipt is available on this page yet.": "本页暂时还没有收据。",
@@ -502,26 +502,26 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "One of the choices for this item is no longer available.": "这件商品的某个选项已不再供应。",
   "One of the chosen options is no longer available.": "所选的某个选项已不再供应。",
   "One of your choices has no current price. Ask staff for help.":
-    "你的某个选项目前没有价格，请向店员求助。",
+    "您的某个选项目前没有价格，请向店员求助。",
   "Online card": "在线刷卡",
   "Online ordering is paused for a short while. Try again in a few minutes, or order with a staff member.":
-    "在线点单暂停一会儿。请几分钟后再试，或请店员帮你点单。",
+    "在线点单暂停一会儿。请几分钟后再试，或请店员帮您点单。",
   "Online ordering paused": "在线点单已暂停",
   "Online payment is unavailable": "在线付款暂不可用",
   "Only the person who joined this table first can make codes. A staff member can give you one.":
-    "只有最先加入这桌的人可以生成代码，店员也可以给你一个。",
+    "只有最先加入这桌的人可以生成代码，店员也可以给您一个。",
   "Only {available} {name} can be made right now — this line has {quantity}. {value1} before checkout.":
     "{name} 目前只能做 {available} 份——这一行是 {quantity} 份。结账前请{value1}。",
   "Only {available} {name} can be made right now, so we couldn’t add more. Your cart is unchanged.":
-    "{name} 目前只能做 {available} 份，所以没有再加。你的购物车没有变化。",
+    "{name} 目前只能做 {available} 份，所以没有再加。您的购物车没有变化。",
   "Only {left} {name} can be made right now — you have {ordered} in your cart. {notCharged} {value1}, then try again.":
-    "{name} 目前只能做 {left} 份——你的购物车里有 {ordered} 份。{notCharged}请{value1}后重试。",
+    "{name} 目前只能做 {left} 份——您的购物车里有 {ordered} 份。{notCharged}请{value1}后重试。",
   "Open now": "营业中",
   "Open the menu": "打开菜单",
   "Opening a new card payment…": "正在打开新的刷卡付款…",
-  "Opening your order": "正在打开你的订单",
-  "Opening your order on this phone…": "正在这部手机上打开你的订单…",
-  "Opening your payment…": "正在打开你的付款…",
+  "Opening your order": "正在打开您的订单",
+  "Opening your order on this phone…": "正在这部手机上打开您的订单…",
+  "Opening your payment…": "正在打开您的付款…",
   "Operation reference": "操作编号",
   Optional: "可选",
   "Optional · up to {max}": "可选 · 最多 {max} 项",
@@ -547,9 +547,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "订单 {orderNumber} 已收到。几秒后会在这里显示进度——本页会自动更新。",
   "Order {orderNumber}. Pickup code {value1}": "订单 {orderNumber}，取餐码 {value1}",
   "Ordered at": "下单时间",
-  "Ordered at your table": "在你这桌点的",
+  "Ordered at your table": "在您这桌点的",
   "Ordered by another guest": "由同桌其他客人点的",
-  "Ordered by you": "你点的",
+  "Ordered by you": "您点的",
   "Ordering and payment are paused until you reconnect. Nothing is sent in the background.":
     "恢复网络前，点单和付款都已暂停，后台不会发送任何内容。",
   "Ordering is paused": "点单已暂停",
@@ -557,14 +557,14 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Closed now": "现在已打烊",
   "Orders on this phone": "这部手机上的订单",
   "Your order at {storeDisplayName} is kept on this phone. Scan {storeDisplayName}’s pickup QR code again to go back to it.":
-    "你在{storeDisplayName}的订单仍保存在这部手机上，再扫{storeDisplayName}的自取二维码就能回去。",
+    "您在{storeDisplayName}的订单仍保存在这部手机上，再扫{storeDisplayName}的自取二维码就能回去。",
   "Your order at {storeDisplayName} isn’t paid yet. Pay by {time}, or it is cancelled and you won’t be charged. Scan {storeDisplayName}’s pickup QR code again to pay for it.":
-    "你在{storeDisplayName}的订单还未付款。请在 {time} 前付款，否则会取消，不会扣款。再扫{storeDisplayName}的自取二维码就能去付款。",
+    "您在{storeDisplayName}的订单还未付款。请在 {time} 前付款，否则会取消，不会扣款。再扫{storeDisplayName}的自取二维码就能去付款。",
   "Order from the QR code you just scanned": "改在刚扫的二维码点单",
   "This table’s visit has ended": "这桌的用餐已结束",
-  "Open your table to see its bill and receipt.": "打开“你的桌位”查看账单和收据。",
-  "Your party’s table changed": "你们换桌了",
-  "Open your table to see where your party is now.": "打开“你的桌位”查看你们现在在哪一桌。",
+  "Open your table to see its bill and receipt.": "打开“您的桌位”查看账单和收据。",
+  "Your party’s table changed": "您这桌换桌了",
+  "Open your table to see where your party is now.": "打开“您的桌位”查看您现在在哪一桌。",
   "This phone is no longer at this table": "这部手机已不在这桌",
   "To order with your table again, scan the QR code on the table.":
     "如需继续和同桌一起点单，请重新扫桌上的二维码。",
@@ -581,15 +581,15 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Paid on the store’s card machine": "已在门店刷卡机付款",
   "Paid online": "已在线付款",
   "Paid so far": "已付",
-  "Paid. Checking on your order…": "已付款，正在查看你的订单…",
+  "Paid. Checking on your order…": "已付款，正在查看您的订单…",
   "Paid. The staff will send it to the kitchen shortly.": "已付款，店员很快会把它送到厨房。",
   "Paid:": "已付：",
   "Part of your order is being remade. Please wait until it's ready before collecting it.":
-    "你的订单有一部分正在重做，请等做好后再来取。",
+    "您的订单有一部分正在重做，请等做好后再来取。",
   "Part of your order is being remade. Please wait until it's ready before showing this code.":
-    "你的订单有一部分正在重做，请等做好后再出示这个代码。",
+    "您的订单有一部分正在重做，请等做好后再出示这个代码。",
   "Part of your order sold out while we were getting it ready, so we didn’t place it and this order hasn’t been charged. Go back to your cart to change your order.":
-    "准备过程中你订单里有商品售罄了，所以没有下单，这一单也没有扣款。请返回购物车修改订单。",
+    "准备过程中您订单里有商品售罄了，所以没有下单，这一单也没有扣款。请返回购物车修改订单。",
   "Partly refunded": "部分退款",
   "Partly served": "部分已上",
   "Pay by {value1}, or it is cancelled and nobody is charged.":
@@ -610,10 +610,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Payment confirmed": "付款成功",
   "Payment context is missing": "缺少付款信息",
   "Payment declined": "付款被拒",
-  "Payment details come from your current checkout.": "付款信息来自你当前的结账。",
+  "Payment details come from your current checkout.": "付款信息来自您当前的结账。",
   "Payment failed": "付款失败",
   "Payment for this round didn’t go through. ": "这一轮付款没有成功。",
-  "Payment for your order didn’t go through. ": "你的订单付款没有成功。",
+  "Payment for your order didn’t go through. ": "您的订单付款没有成功。",
   "Payment is not available": "暂时无法付款",
   "Payment not confirmed yet": "付款尚未确认",
   "Payment not finished": "付款未完成",
@@ -650,14 +650,14 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Preparation note must be 500 characters or fewer.": "制作备注不能超过 500 个字符。",
   Preparing: "准备中",
   "Preparing secure payment…": "正在准备安全付款…",
-  "Preparing your order": "正在准备你的订单",
+  "Preparing your order": "正在准备您的订单",
   "Preparing your payment…": "正在准备付款…",
   "Price changed. Confirm the new total before continuing.": "价格有变动，继续前请确认新的总价。",
   "Price confirmed at checkout": "结账时确认价格",
   "Price unavailable": "价格暂不可用",
   "Priced at checkout": "结账时计价",
   "Prices are being updated. Please try again in a moment.": "价格正在更新，请稍后再试。",
-  "Your price is kept for {remaining}.": "价格为你保留{remaining}。",
+  "Your price is kept for {remaining}.": "价格为您保留{remaining}。",
   "Prices have expired. Checkout will price your order again.": "价格已过期，结账时会重新计价。",
   "Prices need a refresh": "价格需要刷新",
   "Print or save receipt": "打印或保存收据",
@@ -673,7 +673,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   Ready: "已做好",
   "Ready for pickup": "可以取餐",
   "Ready to order": "可以开始点单",
-  "Ready — on its way to your table": "已做好 — 正送往你的桌上",
+  "Ready — on its way to your table": "已做好 — 正送往您的桌上",
   "Reason:": "原因：",
   Receipt: "收据",
   "Receipt email": "收据邮箱",
@@ -695,7 +695,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Reconnect to pay with another card.": "恢复网络后换一张卡付款。",
   "Reconnect to refresh.": "恢复网络后刷新。",
   "You’re offline. Your pickup code shows again when you’re back online.":
-    "你现在离线。网络恢复后会自动显示取餐码。",
+    "您现在离线。网络恢复后会自动显示取餐码。",
   Recorded: "已记录",
   "Refresh after reconnecting": "恢复网络后刷新",
   "Refresh before changing delivery instructions.": "修改配送说明前请先刷新。",
@@ -712,10 +712,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Refund on its way": "退款处理中",
   "Refund pending": "退款处理中",
   "Refund pending · {amount}": "退款处理中 · {amount}",
-  "Refund pending — your payment is being returned in full.": "退款处理中 — 你的款项正在全额退回。",
+  "Refund pending — your payment is being returned in full.": "退款处理中 — 您的款项正在全额退回。",
   "Refund: {amount} returned to your original payment, including {tip} of the tip.":
-    "退款：{amount} 已退回你原来的付款方式，其中含小费 {tip}。",
-  "Refund: {amount} returned to your original payment.": "退款：{amount} 已退回你原来的付款方式。",
+    "退款：{amount} 已退回您原来的付款方式，其中含小费 {tip}。",
+  "Refund: {amount} returned to your original payment.": "退款：{amount} 已退回您原来的付款方式。",
   Refunded: "已退款",
   "Refunded in full": "已全额退款",
   "Refunded in total": "退款合计",
@@ -730,20 +730,20 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Remove now": "立即删除",
   "Remove one {name}": "删除一份 {name}",
   "Remove them now? The store won’t be able to call or email you about this order. You can still collect it by showing your order number.":
-    "现在删除吗？删除后门店将无法就这笔订单给你打电话或发邮件。你仍可以出示订单号取餐。",
+    "现在删除吗？删除后门店将无法就这笔订单给您打电话或发邮件。您仍可以出示订单号取餐。",
   "Remove {extra} of your {ordered} {name}": "从 {ordered} 份 {name} 中删除 {extra} 份",
   "Remove {name}": "删除 {name}",
   "Removing…": "正在删除…",
   Required: "必选",
   "Required · choose {max}": "必选 · 选 {max} 项",
   "Results in {name}": "{name} 中的结果",
-  "Retrieving your receipt.": "正在获取你的收据。",
+  "Retrieving your receipt.": "正在获取您的收据。",
   "Retry checkout": "重试结账",
   "Retry pricing": "重新计价",
   "Retry saving details": "重新保存信息",
   "Retry the same operation": "重试同一操作",
   "Try this again": "再试一次",
-  "You’re already at this table.": "你已在这一桌。",
+  "You’re already at this table.": "您已在这一桌。",
   "We couldn’t confirm this change": "还没确认这次修改",
   "The network or the store’s system was busy. Trying again won’t change it twice.":
     "可能是网络或店里系统忙。再试一次不会重复修改。",
@@ -762,7 +762,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Rounds that weren’t paid aren’t included.": "未付款的轮次不计入。",
   "Safe reason:": "原因：",
   "Saving checkout details…": "正在保存结账信息…",
-  "Saving your details…": "正在保存你的信息…",
+  "Saving your details…": "正在保存您的信息…",
   "Scan again": "重新扫描",
   "Scan the location QR code": "扫描门店二维码",
   "Scan the location QR code again or ask a staff member for help.":
@@ -788,7 +788,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "付款没有成功，没有扣款。可以重试、换一张卡，或请店员帮忙。",
   Waiting: "等待中",
   "Served {value1} of {quantity}": "已上 {value1}/{quantity}",
-  "Serving your order": "正在为你上菜",
+  "Serving your order": "正在为您上菜",
   "Session expired": "会话已过期",
   "Scan the QR code again to keep ordering.": "请重新扫码继续点单。",
   "Your cart is kept and nothing was changed. Try loading it again.":
@@ -812,7 +812,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Some items are priced at checkout, with tax.": "部分商品在结账时计价（含税）。",
   "Some items have been served. Check the remaining items below.": "部分商品已上，剩余商品见下方。",
   "Some items in your cart can’t be made right now. {notCharged} Edit your cart, then try again.":
-    "你购物车里有些商品现在做不了。{notCharged}请修改购物车后重试。",
+    "您购物车里有些商品现在做不了。{notCharged}请修改购物车后重试。",
   "Some items just ran out": "有些商品刚刚售罄",
   "Some payment attempts still need a final result.": "有些付款尝试仍在等待最终结果。",
   "Someone joined with this code. For someone else, make another code.":
@@ -820,10 +820,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "People at your table just scan the QR code on the table. If that is paused, make a code here for them to enter.":
     "同桌的人扫桌上的二维码就能加入。如果扫码被暂停，可以在这里生成邀请码给他们。",
   "Something in your cart can’t be ordered as selected. Review your cart, then refresh.":
-    "你购物车里有东西不能按所选方式下单。请检查购物车后刷新。",
+    "您购物车里有东西不能按所选方式下单。请检查购物车后刷新。",
   Sponsored: "赞助",
   "Staff entered this round for your table. Pay them on the card machine and the kitchen starts it.":
-    "这一轮由店员为你这桌录入。请在刷卡机上付款，厨房随后开始制作。",
+    "这一轮由店员为您这桌录入。请在刷卡机上付款，厨房随后开始制作。",
   "Start a new order": "开始新订单",
   "Start an empty cart": "开一个空购物车",
   "Start secure payment": "开始安全付款",
@@ -833,35 +833,35 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Starting a new order here closes this order on this phone. The store still has it. To keep the receipt, open the order first.":
     "在这里开始新订单会在这部手机上结束当前订单，门店仍保留着它。如需保留收据，请先打开这笔订单。",
   "Your earlier cart here has ended, so this is a new cart. The store still has the orders you placed; ask the store if you need a receipt.":
-    "你之前在这里的购物车已结束，这是一个新的购物车。门店仍保留着你下过的订单；需要收据请问门店。",
+    "您之前在这里的购物车已结束，这是一个新的购物车。门店仍保留着您下过的订单；需要收据请问门店。",
   "Your earlier cart here has ended, so this is a new cart.":
-    "你之前在这里的购物车已结束，这是一个新的购物车。",
+    "您之前在这里的购物车已结束，这是一个新的购物车。",
   "The store isn’t taking new orders right now. Your cart and orders are still here.":
-    "门店现在不接新订单。你的购物车和订单仍在这里。",
+    "门店现在不接新订单。您的购物车和订单仍在这里。",
   "Starting your cart…": "正在创建购物车…",
   Status: "状态",
   "Status may be delayed": "状态可能延迟",
   "Status not confirmed": "状态未确认",
   "Still at your table and want to order more? Scan the table QR code again. If it asks for a join code, a staff member can give it to you.":
-    "还在座位上想再点？请重新扫描桌上的二维码。如果需要入桌码，店员可以给你。",
+    "还在座位上想再点？请重新扫描桌上的二维码。如果需要入桌码，店员可以给您。",
   "Store handoff": "门店交接",
   "Store hours and address": "营业时间和地址",
   "Submitting payment…": "正在提交付款…",
   Subtotal: "小计",
   "Subtotal before tax": "税前小计",
   "Table joining is unavailable here. Ask staff for help. You can still browse the menu.":
-    "这里暂时无法加入桌位，请向店员求助。你仍然可以浏览菜单。",
+    "这里暂时无法加入桌位，请向店员求助。您仍然可以浏览菜单。",
   "Table total": "本桌合计",
   Tax: "税",
   "Tax can’t be calculated right now. Ask staff for help.": "暂时无法计算税费，请向店员求助。",
   "Tax is added at checkout.": "结账时加税。",
   "Tell a staff member before you eat. They can check any dish for you.":
-    "用餐前请告诉店员，他们可以帮你确认任何菜品。",
+    "用餐前请告诉店员，他们可以帮您确认任何菜品。",
   "Test tax (internal testing only)": "测试税率（仅限内部测试）",
-  "Thank you. Your order has been sent to the kitchen.": "谢谢，你的订单已送到厨房。",
+  "Thank you. Your order has been sent to the kitchen.": "谢谢，您的订单已送到厨房。",
   "Thank you. Your payment went through.": "谢谢，付款成功。",
   "That code didn’t work. Check it and try again, or ask staff or the person who invited you for a new one.":
-    "这个代码无效。请检查后重试，或向店员或邀请你的人要一个新的。",
+    "这个代码无效。请检查后重试，或向店员或邀请您的人要一个新的。",
   "The Provider IDR and public Guest Payment adapter are not available.":
     "第三方付款接口暂不可用。",
   "The connection dropped before we could confirm. Retry to check.":
@@ -870,12 +870,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "The details below may be out of date. Refresh to check for an update.":
     "以下信息可能不是最新的，请刷新查看。",
   "The kitchen has your order and will start preparing it soon.":
-    "厨房已收到你的订单，很快开始制作。",
-  "The kitchen is preparing your order.": "厨房正在制作你的订单。",
+    "厨房已收到您的订单，很快开始制作。",
+  "The kitchen is preparing your order.": "厨房正在制作您的订单。",
   "The kitchen starts this round once it is paid.": "这一轮付款后厨房才会开始制作。",
   "The kitchen starts your order once it’s paid.": "付款后厨房才会开始制作。",
   "The latest cart was loaded. Review your change before submitting again.":
-    "已加载最新的购物车，再次提交前请核对你的修改。",
+    "已加载最新的购物车，再次提交前请核对您的修改。",
   "The link has expired or was already used. Each link works once, for 30 minutes.":
     "链接已过期或已被使用。每个链接只能用一次，30 分钟内有效。",
   "The payment is being refunded to the card that paid.": "款项正在退回付款的银行卡。",
@@ -889,36 +889,36 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "The server will determine the exact amount and allowed method.":
     "具体金额和付款方式由服务端确定。",
   "The store": "门店",
-  "The store cancelled it at your request.": "门店已按你的要求取消。",
+  "The store cancelled it at your request.": "门店已按您的要求取消。",
   "The store has closed": "门店已打烊",
   "The store closed for the day before this pickup was collected. Contact the store about your order or a refund.":
     "门店今天已打烊，这份自取单没有被取走。请联系门店处理订单或退款。",
   "The store closed this pickup after the pickup time ended. Contact the store about your order or a refund.":
     "取餐时间结束后，门店关闭了这笔自取订单。关于订单或退款，请联系门店。",
   "The store couldn’t accept your order, so your payment is being refunded to your original payment method.":
-    "门店无法接受你的订单，你的款项正在退回原来的付款方式。",
+    "门店无法接受您的订单，您的款项正在退回原来的付款方式。",
   "The store couldn’t accept your order, so your payment was refunded to your original payment method.":
-    "门店无法接受你的订单，你的款项已退回原来的付款方式。",
+    "门店无法接受您的订单，您的款项已退回原来的付款方式。",
   "The store couldn’t prepare it.": "门店无法制作。",
   "The store has your order and will start preparing it soon.":
-    "门店已收到你的订单，很快开始制作。",
+    "门店已收到您的订单，很快开始制作。",
   "The store hasn’t confirmed your order yet. Please wait or contact the store.":
-    "门店还没有确认你的订单，请稍候或联系门店。",
+    "门店还没有确认您的订单，请稍候或联系门店。",
   "The store is closed now.": "门店现在已打烊。",
   "The store isn’t taking orders right now, so you haven’t been charged. Try again when the store reopens, or ask staff.":
-    "门店现在不接单，所以你没有被扣款。请在门店重新营业后再试，或询问店员。",
+    "门店现在不接单，所以您没有被扣款。请在门店重新营业后再试，或询问店员。",
   "The store still has your order. Give your name or order number to a staff member.":
-    "门店仍保留着你的订单，请把姓名或订单号告诉店员。",
+    "门店仍保留着您的订单，请把姓名或订单号告诉店员。",
   "The store stopped taking orders before payment started, so you haven’t been charged. Check the store’s hours or ask staff.":
-    "门店在付款开始前停止接单，所以你没有被扣款。请查看门店营业时间或询问店员。",
+    "门店在付款开始前停止接单，所以您没有被扣款。请查看门店营业时间或询问店员。",
   "The store uses this only to contact you about this order, for example if an item sold out. It’s deleted 30 days after your order, and you can remove it sooner from your order page.":
-    "门店只会用它就这笔订单联系你，例如商品售罄时。它会在下单 30 天后删除，你也可以在订单页提前删除。",
+    "门店只会用它就这笔订单联系您，例如商品售罄时。它会在下单 30 天后删除，您也可以在订单页提前删除。",
   "The table was closed after your party left, before this was made.":
-    "这一桌在你们离开后关闭，这份还没有制作。",
+    "这一桌在您离开后关闭，这份还没有制作。",
   "The time to pay for this has ended, so you haven’t been charged. Ask staff if you still want it.":
-    "这一份的付款时间已过，你没有被扣款。如果仍然需要，请询问店员。",
+    "这一份的付款时间已过，您没有被扣款。如果仍然需要，请询问店员。",
   "The time to pay for this order has ended, so you haven’t been charged. Ask staff for help.":
-    "这笔订单的付款时间已过，你没有被扣款。请向店员求助。",
+    "这笔订单的付款时间已过，您没有被扣款。请向店员求助。",
   "There are no matching published items right now.": "目前没有匹配的已发布商品。",
   "There were no contact details on this order.": "这笔订单没有联系方式。",
   "There were too many tries with this link. Please wait an hour or ask the store.":
@@ -930,13 +930,13 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "This cart can’t accept more items. Ask staff for help continuing your order.":
     "这个购物车不能再加商品，请向店员求助以继续点单。",
   "This cart can’t accept more items. Your previously paid orders remain unchanged.":
-    "这个购物车不能再加商品。你之前已付款的订单不受影响。",
+    "这个购物车不能再加商品。您之前已付款的订单不受影响。",
   "This cart can’t be checked out right now.": "这个购物车现在无法结账。",
   "This cart is closed and cannot accept another item.": "这个购物车已关闭，不能再加商品。",
   "This cart isn’t available in your current session.": "当前会话无法使用这个购物车。",
   "This cart isn’t available. See the message on this page.": "这个购物车不可用，请查看本页提示。",
   "This cart timed out. Return to the menu and add an item; your table continues with a new cart.":
-    "这个购物车已超时。请返回菜单加入商品，你们这桌会用新的购物车继续。",
+    "这个购物车已超时。请返回菜单加入商品，您这桌会用新的购物车继续。",
   "This cart was abandoned and can’t be changed.": "这个购物车已被放弃，不能修改。",
   "This checkout has ended": "这次结账已结束",
   "This choice can’t be ordered as selected.": "这个选项不能按所选方式下单。",
@@ -945,16 +945,16 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "This code no longer works. A staff member can give a code to someone joining.":
     "这个代码已失效，店员可以给要加入的人一个代码。",
   "This code was already used. Ask staff, or the person who invited you, for a new one.":
-    "这个代码已经用过了。请向店员或邀请你的人要一个新的。",
+    "这个代码已经用过了。请向店员或邀请您的人要一个新的。",
   "This code was replaced. Make a new one.": "这个代码已被替换，请生成新的。",
   "This entry link can’t be used": "这个入口链接无法使用",
   "This item can’t be ordered as selected. Review your choices.":
-    "这件商品不能按所选方式下单，请检查你的选择。",
+    "这件商品不能按所选方式下单，请检查您的选择。",
   "This item is no longer available.": "这件商品已不再供应。",
   "This item is no longer on the menu.": "这件商品已不在菜单上。",
   "This item is not in the current published menu.": "这件商品不在当前发布的菜单中。",
   "This item is sold out right now.": "这件商品现在已售罄。",
-  "This link can’t open your order": "这个链接无法打开你的订单",
+  "This link can’t open your order": "这个链接无法打开您的订单",
   "This link doesn’t lead anywhere. Scan the location QR code again or open the menu.":
     "这个链接没有对应的页面。请重新扫描门店二维码或打开菜单。",
   "This location is not accepting orders. Ask staff about current hours or alternatives.":
@@ -966,7 +966,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "This order is complete.": "这笔订单已完成。",
   "This order isn’t available on this phone": "这部手机上无法查看这笔订单",
   "This order was cancelled because its payment didn’t go through. You weren’t charged for it.":
-    "这笔订单因付款未成功已取消，你没有被扣款。",
+    "这笔订单因付款未成功已取消，您没有被扣款。",
   "This order was stopped before anyone paid, and its dishes went back to your table’s cart. Nobody was charged for it.":
     "这笔订单在付款前已停止，菜品已放回本桌购物车，没有向任何人收费。",
   "This order was cancelled by the store. Nobody was charged for it.":
@@ -983,12 +983,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "This payment wasn’t finished in time, so it was cancelled. Nothing was charged.":
     "这笔付款没有及时完成，已取消，没有扣款。",
   "This pickup code expired. Ask staff at the counter; they can check your order number.":
-    "这个取餐码已过期。请到柜台询问店员，他们可以核对你的订单号。",
+    "这个取餐码已过期。请到柜台询问店员，他们可以核对您的订单号。",
   "This receipt is no longer available on this phone": "这部手机上已无法查看这张收据",
   "This round never went to the kitchen. No one was charged for it.":
     "这一轮没有送到厨房，没有向任何人收费。",
   "This round was cancelled because its payment didn’t go through. You weren’t charged for it.":
-    "这一轮因付款未成功已取消，你没有被扣款。",
+    "这一轮因付款未成功已取消，您没有被扣款。",
   "This round was cancelled by the store. ": "这一轮已被门店取消。",
   "This round wasn’t sent to the kitchen. Ask staff if you still want it.":
     "这一轮没有送到厨房。如果仍需要，请询问店员。",
@@ -1004,7 +1004,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{name} isn't available right now.": "{name} 现在不供应。",
   "Not available now": "现在不供应",
   "One of your choices isn’t available right now. Please choose another.":
-    "你选的一项现在不供应，请另选。",
+    "您选的一项现在不供应，请另选。",
   "This item isn’t available right now.": "这道菜现在不供应。",
   "{option} isn't available right now. Please choose another.": "{option} 现在不供应，请另选。",
   "This size is sold out right now. Please choose another size.":
@@ -1050,7 +1050,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Use the exact link provided after checkout.": "请使用结账后提供的原始链接。",
   "Use the exact link supplied for this order.": "请使用为这笔订单提供的原始链接。",
   "Verify the same payment operation": "核实同一笔付款操作",
-  "Verify your payment": "核实你的付款",
+  "Verify your payment": "核实您的付款",
   "Verifying payment": "正在核实付款",
   "Verifying payment…": "正在核实付款…",
   Version: "版本",
@@ -1058,7 +1058,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "View order": "查看订单",
   "View order status": "查看订单状态",
   "View receipt and support": "查看收据和帮助",
-  "View your receipt": "查看你的收据",
+  "View your receipt": "查看您的收据",
   "View {name}": "查看 {name}",
   "Waiting for payment": "等待付款",
   "Nothing is charged now. Your table pays once at the end.": "现在不收款。这桌最后一起结账。",
@@ -1071,18 +1071,18 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "每一轮提交后直接送厨房。这桌最后一起结账，含税。",
   "Waiting for the store": "等待门店",
   "We can make only {left} {name} along with the rest of your order — some items use the same ingredients. {notCharged} {value1} or change other items, then try again.":
-    "结合你订单里的其他商品，{name} 只能做 {left} 份——有些商品用到相同的配料。{notCharged}请{value1}或修改其他商品后重试。",
+    "结合您订单里的其他商品，{name} 只能做 {left} 份——有些商品用到相同的配料。{notCharged}请{value1}或修改其他商品后重试。",
   "We can’t make that many right now. Choose fewer.": "现在做不了那么多，请减少数量。",
   "We couldn’t add this right now. Please try again.": "暂时无法加入，请重试。",
   "We couldn’t confirm checkout. Retry to recover the same checkout.":
     "无法确认结账，请重试以恢复同一次结账。",
   "We couldn’t confirm your details were saved. Retry saving before changing them.":
-    "无法确认你的信息已保存，修改前请重新保存。",
+    "无法确认您的信息已保存，修改前请重新保存。",
   "We couldn’t confirm your prices. Retry to continue without creating a second order.":
     "无法确认价格。请重试，不会生成第二笔订单。",
   "We couldn’t continue this checkout. Review your cart and scan the QR code again if needed.":
     "无法继续这次结账。请检查购物车，必要时重新扫描二维码。",
-  "We couldn’t load your cart": "无法加载你的购物车",
+  "We couldn’t load your cart": "无法加载您的购物车",
   "The store’s system is busy": "店里的系统有点忙",
   "Nothing has been ordered. This page asks again by itself in a few seconds.":
     "还没有下单。几秒后本页会自动再试。",
@@ -1090,179 +1090,179 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "购物车还在，{seconds} 秒后会自动重新加载。",
   "Nothing was changed. Try again in {seconds} seconds.": "这次没有改动，请 {seconds} 秒后再试。",
   "Your order and cart are kept. This page loads again by itself in {seconds} seconds.":
-    "你的订单和购物车都还在，页面会在 {seconds} 秒后自动重新加载。",
+    "您的订单和购物车都还在，页面会在 {seconds} 秒后自动重新加载。",
   "Trying again…": "正在重试…",
   "We couldn’t load your checkout details. Refresh your checkout to try again.":
     "无法加载结账信息，请刷新结账后重试。",
   "We couldn’t load your order status. Please try again.": "无法加载订单状态，请重试。",
-  "We couldn’t load your payment": "无法加载你的付款",
-  "We couldn’t load your receipt": "无法加载你的收据",
-  "We couldn’t load your table": "无法加载你的桌位",
+  "We couldn’t load your payment": "无法加载您的付款",
+  "We couldn’t load your receipt": "无法加载您的收据",
+  "We couldn’t load your table": "无法加载您的桌位",
   "We couldn’t make a code. Try again, or ask a staff member for one.":
     "无法生成代码。请重试，或向店员要一个。",
   "We couldn’t open another card payment. Check your connection and try again.":
     "无法打开新的刷卡付款，请检查网络后重试。",
   "We couldn’t open your payment. Check your connection and try again.":
-    "无法打开你的付款，请检查网络后重试。",
+    "无法打开您的付款，请检查网络后重试。",
   "We couldn’t prepare your card payment. Check the form and try again.":
     "无法准备刷卡付款，请检查表单后重试。",
   "We couldn’t price your order just now. Try again in a moment; if it still doesn’t work, ask staff to take your order.":
-    "暂时无法为你的订单计价。请稍后再试；如果仍然不行，请店员帮你点单。",
+    "暂时无法为您的订单计价。请稍后再试；如果仍然不行，请店员帮您点单。",
   "We couldn’t reach the store": "无法连接门店",
   "We couldn’t show that code. Make a new one.": "无法显示这个代码，请生成新的。",
   "We couldn’t update your order status. The details below may be out of date.":
     "无法更新订单状态，以下信息可能不是最新的。",
   "We don’t have enough left to make {name} along with the rest of your order — some items use the same ingredients. {notCharged} {value1} or change other items, then try again.":
-    "结合你订单里的其他商品，现在剩下的不够做 {name}——有些商品用到相同的配料。{notCharged}请{value1}或修改其他商品后重试。",
+    "结合您订单里的其他商品，现在剩下的不够做 {name}——有些商品用到相同的配料。{notCharged}请{value1}或修改其他商品后重试。",
   "We don’t know which location you’re ordering from. Scan the QR code again to open the menu.":
-    "不确定你在哪家门店点单，请重新扫描二维码打开菜单。",
-  "We have your order. The store will confirm it shortly.": "已收到你的订单，门店很快会确认。",
+    "不确定您在哪家门店点单，请重新扫描二维码打开菜单。",
+  "We have your order. The store will confirm it shortly.": "已收到您的订单，门店很快会确认。",
   "We send your receipt to this address once. It’s deleted 30 days after your order, and you can remove it sooner from your order page.":
-    "我们只会把收据发到这个邮箱一次。它会在下单 30 天后删除，你也可以在订单页提前删除。",
+    "我们只会把收据发到这个邮箱一次。它会在下单 30 天后删除，您也可以在订单页提前删除。",
   "We won’t show an out-of-date menu. Try again shortly.": "不会显示过期的菜单，请稍后再试。",
   "We’ll also email you when the store has your order and when it’s ready.":
-    "门店收到订单和订单做好时，我们也会发邮件通知你。",
+    "门店收到订单和订单做好时，我们也会发邮件通知您。",
   "We’ll also text you when the store has your order and when it’s ready.":
-    "门店收到订单和订单做好时，我们也会发短信通知你。",
+    "门店收到订单和订单做好时，我们也会发短信通知您。",
   "We’re remaking an item for you. It will be brought to your table shortly.":
-    "我们正在为你重做一件商品，很快会送到你的桌上。",
+    "我们正在为您重做一件商品，很快会送到您的桌上。",
   "We’re remaking part of your order. We’ll have it ready shortly — please wait before collecting it.":
-    "我们正在重做你订单的一部分，很快就好——请稍等再来取。",
-  "We’re updating your order status. Check again shortly.": "正在更新你的订单状态，请稍后再查看。",
+    "我们正在重做您订单的一部分，很快就好——请稍等再来取。",
+  "We’re updating your order status. Check again shortly.": "正在更新您的订单状态，请稍后再查看。",
   "What was refunded": "退款内容",
-  "With your choices:": "按你的选择：",
+  "With your choices:": "按您的选择：",
   "You can follow your table’s order, and what has been served, on your table’s page.":
-    "你可以在桌位页查看这桌的点单和已上的菜品。",
+    "您可以在桌位页查看这桌的点单和已上的菜品。",
   "You can still view and save this receipt on this phone until":
-    "你仍可以在这部手机上查看和保存这张收据，直到",
+    "您仍可以在这部手机上查看和保存这张收据，直到",
   "You can still view and save your receipt on this phone for 24 hours after your visit started.":
-    "从到店起 24 小时内，你仍可以在这部手机上查看和保存收据。",
+    "从到店起 24 小时内，您仍可以在这部手机上查看和保存收据。",
   "You can try again now.": "现在可以重试了。",
   "You haven’t been charged for it. Go back to your cart to check out again, or ask a staff member for help.":
-    "这一份没有向你收费。请返回购物车重新结账，或向店员求助。",
-  "You haven’t been charged.": "你没有被扣款。",
+    "这一份没有向您收费。请返回购物车重新结账，或向店员求助。",
+  "You haven’t been charged.": "您没有被扣款。",
   "This order hasn’t been charged. Check your connection and try again.":
     "这一单没有扣款。请检查网络后重试。",
   "You ordered at a table from this phone. You can check your order and everything your table ordered.":
-    "你在这部手机上为餐桌点过单，可以查看你的订单和这桌点的所有东西。",
+    "您在这部手机上为餐桌点过单，可以查看您的订单和这桌点的所有东西。",
   "You placed a pickup order from this phone. Check its status and your pickup code.":
-    "你在这部手机上下过自取订单，可以查看订单状态和取餐码。",
+    "您在这部手机上下过自取订单，可以查看订单状态和取餐码。",
   "Your Store session expired. Scan the location QR code again.":
-    "你的门店会话已过期，请重新扫描门店二维码。",
-  "Your card was declined. Nothing was charged.": "你的银行卡被拒，没有扣款。",
+    "您的门店会话已过期，请重新扫描门店二维码。",
+  "Your card was declined. Nothing was charged.": "您的银行卡被拒，没有扣款。",
   "Your card was declined. Try another card or ask staff to pay at the counter.":
-    "你的银行卡被拒。请换一张卡，或到柜台请店员收款。",
-  "Your cart": "你的购物车",
+    "您的银行卡被拒。请换一张卡，或到柜台请店员收款。",
+  "Your cart": "您的购物车",
   "Your cart can’t be changed from this session. See the message on this page.":
-    "这个会话无法修改你的购物车，请查看本页提示。",
+    "这个会话无法修改您的购物车，请查看本页提示。",
   "Your cart changed. Refresh to price the current cart.":
-    "你的购物车有变动，请刷新以按当前购物车计价。",
-  "Your cart changed. Review it before trying again.": "你的购物车有变动，请检查后再试。",
+    "您的购物车有变动，请刷新以按当前购物车计价。",
+  "Your cart changed. Review it before trying again.": "您的购物车有变动，请检查后再试。",
   "Your cart changed. Review the current cart before trying again.":
-    "你的购物车有变动，请先查看当前购物车再试。",
-  "Your cart expired. See the message on this page.": "你的购物车已过期，请查看本页提示。",
-  "Your cart is closed. See the message on this page.": "你的购物车已关闭，请查看本页提示。",
+    "您的购物车有变动，请先查看当前购物车再试。",
+  "Your cart expired. See the message on this page.": "您的购物车已过期，请查看本页提示。",
+  "Your cart is closed. See the message on this page.": "您的购物车已关闭，请查看本页提示。",
   "Your cart is empty": "购物车是空的",
   "Your cart is empty.": "购物车是空的。",
   "Your cart is empty. Choose an item to start.": "购物车是空的，选一件商品开始吧。",
   "Your cart is up to date.": "购物车已是最新。",
   "Your cart may be out of date. Refresh before making a change.":
-    "你的购物车可能不是最新的，修改前请先刷新。",
+    "您的购物车可能不是最新的，修改前请先刷新。",
   "Your checkout changed. Reload details before trying again.":
     "结账信息有变动，请重新加载后再试。",
-  "Your contact details": "你的联系方式",
+  "Your contact details": "您的联系方式",
   "Your contact details couldn’t be removed right now. Check your connection and try again.":
-    "暂时无法删除你的联系方式，请检查网络后重试。",
+    "暂时无法删除您的联系方式，请检查网络后重试。",
   "Your contact details had already been removed from this order. There is nothing more to remove.":
     "这笔订单的联系方式已经删除过了，没有需要再删除的内容。",
-  "Your contact details have been removed from this order.": "你的联系方式已从这笔订单中删除。",
+  "Your contact details have been removed from this order.": "您的联系方式已从这笔订单中删除。",
   "Your current session can’t access this menu. Scan the location QR code again or ask staff for help.":
     "当前会话无法访问这个菜单，请重新扫描门店二维码或向店员求助。",
-  "Your details": "你的信息",
+  "Your details": "您的信息",
   "Your food is ready and will be brought to your table shortly.":
-    "你的餐点已做好，很快会送到你的桌上。",
-  "Your items": "你的商品",
+    "您的餐点已做好，很快会送到您的桌上。",
+  "Your items": "您的商品",
   "Your last card is still being checked. Check the payment status again.":
-    "你上一张卡仍在核验中，请再次查看付款状态。",
+    "您上一张卡仍在核验中，请再次查看付款状态。",
   "Your note is too long.": "备注太长了。",
-  "Your order": "你的订单",
-  "Your order has been cancelled.": "你的订单已取消。",
-  "Your order has been collected.": "你的订单已取走。",
-  "Your order has been collected. Enjoy!": "你的订单已取走，请慢用！",
+  "Your order": "您的订单",
+  "Your order has been cancelled.": "您的订单已取消。",
+  "Your order has been collected.": "您的订单已取走。",
+  "Your order has been collected. Enjoy!": "您的订单已取走，请慢用！",
   "Your order is complete. Thank you for visiting!": "订单已完成，感谢光临！",
-  "Your order is ready": "你的订单已做好",
-  "Your order is ready at the counter.": "你的订单已在柜台做好。",
-  "Your order is ready. Collect it at the counter.": "你的订单已做好，请到柜台取餐。",
+  "Your order is ready": "您的订单已做好",
+  "Your order is ready at the counter.": "您的订单已在柜台做好。",
+  "Your order is ready. Collect it at the counter.": "您的订单已做好，请到柜台取餐。",
   "Your order is ready. Show your order number at the counter — staff will check your name or phone number.":
-    "你的订单已做好。请在柜台出示订单号——店员会核对你的姓名或手机号。",
+    "您的订单已做好。请在柜台出示订单号——店员会核对您的姓名或手机号。",
   "Your order is ready. Your pickup code appears here in a moment.":
-    "你的订单已做好，取餐码马上会显示在这里。",
+    "您的订单已做好，取餐码马上会显示在这里。",
   "Your order is ready. Your pickup code appears here in a moment. If you’re already at the counter, show your order number — staff will check your name or phone number.":
-    "你的订单已做好，取餐码马上会显示在这里。如果你已经在柜台，请出示订单号——店员会核对你的姓名或手机号。",
-  "Your order is still processing.": "你的订单仍在处理中。",
+    "您的订单已做好，取餐码马上会显示在这里。如果您已经在柜台，请出示订单号——店员会核对您的姓名或手机号。",
+  "Your order is still processing.": "您的订单仍在处理中。",
   "Your order isn’t ready yet. The code appears here when it is.":
-    "你的订单还没做好，做好后代码会显示在这里。",
-  "Your order number": "你的订单号",
-  "Your order wasn’t accepted.": "你的订单未被接受。",
+    "您的订单还没做好，做好后代码会显示在这里。",
+  "Your order number": "您的订单号",
+  "Your order wasn’t accepted.": "您的订单未被接受。",
   "Your payment is still being confirmed. Don’t start another payment.":
-    "你的付款仍在确认中，请不要再次付款。",
-  "Your payment was refunded in full.": "你的款项已全额退回。",
+    "您的付款仍在确认中，请不要再次付款。",
+  "Your payment was refunded in full.": "您的款项已全额退回。",
   "Your pickup code appears here as soon as your order is ready.":
     "订单做好后，取餐码会立即显示在这里。",
   "Your pickup code appears here once your order is ready.": "订单做好后，取餐码会显示在这里。",
   "Your pickup code can’t be shown right now. Try again or ask staff.":
-    "现在无法显示你的取餐码，请重试或询问店员。",
-  "Your pickup code changed. Check again.": "你的取餐码已更换，请再查看一次。",
+    "现在无法显示您的取餐码，请重试或询问店员。",
+  "Your pickup code changed. Check again.": "您的取餐码已更换，请再查看一次。",
   "Your previous prices expired. Refresh to price your order again.":
     "之前的价格已过期，请刷新重新计价。",
   "Your receipt appears on your order page, where you can print or save it.":
-    "收据会显示在你的订单页，你可以在那里打印或保存。",
+    "收据会显示在您的订单页，您可以在那里打印或保存。",
   "Your session ended. Scan the location QR code again to continue.":
-    "你的会话已结束，请重新扫描门店二维码继续。",
-  "Your table": "你的桌位",
+    "您的会话已结束，请重新扫描门店二维码继续。",
+  "Your table": "您的桌位",
   "Your table at {storeDisplayName} is confirmed for dine-in.":
-    "你在 {storeDisplayName} 的堂食桌位已确认。",
+    "您在 {storeDisplayName} 的堂食桌位已确认。",
   "Your table connection is confirmed. You can continue to the menu. No order has been placed.":
-    "已确认你的桌位，可以继续查看菜单。尚未下单。",
+    "已确认您的桌位，可以继续查看菜单。尚未下单。",
   "Your table was changed. Ask a staff member for a join code for your new table.":
-    "你的桌位已更换，请向店员索取新桌位的入桌码。",
-  "Your table · {tableLabel}": "你的桌位 · {tableLabel}",
+    "您的桌位已更换，请向店员索取新桌位的入桌码。",
+  "Your table · {tableLabel}": "您的桌位 · {tableLabel}",
   "Your table's earlier cart timed out, so items that hadn't been ordered were cleared. Orders already placed are not affected.":
-    "你们这桌之前的购物车已超时，尚未下单的商品已清除。已下的订单不受影响。",
+    "您这桌之前的购物车已超时，尚未下单的商品已清除。已下的订单不受影响。",
   "Your table’s cart timed out and a new one couldn’t be started just now. Wait a moment, then add the item again.":
-    "你们这桌的购物车已超时，暂时无法开新的购物车。请稍等后重新加入商品。",
-  "Your table’s last order is still being processed.": "你们这桌上一笔订单仍在处理中。",
+    "您这桌的购物车已超时，暂时无法开新的购物车。请稍等后重新加入商品。",
+  "Your table’s last order is still being processed.": "您这桌上一笔订单仍在处理中。",
   "Your total, including tax, is calculated at checkout.": "含税总价在结账时计算。",
-  "Your visit has ended": "你的用餐已结束",
-  "Your visit on this phone has ended": "你在这部手机上的用餐已结束",
+  "Your visit has ended": "您的用餐已结束",
+  "Your visit on this phone has ended": "您在这部手机上的用餐已结束",
   "Your visit on this phone has ended, so the code can’t be shown here. Give your name or order number at the counter.":
-    "你在这部手机上的用餐已结束，所以这里无法显示代码。请在柜台报上姓名或订单号。",
+    "您在这部手机上的用餐已结束，所以这里无法显示代码。请在柜台报上姓名或订单号。",
   "Your visit on this phone has ended, so this can’t be changed here. Ask the store to remove your contact details; they are also deleted automatically 30 days after the order.":
-    "这部手机上的到店已结束，这里不能再修改。可以请门店删除你的联系方式；订单 30 天后也会自动删除。",
+    "这部手机上的到店已结束，这里不能再修改。可以请门店删除您的联系方式；订单 30 天后也会自动删除。",
   "You’ll enter your card on the next step. Nothing is charged until you confirm.":
     "下一步输入银行卡，确认前不会扣款。",
-  "You’re offline": "你已离线",
+  "You’re offline": "您已离线",
   "You’re offline, so no code was made. Reconnect, then try again.":
-    "你已离线，没有生成代码。请恢复网络后重试。",
-  "You’re offline.": "你已离线。",
+    "您已离线，没有生成代码。请恢复网络后重试。",
+  "You’re offline.": "您已离线。",
   "You’re offline. Changes and checkout are paused; nothing will replay on reconnect.":
-    "你已离线。修改和结账已暂停，恢复网络后也不会自动提交。",
+    "您已离线。修改和结账已暂停，恢复网络后也不会自动提交。",
   "You’re offline. Joining and recovery are paused. Reconnect, then try again.":
-    "你已离线。加入和恢复已暂停，请恢复网络后重试。",
-  "You’re offline. Nothing was queued or replayed.": "你已离线，没有提交任何操作。",
+    "您已离线。加入和恢复已暂停，请恢复网络后重试。",
+  "You’re offline. Nothing was queued or replayed.": "您已离线，没有提交任何操作。",
   "You’re offline. Reconnect to continue; nothing will be submitted automatically.":
-    "你已离线。恢复网络后继续，不会自动提交任何内容。",
+    "您已离线。恢复网络后继续，不会自动提交任何内容。",
   "You’re offline. Your cart can’t be changed until you reconnect.":
-    "你已离线，恢复网络前无法修改购物车。",
-  "You’ve joined this table": "你已加入这一桌",
+    "您已离线，恢复网络前无法修改购物车。",
+  "You’ve joined this table": "您已加入这一桌",
   "You’ve made a lot of codes in the last few minutes. Try again in a few minutes, or ask a staff member for one.":
-    "你在几分钟内生成了很多代码。请几分钟后再试，或向店员要一个。",
+    "您在几分钟内生成了很多代码。请几分钟后再试，或向店员要一个。",
   "You’ve made a lot of codes in the last few minutes. You can make another at {value1}, or ask a staff member for one.":
-    "你在几分钟内生成了很多代码。你可以在 {value1} 再生成一个，或向店员要一个。",
+    "您在几分钟内生成了很多代码。您可以在 {value1} 再生成一个，或向店员要一个。",
   "about {hours} hours": "约 {hours} 小时",
   "about {minutes} minutes": "约 {minutes} 分钟",
   "contains {value1}": "含有 {value1}",
-  "handles your contact details:": "对你联系方式的处理：",
+  "handles your contact details:": "对您联系方式的处理：",
   "isn’t taking orders right now": "现在不接单",
   "{storeDisplayName} isn’t taking orders right now": "{storeDisplayName}现在不接单",
   "may contain {value1}": "可能含有 {value1}",
@@ -1308,7 +1308,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{name} just sold out. {value1} before checkout.": "{name} 刚刚售罄。结账前请{value1}。",
   "{storeName} · Order": "{storeName} · 点单",
   "{store} keeps the phone number or email you gave only to contact you about this order, and deletes it 30 days after your order.":
-    "{store} 只会用你提供的手机号或邮箱就这笔订单联系你，并在下单 30 天后删除。",
+    "{store} 只会用您提供的手机号或邮箱就这笔订单联系您，并在下单 30 天后删除。",
   "{value1} allows at most {maximumSelections}.": "{value1} 最多可选 {maximumSelections} 项。",
   "{value1} requires at least {minimumSelections}.": "{value1} 至少要选 {minimumSelections} 项。",
   "← Back to menu": "← 返回菜单",
@@ -1318,7 +1318,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Try again shortly.": "请稍后再试。",
   "Try again in {seconds} seconds.": "请 {seconds} 秒后再试。",
   "Please wait {seconds} seconds before trying again.": "请等 {seconds} 秒后再试。",
-  "Checking your session. Please wait.": "正在检查你的会话，请稍候。",
+  "Checking your session. Please wait.": "正在检查您的会话，请稍候。",
   "Please wait before trying again.": "请稍后再试。",
   Refund: "退款",
   Voided: "已作废",
@@ -1333,23 +1333,23 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "A problem with my order": "我点的菜有问题",
   "We're ready to pay": "可以买单了",
   "Staff have closed this bill": "店员已结束这笔账单",
-  "Staff have been asked to come to your table": "已请店员到你的桌边",
+  "Staff have been asked to come to your table": "已请店员到您的桌边",
   "Asked at {time} · {reason}": "{time} 呼叫 · {reason}",
   "Everyone at your table sees this. Someone will come over as soon as they can.":
     "同桌的人都能看到这条，店员会尽快过来。",
   "Sending…": "正在发送…",
   "No longer needed": "不需要了",
   "Need a staff member?": "需要店员吗？",
-  "A staff member saw your request at {time}.": "店员已在 {time} 看到你的请求。",
-  "Your request was withdrawn.": "你的请求已撤回。",
+  "A staff member saw your request at {time}.": "店员已在 {time} 看到您的请求。",
+  "Your request was withdrawn.": "您的请求已撤回。",
   "You’ve asked several times. You can ask again at {time}, or wave to a staff member.":
-    "你已经呼叫了好几次，{time} 后可以再呼叫，也可以直接向店员示意。",
+    "您已经呼叫了好几次，{time} 后可以再呼叫，也可以直接向店员示意。",
   "What do you need?": "需要什么？",
   "Please don’t share allergies here; tell the staff member when they arrive.":
     "过敏信息请不要通过这里告知，店员到了请当面说明。",
   "Ask staff to come to the table": "请店员过来",
   "You’re offline, so staff weren’t told. Please wave to a staff member.":
-    "你已离线，店员没有收到通知。请直接向店员示意。",
+    "您已离线，店员没有收到通知。请直接向店员示意。",
   "We couldn’t reach the staff. Try again, or wave to a staff member.":
     "没能通知到店员。请重试，或直接向店员示意。",
   // Figma v1: the step number is drawn by the list itself.
@@ -1425,9 +1425,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "The tip choices just changed. Choose a tip again to pay.":
     "小费选项刚刚变了，请重新选择后付款。",
   "The menu was just updated": "菜单刚刚更新",
-  "Your table was changed": "你们换了桌",
+  "Your table was changed": "您这桌换了桌",
   "Staff moved your party to another table while you were paying, so you haven’t been charged. Go back to checkout to pay at your new table.":
-    "付款时店员把你们换到了另一张桌，这次没有扣款。请回到结账，在新桌上付款。",
+    "付款时店员把您换到了另一张桌，这次没有扣款。请回到结账，在新桌上付款。",
   "The restaurant just updated its menu, so we priced your order again. Nothing was sent or charged. Check the total, then continue.":
     "餐厅刚更新了菜单，我们已为您重新计价。订单尚未发送，也没有收费。请核对总价后继续。",
   "The price we held for you ran out while you waited, so we priced your order again. Nothing was sent or charged. Check the total, then continue.":
@@ -1438,7 +1438,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "The restaurant updated its menu while you were checking out, so you haven’t been charged. Pay for your order from your table page.":
     "您结账时餐厅更新了菜单，因此没有向您收费。请在本桌页面付款。",
   "Tips were turned off while you were checking out, so this order hasn’t been charged. Go back to checkout to pay without a tip.":
-    "你结账时门店关闭了小费，这一单没有扣款。请回到结账页，不加小费付款。",
+    "您结账时门店关闭了小费，这一单没有扣款。请回到结账页，不加小费付款。",
   "Your table is checking out. To add dishes, ask a staff member.":
     "这桌正在结账，要加菜请找店员。",
   Closed: "不营业",
@@ -1460,7 +1460,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{name} can’t be added as it was ordered — the menu has changed.":
     "{name}无法按原样再点，菜单已有变化。",
   "Choose it from the menu": "去菜单里重新选",
-  "One more {name} is in your cart.": "已把一份{name}加入你的购物车。",
+  "One more {name} is in your cart.": "已把一份{name}加入您的购物车。",
   "This table already ordered {count} of these.": "这桌已经点过 {count} 份。",
   "Your table ordered {count}": "这桌已点 {count} 份",
   "Last orders {time}": "厨房 {time} 停止接单",
@@ -1483,12 +1483,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Your table split the bill by dish, in {count} parts.": "这桌按菜分成 {count} 份。",
   shared: "平分",
   "Pay one part; you can pay another one after it.": "每次付一份，付完可以再替同桌付另一份。",
-  "Which part you pay": "你付哪一份",
+  "Which part you pay": "您付哪一份",
   "Part {number} · {amount}": "第 {number} 份 · {amount}",
   paid: "已付",
   "being paid": "正在付",
   "{paid} of {count} parts paid · {amount} to go": "已付 {paid}/{count} 份 · 还差 {amount}",
-  "Tip (for your part)": "小费（按你这一份）",
+  "Tip (for your part)": "小费（按您这一份）",
   "Every part of the bill is paid ({count} parts). Thank you!": "账单 {count} 份都已付清，谢谢！",
   "Still to pay": "还要付",
   "The table is paying the bill in {count} parts; {paid} paid so far. Cash is rounded to the nearest 5 cents.":
@@ -1506,7 +1506,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "点一下就能和同桌的人一起点餐，不用注册账号。",
   "We couldn't confirm that. Check your cart before adding it again.":
     "没能确认是否加上了。再加之前请先看看购物车。",
-  "You’re offline. Nothing was added.": "你已离线，没有加入。",
+  "You’re offline. Nothing was added.": "您已离线，没有加入。",
   "Add {name} to your cart": "把{name}加入购物车",
   "I have a join code": "我有入桌码",
   "Ask staff, or the person who joined your table first, for the table’s join code.":
@@ -1531,10 +1531,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "This also places {count} items other guests added.": "会一起下单同桌其他人加的 {count} 样。",
   "Check your table": "查看本桌",
   "We couldn’t place your order, so nothing was sent. Try again, or tell a staff member what you’d like.":
-    "这一单没有下成，什么都没有发出去。请重试，或者告诉店员你想点什么。",
+    "这一单没有下成，什么都没有发出去。请重试，或者告诉店员您想点什么。",
   "The store stopped taking orders": "门店已停止接单",
   "Your cart changed while you were checking out, so nothing was placed. Check it, then continue.":
-    "你结账时购物车有变化，所以没有下单。请看一下再继续。",
+    "您结账时购物车有变化，所以没有下单。请看一下再继续。",
   "Your last order was placed.": "上一单已下单。",
   "Your last order was placed. Staff confirm it first.": "上一单已下单，店员确认后开始做。",
   "The dishes below are still in your cart and haven’t been ordered.":
@@ -1564,9 +1564,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "This order hasn’t been charged, and it hasn’t gone to the kitchen.":
     "这一单没有扣款，也还没有送到厨房。",
   "Try again in a moment. If it still doesn’t work, ask a staff member: they can take your order and payment.":
-    "请稍后再试。如果还是不行，请找店员，他们可以帮你下单和收款。",
+    "请稍后再试。如果还是不行，请找店员，他们可以帮您下单和收款。",
   "Your dishes are saved on your table page and go to the kitchen once paid.":
-    "你的菜已保存在这桌页面，付款后才送厨房。",
+    "您的菜已保存在这桌页面，付款后才送厨房。",
   "Still working on it. This order hasn’t been charged.": "还在处理，请稍等。这一单没有扣款。",
   "Still working on it.": "还在处理，请稍等。",
   "Your payment is still being set up": "付款还在准备中",
@@ -1575,15 +1575,15 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这一单没有扣款。请查看本桌，或请店员帮忙。",
   "We can’t confirm where your payment stands": "暂时无法确认付款状态",
   "If you already entered your card, check the result first and don’t pay again. If you haven’t, you can continue.":
-    "如果你已经输入过银行卡，请先查看结果，不要重复付款；如果还没有，可以继续付款。",
+    "如果您已经输入过银行卡，请先查看结果，不要重复付款；如果还没有，可以继续付款。",
   "Your order needs checking again": "这一单需要重新确认",
   "This order hasn’t been charged. Go back to check out again.": "这一单没有扣款。请返回重新结账。",
   "This order hasn’t been charged. Pay for it from your table page.":
     "这一单没有扣款。请在本桌页面付款。",
   "Tips were turned off while you were checking out, so this order hasn’t been charged. Pay for it from your table page, without a tip.":
-    "你结账时门店关闭了小费，这一单没有扣款。请在本桌页面付款，不加小费。",
+    "您结账时门店关闭了小费，这一单没有扣款。请在本桌页面付款，不加小费。",
   "Your table’s cart just changed, maybe because a round is being sent for your table. Wait a moment while this page checks.":
-    "你这桌的购物车刚刚有变化，可能有人正在为这桌下单。请稍等，页面正在核对。",
+    "您这桌的购物车刚刚有变化，可能有人正在为这桌下单。请稍等，页面正在核对。",
   "Your table’s cart changed, so nothing was placed yet. Check it, then tap Place order.":
     "同桌的购物车有变化，还没有下单。请看一下再点“下单”。",
   "We can’t show this payment on this phone": "这台手机无法显示这笔付款",
@@ -1591,15 +1591,15 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Check your connection and try again.": "请检查网络后重试。",
   "The secure card form didn’t load": "安全付款表单没有加载出来",
   "This payment hasn’t been charged. Try again, or ask a staff member to take your payment.":
-    "这笔没有扣款。请重试，或请店员帮你收款。",
+    "这笔没有扣款。请重试，或请店员帮您收款。",
   "The secure card form didn’t load. If you already entered your card, ask a staff member to check before paying again. Otherwise try again.":
-    "安全付款表单没有加载出来。如果你已经输入过银行卡，请先请店员核对，不要重复付款；否则请重试。",
+    "安全付款表单没有加载出来。如果您已经输入过银行卡，请先请店员核对，不要重复付款；否则请重试。",
   "Don’t pay again: ask a staff member to check this payment.":
-    "请不要重复付款，可以请店员帮你核对。",
+    "请不要重复付款，可以请店员帮您核对。",
   "We couldn’t start the payment just now. This payment hasn’t been charged. Try again, or ask a staff member to take payment.":
-    "暂时无法开始付款，这笔没有扣款。请重试，或请店员帮你收款。",
+    "暂时无法开始付款，这笔没有扣款。请重试，或请店员帮您收款。",
   "This is taking longer than usual. Don’t pay again: ask a staff member to check this payment.":
-    "比平时慢一些。请不要重复付款，可以请店员帮你核对。",
+    "比平时慢一些。请不要重复付款，可以请店员帮您核对。",
   "Your payment hasn’t started": "付款还没有开始",
   "This order hasn’t been charged. Go back to check out again, or ask a staff member.":
     "这一单没有扣款。请返回重新结账，或请店员帮忙。",
@@ -1627,10 +1627,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Staff took off {count} charges. They aren’t charged.": "店员撤下了 {count} 项收费，不收费。",
   "Your table moved to table {table}": "您这桌已换到 {table} 桌",
   "Staff moved your party from table {from} to table {table}. Keep ordering and paying on this phone.":
-    "店员已把你们从 {from} 桌换到 {table} 桌，继续用这部手机点餐和付款即可。",
-  "Your table was merged into table {table}": "你们这桌已并到 {table} 桌",
+    "店员已把您从 {from} 桌换到 {table} 桌，继续用这部手机点餐和付款即可。",
+  "Your table was merged into table {table}": "您这桌已并到 {table} 桌",
   "Staff joined your party to table {table}. Everything your table ordered is on that table's bill. Scan the code on table {table} to keep ordering and paying together.":
-    "店员已把你们并到 {table} 桌，你们点过的菜都在那桌的账单上。请扫 {table} 桌的桌台二维码继续点餐和一起付款。",
+    "店员已把您并到 {table} 桌，您点过的菜都在那桌的账单上。请扫 {table} 桌的桌台二维码继续点餐和一起付款。",
   "Staff moved your party to table {table}. Everything your table ordered moved with you. Scan the code on table {table} to keep ordering and paying together.":
     "店员已把您这桌换到 {table} 桌，已点的菜和账单都一起转过去了。请扫 {table} 桌的桌台二维码，继续一起点单和付款。",
   "isn’t taking orders yet": "暂时还不能下单",
@@ -1641,7 +1641,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这家店还在准备中。请询问店员，或稍后再试。",
   // WP-2423 取舍 18 DEC-MEMBER-POINTS
   "The points for this order are still yours. Open this receipt on this phone before {time} to finish.":
-    "这单的积分还是你的。在 {time} 之前用这部手机打开这张收据，就可以继续。",
+    "这单的积分还是您的。在 {time} 之前用这部手机打开这张收据，就可以继续。",
   "Enter a 10-digit Canadian or US mobile number.": "请输入 10 位加拿大或美国手机号码。",
   "That code isn’t right. Check the text and try again.": "验证码不对。请看一下短信再试。",
   "That code has ended. Ask for a new one.": "验证码已失效，请重新获取。",
@@ -1650,25 +1650,25 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "We can’t send a code right now.": "现在发不了验证码。",
   "We couldn’t do that. Check your connection and try again.": "没有成功。请检查网络后再试。",
   "We use your phone number only to text you a sign-in code and to tell you before your points expire. You can leave and delete it any time.":
-    "手机号只用来发登录验证码，以及在积分过期前通知你。你可以随时退出并删除。",
+    "手机号只用来发登录验证码，以及在积分过期前通知您。您可以随时退出并删除。",
   "Also text me offers from this restaurant. Optional; you can stop any time.":
     "也给我发这家餐厅的优惠短信（可选，随时可以取消）。",
   "Code from the text": "短信里的验证码",
   "Text me a code": "发验证码给我",
   "Send another code": "再发一次验证码",
-  "You’re a member": "你已是会员",
+  "You’re a member": "您已是会员",
   "{points} points added for this order.": "这单已加 {points} 分。",
-  "You’re signed in.": "你已登录。",
+  "You’re signed in.": "您已登录。",
   "See your points": "查看我的积分",
   "No problem. You can still add this order’s points on this phone until {time}.":
-    "没关系。在 {time} 之前，你还可以用这部手机加上这单的积分。",
+    "没关系。在 {time} 之前，您还可以用这部手机加上这单的积分。",
   "Join now": "现在加入",
   "Add {points} points for this order": "给这单加 {points} 分",
   "Join and earn {points} points on this order": "加入会员，这单可以积 {points} 分",
   "Add {points} points for this order (after the refund)": "给这单加 {points} 分（已扣除退款部分）",
   "Join and earn {points} points on this order (after the refund)":
     "加入会员，这单可积 {points} 分（已扣除退款部分）",
-  "Which part did you pay?": "你付的是哪一份？",
+  "Which part did you pay?": "您付的是哪一份？",
   "Part {number} · {points} points": "第 {number} 份 · {points} 分",
   "Add my points": "加上我的积分",
   "Join and add my points": "加入并加上积分",
@@ -1678,16 +1678,16 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{points} points used on this bill.": "这张账单已用 {points} 分。",
   "The bill has been split. Ask a staff member to put it back on one bill to use points.":
     "账单已经分开了。要用积分，请店员改回一张账单。",
-  "You don’t have that many points any more.": "你的积分已经不够了。",
+  "You don’t have that many points any more.": "您的积分已经不够了。",
   "This bill is already settled.": "这张账单已经结清。",
   "Someone at your table is paying now. Try again if they stop.":
     "同桌有人正在付款。如果对方没有付，可以再试。",
-  "You have {points} points": "你有 {points} 分",
+  "You have {points} points": "您有 {points} 分",
   "Confirm using points": "确认使用积分",
   "Use {points} points for {amount} off the dishes? Tax is worked out on what’s left. You can’t undo this yourself.":
-    "用 {points} 分抵菜品 {amount}？税按剩下的金额计算。确认后你不能自己撤销。",
+    "用 {points} 分抵菜品 {amount}？税按剩下的金额计算。确认后您不能自己撤销。",
   "Use {points} points to get {dish} free? You can’t undo this yourself.":
-    "用 {points} 分免费换 {dish}？确认后你不能自己撤销。",
+    "用 {points} 分免费换 {dish}？确认后您不能自己撤销。",
   "Use my points": "使用积分",
   "Keep my points": "先不用",
   "Points to use": "要用的积分",
@@ -1703,24 +1703,24 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Returned after a refund": "退款后退回",
   "Gone when you left": "退出时作废",
   Expired: "已过期",
-  "Loading your points": "正在读取你的积分",
+  "Loading your points": "正在读取您的积分",
   "Scan the QR code at your table to see your points.": "请扫桌上的二维码查看积分。",
   "We couldn’t load your points. Check your connection and try again.":
     "读取不到积分。请检查网络后再试。",
-  "You’ve left. Your phone number is deleted.": "你已退出，手机号已删除。",
+  "You’ve left. Your phone number is deleted.": "您已退出，手机号已删除。",
   "Sign in or join with your mobile number.": "用手机号登录或加入。",
   "This restaurant doesn’t offer points right now. If you’re a member, sign in to see your points or leave.":
-    "这家餐厅目前没有积分活动。如果你是会员，可以登录查看积分或退出。",
+    "这家餐厅目前没有积分活动。如果您是会员，可以登录查看积分或退出。",
   "{points} points": "{points} 分",
   "Number ending in {last4}": "手机尾号 {last4}",
   "{points} points are owed from a refunded order. New points pay this off first.":
     "因退款欠 {points} 分。之后获得的积分会先抵这部分。",
   "Your points expire on {date}. Earn or use any before then to keep them.":
-    "你的积分将于 {date} 过期。在此之前积分或使用即可保留。",
+    "您的积分将于 {date} 过期。在此之前积分或使用即可保留。",
   "Your points expire on {date} if you don’t earn or use any before then.":
     "如果在 {date} 之前没有积分或使用，积分将过期。",
   "This restaurant doesn’t offer points right now. Your points stay yours.":
-    "这家餐厅目前没有积分活动。你的积分还在。",
+    "这家餐厅目前没有积分活动。您的积分还在。",
   "How points work": "积分怎么用",
   "{earn} points for every $1 of dishes you pay for. {redeem} points take $1 off dishes, from {minimum} points. Tax, tips and discounted dishes don’t earn.":
     "菜品每付 $1 得 {earn} 分。{redeem} 分抵 $1 菜品，满 {minimum} 分可用。税、小费和免单或打折的部分不积分。",
@@ -1734,7 +1734,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Leave and delete my details": "退出会员并删除资料",
   "Confirm leaving": "确认退出",
   "Your phone number is deleted right away and your {points} points are gone. If you join again you start at 0. This can’t be undone.":
-    "手机号会马上删除，你的 {points} 分会作废。再次加入从 0 分开始。这一步不能撤销。",
+    "手机号会马上删除，您的 {points} 分会作废。再次加入从 0 分开始。这一步不能撤销。",
   "Leave and delete": "退出并删除",
   "Stay a member": "继续做会员",
   "Your points": "我的积分",
@@ -1782,14 +1782,14 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "These dishes were already ordered. Nothing new was charged.":
     "这些菜已经下过单，这次没有新的扣款。",
   "Some of your table’s dishes are waiting for staff to confirm them. Ask staff to confirm them, then pay.":
-    "你这桌有菜品正在等店员确认。请先请店员确认，再付款。",
+    "您这桌有菜品正在等店员确认。请先请店员确认，再付款。",
   "Still adding; the restaurant's system is busy. No need to tap again.":
     "还在加入，餐厅系统有点忙，不用再按。",
   "Checking your payment — don’t pay again": "正在确认付款，请不要重复付款",
-  "We’re checking your payment. This page updates by itself.": "正在确认你的付款，本页会自动更新。",
+  "We’re checking your payment. This page updates by itself.": "正在确认您的付款，本页会自动更新。",
   "Check now": "立即查看",
   "Time to pay ran out": "付款时间已过",
-  "This order is being cancelled and you haven’t been charged.": "这笔订单正在取消，你没有被扣款。",
+  "This order is being cancelled and you haven’t been charged.": "这笔订单正在取消，您没有被扣款。",
   "This page updates by itself.": "本页会自动更新。",
   "Your order was cancelled and you haven’t been charged.": "订单已取消，没有扣款。",
   "Pay by {time}": "请在 {time} 前付款",
@@ -1809,34 +1809,34 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这单因未按时付款已取消，没有扣款。",
   "We’ve stopped keeping your price. Tap Refresh prices: any price that changed is shown before you pay. Your details are kept.":
     "价格保留时间已到。请点“刷新价格”：有改价的菜会在付款前列出。已填信息会保留。",
-  "Your price is kept for {left}": "价格为你保留 {left}",
+  "Your price is kept for {left}": "价格为您保留 {left}",
   "Your price is kept for 1 more minute. Continue now, or we’ll check prices again.":
-    "价格只再为你保留 1 分钟。请现在继续，否则会重新核价。",
+    "价格只再为您保留 1 分钟。请现在继续，否则会重新核价。",
   "New total {total}": "新合计 {total}",
   "I accept the new prices": "我接受新价格",
-  "Some dishes changed since you added them.": "有菜在你加入购物车后改动了。",
+  "Some dishes changed since you added them.": "有菜在您加入购物车后改动了。",
   "Checkout asks you to confirm these changes before you pay.":
-    "结账时会请你先确认这些改动再付款。",
+    "结账时会请您先确认这些改动再付款。",
   "I have read these changes": "我已看过这些改动",
   "Tick the box above to place your order.": "请先勾选上面的方框再下单。",
   "Tick the box above to continue to payment.": "请先勾选上面的方框再继续付款。",
   "A dish changed since you added it. Nothing was ordered. Read the changes above, tick the box, then place your order.":
-    "有菜在你加入购物车后改动了，这次没有下单。请看上面的改动，勾选方框后再下单。",
+    "有菜在您加入购物车后改动了，这次没有下单。请看上面的改动，勾选方框后再下单。",
   "We couldn’t check whether a dish changed since you added it, so nothing was ordered or charged. Try again, or ask staff.":
-    "暂时无法确认菜品在你加入购物车后是否有改动，所以没有下单，也没有扣款。请再试一次，或问店员。",
+    "暂时无法确认菜品在您加入购物车后是否有改动，所以没有下单，也没有扣款。请再试一次，或问店员。",
   "Changed since you added it:": "加入购物车后有改动：",
-  "{dish} was renamed since you added it.": "{dish}在你加入购物车后改了名。",
+  "{dish} was renamed since you added it.": "{dish}在您加入购物车后改了名。",
   "{from} is now called {to}.": "{from}现在叫{to}。",
   "{dish} now has another name on the menu: {to}.": "{dish}在菜单上多了一个名称：{to}。",
   "{dish} now has a {language} name: {to}.": "{dish}现在有{language}名称：{to}。",
   "{dish} was renamed on the menu from {from} to {to}.": "{dish}在菜单上的名称从{from}改为{to}。",
   "{dish}: its {language} name changed from {from} to {to}.":
     "{dish}的{language}名称从{from}改为{to}。",
-  "The name you see here is the same.": "你看到的名称没有变。",
+  "The name you see here is the same.": "您看到的名称没有变。",
   Chinese: "中文",
   English: "英文",
   "{dish} allergens changed since you added it. Ask staff before you order.":
-    "{dish}的过敏原在你加入购物车后有改动。点单前请先问店员。",
+    "{dish}的过敏原在您加入购物车后有改动。点单前请先问店员。",
   "{dish} allergens now: {allergens}.": "{dish}现在的过敏原：{allergens}。",
   "A tip can’t be more than the order itself ({subtotal}). Ask staff if you’d like to leave more.":
     "小费不能超过订单金额（{subtotal}）。如想多给，请告诉店员。",
@@ -1846,9 +1846,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Getting your total…": "正在计算总价…",
   "{dish}: {old} → {new}": "{dish}：{old} → {new}",
   "{dish}: now {new}, was {old}": "{dish}：现价 {new}，原价 {old}",
-  "Prices changed since you added these:": "以下菜品在你加入后改了价：",
+  "Prices changed since you added these:": "以下菜品在您加入后改了价：",
   "A dish": "一道菜",
-  "Checkout asks you to accept the new prices before you pay.": "结账时会请你先确认新价格再付款。",
+  "Checkout asks you to accept the new prices before you pay.": "结账时会请您先确认新价格再付款。",
   "Enter your name": "请填写姓名",
   "Enter an email address, like name@example.com": "请填写邮箱，例如 name@example.com",
   "Tick this to continue": "勾选后才能继续",
@@ -1883,24 +1883,24 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "账单正在更新，本页稍后会自动刷新。",
   "Everything on the bill is paid ({count} payments). Thank you!":
     "账单都已付清（共 {count} 笔），谢谢！",
-  "Paying {amount} for the dishes you chose.": "正在为你选的菜付 {amount}。",
+  "Paying {amount} for the dishes you chose.": "正在为您选的菜付 {amount}。",
   "Paying {amount} for the dishes you chose, tip included.":
-    "正在为你选的菜付 {amount}（含小费）。",
-  "Tip (for the dishes you pay)": "小费（按你付的菜）",
+    "正在为您选的菜付 {amount}（含小费）。",
+  "Tip (for the dishes you pay)": "小费（按您付的菜）",
   "Choose the dishes you pay for": "请选择要付的菜",
   "Your table is paying by dish: {paid} paid so far · {amount} to go.":
     "这桌正在按菜付：已付 {paid} 笔 · 还剩 {amount}。",
-  "you paid": "你付的",
+  "you paid": "您付的",
   "Which dishes are you paying for?": "这次付哪些菜？",
   "The rest of the table ({count} dishes · {amount})": "付剩下的（{count} 道菜 · {amount}）",
   "The whole table ({count} dishes · {amount})": "付全桌（{count} 道菜 · {amount}）",
   "The rest of the table (1 dish · {amount})": "付剩下的（1 道菜 · {amount}）",
   "The whole table (1 dish · {amount})": "付全桌（1 道菜 · {amount}）",
   "The whole table (1 dish)": "付全桌（1 道菜）",
-  "Only what I added (nothing of yours is left to pay)": "只付我加的（你加的菜都已有人付）",
+  "Only what I added (nothing of yours is left to pay)": "只付我加的（您加的菜都已有人付）",
   "Only what I added ({count} · {amount})": "只付我加的（{count} 道 · {amount}）",
   "Choose dishes to pay for": "选择要付的菜",
-  "you added": "你加的",
+  "you added": "您加的",
   "{count} left": "还剩 {count} 份",
   "One less {dish}": "{dish} 少一份",
   "One more {dish}": "{dish} 多一份",
@@ -1917,9 +1917,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Don’t pay. Put the dishes back": "先不付，把菜放回购物车",
   "The dishes are back in the cart. Nothing was charged.": "菜已放回购物车，没有扣款。",
   "Your payment went through, so this round is paid and goes to the kitchen.":
-    "你的付款已成功，这一轮已付款，会送到厨房。",
+    "您的付款已成功，这一轮已付款，会送到厨房。",
   "Your payment may still be going through. Wait a minute, then check again.":
-    "你的付款可能还在处理中，请稍等一分钟再看。",
+    "您的付款可能还在处理中，请稍等一分钟再看。",
   "This table is closed, so the dishes can’t go back to the cart. Ask staff.":
     "这一桌已结束，菜不能放回购物车。请问店员。",
   "This round can’t be stopped now. Ask staff if you need help.":
@@ -1928,14 +1928,14 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "暂时连不上店里。请再试一次，不会重复操作。",
   // WP-2423 shared-table-checkout (a): pay first, the payer chooses this round's dishes.
   "Someone at your table is paying for their dishes. Yours are kept and come back here when they finish.":
-    "同桌有人正在为自己的菜付款。你的菜会保留，付完后回到这里。",
+    "同桌有人正在为自己的菜付款。您的菜会保留，付完后回到这里。",
   "Someone at your table is paying for their dishes. Wait until they finish.":
     "同桌有人正在为自己的菜付款，请等他们付完。",
   "Next round": "下一轮",
   "Putting these dishes back in the cart…": "正在把这些菜放回购物车…",
   "These dishes come back to the cart when the payment is done.": "付完后这些菜会回到购物车。",
   "options chosen": "已选规格",
-  "There is nothing of yours in the cart to pay for.": "购物车里没有你加的菜。",
+  "There is nothing of yours in the cart to pay for.": "购物车里没有您加的菜。",
   "Someone at your table is paying now. Try again in {seconds} seconds.":
     "同桌有人正在付款，请 {seconds} 秒后再试。",
   "The cart just changed. Check the dishes and choose again.": "购物车刚刚有变化，请看一下再选。",
@@ -1949,16 +1949,16 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "没选的菜留给同桌其他人付。含税金额在下一步显示。",
   "One moment…": "请稍等…",
   "Continue to pay": "去付款",
-  "You're paying for the dishes in this cart": "你正在为购物车里的这些菜付款",
+  "You're paying for the dishes in this cart": "您正在为购物车里的这些菜付款",
   "The others' dishes wait for the next round.": "其他人的菜留到下一轮。",
   "Back to cart (your choice is cancelled; nothing was charged)": "返回购物车（不付了，没有扣款）",
-  "The dishes you chose are kept for {seconds} more seconds.": "你选的菜还保留 {seconds} 秒。",
+  "The dishes you chose are kept for {seconds} more seconds.": "您选的菜还保留 {seconds} 秒。",
   "The dishes you chose are no longer kept: the others at your table can take theirs back.":
-    "你选的菜已不再保留，同桌其他人可以拿回他们的菜。",
+    "您选的菜已不再保留，同桌其他人可以拿回他们的菜。",
   "Back to cart": "返回购物车",
   "Someone at your table is paying": "同桌有人正在付款",
   "A choice can add allergens not listed here. If you have an allergy, ask staff before ordering.":
-    "选项可能会加入这里没列出的过敏原。如果你有过敏，请下单前先问店员。",
+    "选项可能会加入这里没列出的过敏原。如果您有过敏，请下单前先问店员。",
   Dishes: "菜品",
   "Nothing to pay": "无需付款",
   "The restaurant took everything off.": "餐厅已全部免单。",

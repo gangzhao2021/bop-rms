@@ -10,6 +10,7 @@ import {
   LanguageSwitch,
   initialLanguage,
   menuLocale,
+  saidTable,
   t,
   withNameLocale,
 } from "./i18n.js";
@@ -102,7 +103,7 @@ it("renders the whole page in Chinese once Chinese is chosen, with a switch back
         ),
     }),
   );
-  expect(html).toContain("你的购物车 · 订单 7");
+  expect(html).toContain("您的购物车 · 订单 7");
   const toggle = renderToStaticMarkup(
     createElement(LanguageRoot, {
       initial: "zh-Hans",
@@ -126,16 +127,64 @@ it("Owner 2026-10-23: asks the Store's item names in Chinese only while Chinese 
   expect(withNameLocale("/bff/customer/cart")).toBe("/bff/customer/cart");
 });
 
-it("b28 (v15 live26): the points and sign-up texts say 你, as the rest of the guest page does", () => {
-  const { keys } = translatedTexts(join(root, "member"));
-  expect(keys.size).toBeGreaterThan(40);
-  const formal = [...keys].filter((key) => (zhHans[key] ?? "").includes("您"));
-  expect(formal).toEqual([]);
+// Batch 42 (v15 b41 live): the waiting page said 您 and the table page 你 in one visit. Every guest
+// text speaks to the guest one way, politely (您), as the Owner's brief does (this replaces b28's
+// "你 everywhere", taken when most texts said 你).
+it("batch 42 (v15 b41 live): every Chinese guest text says 您, never 你", () => {
+  const informal = Object.entries(zhHans).filter(([, chinese]) => chinese.includes("你"));
+  expect(informal).toEqual([]);
+  expect(zhHans["Your table"]).toBe("您的桌位");
   expect(
     zhHans[
       "We use your phone number only to text you a sign-in code and to tell you before your points expire. You can leave and delete it any time."
     ],
-  ).toBe("手机号只用来发登录验证码，以及在积分过期前通知你。你可以随时退出并删除。");
+  ).toBe("手机号只用来发登录验证码，以及在积分过期前通知您。您可以随时退出并删除。");
+});
+
+it("batch 42 (v15 b41 live): a table named in Latin letters keeps a space where it meets Chinese", () => {
+  renderToStaticMarkup(createElement(LanguageRoot, { initial: "zh-Hans", children: () => null }));
+  try {
+    // Live: "Test Merchant 2 Main - not production 的L41V A (TEST) 还没开台".
+    expect(
+      t("Table {table} at {storeDisplayName} isn’t open yet", {
+        table: saidTable("L41V A (TEST)"),
+        storeDisplayName: "Test Merchant 2 Main - not production",
+      }),
+    ).toBe("Test Merchant 2 Main - not production 的 L41V A (TEST) 还没开台");
+    expect(
+      t("Not sitting at table {table}? Tell staff, so they can give you the code for your table.", {
+        table: saidTable("L41V A (TEST)"),
+      }),
+    ).toBe("您坐的不是 L41V A (TEST)？请告诉店员，换成您这桌的二维码。");
+    // A table moved between two named tables: a space on both sides of each name.
+    expect(
+      t(
+        "Staff moved your party from table {from} to table {table}. Keep ordering and paying on this phone.",
+        { from: saidTable("Patio"), table: saidTable("Window") },
+      ),
+    ).toBe("店员已把您从 Patio 换到 Window，继续用这部手机点餐和付款即可。");
+    // A numbered table keeps its word; a Chinese name gets no extra space.
+    expect(
+      t("Table {table} at {storeDisplayName} isn’t open yet", {
+        table: saidTable("12"),
+        storeDisplayName: "面馆",
+      }),
+    ).toBe("面馆 的桌号 12 还没开台");
+    expect(
+      t("Table {table} at {storeDisplayName} isn’t open yet", {
+        table: saidTable("包间"),
+        storeDisplayName: "面馆",
+      }),
+    ).toBe("面馆 的包间 还没开台");
+  } finally {
+    renderToStaticMarkup(createElement(LanguageRoot, { initial: "en", children: () => null }));
+  }
+  expect(
+    t("Table {table} at {storeDisplayName} isn’t open yet", {
+      table: saidTable("L41V A (TEST)"),
+      storeDisplayName: "Noodle Bar",
+    }),
+  ).toBe("L41V A (TEST) at Noodle Bar isn’t open yet");
 });
 
 it("batch 40 (v15 cross-midnight): Chinese sentences end with “。”, never an ASCII period", async () => {
