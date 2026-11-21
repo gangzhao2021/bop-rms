@@ -949,6 +949,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Round total incl. tax": "本轮含税合计",
   "Nothing to charge now. The round is on the table's bill; the table pays once at the end, tip included.":
     "现在不用收款。这一轮已记入本桌账单，这桌最后一起结账，小费也在那时选。",
+  "Nothing to charge now. The round is on the table's bill; the table pays once at the end.":
+    "现在不用收款。这一轮已记入本桌账单，这桌最后一起结账。",
   "Another order for this table": "这张桌台的另一笔订单",
   "Another person with Owner access must approve this configuration. You cannot approve a change you made.":
     "需由另一位有店主权限的人批准此配置。你不能批准自己提出的更改。",

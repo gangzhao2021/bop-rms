@@ -904,11 +904,22 @@ test("@production a table round the system could not send says so plainly, then 
   expect(operations[2]).toBe(operations[1]);
 });
 
-test("@production DEC-DINE-IN-PAY-LATER: a pay-later table's round goes to the kitchen with nothing to charge", async ({
-  page,
-}) => {
+for (const tipsOn of [true, false])
+  test(`@production DEC-DINE-IN-PAY-LATER: a pay-later table's round goes to the kitchen with nothing to charge (tips ${tipsOn ? "on" : "off"})`, async ({
+    page,
+  }) => {
+    await pendingPayLaterRound(page, tipsOn);
+  });
+
+async function pendingPayLaterRound(page: Page, tipsOn: boolean) {
   await signIn(page, { ...table, paymentTiming: "PayLater" });
-  await page.route("**/merchant/counter/menu**", (route) => route.fulfill({ headers, json: menu }));
+  // b39 review: a Store with tips off is never told the table chooses a tip at the end.
+  const storeMenu = tipsOn
+    ? menu
+    : { ...menu, tips: { enabled: false, tierPercents: [10, 15, 18] } };
+  await page.route("**/merchant/counter/menu**", (route) =>
+    route.fulfill({ headers, json: storeMenu }),
+  );
   const rounds: Record<string, unknown>[] = [];
   await page.route("**/merchant/dining/staff-rounds", (route) => {
     rounds.push(route.request().postDataJSON() as Record<string, unknown>);
@@ -949,6 +960,15 @@ test("@production DEC-DINE-IN-PAY-LATER: a pay-later table's round goes to the k
     page.getByRole("heading", { name: "Table T4 round sent to the kitchen" }),
   ).toBeVisible();
   await expect(page.getByText("Nothing to charge now.", { exact: false })).toBeVisible();
+  await expect(
+    page.getByText(
+      tipsOn
+        ? "Nothing to charge now. The round is on the table's bill; the table pays once at the end, tip included."
+        : "Nothing to charge now. The round is on the table's bill; the table pays once at the end.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  if (!tipsOn) await expect(page.getByText(/\btips?\b/iu)).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Paid on card machine/u })).toHaveCount(0);
   expect(rounds.at(-1)).toMatchObject({ tip: { kind: "None" } });
   expect(charged).toBe(false);
@@ -959,11 +979,11 @@ test("@production DEC-DINE-IN-PAY-LATER: a pay-later table's round goes to the k
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
     await page.screenshot({
-      path: `test-results/staff-dining-round-pay-later-${width}.png`,
+      path: `test-results/staff-dining-round-pay-later${tipsOn ? "" : "-no-tips"}-${width}.png`,
       fullPage: true,
     });
   }
-});
+}
 
 /**
  * WP-2423 (staff-round-soldout, v15 8911a4c1 M06): a guest's plum juice in the table's shared cart

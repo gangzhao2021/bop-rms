@@ -2903,9 +2903,14 @@ export function StaffOrderEntryPage({
               </div>
             </dl>
             <p role="status">
-              {t(
-                "Nothing to charge now. The round is on the table's bill; the table pays once at the end, tip included.",
-              )}
+              {/* b39 review: a tip is promised only where the Store takes tips. */}
+              {tips?.enabled === true
+                ? t(
+                    "Nothing to charge now. The round is on the table's bill; the table pays once at the end, tip included.",
+                  )
+                : t(
+                    "Nothing to charge now. The round is on the table's bill; the table pays once at the end.",
+                  )}
             </p>
             {paper ? (
               <p role="note">
