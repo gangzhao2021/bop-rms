@@ -25,7 +25,7 @@ import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
 /** WP-2423 / DEC-INV-WASTE: record waste as it happens; managers review high-value records. */
 const copy: Record<StoreWasteErrorCode | "Loading", string> = {
   Loading: t("Loading waste…"),
-  PermissionDenied: t("You do not have permission for this waste action."),
+  PermissionDenied: t("Your role can't do this with waste records. Ask the owner or a manager."),
   NotFound: t("This waste record does not exist for the selected Store."),
   Conflict: t("This was already recorded. Refresh and check before trying again."),
   NotEnoughStock: t(

@@ -22,7 +22,9 @@ import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
 
 const copy: Record<OpeningCountErrorCode | "Loading", string> = {
   Loading: t("Loading the opening count…"),
-  PermissionDenied: t("You do not have permission for this step of the opening count."),
+  PermissionDenied: t(
+    "Your role can't do this step of the opening count. Ask the owner or a manager.",
+  ),
   NotFound: t("This opening count does not exist for the selected Store."),
   Conflict: t("The count changed since you opened it. Refresh and try again."),
   AlreadyPosted: t(

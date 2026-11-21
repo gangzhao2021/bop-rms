@@ -186,7 +186,7 @@ export function NewChoiceGroupForm({
       }
       setProblem(
         error instanceof MenuPageError && error.code === "PermissionDenied"
-          ? t("You do not have permission to make choice groups.")
+          ? t("Your role can't make choice groups. Ask the owner or a manager.")
           : t("That didn't go through. Read the menu again and retry."),
       );
     } finally {

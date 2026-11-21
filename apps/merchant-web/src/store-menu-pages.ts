@@ -229,7 +229,7 @@ function menuStopText(
     case "NoDraft":
       return t("There is nothing new to list.");
     case "NotAuthorized":
-      return t("Your sign-in no longer allows listing this menu. Ask the Owner to list it.");
+      return t("Your role can't list this menu. Ask the owner to list it.");
     case "NoConfiguration":
       return t(
         "This menu has no dishes ready to list yet. Add a dish, answer its allergens, then list the menu.",

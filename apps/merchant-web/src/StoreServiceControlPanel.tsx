@@ -12,6 +12,7 @@ import {
   createServiceControlClient,
   serviceOperationReference,
   pauseTooLongText,
+  serviceControlDeniedText,
   type ServiceControlCommand,
   type ServiceControlState,
   type ServiceMode,
@@ -170,8 +171,7 @@ export function StoreServiceControlPanel({ store, csrf }: { store: string; csrf:
       setMessage("");
     } catch (error) {
       if (activeController.signal.aborted) return;
-      if (error instanceof Error && error.message.startsWith("Permission denied."))
-        setNoAccess(true);
+      if (error instanceof Error && error.message === serviceControlDeniedText) setNoAccess(true);
       else
         setMessage(t("Unable to load current service status. Check your connection and refresh."));
     } finally {
@@ -216,8 +216,8 @@ export function StoreServiceControlPanel({ store, csrf }: { store: string; csrf:
       if (activeController.signal.aborted) return;
       const detail = error instanceof Error ? error.message : "";
       if (
-        detail.startsWith("Source changed.") ||
-        detail.startsWith("Permission denied.") ||
+        detail.startsWith(t("Source changed. Refresh before trying again.")) ||
+        detail === serviceControlDeniedText ||
         detail === pauseTooLongText
       ) {
         pending.current = null;

@@ -219,7 +219,9 @@ test("@production Settlement shows the day's totals, the run result and differen
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
   await expect(page.getByRole("heading", { name: "No access", exact: true })).toBeVisible();
   await expect(
-    page.getByText("You don't have access to this page. Ask the owner or a manager."),
+    page.getByText(
+      "Your role can't open this page. Ask the owner or a manager to give you access, or sign in as a staff member who has it.",
+    ),
   ).toBeVisible();
   await expect(page.getByText("$1,234.50")).toHaveCount(0);
 });
@@ -486,7 +488,9 @@ test("@production WP-2423 Settlement is hidden from staff without the settlement
   await expect(workspace.getByRole("link", { name: "Settlement" })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "No access", exact: true })).toBeVisible();
   await expect(
-    page.getByText("You don't have access to this page. Ask the owner or a manager."),
+    page.getByText(
+      "Your role can't open this page. Ask the owner or a manager to give you access, or sign in as a staff member who has it.",
+    ),
   ).toBeVisible();
   await expect(page.getByText("$1,234.50")).toHaveCount(0);
   expect(reads).toBeGreaterThan(0);

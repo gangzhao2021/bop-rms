@@ -80,7 +80,7 @@ describe("WP-2423 price changes on a PIN sign-in", () => {
     const denied = renderToStaticMarkup(
       <PriceCommandMessage
         message={{
-          text: "You do not have permission for this price action at Brand level.",
+          text: "Your role can't change prices. Ask the owner or a manager.",
           fullSignIn: false,
         }}
         csrf="csrf"

@@ -301,7 +301,7 @@ describe("WP-2423 product description and photo", () => {
     }
     expect(photoRetryable("PhotoTooSmall")).toBe(false);
     expect(photoUploadMessage("PermissionDenied")).toBe(
-      "You do not have permission for this product action at Brand level.",
+      "Your role can't change products. Ask the owner or a manager.",
     );
   });
 

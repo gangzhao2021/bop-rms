@@ -896,7 +896,7 @@ test("@production lost template reply retains real payload-free IDB through deni
   await region
     .getByRole("button", { name: "Recover original receipt draft save", exact: true })
     .click();
-  await expect(region.getByRole("alert")).toContainText("Permission denied");
+  await expect(region.getByRole("alert")).toContainText("Your role can't change receipt styles.");
   expect(await cursors(page)).toHaveLength(1);
   state.deny = false;
   await region
@@ -1031,7 +1031,7 @@ test("@production lost template submission survives reload and denied recovery w
   await region
     .getByRole("button", { name: "Recover earlier template submission", exact: true })
     .click();
-  await expect(region.getByRole("alert")).toContainText("Permission denied");
+  await expect(region.getByRole("alert")).toContainText("Your role can't change receipt styles.");
   expect(await cursors(page, true)).toHaveLength(1);
   await expect(
     region.getByRole("button", { name: "Save receipt draft", exact: true }),

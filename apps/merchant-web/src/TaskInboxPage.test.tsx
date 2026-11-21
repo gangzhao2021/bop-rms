@@ -81,6 +81,8 @@ it("provides a clear permission-denied state", () => {
     </MemoryRouter>,
   );
   expect(html).toContain("No access");
-  expect(html).toContain("You don&#x27;t have access to this page. Ask the owner or a manager.");
+  expect(html).toContain(
+    "Your role can&#x27;t open this page. Ask the owner or a manager to give you access, or sign in as a staff member who has it.",
+  );
   expect(html).not.toContain("workflow.operate");
 });

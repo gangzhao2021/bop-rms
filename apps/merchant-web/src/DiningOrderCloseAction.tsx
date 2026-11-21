@@ -59,7 +59,7 @@ export function DiningOrderCloseAction({
             : error.code === "NotReady"
               ? closeReasonTexts(error.reasons.length > 0 ? error.reasons : ["UNKNOWN"])
               : error.code === "PermissionDenied"
-                ? [t("Your access doesn't allow closing orders. Ask an Owner or Store Manager.")]
+                ? [t("Your role can't close orders. Ask the owner or a manager.")]
                 : [t("The order changed meanwhile. Refresh it and try again.")],
         );
         if (!unknown) onBusy(false);

@@ -278,7 +278,7 @@ test("@production staff starts a table and recovers a lost join code without dup
   await page.getByRole("button", { name: "Refresh tables", exact: true }).click();
   await expect(page.getByRole("button", { name: "Select T1", exact: true })).toHaveCount(0);
   await expect(page.getByRole("status").last()).toContainText(
-    "Your current permissions do not allow table operations.",
+    "Your role can't use Tables. Ask the owner or a manager to give you access, or sign in as a staff member who has it.",
   );
   await page.getByRole("button", { name: "Refresh tables", exact: true }).click();
   await expect(page.getByRole("button", { name: "Select T1", exact: true })).toBeVisible();

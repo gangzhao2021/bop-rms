@@ -134,7 +134,7 @@ describe("Shared tablets & PINs", () => {
       needsVerification: false,
       message: {
         tone: "error",
-        text: "You don't have permission to do this. Ask the store owner.",
+        text: "Your role can't manage shared tablets or staff PINs. Ask the owner or a manager.",
       },
     });
   });

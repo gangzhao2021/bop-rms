@@ -49,7 +49,7 @@ import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
 const copy: Record<AvailabilityErrorCode | "Loading", string> = {
   Loading: t("Loading item availability…"),
   PermissionDenied: t(
-    "You do not have permission for this. Offering items is a Brand decision; kitchen and front-of-house staff can mark items sold out for today, and a manager can mark them sold out until further notice.",
+    "Your role can't do this. Whether an item is offered is decided for the whole brand; kitchen and front-of-house staff can mark items sold out for today, and a manager can mark them sold out until further notice.",
   ),
   NotFound: t("This item is no longer sold by the Brand."),
   Conflict: t(

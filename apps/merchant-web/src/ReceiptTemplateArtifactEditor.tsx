@@ -341,7 +341,7 @@ function Preset({
       {error && !readFailed && (
         <p role="alert">
           {error === "Denied"
-            ? t("You do not have permission to manage this receipt style.")
+            ? t("Your role can't change receipt styles. Ask the owner or a manager.")
             : error === "Conflict"
               ? t(
                   "The saved style was changed elsewhere. What is saved now is shown; save again if you still need to.",

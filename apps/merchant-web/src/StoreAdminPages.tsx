@@ -1,3 +1,4 @@
+import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { systemText, t } from "./i18n/i18n.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useState } from "react";
@@ -69,11 +70,7 @@ export function StoreAdminStatePanel({ state }: { readonly state: StoreAdminStat
       t("This Store is unavailable in the current scope."),
       "neutral",
     ],
-    PermissionDenied: [
-      t("Permission denied"),
-      t("Your current permission and Store scope do not allow this view."),
-      "error",
-    ],
+    PermissionDenied: [noAccessHeading, pageAccessDeniedText, "error"],
     Offline: [
       t("Offline read-only"),
       t("Store configuration cannot be loaded or changed while the owning source is offline."),

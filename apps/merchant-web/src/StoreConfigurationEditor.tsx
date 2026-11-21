@@ -305,7 +305,7 @@ export function StoreConfigurationEditor({ store, csrf }: { store: string; csrf:
     } catch (error) {
       if (active.signal.aborted) return;
       const text = error instanceof Error ? error.message : t("Configuration request unavailable.");
-      if (text.startsWith("Source changed")) {
+      if (text === t("Source changed. Refresh before trying again.")) {
         pending.current = null;
         setUncertain(false);
         setView(null);
@@ -313,7 +313,6 @@ export function StoreConfigurationEditor({ store, csrf }: { store: string; csrf:
       } else if (
         // WP-2423 (v15): a refusal keeps the form and the change on screen (an approval refused
         // with 403 no longer collapses the editor); the reason says what to do next.
-        text.startsWith("Permission denied") ||
         storeConfigurationKeptRefusals.has(text) ||
         text.startsWith("Change not accepted") ||
         text === STORE_SETUP_UNPUBLISHED_MESSAGE ||

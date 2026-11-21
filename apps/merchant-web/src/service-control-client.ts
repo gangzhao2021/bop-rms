@@ -1,4 +1,8 @@
 import { sharedRead, type SharedReadScope } from "./shared-read.js";
+import { actionAccessDeniedText } from "./access-denied.js";
+import { t } from "./i18n/i18n.js";
+/** Batch 38: the 403 answer, in the shared staff words (the panels tell it apart by this text). */
+export const serviceControlDeniedText = actionAccessDeniedText;
 export type ServiceMode = "DineIn" | "Pickup" | "Delivery";
 export interface ServiceInterval {
   startLocalTime: string;
@@ -259,9 +263,9 @@ export function createServiceControlClient(fetcher: typeof fetch = fetch) {
         },
         ...(command ? { body: JSON.stringify(command) } : {}),
       });
-      if (response.status === 403)
-        throw new Error("Permission denied. Check your session and Store access.");
-      if (response.status === 409) throw new Error("Source changed. Refresh before trying again.");
+      if (response.status === 403) throw new Error(serviceControlDeniedText);
+      if (response.status === 409)
+        throw new Error(t("Source changed. Refresh before trying again."));
       // WP-2423 store-service-controls (v15 M30): a new pause lasts at most 4 hours.
       if (response.status === 422) throw new Error(pauseTooLongText);
       if (

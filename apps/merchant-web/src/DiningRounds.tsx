@@ -507,7 +507,7 @@ export function DiningRoundsProvider({
       <p role="status" className="dining-rounds__status">
         {notice ??
           (unavailable === "PermissionDenied"
-            ? t("Your current permissions do not allow serving progress.")
+            ? t("Your role can't see which dishes are served. Ask the owner or a manager.")
             : unavailable === "Unavailable"
               ? t("Serving progress could not be read. It is read again with the order.")
               : null)}

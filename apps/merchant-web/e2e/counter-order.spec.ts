@@ -715,7 +715,9 @@ test("@production counter order fails closed without the staff ordering permissi
   await page.goto("/operations/order-entry");
   await expect(page.getByRole("heading", { name: "No access", exact: true })).toBeVisible();
   await expect(
-    page.getByText("You don't have access to this page. Ask the owner or a manager."),
+    page.getByText(
+      "Your role can't open this page. Ask the owner or a manager to give you access, or sign in as a staff member who has it.",
+    ),
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "Send order" })).toHaveCount(0);
 });

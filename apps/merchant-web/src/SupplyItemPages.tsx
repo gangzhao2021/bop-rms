@@ -25,7 +25,7 @@ import { stockUnitName } from "./stock-reason-text.js";
 
 const copy: Record<SupplyItemErrorCode | "Loading", string> = {
   Loading: t("Loading inventory items…"),
-  PermissionDenied: t("You do not have permission for this inventory action."),
+  PermissionDenied: t("Your role can't change inventory items. Ask the owner or a manager."),
   NotFound: t("This inventory item does not exist for the selected Brand."),
   Conflict: t(
     "The item changed or the action is not allowed in its current status. Refresh and try again.",
@@ -478,7 +478,7 @@ function ItemForm({
       </label>
       <label>
         {t("Base unit {value}", {
-          value: unitLocked ? t("(requires unit management permission)") : "",
+          value: unitLocked ? t("(your role can't change it)") : "",
         })}
         <select
           disabled={unitLocked}
@@ -495,7 +495,7 @@ function ItemForm({
       <fieldset disabled={trackingLocked}>
         <legend>
           {t("Tracking {value}", {
-            value: trackingLocked ? t("(requires tracking management permission)") : "",
+            value: trackingLocked ? t("(your role can't change it)") : "",
           })}
         </legend>
         <label>

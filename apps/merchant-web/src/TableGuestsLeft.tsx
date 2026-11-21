@@ -566,9 +566,7 @@ export function TableGuestsLeft({
           )}
         </p>
       ) : run === "Denied" ? (
-        <p role="alert">
-          {t("Your access doesn't allow cancelling rounds. Ask an Owner or Store Manager.")}
-        </p>
+        <p role="alert">{t("Your role can't cancel rounds. Ask the owner or a manager.")}</p>
       ) : run === "Refused" ? (
         <p role="alert">
           {t(

@@ -29,7 +29,7 @@ import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
 /** WP-2423 / DEC-ALLERGEN-DECLARATIONS: Brand allergen registry and ingredient declarations. */
 const copy: Record<AllergenErrorCode | "Loading", string> = {
   Loading: t("Loading allergens…"),
-  PermissionDenied: t("You do not have permission for this allergen action at Brand level."),
+  PermissionDenied: t("Your role can't change allergens. Ask the owner or a manager."),
   NotFound: t("This ingredient does not exist or is not active."),
   Conflict: t(
     "The ingredient or the allergen list changed since you opened it. Refresh and declare again.",

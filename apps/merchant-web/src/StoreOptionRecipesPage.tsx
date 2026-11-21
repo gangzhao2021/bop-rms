@@ -28,7 +28,7 @@ import { PageDidNotLoad, readingAgain, useReadAgainWhenSignedInAgain } from "./P
 /** WP-2423 slice 4.4: what each option does to a product's recipes, reviewed and published. */
 const copy: Record<OptionRecipeErrorCode | "Loading", string> = {
   Loading: t("Loading option recipes…"),
-  PermissionDenied: t("You do not have permission for this recipe action at Brand level."),
+  PermissionDenied: t("Your role can't change recipes. Ask the owner or a manager."),
   NotFound: t("That option is no longer on the product. Refresh and check."),
   Conflict: t("This changed since you opened the page, or was already decided. Refresh and check."),
   NoRecipe: t(

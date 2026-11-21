@@ -24,7 +24,9 @@ import { stockReasonText } from "./stock-reason-text.js";
 /** WP-2423 / DEC-INV-STOCK-COUNT: Store stock counts — blind counting, review and posting. */
 const copy: Record<StockCountErrorCode | "Loading", string> = {
   Loading: t("Loading stock counts…"),
-  PermissionDenied: t("You do not have permission for this count action."),
+  PermissionDenied: t(
+    "Your role can't do this step of the stock count. Ask the owner or a manager.",
+  ),
   NotFound: t("This count does not exist for the selected Store."),
   // Only an actual concurrent change: someone saved another step of this count first.
   Conflict: t(

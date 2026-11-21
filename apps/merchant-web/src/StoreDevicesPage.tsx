@@ -61,7 +61,8 @@ export function staffPinStatusText(
 export function commandFailureText(error: unknown, action: "Register" | PendingAction): string {
   const code = error instanceof StaffPinError ? error.code : "Unavailable";
   if (code === "FullSignInRequired") return FULL_SIGN_IN_GUIDANCE;
-  if (code === "Denied") return t("You don't have permission to do this. Ask the store owner.");
+  if (code === "Denied")
+    return t("Your role can't manage shared tablets or staff PINs. Ask the owner or a manager.");
   if (code === "Offline" || code === "Unavailable")
     return t("Nothing changed. Check the connection and try again.");
   if (action === "Register") {
@@ -185,7 +186,9 @@ export function StoreDevicesView({
         <p role="status">{t("Loading shared tablets and PINs…")}</p>
       ) : load.kind === "Denied" ? (
         <StatePanel heading={t("No access")} tone="error" status>
-          <p>{t("Your role can't manage shared tablets or staff PINs. Ask the store owner.")}</p>
+          <p>
+            {t("Your role can't manage shared tablets or staff PINs. Ask the owner or a manager.")}
+          </p>
         </StatePanel>
       ) : load.kind === "Offline" || load.kind === "Failed" ? (
         <StatePanel heading={t("Couldn't load this page")} tone="error" status>

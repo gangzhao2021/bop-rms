@@ -821,7 +821,9 @@ export function DiningSessionWorkspace({
           setFirstReadFailures((prior) => (server ? (prior ?? 0) + 1 : null));
           setMessage(
             denied
-              ? t("Your current permissions do not allow table operations.")
+              ? t(
+                  "Your role can't use Tables. Ask the owner or a manager to give you access, or sign in as a staff member who has it.",
+                )
               : server
                 ? floorServerProblemText
                 : t("Tables unavailable. Check your connection and refresh."),

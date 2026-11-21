@@ -72,7 +72,7 @@ function errorText(error: unknown): string {
         : "OutcomeUnknown";
   switch (code) {
     case "PermissionDenied":
-      return t("Your access doesn't allow this. Ask an Owner or Store Manager.");
+      return t("Your role can't do this. Ask the owner or a manager.");
     case "NotStarted":
       return t("Start checkout first, so no more rounds are sent from this table.");
     case "NothingOwed":

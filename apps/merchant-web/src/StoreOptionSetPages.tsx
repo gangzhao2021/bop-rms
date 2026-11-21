@@ -34,7 +34,7 @@ import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
  */
 const copy: Record<OptionSetErrorCode | "Loading", string> = {
   Loading: t("Loading options…"),
-  PermissionDenied: t("You do not have permission to change the Brand's options."),
+  PermissionDenied: t("Your role can't change options. Ask the owner or a manager."),
   NotFound: t("This option set does not exist for the Brand."),
   Conflict: t("The option set changed since you opened it. Refresh and check again."),
   Invalid: t(

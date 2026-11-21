@@ -30,7 +30,7 @@ import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
 /** WP-2423 / DEC-PRICE-STORE-ASSIGNMENT: Brand price books and the price book this Store charges. */
 const copy: Record<PriceErrorCode | "Loading", string> = {
   Loading: t("Loading prices…"),
-  PermissionDenied: t("You do not have permission for this price action at Brand level."),
+  PermissionDenied: t("Your role can't change prices. Ask the owner or a manager."),
   NotFound: t("This price book does not exist for the Brand."),
   Conflict: t("The price book changed since you opened it. Refresh and check again."),
   CodeTaken: t("Another price book of the Brand already uses this code."),

@@ -546,7 +546,9 @@ export function StoreReports({
         />
       </ReportSection>
       {view.mayExport ? null : (
-        <p className="bop-muted">{t("Downloading reports needs the export permission.")}</p>
+        <p className="bop-muted">
+          {t("Your role can't download reports. Ask the owner or a manager.")}
+        </p>
       )}
     </div>
   );

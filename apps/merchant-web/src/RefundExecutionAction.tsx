@@ -237,7 +237,7 @@ export function RefundExecutionAction({
               ? t("The check did not finish. Keep this page open and retry the same check.")
               : error instanceof OrdinaryRefundExecutionError && error.code === "PermissionDenied"
                 ? t(
-                    "Your session or permissions do not allow this check. Sign in again, then retry.",
+                    "Your role can't check refunds, or your sign-in has ended. Sign in again; if it still doesn't work, ask the owner or a manager.",
                   )
                 : t("Checking refunds is not set up for this store. Contact BOP support."),
         );

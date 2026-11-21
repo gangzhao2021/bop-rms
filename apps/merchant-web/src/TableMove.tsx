@@ -155,7 +155,7 @@ export function TableMove({
                 : code === "CheckingOut"
                   ? t("This table is checking out, so it stays where it is.")
                   : code === "Denied"
-                    ? t("You don't have permission to move tables.")
+                    ? t("Your role can't move tables. Ask the owner or a manager.")
                     : code === "Changed" || code === "NotSeated"
                       ? t("The tables changed meanwhile. They are read again: check and retry.")
                       : t("The move wasn't confirmed. Try again."),

@@ -586,7 +586,7 @@ function stopWords(outcome: Extract<StoreOpeningOutcome, { kind: "Stopped" }>): 
   );
   switch (outcome.code) {
     case "Denied":
-      return t("Your sign-in does not allow {step}. Ask the Owner to open this page.", {
+      return t("Your role can't set up {step}. Ask the owner to do this step.", {
         step: stepWords(outcome.step),
       });
     case "SoleOperatorNeedsVerification":

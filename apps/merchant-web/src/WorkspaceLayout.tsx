@@ -18,6 +18,7 @@ import {
 } from "react";
 import { Link } from "react-router";
 import type { MerchantNavigationItem } from "./merchant-workspace.js";
+import { StaffNavigationContext } from "./NoAccessNotice.js";
 
 /**
  * Pages that render their own full-screen chrome or must guard leaving. The Kitchen pages pick
@@ -479,7 +480,9 @@ export function WorkspaceLayout({
         <SkipLinkProvidedContext.Provider value={true}>
           <WorkspaceFrameContext.Provider value={true}>
             <StaffCallsWaitingContext.Provider value={staffCalls}>
-              {children}
+              <StaffNavigationContext.Provider value={items}>
+                {children}
+              </StaffNavigationContext.Provider>
             </StaffCallsWaitingContext.Provider>
           </WorkspaceFrameContext.Provider>
         </SkipLinkProvidedContext.Provider>

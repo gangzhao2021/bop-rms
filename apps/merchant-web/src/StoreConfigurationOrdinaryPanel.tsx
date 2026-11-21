@@ -355,7 +355,7 @@ const messages: Record<StoreSetupClientError["code"], string> = {
   Invalid: t("This configuration request is invalid."),
   Stale: t("The current configuration observation expired. Refresh before a new request."),
   Denied: t(
-    "Current permission or session refused this request. Keep the original and retry after access is restored.",
+    "Your role can't save this change. What you entered is kept here. Ask the owner or a manager, or sign in as a staff member who can.",
   ),
   Conflict: t(
     "The saved source or configuration changed. Refresh before a new request; recover any pending original first.",

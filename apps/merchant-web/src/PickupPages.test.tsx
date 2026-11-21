@@ -102,7 +102,7 @@ describe("WP-1805 Pickup screens", () => {
     );
     expect(denied).toContain("No access");
     expect(denied).toContain(
-      "You don&#x27;t have access to this page. Ask the owner or a manager.",
+      "Your role can&#x27;t open this page. Ask the owner or a manager to give you access, or sign in as a staff member who has it.",
     );
     expect(denied).not.toMatch(/permission|scope/iu);
     // A real failure keeps its own message.

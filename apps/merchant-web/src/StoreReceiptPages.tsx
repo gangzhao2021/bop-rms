@@ -22,7 +22,7 @@ import { stockReasonText, unitText } from "./stock-reason-text.js";
 
 const copy: Record<StoreReceiptErrorCode | "Loading", string> = {
   Loading: t("Loading receiving…"),
-  PermissionDenied: t("You do not have permission for this receiving action."),
+  PermissionDenied: t("Your role can't record deliveries. Ask the owner or a manager."),
   NotFound: t("This receipt does not exist for the selected Store."),
   Conflict: t(
     "The receipt changed or was already recorded. Refresh and check before trying again.",

@@ -76,8 +76,9 @@ describe("Store administration Section 88 screens", () => {
         <StoreAdminStatePanel state="Conflict" />
       </MemoryRouter>,
     );
-    expect(permission).toContain("Permission denied");
-    expect(permission).toContain("current permission and Store scope");
+    expect(permission).toContain("No access");
+    expect(permission).toContain("Ask the owner or a manager to give you access");
+    expect(permission).not.toContain("Store scope");
     expect(conflict).toContain("Source changed");
     expect(conflict).toContain("authoritative Store version");
   });

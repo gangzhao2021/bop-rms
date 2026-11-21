@@ -201,7 +201,7 @@ describe("WP-2423 Q14 store reports page", () => {
   it("offers downloads only with the export permission", () => {
     const html = render({ ...storeReportsViewFixture(), permissions: { mayExport: false } });
     expect(html).not.toContain("Download CSV");
-    expect(html).toContain("Downloading reports needs the export permission.");
+    expect(html).toContain("Your role can&#x27;t download reports. Ask the owner or a manager.");
   });
   it("shows empty periods plainly", () => {
     const fixture = storeReportsViewFixture();

@@ -38,7 +38,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这张餐桌有客人在座。请先为他们结桌，再停用。",
   "Check the name (up to 40 characters) and the number of seats (1 to 100).":
     "请检查名称（最多 40 个字符）和座位数（1 到 100）。",
-  "You don't have permission to change this Store's tables.": "你没有权限修改本店的餐桌。",
   "Up to this many in total (empty for no limit)": "一共最多几个（不限就留空）",
   "Guests can take more than one of the same choice": "同一个选项可以点多份",
   "Up to this many of each": "每个选项最多几份",
@@ -335,8 +334,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "(exp.": "（到期",
   "(it can be printed later), then take the order.": "（可稍后打印），然后再点单。",
   "(min-width: 48.0625rem)": "(min-width: 48.0625rem)",
-  "(requires tracking management permission)": "（需要跟踪管理权限）",
-  "(requires unit management permission)": "（需要单位管理权限）",
   "+ {value} {unitCode} {to} per one chosen": "每选一份 + {value} {unitCode} {to}",
   ", already finished — release its ingredients on Orders": "，已完成 — 请在订单页释放其配料",
   ", including any tip": "，包括全部小费",
@@ -1381,8 +1378,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Choose “No order limits” when the Store accepts every order it receives; staff pause ordering from Hours & ordering when the kitchen is busy.":
     '当门店接受收到的每一笔订单时，请选择"不限制订单"；后厨忙时，员工可在"营业时间与点单"中暂停点单。',
   "Choose…": "选择…",
-  "Choosing a tax classification needs permission to read Products and tax settings. Leave the service charge and delivery fee as Not set or Off; tips can still be turned on, and you can save the rest of this setup.":
-    '选择税类需要读取商品和税务设置的权限。请将服务费和配送费保持为"未设置"或"关"；小费仍可开启，你也可以保存此设置的其余部分。',
+  "Your role can't choose a tax classification. Leave the service charge and delivery fee as Not set or Off, or ask the owner to choose one; tips can still be turned on, and you can save the rest of this setup.":
+    "你的角色不能选择税类。请将服务费和配送费保持为“未设置”或“关”，或请店主来选择；小费仍可开启，你也可以保存此设置的其余部分。",
   City: "城市",
   "City or town": "城市或镇",
   Claim: "认领",
@@ -1591,8 +1588,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   Currency: "货币",
   "Current orders": "当前订单",
   "Current orders could not be loaded": "无法加载当前订单",
-  "Current permission or session refused this request. Keep the original and retry after access is restored.":
-    "当前权限或登录拒绝了此请求。请保留原请求，在权限恢复后重试。",
   "Current published configuration": "当前已发布的配置",
   "Current timezone": "当前时区",
   "Current until": "有效至",
@@ -1730,7 +1725,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "已下载 {fileName}，里面是 {stableLabel} 桌的二维码。",
   "Downloaded {fileName} with {count} table QR codes.":
     "已下载 {fileName}，里面有 {count} 张桌台二维码。",
-  "Downloading reports needs the export permission.": "下载报表需要导出权限。",
   Draft: "草稿",
   "Draft discarded.": "草稿已放弃。",
   "Draft discarded. The menu is back to its published version.":
@@ -2892,7 +2886,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Operational dashboard filters": "运营看板筛选",
   "Operational metrics": "运营指标",
   "Operational reporting is unavailable for this Store.": "此门店暂不提供运营报表。",
-  "Operational reporting is unavailable for this scope.": "此范围暂不提供运营报表。",
   Operations: "运营",
   "Checked. This case closes on its own within a few minutes.":
     "已记下核对结果。这条会在几分钟内自动关闭。",
@@ -3094,8 +3087,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "处理中 {pending} · 支付方状态未知 {providerUnknown} · 差异 {reconciliationDifferences}",
   "Pending {pending} · ready {ready} · in progress {inProgress} · completed {completed} · exceptions {exceptions}":
     "处理中 {pending} · 已做好 {ready} · 进行中 {inProgress} · 已完成 {completed} · 异常 {exceptions}",
-  "Permission denied": "没有权限",
-  "Permission denied. An earlier save remains protected.": "没有权限。之前的保存仍受保护。",
   "Permission denied. Check your session and Store access.": "没有权限。请检查登录状态和门店权限。",
   "Permission denied. Only the person who made it, or an Owner, can do this.":
     "没有权限。只有提交人或店主可以执行此操作。",
@@ -5511,47 +5502,18 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "You can't check this table's orders with your current access. Ask an Owner or Store Manager to close it.":
     "以你当前的权限无法检查这张桌台的订单。请店主或店长关台。",
   "You cannot see this Store's payment methods.": "你无法查看这家门店的付款方式。",
-  "You cannot access this configuration in the current Store.": "你无法在当前门店访问此配置。",
   "You cannot change your own roles.": "你不能更改自己的角色。",
   "You chose to refund this order. The customer's payment is being refunded in full to their original payment method.":
     "你已选择为这笔订单退款。顾客的付款正在全额退回原付款方式。",
   "You didn't finish signing in. Try again when you're ready.": "你没有完成登录。准备好后请重试。",
-  "You do not have permission for this allergen action at Brand level.":
-    "你没有品牌层级执行此过敏原操作的权限。",
-  "You do not have permission for this count action.": "你没有执行此盘点操作的权限。",
-  "You do not have permission for this inventory action.": "你没有执行此库存操作的权限。",
-  "You do not have permission for this menu action at Brand level.":
-    "你没有品牌层级执行此菜单操作的权限。",
-  "You do not have permission for this price action at Brand level.":
-    "你没有品牌层级执行此价格操作的权限。",
-  "You do not have permission for this price action.": "你没有执行此价格操作的权限。",
-  "You do not have permission for this product action at Brand level.":
-    "你没有品牌层级执行此商品操作的权限。",
-  "You do not have permission for this receiving action.": "你没有执行此收货操作的权限。",
-  "You do not have permission for this recipe action at Brand level.":
-    "你没有品牌层级执行此配方操作的权限。",
-  "You do not have permission for this step of the opening count.":
-    "你没有执行期初盘点这一步的权限。",
-  "You do not have permission for this waste action.": "你没有执行此报损操作的权限。",
-  "You do not have permission for this. Offering items is a Brand decision; kitchen and front-of-house staff can mark items sold out for today, and a manager can mark them sold out until further notice.":
-    "你没有此操作的权限。是否提供商品由品牌决定；后厨和前台员工可以将商品标记为今天售罄，店长可以标记为售罄直至另行通知。",
-  "You do not have permission to change the Brand's options.": "你没有更改品牌选项的权限。",
   "You do not have permission to choose receipt templates. The saved selection is kept.":
     "你没有选择收据模板的权限。已保存的选择会保留。",
-  "You do not have permission to manage stock locations.": "你没有管理库位的权限。",
-  "You do not have permission to manage this receipt style.": "你没有管理此收据样式的权限。",
-  "You do not have permission to read this Store's tax configuration.":
-    "你没有读取本门店税务配置的权限。",
   "You do not have refund authority for this store.": "你没有本店的退款权限。",
   "You do not hold price approval.": "你没有价格审批权限。",
-  "You don't have access to do this. Ask the owner or a manager.":
-    "你没有权限执行此操作。请联系店主或店长。",
-  "You don't have access to this page. Ask the owner or a manager.":
-    "你没有权限查看此页面。请联系店主或店长。",
-  "You don't have permission to change table QR codes.": "你没有更改桌台二维码的权限。",
-  "You don't have permission to do this. Ask the store owner.":
-    "你没有执行此操作的权限。请找店主。",
-  "You don't have permission to print table QR codes.": "你没有打印桌台二维码的权限。",
+  "Your role can't do this. Ask the owner or a manager to give you access, or sign in as a staff member who can.":
+    "你的角色不能做这项操作。请店主或店长给你开通，或换有权限的员工登录。",
+  "Your role can't open this page. Ask the owner or a manager to give you access, or sign in as a staff member who has it.":
+    "你的角色不能打开这个页面。请店主或店长给你开通，或换有权限的员工登录。",
   "You made or sent this change, so someone else with Owner access must approve it, or approve it on your own as sole operator.":
     "此更改由你提出或提交，因此需由另一位有店主权限的人批准，或由你作为独立经营者自行批准。",
   "You are recording this list": "这份清单由你记录",
@@ -5594,29 +5556,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "你的 PIN 已保存。请在本店的共享平板上使用。",
   "Your PIN is set.": "你的 PIN 已设置。",
   "Your PIN was reset. Set a new one.": "你的 PIN 已被重置。请设置新的 PIN。",
-  "Your access doesn't allow cancelling rounds. Ask an Owner or Store Manager.":
-    "你的权限不允许取消轮次。请联系店主或店长。",
-  "Your access doesn't allow closing orders. Ask an Owner or Store Manager.":
-    "你的权限不允许关闭订单。请联系店主或店长。",
-  "Your access doesn't allow closing tables. Ask an Owner or Store Manager to close it.":
-    "你的权限不允许关台。请店主或店长关台。",
   "Your change waiting": "你的更改在等待",
   "Your change was withdrawn. The next change starts from the published hours.":
     "你的更改已撤回。下一项更改将基于已发布的营业时间。",
   "Your check of the refund is recorded. Refresh the page to see whether the case is closed.":
     "你对退款的核对已记录。刷新页面查看案件是否已关闭。",
   "Your configuration waiting": "你的配置在等待",
-  "Your current permission and Store scope do not allow this view.":
-    "你当前的权限和门店范围不允许查看此内容。",
-  "Your current permission or Store scope no longer allows this action. Refresh before continuing.":
-    "你当前的权限或门店范围已不允许此操作。继续前请先刷新。",
-  "Your current permission or selected Store does not allow this action.":
-    "你当前的权限或所选门店不允许此操作。",
-  "Your current permissions do not allow host transfer.": "你当前的权限不允许转让主持人。",
-  "Your current permissions do not allow serving progress.": "你当前的权限不允许查看上桌进度。",
-  "Your current permissions do not allow table operations.": "你当前的权限不允许进行桌台操作。",
-  "Your current session or Store permissions do not allow this queue.":
-    "你当前的登录或门店权限不允许查看此队列。",
   "Your name": "你的名字",
   "Your name could not be read or saved": "无法读取或保存你的名字",
   "Your name couldn't be saved. Check the connection and try again.":
@@ -5626,10 +5571,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Your previous Store is unchanged. After you verify, switch again.":
     "你之前的门店不变。验证后请再次切换。",
   "Your prices waiting for approval": "你的价格在等待批准",
-  "Your role can't manage shared tablets or staff PINs. Ask the store owner.":
-    "你的角色不能管理共享平板或员工 PIN。请找店主。",
-  "Your role does not allow remakes. Ask a manager or kitchen lead.":
-    "你的角色不允许重做。请联系店长或后厨主管。",
   "Your session can't record payments. Sign in again or ask a manager.":
     "你的登录不能记录付款。请重新登录或找店长。",
   "You're signed out, or your role can't send table rounds. Sign in again or ask a manager. Sending the same round again never sends it twice.":
@@ -6402,8 +6343,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   Charge: "收款",
   "Needs cleaning": "待清洁",
   "Cleaned · ready for guests": "已清洁，可以入座",
-  "Your access doesn't allow this. Ask an Owner or Store Manager.":
-    "你的权限不能做这件事。请找店主或店长。",
   "Start checkout first, so no more rounds are sent from this table.":
     "请先开始结账，这样这桌就不能再下单了。",
   "This table owes nothing.": "这桌没有要付的。",
@@ -6972,7 +6911,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Also pause joining by scan": "也暂停扫码加入",
   Hidden: "已隐藏",
   "Missing a name": "缺中文名或英文名",
-  "You do not have permission to see the menu.": "你没有查看菜单的权限。",
   "The menu could not be read. Check the connection and try again.": "读不到菜单。检查网络后再试。",
   "Reading the menu…": "正在读取菜单…",
   "Offline. Nothing was confirmed; try again when you are back online.":
@@ -7107,7 +7045,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "New choice group": "新建规格组",
   "Give the group a name and at least one choice, each with its own name.":
     "请给规格组起名，并至少填一个选项，每个选项名字不同。",
-  "You do not have permission to make choice groups.": "你没有新建规格组的权限。",
   "Group name (English)": "规格组名（英文）",
   "Group name (Chinese)": "规格组名（中文）",
   "Guests choose": "客人选择",
@@ -7163,8 +7100,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{item} has no allergen answers yet. Open the dish, answer each allergen, save it, then list the menu again.":
     "{item} 还没有填写过敏原。请打开这道菜，逐项回答过敏原并保存，再上架菜单。",
   "There is nothing new to list.": "没有新的内容需要上架。",
-  "Your sign-in no longer allows listing this menu. Ask the Owner to list it.":
-    "您现在的登录已无权上架这份菜单。请让店主来上架。",
+  "Your role can't list this menu. Ask the owner to list it.":
+    "你的角色不能上架这份菜单。请让店主来上架。",
   "This menu has no dishes ready to list yet. Add a dish, answer its allergens, then list the menu.":
     "这份菜单还没有可以上架的菜。请先添加菜品并回答过敏原，再上架菜单。",
   "The menu could not be listed this time. Try again in a minute; if it stops again, tell BOP support what time it happened.":
@@ -7457,7 +7394,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Only tables that pay at the end can be merged.": "只有吃完再付的桌才能并桌。",
   "One of the tables is checking out. Merge before checking out.":
     "其中一桌正在结账。请在结账前并桌。",
-  "You don't have permission to merge tables.": "你没有并桌的权限。",
   "The merge wasn't confirmed: this device is offline. Retry.":
     "并桌没有确认：这台设备已离线，请重试。",
   "The merge wasn't confirmed: the system is busy. Retry.": "并桌没有确认：系统正忙，请重试。",
@@ -7483,7 +7419,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "That table seats fewer guests than this party. Choose a bigger table.":
     "那张桌坐不下这桌客人。请换一张大一点的桌。",
   "This table is checking out, so it stays where it is.": "这桌正在结账，不能换桌。",
-  "You don't have permission to move tables.": "你没有换桌的权限。",
   "The tables changed meanwhile. They are read again: check and retry.":
     "桌台刚有变化，已重新读取：请检查后再试。",
   "Move this party to another table": "把这桌客人换到另一张桌",
@@ -7520,7 +7455,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Each section needs its own name of up to 24 characters.":
     "每个档口要有不重复的名字，最多 24 个字。",
   "Save sections": "保存档口",
-  "You do not have permission to change prices at this Store.": "你没有在本店改价格的权限。",
   "This item has no Brand price yet.": "这道菜还没有品牌价格。",
   "That price is not valid.": "这个价格无效。",
   "The price changed since you opened the page. Check the price now shown and confirm again.":
@@ -7565,8 +7499,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Set up one kitchen line for all dishes": "让所有菜都送到后厨",
   "The kitchen is set up. New orders go to it from now on.":
     "厨房已设置好。从现在起新订单都会进厨房。",
-  "Ask the Owner or Store Manager to set this up.": "请店主或店长来设置。",
-  "Ask the Owner or Store Manager to fix this.": "请店主或店长来处理。",
   "One kitchen line takes this Store's dishes, since": "本店的菜都送到后厨，开始于",
   "Every dish with a recipe can reach the kitchen.": "所有有配方的菜品都能进厨房。",
   "These dishes can't reach the kitchen: their recipes need something this kitchen isn't set up for. An order for one would be paid and not reach the kitchen.":
@@ -7580,8 +7512,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "营业中如果已付款的订单没有出现在后厨屏上：照订单页制作，或在订单页取消并退款。然后回到这里修好这道菜。",
   "Someone else changed this kitchen just now. Here is what it is now.":
     "刚才有人改了这个厨房，下面是最新情况。",
-  "You can't change this kitchen. Ask the Owner or Store Manager.":
-    "你不能更改这个厨房，请找店主或店长。",
   "We couldn't confirm that went through. Check your connection and try again.":
     "无法确认是否成功。请检查网络后重试。",
   "Set up the kitchen": "去设置厨房",
@@ -7728,8 +7658,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Days you open": "营业日",
   "What was done stays. Press Continue, here or on another device; nothing is done twice.":
     "已完成的部分会保留。请按“继续”，在这里或其他设备上都可以，不会重复执行。",
-  "Your sign-in does not allow {step}. Ask the Owner to open this page.":
-    "您的登录不能处理{step}。请让店主打开这个页面。",
   "Your check is more than 15 minutes old. Press Continue and enter a new code.":
     "您的验证已超过 15 分钟。请按“继续”并输入新的验证码。",
   "Enter the store's phone number, then press the button again.": "请填写门店电话，再按一次按钮。",
@@ -8481,8 +8409,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "退款申请已记录，但没有发送：它在其他页面上有变动。请先查看申请进度再发送。",
   "The refund request is recorded but was not sent: sending refunds is not set up for this store. Contact BOP support.":
     "退款申请已记录，但没有发送：本店尚未开通发送退款。请联系 BOP 支持。",
-  "The refund request is recorded but was not sent: your permissions do not allow sending refunds, or this refund needs an owner's approval. Ask a manager to check it.":
-    "退款申请已记录，但没有发送：你没有发送退款的权限，或这笔退款需要店主批准。请让店长查看。",
   "The refund request is recorded, but getting it ready to send was not confirmed. Nothing has been sent to the card provider. Continue sending this refund: it is never sent twice.":
     "退款申请已记录，但尚未确认是否准备好发送。还没有发送给发卡方。请继续发送这笔退款，不会重复发送。",
   "The refund request result is unknown. Retry the same request; do not start another refund.":
@@ -8490,8 +8416,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "The refund request was not recorded.": "退款申请没有记录。",
   "The refund was not sent: sending refunds is not set up for this store. Contact BOP support.":
     "退款没有发送：本店尚未开通发送退款。请联系 BOP 支持。",
-  "The refund was not sent: your session or permissions no longer allow sending refunds. Sign in again, then continue.":
-    "退款没有发送：你的登录或权限已不允许发送退款。请重新登录后继续。",
   "The refund was recorded, but this list could not be updated. Select Refresh.":
     "退款已记录，但这个列表没能更新。请点“刷新”。",
   "The refund was sent to the card provider, but its answer could not be checked yet. The amount stays set aside until it answers. Check again.":
@@ -8517,8 +8441,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "须在最近 3 天内、且在申请退款之后。计入实际退款当天。",
   "You run this business alone, so you can approve this refund yourself on the Approvals page after confirming it is you. First confirm it is you; your verification lasts 15 minutes.":
     "这家店由你一人经营，确认是你本人后可以在“审批”页自行批准这笔退款。请先确认是你本人，验证有效期 15 分钟。",
-  "Your session or permissions do not allow this check. Sign in again, then retry.":
-    "你的登录或权限不允许这次查询。请重新登录后重试。",
   "{amount} to refund on the card machine once an owner approves it.":
     "店主批准后，需在刷卡机上退款 {amount}。",
   "{left} of {total} left to refund": "可退 {left} 份，共 {total} 份",
@@ -10154,8 +10076,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "None chosen yet (needed to publish)": "还没有选（发布前必须选）",
   "The template saved in this setup": "这份设置里保存的模板",
   "Checking the receipt template…": "正在核对收据模板…",
-  "You do not have permission to choose receipt templates. The saved choice is kept.":
-    "你没有选择收据模板的权限。已保存的选择不变。",
   "This template is not published for this store's language yet. The saved choice is kept.":
     "这个模板还没有发布本店语言的版本。已保存的选择不变。",
   "The check took too long. Choose the template again.": "核对时间太久，请重新选择模板。",
@@ -10228,4 +10148,98 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "本店不提供{modes}。请在这里取消勾选，或在{where}中提供{modes}。",
   "The tax class is the Brand’s own choice; it has not been checked by a tax professional.":
     "税类由品牌自行选择，未经税务专业人士核对。",
+  "Your role can't change allergens. Ask the owner or a manager.":
+    "你的角色不能修改过敏原，请找店主或店长。",
+  "Your role can't change products. Ask the owner or a manager.":
+    "你的角色不能修改商品，请找店主或店长。",
+  "Your role can't change recipes. Ask the owner or a manager.":
+    "你的角色不能修改配方，请找店主或店长。",
+  "Your role can't change menus. Ask the owner or a manager.":
+    "你的角色不能修改菜单，请找店主或店长。",
+  "Your role can't change prices. Ask the owner or a manager.":
+    "你的角色不能修改价格，请找店主或店长。",
+  "Your role can't change options. Ask the owner or a manager.":
+    "你的角色不能修改选项，请找店主或店长。",
+  "Your role can't record deliveries. Ask the owner or a manager.":
+    "你的角色不能登记收货，请找店主或店长。",
+  "Your role can't do this with waste records. Ask the owner or a manager.":
+    "你的角色不能处理这条报损，请找店主或店长。",
+  "Your role can't change inventory items. Ask the owner or a manager.":
+    "你的角色不能修改库存品项，请找店主或店长。",
+  "Your role can't do this step of the stock count. Ask the owner or a manager.":
+    "你的角色不能做这一步盘点，请找店主或店长。",
+  "Your role can't change stock locations. Ask the owner or a manager.":
+    "你的角色不能修改库位，请找店主或店长。",
+  "Your role can't do this step of the opening count. Ask the owner or a manager.":
+    "你的角色不能做这一步期初盘点，请找店主或店长。",
+  "Your role can't make choice groups. Ask the owner or a manager.":
+    "你的角色不能新建规格组，请找店主或店长。",
+  "Your role can't see the menu. Ask the owner or a manager.":
+    "你的角色不能查看菜单，请找店主或店长。",
+  "Your role can't change receipt styles. Ask the owner or a manager.":
+    "你的角色不能修改收据样式，请找店主或店长。",
+  "Your role can't choose the receipt style. The saved choice is kept. Ask the owner or a manager.":
+    "你的角色不能选择收据样式。已保存的选择不变。请找店主或店长。",
+  "Your role can't change receipt styles. An earlier save is kept. Ask the owner or a manager.":
+    "你的角色不能修改收据样式。之前保存的内容不变。请找店主或店长。",
+  "Your role can't change prices at this store. Ask the owner or a manager.":
+    "你的角色不能修改本店价格，请找店主或店长。",
+  "Your role can't see this store's tax settings. Ask the owner or a manager.":
+    "你的角色不能查看本店的税务设置，请找店主或店长。",
+  "Your role can't merge tables. Ask the owner or a manager.": "你的角色不能并桌，请找店主或店长。",
+  "Your role can't move tables. Ask the owner or a manager.": "你的角色不能换桌，请找店主或店长。",
+  "Your role can't print table QR codes. Ask the owner or a manager.":
+    "你的角色不能打印桌台二维码，请找店主或店长。",
+  "Your role can't change table QR codes. Ask the owner or a manager.":
+    "你的角色不能更改桌台二维码，请找店主或店长。",
+  "Your role can't change this store's tables. Ask the owner or a manager.":
+    "你的角色不能修改本店的餐桌，请找店主或店长。",
+  "Your role can't manage shared tablets or staff PINs. Ask the owner or a manager.":
+    "你的角色不能管理共享平板或员工 PIN，请找店主或店长。",
+  "Your role can't remake dishes. Ask a manager or the kitchen lead.":
+    "你的角色不能重做菜品，请找店长或后厨主管。",
+  "Your role can't see which dishes are served. Ask the owner or a manager.":
+    "你的角色不能查看上菜进度，请找店主或店长。",
+  "Your role can't use Tables. Ask the owner or a manager to give you access, or sign in as a staff member who has it.":
+    "你的角色不能使用桌台。请店主或店长给你开通，或换有权限的员工登录。",
+  "Your role can't change store setup. Nothing was saved. Ask the owner or a manager.":
+    "你的角色不能修改门店设置，没有保存任何内容。请找店主或店长。",
+  "Your role can't change these store details. Nothing was saved. Ask the owner or a manager.":
+    "你的角色不能修改这些门店资料，没有保存任何内容。请找店主或店长。",
+  "Your role can't set up {step}. Ask the owner to do this step.":
+    "你的角色不能设置{step}。请让店主来完成这一步。",
+  "Your role can't download reports. Ask the owner or a manager.":
+    "你的角色不能下载报表，请找店主或店长。",
+  "Your role can't do this in the kitchen. Ask a manager or the kitchen lead, or sign in as a staff member who can.":
+    "你的角色不能在后厨做这项操作。请找店长或后厨主管，或换有权限的员工登录。",
+  "Your role can't save this change. What you entered is kept here. Ask the owner or a manager, or sign in as a staff member who can.":
+    "你的角色不能保存这项更改。你填写的内容仍保留在这里。请找店主或店长，或换有权限的员工登录。",
+  "Your role can't check refunds, or your sign-in has ended. Sign in again; if it still doesn't work, ask the owner or a manager.":
+    "你的角色不能查询退款，或你的登录已结束。请重新登录；如果仍然不行，请找店主或店长。",
+  "The refund request is recorded but was not sent: your role can't send refunds, or this refund needs the owner's approval. Ask a manager to check it.":
+    "退款申请已记录，但没有发送：你的角色不能发送退款，或这笔退款需要店主批准。请让店长查看。",
+  "The refund was not sent: your sign-in has ended, or your role can no longer send refunds. Sign in again, then continue; if it still doesn't work, ask the owner or a manager.":
+    "退款没有发送：你的登录已结束，或你的角色已不能发送退款。请重新登录后继续；如果仍然不行，请找店主或店长。",
+  "(your role can't change it)": "（你的角色不能修改）",
+  "Your role can't close orders. Ask the owner or a manager.":
+    "你的角色不能关闭订单，请找店主或店长。",
+  "Your role can't do this. Ask the owner or a manager.":
+    "你的角色不能做这项操作，请找店主或店长。",
+  "Your role can't cancel rounds. Ask the owner or a manager.":
+    "你的角色不能取消轮次，请找店主或店长。",
+  "Your role can't close tables. Ask the owner or a manager to close it.":
+    "你的角色不能关台。请店主或店长关台。",
+  "Your role can't change the kitchen setup. Ask the owner or a manager.":
+    "你的角色不能修改后厨设置，请找店主或店长。",
+  "Ask the owner or a manager to set this up.": "请店主或店长来设置。",
+  "Ask the owner or a manager to fix this.": "请店主或店长来处理。",
+  "Your role can't do this. Whether an item is offered is decided for the whole brand; kitchen and front-of-house staff can mark items sold out for today, and a manager can mark them sold out until further notice.":
+    "你的角色不能做这项操作。是否提供商品由品牌决定；后厨和前台员工可以将商品标记为今天售罄，店长可以标记为售罄直至另行通知。",
+  "You're signed in for kitchen work, which doesn't include this page. To use it, ask the owner or a manager, or sign in as a staff member who has it.":
+    "你当前是后厨登录，不包括这个页面。要用这个页面，请找店主或店长开通，或换有权限的员工登录。",
+  "Go to the kitchen": "去后厨屏",
+  "Only the person who made this change, or the owner, can withdraw or decline it.":
+    "只有提出这项更改的人或店主可以撤回或拒绝它。",
+  "Your role can't approve this change, or you made it yourself. Someone else must approve it: the owner, or a manager who can approve changes.":
+    "你的角色不能批准这项更改，或这项更改是你提出的。需要由别人批准：店主，或能批准更改的店长。",
 });

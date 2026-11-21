@@ -141,11 +141,11 @@ it("explains a rejected change and a denied approval in staff terms", async () =
   );
   fetcher.mockResolvedValueOnce(reply(403));
   await expect(client.execute(command("Approve"), "csrf", signal)).rejects.toThrow(
-    /^Permission denied\. Someone other than the person who made this change/u,
+    /^Your role can't approve this change, or you made it yourself/u,
   );
   fetcher.mockResolvedValueOnce(reply(403));
   await expect(client.execute(command("SaveDraft"), "csrf", signal)).rejects.toThrow(
-    "Permission denied. Check your session and Store access.",
+    "Your role can't do this. Ask the owner or a manager to give you access, or sign in as a staff member who can.",
   );
 });
 
@@ -328,7 +328,7 @@ describe("WP-2423 Q4 hours draft of a configuration from Store setup", () => {
     // WP-2423 (2026-10-16 v15): the same hours as already saved; nothing was written.
     [409, { error: "no_change" }, "Nothing changed — these opening hours and closures"],
     [422, { error: "store_configuration_rejected" }, "Change not accepted."],
-    [403, { error: "request_denied" }, "Permission denied."],
+    [403, { error: "request_denied" }, "Your role can't do this."],
     [200, { status: "Applied", resultingVersion: 2 }, "Configuration request unavailable."],
   ])("answers %s %j in plain words", async (status, body, message) => {
     const fetcher = vi.fn(async () => answer(status, body));

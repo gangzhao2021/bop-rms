@@ -306,7 +306,7 @@ export function useKitchenActions(input: {
           "Problem",
           code === "PermissionDenied"
             ? t(
-                "Your current permission or Store scope no longer allows this action. Refresh before continuing.",
+                "Your role can't do this in the kitchen. Ask a manager or the kitchen lead, or sign in as a staff member who can.",
               )
             : t("The action was not accepted. Refresh and review the current work item."),
         );

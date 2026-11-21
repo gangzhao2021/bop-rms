@@ -47,7 +47,7 @@ import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
 /** WP-2423 / DEC-MENU-REVISION: Brand menus — edit, review, publish and revise. */
 export const menuErrorText: Record<MenuErrorCode | "Loading", string> = {
   Loading: t("Loading menus…"),
-  PermissionDenied: t("You do not have permission for this menu action at Brand level."),
+  PermissionDenied: t("Your role can't change menus. Ask the owner or a manager."),
   NotFound: t("This menu does not exist for the Brand."),
   Conflict: t("The menu changed since you opened it. Refresh and check again."),
   Frozen: t(

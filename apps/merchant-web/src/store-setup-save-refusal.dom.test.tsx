@@ -244,7 +244,7 @@ for (const [status, alert] of [
     400,
     "This draft was not saved: check the times, wait times and fees you changed; step 4, Review and publish, lists what to change under “Still needed”.",
   ],
-  [403, "Your current permission or selected Store does not allow this action."],
+  [403, "Your role can't change store setup. Nothing was saved. Ask the owner or a manager."],
   [409, "The saved settings or their baseline changed."],
 ] as const)
   it(`b25: a save refused with ${status} is let go: no recovery, Save and Discard stay usable`, async () => {

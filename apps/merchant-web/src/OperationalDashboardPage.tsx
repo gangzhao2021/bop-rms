@@ -1,3 +1,4 @@
+import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { t } from "./i18n/i18n.js";
 import { Link } from "react-router";
 import { StatePanel } from "@bop-rms/ui";
@@ -32,11 +33,7 @@ export function OperationalDashboardState({
 }) {
   const values: Record<typeof state, readonly [string, string, "neutral" | "error" | "offline"]> = {
     Loading: [t("Loading dashboard"), t("Loading authorized operational summaries…"), "neutral"],
-    PermissionDenied: [
-      t("Permission denied"),
-      t("Operational reporting is unavailable for this scope."),
-      "error",
-    ],
+    PermissionDenied: [noAccessHeading, pageAccessDeniedText, "error"],
     NotFound: [
       t("Dashboard not found"),
       t("No authorized operational projection exists."),

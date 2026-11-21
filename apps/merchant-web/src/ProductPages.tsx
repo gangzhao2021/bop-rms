@@ -45,7 +45,7 @@ import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
 /** WP-2423 / DEC-CAT-PRODUCT-ADMIN: Brand Products and their sizes (SKUs). */
 const copy: Record<ProductErrorCode | "Loading", string> = {
   Loading: t("Loading products…"),
-  PermissionDenied: t("You do not have permission for this product action at Brand level."),
+  PermissionDenied: t("Your role can't change products. Ask the owner or a manager."),
   NotFound: t("This product does not exist for the Brand."),
   Conflict: t("The product changed since you opened it. Refresh and check again."),
   CodeTaken: t("Another product or size of the Brand already uses this code."),

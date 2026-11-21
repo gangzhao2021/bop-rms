@@ -567,7 +567,7 @@ it("WP-2423: a staff member without access is told so, with no retry; an outage 
     <OrderExceptionLoadFailed denied onRetry={() => undefined} />,
   );
   expect(denied).toContain("No access");
-  expect(denied).toContain("You don&#x27;t have access to this page.");
+  expect(denied).toContain("Your role can&#x27;t open this page.");
   expect(denied).not.toContain("Retry loading exceptions");
   expect(denied.split('class="bop-state-card"')[1]).not.toContain("<button");
   const outage = renderToStaticMarkup(

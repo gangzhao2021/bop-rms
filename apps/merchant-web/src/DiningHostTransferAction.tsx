@@ -56,7 +56,7 @@ export function DiningHostTransferAction({
       if (!controller.signal.aborted)
         setMessage(
           error instanceof DiningHostClientError && error.code === "Denied"
-            ? t("Your current permissions do not allow host transfer.")
+            ? t("Your access doesn't allow moving the host. Ask a manager.")
             : t("Participants unavailable. Refresh to try again."),
         );
     } finally {

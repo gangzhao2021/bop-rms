@@ -92,7 +92,9 @@ test("@production exception read recovers from an outage, and a refusal of acces
   await page.goto("/operations/order-exceptions");
   await expect(page.getByRole("heading", { name: "No access" })).toBeVisible();
   await expect(
-    page.getByText("You don't have access to this page. Ask the owner or a manager."),
+    page.getByText(
+      "Your role can't open this page. Ask the owner or a manager to give you access, or sign in as a staff member who has it.",
+    ),
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "Retry loading exceptions" })).toHaveCount(0);
   await expect(page.getByText("Exceptions unavailable")).toHaveCount(0);

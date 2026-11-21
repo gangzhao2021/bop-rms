@@ -564,9 +564,7 @@ export function TableSessionClose({
         </p>
       ) : outcome === "Denied" ? (
         <p role="alert">
-          {t(
-            "Your access doesn't allow closing tables. Ask an Owner or Store Manager to close it.",
-          )}
+          {t("Your role can't close tables. Ask the owner or a manager to close it.")}
         </p>
       ) : outcome === "Refused" ? (
         <p role="alert">

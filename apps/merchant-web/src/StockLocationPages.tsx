@@ -20,7 +20,7 @@ import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
 
 const copy: Record<StockLocationErrorCode | "Loading", string> = {
   Loading: t("Loading stock locations…"),
-  PermissionDenied: t("You do not have permission to manage stock locations."),
+  PermissionDenied: t("Your role can't change stock locations. Ask the owner or a manager."),
   NotFound: t("This location no longer exists in the selected Store."),
   Conflict: t(
     "The location changed, the code is already used, or the Store is already set up. Refresh and try again.",

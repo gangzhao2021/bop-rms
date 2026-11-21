@@ -15,7 +15,7 @@ import {
 const money = (minor: string | null) =>
   minor === null ? t("No price") : orderMoney({ amountMinor: minor, currencyCode: "CAD" });
 export const storePriceErrorText: Record<StorePriceErrorCode, string> = {
-  PermissionDenied: t("You do not have permission to change prices at this Store."),
+  PermissionDenied: t("Your role can't change prices at this store. Ask the owner or a manager."),
   NotFound: t("This item has no Brand price yet."),
   Invalid: t("That price is not valid."),
   Changed: t(

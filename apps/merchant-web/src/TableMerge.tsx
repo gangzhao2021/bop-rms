@@ -241,7 +241,7 @@ export function TableMerge({
                   : code === "CheckingOut"
                     ? t("One of the tables is checking out. Merge before checking out.")
                     : code === "Denied"
-                      ? t("You don't have permission to merge tables.")
+                      ? t("Your role can't merge tables. Ask the owner or a manager.")
                       : code === "Changed" || code === "NotSeated"
                         ? t("The tables changed meanwhile. They are read again: check and retry.")
                         : code === "Offline"

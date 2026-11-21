@@ -108,7 +108,7 @@ export function percent(rate: string): string {
 }
 const copy = {
   Loading: t("Loading tax review…"),
-  PermissionDenied: t("You do not have permission to read this Store's tax configuration."),
+  PermissionDenied: t("Your role can't see this store's tax settings. Ask the owner or a manager."),
   Offline: t("Offline. Check your connection and refresh."),
   Unavailable: serverProblemText,
 } as const;

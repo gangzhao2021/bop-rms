@@ -143,7 +143,7 @@ test("@production staff who can't change the kitchen see what's missing and who 
   await page.goto(setupHref + "?section=kitchen");
   const panel = page.locator("#kitchen-setup");
   await expect(panel).toContainText("Guests can't order at this Store");
-  await expect(panel).toContainText("Ask the Owner or Store Manager to set this up.");
+  await expect(panel).toContainText("Ask the owner or a manager to set this up.");
   await expect(panel.getByRole("button")).toHaveCount(0);
 });
 

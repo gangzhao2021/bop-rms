@@ -27,7 +27,7 @@ import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
  * author alone as sole operator (DEC-SOLE-OPERATOR-APPROVAL). */
 const copy: Record<OptionPriceErrorCode | "Loading", string> = {
   Loading: t("Loading option prices…"),
-  PermissionDenied: t("You do not have permission for this price action."),
+  PermissionDenied: t("Your role can't change prices. Ask the owner or a manager."),
   FullSignInRequired: FULL_SIGN_IN_REQUIRED_TEXT,
   NotFound: t("That option is no longer offered on the product. Refresh and check."),
   Conflict: t("Prices changed since you opened the page. Refresh and check again."),

@@ -157,7 +157,7 @@ test("@production current queue pages and clears old orders after denied refresh
   await expect(page.getByRole("button", { name: "Refresh orders" })).toBeFocused();
   deny = true;
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("heading", { name: "Permission denied" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "No access" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "ORD-50", exact: true })).toHaveCount(0);
   deny = false;
   await page.keyboard.press("Enter");

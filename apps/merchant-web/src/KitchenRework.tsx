@@ -240,7 +240,7 @@ export function KitchenReworkStatus({
                   )
                 : t("This dish was finished too long ago to remake. Close the old order instead.")
               : state.code === "PermissionDenied"
-                ? t("Your role does not allow remakes. Ask a manager or kitchen lead.")
+                ? t("Your role can't remake dishes. Ask a manager or the kitchen lead.")
                 : state.code === "Conflict"
                   ? t("The remake changed on another screen. The board has been refreshed.")
                   : t(

@@ -1474,7 +1474,9 @@ export function ReceiptTemplateDraftEditor({
                 "The request could not be confirmed. Recover its original save or submission before writing again.",
               )
             : error === "Denied"
-              ? t("Permission denied. An earlier save remains protected.")
+              ? t(
+                  "Your role can't change receipt styles. An earlier save is kept. Ask the owner or a manager.",
+                )
               : error === "Invalid"
                 ? t(
                     "Check the language, saved receipt styles and the start and end times. An earlier save remains protected.",

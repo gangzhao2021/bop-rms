@@ -321,7 +321,9 @@ export function ReceiptTemplateStoreSelection(props: ReceiptTemplateStoreSelecti
         {checking
           ? t("Checking the receipt template…")
           : error === "Denied"
-            ? t("You do not have permission to choose receipt templates. The saved choice is kept.")
+            ? t(
+                "Your role can't choose the receipt style. The saved choice is kept. Ask the owner or a manager.",
+              )
             : error === "NotFound"
               ? t(
                   "This template is not published for this store's language yet. The saved choice is kept.",

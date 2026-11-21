@@ -283,7 +283,7 @@ describe("WP-2423 menu page helpers", () => {
     );
     expect(stoppedAt("NoDraft")).toBe("There is nothing new to list.");
     expect(stoppedAt("NotAuthorized")).toBe(
-      "Your sign-in no longer allows listing this menu. Ask the Owner to list it.",
+      "Your role can't list this menu. Ask the owner to list it.",
     );
     expect(stoppedAt("NoConfiguration")).toBe(
       "This menu has no dishes ready to list yet. Add a dish, answer its allergens, then list the menu.",

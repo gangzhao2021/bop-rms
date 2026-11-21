@@ -346,7 +346,7 @@ const messages: Record<StoreSetupClientError["code"], string> = {
   Invalid: t(
     "Check the edited settings. Each service interval needs valid times and at least one service mode. Wait times are whole minutes, up to 24 hours (1,440 minutes). A service charge or delivery fee that is On needs a tax classification that is still in use, and every fee that is On needs at least one order type, chosen from the services this setup offers.",
   ),
-  Denied: t("Your current permission or selected Store does not allow this action."),
+  Denied: t("Your role can't change store setup. Nothing was saved. Ask the owner or a manager."),
   Conflict: t(
     "The saved settings or their baseline changed. Refresh, then discard your local edits to use the latest saved version.",
   ),
@@ -3352,7 +3352,9 @@ export function StoreSetupReferenceEditor({
             : error === "Conflict"
               ? t("This configuration changed. Refresh and review before saving.")
               : error === "Denied"
-                ? t("You cannot access this configuration in the current Store.")
+                ? t(
+                    "Your role can't change these store details. Nothing was saved. Ask the owner or a manager.",
+                  )
                 : error === "OutcomeUnknown"
                   ? t(
                       "The save could not be confirmed. Recover the original save before making another change.",
@@ -4160,7 +4162,7 @@ export function StoreSetupFeeContextEditor({
       {error === "Denied" && (
         <p role="status">
           {t(
-            "Choosing a tax classification needs permission to read Products and tax settings. Leave the service charge and delivery fee as Not set or Off; tips can still be turned on, and you can save the rest of this setup.",
+            "Your role can't choose a tax classification. Leave the service charge and delivery fee as Not set or Off, or ask the owner to choose one; tips can still be turned on, and you can save the rest of this setup.",
           )}
         </p>
       )}

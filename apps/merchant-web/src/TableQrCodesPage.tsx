@@ -154,7 +154,7 @@ export function TableQrCodesPage({
           error instanceof TableQrClientError && error.code === "Changed"
             ? t("A code changed since this page loaded. The list is refreshed; print again.")
             : error instanceof TableQrClientError && error.code === "PermissionDenied"
-              ? t("You don't have permission to print table QR codes.")
+              ? t("Your role can't print table QR codes. Ask the owner or a manager.")
               : t("The codes could not be downloaded. Nothing changed; try again."),
       });
       if (error instanceof TableQrClientError && error.code === "Changed") refresh();
@@ -277,7 +277,7 @@ export function TableQrCodesPage({
                   "This table changed since the page loaded. The list is refreshed; check it and try again.",
                 )
               : code === "PermissionDenied"
-                ? t("You don't have permission to change table QR codes.")
+                ? t("Your role can't change table QR codes. Ask the owner or a manager.")
                 : t("Nothing changed. Try again."),
         });
         refresh();
@@ -395,7 +395,7 @@ export function TableQrCodesPage({
                         "This table changed since the page loaded. The list is refreshed; check it and try again.",
                       )
                     : code === "PermissionDenied"
-                      ? t("You don't have permission to change this Store's tables.")
+                      ? t("Your role can't change this store's tables. Ask the owner or a manager.")
                       : t("Nothing changed. Try again."),
         });
         if (code === "NameTaken" || code === "Invalid") setChange({ ...change, unknown: false });

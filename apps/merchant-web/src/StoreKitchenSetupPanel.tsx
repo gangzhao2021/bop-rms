@@ -77,7 +77,7 @@ export function StoreKitchenSetupPanel({
         code === "Conflict"
           ? t("Someone else changed this kitchen just now. Here is what it is now.")
           : code === "PermissionDenied"
-            ? t("You can't change this kitchen. Ask the Owner or Store Manager.")
+            ? t("Your role can't change the kitchen setup. Ask the owner or a manager.")
             : t("We couldn't confirm that went through. Check your connection and try again."),
       );
       if (code === "Conflict") await load();
@@ -134,7 +134,7 @@ export function StoreKitchenSetupPanel({
                 </button>
               </div>
             ) : (
-              <p role="note">{t("Ask the Owner or Store Manager to set this up.")}</p>
+              <p role="note">{t("Ask the owner or a manager to set this up.")}</p>
             )}
           </>
         ) : (
@@ -172,7 +172,7 @@ export function StoreKitchenSetupPanel({
                     </button>
                   </div>
                 ) : (
-                  <p role="note">{t("Ask the Owner or Store Manager to fix this.")}</p>
+                  <p role="note">{t("Ask the owner or a manager to fix this.")}</p>
                 )}
               </div>
             )}

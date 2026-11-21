@@ -1,5 +1,7 @@
 import { systemText, displayLocale, listSeparator, t, saidTable } from "./i18n/i18n.js";
 import { formatContactPhone } from "./contact-phone.js";
+import { noAccessHeading } from "./access-denied.js";
+import { NoAccessNotice } from "./NoAccessNotice.js";
 import { AutomaticRefundLateNotice, KitchenReleaseNotice } from "./KitchenReleaseNotice.js";
 import { useRoundPhones, WithRoundPhones } from "./TablePhones.js";
 import {
@@ -5482,7 +5484,7 @@ export function CurrentOrderQueuePage({
                   ? t("Loading order")
                   : t("Loading orders")
                 : state.kind === "PermissionDenied"
-                  ? t("Permission denied")
+                  ? noAccessHeading
                   : state.kind === "NotFound"
                     ? t("Order not found")
                     : state.kind === "ServerProblem"
@@ -5493,13 +5495,14 @@ export function CurrentOrderQueuePage({
             }
             status
           >
-            <p>
-              {state.kind === "Loading"
-                ? single
-                  ? t("Reading the order…")
-                  : t("Reading current orders…")
-                : state.kind === "PermissionDenied"
-                  ? t("Your current session or Store permissions do not allow this queue.")
+            {state.kind === "PermissionDenied" ? (
+              <NoAccessNotice />
+            ) : (
+              <p>
+                {state.kind === "Loading"
+                  ? single
+                    ? t("Reading the order…")
+                    : t("Reading current orders…")
                   : state.kind === "NotFound"
                     ? t("This order is not at the selected Store.")
                     : state.kind === "ServerProblem"
@@ -5511,7 +5514,8 @@ export function CurrentOrderQueuePage({
                         : t(
                             "Orders can't be read right now. Retrying on its own; they show as soon as the connection is back.",
                           )}
-            </p>
+              </p>
+            )}
           </StatePanel>
         )}
       </>

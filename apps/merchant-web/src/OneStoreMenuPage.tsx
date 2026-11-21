@@ -296,7 +296,7 @@ export function OneStoreMenuPage({
         }
         setFailed(
           denied
-            ? t("You do not have permission to see the menu.")
+            ? t("Your role can't see the menu. Ask the owner or a manager.")
             : t("The menu could not be read. Check the connection and try again."),
         );
       });

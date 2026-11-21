@@ -1,4 +1,5 @@
 import { t } from "./i18n/i18n.js";
+import { actionAccessDeniedText } from "./access-denied.js";
 import { parseStoreSetupFeeContexts } from "./store-setup-client.js";
 import { parseSoleOperatorGate, type SoleOperatorGateView } from "./SoleOperatorSelfApproval.js";
 import {
@@ -506,8 +507,20 @@ export const SOLE_OPERATOR_VERIFY_MESSAGE = t(
 export const STORE_HOURS_NO_CHANGE_MESSAGE = t(
   "Nothing changed — these opening hours and closures are already saved.",
 );
+/** Batch 38: a 403 on withdrawing or declining someone else's open change. */
+export const WITHDRAW_DENIED_MESSAGE = t(
+  "Only the person who made this change, or the owner, can withdraw or decline it.",
+);
+/** Batch 38: a 403 on Approve: no approval right here, or it is the approver's own change. */
+export const APPROVE_DENIED_MESSAGE = t(
+  "Your role can't approve this change, or you made it yourself. Someone else must approve it: the owner, or a manager who can approve changes.",
+);
 /** Refusals after which the form and the open change stay on screen as they were. */
 export const storeConfigurationKeptRefusals: ReadonlySet<string> = new Set([
+  // Batch 38: a 403 (refused, nothing saved) is a refusal, never an outage.
+  actionAccessDeniedText,
+  WITHDRAW_DENIED_MESSAGE,
+  APPROVE_DENIED_MESSAGE,
   STORE_HOURS_NO_CHANGE_MESSAGE,
   NOT_YOUR_CHANGE_MESSAGE,
   APPROVAL_NEEDS_ANOTHER_PERSON_MESSAGE,
@@ -545,8 +558,7 @@ export async function withdrawStoreConfiguration(
     },
     body: JSON.stringify(input),
   });
-  if (response.status === 403)
-    throw new Error("Permission denied. Only the person who made it, or an Owner, can do this.");
+  if (response.status === 403) throw new Error(WITHDRAW_DENIED_MESSAGE);
   if (response.status === 409) throw new Error(t("Source changed. Refresh before trying again."));
   if (!response.ok || response.headers.get("cache-control") !== "no-store")
     throw new Error("Configuration request unavailable.");
@@ -621,8 +633,8 @@ export function createStoreConfigurationClient(fetcher: typeof fetch = fetch) {
           throw new Error(SOLE_OPERATOR_VERIFY_MESSAGE);
         throw new Error(
           command && "command" in command && command.command === "Approve"
-            ? "Permission denied. Someone other than the person who made this change, with approval access, must approve it."
-            : "Permission denied. Check your session and Store access.",
+            ? APPROVE_DENIED_MESSAGE
+            : actionAccessDeniedText,
         );
       }
       if (response.status === 409) {

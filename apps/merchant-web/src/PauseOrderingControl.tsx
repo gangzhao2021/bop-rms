@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { t } from "./i18n/i18n.js";
 import {
   createServiceControlClient,
+  serviceControlDeniedText,
   serviceOperationReference,
   type ServiceControlState,
 } from "./service-control-client.js";
@@ -186,7 +187,7 @@ export function usePauseOrderingRead(
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
         // The client's answer to 403: this person may not pause.
-        if (error instanceof Error && error.message.startsWith("Permission denied"))
+        if (error instanceof Error && error.message === serviceControlDeniedText)
           setAnswer({
             status: shown === true ? "Withdrawn" : "Denied",
             view: null,

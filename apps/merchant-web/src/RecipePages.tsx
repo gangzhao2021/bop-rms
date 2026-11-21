@@ -33,7 +33,7 @@ import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
 /** WP-2423 / DEC-RECIPE-AUTHORING: Brand recipes — drafts, independent review, publication, SKUs. */
 const copy: Record<RecipeErrorCode | "Loading", string> = {
   Loading: t("Loading recipes…"),
-  PermissionDenied: t("You do not have permission for this recipe action at Brand level."),
+  PermissionDenied: t("Your role can't change recipes. Ask the owner or a manager."),
   NotFound: t("This recipe does not exist for the Brand."),
   Conflict: t("The recipe changed or this step was already recorded. Refresh and check again."),
   CodeTaken: t("Another recipe of the Brand already uses this code."),

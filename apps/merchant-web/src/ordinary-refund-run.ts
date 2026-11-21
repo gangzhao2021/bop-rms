@@ -318,7 +318,7 @@ export function refundRunFailureText(error: RefundRunError): string {
         )
       : code === "PermissionDenied" || code === "Denied"
         ? t(
-            "The refund request is recorded but was not sent: your permissions do not allow sending refunds, or this refund needs an owner's approval. Ask a manager to check it.",
+            "The refund request is recorded but was not sent: your role can't send refunds, or this refund needs the owner's approval. Ask a manager to check it.",
           )
         : code === "Conflict"
           ? t(
@@ -334,7 +334,7 @@ export function refundRunFailureText(error: RefundRunError): string {
         )
       : code === "PermissionDenied" || code === "Denied"
         ? t(
-            "The refund was not sent: your session or permissions no longer allow sending refunds. Sign in again, then continue.",
+            "The refund was not sent: your sign-in has ended, or your role can no longer send refunds. Sign in again, then continue; if it still doesn't work, ask the owner or a manager.",
           )
         : t(
             "The refund was not sent: sending refunds is not set up for this store. Contact BOP support.",
