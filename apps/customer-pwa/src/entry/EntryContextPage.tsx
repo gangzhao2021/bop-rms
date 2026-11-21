@@ -734,10 +734,12 @@ export function EntryContextView({
   const established =
     state.kind === "Established" || state.kind === "Resumed" ? state.context : null;
   // WP-2423 DEC-DINING-GUEST-TABLE-START: a guest deciding at a table sees where they are, not a
-  // line telling them to scan the code they just scanned.
+  // line telling them to scan the code they just scanned. Batch 41 (v15 b40 live): nor does a
+  // guest waiting at a table staff haven't opened yet; the heading below says what they wait for.
   const at =
     established ??
-    (state.kind === "TableMayStart" ||
+    (state.kind === "TableNotOpen" ||
+    state.kind === "TableMayStart" ||
     state.kind === "TableBeingCleaned" ||
     state.kind === "TableAskNewParty"
       ? state.context

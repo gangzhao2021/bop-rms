@@ -188,6 +188,56 @@ test.describe("@production CUST-ENTRY table not open", () => {
       await page.getByRole("button", { name: "English" }).click();
     });
 
+  // Batch 41 (v15 b40 live, a-wait-*.png): after scanning the table's code the header read "Start
+  // your order / Scan the location QR code to begin" above "isn't open yet". The header is the
+  // Store's, as on every other table page, and the waiting heading is the page's own.
+  for (const width of [390, 1440])
+    test(`a guest waiting for staff to open the table sees the Store's header, not "scan" (${width})`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await scanNotOpenTable(page, [], "L40J B (TEST)");
+      const banner = page.getByRole("banner");
+      const main = page.getByRole("main");
+      const check = async (language: "en" | "zh-Hans") => {
+        const zh = language === "zh-Hans";
+        await expect(
+          main.getByRole("heading", {
+            name: zh
+              ? "Synthetic Noodle Bar 的L40J B (TEST) 还没开台"
+              : "L40J B (TEST) at Synthetic Noodle Bar isn’t open yet",
+          }),
+        ).toBeVisible();
+        await expect(banner.getByRole("heading", { level: 1 })).toHaveText("Synthetic Noodle Bar");
+        await expect(banner).toContainText(
+          zh ? "Synthetic Brand · 堂食" : "Synthetic Brand · Dine in",
+        );
+        await expect(
+          page.getByText(zh ? "扫描门店二维码开始点单" : "Scan the location QR code to begin"),
+        ).toHaveCount(0);
+        await expect(
+          page.getByText(zh ? "开始点单" : "Start your order", { exact: true }),
+        ).toHaveCount(0);
+        await expect(
+          page.getByRole("navigation").getByRole("link", { name: zh ? "你的桌位" : "Your table" }),
+        ).toBeVisible();
+        // Linux CI fonts (DejaVu) are wider than macOS's: the header must still fit the phone.
+        const overflow = await page.evaluate(
+          () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        );
+        expect(overflow).toBeLessThanOrEqual(0);
+        await expectNoInternalText(page);
+        await page.screenshot({
+          path: `test-results/customer-table-waiting-header-${language}-${width}.png`,
+          fullPage: true,
+        });
+      };
+      await check("en");
+      await page.getByRole("button", { name: "切换到中文" }).click();
+      await check("zh-Hans");
+      await page.getByRole("button", { name: "English" }).click();
+    });
+
   test("a guest whose table was just settled scans it again: thanked with the receipt, before and after", async ({
     page,
   }) => {

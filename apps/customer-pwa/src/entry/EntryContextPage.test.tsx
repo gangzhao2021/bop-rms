@@ -85,9 +85,22 @@ describe("DEC-DINING-GUEST-TABLE-START: a table guests start themselves", () => 
       expect(html).not.toContain("Start your order");
     },
   );
-  it("a table nobody opened at a Store without guest starts reads as it did", () => {
-    const html = render({ kind: "TableNotOpen", context: table });
-    expect(html).toContain("Scan the location QR code to begin");
+  // Batch 41 (v15 b40 live): the guest has scanned the table's code; the header named no Store
+  // and told them to scan it ("Start your order / Scan the location QR code to begin").
+  it("a table staff haven't opened yet keeps the Store's header and never asks to scan again", () => {
+    for (const tableLabel of [undefined, "L40J B (TEST)"]) {
+      const html = render({
+        kind: "TableNotOpen",
+        context: table,
+        ...(tableLabel === undefined ? {} : { tableLabel }),
+      });
+      expect(html).toContain(">Harbour Test Store</h1>");
+      expect(html).toContain("BOP Test Kitchen · Dine in");
+      expect(html).not.toContain("Scan the location QR code to begin");
+      expect(html).not.toContain("Start your order");
+      // The waiting heading stays the page's own heading.
+      expect(html).toContain("isn’t open yet");
+    }
   });
   it("the question makes the answer that ends a table the quieter one", () => {
     const html = render({ kind: "TableAskNewParty", context: table });
