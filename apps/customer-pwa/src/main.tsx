@@ -30,9 +30,9 @@ import { SessionRestoreBusy } from "./session/SessionRestoreBusy.js";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router";
-import { AppErrorBoundary } from "@bop-rms/ui";
 import { App } from "./App.js";
-import { LanguageRoot, t } from "./i18n/i18n.js";
+import { t } from "./i18n/i18n.js";
+import { CustomerRoot } from "./i18n/CustomerRoot.js";
 import { consumeCustomerQrFragment, createCustomerEntryClient } from "./entry/entry-client.js";
 import "./styles.css";
 import "./customer-v3.css";
@@ -68,17 +68,15 @@ async function start() {
     if (!root) throw new Error("Application root is missing");
     createRoot(root).render(
       <StrictMode>
-        <AppErrorBoundary>
-          <LanguageRoot>
-            {() => (
-              <ResumeScreen
-                token={token}
-                fetcher={window.fetch.bind(window)}
-                open={(path) => window.location.replace(path)}
-              />
-            )}
-          </LanguageRoot>
-        </AppErrorBoundary>
+        <CustomerRoot>
+          {() => (
+            <ResumeScreen
+              token={token}
+              fetcher={window.fetch.bind(window)}
+              open={(path) => window.location.replace(path)}
+            />
+          )}
+        </CustomerRoot>
       </StrictMode>,
     );
     return;
@@ -154,19 +152,17 @@ async function start() {
       busyShown += 1;
       reactRoot.render(
         <StrictMode>
-          <AppErrorBoundary>
-            <BrowserRouter>
-              <LanguageRoot>
-                {() => (
-                  <SessionRestoreBusy
-                    key={busyShown}
-                    retryNow={retryNow}
-                    retryAfterSeconds={customerSessionRetryAfterMs / 1000}
-                  />
-                )}
-              </LanguageRoot>
-            </BrowserRouter>
-          </AppErrorBoundary>
+          <CustomerRoot>
+            {() => (
+              <BrowserRouter>
+                <SessionRestoreBusy
+                  key={busyShown}
+                  retryNow={retryNow}
+                  retryAfterSeconds={customerSessionRetryAfterMs / 1000}
+                />
+              </BrowserRouter>
+            )}
+          </CustomerRoot>
         </StrictMode>,
       );
     },
@@ -253,20 +249,18 @@ async function start() {
   };
   reactRoot.render(
     <StrictMode>
-      <AppErrorBoundary>
-        <BrowserRouter>
-          <LanguageRoot>
-            {() => (
-              <App
-                entryClient={entryClient}
-                diningAdmission={diningAdmission}
-                initialMenuContext={initialMenuContext}
-                currentOrder={currentOrder}
-              />
-            )}
-          </LanguageRoot>
-        </BrowserRouter>
-      </AppErrorBoundary>
+      <CustomerRoot>
+        {() => (
+          <BrowserRouter>
+            <App
+              entryClient={entryClient}
+              diningAdmission={diningAdmission}
+              initialMenuContext={initialMenuContext}
+              currentOrder={currentOrder}
+            />
+          </BrowserRouter>
+        )}
+      </CustomerRoot>
     </StrictMode>,
   );
   startCustomerServiceWorker();

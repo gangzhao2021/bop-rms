@@ -1964,4 +1964,11 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "The restaurant took everything off.": "餐厅已全部免单。",
   "The restaurant took everything off: there is nothing to pay.":
     "餐厅已全部免单：没有需要付的钱。",
+  // Batch 42 (v15 b41 live): the shared page frame's own words.
+  "Skip to main content": "跳到主要内容",
+  Primary: "主导航",
+  "Something went wrong": "出错了",
+  "This page could not be shown. Reload to try again. If you were in the middle of something, check it after reloading before doing it again.":
+    "此页面无法显示，请重新加载再试。如果您刚才正在操作，重新加载后请先核对，再决定是否重做。",
+  Reload: "重新加载",
 });
