@@ -1,7 +1,13 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
-import { atTop, remake, store } from "./kitchen-tm2-fixture";
+import { at, atTop, remake, store } from "./kitchen-tm2-fixture";
+
+// Batch 44: Recently finished and Remake follow the device clock. Pin it to the board's time, so the
+// fixture's dishes (ready 18:09-18:12Z) are as recent as the board says.
+test.beforeEach(async ({ page }) => {
+  await page.clock.setFixedTime(new Date(at));
+});
 
 test("@production WP-2423 batch 40: on the back office Kitchen page a remake comes before 53 earlier-day tickets, which stay one tap away", async ({
   page,

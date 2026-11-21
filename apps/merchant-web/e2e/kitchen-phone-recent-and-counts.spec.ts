@@ -1,6 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
-import { atTop, dishes, finished, remake, store, workItem } from "./kitchen-tm2-fixture";
+import { at, atTop, dishes, finished, remake, store, workItem } from "./kitchen-tm2-fixture";
+
+// Batch 44: Recently finished and Remake follow the device clock. Pin it to the board's time, so the
+// fixture's dishes (ready 18:09-18:12Z) are as recent as the board says.
+test.beforeEach(async ({ page }) => {
+  await page.clock.setFixedTime(new Date(at));
+});
 
 /**
  * WP-2423 batch 41 (v15 batch 40 live check, Test Merchant 2, kitchen-office-remakes).

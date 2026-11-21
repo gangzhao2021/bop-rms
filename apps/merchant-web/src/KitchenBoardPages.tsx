@@ -1641,7 +1641,6 @@ function WorkCard({
   item,
   readOnly,
   observedAt,
-  ageAt,
   onStep,
   onDishDone,
   pending,
@@ -1661,9 +1660,11 @@ function WorkCard({
    */
   readonly inTicket?: boolean;
   readonly readOnly: boolean;
+  /**
+   * The ticking clock (useKitchenClock) the card's age and its Remake are measured against. Batch
+   * 44 (v15 b43 live): never the projection time, which stands still while the kitchen is quiet.
+   */
   readonly observedAt: string;
-  /** The ticking clock ages are measured against (falls back to the projection time). */
-  readonly ageAt?: string;
   readonly onStep?: (item: KitchenBoardItem, step: KitchenBoardStep) => void;
   /** Combos: one chosen dish done, on the screen that shows the whole combo. */
   readonly onDishDone?: ((item: KitchenBoardItem, part: ComboPartView) => void) | undefined;
@@ -1682,7 +1683,7 @@ function WorkCard({
 }) {
   const age = Math.max(
     0,
-    Math.floor((Date.parse(ageAt ?? observedAt) - Date.parse(kitchenWaitStart(item))) / 60_000),
+    Math.floor((Date.parse(observedAt) - Date.parse(kitchenWaitStart(item))) / 60_000),
   );
   const allergenLabel = {
     None: t("No allergen cue"),
@@ -2992,17 +2993,20 @@ export function KitchenBoardScreen({
             {workspaceFrame ? boardFreshness : null}
             {/* Owner 2026-10-26: recently finished sits in the top bar, so a wrong dish is found
                 and remade at once. */}
+            {/* Batch 44 (v15 b43 live): its two hours are counted on the ticking clock. Counted on
+                the projection time, a kitchen quiet since 13:41 still offered 13:39 dishes at
+                16:47 as recently finished, each with Remake. */}
             {remakes && onRemake ? (
               <KitchenRecentlyFinished
                 items={board.items}
                 reworks={remakes.items}
-                observedAt={view.projectedAt}
+                observedAt={clockAt}
                 readOnly={remakeReadOnly}
                 onRemake={onRemake}
                 orderLabel={dayLabel}
               />
             ) : recentPlaceKept.current ? (
-              <KitchenRecentlyFinishedPlace items={board.items} observedAt={view.projectedAt} />
+              <KitchenRecentlyFinishedPlace items={board.items} observedAt={clockAt} />
             ) : null}
             {sectionFilterAvailable && !workspaceFrame ? (
               // WP-2423 item 8 ⑧: the section this kitchen screen shows, kept on this device.
@@ -3310,8 +3314,7 @@ export function KitchenBoardScreen({
                           : {})}
                         pending={pendingLines?.get(kitchenLineKey(item))}
                         onRemake={onRemake}
-                        observedAt={view.projectedAt}
-                        ageAt={clockAt}
+                        observedAt={clockAt}
                       />
                     ))}
                   </section>
@@ -3369,8 +3372,8 @@ export function KitchenBoardScreen({
                           inRecentlyFinished:
                             remakes !== undefined &&
                             onRemake !== undefined &&
-                            recentlyFinishedKitchenItems(board.items, view.projectedAt).some(
-                              (item) => searchMatches.includes(item),
+                            recentlyFinishedKitchenItems(board.items, clockAt).some((item) =>
+                              searchMatches.includes(item),
                             ),
                         })
                       : earlierElsewhere !== null
@@ -3582,8 +3585,7 @@ export function KitchenBoardScreen({
                                     cancelledLines?.has(kitchenLineKey(line.item)) === true
                                   }
                                   onRemake={onRemake}
-                                  observedAt={view.projectedAt}
-                                  ageAt={clockAt}
+                                  observedAt={clockAt}
                                   detailState={{
                                     station: activeStation,
                                     status,
@@ -3632,7 +3634,7 @@ export function KitchenBoardScreen({
         {remakes && onRemake ? (
           <KitchenRemakeDialog
             item={remakeTarget}
-            observedAt={view.projectedAt}
+            observedAt={clockAt}
             onSubmit={remakes.onCreate}
             onClose={() => setRemakeTarget(null)}
           />
@@ -3785,8 +3787,7 @@ export function KitchenWorkItemScreen({
           <WorkCard
             item={view.item}
             readOnly
-            observedAt={view.projectedAt}
-            ageAt={clockAt}
+            observedAt={clockAt}
             showDetails={false}
             showActions={false}
             showModifiers

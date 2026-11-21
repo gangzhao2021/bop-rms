@@ -537,7 +537,10 @@ export function KitchenRemakeDialog({
   );
 }
 
-/** Finished dishes of the last two hours, newest first (at most 12): the Recently finished list. */
+/**
+ * Finished dishes of the last two hours, newest first (at most 12): the Recently finished list.
+ * `observedAt` is the ticking kitchen clock (useKitchenClock), never the projection time alone.
+ */
 export function recentlyFinishedKitchenItems(
   items: readonly KitchenBoardItem[],
   observedAt: string,

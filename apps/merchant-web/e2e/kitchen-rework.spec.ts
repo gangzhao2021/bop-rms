@@ -19,6 +19,8 @@ const at = "2026-10-14T18:00:00.000Z";
 const readyAt = "2026-10-14T17:59:00.000Z";
 
 async function board(page: Page) {
+  // Batch 44: Recently finished and its Remake follow the device clock; pin it to the board's time.
+  await page.clock.setFixedTime(new Date(at));
   await page.route("**/merchant/session", (route) =>
     route.fulfill({
       headers,
