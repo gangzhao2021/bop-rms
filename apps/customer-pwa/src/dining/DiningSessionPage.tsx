@@ -307,6 +307,17 @@ function OrderAgainStatus({
     controller.getState,
   );
   if (item === null || state.status === "idle") return null;
+  // b39: a dish sold out today is said as that, never as a menu change.
+  const soldOut =
+    state.status === "validation" &&
+    "issueCodes" in state &&
+    state.issueCodes.includes("CATALOG_ITEM_SOLD_OUT");
+  if (soldOut)
+    return (
+      <div className="configure-status" role="alert">
+        <p>{t("{name} is sold out today.", { name: item.displayName })}</p>
+      </div>
+    );
   if (state.status === "validation" && item.orderAgain !== undefined)
     return (
       <div className="configure-status" role="alert">
@@ -441,7 +452,12 @@ function RoundCard({
                     and checkout say. b25 final: only the read's takenOff says so; a dish of an
                     unpaid pay-first round, one the kitchen refused that stays on the bill, and a
                     paid round's refunded dish read Cancelled. */}
-                {item.takenOff === true ? t("Taken off the bill · not charged") : t("Cancelled")}
+                {item.takenOff === true
+                  ? // b39: a dish staff took off because it sold out says so.
+                    item.soldOut === true
+                    ? t("Sold out · taken off the bill, not charged")
+                    : t("Taken off the bill · not charged")
+                  : t("Cancelled")}
               </span>
             ) : item.beingRemade ? (
               <span className="order-status__item-remake">
@@ -738,12 +754,12 @@ function TableSummary({ view }: { readonly view: DiningSessionView }) {
             : t("Item prices are before tax. Dishes refunded or never charged are not included. ")}
         {payLater && summary.splitParts !== undefined && summary.splitParts.count === null
           ? t(
-              "The table is paying by dish; {paid} paid so far. Each payment has its own tip, and cash is rounded to the nearest 5 cents.",
+              "The table is paying by dish; {paid} paid so far. Cash is rounded to the nearest 5 cents.",
               { paid: String(summary.splitParts.paid) },
             )
           : payLater && summary.splitParts !== undefined
             ? t(
-                "The table is paying the bill in {count} parts; {paid} paid so far. Each part has its own tip, and cash is rounded to the nearest 5 cents.",
+                "The table is paying the bill in {count} parts; {paid} paid so far. Cash is rounded to the nearest 5 cents.",
                 { count: String(summary.splitParts.count), paid: String(summary.splitParts.paid) },
               )
             : payLater
@@ -757,7 +773,7 @@ function TableSummary({ view }: { readonly view: DiningSessionView }) {
                   ? // b13: a bill comped to nothing owes nothing, said as that.
                     t("The restaurant took everything off: there is nothing to pay.")
                   : t(
-                      "Rounds go to the kitchen when they are sent. The table pays once at the end, with tax and any tip.",
+                      "Rounds go to the kitchen when they are sent. The table pays once at the end, with tax.",
                     )
               : t(
                   "Paid amounts include tax and any tip. Amounts waiting for payment include tax, before any tip. Each guest pays for the rounds they order.",
@@ -1255,6 +1271,7 @@ export function DiningSessionScreen({
             onRefresh();
           }}
           onBillChanged={onRefresh}
+          onGone={onRefresh}
         />
       ) : null}
       {staffCall}
@@ -1335,7 +1352,11 @@ export function DiningSessionScreen({
       ) : null}
       {/* DEC-DINE-IN-PAY-LATER: during checkout no more rounds are sent; paid, nothing to add. */}
       {/* A settled table's visit has ended: nothing more to order here. */}
-      {state.status === "settled" || paidOff ? null : tablePay?.checkingOut ? (
+      {/* b39: a table moved or merged away orders on its new table's code, never from here. */}
+      {state.status === "settled" ||
+      state.status === "moved" ||
+      state.status === "not-joined" ||
+      paidOff ? null : tablePay?.checkingOut ? (
         <p className="order-status__back" role="note">
           {t("Your table is checking out. To add dishes, ask a staff member.")}
         </p>

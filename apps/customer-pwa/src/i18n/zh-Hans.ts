@@ -344,6 +344,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Thank you for dining with us.": "谢谢光临",
   "Your meal at table {table} has ended.": "桌号 {table} 的用餐已结束。",
   "From table {table}": "来自 {table} 桌",
+  "Table {table} · rounds {rounds}": "{table} 桌 · 第 {rounds} 轮",
   "Order more": "再点一些",
   "Order at this table": "在这张桌点餐",
   "You pay on your phone each time you order. No account needed.":
@@ -1052,15 +1053,14 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "View your receipt": "查看你的收据",
   "View {name}": "查看 {name}",
   "Waiting for payment": "等待付款",
-  "Nothing is charged now. Your table pays once at the end, and you choose any tip then.":
-    "现在不收款。这桌最后一起结账，小费也在那时选。",
+  "Nothing is charged now. Your table pays once at the end.": "现在不收款。这桌最后一起结账。",
   Send: "送出",
   "This table pays for each round as it orders. Continue to payment instead.":
     "这桌每一轮点完就付款。请继续付款。",
   "On the table's bill": "记入本桌账单",
   "To pay at the end": "最后结账",
-  "Rounds go to the kitchen when they are sent. The table pays once at the end, with tax and any tip.":
-    "每一轮提交后直接送厨房。这桌最后一起结账，含税，小费也在那时选。",
+  "Rounds go to the kitchen when they are sent. The table pays once at the end, with tax.":
+    "每一轮提交后直接送厨房。这桌最后一起结账，含税。",
   "Waiting for the store": "等待门店",
   "We can make only {left} {name} along with the rest of your order — some items use the same ingredients. {notCharged} {value1} or change other items, then try again.":
     "结合你订单里的其他商品，{name} 只能做 {left} 份——有些商品用到相同的配料。{notCharged}请{value1}或修改其他商品后重试。",
@@ -1374,6 +1374,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "您的付款还在处理中，请稍后再查看。",
   "This phone isn’t part of the table any more. Ask a staff member for help.":
     "这部手机已不在这桌的名单里，请找店员帮忙。",
+  "We couldn’t check the bill just now. This page tries again by itself.":
+    "暂时没能读到账单，这一页会自己再试。",
   "We couldn’t reach the payment service. Check your connection and try again.":
     "暂时连不上支付服务，请检查网络后再试。",
   "Your table’s order": "本桌消费",
@@ -1481,10 +1483,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Tip (for your part)": "小费（按你这一份）",
   "Every part of the bill is paid ({count} parts). Thank you!": "账单 {count} 份都已付清，谢谢！",
   "Still to pay": "还要付",
-  "The table is paying the bill in {count} parts; {paid} paid so far. Each part has its own tip, and cash is rounded to the nearest 5 cents.":
-    "这桌分成 {count} 份付款，已付 {paid} 份。每份各自加小费，现金按 5 分取整。",
-  "The table is paying by dish; {paid} paid so far. Each payment has its own tip, and cash is rounded to the nearest 5 cents.":
-    "这桌按菜付款，已付 {paid} 笔。每笔各自加小费，现金按 5 分取整。",
+  "The table is paying the bill in {count} parts; {paid} paid so far. Cash is rounded to the nearest 5 cents.":
+    "这桌分成 {count} 份付款，已付 {paid} 份。现金按 5 分取整。",
+  "The table is paying by dish; {paid} paid so far. Cash is rounded to the nearest 5 cents.":
+    "这桌按菜付款，已付 {paid} 笔。现金按 5 分取整。",
   "Staff have paused joining by scan at this table. Ask staff, or the person who joined first, for the table’s join code.":
     "店员暂停了这桌的扫码加入。请向店员或先入桌的人要入桌码。",
   "This table isn’t open yet. Please ask staff to seat you.": "这张桌还没开台，请找店员。",
@@ -1610,6 +1612,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "This round is still on the table's bill. Ask staff to take it off.":
     "这一轮仍在本桌账单上，请让店员删除。",
   "Taken off the bill · not charged": "已从账单删除 · 不收费",
+  "Sold out · taken off the bill, not charged": "已售罄 · 已从账单删除，不收费",
+  "{name} is sold out today.": "{name}今天已售罄。",
   "Taken off the bill": "已从账单删除",
   "Staff took off 1 charge. It isn’t charged.": "店员撤下了 1 项收费，不收费。",
   "Staff took off {count} charges. They aren’t charged.": "店员撤下了 {count} 项收费，不收费。",

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { MemberJoinPanel } from "../member/MemberJoinPanel.js";
 import { MemberPointsAtTable } from "../member/MemberPointsAtTable.js";
 import { v7 as uuidv7 } from "uuid";
-import { t } from "../i18n/i18n.js";
+import { saidTable, t } from "../i18n/i18n.js";
 import { parseTipAmount } from "../checkout/tip-amount.js";
 import { customTipCheck } from "../checkout/checkout-decisions.js";
 import { formatMoney } from "../journey/format.js";
@@ -28,6 +28,8 @@ type TipChoice = string;
 const OTHER = "other";
 /** WP-2423 item 2: a payment still confirming after this long gets advice, not a longer wait. */
 const confirmingTooLongMs = 60_000;
+/** b39: reads of the bill that may fail in a row, re-read by themselves, before the guest is told. */
+const transientReadFailures = 3;
 const tipOf = (choice: TipChoice, typedMinor: string | null): TableTip =>
   choice === "0"
     ? { kind: "None" }
@@ -121,6 +123,7 @@ export function TablePayPanel({
   onStatus,
   readKey,
   onBillChanged,
+  onGone,
 }: {
   readonly client?: ReturnType<typeof createTablePaymentClient>;
   /** Called when checkout or payment changes, so the table page reads itself again. */
@@ -129,6 +132,8 @@ export function TablePayPanel({
   readonly readKey?: number | undefined;
   /** v15 2026-11-02: the bill changed here (points used): the table's page reads it at once too. */
   readonly onBillChanged?: () => void;
+  /** b39: this phone is no longer at an open table: the table page reads itself again. */
+  readonly onGone?: () => void;
 }) {
   const [client] = useState(() => provided ?? createTablePaymentClient());
   const [view, setView] = useState<TablePaymentView | null>(null);
@@ -170,14 +175,42 @@ export function TablePayPanel({
   const operation = useRef<{ key: string; reference: string; opened: boolean } | null>(null);
   const configuration = paymentConfiguration();
 
+  // v15 sweep 38 (b39): a read that fails for a moment (the table being paid or closed right then,
+  // the store's side busy) is read again by itself; the guest is told only when it keeps failing.
+  const readFailures = useRef(0);
+  const [readRetry, setReadRetry] = useState(0);
+  const gone = useRef<{ report?: (() => void) | undefined; told: boolean }>({ told: false });
+  gone.current.report = onGone;
   const read = useCallback(async (): Promise<TablePaymentView | null> => {
     try {
       const next = await client.read();
       if (next.state === "Paying" && operation.current !== null) operation.current.opened = true;
+      readFailures.current = 0;
+      gone.current.told = false;
       setView(next);
       setProblem(null);
       return next;
     } catch (error) {
+      const code = error instanceof TablePaymentClientError ? error.code : "unavailable";
+      // This phone is no longer at an open table (staff closed it): the table page reads itself
+      // again and shows how the meal ended, never an error about payment.
+      if (code === "not-found") {
+        if (!gone.current.told) {
+          gone.current.told = true;
+          gone.current.report?.();
+        }
+        return null;
+      }
+      if (code === "unavailable" || code === "processing") {
+        readFailures.current += 1;
+        if (readFailures.current < transientReadFailures) {
+          setReadRetry((value) => value + 1);
+          return null;
+        }
+        setProblem(t("We couldn’t check the bill just now. This page tries again by itself."));
+        setReadRetry((value) => value + 1);
+        return null;
+      }
       setProblem(problemText(error));
       return null;
     }
@@ -185,6 +218,14 @@ export function TablePayPanel({
   useEffect(() => {
     void read();
   }, [read, readKey]);
+  useEffect(() => {
+    if (readRetry === 0) return;
+    const timer = window.setTimeout(
+      () => void read(),
+      Math.min(2000 * readFailures.current, 10_000),
+    );
+    return () => window.clearTimeout(timer);
+  }, [readRetry, read]);
   // A reload keeps the tip the guest chose for this bill.
   useEffect(() => {
     if (view === null) return;
@@ -245,7 +286,7 @@ export function TablePayPanel({
     };
   }, [view?.state, configuration?.mode, clientSecret, client, handoffAttempt]);
 
-  if (view === null) return problem ? <p role="alert">{problem}</p> : null;
+  if (view === null) return problem ? <p role="status">{problem}</p> : null;
   if (!view.checkingOut && view.state !== "Paid") return null;
 
   // WP-2423 item 8 ⑦: the Store's own tip percentages; with tips off the guest pays no tip and is
@@ -633,6 +674,15 @@ export function TablePayPanel({
                       : entry.status === "Paying" || entry.status === "Mine"
                         ? ` · ${t("being paid")}`
                         : ""}
+                    {entry.tables.length === 0 ? null : (
+                      // b39: after a merge, which table's rounds this part pays.
+                      <small className="dining-session__split-dishes">
+                        {t("Table {table} · rounds {rounds}", {
+                          table: entry.tables.map(saidTable).join(" + "),
+                          rounds: entry.roundNumbers.join(", "),
+                        })}
+                      </small>
+                    )}
                     {entry.dishes.length === 0 ? null : (
                       <small className="dining-session__split-dishes">
                         {entry.dishes

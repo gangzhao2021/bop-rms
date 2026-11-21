@@ -83,6 +83,8 @@ export interface DiningRound {
     readonly beingRemade?: boolean;
     /** b25 final: staff took this dish off the table's bill before it was charged. */
     readonly takenOff?: true;
+    /** b39: taken off because it sold out (only with `takenOff`). */
+    readonly soldOut?: true;
     /** M91: where the dish is (absent for a cancelled dish or a charge). */
     readonly progress?: "Waiting" | "Making" | "Ready" | "Served";
     /**
@@ -401,6 +403,8 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
           value !== null && typeof value === "object" && Object.hasOwn(value, "beingRemade");
         const takenOff =
           value !== null && typeof value === "object" && Object.hasOwn(value, "takenOff");
+        const soldOut =
+          value !== null && typeof value === "object" && Object.hasOwn(value, "soldOut");
         const again =
           value !== null && typeof value === "object" && Object.hasOwn(value, "orderAgain");
         const progressed =
@@ -414,12 +418,14 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
           ...(priced ? ["priceBeforeTax"] : []),
           ...(remade ? ["beingRemade"] : []),
           ...(takenOff ? ["takenOff"] : []),
+          ...(soldOut ? ["soldOut"] : []),
           ...(again ? ["orderAgain"] : []),
           ...(progressed ? ["progress"] : []),
         ]);
         if (remade && item.beingRemade !== true) return invalid();
         // b25 final: only a cancelled dish can have been taken off the bill.
         if (takenOff && (item.takenOff !== true || item.cancelled !== true)) return invalid();
+        if (soldOut && (item.soldOut !== true || !takenOff)) return invalid();
         const quantity = count(item.quantity, 1);
         const servedQuantity = count(item.servedQuantity, 0);
         if (servedQuantity > quantity || typeof item.cancelled !== "boolean") return invalid();
@@ -440,6 +446,7 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
           ...(priceBeforeTax === null ? {} : { priceBeforeTax }),
           ...(remade ? { beingRemade: true } : {}),
           ...(takenOff ? { takenOff: true as const } : {}),
+          ...(soldOut ? { soldOut: true as const } : {}),
           ...(again ? { orderAgain: orderAgain(item.orderAgain) } : {}),
           ...(progressed
             ? {

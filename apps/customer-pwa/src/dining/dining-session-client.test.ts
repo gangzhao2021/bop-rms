@@ -292,6 +292,24 @@ describe("WP-2423 Q8 dining session client", () => {
     }
   });
 
+  it("b39: decodes a dish taken off because it sold out, only with takenOff", () => {
+    const off = payload();
+    Object.assign(firstRound(off).items[0] as object, {
+      cancelled: true,
+      takenOff: true,
+      soldOut: true,
+    });
+    expect(parseDiningSessionView(off).rounds[0]?.items[0]).toMatchObject({ soldOut: true });
+    for (const change of [
+      { cancelled: true, takenOff: true, soldOut: false },
+      { cancelled: true, soldOut: true },
+    ]) {
+      const wrong = payload();
+      Object.assign(firstRound(wrong).items[0] as object, change);
+      expect(() => parseDiningSessionView(wrong)).toThrow(DiningSessionClientError);
+    }
+  });
+
   it("does not call the server without this browser's session", async () => {
     const request = vi.fn();
     await expect(

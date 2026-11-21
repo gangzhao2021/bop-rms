@@ -429,3 +429,73 @@ it("v15 b12: a split the bill changed under says so to the guest, so no old part
   });
   expect(customerTablePaymentBody(view(false)).payment.split).toMatchObject({ stale: false });
 });
+
+it("b39: a merged table's bill split by rounds says which table's rounds each part pays", () => {
+  const round = (roundNumber: number, fromTableLabel: string | null) => ({
+    roundNumber,
+    fromTableLabel,
+    items: [],
+    subtotalMinor: "100",
+    taxMinor: "13",
+    totalMinor: "113",
+    taxRoundingMinor: "0",
+    paid: false,
+  });
+  const view = (mode: string, merged: boolean) =>
+    ({
+      attempt: null,
+      bill: {
+        tableLabel: "H4",
+        sessionPhase: "Closing",
+        tips: { enabled: false, tierPercents: [] },
+        consistent: true,
+        owed: { subtotalMinor: "400", taxMinor: "52", totalMinor: "452" },
+        settlement: null,
+        writeOff: null,
+        onlinePayment: null,
+        split: {
+          mode,
+          stale: false,
+          dishChoices: [],
+          paidParts: 0,
+          remainingMinor: "452",
+          parts: [
+            [1, [1, 3]],
+            [2, [2, 4]],
+          ].map(([partNumber, roundNumbers]) => ({
+            partNumber,
+            amountMinor: "226",
+            subtotalMinor: "200",
+            taxMinor: "26",
+            roundNumbers,
+            dishes: [],
+            guestPaying: false,
+            payment: null,
+          })),
+        },
+        rounds: [
+          round(1, null),
+          round(2, merged ? "H6" : null),
+          round(3, null),
+          round(4, merged ? "H6" : null),
+        ],
+      },
+    }) as never;
+  expect(
+    customerTablePaymentBody(view("ByRounds", true)).payment.split?.parts.map((part) => [
+      (part as { tables?: unknown }).tables,
+      (part as { roundNumbers?: unknown }).roundNumbers,
+    ]),
+  ).toEqual([
+    [["H4"], [1, 3]],
+    [["H6"], [2, 4]],
+  ]);
+  // Nothing merged, or split another way: nothing more is said.
+  for (const [mode, merged] of [
+    ["ByRounds", false],
+    ["Even", true],
+  ] as const)
+    expect(customerTablePaymentBody(view(mode, merged)).payment.split?.parts[0]).not.toHaveProperty(
+      "tables",
+    );
+});

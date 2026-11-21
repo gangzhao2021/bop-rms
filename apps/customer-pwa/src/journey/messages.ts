@@ -1182,9 +1182,7 @@ export const checkoutText = Object.freeze({
   },
   placeOrderWithTotal: (total: string) => t("Place order · {total}", { total }),
   get sendToKitchenNote() {
-    return t(
-      "Nothing is charged now. Your table pays once at the end, and you choose any tip then.",
-    );
+    return t("Nothing is charged now. Your table pays once at the end.");
   },
   get placingOrder() {
     return t("Placing your order…");

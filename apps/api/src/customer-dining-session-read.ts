@@ -213,6 +213,8 @@ export interface CustomerDiningSessionFacts {
        * so not part of what the table ordered.
        */
       readonly notCharged?: true;
+      /** b39: staff took it off because it sold out (said to the guest as that). */
+      readonly soldOut?: true;
     }[];
     /** WP-2423 Q26: Order items the kitchen is remaking (Kitchen's public Query). */
     readonly remakes?: ReadonlySet<string>;
@@ -320,6 +322,8 @@ export interface CustomerDiningSessionView {
        * unpaid pay-first round and for one the kitchen refused that stays on the bill.
        */
       readonly takenOff?: true;
+      /** b39: present (true) only for a dish taken off because it sold out (with `takenOff`). */
+      readonly soldOut?: true;
       /**
        * M91: where this dish is — waiting for the kitchen, being made, ready or served (all of it).
        * Absent for a cancelled dish and for a charge (tea, corkage), which the kitchen never makes.
@@ -657,6 +661,9 @@ export function composeCustomerDiningSession(
         // "not charged" to the guest: an unpaid pay-first round was never charged but nothing was
         // taken off a bill, and a dish the kitchen refused with no record stays on the bill.
         takenOff: itemCancellation(item.orderItemReference)?.notCharged === true || roundNotCharged,
+        soldOut:
+          itemCancellation(item.orderItemReference)?.notCharged === true &&
+          itemCancellation(item.orderItemReference)?.soldOut === true,
         // v15 b19: staff cancelled this dish with a refund recorded (confirmed or pending).
         refundRecorded:
           (itemCancellation(item.orderItemReference)?.refundAmount.amountMinor ?? 0n) > 0n,
@@ -858,6 +865,7 @@ export function composeCustomerDiningSession(
               : { priceBeforeTax: money(item.price.subtotal.amountMinor) }),
             ...(item.beingRemade ? { beingRemade: true as const } : {}),
             ...(item.takenOff ? { takenOff: true as const } : {}),
+            ...(item.takenOff && item.soldOut ? { soldOut: true as const } : {}),
             ...(item.progress === undefined ? {} : { progress: item.progress }),
             ...(item.orderAgain === undefined ? {} : { orderAgain: item.orderAgain }),
           }),
@@ -1377,6 +1385,7 @@ function postgresDependencies(
               refunded: false,
               refundAmount: { amountMinor: 0n, currencyCode: "CAD" },
               notCharged: true as const,
+              ...(record.reasonCode === "SOLD_OUT" ? { soldOut: true as const } : {}),
             });
         // WP-2423 Q26: items the kitchen is remaking for this table's order.
         const remakes = new Set(

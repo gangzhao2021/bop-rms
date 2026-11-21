@@ -1,5 +1,6 @@
 import type { ConsumerTransaction } from "@bop/eventing";
 import { customerDisplayLocale } from "./customer-display-locale.js";
+import { logGuestFailure } from "./guest-failure-log.js";
 import {
   GuestSessionError,
   GuestSessionService,
@@ -284,6 +285,23 @@ export function customerTablePaymentBody(view: DiningTableOnlinePaymentView) {
                 amountMinor: part.amountMinor,
                 subtotalMinor: part.subtotalMinor,
                 dishes: part.dishes,
+                // b39 (v15 sweep 38): a merged table's bill split by rounds says which table's
+                // rounds each part pays, so guests find their own part (labels, round numbers).
+                ...(bill.split?.mode === "ByRounds" &&
+                bill.rounds.some((round) => round.fromTableLabel !== null)
+                  ? {
+                      tables: [
+                        ...new Set(
+                          part.roundNumbers.map(
+                            (number) =>
+                              bill.rounds.find((round) => round.roundNumber === number)
+                                ?.fromTableLabel ?? bill.tableLabel,
+                          ),
+                        ),
+                      ].filter((label): label is string => label !== null),
+                      roundNumbers: part.roundNumbers,
+                    }
+                  : {}),
                 ...(part.choice === undefined ? {} : { choice: part.choice }),
                 // WP-2423 同桌结账: this phone paid this part (other guests' stay unnamed).
                 ...((view.paidByMe ?? []).includes(part.partNumber) ? { byYou: true } : {}),
@@ -512,7 +530,12 @@ export class CustomerDiningTablePaymentHandler {
     )
       ? 404
       : 503;
-    if (status === 503) response.setHeader("Retry-After", "5");
+    if (status === 503) {
+      // v15 sweep 38 (b39): a guest's bill read failed with no trace anywhere; the cause is logged
+      // (its code only, never the guest's values), so the next one can be found.
+      logGuestFailure("CUSTOMER_DINING_TABLE_PAYMENT_FAILED", error);
+      response.setHeader("Retry-After", "5");
+    }
     response.status(status).json({
       schemaVersion: 1,
       error: { code: status === 404 ? "table_not_found" : "table_payment_unavailable" },

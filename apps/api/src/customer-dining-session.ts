@@ -146,6 +146,8 @@ export class CustomerDiningSessionHandler {
               ...(item.beingRemade === true ? { beingRemade: true } : {}),
               // b25 final: staff took this dish off the table's bill before it was charged.
               ...(item.takenOff === true ? { takenOff: true } : {}),
+              // b39: taken off because it sold out, said to the guest as that.
+              ...(item.takenOff === true && item.soldOut === true ? { soldOut: true } : {}),
               // M91: Waiting / Making / Ready / Served; absent for a cancelled dish or a charge.
               ...(item.progress === undefined ? {} : { progress: item.progress }),
               // WP-2423 item 8 ③ (decision 13): the published menu item and options "Order

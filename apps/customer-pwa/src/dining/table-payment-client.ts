@@ -83,6 +83,12 @@ export interface TablePaymentView {
       readonly status: "Paid" | "Mine" | "Paying" | "ToPay";
       /** WP-2423 同桌结账: this phone paid this part. */
       readonly byYou: boolean;
+      /**
+       * b39: a merged table's bill split by rounds — the tables whose rounds this part pays, and
+       * those round numbers (as on the table page). Empty otherwise.
+       */
+      readonly tables: readonly string[];
+      readonly roundNumbers: readonly number[];
     }[];
   };
   /**
@@ -398,6 +404,24 @@ function splitOf(value: unknown): TablePaymentView["split"] {
           ),
           status: part.status as "Paid" | "Mine" | "Paying" | "ToPay",
           byYou: part.byYou === true,
+          tables: Object.freeze(
+            part.tables === undefined
+              ? []
+              : Array.isArray(part.tables) &&
+                  part.tables.length <= 20 &&
+                  part.tables.every((label) => typeof label === "string" && label.length <= 80)
+                ? (part.tables as string[])
+                : fail(),
+          ),
+          roundNumbers: Object.freeze(
+            part.roundNumbers === undefined
+              ? []
+              : Array.isArray(part.roundNumbers) &&
+                  part.roundNumbers.length <= 100 &&
+                  part.roundNumbers.every((n) => Number.isSafeInteger(n) && Number(n) >= 1)
+                ? (part.roundNumbers as number[])
+                : fail(),
+          ),
         });
       }),
     ),
