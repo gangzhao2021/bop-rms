@@ -32,6 +32,8 @@ export const billTaxRoundingRule = Object.freeze({ code: "DEC_TAX_WHOLE_RECEIPT"
  * named in the basis, so the version recorded for an unpaid bill is superseded.
  */
 export const billTaxRoundingAllocation = "LastRoundBounded";
+/** b39: how a merged table's Order is charged on the bill it joined (named in a merged basis). */
+export const billTaxRoundingMergedOrders = "MergedOrderKeepsOwnBill";
 /** b28: the most of the bill's rounding a round with `dishes` taxed dishes takes, per tax type. */
 export const billTaxRoundingRoundLimitMinor = (dishes: number): bigint =>
   BigInt(Math.ceil(dishes / 2) + 1);
@@ -277,9 +279,16 @@ export function computeBillTaxRounding(
         ? own
         : (kept[position] ?? 0n);
     });
-    const fromTheLast = (candidates: readonly boolean[]) => {
-      const result = [...stays];
-      let left = whole - stays.reduce((sum, value) => sum + value, 0n);
+    // b39: `counted` limits the tax `target` is compared with to some rounds (one merged Order).
+    const fromTheLast = (
+      candidates: readonly boolean[],
+      base: readonly bigint[] = stays,
+      target: bigint = whole,
+      counted: readonly boolean[] = indexes.map(() => true),
+    ) => {
+      const result = [...base];
+      let left =
+        target - base.reduce((sum, value, position) => (counted[position] ? sum + value : sum), 0n);
       for (let position = indexes.length - 1; position >= 0 && left !== 0n; position -= 1) {
         if (!candidates[position] || (scaled[position] ?? 0n) <= 0n) continue;
         const own = result[position] ?? 0n;
@@ -294,7 +303,36 @@ export function computeBillTaxRounding(
       return left === 0n ? result : null;
     };
     const everyRound = indexes.map(() => true);
-    const shares = fromTheLast(carries) ?? fromTheLast(everyRound) ?? sharesOver(everyRound);
+    // b39 (docs/spec/design/tax-whole-receipt.md "b39"): a merged table's Order keeps the bill it
+    // had on its own: its rounds take that Order's own whole tax (worked out on its dishes, placed
+    // as above), so what its guests saw before the merge does not move by a cent. The carrier's
+    // rounds take the rest of the whole bill's tax, so the bill stays exact.
+    const ownBase = [...stays];
+    if (options.carrierOrderReference !== undefined)
+      for (const orderReference of new Set(
+        indexes.map((index) => (rounds[index] as BillTaxRoundingRound).orderReference),
+      )) {
+        if (orderReference === options.carrierOrderReference) continue;
+        const mine = indexes.map(
+          (index) => (rounds[index] as BillTaxRoundingRound).orderReference === orderReference,
+        );
+        const own = indexes.map((_, position) => {
+          const value = charged[position] ?? 0n;
+          return (scaled[position] ?? 0n) > 0n && value >= 0n ? value : (kept[position] ?? 0n);
+        });
+        const ownWhole = roundRational(
+          scaled.reduce((sum, value, position) => (mine[position] ? sum + value : sum), 0n),
+          group.denominator,
+          group.mode,
+        );
+        const alone = fromTheLast(mine, own, ownWhole, mine);
+        if (alone !== null)
+          mine.forEach((isMine, position) => {
+            if (isMine) ownBase[position] = alone[position] ?? 0n;
+          });
+      }
+    const shares =
+      fromTheLast(carries, ownBase) ?? fromTheLast(everyRound) ?? sharesOver(everyRound);
     indexes.forEach((index, position) => {
       const amount = (shares[position] ?? 0n) - (charged[position] ?? 0n);
       if (amount === 0n) return;
@@ -319,6 +357,8 @@ export function computeBillTaxRounding(
           // recorded with the earlier sharing records a new version before it is paid.
           billTaxRoundingAllocation,
           options.carrierOrderReference ?? null,
+          // b39: a merged Order keeps its own bill; a merged bill recorded before records anew.
+          ...(options.carrierOrderReference === undefined ? [] : [billTaxRoundingMergedOrders]),
           rounds.map((round) => [
             round.orderReference,
             round.orderBatchReference,

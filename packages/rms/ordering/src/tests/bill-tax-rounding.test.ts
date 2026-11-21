@@ -222,6 +222,47 @@ describe("WP-2423 DEC-TAX-WHOLE-RECEIPT: the bill's tax rounding", () => {
     ).toBe(-1n);
   });
 
+  // b39 (v15 sweep 38): H6 ordered $11.97, $37.99 and $5.99 (each round's tax rounded on its own:
+  // $1.56 + $4.94 + $0.78 = $7.28) and its own bill was $63.22 (tax on $55.95 is $7.27). Merged
+  // into H4 ($7.98, $21.99, $16.99: $6.10 charged, its own tax $6.10), H6's part read $63.23. A
+  // merged Order keeps its own bill; H4 takes the rest, and the bill's tax is $13.38 exactly.
+  it("keeps a merged table's own bill to the cent; the holder takes the rest", () => {
+    const multi = (order: number, n: number, nets: readonly bigint[]) => ({
+      orderReference: id(order),
+      orderBatchReference: id(100 + n),
+      items: nets.map((net, index) => ({
+        orderItemReference: id(300 + n * 10 + index),
+        netMinor: net,
+        taxComponents: [hst((net * 13n + 50n) / 100n)],
+        reduction: null,
+      })),
+    });
+    const h6 = [multi(6, 2, [399n, 399n, 399n]), multi(6, 4, [2200n, 1599n]), multi(6, 6, [599n])];
+    const h4 = [multi(4, 1, [399n, 399n]), multi(4, 3, [1600n, 599n]), multi(4, 5, [1699n])];
+    const roundTax = (r: BillTaxRoundingRound) =>
+      r.items.reduce((sum, item) => sum + (item.taxComponents[0]?.taxAmountMinor ?? 0n), 0n);
+    const net = (rs: readonly BillTaxRoundingRound[]) =>
+      rs.flatMap((r) => r.items).reduce((sum, item) => sum + item.netMinor, 0n);
+    const charged = (rs: readonly BillTaxRoundingRound[]) =>
+      rs.reduce((sum, r) => sum + roundTax(r), 0n);
+    const taxOf = (
+      rs: readonly BillTaxRoundingRound[],
+      result: { lines: readonly { orderBatchReference: string; amountMinor: bigint }[] },
+    ) =>
+      charged(rs) +
+      result.lines
+        .filter((line) => rs.some((r) => r.orderBatchReference === line.orderBatchReference))
+        .reduce((sum, line) => sum + line.amountMinor, 0n);
+    const alone = computeBillTaxRounding(h6, { carrierOrderReference: id(6) });
+    expect([net(h6), taxOf(h6, alone)]).toEqual([5595n, 727n]);
+    const bill = [...h4, ...h6];
+    const merged = computeBillTaxRounding(bill, { carrierOrderReference: id(4) });
+    expect(taxOf(h6, merged)).toBe(727n);
+    expect(taxOf(bill, merged)).toBe((net(bill) * 13n + 50n) / 100n);
+    expect(taxOf(bill, merged)).toBe(1338n);
+    expect(taxOf(h4, merged)).toBe(611n);
+  });
+
   it("charges the whole-bill tax exactly whoever holds the bill", () => {
     const prices = [105n, 299n, 1n, 1349n, 875n, 33n, 450n];
     for (let size = 1; size <= prices.length; size++)
