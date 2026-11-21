@@ -484,6 +484,47 @@ describe("each route tells a refusal from a failure", () => {
   });
 });
 
+/**
+ * Batch 43 (v15 TM2): a staff session that was signed out or pushed out, or a stale CSRF token,
+ * made POST /dining/table-close-plan answer 503 "unavailable" and log a level-50 fault, while
+ * /dining/tables answered 403. The dining routes with answers of their own refuse it the same way
+ * (403, the shared refusal body, nothing reported); a real fault keeps its own 503 body.
+ */
+describe("dining routes with their own answers refuse an ended sign-in as the others do", () => {
+  const closePlanBody = {
+    orderReference: "01909968-0000-7000-8000-000000000003",
+    diningSessionReference: "01909968-0000-7000-8000-000000000002",
+  };
+  const routes: readonly (readonly [string, string, string, unknown])[] = [
+    [
+      "/dining/table-close-plan",
+      "diningTableClosePlan",
+      "dining_table_close_plan_unavailable",
+      closePlanBody,
+    ],
+    ["/dining/serve-ready", "diningServeReady", "dining_serve_ready_unavailable", {}],
+    ["/dining/closing", "diningClosing", "dining_closing_unavailable", {}],
+  ];
+  const refusals = () => [
+    new BrowserSessionError("BROWSER_SESSION_DENIED"),
+    new BrowserSessionError("BROWSER_SESSION_INPUT_INVALID"),
+  ];
+  it.each(routes)("POST %s", async (path, key, unavailable, body) => {
+    for (const refusal of refusals()) {
+      const refused = await serve(option(key, rejecting(refusal)) as never);
+      const response = await refused.post(path, body);
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({ error: "request_denied" });
+      expect(refused.reported).toEqual([]);
+    }
+    const failing = await serve(option(key, rejecting(unexpected())) as never);
+    const failed = await failing.post(path, body);
+    expect(failed.status).toBe(503);
+    expect(await failed.json()).toEqual({ error: unavailable });
+    expect(failing.reported).toHaveLength(1);
+  });
+});
+
 // WP-2423 (v15 fabf0261): a paper paid-at well before the table's last live round is a refusal
 // the page explains, never a fault in the operator's log.
 it("a table paid-at well before its last round was ordered is a 409 the page reads", async () => {

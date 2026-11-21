@@ -14,7 +14,7 @@ import type { MerchantBffRouterOptions } from "./merchant-bff-contract.js";
 import { tableClosePlanResponse } from "./merchant-dining-table-close-plan-response.js";
 import { DiningServeReadyError } from "./merchant-dining-serve-ready-command.js";
 import { diningServeChangedCode, diningServeInvalidCode } from "./merchant-dining-serve-command.js";
-import { merchantFailureCode } from "./merchant-failure.js";
+import { isMerchantRefusal, merchantFailureCode } from "./merchant-failure.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
 import { DiningClosingError } from "@rms/dining";
 import { DiningCheckoutAlreadyPaidError } from "./merchant-dining-closing-command.js";
@@ -1193,8 +1193,10 @@ export function installMerchantDiningRoutes(
       })
       .catch((error: unknown) => {
         noteFailure(response, error);
-        if (error instanceof Error && error.message === "DINING_TABLE_CLOSE_PLAN_PERMISSION_DENIED")
-          denied(response);
+        // Batch 43 (v15 TM2): a staff session signed out or pushed out, or a stale CSRF token
+        // (BROWSER_SESSION_DENIED / _INPUT_INVALID), is refused as on every merchant route: 403,
+        // so the page sends them to sign in, never "try again" logged as a fault.
+        if (isMerchantRefusal(error)) denied(response);
         else response.status(503).json({ error: "dining_table_close_plan_unavailable" });
       });
   });
@@ -1278,7 +1280,11 @@ export function installMerchantDiningRoutes(
           response.status(400).json({ error: "dining_serve_ready_invalid" });
         else if (error instanceof DiningServeReadyError && error.code === "NotFound")
           response.status(404).json({ error: "dining_serve_ready_not_found" });
-        else if (error instanceof DiningServeReadyError && error.code === "PermissionDenied")
+        else if (
+          (error instanceof DiningServeReadyError && error.code === "PermissionDenied") ||
+          // Batch 43: an ended sign-in or stale CSRF token is a refusal, never "unavailable".
+          isMerchantRefusal(error)
+        )
           denied(response);
         else response.status(503).json({ error: "dining_serve_ready_unavailable" });
       });
@@ -1353,6 +1359,11 @@ export function installMerchantDiningRoutes(
           error instanceof DiningClosingError || error instanceof DiningCheckoutAlreadyPaidError
             ? error.code
             : null;
+        // Batch 43: an ended sign-in or stale CSRF token is refused as on every merchant route.
+        if (code === null && isMerchantRefusal(error)) {
+          denied(response);
+          return;
+        }
         const [status, body] =
           code === "DINING_CHECKOUT_ALREADY_PAID"
             ? ([409, "table_already_paid"] as const)
