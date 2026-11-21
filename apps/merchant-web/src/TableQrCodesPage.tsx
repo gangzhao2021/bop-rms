@@ -580,32 +580,39 @@ export function TableQrCodesPage({
       meta={storeLabel}
       actions={
         <>
-          <button
-            type="button"
-            data-variant="primary"
-            disabled={busy || printable.length === 0 || pending !== null}
-            onClick={() => void print(printable)}
-          >
-            {t("Print all codes")}
-          </button>
-          <button
-            type="button"
-            disabled={busy || pending !== null || change !== null || load.kind !== "Ready"}
-            onClick={() => beginChange("Add", null)}
-          >
-            {t("Add a table")}
-          </button>
+          {/* Batch 40: someone refused this page is offered nothing it can't do. */}
+          {load.kind === "PermissionDenied" ? null : (
+            <>
+              <button
+                type="button"
+                data-variant="primary"
+                disabled={busy || printable.length === 0 || pending !== null}
+                onClick={() => void print(printable)}
+              >
+                {t("Print all codes")}
+              </button>
+              <button
+                type="button"
+                disabled={busy || pending !== null || change !== null || load.kind !== "Ready"}
+                onClick={() => beginChange("Add", null)}
+              >
+                {t("Add a table")}
+              </button>
+            </>
+          )}
           <button type="button" disabled={busy} onClick={refresh}>
             {t("Refresh")}
           </button>
         </>
       }
     >
-      <p className="table-qr__intro">
-        {t(
-          "Guests scan the code on their table to order and pay. Print each code once. If a sticker is damaged, print it again — the code stays the same. If a code is lost or copied, replace it: the old one stops working at once, and only that table needs a new sticker.",
-        )}
-      </p>
+      {load.kind === "PermissionDenied" ? null : (
+        <p className="table-qr__intro">
+          {t(
+            "Guests scan the code on their table to order and pay. Print each code once. If a sticker is damaged, print it again — the code stays the same. If a code is lost or copied, replace it: the old one stops working at once, and only that table needs a new sticker.",
+          )}
+        </p>
+      )}
       <div className="table-qr__notices" ref={noticeRef}>
         {message ? (
           <StatePanel

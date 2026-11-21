@@ -74,6 +74,38 @@ it("lists items counted short of open orders with those orders, and items used b
   // What staff read (links aside) names no code or identifier.
   expect(html.replace(/<[^>]*>/gu, "")).not.toMatch(/USED_BEYOND_COUNT|DineIn|01909a2c/u);
 });
+it("batch 40: in Chinese the shortage lines end with Chinese full stops and say 堂食", async () => {
+  const { setLanguageForTest } = await import("./i18n/i18n.js");
+  setLanguageForTest("zh-Hans");
+  try {
+    const order = (n: number, orderType: string) => ({
+      orderReference: id(n),
+      orderNumber: String(n),
+      orderType,
+      businessDate: "2026-10-18",
+      quantity: "0.13",
+      ended: false,
+    });
+    const text = render([
+      {
+        itemReference: id(1),
+        locationReference: id(3),
+        lotCode: null,
+        unitCode: "L",
+        onHand: "0.1",
+        reserved: "0.26",
+        shortQuantity: "0.16",
+        usedBeyondCount: "0",
+        orders: [order(9, "Pickup"), order(11, "DineIn")],
+      },
+    ]).replace(/<[^>]*>/gu, "");
+    expect(text).toContain("堂食");
+    expect(text).not.toMatch(/dine-in|[\u3400-\u9fff)）]\./u);
+  } finally {
+    setLanguageForTest("en");
+  }
+});
+
 it("shows nothing when no item is short (or the server is older)", () => {
   expect(render([])).toBe("");
   expect(

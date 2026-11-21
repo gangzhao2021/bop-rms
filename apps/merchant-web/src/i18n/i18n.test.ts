@@ -138,6 +138,24 @@ it("leaves no plain English text in a translated screen", () => {
   expect(untranslated).toEqual([]);
 });
 
+it("batch 40 (v15 live): a translated screen never ends a sentence with a bare English full stop", () => {
+  // A "." written after a translated text or link stays "." in Chinese ("…“权限与安全”."); the
+  // sentence end goes through t(".") so Chinese reads "。".
+  const bare: string[] = [];
+  for (const file of sources(root)) {
+    const text = readFileSync(file, "utf8");
+    if (!/from "\.{1,2}\/(?:\.\.\/)*i18n\/i18n\.js"/u.test(text)) continue;
+    const source = parse(file);
+    const visit = (node: ts.Node): void => {
+      if (ts.isJsxText(node) && /^\s*\.\s*$/u.test(node.text))
+        bare.push(`${file}:${source.getLineAndCharacterOfPosition(node.getStart()).line + 1}`);
+      ts.forEachChild(node, visit);
+    };
+    visit(source);
+  }
+  expect(bare).toEqual([]);
+});
+
 it("chooses Chinese for a device that prefers Chinese, and writes Chinese while chosen", () => {
   expect(initialLanguage(["zh-CN", "en"])).toBe("zh-Hans");
   expect(initialLanguage(["en-CA", "zh-CN"])).toBe("en");

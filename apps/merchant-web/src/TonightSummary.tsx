@@ -623,11 +623,16 @@ type TonightState =
 export function TonightReport({
   client,
   revision,
+  onRefused,
 }: {
   readonly client: Pick<StoreReportsClient, "tonight">;
   readonly revision: number;
+  /** Batch 40: told whether the server refused this person the read (the page drops its tabs). */
+  readonly onRefused?: (refused: boolean) => void;
 }) {
   const [state, setState] = useState<TonightState>({ kind: "Loading" });
+  const refused = state.kind === "PermissionDenied";
+  useEffect(() => onRefused?.(refused), [onRefused, refused]);
   const businessDay = useStoreBusinessDay();
   useEffect(() => {
     const controller = new AbortController();

@@ -783,7 +783,8 @@ function MenuBuilder({
               : t(
                   "When this menu is published, customers at this Store won't see these items until they are offered here: ",
                 )}
-            {hiddenNames}.
+            {hiddenNames}
+            {t(".")}
           </p>
           <p>
             {mayOffer ? (

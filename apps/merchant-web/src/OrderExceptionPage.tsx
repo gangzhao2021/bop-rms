@@ -615,7 +615,7 @@ function OrderExceptionCard({
     const day = detail.businessDate === null ? null : businessDateText(detail.businessDate);
     const differences = [
       totalsDifference(t("Payments taken"), detail.captured),
-      totalsDifference("Refunds", detail.refunded),
+      totalsDifference(t("Refunds"), detail.refunded),
     ].filter((text): text is string => text !== null);
     return (
       <>
@@ -657,7 +657,10 @@ function OrderExceptionCard({
         {differences.length > 0 ? (
           <ul className="order-exception__differences">
             {differences.map((text) => (
-              <li key={text}>{text}.</li>
+              <li key={text}>
+                {text}
+                {t(".")}
+              </li>
             ))}
           </ul>
         ) : null}

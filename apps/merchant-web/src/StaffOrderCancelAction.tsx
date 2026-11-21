@@ -446,7 +446,8 @@ export function StaffOrderCancelAction({
             {t(
               "Customer not coming? If they told you, choose Customer request. If they just never came, keep the order: once it is ready and the one-hour pickup hold has passed, close it as not collected in",
             )}{" "}
-            <Link to="/operations/pickup">{t("Pickup")}</Link>.
+            <Link to="/operations/pickup">{t("Pickup")}</Link>
+            {t(".")}
           </p>
         ) : null}
         <form

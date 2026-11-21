@@ -263,7 +263,8 @@ export function StepUpVerification({
         <p role="status">
           {current ? (
             <>
-              {t("Verified until")} <SourceTime instant={verifiedUntil} />.
+              {t("Verified until")} <SourceTime instant={verifiedUntil} />
+              {t(".")}
             </>
           ) : signIn ? (
             t("Confirm it is you by signing in again.")

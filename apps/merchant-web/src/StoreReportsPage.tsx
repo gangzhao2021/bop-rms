@@ -598,6 +598,7 @@ export function StoreReportsPage({
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const active = useRef<AbortController | null>(null);
   // WP-2423 item 8 ② (Figma 47-2): the page opens on tonight's closing summary.
+  const [tonightRefused, setTonightRefused] = useState(false);
   const [tab, setTab] = useState<"Tonight" | "Period" | "Stores">(
     initialTab === "Stores" && stores.length < 2 ? "Tonight" : initialTab,
   );
@@ -698,6 +699,9 @@ export function StoreReportsPage({
     draft.from > draft.to ||
     (today !== null && draft.to > today) ||
     draft.to > shiftDate(draft.from, 30);
+  const refused =
+    (tab === "Tonight" && tonightRefused) ||
+    (tab === "Period" && state.kind === "PermissionDenied");
   return (
     <WorkspacePage
       title={t("Reports")}
@@ -714,25 +718,30 @@ export function StoreReportsPage({
         </button>
       }
     >
-      <nav className="store-reports__tabs" aria-label={t("Reports")}>
-        {(
-          [
-            ["Tonight", t("Today's summary")],
-            ["Period", t("Sales by period")],
-            ...(stores.length >= 2 ? ([["Stores", t("Stores")]] as const) : []),
-          ] as const
-        ).map(([value, label]) => (
-          <button
-            key={value}
-            type="button"
-            aria-pressed={tab === value}
-            onClick={() => setTab(value)}
-          >
-            {label}
-          </button>
-        ))}
-      </nav>
-      {tab === "Tonight" ? <TonightReport client={client} revision={revision} /> : null}
+      {/* Batch 40: a person refused the reports gets the refusal alone, no tabs to try. */}
+      {refused ? null : (
+        <nav className="store-reports__tabs" aria-label={t("Reports")}>
+          {(
+            [
+              ["Tonight", t("Today's summary")],
+              ["Period", t("Sales by period")],
+              ...(stores.length >= 2 ? ([["Stores", t("Stores")]] as const) : []),
+            ] as const
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={tab === value}
+              onClick={() => setTab(value)}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
+      )}
+      {tab === "Tonight" ? (
+        <TonightReport client={client} revision={revision} onRefused={setTonightRefused} />
+      ) : null}
       {tab === "Stores" ? (
         <BrandStoresReport
           client={client}
@@ -744,59 +753,65 @@ export function StoreReportsPage({
       ) : null}
       {tab !== "Period" ? null : (
         <>
-          <form
-            className="list-filters store-reports__picker"
-            aria-label={t("Report period")}
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (!invalid) show(draft.from, draft.to);
-            }}
-          >
-            <label>
-              {t("From")}
-              <input
-                type="date"
-                name="from"
-                value={draft.from}
-                max={today ?? undefined}
-                onChange={(event) => setDraft({ ...draft, from: event.currentTarget.value })}
-              />
-            </label>
-            <label>
-              {t("To")}
-              <input
-                type="date"
-                name="to"
-                value={draft.to}
-                max={today ?? undefined}
-                onChange={(event) => setDraft({ ...draft, to: event.currentTarget.value })}
-              />
-            </label>
-            <button type="submit" disabled={invalid}>
-              {t("Show")}
-            </button>
-            {today === null ? null : (
-              <div className="store-reports__presets" role="group" aria-label={t("Quick periods")}>
-                <button type="button" onClick={() => show(today, today)}>
-                  {t("Today")}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => show(shiftDate(today, -1), shiftDate(today, -1))}
+          {refused ? null : (
+            <form
+              className="list-filters store-reports__picker"
+              aria-label={t("Report period")}
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (!invalid) show(draft.from, draft.to);
+              }}
+            >
+              <label>
+                {t("From")}
+                <input
+                  type="date"
+                  name="from"
+                  value={draft.from}
+                  max={today ?? undefined}
+                  onChange={(event) => setDraft({ ...draft, from: event.currentTarget.value })}
+                />
+              </label>
+              <label>
+                {t("To")}
+                <input
+                  type="date"
+                  name="to"
+                  value={draft.to}
+                  max={today ?? undefined}
+                  onChange={(event) => setDraft({ ...draft, to: event.currentTarget.value })}
+                />
+              </label>
+              <button type="submit" disabled={invalid}>
+                {t("Show")}
+              </button>
+              {today === null ? null : (
+                <div
+                  className="store-reports__presets"
+                  role="group"
+                  aria-label={t("Quick periods")}
                 >
-                  {t("Yesterday")}
-                </button>
-                <button type="button" onClick={() => show(shiftDate(today, -6), today)}>
-                  {t("Last 7 days")}
-                </button>
-              </div>
-            )}
-            {invalid && draft.from !== "" && draft.to !== "" ? (
-              <p className="bop-muted store-reports__hint" role="status">
-                {t("Choose up to 31 days, ending no later than today's business day.")}
-              </p>
-            ) : null}
-          </form>
+                  <button type="button" onClick={() => show(today, today)}>
+                    {t("Today")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => show(shiftDate(today, -1), shiftDate(today, -1))}
+                  >
+                    {t("Yesterday")}
+                  </button>
+                  <button type="button" onClick={() => show(shiftDate(today, -6), today)}>
+                    {t("Last 7 days")}
+                  </button>
+                </div>
+              )}
+              {invalid && draft.from !== "" && draft.to !== "" ? (
+                <p className="bop-muted store-reports__hint" role="status">
+                  {t("Choose up to 31 days, ending no later than today's business day.")}
+                </p>
+              ) : null}
+            </form>
+          )}
           {downloadError === null ? null : (
             <p role="alert" className="command-error">
               {downloadError}

@@ -293,7 +293,8 @@ export function AllergenListPage({
                       jurisdictionCode: view.registryTemplate.jurisdictionCode,
                       length: view.registryTemplate.allergens.length,
                     })}{" "}
-                    <SourceTime instant={view.registryProposal.recordedAt} />.
+                    <SourceTime instant={view.registryProposal.recordedAt} />
+                    {t(".")}
                   </p>
                 }
                 onApprove={() =>

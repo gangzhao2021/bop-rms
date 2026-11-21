@@ -1705,7 +1705,8 @@ export function StoreSetupDraftPage({
                       heading.current?.focus();
                     }}
                   >
-                    {shown + 1}. {stepName(i)}
+                    {`${shown + 1}. `}
+                    {stepName(i)}
                   </button>
                 </li>
               ))}

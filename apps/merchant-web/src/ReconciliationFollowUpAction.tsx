@@ -302,7 +302,8 @@ function ChargeDetails({ evidence }: { evidence: CaptureEvidenceSummary | null }
       <p>
         {t("Charge of {amountMinor} taken", { amountMinor: formatCad(evidence.amountMinor) })}{" "}
         <SourceTime instant={evidence.occurredAt} />
-        {evidence.environment === "Test" ? t(" (test payment, no real money)") : ""}.
+        {evidence.environment === "Test" ? t(" (test payment, no real money)") : ""}
+        {t(".")}
       </p>
       <p>
         {t("Recorded")} <SourceTime instant={evidence.observedAt} />

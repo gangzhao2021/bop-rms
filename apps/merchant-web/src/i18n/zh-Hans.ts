@@ -4400,8 +4400,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Task Inbox": "任务收件箱",
   "Task Inbox unavailable": "任务收件箱暂不可用",
   "Task actions unavailable": "任务操作不可用",
-  "Task and source facts are scoped to the current Store; internal references are hidden.":
-    "任务和来源数据限定于当前门店；内部参考号已隐藏。",
   "Task records": "任务记录",
   Tasks: "任务",
   Tax: "税",
@@ -5714,6 +5712,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "photo changed": "照片已更改",
   "photos changed": "照片已更改",
   pickup: "取餐",
+  "dine-in": "堂食",
   "price approval": "价格审批",
   published: "发布",
   "queue:{revision}": "queue:{revision}",
@@ -10270,4 +10269,80 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "另有 {tables}是之前营业日开的，还没关 · {amount}，不计入今天的数字。请在“桌台”里收款或登记客人未付离开，然后逐桌关台。",
   "Also open from earlier days: {tables}, nothing owed. On Tables, close each one.":
     "另有 {tables}是之前营业日开的，还没关，没有欠款。请在“桌台”里逐桌关台。",
+  // Batch 40: the Brand configuration panel (ORG-BRAND-DETAIL).
+  "The request is invalid. Check the configuration fields.": "填写有误，请检查配置各项。",
+  "Someone else changed this brand's configuration. Recover the change still waiting here, then refresh before making a new one.":
+    "有人改过这个品牌的配置。请先恢复这里还在等待的更改，再刷新后做新的更改。",
+  "The configuration can't be read just now. Refresh, or recover the change still waiting here.":
+    "现在读不到配置。请刷新，或恢复这里还在等待的更改。",
+  "It isn't known whether your change was saved. Recover it here; don't send it again.":
+    "还不知道你的更改是否已保存。请在这里恢复它，不要重新提交。",
+  "The brand or the person signed in changed. Go back to the brand and sign-in you started with to recover that change.":
+    "品牌或登录的人变了。请回到原来的品牌和登录，再恢复那次更改。",
+  "What's on screen is out of date. Refresh before making a new change.":
+    "页面上的内容已过时。请先刷新，再做新的更改。",
+  "Load the current saved configuration.": "载入当前已保存的配置。",
+  "A change is still waiting to be confirmed. Recover it before making a new one.":
+    "有一次更改还在等待确认。请先恢复它，再做新的更改。",
+  "Saved configuration loaded.": "已载入保存的配置。",
+  "No configuration has been saved. A published platform template and registered catalogue are required to create one.":
+    "还没有保存过配置。需要一个已发布的平台模板和已登记的菜品目录才能创建。",
+  "Configuration updated and refreshed.": "配置已更新并刷新。",
+  "The previous operation did not apply changes. Refresh before trying again.":
+    "上一次操作没有生效。请先刷新再试。",
+  "Previous operation confirmed. Current configuration refreshed.":
+    "上一次操作已确认，配置已刷新。",
+  "The previous operation did not apply changes. You can try again.":
+    "上一次操作没有生效，可以再试一次。",
+  "Brand configuration": "品牌配置",
+  "Offline. A change still waiting stays on this device until it can be recovered.":
+    "已离线。还在等待的更改会保留在这台设备上，直到可以恢复。",
+  "Refresh configuration": "刷新配置",
+  "Recover original request": "恢复原来的更改",
+  "Published platform template": "已发布的平台模板",
+  "Platform template": "平台模板",
+  "Choose a current published template": "选择一个当前已发布的模板",
+  "Recorded template — unavailable for new selection": "已记录的模板 — 不能再新选",
+  "Previously selected template — unavailable for new selection": "之前选过的模板 — 不能再新选",
+  "{code}: {name}. Content revision {revision}.": "{code}：{name}。内容版本 {revision}。",
+  "Locales: {locales}. Hard requirements: {required}. Allowed overrides: {overrides}.":
+    "语言：{locales}。必填项：{required}。可改写项：{overrides}。",
+  "Template effective from {from}; until {until}.": "模板生效时间：{from} 起，至 {until}。",
+  open: "不限",
+  "No current published template selected. A recorded historical link is preserved until you explicitly choose another.":
+    "还没有选当前已发布的模板。在你另选之前，已记录的旧模板会保留。",
+  "More published templates": "更多已发布的模板",
+  "Create configuration draft": "创建配置草稿",
+  "Catalogue: {catalogue}. Theme: not configured.": "菜品目录：{catalogue}。主题：未设置。",
+  "Catalogue: register a catalogue, then refresh configuration. Theme: not configured.":
+    "菜品目录：请先登记菜品目录，再刷新配置。主题：未设置。",
+  "Default locale": "默认语言",
+  "Allow override {value}": "允许改写 {value}",
+  "Effective from (UTC)": "生效起始（UTC）",
+  "Effective until (UTC, blank means open)": "生效截止（UTC，留空表示不限）",
+  "Reason code": "原因代码",
+  "Save configuration draft": "保存配置草稿",
+  "Recorded state: {state}. Content version {version}. Revision {revision}.":
+    "当前状态：{state}。内容版本 {version}。修订 {revision}。",
+  "Linked catalogue and platform template. Theme: not configured. Publication checks run when you submit or publish.":
+    "已关联菜品目录和平台模板。主题：未设置。提交或发布时会检查能否发布。",
+  "Linked catalogue and platform template. Theme: recorded theme linked. Publication checks run when you submit or publish.":
+    "已关联菜品目录和平台模板。主题：已关联记录的主题。提交或发布时会检查能否发布。",
+  "Edit saved configuration": "编辑已保存的配置",
+  "Supported locales: {locales}. Available locales are set by the linked template.":
+    "支持的语言：{locales}。可选语言由关联的模板决定。",
+  "Review valid until (UTC)": "审核有效期至（UTC）",
+  "Choose a review deadline. Approval and publication must finish before this time.":
+    "选择审核截止时间。批准和发布都要在这个时间之前完成。",
+  "Approve independently": "由另一人批准",
+  "Publish configuration": "发布配置",
+  "Original review valid until (UTC):": "原审核有效期至（UTC）：",
+  "Review expired. New approval or publication is unavailable; original recovery remains available.":
+    "审核已过期。不能再批准或发布，但仍可恢复原来的更改。",
+  "Approval and publication must finish before this deadline.":
+    "批准和发布都要在这个截止时间之前完成。",
+  "Configuration history": "配置记录",
+  "No recorded configuration history.": "还没有配置记录。",
+  "Revision {revision} · {state} · {recordedAt}": "修订 {revision} · {state} · {recordedAt}",
+  "Older configuration history": "更早的配置记录",
 });

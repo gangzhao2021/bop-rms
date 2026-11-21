@@ -252,3 +252,34 @@ it("WP-2423 (M24): says a dish or choice guests can order is 可售 in Chinese, 
     setLanguageForTest("en");
   }
 });
+
+it("batch 40 (v15 live): the Chinese stock reason uses Chinese punctuation and spaces a Latin name", async () => {
+  const { stockSoldOutText } = await import("./store-availability-page.js");
+  const { setLanguageForTest } = await import("./i18n/i18n.js");
+  // The shape v15 read for DEMO Store's milk: none on hand.
+  const milk = {
+    name: "Whole milk 3.25%",
+    unitCode: "L",
+    displayPrecision: 3,
+    required: "0.24",
+    onHand: "0",
+    reserved: "0",
+    available: "0",
+    openOrderCount: 0,
+  };
+  setLanguageForTest("zh-Hans");
+  try {
+    expect(stockSoldOutText({ ingredients: [milk] })).toBe("Whole milk 3.25% 没有库存。");
+    const both = stockSoldOutText({
+      ingredients: [
+        milk,
+        { ...milk, name: "豆浆", onHand: "2.8", reserved: "2.8", openOrderCount: 11 },
+      ],
+    });
+    expect(both).toMatch(/^Whole milk 3\.25% 没有库存；豆浆的全部 2\.8 L 都已为 .+预留。$/u);
+    expect(both).not.toMatch(/[.;]$|; /u);
+  } finally {
+    setLanguageForTest("en");
+  }
+  expect(stockSoldOutText({ ingredients: [milk] })).toBe("No Whole milk 3.25% is in stock.");
+});

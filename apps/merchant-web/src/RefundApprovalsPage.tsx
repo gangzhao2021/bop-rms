@@ -1132,17 +1132,20 @@ export function RefundApprovalsPage({
       (roleRequests.state !== "Denied" || roleChanges.state !== "Denied") ? null : (
         <section aria-labelledby="refund-approvals-heading" data-screen-id="APPROVAL-INBOX">
           <h2 id="refund-approvals-heading">{t("Refunds awaiting approval")}</h2>
-          {/* Owner 2026-10-25: one line; the rule itself behind "Why approval?". */}
-          <details className="approvals-why">
-            <summary>
-              {t("Large or late refunds need a second person.")} {t("Why approval?")}
-            </summary>
-            <p>
-              {t(
-                "Refunds above $100 for an order, from an earlier business day or more than 24 hours after payment need an owner or finance member who did not ask for them. Approve in person: both of you confirm with your authenticator code, then the refund is sent.",
-              )}
-            </p>
-          </details>
+          {/* Owner 2026-10-25: one line; the rule itself behind "Why approval?". Batch 40: not
+              for someone refused it. */}
+          {state === "Denied" ? null : (
+            <details className="approvals-why">
+              <summary>
+                {t("Large or late refunds need a second person.")} {t("Why approval?")}
+              </summary>
+              <p>
+                {t(
+                  "Refunds above $100 for an order, from an earlier business day or more than 24 hours after payment need an owner or finance member who did not ask for them. Approve in person: both of you confirm with your authenticator code, then the refund is sent.",
+                )}
+              </p>
+            </details>
+          )}
           {state === "Loading" ? (
             <StatePanel heading={t("Loading refunds")} status>
               <p>{t("Checking refunds awaiting approval…")}</p>
@@ -1162,7 +1165,8 @@ export function RefundApprovalsPage({
           ) : view ? (
             <>
               <p>
-                {t("Last checked")} <SourceTime instant={view.observedAt} />.
+                {t("Last checked")} <SourceTime instant={view.observedAt} />
+                {t(".")}
               </p>
               <ul className="refund-approval-list">
                 {view.entries.map((entry) =>
@@ -1192,16 +1196,21 @@ export function RefundApprovalsPage({
           ) : null}
         </section>
       )}
-      {/* Owner 2026-10-25: the sole-operator setting lives with the Store's settings. */}
-      <p className="approvals-sole-link">
-        {t("Sole operator (approving your own refunds) is set in")}{" "}
-        <Link
-          to={"/app/organization/stores/" + storeReference + "/setup?section=access#sole-operator"}
-        >
-          {t("Store setup, Permissions and safety")}
-        </Link>
-        .
-      </p>
+      {/* Owner 2026-10-25: the sole-operator setting lives with the Store's settings. Batch 40:
+          setup guidance only for someone who approves refunds here. */}
+      {state === "Denied" ? null : (
+        <p className="approvals-sole-link">
+          {t("Sole operator (approving your own refunds) is set in")}{" "}
+          <Link
+            to={
+              "/app/organization/stores/" + storeReference + "/setup?section=access#sole-operator"
+            }
+          >
+            {t("Store setup, Permissions and safety")}
+          </Link>
+          {t(".")}
+        </p>
+      )}
     </WorkspacePage>
   );
 }

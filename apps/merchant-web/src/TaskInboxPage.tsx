@@ -166,11 +166,6 @@ export function TaskInboxScreen({
           <div>
             <p className="bop-eyebrow">{t("Tasks")}</p>
             <h2 id="task-inbox-heading">{view?.storeLabel ?? t("Task Inbox")}</h2>
-            <p>
-              {t(
-                "Task and source facts are scoped to the current Store; internal references are hidden.",
-              )}
-            </p>
           </div>
           <div className="task-inbox-toolbar">
             <button

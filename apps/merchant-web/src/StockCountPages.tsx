@@ -166,7 +166,7 @@ export function StockShortageNotice({
                     shortQuantity: quantityText(entry.shortQuantity, entry.unitCode),
                   })}
                 </strong>
-                .
+                {t(".")}
                 {entry.orders.length > 0 ? (
                   <>
                     {" "}
@@ -177,7 +177,7 @@ export function StockShortageNotice({
                         <Link to={`/operations/orders/${order.orderReference}`}>
                           {t("Order {orderNumber}", { orderNumber: order.orderNumber })}
                         </Link>{" "}
-                        ({order.orderType === "DineIn" ? "dine-in" : t("pickup")},{" "}
+                        ({order.orderType === "DineIn" ? t("dine-in") : t("pickup")},{" "}
                         {quantityText(order.quantity, entry.unitCode)}
                         {order.ended
                           ? t(", already finished — release its ingredients on Orders")
@@ -185,7 +185,7 @@ export function StockShortageNotice({
                         )
                       </span>
                     ))}
-                    .
+                    {t(".")}
                   </>
                 ) : null}
               </li>

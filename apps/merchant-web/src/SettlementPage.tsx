@@ -744,7 +744,8 @@ export function SettlementReport({
                           ),
                         },
                       )}{" "}
-                      <Link to="/operations/order-exceptions">{t("Exceptions")}</Link>.
+                      <Link to="/operations/order-exceptions">{t("Exceptions")}</Link>
+                      {t(".")}
                     </li>
                   ) : null}
                   {view.unmatchedProviderCharges.refunded.count > 0 ? (
@@ -1052,46 +1053,49 @@ export function SettlementPage({
         </button>
       }
     >
-      <form
-        className="list-filters settlement__picker"
-        onSubmit={(event) => {
-          event.preventDefault();
-          showDay(draft === null ? requested : draft === "" ? null : draft);
-        }}
-      >
-        {latestDay && previousDay ? (
-          <div className="settlement__days">
-            <button
-              type="button"
-              aria-pressed={selected === latestDay}
-              onClick={() => showDay(null)}
-            >
-              {businessDateLabel(latestDay, latestDay)}
-            </button>
-            <button
-              type="button"
-              aria-pressed={selected === previousDay}
-              onClick={() => showDay(previousDay)}
-            >
-              {businessDateLabel(previousDay, latestDay)}
-            </button>
+      {/* Batch 40: someone refused Settlement gets no day picker for days they can't read. */}
+      {state.kind === "PermissionDenied" ? null : (
+        <form
+          className="list-filters settlement__picker"
+          onSubmit={(event) => {
+            event.preventDefault();
+            showDay(draft === null ? requested : draft === "" ? null : draft);
+          }}
+        >
+          {latestDay && previousDay ? (
+            <div className="settlement__days">
+              <button
+                type="button"
+                aria-pressed={selected === latestDay}
+                onClick={() => showDay(null)}
+              >
+                {businessDateLabel(latestDay, latestDay)}
+              </button>
+              <button
+                type="button"
+                aria-pressed={selected === previousDay}
+                onClick={() => showDay(previousDay)}
+              >
+                {businessDateLabel(previousDay, latestDay)}
+              </button>
+            </div>
+          ) : null}
+          <div className="settlement__other-day">
+            <label>
+              {t("Business day")}
+              <input
+                type="date"
+                name="businessDate"
+                value={draft ?? selected ?? ""}
+                max={latestDay}
+                onChange={(event) => setDraft(event.currentTarget.value)}
+              />
+            </label>
+            <button type="submit">{t("Show")}</button>
           </div>
-        ) : null}
-        <div className="settlement__other-day">
-          <label>
-            {t("Business day")}
-            <input
-              type="date"
-              name="businessDate"
-              value={draft ?? selected ?? ""}
-              max={latestDay}
-              onChange={(event) => setDraft(event.currentTarget.value)}
-            />
-          </label>
-          <button type="submit">{t("Show")}</button>
-        </div>
-      </form>
-      {closedDay.kind === "Open" ? (
+        </form>
+      )}
+      {state.kind === "PermissionDenied" ? null : closedDay.kind === "Open" ? (
         <p className="settlement__closed-day" role="status" data-tone="action">
           <span>{closedDay.text}</span>{" "}
           <button type="button" onClick={() => showDay(closedDay.businessDate)}>

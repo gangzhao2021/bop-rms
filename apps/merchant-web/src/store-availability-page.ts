@@ -1,4 +1,4 @@
-import { listSeparator, t } from "./i18n/i18n.js";
+import { currentLanguage, listSeparator, t } from "./i18n/i18n.js";
 /** WP-2423 8.5: CAT-AVAILABILITY view contract and same-origin client for the selected Store. */
 import { storeDayTime } from "./StoreTime.js";
 import type { KitchenBoardView } from "./kitchen-board.js";
@@ -120,15 +120,19 @@ export function stockSoldOutText(stock: StockSoldOut): string {
     return t(
       "No stock has been received at this store yet. Record its first delivery and guests can order it.",
     );
+  const chinese = currentLanguage() === "zh-Hans";
   const reasons = stock.ingredients.map((entry) => {
     const amount = (value: string) => stockAmount(value, entry.unitCode, entry.displayPrecision);
+    // Batch 40 (v15 "Whole milk 3.25%没有库存."): in Chinese a name ending in Latin letters,
+    // digits or "%" is spaced from the Chinese words after it.
+    const name = chinese && /[A-Za-z0-9%)]$/u.test(entry.name) ? entry.name + " " : entry.name;
     const onHand = micro(entry.onHand),
       reserved = micro(entry.reserved);
-    if (onHand <= 0n) return t("no {name} is in stock", { name: entry.name });
+    if (onHand <= 0n) return t("no {name} is in stock", { name });
     if (reserved > 0n && reserved >= onHand)
       return t("all {onHand} of {name} is set aside for {openOrderCount}", {
         onHand: amount(entry.onHand),
-        name: entry.name,
+        name,
         openOrderCount: orders(entry.openOrderCount),
       });
     if (reserved > 0n)
@@ -136,7 +140,7 @@ export function stockSoldOutText(stock: StockSoldOut): string {
         "{onHand} of {name} is in stock, but {reserved} is set aside for {openOrderCount} and one needs {required}",
         {
           onHand: amount(entry.onHand),
-          name: entry.name,
+          name,
           reserved: amount(entry.reserved),
           openOrderCount: orders(entry.openOrderCount),
           required: amount(entry.required),
@@ -144,12 +148,14 @@ export function stockSoldOutText(stock: StockSoldOut): string {
       );
     return t("only {available} of {name} can be used and one needs {required}", {
       available: amount(entry.available),
-      name: entry.name,
+      name,
       required: amount(entry.required),
     });
   });
   if (reasons.length === 0)
     return t("The ingredients in stock are on hold or past their use-by date.");
+  // Chinese reasons are joined and ended with Chinese punctuation, never "; " and ".".
+  if (chinese) return reasons.join("；") + "。";
   const text = reasons.join("; ");
   return text.charAt(0).toUpperCase() + text.slice(1) + ".";
 }
