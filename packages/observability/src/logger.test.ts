@@ -161,6 +161,11 @@ describe("WP-0040 structured logger", () => {
     { requestId: "raw-header-value" },
     { statusCode: 99 },
     { statusCode: 600 },
+    // WP-2423 (rush-logging-and-entry): a route is a template, never a concrete path.
+    { route: "/bff/customer/carts/018f1f48-7b5d-7a04-8a1b-123456789abc" },
+    { route: "/orders/1234567" },
+    { route: "/a?token=raw-header-value" },
+    { route: "relative/path" },
   ])("fails closed for an invalid bounded HTTP field %#", (unsafeField) => {
     const destination = new MemoryDestination();
     const failures: StructuredLogFailure[] = [];
@@ -173,6 +178,17 @@ describe("WP-0040 structured logger", () => {
 
     expect(failures).toEqual(["LOG_REDACTION_FAILED"]);
     expect(destination.records.join("")).not.toContain("raw-header-value");
+  });
+
+  it("WP-2423 (rush-logging-and-entry): writes a request's route template", () => {
+    const destination = new MemoryDestination();
+    const logger = createStructuredLogger(config, { destination });
+    logger.info({ event: "operation_completed", route: "/bff/customer/carts/:cart_id" });
+    logger.info({ event: "operation_completed", route: "unmatched" });
+    expect(destination.json().map((record) => record.route)).toEqual([
+      "/bff/customer/carts/:cart_id",
+      "unmatched",
+    ]);
   });
 
   it("isolates a redaction accessor failure without exposing the value", () => {

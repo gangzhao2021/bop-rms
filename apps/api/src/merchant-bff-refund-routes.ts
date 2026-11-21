@@ -1,0 +1,705 @@
+/** Merchant BFF routes: refund approvals, requests, dispatch and unmatched capture refunds. Registered by createMerchantBffRouter (merchant-bff.ts). */
+import express, { type Router } from "express";
+import { MerchantRefundApprovalError } from "./merchant-ordinary-refund-approval.js";
+import {
+  cookie,
+  denied,
+  exactHeader,
+  failed,
+  NO_STORE,
+  noteFailure,
+  rawHeaderValues,
+  refundReadFailure,
+  safeRead,
+  sameOriginMutation,
+} from "./merchant-bff-http.js";
+import { UnmatchedCaptureRefundError } from "@rms/payment";
+import { retryTransactionConflict } from "./transaction-conflict-retry.js";
+import { failureNamed } from "./merchant-failure.js";
+import type { MerchantBffRouterOptions } from "./merchant-bff-contract.js";
+
+/**
+ * WP-2423 M10: a refund of every dish of a paid order nobody accepted yet is answered 409, so the
+ * page offers Can't make it (the recorded refusal) instead; anything else as any other failure.
+ */
+function refundRequestFailed(response: express.Response, error: unknown) {
+  if (failureNamed(error, "ORDINARY_REFUND_ORDER_NOT_ACCEPTED")) {
+    response
+      .status(409)
+      .set("Cache-Control", NO_STORE)
+      .json({ error: "refund_order_not_accepted" });
+    return;
+  }
+  // WP-2423 M10: "stop making it too" that the kitchen or the counter can't do as asked; the page
+  // says why and what to do instead. Nothing was recorded.
+  for (const [code, answer] of [
+    ["ORDINARY_REFUND_WITHDRAW_NEEDS_APPROVAL", "refund_withdraw_needs_approval"],
+    ["ORDINARY_REFUND_WITHDRAW_NEEDS_SENDER", "refund_withdraw_needs_sender"],
+    ["ORDINARY_REFUND_WITHDRAW_HANDED_OVER", "refund_withdraw_handed_over"],
+    ["ORDINARY_REFUND_WITHDRAW_EVERYTHING", "refund_withdraw_everything"],
+    ["ORDINARY_REFUND_WITHDRAW_KITCHEN_CHANGED", "refund_withdraw_kitchen_changed"],
+    ["ORDINARY_REFUND_WITHDRAW_STOCK_NOT_RELEASABLE", "refund_withdraw_stock_not_releasable"],
+    // WP-2423 M52/M131: cash goes back in whole nickels; under 3 cents can't be handed back.
+    ["ORDINARY_REFUND_CASH_UNDER_NICKEL", "refund_cash_under_nickel"],
+  ] as const)
+    if (failureNamed(error, code)) {
+      response.status(409).set("Cache-Control", NO_STORE).json({ error: answer });
+      return;
+    }
+  failed(response, error);
+}
+
+/** WP-2423 Q5: why an approval or decline was refused, without internal detail. */
+function refundDecisionFailure(response: express.Response, error: MerchantRefundApprovalError) {
+  // A role refusal is not a session problem: the browser says who may decide, not "sign in".
+  if (error.code === "Denied")
+    response.status(403).set("Cache-Control", NO_STORE).json({ error: "refund_role_required" });
+  else if (error.code === "RequesterNotEligible")
+    response.status(409).json({ error: "requester_not_eligible" });
+  else if (error.code === "SamePerson") response.status(422).json({ error: "same_person" });
+  // WP-2423 Q19: self-approval asked for, but another person now holds refund approval.
+  else if (error.code === "SoleOperatorNotInEffect")
+    response.status(409).json({ error: "sole_operator_not_in_effect" });
+  else if (error.code === "NeedsReverification")
+    response.status(409).json({ error: "needs_reverification", party: error.party });
+  else if (error.code === "AlreadyPrepared")
+    response.status(409).json({ error: "refund_already_prepared" });
+  else if (error.code === "AlreadyDeclined")
+    response.status(409).json({ error: "refund_already_declined" });
+  // WP-2423 M10: the kitchen and the counter already left this refund's dishes out.
+  else if (error.code === "DishesStopped")
+    response.status(409).json({ error: "refund_dishes_stopped" });
+  else response.status(409).json({ error: "refund_changed" });
+}
+
+export function installMerchantRefundRoutes(
+  router: Router,
+  options: MerchantBffRouterOptions,
+): void {
+  // WP-2423 P6: read, request and approve the full refund of an unmatched Provider capture.
+  for (const step of ["status", "request", "approve"] as const)
+    router.post(
+      "/payments/unmatched-capture-refund/" + step,
+      sameOriginMutation(options),
+      (request, response) => {
+        const sessionCookie = cookie(request, "__Host-bop-merchant"),
+          csrf = exactHeader(request, "x-bop-csrf");
+        if (
+          sessionCookie === null ||
+          csrf === null ||
+          csrf.length === 0 ||
+          Object.keys(request.query).length !== 0
+        ) {
+          denied(response);
+          return;
+        }
+        const command = options.unmatchedCaptureRefund;
+        if (!command) {
+          response.status(503).json({ error: "unmatched_capture_refund_unavailable" });
+          return;
+        }
+        void (
+          step === "status"
+            ? command.read({ sessionCookie, csrf, query: request.body })
+            : command[step]({ sessionCookie, csrf, command: request.body })
+        )
+          .then((result) => response.json(result))
+          .catch((error: unknown) => {
+            noteFailure(response, error);
+            if (!(error instanceof UnmatchedCaptureRefundError)) {
+              failed(response, error);
+              return;
+            }
+            const status = {
+              UNMATCHED_REFUND_INPUT_INVALID: 400,
+              UNMATCHED_REFUND_PERMISSION_DENIED: 403,
+              UNMATCHED_REFUND_NOT_FOUND: 404,
+              UNMATCHED_REFUND_STATE_CONFLICT: 409,
+              UNMATCHED_REFUND_SAME_APPROVER: 422,
+              UNMATCHED_REFUND_UNAVAILABLE: 503,
+            }[error.code];
+            response.status(status).json({ error: error.code });
+          });
+      },
+    );
+
+  // WP-2423 Q5: refunds awaiting an Owner/Finance approval at the selected Store.
+  router.get("/payments/refunds/approvals", safeRead(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    if (
+      request.method !== "GET" ||
+      request.body !== undefined ||
+      sessionCookie === null ||
+      Object.keys(request.query).length !== 0 ||
+      rawHeaderValues(request, "origin").length > 1 ||
+      rawHeaderValues(request, "sec-fetch-site").length !== 1
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.ordinaryRefundApprovals) {
+      response.status(503).json({ error: "refund_approvals_unavailable" });
+      return;
+    }
+    // WP-2423 Q19: a read rerun on a transaction conflict; still conflicting is "retry later".
+    const port = options.ordinaryRefundApprovals;
+    void retryTransactionConflict(() => port({ sessionCookie }))
+      .then((view) =>
+        response.set("Cache-Control", NO_STORE).json({
+          observedAt: view.observedAt,
+          canApprove: view.canApprove,
+          // WP-2423 M14: the viewer may send a refund nobody sent (payment.refund.execute).
+          canSend: view.canSend,
+          soleOperator: view.soleOperator,
+          entries: view.entries.map((entry) => ({
+            orderReference: entry.orderReference,
+            orderNumber: entry.orderNumber,
+            requestReference: entry.requestReference,
+            requestOperationReference: entry.requestOperationReference,
+            paymentAttemptReferences: entry.paymentAttemptReferences,
+            paymentIntentReferences: entry.paymentIntentReferences,
+            paymentMethod: entry.paymentMethod,
+            // b10 cash-refund-approvals: a counter cash refund's whole nickels from the drawer
+            // (null for a card or online payment). Without it Approvals reads it as card machine.
+            cashGivenBackMinor: entry.cashGivenBackMinor,
+            currencyCode: entry.currencyCode,
+            amountMinor: entry.amountMinor,
+            reasonCode: entry.reasonCode,
+            note: entry.note,
+            escalationReasons: entry.escalationReasons,
+            requestedAt: entry.requestedAt,
+            requesterName: entry.requesterName,
+            requestedByYou: entry.requestedByYou,
+            requesterVerifiedUntil: entry.requesterVerifiedUntil,
+            state: entry.state,
+            approvalReference: entry.approvalReference,
+            approvedAt: entry.approvedAt,
+            approverName: entry.approverName,
+            canApprove: entry.canApprove,
+            soleOperatorApproval: entry.soleOperatorApproval,
+          })),
+        }),
+      )
+      .catch((error: unknown) => refundReadFailure(response, error));
+  });
+
+  // WP-2423 Q5: approve an escalated refund in person; it is sent at once with the approval.
+  router.post("/payments/refunds/approve", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    const command = options.ordinaryRefundApproval;
+    if (!command) {
+      response.status(503).json({ error: "refund_approval_unavailable" });
+      return;
+    }
+    void command({ sessionCookie, csrf, command: request.body })
+      .then((result) =>
+        response.status(202).json({
+          status: result.status,
+          approvalReference: result.approvalReference,
+          replayed: result.replayed,
+          payments: result.payments.map((payment) => ({
+            paymentAttemptReference: payment.paymentAttemptReference,
+            operationReference: payment.operationReference,
+            state: payment.state,
+          })),
+        }),
+      )
+      .catch((error: unknown) => {
+        if (!(error instanceof MerchantRefundApprovalError)) {
+          failed(response, error);
+          return;
+        }
+        refundDecisionFailure(response, error);
+      });
+  });
+
+  // WP-2423 Q5: decline a refund nothing was prepared for; it stops counting toward the Order.
+  router.post("/payments/refunds/decline", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    const command = options.ordinaryRefundDecline;
+    if (!command) {
+      response.status(503).json({ error: "refund_decline_unavailable" });
+      return;
+    }
+    void command({ sessionCookie, csrf, command: request.body })
+      .then((result) =>
+        response.json({
+          status: result.status,
+          declinedAt: result.declinedAt,
+          replayed: result.replayed,
+        }),
+      )
+      .catch((error: unknown) => {
+        if (!(error instanceof MerchantRefundApprovalError)) {
+          failed(response, error);
+          return;
+        }
+        refundDecisionFailure(response, error);
+      });
+  });
+
+  // WP-2423 M163 (DEC-OWNER-DEFAULTS-2026-11-06 item 5): money taken back after a refund made by
+  // mistake. More than the order's confirmed refunds (less earlier takings) is refused 409.
+  router.post("/payments/refunds/recover", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    const command = options.refundRecovery;
+    if (!command) {
+      response.status(503).json({ error: "refund_recovery_unavailable" });
+      return;
+    }
+    void command({ sessionCookie, csrf, command: request.body })
+      .then((result) =>
+        response.set("Cache-Control", NO_STORE).json({
+          status: result.status,
+          orderReference: result.orderReference,
+          recovery: {
+            recoveryReference: result.recovery.recoveryReference,
+            method: result.recovery.method,
+            amountMinor: result.recovery.amountMinor,
+            currencyCode: result.recovery.currencyCode,
+            reasonCode: result.recovery.reasonCode,
+            businessDate: result.recovery.businessDate,
+            recordedAt: result.recovery.recordedAt,
+            recordedByName: result.recovery.recordedByName,
+          },
+        }),
+      )
+      .catch((error: unknown) => {
+        if (failureNamed(error, "REFUND_RECOVERY_ABOVE_REFUNDED")) {
+          response
+            .status(409)
+            .set("Cache-Control", NO_STORE)
+            .json({ error: "recovery_above_refunded" });
+          return;
+        }
+        // b12: an order paid only in cash takes back cash, in whole nickels: the amount or the
+        // method is wrong, never the person's permission (nothing was recorded).
+        for (const [code, answer] of [
+          ["REFUND_RECOVERY_CASH_ONLY", "recovery_cash_only"],
+          ["REFUND_RECOVERY_WHOLE_NICKELS", "recovery_whole_nickels"],
+          // b13: nothing taken back is said as that, never as a permission refusal.
+          ["REFUND_RECOVERY_AMOUNT_ZERO", "recovery_amount_zero"],
+        ] as const)
+          if (failureNamed(error, code)) {
+            response.status(422).set("Cache-Control", NO_STORE).json({ error: answer });
+            return;
+          }
+        // WP-2423 M163: the same attempt was already recorded with other details.
+        if (failureNamed(error, "REFUND_RECOVERY_CONFLICT")) {
+          response.status(409).set("Cache-Control", NO_STORE).json({ error: "recovery_conflict" });
+          return;
+        }
+        failed(response, error);
+      });
+  });
+
+  router.post("/payments/refunds/progress", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.ordinaryRefundProgress) {
+      response.status(503).json({ error: "refund_progress_unavailable" });
+      return;
+    }
+    // WP-2423 Q19: a read rerun on a transaction conflict; still conflicting is "retry later".
+    const port = options.ordinaryRefundProgress;
+    void retryTransactionConflict(() => port({ sessionCookie, csrf, query: request.body }))
+      .then((result) =>
+        response.set("Cache-Control", NO_STORE).json({
+          requestReference: result.requestReference,
+          progress: result.progress,
+          observedAt: result.observedAt,
+        }),
+      )
+      .catch((error: unknown) => refundReadFailure(response, error));
+  });
+
+  router.post("/payments/refunds/status", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.ordinaryRefundStatus) {
+      response.status(503).json({ error: "refund_status_unavailable" });
+      return;
+    }
+    // WP-2423 Q19: a read rerun on a transaction conflict; still conflicting is "retry later".
+    const port = options.ordinaryRefundStatus;
+    void retryTransactionConflict(() => port({ sessionCookie, csrf, query: request.body }))
+      .then((result) =>
+        response.json({
+          orderReference: result.orderReference,
+          requestReference: result.requestReference,
+          operationReference: result.operationReference,
+          observedAt: result.observedAt,
+          currencyCode: result.currencyCode,
+          amountMinor: result.amountMinor,
+          payments: result.payments.map((payment) => ({
+            paymentAttemptReference: payment.paymentAttemptReference,
+            paymentIntentReference: payment.paymentIntentReference,
+            state: payment.state,
+            // WP-2423 item 4: refunded on the Store's card machine (recorded) or online.
+            method: payment.method,
+            refundedOnCardMachineAt: payment.refundedOnCardMachineAt,
+            // The reference on the machine's refund slip (not secret; never a card number).
+            cardMachineSlipReference: payment.cardMachineSlipReference,
+            // WP-2423 M52/M131: a counter cash payment gives back whole nickels (what was, or is
+            // to be, handed back); absent for card and online payments.
+            ...("cashGivenBackMinor" in payment && typeof payment.cashGivenBackMinor === "string"
+              ? { cashGivenBackMinor: payment.cashGivenBackMinor }
+              : {}),
+            executionOperationReference: payment.executionOperationReference,
+            executionApprovalReference: payment.executionApprovalReference,
+            amountMinor: payment.amountMinor,
+            confirmedMinor: payment.confirmedMinor,
+            pendingMinor: payment.pendingMinor,
+          })),
+        }),
+      )
+      .catch((error: unknown) => refundReadFailure(response, error));
+  });
+
+  router.post("/payments/refunds/context", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.refundPaymentContext) {
+      response.status(503).json({ error: "refund_payment_context_unavailable" });
+      return;
+    }
+    // WP-2423 Q19: a read rerun on a transaction conflict; still conflicting is "retry later".
+    const port = options.refundPaymentContext;
+    void retryTransactionConflict(() => port({ sessionCookie, csrf, query: request.body }))
+      .then((result) =>
+        response.json({
+          paymentIntentReference: result.paymentIntentReference,
+          paymentAttemptReference: result.paymentAttemptReference,
+          orderReference: result.orderReference,
+          orderBatchReference: result.orderBatchReference,
+          observedAt: result.observedAt,
+          paymentState: result.paymentState,
+          paymentMethod: result.paymentMethod,
+          // v15 batch 8: a counter cash payment, given back in cash from the drawer.
+          paidInCash: result.paidInCash,
+          // v15 batch 8: what the drawer still holds of a cash payment (null otherwise).
+          cashLeftMinor: result.cashLeftMinor,
+          // b13: the cash the drawer gave back for its refunds (null when not a cash payment).
+          cashGivenBackMinor: result.cashGivenBackMinor,
+          currencyCode: result.currencyCode,
+          capturedAmountMinor: result.capturedAmountMinor,
+          confirmedRefundMinor: result.confirmedRefundMinor,
+          pendingRefundMinor: result.pendingRefundMinor,
+          canRequest: result.canRequest,
+          // WP-2423 M13: why they may not record a request (the page names the way forward).
+          requestBlocked: result.requestBlocked,
+          // WP-2423 M14: whether they send what they request (a cashier's waits for a manager).
+          canSend: result.canSend,
+          // WP-2423 M163: money taken back on the order, and whether they may record it.
+          canRecover: result.canRecover,
+          // b10: an order paid only in cash at the counter: the cash the guest can still hand
+          // back (whole nickels), the only way it comes back; null otherwise.
+          cashTakeBackLeftMinor: result.cashTakeBackLeftMinor,
+          // b10: money taken back could not be read now (an outage, not "nothing to take back").
+          recoveryUnreadable: result.recoveryUnreadable,
+          recoveries: result.recoveries.map((recovery) => ({
+            recoveryReference: recovery.recoveryReference,
+            method: recovery.method,
+            amountMinor: recovery.amountMinor,
+            currencyCode: recovery.currencyCode,
+            reasonCode: recovery.reasonCode,
+            businessDate: recovery.businessDate,
+            recordedAt: recovery.recordedAt,
+            recordedByName: recovery.recordedByName,
+          })),
+        }),
+      )
+      .catch((error: unknown) => {
+        // M126 I.5: a payment not in this Store's books (another Store's): switch Store, no retry.
+        if (failureNamed(error, "MERCHANT_REFUND_PAYMENT_NOT_FOUND")) {
+          response
+            .status(404)
+            .set("Cache-Control", NO_STORE)
+            .json({ error: "refund_payment_not_found" });
+          return;
+        }
+        refundReadFailure(response, error);
+      });
+  });
+
+  router.post("/payments/refunds/items", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.ordinaryRefundItems) {
+      response.status(503).json({ error: "refund_items_unavailable" });
+      return;
+    }
+    // WP-2423 Q19: a read rerun on a transaction conflict; still conflicting is "retry later".
+    const port = options.ordinaryRefundItems;
+    void retryTransactionConflict(() => port({ sessionCookie, csrf, query: request.body }))
+      .then((result) =>
+        response.json({
+          orderReference: result.orderReference,
+          orderNumber: result.orderNumber,
+          canRequest: result.canRequest,
+          claimVersion: result.claimVersion,
+          recentRequests: result.recentRequests.map((entry) => ({
+            requestReference: entry.requestReference,
+            operationReference: entry.operationReference,
+            claimVersion: entry.claimVersion,
+            requestedAt: entry.requestedAt,
+            reasonCode: entry.reasonCode,
+            currencyCode: entry.currencyCode,
+            amountMinor: entry.amountMinor,
+            decline:
+              entry.decline === null
+                ? null
+                : {
+                    reasonCode: entry.decline.reasonCode,
+                    declinedAt: entry.decline.declinedAt,
+                    declinerName: entry.decline.declinerName,
+                    declinedByYou: entry.decline.declinedByYou,
+                  },
+            progress: entry.progress,
+            paymentMethod: entry.paymentMethod,
+            // b13: a counter cash request's cash given back or to give back (whole nickels).
+            ...("cashGivenBackMinor" in entry && typeof entry.cashGivenBackMinor === "string"
+              ? { cashGivenBackMinor: entry.cashGivenBackMinor }
+              : {}),
+          })),
+          items: result.items.map((item) => ({
+            orderBatchReference: item.orderBatchReference,
+            orderItemReference: item.orderItemReference,
+            label: item.label,
+            quantity: item.quantity,
+            unclaimedQuantity: item.unclaimedQuantity,
+            paymentCaptured: item.paymentCaptured,
+            refundedByCancellation: item.refundedByCancellation,
+            paymentIntentReference: item.paymentIntentReference,
+            paymentMethod: item.paymentMethod,
+            // WP-2423 M10: whether the kitchen started it, and units already not to be made.
+            kitchen: item.kitchen,
+            withdrawnQuantity: item.withdrawnQuantity,
+          })),
+          canWithdraw: result.canWithdraw,
+        }),
+      )
+      .catch((error: unknown) => refundReadFailure(response, error));
+  });
+
+  router.post("/payments/refunds/preview", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.ordinaryRefundPreview) {
+      response.status(503).json({ error: "refund_preview_unavailable" });
+      return;
+    }
+    void options
+      .ordinaryRefundPreview({ sessionCookie, csrf, command: request.body })
+      .then((result) =>
+        response.json({
+          status: result.status,
+          requestReference: result.requestReference,
+          operationReference: result.operationReference,
+          claimVersion: result.claimVersion,
+          currencyCode: result.currencyCode,
+          amountMinor: result.amountMinor,
+          paymentAttemptReferences: result.paymentAttemptReferences,
+          approvalRequired: result.approvalRequired,
+          escalationReasons: result.escalationReasons,
+          approveAlone: result.approveAlone,
+          components: {
+            netAmountMinor: result.components.netAmountMinor,
+            taxAmountMinor: result.components.taxAmountMinor,
+            tipAmountMinor: result.components.tipAmountMinor,
+            serviceChargeAmountMinor: result.components.serviceChargeAmountMinor,
+            serviceChargeTaxAmountMinor: result.components.serviceChargeTaxAmountMinor,
+          },
+        }),
+      )
+      .catch((error: unknown) => refundRequestFailed(response, error));
+  });
+
+  router.post("/payments/refunds/request", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.ordinaryRefundRequest) {
+      response.status(503).json({ error: "refund_request_unavailable" });
+      return;
+    }
+    void options
+      .ordinaryRefundRequest({ sessionCookie, csrf, command: request.body })
+      .then((result) => {
+        response.status(202).json({
+          status: "RequestRecorded",
+          requestReference: result.requestReference,
+          operationReference: result.operationReference,
+          claimVersion: result.claimVersion,
+          currencyCode: result.currencyCode,
+          amountMinor: result.amountMinor,
+          paymentAttemptReferences: result.paymentAttemptReferences,
+          approvalRequired: result.approvalRequired,
+          escalationReasons: result.escalationReasons,
+          approveAlone: result.approveAlone,
+          replayed: result.status === "AlreadyCommitted",
+          // WP-2423 M16: legs already prepared by the server; the browser sends them next.
+          prepared: (result.prepared ?? []).map((leg) => ({
+            paymentAttemptReference: leg.paymentAttemptReference,
+            operationReference: leg.operationReference,
+          })),
+        });
+      })
+      .catch((error: unknown) => refundRequestFailed(response, error));
+  });
+
+  router.post("/payments/refunds/prepare", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.ordinaryRefund) {
+      response.status(503).json({ error: "refund_preparation_unavailable" });
+      return;
+    }
+    void options
+      .ordinaryRefund({ sessionCookie, csrf, command: request.body })
+      .then((result) =>
+        response.status(202).json({
+          status: "PreparationRecorded",
+          operationReference: result.operationReference,
+          replayed: result.status === "AlreadyCommitted",
+        }),
+      )
+      .catch((error: unknown) => failed(response, error));
+  });
+
+  for (const [path, capability, status] of [
+    ["send", "ordinaryRefundSend", "DispatchRecorded"],
+    ["reconcile", "ordinaryRefundReconciliation", "ReconciliationRecorded"],
+  ] as const) {
+    router.post("/payments/refunds/" + path, sameOriginMutation(options), (request, response) => {
+      const sessionCookie = cookie(request, "__Host-bop-merchant");
+      const csrf = exactHeader(request, "x-bop-csrf");
+      if (
+        sessionCookie === null ||
+        csrf === null ||
+        csrf.length === 0 ||
+        Object.keys(request.query).length !== 0
+      ) {
+        denied(response);
+        return;
+      }
+      const execute = options[capability];
+      if (!execute) {
+        response.status(503).json({ error: "refund_execution_unavailable" });
+        return;
+      }
+      void execute({ sessionCookie, csrf, command: request.body })
+        .then((result) => {
+          if (path === "send") return response.status(202).json({ status });
+          if (!("receipt" in result)) throw new Error("REFUND_RECEIPT_RESULT_INVALID");
+          const receipt = result.receipt;
+          return response.status(202).json({
+            status,
+            receipt: {
+              status: receipt.status,
+              version: receipt.version,
+              kind: receipt.kind,
+            },
+          });
+        })
+        // A failure may follow committed dispatch/observation. Never tell the client
+        // to discard its original identity or infer that nothing happened.
+        .catch((error: unknown) => {
+          noteFailure(response, error);
+          response.status(503).json({ error: "refund_execution_unknown" });
+        });
+    });
+  }
+}

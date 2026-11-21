@@ -7,6 +7,7 @@ const moduleManifestInput = {
   lifecycle: "Phase 0",
   publicExports: ["."],
   allowedSynchronousDependencies: [
+    { moduleName: "permission", packageName: "@bop/permission", layer: "BOP" },
     { moduleName: "tenant", packageName: "@bop/tenant", layer: "BOP" },
   ],
   consumedEvents: [],

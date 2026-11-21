@@ -14,6 +14,13 @@ async function prove(context) {
   const role = `bop_wp1020_${context.runId}`;
   await admin.connect();
   try {
+    // The authoring-resolution fence (migration 1100_016) admits operation records only from a
+    // Brand-scoped session without a Store; the owner's statements run outside a transaction,
+    // so the scope is set for the session.
+    await admin.query(
+      "SELECT set_config('bop.brand_id',$1,false),set_config('bop.store_id','',false)",
+      [id(2)],
+    );
     const tables = await admin.query(
       `SELECT table_name
          FROM information_schema.tables

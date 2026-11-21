@@ -24,19 +24,23 @@ describe("Customer PWA connectivity banner", () => {
     const html = renderToStaticMarkup(
       <ConnectivityBanner controller={controller({ status: "offline" })} />,
     );
-    expect(html).toContain("You are offline");
-    expect(html).toContain("Transaction and identity actions are unavailable");
-    expect(html).toContain("Nothing will run or replay in the background");
+    expect(html).toContain("You’re offline");
+    expect(html).toContain("Ordering and payment are paused until you reconnect");
+    expect(html).toContain("Nothing is sent in the background");
     expect(html).toContain('aria-live="polite"');
   });
 
-  it("requires explicit review after connection restoration", () => {
+  it("says the page updates by itself and never claims nothing was sent after restoration (M17, M94)", () => {
     const html = renderToStaticMarkup(
       <ConnectivityBanner controller={controller({ status: "restored" })} />,
     );
     expect(html).toContain("Connection restored");
-    expect(html).toContain("retry explicitly");
-    expect(html).toContain("No action ran automatically");
+    // WP-2423 M17: a confirm sent just before the drop may have gone through; never claim otherwise.
+    // M94: the page reads again by itself, so the guest is not asked to re-check or retry.
+    expect(html).toContain("Updating this page");
+    expect(html).toContain("anything that went through");
+    expect(html).not.toContain("try again");
+    expect(html).not.toContain("Nothing was sent");
     expect(html).toContain("Dismiss");
   });
 });

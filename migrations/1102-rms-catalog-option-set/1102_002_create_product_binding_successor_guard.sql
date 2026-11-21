@@ -1,0 +1,11 @@
+-- bop-rms-migration: 1
+-- owner: @rms/catalog
+-- schema: rms_catalog
+-- phase: expand
+-- risk: medium
+-- transaction: required
+-- lock-timeout-ms: 5000
+-- statement-timeout-ms: 60000
+-- recovery: forward-fix
+-- Binding table is created in1102_001, after the Product publication foundation.
+CREATE TRIGGER product_binding_successor_parent_guard BEFORE UPDATE OF product_version_id ON rms_catalog.product_option_binding FOR EACH ROW EXECUTE FUNCTION rms_catalog.product_successor_parent_guard();

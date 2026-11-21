@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { lstat, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import net from "node:net";
 import path from "node:path";
 import process from "node:process";
 import { clearTimeout, setTimeout } from "node:timers";
 import { tmpdir } from "node:os";
+import { performance } from "node:perf_hooks";
 import pg from "pg";
 import { readMigrationCatalog } from "../src/catalog.ts";
 import { runMigrationCommand } from "../src/runner.ts";
@@ -91,12 +93,65 @@ async function run(command, args, options = {}) {
     child.once("close", (code, signal) => {
       clearTimeout(timer);
       if (code === 0) resolve(stdout);
-      else reject(new Error(`${command} failed (${signal ?? code})`));
+      else {
+        const failure = new Error(`${command} failed (${signal ?? code})`);
+        failure.stderr = stderr;
+        reject(failure);
+      }
     });
   });
 }
 
-async function allocatePort(runId) {
+// Host ports compose binds for this project: compose.yaml publishes only
+// 127.0.0.1:${BOP_RMS_POSTGRES_PORT}. The range stays below every common
+// ephemeral range (Linux 32768-60999, macOS and Windows 49152-65535) so outgoing
+// connections do not sit on a leased port; the API/web values written to the
+// env file (lease + 5000..5002) stay below 32768 as well and are never bound.
+export const leasePortRange = Object.freeze({ count: 5_000, first: 20_000 });
+export const composeStartAttempts = 3;
+const diagnosticLimit = 2_000;
+const portConflictPattern =
+  /address already in use|port is already allocated|ports are not available/iu;
+
+export function isComposePortConflict(stderr) {
+  return typeof stderr === "string" && portConflictPattern.test(stderr);
+}
+
+export function shouldRetryComposeStart({ attempt, stderr }) {
+  return attempt < composeStartAttempts && isComposePortConflict(stderr);
+}
+
+// Bounded, secret-free tail of a child process diagnostic for error causes.
+export function composeDiagnostic(stderr, secrets = []) {
+  if (typeof stderr !== "string") return "";
+  let text = stderr;
+  for (const secret of secrets)
+    if (typeof secret === "string" && secret !== "") text = text.split(secret).join("[redacted]");
+  text = text
+    .replace(/((?:password|secret|token)[a-z_]*\s*[=:]\s*)\S+/giu, "$1[redacted]")
+    .replace(/[^\S\n]+/gu, " ")
+    .split("")
+    .filter((character) => {
+      const code = character.charCodeAt(0);
+      return code === 10 || (code >= 32 && code !== 127);
+    })
+    .join("")
+    .trim();
+  return text.length > diagnosticLimit ? `...${text.slice(-diagnosticLimit)}` : text;
+}
+
+// True when 127.0.0.1:port can be listened on right now (the address compose binds).
+export async function isPortBindable(port, host = "127.0.0.1") {
+  return await new Promise((resolve) => {
+    const server = net.createServer();
+    server.unref();
+    server.once("error", () => resolve(false));
+    server.listen({ exclusive: true, host, port }, () => server.close(() => resolve(true)));
+  });
+}
+
+export async function allocatePort(runId, options = {}) {
+  const portFree = options.isPortBindable ?? isPortBindable;
   const leaseRoot = path.join(await realpath(tmpdir()), "bop-rms-isolated-db-leases");
   await mkdir(leaseRoot, { mode: 0o700, recursive: true });
   const leaseState = await lstat(leaseRoot);
@@ -113,16 +168,32 @@ async function allocatePort(runId) {
       "lease",
       "the isolated port lease root is unsafe",
     );
-  const start = 55_000 + (Number.parseInt(runId.slice(0, 6), 16) % 5_000);
-  for (let offset = 0; offset < 5_000; offset += 1) {
-    const port = 55_000 + ((start - 55_000 + offset) % 5_000);
+  const { count, first } = leasePortRange;
+  const start = Number.parseInt(runId.slice(0, 6), 16) % count;
+  for (let offset = 0; offset < count; offset += 1) {
+    const port = first + ((start + offset) % count);
     const lease = path.join(leaseRoot, String(port));
     try {
       await mkdir(lease, { mode: 0o700 });
+    } catch (error) {
+      if (error && error.code === "EEXIST") continue;
+      throw new IsolatedDatabaseError(
+        "ISOLATED_DB_LEASE_FAILED",
+        "lease",
+        "could not claim an isolated port lease",
+        error,
+      );
+    }
+    try {
+      // Checked after the lease is held so two runs never probe and take the same port.
+      if (!(await portFree(port))) {
+        await rm(lease, { force: true, recursive: true });
+        continue;
+      }
       await writeFile(path.join(lease, "owner"), `${owner}:${runId}\n`, { mode: 0o600 });
       return { lease, port };
     } catch (error) {
-      if (error && error.code === "EEXIST") continue;
+      await rm(lease, { force: true, recursive: true }).catch(() => undefined);
       throw new IsolatedDatabaseError(
         "ISOLATED_DB_LEASE_FAILED",
         "lease",
@@ -138,6 +209,25 @@ async function allocatePort(runId) {
   );
 }
 
+/**
+ * WP-2423 (batch 35): compose.yaml gives the local database its own bridge network, and Docker
+ * carves every such network from a small shared address pool (Docker Desktop: about 30 subnets,
+ * shared with the pilot, the local database and any other project on the machine). Each isolated
+ * database used to take one, so a config with many files beside another config ran the pool dry
+ * ("all predefined address pools have been fully subnetted") and its databases failed to start.
+ * A test database is reached only through its published loopback port, so it joins Docker's
+ * existing default bridge instead and takes no subnet at all.
+ */
+export const isolatedComposeOverride = [
+  "services:",
+  "  postgres:",
+  "    network_mode: bridge",
+  "    networks: !reset []",
+  "networks: !reset {}",
+  "",
+].join("\n");
+const isolatedComposeOverrideName = "compose.isolated.yaml";
+
 function composeArguments(root, project, composeEnv, ...args) {
   return [
     "compose",
@@ -149,6 +239,8 @@ function composeArguments(root, project, composeEnv, ...args) {
     composeEnv,
     "--file",
     path.join(root, "compose.yaml"),
+    "--file",
+    path.join(path.dirname(composeEnv), isolatedComposeOverrideName),
     ...args,
   ];
 }
@@ -176,6 +268,73 @@ async function projectResources(project, root, childEnvironment) {
     return outputs.flatMap((output) => (output.trim() === "" ? [] : output.trim().split("\n")));
   } catch {
     return [];
+  }
+}
+
+/**
+ * WP-2423 (guest-waits-and-refund-lock): the database clock is the one time authority (2026-11-03),
+ * and the pilot's processes follow it. A test that composes its own connections stamps instants
+ * with this process's clock and the owners compare them with the database's clock both ways: the
+ * refund execution and kitchen queue sources refuse an instant after `clock_timestamp()`, the
+ * catalog, recipe and inventory reference sources one before the `statement_timestamp()` they just
+ * read. On a Mac the Docker VM's clock drifts from the host's (both ways), so the test process
+ * follows its database's clock from before each fixture and must land between the two. The pilot's
+ * whole-millisecond lower bound does not (up to a millisecond behind, while a statement's reply
+ * arrives within a quarter of one: the catalog configs failed at random), so this measures to the
+ * microsecond and takes the middle of the quickest of a few reads. A run that asks the pilot
+ * composition to align it (`PILOT_CLOCK_FROM_DATABASE=1`, vitest.clock-skew) is left to do so, as
+ * is a clock someone else installed (the pilot's alignment, fake timers).
+ */
+const HostDate = globalThis.Date;
+const clockSamples = 5;
+let hostAnchorMs = 0,
+  databaseOffsetMs = 0,
+  latestFollowedMs = 0;
+const preciseHostNow = () => performance.timeOrigin + performance.now() + hostAnchorMs;
+function followedNow() {
+  latestFollowedMs = Math.max(latestFollowedMs, Math.floor(preciseHostNow() + databaseOffsetMs));
+  return latestFollowedMs;
+}
+const FollowedDate = new Proxy(HostDate, {
+  construct: (target, args, newTarget) =>
+    Reflect.construct(target, args.length === 0 ? [followedNow()] : args, newTarget),
+  apply: () => new HostDate(followedNow()).toString(),
+  get: (target, key, receiver) =>
+    key === "now"
+      ? followedNow
+      : Reflect.get(target, key, receiver === FollowedDate ? target : receiver),
+});
+/** This host's clock to the microsecond: where its millisecond turns, on the monotonic clock. */
+function anchorHostClock() {
+  const first = HostDate.now(),
+    giveUp = performance.now() + 5;
+  let turned = first;
+  while (turned === first && performance.now() < giveUp) turned = HostDate.now();
+  hostAnchorMs = turned - (performance.timeOrigin + performance.now());
+}
+async function followDatabaseClock(clientConfig) {
+  if (process.env.PILOT_CLOCK_FROM_DATABASE === "1") return;
+  if (globalThis.Date !== HostDate && globalThis.Date !== FollowedDate) return;
+  const client = new Client(clientConfig);
+  await client.connect();
+  try {
+    anchorHostClock();
+    let best = null;
+    for (let sample = 0; sample < clockSamples; sample += 1) {
+      const sent = preciseHostNow();
+      const result = await client.query(
+        "SELECT (extract(epoch FROM clock_timestamp()) * 1000)::float8::text AS now",
+      );
+      const received = preciseHostNow();
+      const database = Number(result.rows[0]?.now);
+      assert.ok(Number.isFinite(database), "database clock is unreadable");
+      if (best === null || received - sent < best.roundTrip)
+        best = { roundTrip: received - sent, offset: database - (sent + received) / 2 };
+    }
+    databaseOffsetMs = best.offset;
+    globalThis.Date = FollowedDate;
+  } finally {
+    await client.end();
   }
 }
 
@@ -334,26 +493,31 @@ export async function withIsolatedDatabase(options, testBody) {
     controlRoot = path.join(root, ".local", `wp0024-${runId}`);
     await mkdir(controlRoot, { mode: 0o700, recursive: true });
     const secret = path.join(controlRoot, "password");
-    composeEnv = path.join(controlRoot, "compose.env");
     await writeFile(secret, password, { mode: 0o600 });
-    await writeFile(
-      composeEnv,
-      [
-        `BOP_RMS_COMPOSE_PROJECT=${project}`,
-        "BOP_RMS_ENVIRONMENT=test",
-        "BOP_RMS_POSTGRES_HOST=127.0.0.1",
-        `BOP_RMS_POSTGRES_PASSWORD_FILE=${secret}`,
-        `BOP_RMS_POSTGRES_PORT=${lease.port}`,
-        `BOP_RMS_POSTGRES_DB=${adminDatabase}`,
-        `BOP_RMS_POSTGRES_USER=${user}`,
-        "BOP_RMS_POSTGRES_SSL_MODE=disable",
-        `BOP_RMS_API_PORT=${lease.port + 5_000}`,
-        `BOP_RMS_MERCHANT_WEB_PORT=${lease.port + 5_001}`,
-        `BOP_RMS_CUSTOMER_PWA_PORT=${lease.port + 5_002}`,
-        "",
-      ].join("\n"),
-      { mode: 0o600 },
-    );
+    await writeFile(path.join(controlRoot, isolatedComposeOverrideName), isolatedComposeOverride, {
+      mode: 0o600,
+    });
+    composeEnv = path.join(controlRoot, "compose.env");
+    const writeComposeEnv = async () =>
+      await writeFile(
+        composeEnv,
+        [
+          `BOP_RMS_COMPOSE_PROJECT=${project}`,
+          "BOP_RMS_ENVIRONMENT=test",
+          "BOP_RMS_POSTGRES_HOST=127.0.0.1",
+          `BOP_RMS_POSTGRES_PASSWORD_FILE=${secret}`,
+          `BOP_RMS_POSTGRES_PORT=${lease.port}`,
+          `BOP_RMS_POSTGRES_DB=${adminDatabase}`,
+          `BOP_RMS_POSTGRES_USER=${user}`,
+          "BOP_RMS_POSTGRES_SSL_MODE=disable",
+          `BOP_RMS_API_PORT=${lease.port + 5_000}`,
+          `BOP_RMS_MERCHANT_WEB_PORT=${lease.port + 5_001}`,
+          `BOP_RMS_CUSTOMER_PWA_PORT=${lease.port + 5_002}`,
+          "",
+        ].join("\n"),
+        { mode: 0o600 },
+      );
+    await writeComposeEnv();
     const existing = await projectResources(project, root, childEnvironment);
     if (existing.length > 0)
       throw new IsolatedDatabaseError(
@@ -362,28 +526,53 @@ export async function withIsolatedDatabase(options, testBody) {
         "owned resources existed before the run",
       );
     injected("beforeComposeStart", options.failureAt);
-    await run(
-      "docker",
-      composeArguments(
-        root,
-        project,
-        composeEnv,
-        "up",
-        "--detach",
-        "--wait",
-        "--wait-timeout",
-        "120",
-        "postgres",
-      ),
-      { cwd: root, env: childEnvironment, timeoutMs: 150_000 },
-    ).catch((error) => {
-      throw new IsolatedDatabaseError(
-        "ISOLATED_DB_START_FAILED",
-        "composeStart",
-        "isolated PostgreSQL failed to start",
-        error,
-      );
-    });
+    for (let attempt = 1; ; attempt += 1) {
+      let stderr = "";
+      let startError;
+      try {
+        await run(
+          "docker",
+          composeArguments(
+            root,
+            project,
+            composeEnv,
+            "up",
+            "--detach",
+            "--wait",
+            "--wait-timeout",
+            "120",
+            "postgres",
+          ),
+          { cwd: root, env: childEnvironment, timeoutMs: 150_000 },
+        );
+        break;
+      } catch (error) {
+        stderr = typeof error?.stderr === "string" ? error.stderr : "";
+        const diagnostic = composeDiagnostic(stderr, [password]);
+        const summary = error instanceof Error ? error.message : "docker failed";
+        startError = new IsolatedDatabaseError(
+          "ISOLATED_DB_START_FAILED",
+          "composeStart",
+          "isolated PostgreSQL failed to start",
+          new Error(diagnostic === "" ? summary : `${summary}: ${diagnostic}`),
+        );
+      }
+      if (!shouldRetryComposeStart({ attempt, stderr })) throw startError;
+      // Another process took the port between the probe and Docker's bind: remove
+      // this project's half-started resources and retry on a newly leased port.
+      await run(
+        "docker",
+        composeArguments(root, project, composeEnv, "down", "--volumes", "--remove-orphans"),
+        { cwd: root, env: childEnvironment, timeoutMs: 60_000 },
+      ).catch(() => {
+        throw startError;
+      });
+      if ((await projectResources(project, root, childEnvironment)).length > 0) throw startError;
+      const conflicted = lease;
+      lease = await allocatePort(runId);
+      await rm(conflicted.lease, { force: true, recursive: true });
+      await writeComposeEnv();
+    }
     injected("afterComposeStart", options.failureAt);
     admin = new Client({
       application_name: owner,
@@ -432,6 +621,7 @@ export async function withIsolatedDatabase(options, testBody) {
         "migration",
         "isolated database bootstrap failed",
       );
+    await followDatabaseClock(clientConfig);
     injected("duringFixture", options.failureAt);
     if (options.fixture) await options.fixture({ clientConfig, databaseName, fixtureRoot, runId });
     injected("duringBody", options.failureAt);

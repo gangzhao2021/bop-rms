@@ -214,7 +214,9 @@ export function createOrderFulfillmentSourceEvidenceBinding(value: unknown): str
   });
 }
 
-function parseInput(value: unknown): ResolveConfirmedOrderFulfillmentSourceInput {
+export function parseResolveConfirmedOrderFulfillmentSourceInput(
+  value: unknown,
+): ResolveConfirmedOrderFulfillmentSourceInput {
   const raw = exact(value, [
     "brandReference",
     "storeReference",
@@ -244,7 +246,7 @@ function parseInput(value: unknown): ResolveConfirmedOrderFulfillmentSourceInput
 export function createOrderFulfillmentSourceQueryService(ports: OrderFulfillmentSourceQueryPorts) {
   return Object.freeze({
     async resolve(value: ResolveConfirmedOrderFulfillmentSourceInput) {
-      const input = parseInput(value);
+      const input = parseResolveConfirmedOrderFulfillmentSourceInput(value);
       let authorized: boolean;
       try {
         authorized = await ports.authorization.authorize({

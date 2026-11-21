@@ -1,9 +1,10 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { describe, expect, it } from "vitest";
-import { ReceiptPage } from "./ReceiptPage.js";
+import { ReceiptPage, receiptLineAmount } from "./ReceiptPage.js";
 import type { ReceiptController } from "./receipt-controller.js";
 import type { ReceiptState } from "./types.js";
+import { findInternalText, staticText } from "../../e2e/internal-text-patterns.js";
 
 const id = (n: number) => `018f8a00-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 function ready(): ReceiptState {
@@ -69,25 +70,387 @@ function render(state: ReceiptState) {
   );
 }
 describe("CUST-RECEIPT-SUPPORT screen contract", () => {
-  it("renders the immutable snapshot, accessible totals, print and gated email intent", () => {
+  it("renders the immutable snapshot, accessible totals and print, with no inactive email stub", () => {
     const html = render(ready());
-    expect(html).toContain("Immutable receipt history");
+    expect(html).toContain('class="receipt-page__content"');
+    expect(html).toContain('class="receipt-page__history"');
+    expect(html).toContain('class="receipt-page__action-card"');
+    expect(html).toContain("Receipt history");
     expect(html).toContain("Synthetic Operating Entity");
-    expect(html).toContain("CAD 11.30");
-    expect(html).toContain("Print receipt");
-    expect(html).toContain("Request email receipt");
-    expect(html).toContain("disabled");
+    expect(html).toContain("$11.30");
+    expect(html).toContain("Print or save receipt");
+    expect(html).toContain("Refresh receipt");
+    // WP-2423 Q10: no reachable stub — email appears only once a provider is connected.
+    expect(html).not.toContain("Request email receipt");
+    expect(html).not.toContain("not active yet");
+    // No internal delivery/support codes for the customer.
+    expect(html).not.toMatch(/Delivery status|support action|server validation/u);
+    expect(html).toContain("Ask a staff member at Synthetic Store");
     expect(html).not.toContain(`>${id(1)}<`);
   });
   it.each([
     [{ status: "loading" }, "Loading receipt"],
     [{ status: "invalid-reference" }, "Receipt link is invalid"],
-    [{ status: "permission-denied" }, "Receipt access denied"],
-    [{ status: "not-found" }, "Receipt not found"],
+    // WP-2423 (v15 3cd0f8dd M5): past the 24 h bound the receipt says so and where to get a copy.
+    [{ status: "permission-denied" }, "This receipt is no longer available on this phone"],
+    [{ status: "not-found" }, "There’s no receipt for this order on this phone."],
     [{ status: "feature-disabled" }, "Digital receipt is disabled"],
-    [{ status: "unavailable" }, "Receipt is unavailable"],
-    [{ status: "offline", view: null }, "Offline read-only"],
+    [{ status: "unavailable" }, "We couldn’t load your receipt"],
+    [{ status: "offline", view: null }, "You’re offline"],
   ] as const)("renders bounded state %#", (state, message) =>
     expect(render(state)).toContain(message),
   );
+  it("f5ae43a5: says plainly that there is no receipt here and where to get a copy", () => {
+    const html = render({ status: "not-found" });
+    expect(html).toContain("Receipt not found");
+    expect(html).toContain("Ask a staff member if you need a copy.");
+    expect(html).not.toMatch(/authori[sz]ed/iu);
+    expect(findInternalText([staticText(html)])).toEqual([]);
+  });
+});
+
+describe("receipt adjustment display", () => {
+  it("prints optional discount and fee amounts with the receipt totals", () => {
+    const state = ready();
+    if (state.status !== "ready") throw new Error("missing fixture");
+    const record = state.view.records[0];
+    if (!record) throw new Error("missing fixture");
+    const html = render({
+      ...state,
+      view: {
+        ...state.view,
+        records: [
+          {
+            ...record,
+            snapshot: {
+              ...record.snapshot,
+              total: { amountMinor: 1080n, currencyCode: "CAD" },
+              adjustments: {
+                discount: { amountMinor: 100n, currencyCode: "CAD" },
+                fee: { amountMinor: 50n, currencyCode: "CAD" },
+              },
+            },
+          },
+        ],
+      },
+    });
+    expect(html).toContain("<dt>Discount</dt><dd>$1.00</dd>");
+    expect(html).toContain("<dt>Fees</dt><dd>$0.50</dd>");
+    expect(html).toContain("$10.80");
+    expect(html).toContain("Print or save receipt");
+    const original = render(ready());
+    expect(original).not.toContain("<dt>Discount</dt>");
+    expect(original).not.toContain("<dt>Fees</dt>");
+  });
+});
+
+it("separates current pending refunds from immutable history and hides them offline", () => {
+  const state = ready();
+  if (state.status !== "ready") throw new Error("fixture");
+  const view = {
+    ...state.view,
+    financial: {
+      observedAt: "2026-09-21T13:00:00.000Z",
+      currencyCode: "CAD",
+      capturedMinor: 1130n,
+      confirmedRefundMinor: 100n,
+      pendingRefundMinor: 600n,
+      unresolvedAttemptCount: 1,
+    },
+  };
+  const html = render({ ...state, view });
+  expect(html).toContain("$6.00");
+  expect(html).toContain("Pending refunds are not confirmed refunds");
+  expect(html).toContain("Some payment attempts still need a final result");
+  expect(html).toContain("Receipt history");
+  const offline = render({ status: "offline", view });
+  expect(offline).not.toContain("$6.00");
+  expect(offline).toContain("be checked while you");
+});
+
+describe("WP-2423 Q10 store contact on the receipt", () => {
+  it("shows the Store's published phone and address with a call link", () => {
+    const state = ready();
+    if (state.status !== "ready") throw new Error("missing fixture");
+    const html = render({
+      ...state,
+      view: {
+        ...state.view,
+        storeContact: {
+          phone: "+14165550123",
+          addressLines: ["DEMO 100 Test Street"],
+          locality: "Toronto",
+          regionCode: "ON",
+          postalCode: "M5V 1A1",
+        },
+      },
+    });
+    expect(html).toContain("Contact the store");
+    expect(html).toContain('href="tel:+14165550123"');
+    expect(html).toContain("Call (416) 555-0123");
+    expect(html).toContain("DEMO 100 Test Street");
+    expect(html).toContain("Toronto, ON M5V 1A1");
+  });
+});
+
+describe("receipt version reasons", () => {
+  it("says why a version was issued in guest words and never shows the reason code", () => {
+    const state = ready();
+    if (state.status !== "ready") throw new Error("missing fixture");
+    const record = state.view.records[0];
+    if (!record) throw new Error("missing fixture");
+    const html = render({
+      ...state,
+      view: {
+        ...state.view,
+        records: [
+          record,
+          {
+            ...record,
+            recordReference: id(5),
+            version: 2,
+            kind: "Reissue",
+            reasonCode: "ORDER_ADDITIONAL_PAYMENT_CAPTURED",
+          },
+          {
+            ...record,
+            recordReference: id(6),
+            version: 3,
+            kind: "Correction",
+            reasonCode: "SOME_UNREVIEWED_CODE",
+          },
+        ],
+      },
+    });
+    expect(html).toContain("Reason: An additional payment was added to this order.");
+    expect(html).not.toMatch(/ORDER.ADDITIONAL|SOME.UNREVIEWED/u);
+  });
+});
+
+describe("WP-2423 D5/D6: item prices before tax and plain payment wording", () => {
+  const amount = (amountMinor: bigint) => ({ amountMinor, currencyCode: "CAD" });
+  function versioned(lines: unknown[], subtotal: bigint, tax: bigint): ReceiptState {
+    const state = ready();
+    if (state.status !== "ready") throw new Error("fixture");
+    const record = state.view.records[0];
+    if (!record) throw new Error("fixture");
+    return {
+      ...state,
+      view: {
+        ...state.view,
+        records: [
+          {
+            ...record,
+            snapshot: {
+              ...record.snapshot,
+              lines: lines as typeof record.snapshot.lines,
+              subtotal: amount(subtotal),
+              tax: amount(tax),
+              total: amount(subtotal + tax),
+            },
+          },
+        ],
+      },
+    };
+  }
+  it("prints each item before tax so the items add up to the subtotal, then tax and total", () => {
+    const lines = [
+      {
+        lineReference: id(4),
+        displayName: "DEMO Latte",
+        quantity: 1,
+        lineTotal: amount(1130n),
+        lineSubtotal: amount(1000n),
+      },
+      {
+        lineReference: id(5),
+        displayName: "Synthetic muffin",
+        quantity: 2,
+        lineTotal: amount(905n),
+        lineSubtotal: amount(801n),
+      },
+    ];
+    const html = render(versioned(lines, 1801n, 234n));
+    expect(html).toContain("<span>1 × DEMO Latte</span><span>$10.00</span>");
+    expect(html).toContain("<span>2 × Synthetic muffin</span><span>$8.01</span>");
+    expect(html).toContain("<dt>Subtotal</dt><dd>$18.01</dd>");
+    expect(html).toContain("<dt>Total</dt><dd>$20.35</dd>");
+    expect(html).not.toContain("$11.30");
+    expect(html).not.toContain("already include tax");
+    const printed = lines.reduce((sum, line) => sum + receiptLineAmount(line).amountMinor, 0n);
+    expect(printed).toBe(1801n);
+    expect(printed + 234n).toBe(2035n);
+  });
+  it("prints an older version's items as issued and says they include tax", () => {
+    const html = render(
+      versioned(
+        [
+          {
+            lineReference: id(4),
+            displayName: "DEMO Latte",
+            quantity: 1,
+            lineTotal: amount(1130n),
+          },
+        ],
+        1000n,
+        130n,
+      ),
+    );
+    expect(html).toContain("<span>1 × DEMO Latte</span><span>$11.30</span>");
+    expect(html).toContain("Item amounts on this version already include tax");
+  });
+  it("lists each chosen option with what it added under its item, inside the item price (WP-2423)", () => {
+    const lines = [
+      {
+        lineReference: id(4),
+        displayName: "TEST Hot Chocolate — Small (8 oz)",
+        quantity: 1,
+        lineTotal: amount(452n),
+        lineSubtotal: amount(400n),
+        options: [
+          { displayName: "Whipped cream", quantity: 1, amount: amount(50n) },
+          { displayName: "Extra shot", quantity: 2, amount: amount(150n) },
+          { displayName: "Oat milk", quantity: 1, amount: amount(0n) },
+        ],
+      },
+    ];
+    const html = render(versioned(lines, 400n, 52n));
+    expect(html).toContain(
+      '<span>1 × TEST Hot Chocolate — Small (8 oz)<span class="receipt-page__option">Whipped cream +$0.50</span><span class="receipt-page__option">Extra shot × 2 +$1.50</span><span class="receipt-page__option">Oat milk</span></span><span>$4.00</span>',
+    );
+    // The item price already includes its options, so the items still add up to the subtotal.
+    expect(html).toContain("<dt>Subtotal</dt><dd>$4.00</dd>");
+    expect(html).toContain("<dt>Total</dt><dd>$4.52</dd>");
+    expect(lines.reduce((sum, line) => sum + receiptLineAmount(line).amountMinor, 0n)).toBe(400n);
+  });
+  it("prints a version issued before options were recorded exactly as issued", () => {
+    const html = render(
+      versioned(
+        [
+          {
+            lineReference: id(4),
+            displayName: "TEST Hot Chocolate — Small (8 oz)",
+            quantity: 1,
+            lineTotal: amount(452n),
+            lineSubtotal: amount(400n),
+          },
+        ],
+        400n,
+        52n,
+      ),
+    );
+    expect(html).toContain("<span>1 × TEST Hot Chocolate — Small (8 oz)</span><span>$4.00</span>");
+    expect(html).not.toContain("receipt-page__option");
+  });
+  it("labels the captured amount as Paid", () => {
+    const state = ready();
+    if (state.status !== "ready") throw new Error("fixture");
+    const html = render({
+      ...state,
+      view: {
+        ...state.view,
+        financial: {
+          observedAt: "2026-08-12T14:05:00.000Z",
+          currencyCode: "CAD",
+          capturedMinor: 1130n,
+          confirmedRefundMinor: 0n,
+          pendingRefundMinor: 0n,
+          unresolvedAttemptCount: 0,
+        },
+      },
+    });
+    expect(html).toContain("<dt>Paid</dt><dd>$11.30</dd>");
+    expect(html).not.toContain("Captured");
+  });
+});
+
+describe("WP-2423 (v15 3cd0f8dd) receipt payments, refunds and ended visits", () => {
+  const amount = (amountMinor: bigint) => ({ amountMinor, currencyCode: "CAD" });
+  function withRefund(): ReceiptState {
+    const state = ready();
+    if (state.status !== "ready") throw new Error("missing fixture");
+    const original = state.view.records[0];
+    if (!original) throw new Error("missing fixture");
+    return {
+      ...state,
+      view: {
+        ...state.view,
+        financial: {
+          observedAt: "2026-08-12T14:10:00.000Z",
+          currencyCode: "CAD",
+          capturedMinor: 1667n,
+          confirmedRefundMinor: 565n,
+          pendingRefundMinor: 0n,
+          unresolvedAttemptCount: 0,
+          paidOnlineMinor: 1130n,
+          paidOnCardMachineMinor: 537n,
+        },
+        records: [
+          original,
+          {
+            ...original,
+            recordReference: id(9),
+            version: 2,
+            kind: "Refund",
+            recordedAt: "2026-08-12T14:05:00.000Z",
+            reasonCode: "PAYMENT_REFUND_STATUS_CHANGED",
+            snapshot: {
+              ...original.snapshot,
+              paymentStatus: "PartiallyRefunded",
+              refundedTotal: amount(565n),
+              refunds: [
+                {
+                  kind: "ItemCancellation",
+                  lines: [
+                    {
+                      lineReference: id(4),
+                      displayName: "Synthetic bowl",
+                      quantity: 1,
+                      amount: amount(500n),
+                    },
+                  ],
+                  tax: amount(65n),
+                  tip: amount(0n),
+                  other: amount(0n),
+                  total: amount(565n),
+                  newInThisVersion: true,
+                },
+              ],
+            },
+          },
+        ],
+      },
+    };
+  }
+
+  it("H1: shows what was paid online and on the store's card machine", () => {
+    const html = render(withRefund());
+    expect(html).toContain("<dt>Paid</dt><dd>$16.67</dd>");
+    expect(html).toContain("<dt>Paid online</dt><dd>$11.30</dd>");
+    expect(html).toContain("<dt>Paid on the store’s card machine</dt><dd>$5.37</dd>");
+  });
+
+  it("M4: a refund version states what was refunded and the total after it; version 1 is unchanged", () => {
+    const html = render(withRefund());
+    expect(html).toContain("Reason: A refund was made to your original payment.");
+    expect(html).toContain("What was refunded");
+    expect(html).toContain("<strong>Cancelled items</strong> · new on this version");
+    expect(html).toContain("<dt>Refunded in total</dt><dd>$5.65</dd>");
+    expect(html).toContain("<dt>Total after refunds</dt><dd>$5.65</dd>");
+    // The original version still prints as issued: nothing refunded, no refund section.
+    const first = html.slice(0, html.indexOf("Version 2"));
+    expect(first).toContain("<dt>Refunded</dt><dd>$0.00</dd>");
+    expect(first).not.toContain("What was refunded");
+  });
+
+  it("M5: says until when an ended visit can still open the receipt here", () => {
+    const state = withRefund();
+    if (state.status !== "ready") throw new Error("missing fixture");
+    const html = render({
+      ...state,
+      view: { ...state.view, visitEnded: { receiptAvailableUntil: "2026-08-13T12:00:00.000Z" } },
+    });
+    expect(html).toContain("Your visit has ended");
+    expect(html).toContain("You can still view and save this receipt on this phone until");
+  });
 });

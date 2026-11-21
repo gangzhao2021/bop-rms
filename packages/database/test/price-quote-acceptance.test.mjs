@@ -136,3 +136,190 @@ async function prove(context) {
 it("pins immutable Quote snapshots and exact Store RLS", async () => {
   await withIsolatedDatabase({ caseId: "price_quote", root }, prove);
 }, 120_000);
+
+it("reads complete historical Quote evidence with exact Store isolation and no legacy reconstruction", async () => {
+  const { createPriceQuote, encodePriceQuoteSnapshot, createPostgresPriceQuoteHistoryReader } =
+    await import("../../rms/pricing/src/index.ts");
+  const { input } = await import("../../rms/pricing/src/tests/price-quote.fixture.ts");
+  await withIsolatedDatabase({ caseId: "wp2256_quote_history", root }, async (context) => {
+    const admin = new Client(context.clientConfig);
+    const role = `wp2256_${context.runId}`;
+    assert.match(role, /^wp2256_[a-f0-9]+$/u);
+    await admin.connect();
+    let active = 0;
+    try {
+      const source = input();
+      const entry = source.priceBook.entries[0];
+      assert.ok(entry);
+      const quote = createPriceQuote({
+        ...source,
+        priceBook: {
+          ...source.priceBook,
+          entries: [{ ...entry, amount: { ...entry.amount, amountMinor: 9007199254740993n } }],
+        },
+      });
+      const encoded = encodePriceQuoteSnapshot(quote);
+      async function insert(value, text) {
+        await admin.query(
+          `INSERT INTO rms_pricing.price_quote
+          (price_quote_id,quote_version,brand_id,store_id,cart_id,cart_version,input_digest,currency_code,
+           currency_metadata_version,currency_metadata_version_id,currency_metadata_digest,subtotal_minor,
+           discount_minor,tax_minor,fee_minor,total_minor,applied_promotion_references_json,warnings_json,
+           blocking_reasons_json,created_at,expires_at,complete_snapshot_text)
+          VALUES ($1,1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb,$17::jsonb,$18::jsonb,$19,$20,$21)`,
+          [
+            value.quoteReference,
+            value.brandReference,
+            value.storeReference,
+            value.cartReference,
+            value.cartVersion,
+            value.inputDigest,
+            value.currencyMetadata.currencyCode,
+            value.currencyMetadata.metadataVersion,
+            value.currencyMetadata.metadataVersionReference,
+            value.currencyMetadata.metadataDigest,
+            value.subtotal.amountMinor.toString(),
+            value.discount.amountMinor.toString(),
+            value.tax.amountMinor.toString(),
+            value.fee.amountMinor.toString(),
+            value.total.amountMinor.toString(),
+            JSON.stringify(value.appliedPromotionReferences),
+            JSON.stringify(value.warnings),
+            JSON.stringify(value.blockingReasons),
+            value.createdAt,
+            value.expiresAt,
+            text,
+          ],
+        );
+      }
+      await insert(quote, encoded);
+      const legacy = { ...quote, quoteReference: id(100) };
+      await insert(legacy, null);
+      const mismatched = { ...quote, quoteReference: id(101) };
+      await insert(
+        { ...mismatched, cartVersion: mismatched.cartVersion + 1 },
+        encodePriceQuoteSnapshot(mismatched),
+      );
+      const fractional = { ...quote, quoteReference: id(102) };
+      await insert(
+        { ...fractional, createdAt: fractional.createdAt.replace(".000Z", ".000001Z") },
+        encodePriceQuoteSnapshot(fractional),
+      );
+      for (const text of [
+        "{}",
+        '{"codecVersion":2,"snapshot":{}}',
+        '{"codecVersion":1,"snapshot":null}',
+        "[]",
+      ]) {
+        await assert.rejects(
+          insert({ ...quote, quoteReference: id(200) }, text),
+          /price_quote_complete_snapshot_check/u,
+        );
+      }
+      await assert.rejects(
+        insert({ ...quote, quoteReference: id(200) }, "not JSON"),
+        /invalid input syntax for type json/u,
+      );
+      assert.equal(
+        (
+          await admin.query(
+            "UPDATE rms_pricing.price_quote SET complete_snapshot_text=$1 WHERE price_quote_id=$2",
+            [encoded, legacy.quoteReference],
+          )
+        ).rowCount,
+        0,
+      );
+      assert.equal(
+        (
+          await admin.query(
+            "UPDATE rms_pricing.price_quote SET complete_snapshot_text=NULL WHERE price_quote_id=$1",
+            [quote.quoteReference],
+          )
+        ).rowCount,
+        0,
+      );
+      assert.equal(
+        (
+          await admin.query("DELETE FROM rms_pricing.price_quote WHERE price_quote_id=$1", [
+            quote.quoteReference,
+          ])
+        ).rowCount,
+        0,
+      );
+      await admin.query(
+        `CREATE ROLE ${role} NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE`,
+      );
+      await admin.query(`GRANT USAGE ON SCHEMA rms_pricing,platform_helpers TO ${role}`);
+      await admin.query(`GRANT USAGE ON TYPE platform_helpers.uuid_v7 TO ${role}`);
+      await admin.query(
+        `GRANT EXECUTE ON FUNCTION platform_helpers.is_uuid_v7(uuid),platform_helpers.current_brand_id(),platform_helpers.current_store_id() TO ${role}`,
+      );
+      await admin.query(`GRANT SELECT ON rms_pricing.price_quote TO ${role}`);
+      const runner = {
+        async run(action) {
+          const client = new Client(context.clientConfig);
+          await client.connect();
+          active++;
+          try {
+            await client.query("BEGIN READ ONLY");
+            await client.query(`SET LOCAL ROLE ${role}`);
+            const result = await action({ query: (sql, values) => client.query(sql, [...values]) });
+            await client.query("COMMIT");
+            return result;
+          } catch (error) {
+            await client.query("ROLLBACK");
+            throw error;
+          } finally {
+            await client.end();
+            active--;
+          }
+        },
+      };
+      const scope = { brandReference: quote.brandReference, storeReference: quote.storeReference };
+      const reader = createPostgresPriceQuoteHistoryReader(runner, scope);
+      const result = await reader.load(quote.quoteReference);
+      assert.deepEqual(result, quote);
+      assert.equal(result.lines[0].unitPrice.amountMinor, 9007199254740993n);
+      assert.equal(result.expiresAt, source.expiresAt);
+      assert.ok(Object.isFrozen(result.lines[0].taxLines[0].explanation));
+      assert.equal(await reader.load(id(999)), null);
+      for (const candidate of [legacy, mismatched, fractional]) {
+        await assert.rejects(reader.load(candidate.quoteReference), {
+          code: "QUOTE_HISTORY_UNAVAILABLE",
+          message: "price quote history is unavailable",
+        });
+      }
+      for (const foreign of [
+        { ...scope, storeReference: id(998) },
+        { ...scope, brandReference: id(997) },
+      ]) {
+        assert.equal(
+          await createPostgresPriceQuoteHistoryReader(runner, foreign).load(quote.quoteReference),
+          null,
+        );
+      }
+      assert.equal(active, 0);
+      const stored = (
+        await admin.query(
+          "SELECT complete_snapshot_text FROM rms_pricing.price_quote WHERE price_quote_id=$1",
+          [quote.quoteReference],
+        )
+      ).rows[0];
+      assert.equal(stored.complete_snapshot_text, encoded);
+      assert.equal(
+        (
+          await admin.query(
+            "SELECT complete_snapshot_text FROM rms_pricing.price_quote WHERE price_quote_id=$1",
+            [legacy.quoteReference],
+          )
+        ).rows[0].complete_snapshot_text,
+        null,
+      );
+    } finally {
+      assert.equal(active, 0);
+      await admin.query(`DROP OWNED BY ${role}`).catch(() => undefined);
+      await admin.query(`DROP ROLE IF EXISTS ${role}`);
+      await admin.end();
+    }
+  });
+}, 120_000);

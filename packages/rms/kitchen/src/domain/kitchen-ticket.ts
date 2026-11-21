@@ -874,3 +874,47 @@ export function createKitchenWorkPlanDigestBinding(value: unknown): string {
     })),
   });
 }
+
+export function parseKitchenPreparationRequest(value: unknown) {
+  const raw = exact(value, [
+    "actorType",
+    "actorReference",
+    "action",
+    "purpose",
+    "brandReference",
+    "storeReference",
+    "effectiveAt",
+    "sourceEvidenceReference",
+    "sourceEvidenceVersion",
+    "sourceEvidenceDigest",
+    "items",
+  ]);
+  if (
+    raw.actorType !== "System" ||
+    raw.actorReference !== null ||
+    raw.action !== "ResolveRecipePreparationEvidence" ||
+    raw.purpose !== "CreateKitchenWork"
+  )
+    return invalid();
+  const items = exactArray(raw.items, 1, 100)
+    .map(planningSourceItem)
+    .sort((left, right) => left.ordinal - right.ordinal);
+  if (
+    new Set(items.map((item) => item.orderItemReference)).size !== items.length ||
+    items.some((item, index) => item.ordinal !== index + 1)
+  )
+    return invalid();
+  return Object.freeze({
+    actorType: "System" as const,
+    actorReference: null,
+    action: "ResolveRecipePreparationEvidence" as const,
+    purpose: "CreateKitchenWork" as const,
+    brandReference: parseKitchenTicketReference(raw.brandReference),
+    storeReference: parseKitchenTicketReference(raw.storeReference),
+    effectiveAt: parseKitchenTicketInstant(raw.effectiveAt),
+    sourceEvidenceReference: parseKitchenTicketReference(raw.sourceEvidenceReference),
+    sourceEvidenceVersion: positiveInteger(raw.sourceEvidenceVersion),
+    sourceEvidenceDigest: parseKitchenTicketDigest(raw.sourceEvidenceDigest),
+    items: Object.freeze(items),
+  });
+}

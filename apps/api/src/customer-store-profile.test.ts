@@ -1,0 +1,429 @@
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { GuestSessionError } from "@bop/identity";
+import { describeStoreUpcomingHours, evaluateStoreOperatingStatus } from "@rms/store";
+import { createApp } from "./app.js";
+import {
+  createCustomerStoreProfileHandler,
+  describeCustomerStoreHours,
+  type CustomerStoreProfileView,
+} from "./customer-store-profile.js";
+import { apiRouteTemplates } from "./http-route-templates.js";
+
+const day = [
+  { startLocalTime: "07:00:00", endLocalTime: "11:00:00", endsNextDay: false },
+  { startLocalTime: "13:00:00", endLocalTime: "18:00:00", endsNextDay: false },
+];
+
+describe("WP-2423 today's hours for the store identity", () => {
+  it("says until when an open Store serves, from today's published interval", () => {
+    expect(
+      describeCustomerStoreHours({
+        state: "Open",
+        servesChannel: true,
+        localTime: "09:30:00",
+        todayHours: day,
+      }),
+    ).toEqual({
+      status: "Open",
+      todayHours: day,
+      closesAt: "11:00:00",
+      opensAt: null,
+      localDate: null,
+      todayKind: null,
+      lastOrdersAt: null,
+      pausedUntil: null,
+      ordersStopped: false,
+      nextOpening: null,
+      upcoming: [],
+      tonight: null,
+    });
+  });
+  it("M117: after midnight in last night's 11:00 a.m.–2:00 a.m. period, open until 2:00 a.m.", () => {
+    // The new date's own hours start at 11:00; at 00:14 the Store is still in last night's period.
+    const today = [{ startLocalTime: "11:00:00", endLocalTime: "02:00:00", endsNextDay: true }];
+    for (const localTime of ["00:00:14", "00:30:00"]) {
+      const hours = describeCustomerStoreHours({
+        state: "Open",
+        servesChannel: true,
+        localTime,
+        todayHours: today,
+        localDate: "2026-12-23",
+        upcoming: {
+          todayKind: null,
+          lastOrdersAt: null,
+          lastOrders: null,
+          pastLastOrders: false,
+          nextOpening: null,
+          upcoming: [],
+          currentPeriod: {
+            startLocalDate: "2026-12-22",
+            startLocalTime: "11:00:00",
+            endLocalTime: "02:00:00",
+            endsNextDay: true,
+          },
+        },
+      });
+      expect(hours).toMatchObject({
+        status: "Open",
+        closesAt: "02:00:00",
+        tonight: { startLocalTime: "11:00:00", endLocalTime: "02:00:00" },
+      });
+    }
+  });
+  it("batch 36: the guest page follows the open gate after midnight and on a holiday", () => {
+    const interval = (start: string, end: string, endsNextDay = false) => ({
+      startLocalTime: start,
+      endLocalTime: end,
+      endsNextDay,
+      serviceModes: ["Pickup" as const],
+      orderCutoffSeconds: 0,
+    });
+    const page = (
+      intervals: ReturnType<typeof interval>[],
+      exceptions: { localDate: string; kind: "Holiday"; intervals: [] }[],
+      localDate: string,
+      localTime: string,
+      isoWeekday: number,
+    ) => {
+      const weeklySchedule = [1, 2, 3, 4, 5, 6, 7].map((weekday) => ({
+        isoWeekday: weekday,
+        intervals,
+      }));
+      const gate = evaluateStoreOperatingStatus({
+        evaluatedAt: "2026-11-20T05:49:00.000Z",
+        localDate,
+        localTime,
+        isoWeekday,
+        weeklySchedule,
+        exceptions,
+        temporaryClosures: [],
+      });
+      return describeCustomerStoreHours({
+        state: gate.state,
+        servesChannel: gate.availableServiceModes.includes("Pickup"),
+        localTime,
+        todayHours: intervals,
+        localDate,
+        upcoming: describeStoreUpcomingHours({
+          localDate,
+          localTime,
+          weeklySchedule,
+          exceptions,
+          days: 7,
+        }),
+      });
+    };
+    // Test Merchant 2 at 00:49 on Friday 2026-11-20: open, until 23:59:59, taking orders.
+    expect(page([interval("00:00:00", "23:59:59")], [], "2026-11-20", "00:49:00", 5)).toMatchObject(
+      { status: "Open", closesAt: "23:59:59", ordersStopped: false, tonight: null },
+    );
+    // Christmas Day is a holiday: Christmas Eve's 18:00-02:00 stops at midnight, as the gate says.
+    expect(
+      page(
+        [interval("18:00:00", "02:00:00", true)],
+        [{ localDate: "2026-12-25", kind: "Holiday", intervals: [] }],
+        "2026-12-25",
+        "01:00:00",
+        5,
+      ),
+    ).toMatchObject({ status: "Closed", closesAt: null, lastOrdersAt: null, tonight: null });
+  });
+  it("WP-2423 store-service-controls (v15 M30): a pickup pause is a pause with its end, not closed", () => {
+    const input = { servesChannel: false, localTime: "18:30:00", todayHours: day };
+    expect(
+      describeCustomerStoreHours({ ...input, state: "Open", channelPausedUntil: "19:45:00" }),
+    ).toMatchObject({ status: "Paused", pausedUntil: "19:45:00", closesAt: null });
+    // The dine-in guest at the same Store is not paused.
+    expect(
+      describeCustomerStoreHours({ ...input, servesChannel: true, state: "Open" }),
+    ).toMatchObject({ status: "Open", pausedUntil: null });
+    // Outside hours a pause says nothing more than closed.
+    expect(
+      describeCustomerStoreHours({ ...input, state: "Closed", channelPausedUntil: "19:45:00" }),
+    ).toMatchObject({ status: "Closed", pausedUntil: null });
+    expect(
+      describeCustomerStoreHours({
+        ...input,
+        state: "TemporarilyClosed",
+        channelPausedUntil: null,
+      }),
+    ).toMatchObject({ status: "Paused", pausedUntil: null });
+  });
+  it("WP-2423 item 8 ③ decision 16: last orders only while open, the next opening only while not", () => {
+    const upcoming = {
+      todayKind: "Override" as const,
+      lastOrdersAt: "10:30:00",
+      lastOrders: { localDate: "2026-12-22", localTime: "10:30:00" },
+      pastLastOrders: false,
+      nextOpening: { localDate: "2026-12-23", startLocalTime: "07:00:00" },
+      upcoming: [{ localDate: "2026-12-25", kind: "Holiday" as const, intervals: [] }],
+    };
+    const input = { servesChannel: true, localTime: "09:30:00", todayHours: day, upcoming };
+    expect(
+      describeCustomerStoreHours({ ...input, state: "Open", localDate: "2026-12-22" }),
+    ).toMatchObject({
+      localDate: "2026-12-22",
+      todayKind: "Override",
+      lastOrdersAt: "10:30:00",
+      nextOpening: null,
+      upcoming: upcoming.upcoming,
+    });
+    expect(describeCustomerStoreHours({ ...input, state: "Closed" })).toMatchObject({
+      lastOrdersAt: null,
+      nextOpening: upcoming.nextOpening,
+    });
+  });
+  it("follow-up: open but past last orders says orders stopped, only while open", () => {
+    const upcoming = {
+      todayKind: null,
+      lastOrdersAt: "10:30:00",
+      lastOrders: { localDate: "2026-12-22", localTime: "10:30:00" },
+      pastLastOrders: true,
+      nextOpening: null,
+      upcoming: [],
+    };
+    const input = { servesChannel: true, localTime: "10:40:00", todayHours: day, upcoming };
+    expect(describeCustomerStoreHours({ ...input, state: "Open" }).ordersStopped).toBe(true);
+    expect(describeCustomerStoreHours({ ...input, state: "Closed" }).ordersStopped).toBe(false);
+  });
+  it("batch 40 (v15 cross-midnight): after last orders the guest is told when the Store opens next", () => {
+    // The live shape at Lane Dessert, 00:30 Toronto: last night's 12:00–01:00 period, cut-off 00:30.
+    const overnight = [{ startLocalTime: "12:00:00", endLocalTime: "01:00:00", endsNextDay: true }];
+    const upcoming = {
+      todayKind: null,
+      lastOrdersAt: "00:30:00",
+      lastOrders: { localDate: "2026-11-21", localTime: "00:30:00" },
+      pastLastOrders: true,
+      nextOpening: { localDate: "2026-11-21", startLocalTime: "12:00:00" },
+      upcoming: [],
+      currentPeriod: {
+        startLocalDate: "2026-11-20",
+        startLocalTime: "12:00:00",
+        endLocalTime: "01:00:00",
+        endsNextDay: true,
+      },
+    };
+    const input = {
+      servesChannel: true,
+      localTime: "00:31:00",
+      localDate: "2026-11-21",
+      todayHours: overnight,
+      upcoming,
+    };
+    expect(describeCustomerStoreHours({ ...input, state: "Open" })).toMatchObject({
+      status: "Open",
+      ordersStopped: true,
+      closesAt: "01:00:00",
+      nextOpening: { localDate: "2026-11-21", startLocalTime: "12:00:00" },
+    });
+    // Before last orders an open Store still says nothing about its next opening.
+    expect(
+      describeCustomerStoreHours({
+        ...input,
+        state: "Open",
+        localTime: "00:10:00",
+        upcoming: { ...upcoming, pastLastOrders: false },
+      }).nextOpening,
+    ).toBeNull();
+  });
+  it("says when a closed Store opens later today, and nothing when it doesn't", () => {
+    expect(
+      describeCustomerStoreHours({
+        state: "Closed",
+        servesChannel: false,
+        localTime: "11:30:00",
+        todayHours: [...day].reverse(),
+      }),
+    ).toMatchObject({ status: "Closed", opensAt: "13:00:00", closesAt: null, todayHours: day });
+    expect(
+      describeCustomerStoreHours({
+        state: "Closed",
+        servesChannel: false,
+        localTime: "19:00:00",
+        todayHours: day,
+      }),
+    ).toMatchObject({ status: "Closed", opensAt: null });
+  });
+  it("treats an open Store that doesn't serve this guest's service now as closed", () => {
+    expect(
+      describeCustomerStoreHours({
+        state: "Open",
+        servesChannel: false,
+        localTime: "06:00:00",
+        todayHours: day,
+      }),
+    ).toMatchObject({ status: "Closed", opensAt: "07:00:00", closesAt: null });
+  });
+  it("reports a pause without inventing when it ends", () => {
+    expect(
+      describeCustomerStoreHours({
+        state: "TemporarilyClosed",
+        servesChannel: false,
+        localTime: "09:00:00",
+        todayHours: day,
+      }),
+    ).toMatchObject({ status: "Paused", opensAt: null, closesAt: null });
+  });
+  it("keeps an overnight period open past midnight and leaves out times it can't state", () => {
+    const late = [{ startLocalTime: "18:00:00", endLocalTime: "02:00:00", endsNextDay: true }];
+    expect(
+      describeCustomerStoreHours({
+        state: "Open",
+        servesChannel: true,
+        localTime: "23:15:00",
+        todayHours: late,
+      }),
+    ).toMatchObject({ closesAt: "02:00:00" });
+    // 01:00 is yesterday's period; today's list does not state its end.
+    expect(
+      describeCustomerStoreHours({
+        state: "Open",
+        servesChannel: true,
+        localTime: "01:00:00",
+        todayHours: late,
+      }),
+    ).toMatchObject({ status: "Open", closesAt: null, opensAt: null });
+    expect(
+      describeCustomerStoreHours({
+        state: "Closed",
+        servesChannel: false,
+        localTime: null,
+        todayHours: day,
+      }),
+    ).toMatchObject({ opensAt: null, closesAt: null });
+  });
+});
+
+const servers: Server[] = [];
+afterEach(async () => {
+  for (const server of servers.splice(0)) {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+const view: CustomerStoreProfileView = {
+  storeDisplayName: "Synthetic Store",
+  brandDisplayName: "Synthetic Brand",
+  timeZone: "America/Toronto",
+  address: {
+    addressLines: ["100 Synthetic Street"],
+    locality: "Toronto",
+    regionCode: "ON",
+    postalCode: "M5V 0A1",
+    countryCode: "CA",
+  },
+  phone: "+15555550100",
+  hours: {
+    status: "Open",
+    todayHours: day,
+    closesAt: "11:00:00",
+    opensAt: null,
+    localDate: "2026-12-22",
+    todayKind: null,
+    lastOrdersAt: "10:30:00",
+    pausedUntil: null,
+    ordersStopped: false,
+    nextOpening: null,
+    tonight: null,
+    upcoming: [
+      {
+        localDate: "2026-12-24",
+        kind: "Override",
+        intervals: [{ startLocalTime: "07:00:00", endLocalTime: "12:00:00", endsNextDay: false }],
+      },
+      { localDate: "2026-12-25", kind: "Holiday", intervals: [] },
+    ],
+  },
+};
+
+async function setup(read = vi.fn().mockResolvedValue(view), enabled = true) {
+  const server = createServer(
+    createApp(
+      enabled
+        ? {
+            customerStoreProfile: createCustomerStoreProfileHandler({
+              allowedOrigin: "https://store.example",
+              port: { read },
+            }),
+          }
+        : {},
+    ),
+  );
+  servers.push(server);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/v1/customer/store`;
+  const headers = {
+    "sec-fetch-site": "same-origin",
+    cookie: "__Host-bop-guest=" + "A".repeat(43),
+  };
+  return {
+    read,
+    request: (extra: Record<string, string> = {}, suffix = "") =>
+      fetch(url + suffix, { headers: { ...headers, ...extra } }),
+  };
+}
+
+describe("GET /api/v1/customer/store", () => {
+  it("is a registered route template", () => {
+    expect(apiRouteTemplates).toContain("/api/v1/customer/store");
+  });
+  it("returns only the Store's public fields, briefly cacheable by this browser", async () => {
+    const f = await setup();
+    const response = await f.request();
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("private, max-age=30");
+    expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+    expect(f.read).toHaveBeenCalledWith("A".repeat(43));
+    expect(await response.json()).toEqual({
+      schemaVersion: 1,
+      store: {
+        storeDisplayName: "Synthetic Store",
+        brandDisplayName: "Synthetic Brand",
+        timeZone: "America/Toronto",
+        address: {
+          addressLines: ["100 Synthetic Street"],
+          locality: "Toronto",
+          regionCode: "ON",
+          postalCode: "M5V 0A1",
+          countryCode: "CA",
+        },
+        phone: "+15555550100",
+        hours: view.hours,
+      },
+    });
+  });
+  it("states no hours when they can't be read", async () => {
+    const f = await setup(vi.fn().mockResolvedValue({ ...view, hours: null }));
+    const body = (await (await f.request()).json()) as { store: { hours: unknown } };
+    expect(body.store.hours).toBeNull();
+  });
+  it("rejects cross-site and query input before reading, and a missing Session as 401", async () => {
+    const f = await setup();
+    expect((await f.request({ "sec-fetch-site": "cross-site" })).status).toBe(400);
+    expect((await f.request({ origin: "https://other.example" })).status).toBe(400);
+    expect((await f.request({}, "?x=1")).status).toBe(400);
+    const missing = await f.request({ cookie: "" });
+    expect(missing.status).toBe(401);
+    expect(missing.headers.get("cache-control")).toBe("no-store");
+    expect(f.read).not.toHaveBeenCalled();
+  });
+  it("answers 401 for an ended Session and 503 for any other failure, never cached", async () => {
+    const ended = await setup(
+      vi.fn().mockRejectedValue(new GuestSessionError("GUEST_SESSION_UNAVAILABLE")),
+    );
+    expect((await ended.request()).status).toBe(401);
+    const failing = await setup(vi.fn().mockRejectedValue(new Error("boom")));
+    const response = await failing.request();
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({
+      schemaVersion: 1,
+      error: { code: "store_unavailable" },
+    });
+    const absent = await setup(undefined, false);
+    expect((await absent.request()).status).toBe(503);
+  });
+});

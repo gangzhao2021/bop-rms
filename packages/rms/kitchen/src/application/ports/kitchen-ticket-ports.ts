@@ -77,3 +77,8 @@ export interface KitchenTicketCreationPorts {
     }): Promise<KitchenTicketCommitResult>;
   };
 }
+
+export type KitchenTicketEffectValidationPorts = Pick<
+  KitchenTicketCreationPorts,
+  "references" | "digests"
+>;

@@ -1,5 +1,6 @@
+import { createHash } from "node:crypto";
 import { createBrand, createStore, createTenantContext } from "@bop/tenant";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   createDiningSessionService,
@@ -27,6 +28,9 @@ const ids = {
   audit: "018f2000-0000-7000-8000-00000000000e",
   correlation: "018f2000-0000-7000-8000-00000000000f",
   policy: "018f2000-0000-7000-8000-000000000010",
+  nextParticipant: "018f2000-0000-7000-8000-000000000011",
+  nextAdmission: "018f2000-0000-7000-8000-000000000012",
+  secondGuest: "018f2000-0000-7000-8000-000000000013",
 } as const;
 const startAt = "2026-07-29T12:00:00.000Z";
 const joinAt = "2026-07-29T12:01:00.000Z";
@@ -143,6 +147,9 @@ function fixture(
   let regenerationRecord: DiningRegenerationRecord | null = null;
   let capabilityIndex = 0;
   let credentialIndex = 0;
+  let participantIndex = 0;
+  let admissionIndex = 0;
+  const capabilities = new Map<string, DiningStartRecord["capability"]>();
   const startOperations = new Map<string, DiningStartRecord>();
   const joinOperations = new Map<string, DiningJoinRecord>();
   const regenerationOperations = new Map<string, DiningRegenerationRecord>();
@@ -178,8 +185,10 @@ function fixture(
     credentials: {
       generateReference(purpose) {
         if (purpose === "DiningSession") return ids.session;
-        if (purpose === "Participant") return ids.participant;
-        if (purpose === "IdentityAdmission") return ids.admission;
+        if (purpose === "Participant")
+          return participantIndex++ === 0 ? ids.participant : ids.nextParticipant;
+        if (purpose === "IdentityAdmission")
+          return admissionIndex++ === 0 ? ids.admission : ids.nextAdmission;
         return [ids.firstCapability, ids.nextCapability][capabilityIndex++] ?? ids.nextCapability;
       },
       generateJoinCredential() {
@@ -189,6 +198,8 @@ function fixture(
         return hash(credential === firstCredential ? "a" : "b") as never;
       },
       hashOperationIntent(intent) {
+        if (intent.startsWith("Join:"))
+          return createHash("sha256").update(intent).digest("hex") as never;
         return hash(
           intent.startsWith("Start:")
             ? intent.endsWith(":HumanCode")
@@ -207,26 +218,26 @@ function fixture(
       },
       async start(input) {
         startRecord = input.record;
+        capabilities.set(input.record.capability.selectorHash, input.record.capability);
         startOperations.set(input.record.operationReference, input.record);
         return input.record;
       },
       async resolveJoinState(selectorHash) {
-        if (startRecord === null || startRecord.capability.selectorHash !== selectorHash)
-          return null;
-        return { session: startRecord.session, capability: startRecord.capability };
+        const capability = capabilities.get(selectorHash);
+        if (startRecord === null || capability === undefined) return null;
+        return { session: startRecord.session, capability };
       },
       async resolveActiveJoin(reference) {
         if (startRecord === null || startRecord.session.diningSessionReference !== reference)
           return null;
-        return joinRecord === null
-          ? { session: startRecord.session, capability: startRecord.capability }
-          : { session: joinRecord.session, capability: joinRecord.capability };
+        return { session: startRecord.session, capability: startRecord.capability };
       },
       async resolveJoinOperation(reference) {
         return joinOperations.get(reference) ?? null;
       },
       async join(input) {
         joinRecord = input.record;
+        capabilities.set(input.record.capability.selectorHash, input.record.capability);
         if (startRecord !== null) {
           startRecord = {
             ...startRecord,
@@ -241,6 +252,10 @@ function fixture(
         return regenerationOperations.get(reference) ?? null;
       },
       async regenerate(input) {
+        capabilities.set(input.previous.selectorHash, input.previous);
+        capabilities.set(input.replacement.selectorHash, input.replacement);
+        if (startRecord !== null)
+          startRecord = { ...startRecord, session: input.session, capability: input.replacement };
         regenerationRecord = {
           capability: input.replacement,
           operationReference: input.operationReference,
@@ -253,6 +268,7 @@ function fixture(
   };
   return {
     service: createDiningSessionService(ports),
+    ports,
     records: () => ({ startRecord, joinRecord }),
   };
 }
@@ -316,8 +332,11 @@ describe("staff-started Dining Session contract", () => {
     });
   });
 
-  it("returns one bounded unavailable result for cooldown and context scope mismatch", async () => {
-    for (const options of [{ cooldown: true }, { wrongTable: true }]) {
+  it("refuses cooldown and another Table's code definitively", async () => {
+    for (const [options, reason] of [
+      [{ cooldown: true }, "TooManyAttempts"],
+      [{ wrongTable: true }, "CodeNotAccepted"],
+    ] as const) {
       const { service } = fixture(options);
       await start(service);
       await expect(
@@ -329,7 +348,7 @@ describe("staff-started Dining Session contract", () => {
           operationReference: ids.joinOperation,
           requestedAt: joinAt,
         }),
-      ).resolves.toEqual({ status: "DiningJoinUnavailable" });
+      ).resolves.toEqual({ status: "DiningJoinRefused", reason });
     }
   });
 
@@ -363,6 +382,7 @@ describe("staff-started Dining Session contract", () => {
       expectedAssignmentVersion: 7,
       expectedSessionVersion: 1,
       expectedCapabilityVersion: 1,
+      expectedGeneration: 1,
       operationReference: ids.regenerateOperation,
       requestedAt: regenerateAt,
     });
@@ -390,5 +410,1084 @@ describe("staff-started Dining Session contract", () => {
         customerCanStart: true,
       }),
     ).rejects.toBeInstanceOf(DiningSessionError);
+  });
+});
+
+const regenerationInput = {
+  diningSessionReference: ids.session,
+  tableReference: ids.table,
+  expectedAssignmentVersion: 7,
+  expectedSessionVersion: 1,
+  expectedCapabilityVersion: 1,
+  expectedGeneration: 1,
+  operationReference: ids.regenerateOperation,
+  requestedAt: regenerateAt,
+};
+function changedRecord(value: unknown, path: string, replacement: unknown): never {
+  const changed = JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
+  const fields = path.split(".");
+  let target = changed;
+  for (const field of fields.slice(0, -1)) target = target[field] as Record<string, unknown>;
+  const last = fields.at(-1);
+  if (last === undefined) throw new Error("missing test field");
+  target[last] = replacement;
+  return changed as never;
+}
+
+describe("WP-2273 current Staff authority and original Session results", () => {
+  it.each(["start", "regenerate"] as const)(
+    "denies revoked Staff before %s history access",
+    async (operation) => {
+      const { service, ports } = fixture();
+      await start(service);
+      if (operation === "regenerate") await service.regenerate(regenerationInput);
+      const read = vi.spyOn(
+        ports.store,
+        operation === "start" ? "resolveStartOperation" : "resolveRegenerationOperation",
+      );
+      const generate = vi.spyOn(ports.credentials, "generateJoinCredential");
+      vi.spyOn(ports.staff, "authorize").mockResolvedValue(null);
+      await expect(
+        operation === "start" ? start(service) : service.regenerate(regenerationInput),
+      ).rejects.toMatchObject({ code: "DINING_SESSION_PERMISSION_DENIED" });
+      expect(read).not.toHaveBeenCalled();
+      expect(generate).not.toHaveBeenCalled();
+    },
+  );
+
+  it("returns authorized original start after occupancy changes without issuing credentials", async () => {
+    const options = { occupied: false };
+    const { service, ports } = fixture(options);
+    const first = await start(service);
+    options.occupied = true;
+    const write = vi.spyOn(ports.store, "start");
+    const generate = vi.spyOn(ports.credentials, "generateJoinCredential");
+    const replay = await start(service);
+    expect(replay).toEqual({
+      status: "AlreadyApplied",
+      session: first.session,
+      capability: first.capability,
+    });
+    expect(write).not.toHaveBeenCalled();
+    expect(generate).not.toHaveBeenCalled();
+    expect(Object.isFrozen(replay.session)).toBe(true);
+  });
+
+  it("returns authorized original regeneration without checking stale write versions or issuing credentials", async () => {
+    const { service, ports } = fixture();
+    await start(service);
+    const first = await service.regenerate(regenerationInput);
+    const read = vi.spyOn(ports.store, "resolveActiveJoin");
+    const write = vi.spyOn(ports.store, "regenerate");
+    const generate = vi.spyOn(ports.credentials, "generateJoinCredential");
+    expect(await service.regenerate(regenerationInput)).toEqual({
+      status: "AlreadyApplied",
+      capability: first.capability,
+    });
+    expect(read).not.toHaveBeenCalled();
+    expect(write).not.toHaveBeenCalled();
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["operationReference", ids.joinOperation],
+    ["operationIntentHash", "invalid"],
+    ["session.brandReference", ids.guest],
+    ["session.storeReference", ids.guest],
+    ["session.tableReference", ids.guest],
+    ["session.tableAssignmentVersion", 8],
+    ["session.startedByActorReference", ids.guest],
+    ["session.phase", "Closed"],
+    ["session.version", 2],
+    ["session.hostParticipantReference", ids.participant],
+    ["session.startedAt", joinAt],
+    ["capability.diningSessionReference", ids.guest],
+    ["capability.storeReference", ids.guest],
+    ["capability.tableReference", ids.guest],
+    ["capability.assignmentVersion", 8],
+    ["capability.generation", 2],
+    ["capability.version", 2],
+    ["capability.issuedAt", joinAt],
+    ["extra", true],
+  ])("rejects invalid start history %s", async (path, value) => {
+    const { service, ports } = fixture();
+    await start(service);
+    const original = await ports.store.resolveStartOperation(ids.startOperation as never);
+    vi.spyOn(ports.store, "resolveStartOperation").mockResolvedValue(
+      changedRecord(original, String(path), value),
+    );
+    const write = vi.spyOn(ports.store, "start");
+    await expect(start(service)).rejects.toMatchObject({
+      code: "DINING_SESSION_DEPENDENCY_UNAVAILABLE",
+    });
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["operationReference", ids.startOperation],
+    ["operationIntentHash", "invalid"],
+    ["capability.storeReference", ids.guest],
+    ["capability.tableReference", ids.guest],
+    ["capability.diningSessionReference", ids.guest],
+    ["capability.assignmentVersion", 8],
+    ["capability.generation", 1],
+    ["capability.version", 2],
+    ["capability.issuedAt", "2026-07-29T12:03:00.000Z"],
+    ["extra", true],
+  ])("rejects invalid regeneration history %s", async (path, value) => {
+    const { service, ports } = fixture();
+    await start(service);
+    await service.regenerate(regenerationInput);
+    const original = await ports.store.resolveRegenerationOperation(
+      ids.regenerateOperation as never,
+    );
+    vi.spyOn(ports.store, "resolveRegenerationOperation").mockResolvedValue(
+      changedRecord(original, String(path), value),
+    );
+    const write = vi.spyOn(ports.store, "regenerate");
+    await expect(service.regenerate(regenerationInput)).rejects.toMatchObject({
+      code: "DINING_SESSION_DEPENDENCY_UNAVAILABLE",
+    });
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["session.diningSessionReference", ids.guest],
+    ["session.brandReference", ids.guest],
+    ["capability.diningSessionReference", ids.guest],
+    ["capability.storeReference", ids.guest],
+    ["capability.tableReference", ids.guest],
+    ["capability.assignmentVersion", 8],
+  ])("rejects wrong current regeneration state %s before generation", async (path, value) => {
+    const { service, ports } = fixture();
+    await start(service);
+    const state = await ports.store.resolveActiveJoin(ids.session as never);
+    vi.spyOn(ports.store, "resolveActiveJoin").mockResolvedValue(
+      changedRecord(state, String(path), value),
+    );
+    const generate = vi.spyOn(ports.credentials, "generateJoinCredential");
+    const write = vi.spyOn(ports.store, "regenerate");
+    await expect(service.regenerate(regenerationInput)).rejects.toMatchObject({
+      code: "DINING_SESSION_UNAVAILABLE",
+    });
+    expect(generate).not.toHaveBeenCalled();
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it("captures history before digest equality can mutate the dependency object", async () => {
+    const { service, ports } = fixture();
+    await start(service);
+    const prior = JSON.parse(
+      JSON.stringify(await ports.store.resolveStartOperation(ids.startOperation as never)),
+    ) as DiningStartRecord;
+    vi.spyOn(ports.store, "resolveStartOperation").mockResolvedValue(prior);
+    vi.spyOn(ports.credentials, "equals").mockImplementation(() => {
+      Object.assign(prior.session, { storeReference: ids.guest });
+      return true;
+    });
+    expect((await start(service)).session.storeReference).toBe(ids.store);
+  });
+
+  it("captures Staff audit and Table evidence before the history callback", async () => {
+    const { service, ports } = fixture();
+    const evidence = staffEvidence("StartSession", startAt, null);
+    vi.spyOn(ports.staff, "authorize").mockResolvedValue(evidence as never);
+    vi.spyOn(ports.store, "resolveStartOperation").mockImplementation(async () => {
+      Object.assign(evidence.table, { storeReference: ids.guest });
+      Object.assign(evidence.audit, { storeId: ids.guest });
+      return null;
+    });
+    const write = vi.spyOn(ports.store, "start");
+    expect((await start(service)).session.storeReference).toBe(ids.store);
+    expect(write.mock.calls[0]?.[0].audit.storeId).toBe(ids.store);
+  });
+
+  it.each(["staff", "history"] as const)(
+    "rejects %s accessors without executing them",
+    async (source) => {
+      const { service, ports } = fixture();
+      await start(service);
+      const getter = vi.fn(() => {
+        throw new Error("private dependency details");
+      });
+      if (source === "staff") {
+        const evidence = staffEvidence("StartSession", startAt, null);
+        Object.defineProperty(evidence, "audit", { get: getter, enumerable: true });
+        vi.spyOn(ports.staff, "authorize").mockResolvedValue(evidence as never);
+      } else {
+        const prior = { ...(await ports.store.resolveStartOperation(ids.startOperation as never)) };
+        Object.defineProperty(prior, "session", { get: getter, enumerable: true });
+        vi.spyOn(ports.store, "resolveStartOperation").mockResolvedValue(prior as never);
+      }
+      await expect(start(service)).rejects.toBeInstanceOf(DiningSessionError);
+      expect(getter).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["start", "regenerate"] as const)(
+    "rejects foreign %s write acknowledgements",
+    async (operation) => {
+      const { service, ports } = fixture();
+      if (operation === "start") {
+        vi.spyOn(ports.store, "start").mockImplementation(async ({ record }) =>
+          changedRecord(record, "session.storeReference", ids.guest),
+        );
+      } else {
+        await start(service);
+        vi.spyOn(ports.store, "regenerate").mockImplementation(async (input) =>
+          changedRecord(
+            {
+              capability: input.replacement,
+              operationReference: input.operationReference,
+              operationIntentHash: input.operationIntentHash,
+            },
+            "capability.storeReference",
+            ids.guest,
+          ),
+        );
+      }
+      await expect(
+        operation === "start" ? start(service) : service.regenerate(regenerationInput),
+      ).rejects.toMatchObject({ code: "DINING_SESSION_DEPENDENCY_UNAVAILABLE" });
+    },
+  );
+
+  it.each(["start", "regenerate"] as const)(
+    "never issues unused raw credentials when %s converges on another original",
+    async (operation) => {
+      const { service, ports } = fixture();
+      if (operation === "start") {
+        vi.spyOn(ports.store, "start").mockImplementation(async ({ record }) =>
+          changedRecord(record, "capability.capabilityReference", ids.nextCapability),
+        );
+      } else {
+        await start(service);
+        vi.spyOn(ports.store, "regenerate").mockImplementation(async (input) =>
+          changedRecord(
+            {
+              capability: input.replacement,
+              operationReference: input.operationReference,
+              operationIntentHash: input.operationIntentHash,
+            },
+            "capability.capabilityReference",
+            ids.firstCapability,
+          ),
+        );
+      }
+      const result = await (operation === "start"
+        ? start(service)
+        : service.regenerate(regenerationInput));
+      expect(result.status).toBe("AlreadyApplied");
+      expect(result).not.toHaveProperty("joinCredential");
+    },
+  );
+
+  it.each(["DINING_SESSION_VERSION_CONFLICT", "DINING_SESSION_IDEMPOTENCY_CONFLICT"] as const)(
+    "copies bounded %s without dependency details",
+    async (code) => {
+      const { service, ports } = fixture();
+      const error = new DiningSessionError(code);
+      error.message = "private dependency details";
+      vi.spyOn(ports.store, "start").mockRejectedValue(error);
+      const result = await start(service).catch((caught: unknown) => caught);
+      expect(result).toMatchObject({ code });
+      expect(result).not.toBe(error);
+      expect(String(result)).not.toContain("private dependency details");
+    },
+  );
+
+  it("redacts a failed digest equality dependency", async () => {
+    const { service, ports } = fixture();
+    await start(service);
+    vi.spyOn(ports.credentials, "equals").mockImplementation(() => {
+      throw new Error("private dependency details");
+    });
+    await expect(start(service)).rejects.toMatchObject({
+      code: "DINING_SESSION_DEPENDENCY_UNAVAILABLE",
+    });
+  });
+});
+
+describe("WP-2273 Staff dependency failures", () => {
+  it.each([
+    "hashOperationIntent",
+    "generateReference",
+    "generateJoinCredential",
+    "hashJoinCredential",
+  ] as const)("redacts failed %s for both Staff operations", async (method) => {
+    for (const operation of ["start", "regenerate"] as const) {
+      const { service, ports } = fixture();
+      if (operation === "regenerate") await start(service);
+      vi.spyOn(ports.credentials, method).mockImplementation(() => {
+        throw new Error("private credential dependency details");
+      });
+      const error = await (
+        operation === "start" ? start(service) : service.regenerate(regenerationInput)
+      ).catch((value: unknown) => value);
+      expect(error).toMatchObject({ code: "DINING_SESSION_DEPENDENCY_UNAVAILABLE" });
+      expect(String(error)).not.toContain("private credential dependency details");
+    }
+  });
+
+  it("rejects stale authorization time before reading history", async () => {
+    const { service, ports } = fixture();
+    const evidence = staffEvidence("RegenerateJoinCredential", regenerateAt, ids.session);
+    vi.spyOn(ports.staff, "authorize").mockResolvedValue({
+      ...evidence,
+      tenantContext: tenantContext(startAt),
+    } as never);
+    const read = vi.spyOn(ports.store, "resolveRegenerationOperation");
+    await expect(service.regenerate(regenerationInput)).rejects.toMatchObject({
+      code: "DINING_SESSION_PERMISSION_DENIED",
+    });
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it("keeps changed regeneration intent an idempotency conflict", async () => {
+    const { service, ports } = fixture();
+    await start(service);
+    await service.regenerate(regenerationInput);
+    vi.spyOn(ports.credentials, "hashOperationIntent").mockReturnValue(hash("f") as never);
+    const write = vi.spyOn(ports.store, "regenerate");
+    await expect(service.regenerate(regenerationInput)).rejects.toMatchObject({
+      code: "DINING_SESSION_IDEMPOTENCY_CONFLICT",
+    });
+    expect(write).not.toHaveBeenCalled();
+  });
+});
+
+describe("WP-2273 synchronous Staff port failures", () => {
+  it.each(["staff", "history", "write"] as const)(
+    "redacts synchronous %s failure",
+    async (source) => {
+      const { service, ports } = fixture();
+      const failed = () => {
+        throw new Error("private synchronous dependency details");
+      };
+      if (source === "staff") vi.spyOn(ports.staff, "authorize").mockImplementation(failed);
+      if (source === "history")
+        vi.spyOn(ports.store, "resolveStartOperation").mockImplementation(failed);
+      if (source === "write") vi.spyOn(ports.store, "start").mockImplementation(failed);
+      await expect(start(service)).rejects.toMatchObject({
+        code: "DINING_SESSION_DEPENDENCY_UNAVAILABLE",
+      });
+    },
+  );
+});
+
+const joinInput = {
+  guestSessionReference: ids.guest,
+  joinCredential: firstCredential,
+  expectedSessionVersion: 1,
+  expectedCapabilityVersion: 1,
+  operationReference: ids.joinOperation,
+  requestedAt: joinAt,
+};
+const joinUnavailable = { status: "DiningJoinUnavailable" };
+const refused = (reason: "CodeUsed" | "CodeNotAccepted" | "TooManyAttempts") => ({
+  status: "DiningJoinRefused",
+  reason,
+});
+
+describe("WP-2274 current Guest and complete original Join isolation", () => {
+  it.each([
+    ["guestSessionReference", ids.actor],
+    ["diningState", "DiningBound"],
+    ["channel", "Pickup"],
+    ["storeReference", ids.actor],
+    ["tableReference", ids.actor],
+    ["tableReference", null],
+    ["observedAt", startAt],
+  ])("denies current Guest %s mismatch before history", async (path, value) => {
+    // Another Store or Table is a definitive refusal; other Guest evidence faults stay unavailable.
+    const expected =
+      path === "storeReference" || (path === "tableReference" && value !== null)
+        ? refused("CodeNotAccepted")
+        : joinUnavailable;
+    const { service, ports } = fixture();
+    await start(service);
+    await service.join(joinInput);
+    const guest = await ports.guests.resolve({
+      guestSessionReference: ids.guest as never,
+      observedAt: joinAt as never,
+    });
+    vi.spyOn(ports.guests, "resolve").mockResolvedValue(changedRecord(guest, String(path), value));
+    const history = vi.spyOn(ports.store, "resolveJoinOperation");
+    const write = vi.spyOn(ports.store, "join");
+    const generate = vi.spyOn(ports.credentials, "generateReference");
+    expect(await service.join(joinInput)).toEqual(expected);
+    expect(history).not.toHaveBeenCalled();
+    expect(write).not.toHaveBeenCalled();
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it.each([null, "Cooldown", "unknown"])(
+    "denies missing Guest or non-admitted abuse %s",
+    async (decision) => {
+      const { service, ports } = fixture();
+      await start(service);
+      await service.join(joinInput);
+      if (decision === null) vi.spyOn(ports.guests, "resolve").mockResolvedValue(null);
+      else vi.spyOn(ports.abuse, "admit").mockResolvedValue(decision as never);
+      const history = vi.spyOn(ports.store, "resolveJoinOperation");
+      expect(await service.join(joinInput)).toEqual(
+        decision === "Cooldown" ? refused("TooManyAttempts") : joinUnavailable,
+      );
+      expect(history).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ["session.phase", "Closing"],
+    ["session.phase", "Closed"],
+    ["session.phase", "Cancelled"],
+    ["session.startedAt", regenerateAt],
+    ["session.tableAssignmentVersion", 8],
+    ["capability.selectorHash", hash("f")],
+    ["capability.assignmentVersion", 8],
+    ["capability.storeReference", ids.actor],
+    ["capability.tableReference", ids.actor],
+    ["capability.diningSessionReference", ids.actor],
+    ["capability.issuedAt", regenerateAt],
+    ["capability.kind", "HumanCode"],
+  ])("denies current Join state %s mismatch before history", async (path, value) => {
+    // An ended Session or a moved Table no longer accepts the code; integrity faults stay unavailable.
+    const expected = [
+      "session.phase",
+      "session.tableAssignmentVersion",
+      "capability.assignmentVersion",
+    ].includes(String(path))
+      ? refused("CodeNotAccepted")
+      : joinUnavailable;
+    const { service, ports } = fixture();
+    await start(service);
+    await service.join(joinInput);
+    const state = await ports.store.resolveJoinState(hash("a") as never);
+    vi.spyOn(ports.store, "resolveJoinState").mockResolvedValue(
+      changedRecord(state, String(path), value),
+    );
+    const history = vi.spyOn(ports.store, "resolveJoinOperation");
+    const generate = vi.spyOn(ports.credentials, "generateReference");
+    expect(await service.join(joinInput)).toEqual(expected);
+    expect(history).not.toHaveBeenCalled();
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it("replays the original consumed Join without generating or consuming again", async () => {
+    const { service, ports } = fixture();
+    await start(service);
+    const first = await service.join(joinInput);
+    const write = vi.spyOn(ports.store, "join");
+    const generate = vi.spyOn(ports.credentials, "generateReference");
+    const replay = await service.join({ ...joinInput, requestedAt: regenerateAt });
+    expect(replay).toEqual({ ...first, status: "AlreadyApplied" });
+    expect(replay).not.toHaveProperty("joinCredential");
+    if (replay.status === "DiningJoinUnavailable" || replay.status === "DiningJoinRefused")
+      throw new Error("missing replay");
+    expect(Object.isFrozen(replay.admission)).toBe(true);
+    expect(write).not.toHaveBeenCalled();
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it("conflicts for another currently authorized Guest's intent under the same operation", async () => {
+    const { service } = fixture();
+    await start(service);
+    await service.join(joinInput);
+    await expect(
+      service.join({ ...joinInput, guestSessionReference: ids.actor }),
+    ).rejects.toMatchObject({ code: "DINING_SESSION_IDEMPOTENCY_CONFLICT" });
+  });
+
+  it.each([
+    ["operationReference", ids.startOperation],
+    ["operationIntentHash", "invalid"],
+    ["extra", true],
+    ["session.brandReference", ids.actor],
+    ["session.storeReference", ids.actor],
+    ["session.tableReference", ids.actor],
+    ["session.diningSessionReference", ids.actor],
+    ["session.tableAssignmentVersion", 8],
+    ["session.startedByActorReference", ids.participant],
+    ["session.startedAt", joinAt],
+    ["session.phase", "Closing"],
+    ["session.version", 1],
+    ["session.version", 3],
+    ["session.hostParticipantReference", ids.actor],
+    ["participant.participantReference", ids.actor],
+    ["participant.diningSessionReference", ids.actor],
+    ["participant.version", 2],
+    ["participant.joinedAt", regenerateAt],
+    ["admission.participantReference", ids.actor],
+    ["admission.diningSessionReference", ids.actor],
+    ["admission.storeReference", ids.actor],
+    ["admission.tableReference", ids.actor],
+    ["admission.tableAssignmentVersion", 8],
+    ["admission.operationReference", ids.startOperation],
+    ["admission.operationIntentHash", hash("f")],
+    ["admission.version", 2],
+    ["admission.issuedAt", startAt],
+    ["capability.selectorHash", hash("f")],
+    ["capability.capabilityReference", ids.nextCapability],
+    ["capability.version", 3],
+    ["capability.consumedAt", regenerateAt],
+    ["capability.generation", 2],
+  ])("rejects malformed original Join %s", async (path, value) => {
+    const { service, ports } = fixture();
+    await start(service);
+    await service.join(joinInput);
+    const original = await ports.store.resolveJoinOperation(ids.joinOperation as never);
+    vi.spyOn(ports.store, "resolveJoinOperation").mockResolvedValue(
+      changedRecord(original, String(path), value),
+    );
+    const write = vi.spyOn(ports.store, "join");
+    await expect(service.join(joinInput)).rejects.toMatchObject({
+      code: "DINING_SESSION_DEPENDENCY_UNAVAILABLE",
+    });
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it("does not accept a rewritten joined/admission/consumption time even when mutually consistent", async () => {
+    const { service, ports } = fixture();
+    await start(service);
+    await service.join(joinInput);
+    let original = await ports.store.resolveJoinOperation(ids.joinOperation as never);
+    for (const path of ["participant.joinedAt", "admission.issuedAt", "capability.consumedAt"])
+      original = changedRecord(original, path, "2026-07-29T12:00:30.000Z");
+    vi.spyOn(ports.store, "resolveJoinOperation").mockResolvedValue(original);
+    await expect(service.join(joinInput)).rejects.toMatchObject({
+      code: "DINING_SESSION_DEPENDENCY_UNAVAILABLE",
+    });
+  });
+
+  it.each(["guest", "state", "history"] as const)(
+    "never invokes %s dependency accessors",
+    async (source) => {
+      const { service, ports } = fixture();
+      await start(service);
+      await service.join(joinInput);
+      const getter = vi.fn(() => {
+        throw new Error("private getter details");
+      });
+      if (source === "guest") {
+        const guest = {
+          ...(await ports.guests.resolve({
+            guestSessionReference: ids.guest as never,
+            observedAt: joinAt as never,
+          })),
+        };
+        Object.defineProperty(guest, "guestSessionReference", { get: getter, enumerable: true });
+        vi.spyOn(ports.guests, "resolve").mockResolvedValue(guest as never);
+      } else if (source === "state") {
+        const state = { ...(await ports.store.resolveJoinState(hash("a") as never)) };
+        Object.defineProperty(state, "session", { get: getter, enumerable: true });
+        vi.spyOn(ports.store, "resolveJoinState").mockResolvedValue(state as never);
+      } else {
+        const history = { ...(await ports.store.resolveJoinOperation(ids.joinOperation as never)) };
+        Object.defineProperty(history, "admission", { get: getter, enumerable: true });
+        vi.spyOn(ports.store, "resolveJoinOperation").mockResolvedValue(history as never);
+      }
+      if (source === "history")
+        await expect(service.join(joinInput)).rejects.toMatchObject({
+          code: "DINING_SESSION_DEPENDENCY_UNAVAILABLE",
+        });
+      else expect(await service.join(joinInput)).toEqual(joinUnavailable);
+      expect(getter).not.toHaveBeenCalled();
+    },
+  );
+
+  it("captures original admission before digest equality callbacks", async () => {
+    const { service, ports } = fixture();
+    await start(service);
+    await service.join(joinInput);
+    const history = JSON.parse(
+      JSON.stringify(await ports.store.resolveJoinOperation(ids.joinOperation as never)),
+    ) as DiningJoinRecord;
+    vi.spyOn(ports.store, "resolveJoinOperation").mockResolvedValue(history);
+    vi.spyOn(ports.credentials, "equals").mockImplementation(() => {
+      Object.assign(history.admission, { participantReference: ids.actor });
+      return true;
+    });
+    expect(await service.join(joinInput)).toMatchObject({
+      status: "AlreadyApplied",
+      admission: { participantReference: ids.participant },
+    });
+  });
+
+  it("captures current Guest before selector callbacks", async () => {
+    const { service, ports } = fixture();
+    await start(service);
+    const guest = await ports.guests.resolve({
+      guestSessionReference: ids.guest as never,
+      observedAt: joinAt as never,
+    });
+    if (guest === null) throw new Error("missing guest");
+    vi.spyOn(ports.guests, "resolve").mockResolvedValue(guest);
+    vi.spyOn(ports.credentials, "hashJoinCredential").mockImplementation(() => {
+      Object.assign(guest, { storeReference: ids.actor });
+      return hash("a") as never;
+    });
+    expect(await service.join(joinInput)).toMatchObject({
+      status: "Joined",
+      admission: { storeReference: ids.store },
+    });
+  });
+
+  it("captures coherent state before intent callbacks", async () => {
+    const { service, ports } = fixture();
+    await start(service);
+    const state = JSON.parse(
+      JSON.stringify(await ports.store.resolveJoinState(hash("a") as never)),
+    ) as { session: DiningStartRecord["session"]; capability: DiningStartRecord["capability"] };
+    vi.spyOn(ports.store, "resolveJoinState").mockResolvedValue(state);
+    vi.spyOn(ports.credentials, "hashOperationIntent").mockImplementation((intent) => {
+      Object.assign(state.session, { storeReference: ids.actor });
+      return createHash("sha256").update(intent).digest("hex") as never;
+    });
+    expect(await service.join(joinInput)).toMatchObject({
+      status: "Joined",
+      session: { storeReference: ids.store },
+    });
+  });
+
+  it.each([
+    "session.storeReference",
+    "participant.diningSessionReference",
+    "admission.participantReference",
+    "operationReference",
+  ])("rejects malformed write acknowledgement %s", async (path) => {
+    const { service, ports } = fixture();
+    await start(service);
+    vi.spyOn(ports.store, "join").mockImplementation(async ({ record }) =>
+      changedRecord(record, path, ids.actor),
+    );
+    await expect(service.join(joinInput)).rejects.toMatchObject({
+      code: "DINING_SESSION_DEPENDENCY_UNAVAILABLE",
+    });
+  });
+
+  it("converges on a complete concurrent original without claiming another new Join", async () => {
+    const { service, ports } = fixture();
+    await start(service);
+    const write = vi.spyOn(ports.store, "join").mockImplementation(async ({ record }) => {
+      let original = changedRecord(record, "participant.participantReference", ids.actor);
+      original = changedRecord(original, "session.hostParticipantReference", ids.actor);
+      original = changedRecord(original, "admission.participantReference", ids.actor);
+      return changedRecord(original, "admission.admissionReference", ids.policy);
+    });
+    expect(await service.join(joinInput)).toMatchObject({
+      status: "AlreadyApplied",
+      participant: { participantReference: ids.actor },
+      admission: { admissionReference: ids.policy },
+    });
+    expect(write).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects an expired outstanding credential without a write", async () => {
+    const { service, ports } = fixture();
+    await start(service);
+    const write = vi.spyOn(ports.store, "join");
+    expect(await service.join({ ...joinInput, requestedAt: "2026-07-29T12:15:00.000Z" })).toEqual(
+      refused("CodeNotAccepted"),
+    );
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it.each(["abuse", "state", "history", "write", "hash", "generate"] as const)(
+    "redacts synchronous %s errors",
+    async (source) => {
+      const { service, ports } = fixture();
+      await start(service);
+      const failed = () => {
+        throw new Error("private join dependency details");
+      };
+      if (source === "abuse") vi.spyOn(ports.abuse, "admit").mockImplementation(failed);
+      if (source === "state") vi.spyOn(ports.store, "resolveJoinState").mockImplementation(failed);
+      if (source === "history")
+        vi.spyOn(ports.store, "resolveJoinOperation").mockImplementation(failed);
+      if (source === "write") vi.spyOn(ports.store, "join").mockImplementation(failed);
+      if (source === "hash")
+        vi.spyOn(ports.credentials, "hashJoinCredential").mockImplementation(failed);
+      if (source === "generate")
+        vi.spyOn(ports.credentials, "generateReference").mockImplementation(failed);
+      const error = await service.join(joinInput).catch((value: unknown) => value);
+      expect(error).toMatchObject({ code: "DINING_SESSION_DEPENDENCY_UNAVAILABLE" });
+      expect(String(error)).not.toContain("private join dependency details");
+    },
+  );
+});
+
+describe("WP-2274 first Join invariants", () => {
+  it("rejects a second-version Join attributed to a different Host even when current state agrees", async () => {
+    const { service, ports } = fixture();
+    await start(service);
+    await service.join(joinInput);
+    const state = changedRecord(
+      await ports.store.resolveJoinState(hash("a") as never),
+      "session.hostParticipantReference",
+      ids.actor,
+    );
+    const original = changedRecord(
+      await ports.store.resolveJoinOperation(ids.joinOperation as never),
+      "session.hostParticipantReference",
+      ids.actor,
+    );
+    vi.spyOn(ports.store, "resolveJoinState").mockResolvedValue(state);
+    vi.spyOn(ports.store, "resolveJoinOperation").mockResolvedValue(original);
+    await expect(service.join(joinInput)).rejects.toMatchObject({
+      code: "DINING_SESSION_DEPENDENCY_UNAVAILABLE",
+    });
+  });
+  it("rejects consumed version one even when current capability and history agree", async () => {
+    const { service, ports } = fixture();
+    await start(service);
+    await service.join(joinInput);
+    const state = changedRecord(
+      await ports.store.resolveJoinState(hash("a") as never),
+      "capability.version",
+      1,
+    );
+    const original = changedRecord(
+      await ports.store.resolveJoinOperation(ids.joinOperation as never),
+      "capability.version",
+      1,
+    );
+    vi.spyOn(ports.store, "resolveJoinState").mockResolvedValue(state);
+    vi.spyOn(ports.store, "resolveJoinOperation").mockResolvedValue(original);
+    await expect(service.join(joinInput)).rejects.toMatchObject({
+      code: "DINING_SESSION_DEPENDENCY_UNAVAILABLE",
+    });
+  });
+});
+
+describe("WP-2276 sequential Guest admission", () => {
+  it("admits a second Guest through a fresh Staff generation and keeps the original Host", async () => {
+    const { service, ports } = fixture();
+    await start(service);
+    const first = await service.join(joinInput);
+    expect(first.status).toBe("Joined");
+    const old = await ports.store.resolveJoinState(hash("a") as never);
+    const renewed = await service.regenerate({
+      ...regenerationInput,
+      expectedSessionVersion: 2,
+      expectedCapabilityVersion: 2,
+    });
+    expect(renewed).toMatchObject({
+      status: "Issued",
+      joinCredential: nextCredential,
+      capability: { generation: 2, status: "Active", version: 1 },
+    });
+    expect((await ports.store.resolveJoinState(hash("a") as never))?.capability).toEqual(
+      old?.capability,
+    );
+    const second = await service.join({
+      ...joinInput,
+      guestSessionReference: ids.secondGuest,
+      joinCredential: nextCredential,
+      expectedSessionVersion: 2,
+      expectedCapabilityVersion: 1,
+      operationReference: ids.policy,
+      requestedAt: "2026-07-29T12:03:00.000Z",
+    });
+    expect(second).toMatchObject({
+      status: "Joined",
+      session: {
+        diningSessionReference: ids.session,
+        version: 3,
+        hostParticipantReference: ids.participant,
+      },
+      participant: { participantReference: ids.nextParticipant },
+      admission: { admissionReference: ids.nextAdmission },
+    });
+    expect(await service.join({ ...joinInput, requestedAt: "2026-07-29T12:04:00.000Z" })).toEqual({
+      ...first,
+      status: "AlreadyApplied",
+    });
+    expect(
+      await service.join({
+        ...joinInput,
+        guestSessionReference: ids.secondGuest,
+        operationReference: ids.audit,
+        requestedAt: "2026-07-29T12:04:00.000Z",
+      }),
+    ).toEqual(joinUnavailable);
+  });
+  it("issues fresh credentials after the initial invitation expires", async () => {
+    const { service, ports } = fixture();
+    await start(service);
+    expect(await service.join({ ...joinInput, requestedAt: "2026-07-29T12:16:00.000Z" })).toEqual(
+      refused("CodeNotAccepted"),
+    );
+    expect(
+      await service.regenerate({ ...regenerationInput, requestedAt: "2026-07-29T12:16:00.000Z" }),
+    ).toMatchObject({
+      status: "Issued",
+      capability: {
+        generation: 2,
+        issuedAt: "2026-07-29T12:16:00.000Z",
+        expiresAt: "2026-07-29T12:31:00.000Z",
+      },
+    });
+    expect((await ports.store.resolveJoinState(hash("a") as never))?.capability).toMatchObject({
+      status: "Revoked",
+      expiresAt: "2026-07-29T12:15:00.000Z",
+    });
+  });
+  it("uses the configured current pepper version for the fresh hash", async () => {
+    const { service, ports } = fixture();
+    await start(service);
+    const currentProviderService = createDiningSessionService({ ...ports, pepperVersion: 3 });
+    expect(await currentProviderService.regenerate(regenerationInput)).toMatchObject({
+      status: "Issued",
+      capability: { pepperVersion: 3 },
+    });
+    expect((await ports.store.resolveJoinState(hash("a") as never))?.capability.pepperVersion).toBe(
+      2,
+    );
+  });
+  it("does not bypass revoked Staff after consumption", async () => {
+    const { service, ports } = fixture();
+    await start(service);
+    await service.join(joinInput);
+    vi.spyOn(ports.staff, "authorize").mockResolvedValue(null);
+    const write = vi.spyOn(ports.store, "regenerate");
+    await expect(
+      service.regenerate({
+        ...regenerationInput,
+        expectedSessionVersion: 2,
+        expectedCapabilityVersion: 2,
+      }),
+    ).rejects.toMatchObject({ code: "DINING_SESSION_PERMISSION_DENIED" });
+    expect(write).not.toHaveBeenCalled();
+  });
+  it.each(["Closing", "Closed", "Cancelled"])(
+    "does not generate a fresh capability for a %s Session",
+    async (phase) => {
+      const { service, ports } = fixture();
+      await start(service);
+      await service.join(joinInput);
+      const state = changedRecord(
+        await ports.store.resolveActiveJoin(ids.session as never),
+        "session.phase",
+        phase,
+      );
+      vi.spyOn(ports.store, "resolveActiveJoin").mockResolvedValue(state);
+      const generate = vi.spyOn(ports.credentials, "generateJoinCredential");
+      await expect(
+        service.regenerate({
+          ...regenerationInput,
+          expectedSessionVersion: 2,
+          expectedCapabilityVersion: 2,
+        }),
+      ).rejects.toMatchObject({ code: "DINING_SESSION_UNAVAILABLE" });
+      expect(generate).not.toHaveBeenCalled();
+    },
+  );
+});
+
+describe("normal regeneration generation fence", () => {
+  it("rejects a delayed different operation before generating or writing", async () => {
+    const { service, ports } = fixture();
+    await start(service);
+    const issued = await service.regenerate(regenerationInput);
+    const generate = vi.spyOn(ports.credentials, "generateJoinCredential");
+    const write = vi.spyOn(ports.store, "regenerate");
+    await expect(
+      service.regenerate({ ...regenerationInput, operationReference: ids.policy }),
+    ).rejects.toMatchObject({ code: "DINING_SESSION_UNAVAILABLE" });
+    expect(generate).not.toHaveBeenCalled();
+    expect(write).not.toHaveBeenCalled();
+    expect(await service.regenerate(regenerationInput)).toEqual({
+      status: "AlreadyApplied",
+      capability: issued.capability,
+    });
+  });
+});
+
+const currentJoinInput = {
+  guestSessionReference: ids.guest,
+  joinCredential: firstCredential,
+  operationReference: ids.joinOperation,
+  requestedAt: joinAt,
+};
+describe("WP-2303 owner-selected current Join versions", () => {
+  it("uses one authorized read and one abuse admission, preserving original replay", async () => {
+    const f = fixture();
+    await start(f.service);
+    const abuse = vi.spyOn(f.ports.abuse, "admit"),
+      guest = vi.spyOn(f.ports.guests, "resolve");
+    const read = vi.spyOn(f.ports.store, "resolveJoinState"),
+      write = vi.spyOn(f.ports.store, "join");
+    const joined = await f.service.joinCurrent(currentJoinInput);
+    expect(joined.status).toBe("Joined");
+    expect(abuse).toHaveBeenCalledTimes(1);
+    expect(guest).toHaveBeenCalledTimes(1);
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(write).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedSessionVersion: 1,
+        expectedCapabilityVersion: 1,
+        guestSessionReference: ids.guest,
+      }),
+    );
+    expect(await f.service.joinCurrent({ ...currentJoinInput, requestedAt: regenerateAt })).toEqual(
+      { ...joined, status: "AlreadyApplied" },
+    );
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(joined)).not.toContain(firstCredential);
+  });
+  it("selects the current higher Session version after another participant joins", async () => {
+    const f = fixture();
+    await start(f.service);
+    await f.service.join(joinInput);
+    await f.service.regenerate({
+      ...regenerationInput,
+      expectedSessionVersion: 2,
+      expectedCapabilityVersion: 2,
+    });
+    const write = vi.spyOn(f.ports.store, "join");
+    const result = await f.service.joinCurrent({
+      ...currentJoinInput,
+      guestSessionReference: ids.secondGuest,
+      joinCredential: nextCredential,
+      operationReference: ids.policy,
+      requestedAt: "2026-07-29T12:03:00.000Z",
+    });
+    expect(result).toMatchObject({
+      status: "Joined",
+      session: { version: 3, hostParticipantReference: ids.participant },
+    });
+    expect(write).toHaveBeenCalledWith(
+      expect.objectContaining({ expectedSessionVersion: 2, expectedCapabilityVersion: 1 }),
+    );
+  });
+  it.each([
+    null,
+    [],
+    {},
+    joinInput,
+    { ...currentJoinInput, expectedSessionVersion: 1 },
+    { ...currentJoinInput, extra: true },
+    { ...currentJoinInput, joinCredential: "bad" },
+    { ...currentJoinInput, requestedAt: "bad" },
+  ])("rejects malformed or caller-version input", async (value) => {
+    const f = fixture();
+    const abuse = vi.spyOn(f.ports.abuse, "admit");
+    await expect(f.service.joinCurrent(value)).rejects.toMatchObject({
+      code: "DINING_SESSION_INPUT_INVALID",
+    });
+    expect(abuse).not.toHaveBeenCalled();
+  });
+  it("rejects accessors without calling them and captures original input before awaits", async () => {
+    const f = fixture();
+    await start(f.service);
+    const getter = vi.fn(() => firstCredential);
+    await expect(
+      f.service.joinCurrent(
+        Object.defineProperty({ ...currentJoinInput }, "joinCredential", { get: getter }),
+      ),
+    ).rejects.toMatchObject({ code: "DINING_SESSION_INPUT_INVALID" });
+    expect(getter).not.toHaveBeenCalled();
+    const mutable = {
+      ...currentJoinInput,
+      guestSessionReference: String(currentJoinInput.guestSessionReference),
+    };
+    vi.spyOn(f.ports.abuse, "admit").mockImplementationOnce(async () => {
+      mutable.guestSessionReference = ids.secondGuest;
+      mutable.joinCredential = nextCredential;
+      return "Admitted";
+    });
+    const write = vi.spyOn(f.ports.store, "join");
+    expect(await f.service.joinCurrent(mutable)).toMatchObject({ status: "Joined" });
+    expect(write).toHaveBeenCalledWith(
+      expect.objectContaining({ guestSessionReference: ids.guest }),
+    );
+  });
+  it.each(["cooldown", "guest", "bound"] as const)(
+    "checks %s before capability/history reads",
+    async (mode) => {
+      const f = fixture({ cooldown: mode === "cooldown" });
+      await start(f.service);
+      if (mode === "guest") vi.spyOn(f.ports.guests, "resolve").mockResolvedValue(null);
+      if (mode === "bound") {
+        const value = await f.ports.guests.resolve({
+          guestSessionReference: ids.guest as never,
+          observedAt: joinAt as never,
+        });
+        vi.spyOn(f.ports.guests, "resolve").mockResolvedValue(
+          changedRecord(value, "diningState", "DiningBound"),
+        );
+      }
+      const read = vi.spyOn(f.ports.store, "resolveJoinState"),
+        history = vi.spyOn(f.ports.store, "resolveJoinOperation");
+      expect(await f.service.joinCurrent(currentJoinInput)).toEqual(
+        mode === "cooldown" ? refused("TooManyAttempts") : joinUnavailable,
+      );
+      expect(read).not.toHaveBeenCalled();
+      expect(history).not.toHaveBeenCalled();
+    },
+  );
+  it.each(["Closing", "Closed", "Cancelled", "moved", "expired", "wrongTable"] as const)(
+    "preserves current %s denial",
+    async (mode) => {
+      const f = fixture({ wrongTable: mode === "wrongTable" });
+      await start(f.service);
+      if (["Closing", "Closed", "Cancelled", "moved"].includes(mode)) {
+        const state = await f.ports.store.resolveJoinState(hash("a") as never);
+        vi.spyOn(f.ports.store, "resolveJoinState").mockResolvedValue(
+          changedRecord(
+            state,
+            mode === "moved" ? "session.tableAssignmentVersion" : "session.phase",
+            mode === "moved" ? 8 : mode,
+          ),
+        );
+      }
+      const write = vi.spyOn(f.ports.store, "join");
+      expect(
+        await f.service.joinCurrent({
+          ...currentJoinInput,
+          requestedAt: mode === "expired" ? "2026-07-29T12:16:00.000Z" : joinAt,
+        }),
+      ).toEqual(refused("CodeNotAccepted"));
+      expect(write).not.toHaveBeenCalled();
+    },
+  );
+  it("refuses another Guest's reuse of a consumed code as used, without a write", async () => {
+    const f = fixture();
+    await start(f.service);
+    await f.service.joinCurrent(currentJoinInput);
+    const write = vi.spyOn(f.ports.store, "join");
+    expect(
+      await f.service.joinCurrent({
+        ...currentJoinInput,
+        guestSessionReference: ids.secondGuest,
+        operationReference: ids.policy,
+      }),
+    ).toEqual(refused("CodeUsed"));
+    expect(write).not.toHaveBeenCalled();
+    // The original Guest's exact retry still recovers its own Join.
+    expect(await f.service.joinCurrent(currentJoinInput)).toMatchObject({
+      status: "AlreadyApplied",
+    });
+  });
+  it("propagates the writer version fence without retrying a fresh state", async () => {
+    const f = fixture();
+    await start(f.service);
+    const read = vi.spyOn(f.ports.store, "resolveJoinState");
+    const write = vi
+      .spyOn(f.ports.store, "join")
+      .mockRejectedValue(new DiningSessionError("DINING_SESSION_VERSION_CONFLICT"));
+    await expect(f.service.joinCurrent(currentJoinInput)).rejects.toMatchObject({
+      code: "DINING_SESSION_VERSION_CONFLICT",
+    });
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(write).toHaveBeenCalledTimes(1);
+  });
+  it("keeps explicit stale-version rejection intact", async () => {
+    const f = fixture();
+    await start(f.service);
+    expect(await f.service.join({ ...joinInput, expectedSessionVersion: 2 })).toEqual(
+      joinUnavailable,
+    );
+    expect(await f.service.joinCurrent(currentJoinInput)).toMatchObject({ status: "Joined" });
   });
 });

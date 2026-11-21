@@ -181,18 +181,19 @@ export function createOrderAmendmentService(ports: OrderAmendmentPorts) {
               ? "ORDER_AMENDMENT_ORDER_INELIGIBLE"
               : "ORDER_AMENDMENT_VERSION_CONFLICT",
           );
-        const [impact, quote] = await Promise.all([
-          ports.impact.assess({ orderReference, change, expectedOrderVersion }).catch(dependency),
-          ports.pricing
-            .reprice({
-              orderReference,
-              expectedOrderVersion,
-              change,
-              originalTotalMinor: source.totalMinor,
-              currencyCode: source.currencyCode,
-            })
-            .catch(dependency),
-        ]);
+        // Sequential: owner ports may share one caller transaction (no concurrent use of a client).
+        const impact = await ports.impact
+          .assess({ orderReference, change, expectedOrderVersion })
+          .catch(dependency);
+        const quote = await ports.pricing
+          .reprice({
+            orderReference,
+            expectedOrderVersion,
+            change,
+            originalTotalMinor: source.totalMinor,
+            currencyCode: source.currencyCode,
+          })
+          .catch(dependency);
         if (
           quote.originalTotalMinor !== source.totalMinor ||
           quote.currencyCode !== source.currencyCode ||

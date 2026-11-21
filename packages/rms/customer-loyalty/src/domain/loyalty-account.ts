@@ -7,7 +7,16 @@ import {
 } from "./customer-profile.js";
 export type LoyaltyAccountStatus = "Pending" | "Active" | "Suspended" | "Closed";
 export type PointsTransactionType =
-  "Earn" | "Activate" | "Reserve" | "Release" | "Redeem" | "Reverse" | "Adjust" | "Expire";
+  | "Earn"
+  | "Activate"
+  | "Reserve"
+  | "Release"
+  | "Redeem"
+  | "Reverse"
+  | "Adjust"
+  | "Expire"
+  // WP-2423 取舍 18: points spent on a bill that was refunded come back (a debt is paid first).
+  | "Return";
 export interface PointsReservationSummary {
   readonly reservationReference: CustomerReference;
   readonly redemptionRequestReference: CustomerReference;
@@ -247,6 +256,11 @@ export function applyPointsOperation(
     }
   } else if (input.type === "Adjust") {
     if (!original || input.sourceType !== "AuthorizedCorrection") fail();
+    const paid = Math.min(points, debt);
+    debt -= paid;
+    available += points - paid;
+  } else if (input.type === "Return") {
+    if (!original || input.sourceType !== "Refund") fail();
     const paid = Math.min(points, debt);
     debt -= paid;
     available += points - paid;

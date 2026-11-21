@@ -36,6 +36,7 @@ function version(overrides: Record<string, unknown> = {}) {
     decisionEvidenceReference: null,
     reasonCode: "ROLE_ADMIN_CHANGE",
     changedAt: at,
+    approvalMode: "Independent",
     ...overrides,
   });
 }
@@ -129,7 +130,10 @@ describe("WP-2195 role administration", () => {
               source: "ExplicitAllow",
             }) as never,
         },
-        impact: { countActiveAssignments: async () => 0 },
+        impact: {
+          countActiveAssignments: async () => 0,
+          countOpenAssignmentChanges: async () => 0,
+        },
         policy: { currentVersion: async () => 7 },
         unitOfWork: { commit: async (input) => void commits.push(input) },
       },
@@ -174,7 +178,10 @@ describe("WP-2195 role administration", () => {
                 source: "ExplicitAllow",
               }) as never,
           },
-          impact: { countActiveAssignments: async () => 2 },
+          impact: {
+            countActiveAssignments: async () => 2,
+            countOpenAssignmentChanges: async () => 0,
+          },
           policy: { currentVersion: async () => 8 },
           unitOfWork: { commit: async () => undefined },
         },

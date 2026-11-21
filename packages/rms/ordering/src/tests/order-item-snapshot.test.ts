@@ -304,6 +304,22 @@ describe("WP-1222 immutable Order Item transaction snapshot", () => {
     }
   });
 
+  it("Owner #26 (DEC-PRICE-HOLD): records the same dish on a menu listed since its validation, at the quoted price", () => {
+    const [item] = createOrderItemSnapshots(
+      input({
+        lines: [
+          {
+            orderItemReference: id(52),
+            cartItemReference: id(10),
+            catalog: catalogSnapshot({ menuVersionReference: id(98) }),
+            pricing: pricingSnapshot(),
+          },
+        ],
+      }),
+    );
+    expect(item?.catalog.menuVersionReference).toBe(id(98));
+    expect(item?.pricing).toEqual(pricingSnapshot());
+  });
   it("rejects missing, changed or unvalidated Option configuration", () => {
     const variants = [
       catalogSnapshot({ options: [] }),

@@ -50,3 +50,38 @@ export type CatalogSelectionValidationResult =
         | "RULE_UNSATISFIED"
         | "OPTION_CONFLICT";
     };
+
+/**
+ * WP-2423 (DEC-PRICE-HOLD §3, price-hold-dish-changes): one cart line priced on one menu version
+ * and found on another. The dish keeps its product version while the restaurant renames it or
+ * changes its allergens (a draft edited in place), so the published menus are compared.
+ */
+export interface CatalogDishChangeKey {
+  readonly sellableReference: string;
+  readonly productVersionReference: string;
+  /** The menu version the guest's price was confirmed on. */
+  readonly fromMenuVersionReference: string;
+  /** The menu version the dish is sold on now. */
+  readonly toMenuVersionReference: string;
+}
+/**
+ * What the guest is told differently about the dish on the newer menu: its name (any language) or
+ * its allergens (any line of the disclosure). A dish either menu does not show exactly once is
+ * answered as both, so it is never held unchecked.
+ */
+export type CatalogDishChange = "Name" | "Allergens";
+/**
+ * v15 2026-11-11 b10: a dish's name in one menu language before and now, for each language whose
+ * name changed, so a guest reading another language is told what changed (only the Chinese name,
+ * say) instead of seeing the same name twice.
+ */
+export interface CatalogDishRename {
+  readonly locale: string;
+  readonly from: string;
+  readonly to: string;
+}
+/** What changed about one dish, and how its names changed (empty when the names are the same). */
+export interface CatalogDishChangeDetail {
+  readonly changes: readonly CatalogDishChange[];
+  readonly renamed: readonly CatalogDishRename[];
+}

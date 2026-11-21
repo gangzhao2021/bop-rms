@@ -1,0 +1,320 @@
+import { parseCatalogReference } from "@rms/catalog";
+import { beforeEach, expect, it, vi } from "vitest";
+import { RecipeReviewGapError } from "@rms/recipe";
+import {
+  createMenuRecipeAllergenSource,
+  createCompleteMenuRecipeAllergenSource,
+  optionOwnEvidence,
+} from "./menu-recipe-allergen-source.js";
+
+const fixtures = vi.hoisted(() => ({
+  recipe: null as unknown,
+  allergens: null as unknown,
+  requests: [] as unknown[],
+  failAt: 0,
+  failure: new Error("synthetic missing source") as unknown,
+  allergenReads: 0,
+}));
+vi.mock("@rms/recipe", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@rms/recipe")>()),
+  createPostgresRecipeReviewSource: () => {
+    const resolve = async (_tx: unknown, query: unknown) => {
+      fixtures.requests.push(query);
+      if (fixtures.failAt === fixtures.requests.length) throw fixtures.failure;
+      return fixtures.recipe;
+    };
+    return {
+      resolve,
+      resolveConfigurations: async (
+        tx: unknown,
+        query: object,
+        configurations: readonly unknown[],
+      ) => {
+        const results = [];
+        for (const selections of configurations)
+          results.push(await resolve(tx, { ...query, selections }));
+        return results;
+      },
+      resolveCoverage: async (
+        tx: unknown,
+        query: object,
+        covering: readonly unknown[],
+        everySet: () => readonly unknown[],
+      ) => {
+        const list = async (configurations: readonly unknown[]) => {
+          const results = [];
+          for (const selections of configurations)
+            results.push(
+              (await resolve(tx, { ...query, selections })) as {
+                modifierRules: { changes: unknown[] }[];
+              },
+            );
+          return results;
+        };
+        const first = await list(covering);
+        const changesNothing = first.every((recipe) =>
+          recipe.modifierRules.every((rule) => rule.changes.length === 0),
+        );
+        const selections = changesNothing ? covering : everySet();
+        return {
+          selections,
+          results: changesNothing ? first : await list(selections),
+          changesNothing,
+        };
+      },
+    };
+  },
+}));
+vi.mock("@rms/catalog", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@rms/catalog")>()),
+  createPostgresAllergenReviewFactsStore: () => async () => {
+    fixtures.allergenReads += 1;
+    return fixtures.allergens;
+  },
+}));
+const id = (n: number) => "01902405-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+const requirement = () => ({
+  sourceKind: "InventoryItem",
+  sourceReference: id(2),
+  sourceVersionReference: id(3),
+  allergens: [{ evidenceReference: id(4), allergenReference: id(5), verified: true }],
+});
+const evidence = () => ({
+  evidenceReference: id(4),
+  subjectReference: id(2),
+  sourceVersionReference: id(3),
+  subjectKind: "Ingredient",
+  assertions: [{ allergenReference: id(5), classification: "Contains" }],
+});
+const input = {
+  recipe: {
+    actorType: "User" as const,
+    actorReference: id(10),
+    action: "ResolveMenuRecipeFacts" as const,
+    purpose: "ReviewMenu" as const,
+    brandReference: id(1),
+    storeReference: id(11),
+    skuReference: id(12),
+    observedAt: "2026-08-13T18:00:00.000Z",
+    selections: [],
+  },
+  registryVersionReference: id(13),
+  defaultLocale: "en-CA",
+};
+const tx = { query: async <Row>() => ({ rows: [] as Row[] }) };
+const load = () =>
+  createMenuRecipeAllergenSource({
+    brandReference: id(1),
+    authorize: async () => true,
+  }).resolve(tx, input);
+
+beforeEach(() => {
+  fixtures.requests = [];
+  fixtures.failAt = 0;
+  fixtures.failure = new Error("synthetic missing source");
+  fixtures.allergenReads = 0;
+  fixtures.recipe = {
+    configuredIngredients: [requirement()],
+    graph: [],
+    // A choice that does change the recipe, so every set of choices is reviewed.
+    modifierRules: [{ changes: [{ action: "Remove" }] }],
+    observedAt: input.recipe.observedAt,
+    sourceDigest: "sha256:" + "a".repeat(64),
+  };
+  fixtures.allergens = { registryVersionReference: id(13), registry: [], evidence: [evidence()] };
+});
+it("binds shared evidence once across repeated uses of the same ingredient version", async () => {
+  fixtures.recipe = {
+    configuredIngredients: [requirement()],
+    graph: [{ ingredients: [requirement()] }],
+    observedAt: input.recipe.observedAt,
+    sourceDigest: "sha256:" + "a".repeat(64),
+  };
+  expect((await load()).evidenceReferences).toEqual([id(4)]);
+});
+it.each([
+  { subjectReference: id(99) },
+  { sourceVersionReference: id(99) },
+  { subjectKind: "Recipe" },
+  { assertions: [] },
+  { assertions: [{ allergenReference: id(99), classification: "Contains" }] },
+  {
+    assertions: [
+      ...evidence().assertions,
+      { allergenReference: id(99), classification: "Contains" },
+    ],
+  },
+])("rejects inconsistent subject/version/assertions %j", async (patch) => {
+  fixtures.allergens = { evidence: [{ ...evidence(), ...patch }] };
+  await expect(load()).rejects.toMatchObject({ code: "MENU_RECIPE_ALLERGEN_UNAVAILABLE" });
+});
+it("rejects one evidence reference reused for different ingredient subjects", async () => {
+  fixtures.recipe = {
+    configuredIngredients: [requirement(), { ...requirement(), sourceReference: id(99) }],
+    graph: [],
+    observedAt: input.recipe.observedAt,
+  };
+  await expect(load()).rejects.toMatchObject({ code: "MENU_RECIPE_ALLERGEN_UNAVAILABLE" });
+});
+it("does not infer allergen absence from a leaf with no evidence", async () => {
+  fixtures.recipe = {
+    configuredIngredients: [{ ...requirement(), allergens: [] }],
+    graph: [],
+    observedAt: input.recipe.observedAt,
+  };
+  await expect(load()).rejects.toMatchObject({ code: "MENU_RECIPE_ALLERGEN_UNAVAILABLE" });
+});
+
+const completeInput = () => {
+  const ref = (n: number) => parseCatalogReference(id(n));
+  return {
+    recipe: input.recipe,
+    registryVersionReference: input.registryVersionReference,
+    defaultLocale: input.defaultLocale,
+    budget: { maximumConfigurations: 10, maximumSearchSteps: 1000 },
+    rules: [
+      {
+        bindingReference: ref(20),
+        optionSetVersionReference: ref(21),
+        activationOptionReferences: [],
+        minimumQuantity: 0,
+        maximumQuantity: 2,
+        options: [{ optionReference: ref(22), maximumQuantity: 2, conflictOptionReferences: [] }],
+      },
+    ],
+  };
+};
+const complete = () =>
+  createCompleteMenuRecipeAllergenSource({
+    brandReference: id(1),
+    authorize: async () => true,
+  });
+it("resolves every legal quantity and deduplicates shared source evidence", async () => {
+  const result = await complete().resolve(tx, completeInput());
+  expect(
+    result.configurations.map((item) => item.selections.map((selection) => selection.quantity)),
+  ).toEqual([[], [1], [2]]);
+  // Every option at every quantity first (2), to see whether any changes the recipe, then every set.
+  expect(fixtures.requests).toHaveLength(5);
+  expect(result.changesNothing).toBe(false);
+  // One allergen read covers every configuration (v15 2026-10-22: one per configuration was slow).
+  expect(fixtures.allergenReads).toBe(1);
+  expect(result.configurations.map((item) => item.evidenceReferences)).toEqual([
+    [id(4)],
+    [id(4)],
+    [id(4)],
+  ]);
+  expect(result.allergens.evidence).toHaveLength(1);
+  expect(result.sourceDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
+});
+it("WP-2423 item 3: where no choice changes the recipe, every option at every quantity is the whole review", async () => {
+  fixtures.recipe = {
+    ...(fixtures.recipe as object),
+    modifierRules: [{ changes: [] }],
+  };
+  const result = await complete().resolve(tx, completeInput());
+  expect(
+    result.configurations.map((item) => item.selections.map((selection) => selection.quantity)),
+  ).toEqual([[1], [2]]);
+  expect(fixtures.requests).toHaveLength(2);
+  expect(result.changesNothing).toBe(true);
+  // At another Store of the menu one does: this one is then reviewed set by set too.
+  fixtures.requests = [];
+  const everySet = await complete().resolve(tx, { ...completeInput(), everySet: true });
+  expect(everySet.changesNothing).toBe(false);
+  expect(
+    everySet.configurations.map((item) => item.selections.map((selection) => selection.quantity)),
+  ).toEqual([[], [1], [2]]);
+});
+it("rejects the whole coverage when a later configuration has no source", async () => {
+  fixtures.failAt = 3;
+  await expect(complete().resolve(tx, completeInput())).rejects.toMatchObject({
+    code: "MENU_RECIPE_ALLERGEN_UNAVAILABLE",
+  });
+  expect(fixtures.requests).toHaveLength(3);
+});
+it("does not start owner queries for an incomplete enumeration", async () => {
+  await expect(
+    complete().resolve(tx, {
+      ...completeInput(),
+      budget: { maximumConfigurations: 1, maximumSearchSteps: 1000 },
+    }),
+  ).rejects.toMatchObject({ code: "MENU_RECIPE_ALLERGEN_UNAVAILABLE" });
+  expect(fixtures.requests).toHaveLength(0);
+});
+it("names the SKU, Store, option and quantity whose option recipe change is missing", async () => {
+  fixtures.failAt = 1;
+  fixtures.failure = new RecipeReviewGapError({
+    missing: "OptionRecipe",
+    selection: { bindingReference: id(20), optionReference: id(22), quantity: 2 },
+  });
+  await expect(complete().resolve(tx, completeInput())).rejects.toMatchObject({
+    code: "MENU_RECIPE_ALLERGEN_UNAVAILABLE",
+    gap: {
+      skuReference: id(12),
+      storeReference: id(11),
+      missing: "OptionRecipe",
+      optionReference: id(22),
+      quantity: 2,
+      ingredientReference: null,
+    },
+  });
+});
+it("names the ingredient without an allergen declaration", async () => {
+  fixtures.recipe = {
+    configuredIngredients: [{ ...requirement(), allergens: [] }],
+    graph: [],
+    modifierRules: [],
+    observedAt: input.recipe.observedAt,
+  };
+  await expect(complete().resolve(tx, completeInput())).rejects.toMatchObject({
+    gap: { missing: "AllergenDeclaration", ingredientReference: id(2), optionReference: null },
+  });
+});
+
+it("WP-2423 item 12: a choice's own evidence is what its recipe change brings in", () => {
+  const rule = (changes: unknown[]) => ({ changes }) as never;
+  const ingredient = (extra: object) => ({ ...requirement(), ...extra, allergens: [] });
+  // An added dish with its declaration and the allergens that declaration lists.
+  expect(
+    optionOwnEvidence(
+      rule([
+        {
+          action: "Add",
+          ingredient: {
+            ...requirement(),
+            allergenDeclarationReference: id(7),
+            allergens: [{ evidenceReference: id(4), allergenReference: id(5), verified: true }],
+          },
+        },
+      ]),
+    ),
+  ).toEqual([id(4), id(7)].sort());
+  // A declaration that lists no allergens is still a statement about the dish.
+  expect(
+    optionOwnEvidence(
+      rule([{ action: "Add", ingredient: ingredient({ allergenDeclarationReference: id(7) }) }]),
+    ),
+  ).toEqual([id(7)]);
+  // A replacement brings its ingredient in; a removal brings nothing.
+  expect(
+    optionOwnEvidence(
+      rule([
+        { action: "Remove", requirementReference: id(9) },
+        {
+          action: "Replace",
+          requirementReference: id(10),
+          ingredient: ingredient({ allergenDeclarationReference: id(8) }),
+        },
+      ]),
+    ),
+  ).toEqual([id(8)]);
+  expect(optionOwnEvidence(rule([{ action: "Remove", requirementReference: id(9) }]))).toEqual([]);
+  expect(optionOwnEvidence(rule([]))).toEqual([]);
+  // A sub-recipe's evidence belongs to the whole graph: nothing is stated for the choice alone.
+  expect(
+    optionOwnEvidence(
+      rule([{ action: "Add", ingredient: ingredient({ sourceKind: "SubRecipe" }) }]),
+    ),
+  ).toBeNull();
+});

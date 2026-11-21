@@ -2,6 +2,7 @@ import { createServer, type Server } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
 import type { StructuredLogDestination } from "@bop-rms/observability";
 import { createApp } from "./app.js";
+import { logGuestFailure } from "./guest-failure-log.js";
 import { createApiRuntimeLogger } from "./server.js";
 
 const servers: Server[] = [];
@@ -81,6 +82,7 @@ describe("WP-0040 API composition-root logging", () => {
       module: "api-runtime",
       requestId: response.headers.get("x-request-id"),
       resultCode: "HTTP_CLIENT_ERROR",
+      route: "unmatched",
       service: "bop-rms-api",
       statusCode: 404,
     });
@@ -94,6 +96,7 @@ describe("WP-0040 API composition-root logging", () => {
         "module",
         "requestId",
         "resultCode",
+        "route",
         "service",
         "statusCode",
         "time",
@@ -113,6 +116,36 @@ describe("WP-0040 API composition-root logging", () => {
       expect(serialized).not.toContain(canary);
   });
 
+  it("v15 b12: a guest request's visit cookies and CSRF value never reach the request log", async () => {
+    const records: string[] = [];
+    const logger = createApiRuntimeLogger({ write: (message) => records.push(String(message)) });
+    const origin = await listen(createApp({ requestLogger: logger, errorLogger: logger }));
+    const guest = "guest-cookie-value-" + "g".repeat(24),
+      visits = "visits-cookie-value-" + "v".repeat(24),
+      csrf = "csrf-value-" + "c".repeat(32);
+    for (const [method, path] of [
+      ["GET", "/customer/orders/" + "0".repeat(8) + "/status"],
+      ["POST", "/customer/orders/" + "0".repeat(8) + "/contact-removal"],
+      ["POST", "/customer/cart/items"],
+    ] as const) {
+      const response = await fetch(origin + path, {
+        method,
+        headers: {
+          cookie: `__Host-bop-guest=${guest}; __Host-bop-visits=${visits}`,
+          "x-bop-csrf": csrf,
+          "x-csrf-token": csrf,
+          "content-type": "application/json",
+        },
+        ...(method === "POST" ? { body: JSON.stringify({ csrf }) } : {}),
+      });
+      await response.arrayBuffer();
+    }
+    const serialized = records.join("");
+    expect(records.length).toBeGreaterThanOrEqual(3);
+    for (const canary of [guest, visits, csrf, "__Host-bop-guest", "__Host-bop-visits", "csrf"])
+      expect(serialized).not.toContain(canary);
+  });
+
   it("isolates request logger failure from HTTP completion", async () => {
     const origin = await listen(
       createApp({
@@ -128,5 +161,21 @@ describe("WP-0040 API composition-root logging", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ status: "healthy" });
+  });
+
+  it("v15 b12: a guest failure line holds no visit cookie or CSRF value, whatever the error carries", () => {
+    const lines: string[] = [];
+    const csrf = "c".repeat(43);
+    logGuestFailure(
+      "CUSTOMER_CART_READ_UNAVAILABLE",
+      Object.assign(new Error(`__Host-bop-guest=${"g".repeat(43)}; x-bop-csrf ${csrf}`), {
+        cause: Object.assign(new Error(`__Host-bop-visits=${"v".repeat(43)}`), { code: "57014" }),
+      }),
+      (line) => lines.push(line),
+    );
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0] ?? "")).toMatchObject({ code: "Error", causes: ["57014"] });
+    for (const canary of ["__Host-bop", "g".repeat(43), "v".repeat(43), csrf, "csrf"])
+      expect(lines[0]).not.toContain(canary);
   });
 });

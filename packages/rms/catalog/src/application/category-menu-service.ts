@@ -211,7 +211,13 @@ async function menuReplay(
   let priorIntent: ReturnType<typeof parseCatalogHash>;
   try {
     const raw = exact(prior, ["action", "operationReference", "operationIntentHash", "aggregate"]);
-    if (raw.action !== "Create" && raw.action !== "ReplaceDraft") throw new Error("invalid action");
+    if (
+      raw.action !== "Create" &&
+      raw.action !== "ReplaceDraft" &&
+      raw.action !== "Revise" &&
+      raw.action !== "DiscardDraft"
+    )
+      throw new Error("invalid action");
     priorReference = parseCatalogReference(raw.operationReference);
     priorIntent = parseCatalogHash(raw.operationIntentHash);
     aggregate = parseMenuAggregate(raw.aggregate);
@@ -314,18 +320,17 @@ async function validateMenuFacts(ports: CategoryMenuPorts, aggregate: MenuAggreg
       ),
     ),
   ];
-  const [categoriesValid, sellablesValid] = await Promise.all([
-    ports.facts
-      .validateCategories({ brandReference: aggregate.brandReference, categoryReferences })
-      .catch(dependencyFailure),
-    ports.facts
-      .validateSellables({
-        brandReference: aggregate.brandReference,
-        sellableReferences,
-        sellableType: "Sku",
-      })
-      .catch(dependencyFailure),
-  ]);
+  // Sequential: owner ports may share one caller transaction (no concurrent use of a client).
+  const categoriesValid = await ports.facts
+    .validateCategories({ brandReference: aggregate.brandReference, categoryReferences })
+    .catch(dependencyFailure);
+  const sellablesValid = await ports.facts
+    .validateSellables({
+      brandReference: aggregate.brandReference,
+      sellableReferences,
+      sellableType: "Sku",
+    })
+    .catch(dependencyFailure);
   if (!categoriesValid || !sellablesValid) throw new CatalogError("CATALOG_UNAVAILABLE");
   await inspectBase(ports, aggregate);
 }
@@ -816,6 +821,149 @@ export function createCategoryMenuService(ports: CategoryMenuPorts) {
       await validateMenuFacts(ports, next);
       const record: MenuOperationRecord = Object.freeze({
         action: "ReplaceDraft",
+        operationReference: op.operationReference,
+        operationIntentHash: intent,
+        aggregate: next,
+      });
+      const saved = await ports.menus
+        .commit({ record, expectedAggregateVersion: expected, audit: auth.audit })
+        .catch(dependencyFailure);
+      return Object.freeze({
+        status: "Applied" as const,
+        aggregate: verifyMenu(saved, record, ports),
+      });
+    },
+
+    /**
+     * WP-2423 / DEC-MENU-REVISION: starts a new version of the Menu copied from its current version
+     * (new version, section and placement identities; same content). The repository admits it only
+     * when the current version has been submitted for review or published.
+     */
+    async reviseMenu(value: unknown) {
+      const raw = exact(value, [
+        "menuReference",
+        "expectedAggregateVersion",
+        "operationReference",
+        "requestedAt",
+      ]);
+      const menuReference = parseCatalogReference(raw.menuReference);
+      const expected = positive(raw.expectedAggregateVersion);
+      const op = operation(raw);
+      const intent = parseCatalogHash(
+        ports.references.hashIntent(`MenuRevise:${menuReference}:${expected}`),
+      );
+      const prior = await menuReplay(ports, op.operationReference, intent);
+      if (prior !== null) return prior;
+      const currentValue = await ports.menus.load(menuReference).catch(dependencyFailure);
+      if (currentValue === null) throw new CatalogError("CATALOG_UNAVAILABLE");
+      const current = parseMenuAggregate(currentValue);
+      if (current.aggregateVersion !== expected) throw new CatalogError("CATALOG_VERSION_CONFLICT");
+      const auth = await authorize(
+        ports,
+        "Menu",
+        "Revise",
+        op.operationReference,
+        menuReference,
+        op.requestedAt,
+      );
+      if (auth.brand !== current.brandReference)
+        throw new CatalogError("CATALOG_PERMISSION_DENIED");
+      const next = parseMenuAggregate({
+        ...current,
+        aggregateVersion: expected + 1,
+        updatedAt: op.requestedAt,
+        draft: {
+          ...current.draft,
+          versionReference: parseCatalogReference(ports.references.generate("MenuVersion")),
+          createdAt: op.requestedAt,
+          updatedAt: op.requestedAt,
+          sections: current.draft.sections.map((section) => {
+            const sectionReference = parseCatalogReference(
+              ports.references.generate("MenuSection"),
+            );
+            return {
+              ...section,
+              sectionReference,
+              placements: section.placements.map((placement) => ({
+                ...placement,
+                placementReference: parseCatalogReference(ports.references.generate("Placement")),
+                sectionReference,
+                createdAt: op.requestedAt,
+                createdByActorReference: auth.actor,
+              })),
+            };
+          }),
+        },
+      });
+      const record: MenuOperationRecord = Object.freeze({
+        action: "Revise",
+        operationReference: op.operationReference,
+        operationIntentHash: intent,
+        aggregate: next,
+      });
+      const saved = await ports.menus
+        .commit({ record, expectedAggregateVersion: expected, audit: auth.audit })
+        .catch(dependencyFailure);
+      return Object.freeze({
+        status: "Applied" as const,
+        aggregate: verifyMenu(saved, record, ports),
+      });
+    },
+
+    /**
+     * WP-2423 (v15 2026-10-16): discards the Menu's open draft. The Menu points at its latest released
+     * version again; the draft version and its rows stay as history (append-only) and the published
+     * Menu is untouched. The repository admits it only while the current version is an unsubmitted
+     * draft and the Menu has a release.
+     */
+    async discardMenuDraft(value: unknown) {
+      const raw = exact(value, [
+        "menuReference",
+        "expectedAggregateVersion",
+        "operationReference",
+        "requestedAt",
+      ]);
+      const menuReference = parseCatalogReference(raw.menuReference);
+      const expected = positive(raw.expectedAggregateVersion);
+      const op = operation(raw);
+      const intent = parseCatalogHash(
+        ports.references.hashIntent(`MenuDiscardDraft:${menuReference}:${expected}`),
+      );
+      const prior = await menuReplay(ports, op.operationReference, intent);
+      if (prior !== null) return prior;
+      const currentValue = await ports.menus.load(menuReference).catch(dependencyFailure);
+      if (currentValue === null) throw new CatalogError("CATALOG_UNAVAILABLE");
+      const current = parseMenuAggregate(currentValue);
+      if (current.aggregateVersion !== expected) throw new CatalogError("CATALOG_VERSION_CONFLICT");
+      const auth = await authorize(
+        ports,
+        "Menu",
+        "DiscardDraft",
+        op.operationReference,
+        menuReference,
+        op.requestedAt,
+      );
+      if (auth.brand !== current.brandReference)
+        throw new CatalogError("CATALOG_PERMISSION_DENIED");
+      const releasedValue = await ports.menus
+        .loadLatestRelease(menuReference)
+        .catch(dependencyFailure);
+      if (releasedValue === null) throw new CatalogError("CATALOG_LIFECYCLE_CONFLICT");
+      const released = parseMenuAggregate(releasedValue);
+      if (
+        released.menuReference !== menuReference ||
+        released.brandReference !== current.brandReference ||
+        released.draft.versionReference === current.draft.versionReference
+      )
+        throw new CatalogError("CATALOG_LIFECYCLE_CONFLICT");
+      const next = parseMenuAggregate({
+        ...current,
+        aggregateVersion: expected + 1,
+        updatedAt: op.requestedAt,
+        draft: released.draft,
+      });
+      const record: MenuOperationRecord = Object.freeze({
+        action: "DiscardDraft",
         operationReference: op.operationReference,
         operationIntentHash: intent,
         aggregate: next,

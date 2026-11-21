@@ -96,7 +96,7 @@ function validateEffectivePeriod(
   return Object.freeze({ ...candidate, effectiveVersion });
 }
 
-function localFields(
+export function resolveStoreOperatingLocalFields(
   evaluatedAt: CanonicalInstant,
   timeZone: string,
 ): Readonly<{
@@ -178,7 +178,7 @@ function resolveStatus(input: {
   });
   if (matches.length !== 1 || matches[0] === undefined) return null;
   const selected = matches[0];
-  const local = localFields(input.evaluatedAt, selected.timeZone);
+  const local = resolveStoreOperatingLocalFields(input.evaluatedAt, selected.timeZone);
   const evaluation = evaluateStoreOperatingStatus({
     evaluatedAt: input.evaluatedAt,
     ...local,

@@ -1,0 +1,345 @@
+import { createOperatingEntity, type OperatingEntity } from "../../domain/operating-entity.js";
+import {
+  hashInitialOwnerEntity,
+  initialOwnerQualificationFail as fail,
+  initialOwnerQualificationRecord as record,
+  initialOwnerQualificationPurpose,
+  parseInitialOwnerQualificationExpected,
+  parseInitialOwnerQualificationInstant as instant,
+  type InitialOwnerQualificationCodec,
+  type InitialOwnerQualificationExpected,
+} from "../../contracts/initial-owner-qualification.js";
+
+export interface InitialOwnerEntityTransaction {
+  query(sql: string, values: readonly unknown[]): Promise<unknown>;
+}
+export interface InitialOwnerEntityAuthorityRequest {
+  readonly expected: InitialOwnerQualificationExpected;
+  readonly requestDigest: string;
+  readonly observedAt: string;
+  readonly validUntil: string;
+}
+export interface InitialOwnerEntitySourceOptions {
+  readonly transaction: InitialOwnerEntityTransaction;
+  readonly expected: InitialOwnerQualificationExpected;
+  readonly clock: { now(): string };
+  readonly originalObservedAt: string;
+  readonly originalValidUntil: string;
+  readonly codec: InitialOwnerQualificationCodec;
+  readonly authority: {
+    hold(
+      transaction: InitialOwnerEntityTransaction,
+      request: InitialOwnerEntityAuthorityRequest,
+    ): Promise<{
+      readonly operatorReference: string;
+      readonly requestDigest: string;
+      readonly validUntil: string;
+    }>;
+  };
+  readonly registerBeforeCommit: (
+    transaction: InitialOwnerEntityTransaction,
+    guard: () => Promise<void>,
+    final: () => void,
+  ) => Promise<void> | void;
+}
+export interface InitialOwnerEntityMaterial {
+  readonly entity: OperatingEntity;
+  readonly entityDigest: string;
+  readonly observedAt: string;
+  readonly validUntil: string;
+}
+export interface InitialOwnerEntitySource {
+  hold(): Promise<InitialOwnerEntityMaterial>;
+  assertFinalized(): void;
+}
+export function hashInitialOwnerEntityAuthorityRequest(
+  expected: InitialOwnerQualificationExpected,
+  observedAt: string,
+  validUntil: string,
+  codec: InitialOwnerQualificationCodec,
+): string {
+  const hex = codec.sha256Hex(
+    codec.canonicalize({
+      expected: parseInitialOwnerQualificationExpected(expected),
+      observedAt: instant(observedAt),
+      validUntil: instant(validUntil),
+    }),
+  );
+  if (!/^[0-9a-f]{64}$/u.test(hex)) return fail();
+  return `sha256:${hex}`;
+}
+function one(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object") return fail();
+  const d = Object.getOwnPropertyDescriptor(value, "rows");
+  if (!d || !("value" in d)) return fail();
+  const rows: unknown = d.value;
+  if (
+    !Array.isArray(rows) ||
+    Object.getPrototypeOf(rows) !== Array.prototype ||
+    rows.length > 1 ||
+    Reflect.ownKeys(rows).length !== rows.length + 1
+  )
+    return fail();
+  if (rows.length === 0) return null;
+  const entry = Object.getOwnPropertyDescriptor(rows, "0");
+  if (!entry?.enumerable || !("value" in entry)) return fail();
+  return record(entry.value, ["entity_text", "precise"]);
+}
+/** Actual owner root only. The mandatory API authority source authenticates its
+ * operator through Identity; this port/result does not independently prove MFA.
+ * Borrowed transaction host must execute both guards before its own COMMIT. */
+export function createPostgresInitialOwnerEntitySource(
+  options: InitialOwnerEntitySourceOptions,
+): InitialOwnerEntitySource {
+  record(options, [
+    "transaction",
+    "expected",
+    "clock",
+    "originalObservedAt",
+    "originalValidUntil",
+    "codec",
+    "authority",
+    "registerBeforeCommit",
+  ]);
+  record(options.clock, ["now"]);
+  record(options.codec, ["canonicalize", "sha256Hex"]);
+  record(options.authority, ["hold"]);
+  const tx = options.transaction,
+    queryPort = tx.query,
+    clock = options.clock,
+    now = clock.now,
+    codec = options.codec,
+    canonical = codec.canonicalize,
+    sha = codec.sha256Hex,
+    authority = options.authority,
+    authorityPort = authority.hold,
+    register = options.registerBeforeCommit,
+    expected = parseInitialOwnerQualificationExpected(options.expected),
+    origin = instant(options.originalObservedAt),
+    originalEnd = instant(options.originalValidUntil);
+  if (
+    [queryPort, now, canonical, sha, authorityPort, register].some(
+      (p) => typeof p !== "function",
+    ) ||
+    origin >= originalEnd ||
+    Date.parse(originalEnd) > Date.parse(origin) + 5000
+  )
+    return fail();
+  const expectedBytes = canonical.call(codec, expected);
+  let phase: "Open" | "Ready" | "Final" | "Poison" = "Open",
+    busy = false,
+    registered = false,
+    checked = false,
+    deadline = originalEnd,
+    latest = origin,
+    transactionId: string | undefined,
+    materialIdentity: string | undefined;
+  const poison = (): never => {
+    phase = "Poison";
+    return fail();
+  };
+  function check(): string {
+    try {
+      record(options, [
+        "transaction",
+        "expected",
+        "clock",
+        "originalObservedAt",
+        "originalValidUntil",
+        "codec",
+        "authority",
+        "registerBeforeCommit",
+      ]);
+      record(clock, ["now"]);
+      record(codec, ["canonicalize", "sha256Hex"]);
+      record(authority, ["hold"]);
+      const at = instant(now.call(clock));
+      if (
+        phase === "Poison" ||
+        phase === "Final" ||
+        options.transaction !== tx ||
+        tx.query !== queryPort ||
+        options.clock !== clock ||
+        clock.now !== now ||
+        options.codec !== codec ||
+        codec.canonicalize !== canonical ||
+        codec.sha256Hex !== sha ||
+        options.authority !== authority ||
+        authority.hold !== authorityPort ||
+        options.registerBeforeCommit !== register ||
+        options.originalObservedAt !== origin ||
+        options.originalValidUntil !== originalEnd ||
+        canonical.call(codec, parseInitialOwnerQualificationExpected(options.expected)) !==
+          expectedBytes ||
+        at < latest ||
+        at >= deadline
+      )
+        return poison();
+      latest = at;
+      return at;
+    } catch {
+      return poison();
+    }
+  }
+  async function query(sql: string, values: readonly unknown[]): Promise<unknown> {
+    check();
+    const result = await queryPort.call(tx, sql, values);
+    check();
+    return result;
+  }
+  async function authorize(): Promise<void> {
+    const at = check(),
+      until = deadline,
+      requestDigest = hashInitialOwnerEntityAuthorityRequest(expected, at, until, codec);
+    check();
+    const result = await authorityPort.call(
+      authority,
+      tx,
+      Object.freeze({ expected, requestDigest, observedAt: at, validUntil: until }),
+    );
+    check();
+    const r = record(result, ["operatorReference", "requestDigest", "validUntil"]),
+      end = instant(r.validUntil);
+    if (
+      r.operatorReference !== expected.operatorReference ||
+      r.requestDigest !== requestDigest ||
+      end > until ||
+      end <= latest
+    )
+      return poison();
+    deadline = end;
+  }
+  async function read(): Promise<InitialOwnerEntityMaterial> {
+    await authorize();
+    const result = await query(
+      "SELECT current_setting('transaction_isolation') AS isolation,pg_current_xact_id()::text AS transaction_id",
+      [],
+    );
+    if (!result || typeof result !== "object") return poison();
+    const d = Object.getOwnPropertyDescriptor(result, "rows");
+    if (
+      !d ||
+      !("value" in d) ||
+      !Array.isArray(d.value) ||
+      d.value.length !== 1 ||
+      Reflect.ownKeys(d.value).length !== 2
+    )
+      return poison();
+    const first = Object.getOwnPropertyDescriptor(d.value, "0");
+    if (!first?.enumerable || !("value" in first)) return poison();
+    const context = record(first.value, ["isolation", "transaction_id"]);
+    if (
+      context.isolation !== "read committed" ||
+      typeof context.transaction_id !== "string" ||
+      !/^[1-9][0-9]{0,19}$/u.test(context.transaction_id) ||
+      (transactionId !== undefined && context.transaction_id !== transactionId)
+    )
+      return poison();
+    transactionId = context.transaction_id;
+    const verifyTx = await query(
+      "SELECT pg_current_xact_id_if_assigned()::text AS transaction_id",
+      [],
+    );
+    if (!verifyTx || typeof verifyTx !== "object") return poison();
+    const verifyRows = Object.getOwnPropertyDescriptor(verifyTx, "rows");
+    if (
+      !verifyRows ||
+      !("value" in verifyRows) ||
+      !Array.isArray(verifyRows.value) ||
+      verifyRows.value.length !== 1 ||
+      Reflect.ownKeys(verifyRows.value).length !== 2
+    )
+      return poison();
+    const verifyFirst = Object.getOwnPropertyDescriptor(verifyRows.value, "0");
+    if (
+      !verifyFirst?.enumerable ||
+      !("value" in verifyFirst) ||
+      record(verifyFirst.value, ["transaction_id"]).transaction_id !== transactionId
+    )
+      return poison();
+    await query(
+      "SELECT set_config('bop.initial_owner_operator_id',$1,true),set_config('bop.initial_owner_entity_id',$2,true),set_config('bop.initial_owner_purpose',$3,true)",
+      [
+        expected.operatorReference,
+        expected.entity.operatingEntityReference,
+        initialOwnerQualificationPurpose,
+      ],
+    );
+    const row = one(
+      await query(
+        "SELECT entity_text,precise FROM bop_operating_entity.initial_owner_entity_read($1::uuid,$2::uuid,$3::text)",
+        [
+          expected.entity.operatingEntityReference,
+          expected.operatorReference,
+          initialOwnerQualificationPurpose,
+        ],
+      ),
+    );
+    if (
+      !row ||
+      row.precise !== true ||
+      typeof row.entity_text !== "string" ||
+      row.entity_text.length > 16384
+    )
+      return poison();
+    const entity = createOperatingEntity(JSON.parse(row.entity_text)),
+      entityDigest = hashInitialOwnerEntity(entity, codec);
+    check();
+    const identity = canonical.call(codec, entity);
+    if (
+      entity.lifecycle !== "Active" ||
+      String(entity.operatingEntityReference) !== expected.entity.operatingEntityReference ||
+      entity.version !== expected.entity.entityVersion ||
+      entity.evidenceReference !== expected.entity.entityEvidenceReference ||
+      entityDigest !== expected.entity.entityDigest ||
+      instant(entity.createdAt) > origin ||
+      instant(entity.updatedAt) > origin ||
+      (materialIdentity !== undefined && materialIdentity !== identity)
+    )
+      return poison();
+    materialIdentity = identity;
+    await authorize();
+    return Object.freeze({ entity, entityDigest, observedAt: origin, validUntil: deadline });
+  }
+  const guard = async (): Promise<void> => {
+    if (busy || phase !== "Ready" || checked) return poison();
+    busy = true;
+    try {
+      await read();
+      checked = true;
+    } catch {
+      return poison();
+    } finally {
+      busy = false;
+    }
+  };
+  const final = (): void => {
+    if (busy || phase !== "Ready" || !checked) return poison();
+    check();
+    phase = "Final";
+  };
+  return Object.freeze({
+    async hold(): Promise<InitialOwnerEntityMaterial> {
+      if (busy || phase === "Final" || phase === "Poison" || checked) return poison();
+      busy = true;
+      try {
+        if (!registered) {
+          registered = true;
+          await register(tx, guard, final);
+        }
+        check();
+        const material = await read();
+        check();
+        phase = "Ready";
+        return material;
+      } catch {
+        return poison();
+      } finally {
+        busy = false;
+      }
+    },
+    assertFinalized(): void {
+      if (phase !== "Final" || busy || !checked) return poison();
+    },
+  });
+}

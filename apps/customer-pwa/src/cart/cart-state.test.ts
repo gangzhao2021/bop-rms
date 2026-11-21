@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { CustomerCartClient } from "./cart-client.js";
 import { createCartStateController } from "./cart-state.js";
-import { CartClientError, type CartView } from "./types.js";
+import { CartClientError, orderProcessingMessage, type CartView } from "./types.js";
 
 const id = (n: number) => `018f5300-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 
@@ -44,10 +44,12 @@ function fixture() {
   let current: CartView | null = cart();
   let updateFailure: Error | null = null;
   let removeFailure: Error | null = null;
+  let loadFailure: Error | null = null;
   const calls: { name: string; operationReference?: string }[] = [];
   const client: CustomerCartClient = {
     async loadCurrent() {
       calls.push({ name: "load" });
+      if (loadFailure !== null) throw loadFailure;
       return current;
     },
     async createCart() {
@@ -69,10 +71,18 @@ function fixture() {
       return current;
     },
   };
-  const controller = createCartStateController({ client, keyFactory: () => id(20) });
+  let keys = 0;
+  const controller = createCartStateController({
+    client,
+    keyFactory: () => {
+      keys++;
+      return id(20);
+    },
+  });
   return {
     controller,
     calls,
+    getKeyCount: () => keys,
     failUpdate(error: Error | null) {
       updateFailure = error;
     },
@@ -82,10 +92,94 @@ function fixture() {
     setCurrent(value: CartView | null) {
       current = value;
     },
+    failLoad(error: Error | null) {
+      loadFailure = error;
+    },
   };
 }
 
 describe("WP-1205 in-memory Cart state", () => {
+  function foreignCart(): CartView {
+    const base = cart();
+    return {
+      ...base,
+      cart: {
+        ...base.cart,
+        orderType: "DineIn",
+        serviceMode: "DineIn",
+        items: base.cart.items.map((item) => ({ ...item, warnings: ["OTHER_PARTICIPANT_ITEM"] })),
+      },
+    };
+  }
+  it("declines new foreign-item update/remove intents without generating a key", async () => {
+    const f = fixture();
+    f.setCurrent(foreignCart());
+    await f.controller.load();
+    await f.controller.updateItem(id(2), { quantity: 2, optionSelections: [], customerNote: null });
+    await f.controller.removeItem(id(2));
+    expect(f.calls).toEqual([{ name: "load" }]);
+    expect(f.getKeyCount()).toBe(0);
+    expect(f.controller.getState()).toEqual({ status: "ready", cart: foreignCart() });
+  });
+  it("preserves explicit original recovery despite a later foreign-item display", async () => {
+    const f = fixture();
+    await f.controller.load();
+    f.failUpdate(new CartClientError("network_unknown"));
+    await f.controller.updateItem(id(2), { quantity: 2, optionSelections: [], customerNote: null });
+    f.setCurrent(foreignCart());
+    await f.controller.load();
+    expect(f.controller.getState()).toMatchObject({
+      status: "command-failed",
+      canRetrySameOperation: true,
+    });
+    f.failUpdate(null);
+    await f.controller.retry();
+    expect(f.calls.filter((call) => call.name === "update")).toEqual([
+      { name: "update", operationReference: id(20) },
+      { name: "update", operationReference: id(20) },
+    ]);
+    expect(f.getKeyCount()).toBe(1);
+  });
+  it("does not queue or replay foreign-item intents offline", async () => {
+    const f = fixture();
+    f.setCurrent(foreignCart());
+    await f.controller.load();
+    f.controller.setOnline(false);
+    await f.controller.removeItem(id(2));
+    f.controller.setOnline(true);
+    await f.controller.retry();
+    expect(f.calls).toEqual([{ name: "load" }]);
+    expect(f.getKeyCount()).toBe(0);
+  });
+
+  it("reads a pickup cart again by itself when the phone is back online (M94)", async () => {
+    const f = fixture();
+    await f.controller.load();
+    f.controller.setOnline(false);
+    expect(f.controller.getState()).toMatchObject({ status: "offline-readonly" });
+    f.setCurrent(cart(4));
+    f.controller.setOnline(true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(f.calls.map((call) => call.name)).toEqual(["load", "load"]);
+    expect(f.controller.getState()).toMatchObject({
+      status: "ready",
+      cart: { cart: { version: 4 } },
+    });
+  });
+
+  it("leaves a table cart's reconnect read to the table poll, so it reads once (M94)", async () => {
+    const f = fixture();
+    f.setCurrent({
+      ...cart(),
+      cart: { ...cart().cart, orderType: "DineIn", serviceMode: "DineIn" },
+    });
+    await f.controller.load();
+    f.controller.setOnline(false);
+    f.controller.setOnline(true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(f.calls.map((call) => call.name)).toEqual(["load"]);
+  });
+
   it("loads server-authoritative ready and empty states", async () => {
     const state = fixture();
     await state.controller.load();
@@ -93,6 +187,127 @@ describe("WP-1205 in-memory Cart state", () => {
     state.setCurrent(null);
     await state.controller.load();
     expect(state.controller.getState()).toEqual({ status: "empty" });
+  });
+
+  it("WP-2423 item 6: a quiet read keeps the cart on screen, also when it fails", async () => {
+    const f = fixture();
+    await f.controller.load();
+    const seen: string[] = [];
+    f.controller.subscribe(() => seen.push(f.controller.getState().status));
+    await f.controller.refresh();
+    expect(seen).toEqual(["ready"]);
+    f.failLoad(new CartClientError("cart_service_unavailable"));
+    await f.controller.refresh();
+    expect(f.controller.getState()).toMatchObject({ status: "ready" });
+    expect(seen).toEqual(["ready"]);
+    // A plain load still says it's loading, and says what failed.
+    await f.controller.load();
+    expect(seen.slice(1)).toEqual(["loading", "unavailable"]);
+  });
+
+  it.each([
+    ["cart_table_checking_out", "table-checking-out"],
+    ["cart_session_expired", "session-expired"],
+    // M126 I.2: this phone's place at the table ended; said as such, never as expired.
+    ["cart_participant_ended", "participation-ended"],
+  ] as const)("WP-2423 guest-cart-503: a quiet read says %s at once", async (code, status) => {
+    const f = fixture();
+    await f.controller.load();
+    f.failLoad(new CartClientError(code));
+    await f.controller.refresh();
+    expect(f.controller.getState()).toMatchObject({ status });
+  });
+
+  it("WP-2423 guest-cart-503: removes another phone's line only once the Store marks it", async () => {
+    for (const [warnings, removed] of [
+      [["OTHER_PARTICIPANT_ITEM"], false],
+      [["OTHER_PARTICIPANT_ITEM", "ITEM_UNAVAILABLE"], true],
+      [["OTHER_PARTICIPANT_ITEM", "ITEM_OPTIONS_CHANGED"], true],
+      // WP-2423 same-table-ordering: its phone has left the table.
+      [["OTHER_PARTICIPANT_ITEM", "ADDER_LEFT_TABLE"], true],
+    ] as const) {
+      const f = fixture();
+      const base = cart();
+      const item = base.cart.items[0];
+      if (item === undefined) throw new Error("synthetic item missing");
+      f.setCurrent({
+        ...base,
+        cart: { ...base.cart, items: [{ ...item, warnings: [...warnings] }] },
+      });
+      await f.controller.load();
+      // Any other change of that line stays the adder's.
+      await f.controller.updateItem(item.cartItemReference, {
+        quantity: 3,
+        optionSelections: [],
+        customerNote: null,
+      });
+      expect(f.calls.some((call) => call.name === "update")).toBe(false);
+      await f.controller.removeItem(item.cartItemReference);
+      expect(f.calls.some((call) => call.name === "remove")).toBe(removed);
+    }
+  });
+
+  it("WP-2423 same-table-ordering: removing a left phone's line never says this session expired", async () => {
+    const stranded = () => {
+      const base = cart();
+      const item = base.cart.items[0];
+      if (item === undefined) throw new Error("synthetic item missing");
+      return {
+        ...base,
+        cart: {
+          ...base.cart,
+          items: [{ ...item, warnings: ["OTHER_PARTICIPANT_ITEM", "ADDER_LEFT_TABLE"] }],
+        },
+      };
+    };
+    // The check of that phone could not run (the server answers 503, the client cannot tell
+    // whether it applied): the guest is told to try again, with the same operation.
+    const outage = fixture();
+    outage.setCurrent(stranded());
+    await outage.controller.load();
+    outage.failRemove(new CartClientError("network_unknown"));
+    await outage.controller.removeItem(id(2));
+    expect(outage.controller.getState()).toMatchObject({
+      status: "command-failed",
+      canRetrySameOperation: true,
+    });
+    // That phone is back at the table: the cart is read again and says it changed.
+    const back = fixture();
+    back.setCurrent(stranded());
+    await back.controller.load();
+    back.failRemove(new CartClientError("cart_version_conflict"));
+    await back.controller.removeItem(id(2));
+    expect(back.controller.getState()).toMatchObject({ status: "conflict" });
+    expect(back.calls.filter((call) => call.name === "load")).toHaveLength(2);
+  });
+
+  it("WP-2423 same-table-ordering: a read that failed is marked so, and the next read recovers", async () => {
+    const f = fixture();
+    await f.controller.load();
+    f.failLoad(new CartClientError("cart_service_unavailable"));
+    await f.controller.load();
+    expect(f.controller.getState()).toMatchObject({ status: "unavailable", fromRead: true });
+    f.failLoad(null);
+    await f.controller.refresh();
+    expect(f.controller.getState()).toMatchObject({ status: "ready" });
+    // The network went away and came back: still shown read-only until the next read.
+    f.controller.setOnline(false);
+    expect(f.controller.getState()).toMatchObject({ status: "offline-readonly" });
+    f.controller.setOnline(true);
+    expect(await f.controller.refresh()).toBe(true);
+    expect(f.controller.getState()).toMatchObject({ status: "ready" });
+    // A failed change of the guest's own is not a read failure.
+    f.failRemove(new CartClientError("cart_service_unavailable"));
+    await f.controller.removeItem(id(2));
+    expect(f.controller.getState()).toMatchObject({ status: "unavailable" });
+    expect(f.controller.getState()).not.toHaveProperty("fromRead");
+  });
+
+  it("WP-2423 item 6: with nothing on screen yet a quiet read is a load", async () => {
+    const f = fixture();
+    f.failLoad(new CartClientError("cart_service_unavailable"));
+    await f.controller.refresh();
+    expect(f.controller.getState()).toMatchObject({ status: "unavailable" });
   });
 
   it("applies a mutation and advances only from the server result", async () => {
@@ -193,7 +408,8 @@ describe("WP-1205 in-memory Cart state", () => {
     expect(state.controller.getState()).toMatchObject({ status: "offline-readonly" });
     expect(state.calls.map((call) => call.name)).toEqual(["load"]);
     state.controller.setOnline(true);
-    expect(state.calls.map((call) => call.name)).toEqual(["load"]);
+    // Back online the cart is only read again (M94); the removal is never sent.
+    expect(state.calls.map((call) => call.name)).toEqual(["load", "load"]);
   });
 
   it.each([
@@ -201,6 +417,8 @@ describe("WP-1205 in-memory Cart state", () => {
     ["cart_not_found", "not-found"],
     ["cart_selection_invalid", "validation"],
     ["cart_rate_limited", "rate-limited"],
+    ["cart_order_processing", "order-processing"],
+    ["cart_checkout_in_progress", "checkout-in-progress"],
     ["cart_expired", "expired"],
     ["cart_abandoned", "abandoned"],
     ["cart_service_unavailable", "unavailable"],
@@ -216,5 +434,300 @@ describe("WP-1205 in-memory Cart state", () => {
       customerNote: null,
     });
     expect(state.controller.getState()).toMatchObject({ status: expected });
+  });
+
+  it("WP-2423: a quantity the store can't make keeps the line and how many it can make", async () => {
+    const state = fixture();
+    await state.controller.load();
+    state.failUpdate(
+      new CartClientError("cart_selection_invalid", { issueCodes: ["ITEM_SHORT"], available: 2 }),
+    );
+    await state.controller.updateItem(id(2), {
+      quantity: 3,
+      optionSelections: [],
+      customerNote: null,
+    });
+    expect(state.controller.getState()).toMatchObject({
+      status: "validation",
+      shortItem: { cartItemReference: id(2), available: 2 },
+      canRetrySameOperation: false,
+    });
+    state.failUpdate(new CartClientError("cart_selection_invalid", { issueCodes: ["OTHER"] }));
+    await state.controller.updateItem(id(2), {
+      quantity: 3,
+      optionSelections: [],
+      customerNote: null,
+    });
+    expect(state.controller.getState()).not.toHaveProperty("shortItem");
+  });
+
+  it("WP-2423: keeps the wait and offers no replay while another guest is checking out", async () => {
+    const state = fixture();
+    await state.controller.load();
+    state.failUpdate(new CartClientError("cart_checkout_in_progress", { retryAfterSeconds: 90 }));
+    await state.controller.updateItem(id(2), {
+      quantity: 2,
+      optionSelections: [],
+      customerNote: null,
+    });
+    expect(state.controller.getState()).toMatchObject({
+      status: "checkout-in-progress",
+      retryAfterSeconds: 90,
+      canRetrySameOperation: false,
+    });
+  });
+});
+
+describe("retained foreground Cart intent", () => {
+  it.each(["update", "remove"] as const)(
+    "pins %s through unknown, refresh, caller edits and reconnect",
+    async (kind) => {
+      const original = cart();
+      const draft = {
+        quantity: 2,
+        customerNote: null,
+        optionSelections: [{ optionReference: id(4), quantity: 1 }],
+      };
+      const requests: unknown[] = [];
+      let reject = true;
+      let keyCount = 0;
+      let loads = 0;
+      const mutate = async (
+        input:
+          | Parameters<CustomerCartClient["updateItem"]>[0]
+          | Parameters<CustomerCartClient["removeItem"]>[0],
+      ) => {
+        requests.push(structuredClone(input));
+        if (reject) throw new CartClientError("network_unknown");
+        return cart(4);
+      };
+      const client: CustomerCartClient = {
+        loadCurrent: async () => (++loads === 1 ? original : cart(9)),
+        createCart: async () => cart(),
+        addItem: async () => cart(),
+        updateItem: mutate,
+        removeItem: mutate,
+      };
+      const controller = createCartStateController({
+        client,
+        keyFactory: () => id(20 + keyCount++),
+      });
+      await controller.load();
+      if (kind === "update") await controller.updateItem(id(2), draft);
+      else await controller.removeItem(id(2));
+      draft.quantity = 7;
+      Object.assign(draft.optionSelections[0] ?? {}, { quantity: 3 });
+      Object.assign(original.cart, { version: 90 });
+      await controller.load();
+      expect(controller.getState()).toMatchObject({
+        status: "command-failed",
+        cart: { cart: { version: 9 } },
+        canRetrySameOperation: true,
+      });
+      await controller.updateItem(id(2), draft);
+      await controller.removeItem(id(2));
+      expect(requests).toHaveLength(1);
+      expect(keyCount).toBe(1);
+      controller.setOnline(false);
+      await controller.retry();
+      controller.setOnline(true);
+      expect(requests).toHaveLength(1);
+      expect(controller.getState()).toMatchObject({
+        status: "command-failed",
+        canRetrySameOperation: true,
+      });
+      reject = false;
+      await controller.retry();
+      expect(requests).toHaveLength(2);
+      expect(requests[1]).toEqual(requests[0]);
+      expect(requests[1]).toMatchObject({
+        cart: { cart: { version: 3 } },
+        operationReference: id(20),
+      });
+      expect(controller.getState()).toMatchObject({ status: "ready" });
+      await controller.removeItem(id(2));
+      expect(keyCount).toBe(2);
+    },
+  );
+
+  it("does not allow a late refresh to overwrite a completed retry", async () => {
+    let release!: (value: CartView | null) => void;
+    let loads = 0;
+    let calls = 0;
+    const client: CustomerCartClient = {
+      loadCurrent: async () =>
+        ++loads === 1
+          ? cart()
+          : new Promise((resolve) => {
+              release = resolve;
+            }),
+      createCart: async () => cart(),
+      addItem: async () => cart(),
+      updateItem: async () => cart(),
+      removeItem: async () => {
+        if (++calls === 1) throw new CartClientError("network_unknown");
+        return cart(4);
+      },
+    };
+    const controller = createCartStateController({ client, keyFactory: () => id(20) });
+    await controller.load();
+    await controller.removeItem(id(2));
+    const refresh = controller.load();
+    await controller.retry();
+    release(cart(3));
+    await refresh;
+    expect(controller.getState()).toMatchObject({
+      status: "ready",
+      cart: { cart: { version: 4 } },
+    });
+  });
+
+  it("allocates no offline intent and allows reviewed input after a known rejection", async () => {
+    const state = fixture();
+    await state.controller.load();
+    state.controller.setOnline(false);
+    await state.controller.removeItem(id(2));
+    state.controller.setOnline(true);
+    await state.controller.retry();
+    // Back online the cart is only read again (M94); nothing offline is sent.
+    expect(state.calls).toEqual([{ name: "load" }, { name: "load" }]);
+    await state.controller.load();
+    state.failRemove(new CartClientError("cart_selection_invalid"));
+    await state.controller.removeItem(id(2));
+    await state.controller.retry();
+    expect(state.calls.filter((call) => call.name === "remove")).toHaveLength(1);
+    state.failRemove(null);
+    await state.controller.removeItem(id(2));
+    expect(state.calls.filter((call) => call.name === "remove")).toHaveLength(2);
+  });
+});
+
+it("does not treat a later rejection as proof an earlier Cart command failed", async () => {
+  const state = fixture();
+  await state.controller.load();
+  state.failRemove(new CartClientError("network_unknown"));
+  await state.controller.removeItem(id(2));
+  state.failRemove(new CartClientError("cart_session_expired"));
+  await state.controller.retry();
+  await state.controller.removeItem(id(2));
+  expect(state.calls.filter((call) => call.name === "remove")).toHaveLength(2);
+  expect(state.controller.getState()).toMatchObject({
+    status: "command-failed",
+    canRetrySameOperation: true,
+  });
+  state.failRemove(null);
+  await state.controller.retry();
+  expect(state.calls.filter((call) => call.name === "remove")).toHaveLength(3);
+});
+
+it("retries terminal Dining replacement with one original operation and no automatic reconnect mutation", async () => {
+  const old: CartView = {
+    ...cart(),
+    cart: {
+      ...cart().cart,
+      orderType: "DineIn",
+      lifecycle: { ...cart().cart.lifecycle, status: "Expired" },
+    },
+  };
+  const successor: CartView = {
+    ...old,
+    cart: {
+      ...old.cart,
+      cartReference: id(30),
+      version: 1,
+      items: [],
+      lifecycle: { ...old.cart.lifecycle, status: "Active" },
+    },
+  };
+  const calls: string[] = [];
+  let fail = true;
+  let keys = 0;
+  const client: CustomerCartClient = {
+    loadCurrent: async () => old,
+    createCart: async () => old,
+    addItem: async () => old,
+    updateItem: async () => old,
+    removeItem: async () => old,
+    replaceExpiredCart: async (input) => {
+      calls.push(input.operationReference);
+      if (fail) throw new CartClientError("network_unknown");
+      return successor;
+    },
+  };
+  const state = createCartStateController({ client, keyFactory: () => id(20 + keys++) });
+  await state.load();
+  if (state.replaceExpiredCart === undefined) throw new Error("replacement missing");
+  await state.replaceExpiredCart();
+  expect(state.getState()).toMatchObject({ status: "command-failed", canRetrySameOperation: true });
+  if (state.replaceExpiredCart === undefined) throw new Error("replacement missing");
+  await state.replaceExpiredCart();
+  expect(keys).toBe(1);
+  state.setOnline(false);
+  await state.retry();
+  state.setOnline(true);
+  expect(calls).toHaveLength(1);
+  fail = false;
+  await state.retry();
+  expect(calls).toEqual([id(20), id(20)]);
+  expect(state.getState()).toEqual({ status: "ready", cart: successor });
+  if (state.replaceExpiredCart === undefined) throw new Error("replacement missing");
+  await state.replaceExpiredCart();
+  expect(calls).toHaveLength(2);
+});
+
+it.each([false, true])(
+  "preserves unknown history=%s when replacement later receives permission refusal",
+  async (unknownFirst) => {
+    const old: CartView = {
+      ...cart(),
+      cart: {
+        ...cart().cart,
+        orderType: "DineIn",
+        lifecycle: { ...cart().cart.lifecycle, status: "Expired" },
+      },
+    };
+    let count = 0;
+    const calls: string[] = [];
+    const client: CustomerCartClient = {
+      loadCurrent: async () => old,
+      createCart: async () => old,
+      addItem: async () => old,
+      updateItem: async () => old,
+      removeItem: async () => old,
+      replaceExpiredCart: async (input) => {
+        calls.push(input.operationReference);
+        if (unknownFirst && count++ === 0) throw new CartClientError("network_unknown");
+        throw new CartClientError("cart_replacement_forbidden");
+      },
+    };
+    const state = createCartStateController({ client, keyFactory: () => id(20) });
+    await state.load();
+    await state.replaceExpiredCart?.();
+    if (unknownFirst) await state.retry();
+    expect(state.getState()).toMatchObject({
+      status: unknownFirst ? "command-failed" : "replacement-forbidden",
+      canRetrySameOperation: unknownFirst,
+    });
+    if (!unknownFirst) {
+      await state.retry();
+      await state.replaceExpiredCart?.();
+      expect(calls).toEqual([id(20)]);
+    } else expect(calls).toEqual([id(20), id(20)]);
+  },
+);
+
+describe("WP-2423: the wait for the table's last order", () => {
+  it("promises a time only when the wait is time-bounded", () => {
+    expect(orderProcessingMessage(10)).toBe(
+      "Your table’s last order is still being processed. Try again in a moment.",
+    );
+    expect(orderProcessingMessage(125)).toBe(
+      "Your table’s last order is still being processed. Try again in about 3 minutes.",
+    );
+    expect(orderProcessingMessage(60 * 1 + 0)).toContain("Try again in a moment.");
+    expect(orderProcessingMessage(61)).toContain("about 2 minutes");
+    expect(orderProcessingMessage(null)).toBe(
+      "Your table’s last order is still being processed. Please try again shortly. If this keeps happening, ask a staff member.",
+    );
   });
 });

@@ -24,10 +24,10 @@ describe("Store administration Section 88 screens", () => {
       </MemoryRouter>,
     );
     for (const value of [
-      "STORE-LIST",
+      "Stores",
       "TRAINING_01",
       "Training Store",
-      "America/Toronto",
+      "Eastern Time (Toronto, Ottawa and Montréal)",
       "Synthetic Avenue",
       "DineIn, Pickup",
       "Today hours",
@@ -55,7 +55,8 @@ describe("Store administration Section 88 screens", () => {
         <StoreSetupScreen view={parseStoreSetupView(setupView())} />
       </MemoryRouter>,
     );
-    expect(html).toContain("Expected Version 3");
+    // Staff never see internal screen codes or version counters.
+    expect(html).not.toMatch(/STORE-SETUP|Expected Version/u);
     expect(html).toContain("Evidence gate:");
     expect(html).toContain("TaxPaymentReferences");
     expect(html).toContain("Save draft");
@@ -75,8 +76,9 @@ describe("Store administration Section 88 screens", () => {
         <StoreAdminStatePanel state="Conflict" />
       </MemoryRouter>,
     );
-    expect(permission).toContain("Permission denied");
-    expect(permission).toContain("current permission and Store scope");
+    expect(permission).toContain("No access");
+    expect(permission).toContain("Ask the owner or a manager to give you access");
+    expect(permission).not.toContain("Store scope");
     expect(conflict).toContain("Source changed");
     expect(conflict).toContain("authoritative Store version");
   });
@@ -88,7 +90,7 @@ describe("Store administration Section 88 screens", () => {
       </MemoryRouter>,
     );
     for (const value of [
-      "STORE-HOURS-SERVICE",
+      "Hours &amp; ordering",
       "StoreOverride",
       "Business Day Start",
       "04:00:00 local",

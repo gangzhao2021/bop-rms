@@ -1,7 +1,12 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
-import { SupplierDetail, SupplierList, SupplierState } from "./SupplierPages.js";
+import {
+  SupplierDetail,
+  SupplierDetailUnavailable,
+  SupplierList,
+  SupplierState,
+} from "./SupplierPages.js";
 import { parseSupplierView, SupplierClientError } from "./supplier-pages.js";
 const id = (n: number) => `018fa900-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 function projection(detail = false, masked = false) {
@@ -85,6 +90,24 @@ function projection(detail = false, masked = false) {
   };
 }
 describe("Supplier pages", () => {
+  it("renders the registered detail groups without inferring unavailable Supplier facts", () => {
+    const html = renderToStaticMarkup(<SupplierDetailUnavailable />);
+    for (const value of [
+      "SUP-SUPPLIER-DETAIL",
+      "Identity fields not loaded",
+      "Contact role · name · email · phone",
+      "Business / remittance address",
+      "Tax registration reference",
+      "Qualifications and evidence",
+      "Offerings · open POs · performance · history / Audit: Unavailable",
+      "Edit · review qualification · suspend · open Offering / PO / discrepancy: unavailable.",
+      "No physical delete; suspension preserves issued POs.",
+      "DESIGN REVIEW · NOT ACCEPTED",
+    ])
+      expect(html).toContain(value);
+    expect(html).not.toMatch(/Synthetic|DEMO-|@[a-z]|\bCAD\b/u);
+  });
+
   it("strictly parses list/detail and rejects extra fields", () => {
     expect(parseSupplierView(projection())).toMatchObject({
       screenId: "SUP-SUPPLIER-LIST",

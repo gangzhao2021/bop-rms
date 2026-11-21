@@ -1,4 +1,5 @@
 import { AppFrame, StatePanel } from "@bop-rms/ui";
+import { SourceTime } from "./StoreTime.js";
 import { useEffect, useState } from "react";
 import {
   KdsProfileClientError,
@@ -44,7 +45,7 @@ export function KdsProfileScreen({ view }: { readonly view: KdsProfileView }) {
             {view.browserFamily} · minimum {view.minimumLogicalWidth}×{view.minimumLogicalHeight}
           </h2>
           <p>
-            {view.lifecycle} · {view.freshness} · source {view.sourceAsOf}
+            {view.lifecycle} · {view.freshness} · source <SourceTime instant={view.sourceAsOf} />
           </p>
         </div>
         <strong>{view.uat.status}</strong>

@@ -1,4 +1,5 @@
 import { StatePanel } from "@bop-rms/ui";
+import { SourceTime } from "./StoreTime.js";
 import { useEffect, useState } from "react";
 import {
   OperatingEntityPageError,
@@ -49,7 +50,7 @@ export function OperatingEntities({ view }: { readonly view: OperatingEntityAdmi
           <p className="bop-eyebrow">{view.screenId} · Organization</p>
           <h1>Operating Entities</h1>
           <p>
-            Source {view.sourceAsOf} · {view.completeness} · {view.freshness}
+            Source <SourceTime instant={view.sourceAsOf} /> · {view.completeness} · {view.freshness}
           </p>
         </div>
         {view.permissions.mayCreate ? (

@@ -131,12 +131,123 @@ describe("WP-2192 Store configuration administration", () => {
     );
   });
 
-  it("requires independent approval plus Publishing and Live Gate evidence", () => {
+  it.each(["Holiday", "TemporaryClosure", "Override"])(
+    "rejects disabled service modes in a %s exception before publication",
+    (kind) => {
+      const value = published();
+      value.exceptions = [
+        {
+          localDate: "2026-12-31",
+          kind,
+          intervals: [
+            {
+              startLocalTime: "10:00:00",
+              endLocalTime: "18:00:00",
+              endsNextDay: false,
+              serviceModes: ["Delivery"],
+              orderCutoffSeconds: 600,
+              leadTimeSeconds: 900,
+            },
+          ],
+        },
+      ];
+      // Draft construction preserves valid content; publication owns the gate.
+      const configuration = createStoreConfigurationVersion(value);
+      expect(() => validateStoreConfigurationForPublication(configuration)).toThrow(
+        StoreConfigurationAdministrationError,
+      );
+      value.enabledServiceModes.push("Delivery");
+      expect(() =>
+        validateStoreConfigurationForPublication(createStoreConfigurationVersion(value)),
+      ).not.toThrow();
+    },
+  );
+
+  it("requires approval plus Publishing and Live Gate evidence", () => {
+    // WP-2423 DEC-SOLE-OPERATOR-APPROVAL (v15): an author's own approval parses; it is accepted
+    // only with its recorded sole-operator approval (publication readers and the database).
     expect(() =>
       createStoreConfigurationVersion({ ...published(), approvedByReference: id(10) }),
+    ).not.toThrow();
+    expect(() =>
+      createStoreConfigurationVersion({ ...published(), approvedByReference: null }),
     ).toThrow(StoreConfigurationAdministrationError);
     expect(() =>
       createStoreConfigurationVersion({ ...published(), liveGateEvidenceReference: null }),
     ).toThrow(StoreConfigurationAdministrationError);
+  });
+});
+
+const setupBasis = () => ({
+  profile: "StoreSetupConfigurationBasisV2",
+  tenantReference: id(50),
+  setupDraftReference: id(51),
+  sourceRevision: 2,
+  sourceSnapshotDigest: `sha256:${"a".repeat(64)}`,
+  feeContexts: [
+    {
+      chargeType: "ServiceCharge",
+      state: "Enabled",
+      taxClassificationReference: id(52),
+      orderTypes: ["Pickup"],
+    },
+    { chargeType: "DeliveryFee", state: "Disabled" },
+    { chargeType: "Tip", state: "Disabled" },
+  ],
+});
+describe("complete configuration setup basis", () => {
+  it("preserves exact legacy shape and freezes the new source basis", () => {
+    expect(Object.keys(createStoreConfigurationVersion(published()))).toHaveLength(32);
+    const input = setupBasis();
+    const result = createStoreConfigurationVersion({ ...published(), setupBasis: input });
+    input.feeContexts.reverse();
+    expect(result.setupBasis?.feeContexts[0]).toMatchObject({ chargeType: "ServiceCharge" });
+    expect(Object.isFrozen(result.setupBasis)).toBe(true);
+    expect(Object.keys(result)).toHaveLength(33);
+  });
+  it("refuses missing source digest, incomplete fees and unsupported service modes", () => {
+    expect(() =>
+      createStoreConfigurationVersion({
+        ...published(),
+        setupBasis: { ...setupBasis(), sourceSnapshotDigest: "a".repeat(64) },
+      }),
+    ).toThrow();
+    expect(() =>
+      createStoreConfigurationVersion({
+        ...published(),
+        setupBasis: {
+          ...setupBasis(),
+          feeContexts: [
+            { chargeType: "ServiceCharge", state: "Unconfigured" },
+            ...setupBasis().feeContexts.slice(1),
+          ],
+        },
+      }),
+    ).toThrow();
+    expect(() =>
+      createStoreConfigurationVersion({
+        ...published(),
+        setupBasis: {
+          ...setupBasis(),
+          feeContexts: [
+            { ...setupBasis().feeContexts[0], orderTypes: ["Delivery"] },
+            ...setupBasis().feeContexts.slice(1),
+          ],
+        },
+      }),
+    ).toThrow();
+  });
+  it("rejects basis accessors without treating them as a source", () => {
+    const basis = setupBasis();
+    let called = false;
+    Object.defineProperty(basis, "sourceRevision", {
+      enumerable: true,
+      get() {
+        called = true;
+        return 2;
+      },
+    });
+    expect(() => createStoreConfigurationVersion({ ...published(), setupBasis: basis })).toThrow();
+    expect(called).toBe(false);
   });
 });

@@ -26,3 +26,5 @@ pmOnFail: error
 preferFrozenLockfile: true
 savePrefix: ""
 strictPeerDependencies: true
+patchedDependencies:
+  openid-client@6.8.4: patches/openid-client@6.8.4.patch

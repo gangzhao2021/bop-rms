@@ -469,12 +469,112 @@ export function resolveTaxConfiguration(
     Date.parse(snapshot.professionalEvidence.validUntil) <= Date.parse(evaluatedAt)
   )
     fail("TAX_CONFIGURATION_EVIDENCE_INVALID");
+  assertEffective(snapshot, evaluatedAt);
+  return matchedResolution(snapshot, context);
+}
+
+/** Mechanical Draft calculation only; no registration/professional approval or
+ * Published eligibility is established by this candidate resolution. */
+export interface TaxDraftCandidateResolution extends TaxConfigurationResolution {
+  readonly profile: "TaxDraftCandidateResolutionV1";
+  readonly professionalReviewStatus: "NotEvaluated";
+  readonly legalConclusion: "NotEvaluated";
+}
+export function resolveDraftTaxConfiguration(
+  snapshotInput: TaxConfigurationSnapshot,
+  context: TaxResolutionContext,
+): TaxDraftCandidateResolution {
+  // Detach the candidate before any owning constructor visits array entries.
+  let budget = 100000;
+  const detached = (value: unknown, depth: number): unknown => {
+    if (--budget < 0 || depth > 16) fail("TAX_CONFIGURATION_INPUT_INVALID");
+    if (
+      value === null ||
+      typeof value === "boolean" ||
+      typeof value === "string" ||
+      (typeof value === "number" && Number.isFinite(value))
+    )
+      return value;
+    if (!value || typeof value !== "object") return fail("TAX_CONFIGURATION_INPUT_INVALID");
+    if (Array.isArray(value)) {
+      if (
+        Object.getPrototypeOf(value) !== Array.prototype ||
+        value.length > 10000 ||
+        Reflect.ownKeys(value).length !== value.length + 1
+      )
+        fail("TAX_CONFIGURATION_INPUT_INVALID");
+      return Array.from({ length: value.length }, (_, i) => {
+        const d = Object.getOwnPropertyDescriptor(value, String(i));
+        if (!d?.enumerable || !("value" in d)) return fail("TAX_CONFIGURATION_INPUT_INVALID");
+        return detached(d.value, depth + 1);
+      });
+    }
+    if (Object.getPrototypeOf(value) !== Object.prototype)
+      return fail("TAX_CONFIGURATION_INPUT_INVALID");
+    return Object.fromEntries(
+      Reflect.ownKeys(value).map((key) => {
+        if (typeof key !== "string") return fail("TAX_CONFIGURATION_INPUT_INVALID");
+        const d = Object.getOwnPropertyDescriptor(value, key);
+        if (!d?.enumerable || !("value" in d)) return fail("TAX_CONFIGURATION_INPUT_INVALID");
+        return [key, detached(d.value, depth + 1)];
+      }),
+    );
+  };
+  const candidate = detached(snapshotInput, 0);
+  if (new TextEncoder().encode(JSON.stringify(candidate)).length > 2097152)
+    fail("TAX_CONFIGURATION_INPUT_INVALID");
+  const snapshot = createTaxConfigurationSnapshot(candidate as TaxConfigurationSnapshot);
+  exact(
+    context,
+    [
+      "brandReference",
+      "storeReference",
+      "jurisdictionCode",
+      "currencyCode",
+      "taxClassificationReference",
+      "orderType",
+      "chargeType",
+      "evaluatedAt",
+    ],
+    "TAX_CONFIGURATION_INPUT_INVALID",
+  );
+  const evaluatedAt = parseInstant(context.evaluatedAt);
+  if (new Date(evaluatedAt).toISOString() !== evaluatedAt) fail("TAX_CONFIGURATION_INPUT_INVALID");
+  reference(context.taxClassificationReference);
+  if (
+    !["DineIn", "Pickup"].includes(context.orderType) ||
+    !["Sellable", "ServiceCharge", "DeliveryFee", "Tip"].includes(context.chargeType)
+  )
+    fail("TAX_CONFIGURATION_INPUT_INVALID");
+  if (
+    snapshot.lifecycle !== "Draft" ||
+    context.brandReference !== snapshot.brandReference ||
+    context.storeReference !== snapshot.storeReference ||
+    context.jurisdictionCode !== snapshot.jurisdictionCode ||
+    context.currencyCode !== snapshot.currencyMetadata.currencyCode
+  )
+    fail("TAX_CONFIGURATION_SCOPE_MISMATCH");
+  assertEffective(snapshot, evaluatedAt);
+  return Object.freeze({
+    profile: "TaxDraftCandidateResolutionV1",
+    ...matchedResolution(snapshot, context),
+    professionalReviewStatus: "NotEvaluated",
+    legalConclusion: "NotEvaluated",
+  });
+}
+
+function assertEffective(snapshot: TaxConfigurationSnapshot, evaluatedAt: string): void {
   if (
     Date.parse(evaluatedAt) < Date.parse(snapshot.effectivePeriod.effectiveFrom.instant) ||
     (snapshot.effectivePeriod.effectiveUntil !== null &&
       Date.parse(evaluatedAt) >= Date.parse(snapshot.effectivePeriod.effectiveUntil.instant))
   )
     fail("TAX_CONFIGURATION_NOT_EFFECTIVE");
+}
+function matchedResolution(
+  snapshot: TaxConfigurationSnapshot,
+  context: TaxResolutionContext,
+): TaxConfigurationResolution {
   const matched = snapshot.rules
     .filter(
       (rule) =>

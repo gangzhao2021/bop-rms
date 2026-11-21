@@ -50,12 +50,21 @@ export function parseStoreReference(value: unknown): StoreReference {
     throw new OrganizationContractError("STORE_REFERENCE_INVALID");
   return value as StoreReference;
 }
+/**
+ * Batch 37 (v15 b36, merchant reads CPU-bound): instants that passed this check, by text. The
+ * check is a pure function of the text and the same instants (the policy, session and Store rows)
+ * are checked again on every read, so a repeat is answered from here; bounded, forgotten when full.
+ */
+const canonicalInstants = new Set<string>();
 export function parseCanonicalInstant(value: unknown): CanonicalInstant {
+  if (typeof value === "string" && canonicalInstants.has(value)) return value as CanonicalInstant;
   if (typeof value !== "string" || !instantPattern.test(value))
     throw new OrganizationContractError("ORGANIZATION_INPUT_INVALID");
   const parsed = Date.parse(value);
   if (!Number.isFinite(parsed) || new Date(parsed).toISOString() !== value)
     throw new OrganizationContractError("ORGANIZATION_INPUT_INVALID");
+  if (canonicalInstants.size >= 65_536) canonicalInstants.clear();
+  canonicalInstants.add(value);
   return value as CanonicalInstant;
 }
 export function parseOrganizationVersion(value: unknown): OrganizationVersion {
@@ -77,17 +86,15 @@ function readClosedRecord(
       Object.getPrototypeOf(value) !== Object.prototype
     )
       throw new OrganizationContractError(code);
+    // Batch 37: the same check without a Set and every descriptor at once per call (~3x faster;
+    // this runs for every row of every policy packet a read evaluates).
     const ownKeys = Reflect.ownKeys(value);
-    const allowed = new Set(keys);
-    if (
-      ownKeys.length !== keys.length ||
-      ownKeys.some((key) => typeof key !== "string" || !allowed.has(key))
-    )
-      throw new OrganizationContractError(code);
-    const descriptors = Object.getOwnPropertyDescriptors(value);
+    if (ownKeys.length !== keys.length) throw new OrganizationContractError(code);
+    for (const key of ownKeys)
+      if (typeof key !== "string" || !keys.includes(key)) throw new OrganizationContractError(code);
     const output: Record<string, unknown> = {};
     for (const key of keys) {
-      const descriptor = descriptors[key];
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
       if (!descriptor || !("value" in descriptor) || !descriptor.enumerable)
         throw new OrganizationContractError(code);
       output[key] = descriptor.value;
@@ -115,14 +122,22 @@ function lifecycle(value: unknown): OrganizationLifecycle {
     throw new OrganizationContractError("ORGANIZATION_INPUT_INVALID");
   return value as OrganizationLifecycle;
 }
+/**
+ * WP-2423 item 4: canonical IANA zones already accepted by this process. Whether a name is a
+ * canonical zone cannot change while the process runs, and building an Intl formatter for every
+ * Store read was a measurable share of a staff command; the set is bounded.
+ */
+const acceptedTimeZones = new Set<string>();
 function timeZone(value: unknown): string {
   const zone = text(value, 64);
+  if (acceptedTimeZones.has(zone)) return zone;
   try {
     if (new Intl.DateTimeFormat("en-CA", { timeZone: zone }).resolvedOptions().timeZone !== zone)
       throw new Error();
   } catch {
     throw new OrganizationContractError("STORE_SHAPE_INVALID");
   }
+  if (acceptedTimeZones.size < 64) acceptedTimeZones.add(zone);
   return zone;
 }
 

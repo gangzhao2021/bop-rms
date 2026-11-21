@@ -1,0 +1,302 @@
+import { Buffer } from "node:buffer";
+import { createHash } from "node:crypto";
+import sharp from "sharp";
+import { expect, it } from "vitest";
+import { processPublicImage } from "../infrastructure/processing/public-image-processor.js";
+
+const hash = (bytes: Uint8Array) => "sha256:" + createHash("sha256").update(bytes).digest("hex");
+const raster = () =>
+  sharp({
+    create: {
+      width: 80,
+      height: 40,
+      channels: 4,
+      background: { r: 30, g: 80, b: 150, alpha: 0.5 },
+    },
+  });
+async function rejected(input: unknown): Promise<void> {
+  const error: unknown = await processPublicImage(
+    input as Parameters<typeof processPublicImage>[0],
+  ).then(
+    () => null,
+    (failure: unknown) => failure,
+  );
+  expect(error).toBeInstanceOf(Error);
+  expect(error).toMatchObject({
+    code: "MEDIA_IMAGE_PROCESSING_FAILED",
+    message: "MEDIA_IMAGE_PROCESSING_FAILED",
+  });
+  if (!(error instanceof Error)) throw new Error("Expected bounded image error");
+  expect(Object.hasOwn(error, "cause")).toBe(false);
+  expect(Object.keys(error).sort()).toEqual(["code", "name"]);
+}
+
+it.each(["jpeg", "png", "webp"] as const)(
+  "fully decodes real %s pixels and encodes six bounded, hashed renditions",
+  async (format) => {
+    const bytes = await raster().toFormat(format).toBuffer();
+    const contentType = `image/${format}` as const;
+    const result = await processPublicImage({ bytes, declaredContentType: contentType });
+    expect(Object.keys(result).sort()).toEqual(["profile", "renditions", "source"]);
+    expect(result.profile).toBe("PUBLIC_IMAGE_V1");
+    expect(result.source).toEqual({
+      contentType,
+      width: 80,
+      height: 40,
+      byteSize: bytes.length,
+      checksum: hash(bytes),
+    });
+    expect(Object.isFrozen(result)).toBe(true);
+    expect(Object.isFrozen(result.source)).toBe(true);
+    expect(Object.isFrozen(result.renditions)).toBe(true);
+    expect(result.renditions.map((r) => [r.contentType, r.width, r.height])).toEqual([
+      ["image/jpeg", 320, 160],
+      ["image/webp", 320, 160],
+      ["image/jpeg", 640, 320],
+      ["image/webp", 640, 320],
+      ["image/jpeg", 1280, 640],
+      ["image/webp", 1280, 640],
+    ]);
+    for (const rendition of result.renditions) {
+      expect(Object.isFrozen(rendition)).toBe(true);
+      expect(rendition.checksum).toBe(hash(rendition.bytes));
+      expect(rendition.byteSize).toBe(rendition.bytes.byteLength);
+      const decoded = await sharp(rendition.bytes).raw().toBuffer({ resolveWithObject: true });
+      const metadata = await sharp(rendition.bytes).metadata();
+      expect(metadata.format).toBe(rendition.contentType.slice(6));
+      expect([decoded.info.width, decoded.info.height]).toEqual([
+        rendition.width,
+        rendition.height,
+      ]);
+      expect(metadata.exif).toBeUndefined();
+      expect(metadata.icc).toBeUndefined();
+      expect(metadata.iptc).toBeUndefined();
+      expect(metadata.xmp).toBeUndefined();
+    }
+  },
+);
+
+it("copies the precise byte view before its first await and never reads caller byte getters", async () => {
+  const bytes = await raster().png().toBuffer();
+  const padded = Buffer.concat([Buffer.alloc(7), bytes, Buffer.alloc(9)]);
+  const view = new Uint8Array(padded.buffer, padded.byteOffset + 7, bytes.length);
+  let reads = 0;
+  Object.defineProperty(view, "byteLength", {
+    get() {
+      reads++;
+      throw new Error("Caller byte getter");
+    },
+  });
+  const pending = processPublicImage({ bytes: view, declaredContentType: "image/png" });
+  view.fill(0);
+  const result = await pending;
+  expect(reads).toBe(0);
+  expect(result.source.checksum).toBe(hash(bytes));
+  expect(result.source.byteSize).toBe(bytes.length);
+  expect(result.renditions).toHaveLength(6);
+});
+
+it("re-encodes transparent pixels with a white JPEG background while retaining WebP alpha", async () => {
+  const bytes = await sharp({
+    create: { width: 40, height: 20, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
+  })
+    .png()
+    .toBuffer();
+  const result = await processPublicImage({ bytes, declaredContentType: "image/png" });
+  const jpeg = result.renditions.find((r) => r.contentType === "image/jpeg" && r.width === 320);
+  const webp = result.renditions.find((r) => r.contentType === "image/webp" && r.width === 320);
+  if (!jpeg || !webp) throw new Error("Missing synthetic renditions");
+  const jpgPixels = await sharp(jpeg.bytes).raw().toBuffer({ resolveWithObject: true });
+  const webpPixels = await sharp(webp.bytes)
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  expect(jpgPixels.info.channels).toBe(3);
+  expect([...jpgPixels.data.subarray(0, 3)]).toEqual([255, 255, 255]);
+  expect(webpPixels.info.channels).toBe(4);
+  expect(webpPixels.data[3]).toBe(0);
+});
+
+// Photoshop APP13 contains one standard IPTC caption resource. The raster and
+// remaining EXIF/ICC/XMP are generated by the actual Sharp encoder below; no
+// decoder is mocked, and the test verifies that Sharp can read this metadata.
+function withSyntheticIptc(jpeg: Buffer): Buffer {
+  const caption = Buffer.from("SYNTHETIC_IPTC", "ascii");
+  const iptcHeader = Buffer.from([0x1c, 0x02, 0x78, 0, caption.length]);
+  const iptc = Buffer.concat([iptcHeader, caption]);
+  const resourceLength = Buffer.alloc(4);
+  resourceLength.writeUInt32BE(iptc.length);
+  const resource = Buffer.concat([
+    Buffer.from("Photoshop 3.0\0", "ascii"),
+    Buffer.from("8BIM", "ascii"),
+    Buffer.from([0x04, 0x04, 0, 0]),
+    resourceLength,
+    iptc,
+    Buffer.alloc(iptc.length % 2),
+  ]);
+  const marker = Buffer.alloc(4);
+  marker[0] = 0xff;
+  marker[1] = 0xed;
+  marker.writeUInt16BE(resource.length + 2, 2);
+  return Buffer.concat([jpeg.subarray(0, 2), marker, resource, jpeg.subarray(2)]);
+}
+
+it("normalizes EXIF orientation and removes actual EXIF/GPS, IPTC, XMP and ICC metadata", async () => {
+  const generated = await sharp({
+    create: { width: 60, height: 40, channels: 3, background: "#184060" },
+  })
+    .withMetadata({ orientation: 6 })
+    .withExifMerge({
+      IFD0: { Artist: "SYNTHETIC_CREATOR" },
+      IFD3: {
+        GPSLatitudeRef: "N",
+        GPSLatitude: "1/1 2/1 3/1",
+        GPSLongitudeRef: "W",
+        GPSLongitude: "4/1 5/1 6/1",
+      },
+    })
+    .withXmp(
+      '<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description xmlns:dc="http://purl.org/dc/elements/1.1/" dc:description="SYNTHETIC_XMP"/></rdf:RDF></x:xmpmeta>',
+    )
+    .withIccProfile("srgb")
+    .jpeg()
+    .toBuffer();
+  const bytes = withSyntheticIptc(generated);
+  const original = await sharp(bytes).metadata();
+  expect(original.orientation).toBe(6);
+  expect(original.exif?.length).toBeGreaterThan(0);
+  expect(original.iptc?.length).toBeGreaterThan(0);
+  expect(original.xmp?.length).toBeGreaterThan(0);
+  expect(original.icc?.length).toBeGreaterThan(0);
+  const result = await processPublicImage({ bytes, declaredContentType: "image/jpeg" });
+  expect([result.source.width, result.source.height]).toEqual([60, 40]);
+  for (const rendition of result.renditions) {
+    expect(rendition.height).toBe(rendition.width * 1.5);
+    const metadata = await sharp(rendition.bytes).metadata();
+    expect(metadata.width).toBe(rendition.width);
+    expect(metadata.height).toBe(rendition.height);
+    for (const value of [
+      metadata.orientation,
+      metadata.exif,
+      metadata.iptc,
+      metadata.xmp,
+      metadata.icc,
+    ])
+      expect(value).toBeUndefined();
+    expect(Buffer.from(rendition.bytes).includes(Buffer.from("SYNTHETIC_"))).toBe(false);
+  }
+});
+
+it("flattens a real animated WebP to its first frame only", async () => {
+  const red = await sharp({ create: { width: 20, height: 10, channels: 4, background: "#ff0000" } })
+    .png()
+    .toBuffer();
+  const blue = await sharp({
+    create: { width: 20, height: 10, channels: 4, background: "#0000ff" },
+  })
+    .png()
+    .toBuffer();
+  const bytes = await sharp([red, blue], { join: { animated: true } })
+    .webp({ lossless: true, delay: [100, 100], loop: 0 })
+    .toBuffer();
+  expect((await sharp(bytes, { animated: true }).metadata()).pages).toBe(2);
+  const result = await processPublicImage({ bytes, declaredContentType: "image/webp" });
+  expect([result.source.width, result.source.height]).toEqual([20, 10]);
+  for (const rendition of result.renditions) {
+    const metadata = await sharp(rendition.bytes, { animated: true }).metadata();
+    expect(metadata.pages ?? 1).toBe(1);
+    expect(metadata.delay).toBeUndefined();
+    expect(metadata.height).toBe(rendition.width / 2);
+    const pixels = await sharp(rendition.bytes).removeAlpha().raw().toBuffer();
+    expect(pixels[0]).toBeGreaterThan(245);
+    expect(pixels[1]).toBeLessThan(10);
+    expect(pixels[2]).toBeLessThan(10);
+  }
+});
+
+it("does not mistake readable JPEG headers for a successful full pixel decode", async () => {
+  const pixels = Buffer.alloc(64 * 64 * 3);
+  for (let i = 0; i < pixels.length; i++) pixels[i] = (i * 31 + Math.floor(i / 17)) % 256;
+  const complete = await sharp(pixels, { raw: { width: 64, height: 64, channels: 3 } })
+    .jpeg()
+    .toBuffer();
+  const bytes = complete.subarray(0, complete.length - 64);
+  expect((await sharp(bytes).metadata()).width).toBe(64);
+  await rejected({ bytes, declaredContentType: "image/jpeg" });
+});
+
+it.each(["jpeg", "png", "webp"] as const)(
+  "rejects a real %s raster declared as a different allowlisted type",
+  async (format) => {
+    const bytes = await raster().toFormat(format).toBuffer();
+    await rejected({ bytes, declaredContentType: format === "png" ? "image/webp" : "image/png" });
+  },
+);
+
+it.each(["gif", "avif"] as const)(
+  "rejects actual %s encoding even when declared as PNG",
+  async (format) => {
+    const bytes = await raster().toFormat(format).toBuffer();
+    await rejected({ bytes, declaredContentType: "image/png" });
+    await rejected({ bytes, declaredContentType: `image/${format}` });
+  },
+);
+
+it.each([
+  Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"></svg>'),
+  Buffer.from("<!DOCTYPE html><script>SYNTHETIC_MARKER</script>"),
+  Buffer.from([0xff, 0xd8, 0xff, 0, 0, 0]),
+  Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 0]),
+  Buffer.from("RIFF0000WEBPVP8 SYNTHETIC_NOT_PIXELS"),
+])(
+  "rejects active content and forged signatures without exposing bytes or decoder text",
+  async (bytes) => {
+    for (const declaredContentType of ["image/jpeg", "image/png", "image/webp"])
+      await rejected({ bytes, declaredContentType });
+  },
+);
+
+it("enforces the input byte and actual image pixel ceilings", async () => {
+  await rejected({ bytes: Buffer.alloc(10 * 1024 * 1024 + 1), declaredContentType: "image/png" });
+  const bytes = await sharp({
+    create: { width: 5001, height: 5000, channels: 3, background: "#ffffff" },
+  })
+    .png()
+    .toBuffer();
+  expect(bytes.byteLength).toBeLessThan(10 * 1024 * 1024);
+  expect((await sharp(bytes).metadata()).width).toBe(5001);
+  await rejected({ bytes, declaredContentType: "image/png" });
+});
+
+it("rejects slender-image enlargement beyond output edge or pixel limits without cropping", async () => {
+  const bytes = await sharp({
+    create: { width: 1, height: 100, channels: 3, background: "#ffffff" },
+  })
+    .png()
+    .toBuffer();
+  await rejected({ bytes, declaredContentType: "image/png" });
+});
+
+it("rejects paths, URLs, shared buffers, wrong byte types, extra fields and accessor input", async () => {
+  for (const bytes of [
+    "/private/synthetic.png",
+    "https://invalid.example/synthetic.png",
+    new Uint16Array(8),
+    new Uint8Array(new SharedArrayBuffer(8)),
+    new Uint8Array(),
+  ])
+    await rejected({ bytes, declaredContentType: "image/png" });
+  const bytes = await raster().png().toBuffer();
+  await rejected({ bytes, declaredContentType: "image/png", path: "SYNTHETIC_EXTRA" });
+  await rejected(Object.assign(Object.create(null), { bytes, declaredContentType: "image/png" }));
+  let calls = 0;
+  const input = {
+    declaredContentType: "image/png",
+    get bytes() {
+      calls++;
+      return bytes;
+    },
+  };
+  await rejected(input);
+  expect(calls).toBe(0);
+});

@@ -105,7 +105,7 @@ timestamps and digests only.
 - Allowed asynchronous dependencies: consumes `rms.ordering.order-confirmed.v1` plus
   `rms.kitchen.kitchen-work-created.v1`, `rms.kitchen.kitchen-work-accepted.v1`,
   `rms.kitchen.kitchen-work-started.v1`, `rms.kitchen.kitchen-item-progress-recorded.v1` and
-  `rms.kitchen.kitchen-item-completed.v1`; publishes the same five Kitchen Events plus the five
+  `rms.kitchen.kitchen-item-completed.v1`; publishes those Kitchen Events and the existing item/order-ready Events declared in its manifest, plus the five
   Store-scoped `ProductionBatch*` lifecycle Events registered by WP-2111.
 - Forbidden dependencies: Ordering private paths/repository/tables, current Catalog/Recipe lookup,
   HTTP/ORM/Provider SDK, cross-domain transaction and inferred routing.
@@ -263,3 +263,14 @@ Progress/Completed Events and atomic rollback.
 - Revisit triggers: live Worker composition, Station/Rule authoring or persistence, Recipe module,
   multi-Station routing, Hold/Resume/Cancel/Rework, partial Ready, Ticket lifecycle, Ready Event /
   realtime activation, export or a new Customer/health field.
+
+## One tap on the board (DEC-KITCHEN-ONE-TAP)
+
+`runKitchenWorkStepChunk` is how the board records a step: it follows current state under the ticket's
+row lock (Ordering fence first, then the ticket), and writes ordinary lifecycle facts: Accept, Start
+and Complete, each with its actor, audit and event, under one correlation. An implied Start is one
+that shares its correlation and instant with a Complete. A combo's dishes finish through the same
+step (`listKitchenComboDishes` is the one rule for what a combo's dishes are), and the last one
+completes the combo in that commit. The caller runs each chunk in its own authorized transaction,
+because the Store-wide audit head stays locked from a chunk's first fact to its commit. See
+`docs/spec/design/kitchen-one-tap-steps.md`.

@@ -15,7 +15,35 @@ import {
   type InventoryItemAggregate,
   type InventoryReorderPolicy,
 } from "../domain/inventory-item.js";
-import type { InventoryItemPorts } from "./ports/inventory-item-ports.js";
+import type { InventoryItemPermission, InventoryItemPorts } from "./ports/inventory-item-ports.js";
+
+const primaryPermission: Record<InventoryItemAction, InventoryItemPermission> = {
+  Create: "inventory.item.create",
+  Update: "inventory.item.update",
+  Activate: "inventory.item.activate",
+  Deactivate: "inventory.item.deactivate",
+  Archive: "inventory.item.archive",
+  Restore: "inventory.item.restore",
+  SetReorderPolicy: "inventory.item.reorder.manage",
+};
+/**
+ * DEC-PERM-CATALOG: the action's own permission, plus the high-risk unit and tracking permissions
+ * when an update (or a create) defines or changes how the item is measured or tracked.
+ */
+export function inventoryItemRequiredPermissions(
+  command: InventoryItemCommand,
+  before: InventoryItemAggregate | null,
+): readonly InventoryItemPermission[] {
+  const required: InventoryItemPermission[] = [primaryPermission[command.action]];
+  if (command.action === "Update" && before !== null) {
+    const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
+    if (!same(command.payload.baseUnit, before.baseUnit))
+      required.push("inventory.item.unit.manage");
+    if (!same(command.payload.trackingPolicy, before.trackingPolicy))
+      required.push("inventory.item.tracking.manage");
+  }
+  return Object.freeze(required);
+}
 
 const actions = [
   "Create",
@@ -151,7 +179,6 @@ export function parseInventoryItemCommand(value: unknown): InventoryItemCommand 
     "brandReference",
     "actorReference",
     "purpose",
-    "permission",
     "operationReference",
     "occurredAt",
     "action",
@@ -159,7 +186,6 @@ export function parseInventoryItemCommand(value: unknown): InventoryItemCommand 
   ]);
   if (
     raw.purpose !== "InventoryItemManagement" ||
-    raw.permission !== "inventory.manage" ||
     typeof raw.action !== "string" ||
     !actions.includes(raw.action as InventoryItemAction)
   )
@@ -170,7 +196,6 @@ export function parseInventoryItemCommand(value: unknown): InventoryItemCommand 
     brandReference: parseInventoryReference(raw.brandReference),
     actorReference: parseInventoryReference(raw.actorReference),
     purpose: "InventoryItemManagement",
-    permission: "inventory.manage",
     operationReference: parseInventoryReference(raw.operationReference),
     occurredAt: parseInventoryInstant(raw.occurredAt),
     action,
@@ -282,20 +307,23 @@ export async function executeInventoryItemCommand(
   ports: InventoryItemPorts,
 ): Promise<InventoryItemCommandRecord> {
   const command = parseInventoryItemCommand(value);
-  let authorized;
-  try {
-    authorized = await ports.authorization.authorize({
-      tenantReference: command.tenantReference,
-      brandReference: command.brandReference,
-      actorReference: command.actorReference,
-      purpose: command.purpose,
-      permission: command.permission,
-      action: command.action,
-    });
-  } catch {
-    return fail("INVENTORY_ITEM_DEPENDENCY_UNAVAILABLE");
-  }
-  if (!authorized?.authorized) return fail("INVENTORY_ITEM_PERMISSION_DENIED");
+  const authorize = async (permission: InventoryItemPermission) => {
+    let authorized;
+    try {
+      authorized = await ports.authorization.authorize({
+        tenantReference: command.tenantReference,
+        brandReference: command.brandReference,
+        actorReference: command.actorReference,
+        purpose: command.purpose,
+        permission,
+        action: command.action,
+      });
+    } catch {
+      return fail("INVENTORY_ITEM_DEPENDENCY_UNAVAILABLE");
+    }
+    if (!authorized?.authorized) return fail("INVENTORY_ITEM_PERMISSION_DENIED");
+  };
+  await authorize(primaryPermission[command.action]);
   try {
     const intentHash = ports.references.hashIntent(`InventoryItem:v1:${JSON.stringify(command)}`);
     if (!hashPattern.test(intentHash)) return fail("INVENTORY_ITEM_DEPENDENCY_UNAVAILABLE");
@@ -314,6 +342,8 @@ export async function executeInventoryItemCommand(
     }
     const before =
       command.action === "Create" ? null : await ports.repository.load(itemReference(command));
+    for (const permission of inventoryItemRequiredPermissions(command, before).slice(1))
+      await authorize(permission);
     const after = await apply(command, before, ports);
     const audit = await ports.audit.create({ command, before, after });
     return await ports.repository.commit(

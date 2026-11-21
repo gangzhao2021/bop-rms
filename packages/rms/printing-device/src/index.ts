@@ -1,3 +1,5 @@
+export * from "./contracts/digital-receipt-template-published-current.js";
+export * from "./infrastructure/persistence/digital-receipt-template-lifecycle-store.js";
 export { moduleManifest } from "./module.manifest.js";
 export * from "./contracts/device-management.js";
 export * from "./application/device-management-service.js";
@@ -5,3 +7,24 @@ export * from "./application/ports/device-management-ports.js";
 export * from "./contracts/kds-profile-management.js";
 export * from "./application/kds-profile-management-service.js";
 export * from "./application/ports/kds-profile-management-ports.js";
+export * from "./contracts/digital-receipt-template.js";
+export * from "./contracts/digital-receipt-template-content.js";
+export * from "./contracts/digital-receipt-template-artifact.js";
+export * from "./contracts/digital-receipt-template-draft-fields.js";
+export * from "./contracts/digital-receipt-template-draft.js";
+export * from "./contracts/digital-receipt-template-submission.js";
+export * from "./contracts/digital-receipt-template-submit.js";
+export * from "./contracts/digital-receipt-template-review.js";
+export * from "./contracts/digital-receipt-template-lifecycle-action.js";
+export * from "./infrastructure/persistence/digital-receipt-template-store.js";
+export * from "./infrastructure/persistence/digital-receipt-template-artifact-store.js";
+export * from "./infrastructure/persistence/digital-receipt-template-draft-store.js";
+export * from "./infrastructure/persistence/digital-receipt-template-submission-store.js";
+export * from "./infrastructure/persistence/digital-receipt-template-submit-store.js";
+export * from "./infrastructure/persistence/digital-receipt-template-sole-operator-store.js";
+export {
+  createPostgresReceiptTemplatePublicationProof,
+  createPostgresInstalledReceiptTemplatePublicationProof,
+  readInstalledReceiptTemplateReference,
+} from "./infrastructure/template-publication-proof.js";
+export { createPostgresReceiptTemplateContentPublicationProof } from "./infrastructure/template-content-publication-proof.js";

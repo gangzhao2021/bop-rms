@@ -111,6 +111,25 @@ function addMinutes(instant: CanonicalInstant, minutes: number): string {
   return new Date(Date.parse(instant) + minutes * 60_000).toISOString();
 }
 
+/**
+ * WP-2423 Q18: the idle deadline after activity observed at `lastSeenAt` — the policy's idle
+ * timeout from that activity, never past the absolute deadline fixed at creation.
+ */
+export function slidingIdleExpiry(
+  lastSeenAt: CanonicalInstant,
+  absoluteExpiresAt: CanonicalInstant,
+  policy: SessionPolicy,
+): string {
+  const idle = addMinutes(lastSeenAt, policy.idleTimeoutMinutes);
+  return Date.parse(idle) < Date.parse(absoluteExpiresAt) ? idle : absoluteExpiresAt;
+}
+
+/**
+ * WP-2423 Q18: activity records are written at most once per this interval per Session, so an
+ * actively used screen extends its idle deadline without a write on every request.
+ */
+export const sessionActivityWriteIntervalSeconds = 60;
+
 export interface AuthenticationSession {
   readonly sessionReference: SessionReference;
   readonly actor: IdentityActor;
@@ -170,7 +189,7 @@ export function createAuthenticationSession(value: unknown): AuthenticationSessi
     Date.parse(createdAt) > Date.parse(lastSeenAt) ||
     Date.parse(lastSeenAt) > Date.parse(idleExpiresAt) ||
     Date.parse(idleExpiresAt) > Date.parse(absoluteExpiresAt) ||
-    idleExpiresAt !== addMinutes(lastSeenAt, policy.idleTimeoutMinutes) ||
+    idleExpiresAt !== slidingIdleExpiry(lastSeenAt, absoluteExpiresAt, policy) ||
     absoluteExpiresAt !== addMinutes(createdAt, policy.absoluteTimeoutMinutes)
   ) {
     throw new IdentityContractError("SESSION_SHAPE_INVALID");
@@ -228,6 +247,33 @@ export function assertSessionUsable(
     throw new IdentityContractError("SESSION_EXPIRED");
   }
   return session;
+}
+
+/**
+ * WP-2423 Q18: the Session after genuine staff activity observed at `observedAtInput`, or null when
+ * the last recorded activity is younger than `sessionActivityWriteIntervalSeconds` (no write).
+ * Only a usable Session moves; the absolute deadline, version, status and actor never change, so
+ * a revoked or expired Session is never revived and concurrent lifecycle changes are unaffected.
+ */
+export function recordSessionActivity(
+  session: AuthenticationSession,
+  observedAtInput: unknown,
+): AuthenticationSession | null {
+  const usable = assertSessionUsable(session, observedAtInput);
+  const observedAt = parseCanonicalInstant(observedAtInput);
+  if (Date.parse(observedAt) < Date.parse(usable.lastSeenAt)) return null;
+  if (
+    Date.parse(observedAt) - Date.parse(usable.lastSeenAt) <
+    sessionActivityWriteIntervalSeconds * 1000
+  )
+    return null;
+  const idleExpiresAt = slidingIdleExpiry(observedAt, usable.absoluteExpiresAt, usable.policy);
+  if (Date.parse(idleExpiresAt) <= Date.parse(usable.idleExpiresAt)) return null;
+  return Object.freeze({
+    ...usable,
+    lastSeenAt: observedAt,
+    idleExpiresAt: parseCanonicalInstant(idleExpiresAt),
+  });
 }
 
 export interface SessionRevokedEvent {

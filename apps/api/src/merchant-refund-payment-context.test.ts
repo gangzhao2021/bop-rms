@@ -1,0 +1,371 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createMerchantRefundPaymentContext } from "./merchant-refund-payment-context.js";
+import { kdsOperatorProfileAllows } from "./merchant-kds-operator-profile.js";
+const d = vi.hoisted(() => ({
+  cards: (): unknown => ({
+    loadByIntent: async () => null,
+    loadByBatch: async () => null,
+  }),
+  resolve: vi.fn(),
+  workforce: vi.fn(),
+  binding: vi.fn(),
+  terminal: vi.fn(),
+  position: vi.fn(),
+  bindingOptions: vi.fn(),
+  ordinary: vi.fn(),
+  whole: vi.fn(async (): Promise<unknown> => null),
+  // b10: what an order paid only in cash can still take back (the payment owner's read).
+  allowance: vi.fn<
+    (...args: unknown[]) => Promise<{ readonly cashOnly: boolean; readonly leftMinor: bigint }>
+  >(async () => ({ cashOnly: true, leftMinor: 0n })),
+}));
+vi.mock("./merchant-card-machine-refund.js", () => ({
+  cardMachineWholeRefundSource: d.whole,
+}));
+vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => d.resolve }));
+vi.mock("./merchant-workforce-authority-source.js", () => ({
+  createMerchantWorkforcePermissionSource: () => d.workforce,
+}));
+const observations = vi.hoisted(() => ({
+  at: null as string | null,
+  calls: [] as string[],
+}));
+vi.mock("@rms/payment", async (original) => ({
+  ...(await original<object>()),
+  // v15 2026-10-18: the time read once the Order's refund fence is held (recorded per call).
+  observeOrdinaryRefundOrderAfterFence: async (
+    _tx: unknown,
+    _scope: unknown,
+    orderReference: string,
+    notBefore: string,
+  ) => {
+    observations.calls.push(orderReference);
+    return observations.at ?? notBefore;
+  },
+  // WP-2423 item 4: no card-machine payment unless a test says so.
+  createPostgresCardMachinePaymentStore: () => d.cards(),
+  createPostgresPaymentIntentBindingSource: (options: unknown) => {
+    d.bindingOptions(options);
+    return d.binding;
+  },
+  createPostgresPaymentTerminalStore: () => ({ read: d.terminal }),
+  createPostgresOrderPaymentRefundPosition: () => d.position,
+  createPostgresOrdinaryRefundPositionSource: () => d.ordinary,
+  readRefundRecoveryAllowance: d.allowance,
+}));
+// WP-2423 M163: money taken back on the order (owner read), none unless a test says so.
+vi.mock("./merchant-refund-recovery.js", async (original) => ({
+  ...(await original<object>()),
+  readOrderRefundRecoveries: async () => [],
+}));
+vi.mock("./merchant-round-business-date.js", () => ({
+  // As the real one: a read that fails answers its fallback.
+  withOptionalRead: async (_tx: unknown, work: () => Promise<unknown>, fallback: unknown) =>
+    work().catch(() => fallback),
+}));
+const id = (n: number) => "01909974-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+type Options = Parameters<typeof createMerchantRefundPaymentContext>[0];
+const at = "2026-09-20T12:00:00.000Z";
+function setup() {
+  const tx = {},
+    allowed = vi.fn(async () => true);
+  const current = {
+    selected: { tenantReference: id(1) },
+    context: { brand: { brandReference: id(2) }, resolvedAt: at },
+    store: { storeReference: id(3) },
+    actorReference: id(4),
+    allowed,
+    kdsOperatorProfileAllows: vi.fn<(action: string) => boolean>(() => true),
+    authorizeAction: vi.fn(async () => ({ effect: "Allow" })),
+  };
+  d.resolve.mockResolvedValue(current);
+  const run = vi.fn(async (work: (tx: object) => Promise<unknown>) => work(tx));
+  const authorize = vi.fn(async () => ({ sessionReference: id(5) }));
+  const configure = vi.fn(async () => ({
+    providerAccountReference: id(6),
+    environment: "Test" as const,
+    roleMapping: { Manager: ["manager"], Owner: ["owner"], Finance: [] },
+  }));
+  const operation = createMerchantRefundPaymentContext({
+    persistence: { transactions: { run } } as unknown as Options["persistence"],
+    authentication: { authorize } as unknown as Options["authentication"],
+    resolveConfiguration: configure,
+  });
+  const input = {
+    sessionCookie: "synthetic-cookie",
+    csrf: "synthetic-csrf",
+    query: { paymentIntentReference: id(8) },
+  };
+  return { tx, allowed, current, run, authorize, configure, operation, input };
+}
+const binding = {
+  paymentIntentReference: id(8),
+  paymentAttemptReference: id(13),
+  orderReference: id(9),
+  orderBatchReference: id(11),
+};
+const terminal = {
+  ...binding,
+  outcome: "Succeeded",
+  recordedAt: at,
+  paymentTransactionReference: id(14),
+  amount: { currencyCode: "CAD", amountMinor: 2260n },
+  providerIntentReference: "private",
+};
+beforeEach(() => {
+  vi.clearAllMocks();
+  observations.at = null;
+  observations.calls.length = 0;
+  d.workforce.mockResolvedValue({ decision: { effect: "Allow" }, activeRoleCodes: ["manager"] });
+  d.binding.mockResolvedValue(binding);
+  d.terminal.mockResolvedValue(terminal);
+  d.position.mockResolvedValue({
+    confirmedMinor: 100n,
+    pendingMinor: 1130n,
+    snapshotDigest: "private",
+  });
+});
+it("binds actual captured payment and returns distinct confirmed and pending refund amounts", async () => {
+  const f = setup();
+  expect(await f.operation(f.input)).toEqual({
+    ...binding,
+    observedAt: at,
+    paymentState: "Captured",
+    paymentMethod: "Online",
+    paidInCash: false,
+    cashLeftMinor: null,
+    cashGivenBackMinor: null,
+    currencyCode: "CAD",
+    capturedAmountMinor: "2260",
+    confirmedRefundMinor: "100",
+    pendingRefundMinor: "1130",
+    canRequest: true,
+    requestBlocked: null,
+    canSend: true,
+    canRecover: true,
+    recoveries: [],
+    cashTakeBackLeftMinor: null,
+    recoveryUnreadable: false,
+  });
+  expect(d.position.mock.calls[0]?.[1]).toEqual({
+    orderReference: id(9),
+    paymentTransactionReference: id(14),
+    paymentIntentReference: id(8),
+    paymentAttemptReference: id(13),
+    observedAt: at,
+  });
+});
+it.each([null, { ...terminal, outcome: "Failed" }])(
+  "does not invent zero captured/refund amounts without capture case %#",
+  async (value) => {
+    const f = setup();
+    d.terminal.mockResolvedValue(value);
+    expect(await f.operation(f.input)).toEqual({
+      ...binding,
+      observedAt: at,
+      paymentState: value === null ? "Unresolved" : "Failed",
+      paymentMethod: "Online",
+      paidInCash: false,
+      cashLeftMinor: null,
+      cashGivenBackMinor: null,
+      currencyCode: null,
+      capturedAmountMinor: null,
+      confirmedRefundMinor: null,
+      pendingRefundMinor: null,
+      canRequest: true,
+      requestBlocked: null,
+      canSend: true,
+      canRecover: false,
+      recoveries: [],
+      cashTakeBackLeftMinor: null,
+      recoveryUnreadable: false,
+    });
+    expect(d.position).not.toHaveBeenCalled();
+  },
+);
+it("denies a kitchen display sign-in before any refund permission or payment lookup", async () => {
+  const f = setup();
+  f.current.kdsOperatorProfileAllows.mockImplementation((action: string) =>
+    kdsOperatorProfileAllows({ policy: { code: "NamedKdsOperator" } }, action),
+  );
+  await expect(f.operation(f.input)).rejects.toThrow();
+  expect(d.workforce).not.toHaveBeenCalled();
+  expect(d.binding).not.toHaveBeenCalled();
+});
+it("denies non-manager read before payment lookup", async () => {
+  const f = setup();
+  d.workforce.mockResolvedValue({ decision: { effect: "Allow" }, activeRoleCodes: ["kitchen"] });
+  await expect(f.operation(f.input)).rejects.toThrow();
+  expect(d.binding).not.toHaveBeenCalled();
+});
+it.each([
+  { ...terminal, paymentAttemptReference: id(99) },
+  { ...terminal, orderReference: id(99) },
+  { ...terminal, recordedAt: "2026-09-21T12:00:00.000Z" },
+])("rejects incompatible terminal facts case %#", async (value) => {
+  const f = setup();
+  d.terminal.mockResolvedValue(value);
+  await expect(f.operation(f.input)).rejects.toThrow();
+  expect(d.position).not.toHaveBeenCalled();
+});
+it("M126 I.5: a payment this Store has no record of is another Store's, not an outage", async () => {
+  const f = setup();
+  d.binding.mockRejectedValueOnce(new Error("PAYMENT_INTENT_BINDING_NOT_FOUND"));
+  await expect(f.operation(f.input)).rejects.toThrow("MERCHANT_REFUND_PAYMENT_NOT_FOUND");
+  expect(d.terminal).not.toHaveBeenCalled();
+  // A binding read that couldn't answer stays itself (503, try again).
+  d.binding.mockRejectedValueOnce(new Error("PAYMENT_INTENT_BINDING_UNAVAILABLE"));
+  await expect(f.operation(f.input)).rejects.toThrow("PAYMENT_INTENT_BINDING_UNAVAILABLE");
+});
+it("rejects refund totals exceeding captured amount", async () => {
+  const f = setup();
+  d.position.mockResolvedValue({ confirmedMinor: 2000n, pendingMinor: 1000n });
+  await expect(f.operation(f.input)).rejects.toThrow();
+});
+it("WP-2423: resolves the caller in full exactly twice (start and before the reply)", async () => {
+  const f = setup();
+  await f.operation(f.input);
+  expect(d.resolve).toHaveBeenCalledOnce();
+  expect(f.allowed).toHaveBeenCalledTimes(2);
+  // Who may read refunds is decided at the start and re-decided before the reply (WP-2423 M14:
+  // each time with whether they may send what they request).
+  expect(d.workforce).toHaveBeenCalledTimes(4);
+});
+it("WP-2423: a permission withdrawn or Session ended during the read refuses the reply", async () => {
+  const f = setup();
+  f.allowed.mockResolvedValueOnce(true).mockResolvedValue(false);
+  await expect(f.operation(f.input)).rejects.toThrow("ORDINARY_REFUND_REQUEST_DENIED");
+  expect(d.position).toHaveBeenCalledOnce();
+  expect(f.allowed).toHaveBeenCalledTimes(2);
+});
+it("WP-2423: refund read access withdrawn during the read refuses the reply", async () => {
+  const f = setup();
+  d.workforce
+    .mockResolvedValueOnce({ decision: { effect: "Allow" }, activeRoleCodes: ["manager"] })
+    .mockResolvedValue({ decision: { effect: "Deny" }, activeRoleCodes: [] });
+  await expect(f.operation(f.input)).rejects.toThrow("ORDINARY_REFUND_REQUEST_DENIED");
+});
+it("WP-2423: owner reads take the run's guard (true during the run, false after)", async () => {
+  const f = setup();
+  const during: boolean[] = [];
+  d.binding.mockImplementation(async (tx: unknown) => {
+    const { authorize } = d.bindingOptions.mock.calls[0]?.[0] as {
+      authorize(tx: unknown): Promise<boolean>;
+    };
+    during.push(await authorize(tx));
+    // Not this run's transaction: refused without a query.
+    during.push(await authorize({ query: vi.fn() }));
+    return binding;
+  });
+  await f.operation(f.input);
+  const { authorize } = d.bindingOptions.mock.calls[0]?.[0] as {
+    authorize(tx: unknown): Promise<boolean>;
+  };
+  const tx = d.binding.mock.calls[0]?.[0];
+  expect(during).toEqual([true, false]);
+  expect(await authorize(tx)).toBe(false);
+  expect(f.allowed).toHaveBeenCalledTimes(2);
+});
+it("rejects client supplied scope and clock", async () => {
+  const f = setup();
+  await expect(
+    f.operation({ ...f.input, query: { ...f.input.query, observedAt: at } }),
+  ).rejects.toThrow();
+  expect(f.run).not.toHaveBeenCalled();
+});
+
+// WP-2423 M52/M131: a counter order paid in cash. Its refunds give back whole nickels; the page
+// reads what they gave the Order, so a fully given back cash order is refunded, never refused.
+describe("a counter cash payment", () => {
+  const card = (totalMinor: bigint, roundingMinor: bigint) => ({
+    ...binding,
+    cardMachinePaymentReference: id(20),
+    recordedAt: at,
+    slipReference: null,
+    preparation: { total: { amountMinor: totalMinor, currencyCode: "CAD" } },
+    cash: { roundingMinor, tenderedMinor: totalMinor + roundingMinor, changeMinor: 0n },
+  });
+  const refund = (sourceKind: string, amountMinor: bigint, sourceReference = id(30)) => ({
+    cardMachinePaymentReference: id(20),
+    sourceKind,
+    sourceReference,
+    amountMinor,
+    recordedAt: at,
+  });
+  function cash(payment: ReturnType<typeof card>, refunds: unknown[]) {
+    d.cards = () => ({
+      loadByIntent: async () => payment,
+      loadByBatch: async () => null,
+      refunds: async () => refunds,
+    });
+  }
+  afterEach(() => {
+    d.cards = () => ({ loadByIntent: async () => null, loadByBatch: async () => null });
+  });
+  // b10 cash-refund-approvals: money taken back on an order paid only in cash is cash alone, up
+  // to what the drawer gave back, as the payment owner reads it at the payment's observation.
+  it("names the cash a guest can still hand back, only for an order paid only in cash", async () => {
+    cash(card(2243n, 2n), [refund("OrdinaryRefund", 435n, id(31))]);
+    d.ordinary.mockResolvedValue({ confirmedMinor: 437n, pendingMinor: 0n });
+    d.allowance.mockResolvedValueOnce({ cashOnly: true, leftMinor: 435n });
+    const f = setup();
+    expect(await f.operation(f.input)).toMatchObject({
+      paidInCash: true,
+      canRecover: true,
+      cashTakeBackLeftMinor: "435",
+    });
+    expect(d.allowance.mock.lastCall?.[2]).toEqual({ orderReference: id(9), observedAt: at });
+    // A table that also took card or online money keeps both ways (no cash-only limit).
+    d.allowance.mockResolvedValueOnce({ cashOnly: false, leftMinor: 437n });
+    expect(await setup().operation(f.input)).toMatchObject({ cashTakeBackLeftMinor: null });
+    // b10: the allowance could not be read (an outage): nothing is offered, and the page is told
+    // it could not load rather than that there is nothing to take back.
+    d.allowance.mockRejectedValueOnce(new Error("connection lost"));
+    expect(await setup().operation(f.input)).toMatchObject({
+      canRecover: false,
+      recoveryUnreadable: true,
+      cashTakeBackLeftMinor: null,
+    });
+  });
+  it("$22.43 paid as $22.45 and cancelled: refunded in full, not refused", async () => {
+    cash(card(2243n, 2n), [refund("StaffCancellation", 2245n)]);
+    d.ordinary.mockResolvedValue({ confirmedMinor: 0n, pendingMinor: 0n });
+    d.whole.mockResolvedValue({ reference: id(30) });
+    const f = setup();
+    expect(await f.operation(f.input)).toMatchObject({
+      paymentMethod: "CardMachine",
+      // v15 batch 8: the page says its refunds go back in cash, never on the card machine.
+      paidInCash: true,
+      // The drawer gave back all $22.45 it took: no cash is left to give back.
+      cashLeftMinor: "0",
+      capturedAmountMinor: "2243",
+      confirmedRefundMinor: "2243",
+      pendingRefundMinor: "0",
+    });
+  });
+  it("$22.47 paid as $22.45: a dish then the cancellation leaves nothing of the Order open", async () => {
+    cash(card(2247n, -2n), [
+      refund("OrdinaryRefund", 440n, id(31)),
+      refund("StaffCancellation", 1805n),
+    ]);
+    d.ordinary.mockResolvedValue({ confirmedMinor: 438n, pendingMinor: 0n });
+    d.whole.mockResolvedValue({ reference: id(30) });
+    const f = setup();
+    expect(await f.operation(f.input)).toMatchObject({
+      confirmedRefundMinor: "2247",
+      pendingRefundMinor: "0",
+    });
+  });
+  it("a cancellation still to give back owes the rest of the Order", async () => {
+    cash(card(2243n, 2n), [refund("OrdinaryRefund", 435n, id(31))]);
+    d.ordinary.mockResolvedValue({ confirmedMinor: 437n, pendingMinor: 0n });
+    d.whole.mockResolvedValue({ reference: id(30) });
+    const f = setup();
+    expect(await f.operation(f.input)).toMatchObject({
+      confirmedRefundMinor: "437",
+      pendingRefundMinor: "1806",
+      // $22.45 taken, $4.35 given back: the drawer still holds $18.10 of it.
+      cashLeftMinor: "1810",
+    });
+  });
+});

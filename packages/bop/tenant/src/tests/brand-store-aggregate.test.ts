@@ -78,6 +78,17 @@ describe("Brand and Store aggregate contract", () => {
     );
   });
 
+  it("WP-2423 item 4: keeps refusing non-canonical zones after a canonical one was accepted", () => {
+    for (let i = 0; i < 3; i++)
+      expect(createStore({ ...storeInput(), timeZone: "America/Toronto" }).timeZone).toBe(
+        "America/Toronto",
+      );
+    for (const zone of ["Toronto", "america/toronto", "America/Toronto "])
+      expect(() => createStore({ ...storeInput(), timeZone: zone })).toThrow(
+        OrganizationContractError,
+      );
+  });
+
   it("enforces expected version and the closed lifecycle graph", () => {
     const brand = createBrand(brandInput());
     expect(() => transitionBrand(brand, parseOrganizationVersion(2), "Active", LATER)).toThrowError(

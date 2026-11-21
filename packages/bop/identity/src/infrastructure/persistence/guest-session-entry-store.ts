@@ -9,6 +9,13 @@ import {
 import { parseCanonicalInstant, parseOpaqueUuidV7 } from "../../contracts/identity-actor.js";
 import type { GuestSessionStorePort } from "../../application/ports/guest-session-ports.js";
 
+/**
+ * WP-2423 M35 (DEC-STAFF-ROUND-SPEED): marks a plain read with no side effect, so the pilot's
+ * transaction runner may answer an identical repeat of it from the same transaction while nothing
+ * that could change its answer ran in between. An ordinary SQL comment everywhere else.
+ */
+const stableRead = "-- bop:stable-read\n";
+
 export interface GuestSessionEntryTransaction {
   query(sql: string, values: readonly unknown[]): Promise<unknown>;
 }
@@ -85,10 +92,62 @@ WHERE brand_id = $1 AND store_id = $2 AND session_selector_hash = decode($3, 'he
   AND (closure_expires_at IS NULL OR closure_expires_at > $5)
 RETURNING ${projection}`;
 const unavailable = () => new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+/**
+ * WP-2423 (reads-under-burst, v15 2026-11-13): the plain answer keeps a safe code of what failed
+ * behind it (`bop.failure.cause`, as the API's own failures do: a code and a SQLSTATE only, never a
+ * message, never enumerated), so the API can tell a read that found no database connection in a
+ * rush from a real fault. Before, every cart read's first step (this Session read) dropped it: the
+ * log said only GUEST_SESSION_UNAVAILABLE, and a read with no connection to give was read again,
+ * adding to the rush.
+ */
+const failureCauseKey = Symbol.for("bop.failure.cause");
+const safeFailureCode = /^[A-Z][A-Z0-9_]{0,63}$/u;
+const ownValue = (value: unknown, key: PropertyKey): unknown =>
+  value !== null && typeof value === "object"
+    ? Object.getOwnPropertyDescriptor(value, key)?.value
+    : undefined;
+const unavailableFrom = (cause: unknown): GuestSessionError => {
+  // This store's own refusal is already the plain answer.
+  if (cause instanceof GuestSessionError && cause.code === "GUEST_SESSION_UNAVAILABLE")
+    return cause;
+  const error = unavailable();
+  const code = ownValue(cause, "code");
+  if (typeof code !== "string" || !safeFailureCode.test(code)) return error;
+  const sqlState = ownValue(ownValue(cause, "diagnostic"), "sqlState");
+  Object.defineProperty(error, failureCauseKey, {
+    value: Object.freeze({
+      code,
+      ...(typeof sqlState === "string" && /^[0-9A-Z]{5}$/u.test(sqlState)
+        ? { diagnostic: Object.freeze({ sqlState }) }
+        : {}),
+    }),
+    enumerable: false,
+  });
+  return error;
+};
 
 export function createPostgresGuestSessionEntryStore(
   runner: GuestSessionEntryTransactionRunner,
   scope: Readonly<{ brandReference: string; storeReference: string }>,
+): GuestSessionEntryStore {
+  return createGuestEntryStore(runner, scope, false);
+}
+
+/** Caller must lend its write transaction and retain the Guest row lock through
+ * the authorized action. Acquire before Dining/Cart locks; no credentials returned.
+ * Lifecycle/credential/CSRF/current binding checks still belong to GuestSessionService.
+ */
+export function createPostgresFencedGuestSessionEntryStore(
+  runner: GuestSessionEntryTransactionRunner,
+  scope: Readonly<{ brandReference: string; storeReference: string }>,
+): GuestSessionEntryStore {
+  return createGuestEntryStore(runner, scope, true);
+}
+
+function createGuestEntryStore(
+  runner: GuestSessionEntryTransactionRunner,
+  scope: Readonly<{ brandReference: string; storeReference: string }>,
+  fenceResolve: boolean,
 ): GuestSessionEntryStore {
   const brand = parseOpaqueUuidV7(scope.brandReference, "IDENTITY_INPUT_INVALID");
   const store = parseOpaqueUuidV7(scope.storeReference, "IDENTITY_INPUT_INVALID");
@@ -198,7 +257,7 @@ export function createPostgresGuestSessionEntryStore(
   function lifecycleError(error: unknown): never {
     if (error instanceof GuestSessionError && error.code === "GUEST_SESSION_VERSION_CONFLICT")
       throw new GuestSessionError("GUEST_SESSION_VERSION_CONFLICT");
-    throw unavailable();
+    throw unavailableFrom(error);
   }
 
   return Object.freeze<GuestSessionEntryStore>({
@@ -343,8 +402,8 @@ export function createPostgresGuestSessionEntryStore(
           }
           return persisted;
         });
-      } catch {
-        throw unavailable();
+      } catch (error) {
+        throw unavailableFrom(error);
       }
     },
     async create(command) {
@@ -389,8 +448,8 @@ export function createPostgresGuestSessionEntryStore(
           await append(transaction, persisted);
           return persisted;
         });
-      } catch {
-        throw unavailable();
+      } catch (error) {
+        throw unavailableFrom(error);
       }
     },
     async resolve(selectorInput) {
@@ -398,17 +457,16 @@ export function createPostgresGuestSessionEntryStore(
         const selector = parseGuestSelectorHash(selectorInput);
         return await run(async (transaction) => {
           const found = record(
-            await transaction.query(`${select} AND session_selector_hash = decode($3, 'hex')`, [
-              brand,
-              store,
-              selector,
-            ]),
+            await transaction.query(
+              `${fenceResolve ? "" : stableRead}${select} AND session_selector_hash = decode($3, 'hex')${fenceResolve ? " FOR UPDATE" : ""}`,
+              [brand, store, selector],
+            ),
           );
           if (found !== null && found.sessionSelectorHash !== selector) throw unavailable();
           return found;
         });
-      } catch {
-        throw unavailable();
+      } catch (error) {
+        throw unavailableFrom(error);
       }
     },
     async resolveOperation(operationInput) {
@@ -423,8 +481,8 @@ export function createPostgresGuestSessionEntryStore(
           if (found !== null && found.operationReference !== operation) throw unavailable();
           return found;
         });
-      } catch {
-        throw unavailable();
+      } catch (error) {
+        throw unavailableFrom(error);
       }
     },
   });
@@ -491,9 +549,132 @@ export function createPostgresGuestSessionLegacyInspector(
               ? "InactiveLegacyRowsOnly"
               : "NoLegacyRows",
         });
-      } catch {
-        throw unavailable();
+      } catch (error) {
+        throw unavailableFrom(error);
       }
     },
   });
+}
+
+/**
+ * WP-2423 (same-table-ordering): the live Guest Sessions bound to some Dining participants, for the
+ * cart's "has this phone left the table" answer. Read only; the caller still runs the ordinary
+ * binding check on each session. No credential or selector leaves this function.
+ */
+export function createPostgresGuestParticipantSessionSource(
+  runner: GuestSessionEntryTransactionRunner,
+  scope: Readonly<{ brandReference: string; storeReference: string }>,
+) {
+  const brand = parseOpaqueUuidV7(scope.brandReference, "IDENTITY_INPUT_INVALID");
+  const store = parseOpaqueUuidV7(scope.storeReference, "IDENTITY_INPUT_INVALID");
+  return Object.freeze({
+    async listBound(input: {
+      readonly diningSessionReference: string;
+      readonly participantReferences: readonly string[];
+      readonly observedAt: string;
+    }) {
+      const diningSession = parseOpaqueUuidV7(
+        input.diningSessionReference,
+        "IDENTITY_INPUT_INVALID",
+      );
+      const participants = input.participantReferences.map((reference) =>
+        parseOpaqueUuidV7(reference, "IDENTITY_INPUT_INVALID"),
+      );
+      const observedAt = parseCanonicalInstant(input.observedAt);
+      if (participants.length === 0 || participants.length > 50) throw unavailable();
+      try {
+        const result = await runner.run(async (transaction) => {
+          await transaction.query(
+            "SELECT set_config('bop.brand_id', $1, true), set_config('bop.store_id', $2, true)",
+            [brand, store],
+          );
+          return transaction.query(
+            `${select} AND dining_session_id = $3 AND dining_participant_id = ANY($4::uuid[])
+             AND dining_state = 'DiningBound' AND status = 'Active'
+             AND idle_expires_at > $5 AND absolute_expires_at > $5
+             AND (closure_expires_at IS NULL OR closure_expires_at > $5)
+             ORDER BY created_at DESC LIMIT 200`,
+            [brand, store, diningSession, participants, observedAt],
+          );
+        });
+        if (
+          typeof result !== "object" ||
+          result === null ||
+          !("rows" in result) ||
+          !Array.isArray(result.rows)
+        )
+          throw unavailable();
+        return Object.freeze(
+          result.rows.map((row: { record?: unknown }) => {
+            const parsed = createGuestSessionRecord(row?.record).session;
+            if (
+              parsed.brandReference !== brand ||
+              parsed.storeReference !== store ||
+              String(parsed.diningSessionReference) !== diningSession ||
+              !participants.includes(String(parsed.diningParticipantReference) as never)
+            )
+              throw unavailable();
+            return parsed;
+          }),
+        );
+      } catch (error) {
+        throw unavailableFrom(error);
+      }
+    },
+  });
+}
+
+/**
+ * WP-2423 batch 42: which table participant each of some Guest Sessions was bound to at a Dining
+ * Session — Identity's own record of the phone that session belongs to, whatever the session's
+ * state now (a round's sender stays its sender after the phone leaves or its session ends).
+ * Sessions bound elsewhere or never bound are simply absent. Read only, in the caller's
+ * transaction; no credential or selector leaves this function.
+ */
+export async function readGuestSessionDiningParticipants(
+  transaction: GuestSessionEntryTransaction,
+  scope: Readonly<{ brandReference: string; storeReference: string }>,
+  input: Readonly<{
+    diningSessionReference: string;
+    guestSessionReferences: readonly string[];
+  }>,
+): Promise<ReadonlyMap<string, string>> {
+  const brand = parseOpaqueUuidV7(scope.brandReference, "IDENTITY_INPUT_INVALID");
+  const store = parseOpaqueUuidV7(scope.storeReference, "IDENTITY_INPUT_INVALID");
+  const diningSession = parseOpaqueUuidV7(input.diningSessionReference, "IDENTITY_INPUT_INVALID");
+  const sessions = [
+    ...new Set(
+      input.guestSessionReferences.map((reference) =>
+        parseOpaqueUuidV7(reference, "IDENTITY_INPUT_INVALID"),
+      ),
+    ),
+  ];
+  const found = new Map<string, string>();
+  if (sessions.length === 0) return found;
+  if (sessions.length > 200) throw unavailable();
+  try {
+    await transaction.query(
+      "SELECT set_config('bop.brand_id', $1, true), set_config('bop.store_id', $2, true)",
+      [brand, store],
+    );
+    const result = await transaction.query(
+      `${stableRead}SELECT guest_session_id::text AS session, dining_participant_id::text AS participant
+       FROM bop_identity.guest_session
+       WHERE brand_id = $1 AND store_id = $2 AND dining_session_id = $3
+         AND guest_session_id = ANY($4::uuid[]) AND dining_participant_id IS NOT NULL
+       LIMIT 201`,
+      [brand, store, diningSession, sessions],
+    );
+    const rows =
+      typeof result === "object" && result !== null && "rows" in result ? result.rows : null;
+    if (!Array.isArray(rows) || rows.length > 200) throw unavailable();
+    for (const row of rows as readonly { session?: unknown; participant?: unknown }[]) {
+      const session = parseOpaqueUuidV7(row?.session, "IDENTITY_INPUT_INVALID");
+      if (!sessions.includes(session) || found.has(session)) throw unavailable();
+      found.set(session, parseOpaqueUuidV7(row?.participant, "IDENTITY_INPUT_INVALID"));
+    }
+    return found;
+  } catch (error) {
+    throw unavailableFrom(error);
+  }
 }

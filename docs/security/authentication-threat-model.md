@@ -1,5 +1,9 @@
 # Authentication Threat Model
 
+## Accepted OIDC protocol exception
+
+Handoff Section 87.6 permits Provider authorization protocol parameters and the one-time callback code/state query. Callback atomically consumes the exact transaction, exchanges the code and immediately redirects to an allowlisted clean path. Application/analytics logs omit the query. Because ALB access logs cannot redact a request line by route, callback-containing access logs are encrypted `Restricted` security evidence with the accepted seven-day default retention and security-only access. This exception does not permit tokens, Cookie values, CSRF credentials, PKCE verifiers, secrets or data keys in URLs/logs, nor arbitrary query persistence or browser storage. The [tracked Handoff source](../../BOP-RMS%20Complete%20Handoff%20Package.md) and [spec authority](../spec/README.md#authority) govern this exception.
+
 ## Scope and decision status
 
 This model covers Merchant and Admin authentication through the accepted same-origin BFF, the
@@ -16,9 +20,7 @@ Merchant authentication stays disabled until every external gate in this documen
 
 1. A Provider assertion authenticates an identity but never grants Brand, Store, object or action
    authority.
-2. Browser-visible authentication state is an opaque, high-entropy `__Host-` Cookie; OIDC tokens,
-   selectors, authorization codes, PKCE material and encryption keys never enter application URLs,
-   browser storage, Service Worker state, logs, analytics or public errors.
+2. Browser Session authority is an opaque, high-entropy `__Host-` Cookie. Tokens, Cookie/CSRF selectors, PKCE verifiers, secrets and keys never enter URLs, browser storage, Service Worker state, application logs, analytics or public errors. Protocol state/nonce/S256 challenge and the one-time callback code/state have only the accepted OIDC boundary described below; they do not grant business authority.
 3. Every state-changing request requires a current server Session, exact same-origin and Fetch
    Metadata checks, and a Session-bound CSRF credential held only in page memory.
 4. Session creation, privilege elevation, recovery, risk change and Store-context change rotate
@@ -44,13 +46,14 @@ Merchant authentication stays disabled until every external gate in this documen
 
 ## Assets and data classification
 
-| Asset                                                                  | Classification                  | Permitted location                                                          | Prohibited location                                                                                                               |
-| ---------------------------------------------------------------------- | ------------------------------- | --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| Cookie/CSRF/state/nonce/PKCE/code/tokens/client secret/pepper/data key | Prohibited plaintext credential | transient process memory; encrypted Provider/secret boundary where required | database plaintext, URL except one-time Provider callback code/state, logs, metrics, traces, analytics, fixtures, browser storage |
-| Hashed selectors and authenticated ciphertext                          | Restricted                      | Identity-owned Session/OIDC records                                         | public contracts, frontend, cross-Domain tables                                                                                   |
-| Actor/external subject surrogate/Session/Membership references         | Confidential identifier         | owning records and request-private context                                  | public errors, metric labels, analytics                                                                                           |
-| Risk, MFA, recovery and revocation evidence                            | Restricted security evidence    | owning append-only Audit/Case records under policy                          | general logs, browser cache, business projections                                                                                 |
-| Brand/Store/Permission decision                                        | Confidential authorization fact | Tenant/Membership/Permission owner and request-private context              | Provider claims, client-selected headers/body                                                                                     |
+| Asset                                                          | Classification                  | Permitted location                                                                                      | Prohibited location                                                                                       |
+| -------------------------------------------------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| Cookie/CSRF/PKCE verifier/tokens/client secret/pepper/data key | Prohibited plaintext credential | transient process memory; encrypted Provider/secret boundary where required                             | database plaintext, URLs, logs, metrics, traces, analytics, fixtures, browser storage                     |
+| OIDC state/nonce/S256 challenge and one-time callback code     | Restricted protocol parameters  | exact Provider authorization/callback boundary; encrypted Restricted ALB access logs under Section 87.6 | application/analytics logs, private browser persistence, reusable application authority or unrelated URLs |
+| Hashed selectors and authenticated ciphertext                  | Restricted                      | Identity-owned Session/OIDC records                                                                     | public contracts, frontend, cross-Domain tables                                                           |
+| Actor/external subject surrogate/Session/Membership references | Confidential identifier         | owning records and request-private context                                                              | public errors, metric labels, analytics                                                                   |
+| Risk, MFA, recovery and revocation evidence                    | Restricted security evidence    | owning append-only Audit/Case records under policy                                                      | general logs, browser cache, business projections                                                         |
+| Brand/Store/Permission decision                                | Confidential authorization fact | Tenant/Membership/Permission owner and request-private context                                          | Provider claims, client-selected headers/body                                                             |
 
 ## Data flows and trust boundaries
 

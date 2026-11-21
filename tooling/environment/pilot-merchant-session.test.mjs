@@ -1,0 +1,419 @@
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+const seam = vi.hoisted(() => ({
+  storeOptions: null,
+  selectionOptions: null,
+  created: [],
+  selections: [],
+  kdsStarts: [],
+  // "actor store" pairs that are current Store members.
+  members: new Set(),
+}));
+vi.mock("../../packages/bop/membership/src/index.ts", () => ({
+  async isActiveStoreMember(_tx, scope) {
+    return (
+      seam.members === null || seam.members.has(scope.actorReference + " " + scope.storeReference)
+    );
+  },
+}));
+vi.mock("../../packages/bop/tenant/src/index.ts", () => ({
+  createPostgresMerchantOrganizationSource(_tx, scope) {
+    return {
+      async getStore(reference) {
+        return reference === scope.storeReference
+          ? { displayName: "DEMO Store " + reference.slice(-1) }
+          : null;
+      },
+    };
+  },
+}));
+vi.mock("../../packages/rms/kitchen/src/index.ts", () => ({
+  createPostgresKdsOperatorShiftStore(options) {
+    return {
+      async start(input) {
+        seam.kdsStarts.push({ options, input });
+        return null;
+      },
+    };
+  },
+}));
+vi.mock("../../packages/bop/identity/src/index.ts", async (original) => {
+  const actual = await original();
+  return {
+    ...actual,
+    createPostgresBrowserSessionStore(options) {
+      seam.storeOptions = options;
+      return {
+        async createSession(input) {
+          await options.onSessionCreated(
+            {
+              query: () => {
+                throw Error("UNEXPECTED_SQL");
+              },
+            },
+            {
+              session: {
+                ...input,
+                policy: { code: input.policyCode },
+                version: 1,
+                createdAt: input.observedAt,
+                idleExpiresAt: "2099-01-01T01:00:00.000Z",
+                absoluteExpiresAt: "2099-01-01T12:00:00.000Z",
+              },
+            },
+          );
+          seam.created.push(input);
+        },
+      };
+    },
+    createPostgresBrowserSessionSelectionStore(options) {
+      seam.selectionOptions = options;
+      return {
+        async write(tx, session, scope, at) {
+          if (!(await options.validate(tx, session, scope, at))) throw Error("SELECTION_DENIED");
+          seam.selections.push({ actorReference: session.actor.actorReference, scope, at });
+        },
+      };
+    },
+    BrowserSessionService: class {
+      constructor(options) {
+        this.options = options;
+      }
+      async authorize(input) {
+        return this.options.store.authorize(input);
+      }
+    },
+  };
+});
+import { createInternalMerchantSession } from "./pilot-merchant-session.mjs";
+const id = (n) => "0190fa31-0000-7000-8000-" + String(n).padStart(12, "0"),
+  at = "2026-10-04T12:00:00.000Z",
+  until = "2026-10-04T13:00:00.000Z",
+  scope = { tenantReference: id(1), brandReference: id(2), storeReference: id(3) };
+beforeEach(() => {
+  vi.stubEnv("NODE_ENV", "development");
+  seam.storeOptions = null;
+  seam.selectionOptions = null;
+  seam.created = [];
+  seam.selections = [];
+  seam.kdsStarts = [];
+  // Everyone configured works at the Store unless a test says otherwise.
+  seam.members = null;
+});
+afterEach(() => vi.unstubAllEnvs());
+function setup(multiple = true) {
+  let value = multiple
+      ? {
+          schemaVersion: 2,
+          environment: "InternalTest",
+          database: "synthetic_pilot",
+          scope,
+          actors: [
+            { selector: "author", actorReference: id(4), validUntil: until },
+            { selector: "reviewer", actorReference: id(5), validUntil: until },
+          ],
+        }
+      : {
+          environment: "InternalTest",
+          database: "synthetic_pilot",
+          scope,
+          actorReference: id(4),
+          validUntil: until,
+        },
+    clock = at,
+    sequence = 20;
+  const encrypt = vi.fn(async () => ({
+      algorithm: "SYNTHETIC_AES_256_GCM",
+      ciphertext: "controlled",
+    })),
+    loadEmployee = vi.fn(async () => value),
+    createInternalMerchantCredentials = vi.fn(async () => ({
+      hasher: { hash: () => "controlled" },
+      envelopes: { encrypt },
+    })),
+    transactions = {
+      run: vi.fn(async (work) =>
+        work({
+          query: () => {
+            throw Error("NO_AUTHORIZATION_SQL_FROM_ROSTER");
+          },
+        }),
+      ),
+    },
+    resources = {
+      scope: { brandReference: scope.brandReference, storeReference: scope.storeReference },
+      publicProfile: { binding: scope },
+      now: () => clock,
+      transactions,
+      credentials: { reference: () => id(++sequence) },
+    };
+  return {
+    resources,
+    encrypt,
+    loadEmployee,
+    createInternalMerchantCredentials,
+    transactions,
+    get value() {
+      return value;
+    },
+    change(v) {
+      value = v;
+    },
+    time(v) {
+      clock = v;
+    },
+    create: () =>
+      createInternalMerchantSession(resources, {
+        loadEmployee,
+        expectedDatabaseName: "synthetic_pilot",
+        createInternalMerchantCredentials,
+      }),
+  };
+}
+it("retains legacy single-Actor issue and exposes only its safe alias", async () => {
+  const f = setup(false),
+    session = await f.create();
+  expect(await session.staffChoices()).toEqual([{ selector: "staff", label: "DEMO staff staff" }]);
+  const receipt = await session.issue();
+  expect(typeof receipt.sessionCookie).toBe("string");
+  expect(receipt.sessionCookie.length).toBe(43);
+  expect(seam.created).toHaveLength(1);
+  expect(seam.created[0].actor.actorReference).toBe(id(4));
+  expect(seam.selections).toEqual([{ actorReference: id(4), scope, at }]);
+  expect(f.transactions.run).not.toHaveBeenCalled(); // Mock owning session storage; roster does not create grants.
+});
+it("requires explicit multi-Actor selection and binds two independent session identities", async () => {
+  const f = setup(),
+    session = await f.create();
+  await expect(session.issue()).rejects.toThrow(/^INTERNAL_MERCHANT_DENIED$/);
+  await expect(session.issue("unknown")).rejects.toThrow(/^INTERNAL_MERCHANT_DENIED$/);
+  await expect(session.issue(id(4))).rejects.toThrow(/^INTERNAL_MERCHANT_DENIED$/);
+  expect(seam.created).toHaveLength(0);
+  const choices = await session.staffChoices();
+  expect(choices.map((choice) => choice.selector)).toEqual(["author", "reviewer"]);
+  expect(JSON.stringify(choices).includes(id(4))).toBe(false);
+  expect(Object.isFrozen(choices)).toBe(true);
+  await session.issue("author");
+  await session.issue("reviewer");
+  expect(seam.created.map((value) => value.actor.actorReference)).toEqual([id(4), id(5)]);
+  expect(seam.created[0].sessionReference).not.toBe(seam.created[1].sessionReference);
+  expect(f.createInternalMerchantCredentials).toHaveBeenCalledTimes(1);
+  expect(Object.hasOwn(choices[0], "permissions")).toBe(false);
+});
+it("fresh roster removal and expiry deny existing Actor resolution and selected association", async () => {
+  const f = setup(),
+    session = await f.create();
+  await session.issue("author");
+  const previous = seam.created[0];
+  expect((await session.currentActor(null, id(4), at, at)).actorReference).toBe(id(4));
+  f.change({ ...f.value, actors: [f.value.actors[1]] });
+  await expect(session.currentActor(null, id(4), at, at)).rejects.toThrow(
+    /^INTERNAL_MERCHANT_DENIED$/,
+  );
+  expect(await session.validateAssociation(null, previous, scope, at)).toBe(false);
+  f.time(until);
+  expect(await session.staffChoices()).toEqual([]);
+  await expect(session.issue("reviewer")).rejects.toThrow(/^INTERNAL_MERCHANT_DENIED$/);
+  expect(seam.created).toHaveLength(1);
+});
+it("rechecks scope/database and does not trust arbitrary Actor or scope selected by a caller", async () => {
+  const f = setup(),
+    session = await f.create();
+  await session.issue("author");
+  expect(
+    await session.validateAssociation(
+      null,
+      seam.created[0],
+      { ...scope, storeReference: id(8) },
+      at,
+    ),
+  ).toBe(false);
+  await expect(session.currentActor(null, id(9), at, at)).rejects.toThrow(
+    /^INTERNAL_MERCHANT_DENIED$/,
+  );
+  f.change({ ...f.value, scope: { ...scope, tenantReference: id(8) } });
+  await expect(session.staffChoices()).rejects.toThrow(/^INTERNAL_MERCHANT_DENIED$/);
+  expect(await session.validateAssociation(null, seam.created[0], scope, at)).toBe(false);
+});
+it("fresh selection validation refuses removal during encryption before owning session commits", async () => {
+  const f = setup(),
+    session = await f.create();
+  f.encrypt.mockImplementation(async () => {
+    f.change({ ...f.value, actors: [f.value.actors[1]] });
+    return { algorithm: "SYNTHETIC_AES_256_GCM", ciphertext: "controlled" };
+  });
+  await expect(session.issue("author")).rejects.toThrow("SELECTION_DENIED");
+  expect(seam.created).toHaveLength(0);
+  expect(seam.selections).toHaveLength(0);
+});
+it.each([
+  (v) => ({ ...v, actors: [] }),
+  (v) => ({ ...v, actors: [...v.actors, v.actors[0]] }),
+  (v) => ({ ...v, actors: [v.actors[0], { ...v.actors[1], selector: "author" }] }),
+  (v) => ({ ...v, actors: [v.actors[0], { ...v.actors[1], actorReference: id(4) }] }),
+  (v) => ({ ...v, actors: [{ ...v.actors[0], permissions: ["catalog.product.approve"] }] }),
+  (v) => ({ ...v, actors: [{ ...v.actors[0], selector: "<script>" }] }),
+  (v) => ({ ...v, actors: [{ ...v.actors[0], validUntil: "2026-99-04T13:00:00.000Z" }] }),
+  (v) => ({ ...v, actors: [{ ...v.actors[0], actorReference: "bad" }] }),
+  (v) => ({ ...v, schemaVersion: 3 }),
+  (v) => ({ ...v, actorReference: id(4) }),
+  (v) => ({ ...v, database: "other" }),
+])("rejects malformed roster without reading credentials", async (change) => {
+  const f = setup();
+  f.change(change(f.value));
+  await expect(f.create()).rejects.toThrow(/^INTERNAL_MERCHANT_DENIED$/);
+  expect(f.createInternalMerchantCredentials).not.toHaveBeenCalled();
+});
+it("rejects accessors without evaluating them and sanitizes loader failures", async () => {
+  const f = setup(),
+    getter = vi.fn(() => f.value.actors),
+    value = { ...f.value };
+  Object.defineProperty(value, "actors", { enumerable: true, get: getter });
+  f.change(value);
+  await expect(f.create()).rejects.toThrow(/^INTERNAL_MERCHANT_DENIED$/);
+  expect(getter).not.toHaveBeenCalled();
+  f.loadEmployee.mockRejectedValue(new Error("private file detail"));
+  await expect(f.create()).rejects.toThrow(/^INTERNAL_MERCHANT_DENIED$/);
+});
+it("production is rejected before reading identity configuration or credentials", async () => {
+  const f = setup();
+  vi.stubEnv("NODE_ENV", "production");
+  await expect(f.create()).rejects.toThrow(/^INTERNAL_TEST_ONLY$/);
+  expect(f.loadEmployee).not.toHaveBeenCalled();
+  expect(f.createInternalMerchantCredentials).not.toHaveBeenCalled();
+});
+it("issues the IDR-0039 named KDS Operator policy only for an explicit kitchen display", async () => {
+  const f = setup(),
+    session = await f.create();
+  await session.issue("author");
+  await session.issue("author", "KitchenDisplay");
+  await expect(session.issue("author", "Privileged")).rejects.toThrow(/^INTERNAL_MERCHANT_DENIED$/);
+  expect(seam.created.map((value) => value.policyCode)).toEqual([
+    "WorkforceStandard",
+    "NamedKdsOperator",
+  ]);
+  expect(seam.created[1].actor.actorReference).toBe(id(4));
+  expect(seam.kdsStarts).toHaveLength(1);
+  const start = seam.kdsStarts[0];
+  expect(start.options.storeReference).toBe(scope.storeReference);
+  expect(start.input.session).toMatchObject({
+    sessionReference: seam.created[1].sessionReference,
+    actorReference: id(4),
+    sessionKind: "NamedKdsOperator",
+    state: "Active",
+    validUntil: "2099-01-01T01:00:00.000Z",
+  });
+});
+it("WP-2423 Q18 option A: a PIN sign-in issues an ordinary session for a configured identity and finalizes it in the same transaction", async () => {
+  const f = setup(),
+    session = await f.create();
+  const finalized = [];
+  await expect(session.issueForPin(id(9), async () => undefined)).rejects.toThrow(
+    /^INTERNAL_MERCHANT_DENIED$/,
+  );
+  await expect(session.issueForPin(id(4))).rejects.toThrow(/^INTERNAL_MERCHANT_DENIED$/);
+  const issued = await session.issueForPin(id(4), async (tx, created) => {
+    finalized.push({ tx, created });
+  });
+  expect(issued.sessionCookie).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+  expect(seam.created.map((value) => value.policyCode)).toEqual(["WorkforceStandard"]);
+  expect(finalized).toHaveLength(1);
+  expect(finalized[0].created.sessionReference).toBe(seam.created[0].sessionReference);
+  expect(finalized[0].created.actor.actorReference).toBe(id(4));
+  // A later ordinary sign-in runs no PIN work.
+  await session.issue("author");
+  expect(finalized).toHaveLength(1);
+});
+it("WP-2423 Q18: a full sign-in on a registered tablet finalizes in the transaction creating it", async () => {
+  const f = setup(),
+    session = await f.create();
+  const finalized = [];
+  await expect(session.issue("author", "Workforce", "not a function")).rejects.toThrow(
+    /^INTERNAL_MERCHANT_DENIED$/,
+  );
+  await session.issue("author", "KitchenDisplay", async (tx, created) => {
+    finalized.push(created);
+  });
+  expect(finalized).toHaveLength(1);
+  expect(finalized[0].sessionReference).toBe(seam.created[0].sessionReference);
+  expect(finalized[0].actor.actorReference).toBe(id(4));
+  await session.issue("author");
+  expect(finalized).toHaveLength(1);
+});
+
+// v15 2026-11-01: "Start kitchen display" always opened the installation's own Store, and a kitchen
+// display has no Store switch, so store 2 had no kitchen display. A kitchen display now belongs to
+// the Store it was started for: the session's Store and the operator's shift are that Store's.
+it("v15 2026-11-01: a kitchen display started for another served Store belongs to that Store", async () => {
+  const f = setup(),
+    storeTwo = id(9);
+  f.resources.servedStores = [
+    {
+      tenantReference: f.resources.publicProfile.binding.tenantReference,
+      brandReference: scope.brandReference,
+      storeReference: storeTwo,
+    },
+  ];
+  const session = await f.create();
+  seam.members = new Set([id(4) + " " + scope.storeReference, id(4) + " " + storeTwo]);
+  seam.members.add(id(5) + " " + scope.storeReference);
+  // One start per Store each person works at, by position and the Store's own name.
+  expect(await session.kitchenDisplayChoices()).toEqual([
+    { selector: "author", label: "DEMO staff author", store: "1", storeLabel: "DEMO Store 3" },
+    { selector: "reviewer", label: "DEMO staff reviewer", store: "1", storeLabel: "DEMO Store 3" },
+    { selector: "author", label: "DEMO staff author", store: "2", storeLabel: "DEMO Store 9" },
+  ]);
+  await session.issue("author", "KitchenDisplay", undefined, "2");
+  expect(seam.selections.at(-1).scope).toEqual({ ...scope, storeReference: storeTwo });
+  expect(seam.kdsStarts.at(-1).options.storeReference).toBe(storeTwo);
+  expect(seam.kdsStarts.at(-1).input.session.storeReference).toBe(storeTwo);
+  // Its own Store, as before.
+  await session.issue("author", "KitchenDisplay", undefined, "1");
+  expect(seam.selections.at(-1).scope).toEqual(scope);
+  expect(seam.kdsStarts.at(-1).options.storeReference).toBe(scope.storeReference);
+  // Not a member there, not a kitchen display, or not a served Store: refused, nothing started.
+  const before = seam.kdsStarts.length;
+  await expect(session.issue("reviewer", "KitchenDisplay", undefined, "2")).rejects.toThrow(
+    /^INTERNAL_MERCHANT_DENIED$/,
+  );
+  await expect(session.issue("author", "Workforce", undefined, "2")).rejects.toThrow(
+    /^INTERNAL_MERCHANT_DENIED$/,
+  );
+  await expect(session.issue("author", "KitchenDisplay", undefined, "3")).rejects.toThrow(
+    /^INTERNAL_MERCHANT_DENIED$/,
+  );
+  expect(seam.kdsStarts).toHaveLength(before);
+});
+it("v15 2026-11-01: with one Store the page offers one kitchen display start, as before", async () => {
+  const session = await setup().create();
+  expect(await session.kitchenDisplayChoices()).toEqual([]);
+});
+
+it("DEC-MULTI-MERCHANT-ONE-INSTALLATION A6: a person of another merchant signs in to their own Store", async () => {
+  const f = setup(),
+    other = { tenantReference: id(91), brandReference: id(92), storeReference: id(93) };
+  f.resources.servedStores = [other];
+  const session = await f.create();
+  seam.members = new Set([id(4) + " " + other.storeReference]);
+  await session.issue("author");
+  expect(seam.selections.at(-1).scope).toEqual(other);
+  // Someone who works nowhere here gets no session.
+  seam.members = new Set();
+  await expect(session.issue("author")).rejects.toThrow();
+});
+
+it("v15 2026-11-04: platform support works at no Store and still signs in", async () => {
+  const f = setup();
+  f.change({
+    ...f.value,
+    actors: [
+      ...f.value.actors,
+      { selector: "support-1", actorReference: id(6), validUntil: until },
+    ],
+  });
+  const session = await f.create();
+  seam.members = new Set();
+  await session.issue("support-1");
+  expect(seam.selections.at(-1).scope).toEqual(scope);
+  // The same page, for someone who isn't support and works nowhere here: no session.
+  await expect(session.issue("author")).rejects.toThrow();
+});

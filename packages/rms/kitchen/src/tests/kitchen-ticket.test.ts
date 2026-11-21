@@ -36,6 +36,11 @@ import {
   parseKitchenWorkPlan,
 } from "../index.js";
 
+import {
+  encodeKitchenTicketCreationRecord,
+  decodeKitchenTicketCreationRecord,
+} from "../application/kitchen-ticket-creation-record.js";
+
 function id(value: number): string {
   return `018f1000-0000-7000-8000-${value.toString(16).padStart(12, "0")}`;
 }
@@ -442,6 +447,7 @@ const transaction: ConsumerTransaction = {
 };
 
 interface HarnessOptions {
+  readonly observeSourceQuery?: (query: unknown) => void;
   readonly hideFirstResolution?: boolean;
   readonly resolveConflict?: boolean;
   readonly resolveStatusFlip?: boolean;
@@ -471,7 +477,8 @@ function harness(inputReceipt: ConfirmedOrderIntakeReceipt, options: HarnessOpti
   const calls = { source: 0, plan: 0, clock: 0, resolve: 0, commit: 0 };
   const ports: KitchenTicketCreationPorts = {
     orderingSource: {
-      resolve: async () => {
+      resolve: async (query) => {
+        options.observeSourceQuery?.(query);
         calls.source += 1;
         const source = sourceFor(inputReceipt);
         return options.mutateSource?.(source) ?? source;
@@ -812,7 +819,8 @@ describe("WP-1401 Kitchen Ticket aggregate", () => {
           !String(error).includes("private"),
       );
       expect(test.durable(), scenario.name).toBeUndefined();
-      expect(test.calls.clock, scenario.name).toBe(0);
+      // The clock is read once, as the instant the kitchen takes the round (batch 29).
+      expect(test.calls.clock, scenario.name).toBe(1);
       expect(test.calls.commit, scenario.name).toBe(0);
       expect(planner.calls, scenario.name).toMatchObject(scenario.expected);
       expect(planner.calls.reference, scenario.name).toBe(0);
@@ -867,7 +875,8 @@ describe("WP-1401 Kitchen Ticket aggregate", () => {
     await expect(
       withProducerDigest.service.create({ receipt: input, transaction }),
     ).rejects.toSatisfy((error: unknown) => code(error) === "KITCHEN_TICKET_CONFLICT");
-    expect(withProducerDigest.calls.clock).toBe(0);
+    expect(withProducerDigest.calls.clock).toBe(1);
+    expect(withProducerDigest.calls.commit).toBe(0);
   });
 
   it("persists descriptor-safe Audit and minimal causally exact Outbox content with no note narrative", async () => {
@@ -1095,7 +1104,32 @@ describe("WP-1401 Kitchen Ticket aggregate", () => {
     }
   });
 
-  it("fails closed before plan/time/mutation for changed Ordering evidence", async () => {
+  it("reads the round's Ordering source as of the instant the kitchen takes it, not its confirmation", async () => {
+    // v15 2026-11-17 (batch 29): a later round's acceptance landed between this round's
+    // confirmation and the kitchen's delivery; read as of the confirmation, the Order's later facts
+    // failed the read on every retry, and four paid rounds never reached the kitchen.
+    const input = receipt();
+    const queries: unknown[] = [];
+    const test = harness(input, {
+      now: at.later,
+      observeSourceQuery: (query) => queries.push(query),
+    });
+    const created = await test.service.create({ receipt: input, transaction });
+    expect(created.status).toBe("Created");
+    expect(queries).toHaveLength(1);
+    expect((queries[0] as { observedAt: string }).observedAt).toBe(at.later);
+    expect(test.durable()?.ticket.createdAt).toBe(at.later);
+    expect(test.calls).toEqual({ source: 1, plan: 1, clock: 1, resolve: 1, commit: 1 });
+
+    // A kitchen clock behind the confirmation never reads the source; the delivery is retried.
+    const behind = harness(input, { now: at.captured });
+    await expect(behind.service.create({ receipt: input, transaction })).rejects.toSatisfy(
+      (error: unknown) => code(error) === "KITCHEN_TICKET_DEPENDENCY_UNAVAILABLE",
+    );
+    expect(behind.calls).toEqual({ source: 0, plan: 0, clock: 1, resolve: 1, commit: 0 });
+  });
+
+  it("fails closed before plan/mutation for changed Ordering evidence", async () => {
     const input = receipt();
     const test = harness(input, {
       mutateSource: (source) => ({ ...source, storeReference: id(300) }),
@@ -1103,11 +1137,11 @@ describe("WP-1401 Kitchen Ticket aggregate", () => {
     await expect(test.service.create({ receipt: input, transaction })).rejects.toSatisfy(
       (error: unknown) => code(error) === "KITCHEN_TICKET_CONFLICT",
     );
-    expect(test.calls).toEqual({ source: 1, plan: 0, clock: 0, resolve: 1, commit: 0 });
+    expect(test.calls).toEqual({ source: 1, plan: 0, clock: 1, resolve: 1, commit: 0 });
     expect(test.durable()).toBeUndefined();
   });
 
-  it("fails closed before time/mutation for missing, incomplete or changed plans", async () => {
+  it("fails closed before mutation for missing, incomplete or changed plans", async () => {
     const input = receipt();
     const cases = [
       harness(input, { mutatePlan: () => null }),
@@ -1120,7 +1154,7 @@ describe("WP-1401 Kitchen Ticket aggregate", () => {
       await expect(test.service.create({ receipt: input, transaction })).rejects.toBeInstanceOf(
         Error,
       );
-      expect(test.calls.clock).toBe(0);
+      expect(test.calls.clock).toBe(1);
       expect(test.calls.commit).toBe(0);
       expect(test.durable()).toBeUndefined();
     }
@@ -1134,7 +1168,7 @@ describe("WP-1401 Kitchen Ticket aggregate", () => {
     await expect(test.service.create({ receipt: input, transaction })).rejects.toSatisfy(
       (error: unknown) => code(error) === "KITCHEN_TICKET_CONFLICT",
     );
-    expect(test.calls.clock).toBe(0);
+    expect(test.calls.clock).toBe(1);
     expect(test.calls.commit).toBe(0);
   });
 
@@ -1438,4 +1472,77 @@ describe("WP-1401 Kitchen Ticket aggregate", () => {
     expect(() => parseKitchenCustomerNote("safe\u2029")).toThrow();
     expect(() => parseKitchenCustomerNote("x".repeat(241))).toThrow();
   });
+});
+
+describe("immutable Kitchen creation record encoding", () => {
+  async function original(version = 3n) {
+    const input = receipt({ sourceAggregateVersion: version });
+    const test = harness(input);
+    await test.service.create({
+      receipt: input,
+      transaction: { query: async () => ({ rowCount: 0, rows: [] }) },
+    });
+    const effect = test.durable();
+    if (effect === undefined) throw new Error("fixture effect missing");
+    return { test, effect, encoded: encodeKitchenTicketCreationRecord(effect, test.ports) };
+  }
+
+  it("recovers the exact original effect, including Audit/event IDs and all saved work snapshots", async () => {
+    const { test, effect, encoded } = await original(9007199254740993n);
+    expect(decodeKitchenTicketCreationRecord(encoded, test.ports)).toEqual(effect);
+    const stored = JSON.parse(encoded);
+    expect(stored.effect.ticket.sourceAggregateVersion).toBe("9007199254740993");
+    expect(stored.effect.event.payload.aggregateVersion).toBe(1);
+    expect(stored.effect.ticket.workItems[0].customerNote).toBe(
+      effect.ticket.workItems[0]?.customerNote,
+    );
+    expect(test.calls).toEqual({ source: 1, plan: 1, clock: 1, resolve: 1, commit: 1 });
+  });
+
+  it("preserves the full supported PostgreSQL version range", async () => {
+    const { test, effect, encoded } = await original(9223372036854775807n);
+    expect(decodeKitchenTicketCreationRecord(encoded, test.ports)).toEqual(effect);
+  });
+
+  it("rejects a source version that cannot be persisted losslessly", async () => {
+    await expect(original(9223372036854775808n)).rejects.toMatchObject({
+      code: "KITCHEN_TICKET_DEPENDENCY_UNAVAILABLE",
+    });
+  });
+
+  it.each([
+    ["unknown format", ["recordVersion"], 2],
+    ["additional record field", ["currentStatus"], "Completed"],
+    ["rounded source number", ["effect", "ticket", "sourceAggregateVersion"], 3],
+    ["leading zero version", ["effect", "receipt", "sourceAggregateVersion"], "03"],
+    ["overflow version", ["effect", "ticket", "sourceAggregateVersion"], "9223372036854775808"],
+    ["altered completion", ["effect", "ticket", "workItems", "0", "completedQuantity"], 1],
+    ["changed note", ["effect", "ticket", "workItems", "0", "customerNote"], "altered"],
+    ["changed event ID", ["effect", "event", "eventId"], id(999)],
+    ["changed Audit ID", ["effect", "audit", "auditId"], id(999)],
+    ["changed digest", ["effect", "effectDigest"], sha256("altered")],
+    ["unknown effect field", ["effect", "refund"], true],
+    ["string payload version", ["effect", "event", "payload", "aggregateVersion"], "1"],
+  ] as const)("rejects %s instead of synthesizing recovery", async (_label, path, replacement) => {
+    const { test, encoded } = await original();
+    const stored: unknown = JSON.parse(encoded);
+    let target = stored as Record<string, unknown>;
+    for (const key of path.slice(0, -1)) target = target[key] as Record<string, unknown>;
+    const last = path.at(-1);
+    if (last === undefined) throw new Error("fixture mutation path missing");
+    target[last] = replacement;
+    expect(() =>
+      decodeKitchenTicketCreationRecord(JSON.stringify(stored), test.ports),
+    ).toThrowError(expect.objectContaining({ code: "KITCHEN_TICKET_DEPENDENCY_UNAVAILABLE" }));
+  });
+
+  it.each([null, {}, "null", "[]", "{", "{}"])(
+    "rejects malformed storage input %j",
+    async (value) => {
+      const { test } = await original();
+      expect(() => decodeKitchenTicketCreationRecord(value, test.ports)).toThrowError(
+        expect.objectContaining({ code: "KITCHEN_TICKET_DEPENDENCY_UNAVAILABLE" }),
+      );
+    },
+  );
 });

@@ -32,6 +32,12 @@ export interface PriceBookAuthorizationEvidence {
   readonly permission: PermissionDecision;
   readonly approvalPermission: PermissionDecision | null;
   readonly draftAuthorActorReference: string | null;
+  /** WP-2423 Q19: the draft's author publishes it alone as sole operator. Only the composition
+   * may set this, after the Organization read says sole operator is in effect for this actor in
+   * the same transaction and their second factor is at most 15 minutes old. */
+  readonly soleOperatorApproval?: boolean;
+  /** WP-2423 item 8 ⑥: the author's own publication at a single store ("List it", no review). */
+  readonly singleStoreListing?: boolean;
   readonly audit: AppendAuditRecordInput;
 }
 export interface PriceBookPorts {

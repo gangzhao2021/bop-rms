@@ -1,10 +1,20 @@
 import type { AppendAuditRecordInput } from "@bop/audit";
 import type { DiningSession } from "../../contracts/dining-session.js";
 import type { DiningTable } from "../../domain/dining-table.js";
-import type { DiningReference } from "../../contracts/dining-session.js";
+import type { DiningReference, DiningInstant } from "../../contracts/dining-session.js";
 
 export type DiningTableAction =
-  "CreateDraft" | "ReplaceDraft" | "Publish" | "IssueQr" | "RevokeQr" | "SetBlock" | "ClearBlock";
+  | "CreateDraft"
+  | "ReplaceDraft"
+  | "Publish"
+  | "IssueQr"
+  | "RevokeQr"
+  | "SetBlock"
+  | "ClearBlock"
+  /** 2026-11-01: a published table's name, as staff and guests see it, changes. */
+  | "Rename"
+  /** 2026-11-01: the table leaves service (no open session); its code is turned off. */
+  | "Retire";
 
 export interface DiningTableEvent {
   readonly eventType:
@@ -37,7 +47,20 @@ export interface DiningTableOperationRecord {
   readonly event: DiningTableEvent;
 }
 
+export interface DiningSessionMoveCommand {
+  readonly operationReference: DiningReference;
+  readonly diningSessionReference: DiningReference;
+  readonly sourceTableReference: DiningReference;
+  readonly targetTableReference: DiningReference;
+  readonly expectedSessionVersion: number;
+  readonly expectedSourceTableVersion: number;
+  readonly expectedTargetTableVersion: number;
+  readonly partySize: number;
+  readonly observedAt: DiningInstant;
+}
+
 export interface DiningSessionMoveRecord {
+  readonly command: DiningSessionMoveCommand;
   readonly operationReference: DiningReference;
   readonly intentDigest: string;
   readonly session: DiningSession;
@@ -79,6 +102,11 @@ export interface DiningTablePorts {
     commitTable(record: DiningTableOperationRecord): Promise<void>;
     resolveMoveOperation(reference: DiningReference): Promise<DiningSessionMoveRecord | null>;
     loadSession(reference: DiningReference): Promise<DiningSession | null>;
-    commitMove(record: DiningSessionMoveRecord): Promise<void>;
+    commitMove(record: DiningSessionMoveRecord): Promise<
+      Readonly<{
+        status: "Applied" | "AlreadyApplied";
+        record: DiningSessionMoveRecord;
+      }>
+    >;
   };
 }
