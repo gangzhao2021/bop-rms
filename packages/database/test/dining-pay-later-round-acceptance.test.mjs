@@ -259,6 +259,11 @@ it("a merged table's dish comped in full owes nothing; the host pays the rest an
 // what the merged bill went down by — never its own Order's rounds worked out alone.
 it("a dish taken off a merged table's bill reads what the merged bill went down by", () =>
   journey("MergedRemoved"));
+// b39/b40 (v15 sweep 38, H4/H6): the merged table ordered two rounds, each round's tax rounded on
+// its own ($1.63 + $1.63) where its own bill's tax is $3.25: that table's part of the merged bill
+// keeps the $28.25 it showed before the merge, and the parts add up to the merged bill exactly.
+it("a merged table with its own tax rounding keeps its own bill to the cent; the parts add up", () =>
+  journey("MergedOwnRounding"));
 
 // WP-2423 DEC-TAX-WHOLE-RECEIPT step 2: the bill's tax is rounded once over every dish; the rounds'
 // difference is recorded by the system rule as the bill's tax rounding, paid exactly, part by part.
@@ -1151,39 +1156,41 @@ async function journey(journeyEnding) {
                             ? "wp2423_plccu"
                             : ending === "MergedCompCent"
                               ? "wp2423_plmergc"
-                              : ending === "MergedRemoved"
-                                ? "wp2423_plmergrm"
-                                : ending === "MemberPointsOnline"
-                                  ? "wp2423_plmembon"
-                                  : ending === "MemberPointsOtherPhone"
-                                    ? "wp2423_plmembop"
-                                    : ending === "MemberPointsStoreAccount"
-                                      ? "wp2423_plmembac"
-                                      : ending === "MemberPointsRefunded"
-                                        ? "wp2423_plmembrf"
-                                        : ending === "MemberPointsPickup"
-                                          ? "wp2423_plmembpk"
-                                          : ending === "MemberPoints"
-                                            ? "wp2423_plmember"
-                                            : ending === "MemberPointsSplit"
-                                              ? "wp2423_plmembsp"
-                                              : ending === "MemberPointsWrittenOff"
-                                                ? "wp2423_plmembwo"
-                                                : ending === "PaidSplit"
-                                                  ? "wp2423_plsplit"
-                                                  : ending === "SplitWrittenOff"
-                                                    ? "wp2423_plsplwo"
-                                                    : ending === "Held"
-                                                      ? "wp2423_plheld"
-                                                      : ending === "HeldAtCheckout"
-                                                        ? "wp2423_plheldco"
-                                                        : ending === "TipsOff"
-                                                          ? "wp2423_pltips"
-                                                          : ending === "Moved"
-                                                            ? "wp2423_plmove"
-                                                            : ending === "Merged"
-                                                              ? "wp2423_plmerge"
-                                                              : "wp2423_plon",
+                              : ending === "MergedOwnRounding"
+                                ? "wp2423_plmergor"
+                                : ending === "MergedRemoved"
+                                  ? "wp2423_plmergrm"
+                                  : ending === "MemberPointsOnline"
+                                    ? "wp2423_plmembon"
+                                    : ending === "MemberPointsOtherPhone"
+                                      ? "wp2423_plmembop"
+                                      : ending === "MemberPointsStoreAccount"
+                                        ? "wp2423_plmembac"
+                                        : ending === "MemberPointsRefunded"
+                                          ? "wp2423_plmembrf"
+                                          : ending === "MemberPointsPickup"
+                                            ? "wp2423_plmembpk"
+                                            : ending === "MemberPoints"
+                                              ? "wp2423_plmember"
+                                              : ending === "MemberPointsSplit"
+                                                ? "wp2423_plmembsp"
+                                                : ending === "MemberPointsWrittenOff"
+                                                  ? "wp2423_plmembwo"
+                                                  : ending === "PaidSplit"
+                                                    ? "wp2423_plsplit"
+                                                    : ending === "SplitWrittenOff"
+                                                      ? "wp2423_plsplwo"
+                                                      : ending === "Held"
+                                                        ? "wp2423_plheld"
+                                                        : ending === "HeldAtCheckout"
+                                                          ? "wp2423_plheldco"
+                                                          : ending === "TipsOff"
+                                                            ? "wp2423_pltips"
+                                                            : ending === "Moved"
+                                                              ? "wp2423_plmove"
+                                                              : ending === "Merged"
+                                                                ? "wp2423_plmerge"
+                                                                : "wp2423_plon",
     },
     async (context) => {
       const admin = new Client(context.clientConfig);
@@ -2066,6 +2073,158 @@ async function journey(journeyEnding) {
           const mEvent = await transactions({ guc: true }).run((tx) =>
             loadOutboxEnvelope(tx, mSent.confirmation.orderConfirmedEventReference),
           );
+          /** b40: T-M's own bill before the merge (its rounds, its own tax rounding). */
+          let mBillBefore = null;
+          let M2 = null;
+          if (ending === "MergedOwnRounding") {
+            // ── T-M's phone sends a second $12.50 round, through the actual Ordering writer.
+            // After T-M's first round was sent (its Order's revision is from just now).
+            M2 = journeyRound({
+              at: now(),
+              prefix: "01a00022",
+              party: { prefix: "01a0002f" },
+              laterRound: true,
+              ...centsPrice,
+            });
+            assert.equal(M2.f.request.record.order.orderReference, mOrder);
+            await seedSubmissionCart(admin, M2.f);
+            const mLive = parseDiningSession(
+              (
+                await rows(
+                  "SELECT session_snapshot FROM rms_dining.dining_session WHERE session_id=$1",
+                  [mSession],
+                )
+              )[0].session_snapshot,
+            );
+            const mLink2 = await mDining.prepare(M2, {
+              currentSession: mLive,
+              paymentOperationReference: id(0x2210),
+              participant: mDining.host,
+            });
+            const mEvidence2 = M2.evidence(mLink2),
+              mItems2 = M2.items(mEvidence2);
+            await seedJourneyCheckout(admin, {
+              round: M2,
+              evidence: mEvidence2,
+              link: mLink2,
+              references: {
+                createOperation: id(0x2201),
+                checkoutSession: id(0x2202),
+                details: id(0x2203),
+                detailsOperation: id(0x2204),
+              },
+            });
+            const mSnapshot2 = parseAdditionalDiningBatchSnapshot({
+              orderReference: mOrder,
+              brandReference: scope.brandReference,
+              storeReference: scope.storeReference,
+              diningSessionReference: mSession,
+              guestSessionReference: mGuest,
+              originalOrderCreatedAt: mRecord.createdAt,
+              expectedOrderVersion: 2,
+              batchSequence: 2,
+              snapshotVersion: 1,
+              batch: M2.batch,
+              items: mItems2,
+            });
+            await seedJourneyQuote({
+              runner: ownerRunner,
+              scope: ownerScope,
+              snapshot: mSnapshot2,
+              prefix: "01a10022",
+            });
+            const mSubmitted = await transactions().run((tx) =>
+              createCustomerAdditionalDiningSubmissionStore({
+                ...scope,
+                authorize: async (_tx, candidate) => candidate.guestSessionReference === mGuest,
+                audit: async (candidate) => ({
+                  auditId: fresh(),
+                  brandId: scope.brandReference,
+                  storeId: scope.storeReference,
+                  actor: { type: "System" },
+                  actionCode: "ORDERING_ADDITIONAL_BATCH_SUBMIT",
+                  targetType: "OrderingOrderBatch",
+                  targetId: candidate.batch.orderBatchReference,
+                  reasonCode: "AUTHORIZED_ADDITIONAL_BATCH_SUBMIT",
+                  correlationId: fresh(),
+                  occurredAt: candidate.batch.submittedAt,
+                  sourceChannel: "CUSTOMER_PWA",
+                  dataClassification: "Restricted",
+                  retentionPolicyCode: "AUDIT_DEFAULT",
+                  retentionPolicyVersion: 1,
+                }),
+                eventReference: fresh,
+                currentPolicies: async (_tx, request) => ({
+                  ...scope,
+                  orderType: "DineIn",
+                  checkedAt: request.observedAt,
+                  validUntil: new Date(Date.parse(request.observedAt) + minutes(5)).toISOString(),
+                  required: [],
+                }),
+                validateCurrent: async () => undefined,
+                inventory: {
+                  scope: ownerScope,
+                  stockSiteReference: stock.stockSiteReference,
+                  workflow: {
+                    ...inventoryWorkflow,
+                    gates: {
+                      ...inventoryWorkflow.gates,
+                      authorizeResource: async (innerTx, request) =>
+                        inventoryWorkflow.gates.authorizeResource(innerTx, {
+                          ...request,
+                          actorReference:
+                            request.actorReference === mGuest
+                              ? guestSession
+                              : request.actorReference,
+                        }),
+                    },
+                  },
+                  authorize: async (_tx, input) =>
+                    [guestSession, mGuest].includes(input.actorReference),
+                  resolveExpiryCutoff: stock.resolveExpiryCutoff,
+                  generateReference: fresh,
+                  audit: {
+                    reasonCode: "SYNTHETIC_SUBMISSION",
+                    sourceChannel: "CUSTOMER_PWA",
+                    retentionPolicyCode: "SYNTHETIC_AUDIT",
+                    retentionPolicyVersion: 1,
+                  },
+                },
+                diningSealAudit: async (record) => mDining.audit(record),
+              }).append({
+                transaction: {
+                  query: (sql, values) =>
+                    sql === "SELECT clock_timestamp() AS observed_at"
+                      ? Promise.resolve({
+                          rows: [
+                            { observed_at: new Date(Date.parse(M2.batch.submittedAt) + 1000) },
+                          ],
+                          rowCount: 1,
+                        })
+                      : tx.query(sql, values),
+                },
+                snapshot: mSnapshot2,
+                capacityLink: mLink2,
+                checkoutValidationEvidence: mEvidence2,
+              }),
+            );
+            assert.equal(mSubmitted.status, "Created");
+            // Sent once the round is recorded (the writer's clock was a second after it).
+            clock = new Date(Date.parse(M2.batch.submittedAt) + 2000).toISOString();
+            assert.equal(
+              (await guestSends(M2.batch.submissionReference, mGuest)).status,
+              "Confirmed",
+            );
+            // What T-M's own table showed before the merge: two rounds charged $1.63 tax each,
+            // its own bill's tax $3.25 (−$0.01 on its rounds), $28.25 in all.
+            mBillBefore = await createMerchantDiningTableBillRead({
+              persistence: persistenceOf(server),
+              authentication: server.authentication,
+            })({ ...as(server), query: { diningSessionReference: mSession } });
+            assert.equal(mBillBefore.rounds.length, 2);
+            assert.equal(mBillBefore.taxRoundingMinor, "-1");
+            assert.equal(mBillBefore.owed.totalMinor, "2825");
+          }
           const tableVersion = async (table) =>
             Number(
               (
@@ -2282,6 +2441,60 @@ async function journey(journeyEnding) {
             ),
             [{ m: mOrder, b: orderReference }],
           );
+          if (ending === "MergedOwnRounding") {
+            // ── b40: the merged bill, as staff read it under the pilot API's grants. Four $12.50
+            // rounds charged $1.63 tax each ($6.52); the bill's tax is $6.50 (−$0.02). Each
+            // table's Order keeps its own bill: −$0.01 on T-M's rounds, −$0.01 on the host's.
+            const mergedOwn = await bill();
+            assert.equal(mergedOwn.rounds.length, 4);
+            assert.equal(mergedOwn.taxRoundingMinor, "-2");
+            assert.equal(mergedOwn.owed.taxMinor, "650");
+            assert.equal(mergedOwn.owed.totalMinor, "5650");
+            const share = (order) =>
+              mergedOwn.rounds
+                .filter((round) => round.orderReference === order)
+                .reduce((sum, round) => sum + BigInt(round.taxRoundingMinor), 0n)
+                .toString();
+            assert.deepEqual([share(mOrder), share(orderReference)], ["-1", "-1"]);
+            // Split by table ("each pays own rounds" as staff choose it for T-M's party).
+            assert.equal((await closing(server, "Begin")).phase, "Closing");
+            const ownSplit = await createMerchantDiningTableSplit({
+              persistence: persistenceOf(server),
+              authentication: server.authentication,
+              nextReference: fresh,
+            })({
+              ...as(server),
+              command: {
+                operationReference: fresh(),
+                diningSessionReference: sessionReference,
+                mode: "ByRounds",
+                people: null,
+                rounds: mergedOwn.rounds.map((round) => ({
+                  roundNumber: round.roundNumber,
+                  partNumber: round.orderReference === mOrder ? 2 : 1,
+                })),
+              },
+            });
+            assert.equal(ownSplit.status, "Recorded");
+            const parts = ownSplit.bill.split.parts.map((part) => [
+              part.partNumber,
+              part.amountMinor,
+            ]);
+            // T-M's part is the $28.25 its table showed before the merge, to the cent; the
+            // host's part is its own $28.25; together they are the merged bill.
+            assert.deepEqual(parts, [
+              [1, "2825"],
+              [2, mBillBefore.owed.totalMinor],
+            ]);
+            assert.equal(
+              ownSplit.bill.split.parts
+                .reduce((sum, part) => sum + BigInt(part.amountMinor), 0n)
+                .toString(),
+              mergedOwn.owed.totalMinor,
+            );
+            assert.equal(M2.batch.orderBatchReference.length, 36);
+            return;
+          }
           // ── Codes: T-M's code admits no one now (its party ended); this table's code admits a
           // phone from either table (no host needed) — T-M's host scans it and joins again.
           const stale = await scanAt(fromTable, fresh());

@@ -36,6 +36,8 @@ export function journeyRound({
   prefix,
   submitter = null,
   party = null,
+  /** b40: a later round of `party`'s Order, from that party's next Cart (its own Cart identity). */
+  laterRound = false,
   dineIn = true,
   quantity,
   unitPriceMinor,
@@ -59,7 +61,7 @@ export function journeyRound({
           record.order.orderReference,
           record.order.diningSessionReference,
           record.guestSessionReference,
-          f.cart.cartReference,
+          ...(laterRound ? [] : [f.cart.cartReference]),
           f.cart.createdByActorReference,
           ...f.cart.items.map((item) => item.addedByParticipantReference),
         ];
