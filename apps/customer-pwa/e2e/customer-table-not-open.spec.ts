@@ -67,6 +67,7 @@ async function scanNotOpenTable(
       },
     });
   });
+  // The menu in the language asked for (batch 44: a guest who switched to 中文 reads it too).
   await page.route("**/api/v1/public/stores/*/menu?*", (route) =>
     route.fulfill({
       status: 200,
@@ -94,7 +95,7 @@ async function scanNotOpenTable(
           menuReference: id(7),
           menuVersionReference: id(8),
           releaseReference: id(9),
-          locale: "en-CA",
+          locale: new URL(route.request().url()).searchParams.get("locale") ?? "en-CA",
           name: "Synthetic menu",
           effectiveFrom: at,
           effectiveUntil: null,
@@ -623,4 +624,233 @@ test.describe("@production CUST-ENTRY table not open", () => {
     await expect(main).not.toContainText("Join your table first");
     expect(entries).toHaveLength(1);
   });
+
+  // Batch 44 (v15 b43 verify, v-VQ-add-after-open-noreload-en-390.png): a guest waiting on a
+  // dish page while the table wasn't open. Staff opened it, and Add still said "This table isn't
+  // open yet" and sent nothing (the wait kept on the phone was never asked again); the menu never
+  // moved on either. Add now asks first, and goes to the join, saying the dish wasn't added yet.
+  for (const width of [390, 1440])
+    for (const reload of [false, true])
+      test(`Add on a dish asks again once staff open the table, and goes to the join (${width}${reload ? ", after a reload" : ""})`, async ({
+        page,
+      }) => {
+        await page.setViewportSize({ width, height: 900 });
+        let open = false;
+        await scanNotOpenTable(page, [], "L44 A (TEST)", () => open);
+        const main = page.getByRole("main");
+        const zh = width === 1440;
+        if (zh) await page.getByRole("button", { name: "切换到中文" }).click();
+        await expect(
+          main.getByRole("heading", {
+            name: zh
+              ? "Synthetic Noodle Bar 的 L44 A (TEST) 还没开台"
+              : "L44 A (TEST) at Synthetic Noodle Bar isn’t open yet",
+          }),
+        ).toBeVisible();
+        await main
+          .getByRole("button", { name: zh ? "先看看菜单" : "Look at the menu first" })
+          .click();
+        await page
+          .getByRole("link", {
+            name: zh ? "查看 Synthetic tea" : "View Synthetic tea",
+            exact: true,
+          })
+          .click();
+        await expect(page).toHaveURL(/\/menu\/items\//u);
+        if (reload) await page.reload();
+        const add = page.getByRole("button", {
+          name: zh ? "加入购物车" : "Add to cart",
+          exact: true,
+        });
+        await add.click();
+        await expect(page.getByRole("alert")).toContainText(
+          zh
+            ? "这桌还没开台。店员开台后就可以点单。"
+            : "This table isn’t open yet. You can order once staff open it.",
+        );
+        // Staff open the table; the guest taps Add again at once (before the page's own check).
+        open = true;
+        await add.click();
+        await expect(page).toHaveURL(/\/$/u, { timeout: 2_500 });
+        await expect(
+          main.getByRole("heading", {
+            name: zh ? "欢迎光临 Synthetic Noodle Bar" : "Welcome to Synthetic Noodle Bar",
+          }),
+        ).toBeVisible();
+        await expect(main.getByRole("status").filter({ hasText: "Synthetic tea" })).toHaveText(
+          zh
+            ? "Synthetic tea 还没加进购物车。请先加入这一桌，再重新加一次。"
+            : "Synthetic tea wasn’t added yet. Join this table, then add it again.",
+        );
+        await expect(main).not.toContainText(zh ? "还没开台" : "isn’t open yet");
+        const join = main.getByRole("button", { name: zh ? "加入这一桌" : "Join this table" });
+        await expect(join).toBeVisible();
+        // On the first screen with room for Linux CI's wider DejaVu fonts (batch 40 CI: ~40 px).
+        const box = await join.boundingBox();
+        expect(box).not.toBeNull();
+        expect((box?.y ?? 0) + (box?.height ?? 0)).toBeLessThanOrEqual(900 - 40);
+        expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(width - 16);
+        const overflow = await page.evaluate(
+          () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        );
+        expect(overflow).toBeLessThanOrEqual(0);
+        await expectNoInternalText(page);
+        await page.screenshot({
+          path: `test-results/b44-add-after-open-${zh ? "zh" : "en"}-${width}${reload ? "-reload" : ""}.png`,
+          fullPage: true,
+        });
+        expect(cartWrites).toEqual([]);
+        if (zh) await page.getByRole("button", { name: "English" }).click();
+      });
+
+  // Batch 44: the menu (and a dish page) goes on by itself once staff open the table, as Your
+  // table and Cart do; and the waiting Cart offers no "Refresh cart" (nothing to refresh).
+  for (const width of [390, 1440])
+    for (const reload of [false, true])
+      test(`the menu goes on by itself once staff open the table; the waiting Cart has no refresh (${width}${reload ? ", after a reload" : ""})`, async ({
+        page,
+      }) => {
+        await page.setViewportSize({ width, height: 900 });
+        let open = false;
+        await scanNotOpenTable(page, [], "L44 B (TEST)", () => open);
+        const main = page.getByRole("main");
+        const nav = page.getByRole("navigation", { name: /^(Customer journey|点单步骤)$/u });
+        const zh = width === 390;
+        if (zh) await page.getByRole("button", { name: "切换到中文" }).click();
+        const back = zh ? "回到等候开台页" : "Back to the waiting page";
+        // Cart while waiting: the wait and the way back, nothing to refresh.
+        await nav.getByRole("link", { name: zh ? "购物车" : "Cart" }).click();
+        await expect(page).toHaveURL(/\/cart$/u);
+        if (reload) await page.reload();
+        await expect(main.getByRole("link", { name: back })).toBeVisible();
+        await expect(
+          main.getByRole("button", { name: zh ? "刷新购物车" : "Refresh cart" }),
+        ).toHaveCount(0);
+        await expect(
+          main.getByRole("link", { name: zh ? "返回菜单" : "Return to menu" }),
+        ).toBeVisible();
+        await page.screenshot({
+          path: `test-results/b44-cart-waiting-${zh ? "zh" : "en"}-${width}${reload ? "-reload" : ""}.png`,
+          fullPage: true,
+        });
+        // The menu, waiting: staff open the table and it goes on to the join by itself.
+        await nav.getByRole("link", { name: zh ? "菜单" : "Menu" }).click();
+        await expect(page).toHaveURL(/\/menu$/u);
+        if (reload) await page.reload();
+        await expect(
+          page.getByRole("link", {
+            name: zh ? "查看 Synthetic tea" : "View Synthetic tea",
+            exact: true,
+          }),
+        ).toBeVisible();
+        open = true;
+        await expect(page).toHaveURL(/\/$/u, { timeout: 10_000 });
+        await expect(
+          main.getByRole("heading", {
+            name: zh ? "欢迎光临 Synthetic Noodle Bar" : "Welcome to Synthetic Noodle Bar",
+          }),
+        ).toBeVisible();
+        await expect(
+          main.getByRole("button", { name: zh ? "加入这一桌" : "Join this table" }),
+        ).toBeVisible();
+        await expect(main).not.toContainText(zh ? "还没开台" : "isn’t open yet");
+        expect(cartWrites).toEqual([]);
+        if (zh) await page.getByRole("button", { name: "English" }).click();
+      });
+
+  // Batch 44 (v15 b43 live, h-ended-reload-header-en-390.png): after the table was paid, closed
+  // and cleaned, a reload of Your table showed the header "Order / Scan the location QR code to
+  // begin" over the ended meal, and told a new party only to scan. The Store's header is kept (the
+  // restore names it) and the words match the start page's.
+  for (const width of [390, 1440])
+    test(`the ended meal's table page keeps the Store's header after a reload (${width})`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await page.route("**/api/v1/customer/session/csrf", (route) =>
+        route.fulfill({
+          status: 200,
+          headers: { "cache-control": "no-store" },
+          json: {
+            schemaVersion: 1,
+            settledTable: {
+              tableLabel: "L44W A (TEST)",
+              csrfToken: "e".repeat(43),
+              store: {
+                brandDisplayName: "Synthetic Brand",
+                storeDisplayName: "Synthetic Noodle Bar",
+              },
+            },
+          },
+        }),
+      );
+      await page.route("**/api/v1/dine-in/table-payment", (route) =>
+        route.fulfill({
+          status: 200,
+          headers: { "cache-control": "no-store" },
+          json: {
+            schemaVersion: 1,
+            receipt: {
+              tableLabel: "L44W A (TEST)",
+              rounds: [
+                {
+                  roundNumber: 1,
+                  fromTableLabel: null,
+                  items: [
+                    { displayName: "Beef noodles (TEST)", subtotalMinor: "1250", reduced: null },
+                  ],
+                },
+              ],
+              subtotalMinor: "1250",
+              taxMinor: "163",
+              ordersTotalMinor: "1413",
+              tipMinor: "0",
+              roundingMinor: "0",
+              paidMinor: "1413",
+              split: false,
+              payments: [{ partNumber: null, method: "Online", totalMinor: "1413" }],
+            },
+          },
+        }),
+      );
+      const main = page.getByRole("main");
+      const banner = page.getByRole("banner");
+      for (const zh of [false, true]) {
+        await page.goto("/dine-in/session");
+        if (zh) await page.getByRole("button", { name: "切换到中文" }).click();
+        await expect(
+          main.getByRole("heading", { name: zh ? "谢谢光临" : "Thank you for dining with us." }),
+        ).toBeVisible();
+        await expect(main.getByRole("region", { name: zh ? "收据" : "Receipt" })).toContainText(
+          "$14.13",
+        );
+        await expect(banner.getByRole("heading", { level: 1 })).toHaveText("Synthetic Noodle Bar");
+        await expect(banner).toContainText(
+          zh ? "Synthetic Brand · 堂食" : "Synthetic Brand · Dine in",
+        );
+        await expect(
+          page.getByText(zh ? "扫描门店二维码开始点单" : "Scan the location QR code to begin"),
+        ).toHaveCount(0);
+        await expect(main).toContainText(
+          zh
+            ? "新的一桌？请让店员带位，开台后再扫一次码。"
+            : "New party? Ask staff to seat you, then scan again.",
+        );
+        await page.reload();
+        await expect(banner.getByRole("heading", { level: 1 })).toHaveText("Synthetic Noodle Bar");
+        await expect(
+          main.getByRole("heading", { name: zh ? "谢谢光临" : "Thank you for dining with us." }),
+        ).toBeVisible();
+        const overflow = await page.evaluate(
+          () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        );
+        expect(overflow).toBeLessThanOrEqual(0);
+        await expectNoInternalText(page);
+        await page.screenshot({
+          path: `test-results/b44-ended-reload-${zh ? "zh" : "en"}-${width}.png`,
+          fullPage: true,
+        });
+        if (zh) await page.getByRole("button", { name: "English" }).click();
+      }
+    });
 });

@@ -20,6 +20,8 @@ import {
   setUnseatedTableWait,
   keepUnseatedTableWait,
   forgetKeptUnseatedTableWait,
+  getDishNotAddedYet,
+  setDishNotAddedYet,
   type GuestTableStartAnswer,
 } from "../session/customer-transaction-context.js";
 import { tableNotOpenHeading, tableNotOpenWaitText } from "./table-wait-away.js";
@@ -265,7 +267,11 @@ export function EntryContextPage({
         : null,
     );
     // M115: only an open table's page offers the menu's join; any other answer clears it.
-    if (state.kind !== "Established" && state.kind !== "Resumed") setGuestTableJoiner(null);
+    if (state.kind !== "Established" && state.kind !== "Resumed") {
+      setGuestTableJoiner(null);
+      // Batch 44: "this dish wasn't added yet" is only said beside the join.
+      setDishNotAddedYet(null);
+    }
     if (state.kind !== "TableMayStart") {
       setGuestTableStarter(null);
       return;
@@ -987,6 +993,10 @@ function EntryNextSteps({
   const [joined, setJoined] = useState(false);
   // Joining is the next step only where it can happen here.
   const first = joining && diningAdmission !== undefined && !joined;
+  // Batch 44 (v15 b43 verify): the guest tapped Add on a dish just as staff opened the table; it
+  // wasn't added. Said once, here beside the join.
+  const [dishNotAdded] = useState(getDishNotAddedYet);
+  useEffect(() => setDishNotAddedYet(null), []);
   const opened = useRef(false);
   // WP-2423 M115: the guest may look at the menu first; their tap on Add there joins this table
   // by its QR code (the same join as the panel's) and the dish they configured goes in. Cleared
@@ -1001,6 +1011,13 @@ function EntryNextSteps({
   }, [first, diningAdmission, context, starting]);
   return (
     <>
+      {first && dishNotAdded !== null ? (
+        <p className="entry-context" role="status">
+          {t("{name} wasn’t added yet. Join this table, then add it again.", {
+            name: dishNotAdded,
+          })}
+        </p>
+      ) : null}
       {joining ? (
         <DiningAdmissionPanel
           contextEpoch={context}

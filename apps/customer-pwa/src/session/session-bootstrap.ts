@@ -86,6 +86,28 @@ function endedVisit(value: unknown) {
     receiptAvailableUntil: raw.receiptAvailableUntil,
   });
 }
+/** Batch 44: the settled table's Store, by its names only (null when malformed). */
+function settledStore(
+  value: unknown,
+): Readonly<{ brandDisplayName: string; storeDisplayName: string }> | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  const raw = value as Record<string, unknown>;
+  const keys = ["brandDisplayName", "storeDisplayName"];
+  if (
+    Object.keys(raw).length !== keys.length ||
+    keys.some(
+      (key) =>
+        typeof raw[key] !== "string" ||
+        !(raw[key] as string).trim() ||
+        (raw[key] as string).length > 200,
+    )
+  )
+    return null;
+  return Object.freeze({
+    brandDisplayName: raw.brandDisplayName as string,
+    storeDisplayName: raw.storeDisplayName as string,
+  });
+}
 /** M02: a restored dine-in Session's table, and whether this phone joined the party there. */
 export interface CustomerRestoredVisit {
   readonly publicTableReference: string;
@@ -211,11 +233,17 @@ export async function restoreCustomerSession(
       "settledTable" in value
     ) {
       const settled = value.settledTable;
+      // Batch 44: a newer server names the Store too (for the header); an older one doesn't.
+      const store =
+        settled !== null && typeof settled === "object" && "store" in settled
+          ? settledStore(settled.store)
+          : undefined;
       if (
         settled !== null &&
         typeof settled === "object" &&
         !Array.isArray(settled) &&
-        Object.keys(settled).length === 2 &&
+        store !== null &&
+        Object.keys(settled).length === (store === undefined ? 2 : 3) &&
         "tableLabel" in settled &&
         typeof settled.tableLabel === "string" &&
         /^[^\p{Cc}\p{Cf}<>{}$]{1,40}$/u.test(settled.tableLabel) &&
@@ -223,7 +251,11 @@ export async function restoreCustomerSession(
         typeof settled.csrfToken === "string" &&
         /^[A-Za-z0-9_-]{43}$/u.test(settled.csrfToken)
       )
-        setSettledTable({ tableLabel: settled.tableLabel, csrfToken: settled.csrfToken });
+        setSettledTable({
+          tableLabel: settled.tableLabel,
+          csrfToken: settled.csrfToken,
+          ...(store === undefined ? {} : { store }),
+        });
       return false;
     }
     // v15 2026-10-30: staff moved the party after this phone joined: only where it sits now.

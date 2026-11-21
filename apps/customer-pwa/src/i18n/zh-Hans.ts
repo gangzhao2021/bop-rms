@@ -54,6 +54,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Join this table to order and see what your table has ordered.":
     "加入这一桌就能点单，也能看到这桌点了什么。",
   "Join this table first, then add the dish.": "请先加入这一桌，再加这道菜。",
+  "Staff have opened this table. Join it, then add the dish again.":
+    "店员已经开台。请先加入这一桌，再重新加这道菜。",
+  "{name} wasn’t added yet. Join this table, then add it again.":
+    "{name} 还没加进购物车。请先加入这一桌，再重新加一次。",
   "We couldn’t join you to this table just now. Try again, or ask staff. Your choices are kept here.":
     "暂时无法加入这一桌。请再试一次，或询问店员。您的选择会保留在这里。",
   "You’re paying for round {round}. It goes to the kitchen once it’s paid.":
@@ -418,7 +422,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Part {number} paid by": "第 {number} 份付款方式",
   "We couldn’t load the receipt. Check your connection and try again.":
     "收据没能加载。请检查网络后重试。",
-  "New party? Scan the table QR code": "新的一桌？扫桌台二维码",
   "Keep a copy": "保留一份",
   "Keep browsing": "继续浏览",
   "Keep them": "保留",

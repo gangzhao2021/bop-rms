@@ -83,12 +83,30 @@ export function getMovedTableLabel(): string | null {
  * closed and its bill settled, and the ended visit's CSRF value that reads that table's receipt
  * (read only); the dine-in page thanks them instead of asking them to join. Memory only.
  */
-let settledTable: { readonly tableLabel: string; readonly csrfToken: string } | null = null;
+/**
+ * Batch 44 (v15 b43 live): the Store's and brand's names come with it (a newer server), so the
+ * page's header names the Store after a reload, not "scan the code to begin".
+ */
+interface SettledTable {
+  readonly tableLabel: string;
+  readonly csrfToken: string;
+  readonly store?: Readonly<{ brandDisplayName: string; storeDisplayName: string }>;
+}
+let settledTable: SettledTable | null = null;
 
-export function setSettledTable(
-  value: { readonly tableLabel: string; readonly csrfToken: string } | null,
-): void {
-  settledTable = value === null ? null : Object.freeze({ ...value });
+export function setSettledTable(value: SettledTable | null): void {
+  settledTable =
+    value === null
+      ? null
+      : Object.freeze({
+          ...value,
+          ...(value.store === undefined ? {} : { store: Object.freeze({ ...value.store }) }),
+        });
+}
+
+/** The settled table's Store (its names only), when the restore said which it is. */
+export function getSettledTableStore(): SettledTable["store"] | null {
+  return settledTable?.store ?? null;
 }
 
 export function getSettledTableLabel(): string | null {
@@ -219,6 +237,21 @@ export function setTableOpenedWhileAway(value: boolean): void {
 
 export function isTableOpenedWhileAway(): boolean {
   return tableOpenedWhileAway;
+}
+
+/**
+ * Batch 44 (v15 b43 verify): the guest tapped Add on a dish while waiting, and the check said
+ * staff had just opened the table. The start page offers the join and says this dish wasn't added
+ * yet (its name only, as on the menu). Memory only; cleared once the start page has said it.
+ */
+let dishNotAddedYet: string | null = null;
+
+export function setDishNotAddedYet(name: string | null): void {
+  dishNotAddedYet = name;
+}
+
+export function getDishNotAddedYet(): string | null {
+  return dishNotAddedYet;
 }
 
 /**

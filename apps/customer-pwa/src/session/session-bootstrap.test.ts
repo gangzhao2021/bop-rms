@@ -15,6 +15,7 @@ import {
   getSettledTableLabel,
   setSettledTable,
   getSettledTableReceiptCsrf,
+  getSettledTableStore,
   isCustomerSessionRestoreUnavailable,
   setCustomerSessionRestoreUnavailable,
 } from "./customer-transaction-context.js";
@@ -289,6 +290,12 @@ it("keeps that a guest's table was settled, with the value that reads its receip
     { tableLabel: "T7", csrfToken: "short" },
     { tableLabel: "T7" },
     { tableLabel: "T7", csrfToken: "C".repeat(43), extra: 1 },
+    { tableLabel: "T7", csrfToken: "C".repeat(43), store: { storeDisplayName: "Only one" } },
+    {
+      tableLabel: "T7",
+      csrfToken: "C".repeat(43),
+      store: { brandDisplayName: "B", storeDisplayName: " " },
+    },
     "T7",
     null,
   ]) {
@@ -296,6 +303,46 @@ it("keeps that a guest's table was settled, with the value that reads its receip
     expect(await restoreCustomerSession(fetcher)).toBe(false);
     expect(getSettledTableLabel()).toBeNull();
   }
+});
+
+// Batch 44 (v15 b43 live, h-ended-reload-header-en-390.png): after the table was settled and
+// cleaned, a reload of Your table showed "Order / Scan the location QR code to begin". A newer
+// server names the Store with the settled table, and the page keeps it; an older one doesn't.
+it("batch 44: keeps the settled table's Store names for the header, when the restore gives them", async () => {
+  const store = {
+    brandDisplayName: "Test Merchant 2 - not production",
+    storeDisplayName: "Test Merchant 2 Main - not production",
+  };
+  expect(
+    await restoreCustomerSession(
+      vi.fn().mockResolvedValue(
+        response({
+          schemaVersion: 1,
+          settledTable: { tableLabel: "L43W A (TEST)", csrfToken: "C".repeat(43), store },
+        }),
+      ),
+    ),
+  ).toBe(false);
+  expect(getCustomerCsrfCredential()).toBeNull();
+  expect(getSettledTableLabel()).toBe("L43W A (TEST)");
+  expect(getSettledTableStore()).toEqual(store);
+  setCustomerCsrfCredential("D".repeat(43));
+  expect(getSettledTableStore()).toBeNull();
+  setCustomerCsrfCredential(null);
+  expect(
+    await restoreCustomerSession(
+      vi.fn().mockResolvedValue(
+        response({
+          schemaVersion: 1,
+          settledTable: { tableLabel: "L43W A (TEST)", csrfToken: "C".repeat(43) },
+        }),
+      ),
+    ),
+  ).toBe(false);
+  expect(getSettledTableLabel()).toBe("L43W A (TEST)");
+  expect(getSettledTableStore()).toBeNull();
+  setCustomerCsrfCredential("D".repeat(43));
+  setCustomerCsrfCredential(null);
 });
 
 // M02 (v15 07b7a1b7): a reloaded table page stays at its own table.

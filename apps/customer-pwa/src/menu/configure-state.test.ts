@@ -6,8 +6,12 @@ import {
   setGuestTableQuestion,
   setGuestTableStarter,
   setUnseatedTableScan,
+  setUnseatedTableWait,
+  isTableOpenedWhileAway,
+  setTableOpenedWhileAway,
   type GuestTableStartAnswer,
 } from "../session/customer-transaction-context.js";
+import type { CustomerTableWaitAnswer } from "../entry/types.js";
 import { describe, expect, it } from "vitest";
 import type { CustomerCartClient } from "../cart/cart-client.js";
 import { CartClientError, type CartView } from "../cart/types.js";
@@ -205,6 +209,58 @@ describe("WP-1702 in-memory Configurator state", () => {
       expect(state.calls).toEqual([]);
     } finally {
       setUnseatedTableScan(false);
+    }
+  });
+
+  // Batch 44 (v15 b43 verify, v-VQ-add-after-open-noreload-en-390.png): staff opened the table
+  // while the guest waited on a dish; Add still said "isn't open yet" from the wait kept on the
+  // phone and asked nothing. It asks the scan's cheap check first.
+  it("batch 44: Add asks whether staff opened the table before saying it isn't open yet", async () => {
+    const answers: CustomerTableWaitAnswer[] = [];
+    let asked = 0;
+    const wait = (answer: CustomerTableWaitAnswer) => {
+      answers.push(answer);
+      setUnseatedTableWait({
+        kind: "NotOpen",
+        storeDisplayName: "Test Merchant 2 Main - not production",
+        tableLabel: "L43V A (TEST)",
+        check: async () => {
+          asked += 1;
+          return answers.shift() ?? { kind: "Waiting" };
+        },
+      });
+    };
+    setUnseatedTableScan(true);
+    setCustomerCsrfCredential(null);
+    try {
+      // Still waiting: said so, nothing sent to a cart.
+      wait({ kind: "Waiting" });
+      let state = fixture(null);
+      await state.controller.submit(id(3), draft);
+      expect(state.controller.getState()).toMatchObject({ status: "not-seated" });
+      expect(asked).toBe(1);
+      expect(state.calls).toEqual([]);
+      // Staff opened it: the start page is asked again at once and offers the join.
+      wait({ kind: "Changed" });
+      state = fixture(null);
+      await state.controller.submit(id(3), draft);
+      expect(state.controller.getState()).toMatchObject({ status: "table-opened" });
+      expect(isTableOpenedWhileAway()).toBe(true);
+      expect(state.calls).toEqual([]);
+      setTableOpenedWhileAway(false);
+      // The check couldn't answer: never "isn't open yet" on a guess.
+      wait({ kind: "Busy", retryAfterSeconds: 5 });
+      state = fixture(null);
+      await state.controller.submit(id(3), draft);
+      expect(state.controller.getState()).toMatchObject({
+        status: "unavailable",
+        retryAfterSeconds: 5,
+      });
+      expect(state.calls).toEqual([]);
+    } finally {
+      setUnseatedTableWait(null);
+      setUnseatedTableScan(false);
+      setTableOpenedWhileAway(false);
     }
   });
 

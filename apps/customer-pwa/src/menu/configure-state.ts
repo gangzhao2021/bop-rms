@@ -1,11 +1,15 @@
 import type { CustomerCartClient } from "../cart/cart-client.js";
 import { CartClientError, type CartItemDraft, type CartView } from "../cart/types.js";
 import {
+  forgetKeptUnseatedTableWait,
   getCustomerCsrfCredential,
   getGuestTableJoiner,
   getGuestTableStarter,
+  getUnseatedTableWait,
   isGuestTableQuestion,
   isUnseatedTableScan,
+  keepUnseatedTableWait,
+  setTableOpenedWhileAway,
 } from "../session/customer-transaction-context.js";
 
 export type ConfigureState =
@@ -30,6 +34,11 @@ export type ConfigureState =
         /** M126 I.2: this phone's place at the table ended (why: getParticipationEnded). */
         | "participation-ended"
         | "not-seated"
+        /**
+         * Batch 44: staff opened the table while this phone waited; asked again on Add, so the
+         * start page offers the join (the dish wasn't added).
+         */
+        | "table-opened"
         | "table-start-refused"
         | "table-join-refused"
         | "table-in-use"
@@ -227,6 +236,38 @@ export function createConfigureController({
         return;
       }
       if (starter === null) {
+        // Batch 44 (v15 b43 verify): the wait kept on the phone may be out of date: staff may
+        // have opened the table since. The scan's cheap "is it open now?" is asked first, so the
+        // guest is never told the table isn't open when it is.
+        const wait = getUnseatedTableWait();
+        const check = wait?.kind === "NotOpen" ? wait.check : null;
+        if (check !== null && check !== undefined) {
+          publish({ status: "pending", stage: "locate" });
+          const answer = await check().catch(() => ({ kind: "Busy" as const }));
+          if (answer.kind === "Changed") {
+            setTableOpenedWhileAway(true);
+            publish({
+              status: "table-opened",
+              issueCodes: [],
+              retryAfterSeconds: null,
+              canRetry: false,
+            });
+            return;
+          }
+          if (answer.kind === "Waiting") keepUnseatedTableWait();
+          else if (answer.kind === "Refused") forgetKeptUnseatedTableWait();
+          else {
+            // Not known now (busy, or too many checks): never "not open yet" on a guess.
+            publish({
+              status: "unavailable",
+              issueCodes: [],
+              retryAfterSeconds:
+                "retryAfterSeconds" in answer ? (answer.retryAfterSeconds ?? null) : null,
+              canRetry: false,
+            });
+            return;
+          }
+        }
         fail(new CartClientError("cart_dining_not_seated"), false);
         return;
       }

@@ -46,8 +46,13 @@ import {
   getTablePaymentTiming,
   isGuestTableQuestion,
   isUnseatedTableScan,
+  setDishNotAddedYet,
 } from "../session/customer-transaction-context.js";
-import { backToWaitingText, tableWaitingToOpen } from "../entry/table-wait-away.js";
+import {
+  backToWaitingText,
+  tableWaitingToOpen,
+  useGoOnWhenTableOpens,
+} from "../entry/table-wait-away.js";
 import {
   allergensForChoice,
   comboDishAllergens,
@@ -478,6 +483,11 @@ export function MenuScreen({
   // push the page down; the item's own heading carries its name.
   const title = mode === "search" ? t("Search menu") : t("Menu");
   const browseFound = mode === "browse" && state.kind === "Found";
+  // Batch 44 (v15 b43 verify): while this phone waits for staff to open the table, the menu and a
+  // dish page go on by themselves once they do, as Your table and Cart do.
+  useGoOnWhenTableOpens(
+    tableWaitingToOpen() !== null && getGuestTableStarter() === null && !isGuestTableQuestion(),
+  );
   // M116: a Store not taking orders now shows its menu to look at, with no cart and no adding.
   const closed = context?.closed;
   const readOnlyNotice =
@@ -1125,7 +1135,11 @@ function QuickAddButton({ family }: { readonly family: MenuFamily }) {
     else if (state.status === "outcome-unknown")
       quick.onAdded(t("We couldn't confirm that. Check your cart before adding it again."));
     else if (state.status === "offline") quick.onAdded(t("You’re offline. Nothing was added."));
-    else if (quickAddHeldText(state) !== null)
+    else if (state.status === "table-opened") {
+      // Batch 44: staff just opened the table: join it first (the dish wasn't added).
+      setDishNotAddedYet(family.name);
+      void navigate("/");
+    } else if (quickAddHeldText(state) !== null)
       // v15 b17: the table's cart was busy with another guest's order (tried once more already),
       // or changed meanwhile: said here, on the menu, never a silent jump to the dish page.
       quick.onAdded(
@@ -1559,6 +1573,7 @@ export function ConfigureStatus({
       : isUnseatedTableScan()
         ? t("You can order once staff seat you. Ask a staff member, then scan again.")
         : t("Join this table first, then add the dish."),
+    "table-opened": t("Staff have opened this table. Join it, then add the dish again."),
     "table-join-refused": t(
       "We couldn’t join you to this table just now. Try again, or ask staff. Your choices are kept here.",
     ),
@@ -1608,7 +1623,9 @@ export function ConfigureStatus({
       ) : null}
       {state.status === "table-question" ? <Link to="/">{t("Back to the question")}</Link> : null}
       {state.status === "table-in-use" ? <Link to="/">{t("Back to this table")}</Link> : null}
-      {state.status === "not-seated" && waitingToOpen ? (
+      {state.status === "table-opened" ? (
+        <Link to="/">{t("Join this table")}</Link>
+      ) : state.status === "not-seated" && waitingToOpen ? (
         <Link to="/">{backToWaitingText()}</Link>
       ) : state.status === "not-seated" && !isUnseatedTableScan() ? (
         <Link to="/">{t("Join this table")}</Link>
@@ -1741,6 +1758,13 @@ export function SellableConfigurator({
     if (state.status === "added" && state.earlierCartCleared !== true)
       void navigate("/menu", { state: { added: true } });
   }, [state, navigate]);
+  // Batch 44 (v15 b43 verify): staff opened the table while the guest chose: the start page
+  // offers the join and says this dish wasn't added yet.
+  useEffect(() => {
+    if (state.status !== "table-opened") return;
+    setDishNotAddedYet(sellable.name);
+    void navigate("/");
+  }, [state, navigate, sellable.name]);
   const sizes = variants !== undefined && variants.length > 1 ? variants : null;
   return (
     <form className="sellable-configurator" aria-labelledby="configure-heading" onSubmit={submit}>

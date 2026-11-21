@@ -28,6 +28,7 @@ import { TablePayPanel, type TablePayStatus } from "./TablePayPanel.js";
 import {
   getGuestTableStarter,
   isGuestTableQuestion,
+  getSettledTableStore,
   getUnseatedTableWait,
   isUnseatedTableScan,
   subscribeCustomerCsrfContext,
@@ -1070,7 +1071,8 @@ function SettledTable({
         <h2>{t("Thank you for dining with us.")}</h2>
         {/* b13: a table comped to nothing closes too; "paid" is the receipt's to say. */}
         <p>{t("Your meal at table {table} has ended.", { table: saidTable(tableLabel) })}</p>
-        <p>{t("New party? Scan the table QR code")}</p>
+        {/* Batch 44: the same words as the start page (a new party is seated first). */}
+        <p>{t("New party? Ask staff to seat you, then scan again.")}</p>
       </section>
       <SettledTableReceiptPanel {...(receipt === undefined ? {} : { client: receipt })} />
     </>
@@ -1155,8 +1157,20 @@ export function DiningSessionScreen({
     (active || view?.paymentTiming === "PayLater") &&
     !paidOff &&
     tablePay?.checkingOut !== true;
+  // Batch 44 (v15 b43 live): after a reload the ended meal's page still names its Store (the
+  // restore says which), never "scan the location QR code to begin".
+  const settledStore = state.status === "settled" ? getSettledTableStore() : null;
+  const pageStore: CustomerStoreContext | undefined =
+    store ??
+    (settledStore === null || settledStore === undefined
+      ? undefined
+      : {
+          storeName: settledStore.storeDisplayName,
+          brandName: settledStore.brandDisplayName,
+          serviceMode: "DineIn",
+        });
   return (
-    <CustomerPage step="table" store={store} className="order-status dining-session">
+    <CustomerPage step="table" store={pageStore} className="order-status dining-session">
       <PageHeading
         eyebrow={
           view?.orderNumber

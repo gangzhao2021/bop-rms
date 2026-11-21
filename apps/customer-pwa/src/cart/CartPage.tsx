@@ -645,7 +645,7 @@ function ErrorState({
           <button type="button" onClick={() => void controller.retry()}>
             {failure.retrySameOperation}
           </button>
-        ) : (
+        ) : waitingToOpen ? null : ( // Batch 44 (v15 b43 live): nothing to refresh before staff open the table.
           <button type="button" onClick={() => void controller.load()}>
             {failure.refreshCart}
           </button>
