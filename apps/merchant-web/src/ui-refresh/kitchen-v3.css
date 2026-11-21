@@ -193,7 +193,7 @@
 }
 /* Batch 42 (v15 b41 live): the list opens right under its button (top: auto keeps it where it
    would sit in the flow, under the summary), not under the whole bar: on a phone the bar wraps and
-   the list opened about 100 px below the button. Across, it still keeps to the bar's right edge. */
+   the list opened about 100 px below the button. Across, see batch 43 below. */
 .kitchen-board-heading__actions .kitchen-recent-finished[open] > .kitchen-recent-finished__panel {
   position: absolute;
   inset: auto 0 auto auto;
@@ -209,6 +209,15 @@
   border-radius: var(--bop-radius-control);
   background: var(--bop-color-surface-default);
   box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
+}
+/* Batch 43 (v15 b42 live): from a tablet up the panel hangs from its own button, placed by
+   placeRecentlyFinishedPanel (KitchenRework.tsx) inside the screen; until then the bar's right edge. */
+@media (min-width: 768px) {
+  .kitchen-board-heading__actions
+    .kitchen-recent-finished[open][data-anchored]
+    > .kitchen-recent-finished__panel {
+    inset-inline: var(--kitchen-recent-left, auto) auto;
+  }
 }
 @media (max-width: 767px) {
   .kitchen-board-heading__actions .kitchen-recent-finished[open] > .kitchen-recent-finished__panel {

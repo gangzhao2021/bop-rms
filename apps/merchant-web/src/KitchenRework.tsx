@@ -1,5 +1,5 @@
 import { t } from "./i18n/i18n.js";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { StatePanel } from "@bop-rms/ui";
 import { kitchenOrderText, type KitchenBoardItem } from "./kitchen-board.js";
 import {
@@ -550,6 +550,36 @@ export function recentlyFinishedKitchenItems(
     .slice(0, 12);
 }
 
+/** The space kept between the Recently finished panel and either side of the screen. */
+const RECENT_PANEL_MARGIN = 16;
+
+/**
+ * Batch 43 (v15 b42 live): from a tablet up, the open panel hangs from its own button. At 1440 it
+ * had kept to the heading bar's right edge (button x 684-846, panel x 996-1416) and read as part of
+ * the section picker. It starts under the button, ends with it when it would run past the screen,
+ * and stays fully inside the screen either way. A phone keeps the bar's whole width (the CSS there
+ * ignores this), the batch 41 fix for a list that had opened off the left of the screen.
+ */
+export function placeRecentlyFinishedPanel(details: HTMLDetailsElement | null): void {
+  if (details === null || !details.open) return;
+  const summary = details.querySelector("summary");
+  const panel = details.querySelector<HTMLElement>(":scope > .kitchen-recent-finished__panel");
+  // The heading bar is the panel's containing block (it is the positioned one).
+  const bar = details.closest(".kitchen-board-heading__actions") ?? details.offsetParent;
+  if (summary === null || panel === null || bar === null) return;
+  const viewport = document.documentElement.clientWidth;
+  const button = summary.getBoundingClientRect();
+  const width = panel.getBoundingClientRect().width;
+  let left = button.left;
+  if (left + width > viewport - RECENT_PANEL_MARGIN) left = button.right - width;
+  left = Math.max(RECENT_PANEL_MARGIN, Math.min(left, viewport - RECENT_PANEL_MARGIN - width));
+  details.style.setProperty(
+    "--kitchen-recent-left",
+    `${left - bar.getBoundingClientRect().left - bar.clientLeft}px`,
+  );
+  details.dataset.anchored = "true";
+}
+
 /** Finished dishes of the last two hours, newest first, so a returned dish can be remade. */
 export function KitchenRecentlyFinished({
   items,
@@ -576,9 +606,29 @@ export function KitchenRecentlyFinished({
   // Batch 41 (v15 b40 live): the list folds when a dish is chosen, so it never lies over the new
   // remake card (it had hidden the card's "Pickup · Order 1").
   const listRef = useRef<HTMLDetailsElement | null>(null);
+  // Batch 43 (v15 b42 live): placed before it is drawn, every time it opens, and again while open.
+  useLayoutEffect(() => {
+    placeRecentlyFinishedPanel(listRef.current);
+  });
+  useEffect(() => {
+    const place = () => placeRecentlyFinishedPanel(listRef.current);
+    globalThis.addEventListener("resize", place);
+    return () => globalThis.removeEventListener("resize", place);
+  }, []);
   return (
     <details className="kitchen-recent-finished" ref={listRef}>
-      <summary>{t("Recently finished · {length}", { length: finished.length })}</summary>
+      <summary
+        onClick={(event) => {
+          // Opened here rather than by the browser, so the panel is placed before it is drawn.
+          const details = listRef.current;
+          if (details === null) return;
+          event.preventDefault();
+          details.open = !details.open;
+          placeRecentlyFinishedPanel(details);
+        }}
+      >
+        {t("Recently finished · {length}", { length: finished.length })}
+      </summary>
       {/* Batch 42 (v15 b41 live): with none, one plain line, never an empty box. */}
       {finished.length === 0 ? (
         <p className="kitchen-recent-finished__panel kitchen-recent-finished__none">
