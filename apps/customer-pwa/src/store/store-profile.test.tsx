@@ -221,6 +221,14 @@ describe("WP-2423 item 8 ③ follow-up: after last orders", () => {
     expect(renderToStaticMarkup(<StoreStatusStrip load={loaderOf(false)} />)).toContain(
       `Last orders ${formatStoreLocalTime("17:30:00")}`,
     );
+    // Batch 40 review: nor does the start page's store card, below the page's own stop notice;
+    // before last orders it still names them.
+    const card = renderToStaticMarkup(<StoreIdentityCard load={loaderOf(true)} />);
+    expect(card).toContain("Open now");
+    expect(card).not.toContain("stopped taking orders");
+    expect(renderToStaticMarkup(<StoreIdentityCard load={loaderOf(false)} />)).toContain(
+      `last orders ${formatStoreLocalTime("17:30:00")}`,
+    );
   });
 });
 
@@ -279,7 +287,18 @@ describe("M117: after midnight in last night's overnight period", () => {
       </LanguageRoot>,
     );
     renderToStaticMarkup(<LanguageRoot initial="en">{() => null}</LanguageRoot>);
-    expect(line(zh)).toBe("今天 营业至 2:00，之后 11:00–2:00（次日）");
+    expect(line(zh)).toBe("今天营业至 2:00，之后 11:00–2:00（次日）");
+    // Before a time the space stays: "今天 11:00–2:00（次日）".
+    const evening = { ...profile, hours: { ...lateHours, tonight: null } };
+    const zhEvening = renderToStaticMarkup(
+      <LanguageRoot initial="zh-Hans">
+        {() => (
+          <StoreIdentityCard load={Object.assign(async () => evening, { last: () => evening })} />
+        )}
+      </LanguageRoot>,
+    );
+    renderToStaticMarkup(<LanguageRoot initial="en">{() => null}</LanguageRoot>);
+    expect(line(zhEvening)).toBe("今天 11:00–2:00（次日）");
     expect(zh).not.toContain("今晚");
     expect(() =>
       parseStoreProfile({

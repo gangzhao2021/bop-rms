@@ -37,10 +37,11 @@ async function storeRead(page: Page, hours: Record<string, unknown>) {
   );
 }
 
-async function enter(page: Page, channel: "Pickup" | "DineIn") {
+async function enter(page: Page, channel: "Pickup" | "DineIn", { resumed = false } = {}) {
   await page.route("**/bff/customer/entry", (route) =>
     route.fulfill({
-      status: 201,
+      // The same pickup code scanned again with this phone's cart still open: 200, resumed.
+      status: resumed ? 200 : 201,
       headers: { "cache-control": "no-store" },
       json: {
         schemaVersion: 2,
@@ -55,6 +56,7 @@ async function enter(page: Page, channel: "Pickup" | "DineIn") {
         locale: "en-CA",
         contextExpiresAt: new Date(Date.now() + 600_000).toISOString(),
         csrfToken: "h".repeat(43),
+        ...(resumed ? { resumed: true } : {}),
       },
     }),
   );
@@ -92,6 +94,8 @@ test.describe("@production after last orders and after midnight", () => {
     const info = page.getByRole("region", { name: "Synthetic Store" }).last();
     await expect(info).toContainText("Today until 1:00 a.m., then 12:00 p.m.–1:00 a.m. (next day)");
     await expect(info).not.toContainText("Tonight");
+    // The notice above says the kitchen stopped; the store card's status line doesn't repeat it.
+    await expect(info).not.toContainText("stopped taking orders");
     await expectNoInternalText(page);
     for (const width of [390, 1440]) await fitsAt(page, width, "pickup-stopped-en");
 
@@ -100,8 +104,9 @@ test.describe("@production after last orders and after midnight", () => {
     await expect(card).toContainText("厨房 0:30 已停止接单。现在不能用手机下自取单。");
     await expect(card).toContainText("门店 1:00 打烊，今天 12:00 再开门。");
     await expect(card).not.toContainText("可以开始点单");
-    await expect(info).toContainText("今天 营业至 1:00，之后 12:00–1:00（次日）");
+    await expect(info).toContainText("今天营业至 1:00，之后 12:00–1:00（次日）");
     await expect(info).not.toContainText("今晚");
+    await expect(info).not.toContainText("停止接单");
     expect(await page.locator("main").innerText()).not.toMatch(asciiInChinese);
     for (const width of [390, 1440]) await fitsAt(page, width, "pickup-stopped-zh");
 
@@ -126,6 +131,30 @@ test.describe("@production after last orders and after midnight", () => {
     for (const width of [390, 1440]) await fitsAt(page, width, "menu-stopped");
   });
 
+  test("the same pickup code scanned again with the cart still open says the kitchen stopped, and continues", async ({
+    page,
+  }) => {
+    await page.clock.setFixedTime(at);
+    await storeRead(page, stoppedHours);
+    await enter(page, "Pickup", { resumed: true });
+    await page.goto("/#qr=aaa.bbb.ccc");
+    const card = page.locator(".entry-card");
+    await expect(
+      card.getByRole("heading", { name: "The kitchen has stopped taking orders" }),
+    ).toBeVisible();
+    await expect(card).toContainText(
+      "The kitchen stopped taking orders at 12:30 a.m. You can’t place a pickup order from your phone now.",
+    );
+    await expect(card).not.toContainText("Ready to order");
+    await expect(card).not.toContainText("is selected");
+    await expect(card.getByRole("button")).toHaveText(["Continue"]);
+    await page.getByRole("button", { name: "切换到中文" }).click();
+    await expect(card.getByRole("heading", { name: "厨房已停止接单" })).toBeVisible();
+    await expect(card).not.toContainText("可以开始点单");
+    await expect(card.getByRole("button")).toHaveText(["继续"]);
+    expect(await card.innerText()).not.toMatch(asciiInChinese);
+  });
+
   test("at a table after last orders the guest is told the kitchen stopped and to ask staff", async ({
     page,
   }) => {
@@ -137,6 +166,16 @@ test.describe("@production after last orders and after midnight", () => {
     await expect(card).toContainText(
       "The kitchen stopped taking orders at 12:30 a.m. You can’t send a new order from your phone now. To add something, ask a staff member.",
     );
+    // Joining the table (to see and pay the bill, by tap or join code) and looking at the menu are
+    // all it offers; no button starts or sends an order.
+    await expect(card.getByRole("heading", { level: 2 }).first()).toHaveText(
+      "Welcome to Synthetic Store",
+    );
+    await expect(card.getByRole("button")).toHaveText([
+      "Join this table",
+      "I have a join code",
+      "Look at the menu first",
+    ]);
     for (const width of [390, 1440]) await fitsAt(page, width, "table-stopped-en");
     await page.getByRole("button", { name: "切换到中文" }).click();
     await expect(card).toContainText("厨房 0:30 已停止接单。");

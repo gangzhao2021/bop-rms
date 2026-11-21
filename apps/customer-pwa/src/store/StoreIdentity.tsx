@@ -150,13 +150,24 @@ export function storeHoursLine(hours: NonNullable<StoreProfile["hours"]>): strin
     : t("until {time}, then {hours}", { time: until, hours: today });
 }
 
+/**
+ * The gap after "Today" on the hours line: a space in English and before a time ("今天 12:00–…"),
+ * none before Chinese words ("今天营业至 1:00…", not "今天 营业至").
+ */
+function hoursGap(line: string): string {
+  return currentLanguage() === "zh-Hans" && /^[\u3400-\u9fff]/u.test(line) ? "" : " ";
+}
+
 function StoreDetails({ profile }: { readonly profile: StoreProfile }) {
+  const hoursLine = profile.hours === null ? null : storeHoursLine(profile.hours);
   return (
     <>
-      {profile.hours === null ? null : (
+      {profile.hours === null || hoursLine === null ? null : (
         <>
           <p className="store-identity__hours">
-            <span>{t("Today")}</span> {storeHoursLine(profile.hours)}
+            <span>{t("Today")}</span>
+            {hoursGap(hoursLine)}
+            {hoursLine}
           </p>
           {profile.hours.upcoming.length === 0 ? null : (
             <div className="store-identity__upcoming">
@@ -277,7 +288,11 @@ export function StoreInfoSection({ load }: { readonly load: StoreProfileLoader |
 export function StoreIdentityCard({ load }: { readonly load: StoreProfileLoader | null }) {
   const profile = useStoreProfile(load);
   if (profile === null) return null;
-  const status = profile.hours ? storeStatusLine(profile.hours) : null;
+  // Batch 40 review: once the kitchen stopped, the start page's notice above the card says so with
+  // what to do; the card's status line doesn't say it a second time.
+  const status = profile.hours
+    ? storeStatusLine(profile.hours, { lastOrders: !profile.hours.ordersStopped })
+    : null;
   return (
     <section className="store-identity" aria-labelledby="store-identity-heading">
       <h2 id="store-identity-heading">{profile.storeDisplayName}</h2>
