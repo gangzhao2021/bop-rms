@@ -118,6 +118,11 @@ export interface OrdersSummary {
    * table still open for one of them is waiting to be closed once the guests leave.
    */
   readonly servedDineIn: ReadonlySet<string>;
+  /**
+   * b41 (v15 b40 live): dine-in Orders (on this page) whose table bill is paid, or owes nothing
+   * (comped or written off), so a table still open for one only needs closing. Absent: unknown.
+   */
+  readonly settledDineIn?: ReadonlySet<string>;
 }
 export interface PickupsSummary {
   /** Waiting pickups of today's business day (all of them while the day is not known). */
@@ -155,6 +160,11 @@ export interface TablesSummary {
    * b39: not in `open` or `toClose`; a late service past the day's turn is still today's.
    */
   readonly earlierDays: number | null;
+  /**
+   * b41 (v15 b40 live): of `earlierDays`, the tables whose bill is paid or owes nothing (they only
+   * need closing). Null when not known (the orders were not read).
+   */
+  readonly earlierDaysSettled?: number | null;
   readonly more: boolean;
 }
 export function summarizeTables(
@@ -162,6 +172,8 @@ export function summarizeTables(
   servedDineIn: ReadonlySet<string> | null,
   /** Start of the Store's current business day (Store time zone and day start, from the shell). */
   dayStartsAt: string | null = null,
+  /** b41: dine-in Orders whose bill is paid or owes nothing; null when the orders weren't read. */
+  settledDineIn: ReadonlySet<string> | null = null,
 ) {
   const seated = read.tables.filter((table) => table.currentDiningSessionReference !== null);
   const readAt = read.readAt === undefined ? Number.NaN : Date.parse(read.readAt);
@@ -185,8 +197,47 @@ export function summarizeTables(
     open: open.length,
     toClose: read.canClose ? toClose : null,
     earlierDays,
+    ...(earlierDays === null || settledDineIn === null
+      ? {}
+      : {
+          earlierDaysSettled: seated.filter(
+            (table) =>
+              earlier(table) &&
+              table.session?.orderReference != null &&
+              settledDineIn.has(table.session.orderReference),
+          ).length,
+        }),
     more: read.more,
   } satisfies TablesSummary;
+}
+/**
+ * b41 (v15 b40 live, Fireside Hotpot: 5 of 8 earlier-day tables paid): what Home says about the
+ * tables left open from earlier days — how many only need closing (paid, or nothing to pay) and
+ * how many still owe, so an owner never reads "take the payment" for tables already paid.
+ */
+export function earlierDaysDetail(count: number, settled: number | null | undefined): string {
+  const tables = countOf(count, "table");
+  if (settled === null || settled === undefined || settled === 0)
+    return (
+      tables +
+      " · " +
+      t("Take the payment, or record that the guests left without paying, then close the table")
+    );
+  if (settled >= count)
+    return (
+      tables + " · " + t("All paid or nothing to pay; close each one when its guests have left")
+    );
+  return (
+    tables +
+    " · " +
+    t(
+      "{settled} paid, only to close · {owing} still to pay: take the payment, or record that the guests left without paying",
+      {
+        settled: String(settled),
+        owing: String(count - settled),
+      },
+    )
+  );
 }
 export interface ExceptionsSummary {
   readonly open: number;
@@ -270,6 +321,17 @@ export function summarizeOrders(queue: CurrentOrderQueue, now = Date.now()): Ord
         .filter((order) => order.orderType === "DineIn" && order.currentPhase === "Fulfilled")
         .map((order) => order.orderReference),
     ),
+    settledDineIn: new Set(
+      queue.items
+        .filter(
+          (order) =>
+            order.orderType === "DineIn" &&
+            order.tableBill != null &&
+            order.tableBill.mergedInto === undefined &&
+            (order.tableBill.paid !== null || order.tableBill.totalMinor === "0"),
+        )
+        .map((order) => order.orderReference),
+    ),
   };
 }
 export function summarizePickups(
@@ -338,6 +400,7 @@ export function tablesSummary(
       state.tables.value,
       state.orders.kind === "Ready" ? state.orders.value.servedDineIn : null,
       dayStartsAt,
+      state.orders.kind === "Ready" ? (state.orders.value.settledDineIn ?? null) : null,
     ),
   };
 }
@@ -782,10 +845,7 @@ export function attentionItems(
     items.push({
       key: "tables-earlier-days",
       title: t("Tables still open from earlier days"),
-      detail:
-        countOf(summary.value.earlierDays ?? 0, "table") +
-        " · " +
-        t("Take the payment, or record that the guests left without paying, then close the table"),
+      detail: earlierDaysDetail(summary.value.earlierDays ?? 0, summary.value.earlierDaysSettled),
       state: t("To check"),
       tone: "warning",
       href: "/operations/dining",

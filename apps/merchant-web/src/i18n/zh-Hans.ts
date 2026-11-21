@@ -10245,6 +10245,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "你的角色不能批准这项更改，或这项更改是你提出的。需要由别人批准：店主，或能批准更改的店长。",
   // b39 (v15 b38 sweep): tables and tickets from earlier days, and the closing alert on Tables.
   "Tables still open from earlier days": "之前营业日没关的桌",
+  "All paid or nothing to pay; close each one when its guests have left":
+    "都已付款或不用付款，客人离开后逐张关台",
+  "{settled} paid, only to close · {owing} still to pay: take the payment, or record that the guests left without paying":
+    "{settled} 张已付款，只需关台 · {owing} 张还没付：收款，或登记客人未付离开",
   "Take the payment, or record that the guests left without paying, then close the table":
     "收款，或登记客人未付离开，然后关台",
   "From earlier days": "之前营业日的",

@@ -69,7 +69,29 @@ describe("WP-2423 P2 store overview", () => {
       dineIn: true,
       more: false,
       servedDineIn: new Set(),
+      settledDineIn: new Set(),
     });
+  });
+  it("b41: a dine-in Order whose table bill is paid or owes nothing is settled; a merged-in one is not", () => {
+    const queue = parseCurrentOrderQueue(currentOrderQueueFixture(), null);
+    const base = queue.items[0];
+    if (!base) throw new Error("fixture");
+    const dineIn = (orderReference: string, tableBill: (typeof base)["tableBill"]) => ({
+      ...base,
+      orderReference,
+      orderType: "DineIn" as const,
+      tableBill,
+    });
+    const settled = summarizeOrders({
+      ...queue,
+      items: [
+        dineIn("p", { totalMinor: "3192", paid: { amountMinor: "3192", method: "Online" } }),
+        dineIn("z", { totalMinor: "0", paid: null, writtenOffMinor: "1413" }),
+        dineIn("o", { totalMinor: "1780", paid: null }),
+        dineIn("m", { totalMinor: "0", paid: null, mergedInto: { tableLabel: "A", paid: false } }),
+      ],
+    }).settledDineIn;
+    expect([...(settled ?? [])]).toEqual(["p", "z"]);
   });
   it("counts a table whose later round awaits acceptance, the same way the Orders page does", () => {
     const fixture = currentOrderQueueFixture();
@@ -947,6 +969,79 @@ describe("WP-2423 3cd0f8dd: tables to close, earlier-day pickups and the day che
     expect(zh).not.toContain("待关闭的桌台");
     expect(zh).toContain("之前营业日没关的桌");
     expect(zh).toContain("不计入：8 张桌台是之前营业日的");
+  });
+  it("b41 (v15 b40 live): Home says how many earlier-day tables are paid and only need closing", () => {
+    // Fireside Hotpot, Sat Nov 21: 5 of the 8 earlier-day tables read "Paid · close when the
+    // guests leave" on Tables, yet Home said "8 tables · Take the payment, …" for all of them.
+    const readAt = "2026-11-21T11:00:00.000Z";
+    const orderOf = (index: number) =>
+      `01909985-0000-7000-8000-0000000004${String(index).padStart(2, "0")}`;
+    const earlierTables = [21_640, 21_600, 21_590, 21_580, 21_570, 21_560, 20_300, 20_250].map(
+      (elapsedMinutes, index) =>
+        table({
+          elapsedMinutes,
+          session: {
+            phase: index < 5 ? "Closing" : "Active",
+            version: 3,
+            orderReference: orderOf(index),
+          },
+        }),
+    );
+    const day = {
+      businessDate: "2026-11-21",
+      startsAt: "2026-11-21T09:00:00.000Z",
+      endsAt: "2026-11-22T09:00:00.000Z",
+      closesAt: "2026-11-22T05:00:00.000Z",
+    };
+    const render = (settled: number, language: "en" | "zh-Hans" = "en") => {
+      setLanguageForTest(language);
+      const state: OverviewTodayState = {
+        ...initialOverviewState,
+        orders: {
+          kind: "Ready",
+          value: {
+            open: 8,
+            awaitingAcceptance: 0,
+            earlierUnfinished: 0,
+            awaitingRounds: 0,
+            urgentRounds: 0,
+            paidStuck: 0,
+            readyToServe: 0,
+            dineIn: true,
+            more: false,
+            servedDineIn: new Set(),
+            settledDineIn: new Set(Array.from({ length: settled }, (_, index) => orderOf(index))),
+          },
+        },
+        pickups: { kind: "Hidden" },
+        exceptions: { kind: "Hidden" },
+        tables: { kind: "Ready", value: { ...read(earlierTables), readAt } },
+      };
+      try {
+        return renderToStaticMarkup(
+          <StoreBusinessDayContext.Provider value={day}>
+            <MemoryRouter>
+              <NeedsAttention state={state} />
+            </MemoryRouter>
+          </StoreBusinessDayContext.Provider>,
+        );
+      } finally {
+        setLanguageForTest("en");
+      }
+    };
+    const mixed = render(5);
+    expect(mixed).toContain(
+      "8 tables · 5 paid, only to close · 3 still to pay: take the payment, or record that the guests left without paying",
+    );
+    expect(mixed).not.toContain("Take the payment");
+    expect(render(5, "zh-Hans")).toContain(
+      "8 张桌台 · 5 张已付款，只需关台 · 3 张还没付：收款，或登记客人未付离开",
+    );
+    expect(render(8)).toContain(
+      "8 tables · All paid or nothing to pay; close each one when its guests have left",
+    );
+    expect(render(8, "zh-Hans")).toContain("都已付款或不用付款，客人离开后逐张关台");
+    expect(render(0)).toContain("8 tables · Take the payment");
   });
   it("M6: the opening and closing checklist reads the same sources and leaves out hidden ones", () => {
     const state: OverviewTodayState = {
