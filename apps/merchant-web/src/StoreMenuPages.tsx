@@ -1,4 +1,5 @@
 import { t } from "./i18n/i18n.js";
+import { wordGap } from "./word-gap.js";
 import { noAccessHeading } from "./access-denied.js";
 import { NoAccessNotice } from "./NoAccessNotice.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
@@ -363,7 +364,8 @@ function MenuCustomerViewSection({
         {published ? t("What customers see") : t("What customers will see")}
       </h3>
       <p>
-        {t("Each item's description and photo exactly as fixed for review on")}{" "}
+        {t("Each item's description and photo exactly as fixed for review on")}
+        {wordGap()}
         <StaffTime instant={view.frozenAt} />
         {t(". Changes made to products after that appear only in a new version.")}
       </p>
@@ -755,7 +757,8 @@ function MenuBuilder({
             </p>
           ) : (
             <p>
-              {t("Changes to this menu made on this device were not saved. Last change:")}{" "}
+              {t("Changes to this menu made on this device were not saved. Last change:")}
+              {wordGap()}
               <StaffTime instant={kept.keptAt} />
             </p>
           )}

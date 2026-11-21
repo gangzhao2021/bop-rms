@@ -1,4 +1,5 @@
 import { systemText, t } from "./i18n/i18n.js";
+import { wordGap } from "./word-gap.js";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { StatePanel } from "@bop-rms/ui";
@@ -1200,7 +1201,8 @@ export function RefundApprovalsPage({
           setup guidance only for someone who approves refunds here. */}
       {state === "Denied" ? null : (
         <p className="approvals-sole-link">
-          {t("Sole operator (approving your own refunds) is set in")}{" "}
+          {t("Sole operator (approving your own refunds) is set in")}
+          {wordGap()}
           <Link
             to={
               "/app/organization/stores/" + storeReference + "/setup?section=access#sole-operator"

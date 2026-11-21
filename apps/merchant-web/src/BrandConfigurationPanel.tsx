@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { wordGap } from "./word-gap.js";
 import {
   BrandConfigurationClientError,
   createMerchantBrandConfigurationClient,
@@ -1026,7 +1027,8 @@ export function BrandConfigurationPanel({
           </div>
           {current?.recordedReview ? (
             <p>
-              {t("Original review valid until (UTC):")}{" "}
+              {t("Original review valid until (UTC):")}
+              {wordGap()}
               <time dateTime={current.recordedReview.reviewValidUntil}>
                 {current.recordedReview.reviewValidUntil}
               </time>

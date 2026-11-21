@@ -1,4 +1,5 @@
 import { countOf, t } from "./i18n/i18n.js";
+import { wordGap } from "./word-gap.js";
 import { StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router";
@@ -120,7 +121,10 @@ function DayDifferenceHelp({ check }: { readonly check: SettlementCheck }) {
         )}
       </p>
       <p>
-        <span className="system-alert__label">{t("What to do:")} </span>
+        <span className="system-alert__label">
+          {t("What to do:")}
+          {wordGap()}
+        </span>
         {t(
           "{value}This day is checked again automatically when new records arrive. If it still differs, note what you found on the difference in",
           {

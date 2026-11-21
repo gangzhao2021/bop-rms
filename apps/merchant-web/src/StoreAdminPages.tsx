@@ -1,4 +1,5 @@
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
+import { wordGap } from "./word-gap.js";
 import { NoAccessNotice } from "./NoAccessNotice.js";
 import { systemText, t } from "./i18n/i18n.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
@@ -328,7 +329,9 @@ export function StoreSetupScreen({ view }: { readonly view: StoreSetupView }) {
         <div>
           <h2>{t("Store setup")}</h2>
           <p>
-            {t("Evidence gate:")} <strong>{view.evidenceGate}</strong>
+            {t("Evidence gate:")}
+            {wordGap()}
+            <strong>{view.evidenceGate}</strong>
           </p>
         </div>
       </header>

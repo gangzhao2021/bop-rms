@@ -1,4 +1,5 @@
 import { PaidOrderSwitchLine } from "./PaidOrderSwitchLine.js";
+import { wordGap } from "./word-gap.js";
 import { elapsedText } from "./elapsed-text.js";
 import { openedOnEarlierDay } from "./earlier-day-tables.js";
 import { tablesClosingAlert } from "./tables-closing-alert.js";
@@ -463,7 +464,9 @@ export function DiningEntryCode({
     <div className="dining-entry-code">
       <p>{t("Share this one-time code with the party at this table.")}</p>
       <p>
-        {t("Join code:")} <strong>{code}</strong>
+        {t("Join code:")}
+        {wordGap()}
+        <strong>{code}</strong>
       </p>
       <button onClick={onHide}>{t("Hide join code")}</button>
     </div>

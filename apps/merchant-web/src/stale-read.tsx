@@ -87,6 +87,9 @@ export function useBrowserOffline(onOffline: () => void): void {
 }
 
 /** The stale-mode notice: what is on screen, from when, and that actions wait for the connection. */
+/** Where the time goes in a stale-read sentence (never shown). */
+const TIME = "\u0001";
+
 export function StaleReadNotice({
   stale,
   className,
@@ -101,8 +104,19 @@ export function StaleReadNotice({
   // b40 review: on Tables the time reads as everywhere else there ("2:05 p.m.", not "14:05").
   const style = useContext(ClockStyleContext);
   const lastLoaded = storeTime(stale.lastLoadedAt, timeZone, false, style);
-  // "… from 2:05 p.m. Actions …": a time ending in a period ends the sentence itself.
-  const after = (text: string) => (lastLoaded.endsWith(".") ? text.replace(/^\./u, "") : text);
+  // b41 (v15 b40 live): one whole sentence per language with the time inside it, so Chinese reads
+  // "离线 — 显示的是 6:07 的最近更新，…" (never "以下时间的最近更新： 6:07"). "… from 2:05 p.m. Actions
+  // …": a time ending in a period ends the sentence itself.
+  const aroundTime = (sentence: string) => {
+    const [before = "", rest = ""] = sentence.split(TIME);
+    return (
+      <>
+        {before}
+        <time dateTime={stale.lastLoadedAt}>{lastLoaded}</time>
+        {lastLoaded.endsWith(".") ? rest.replace(/^\./u, "") : rest}
+      </>
+    );
+  };
   const offline = stale.reason === "Offline";
   if (stale.reason === "ServerProblem")
     return (
@@ -110,9 +124,11 @@ export function StaleReadNotice({
         <StatePanel heading={floorServerProblemHeading} tone="offline" status>
           <p>{serverProblemText}</p>
           <p>
-            {t("Showing the last update from")}{" "}
-            <time dateTime={stale.lastLoadedAt}>{lastLoaded}</time>
-            {after(t(". Actions are paused until it is back."))}
+            {aroundTime(
+              t("Showing the last update from {time}. Actions are paused until it is back.", {
+                time: TIME,
+              }),
+            )}
           </p>
         </StatePanel>
       </div>
@@ -121,11 +137,12 @@ export function StaleReadNotice({
     <div className={className ?? "stale-read-notice"} data-stale-reason={stale.reason}>
       <StatePanel heading={t("Read-only until reconnected")} tone="offline" status>
         <p>
-          {t("{value} — showing the last update from", {
-            value: offline ? t("Offline") : t("Connection lost"),
-          })}{" "}
-          <time dateTime={stale.lastLoadedAt}>{lastLoaded}</time>
-          {after(t(". Actions are paused until the connection returns."))}
+          {aroundTime(
+            t(
+              "{value} — showing the last update from {time}. Actions are paused until the connection returns.",
+              { value: offline ? t("Offline") : t("Connection lost"), time: TIME },
+            ),
+          )}
         </p>
         <p>{t("Trying again automatically.")}</p>
       </StatePanel>

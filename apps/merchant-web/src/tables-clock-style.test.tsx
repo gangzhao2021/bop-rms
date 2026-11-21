@@ -137,3 +137,23 @@ it("the offline and server-problem notice on Tables says its time in the guests'
     expect(html(stale)).toContain(">00:30</time>. Actions are paused");
   }
 });
+
+it("b41 (v15 b40 live): the Chinese offline notice is one natural sentence with the time inside", () => {
+  setLanguageForTest("zh-Hans");
+  const html = (reason: StaleRead["reason"]) =>
+    renderToStaticMarkup(
+      <ClockStyleContext.Provider value="Guest">
+        <StoreTimeZoneContext.Provider value={zone}>
+          <StaleReadNotice
+            stale={{ reason, lastLoadedAt: "2026-11-21T11:07:00.000Z", attempts: 1 }}
+          />
+        </StoreTimeZoneContext.Provider>
+      </ClockStyleContext.Provider>,
+    ).replace(/<[^>]+>/gu, "");
+  expect(html("Offline")).toContain("离线 — 显示的是 6:07 的最近更新，网络恢复前操作暂停。");
+  expect(html("ServerProblem")).toContain("显示的是 6:07 的最近更新，恢复前操作暂停。");
+  for (const reason of ["Offline", "ServerProblem"] as const) {
+    expect(html(reason)).not.toContain("以下时间");
+    expect(html(reason)).not.toMatch(/：\s/u);
+  }
+});

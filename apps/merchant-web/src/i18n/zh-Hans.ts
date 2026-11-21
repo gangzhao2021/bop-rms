@@ -347,7 +347,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   ", when {value}. Renew it before then or the Store cannot take orders.":
     "，在{value}。请在此之前续期，否则门店无法接单。",
   ", {reserved} held for open orders": "，未完成订单占用 {reserved}",
-  ". Actions are paused until the connection returns.": "。网络恢复前操作暂停。",
   ". Changes made to products after that appear only in a new version.":
     "。之后对商品所做的更改只会出现在新版本中。",
   ". It can no longer be approved or published. {value}": "。它不能再被批准或发布。{value}",
@@ -6084,7 +6083,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "{value} · 版本 {aggregateVersion}{value2} · 价格{value3}为税前价，自取和堂食相同",
   "{value} · version {versionNumber} · {value2} · prices in {value3}":
     "{value} · 版本 {versionNumber} · {value2} · 价格以 {value3} 计",
-  "{value} — showing the last update from": "{value} — 显示的是以下时间的最近更新：",
+  "{value} — showing the last update from {time}. Actions are paused until the connection returns.":
+    "{value} — 显示的是 {time} 的最近更新，网络恢复前操作暂停。",
   "{value} — until {value2}": "{value} — 至 {value2}",
   "{value}. Don't serve it until the kitchen marks the remake done; tell the guest it's being remade.":
     "{value}。后厨标记重做完成前不要上桌；请告诉顾客正在重做。",
@@ -8609,8 +8609,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "We couldn't confirm the result. Press the button again: it is never recorded twice.":
     "没能确认结果。请再按一次，不会重复记录。",
   "This table changed. It has been read again.": "这张桌子有变动，已重新读取。",
-  "Showing the last update from": "显示的是以下时间的最近更新：",
-  ". Actions are paused until it is back.": "。恢复前操作暂停。",
+  "Showing the last update from {time}. Actions are paused until it is back.":
+    "显示的是 {time} 的最近更新，恢复前操作暂停。",
   "Table {table}: not confirmed. Press it again: it is never recorded twice.":
     "{table} 桌：没能确认。请再按一次，不会重复记录。",
   "Your access doesn't allow this table action. Ask a manager.":

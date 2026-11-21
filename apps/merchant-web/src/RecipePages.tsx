@@ -1,4 +1,5 @@
 import { systemText, t } from "./i18n/i18n.js";
+import { wordGap } from "./word-gap.js";
 import { noAccessHeading } from "./access-denied.js";
 import { NoAccessNotice } from "./NoAccessNotice.js";
 import { SoleOperatorSelfApproval } from "./SoleOperatorSelfApproval.js";
@@ -1137,7 +1138,8 @@ function RecipeEditor({
       {errorPanel}
       {recipe.family.length > 1 ? (
         <p>
-          {t("Revisions:")}{" "}
+          {t("Revisions:")}
+          {wordGap()}
           {recipe.family.map((member, index) => (
             <span key={member.recipeReference}>
               {index > 0 ? ", " : ""}

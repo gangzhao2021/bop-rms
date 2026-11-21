@@ -1,3 +1,4 @@
+import { wordGap } from "./word-gap.js";
 import {
   t,
   saidTable,
@@ -1920,7 +1921,8 @@ export function StaffOrderEntryPage({
           {createCode ? (
             // Same rule as the Tables page: staff who can create codes get the link.
             <p>
-              {t("Orders for a table use its code. Create one on")}{" "}
+              {t("Orders for a table use its code. Create one on")}
+              {wordGap()}
               <Link to={createCode}>{t("Table QR codes")}</Link>{" "}
               {t("(it can be printed later), then take the order.")}
             </p>

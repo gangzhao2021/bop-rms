@@ -1,4 +1,5 @@
 import { systemText, t } from "./i18n/i18n.js";
+import { wordGap } from "./word-gap.js";
 import { offlineCheckBeforeRepeatText } from "./failure-words.js";
 import { noAccessHeading } from "./access-denied.js";
 import { NoAccessNotice } from "./NoAccessNotice.js";
@@ -170,7 +171,8 @@ export function StockShortageNotice({
                 {entry.orders.length > 0 ? (
                   <>
                     {" "}
-                    {t("Held by:")}{" "}
+                    {t("Held by:")}
+                    {wordGap()}
                     {entry.orders.map((order, index) => (
                       <span key={order.orderReference}>
                         {index > 0 ? ", " : ""}
