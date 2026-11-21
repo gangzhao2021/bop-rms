@@ -1163,6 +1163,8 @@ export function DiningSessionWorkspace({
     timeZone,
   );
   const seatedCount = counts.get("Seated") ?? 0;
+  // Batch 40: the server refused this person the Tables read; the page says so and nothing else.
+  const refused = message === tablesDeniedMessage && tables.length === 0;
   const needCount = counts.get("Needs") ?? 0;
   const freeRows = rows
     .filter((row) => row.table.currentDiningSessionReference === null && row.need.step === null)
@@ -1449,11 +1451,11 @@ export function DiningSessionWorkspace({
       }
     >
       {/* DEC-PAID-ORDER-AUTO-ACCEPT: the brake, at a Store sending paid rounds straight through. */}
-      <PaidOrderSwitchLine csrf={csrf} />
+      {refused ? null : <PaidOrderSwitchLine csrf={csrf} />}
       {/* WP-2423 item 8 ③ follow-up: guests' last orders coming, or passed (staff still can). */}
-      <LastOrdersNotice timeZone={timeZone} />
+      {refused ? null : <LastOrdersNotice timeZone={timeZone} />}
       {/* b39: warn before the day ends with tables still open (nothing closes them by itself). */}
-      {closingAlert === null ? null : (
+      {closingAlert === null || refused ? null : (
         <p className="last-orders-notice" role="status" data-tone={closingAlert.tone}>
           {closingAlert.text}
         </p>
@@ -1463,18 +1465,21 @@ export function DiningSessionWorkspace({
       {stale || firstReadFailures !== null ? (
         <TablesOfflineGuide storeReference={storeReference} />
       ) : null}
-      <nav className="table-tabs" aria-label={t("Show tables")}>
-        {tableTabs.map((value) => (
-          <button
-            key={value}
-            type="button"
-            aria-pressed={tab === value}
-            onClick={() => setTab(value)}
-          >
-            {tabText[value]} <span className="table-tabs__count">{counts.get(value) ?? 0}</span>
-          </button>
-        ))}
-      </nav>
+      {/* Batch 40: a refused read has no tables to count; zeros would read as "no tables". */}
+      {refused ? null : (
+        <nav className="table-tabs" aria-label={t("Show tables")}>
+          {tableTabs.map((value) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={tab === value}
+              onClick={() => setTab(value)}
+            >
+              {tabText[value]} <span className="table-tabs__count">{counts.get(value) ?? 0}</span>
+            </button>
+          ))}
+        </nav>
+      )}
       {result ? (
         <p className="table-result" role="status">
           {result.text}
@@ -1565,6 +1570,7 @@ export function DiningSessionWorkspace({
           ref={detailRef}
           className="dining-session-detail table-panel"
           aria-label={t("Selected table details")}
+          hidden={refused}
         >
           {selected ? (
             <TablePanel
@@ -1686,7 +1692,7 @@ export function DiningSessionWorkspace({
       ) : null}
       {/* WP-2423 item 8 ⑤ decision 5: the Store's "a new phone's first round waits for staff". A
           setting, so it sits below the tables staff work with. */}
-      {csrf ? (
+      {csrf && !refused ? (
         <details className="table-settings">
           <summary>{t("Table settings")}</summary>
           <RoundHoldSettingControl csrf={csrf} locked={locked} />

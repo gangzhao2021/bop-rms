@@ -1874,3 +1874,8 @@
     margin-inline-start: 0;
   }
 }
+
+/* Batch 40: a person refused Tables sees the refusal alone, without an empty detail panel. */
+.workspace-page.dining-floor .dining-session-detail[hidden] {
+  display: none;
+}

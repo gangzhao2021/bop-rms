@@ -74,32 +74,28 @@ describe("merchant route classification", () => {
 
   it("WP-2423 item 8 ⑦: serves a module's screens only while the Store uses it", () => {
     const listed = ["HOME-OVERVIEW", "STORE-CAPABILITY", "OPS-ORDER-ENTRY", "INV-ITEM-LIST"];
+    // Floor staff with Tables, at a Store that turned the module off.
+    const floor = ["HOME-OVERVIEW", "DIN-FLOOR-BOARD"];
     expect(pilotHiddenRedirect("/app/organization/stores/x/capabilities", listed)).toBeNull();
     expect(pilotHiddenRedirect("/app/organization/stores/x/capabilities", ["HOME-OVERVIEW"])).toBe(
       "/app",
     );
     expect(pilotHiddenRedirect("/operations/order-entry", listed)).toBeNull();
     // Counter ordering turned off: the address goes to Tables.
-    expect(pilotHiddenRedirect("/operations/order-entry", ["HOME-OVERVIEW"])).toBe(
-      "/operations/dining",
-    );
+    expect(pilotHiddenRedirect("/operations/order-entry", floor)).toBe("/operations/dining");
     // WP-2423 M08: a round for a seated table is served with counter ordering off.
     const table = "?table=01909985-0000-7000-8000-000000000042";
-    expect(pilotHiddenRedirect("/operations/order-entry", ["HOME-OVERVIEW"], table)).toBeNull();
+    expect(pilotHiddenRedirect("/operations/order-entry", floor, table)).toBeNull();
     expect(pilotHiddenRedirect("/operations/order-entry", listed, table)).toBeNull();
     // No table, or an empty one: the walk-up address still goes to Tables.
     for (const search of ["", "?table=", "?other=1"])
-      expect(pilotHiddenRedirect("/operations/order-entry", ["HOME-OVERVIEW"], search)).toBe(
+      expect(pilotHiddenRedirect("/operations/order-entry", floor, search)).toBe(
         "/operations/dining",
       );
     // A typed bad reference is served; the page says it can't open that table.
-    expect(
-      pilotHiddenRedirect("/operations/order-entry", ["HOME-OVERVIEW"], "?table=not-a-table"),
-    ).toBeNull();
+    expect(pilotHiddenRedirect("/operations/order-entry", floor, "?table=not-a-table")).toBeNull();
     // Only the table-mode screen: Pickup with ?table= still goes to Tables.
-    expect(pilotHiddenRedirect("/operations/pickup", ["HOME-OVERVIEW"], table)).toBe(
-      "/operations/dining",
-    );
+    expect(pilotHiddenRedirect("/operations/pickup", floor, table)).toBe("/operations/dining");
     expect(pilotHiddenRedirect("/app/supply/items/x", listed)).toBeNull();
     expect(pilotHiddenRedirect("/operations/receiving", listed)).toBe("/app");
     expect(pilotHiddenRedirect("/app/commerce/recipes", ["HOME-OVERVIEW"])).toBe("/app");
@@ -107,7 +103,15 @@ describe("merchant route classification", () => {
     expect(
       pilotHiddenRedirect("/operations/pickup", ["HOME-OVERVIEW", "FUL-PICKUP-QUEUE"]),
     ).toBeNull();
-    expect(pilotHiddenRedirect("/operations/pickup", ["HOME-OVERVIEW"])).toBe("/operations/dining");
+    expect(pilotHiddenRedirect("/operations/pickup", floor)).toBe("/operations/dining");
+    // Batch 40 (v15 live): a cook has neither Pickup nor Tables. The address opens Pickup itself,
+    // whose refused read says it is not their work, never an empty Tables page they can't use.
+    const cook = ["KIT-KITCHEN-QUEUE", "CAT-AVAILABILITY", "INV-WASTE-RECORD"];
+    expect(pilotHiddenRedirect("/operations/pickup", cook)).toBeNull();
+    expect(pilotHiddenRedirect("/operations/order-entry", cook)).toBeNull();
+    expect(
+      pilotHiddenRedirect("/operations/pickup", ["KIT-KITCHEN-QUEUE", "CAT-AVAILABILITY"]),
+    ).toBeNull();
   });
 
   it("serves the Brand and Platform consoles only where the session lists them", () => {

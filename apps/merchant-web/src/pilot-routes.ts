@@ -27,6 +27,12 @@ export interface MerchantRoute {
      * the screen is unlisted; the Tables read decides who is offered it and the server authorizes.
      */
     readonly tableMode?: true;
+    /**
+     * Batch 40: the screen `to` is, when it is a screen of its own. A person whose navigation
+     * lists neither (a cook opening Pickup) is not sent to a page they can't use either: the
+     * address opens its own page, whose refused read says the page is not part of their role.
+     */
+    readonly toScreenId?: string;
   };
 }
 
@@ -43,7 +49,7 @@ function listedRoute(
   path: string,
   screenId: string,
   to: string,
-  extra: { readonly tableMode?: true } = {},
+  extra: { readonly tableMode?: true; readonly toScreenId?: string } = {},
 ): MerchantRoute {
   return { ...route(path), listed: { screenId, to, ...extra } };
 }
@@ -106,6 +112,7 @@ export const merchantRoutes: readonly MerchantRoute[] = Object.freeze([
   // WP-2423 M08: counter ordering off removes walk-up orders only, never a table's round.
   listedRoute("/operations/order-entry", "OPS-ORDER-ENTRY", "/operations/dining", {
     tableMode: true,
+    toScreenId: "DIN-FLOOR-BOARD",
   }),
   route("/operations/order-exceptions"),
   route("/operations/kitchen"),
@@ -113,7 +120,9 @@ export const merchantRoutes: readonly MerchantRoute[] = Object.freeze([
   route("/operations/dining"),
   // WP-2423 item 8 ⑦ (v15 finding v): listed while guests' pickup, counter ordering or pickups
   // still to hand over need it; otherwise the address goes to Tables.
-  listedRoute("/operations/pickup", "FUL-PICKUP-QUEUE", "/operations/dining"),
+  listedRoute("/operations/pickup", "FUL-PICKUP-QUEUE", "/operations/dining", {
+    toScreenId: "DIN-FLOOR-BOARD",
+  }),
   listedRoute("/operations/inventory/counts", "INV-COUNT-LIST", home),
   listedRoute("/operations/inventory/counts/:id", "INV-COUNT-LIST", home),
   listedRoute("/operations/inventory/waste", "INV-WASTE-RECORD", home),
@@ -239,6 +248,9 @@ export function pilotHiddenRedirect(
       return null;
     // A round for a table: served whatever the module's sidebar entry says (M08).
     if (working.listed.tableMode && (new URLSearchParams(search).get("table") ?? "") !== "")
+      return null;
+    // Batch 40: never to a screen the person can't use either.
+    if (working.listed.toScreenId !== undefined && !screens.includes(working.listed.toScreenId))
       return null;
     return working.listed.to;
   }
