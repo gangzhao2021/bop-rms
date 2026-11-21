@@ -152,6 +152,10 @@ test.describe("@production a guest at the table asks staff to come over", () => 
     page,
   }) => {
     let mode: "answered" | "limit" | "down" = "answered";
+    // Batch 42: the limit lifts 47 seconds into a minute; the guest is told the next minute,
+    // never the minute before it, when asking again would still be refused.
+    const minute = Math.floor(Date.now() / 60_000) * 60_000 + 20 * 60_000;
+    const nextCallAt = new Date(minute + 47_000).toISOString();
     await page.route("**/api/v1/dine-in/staff-call", (route) => {
       if (route.request().method() !== "GET")
         return route.fulfill({ status: 503, headers: noStore, json: {} });
@@ -171,7 +175,7 @@ test.describe("@production a guest at the table asks staff to come over", () => 
               : {
                   open: null,
                   recentlyClosed: null,
-                  nextCallAt: new Date(Date.now() + 20 * 60_000).toISOString(),
+                  nextCallAt,
                 },
         },
       });
@@ -185,9 +189,19 @@ test.describe("@production a guest at the table asks staff to come over", () => 
     ).toBeVisible();
     mode = "limit";
     await enterTable(page);
+    const [early, shown] = await page.evaluate(
+      (at) =>
+        [at, at + 60_000].map((ms) =>
+          new Intl.DateTimeFormat("en-CA", { hour: "numeric", minute: "2-digit" }).format(
+            new Date(ms),
+          ),
+        ),
+      minute,
+    );
     await expect(
-      page.getByText(/You can ask again at .+, or wave to a staff member\./u),
+      page.getByText(`You can ask again at ${shown ?? ""}, or wave to a staff member.`),
     ).toBeVisible();
+    await expect(page.getByText(`You can ask again at ${early ?? ""},`)).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Ask staff to come to the table" })).toHaveCount(
       0,
     );

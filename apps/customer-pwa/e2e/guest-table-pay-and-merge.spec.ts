@@ -442,7 +442,7 @@ test.describe("@production a pay-at-the-end table after another phone paid, merg
     await page.setViewportSize({ width: 390, height: 844 });
     await page.getByRole("button", { name: "切换到中文" }).click();
     await expect(page.getByRole("group", { name: "付哪一份" })).toContainText(
-      "H6 桌 · 第 2, 4, 6 轮",
+      "H6 桌 · 第 2、4、6 轮",
     );
     await expect(page.getByRole("heading", { name: /^第 1 轮 · .* · 来自 H6 桌$/u })).toBeVisible();
     await expect(page.getByText(/小费/u)).toHaveCount(0);
