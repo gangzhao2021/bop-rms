@@ -42,9 +42,12 @@ import {
 } from "./configure-state.js";
 import { createCustomerMenuClient, normalizeMenuSearch } from "./menu-client.js";
 import {
+  getGuestTableStarter,
   getTablePaymentTiming,
+  isGuestTableQuestion,
   isUnseatedTableScan,
 } from "../session/customer-transaction-context.js";
+import { backToWaitingText, tableWaitingToOpen } from "../entry/table-wait-away.js";
 import {
   allergensForChoice,
   comboDishAllergens,
@@ -1523,6 +1526,8 @@ export function ConfigureStatus({
         <Link to="/menu">{t("Keep browsing")}</Link>
       </div>
     );
+  const waitingToOpen =
+    tableWaitingToOpen() !== null && getGuestTableStarter() === null && !isGuestTableQuestion();
   const copy = {
     offline: t("You’re offline. Nothing was queued or replayed."),
     "session-expired": t("Your Store session expired. Scan the location QR code again."),
@@ -1548,9 +1553,12 @@ export function ConfigureStatus({
       "Your table is checking out, so new dishes can’t be sent. To add more, ask a staff member.",
     ),
     // WP-2423 M115: an open table this phone hasn't joined (e.g. after a reload): join it there.
-    "not-seated": isUnseatedTableScan()
-      ? t("You can order once staff seat you. Ask a staff member, then scan again.")
-      : t("Join this table first, then add the dish."),
+    // Batch 42 (v15 b41 live): staff open this table; the start page waits for them.
+    "not-seated": waitingToOpen
+      ? t("This table isn’t open yet. You can order once staff open it.")
+      : isUnseatedTableScan()
+        ? t("You can order once staff seat you. Ask a staff member, then scan again.")
+        : t("Join this table first, then add the dish."),
     "table-join-refused": t(
       "We couldn’t join you to this table just now. Try again, or ask staff. Your choices are kept here.",
     ),
@@ -1600,7 +1608,9 @@ export function ConfigureStatus({
       ) : null}
       {state.status === "table-question" ? <Link to="/">{t("Back to the question")}</Link> : null}
       {state.status === "table-in-use" ? <Link to="/">{t("Back to this table")}</Link> : null}
-      {state.status === "not-seated" && !isUnseatedTableScan() ? (
+      {state.status === "not-seated" && waitingToOpen ? (
+        <Link to="/">{backToWaitingText()}</Link>
+      ) : state.status === "not-seated" && !isUnseatedTableScan() ? (
         <Link to="/">{t("Join this table")}</Link>
       ) : null}
     </div>

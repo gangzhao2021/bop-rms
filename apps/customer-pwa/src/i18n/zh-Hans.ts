@@ -1971,4 +1971,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "This page could not be shown. Reload to try again. If you were in the middle of something, check it after reloading before doing it again.":
     "此页面无法显示，请重新加载再试。如果您刚才正在操作，重新加载后请先核对，再决定是否重做。",
   Reload: "重新加载",
+  // Batch 42 (v15 b41 live): the other tabs of a table staff haven't opened yet.
+  "Back to the waiting page": "回到等候开台页",
+  "This table isn’t open yet. You can order once staff open it.":
+    "这桌还没开台。店员开台后就可以点单。",
 });

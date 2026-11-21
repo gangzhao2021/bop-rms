@@ -4,6 +4,12 @@ import {
   isUnseatedTableScan,
 } from "../session/customer-transaction-context.js";
 import { saidTable, t } from "../i18n/i18n.js";
+import {
+  backToWaitingText,
+  tableNotOpenHeading,
+  tableNotOpenWaitText,
+  tableWaitingToOpen,
+} from "../entry/table-wait-away.js";
 import type { CartState } from "../cart/cart-state.js";
 import type { CartRoundPaymentState } from "../cart/types.js";
 import {
@@ -696,6 +702,7 @@ export const cartText = Object.freeze({
       ] as const;
     },
     get notSeated() {
+      const waiting = tableWaitingToOpen();
       // WP-2423 DEC-DINING-GUEST-TABLE-START: this table starts with the guest's first dish.
       return getGuestTableStarter() !== null
         ? ([
@@ -707,20 +714,29 @@ export const cartText = Object.freeze({
               t("Nothing in your cart yet"),
               t("First tell us if you’re with the people at this table."),
             ] as const)
-          : !isUnseatedTableScan()
-            ? // M115: an open table this phone hasn't joined (after a reload or a deep link too):
-              // the table's page lets it join; nobody needs to seat it.
+          : waiting !== null
+            ? // Batch 42 (v15 b41 live): staff open this table; the start page waits for them.
               ([
-                t("Join this table first"),
-                t("Join this table to order and see what your table has ordered."),
+                tableNotOpenHeading(waiting.storeDisplayName, waiting.tableLabel),
+                tableNotOpenWaitText(),
               ] as const)
-            : ([
-                t("You can order once staff seat you"),
-                t("You can order once staff seat you. Ask a staff member, then scan again."),
-              ] as const);
+            : !isUnseatedTableScan()
+              ? // M115: an open table this phone hasn't joined (after a reload or a deep link too):
+                // the table's page lets it join; nobody needs to seat it.
+                ([
+                  t("Join this table first"),
+                  t("Join this table to order and see what your table has ordered."),
+                ] as const)
+              : ([
+                  t("You can order once staff seat you"),
+                  t("You can order once staff seat you. Ask a staff member, then scan again."),
+                ] as const);
     },
     get goToStart() {
       return t("Go to the start");
+    },
+    get backToWaiting() {
+      return backToWaitingText();
     },
     get participationEnded() {
       return participationEndedText();

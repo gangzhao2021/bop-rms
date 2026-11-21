@@ -1,3 +1,4 @@
+import type { CustomerTableWaitAnswer } from "../entry/types.js";
 const csrfContextListeners = new Set<() => void>();
 let csrfContext = Symbol();
 let csrfCredential: string | null = null;
@@ -109,6 +110,42 @@ export function setUnseatedTableScan(value: boolean): void {
 
 export function isUnseatedTableScan(): boolean {
   return unseatedTableScan;
+}
+
+/**
+ * Batch 42 (v15 b41 live): this phone scanned a table staff have not opened yet (or one being
+ * cleaned) and its start page says so. The other tabs (Menu, Cart, Your table) say the same and
+ * offer the way back, instead of asking for a join code nobody hands out. `check` is the scan's
+ * cheap "is it open now?"; a page that waits uses it to go on by itself. Memory only.
+ */
+export interface UnseatedTableWait {
+  readonly kind: "NotOpen" | "BeingCleaned";
+  readonly storeDisplayName: string;
+  readonly tableLabel: string | null;
+  readonly check: (() => Promise<CustomerTableWaitAnswer>) | null;
+}
+let unseatedTableWait: UnseatedTableWait | null = null;
+
+export function setUnseatedTableWait(value: UnseatedTableWait | null): void {
+  unseatedTableWait = value === null ? null : Object.freeze({ ...value });
+}
+
+export function getUnseatedTableWait(): UnseatedTableWait | null {
+  return unseatedTableWait;
+}
+
+/**
+ * Staff opened the table while the guest was on another tab: the start page asks the scan again at
+ * once (not its earlier "not open yet" answer), so it shows the join straight away. Memory only.
+ */
+let tableOpenedWhileAway = false;
+
+export function setTableOpenedWhileAway(value: boolean): void {
+  tableOpenedWhileAway = value;
+}
+
+export function isTableOpenedWhileAway(): boolean {
+  return tableOpenedWhileAway;
 }
 
 /**

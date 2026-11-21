@@ -28,9 +28,16 @@ import { TablePayPanel, type TablePayStatus } from "./TablePayPanel.js";
 import {
   getGuestTableStarter,
   isGuestTableQuestion,
+  getUnseatedTableWait,
   isUnseatedTableScan,
   subscribeCustomerCsrfContext,
 } from "../session/customer-transaction-context.js";
+import {
+  backToWaitingText,
+  tableNotOpenHeading,
+  tableNotOpenWaitText,
+  useGoOnWhenTableOpens,
+} from "../entry/table-wait-away.js";
 import { SettledTableReceiptPanel, type SettledTableReceiptClient } from "./SettledTableReceipt.js";
 import { DiningStaffCallPanel } from "./DiningStaffCallPanel.js";
 import type { DiningStaffCallClient } from "./dining-staff-call-client.js";
@@ -1120,6 +1127,16 @@ export function DiningSessionScreen({
   const [tablePay, setTablePay] = useState<TablePayStatus | null>(null);
   const view = state.status === "ready" || state.status === "unavailable" ? state.view : null;
   const active = isDiningSessionActive(view);
+  // Batch 42 (v15 b41 live): a table staff haven't opened yet (or one being cleaned) says so here
+  // too, and goes on by itself once staff open it, as the start page does.
+  const unseated =
+    state.status === "not-joined" &&
+    getGuestTableStarter() === null &&
+    !isGuestTableQuestion() &&
+    isUnseatedTableScan()
+      ? getUnseatedTableWait()
+      : null;
+  useGoOnWhenTableOpens(unseated?.kind === "NotOpen");
   const [orderAgain] = useState(() =>
     createConfigureController({ client: cartClient ?? createBrowserCustomerCartClient() }),
   );
@@ -1223,7 +1240,15 @@ export function DiningSessionScreen({
               <h2>{t("Join your table first")}</h2>
               <p>{t("First tell us if you’re with the people at this table.")}</p>
             </>
-          ) : !isUnseatedTableScan() ? (
+          ) : unseated?.kind === "NotOpen" ? (
+            // Batch 42: staff open this table; nobody hands out a code. The start page's words.
+            <>
+              <h2>{tableNotOpenHeading(unseated.storeDisplayName, unseated.tableLabel)}</h2>
+              <p role="status">{tableNotOpenWaitText()}</p>
+            </>
+          ) : unseated?.kind === "BeingCleaned" ? (
+            <h2>{t("This table is being cleaned. Pick another table or ask staff.")}</h2>
+          ) : !isUnseatedTableScan() && store !== undefined ? (
             // WP-2423 M115: the table's page offers the join this table allows (its QR code, or a
             // code when QR joins are paused), so the guest is sent there, not asked for a code.
             <>
@@ -1231,6 +1256,7 @@ export function DiningSessionScreen({
               <p>{t("Join this table to order and see what your table has ordered.")}</p>
             </>
           ) : (
+            // No table on this phone at all (opened here without a scan): how a guest joins one.
             <>
               <h2>{t("Join your table first")}</h2>
               <p>
@@ -1241,9 +1267,14 @@ export function DiningSessionScreen({
             </>
           )}
           <Link className="order-status__back" to="/">
-            {getGuestTableStarter() === null && !isGuestTableQuestion() && !isUnseatedTableScan()
-              ? t("Join this table")
-              : t("Go to the start")}
+            {unseated?.kind === "NotOpen"
+              ? backToWaitingText()
+              : getGuestTableStarter() === null &&
+                  !isGuestTableQuestion() &&
+                  !isUnseatedTableScan() &&
+                  store !== undefined
+                ? t("Join this table")
+                : t("Go to the start")}
           </Link>
         </section>
       ) : null}

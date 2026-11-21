@@ -13,6 +13,7 @@ import {
   captureCustomerCsrfContext,
   getCustomerCsrfCredential,
   setCustomerCsrfCredential,
+  getUnseatedTableWait,
   isUnseatedTableScan,
   isCustomerSessionRestoreUnavailable,
   setParticipationEnded,
@@ -614,6 +615,11 @@ export function createBrowserCustomerCartClient(): CustomerCartClient {
       }
     },
     loadCurrent(signal?: AbortSignal) {
+      // Batch 42: a scan of a table staff haven't opened yet (or one being cleaned) started no
+      // visit, so there is no cart to read; the Store would answer "your visit ended". The cart
+      // says the table isn't open yet instead, as the start page does.
+      if (getCustomerCsrfCredential() === null && getUnseatedTableWait() !== null)
+        return Promise.reject(new CartClientError("cart_dining_not_seated"));
       const read = () =>
         request(
           withNameLocale("/bff/customer/cart"),

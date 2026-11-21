@@ -53,6 +53,7 @@ import {
   type SendRoundState,
 } from "../checkout/send-round.js";
 import { DiningStaffCallPanel } from "../dining/DiningStaffCallPanel.js";
+import { tableWaitingToOpen, useGoOnWhenTableOpens } from "../entry/table-wait-away.js";
 import type { DiningSessionClient } from "../dining/dining-session-client.js";
 import { useTablePaymentTiming, type TableTimingAnswer } from "../dining/table-timing.js";
 import { CustomerPage, PageHeading, type CustomerStoreContext } from "../journey/CustomerPage.js";
@@ -554,6 +555,13 @@ function ErrorState({
   readonly state: CartState;
   readonly controller: CartStateController;
 }) {
+  // Batch 42: a table staff haven't opened yet goes on by itself once they open it.
+  const waitingToOpen =
+    state.status === "not-seated" &&
+    !isGuestTableQuestion() &&
+    getGuestTableStarter() === null &&
+    tableWaitingToOpen() !== null;
+  useGoOnWhenTableOpens(waitingToOpen);
   if (!("cart" in state) || !("issueCodes" in state)) return null;
   const retry = state.status === "command-failed" && state.canRetrySameOperation;
   const failure = cartText.failure;
@@ -647,7 +655,9 @@ function ErrorState({
         {state.status === "participation-ended" ? (
           <Link to="/dine-in/session">{cartText.failure.yourTable}</Link>
         ) : null}
-        {state.status === "not-seated" && (isGuestTableQuestion() || getGuestTableStarter()) ? (
+        {waitingToOpen ? (
+          <Link to="/">{failure.backToWaiting}</Link>
+        ) : state.status === "not-seated" && (isGuestTableQuestion() || getGuestTableStarter()) ? (
           <Link to="/">{failure.goToStart}</Link>
         ) : state.status === "not-seated" && !isUnseatedTableScan() ? (
           // WP-2423 M115: an open table this phone hasn't joined: the table's page joins it.

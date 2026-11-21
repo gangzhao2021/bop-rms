@@ -15,8 +15,12 @@ import {
   setGuestTableJoiner,
   setGuestTableStarter,
   setNewPartyJoin,
+  isTableOpenedWhileAway,
+  setTableOpenedWhileAway,
+  setUnseatedTableWait,
   type GuestTableStartAnswer,
 } from "../session/customer-transaction-context.js";
+import { tableNotOpenHeading, tableNotOpenWaitText } from "./table-wait-away.js";
 import {
   createStoreProfileClient,
   type StoreProfileLoader,
@@ -164,8 +168,14 @@ export function EntryContextPage({
         if (!active) return;
         const fresh = action === "start" && startingNew.current && client.startNew !== undefined;
         startingNew.current = false;
-        const next = await (fresh && client.startNew ? client.startNew() : client[action]());
+        // Batch 42: staff opened the table while the guest was on another tab: the scan is asked
+        // again at once, so the page offers the join instead of its earlier "not open yet".
+        const reask = action === "start" && !fresh && isTableOpenedWhileAway();
+        const next = await (fresh && client.startNew
+          ? client.startNew()
+          : client[reask ? "retry" : action]());
         if (!active) return;
+        if (reask) setTableOpenedWhileAway(false);
         setResult({ client, state: next });
         // M104: "Order more" at a pickup visit goes straight back to its menu and cart.
         if (fresh && next.kind === "Resumed" && next.context.channel === "Pickup") {
@@ -231,6 +241,21 @@ export function EntryContextPage({
   useEffect(() => {
     if (state.kind === "Loading") return;
     setGuestTableQuestion(state.kind === "TableAskNewParty");
+    // Batch 42: the other tabs say what this page says while the table isn't open (or is being
+    // cleaned), and wait with the same check; a guest whose own table was settled is thanked here.
+    const owner = clientRef.current;
+    const probe = owner.waitForTable;
+    setUnseatedTableWait(
+      (state.kind === "TableNotOpen" && getSettledTableLabel() === null) ||
+        state.kind === "TableBeingCleaned"
+        ? {
+            kind: state.kind === "TableNotOpen" ? "NotOpen" : "BeingCleaned",
+            storeDisplayName: state.context.storeDisplayName,
+            tableLabel: state.kind === "TableNotOpen" ? (state.tableLabel ?? null) : null,
+            check: probe === undefined ? null : () => probe.call(owner),
+          }
+        : null,
+    );
     // M115: only an open table's page offers the menu's join; any other answer clears it.
     if (state.kind !== "Established" && state.kind !== "Resumed") setGuestTableJoiner(null);
     if (state.kind !== "TableMayStart") {
@@ -1250,14 +1275,7 @@ function EntryState({
             <StateHeading headingRef={headingRef}>
               {waitRefused
                 ? t("This QR code can’t be used")
-                : state.tableLabel === undefined
-                  ? t("This table at {storeDisplayName} isn’t open yet", {
-                      storeDisplayName: state.context.storeDisplayName,
-                    })
-                  : t("Table {table} at {storeDisplayName} isn’t open yet", {
-                      table: saidTable(state.tableLabel),
-                      storeDisplayName: state.context.storeDisplayName,
-                    })}
+                : tableNotOpenHeading(state.context.storeDisplayName, state.tableLabel)}
             </StateHeading>
             {/* WP-2423 (guest-waits-and-refund-lock): what the page waits for, and when it stopped. */}
             <p className="entry-context" role="status">
@@ -1271,9 +1289,7 @@ function EntryState({
                     ? t(
                         "This page is having trouble checking whether the table is open. Once staff have seated you, tap “We’ve been seated”.",
                       )
-                    : t(
-                        "Ask staff to seat you. This page goes on by itself a few seconds after staff open the table.",
-                      )}
+                    : tableNotOpenWaitText()}
             </p>
             {state.tableLabel === undefined || waitRefused ? null : (
               <p className="entry-context">

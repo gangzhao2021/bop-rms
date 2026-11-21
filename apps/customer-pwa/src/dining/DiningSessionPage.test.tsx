@@ -1,4 +1,7 @@
-import { setUnseatedTableScan } from "../session/customer-transaction-context.js";
+import {
+  setUnseatedTableScan,
+  setUnseatedTableWait,
+} from "../session/customer-transaction-context.js";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
@@ -500,15 +503,47 @@ describe("CUST-DINE-IN-SESSION (WP-2423 Q8)", () => {
     expect(notJoined).not.toContain("join code");
     expect(notJoined).toContain(">Join this table</a>");
     expect(notJoined).not.toContain("Round");
-    // A table nobody is seated at keeps the staff/code guidance.
+    // Batch 42 (v15 b41 live): a table staff haven't opened yet says what the waiting page says,
+    // and offers the way back to it; nobody hands out a join code there.
     setUnseatedTableScan(true);
+    setUnseatedTableWait({
+      kind: "NotOpen",
+      storeDisplayName: "Test Merchant 2 Main - not production",
+      tableLabel: "L41V A (TEST)",
+      check: null,
+    });
     try {
-      expect(render({ status: "not-joined" })).toContain(
-        "Ask a staff member, or the person who joined your table first",
+      const waiting = render({ status: "not-joined" });
+      expect(waiting).toContain(
+        "L41V A (TEST) at Test Merchant 2 Main - not production isn’t open yet",
       );
+      expect(waiting).toContain(
+        "Ask staff to seat you. This page goes on by itself a few seconds after staff open the table.",
+      );
+      expect(waiting).toContain(">Back to the waiting page</a>");
+      expect(waiting).not.toContain("join code");
+      expect(waiting).not.toContain("Join your table first");
+      setUnseatedTableWait({
+        kind: "BeingCleaned",
+        storeDisplayName: "Synthetic Noodle Bar",
+        tableLabel: null,
+        check: null,
+      });
+      const cleaning = render({ status: "not-joined" });
+      expect(cleaning).toContain("This table is being cleaned. Pick another table or ask staff.");
+      expect(cleaning).not.toContain("join code");
     } finally {
+      setUnseatedTableWait(null);
       setUnseatedTableScan(false);
     }
+    // A phone with no table at all (opened here without a scan) is told how a guest joins one.
+    const noTable = renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/dine-in/session"]}>
+        <DiningSessionScreen state={{ status: "not-joined" }} onRefresh={() => undefined} />
+      </MemoryRouter>,
+    );
+    expect(noTable).toContain("Ask a staff member, or the person who joined your table first");
+    expect(noTable).toContain(">Go to the start</a>");
     const failed = render({ status: "unavailable", view: null, offline: false });
     expect(failed).toContain("We couldn’t load your table");
     expect(failed).toContain("Try again");
