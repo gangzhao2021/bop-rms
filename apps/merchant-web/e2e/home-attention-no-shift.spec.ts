@@ -255,10 +255,16 @@ async function home(
   await page.addInitScript(() => {
     const samples: { reminder: number; top: number; rows: number; at: number }[] = [];
     (window as unknown as { homeSamples: typeof samples }).homeSamples = samples;
+    (window as unknown as { homeHiddenAgain: number }).homeHiddenAgain = 0;
     const sample = () => {
       const now = document.querySelector("main .overview-now");
       // Shown, that is: Home keeps its sections hidden while it holds them back.
-      if (now !== null && now.getClientRects().length > 0)
+      const shown = now !== null && now.getClientRects().length > 0;
+      // A frame where Home hides again after it first showed. Counted per frame, so a slow CI
+      // runner that skips frames (a long gap between samples) is not mistaken for Home hiding.
+      if (!shown && samples.length > 0)
+        (window as unknown as { homeHiddenAgain: number }).homeHiddenAgain += 1;
+      if (now !== null && shown)
         samples.push({
           // How much of the evening reminder shows: none (-1), or its text (with or without figures).
           reminder:
@@ -378,9 +384,10 @@ for (const dayDelay of [1_500, 2_500])
     await page.waitForTimeout(4_000);
     const seen = await samples(page);
     expect(seen.length).toBeGreaterThan(100);
-    // Once shown, Home stays shown: no frame is missing between the first and the last sample.
-    const gaps = seen.slice(1).map((entry, index) => entry.at - (seen[index]?.at ?? entry.at));
-    expect(Math.max(...gaps)).toBeLessThan(250);
+    // Once shown, Home stays shown: no frame after the first sample has Home hidden again.
+    expect(
+      await page.evaluate(() => (window as unknown as { homeHiddenAgain: number }).homeHiddenAgain),
+    ).toBe(0);
     // No frame shows the reminder without its figures.
     const whole = seen.at(-1)?.reminder;
     expect(seen.filter((entry) => entry.reminder !== -1 && entry.reminder !== whole)).toEqual([]);
