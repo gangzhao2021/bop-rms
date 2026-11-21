@@ -226,3 +226,33 @@ test("@production WP-2423 batch 41: a search that finds only earlier-day tickets
     "1 ticket from an earlier day has number or table “30”: see Needs attention above.",
   );
 });
+
+test("@production WP-2423 batch 41 review: a remake being made is under Open work, not To make, and no tab calls itself empty under a remake", async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  const state = { reworks: [remake(1, "In Progress")], commands: [] };
+  await store(page, "Unverified", state, { todays: [] });
+  await page.goto("/operations/kitchen");
+  const tabs = page.getByRole("group", { name: "Show kitchen work" });
+  const lane = page.getByRole("region", { name: "Remakes" });
+  await expect(tabs.getByRole("button", { name: /^Open work/u })).toHaveText("Open work1");
+  await expect(tabs.getByRole("button", { name: /^To make/u })).toHaveText("To make0");
+  await expect(lane.getByRole("article")).toHaveCount(1);
+  await expect(page.locator(".kitchen-board-empty")).toHaveCount(0);
+  // To make draws no remake being made, so its empty state stands alone; Completed shows the
+  // finished ticket only, with no open remake card above it.
+  await tabs.getByRole("button", { name: /^To make/u }).click();
+  await expect(lane).toHaveCount(0);
+  await expect(page.locator(".kitchen-board-empty")).toHaveCount(1);
+  await tabs.getByRole("button", { name: /^Completed/u }).click();
+  await expect(lane).toHaveCount(0);
+  await expect(page.locator(".kitchen-board-empty")).toHaveCount(0);
+  await expect(
+    page.locator(".kitchen-board-lanes:not(.kitchen-board-remakes)").getByText("牛肉面"),
+  ).toBeVisible();
+  await tabs.getByRole("button", { name: /^All/u }).click();
+  await expect(lane.getByRole("article")).toHaveCount(1);
+  await expect(page.locator(".kitchen-board-empty")).toHaveCount(0);
+  await expectNoInternalText(page);
+});

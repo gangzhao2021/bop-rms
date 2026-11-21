@@ -2584,6 +2584,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "No tax classifications are set up for this Brand yet.": "此品牌还没有设置税类。",
   "No tax classifications yet.{value}": "还没有税类。{value}",
   "No tax configuration in effect": "没有生效中的税务配置",
+  "No ticket matches these filters. Remakes are shown above whatever the filters. Clear the filters to see all work.":
+    "没有符合这些筛选的票据。重做不受筛选影响，显示在上方。清除筛选以查看全部工作。",
   "No tip": "不加小费",
   "No tips in this period.": "这段时间没有小费。",
   "No transaction facts or zero values are inferred.": "不推断任何交易数据或零值。",

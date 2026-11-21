@@ -2373,13 +2373,27 @@ export function KitchenBoardScreen({
   // Batch 41 (v15 b40 live): an open remake is a dish to make, so it counts as work wherever the
   // board counts work (the header, the tabs). Shown in the Remakes lane, it was left out, and a
   // remake waiting alone read "Today 0 work items", "To make 0" and "Nothing to make right now."
+  // A remake is in a work-state tab as a ticket in its state is: one being made is Open work and
+  // Being made, never To make. The Remakes lane draws exactly these, so a tab's count, its lane and
+  // its empty state agree. Remakes have no section, station, allergen cue or exception, so those
+  // filters (which choose tickets) leave them shown apart, and the board says so.
   const remakesInStatus = (value: string) =>
     remakes
       ? board.openReworks.filter(
           (rework) => value === "Active" || value === "All" || rework.status === value,
         )
       : [];
-  const workCount = items.length + remakesInStatus(status).length;
+  const laneRemakes = remakesInStatus(status);
+  const workCount = items.length + laneRemakes.length;
+  const ticketFilters =
+    activeSection !== "All" ||
+    activeStation !== "All" ||
+    activeAllergen !== "All" ||
+    activeException !== "All";
+  const boardEmpty =
+    items.length === 0 &&
+    (laneRemakes.length === 0 ||
+      (ticketFilters && orderSearch === null && view.items.length > earlierOpen.size));
   const stationLaneMap = new Map<
     string,
     { key: string; stationLabel: string | null; items: KitchenBoardItem[] }
@@ -2850,10 +2864,10 @@ export function KitchenBoardScreen({
   // display they come before the phone's Filters button too (filters choose tickets, never
   // remakes), so a remake's buttons are on a 390 px phone's first screen (v15 b39 live).
   const remakeLane =
-    remakes && board.openReworks.length > 0 ? (
+    remakes && laneRemakes.length > 0 ? (
       <div className="kitchen-board-lanes kitchen-board-remakes">
         <KitchenRemakeLane
-          items={board.openReworks}
+          items={laneRemakes}
           today={today}
           readOnly={remakeReadOnly}
           slotRef={slotRef}
@@ -3266,8 +3280,10 @@ export function KitchenBoardScreen({
             {awaitingNotice}
           </p>
         ) : null}
-        {/* Batch 41: the board is empty only when its count is: never under a remake to make. */}
-        {workCount > 0 && items.length === 0 ? null : items.length === 0 ? (
+        {/* Batch 41: the board is empty only when its count is: never under a remake to make, unless
+            filters that choose tickets hide every ticket (then it says so, and that the remakes
+            above are shown apart). */}
+        {items.length === 0 && !boardEmpty ? null : items.length === 0 ? (
           <div className="kitchen-board-empty">
             <StatePanel
               heading={
@@ -3308,7 +3324,11 @@ export function KitchenBoardScreen({
                       : !hasFilters || view.items.length === 0
                         ? // v15 2026-10-16: an empty board with no filter set is simply quiet.
                           t("Nothing to make right now.")
-                        : t("Nothing matches these filters. Clear the filters to see all work.")}
+                        : laneRemakes.length > 0
+                          ? t(
+                              "No ticket matches these filters. Remakes are shown above whatever the filters. Clear the filters to see all work.",
+                            )
+                          : t("Nothing matches these filters. Clear the filters to see all work.")}
               </p>
             </StatePanel>
           </div>

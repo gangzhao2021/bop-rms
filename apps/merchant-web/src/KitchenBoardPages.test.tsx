@@ -1297,6 +1297,79 @@ describe("WP-2423 Q26 kitchen remakes (Handoff Section 26.6)", () => {
     expect(back).toContain("Back in progress · Marked done too early");
     expect(back).toContain("Remake done");
   });
+  const scoped = (
+    scope: { station?: string; status: string },
+    items: ReturnType<typeof rework>[],
+    tickets: readonly unknown[] = [finished, awaitingReady],
+  ) =>
+    renderToStaticMarkup(
+      <MemoryRouter
+        initialEntries={[
+          {
+            pathname: "/operations/kitchen",
+            state: {
+              kitchenQueueScope: {
+                station: scope.station ?? "All",
+                status: scope.status,
+                allergen: "All",
+                exception: "All",
+              },
+            },
+          },
+        ]}
+      >
+        <KitchenBoardScreen
+          view={parseKitchenBoardView({ ...kitchenBoardFixture(), items: tickets })}
+          remakes={remakes(true, items)}
+          actionsBlocked={false}
+        />
+      </MemoryRouter>,
+    );
+  it("batch 41 review: a remake is in the work-state tabs a ticket in its state is in, and the board never calls itself empty under one", () => {
+    const being = [rework({ status: "In Progress" })];
+    // To make: a remake being made is not to make (as a ticket being made is not), so it is not drawn there.
+    const toMake = scoped({ status: "Queued" }, being);
+    expect(toMake).not.toContain('aria-label="Remakes"');
+    expect(toMake).not.toContain("Back in progress");
+    // Being made, Open work and All draw it, and then the board does not say it is empty.
+    for (const status of ["In Progress", "Active", "All"]) {
+      const html = scoped({ status }, being);
+      expect(html).toContain('aria-label="Remakes"');
+      expect(html).not.toContain("kitchen-board-empty");
+      expect(html).not.toContain("Nothing to make right now.");
+    }
+    // A remake waiting to be made is under To make, with no empty board under it.
+    const waiting = scoped({ status: "Queued" }, [rework()]);
+    expect(waiting).toContain('aria-label="Remakes"');
+    expect(waiting).not.toContain("kitchen-board-empty");
+    // Completed holds finished work only: no open remake card above its list.
+    const completed = scoped({ status: "Completed" }, [rework()]);
+    expect(completed).not.toContain('aria-label="Remakes"');
+    expect(completed).toContain("Mushroom rice bowl");
+  });
+  it("batch 41 review: a station filter that hides every ticket says so, and that the remakes are shown apart", () => {
+    const tickets = [
+      kitchenItemFixture(),
+      {
+        ...finished,
+        workItemReference: "018f0f58-767a-7f3b-a1d0-000000000421",
+        stationLabel: "Cold line",
+      },
+    ];
+    const html = scoped({ station: "Cold line", status: "Active" }, [rework()], tickets);
+    expect(html).toContain('aria-label="Remakes"');
+    expect(html).toContain("No matching work");
+    expect(html).toContain(
+      "No ticket matches these filters. Remakes are shown above whatever the filters. Clear the filters to see all work.",
+    );
+    expect(html).not.toContain("Nothing to make right now.");
+    // What is counted is what is drawn: the one remake, no ticket.
+    expect(html).toContain("1 work item");
+    // Without the filter the ticket and the remake are both counted, and there is no hint.
+    const all = scoped({ status: "Active" }, [rework()], tickets);
+    expect(all).toContain("2 work items");
+    expect(all).not.toContain("kitchen-board-empty");
+  });
   it("WP-2423 (2026-10-18): offers Cancel remake only with the remake permission and hides cancelled remakes", () => {
     const withCancel = (canRework: boolean, items = [rework()]) =>
       renderToStaticMarkup(
