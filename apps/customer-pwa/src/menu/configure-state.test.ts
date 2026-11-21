@@ -725,3 +725,65 @@ it("WP-2423: does not auto-retry while another guest is checking out, and allows
   await state.controller.submit(id(3), draft);
   expect(state.controller.getState()).toMatchObject({ status: "added" });
 });
+
+describe("b39: the same dish tapped twice is one line", () => {
+  const own = (overrides: Partial<CartView["cart"]["items"][number]> = {}) => ({
+    ...addedItem,
+    ...overrides,
+  });
+  it("adds to this phone's own line with the same choices and note", async () => {
+    const calls: unknown[] = [];
+    const client: CustomerCartClient = {
+      loadCurrent: async () => cart(3, [own()]),
+      createCart: async () => cart(1),
+      addItem: async () => {
+        throw new Error("a second line must not be added");
+      },
+      updateItem: async (input) => {
+        calls.push({
+          line: input.cartItemReference,
+          quantity: input.draft.quantity,
+          key: input.operationReference,
+        });
+        return cart(4, [own({ quantity: input.draft.quantity })]);
+      },
+      removeItem: async () => cart(1),
+    };
+    const controller = createConfigureController({ client, keyFactory: () => id(40) });
+    await controller.submit(id(3), draft);
+    expect(calls).toEqual([{ line: id(2), quantity: 2, key: id(40) }]);
+    expect(controller.getState()).toMatchObject({
+      status: "added",
+      cart: { cart: { items: [{ quantity: 2 }] } },
+    });
+  });
+
+  it.each([
+    ["another guest's line", own({ warnings: ["OTHER_PARTICIPANT_ITEM"] })],
+    ["a line with a note", own({ customerNote: "No ice" })],
+    [
+      "a line with other choices",
+      own({ configuration: [{ optionReference: id(9), displayName: "Large", quantity: 1 }] }),
+    ],
+    ["a line that can't be sold now", own({ warnings: ["ITEM_UNAVAILABLE"] })],
+    ["a full line", own({ quantity: 100 })],
+  ])("adds a new line next to %s", async (_name, line) => {
+    let added = 0;
+    const client: CustomerCartClient = {
+      loadCurrent: async () => cart(3, [line]),
+      createCart: async () => cart(1),
+      addItem: async () => {
+        added += 1;
+        return cart(4, [line, own({ cartItemReference: id(5) })]);
+      },
+      updateItem: async () => {
+        throw new Error("must not change the existing line");
+      },
+      removeItem: async () => cart(1),
+    };
+    const controller = createConfigureController({ client, keyFactory: () => id(41) });
+    await controller.submit(id(3), draft);
+    expect(added).toBe(1);
+    expect(controller.getState()).toMatchObject({ status: "added" });
+  });
+});

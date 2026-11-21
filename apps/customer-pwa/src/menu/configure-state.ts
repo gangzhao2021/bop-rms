@@ -59,6 +59,53 @@ interface AddPlan {
   conflictRetries?: number;
   /** v15 b17: the one add tried again after another guest's order at the table held the cart. */
   heldRetried?: boolean;
+  /**
+   * b39: the line of this phone's own the dish joins (same dish, same choices, same note), worked
+   * out once per add operation so a retry of the same operation asks for the same quantity; null
+   * when the dish goes in as a new line.
+   */
+  merge?: { readonly operation: string; readonly line: MergeLine | null };
+}
+
+interface MergeLine {
+  readonly cartItemReference: string;
+  readonly quantity: number;
+}
+
+/** The most one cart line holds (the Store refuses more). */
+const MAX_LINE_QUANTITY = 100;
+
+const selectionKey = (selections: readonly { optionReference: string; quantity: number }[]) =>
+  selections
+    .map((selection) => `${selection.optionReference}:${selection.quantity}`)
+    .sort()
+    .join(",");
+
+/**
+ * b39 (v15 b38 sweep): two taps on + for the same dish gave two lines of 1 instead of one line of
+ * 2. A dish with the same choices and note as a line this phone added (and can still change) is
+ * added to that line; a line another guest added, or one that can't be sold now, is left alone.
+ */
+export function cartLineToMerge(
+  cart: CartView,
+  sellableReference: string,
+  draft: CartItemDraft,
+): MergeLine | null {
+  const wanted = selectionKey(draft.optionSelections);
+  const note = draft.customerNote ?? null;
+  const line = cart.cart.items.find(
+    (item) =>
+      item.sellableReference === sellableReference &&
+      !item.warnings.includes("OTHER_PARTICIPANT_ITEM") &&
+      !item.warnings.includes("ITEM_UNAVAILABLE") &&
+      !item.warnings.includes("ITEM_OPTIONS_CHANGED") &&
+      (item.customerNote ?? null) === note &&
+      selectionKey(item.configuration) === wanted &&
+      item.quantity + draft.quantity <= MAX_LINE_QUANTITY,
+  );
+  return line === undefined
+    ? null
+    : { cartItemReference: line.cartItemReference, quantity: line.quantity + draft.quantity };
 }
 
 /** WP-2423: cart warning set once when the table's timed-out cart held unordered items. */
@@ -253,12 +300,26 @@ export function createConfigureController({
       if (plan.cart === null) throw new CartClientError("cart_service_unavailable");
       const priorVersion = plan.cart.cart.version;
       publish({ status: "pending", stage: "add" });
-      const result = await client.addItem({
-        cart: plan.cart,
-        sellableReference: plan.sellableReference,
-        draft: plan.draft,
-        operationReference: plan.addOperationReference,
-      });
+      if (plan.merge?.operation !== plan.addOperationReference)
+        plan.merge = {
+          operation: plan.addOperationReference,
+          line: cartLineToMerge(plan.cart, plan.sellableReference, plan.draft),
+        };
+      const merge = plan.merge.line;
+      const result =
+        merge === null
+          ? await client.addItem({
+              cart: plan.cart,
+              sellableReference: plan.sellableReference,
+              draft: plan.draft,
+              operationReference: plan.addOperationReference,
+            })
+          : await client.updateItem({
+              cart: plan.cart,
+              cartItemReference: merge.cartItemReference,
+              draft: { ...plan.draft, quantity: merge.quantity },
+              operationReference: plan.addOperationReference,
+            });
       if (
         result.cart.version <= priorVersion ||
         !result.cart.items.some((item) => item.sellableReference === plan.sellableReference)
