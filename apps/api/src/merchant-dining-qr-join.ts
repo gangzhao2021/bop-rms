@@ -1,5 +1,5 @@
 import { loadDiningGuestPhones } from "./dining-guest-phones.js";
-import { readClosedRecord } from "@bop/identity";
+import { readClosedRecord, readGuestSessionDiningParticipants } from "@bop/identity";
 import type { ConsumerTransaction } from "@bop/eventing";
 import {
   createPostgresDiningQrJoinStore,
@@ -71,21 +71,27 @@ export function parseMerchantDiningQrJoinCommand(value: unknown): MerchantDining
 /**
  * WP-2423 M139: the phones panel's label for each round — the number of the phone that sent it, or
  * null for a round staff entered, one whose sender is not recorded, or a phone no longer listed.
+ * Batch 42: the sender is the table phone Identity bound the round's submitting Guest Session to
+ * (`boundParticipants`); Ordering's cart record of that session is only a fallback, because a phone
+ * that joins a table cart another phone opened has none, and its rounds went unlabelled.
  */
 export function diningRoundPhoneNumbers(
   senders: readonly DiningSessionRoundSender[],
   phones: readonly { readonly participantReference: unknown; readonly phoneNumber: number }[],
+  boundParticipants: ReadonlyMap<string, string> = new Map(),
 ): readonly { readonly orderBatchReference: string; readonly phoneNumber: number | null }[] {
   const phoneOf = new Map(
     phones.map((phone) => [String(phone.participantReference), phone.phoneNumber]),
   );
   const rounds = new Map<string, number | null>(
-    senders.map((round) => [
-      round.orderBatchReference,
-      round.staffEntered || round.participantReference === null
-        ? null
-        : (phoneOf.get(round.participantReference) ?? null),
-    ]),
+    senders.map((round) => {
+      const participant =
+        boundParticipants.get(round.guestSessionReference) ?? round.participantReference;
+      return [
+        round.orderBatchReference,
+        round.staffEntered || participant === null ? null : (phoneOf.get(participant) ?? null),
+      ];
+    }),
   );
   return Object.freeze(
     [...rounds].map(([orderBatchReference, phoneNumber]) =>
@@ -194,15 +200,22 @@ export function createMerchantDiningQrJoin(options: {
             brandReference: scope.brandReference,
             storeReference: scope.storeReference,
           };
+          const senders = await listDiningSessionRoundSenders(
+            tx as unknown as ConsumerTransaction,
+            owner,
+            command.diningSessionReference,
+          );
           return Object.freeze({
             ...state,
             rounds: diningRoundPhoneNumbers(
-              await listDiningSessionRoundSenders(
-                tx as unknown as ConsumerTransaction,
-                owner,
-                command.diningSessionReference,
-              ),
+              senders,
               state.phones,
+              await readGuestSessionDiningParticipants(tx as never, owner, {
+                diningSessionReference: command.diningSessionReference,
+                guestSessionReferences: senders
+                  .filter((round) => !round.staffEntered)
+                  .map((round) => round.guestSessionReference),
+              }),
             ),
           });
         },

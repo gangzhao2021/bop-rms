@@ -623,3 +623,58 @@ export function createPostgresGuestParticipantSessionSource(
     },
   });
 }
+
+/**
+ * WP-2423 batch 42: which table participant each of some Guest Sessions was bound to at a Dining
+ * Session — Identity's own record of the phone that session belongs to, whatever the session's
+ * state now (a round's sender stays its sender after the phone leaves or its session ends).
+ * Sessions bound elsewhere or never bound are simply absent. Read only, in the caller's
+ * transaction; no credential or selector leaves this function.
+ */
+export async function readGuestSessionDiningParticipants(
+  transaction: GuestSessionEntryTransaction,
+  scope: Readonly<{ brandReference: string; storeReference: string }>,
+  input: Readonly<{
+    diningSessionReference: string;
+    guestSessionReferences: readonly string[];
+  }>,
+): Promise<ReadonlyMap<string, string>> {
+  const brand = parseOpaqueUuidV7(scope.brandReference, "IDENTITY_INPUT_INVALID");
+  const store = parseOpaqueUuidV7(scope.storeReference, "IDENTITY_INPUT_INVALID");
+  const diningSession = parseOpaqueUuidV7(input.diningSessionReference, "IDENTITY_INPUT_INVALID");
+  const sessions = [
+    ...new Set(
+      input.guestSessionReferences.map((reference) =>
+        parseOpaqueUuidV7(reference, "IDENTITY_INPUT_INVALID"),
+      ),
+    ),
+  ];
+  const found = new Map<string, string>();
+  if (sessions.length === 0) return found;
+  if (sessions.length > 200) throw unavailable();
+  try {
+    await transaction.query(
+      "SELECT set_config('bop.brand_id', $1, true), set_config('bop.store_id', $2, true)",
+      [brand, store],
+    );
+    const result = await transaction.query(
+      `${stableRead}SELECT guest_session_id::text AS session, dining_participant_id::text AS participant
+       FROM bop_identity.guest_session
+       WHERE brand_id = $1 AND store_id = $2 AND dining_session_id = $3
+         AND guest_session_id = ANY($4::uuid[]) AND dining_participant_id IS NOT NULL
+       LIMIT 201`,
+      [brand, store, diningSession, sessions],
+    );
+    const rows =
+      typeof result === "object" && result !== null && "rows" in result ? result.rows : null;
+    if (!Array.isArray(rows) || rows.length > 200) throw unavailable();
+    for (const row of rows as readonly { session?: unknown; participant?: unknown }[]) {
+      const session = parseOpaqueUuidV7(row?.session, "IDENTITY_INPUT_INVALID");
+      if (!sessions.includes(session) || found.has(session)) throw unavailable();
+      found.set(session, parseOpaqueUuidV7(row?.participant, "IDENTITY_INPUT_INVALID"));
+    }
+    return found;
+  } catch (error) {
+    throw unavailableFrom(error);
+  }
+}

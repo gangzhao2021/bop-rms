@@ -158,6 +158,12 @@ export async function listStoreDiningSessionOrderActivity(
 /** WP-2423 M139: who sent one round of a table: the table phone, or staff. */
 export interface DiningSessionRoundSender {
   readonly orderBatchReference: string;
+  /**
+   * WP-2423 batch 42: the Guest Session that sent it, as the round's own submission recorded it.
+   * Identity knows which table phone that session belongs to; Ordering's cart records do not
+   * always (a phone that joins a table cart someone else opened has none).
+   */
+  readonly guestSessionReference: string;
   /** The table participant whose Guest Session sent (or paid) it; null when not recorded. */
   readonly participantReference: string | null;
   /** Staff entered it with the staff round (its Guest Session is a staff round's). */
@@ -184,7 +190,7 @@ export async function listDiningSessionRoundSenders(
   );
   const rows = (
     await transaction.query(
-      `SELECT b.order_batch_id::text batch,
+      `SELECT b.order_batch_id::text batch, s.guest_session_id::text guest,
          (SELECT o.participant_id::text FROM rms_ordering.dining_cart_operation o
            WHERE o.brand_id=$1 AND o.store_id=$2 AND o.dining_session_id=$3
              AND o.guest_session_id=s.guest_session_id
@@ -209,6 +215,7 @@ export async function listDiningSessionRoundSenders(
         throw new Error("DINING_SESSION_ORDER_LOOKUP_UNAVAILABLE");
       return Object.freeze({
         orderBatchReference: parseOrderingReference(row.batch),
+        guestSessionReference: parseOrderingReference(row.guest),
         participantReference:
           row.participant === null ? null : parseOrderingReference(row.participant),
         staffEntered: row.staff,

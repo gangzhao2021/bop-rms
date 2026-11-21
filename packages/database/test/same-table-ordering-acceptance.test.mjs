@@ -5,6 +5,7 @@ import { it } from "vitest";
 import {
   createGuestSessionCredentialProvider,
   createPostgresGuestParticipantSessionSource,
+  readGuestSessionDiningParticipants,
 } from "../../bop/identity/src/index.ts";
 import { createCustomerCartAdderStanding } from "../../../apps/api/src/customer-cart-adder-standing.ts";
 import {
@@ -103,13 +104,13 @@ it("WP-2423 (same-table-ordering): a stranded line's phone is found Gone from it
       const aOld = await seed({ participant: phoneA, qrVersion: 1 });
       const aNow = await seed({ participant: phoneA });
       // Phone B: its session was revoked (removed), and an older one timed out.
-      await seed({ participant: phoneB, status: "Revoked" });
+      const bRevoked = await seed({ participant: phoneB, status: "Revoked" });
       await seed({ participant: phoneB, lastSeenMinutes: -250 });
       // Phone C: only its closed-order session, already past its closure time.
-      await seed({ participant: phoneC, closedMinutes: -130 });
+      const cClosed = await seed({ participant: phoneC, closedMinutes: -130 });
       // Never returned: the same participant id at another table session, Store or Brand.
-      await seed({ participant: phoneB, diningSession: otherTable });
-      await seed({ participant: phoneB, storeId: otherStore });
+      const bOtherTable = await seed({ participant: phoneB, diningSession: otherTable });
+      const bOtherStore = await seed({ participant: phoneB, storeId: otherStore });
       await seed({ participant: phoneB, brandId: otherBrand });
 
       const transactions = (scope) => ({
@@ -166,6 +167,37 @@ it("WP-2423 (same-table-ordering): a stranded line's phone is found Gone from it
           { participantReference: phoneC, standing: "Gone" },
         ],
       );
+
+      // Batch 42: the phone a round's submitting Guest Session belongs to is Identity's binding of
+      // that session, whatever its state now: a revoked or closed session still names its phone
+      // (v15 L41 OSB P: round 2 came from a phone with no cart record of its own). A session bound
+      // at another table session or Store, or one never seen, names nobody.
+      const bound = await transactions(scope).run((tx) =>
+        readGuestSessionDiningParticipants(tx, scope, {
+          diningSessionReference: table,
+          guestSessionReferences: [aNow, bRevoked, cClosed, bOtherTable, bOtherStore, id(999)],
+        }),
+      );
+      assert.deepEqual(Object.fromEntries(bound), {
+        [aNow]: phoneA,
+        [bRevoked]: phoneB,
+        [cClosed]: phoneC,
+      });
+      for (const other of [
+        { brandReference: brand, storeReference: otherStore },
+        { brandReference: otherBrand, storeReference: store },
+      ])
+        assert.equal(
+          (
+            await transactions(other).run((tx) =>
+              readGuestSessionDiningParticipants(tx, other, {
+                diningSessionReference: table,
+                guestSessionReferences: [aNow, bRevoked],
+              }),
+            )
+          ).size,
+          0,
+        );
 
       // RLS: with another Store (or Brand) selected, the table's sessions are invisible.
       for (const other of [
@@ -297,6 +329,8 @@ it("WP-2423 (same-table-ordering): a round sent from the cart is reported with i
         listDiningSessionRoundSenders(tx, f.scope, diningSession),
       );
       assert.equal(senders.length, 1);
+      // Batch 42: with the round's own submitting Guest Session, for Identity's phone binding.
+      assert.equal(senders[0].guestSessionReference, f.request.record.guestSessionReference);
       assert.equal(senders[0].participantReference, payer);
       assert.equal(senders[0].staffEntered, false);
       // Another Store sees no rounds.
