@@ -5,7 +5,9 @@ interface Query {
   readonly observedAt: string;
 }
 /** Caller retains the Dining admission fence before invoking this source and until
- * its outer transaction ends. Parent locks fence batch additions; this inventory
+ * its outer transaction ends, and holds the session's bill disposition fences
+ * (`OrderingOrderDisposition`, WP-2423 batch 44: Order rows only after them; the API's
+ * fenceOrderBills). Parent locks fence batch additions; this inventory
  * conveys no execution or financial finality and cannot authorize closing itself. */
 export function createPostgresDiningSessionOrderInventory(options: {
   brandReference: string;

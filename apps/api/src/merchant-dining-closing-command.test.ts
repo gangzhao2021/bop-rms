@@ -31,6 +31,11 @@ const mock = vi.hoisted(() => ({
   taskComposition: vi.fn(),
   evidence: vi.fn(),
   refresh: vi.fn(),
+  fenceBills: vi.fn(),
+}));
+vi.mock("./dining-waiting-rounds.js", async (original) => ({
+  ...(await original<typeof import("./dining-waiting-rounds.js")>()),
+  fenceOrderBills: (...input: unknown[]) => mock.fenceBills(...input),
 }));
 vi.mock("./merchant-dining-table-checkout.js", async (original) => ({
   ...(await original<typeof import("./merchant-dining-table-checkout.js")>()),
@@ -60,6 +65,7 @@ beforeEach(() => vi.resetAllMocks());
 function setup() {
   mock.sessionOrders.mockResolvedValue(new Map());
   mock.refresh.mockResolvedValue(undefined);
+  mock.fenceBills.mockResolvedValue(undefined);
   mock.guestStarted.mockResolvedValue(new Map());
   mock.guestSetting.mockResolvedValue({ guestTableStart: false });
   const allowed = vi.fn(async () => true),
@@ -209,6 +215,36 @@ it("v15 b11: starting or finishing checkout records the bill's tax rounding agai
   mock.sessionOrders.mockResolvedValue(new Map());
   await f.handler({ ...f.input, command: { ...f.input.command, operationReference: id(12) } });
   expect(mock.refresh).not.toHaveBeenCalled();
+});
+it("batch 44: the table's bill fences come after its Dining fences and before any Order read", async () => {
+  // v15 b43 live 22:02/22:14 UTC (5 × 40P01): the close locked the Order header rows, then asked
+  // for the bill's fence a guest's Start held while it waited for those rows.
+  const f = setup();
+  f.input.command.action = "Finalize";
+  mock.sessionOrders.mockResolvedValue(new Map([[id(5), id(11)]]));
+  const order: string[] = [];
+  mock.fence.mockImplementation(async () => {
+    order.push("dining");
+    return { diningSessionReference: id(5), version: 2, tableAssignmentVersion: 1 };
+  });
+  mock.fenceBills.mockImplementation(async () => void order.push("bill"));
+  mock.refresh.mockImplementation(async () => void order.push("refresh"));
+  mock.finalize.mockImplementation(async () => {
+    order.push("finalize");
+    return { status: "Applied", session: { phase: "Closed", version: 3 } };
+  });
+  await f.handler(f.input);
+  expect(order.slice(0, 4)).toEqual(["dining", "bill", "refresh", "finalize"]);
+  expect(mock.fenceBills).toHaveBeenCalledExactlyOnceWith(
+    expect.anything(),
+    { brandReference: id(2), storeReference: id(3) },
+    [id(11)],
+  );
+  // A table with no Order yet has no bill to fence.
+  mock.fenceBills.mockClear();
+  mock.sessionOrders.mockResolvedValue(new Map());
+  await f.handler({ ...f.input, command: { ...f.input.command, operationReference: id(12) } });
+  expect(mock.fenceBills).not.toHaveBeenCalled();
 });
 it("WP-2423: owner callbacks take the run's guard during the close and are refused after it", async () => {
   const f = setup();

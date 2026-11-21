@@ -17,6 +17,7 @@ import {
 } from "@rms/ordering";
 import { createPostgresDiningTableSettlementStore } from "@rms/payment";
 import { readDiningTableBill, refreshBillTaxRounding } from "./merchant-dining-table-checkout.js";
+import { fenceOrderBills } from "./dining-waiting-rounds.js";
 import {
   createDiningSettledSessionEvidence,
   createDiningSessionClosingEvidence,
@@ -127,6 +128,18 @@ export async function runDiningSessionClosing(input: {
       [String(command.diningSessionReference)],
     )
   ).get(String(command.diningSessionReference));
+  // Batch 44 (v15 b43 live 2026-11-21 22:02:33 and 22:14:48 UTC, 5 × 40P01): the table's bill
+  // fences (OrderingOrderDisposition, in the bill's lock order, fenceOrderBills) before any Order
+  // row. Closing locks the session's Order header rows (its Order inventory) and its Order readers
+  // then take the fence; a guest tapping pay holds that fence and then reads the same header rows.
+  // Taken after the header rows, the close and the guest's Start waited for each other. Here, after
+  // the table's Dining fences, as an unpaid table's bill was already fenced (refreshBillTaxRounding).
+  if (tableOrder !== undefined)
+    await fenceOrderBills(
+      tx,
+      { brandReference: scope.brandReference, storeReference: scope.storeReference },
+      [tableOrder],
+    );
   if (tableOrder !== undefined)
     await refreshBillTaxRounding(tx, scope, {
       orderReference: tableOrder,

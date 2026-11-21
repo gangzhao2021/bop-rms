@@ -56,6 +56,11 @@ export async function fenceTableBill(
  *   3. a transaction that reads or changes a bill through one of its Orders takes the whole bill's
  *      fences, in that order, before its first fence on any of them. The per-Order readers after it
  *      take their fence again (re-entrant), so they never wait while holding another of the bill's.
+ *   4. batch 44: an Order's rows (header and Initial submission FOR UPDATE, batches, items) are
+ *      locked only after its bill's fences. Closing a table takes its Dining fences, then the bill's
+ *      (runDiningSessionClosing), then its Order inventory. v15 2026-11-21 22:02/22:14 UTC: 5 ×
+ *      40P01 between a close that locked the Order header first and a guest's Start holding the
+ *      fence. (Receipt issuance keeps its own order: OrderingReceipt, Order rows, refund fences.)
  * An Order on no merged bill is its own bill. (The Orders list and the pickup queue fence their
  * listed Orders in ascending reference; the pilot reads both as snapshots, which hold no lock.)
  * v15 2026-11-21 15:01–15:03 UTC: 14 × 40P01 on the two Orders of a merged bill. Closing the merged

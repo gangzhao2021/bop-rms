@@ -92,6 +92,7 @@ import { createDiningTableOnlineRefundSender } from "../../../apps/api/src/dinin
 import { createDiningTableOnlinePayments } from "../../../apps/api/src/dining-table-online-payment.ts";
 import { createMerchantDiningTableOnlinePaymentStop } from "../../../apps/api/src/merchant-dining-table-online-payment.ts";
 import {
+  CustomerDiningTablePaymentHandler,
   createCustomerDiningTablePayment,
   customerSettledTableReceiptBody,
 } from "../../../apps/api/src/customer-dining-table-payment.ts";
@@ -9633,6 +9634,248 @@ async function journey(journeyEnding) {
         );
 
         await assertSalesCountEveryRoundOnce();
+        if (ending === "Paid" || ending === "TipsOff") {
+          // Batch 44 (v15 b43 live 2026-11-21 22:02:33 and 22:14:48 UTC, 5 × 40P01): staff press
+          // Close on the cash-paid table while a guest phone still taps pay. The guest's Start took
+          // the bill's fence (OrderingOrderDisposition, the bill's lock order) and then the Order
+          // header row; the close locked the Order header rows first (the session's Order
+          // inventory) and then asked for the same fence: one side died, staff or the guest saw 503.
+          // The close now takes the bill's fences before any Order row. A barrier holds the fence
+          // until the guest's Start and the close both queue on it: at the first table the guest
+          // first (told the table is paid), at the tips-off table the close first (the guest, whose
+          // table has ended by the time the fence is theirs, is told so: never "try again").
+          const guestFirst = ending === "Paid";
+          await cookAndServeRound1();
+          const progress = await createMerchantDiningOrderProgress({
+            persistence: persistenceOf(server),
+            locale: "en-CA",
+            authentication: server.authentication,
+          })({ ...as(server), query: { orderReference } });
+          const closedOrder = await createMerchantDiningOrderCloseCommand({
+            persistence: persistenceOf(server),
+            authentication: server.authentication,
+            resolveConfiguration: createDiningOrderCloseConfiguration({
+              ...ownerScope,
+              providerAccountReference: provider,
+              environment: "Test",
+            }),
+            newReference: fresh,
+            audit: { retentionPolicyCode: "ORDER_AUDIT", retentionPolicyVersion: 1 },
+          })({
+            ...as(server),
+            command: {
+              orderReference,
+              operationReference: fresh(),
+              expectedOrderVersion: progress.currentOrderVersion,
+              expectedClosureVersion: progress.closureVersion,
+              reasonCode: "ORDER_COMPLETED",
+            },
+          });
+          assert.equal(closedOrder.status, "Committed");
+          // The guest's Start runs its transactions one after another (the Provider check of an
+          // open payment, then the payment plan under the bill's fence). TEST-ONLY gate: the
+          // barrier pauses the Start just before its plan's transaction, holding nothing.
+          let guestRuns = 0;
+          let pause = null;
+          const guestTransactions = {
+            run: async (work) => {
+              guestRuns += 1;
+              if (pause !== null && guestRuns === pause.at) {
+                pause.reached();
+                await pause.gate;
+              }
+              return transactions().run(work);
+            },
+          };
+          // The guest's phone of this table, as the pilot composes the guest route (its cookie
+          // and CSRF value, the binding to the table it joined at). No card form is ever opened.
+          let intentsCreated = 0;
+          const guestPort = createCustomerDiningTablePayment({
+            access: {
+              scope,
+              transactions: transactions(),
+              credentials: tablePhone.identity.session.credentials,
+              now: () => new Date().toISOString(),
+              binding: (transaction) => ({
+                validate: async (session, observedAt) =>
+                  (await createDiningGuestBindingQuery({
+                    scope,
+                    now: () => observedAt,
+                    repository: createPostgresDiningGuestBindingStore(
+                      { run: (work) => work(transaction) },
+                      ownerScope,
+                    ),
+                  }).resolve({
+                    purpose: "GuestSessionBinding",
+                    diningSessionReference: session.diningSessionReference,
+                    participantReference: session.diningParticipantReference,
+                    tableReference: dining.table.tableReference,
+                  }))
+                    ? "Current"
+                    : "Unavailable",
+              }),
+            },
+            payments: createDiningTableOnlinePayments({
+              scope: ownerScope,
+              providerAccountReference: provider,
+              environment: "Test",
+              provider: {
+                async createIntent() {
+                  intentsCreated += 1;
+                  throw new Error("a paid table never opens a card payment");
+                },
+                async retrieveIntent() {
+                  throw new Error("no card payment to look up");
+                },
+                async cancelIntent() {
+                  throw new Error("no card payment to cancel");
+                },
+              },
+              transactions: guestTransactions,
+              now,
+              nextReference: fresh,
+            }),
+            providerEnvironment: "Test",
+          });
+          const guestCredentials = {
+            sessionCredential: tablePhone.sessionCredential,
+            csrfCredential: tablePhone.csrfCredential,
+          };
+          const startNow = () =>
+            guestPort.start(guestCredentials, {
+              operationReference: fresh(),
+              tip: { kind: "None" },
+            });
+          // What the guest route answers for a failure (status and public code).
+          const answerOf = (error) => {
+            const answer = { status: 0, code: null };
+            new CustomerDiningTablePaymentHandler({
+              allowedOrigin: "https://synthetic-journey.invalid",
+              port: guestPort,
+            }).failure(
+              {
+                setHeader: () => undefined,
+                status(status) {
+                  answer.status = status;
+                  return {
+                    json(body) {
+                      answer.code = body.error.code;
+                    },
+                  };
+                },
+              },
+              error,
+            );
+            return answer;
+          };
+          // Before the race: the phone is told the table is paid (409 table_already_paid).
+          assert.deepEqual(answerOf(await startNow().catch((error) => error)), {
+            status: 409,
+            code: "table_already_paid",
+          });
+          const fenceKey =
+            "OrderingOrderDisposition:" +
+            scope.brandReference +
+            ":" +
+            scope.storeReference +
+            ":" +
+            orderReference;
+          const waiting = async () =>
+            (
+              await admin.query(
+                "SELECT count(*)::int n FROM pg_locks WHERE locktype='advisory' AND NOT granted AND ((classid::bigint<<32)|objid::bigint)=hashtextextended($1,0)",
+                [fenceKey],
+              )
+            ).rows[0].n;
+          const until = async (count) => {
+            for (let tries = 0; tries < 200; tries += 1) {
+              if ((await waiting()) === count) return;
+              await new Promise((resolve) => setTimeout(resolve, 25));
+            }
+            assert.fail("the guest's Start and the close never queued on the bill's fence");
+          };
+          const deadlocks = async () => {
+            await admin.query("SELECT pg_stat_clear_snapshot()");
+            return (
+              await admin.query(
+                "SELECT deadlocks::int n FROM pg_stat_database WHERE datname=current_database()",
+              )
+            ).rows[0].n;
+          };
+          const deadlocksBefore = await deadlocks();
+          const holder = new Client(context.clientConfig);
+          await holder.connect();
+          let started, closed;
+          try {
+            let reached, open;
+            const atPlan = new Promise((resolve) => (reached = resolve));
+            pause = {
+              at: guestRuns + 2,
+              reached,
+              gate: new Promise((resolve) => (open = resolve)),
+            };
+            const guestTap = startNow().then(
+              (view) => view,
+              (error) => error,
+            );
+            await atPlan;
+            await holder.query("BEGIN");
+            await holder.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [fenceKey]);
+            const staffCloses = () =>
+              closing(server, "Finalize").then(
+                (result) => result,
+                (error) => error,
+              );
+            let staffClose;
+            if (guestFirst) {
+              open();
+              await until(1);
+              staffClose = staffCloses();
+            } else {
+              staffClose = staffCloses();
+              await until(1);
+              open();
+            }
+            await until(2);
+            await holder.query("COMMIT");
+            [started, closed] = await Promise.all([guestTap, staffClose]);
+          } finally {
+            pause = null;
+            await holder.end();
+          }
+          // Staff close the table, once; never "try again".
+          assert.ok(
+            !(closed instanceof Error),
+            String(closed?.cause?.code ?? closed?.code ?? closed),
+          );
+          assert.equal(closed.phase, "Closed");
+          assert.ok(started instanceof Error, "a paid table never starts a phone payment");
+          // First to the fence, the guest is told the table is paid (409); after the close, that
+          // the table is not theirs any more (404: the page shows the receipt).
+          assert.deepEqual(
+            answerOf(started),
+            guestFirst
+              ? { status: 409, code: "table_already_paid" }
+              : { status: 404, code: "table_not_found" },
+            String(started?.code ?? started),
+          );
+          // A later tap of the closed table is refused the same way.
+          assert.deepEqual(answerOf(await startNow().catch((error) => error)), {
+            status: 404,
+            code: "table_not_found",
+          });
+          assert.equal(intentsCreated, 0);
+          assert.deepEqual(
+            await rows(
+              "SELECT (SELECT count(*)::int FROM rms_payment.dining_table_settlement WHERE order_id=$1) AS settlements,(SELECT count(*)::int FROM rms_payment.dining_table_online_payment WHERE order_id=$1) AS online,(SELECT count(*)::int FROM rms_dining.dining_closing_operation WHERE session_id=$2 AND action='Finalize') AS closes",
+              [orderReference, sessionReference],
+            ),
+            [{ settlements: 1, online: 0, closes: 1 }],
+          );
+          // Each backend reports its counts when its transaction ends, at most a second later.
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+          assert.equal(await deadlocks(), deadlocksBefore);
+        }
         if (ending === "Moved") {
           // v15 2026-10-30: the moved table, paid, closes as the Tables page does it — the Order,
           // then the table (its session at the table it moved to).

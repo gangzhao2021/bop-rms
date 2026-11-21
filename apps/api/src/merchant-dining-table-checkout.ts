@@ -647,8 +647,13 @@ export async function readDiningTableBill(
   // WP-2423 item 8 ⑨ (DEC-DINING-TABLE-MERGE): the bill is the table's Order and the Orders of
   // tables merged into it; each round stays on its own Order, with who ordered it.
   const billOrders = await listOrderBillOrders(tx, owner, orderReference);
-  if (input.recordTaxRounding !== undefined || input.lockForPayment === true)
+  if (input.recordTaxRounding !== undefined || input.lockForPayment === true) {
     await fenceTableBill(tx, owner, billOrders);
+    // Batch 44 (v15 b43 live 22:14:48Z): the fence may have been waited for behind staff closing
+    // the table. A reader no longer allowed once it holds the fence (a guest whose table closed
+    // meanwhile) is refused (the guest is told the table ended), never "unavailable, try again".
+    if (!(await allowed())) return fail("TABLE_CHECKOUT_PERMISSION_DENIED");
+  }
   const confirmations = [
     ...(await createPostgresOrderPayLaterConfirmationStore({
       ...owner,
