@@ -4,6 +4,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { setLanguageForTest } from "./i18n/i18n.js";
 import { elapsedText } from "./elapsed-text.js";
 import { openedOnEarlierDay } from "./earlier-day-tables.js";
+import { kitchenBoardFixture, kitchenItemFixture } from "./kitchen-board.fixtures.js";
+import { parseKitchenBoardView, type KitchenBoardItem } from "./kitchen-board.js";
+import { kitchenBoardSearch } from "./KitchenBoardPages.js";
 import { fromEarlierKitchenDay, previousBusinessDate } from "./KitchenEarlierDays.js";
 import { optionLabel, type AvailabilityOption } from "./store-availability-page.js";
 import { parseTonightSummary } from "./store-reports-client.js";
@@ -82,6 +85,52 @@ describe("b39 earlier days are not today's", () => {
     expect(fromEarlierKitchenDay(round("2026-11-19"), "2026-11-20")).toBe(false);
     expect(fromEarlierKitchenDay(round("2026-11-05"), "2026-11-20")).toBe(true);
     expect(fromEarlierKitchenDay({ businessDate: "2026-11-19" }, "2026-11-20")).toBe(true);
+  });
+  it("b39-2: moves a table seated the evening before and never closed off today's kitchen board", () => {
+    // Business day Nov 20 began at 04:00 Toronto (09:00Z). Table 5 was seated Nov 19 at 19:00
+    // (00:00Z) and never closed; at 14:00 on Nov 20 Tables lists it under "From earlier days".
+    const at = "2026-11-20T19:00:00.000Z";
+    const seated = (n: number, createdAt: string, tableLabel: string) => ({
+      ...kitchenItemFixture(),
+      workItemReference: `018f0f58-767a-7f3b-a1d0-00000000050${n}`,
+      ticketReference: `018f0f58-767a-7f3b-a1d0-00000000060${n}`,
+      orderReference: `018f0f58-767a-7f3b-a1d0-00000000070${n}`,
+      createdAt,
+      businessDate: "2026-11-19",
+      atSeatedTable: true,
+      orderLabel: { orderNumber: String(n), orderType: "DineIn", tableLabel },
+    });
+    const view = parseKitchenBoardView({
+      ...kitchenBoardFixture(),
+      projectedAt: at,
+      items: [
+        // The forgotten table: its dinner round, and a last round at 02:00 (07:00Z).
+        seated(1, "2026-11-20T00:10:00.000Z", "5"),
+        seated(2, "2026-11-20T07:00:00.000Z", "5"),
+        // A late service seated at 03:30 (08:30Z), still eating at 14:00: today's work.
+        seated(3, "2026-11-20T08:30:00.000Z", "9"),
+      ],
+    });
+    const board = kitchenBoardSearch({
+      items: view.items,
+      reworks: [],
+      today: "2026-11-20",
+      at,
+      search: null,
+    });
+    expect(board.earlier.map((ticket) => ticket.orderLabel)).toEqual([
+      "Table 5 · Order 1",
+      "Table 5 · Order 2",
+    ]);
+    expect(board.todayMatches.map((item) => item.orderLabel?.tableLabel)).toEqual(["9"]);
+    // One ticket alone, aged by its own time: 19 h old is an earlier day's, 10 h 30 min is not.
+    const [dinner, , late] = view.items as readonly [
+      KitchenBoardItem,
+      KitchenBoardItem,
+      KitchenBoardItem,
+    ];
+    expect(fromEarlierKitchenDay(dinner, "2026-11-20", at)).toBe(true);
+    expect(fromEarlierKitchenDay(late, "2026-11-20", at)).toBe(false);
   });
   it("lists an earlier day's table apart in tonight's summary, out of tonight's amount", () => {
     const fixture = tonightSummaryFixture();

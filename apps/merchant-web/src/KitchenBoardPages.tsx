@@ -27,7 +27,7 @@ import {
 import {
   earlierDayText,
   earlierDayTickets,
-  fromEarlierKitchenDay,
+  kitchenEarlierDayRule,
   KitchenCloseTicketDialog,
   KitchenEarlierDayConfirm,
   kitchenStaleCloseHeading,
@@ -445,6 +445,8 @@ export function kitchenBoardSearch(input: {
   readonly items: readonly KitchenBoardItem[];
   readonly reworks: readonly KitchenReworkView[];
   readonly today: string | null;
+  /** b39-2: the board's clock, for a seated table's rounds of the day before (see KitchenEarlierDays). */
+  readonly at?: string | number | null;
   readonly search: string | null;
   /** v15: today's paid orders still waiting for acceptance (null or omitted when unknown). */
   readonly awaitingAcceptance?: readonly KitchenOrderLabel[] | null | undefined;
@@ -456,10 +458,12 @@ export function kitchenBoardSearch(input: {
     search === null
       ? input.reworks
       : input.reworks.filter((rework) => matchesKitchenOrderLabel(rework.orderLabel, search));
+  const isEarlier = kitchenEarlierDayRule(input.items, input.today, input.at);
   const earlier = earlierDayTickets(
     input.items.filter(isActiveKitchenWork),
     input.today,
     kitchenOrderLabel,
+    isEarlier,
   );
   const earlierOpen = new Set(
     earlier.flatMap((ticket) => ticket.items.map((item) => item.workItemReference)),
@@ -476,10 +480,7 @@ export function kitchenBoardSearch(input: {
      * day's finished or cancelled order 13 must not answer for today's order 13.
      */
     todayMatches: input.items.filter(
-      (item) =>
-        !earlierOpen.has(item.workItemReference) &&
-        !fromEarlierKitchenDay(item, input.today) &&
-        match(item),
+      (item) => !earlierOpen.has(item.workItemReference) && !isEarlier(item) && match(item),
     ),
     /** v15: today's orders the search finds that are paid but not accepted yet (no work yet). */
     awaitingMatches:
@@ -2127,8 +2128,9 @@ export function KitchenBoardScreen({
   // DEC-KITCHEN-STALE-TICKETS: order numbers restart every business day. An earlier day's open
   // work is kept apart (collapsed), labelled with its day and guarded before any kitchen step.
   const today = useStoreBusinessDay()?.businessDate ?? null;
+  const fromEarlierDay = kitchenEarlierDayRule(view.items, today, clockAt);
   const dayLabel = (item: KitchenBoardItem) =>
-    fromEarlierKitchenDay(item, today) && item.businessDate
+    fromEarlierDay(item) && item.businessDate
       ? `${kitchenOrderLabel(item)} · ${earlierDayText(item.businessDate)}`
       : kitchenOrderLabel(item);
   const [confirm, setConfirm] = useState<{
@@ -2139,7 +2141,7 @@ export function KitchenBoardScreen({
   } | null>(null);
   const [closeTarget, setCloseTarget] = useState<EarlierDayTicket | null>(null);
   const guarded = (item: KitchenBoardItem, actionLabel: string, proceed: () => void) => {
-    if (fromEarlierKitchenDay(item, today) && item.businessDate)
+    if (fromEarlierDay(item) && item.businessDate)
       setConfirm({
         businessDate: item.businessDate,
         orderLabel: kitchenOrderLabel(item),
@@ -2262,6 +2264,7 @@ export function KitchenBoardScreen({
     items: view.items,
     reworks: remakes?.items ?? [],
     today,
+    at: clockAt,
     search: orderSearch,
     awaitingAcceptance: view.awaitingAcceptance,
   });
@@ -3345,7 +3348,7 @@ export function KitchenBoardScreen({
                                           orderNumber: label.orderNumber,
                                         })
                                       : t("Dine-in")}
-                                  {fromEarlierKitchenDay(first, today) && first.businessDate
+                                  {fromEarlierDay(first) && first.businessDate
                                     ? ` · ${earlierDayText(first.businessDate)}`
                                     : ""}
                                 </span>

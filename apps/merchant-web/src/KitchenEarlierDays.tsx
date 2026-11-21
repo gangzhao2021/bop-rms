@@ -2,7 +2,8 @@ import { t } from "./i18n/i18n.js";
 import { useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router";
 import { StatePanel } from "@bop-rms/ui";
-import type { KitchenBoardItem } from "./kitchen-board.js";
+import { kitchenWaitStart, type KitchenBoardItem } from "./kitchen-board.js";
+import { lateServiceHours } from "./earlier-day-tables.js";
 import {
   createKitchenStaleCloseClient,
   KitchenStaleCloseClientError,
@@ -19,8 +20,14 @@ import { businessDateText } from "./StoreBusinessDay.js";
  * apart, labelled with their day, guarded before any kitchen step, and closed by a manager.
  */
 export function fromEarlierKitchenDay(
-  item: Pick<KitchenBoardItem, "businessDate" | "atSeatedTable">,
+  item: Pick<KitchenBoardItem, "businessDate" | "atSeatedTable"> &
+    Partial<Pick<KitchenBoardItem, "createdAt" | "placedAt">>,
   today: string | null | undefined,
+  /** The board's clock (its projection time when nothing ticks); unknown: a seated table's round of
+   * the day before stays today's work, as before b39-2. */
+  at?: string | number | null,
+  /** When the table's earliest round of the day before was placed (its guests sat at least then). */
+  seatedSince?: number,
 ): boolean {
   if (!item.businessDate || !today || item.businessDate >= today) return false;
   // v15 b11/b12: a table still seated across the day's turn (late-night service, or guests who
@@ -28,7 +35,46 @@ export function fromEarlierKitchenDay(
   // never closed as stale. b39 (v15 b38 sweep): only across one turn — a round of the business day
   // before. A table left open for two weeks kept its 15-day-old tickets at the top of every day's
   // board; those are an earlier day's tickets to check and close, like any other.
-  return !(item.atSeatedTable === true && item.businessDate === previousBusinessDate(today));
+  if (item.atSeatedTable !== true || item.businessDate !== previousBusinessDate(today)) return true;
+  // b39-2 (review): the same rule as Tables, Home and the summary (earlier-day-tables.ts): a table
+  // seated before the day began and open more than `lateServiceHours` is an earlier day's. A table
+  // seated at 19:00 and never closed left its unserved rounds at the top of the next day's board
+  // ("Overdue 22 h") and in "N work items" all day, while Tables listed it apart.
+  const now = typeof at === "number" ? at : at ? Date.parse(at) : Number.NaN;
+  const since =
+    seatedSince ??
+    (item.createdAt ? Date.parse(kitchenWaitStart(item as KitchenSince)) : Number.NaN);
+  if (!Number.isFinite(now) || !Number.isFinite(since)) return false;
+  return now - since > lateServiceHours * 3_600_000;
+}
+
+type KitchenSince = Pick<KitchenBoardItem, "createdAt" | "placedAt">;
+
+/**
+ * b39-2: one earlier-day rule for the whole board. A seated table's rounds of the day before move
+ * together, aged from the table's earliest such round (its guests sat at least then), so a last
+ * round sent at 02:00 is not left on today's board after the table's dinner rounds moved apart.
+ */
+export function kitchenEarlierDayRule(
+  items: readonly KitchenBoardItem[],
+  today: string | null | undefined,
+  at: string | number | null | undefined,
+): (item: KitchenBoardItem) => boolean {
+  const before = today ? previousBusinessDate(today) : null;
+  const tableKey = (item: KitchenBoardItem) =>
+    item.orderLabel?.tableLabel
+      ? `table:${item.orderLabel.tableLabel}`
+      : `order:${item.orderReference}`;
+  const since = new Map<string, number>();
+  for (const item of items) {
+    if (item.atSeatedTable !== true || item.businessDate !== before) continue;
+    const placed = Date.parse(kitchenWaitStart(item));
+    if (!Number.isFinite(placed)) continue;
+    const key = tableKey(item);
+    const known = since.get(key);
+    if (known === undefined || placed < known) since.set(key, placed);
+  }
+  return (item) => fromEarlierKitchenDay(item, today, at, since.get(tableKey(item)));
 }
 
 /** The calendar date before a business date ("2026-10-14" → "2026-10-13"). */
@@ -68,10 +114,12 @@ export function earlierDayTickets(
   items: readonly KitchenBoardItem[],
   today: string | null | undefined,
   orderLabel: (item: KitchenBoardItem) => string,
+  /** The board's earlier-day rule (kitchenEarlierDayRule); default: by business day alone. */
+  isEarlier: (item: KitchenBoardItem) => boolean = (item) => fromEarlierKitchenDay(item, today),
 ): readonly EarlierDayTicket[] {
   const tickets = new Map<string, KitchenBoardItem[]>();
   for (const item of items) {
-    if (!fromEarlierKitchenDay(item, today)) continue;
+    if (!isEarlier(item)) continue;
     const group = tickets.get(item.ticketReference);
     if (group) group.push(item);
     else tickets.set(item.ticketReference, [item]);

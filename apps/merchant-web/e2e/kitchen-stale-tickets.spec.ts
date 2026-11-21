@@ -300,13 +300,13 @@ for (const width of [1440, 1024, 390])
   test(`@production v15 b11: a seated table's round sent before the day turned stays on today's board, at ${width}`, async ({
     page,
   }) => {
-    // BR A on v15: round sent at 23:52 on Oct 13, the guests still at the table on Oct 14. It is
-    // that table's work, made and served as usual (else the table can never close), never an
-    // earlier day's ticket to close.
+    // BR A on v15: round sent at 03:52 on Oct 14, before the day turned at 04:00, the guests
+    // still at the table. It is that table's work, made and served as usual (else the table can
+    // never close), never an earlier day's ticket to close. b39-2: within 12 hours, as on Tables.
     const lateRound = item(0x30, {
       localizedDisplayNames: { "en-CA": "Late-night congee" },
       orderLabel: { orderNumber: "7", orderType: "DineIn", tableLabel: "T9" },
-      workItemCreatedAt: "2026-10-14T03:52:00.000Z",
+      workItemCreatedAt: "2026-10-14T07:52:00.000Z",
       businessDate: "2026-10-13",
       atSeatedTable: true,
     });
@@ -330,11 +330,12 @@ for (const width of [1440, 1024, 390])
   });
 
 for (const width of [1440, 1024, 390])
-  test(`@production v15 b12: a seated table's later round from the day before reads its age in days, at ${width}`, async ({
+  test(`@production v15 b12: a seated table's later round from the day before reads its age in hours, at ${width}`, async ({
     page,
   }) => {
-    // BR A/E on v15: both rounds sent the evening before, guests still seated; the later round's
-    // note read "Added · 1476 min ago".
+    // BR A/E on v15: both rounds sent before the day turned, guests still seated; the later
+    // round's note read "Added · 1476 min ago". b39-2: a round over 12 hours old at a seated
+    // table is an earlier day's (as on Tables), so on today's board it reads in hours.
     const round = (n: number, name: string, createdAt: string) =>
       item(n, {
         localizedDisplayNames: { "en-CA": name },
@@ -346,8 +347,8 @@ for (const width of [1440, 1024, 390])
       });
     await board(page, true, {
       items: [
-        round(0x40, "Wonton soup", "2026-10-13T17:00:00.000Z"),
-        round(0x48, "Fried rice", "2026-10-13T17:24:00.000Z"),
+        round(0x40, "Wonton soup", "2026-10-14T06:30:00.000Z"),
+        round(0x48, "Fried rice", "2026-10-14T07:00:00.000Z"),
       ],
     });
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
@@ -357,12 +358,63 @@ for (const width of [1440, 1024, 390])
       .first()
       .getByRole("region", { name: "Table T5 · Order 8" });
     await expect(ticket.getByText("Fried rice")).toBeVisible();
-    await expect(ticket.getByText("Added · 1 day ago", { exact: true })).toBeVisible();
-    await expect(ticket.getByText(/min ago/u)).toHaveCount(0);
+    await expect(ticket.getByText("Added · 11 h ago", { exact: true })).toBeVisible();
+    await expect(ticket.getByText(/\d{3,} min ago/u)).toHaveCount(0);
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
     await page.screenshot({ path: `test-results/kitchen-added-day-ago-${width}.png` });
+  });
+
+for (const language of ["en", "zh-Hans"] as const)
+  test(`@production b39-2: a table seated the evening before and never closed leaves today's board, in ${language}`, async ({
+    page,
+  }) => {
+    // Review of b39: Table 6 seated Oct 13 at 19:00 and never closed. On Oct 14 Tables and Home
+    // list it under "From earlier days"; its unserved rounds (dinner, and one at 02:00) sat at the
+    // top of the board ("Overdue 19 h") and in "N work items" all day.
+    const forgotten = (n: number, name: string, createdAt: string) =>
+      item(n, {
+        localizedDisplayNames: { "en-CA": name, "zh-Hans": name },
+        orderReference: id(0x72),
+        orderLabel: { orderNumber: "6", orderType: "DineIn", tableLabel: "6" },
+        workItemCreatedAt: createdAt,
+        businessDate: "2026-10-13",
+        atSeatedTable: true,
+      });
+    if (language === "zh-Hans")
+      await page.addInitScript(() => {
+        try {
+          localStorage.setItem("bop.merchant.language", "zh-Hans");
+        } catch {
+          /* the page falls back to English */
+        }
+      });
+    await board(page, true, {
+      items: [
+        forgotten(0x70, "Tomato pot", "2026-10-13T23:05:00.000Z"),
+        forgotten(0x78, "Fried noodles", "2026-10-14T06:00:00.000Z"),
+      ],
+    });
+    await page.goto("/operations/kitchen");
+    const lanes = page.locator(".kitchen-board-lanes").first();
+    await expect(lanes.getByText("Beef noodle soup")).toBeVisible();
+    await expect(lanes.getByText("Tomato pot")).toHaveCount(0);
+    await expect(lanes.getByText("Fried noodles")).toHaveCount(0);
+    if (language === "en")
+      await expect(page.getByText("1 work item", { exact: true }).first()).toBeVisible();
+    // Both rounds wait with the Oct 9 pickup among the earlier days, for a manager to close.
+    await expect(
+      page.getByText(
+        language === "en"
+          ? "3 tickets from earlier days to check and close"
+          : "3 张较早营业日的票据待核对并关闭",
+      ),
+    ).toBeVisible();
+    await page.screenshot({
+      path: `test-results/b39-2-kitchen-forgotten-yesterday-${language}.png`,
+      fullPage: true,
+    });
   });
 
 test("@production b39: a table left open for days has its old tickets kept apart, not at the top of today's board", async ({
