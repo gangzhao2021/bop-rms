@@ -48,6 +48,8 @@ async function signedIn(page: Page) {
           navigation: [
             nav("OPS-ORDER-QUEUE", "Orders", "/operations/orders", "ordering.operate"),
             nav("KIT-KITCHEN-QUEUE", "Kitchen", "/operations/kitchen", "kitchen.operate"),
+            // Batch 40: an unlisted Pickup goes to Tables only for someone who has Tables.
+            nav("DIN-FLOOR-BOARD", "Tables", "/operations/dining", "dining.operate"),
             nav("RPT-OPS-DASHBOARD", "Reports", "/app/reports/operations", "reporting.sales.read"),
           ],
         },
