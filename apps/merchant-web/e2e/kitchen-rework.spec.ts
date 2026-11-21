@@ -244,6 +244,8 @@ test("@production WP-2423 Q26: the kitchen remakes a dropped dish and puts a dis
   // Marked done by mistake: back in progress, nothing wasted.
   await page.getByRole("button", { name: "Details", exact: true }).click();
   await page.getByRole("button", { name: "Dismiss" }).click();
+  // Batch 41: Recently finished folds once a dish is chosen, so it is opened again.
+  await page.locator(".kitchen-recent-finished:not([data-place-kept]) > summary").click();
   await page.getByRole("button", { name: "Remake Beef noodle soup, Table T4 · Order 21" }).click();
   await dialog.getByLabel("Not ready yet — marked done by mistake").check();
   await expect(dialog.getByText("Nothing is recorded as waste", { exact: false })).toBeVisible();

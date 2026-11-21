@@ -573,8 +573,11 @@ export function KitchenRecentlyFinished({
         rework.originalWorkItemReference === item.workItemReference &&
         rework.status !== "Cancelled",
     ).length;
+  // Batch 41 (v15 b40 live): the list folds when a dish is chosen, so it never lies over the new
+  // remake card (it had hidden the card's "Pickup · Order 1").
+  const listRef = useRef<HTMLDetailsElement | null>(null);
   return (
-    <details className="kitchen-recent-finished">
+    <details className="kitchen-recent-finished" ref={listRef}>
       <summary>{t("Recently finished · {length}", { length: finished.length })}</summary>
       <ul>
         {finished.map((item) => (
@@ -594,7 +597,10 @@ export function KitchenRecentlyFinished({
             <button
               type="button"
               disabled={readOnly}
-              onClick={() => onRemake(item)}
+              onClick={() => {
+                if (listRef.current) listRef.current.open = false;
+                onRemake(item);
+              }}
               aria-label={t("Remake {displayName}, {item}", {
                 displayName: item.displayName,
                 item: orderLabel(item),

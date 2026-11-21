@@ -170,9 +170,16 @@
     display: none;
   }
 }
-/* Recently finished: in the bar; its list opens under it, above the tickets. */
-.kitchen-board-heading__actions .kitchen-recent-finished {
+/* Recently finished: in the bar; its list opens under the bar, above the tickets. Batch 41 (v15 b40
+   live): the list is placed against the bar, not against its own button. On a phone the button is
+   the first in the bar, at the left edge, and a list anchored to its right edge opened 167-234 px
+   off the left of the screen, hiding the dish, the order and Remake. Against the bar's right edge
+   it always opens inside the screen; on a phone it takes the bar's whole width. */
+.kitchen-board-heading__actions {
   position: relative;
+}
+.kitchen-board-heading__actions .kitchen-recent-finished {
+  position: static;
   margin: 0;
   padding: 0;
   border: 0;
@@ -189,6 +196,7 @@
   inset: calc(100% + 4px) 0 auto auto;
   z-index: 5;
   width: min(28rem, calc(100vw - 48px));
+  box-sizing: border-box;
   max-height: 60vh;
   margin: 0;
   padding: 8px 16px;
@@ -198,7 +206,16 @@
   background: var(--bop-color-surface-default);
   box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
 }
+@media (max-width: 767px) {
+  .kitchen-board-heading__actions .kitchen-recent-finished[open] > ul {
+    inset-inline: 0;
+    width: auto;
+  }
+}
+/* The phone's bar buttons share its width (flex: 1 1 0); a row's Remake keeps its own size, at the
+   row's end, so the four Remakes line up under each other. */
 .kitchen-recent-finished li button {
+  flex: none;
   min-height: var(--bop-kitchen-target);
   border: 0;
   background: none;
