@@ -36,6 +36,7 @@ import {
   waitedAgoText,
 } from "./paid-round-wait.js";
 import { setLanguageForTest } from "./i18n/i18n.js";
+import { StoreBusinessDayContext } from "./StoreBusinessDay.js";
 
 describe("WP-2423 P2 store overview", () => {
   it("Owner 2026-11-04: a pickup closed as not collected is not an open order", () => {
@@ -896,6 +897,56 @@ describe("WP-2423 3cd0f8dd: tables to close, earlier-day pickups and the day che
       title: "Tables still open from earlier days",
       action: "Check and close",
     });
+  });
+  it("b40: Home's rows and count take the day from the Store's business-day read, as on v15", () => {
+    // v15 b39 live (Fireside Hotpot, 01:08): eight tables seated two weeks before and never closed.
+    // NeedsAttention passed null as the day's start, so they were tonight's "Tables to close".
+    const readAt = "2026-11-21T06:08:00.000Z";
+    const earlierTables = [21_640, 21_600, 21_590, 21_580, 21_570, 21_560, 20_300, 20_250].map(
+      (elapsedMinutes) => table({ elapsedMinutes }),
+    );
+    const state = (tables: StaffDiningTable[]): OverviewTodayState => ({
+      ...initialOverviewState,
+      orders: { kind: "Hidden" },
+      pickups: { kind: "Hidden" },
+      exceptions: { kind: "Hidden" },
+      tables: { kind: "Ready", value: { ...read(tables), readAt } },
+    });
+    const day = {
+      businessDate: "2026-11-20",
+      startsAt: "2026-11-20T09:00:00.000Z",
+      endsAt: "2026-11-21T09:00:00.000Z",
+      closesAt: "2026-11-21T05:00:00.000Z",
+    };
+    const render = (tables: StaffDiningTable[], language: "en" | "zh-Hans" = "en") => {
+      setLanguageForTest(language);
+      try {
+        return renderToStaticMarkup(
+          <StoreBusinessDayContext.Provider value={day}>
+            <MemoryRouter>
+              <NeedsAttention state={state(tables)} />
+              <OverviewToday state={state(tables)} />
+            </MemoryRouter>
+          </StoreBusinessDayContext.Provider>,
+        );
+      } finally {
+        setLanguageForTest("en");
+      }
+    };
+    const html = render(earlierTables);
+    expect(html).not.toContain("Tables to close");
+    expect(html).toContain("Tables still open from earlier days");
+    expect(html).toContain("8 tables · Take the payment");
+    expect(html).toContain('<strong class="overview-count__value">0</strong>');
+    expect(html).toContain("Not counted: 8 tables from earlier days");
+    // A table seated tonight is still tonight's, counted and to close once long open.
+    const tonight = render([...earlierTables, table({ elapsedMinutes: 13 * 60 })]);
+    expect(tonight).toContain("1 table served — close when the guests have left");
+    expect(tonight).toContain('<strong class="overview-count__value">1</strong>');
+    const zh = render(earlierTables, "zh-Hans");
+    expect(zh).not.toContain("待关闭的桌台");
+    expect(zh).toContain("之前营业日没关的桌");
+    expect(zh).toContain("不计入：8 张桌台是之前营业日的");
   });
   it("M6: the opening and closing checklist reads the same sources and leaves out hidden ones", () => {
     const state: OverviewTodayState = {

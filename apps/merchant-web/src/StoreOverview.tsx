@@ -410,6 +410,7 @@ export function OverviewToday({
   busy = false,
   onRefresh,
   reportsHref = null,
+  dayStartsAt,
 }: {
   readonly state: OverviewTodayState;
   readonly timeZone?: string | undefined;
@@ -417,7 +418,11 @@ export function OverviewToday({
   readonly onRefresh?: (() => void) | undefined;
   /** Where Today's summary lives; null when this staff member has no reports screen. */
   readonly reportsHref?: string | null;
+  /** The store's current business day; from the Store's business-day read when not given. */
+  readonly dayStartsAt?: string | null | undefined;
 }) {
+  const businessDay = useStoreBusinessDay();
+  const tables = tablesSummary(state, dayStartsAt ?? businessDay?.startsAt ?? null);
   if (
     reportsHref === null &&
     [state.orders, state.pickups, state.tables].every((read) => read.kind === "Hidden")
@@ -460,12 +465,23 @@ export function OverviewToday({
         />
         <Count
           label={t("Open tables")}
-          read={tablesSummary(state)}
+          read={tables}
           value={(read) => countShown(read.open, read.more, t("the first tables listed"))}
+          // b40: today's tables are the number; those left open from earlier days are said apart,
+          // as on Tables, never counted as seated tonight.
           detail={(read) =>
-            read.open > 0 && read.toClose === null
-              ? t("A manager or the owner closes tables when the guests have left")
-              : null
+            [
+              (read.earlierDays ?? 0) > 0
+                ? t("Not counted: {tables} from earlier days", {
+                    tables: countOf(read.earlierDays ?? 0, "table"),
+                  })
+                : null,
+              read.open > 0 && read.toClose === null
+                ? t("A manager or the owner closes tables when the guests have left")
+                : null,
+            ]
+              .filter((part) => part !== null)
+              .join(" · ") || null
           }
           href="/operations/dining"
         />
@@ -931,11 +947,10 @@ export function NeedsAttention({
 }) {
   const reads = [state.orders, state.pickups, state.exceptions, state.tables];
   const businessDay = useStoreBusinessDay();
-  const listed = systemAttentionItems(
-    system,
-    timeZone,
-    dayStartsAt ?? businessDay?.startsAt ?? null,
-  );
+  // b40 (v15 b39 live): the day's start reaches every row, tables included. Passing null to the
+  // tables' rows counted eight two-week-old tables as tonight's "Tables to close".
+  const dayStart = dayStartsAt ?? businessDay?.startsAt ?? null;
+  const listed = systemAttentionItems(system, timeZone, dayStart);
   const urgent = listed.urgent;
   // Same key as the "could not be checked" row, so the same row takes the answer in its place.
   const later: readonly AttentionItem[] =
@@ -963,7 +978,7 @@ export function NeedsAttention({
   const work = attentionItems(
     state,
     approvals,
-    null,
+    dayStart,
     kitchenSetupHref,
     settlement,
     staffRoles,

@@ -137,6 +137,21 @@ test("@production b39: Tables keeps earlier days apart, says what a guest asked 
       /^Closing at 10:00\s?(PM|p\.m\.): 2 tables still open\. Take each table's payment and close it when the guests leave\.$/u,
     ),
   ).toBeVisible();
+  // b40 (v15 b39 live: "8 seated", Seated 8 with no table seated today): the header and every
+  // tab count today's tables only; the earlier day's table is counted and listed apart.
+  const summary = page.locator(".dining-floor-summary");
+  await expect(summary).toContainText("2 seated");
+  await expect(summary).not.toContainText("3 seated");
+  const tabs = page.getByRole("navigation", { name: "Show tables" });
+  await expect(tabs.getByRole("button", { name: /^All/u })).toHaveText("All 2");
+  await expect(tabs.getByRole("button", { name: /^Seated/u })).toHaveText("Seated 2");
+  for (const name of ["Seated", "All"]) {
+    await tabs.getByRole("button", { name: new RegExp("^" + name, "u") }).click();
+    await expect(list.getByRole("heading", { name: "From earlier days" })).toBeVisible();
+    await expect(list.locator(".table-rows").first().locator(".table-row")).toHaveCount(2);
+    await expect(list.locator(".table-rows").last().locator(".table-row")).toContainText("Table 5");
+  }
+  await tabs.getByRole("button", { name: /^Needs action/u }).click();
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: 900 });
     await expect

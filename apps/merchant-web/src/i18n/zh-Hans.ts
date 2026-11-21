@@ -10345,4 +10345,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "No recorded configuration history.": "还没有配置记录。",
   "Revision {revision} · {state} · {recordedAt}": "修订 {revision} · {state} · {recordedAt}",
   "Older configuration history": "更早的配置记录",
+  // b40 (v15 b39 live): Home counts tonight's tables apart from earlier days'.
+  "Not counted: {tables} from earlier days": "不计入：{tables}是之前营业日的",
 });

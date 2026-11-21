@@ -153,7 +153,9 @@ export function ClosingReminder({
     summary?.openTables.filter((table) => table.owedMinor !== "0" && !fromEarlierDay(table)) ?? [];
   const earlier = summary?.openTables.filter(fromEarlierDay) ?? [];
   const earlierOwedMinor = earlier.reduce((sum, table) => sum + BigInt(table.owedMinor), 0n);
-  if (phase === "UnpaidTablesOnly" && open.length === 0) return null;
+  // b40 (b39 review): later in the night only an unpaid table is worth saying, and a table left
+  // open from an earlier day that still owes is one, so it is named even when today's are paid.
+  if (phase === "UnpaidTablesOnly" && open.length === 0 && earlierOwedMinor === 0n) return null;
   const before = phase === "BeforeClosing";
   const net =
     summary === null

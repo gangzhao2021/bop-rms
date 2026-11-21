@@ -1149,11 +1149,12 @@ export function DiningSessionWorkspace({
     openedOnEarlierDay(table.elapsedMinutes, readAt, dayStart);
   const earlierRows = rows.filter((row) => fromEarlierDay(row.table));
   const todayRows = rows.filter((row) => !fromEarlierDay(row.table));
+  // b40 (v15 b39 live): every tab counts today's tables only, so "8 seated" never means eight
+  // tables left open two weeks ago; those are counted and listed apart, "from earlier days".
   const counts = new Map(
     tableTabs.map((value) => [
       value,
-      (value === "Needs" ? todayRows : rows).filter((row) => tableInTab(row.table, row.need, value))
-        .length,
+      todayRows.filter((row) => tableInTab(row.table, row.need, value)).length,
     ]),
   );
   const closingAlert = tablesClosingAlert(
@@ -1331,12 +1332,23 @@ export function DiningSessionWorkspace({
       <span className="table-row__next">{stepButton(table, need)}</span>
     </li>
   );
-  const visible = (tab === "Needs" ? todayRows : rows).filter((row) =>
-    tableInTab(row.table, row.need, tab),
-  );
+  const visible = todayRows.filter((row) => tableInTab(row.table, row.need, tab));
   const seatedOthers = todayRows.filter(
     (row) => row.table.currentDiningSessionReference !== null && row.need.tone !== "action",
   );
+  const earlierShown = earlierRows.length > 0 && (tab === "All" || tab === "Seated");
+  const earlierGroup =
+    earlierRows.length === 0 ? null : (
+      <>
+        <h2 className="table-list__group">{t("From earlier days")}</h2>
+        <p className="table-list__calm">
+          {t(
+            "These tables were opened on an earlier day and never closed. Open each one: take the payment, or record that the guests left without paying, then close it. Nothing is closed or written off by itself.",
+          )}
+        </p>
+        <ul className="table-rows">{earlierRows.map(tableRow)}</ul>
+      </>
+    );
   const freeLine =
     freeRows.length === 0 ? null : (
       <section className="table-free" aria-label={t("Free tables")}>
@@ -1545,25 +1557,21 @@ export function DiningSessionWorkspace({
                   <ul className="table-rows">{seatedOthers.map(tableRow)}</ul>
                 </>
               ) : null}
-              {earlierRows.length > 0 ? (
-                <>
-                  <h2 className="table-list__group">{t("From earlier days")}</h2>
-                  <p className="table-list__calm">
-                    {t(
-                      "These tables were opened on an earlier day and never closed. Open each one: take the payment, or record that the guests left without paying, then close it. Nothing is closed or written off by itself.",
-                    )}
-                  </p>
-                  <ul className="table-rows">{earlierRows.map(tableRow)}</ul>
-                </>
-              ) : null}
+              {earlierGroup}
               {freeLine}
             </>
           ) : tab === "Free" ? (
             (freeLine ?? <p className="table-list__calm">{t("No free tables.")}</p>)
-          ) : visible.length === 0 ? (
-            <p className="table-list__calm">{t("No tables here.")}</p>
           ) : (
-            <ul className="table-rows">{visible.map(tableRow)}</ul>
+            <>
+              {visible.length > 0 ? (
+                <ul className="table-rows">{visible.map(tableRow)}</ul>
+              ) : earlierShown ? null : (
+                <p className="table-list__calm">{t("No tables here.")}</p>
+              )}
+              {/* b40: All and Seated list earlier days' tables too, apart and under their own count. */}
+              {earlierShown ? earlierGroup : null}
+            </>
           )}
         </section>
         <aside
