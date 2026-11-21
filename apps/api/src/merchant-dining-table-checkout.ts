@@ -530,6 +530,31 @@ export async function billReductionTaxShares(
   );
 }
 
+/**
+ * b40 review (v15 b39 live, a merged table): each round's number on the table's whole bill, by
+ * round reference, so every staff screen calls a round what checkout, the split and the guest call
+ * it. The bill's rounds keep their numbers; a round still waiting for staff OK (not on the bill
+ * yet) follows them in the order it was held, so it never shares a number with a bill round.
+ */
+export function diningTableBillRoundNumbers(
+  bill: Pick<DiningTableBill, "rounds" | "waitingRounds">,
+): { readonly orderBatchReference: string; readonly roundNumber: number }[] {
+  const numbers = bill.rounds.map((round) => ({
+    orderBatchReference: round.orderBatchReference,
+    roundNumber: round.roundNumber,
+  }));
+  let last = numbers.reduce((max, round) => Math.max(max, round.roundNumber), 0);
+  const onBill = new Set(numbers.map((round) => round.orderBatchReference));
+  for (const round of [...bill.waitingRounds].sort((a, b) =>
+    a.heldAt < b.heldAt ? -1 : a.heldAt > b.heldAt ? 1 : 0,
+  ))
+    if (!onBill.has(round.orderBatchReference)) {
+      last += 1;
+      numbers.push({ orderBatchReference: round.orderBatchReference, roundNumber: last });
+    }
+  return numbers;
+}
+
 export async function readDiningTableBill(
   tx: ConsumerTransaction,
   scope: Scope,

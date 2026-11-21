@@ -917,6 +917,19 @@ export function orderBill(
   });
 }
 
+/**
+ * b40 review (v15 b39 live, a merged table): the number staff see for a round. On a table with
+ * tables merged into it, the round's number on the whole bill (as checkout, the split and the
+ * guest call it), so the host's order and a merged-in order never both show "round 1"; otherwise
+ * the order's own round number.
+ */
+export function billRoundNumber(
+  order: { readonly tableBill: CurrentOrderQueue["items"][number]["tableBill"] },
+  batch: { readonly orderBatchReference: string; readonly sequence: number },
+): number {
+  return order.tableBill?.billRoundNumbers?.get(batch.orderBatchReference) ?? batch.sequence;
+}
+
 export interface OrderRefundRow {
   readonly label: string;
   /** Null: the refund has started but Payment has not opened it yet (amount not known). */
@@ -948,7 +961,9 @@ export function orderRefundRows(
     const label =
       (order.orderType === "Pickup"
         ? t("Order cancellation refund")
-        : t("Round {sequence} cancellation refund", { sequence: batch.sequence })) +
+        : t("Round {sequence} cancellation refund", {
+            sequence: billRoundNumber(order, batch),
+          })) +
       (cancellation.refundMethod === "CardMachine"
         ? order.counter?.paidOnCardMachine?.cash != null
           ? t(" (cash)")
@@ -2007,7 +2022,10 @@ function QueuedOrderLines({
   timeZone,
   today = null,
   batches,
+  roundNumber,
 }: {
+  /** b40 review: the number staff see for a round (on a merged table, the whole bill's). */
+  readonly roundNumber?: ((batch: QueuedOrder["batches"][number]) => number) | undefined;
   /**
    * b22: what staff can do to a round's dishes (take them off the bill), under its dishes; with the
    * order's detail once read (undefined while it isn't: the action then links to the order's page).
@@ -2094,6 +2112,7 @@ function QueuedOrderLines({
                 timeZone,
                 today,
                 phones,
+                number: (batch) => billRoundNumber(state.detail.order, batch),
                 action:
                   roundAction === undefined
                     ? undefined
@@ -2114,10 +2133,14 @@ function QueuedOrderLines({
               <section
                 key={batch.orderBatchReference}
                 className="order-round order-round--lines"
-                aria-label={t("Round {sequence}", { sequence: batch.sequence })}
+                aria-label={t("Round {sequence}", {
+                  sequence: roundNumber?.(batch) ?? batch.sequence,
+                })}
               >
                 <header className="order-round__head">
-                  <h3>{t("Round {sequence}", { sequence: batch.sequence })}</h3>
+                  <h3>
+                    {t("Round {sequence}", { sequence: roundNumber?.(batch) ?? batch.sequence })}
+                  </h3>
                 </header>
                 {roundHead(batch)}
                 <DiningRoundProgressItems sequence={batch.sequence} />
@@ -2393,7 +2416,9 @@ function OrderStatusNotes({
       {order.batches.map((batch) =>
         batch.waitingForStaff !== null ? (
           <span key={batch.orderBatchReference} className="order-accept-by" data-tier="warning">
-            {order.batches.length > 1 ? t("Round {sequence}: ", { sequence: batch.sequence }) : ""}
+            {order.batches.length > 1 || order.tableBill?.billRoundNumbers !== undefined
+              ? t("Round {sequence}: ", { sequence: billRoundNumber(order, batch) })
+              : ""}
             {t("Waiting for your OK · not on the bill")}
           </span>
         ) : batch.paymentDue === null ? null : (
@@ -2402,7 +2427,9 @@ function OrderStatusNotes({
             className="order-accept-by"
             data-tier={paymentDueTier(batch.paymentDue, now)}
           >
-            {order.batches.length > 1 ? t("Round {sequence}: ", { sequence: batch.sequence }) : ""}
+            {order.batches.length > 1 || order.tableBill?.billRoundNumbers !== undefined
+              ? t("Round {sequence}: ", { sequence: billRoundNumber(order, batch) })
+              : ""}
             {paymentDueText(batch.paymentDue, timeZone, now, batch.staffRound !== null)}
           </span>
         ),
@@ -3123,14 +3150,14 @@ function OrderDetailBody({
               aria-label={
                 order.orderType === "Pickup"
                   ? t("Order")
-                  : t("Round {sequence}", { sequence: batch.sequence })
+                  : t("Round {sequence}", { sequence: billRoundNumber(order, batch) })
               }
             >
               {/* v15 1fc58e90 ⑧: a pickup order has one batch, so it reads as the order. */}
               {order.orderType === "Pickup" ? null : (
                 <h3>
                   {t("Round {sequence}{value}", {
-                    sequence: batch.sequence,
+                    sequence: billRoundNumber(order, batch),
                     value: batch.sequence === 1 ? t(" · First round") : t(" · Added round"),
                   })}
                   {batch.staffRound !== null ? t(" · Entered by staff") : ""}
@@ -4062,6 +4089,7 @@ export function CurrentOrderQueuePage({
             csrf={csrf}
             fetcher={fetcher}
             roundMinor={roundMinor}
+            roundNumber={billRoundNumber(order, batch)}
             openOnArrival={
               order.orderReference === orderReference && arrivalRound === batch.sequence
             }
@@ -4078,7 +4106,7 @@ export function CurrentOrderQueuePage({
           // b22 review: while the dishes are being read, the same button in the same place, not
           // pressable yet; never a link to the order's page that turns into it a moment later.
           <button type="button" disabled>
-            {t("Take dishes off round {sequence}", { sequence: batch.sequence })}
+            {t("Take dishes off round {sequence}", { sequence: billRoundNumber(order, batch) })}
           </button>
         ) : (
           // The order's dishes could not be read here: its page, with this round's panel open.
@@ -4087,7 +4115,7 @@ export function CurrentOrderQueuePage({
             to={`/operations/orders/${order.orderReference}`}
             state={{ ordersListSearch: listSearch, takeOffRound: batch.sequence }}
           >
-            {t("Take dishes off round {sequence}", { sequence: batch.sequence })}
+            {t("Take dishes off round {sequence}", { sequence: billRoundNumber(order, batch) })}
           </Link>
         )}
       </fieldset>
@@ -4498,7 +4526,7 @@ export function CurrentOrderQueuePage({
                   ? orderLabel(order, today)
                   : orderLabel(order, today) +
                     " · " +
-                    t("round {sequence}", { sequence: batch.sequence }),
+                    t("round {sequence}", { sequence: billRoundNumber(order, batch) }),
             })),
         )
       : [];
@@ -5109,6 +5137,7 @@ export function CurrentOrderQueuePage({
                                     timeZone,
                                     today: businessDay,
                                     phones,
+                                    number: (batch) => billRoundNumber(order, batch),
                                     // b22: under the round's dishes, as on Tables.
                                     action: (batch) =>
                                       roundTakeOff(
@@ -5154,6 +5183,7 @@ export function CurrentOrderQueuePage({
                         timeZone={timeZone}
                         today={businessDay}
                         batches={order.batches}
+                        roundNumber={(batch) => billRoundNumber(order, batch)}
                         onDetail={(read) => {
                           setPositions((current) =>
                             current.get(order.orderReference) === read.paymentPosition
@@ -5502,7 +5532,7 @@ export function CurrentOrderQueuePage({
                       }
                       orderReference={order.orderReference}
                       orderBatchReference={batch.orderBatchReference}
-                      roundNumber={batch.sequence}
+                      roundNumber={billRoundNumber(order, batch)}
                       orderLabel={t("order {orderNumber}", { orderNumber: order.orderNumber })}
                       csrf={csrf}
                       fetcher={fetcher}

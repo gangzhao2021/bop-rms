@@ -14,6 +14,7 @@ import {
   cashTotalMinor,
   createTableCheckoutClient,
   TableCheckoutError,
+  tableBillRoundNumbers,
   type TableBill,
 } from "./table-checkout-client.js";
 import type { StaffDiningTable, StaffDiningTableSession } from "./dining-session-client.js";
@@ -149,9 +150,13 @@ function WaitingRoundsAtCheckout({
 }) {
   const count = bill.waitingRounds.length;
   const total = bill.waitingRounds.reduce((sum, round) => sum + BigInt(round.totalMinor), 0n);
-  const known = new Map(
-    (table.heldRounds ?? []).map((round) => [round.orderBatchReference, round.roundNumber]),
-  );
+  // b40 review: on a merged table, numbered as on the whole bill (after its rounds), as the panel.
+  const known: ReadonlyMap<string, number | null> =
+    (table.session?.mergedTables ?? []).length > 0
+      ? tableBillRoundNumbers(bill)
+      : new Map(
+          (table.heldRounds ?? []).map((round) => [round.orderBatchReference, round.roundNumber]),
+        );
   return (
     <div className="table-checkout__waiting" role="alert">
       <p>

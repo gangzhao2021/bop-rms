@@ -1898,7 +1898,14 @@ function TablePanel({
       {/* At checkout the waiting rounds are decided in Checkout itself, before the payment. */}
       {seated && !(table.paymentTiming === "PayLater" && table.session?.phase === "Closing") ? (
         <TableHeldRounds
-          rounds={table.heldRounds ?? []}
+          // b40 review: on a merged table, numbered as on the whole bill (after its rounds).
+          rounds={(table.heldRounds ?? []).map((round) => ({
+            ...round,
+            roundNumber:
+              billRoundNumbers instanceof Map
+                ? (billRoundNumbers.get(round.orderBatchReference) ?? round.roundNumber)
+                : round.roundNumber,
+          }))}
           csrf={csrf}
           timeZone={timeZone}
           locked={locked}

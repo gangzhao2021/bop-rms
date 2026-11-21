@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { t } from "./i18n/i18n.js";
 import { orderMoney } from "./order-money.js";
-import { createTableCheckoutClient } from "./table-checkout-client.js";
+import { createTableCheckoutClient, tableBillRoundNumbers } from "./table-checkout-client.js";
 
 /**
  * WP-2423 item 8 ⑨ (DEC-DINING-TABLE-MERGE): a table with tables merged into it pays one bill —
@@ -100,11 +100,8 @@ export function useBillRoundNumbers(input: {
       .bill(csrf, diningSessionReference, controller.signal)
       .then((bill) => {
         if (controller.signal.aborted) return;
-        const rounds = new Map<string, number>();
-        for (const round of bill.rounds)
-          if (round.orderBatchReference !== undefined)
-            rounds.set(round.orderBatchReference, round.roundNumber);
-        setRead({ session: diningSessionReference, rounds });
+        // b40 review: a round waiting for staff OK follows the bill's, never sharing a number.
+        setRead({ session: diningSessionReference, rounds: tableBillRoundNumbers(bill) });
       })
       .catch(() => {
         // A failed reread keeps the last numbers; a failed first read: each order's own.

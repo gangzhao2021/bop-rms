@@ -92,6 +92,7 @@ import {
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { runMerchantSnapshotRead } from "./merchant-snapshot-read.js";
 import {
+  diningTableBillRoundNumbers,
   readDiningTableBill,
   readOrderBillRounds,
   tableRefundedMinor,
@@ -702,6 +703,11 @@ export function createPersistentMerchantOrderQueue(options: {
                * (and in its amount), paid there or still to be.
                */
               mergedInto?: { tableLabel: string | null; paid: boolean };
+              /**
+               * b40 review: on a table with tables merged into it (this one or the one it was
+               * merged into), each round's number on the whole bill, as checkout numbers it.
+               */
+              billRoundNumbers?: { orderBatchReference: string; roundNumber: number }[];
               /** Owner 2026-11-03 walkthrough: a split bill with some parts paid: what is left. */
               partlyPaid?: {
                 remainingMinor: string;
@@ -1475,10 +1481,26 @@ export function createPersistentMerchantOrderQueue(options: {
                       : ((
                           await listDiningSessionTableLabels(businessTransaction, scoped, [session])
                         ).get(session) ?? null);
+                  // b40 review: its rounds as the bill it is on numbers them.
+                  const hostBill =
+                    session === undefined || tenantReference === null
+                      ? undefined
+                      : await readDiningTableBill(
+                          businessTransaction,
+                          { tenantReference, ...scoped },
+                          {
+                            diningSessionReference: session,
+                            observedAt: new Date(Date.parse(String(source.now()))).toISOString(),
+                            authorize: async () => stillAllowed(),
+                          },
+                        );
                   tableBills.set(order, {
                     totalMinor: "0",
                     paid: null,
                     mergedInto: { tableLabel, paid: paidThere },
+                    ...(hostBill === undefined
+                      ? {}
+                      : { billRoundNumbers: diningTableBillRoundNumbers(hostBill) }),
                   });
                   continue;
                 }
@@ -1506,6 +1528,7 @@ export function createPersistentMerchantOrderQueue(options: {
                         .reduce((sum, round) => sum + BigInt(round.totalMinor), 0n)
                         .toString(),
                       paid: null,
+                      billRoundNumbers: diningTableBillRoundNumbers(merged),
                     });
                     continue;
                   }

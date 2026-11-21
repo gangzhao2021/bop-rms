@@ -225,6 +225,32 @@ const signed = (value: unknown) =>
       ? value
       : invalid();
 
+/**
+ * b40 review (v15 b39 live, a merged table): each round's number on the whole bill by round
+ * reference, as checkout numbers it; a round still waiting for staff OK (not on the bill yet)
+ * follows the bill's rounds in the order it was held, so no two rounds share a number. The API's
+ * order reads number them the same way (diningTableBillRoundNumbers).
+ */
+export function tableBillRoundNumbers(
+  bill: Pick<TableBill, "rounds" | "waitingRounds">,
+): ReadonlyMap<string, number> {
+  const numbers = new Map<string, number>();
+  let last = 0;
+  for (const round of bill.rounds)
+    if (round.orderBatchReference !== undefined) {
+      numbers.set(round.orderBatchReference, round.roundNumber);
+      last = Math.max(last, round.roundNumber);
+    }
+  for (const round of [...bill.waitingRounds].sort((a, b) =>
+    a.heldAt < b.heldAt ? -1 : a.heldAt > b.heldAt ? 1 : 0,
+  ))
+    if (!numbers.has(round.orderBatchReference)) {
+      last += 1;
+      numbers.set(round.orderBatchReference, last);
+    }
+  return numbers;
+}
+
 export function parseTableBill(value: unknown): TableBill {
   if (value === null || typeof value !== "object") return invalid();
   const raw = value as Record<string, unknown>;

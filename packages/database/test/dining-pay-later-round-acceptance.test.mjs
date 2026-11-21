@@ -2633,6 +2633,31 @@ async function journey(journeyEnding) {
               )
               .every((round) => round.orderedBy !== mRound.orderedBy),
           );
+          // b40 review: Orders numbers the merged bill's rounds as the bill does, on the host's
+          // Order and on T-M's (its own round 1 is round 3 there), never two "round 1"s.
+          const billNumbers = merchantBill.rounds.map((round) => ({
+            orderBatchReference: round.orderBatchReference,
+            roundNumber: round.roundNumber,
+          }));
+          assert.deepEqual(
+            billNumbers.map((round) => round.roundNumber),
+            [1, 2, 3],
+          );
+          assert.deepEqual((await orderDetail()).items[0].tableBill.billRoundNumbers, billNumbers);
+          const mergedDetail = await createPersistentMerchantOrderQueue({
+            persistence: persistenceOf(server),
+            quoteVersion: 1,
+            acceptanceConfigured: true,
+          })({
+            sessionCookie: server.sessionCookie,
+            afterOrderReference: null,
+            orderReference: mOrder,
+          });
+          assert.equal(
+            mergedDetail.items[0].tableBill.mergedInto.tableLabel,
+            dining.table.stableLabel,
+          );
+          assert.deepEqual(mergedDetail.items[0].tableBill.billRoundNumbers, billNumbers);
 
           if (ending === "MergedRemoved") {
             // Three $12.50 rounds (two on the host's Order, T-M's on its own) are $42.38 on the
@@ -2986,6 +3011,11 @@ async function journey(journeyEnding) {
               .reduce((sum, round) => sum + BigInt(round.totalMinor), 0n)
               .toString(),
             paid: null,
+            // b40 review: each round's number on the merged bill, as checkout numbers it.
+            billRoundNumbers: merchantRounds.map((round) => ({
+              orderBatchReference: round.orderBatchReference,
+              roundNumber: round.roundNumber,
+            })),
             taxRoundingMinor: "-1",
             rounds: billRoundsOf(merchantRounds, orderReference),
           });
@@ -3080,9 +3110,15 @@ async function journey(journeyEnding) {
               BigInt(details[0].items[0].tableBill.totalMinor),
             compedMinor,
           );
+          // b40 review: both Orders number the rounds as the merged bill does.
+          const mergedNumbers = mergedBill.rounds.map((round) => ({
+            orderBatchReference: round.orderBatchReference,
+            roundNumber: round.roundNumber,
+          }));
           assert.deepEqual(details[0].items[0].tableBill, {
             totalMinor: mergedBill.owed.totalMinor,
             paid: null,
+            billRoundNumbers: mergedNumbers,
             taxRoundingMinor: mergedBill.taxRoundingMinor,
             rounds: billRoundsOf(mergedBill.rounds, orderReference),
           });
@@ -3090,6 +3126,7 @@ async function journey(journeyEnding) {
             totalMinor: "0",
             paid: null,
             mergedInto: { tableLabel: dining.table.stableLabel, paid: false },
+            billRoundNumbers: mergedNumbers,
             rounds: billRoundsOf(mergedBill.rounds, mOrder),
           });
           // v15 b15: the two details' rounds are the bill's rounds, so the host and the merged

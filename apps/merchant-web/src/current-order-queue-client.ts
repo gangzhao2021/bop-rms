@@ -27,6 +27,12 @@ type TableBill = NonNullable<ReturnType<typeof parseTableBillBody>> & {
    */
   readonly rounds?: readonly OrderBillRound[];
   /**
+   * b40 review: on a table with tables merged into it (this Order's, or the one it was merged
+   * into), each round's number on the whole bill by round reference, as checkout numbers it; a
+   * round waiting for staff OK follows the bill's. Absent: the Order's own numbers.
+   */
+  readonly billRoundNumbers?: ReadonlyMap<string, number>;
+  /**
    * v15 b19 (DEC-TAX-WHOLE-RECEIPT): on an Order's detail, what the dishes taken off its bill
    * before it was paid took off it — the bill with them less the bill without them, to the cent,
    * open, paid, split, merged or written off (absent: none, an older server, or not a detail).
@@ -67,6 +73,27 @@ function parseBillRounds(value: unknown): readonly OrderBillRound[] {
     }),
   );
 }
+function parseBillRoundNumbers(value: unknown): ReadonlyMap<string, number> {
+  if (!Array.isArray(value) || value.length > 500) return fail();
+  const numbers = new Map<string, number>();
+  const used = new Set<number>();
+  for (const entry of value as unknown[]) {
+    const round = exact(entry, ["orderBatchReference", "roundNumber"]);
+    if (
+      typeof round.orderBatchReference !== "string" ||
+      !ref.test(round.orderBatchReference) ||
+      numbers.has(round.orderBatchReference) ||
+      typeof round.roundNumber !== "number" ||
+      !Number.isSafeInteger(round.roundNumber) ||
+      round.roundNumber < 1 ||
+      used.has(round.roundNumber)
+    )
+      return fail();
+    numbers.set(round.orderBatchReference, round.roundNumber);
+    used.add(round.roundNumber);
+  }
+  return numbers;
+}
 function parseTableBill(value: unknown, orderType: unknown): TableBill | null {
   if (
     value === null ||
@@ -74,11 +101,15 @@ function parseTableBill(value: unknown, orderType: unknown): TableBill | null {
     !(
       Object.hasOwn(value, "taxRoundingMinor") ||
       Object.hasOwn(value, "rounds") ||
-      Object.hasOwn(value, "removedMinor")
+      Object.hasOwn(value, "removedMinor") ||
+      Object.hasOwn(value, "billRoundNumbers")
     )
   )
     return parseTableBillBody(value, orderType);
-  const { taxRoundingMinor, rounds, removedMinor, ...rest } = value as Record<string, unknown>;
+  const { taxRoundingMinor, rounds, removedMinor, billRoundNumbers, ...rest } = value as Record<
+    string,
+    unknown
+  >;
   if (
     (taxRoundingMinor !== undefined &&
       (typeof taxRoundingMinor !== "string" || !/^-?[1-9][0-9]{0,5}$/u.test(taxRoundingMinor))) ||
@@ -94,6 +125,9 @@ function parseTableBill(value: unknown, orderType: unknown): TableBill | null {
         ...(taxRoundingMinor === undefined ? {} : { taxRoundingMinor: taxRoundingMinor as string }),
         ...(rounds === undefined ? {} : { rounds: parseBillRounds(rounds) }),
         ...(removedMinor === undefined ? {} : { removedMinor: removedMinor as string }),
+        ...(billRoundNumbers === undefined
+          ? {}
+          : { billRoundNumbers: parseBillRoundNumbers(billRoundNumbers) }),
       });
 }
 function parseTableBillBody(
@@ -969,7 +1003,8 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
       // WP-2423 item 8 ⑤: a guest round waiting for staff OK (absent from an older server).
       const withWaitingForStaff =
         value !== null && typeof value === "object" && Object.hasOwn(value, "waitingForStaff");
-      // b40: dishes taken off because they sold out (sent only when there are any).
+      // b40: dishes taken off because they sold out (the API always sends it, empty when none;
+      // absent from an older server).
       const withSoldOut =
         value !== null && typeof value === "object" && Object.hasOwn(value, "unpaidSoldOutItems");
       const batch = exact(value, [
