@@ -75,11 +75,21 @@ const internalWords =
 /** An English full stop straight after Chinese text. */
 const asciiStopAfterChinese = /[㐀-鿿”）]\./u;
 
+/**
+ * Until a page's own header arrives the workspace's top bar carries the language switch; the header
+ * then hides it and shows its own. A click that first found the top bar's switch kept waiting for it
+ * on a slower machine (CI), so each try looks for the switch on screen again.
+ */
+async function switchLanguage(page: Page, name: string) {
+  await expect(async () => {
+    await page.getByRole("button", { name }).click({ timeout: 2_000 });
+  }).toPass({ timeout: 20_000 });
+}
 async function toChinese(page: Page) {
-  await page.getByRole("button", { name: "切换到中文" }).click();
+  await switchLanguage(page, "切换到中文");
 }
 async function toEnglish(page: Page) {
-  await page.getByRole("button", { name: "Switch to English" }).click();
+  await switchLanguage(page, "Switch to English");
 }
 
 async function shoot(page: Page, name: string) {
