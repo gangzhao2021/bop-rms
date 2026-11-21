@@ -14,7 +14,7 @@ import {
   parseOrderingReference,
 } from "@rms/ordering";
 import { createPostgresDiningTableSettlementStore, onlinePaymentHoldsBill } from "@rms/payment";
-import { fenceTableBill } from "./dining-waiting-rounds.js";
+import { fenceOrderBills } from "./dining-waiting-rounds.js";
 import type { createDiningBatchCancellation } from "./dining-batch-cancellation.js";
 import type { DiningPayLaterRound } from "./dining-pay-later-round.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
@@ -137,7 +137,8 @@ export function createMerchantDiningHeldRound(options: {
             };
             // The bill's fence first (as every payment takes it): a payment and this decision run
             // one after the other, never both on what each read before the other committed.
-            await fenceTableBill(consumer, owner, [command.orderReference]);
+            // Batch 42: the whole bill's, the Order holding it first (fenceOrderBills).
+            await fenceOrderBills(consumer, owner, [command.orderReference]);
             const hold = await holds.load({
               transaction: consumer,
               orderReference: command.orderReference,

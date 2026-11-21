@@ -19,7 +19,7 @@ import {
 } from "@rms/ordering";
 import type { RequestHandler, Response } from "express";
 import type { createDiningBatchCancellation } from "./dining-batch-cancellation.js";
-import { fenceTableBill } from "./dining-waiting-rounds.js";
+import { fenceOrderBills } from "./dining-waiting-rounds.js";
 import type { OpenPaymentAttemptResolution } from "./open-payment-attempt-resolution.js";
 
 /**
@@ -218,7 +218,8 @@ export function createCustomerDiningRoundWithdraw(options: CustomerDiningRoundWi
             again.submittedGuestSessionReference !== round.submittedGuestSessionReference
           )
             return Object.freeze({ status: "NotWithdrawable" as const });
-          await fenceTableBill(transaction, owner, [round.orderReference]);
+          // Batch 42: the whole bill's, the Order holding it first (fenceOrderBills).
+          await fenceOrderBills(transaction, owner, [round.orderReference]);
           const cancelled = await options.cancellation.cancelUnpaidForGuest(transaction, {
             operationReference,
             orderReference: round.orderReference,

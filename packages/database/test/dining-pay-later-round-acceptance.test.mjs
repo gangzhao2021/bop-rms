@@ -59,6 +59,7 @@ import {
   createMerchantDiningTableBillRead,
   createMerchantDiningTableSettle,
   createMerchantDiningTableSplit,
+  refreshBillTaxRounding,
 } from "../../../apps/api/src/merchant-dining-table-checkout.ts";
 import { createMerchantDiningUnpaidDeparture } from "../../../apps/api/src/merchant-dining-unpaid-departure.ts";
 import {
@@ -2683,6 +2684,119 @@ async function journey(journeyEnding) {
             [[M.batch.orderBatchReference, "OnTableBill"]],
           );
           assert.equal(await planOf(orderReference, mSession), null);
+          if (ending === "Merged") {
+            // Batch 42 (v15 2026-11-21 15:01–15:03 UTC, 14 × 40P01 on these two Orders' fences):
+            // staff closing the merged table read both Orders' close plans at once. With the bill's
+            // tax rounding recorded (a split or a dish taken off records it), each plan reads the
+            // bill. The host's plan waits for its own Order's fence; the merged-in Order's plan
+            // starts behind it. Before the fix the merged-in plan held its own Order's fence and
+            // waited for the host's, while the host's plan then waited for it: deadlock detected,
+            // one plan failed and staff saw 503. Now both take the bill's fences host first.
+            await transactions({ guc: true }).run((tx) =>
+              refreshBillTaxRounding(tx, ownerScope, {
+                orderReference,
+                observedAt: now(),
+                authorize: async () => true,
+                nextReference: fresh,
+                whenNeverRecorded: true,
+              }),
+            );
+            assert.equal(
+              (
+                await rows(
+                  "SELECT count(*)::int n FROM rms_ordering.order_tax_rounding_adjustment WHERE bill_order_id=$1",
+                  [orderReference],
+                )
+              )[0].n,
+              1,
+            );
+            const fenceKey = (order) =>
+              "OrderingOrderDisposition:" +
+              scope.brandReference +
+              ":" +
+              scope.storeReference +
+              ":" +
+              order;
+            const waitingFor = async (order) =>
+              (
+                await admin.query(
+                  "SELECT count(*)::int n FROM pg_locks WHERE locktype='advisory' AND NOT granted AND ((classid::bigint<<32)|objid::bigint)=hashtextextended($1,0)",
+                  [fenceKey(order)],
+                )
+              ).rows[0].n;
+            const until = async (check) => {
+              for (let tries = 0; tries < 200; tries += 1) {
+                if (await check()) return;
+                await new Promise((resolve) => setTimeout(resolve, 25));
+              }
+              assert.fail("the close plans never queued on the host Order's fence");
+            };
+            // What each plan says read alone (a deadlock inside the plan's readiness savepoint was
+            // answered as "couldn't check" rather than failing the plan) and the database's own
+            // count of deadlocks, which must not move.
+            const calm = {
+              [orderReference]: (await planOf(orderReference, sessionReference)).closeBlockers,
+              [mOrder]: (await planOf(mOrder, sessionReference)).closeBlockers,
+            };
+            const deadlocks = async () => {
+              await admin.query("SELECT pg_stat_clear_snapshot()");
+              return (
+                await admin.query(
+                  "SELECT deadlocks::int n FROM pg_stat_database WHERE datname=current_database()",
+                )
+              ).rows[0].n;
+            };
+            const deadlocksBefore = await deadlocks();
+            const holder = new Client(context.clientConfig);
+            await holder.connect();
+            try {
+              await holder.query("BEGIN");
+              await holder.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+                fenceKey(orderReference),
+              ]);
+              const hostPlan = planOf(orderReference, sessionReference).then(
+                (plan) => plan,
+                (error) => error,
+              );
+              await until(async () => (await waitingFor(orderReference)) === 1);
+              const mergedPlan = planOf(mOrder, sessionReference).then(
+                (plan) => plan,
+                (error) => error,
+              );
+              await until(async () => (await waitingFor(orderReference)) === 2);
+              await holder.query("COMMIT");
+              const [host, merged] = await Promise.all([hostPlan, mergedPlan]);
+              for (const [plan, order] of [
+                [host, orderReference],
+                [merged, mOrder],
+              ]) {
+                assert.ok(
+                  !(plan instanceof Error),
+                  String(plan?.cause?.code ?? plan?.code ?? plan),
+                );
+                assert.equal(plan.orderReference, order);
+                assert.equal(plan.diningSessionReference, sessionReference);
+                assert.deepEqual(plan.closeBlockers, calm[order]);
+              }
+            } finally {
+              await holder.end();
+            }
+            // And as staff screens read them: both plans, several times at once, all answered.
+            for (let round = 0; round < 4; round += 1)
+              for (const result of await Promise.allSettled([
+                planOf(mOrder, sessionReference),
+                planOf(orderReference, sessionReference),
+                planOf(mOrder, sessionReference),
+              ]))
+                assert.equal(
+                  result.status,
+                  "fulfilled",
+                  String(result.reason?.code ?? result.reason),
+                );
+            // Each backend reports its counts when its transaction ends, at most a second later.
+            await new Promise((resolve) => setTimeout(resolve, 1500));
+            assert.equal(await deadlocks(), deadlocksBefore);
+          }
 
           if (ending === "MergedRemoved") {
             // Three $12.50 rounds (two on the host's Order, T-M's on its own) are $42.38 on the

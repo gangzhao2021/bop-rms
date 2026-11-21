@@ -20,6 +20,7 @@ import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js"
 import type { MerchantBffService } from "./merchant-bff.js";
 import { isMerchantRefusal, keepingCause, onlyRefusal } from "./merchant-failure.js";
 import { refreshBillTaxRounding } from "./merchant-dining-table-checkout.js";
+import { fenceOrderBills } from "./dining-waiting-rounds.js";
 
 /**
  * WP-2423 DEC-DINE-IN-PAY-LATER: a table left without paying what it still owed. A manager
@@ -138,6 +139,13 @@ export function createMerchantDiningUnpaidDeparture(options: {
               },
               actorReference = String(current.actorReference);
             const authorize = () => authority.guard();
+            // Batch 42: the whole bill's fences first, the Order holding it first (the lock order,
+            // fenceOrderBills): this command closes the Order and records its bill's tax rounding.
+            await fenceOrderBills(
+              tx,
+              { brandReference: scope.brandReference, storeReference: scope.storeReference },
+              [command.orderReference],
+            );
             const configuration = await options.resolveConfiguration(
               tx,
               { ...scope, actorReference },

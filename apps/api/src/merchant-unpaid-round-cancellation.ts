@@ -2,7 +2,7 @@ import type { ConsumerTransaction } from "@bop/eventing";
 import { readClosedRecord } from "@bop/identity";
 import { loadDiningRoundPaymentIdentity, parseOrderingReference } from "@rms/ordering";
 import type { createDiningBatchCancellation } from "./dining-batch-cancellation.js";
-import { fenceTableBill } from "./dining-waiting-rounds.js";
+import { fenceOrderBills } from "./dining-waiting-rounds.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { MerchantBffService } from "./merchant-bff.js";
@@ -162,7 +162,8 @@ export function createMerchantUnpaidRoundCancellation(options: {
         async ({ transaction, selected, actorReference, allowed }) => {
           // The bill's fence first, as payments and the held-round decisions take it: cancelling a
           // round waiting for staff releases its hold under the same fence, never in another order.
-          await fenceTableBill(
+          // Batch 42: the whole bill's, the Order holding it first (fenceOrderBills).
+          await fenceOrderBills(
             transaction,
             { brandReference: selected.brandReference, storeReference: selected.storeReference },
             [orderReference],

@@ -26,7 +26,7 @@ import {
   readyToServeQuantity,
 } from "./dining-order-delivery-progress.js";
 import { createDiningSettledCloseEvidence } from "./dining-settled-close-evidence.js";
-import { listRoundsWaitingForStaff } from "./dining-waiting-rounds.js";
+import { fenceOrderBills, listRoundsWaitingForStaff } from "./dining-waiting-rounds.js";
 import { refreshBillTaxRounding } from "./merchant-dining-table-checkout.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
@@ -174,6 +174,11 @@ export function createMerchantDiningTableClosePlan(options: {
           const tx = transaction as unknown as ConsumerTransaction;
           const allowed = () => authority.guard();
           const stillAllowed = async () => (await allowed()) === true;
+          // Batch 42 (v15 40P01): the whole bill's fences first, the Order holding it first (the
+          // lock order, fenceOrderBills). This plan reads the bill (and may record its tax rounding
+          // in the savepoint below): a merged-in Order's plan fencing its own Order first deadlocked
+          // with the host's plan, read at the same moment when the merged table is closed.
+          await fenceOrderBills(tx, owner, [orderReference]);
           const selected = await createPostgresMerchantOrderIndex({
             ...owner,
             authorize: allowed,
