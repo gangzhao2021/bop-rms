@@ -168,7 +168,10 @@ test("@production Tables keeps the last tables read-only after a failed refresh 
   offline = true;
   await page.getByRole("button", { name: "Refresh tables", exact: true }).click();
   const notice = page.getByRole("status").filter({ hasText: "Read-only until reconnected" });
-  await expect(notice).toContainText(/showing the last update from \d\d:\d\d/u);
+  // b40: in the Tables clock style, as guests read it ("2:05 p.m.", never "14:05").
+  await expect(notice).toContainText(
+    /showing the last update from \d{1,2}:\d\d\s[ap]\.m\.(?:\s[A-Z]{2,5}\.)? Actions are paused/u,
+  );
   await expect(select).toBeDisabled();
   await expect(page.getByText("Tables unavailable", { exact: false })).toHaveCount(0);
   // Operating continuity (WP-2423 item 8 ①): what servers do instead, on this screen.

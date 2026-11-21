@@ -598,7 +598,8 @@ test("@production the Tables page warns before a staff round's payment time ends
   await expect(tile).toHaveAttribute("data-urgent", "true");
   await tile.getByRole("button", { name: /^Select /u }).click();
   await expect(page.getByRole("complementary", { name: "Selected table details" })).toContainText(
-    "5 min left: record the card-machine payment for the round entered by staff by 12:30, or it is cancelled.",
+    // b40: Tables reads times in the guest clock style ("12:30 p.m.").
+    "5 min left: record the card-machine payment for the round entered by staff by 12:30 p.m., or it is cancelled.",
   );
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
