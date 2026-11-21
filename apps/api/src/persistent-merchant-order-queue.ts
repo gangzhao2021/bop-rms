@@ -719,6 +719,8 @@ export function createPersistentMerchantOrderQueue(options: {
             }
           >();
           const unpaidRemoved = new Map<string, string[]>();
+          /** b40: of those, dishes taken off because they sold out (staff read why, as guests do). */
+          const unpaidSoldOut = new Map<string, string[]>();
           /** v15 b19: dishes taken off a bill before it was paid, as what the bill went down by. */
           const removedFromBill = new Map<string, bigint>();
           // WP-2423 item 8 ① segment 2: dishes a manager may comp or discount on an unpaid
@@ -1129,6 +1131,11 @@ export function createPersistentMerchantOrderQueue(options: {
                     ...(unpaidRemoved.get(record.orderBatchReference) ?? []),
                     line,
                   ]);
+                  if (record.reasonCode === "SOLD_OUT")
+                    unpaidSoldOut.set(record.orderBatchReference, [
+                      ...(unpaidSoldOut.get(record.orderBatchReference) ?? []),
+                      line,
+                    ]);
                 }
               }
               if (tenantReference === null) continue;
@@ -2143,6 +2150,9 @@ export function createPersistentMerchantOrderQueue(options: {
                         ),
                         unpaidRemovedItems: Object.freeze(
                           unpaidRemoved.get(batch.orderBatchReference) ?? [],
+                        ),
+                        unpaidSoldOutItems: Object.freeze(
+                          unpaidSoldOut.get(batch.orderBatchReference) ?? [],
                         ),
                         // WP-2423 item 8 ① segment 2: comps and discounts on this round.
                         compableItems: Object.freeze(

@@ -73,3 +73,50 @@ export function TableBillTotal({
     </section>
   );
 }
+
+/**
+ * b40 (v15 b39 live): on a table with tables merged into it, each round's number on the whole
+ * bill (by round reference), read from checkout's bill (rounds numbered across every merged order in the order they
+ * were sent, as checkout, the split and the guest show them). "Reading" until the first answer, so
+ * no round is shown under one number and then another; null when the read fails (each order then
+ * keeps its own numbers) or when nothing was merged in.
+ */
+export function useBillRoundNumbers(input: {
+  readonly diningSessionReference: string | null;
+  readonly merged: boolean;
+  readonly csrf: string;
+  readonly refreshKey: string;
+  readonly fetcher?: typeof fetch | undefined;
+}): ReadonlyMap<string, number> | null | "Reading" {
+  const { diningSessionReference, merged, csrf, refreshKey, fetcher } = input;
+  const [read, setRead] = useState<{
+    readonly session: string;
+    readonly rounds: ReadonlyMap<string, number> | null;
+  } | null>(null);
+  useEffect(() => {
+    if (!merged || diningSessionReference === null) return;
+    const controller = new AbortController();
+    createTableCheckoutClient(fetcher)
+      .bill(csrf, diningSessionReference, controller.signal)
+      .then((bill) => {
+        if (controller.signal.aborted) return;
+        const rounds = new Map<string, number>();
+        for (const round of bill.rounds)
+          if (round.orderBatchReference !== undefined)
+            rounds.set(round.orderBatchReference, round.roundNumber);
+        setRead({ session: diningSessionReference, rounds });
+      })
+      .catch(() => {
+        // A failed reread keeps the last numbers; a failed first read: each order's own.
+        if (!controller.signal.aborted)
+          setRead((last) =>
+            last !== null && last.session === diningSessionReference
+              ? last
+              : { session: diningSessionReference, rounds: null },
+          );
+      });
+    return () => controller.abort();
+  }, [csrf, diningSessionReference, merged, fetcher, refreshKey]);
+  if (!merged || diningSessionReference === null) return null;
+  return read !== null && read.session === diningSessionReference ? read.rounds : "Reading";
+}

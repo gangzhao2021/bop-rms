@@ -190,6 +190,8 @@ function orderQueueRow(item: MerchantOrderQueueItem) {
       // and those taken off it.
       unpaidRemovableItems: batch.unpaidRemovableItems,
       unpaidRemovedItems: batch.unpaidRemovedItems,
+      // b40: of those, the dishes taken off because they sold out (staff read why).
+      unpaidSoldOutItems: batch.unpaidSoldOutItems,
       // WP-2423 item 8 ① segment 2: dishes a manager may comp or discount, and those comped.
       compableItems: batch.compableItems,
       compedItems: batch.compedItems,

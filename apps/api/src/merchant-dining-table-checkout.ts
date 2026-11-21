@@ -198,6 +198,8 @@ export interface DiningTableBill {
       readonly orderItemReference: string;
       readonly quantity: number;
       readonly displayName: string;
+      /** b40: taken off because it sold out (absent otherwise); staff read why, as guests do. */
+      readonly soldOut?: true;
     }[];
     readonly subtotalMinor: string;
     /** Includes the round's share of the bill's tax rounding (`taxRoundingMinor`). */
@@ -631,14 +633,17 @@ export async function readDiningTableBill(
     }).listByOrders({ transaction: tx, orderReferences: billOrders })),
   ].sort((a, b) => (a.confirmedAt < b.confirmedAt ? -1 : a.confirmedAt > b.confirmedAt ? 1 : 0));
   // Dishes taken off the bill before the table paid (rule 2) are no longer owed.
-  const removed = new Set(
-    (
-      await createPostgresPayLaterItemCancellationStore({
-        ...owner,
-        authorize: async (_tx, value) =>
-          billOrders.includes(String(value.orderReference)) && (await allowed()),
-      }).listByOrders(tx, billOrders)
-    ).flatMap((record) => record.orderItemReferences),
+  const removalRecords = await createPostgresPayLaterItemCancellationStore({
+    ...owner,
+    authorize: async (_tx, value) =>
+      billOrders.includes(String(value.orderReference)) && (await allowed()),
+  }).listByOrders(tx, billOrders);
+  const removed = new Set(removalRecords.flatMap((record) => record.orderItemReferences));
+  // b40: those taken off because they sold out.
+  const soldOutRemoved = new Set(
+    removalRecords
+      .filter((record) => record.reasonCode === "SOLD_OUT")
+      .flatMap((record) => record.orderItemReferences),
   );
   // One query at a time on the transaction (the pilot's runner refuses overlapping queries).
   const billPrices: Awaited<ReturnType<typeof listOrderItemPrices>>[number][] = [];
@@ -869,6 +874,9 @@ export async function readDiningTableBill(
               orderItemReference: String(item.orderItemReference),
               quantity: item.quantity,
               displayName: item.displayName,
+              ...(soldOutRemoved.has(String(item.orderItemReference))
+                ? { soldOut: true as const }
+                : {}),
             }),
           ),
       ),

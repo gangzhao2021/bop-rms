@@ -797,7 +797,9 @@ export function TableCheckout({
                         {item.displayName}
                         <span className="table-checkout__comp">
                           {" · "}
-                          {t("Taken off the bill · not charged")}
+                          {item.soldOut === true
+                            ? t("Sold out · taken off the bill, not charged")
+                            : t("Taken off the bill · not charged")}
                         </span>
                       </span>
                     </li>

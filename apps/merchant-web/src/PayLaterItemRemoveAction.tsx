@@ -301,6 +301,7 @@ export function PayLaterItemRemoveAction({
   openOnArrival = false,
   onArrived,
   fetcher = fetch,
+  roundNumber,
 }: {
   readonly order: Order;
   readonly batch: Batch;
@@ -319,7 +320,13 @@ export function PayLaterItemRemoveAction({
   readonly openOnArrival?: boolean | undefined;
   readonly onArrived?: (() => void) | undefined;
   readonly fetcher?: typeof fetch | undefined;
+  /**
+   * b40 (v15 b39 live): the round's number on the table's whole bill when other tables were merged
+   * into it (as checkout, the split and the guest number it); absent: the order's own round.
+   */
+  readonly roundNumber?: number | undefined;
 }) {
+  const sequence = roundNumber ?? batch.sequence;
   const [open, setOpen] = useState(openOnArrival);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [reason, setReason] = useState<StaffCancellationReason | "">("");
@@ -512,7 +519,7 @@ export function PayLaterItemRemoveAction({
   };
   // v15 b21: a table's rounds each have this action, so it names its round (as the round's own
   // heading does) and no two read the same.
-  const title = t("Take dishes off round {sequence}", { sequence: batch.sequence });
+  const title = t("Take dishes off round {sequence}", { sequence });
   // b22: the round's own figure is compared only when every dish of it on the bill is ticked; a
   // round with a dish that stays reads more than what can come off, and that is not tax.
   const wholeRound = payLaterChosenWholeRound({
@@ -524,7 +531,7 @@ export function PayLaterItemRemoveAction({
     previewMinor,
     dishMinors: chosen.map((line) => previews.get(keyFor([line.orderItemReference]) as string)),
     roundMinor: wholeRound ? roundMinor : undefined,
-    sequence: batch.sequence,
+    sequence,
     currencyCode,
   });
   if (!open)
@@ -608,7 +615,7 @@ export function PayLaterItemRemoveAction({
             wholeRound,
             previewMinor,
             currencyCode,
-            sequence: batch.sequence,
+            sequence,
           })}
         </button>{" "}
         <button

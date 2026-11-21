@@ -63,6 +63,30 @@ export function roundTableOf(bill: TableBill): ((roundNumber: number) => string 
   };
 }
 
+/**
+ * b40 (v15 b39 live): who sent a round, for the split's round list. A round from a table merged in
+ * whose guests used one phone is named by its table alone ("L39 M3"), never "phone 3", a number
+ * that phone never had at its own table; with several phones there, the bill's phone numbers tell
+ * them apart (as the table's phone list does). Null: nothing to add.
+ */
+export function splitRoundSender(
+  bill: TableBill,
+  round: TableBill["rounds"][number],
+): string | null {
+  if (round.orderedBy === null) return t("entered by staff");
+  if (round.fromTableLabel !== null) {
+    const phones = new Set(
+      bill.rounds
+        .filter(
+          (other) => other.fromTableLabel === round.fromTableLabel && other.orderedBy !== null,
+        )
+        .map((other) => other.orderedBy),
+    );
+    if (phones.size <= 1) return null;
+  }
+  return t("phone {number}", { number: String(round.orderedBy) });
+}
+
 export function TableSplitControls({
   bill,
   csrf,
@@ -413,12 +437,13 @@ export function TableSplitControls({
                           ? null
                           : t("Table {table}", { table: saidTable(label) }) + " · ";
                       })()}
-                  {round.orderedBy === null
-                    ? t("entered by staff")
-                    : t("phone {number}", { number: String(round.orderedBy) })}{" "}
+                  {(() => {
+                    const sender = splitRoundSender(bill, round);
+                    return sender === null ? null : sender + " · ";
+                  })()}
                   {/* DEC-TAX-WHOLE-RECEIPT: with its share of the bill's tax rounding, so the
                       parts add up to the bill (checkout lists rounds as ordered). */}
-                  · {cad(round.totalMinor)}
+                  {cad(round.totalMinor)}
                 </span>
                 <label>
                   <span className="sr-only">

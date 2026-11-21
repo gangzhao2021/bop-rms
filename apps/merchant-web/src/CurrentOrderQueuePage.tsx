@@ -278,6 +278,11 @@ export interface OrderLineRounds {
    * round under its dishes, never stacked under the totals where no round is named.
    */
   readonly action?: ((batch: QueuedOrder["batches"][number]) => React.ReactNode) | undefined;
+  /**
+   * b40 (v15 b39 live): the round's number on the table's whole bill when tables were merged into
+   * it, so the panel says "Round 4" where checkout and the guest do; absent: the order's own.
+   */
+  readonly number?: ((batch: QueuedOrder["batches"][number]) => number) | undefined;
 }
 /** WP-2423 OPS-ORDER-DETAIL: what was ordered — items with options and notes, and the totals. */
 /** WP-2423 (M23): why a line can't be made as ordered now, in staff words. */
@@ -370,6 +375,7 @@ export function CurrentOrderLines({
   unpaidCancelledBatches,
   failedPaymentBatches,
   removedItems,
+  soldOutItems,
   removedFromBillMinor,
   waitingBatches,
   refundRows,
@@ -401,6 +407,8 @@ export function CurrentOrderLines({
   readonly failedPaymentBatches?: ReadonlySet<string> | undefined;
   /** DEC-DINE-IN-PAY-LATER: dishes taken off the bill before the table paid (never charged). */
   readonly removedItems?: ReadonlySet<string> | undefined;
+  /** b40 (v15 b39 live): of those, dishes taken off because they sold out; staff read why. */
+  readonly soldOutItems?: ReadonlySet<string> | undefined;
   /**
    * v15 b19 (DEC-TAX-WHOLE-RECEIPT): what those dishes took off the bill, from the server (the
    * bill with them less the bill now), so it equals the bill they were on to the cent. Absent:
@@ -523,7 +531,11 @@ export function CurrentOrderLines({
           </span>
         ) : removedLine(item) ? (
           <span className="order-line-cancellation">
-            <strong>{t("Taken off the bill · not charged")}</strong>
+            <strong>
+              {soldOutItems?.has(item.orderItemReference) === true
+                ? t("Sold out · taken off the bill, not charged")
+                : t("Taken off the bill · not charged")}
+            </strong>
           </span>
         ) : waitingLine(item) ? (
           <span className="order-line-cancellation">
@@ -623,13 +635,17 @@ export function CurrentOrderLines({
                   <section
                     key={batch.orderBatchReference}
                     className="order-round order-round--lines"
-                    aria-label={t("Round {sequence}", { sequence: batch.sequence })}
+                    aria-label={t("Round {sequence}", {
+                      sequence: rounds.number?.(batch) ?? batch.sequence,
+                    })}
                     // b23 review: where the focus goes when a confirmed take-off leaves no button.
                     data-focus-return="round"
                   >
                     <header className="order-round__head">
                       <h3>
-                        {t("Round {sequence}", { sequence: batch.sequence })}
+                        {t("Round {sequence}", {
+                          sequence: rounds.number?.(batch) ?? batch.sequence,
+                        })}
                         {batch.staffRound !== null
                           ? t(" · Entered by staff")
                           : typeof rounds.phones?.get(batch.orderBatchReference) === "number"
@@ -1044,6 +1060,13 @@ export function removedItemsTotal(
 export function removedUnpaidItems(view: CurrentOrderQueue): ReadonlySet<string> {
   return new Set(
     view.items.flatMap((order) => order.batches.flatMap((batch) => batch.unpaidRemovedItems)),
+  );
+}
+
+/** b40: the dishes of this view taken off an unpaid bill because they sold out. */
+export function soldOutRemovedItems(view: CurrentOrderQueue): ReadonlySet<string> {
+  return new Set(
+    view.items.flatMap((order) => order.batches.flatMap((batch) => batch.unpaidSoldOutItems)),
   );
 }
 
@@ -2041,6 +2064,7 @@ function QueuedOrderLines({
         unpaidCancelledBatches={unpaidCancelledBatches(state.detail.view)}
         failedPaymentBatches={failedPaymentBatches(state.detail.view)}
         removedItems={removedUnpaidItems(state.detail.view)}
+        soldOutItems={soldOutRemovedItems(state.detail.view)}
         removedFromBillMinor={state.detail.order.tableBill?.removedMinor}
         waitingBatches={waitingForStaffBatches(state.detail.view)}
         refundRows={orderRefundRows(
@@ -5050,6 +5074,7 @@ export function CurrentOrderQueuePage({
                             unpaidCancelledBatches={unpaidCancelledBatches(detail.view)}
                             failedPaymentBatches={failedPaymentBatches(detail.view)}
                             removedItems={removedUnpaidItems(detail.view)}
+                            soldOutItems={soldOutRemovedItems(detail.view)}
                             removedFromBillMinor={detail.order.tableBill?.removedMinor}
                             waitingBatches={waitingForStaffBatches(detail.view)}
                             refundRows={orderRefundRows(

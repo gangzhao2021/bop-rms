@@ -310,6 +310,8 @@ const dineIn = {
       // DEC-DINE-IN-PAY-LATER (rule 19): dishes that can come off / came off the unpaid bill.
       unpaidRemovableItems: [id(0x9037)],
       unpaidRemovedItems: [id(0x9038)],
+      // b40: the dish was taken off because it sold out (staff read why).
+      unpaidSoldOutItems: [id(0x9038)],
       // WP-2423 item 8 ① segment 2: comps and discounts; Orders v3: when the round was sent.
       compableItems: [],
       compedItems: [],
@@ -341,6 +343,7 @@ const dineIn = {
       staffRound: null,
       unpaidRemovableItems: [],
       unpaidRemovedItems: [],
+      unpaidSoldOutItems: [],
       // WP-2423 item 8 ① segment 2: comps and discounts; Orders v3: when the round was sent.
       compableItems: [],
       compedItems: [],
@@ -371,6 +374,7 @@ const dineIn = {
       staffRound: { recordedAfterOutage: false, paidOnCardMachine: null, amountDueMinor: "1200" },
       unpaidRemovableItems: [],
       unpaidRemovedItems: [],
+      unpaidSoldOutItems: [],
       // WP-2423 item 8 ① segment 2: comps and discounts; Orders v3: when the round was sent.
       compableItems: [],
       compedItems: [],
@@ -411,6 +415,7 @@ const dineIn = {
       },
       unpaidRemovableItems: [],
       unpaidRemovedItems: [],
+      unpaidSoldOutItems: [],
       // WP-2423 item 8 ① segment 2: comps and discounts; Orders v3: when the round was sent.
       compableItems: [],
       compedItems: [],
@@ -493,6 +498,7 @@ const heldPickup = {
       staffRound: null,
       unpaidRemovableItems: [],
       unpaidRemovedItems: [],
+      unpaidSoldOutItems: [],
       // WP-2423 item 8 ① segment 2: comps and discounts; Orders v3: when the round was sent.
       compableItems: [],
       compedItems: [],
@@ -588,6 +594,7 @@ const earlierCounterPickup = {
       staffRound: null,
       unpaidRemovableItems: [],
       unpaidRemovedItems: [],
+      unpaidSoldOutItems: [],
       // WP-2423 item 8 ① segment 2: comps and discounts; Orders v3: when the round was sent.
       compableItems: [],
       compedItems: [],

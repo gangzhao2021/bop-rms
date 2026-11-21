@@ -969,6 +969,9 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
       // WP-2423 item 8 ⑤: a guest round waiting for staff OK (absent from an older server).
       const withWaitingForStaff =
         value !== null && typeof value === "object" && Object.hasOwn(value, "waitingForStaff");
+      // b40: dishes taken off because they sold out (sent only when there are any).
+      const withSoldOut =
+        value !== null && typeof value === "object" && Object.hasOwn(value, "unpaidSoldOutItems");
       const batch = exact(value, [
         "orderBatchReference",
         "sequence",
@@ -991,6 +994,7 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
         ...(withKitchenRelease ? ["kitchenRelease"] : []),
         ...(withRefundLate ? ["automaticRefundLate"] : []),
         ...(withWaitingForStaff ? ["waitingForStaff"] : []),
+        ...(withSoldOut ? ["unpaidSoldOutItems"] : []),
       ]);
       const references = (list: unknown) =>
         Array.isArray(list) && list.length <= 500
@@ -1012,6 +1016,11 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
         unpaidRemovableItems.some((line) => unpaidRemovedItems.includes(line))
       )
         return fail();
+      const unpaidSoldOutItems = withSoldOut
+        ? references(batch.unpaidSoldOutItems)
+        : Object.freeze([] as string[]);
+      // Only a dish that was taken off can have been taken off because it sold out.
+      if (unpaidSoldOutItems.some((line) => !unpaidRemovedItems.includes(line))) return fail();
       const compableItems = withComps ? references(batch.compableItems) : Object.freeze([]);
       const compedItems = withComps
         ? Array.isArray(batch.compedItems) && batch.compedItems.length <= 500
@@ -1227,6 +1236,8 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
         unpaidRemovableItems,
         /** DEC-DINE-IN-PAY-LATER: dishes taken off this round's bill before the table paid. */
         unpaidRemovedItems,
+        /** b40: of those, the dishes taken off because they sold out (staff read why). */
+        unpaidSoldOutItems,
         /** WP-2423 item 8 ① segment 2: dishes a manager may comp or discount now. */
         compableItems,
         /** Comps and discounts on this round (tax included), never removed. */

@@ -65,7 +65,7 @@ import { TableCheckout } from "./TableCheckout.js";
 import { TablePartySize, TableTeaCheck, createTablePartySizeClient } from "./TablePartySize.js";
 import { TableMove } from "./TableMove.js";
 import { TableMerge } from "./TableMerge.js";
-import { TableBillTotal } from "./TableBillTotal.js";
+import { TableBillTotal, useBillRoundNumbers } from "./TableBillTotal.js";
 import { TableOrderRounds } from "./TableOrderRounds.js";
 import {
   CheckoutScopeSettingControl,
@@ -1801,6 +1801,13 @@ function TablePanel({
   const [roundPhones, setRoundPhones] = useState<ReadonlyMap<string, number | null>>(new Map());
   // The per-head charge is shown in two places on the panel; a change in one reads the other again.
   const [teaRevision, setTeaRevision] = useState(0);
+  // b40: with tables merged in, rounds are numbered across the whole bill, as checkout does.
+  const billRoundNumbers = useBillRoundNumbers({
+    diningSessionReference: table.currentDiningSessionReference,
+    merged: (table.session?.mergedTables ?? []).length > 0,
+    csrf,
+    refreshKey: refreshKey + ":" + String(checkoutRevision),
+  });
   return (
     <>
       <header className="table-panel__head">
@@ -1897,6 +1904,7 @@ function TablePanel({
           locked={locked}
           onChanged={onChanged}
           roundPhones={roundPhones}
+          billRoundNumbers={billRoundNumbers}
           mergedTableLabels={(table.session.mergedTables ?? []).map(
             (merged) => merged.fromTableLabel,
           )}
@@ -1923,6 +1931,7 @@ function TablePanel({
                   locked={locked}
                   onChanged={onChanged}
                   roundPhones={roundPhones}
+                  billRoundNumbers={billRoundNumbers}
                 />
               </section>
             ),

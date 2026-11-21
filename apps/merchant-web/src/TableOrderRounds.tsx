@@ -6,6 +6,7 @@ import {
   orderBill,
   orderRefundRows,
   removedUnpaidItems,
+  soldOutRemovedItems,
   waitingForStaffBatches,
   storeCancelledBatches,
   unpaidCancelledBatches,
@@ -42,7 +43,14 @@ export function TableOrderRounds({
   fetcher,
   roundPhones,
   mergedTableLabels = [],
+  billRoundNumbers,
 }: {
+  /**
+   * b40 (v15 b39 live): on a table with tables merged into it, each round's number on the
+   * whole bill (from checkout's read, by round reference), so the rounds here are numbered as checkout, the split and
+   * the guest number them, never each order from 1 again. Absent: the order's own numbers.
+   */
+  readonly billRoundNumbers?: ReadonlyMap<string, number> | null | "Reading" | undefined;
   /** v15 batch 7: tables merged into this one; their dishes are on this table's bill too. */
   readonly mergedTableLabels?: readonly string[];
   readonly orderReference: string;
@@ -94,15 +102,17 @@ export function TableOrderRounds({
     return () => controller.abort();
   }, [client, orderReference, refreshKey, served]);
   if (state.kind === "PermissionDenied") return null;
-  if (state.kind !== "Ready")
+  if (state.kind !== "Ready" || billRoundNumbers === "Reading")
     return (
       <p className="order-lines-state" role="status">
-        {state.kind === "Loading"
+        {state.kind === "Loading" || state.kind === "Ready"
           ? t("Reading the table's order…")
           : t("The table's order could not be read. It is read again with the table.")}
       </p>
     );
   const { detail } = state;
+  const roundNumber = (batch: CurrentOrderDetail["order"]["batches"][number]) =>
+    billRoundNumbers == null ? undefined : billRoundNumbers.get(batch.orderBatchReference);
   // DEC-DINE-IN-PAY-LATER (rule 2), item 8 ①: dishes come off the unpaid bill right here. v15
   // b21: with the round they belong to, under its dishes, never stacked under the totals.
   const removeAction = (batch: CurrentOrderDetail["order"]["batches"][number]) =>
@@ -132,6 +142,7 @@ export function TableOrderRounds({
           fetcher={fetcher}
           // b22: what the round reads on the bill, to say why taking it all off differs.
           roundMinor={orderBill(detail.order)?.rounds?.get(batch.orderBatchReference)?.totalMinor}
+          roundNumber={roundNumber(batch)}
           onRefused={(refusal) =>
             setRemoveRefusals((current) => ({
               ...current,
@@ -170,6 +181,7 @@ export function TableOrderRounds({
           cancelledBatches={storeCancelledBatches(detail.view)}
           unpaidCancelledBatches={unpaidCancelledBatches(detail.view)}
           removedItems={removedUnpaidItems(detail.view)}
+          soldOutItems={soldOutRemovedItems(detail.view)}
           removedFromBillMinor={detail.order.tableBill?.removedMinor}
           waitingBatches={waitingForStaffBatches(detail.view)}
           failedPaymentBatches={failedPaymentBatches(detail.view)}
@@ -192,6 +204,7 @@ export function TableOrderRounds({
               <KitchenReleaseNotice release={batch.kitchenRelease} now={Date.now()} />
             ),
             action: removeAction,
+            number: (batch) => roundNumber(batch) ?? batch.sequence,
           }}
         />
       </DiningRoundsProvider>

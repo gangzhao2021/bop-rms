@@ -1956,6 +1956,8 @@ async function journey(journeyEnding) {
 
         // ── S3 (rule 2): a dish comes off the unpaid bill before the table pays — who and why, as
         // an append-only cancellation on the 'PayLater' basis; the table is never charged for it.
+        // b40: the written-off table's dish came off because it sold out; staff read that reason.
+        const removalReason = ending === "WrittenOff" ? "SOLD_OUT" : "CUSTOMER_REQUEST";
         const removal = (who, command) =>
           createMerchantDiningUnpaidItemRemoval({
             persistence: persistenceOf(who),
@@ -1973,7 +1975,7 @@ async function journey(journeyEnding) {
               orderReference,
               orderBatchReference: R2.batch.orderBatchReference,
               orderItemReferences: [String(items2[0].orderItemReference)],
-              reasonCode: "CUSTOMER_REQUEST",
+              reasonCode: removalReason,
               ...command,
             },
           });
@@ -4040,7 +4042,7 @@ async function journey(journeyEnding) {
             [
               {
                 basis: "PayLater",
-                reason_code: "CUSTOMER_REQUEST",
+                reason_code: removalReason,
                 actor: id(0x700),
                 payment_disposition_id: null,
                 refund_request_id: null,
@@ -4137,6 +4139,24 @@ async function journey(journeyEnding) {
           assert.deepEqual(open.rounds[1].items, []);
           assert.equal(typeof open.rounds[1].takenOffDishes[0].displayName, "string");
           assert.ok(open.rounds[1].takenOffDishes[0].displayName.length > 0);
+          // b40: staff read why, as the guest does: sold out says so, any other reason does not.
+          assert.equal(
+            open.rounds[1].takenOffDishes[0].soldOut,
+            removalReason === "SOLD_OUT" ? true : undefined,
+          );
+          // The same on Orders and the table's rounds (the order queue's detail).
+          const queued = await createPersistentMerchantOrderQueue({
+            persistence: persistenceOf(server),
+            quoteVersion: 1,
+            acceptanceConfigured: true,
+          })({ sessionCookie: server.sessionCookie, afterOrderReference: null, orderReference });
+          const round2 = queued.items
+            .flatMap((order) => order.batches)
+            .find((batch) => batch.orderBatchReference === R2.batch.orderBatchReference);
+          assert.deepEqual(
+            round2?.unpaidSoldOutItems,
+            removalReason === "SOLD_OUT" ? [String(items2[0].orderItemReference)] : [],
+          );
         }
         assert.equal(
           open.owed.totalMinor,

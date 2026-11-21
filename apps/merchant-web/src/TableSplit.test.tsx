@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { createTableCheckoutClient, parseTableBill } from "./table-checkout-client.js";
-import { defaultRoundParts, TableSplitControls } from "./TableSplit.js";
+import { defaultRoundParts, splitRoundSender, TableSplitControls } from "./TableSplit.js";
 import { splitBillFixture } from "./table-split.fixtures.js";
 
 describe("WP-2423 item 8 ④ split bill at the Tables checkout", () => {
@@ -88,7 +88,9 @@ describe("WP-2423 item 8 ④ split bill at the Tables checkout", () => {
     expect(parts).toContain("Table DEMO-02 · rounds 4");
     // Before any part is paid the rounds can still be moved; each names its table first.
     expect(parts).toContain("Round 1 · Table 8 · phone 1");
-    expect(parts).toContain("Round 4 · Table DEMO-02 · phone 1");
+    // b40: DEMO-02's guests used one phone; the table names it, no phone number.
+    expect(parts).toContain("Round 4 · Table DEMO-02 · $");
+    expect(parts).not.toContain("Table DEMO-02 · phone");
     expect(parts).toContain("Round 3 · Table 8 · entered by staff");
   });
 
@@ -285,5 +287,41 @@ describe("WP-2423 同桌结账: guests paying by dish, staff take the rest", () 
       "We couldn&#x27;t work out what is left to pay just now. Refresh the bill and try again.",
     );
     expect(html).not.toContain("Every dish is chosen");
+  });
+});
+
+describe("b40 who sent each round on a merged bill", () => {
+  // v15 b39 live: L39 M3 (one phone, phone 3 on the merged bill) merged into L39 M2.
+  const merged = () => {
+    const value = splitBillFixture() as { rounds: Record<string, unknown>[] };
+    const base = value.rounds[0] as Record<string, unknown>;
+    value.rounds = [
+      { ...base, roundNumber: 1, orderedBy: 1, fromTableLabel: null },
+      { ...base, roundNumber: 2, orderedBy: 3, fromTableLabel: "L39 M3 (TEST)" },
+      { ...base, roundNumber: 3, orderedBy: 3, fromTableLabel: "L39 M3 (TEST)" },
+      { ...base, roundNumber: 4, orderedBy: 1, fromTableLabel: null },
+    ];
+    return value;
+  };
+  it("names a merged table's only phone by the table, never as phone 3", () => {
+    const bill = parseTableBill(merged());
+    expect(bill.rounds.map((round) => splitRoundSender(bill, round))).toEqual([
+      "phone 1",
+      null,
+      null,
+      "phone 1",
+    ]);
+  });
+  it("tells a merged table's several phones apart, and says a staff round", () => {
+    const value = merged();
+    (value.rounds[2] as Record<string, unknown>).orderedBy = 4;
+    (value.rounds[3] as Record<string, unknown>).orderedBy = null;
+    const bill = parseTableBill(value);
+    expect(bill.rounds.map((round) => splitRoundSender(bill, round))).toEqual([
+      "phone 1",
+      "phone 3",
+      "phone 4",
+      "entered by staff",
+    ]);
   });
 });

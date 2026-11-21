@@ -49,6 +49,11 @@ export interface TableBill {
   readonly orderReference: string | null;
   readonly rounds: readonly {
     readonly roundNumber: number;
+    /**
+     * b40: the round's own reference, so a screen showing one order's rounds can number them as
+     * the bill does (absent from an older server).
+     */
+    readonly orderBatchReference?: string;
     readonly items: readonly {
       readonly orderItemReference: string;
       readonly quantity: number;
@@ -74,6 +79,8 @@ export interface TableBill {
       readonly orderItemReference: string;
       readonly quantity: number;
       readonly displayName: string;
+      /** b40: taken off because it sold out (staff read why, as guests do). */
+      readonly soldOut?: true;
     }[];
     readonly subtotalMinor: string;
     /** Includes the round's share of the bill's tax rounding. */
@@ -257,6 +264,15 @@ export function parseTableBill(value: unknown): TableBill {
           return invalid();
         return Object.freeze({
           roundNumber: round.roundNumber as number,
+          ...(round.orderBatchReference === undefined
+            ? {}
+            : {
+                orderBatchReference:
+                  typeof round.orderBatchReference === "string" &&
+                  reference.test(round.orderBatchReference)
+                    ? round.orderBatchReference
+                    : invalid(),
+              }),
           items: Object.freeze(
             round.items.map((item: Record<string, unknown>) =>
               Object.freeze({
@@ -293,6 +309,11 @@ export function parseTableBill(value: unknown): TableBill {
                             ? (item.quantity as number)
                             : invalid(),
                         displayName: text(item.displayName),
+                        ...(item.soldOut === undefined
+                          ? {}
+                          : item.soldOut === true
+                            ? { soldOut: true as const }
+                            : invalid()),
                       }),
                     ),
                   )
