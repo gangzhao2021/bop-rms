@@ -628,6 +628,61 @@ for (const screen of [
   });
 }
 
+// Batch 40 (v15 live b39 left open): at a tips-off Store the table's cart never mentions a tip.
+test.describe("@production Pay-later table at a Store with tips off", () => {
+  test.use({ serviceWorkers: "block" });
+  test("the cart says nothing about a tip (en, zh-Hans; 390, 1440)", async ({ page }) => {
+    await stubTable(page, [], {
+      quote: (route) =>
+        route.fulfill({
+          status: 201,
+          json: {
+            schemaVersion: 1,
+            tips: { enabled: false, tierPercents: [10, 15, 18] },
+            quote: {
+              quoteReference: id(6),
+              quoteVersion: 1,
+              cartVersion: 3,
+              currency: "CAD",
+              subtotal: { amountMinor: "2000", currency: "CAD" },
+              discount: { amountMinor: "0", currency: "CAD" },
+              tax: { amountMinor: "260", currency: "CAD" },
+              fee: { amountMinor: "0", currency: "CAD" },
+              total: { amountMinor: "2260", currency: "CAD" },
+              expiresAt: new Date(Date.now() + 600_000).toISOString(),
+              warnings: [],
+              blockingReasons: [],
+              priceChange: null,
+            },
+          },
+        }),
+    });
+    await openCart(page);
+    const main = page.getByRole("main");
+    await expect(main).toContainText("Nothing is charged now. Your table pays once at the end.");
+    await expect(placeOrder(page)).toBeEnabled();
+    for (const language of ["en", "zh-Hans"] as const) {
+      if (language === "zh-Hans") {
+        await page.getByRole("button", { name: "切换到中文" }).click();
+        await expect(main).toContainText("现在不收款。这桌最后一起结账。");
+      }
+      for (const width of [390, 1440]) {
+        await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+        const text = await main.innerText();
+        expect(text, `${language} ${width}`).not.toMatch(/\btips?\b|gratuity/iu);
+        expect(text, `${language} ${width}`).not.toContain("小费");
+        expect(
+          await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+        ).toBe(true);
+        await page.screenshot({
+          path: `test-results/b40-tips-off-table-cart-${language}-${width}.png`,
+          fullPage: true,
+        });
+      }
+    }
+  });
+});
+
 test.describe("@production Pay-later table, the round just placed", () => {
   test.use({ serviceWorkers: "block", viewport: { width: 390, height: 844 } });
 

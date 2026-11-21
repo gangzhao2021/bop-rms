@@ -266,6 +266,49 @@ for (const screen of [
       await expect(page.locator("#checkout-tip-heading")).toHaveCount(0);
     });
 
+    // Batch 40 (v15 live b39 left open): tips-off texts were never checked live. At a Store with
+    // tips off neither the cart nor the checkout says anything about a tip, in either language.
+    test("with tips off the cart and checkout say nothing about a tip (en, zh-Hans; 390, 1440)", async ({
+      page,
+    }) => {
+      await stubCheckout(page, {
+        quoteReference: () => id(5),
+        tips: { enabled: false, tierPercents: [10, 15, 18] },
+      });
+      await page.goto("/#qr=aaa.bbb.ccc");
+      await expect(
+        page.getByRole("heading", { name: "Synthetic One Tap Store", exact: true }),
+      ).toBeVisible();
+      const main = page.getByRole("main");
+      for (const path of ["/cart", "/checkout"]) {
+        await page.evaluate((target) => {
+          history.pushState(null, "", target);
+          window.dispatchEvent(new PopStateEvent("popstate"));
+        }, path);
+        await expect(main.getByText("Synthetic tea").first()).toBeVisible();
+        if (path === "/checkout")
+          await expect(page.getByRole("heading", { name: "Total", exact: true })).toBeVisible();
+        else await expect(main).toContainText("Order summary");
+        for (const language of ["en", "zh-Hans"] as const) {
+          if (language === "zh-Hans") {
+            await page.getByRole("button", { name: "切换到中文" }).click();
+            await expect(page.getByRole("button", { name: "Switch to English" })).toBeVisible();
+          }
+          for (const width of [390, 1440]) {
+            await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+            const text = await main.innerText();
+            expect(text, `${path} ${language} ${width}`).not.toMatch(/\btips?\b|gratuity/iu);
+            expect(text, `${path} ${language} ${width}`).not.toContain("小费");
+            await page.screenshot({
+              path: `test-results/b40-tips-off${path.replace("/", "-")}-${language}-${width}.png`,
+              fullPage: true,
+            });
+          }
+        }
+        await page.getByRole("button", { name: "Switch to English" }).click();
+      }
+    });
+
     // b25 (brief §2 v3, as merchant Tables checkout): the chosen tip is accent words with an
     // accent underline, never a filled or outlined box; every choice keeps a 44 px target and
     // choosing one moves nothing, in English and Chinese.
