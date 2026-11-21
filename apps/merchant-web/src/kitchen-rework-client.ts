@@ -1,4 +1,4 @@
-import { t } from "./i18n/i18n.js";
+import { kitchenDishNames, t } from "./i18n/i18n.js";
 /**
  * WP-2423 Q26 (Handoff Section 26.6): the Kitchen board's remakes. A finished dish that was made
  * wrong, dropped, sent back or failed a quality check is made again as a new rework; a dish marked
@@ -61,6 +61,8 @@ export interface KitchenReworkView {
   readonly cancelledAt: string | null;
   readonly cancelReasonCode: KitchenReworkCancelReason | null;
   readonly displayName: string;
+  /** Batch 40: the dish's other name under it, as on every kitchen card (item 8 ③). */
+  readonly otherName?: string;
   readonly selectedOptions: readonly { readonly displayName: string; readonly quantity: number }[];
   readonly orderLabel: {
     readonly orderNumber: string;
@@ -115,6 +117,29 @@ const optionalText = (value: unknown) =>
       ? value
       : fail("OutcomeUnknown");
 
+const LOCALE = /^[a-z]{2,3}(?:-[A-Z][a-z]{3})?(?:-[A-Z]{2}|-[0-9]{3})?$/u;
+/**
+ * Batch 40 (v15 b39 live): the dish's names by language, when the server gives them, named by the
+ * kitchen's own rule (Chinese first, the English under it) as the board's tickets and Recently
+ * finished are. The single name chosen by the staff language is kept for an older server. Unusable
+ * names are ignored, never a reason to lose the remake.
+ */
+function kitchenNames(
+  value: unknown,
+): { readonly displayName: string; readonly otherName: string | null } | null {
+  if (value === undefined || value === null || typeof value !== "object" || Array.isArray(value))
+    return null;
+  const names: Record<string, string> = {};
+  for (const [key, name] of Object.entries(value)) {
+    if (!LOCALE.test(key) || typeof name !== "string" || !SAFE_TEXT.test(name)) return null;
+    names[key] = name;
+  }
+  const { displayName, otherName } = kitchenDishNames(names);
+  return displayName === undefined || !SAFE_TEXT.test(displayName)
+    ? null
+    : { displayName, otherName };
+}
+
 function parseView(value: unknown): KitchenReworkView {
   const raw = record(value);
   if (
@@ -149,11 +174,20 @@ function parseView(value: unknown): KitchenReworkView {
         : kitchenReworkCancelReasons.includes(raw.cancelReasonCode as KitchenReworkCancelReason)
           ? (raw.cancelReasonCode as KitchenReworkCancelReason)
           : fail("OutcomeUnknown"),
-    displayName: optionalText(raw.displayName) ?? "Dish",
+    ...((names) =>
+      names === null
+        ? { displayName: optionalText(raw.displayName) ?? "Dish" }
+        : {
+            displayName: names.displayName,
+            ...(names.otherName === null ? {} : { otherName: names.otherName }),
+          })(kitchenNames(raw.localizedDisplayNames)),
     selectedOptions: raw.selectedOptions.map((option: unknown) => {
       const entry = record(option);
       return Object.freeze({
-        displayName: optionalText(entry.displayName) ?? "Option",
+        displayName:
+          kitchenNames(entry.localizedNames)?.displayName ??
+          optionalText(entry.displayName) ??
+          "Option",
         quantity: Number.isSafeInteger(entry.quantity) ? Number(entry.quantity) : 1,
       });
     }),
@@ -288,7 +322,12 @@ export function createKitchenReworkClient(options: {
       );
       if (raw.action !== body.action || !["Applied", "AlreadyApplied"].includes(String(raw.status)))
         return fail("OutcomeUnknown");
-      return parseView({ ...record(raw.rework), displayName: null, selectedOptions: [] });
+      return parseView({
+        ...record(raw.rework),
+        displayName: null,
+        localizedDisplayNames: undefined,
+        selectedOptions: [],
+      });
     },
   });
 }

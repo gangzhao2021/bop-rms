@@ -68,11 +68,16 @@ function reworkView(
     cancelledAt: item.cancelledAt,
     cancelReasonCode: item.cancelReasonCode,
     displayName: dish === null ? null : displayName(dish.localizedDisplayNames),
+    // Batch 40 (v15 b39 live): the dish's names by language too, so the kitchen names a remake by
+    // its own rule (Chinese first, the English under it) as it names the dish on every ticket.
+    // The remake card showed "Beef noodles" beside Recently finished's "牛肉面" for the same dish.
+    ...(dish === null ? {} : { localizedDisplayNames: dish.localizedDisplayNames }),
     selectedOptions:
       dish === null
         ? []
         : dish.selectedOptions.map((option) => ({
             displayName: displayName(option.localizedNames),
+            localizedNames: option.localizedNames,
             quantity: option.quantity,
           })),
     orderLabel: preparation?.orderLabel ?? null,

@@ -54,6 +54,42 @@ describe("WP-2423 Q26 kitchen rework client", () => {
       createKitchenReworkClient({ csrf, storeReference: id(8), fetcher }).load(),
     ).rejects.toMatchObject({ code: "PermissionDenied" });
   });
+  it("batch 40: names a remake by the kitchen's rule when the server gives the dish's names", async () => {
+    // As at Test Merchant 2 (v15 b39 live): the single name follows the staff language (English),
+    // while every ticket and Recently finished lead with the Chinese one.
+    const bilingual = {
+      ...view,
+      displayName: "Beef noodles (TEST)",
+      localizedDisplayNames: { "zh-Hans": "牛肉面", "en-CA": "Beef noodles (TEST)" },
+      selectedOptions: [
+        {
+          displayName: "Extra spicy",
+          localizedNames: { "zh-Hans": "加辣", "en-CA": "Extra spicy" },
+          quantity: 1,
+        },
+      ],
+    };
+    const english = { ...view, localizedDisplayNames: { "en-CA": "Noodle bowl" } };
+    // A name the board cannot use is ignored: the remake still shows, by its single name.
+    const odd = { ...view, reworkReference: id(5), localizedDisplayNames: { "not a locale": "x" } };
+    const fetcher = vi.fn(async () =>
+      json({
+        storeReference: id(9),
+        observedAt: view.createdAt,
+        canRework: true,
+        items: [bilingual, english, odd],
+      }),
+    );
+    const board = await createKitchenReworkClient({ csrf, storeReference: id(9), fetcher }).load();
+    expect(board.items[0]).toMatchObject({
+      displayName: "牛肉面",
+      otherName: "Beef noodles (TEST)",
+      selectedOptions: [{ displayName: "加辣", quantity: 1 }],
+    });
+    expect(board.items[1]).toMatchObject({ displayName: "Noodle bowl" });
+    expect(board.items[1]).not.toHaveProperty("otherName");
+    expect(board.items[2]).toMatchObject({ displayName: "Noodle bowl" });
+  });
   it("hides remakes where the source does not offer them", async () => {
     const client = createKitchenReworkClient({
       csrf,

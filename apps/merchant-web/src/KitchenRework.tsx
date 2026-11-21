@@ -330,6 +330,12 @@ export function KitchenRemakeLane({
                 </span>
                 {rework.displayName}
               </h3>
+              {/* Batch 40: named as every ticket names the dish (item 8 ③), English under it. */}
+              {rework.otherName === undefined ? null : (
+                <p className="kitchen-work-item__other-name" lang="en">
+                  {rework.otherName}
+                </p>
+              )}
             </div>
             <div className="kitchen-work-item__state">
               <strong data-status={rework.status}>
@@ -463,6 +469,11 @@ export function KitchenRemakeDialog({
           }}
         >
           <h2 id={titleId}>{t("Remake {displayName}", { displayName: item.displayName })}</h2>
+          {item.otherName === undefined ? null : (
+            <p className="kitchen-remake-dialog__other-name" lang="en">
+              {item.otherName}
+            </p>
+          )}
           <fieldset>
             <legend>{t("Why does it need to be made again?")}</legend>
             {reasons.map((value) => (
@@ -573,6 +584,11 @@ export function KitchenRecentlyFinished({
           <li key={item.workItemReference}>
             <span className="kitchen-recent-finished__name">
               <strong>{item.displayName}</strong>
+              {item.otherName === undefined ? null : (
+                <span className="kitchen-recent-finished__other" lang="en">
+                  {item.otherName}
+                </span>
+              )}
               <span>
                 {orderLabel(item)} · {item.requiredQuantity} ×
                 {remade(item) > 0 ? t(" · Remade {item}×", { item: remade(item) }) : ""}

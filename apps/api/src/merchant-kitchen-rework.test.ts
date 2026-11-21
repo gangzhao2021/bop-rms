@@ -13,6 +13,10 @@ vi.mock("@rms/kitchen", async (original) => ({
   ...(await original<object>()),
   createPostgresKitchenReworkStore: doubles.store,
 }));
+vi.mock("./merchant-kitchen-query.js", async (original) => ({
+  ...(await original<object>()),
+  kitchenPreparation: async () => new Map(),
+}));
 const id = (n: number) => "01a0f026-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const now = "2026-10-14T12:00:00.000Z";
 const item = {
@@ -239,4 +243,34 @@ it("WP-2423: a remake resolves the caller twice and is refused before commit if 
     // Thrown inside the transaction callback, so the remake does not commit.
     expect(inside.thrown).toBe(true);
   }
+});
+
+it("WP-2423 batch 40: a remake carries the dish's names by language, so the kitchen names it as it names the dish on its tickets", async () => {
+  const { rework } = setup();
+  // As at Test Merchant 2 (v15 b39 live): a bilingual dish, read by a staff member in English.
+  doubles.list.mockResolvedValue([
+    {
+      item,
+      dish: {
+        localizedDisplayNames: { "zh-Hans": "牛肉面", "en-CA": "Beef noodles (TEST)" },
+        selectedOptions: [
+          { quantity: 1, localizedNames: { "zh-Hans": "加辣", "en-CA": "Extra spicy" } },
+        ],
+      },
+    },
+  ]);
+  const read = (await rework.query({ sessionCookie: "s", csrf: "c" })) as {
+    items: readonly Record<string, unknown>[];
+  };
+  expect(read.items[0]).toMatchObject({
+    displayName: "Beef noodles (TEST)",
+    localizedDisplayNames: { "zh-Hans": "牛肉面", "en-CA": "Beef noodles (TEST)" },
+    selectedOptions: [
+      {
+        displayName: "Extra spicy",
+        localizedNames: { "zh-Hans": "加辣", "en-CA": "Extra spicy" },
+        quantity: 1,
+      },
+    ],
+  });
 });

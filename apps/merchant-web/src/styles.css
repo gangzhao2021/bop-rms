@@ -8543,6 +8543,12 @@ body:has(.product-complete-draft) .bop-shell__header,
   font-weight: 600;
   overflow-wrap: anywhere;
 }
+/* Batch 40: the dish's English name under its Chinese one, as on the kitchen's cards. */
+.kitchen-remake-dialog__other-name {
+  margin: -10px 0 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
 .kitchen-remake-dialog fieldset {
   display: grid;
   gap: 4px;
