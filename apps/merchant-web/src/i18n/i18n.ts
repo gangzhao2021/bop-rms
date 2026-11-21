@@ -237,13 +237,18 @@ export function displayLocale(): string {
   return current === "zh-Hans" ? "zh-CN" : "en-US";
 }
 
+/** The locale the guests' pages write times in ("12:30 a.m." / "0:30"); see clockTime. */
+export function guestLocale(): string {
+  return current === "zh-Hans" ? "zh-CN" : "en-CA";
+}
+
 /**
  * b40 (v15 b39 cross-midnight check: staff read "12:30 AM" where guests read "12:30 a.m."): a
  * time of day as the guest's pages write it, in the house style of the language ("12:30 a.m.",
  * "0:30"), in the Store's time zone when given.
  */
 export function clockTime(at: number, timeZone?: string): string {
-  return new Intl.DateTimeFormat(current === "zh-Hans" ? "zh-CN" : "en-CA", {
+  return new Intl.DateTimeFormat(guestLocale(), {
     hour: "numeric",
     minute: "2-digit",
     ...(timeZone === undefined ? {} : { timeZone }),
@@ -253,6 +258,14 @@ export function clockTime(at: number, timeZone?: string): string {
 export function clockTimeEndingSentence(at: number, timeZone?: string): string {
   const time = clockTime(at, timeZone);
   return time.endsWith(".") ? time.slice(0, -1) : time;
+}
+
+/**
+ * b40 review: a sentence whose "{at}" is a clockTime brings that time's own period ("ended at
+ * 4:00 a.m. It was…"), never "a.m.. It was".
+ */
+export function withOneSentenceEnd(text: string): string {
+  return text.replace(/([ap])\.m\.\./gu, "$1.m.");
 }
 
 /**

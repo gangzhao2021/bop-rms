@@ -1,14 +1,38 @@
-import { displayLocale, t } from "./i18n/i18n.js";
+import { displayLocale, guestLocale, t } from "./i18n/i18n.js";
 import { createContext, useContext } from "react";
 
 /** WP-2423: the selected Store's IANA time zone, provided once by the workspace. */
 export const StoreTimeZoneContext = createContext<string | undefined>(undefined);
 
 /**
- * An instant as Store-local time: "14:05", or with the date "Oct 14, 2026, 2:05 PM" (never a
- * machine date such as 2026-10-14). UTC, labelled, when the Store's time zone is not known.
+ * b40 review (Tables mixed "12:30 a.m.", "12:30 AM" and "01:23" on one screen): how a screen
+ * writes times. "Staff" is the back office's "14:05"; "Guest" is the guests' house style
+ * ("12:30 a.m.", "0:30"). Tables provides "Guest", so every time on it reads one way, as on the
+ * guest's phone at that table.
  */
-export function storeTime(instant: string, timeZone: string | undefined, withDate = false): string {
+export type ClockStyle = "Staff" | "Guest";
+export const ClockStyleContext = createContext<ClockStyle>("Staff");
+
+/**
+ * An instant as Store-local time: "14:05", or with the date "Oct 14, 2026, 2:05 PM" (never a
+ * machine date such as 2026-10-14). UTC, labelled, when the Store's time zone is not known. In
+ * the "Guest" style: "12:30 a.m.", or "Nov 21, 2026, 12:30 a.m.".
+ */
+export function storeTime(
+  instant: string,
+  timeZone: string | undefined,
+  withDate = false,
+  style: ClockStyle = "Staff",
+): string {
+  if (style === "Guest") {
+    const text = new Intl.DateTimeFormat(guestLocale(), {
+      timeZone: timeZone ?? "UTC",
+      ...(withDate ? { year: "numeric", month: "short", day: "numeric" } : {}),
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(new Date(instant));
+    return timeZone === undefined ? text + " UTC" : text;
+  }
   if (withDate) {
     const text = new Intl.DateTimeFormat(displayLocale(), {
       timeZone: timeZone ?? "UTC",
@@ -115,9 +139,10 @@ export function SourceTime({
   readonly withDate?: boolean;
 }) {
   const timeZone = useContext(StoreTimeZoneContext);
+  const style = useContext(ClockStyleContext);
   return (
     <time dateTime={instant} title={instant}>
-      {storeTime(instant, timeZone, withDate)}
+      {storeTime(instant, timeZone, withDate, style)}
     </time>
   );
 }

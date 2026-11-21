@@ -1,5 +1,5 @@
 import { useContext, useEffect, useMemo, useRef, useState } from "react";
-import { StoreTimeZoneContext, storeTime } from "./StoreTime.js";
+import { ClockStyleContext, StoreTimeZoneContext, storeTime } from "./StoreTime.js";
 import { t } from "./i18n/i18n.js";
 import { isFullSignInRequired } from "./full-sign-in.js";
 import { FullSignInPrompt } from "./FullSignInPrompt.js";
@@ -269,6 +269,7 @@ function TablePaymentBlock({
   const online = payment.method === "Online";
   const onMachine = payment.method === "CardMachine";
   const timeZone = useContext(StoreTimeZoneContext);
+  const clockStyle = useContext(ClockStyleContext);
   const [slip, setSlip] = useState("");
   const slipValid = slip.trim() === "" || /^[A-Za-z0-9][A-Za-z0-9 #./-]{0,39}$/u.test(slip.trim());
 
@@ -283,9 +284,9 @@ function TablePaymentBlock({
   const when = (at: string, byLabel: string | null) =>
     " · " +
     (byLabel === null
-      ? storeTime(at, timeZone, true)
+      ? storeTime(at, timeZone, true, clockStyle)
       : t("{time} by {person}", {
-          time: storeTime(at, timeZone, true),
+          time: storeTime(at, timeZone, true, clockStyle),
           person: byLabel === "You" ? t("You") : byLabel,
         }));
   const give = async () => {

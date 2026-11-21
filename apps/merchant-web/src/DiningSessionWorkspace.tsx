@@ -57,7 +57,7 @@ import {
 } from "./dining-session-client.js";
 import { TableAllergies, tableAllergenText } from "./TableAllergies.js";
 import { serviceOperationReference } from "./service-control-client.js";
-import { storeTime } from "./StoreTime.js";
+import { ClockStyleContext, storeTime } from "./StoreTime.js";
 import { newOperationReference } from "./operation-reference.js";
 import { TableSessionClose } from "./TableSessionClose.js";
 import { LastOrdersNotice } from "./LastOrdersNotice.js";
@@ -218,7 +218,7 @@ export function staffRoundPaymentNotice(
   const count = table.staffRoundsAwaitingPayment.length;
   const rounds = count === 1 ? t("A round") : t("{count} rounds", { count: String(count) });
   const remainingMs = Date.parse(first.payBy) - now;
-  const at = storeTime(first.payBy, timeZone);
+  const at = storeTime(first.payBy, timeZone, false, "Guest");
   if (remainingMs <= 0)
     return {
       tier: "urgent",
@@ -283,7 +283,7 @@ export function guestRoundPaymentNotice(
       ? t("Round {roundNumber}", { roundNumber: String(first.roundNumber) })
       : t("Rounds {value}", { value: rounds.map((round) => String(round.roundNumber)).join(", ") });
   const remainingMs = Date.parse(first.payBy) - now;
-  const at = storeTime(first.payBy, timeZone);
+  const at = storeTime(first.payBy, timeZone, false, "Guest");
   // WP-2423 abandoned payment: still here well after the deadline, the card provider couldn't
   // confirm the guest's payment, so staff decide with the guest (only those rounds are named).
   const unconfirmed = rounds.filter((round) => isPaymentUnconfirmed(round.payBy, now));
@@ -300,7 +300,7 @@ export function guestRoundPaymentNotice(
               : t("Rounds {value}", {
                   value: unconfirmed.map((round) => String(round.roundNumber)).join(", "),
                 }),
-          payBy: storeTime(firstUnconfirmed.payBy, timeZone),
+          payBy: storeTime(firstUnconfirmed.payBy, timeZone, false, "Guest"),
         },
       ),
     };
@@ -520,7 +520,19 @@ const noTablesMessage = "no-tables";
 /** Batch 38: the floor read was refused; worded at render, by who is signed in. */
 const tablesDeniedMessage = "tables-denied";
 
-export function DiningSessionWorkspace({
+/**
+ * b40 review: Tables writes every time in the guests' house style ("12:30 a.m."), the notices,
+ * the rounds, the checkout and the shared order lines alike, so one screen never mixes styles.
+ */
+export function DiningSessionWorkspace(props: Parameters<typeof DiningSessionWorkspaceBody>[0]) {
+  return (
+    <ClockStyleContext.Provider value="Guest">
+      <DiningSessionWorkspaceBody {...props} />
+    </ClockStyleContext.Provider>
+  );
+}
+
+function DiningSessionWorkspaceBody({
   csrf,
   storeReference,
   storeLabel,

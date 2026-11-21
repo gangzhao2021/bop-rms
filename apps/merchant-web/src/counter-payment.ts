@@ -1,6 +1,12 @@
-import { t } from "./i18n/i18n.js";
+import { t, withOneSentenceEnd } from "./i18n/i18n.js";
 import { orderMoney } from "./order-money.js";
-import { storeDate, storeLocalInputValue, storeLocalInstant, storeTime } from "./StoreTime.js";
+import {
+  type ClockStyle,
+  storeDate,
+  storeLocalInputValue,
+  storeLocalInstant,
+  storeTime,
+} from "./StoreTime.js";
 import type { CounterOrderClientError } from "./staff-order-entry.js";
 import type { CurrentOrderQueue } from "./current-order-queue-client.js";
 
@@ -211,7 +217,14 @@ export const paymentUrgentMinutes = 10;
  * card-machine payment. A table round not recorded by then is cancelled automatically and never
  * reaches the kitchen; a counter order is released. Nothing is charged in the system either way.
  */
-export function paymentWindowNotice(input: {
+export function paymentWindowNotice(
+  input: Parameters<typeof paymentWindowNoticeText>[0],
+): ReturnType<typeof paymentWindowNoticeText> {
+  const notice = paymentWindowNoticeText(input);
+  return { ...notice, text: withOneSentenceEnd(notice.text) };
+}
+
+function paymentWindowNoticeText(input: {
   readonly payBy: string;
   readonly now: number;
   readonly tableMode: boolean;
@@ -222,8 +235,10 @@ export function paymentWindowNotice(input: {
    * system does at the time, never to charge or take payment.
    */
   readonly paper?: boolean;
+  /** b40 review: "Guest" on Tables, so the time reads as everywhere else on it. */
+  readonly clockStyle?: ClockStyle;
 }): { readonly tier: "warning" | "urgent"; readonly ended: boolean; readonly text: string } {
-  const at = storeTime(input.payBy, input.timeZone);
+  const at = storeTime(input.payBy, input.timeZone, false, input.clockStyle);
   const remainingMs = Date.parse(input.payBy) - input.now;
   if (input.paper === true) {
     if (remainingMs <= 0)

@@ -1,4 +1,11 @@
-import { systemText, displayLocale, listSeparator, t, saidTable } from "./i18n/i18n.js";
+import {
+  systemText,
+  displayLocale,
+  guestLocale,
+  listSeparator,
+  t,
+  saidTable,
+} from "./i18n/i18n.js";
 import { formatContactPhone } from "./contact-phone.js";
 import { noAccessHeading } from "./access-denied.js";
 import { NoAccessNotice } from "./NoAccessNotice.js";
@@ -62,7 +69,7 @@ import { useRememberedAlertSound } from "./alert-sound.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import { StatePanel } from "@bop-rms/ui";
 import { playKitchenChime } from "./alert-chime.js";
-import { storeTime } from "./StoreTime.js";
+import { ClockStyleContext, type ClockStyle, storeTime } from "./StoreTime.js";
 import { compRecordText } from "./ItemCompAction.js";
 import {
   counterAwaitingCardMachine,
@@ -79,7 +86,7 @@ import {
 import { WorkspacePage } from "./WorkspacePage.js";
 export { storeTime } from "./StoreTime.js";
 export { counterAwaitingCardMachine, counterPayByText, counterPayByTier };
-import { Fragment, useEffect, useId, useMemo, useRef, useState } from "react";
+import { Fragment, useContext, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useStaffSessionLive } from "./staff-session-reads.js";
 import { browserOffline, useStaleRetry } from "./stale-read.js";
 import { Link, useLocation, useNavigate, useParams } from "react-router";
@@ -421,6 +428,7 @@ export function CurrentOrderLines({
    */
   readonly refundRows?: readonly OrderRefundRow[] | undefined;
 }) {
+  const clockStyle = useContext(ClockStyleContext);
   const totals = lines.totals;
   const cancelledRefund = cancelledItemsRefund(lines.items);
   const refunds: readonly OrderRefundRow[] =
@@ -655,7 +663,12 @@ export function CurrentOrderLines({
                             : ""}
                         {batch.submittedAt === null ? null : (
                           <time className="order-round__time" dateTime={batch.submittedAt}>
-                            {orderWhen(batch.submittedAt, rounds.timeZone, rounds.today ?? null)}
+                            {orderWhen(
+                              batch.submittedAt,
+                              rounds.timeZone,
+                              rounds.today ?? null,
+                              clockStyle,
+                            )}
                           </time>
                         )}
                       </h3>
@@ -2505,8 +2518,13 @@ export function orderLabel(
  * Orders v2: when an order was placed, in one style — the time today, else the date with the
  * weekday ("Sat, Oct 24 20:00"), with the year only when it is not this year.
  */
-export function orderWhen(instant: string, timeZone: string | undefined, today: string | null) {
-  const time = storeTime(instant, timeZone);
+export function orderWhen(
+  instant: string,
+  timeZone: string | undefined,
+  today: string | null,
+  style: ClockStyle = "Staff",
+) {
+  const time = storeTime(instant, timeZone, false, style);
   if (timeZone === undefined) return time;
   const date = new Intl.DateTimeFormat("en-CA", {
     timeZone,
@@ -2515,7 +2533,7 @@ export function orderWhen(instant: string, timeZone: string | undefined, today: 
     day: "2-digit",
   }).format(new Date(instant));
   if (date === today) return time;
-  const label = new Intl.DateTimeFormat(displayLocale(), {
+  const label = new Intl.DateTimeFormat(style === "Guest" ? guestLocale() : displayLocale(), {
     timeZone,
     ...(today !== null && date.slice(0, 4) === today.slice(0, 4) ? {} : { year: "numeric" }),
     month: "short",

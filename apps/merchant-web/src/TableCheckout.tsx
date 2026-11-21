@@ -410,7 +410,7 @@ export function TableCheckout({
     paidBeforeOrdered && lastLiveOrderedAt !== null
       ? t(
           "This is before this table's last round was ordered in the system ({at}). A card machine's clock can be a few minutes off: check the time on the slip before you confirm.",
-          { at: storeTime(lastLiveOrderedAt, timeZone, true) },
+          { at: storeTime(lastLiveOrderedAt, timeZone, true, "Guest") },
         )
       : null,
     paidAtDayNote(paperInstant, Date.now(), timeZone),
@@ -1186,7 +1186,7 @@ export function TableCheckout({
                         {paper && paperInstant !== null ? (
                           <div>
                             <dt>{t("Paid at")}</dt>
-                            <dd>{storeTime(paperInstant, timeZone, true)}</dd>
+                            <dd>{storeTime(paperInstant, timeZone, true, "Guest")}</dd>
                           </div>
                         ) : null}
                         {method === "Cash" && cashDue !== null && change !== null ? (
@@ -1420,7 +1420,7 @@ function TableReceipt({
         {storeLabel ? <p className="table-receipt__store">{storeLabel}</p> : null}
         <p>{t("Table {table}", { table: saidTable(tableLabel) })}</p>
         {paidAt !== "" ? (
-          <p>{t("Paid {time}", { time: storeTime(paidAt, timeZone, true) })}</p>
+          <p>{t("Paid {time}", { time: storeTime(paidAt, timeZone, true, "Guest") })}</p>
         ) : null}
       </header>
       <ul className="table-receipt__dishes" data-print-only="">

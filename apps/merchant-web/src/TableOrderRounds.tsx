@@ -221,7 +221,7 @@ export function TableOrderRounds({
               <li key={comp.orderItemReference}>
                 <span>
                   {names.get(comp.orderItemReference)?.name ?? t("Dish")} ·{" "}
-                  {compRecordText(comp, timeZone)}
+                  {compRecordText(comp, timeZone, "Guest")}
                 </span>
                 <span>−{orderMoney({ amountMinor: comp.amountMinor, currencyCode: "CAD" })}</span>
               </li>

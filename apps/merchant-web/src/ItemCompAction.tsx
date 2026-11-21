@@ -8,7 +8,7 @@ import { orderMoney } from "./order-money.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import { payLaterRemoveDishText } from "./PayLaterItemRemoveAction.js";
 import { dollarsToMinor } from "./TableCheckout.js";
-import { storeTime } from "./StoreTime.js";
+import { type ClockStyle, storeTime } from "./StoreTime.js";
 
 type Order = CurrentOrderQueue["items"][number];
 export type CompReason = "QUALITY" | "WRONG_DISH" | "LONG_WAIT" | "GOODWILL";
@@ -627,6 +627,7 @@ export function compRecordText(
     readonly byLabel?: string | null;
   },
   timeZone: string | undefined,
+  style: ClockStyle = "Staff",
 ): string {
   if (comp.reasonCode === "POINTS_REDEMPTION") return t("Points used");
   const parts = [compedText(comp.kind, comp.percent)];
@@ -635,10 +636,10 @@ export function compRecordText(
   if (comp.decidedAt !== undefined)
     parts.push(
       comp.byLabel === null || comp.byLabel === undefined
-        ? storeTime(comp.decidedAt, timeZone)
+        ? storeTime(comp.decidedAt, timeZone, false, style)
         : t("by {person}, {time}", {
             person: comp.byLabel === "You" ? t("You") : comp.byLabel,
-            time: storeTime(comp.decidedAt, timeZone),
+            time: storeTime(comp.decidedAt, timeZone, false, style),
           }),
     );
   return parts.join(" · ");
