@@ -24,6 +24,8 @@ interface Item {
   readonly cancelled?: boolean;
   readonly takenOff?: true;
   readonly soldOut?: true;
+  /** b39 review: the round came from a table merged into this one. */
+  readonly fromTable?: string;
 }
 const sessionBody = (item: Item = {}) => ({
   schemaVersion: 1,
@@ -41,6 +43,7 @@ const sessionBody = (item: Item = {}) => ({
         payment: "OnTableBill",
         cancelsAt: null,
         storeCancellationReason: null,
+        ...(item.fromTable === undefined ? {} : { fromTable: item.fromTable }),
         items: [
           {
             displayName: "Sliced beef (TEST)",
@@ -208,6 +211,49 @@ async function openTable(
 const ok = (body: unknown) => (route: Route) =>
   route.fulfill({ status: 200, headers: json, json: body });
 
+/**
+ * b39 review: once staff closed the table, its session read says this phone is no longer at an
+ * open table, the visit's restore says the table was settled, and the receipt reads with it.
+ */
+async function endTableWhen(page: Page, closed: () => boolean) {
+  await page.route("**/api/v1/customer/session/csrf", (route) =>
+    closed()
+      ? route.fulfill({
+          status: 200,
+          headers: json,
+          json: { schemaVersion: 1, settledTable: { tableLabel: "H4", csrfToken: "e".repeat(43) } },
+        })
+      : route.fulfill({ status: 204, headers: json }),
+  );
+}
+const settledReceipt = (route: Route) =>
+  route.fulfill({
+    status: 200,
+    headers: json,
+    json: {
+      schemaVersion: 1,
+      receipt: {
+        tableLabel: "H4",
+        rounds: [
+          {
+            roundNumber: 1,
+            fromTableLabel: null,
+            items: [{ displayName: "Tomato pot (TEST)", subtotalMinor: "1808", reduced: null }],
+          },
+        ],
+        subtotalMinor: "1808",
+        taxMinor: "235",
+        ordersTotalMinor: "2043",
+        tipMinor: "0",
+        roundingMinor: "0",
+        paidMinor: "2043",
+        split: false,
+        payments: [{ partNumber: null, method: "Cash", totalMinor: "2043" }],
+      },
+    },
+  });
+const stillChecking = "We couldn’t check the bill just now. This page tries again by itself.";
+
 test.describe("@production a pay-at-the-end table after another phone paid, merges and sold-out dishes", () => {
   test("a bill read that fails for a moment is read again; the receipt shows, never an outage", async ({
     page,
@@ -263,20 +309,22 @@ test.describe("@production a pay-at-the-end table after another phone paid, merg
     }
   });
 
-  test("a bill read saying this phone left an open table reads the table page again", async ({
+  test("a bill read saying this phone left an open table shows how the meal ended, with the receipt", async ({
     page,
   }) => {
-    let sessionReads = 0;
-    let atClose: number | null = null;
+    let closed = false;
+    await endTableWhen(page, () => closed);
     await openTable(page, {
-      session: (route) => {
-        sessionReads += 1;
-        return route.fulfill({ status: 200, headers: json, json: sessionBody() });
-      },
+      session: (route) =>
+        closed
+          ? route.fulfill({ status: 404, headers: json, json: {} })
+          : route.fulfill({ status: 200, headers: json, json: sessionBody() }),
       // Staff close the table while the bill is read (answered after the page settled).
       tablePayment: async (route) => {
+        if ((route.request().postData() ?? "").includes("SettledReceipt"))
+          return settledReceipt(route);
         await new Promise((resolve) => setTimeout(resolve, 1_500));
-        atClose ??= sessionReads;
+        closed = true;
         return route.fulfill({
           status: 404,
           headers: json,
@@ -284,14 +332,63 @@ test.describe("@production a pay-at-the-end table after another phone paid, merg
         });
       },
     });
-    await expect.poll(() => atClose, { timeout: 5_000 }).not.toBeNull();
     // The page reads the table again at once (its next regular read is 15 s away), which says
-    // how the meal ended; nothing about payment is said meanwhile.
-    await expect.poll(() => sessionReads, { timeout: 5_000 }).toBeGreaterThan(atClose ?? 0);
-    await expect(
-      page.getByText("This phone isn’t part of the table any more. Ask a staff member for help."),
-    ).toHaveCount(0);
+    // how the meal ended and shows the receipt; nothing about payment is said meanwhile.
+    const main = page.getByRole("main");
+    await expect(main.getByRole("heading", { name: "Thank you for dining with us." })).toBeVisible({
+      timeout: 6_000,
+    });
+    await expect(main).toContainText("Your meal at table H4 has ended.");
+    await expect(main.getByRole("region", { name: "Receipt" })).toContainText("Total paid$20.43");
     await expect(page.getByText(outage)).toHaveCount(0);
+    await expect(page.getByText(stillChecking)).toHaveCount(0);
+    await expectNoInternalText(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({ path: "test-results/b39-closed-ended-390.png", fullPage: true });
+  });
+
+  test("bill reads that keep failing for a just-closed table show its end, not a bill problem", async ({
+    page,
+  }) => {
+    let closed = false;
+    let failedReads = 0;
+    await endTableWhen(page, () => closed);
+    await openTable(page, {
+      session: (route) =>
+        closed
+          ? route.fulfill({ status: 404, headers: json, json: {} })
+          : route.fulfill({ status: 200, headers: json, json: sessionBody() }),
+      // Staff closed the table just as the bill was read; the store's side keeps answering 503.
+      tablePayment: (route) => {
+        if ((route.request().postData() ?? "").includes("SettledReceipt"))
+          return settledReceipt(route);
+        failedReads += 1;
+        closed = true;
+        return route.fulfill({
+          status: 503,
+          headers: { ...json, "retry-after": "5" },
+          json: { schemaVersion: 1, error: { code: "table_payment_unavailable" } },
+        });
+      },
+    });
+    const main = page.getByRole("main");
+    const seen: number[] = [];
+    const deadline = Date.now() + 6_000;
+    while (Date.now() < deadline) {
+      seen.push(
+        (await page.getByText(stillChecking).count()) + (await page.getByText(outage).count()),
+      );
+      if ((await main.getByRole("heading", { name: "Thank you for dining with us." }).count()) > 0)
+        break;
+      await page.waitForTimeout(200);
+    }
+    // Well before the table's next regular read (15 s), and before the guest is told anything.
+    await expect(main.getByRole("heading", { name: "Thank you for dining with us." })).toBeVisible({
+      timeout: 100,
+    });
+    await expect(main.getByRole("region", { name: "Receipt" })).toContainText("Total paid$20.43");
+    expect(seen.every((count) => count === 0)).toBe(true);
+    expect(failedReads).toBeGreaterThanOrEqual(2);
   });
 
   test("a merged table split by rounds says whose rounds each part pays (en and zh-Hans)", async ({
@@ -307,7 +404,7 @@ test.describe("@production a pay-at-the-end table after another phone paid, merg
       roundNumbers: rounds,
     });
     await openTable(page, {
-      session: ok(sessionBody()),
+      session: ok(sessionBody({ fromTable: "H6" })),
       tablePayment: ok(
         payment({
           checkingOut: true,
@@ -328,6 +425,10 @@ test.describe("@production a pay-at-the-end table after another phone paid, merg
     await expect(parts).toContainText("Table H4 · rounds 1, 3, 5");
     await expect(parts).toContainText("Part 2 · $63.22");
     await expect(parts).toContainText("Table H6 · rounds 2, 4, 6");
+    // b39 review: the round card says the table the round was ordered at.
+    await expect(
+      page.getByRole("heading", { name: /^Round 1 · .* · From table H6$/u }),
+    ).toBeVisible();
     // No tip is promised where this Store takes none.
     await expect(page.getByText(/tip/iu)).toHaveCount(0);
     await expectNoInternalText(page);
@@ -343,6 +444,7 @@ test.describe("@production a pay-at-the-end table after another phone paid, merg
     await expect(page.getByRole("group", { name: "付哪一份" })).toContainText(
       "H6 桌 · 第 2, 4, 6 轮",
     );
+    await expect(page.getByRole("heading", { name: /^第 1 轮 · .* · 来自 H6 桌$/u })).toBeVisible();
     await expect(page.getByText(/小费/u)).toHaveCount(0);
     await page.screenshot({ path: "test-results/b39-merged-parts-zh-390.png" });
   });

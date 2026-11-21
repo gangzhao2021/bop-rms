@@ -132,7 +132,10 @@ export function TablePayPanel({
   readonly readKey?: number | undefined;
   /** v15 2026-11-02: the bill changed here (points used): the table's page reads it at once too. */
   readonly onBillChanged?: () => void;
-  /** b39: this phone is no longer at an open table: the table page reads itself again. */
+  /**
+   * b39: this phone may no longer be at an open table (the bill read said so, or kept failing):
+   * the table page reads itself again.
+   */
   readonly onGone?: () => void;
 }) {
   const [client] = useState(() => provided ?? createTablePaymentClient());
@@ -203,6 +206,10 @@ export function TablePayPanel({
       }
       if (code === "unavailable" || code === "processing") {
         readFailures.current += 1;
+        // b39 review: a bill read that keeps failing right after the table was paid or closed
+        // asks the table page to read itself too (from the second failure in a row, once per
+        // retry), so a table that ended shows its end at once, not after its next regular read.
+        if (readFailures.current >= 2) gone.current.report?.();
         if (readFailures.current < transientReadFailures) {
           setReadRetry((value) => value + 1);
           return null;
