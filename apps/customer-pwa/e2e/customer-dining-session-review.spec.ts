@@ -1463,7 +1463,8 @@ test.describe("@production CUST-DINE-IN-SESSION table view", () => {
       main.getByRole("heading", { name: "Thank you for dining with us." }),
     ).toBeVisible();
     await expect(main).toContainText("Your meal at table 12 has ended.");
-    await expect(main).toContainText("New party? Scan the table QR code");
+    // Batch 44: the start page's words (a new party is seated first, then scans).
+    await expect(main).toContainText("New party? Ask staff to seat you, then scan again.");
     const card = main.getByRole("region", { name: "Receipt" });
     await expect(card).toContainText("Milk tea");
     await expect(card).toContainText("Subtotal before tax$4.50");
@@ -1487,7 +1488,7 @@ test.describe("@production CUST-DINE-IN-SESSION table view", () => {
     // b13 review: plain words for guests (never staff's "关台"), and nothing said of paying.
     await expect(main).toContainText("桌号 12 的用餐已结束。");
     await expect(main).not.toContainText("关台");
-    await expect(main).toContainText("新的一桌？扫桌台二维码");
+    await expect(main).toContainText("新的一桌？请让店员带位，开台后再扫一次码。");
     await expect(main.getByRole("region", { name: "收据" })).toContainText("现金");
     // v15 b16: switching language reads the receipt again, so the dishes carry their Chinese
     // names as staff screens do, never the English name under Chinese headings.
