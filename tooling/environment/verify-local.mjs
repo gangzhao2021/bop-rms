@@ -19,7 +19,10 @@ const logFile = path.join(temp, "supervisor.log");
 // synthetic workload that only waits to be stopped.
 const workerConfiguration = path.join(temp, "idle-worker.mjs");
 const projectName = "bop-rms-wp0006-verify";
-const ports = { api: 53001, customerPwa: 53003, merchantWeb: 53002, postgres: 55433 };
+// Below Linux's default ephemeral range (32768-60999): a port in that range can already be held as
+// the local end of an outbound connection on a shared CI runner (2026-11-21, merchant web 53002
+// "already in use"), so the proof would fail for a reason that is not the environment's.
+const ports = { api: 31301, customerPwa: 31303, merchantWeb: 31302, postgres: 31304 };
 const healthyStatusTimeoutMs = 360_000;
 let supervisor;
 let logHandle;
