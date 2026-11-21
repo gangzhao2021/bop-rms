@@ -178,6 +178,8 @@ export interface StoreAvailabilityView {
 export interface AvailabilityOption {
   readonly optionReference: string;
   readonly name: string;
+  /** b39: its choice group's name ("First side"); absent from an older server. */
+  readonly groupName?: string;
   readonly dishNames: readonly string[];
   readonly status: "Available" | "SoldOut";
   readonly soldOutUntil: string | null;
@@ -214,13 +216,31 @@ export function optionDishesText(dishNames: readonly string[]): string {
   const more = dishNames.length - 3;
   return t("In: {list}", { list: more > 0 ? shown + " +" + more : shown });
 }
-/** Choices whose name or dishes contain the search text (either language, as typed). */
+/**
+ * b39 (v15 b38 sweep): the name staff read for a choice. Two choices with the same name in
+ * different groups (a two-flavour pot's "Tomato" for the first side and for the second) carry
+ * their group's name, so staff stop the one they mean: "Tomato · First side".
+ */
+export function optionLabel(
+  option: AvailabilityOption,
+  options: readonly AvailabilityOption[],
+): string {
+  const group = option.groupName ?? "";
+  const shared = options.some(
+    (other) => other.optionReference !== option.optionReference && other.name === option.name,
+  );
+  return shared && group !== ""
+    ? t("{choice} · {group}", { choice: option.name, group })
+    : option.name;
+}
+/** Choices whose name, group or dishes contain the search text (either language, as typed). */
 export function optionMatches(option: AvailabilityOption, search: string): boolean {
   const fold = (value: string) => value.normalize("NFKC").toLocaleLowerCase();
   const query = fold(search.trim());
   return (
     query === "" ||
     fold(option.name).includes(query) ||
+    fold(option.groupName ?? "").includes(query) ||
     option.dishNames.some((dish) => fold(dish).includes(query))
   );
 }
@@ -231,6 +251,7 @@ const validOption = (value: unknown): boolean => {
     typeof o === "object" &&
     typeof o.optionReference === "string" &&
     typeof o.name === "string" &&
+    (o.groupName === undefined || typeof o.groupName === "string") &&
     Array.isArray(o.dishNames) &&
     o.dishNames.every((dish) => typeof dish === "string") &&
     (o.status === "Available" || o.status === "SoldOut") &&

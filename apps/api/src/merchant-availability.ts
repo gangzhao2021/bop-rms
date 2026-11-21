@@ -464,6 +464,8 @@ export function createMerchantAvailability(options: {
         .map((option) => ({
           optionReference: option.optionReference,
           name: name(option.localizedNames, ""),
+          // b39: the choice group, so two same-named choices (a pot's two sides) read apart.
+          groupName: name(option.groupNames, ""),
           dishNames: option.dishNames
             .map((names) => name(names, ""))
             .filter((dish) => dish !== "")

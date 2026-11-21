@@ -199,3 +199,64 @@ test("@production A stock read that failed is said, and no dish is shown as Avai
     fullPage: true,
   });
 });
+
+test("@production b39: two same-named choices of a two-flavour pot say which side they are", async ({
+  page,
+}) => {
+  // v15 b38 sweep: "Tomato · In: Two-flavour pot" was listed twice (first side, second side), and
+  // staff could stop only one side without knowing which.
+  await page.clock.setFixedTime(new Date("2026-10-14T22:00:00.000Z"));
+  await session(page);
+  const commands: Record<string, unknown>[] = [];
+  const option = (n: number, name: string, groupName: string) => ({
+    optionReference: id(n),
+    name,
+    groupName,
+    dishNames: ["Two-flavour pot"],
+    status: "Available",
+    soldOutUntil: null,
+  });
+  await page.route("**/merchant/commerce/availability/query", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        screenId: "CAT-AVAILABILITY",
+        sourceAsOf: "2026-10-14T18:00:00.000Z",
+        viewer: id(50),
+        timeZone: "America/Toronto",
+        permissions: { mayOffer: true, mayMarkSoldOut: true, mayMarkUntilBack: true },
+        stockCheck: "Checked",
+        items: [],
+        options: [
+          option(40, "Tomato", "First side"),
+          option(41, "Tomato", "Second side"),
+          option(42, "Mushroom", "First side"),
+        ],
+      },
+    }),
+  );
+  await page.route("**/merchant/commerce/availability/command", (route) => {
+    commands.push(route.request().postDataJSON() as Record<string, unknown>);
+    return route.fulfill({
+      headers,
+      json: {
+        status: "Applied",
+        option: { status: "SoldOut", soldOutUntil: "2026-10-15T08:00:00.000Z" },
+      },
+    });
+  });
+  await page.goto("/app/commerce/availability");
+  await expect(page.getByRole("row", { name: /Tomato · First side/u })).toBeVisible();
+  const second = page.getByRole("row", { name: /Tomato · Second side/u });
+  await expect(second).toBeVisible();
+  // A name no other choice has stays as it is.
+  await expect(page.getByRole("row", { name: /^Mushroom/u })).not.toContainText("First side");
+  await page.getByLabel("Find a choice").fill("second");
+  await expect(page.getByRole("row", { name: /Tomato · First side/u })).toHaveCount(0);
+  await second.getByRole("button", { name: "Sold out today" }).click();
+  await expect(
+    page.getByText("Tomato · Second side is sold out for today in every dish."),
+  ).toBeVisible();
+  expect(commands[0]).toMatchObject({ action: "OptionSoldOut", optionReference: id(41) });
+  await page.screenshot({ path: "test-results/b39-availability-pot-sides.png", fullPage: true });
+});

@@ -346,6 +346,11 @@ export async function changeStoreOptionSoldOut(
 export interface StoreChoiceOption {
   readonly optionReference: string;
   readonly localizedNames: Readonly<Record<string, string>>;
+  /**
+   * b39: the name of the choice group it belongs to ("First side", "Broth"), so staff can tell
+   * apart two choices with the same name in different groups (a two-flavour pot's two sides).
+   */
+  readonly groupNames: Readonly<Record<string, string>>;
   /** The dishes (current versions, on sale at the Brand) whose choices include it. */
   readonly dishNames: readonly Readonly<Record<string, string>>[];
 }
@@ -364,7 +369,9 @@ export async function listStoreChoiceOptions(
     throw new StoreOptionSoldOutError("STORE_OPTION_SOLD_OUT_INPUT_INVALID");
   return inBrandScope(tx, brand, async () => {
     const { rows } = await tx.query<Record<string, unknown>>(
-      `SELECT q.option,q.names,q.dishes FROM (SELECT o.option_id AS option_id,o.option_id::text AS option,o.localized_names_json AS names,
+      `SELECT q.option,q.names,q.group_names,q.dishes FROM (SELECT o.option_id AS option_id,o.option_id::text AS option,o.localized_names_json AS names,
+        (SELECT v.localized_names_json FROM rms_catalog.option_set_version v
+          WHERE v.option_set_version_id=o.option_set_version_id AND v.option_set_id=o.option_set_id AND v.brand_id=o.brand_id) AS group_names,
         COALESCE((SELECT jsonb_agg(DISTINCT pv.localized_names_json)
            FROM rms_catalog.product_option_binding_option x
            JOIN rms_catalog.product_option_binding b ON b.binding_id=x.binding_id AND b.product_id=x.product_id AND b.brand_id=x.brand_id
@@ -385,6 +392,7 @@ export async function listStoreChoiceOptions(
       Object.freeze({
         optionReference: String(row.option),
         localizedNames: (row.names ?? {}) as Readonly<Record<string, string>>,
+        groupNames: (row.group_names ?? {}) as Readonly<Record<string, string>>,
         dishNames: Object.freeze(
           (Array.isArray(row.dishes) ? row.dishes : []) as Readonly<Record<string, string>>[],
         ),

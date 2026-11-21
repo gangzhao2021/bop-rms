@@ -22,6 +22,7 @@ import {
   commandTarget,
   floorStaffOnly,
   optionDishesText,
+  optionLabel,
   optionMatches,
   kitchenDisplayPermissions,
   parseStoreAvailabilityView,
@@ -558,6 +559,7 @@ function OptionAvailability({
           </thead>
           <tbody>
             {shown.map((option) => {
+              const label = optionLabel(option, options);
               const mark = (until: "EndOfDay" | "UntilBack") =>
                 void send(
                   {
@@ -567,16 +569,16 @@ function OptionAvailability({
                     until,
                   },
                   until === "EndOfDay"
-                    ? t("{item} is sold out for today in every dish.", { item: option.name })
+                    ? t("{item} is sold out for today in every dish.", { item: label })
                     : t("{item} is sold out in every dish until you bring it back.", {
-                        item: option.name,
+                        item: label,
                       }),
                 );
               return (
                 <tr key={option.optionReference}>
                   <td>
                     <div className="availability-option">
-                      <span>{option.name}</span>
+                      <span>{label}</span>
                       <span className="availability-option__dishes">
                         {optionDishesText(option.dishNames)}
                       </span>
@@ -606,7 +608,7 @@ function OptionAvailability({
                                 operationReference: newOperationReference(),
                                 optionReference: option.optionReference,
                               },
-                              t("{item} is back on.", { item: option.name }),
+                              t("{item} is back on.", { item: label }),
                             )
                           }
                         >
