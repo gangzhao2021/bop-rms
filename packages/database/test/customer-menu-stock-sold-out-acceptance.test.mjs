@@ -16,6 +16,8 @@ import {
   createStaffStockShortageSource,
 } from "../../../apps/api/src/customer-menu-inventory-evidence.ts";
 import { createMerchantAvailability } from "../../../apps/api/src/merchant-availability.ts";
+import { createOneStoreMenuFixture } from "../test-support/one-store-menu-fixture.mjs";
+import { createPilotApiRole } from "../test-support/sole-operator-brand-gate.mjs";
 const { Client } = pg;
 const id = (n) => "01902402-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const at = "2026-08-02T16:00:00.000Z";
@@ -29,6 +31,105 @@ const digest = "sha256:" + "a".repeat(64);
  * are synthetic isolated fixtures (not a real Store receipt, count or approval); every read runs
  * as a NOBYPASSRLS role in a Repeatable Read, read-only transaction, as the customer runtime does.
  */
+/**
+ * b39-2 (review of b39 item 3): a two-flavour pot offers "番茄" in both of its broth groups. The
+ * Item availability page, read through the real query as the restricted NOBYPASSRLS pilot API
+ * role, names each choice's own group, and follows the group's current name after a rename, so
+ * staff stop the side they mean.
+ */
+it("b39-2: Item availability names the group of each of two same-named choices", async () => {
+  await withIsolatedDatabase({ caseId: "wp2423_choice_groups" }, async (context) => {
+    const admin = new Client(context.clientConfig);
+    await admin.connect();
+    const role = await createPilotApiRole(admin, context, "wp2423_cg");
+    const f = await createOneStoreMenuFixture(admin, context, { role });
+    try {
+      const sideOne = await f.makeGroup("Side one broth (TEST)", "One", ["番茄", "Spicy"], {
+        minimum: 1,
+      });
+      const sideTwo = await f.makeGroup("Side two broth (TEST)", "One", ["番茄", "Mushroom"], {
+        minimum: 1,
+      });
+      const free = (set) => ({
+        optionSetReference: set.optionSetReference,
+        options: set.options.map((option) => ({
+          optionReference: option.optionReference,
+          amountMinor: "0",
+        })),
+      });
+      const dish = await f.saveDish({
+        name: "Two-flavour pot (TEST)",
+        nameZh: "鸳鸯锅",
+        choiceGroups: [free(sideOne), free(sideTwo)],
+      });
+      assert.equal(dish.status, "Saved");
+      const allow = { effect: "Allow" };
+      const staffScope = {
+        tenantReference: f.tenantReference,
+        context: { brand: { brandReference: f.brandReference } },
+        storeContext: {},
+        selectedStoreReference: f.storeReference,
+        selectedStoreTimeZone: "America/Toronto",
+        actorReference: f.owner,
+        authorizeAction: async () => allow,
+        authorizeStoreAction: async () => allow,
+      };
+      const reported = [];
+      const tomatoes = async () => {
+        const page = await createMerchantAvailability({
+          persistence: f.persistence,
+          authentication: { authorize: async () => ({ sessionReference: f.id(70) }) },
+          references: { next: () => f.id(71) },
+          locale: "en-CA",
+          resolveScope: async () => staffScope,
+          onUnexpected: (code) => reported.push(code),
+        }).query({ sessionCookie: "synthetic", csrf: "synthetic" });
+        return Object.fromEntries(
+          page.options
+            .filter((option) => option.name === "番茄")
+            .map((option) => [option.optionReference, option.groupName]),
+        );
+      };
+      const [tomatoOne] = sideOne.options.map((option) => option.optionReference);
+      const [tomatoTwo] = sideTwo.options.map((option) => option.optionReference);
+      assert.deepEqual(await tomatoes(), {
+        [tomatoOne]: "Side one broth (TEST)",
+        [tomatoTwo]: "Side two broth (TEST)",
+      });
+      // Staff rename the second group: the page reads its current name, never the old one.
+      const renamed = await f.optionSets.command({
+        ...f.session,
+        body: {
+          action: "Save",
+          operationReference: f.op(),
+          optionSetReference: sideTwo.optionSetReference,
+          expectedAggregateVersion: sideTwo.aggregateVersion,
+          name: "Right side broth (TEST)",
+          kind: "One",
+          minimum: 1,
+          maximum: 1,
+          perOptionMaximum: 1,
+          options: sideTwo.options.map((option, index) => ({
+            optionReference: option.optionReference,
+            name: option.name,
+            offered: true,
+            defaultChoice: index === 0,
+          })),
+        },
+      });
+      assert.equal(renamed.optionSet.name, "Right side broth (TEST)");
+      assert.deepEqual(await tomatoes(), {
+        [tomatoOne]: "Side one broth (TEST)",
+        [tomatoTwo]: "Right side broth (TEST)",
+      });
+      assert.deepEqual(reported, []);
+    } finally {
+      await f.close();
+      await admin.end();
+    }
+  });
+});
+
 it("shows an item sold out while its ingredient stock cannot make one, and available again after release or receipt", async () => {
   await withIsolatedDatabase({ caseId: "wp2423_stock_soldout" }, async (context) => {
     const admin = new Client(context.clientConfig);
