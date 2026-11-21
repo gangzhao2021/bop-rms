@@ -3041,3 +3041,74 @@ for (const language of ["en", "zh-Hans"] as const)
     }
     await expectNoInternalText(page, ["Temporarily unavailable"]);
   });
+
+// Batch 42 (v15 TM2 zh-Hans): after 按菜分 a part read "牛肉面, 豆浆" with an English comma, while
+// the Orders rows of the same Store list "1× 牛肉面、1× 豆浆（热）". Each part now lists its dishes
+// as the screen's language does; English keeps its comma.
+for (const language of ["en", "zh-Hans"] as const)
+  for (const width of [1440, 390])
+    test(`@production batch 42: a by-dish part lists its dishes in the screen's language, ${language} ${width}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      if (language === "zh-Hans")
+        await page.addInitScript(() => {
+          try {
+            window.localStorage.setItem("bop.merchant.language", "zh-Hans");
+          } catch {
+            /* the page falls back to English */
+          }
+        });
+      await floor(page, { phase: "Closing", version: 7 }, { canWriteOff: true });
+      await page.route("**/merchant/dining/table-close-plan", (route) =>
+        route.fulfill({
+          headers,
+          json: {
+            orderReference: id(3),
+            diningSessionReference: id(2),
+            orderVersion: 4,
+            observedAt: "2026-10-15T19:00:00.000Z",
+            rounds: [],
+            closeBlockers: [],
+            totals: { onlineMinor: "0", cardMachineMinor: "0" },
+          },
+        }),
+      );
+      const { splitBillFixture } = await import("../src/table-split.fixtures.js");
+      const bill: Record<string, unknown> = {
+        ...splitBillFixture(),
+        diningSessionReference: id(2),
+        orderReference: id(3),
+      };
+      const split = bill.split as Record<string, unknown>;
+      split.mode = "ByItems";
+      split.paidParts = 0;
+      split.parts = (split.parts as Record<string, unknown>[]).map((part, index) => ({
+        ...part,
+        payment: null,
+        guestPaying: false,
+        dishes:
+          index === 0
+            ? [
+                { displayName: "牛肉面", quantity: 1, shared: false },
+                { displayName: "豆浆", quantity: 1, shared: false },
+              ]
+            : [{ displayName: "虾饺", quantity: 2, shared: false }],
+      }));
+      await page.route("**/merchant/dining/table-bill", (route) =>
+        route.fulfill({ headers, json: bill }),
+      );
+      await page.goto("/operations/dining");
+      const zh = language === "zh-Hans";
+      await page.getByRole("button", { name: zh ? "选择 T2" : "Select T2", exact: true }).click();
+      const first = page.locator(".table-split__dishes").first();
+      await expect(first).toHaveText(zh ? "牛肉面、豆浆" : "牛肉面, 豆浆");
+      await expect(page.locator(".table-split__dishes").nth(1)).toHaveText("2 × 虾饺");
+      const box = await first.boundingBox();
+      expect(box).not.toBeNull();
+      expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(width);
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      await page.screenshot({ path: `test-results/by-dish-parts-${language}-${width}.png` });
+    });
