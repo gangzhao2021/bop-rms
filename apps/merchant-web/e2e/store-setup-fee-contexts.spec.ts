@@ -564,7 +564,7 @@ test("@production Store fee context lost reply old original recovery retains new
   await expect(recover(page)).toBeEnabled();
   f.control.denyResolve = true;
   await recover(page).click();
-  await expect(page.getByRole("alert")).toContainText("does not allow this action");
+  await expect(page.getByRole("alert")).toContainText("Your role can't change store setup");
   expect(await journalRecords(page)).toEqual(original);
   f.control.denyResolve = false;
   await recover(page).click();

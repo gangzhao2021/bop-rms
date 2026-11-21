@@ -468,7 +468,7 @@ test("@production Contact committed response loss retains payload-free original 
   await page.getByRole("button", { name: "Recover original contact save", exact: true }).click();
   await expect(
     page.getByRole("region", { name: "Contact configuration", exact: true }).getByRole("alert"),
-  ).toContainText("cannot access this configuration");
+  ).toContainText("Your role can't change these store details");
   expect(await records(page)).toEqual(original);
   await expect(
     page.getByRole("button", { name: "Save contact configuration", exact: true }),
@@ -525,7 +525,7 @@ test("@production Reference controls reflow at 390px and scope or CSRF denial ca
   await page.keyboard.press("Enter");
   await expect(
     page.getByRole("region", { name: "Address configuration", exact: true }).getByRole("alert"),
-  ).toContainText("cannot access this configuration");
+  ).toContainText("Your role can't change these store details");
   expect(f.control.referenceWrites).toEqual([]);
   expect(f.versions.size).toBe(0);
   // b25: a refusal (403) proves nothing was written, so no original is kept to recover.

@@ -782,7 +782,7 @@ test("lost reply retains original through denied conflict and failed refresh the
   ).toBeEnabled();
   expect(state.reads.slice(before)).not.toContain("current");
   await panel(page).getByRole("button", { name: "Recover original configuration request" }).click();
-  await expect(panel(page).getByRole("alert")).toContainText("permission");
+  await expect(panel(page).getByRole("alert")).toContainText("Your role can't save this change.");
   expect(await cursor(page)).toEqual(stored);
   state.denyResolve = false;
   state.conflictResolve = true;
@@ -890,7 +890,7 @@ test("actual immutable history paginates original authors and read refusal keeps
   expect(original).toHaveLength(1);
   state.denyHistory = true;
   await reopen();
-  await expect(history.getByRole("alert")).toContainText("permission");
+  await expect(history.getByRole("alert")).toContainText("Your role can't save this change.");
   expect(await cursor(page)).toEqual(original);
   state.denyHistory = false;
   await panel(page).getByRole("button", { name: "Recover original configuration request" }).click();

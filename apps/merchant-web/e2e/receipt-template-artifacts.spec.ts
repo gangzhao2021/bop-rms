@@ -288,7 +288,7 @@ test("@production lost receipt reply reload retains denied original then resolve
     .click();
   await expect(
     page.getByRole("region", { name: "receipt layout", exact: true }).getByRole("alert"),
-  ).toContainText("permission");
+  ).toContainText("Your role can't change receipt styles.");
   expect((await cursors(page)).length).toBe(1);
   state.deny = false;
   await page

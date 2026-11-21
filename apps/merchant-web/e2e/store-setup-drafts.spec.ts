@@ -357,7 +357,7 @@ test("@production Store Setup lost committed reply survives reload and denied re
   });
   fixture.control.denyResolve = true;
   await page.getByRole("button", { name: "Recover original save", exact: true }).click();
-  await expect(page.getByRole("alert")).toContainText("does not allow this action");
+  await expect(page.getByRole("alert")).toContainText("Your role can't change store setup");
   await expect(page.getByRole("button", { name: "Save as draft", exact: true })).toBeDisabled();
   await page.reload();
   await expect(
