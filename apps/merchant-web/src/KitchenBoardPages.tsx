@@ -2399,10 +2399,21 @@ export function KitchenBoardScreen({
     activeStation !== "All" ||
     activeAllergen !== "All" ||
     activeException !== "All";
-  const boardEmpty =
+  // Batch 42 review: the ticket filters hide work only when some of today's work in the chosen
+  // state is left out by them. A section stays chosen on a station's display (saved per device),
+  // so a quiet drinks station, or To make while its one drink is being made, hides nothing: the
+  // tab says it is quiet, never "clear the filters" (which would also move the station off its
+  // section).
+  const filtersHideWork =
+    ticketFilters &&
     items.length === 0 &&
-    (laneRemakes.length === 0 ||
-      (ticketFilters && orderSearch === null && view.items.length > earlierOpen.size));
+    searchMatches.some(
+      (item) =>
+        kitchenLineInStatus(item, status) ||
+        (status === "Active" && cancelledLines?.has(kitchenLineKey(item)) === true),
+    );
+  const boardEmpty =
+    items.length === 0 && (laneRemakes.length === 0 || (filtersHideWork && orderSearch === null));
   const stationLaneMap = new Map<
     string,
     { key: string; stationLabel: string | null; items: KitchenBoardItem[] }
@@ -3296,7 +3307,7 @@ export function KitchenBoardScreen({
           <div className="kitchen-board-empty">
             <StatePanel
               heading={
-                searchApplied || (ticketFilters && view.items.length > earlierOpen.size)
+                searchApplied || filtersHideWork
                   ? t("No matching work")
                   : status === "Completed"
                     ? t("No finished work")
@@ -3334,9 +3345,10 @@ export function KitchenBoardScreen({
                       ? t(
                           "Nothing from today is waiting. Earlier days' tickets are under Needs attention above.",
                         )
-                      : !ticketFilters || view.items.length === 0
+                      : !filtersHideWork
                         ? // v15 2026-10-16: an empty board with no filter set is simply quiet;
-                          // batch 42: in the words of the work-state tab chosen.
+                          // batch 42: in the words of the work-state tab chosen, also while a
+                          // section is chosen that hides nothing in that state.
                           kitchenQuietEmptyText(status)
                         : laneRemakes.length > 0
                           ? t(

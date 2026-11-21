@@ -1931,6 +1931,55 @@ it("batch 42 (v15 b41 live): an empty work-state tab is quiet in its own words, 
   expect(office).toContain('<button type="button" disabled="">Clear filters</button>');
   expect(office).not.toContain("Applied");
 });
+it("batch 42 review: a section chosen on the display is a filter only while it hides work in the chosen state", () => {
+  // A drinks station keeps 饮品 chosen (saved per device). Nothing it hides: the tab's quiet line.
+  const render = (status: string, section: string, item: Record<string, unknown>) =>
+    renderToStaticMarkup(
+      <MemoryRouter
+        initialEntries={[
+          {
+            pathname: "/operations/kitchen",
+            state: {
+              kitchenQueueScope: { station: "All", status, allergen: "All", exception: "All" },
+            },
+          },
+        ]}
+      >
+        <KitchenBoardScreen
+          view={parseKitchenBoardView({
+            ...kitchenBoardFixture(),
+            kitchenSections: ["饮品", "小食"],
+            items: [{ ...kitchenItemFixture(), kitchenSection: "饮品", ...item }],
+          })}
+          onRefresh={() => undefined}
+          section={section}
+        />
+      </MemoryRouter>,
+    );
+  const quiet = (html: string, text: string) => {
+    expect(html).toContain(text);
+    expect(html).not.toContain("No matching work");
+    expect(html).not.toContain("Nothing matches these filters.");
+  };
+  // (a) The store is quiet, one drink finished today, Active work.
+  quiet(
+    render("Active", "饮品", { status: "Completed", completedQuantity: 2 }),
+    "Nothing to make right now.",
+  );
+  // (b) One drink is being made and To make is chosen: the tab hides it, not the section.
+  quiet(render("Queued", "饮品", { status: "In Progress" }), "Nothing to make right now.");
+  // A section that does hide open work in the chosen state still says so.
+  const hidden = render("Active", "小食", { status: "Queued" });
+  expect(hidden).toContain("No matching work");
+  expect(hidden).toContain("Nothing matches these filters.");
+  const hiddenInTab = render("In Progress", "小食", { status: "In Progress" });
+  expect(hiddenInTab).toContain("Nothing matches these filters.");
+  // The drink finished in 饮品 is not open work: 小食 on Active hides nothing either.
+  quiet(
+    render("Active", "小食", { status: "Completed", completedQuantity: 2 }),
+    "Nothing to make right now.",
+  );
+});
 it("batch 42 (v15 b41 live): Recently finished · 0 opens one plain line, never an empty box", () => {
   const html = renderToStaticMarkup(
     <KitchenRecentlyFinished

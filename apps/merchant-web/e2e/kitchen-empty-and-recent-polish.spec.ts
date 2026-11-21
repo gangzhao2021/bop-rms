@@ -124,6 +124,63 @@ test("@production WP-2423 batch 42: a section that hides every ticket still says
   await expect(empty).toContainText("Nothing matches these filters.");
 });
 
+test("@production WP-2423 batch 42 review: a drinks station keeping 饮品 chosen is quiet when the section hides nothing", async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  const state = { reworks: [] as Record<string, unknown>[], commands: [] };
+  const drink = (overrides: Record<string, unknown>) =>
+    workItem(72, {
+      orderLabel: { orderNumber: "11", orderType: "Pickup", tableLabel: null },
+      kitchenSection: "饮品",
+      ...overrides,
+    });
+  const filtersText = /No matching work|Nothing matches these filters|Clear the filters/u;
+  // (a) The store is quiet and one drink finished today; the display is on Active work.
+  await store(page, "Named", state, {
+    todays: [],
+    finished: [
+      drink({
+        status: "Completed",
+        completedQuantity: 1,
+        orderItemReadyAt: "2026-11-20T18:10:00.000Z",
+        ticketAggregateVersion: "5",
+        workItemVersion: "3",
+      }),
+    ],
+    kitchenSections: ["饮品", "小食"],
+  });
+  await page.goto("/operations/kitchen");
+  await page.locator(".kitchen-section-choice select").selectOption("饮品");
+  const empty = page.locator(".kitchen-board-empty");
+  await expect(empty).toContainText("No active work");
+  await expect(empty).toContainText("Nothing to make right now.");
+  await expect(empty).not.toContainText(filtersText);
+  // (b) One drink is being made and To make is chosen: the tab hides it, not the section.
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  await store(page, "Named", state, {
+    todays: [drink({ status: "In Progress" })],
+    kitchenSections: ["饮品", "小食"],
+  });
+  await page.goto("/operations/kitchen");
+  await expect(page.locator(".kitchen-section-choice select")).toHaveValue("饮品");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: /^Filters/u }).click();
+  const sheet = page.getByRole("dialog", { name: "Filter Kitchen work" });
+  await sheet.getByLabel("Work state").selectOption("Queued");
+  await sheet.getByRole("button", { name: "Done" }).click();
+  await expect(empty).toContainText("Nothing to make right now.");
+  await expect(empty).not.toContainText(filtersText);
+  await chooseLanguage(page, "zh-Hans");
+  await page.getByRole("button", { name: /^筛选/u }).click();
+  const zhSheet = page.getByRole("dialog", { name: "筛选后厨工作" });
+  await zhSheet.getByLabel("工作状态").selectOption("Queued");
+  await zhSheet.getByRole("button", { name: "完成" }).click();
+  await expect(empty).toContainText("目前没有需要制作的。");
+  await expect(empty).not.toContainText("筛选");
+  await expectNoInternalText(page);
+});
+
 /** Four finished dishes as live at TM2 at 390: a table order and a dish remade once among them. */
 const recent = [
   workItem(80, {
