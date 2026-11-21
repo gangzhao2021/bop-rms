@@ -1,4 +1,11 @@
-import { expect, test, type Locator, type Page, type Route } from "@playwright/test";
+import {
+  expect,
+  test,
+  type BrowserContext,
+  type Locator,
+  type Page,
+  type Route,
+} from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
 import { routeStorefrontReads, syntheticStoreProfile } from "./storefront-reads";
 
@@ -9,7 +16,7 @@ import { routeStorefrontReads, syntheticStoreProfile } from "./storefront-reads"
 // These rounds are not about the Store's hours: the synthetic Store takes last orders at 9:30 p.m.
 // Toronto, so between 9:00 and 9:30 on the runner's real clock the cart rightly shows its own
 // "Last orders" alert beside the round's. Here the Store has no last-orders time, whatever the hour.
-test.beforeEach(async ({ context }) => {
+async function routeStoreWithoutLastOrders(context: BrowserContext): Promise<void> {
   await routeStorefrontReads(context);
   await context.route("**/api/v1/customer/store", (route) =>
     route.fulfill({
@@ -25,7 +32,8 @@ test.beforeEach(async ({ context }) => {
       }),
     }),
   );
-});
+}
+test.beforeEach(async ({ context }) => routeStoreWithoutLastOrders(context));
 const id = (n: number) => "018f8a00-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const publicStore = id(4);
 
@@ -1433,7 +1441,7 @@ test.describe("@production Pay-later table, the round just placed", () => {
       ["total", { subtotalMinor: "16000", totalMinor: "18080" }, "$180.80"],
     ] as const) {
       await page.unrouteAll({ behavior: "wait" });
-      await routeStorefrontReads(page.context());
+      await routeStoreWithoutLastOrders(page.context());
       await stubTable(page, [], { ...options, moreDishes: 6 });
       // Each read takes a moment, as it does on a phone: nothing may jump meanwhile.
       await page.route(/\/bff\/customer\/cart(?:\?.*)?$/u, async (route) => {
