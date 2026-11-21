@@ -186,6 +186,22 @@ export async function addInternalTestStaffMember(
   }
 }
 
+/**
+ * What `add` reports: the status Membership answered, also on a rerun for a person already in the
+ * login roster (their rows may have been missing and were written again, which says "Added").
+ */
+export function staffRunResult({ status, selector, references, validUntil, approvedBy }) {
+  return {
+    status,
+    selector,
+    actorReference: references.actorReference,
+    membershipReference: references.membershipReference,
+    storeAssignmentReference: references.storeAssignmentReference,
+    validUntil,
+    approvedBy,
+  };
+}
+
 /** v7-shaped reference for operations and audit rows, as the other TEST tools make them. */
 const uuidV7 = () => {
   const hex = Date.now().toString(16).padStart(12, "0");
@@ -247,15 +263,13 @@ async function run(options) {
       await chmod(file + ".next", 0o600);
       await rename(file + ".next", file);
     }
-    return {
-      status: listed === undefined ? status : "AlreadyPresent",
+    return staffRunResult({
+      status,
       selector: options.selector,
-      actorReference: references.actorReference,
-      membershipReference: references.membershipReference,
-      storeAssignmentReference: references.storeAssignmentReference,
+      references,
       validUntil: until,
       approvedBy: options.approvedBy,
-    };
+    });
   } finally {
     await client.end().catch(() => undefined);
   }

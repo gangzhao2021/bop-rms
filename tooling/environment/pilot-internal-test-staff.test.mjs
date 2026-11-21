@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { it } from "vitest";
 import {
   nextDemoStaffReferences,
   parseStaffArguments,
+  staffRunResult,
   withStaffEntry,
 } from "./pilot-internal-test-staff.mjs";
 
@@ -84,4 +87,26 @@ it("batch 38: only a TEST name and an ordinary selector are accepted", () => {
   assert.throws(() => parseStaffArguments(["remove", "/dir", ...args()]), {
     reason: "arguments-invalid",
   });
+});
+
+it("batch 38 review: a rerun reports what Membership did, not that the person was listed", () => {
+  const references = {
+    actorReference: demo(0x500),
+    membershipReference: demo(0x501),
+    storeAssignmentReference: demo(0x503),
+  };
+  for (const status of ["Added", "AlreadyPresent"])
+    assert.equal(
+      staffRunResult({
+        status,
+        selector: "cook",
+        references,
+        validUntil: "2026-12-06T02:26:31.598Z",
+        approvedBy: "Owner",
+      }).status,
+      status,
+    );
+  // The listed-person shortcut that hid an "Added" rerun is gone from the command itself.
+  const source = readFileSync(join(import.meta.dirname, "pilot-internal-test-staff.mjs"), "utf8");
+  assert.doesNotMatch(source, /listed === undefined \? status : "AlreadyPresent"/u);
 });
