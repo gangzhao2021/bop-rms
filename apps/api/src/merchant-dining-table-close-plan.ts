@@ -8,6 +8,7 @@ import {
   createPostgresOrderPayLaterConfirmationStore,
   createPostgresStaffOrderCancellationReader,
   listStoreDiningBatchPaymentDeadlines,
+  listOrderMergedInto,
   listStoreOrderBatchPayments,
   parseOrderingInstant,
   parseOrderingReference,
@@ -180,15 +181,29 @@ export function createMerchantDiningTableClosePlan(options: {
           if (
             !selected ||
             selected.orderType !== "DineIn" ||
-            selected.diningSessionReference !== diningSessionReference
+            selected.diningSessionReference === null
           )
             return null;
+          // b41 (v15 b40 live): a table merged into this one has its Order on this table's bill;
+          // its rounds are closed out from here too, so its plan is read under this table's
+          // session (each round is still read and cancelled on its own Order).
+          const billHolder =
+            (await listOrderMergedInto(tx, owner, [orderReference])).get(orderReference) ??
+            orderReference;
+          if (selected.diningSessionReference !== diningSessionReference) {
+            if (billHolder === orderReference) return null;
+            const host = await createPostgresMerchantOrderIndex({
+              ...owner,
+              authorize: allowed,
+            }).find({ transaction: tx, orderReference: billHolder });
+            if (!host || host.diningSessionReference !== diningSessionReference) return null;
+          }
           const observedAt = String(parseOrderingInstant(options.persistence.now()));
           const query = {
             transaction: tx,
             ...owner,
             orderReference,
-            diningSessionReference,
+            diningSessionReference: String(selected.diningSessionReference),
             guestSessionReference: selected.guestSessionReference,
             observedAt,
           };
@@ -259,15 +274,16 @@ export function createMerchantDiningTableClosePlan(options: {
           // Once the table has paid, every pay-later round is paid with it (a round comped or
           // emptied to nothing is no payment line, but it is still the paid table's).
           // WP-2423 item 8 ④: a split bill is paid when every part of the current split is.
+          // b41: a merged-in Order's rounds are paid with the bill of the table it was merged into.
           const tableStore = createPostgresDiningTableSettlementStore({
             scope,
             authorize: async (_t, value) =>
-              value.orderReference === orderReference && (await stillAllowed()),
+              value.orderReference === billHolder && (await stillAllowed()),
           });
           const tableSettlements =
-            payLater.size > 0 ? await tableStore.listByOrders(tx, [orderReference]) : [];
+            payLater.size > 0 ? await tableStore.listByOrders(tx, [billHolder]) : [];
           const [splitPlan] = tableSettlements.some((settlement) => settlement.part !== null)
-            ? await tableStore.listSplitPlans(tx, [orderReference])
+            ? await tableStore.listSplitPlans(tx, [billHolder])
             : [];
           const tablePaid =
             tableSettlements.some((settlement) => settlement.part === null) ||

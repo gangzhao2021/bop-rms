@@ -2658,6 +2658,31 @@ async function journey(journeyEnding) {
             dining.table.stableLabel,
           );
           assert.deepEqual(mergedDetail.items[0].tableBill.billRoundNumbers, billNumbers);
+          // b41 (v15 b40 live): closing the merged table lists T-M's unserved round too. Its
+          // Order's plan is read under this table's session (it was refused before: T-M's own
+          // session is not this one), with its round on the bill it is on; a session the Order
+          // has nothing to do with is still refused.
+          const planOf = (order, session) =>
+            createMerchantDiningTableClosePlan({
+              persistence: persistenceOf(manager),
+              authentication: manager.authentication,
+              resolveRefundConfiguration: async () => ({
+                providerAccountReference: provider,
+                environment: "Test",
+              }),
+            })({
+              ...as(manager),
+              query: { orderReference: order, diningSessionReference: session },
+            });
+          const mPlan = await planOf(mOrder, sessionReference);
+          assert.ok(mPlan !== null);
+          assert.equal(mPlan.orderReference, mOrder);
+          assert.equal(mPlan.diningSessionReference, sessionReference);
+          assert.deepEqual(
+            mPlan.rounds.map((round) => [round.orderBatchReference, round.state]),
+            [[M.batch.orderBatchReference, "OnTableBill"]],
+          );
+          assert.equal(await planOf(orderReference, mSession), null);
 
           if (ending === "MergedRemoved") {
             // Three $12.50 rounds (two on the host's Order, T-M's on its own) are $42.38 on the
@@ -2908,6 +2933,12 @@ async function journey(journeyEnding) {
             });
             assert.equal(paid.status, "Recorded");
             assert.equal(paid.bill.settlement.roundsMinor, "1413");
+            // b41 (v15 b40 live): once paid, the host's Order still numbers its rounds as the
+            // merged bill does (it went back to its own 1, 2 while T-M's kept 3: two "round 2"s).
+            assert.deepEqual(
+              (await orderDetail()).items[0].tableBill.billRoundNumbers,
+              billNumbers,
+            );
             const paidBill = await bill();
             assert.equal(paidBill.owed.totalMinor, "0");
             assert.equal(
@@ -3462,6 +3493,23 @@ async function journey(journeyEnding) {
           assert.equal((await closeOrder(mOrder)).status, "Committed");
           assert.equal((await closeOrder(orderReference)).status, "Committed");
           assert.equal((await closing(server, "Finalize")).phase, "Closed");
+          // b41 (v15 b40 live): paid part by part and closed, both Orders keep the merged bill's
+          // round numbers (the paid record and refunds read them), never each Order's own.
+          for (const reference of [orderReference, mOrder])
+            assert.deepEqual(
+              (
+                await createPersistentMerchantOrderQueue({
+                  persistence: persistenceOf(server),
+                  quoteVersion: 1,
+                  acceptanceConfigured: true,
+                })({
+                  sessionCookie: server.sessionCookie,
+                  afterOrderReference: null,
+                  orderReference: reference,
+                })
+              ).items[0].tableBill.billRoundNumbers,
+              mergedNumbers,
+            );
           // Coordinator 2026-10-30: the table paid and closed. A phone of this table and the phone
           // merged in from T-M reload their table page: both are thanked at this table, never
           // asked to join (the real restore handler and guest clients, the pilot API role).

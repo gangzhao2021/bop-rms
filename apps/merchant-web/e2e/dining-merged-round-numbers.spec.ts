@@ -233,6 +233,82 @@ for (const language of ["en", "zh-Hans"] as const)
         },
       }),
     );
+    // b41 (v15 b40 live): each Order's progress (nothing served yet) and close plan, the merged
+    // Order's read under this table's session as the API now allows. Each lists its own rounds by
+    // its own numbers (the host's soy milk round is its round 2, bill round 4).
+    const open = rounds.filter((round) => round.item !== soldOut);
+    await page.route("**/merchant/dining/order-progress", async (route) => {
+      const n =
+        (JSON.parse(route.request().postData() ?? "{}") as { orderReference?: string })
+          .orderReference === id(2)
+          ? 2
+          : 1;
+      return route.fulfill({
+        headers,
+        json: {
+          orderReference: id(n),
+          orderVersion: 3,
+          sessionVersion: 4,
+          diningSessionReference: n === 1 ? id(71) : id(72),
+          sessionPhase: n === 1 ? "Active" : "Closed",
+          tableAssignmentVersion: 2,
+          closureStatus: "Open",
+          closureVersion: 0,
+          currentOrderVersion: 3,
+          tableLabel: n === 1 ? "L39 M2 (TEST)" : "L39 M3 (TEST)",
+          phase: "InProgress",
+          observedAt: "2026-11-21T06:30:00.000Z",
+          items: open
+            .filter((round) => round.order === n)
+            .map((round) => ({
+              orderItemReference: id(round.item),
+              orderBatchReference: id(round.batch),
+              displayName: round.name,
+              batchSequence: round.sequence,
+              itemOrdinal: 1,
+              phase: "Accepted",
+              orderedQuantity: 1,
+              deliveredQuantity: 0,
+              remainingQuantity: 1,
+              itemServiceVersion: 1,
+            })),
+        },
+      });
+    });
+    const planRequests: string[] = [];
+    await page.route("**/merchant/dining/table-close-plan", async (route) => {
+      const body = JSON.parse(route.request().postData() ?? "{}") as {
+        orderReference: string;
+        diningSessionReference: string;
+      };
+      planRequests.push(body.orderReference);
+      const n = body.orderReference === id(2) ? 2 : 1;
+      return route.fulfill({
+        headers,
+        json: {
+          orderReference: id(n),
+          diningSessionReference: body.diningSessionReference,
+          orderVersion: 3,
+          observedAt: "2026-11-21T06:30:00.000Z",
+          rounds: open
+            .filter((round) => round.order === n)
+            .map((round) => ({
+              orderBatchReference: id(round.batch),
+              sequence: round.sequence,
+              state: "OnTableBill",
+              openItemCount: 1,
+              startedItemCount: 0,
+              readyItemCount: 0,
+              cancellableItemReferences: [],
+              refund: null,
+              cancelsAt: null,
+              kitchenReceivedAt: null,
+            })),
+          totals: { onlineMinor: "0", cardMachineMinor: "0" },
+          closeBlockers: n === 1 ? ["ORDER_BALANCE_UNPAID"] : [],
+        },
+      });
+    });
     await page.goto("/operations/dining");
     await page
       .getByRole("button", { name: /L39 M2 \(TEST\)/u })
@@ -270,6 +346,15 @@ for (const language of ["en", "zh-Hans"] as const)
     await expect(host).toContainText(
       zh ? "已售罄 · 已从账单删除，不收费" : "Sold out · taken off the bill, not charged",
     );
+    // b41: closing the table lists every unserved round of the merged bill, by its bill number.
+    const toServe = details.getByRole("region", {
+      name: zh ? "还没上的菜" : "Dishes still to serve",
+    });
+    await expect(toServe.locator("li")).toHaveCount(3);
+    expect(
+      (await toServe.locator("li").allTextContents()).map((text) => text.replace(/[:：].*$/su, "")),
+    ).toEqual([round(1), round(2), round(3)]);
+    expect([...new Set(planRequests)].sort()).toEqual([id(1), id(2)]);
     for (const width of [1440, 1024, 390]) {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
       expect(

@@ -269,7 +269,10 @@ export function TableSessionClose({
   timeZone,
   canResolveGuestsLeft = true,
   freesStraightAway = false,
+  billRoundNumbers = null,
 }: {
+  /** b41: each round's number on the whole bill when tables were merged in (as on the panel). */
+  readonly billRoundNumbers?: ReadonlyMap<string, number> | null | "Reading";
   /** WP-2423 item 8 ①: may close out a departed table's rounds (cancel or refund: a manager). */
   readonly canResolveGuestsLeft?: boolean;
   /**
@@ -405,6 +408,8 @@ export function TableSessionClose({
           onRefresh();
         }}
         fetcher={fetcher}
+        mergedOrderReferences={mergedOrders === "" ? [] : mergedOrders.split(",")}
+        billRoundNumbers={billRoundNumbers}
       />
     ) : null;
   // The rounds the plan lists keep the table open even when no item is waiting (refunds).

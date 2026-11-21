@@ -5,6 +5,7 @@ import {
   closeOutButtonText,
   closeOutSummaryText,
   nothingRefundedText,
+  loadBillClosePlan,
 } from "./TableGuestsLeft.js";
 import { setLanguageForTest } from "./i18n/i18n.js";
 import { kitchenMayHaveStartedText } from "./kitchen-cancel-warning.js";
@@ -448,6 +449,78 @@ it("b28 (v15 live26): a round still on the table's bill says take off (删掉), 
   try {
     expect(text()).toContain("可以在这桌付款前从那一轮删掉");
     expect(text()).not.toContain("取消");
+  } finally {
+    setLanguageForTest("en");
+  }
+});
+
+it("b41 (v15 b40 live): closing a merged table lists every unserved round of the bill by its bill number", async () => {
+  // TM2 H40 A with H40 B merged in: A's own rounds 1 and 2 are bill rounds 1 and 3, B's own round 1
+  // is bill round 2. The blocker said "Round 1", "Round 2" (the Soy milk round, bill round 3) and
+  // left B's Beef noodles round out.
+  const onBill = (batch: number, sequence: number) => ({
+    ...wire.rounds[0],
+    orderBatchReference: id(batch),
+    sequence,
+    state: "OnTableBill",
+    refund: null,
+  });
+  const plans: Record<string, unknown> = {
+    [id(3)]: {
+      ...wire,
+      rounds: [onBill(31, 1), onBill(32, 2)],
+      totals: { onlineMinor: "0", cardMachineMinor: "0" },
+    },
+    [id(4)]: {
+      ...wire,
+      orderReference: id(4),
+      orderVersion: 7,
+      rounds: [onBill(41, 1)],
+      totals: { onlineMinor: "0", cardMachineMinor: "0" },
+      closeBlockers: ["ORDER_BALANCE_UNPAID"],
+    },
+  };
+  const fetcher = vi.fn<typeof fetch>(async (_path, init) => {
+    const body = JSON.parse(String(init?.body)) as {
+      orderReference: string;
+      diningSessionReference: string;
+    };
+    expect(body.diningSessionReference).toBe(id(2));
+    return new Response(JSON.stringify(plans[body.orderReference]), { status: 200 });
+  });
+  const plan = await loadBillClosePlan(
+    createTableClosePlanClient(fetcher),
+    { orderReference: id(3), diningSessionReference: id(2), mergedOrderReferences: [id(4)] },
+    csrf,
+  );
+  expect(plan.rounds.map((entry) => entry.orderBatchReference)).toEqual([id(31), id(32), id(41)]);
+  expect(plan.ownerOf(plan.rounds[2] as TableCloseRound)).toMatchObject({
+    orderReference: id(4),
+    orderVersion: 7,
+  });
+  expect(plan.ownerOf(plan.rounds[0] as TableCloseRound).orderReference).toBe(id(3));
+  // The table's own Order says what stops it closing.
+  expect(plan.closeBlockers).toEqual([]);
+  const numbers = new Map([
+    [id(31), 1],
+    [id(41), 2],
+    [id(32), 3],
+  ]);
+  const now = Date.parse("2026-11-21T11:10:00.000Z");
+  const texts = [...plan.rounds]
+    .sort(
+      (a, b) =>
+        (numbers.get(a.orderBatchReference) ?? 0) - (numbers.get(b.orderBatchReference) ?? 0),
+    )
+    .map((entry) =>
+      guestsLeftRoundText(entry, undefined, now, null, numbers.get(entry.orderBatchReference)),
+    );
+  expect(texts.map((text) => text.split(":")[0])).toEqual(["Round 1", "Round 2", "Round 3"]);
+  setLanguageForTest("zh-Hans");
+  try {
+    expect(guestsLeftRoundText(plan.rounds[2] as TableCloseRound, undefined, now, null, 2)).toMatch(
+      /^第 2 轮/u,
+    );
   } finally {
     setLanguageForTest("en");
   }

@@ -2008,6 +2008,7 @@ function TablePanel({
           locked={locked}
           canResolveGuestsLeft={canCancelUnpaidRounds}
           freesStraightAway={table.guestStart != null && guestStartsOn}
+          billRoundNumbers={billRoundNumbers}
           onBusy={() => undefined}
           onClosed={onClosed}
           onRefresh={onReread}

@@ -122,8 +122,10 @@ export function guestsLeftRoundText(
   timeZone: string | undefined,
   now: number,
   partlyRefund: string | null = null,
+  /** b41: the round's number on the table's bill (merged tables number rounds across the bill). */
+  roundNumber: number = round.sequence,
 ): string {
-  const name = t("Round {sequence}", { sequence: String(round.sequence) });
+  const name = t("Round {sequence}", { sequence: String(roundNumber) });
   const machine = round.refund?.method === "CardMachine";
   switch (round.state) {
     case "NotPaid":
@@ -251,8 +253,56 @@ export function guestsLeftRoundText(
 
 type Load =
   | { readonly kind: "Loading" }
-  | { readonly kind: "Ready"; readonly plan: TableClosePlan }
+  | { readonly kind: "Ready"; readonly plan: BillClosePlan }
   | { readonly kind: "Failed"; readonly denied: boolean };
+
+/**
+ * b41 (v15 b40 live): the close plan of a table's whole bill — its own Order's rounds and those of
+ * every table merged into it (each read under this table's session), as one list. `ownerOf` names
+ * the Order (and its version) each round is cancelled on.
+ */
+export interface BillClosePlan extends TableClosePlan {
+  readonly ownerOf: (round: TableCloseRound) => TableClosePlan;
+}
+export async function loadBillClosePlan(
+  client: Pick<ReturnType<typeof createTableClosePlanClient>, "load">,
+  input: {
+    readonly orderReference: string;
+    readonly diningSessionReference: string;
+    readonly mergedOrderReferences: readonly string[];
+  },
+  csrf: string,
+  signal?: AbortSignal,
+): Promise<BillClosePlan> {
+  const plans = await Promise.all(
+    [input.orderReference, ...input.mergedOrderReferences].map((orderReference) =>
+      client.load(
+        { orderReference, diningSessionReference: input.diningSessionReference },
+        csrf,
+        signal,
+      ),
+    ),
+  );
+  const [host] = plans as [TableClosePlan, ...TableClosePlan[]];
+  const owners = new Map<string, TableClosePlan>();
+  for (const plan of plans)
+    for (const round of plan.rounds) owners.set(round.orderBatchReference, plan);
+  return Object.freeze({
+    ...host,
+    rounds: Object.freeze(plans.flatMap((plan) => plan.rounds)),
+    totals: Object.freeze({
+      onlineMinor: plans
+        .reduce((sum, plan) => sum + BigInt(plan.totals.onlineMinor), 0n)
+        .toString(),
+      cardMachineMinor: plans
+        .reduce((sum, plan) => sum + BigInt(plan.totals.cardMachineMinor), 0n)
+        .toString(),
+    }),
+    // What stops this table's own Order closing; the merged Orders close with it.
+    closeBlockers: host.closeBlockers,
+    ownerOf: (round: TableCloseRound) => owners.get(round.orderBatchReference) ?? host,
+  });
+}
 type Run = null | "Running" | "Unknown" | "Refused" | "Denied" | "FullSignInRequired";
 
 /**
@@ -289,7 +339,13 @@ export function TableGuestsLeft({
   onResolved,
   fetcher,
   canResolve = true,
+  mergedOrderReferences = [],
+  billRoundNumbers = null,
 }: {
+  /** b41: the Orders of the tables merged into this one (their rounds are on this bill). */
+  readonly mergedOrderReferences?: readonly string[];
+  /** b41: each round's number on the whole bill (null or "Reading": each Order's own). */
+  readonly billRoundNumbers?: ReadonlyMap<string, number> | null | "Reading";
   /**
    * WP-2423 item 8 ①: closing out rounds cancels and refunds them (money), so only a manager is
    * offered it; a server sees what is still open and whom to ask.
@@ -332,18 +388,36 @@ export function TableGuestsLeft({
   const operations = useRef(new Map<string, string>());
   const onPlanRef = useRef(onPlan);
   onPlanRef.current = onPlan;
+  const merged = mergedOrderReferences.join(",");
+  const readPlan = (client: ReturnType<typeof createTableClosePlanClient>, signal?: AbortSignal) =>
+    loadBillClosePlan(
+      client,
+      {
+        orderReference,
+        diningSessionReference,
+        mergedOrderReferences: merged === "" ? [] : merged.split(","),
+      },
+      csrf,
+      signal,
+    );
+  const numberOf = (round: TableCloseRound) =>
+    billRoundNumbers instanceof Map
+      ? (billRoundNumbers.get(round.orderBatchReference) ?? round.sequence)
+      : round.sequence;
   useEffect(() => {
     const controller = new AbortController();
     setLoad({ kind: "Loading" });
     const client = createTableClosePlanClient(fetcher);
-    client
-      .load({ orderReference, diningSessionReference }, csrf, controller.signal)
+    readPlan(client, controller.signal)
       .then(async (plan) => {
         if (controller.signal.aborted) return;
         const next = new Map<string, string | null>();
         for (const round of plan.rounds)
           if (round.state === "PartlyStarted")
-            next.set(round.orderBatchReference, await client.previewItems(plan, round, csrf));
+            next.set(
+              round.orderBatchReference,
+              await client.previewItems(plan.ownerOf(round), round, csrf),
+            );
         if (controller.signal.aborted) return;
         setPreviews(next);
         setLoad({ kind: "Ready", plan });
@@ -363,7 +437,7 @@ export function TableGuestsLeft({
         onPlanRef.current(null);
       });
     return () => controller.abort();
-  }, [orderReference, diningSessionReference, csrf, fetcher, attempt, reload]);
+  }, [orderReference, diningSessionReference, merged, csrf, fetcher, attempt, reload]);
   // v15 staff-round-speed: closing the page mid-way would stop the rounds not yet closed out.
   const running = run === "Running";
   useEffect(() => {
@@ -389,6 +463,8 @@ export function TableGuestsLeft({
     );
   const plan = load.plan;
   if (plan.rounds.length === 0) return null;
+  // b41: in the order of the bill (a merged table's rounds among this table's).
+  const listed = [...plan.rounds].sort((a, b) => numberOf(a) - numberOf(b));
   // v15 2026-10-28: a table that pays at the end — what staff do is serve its dishes (nothing to
   // cancel or refund round by round here), so everyone sees it, not "Check again".
   if (
@@ -397,9 +473,9 @@ export function TableGuestsLeft({
     return (
       <section aria-label={t("Dishes still to serve")} className="dining-table-guests-left">
         <ul>
-          {plan.rounds.map((round) => (
+          {listed.map((round) => (
             <li key={round.orderBatchReference} data-round-state={round.state}>
-              {guestsLeftRoundText(round, timeZone, Date.now(), null)}
+              {guestsLeftRoundText(round, timeZone, Date.now(), null, numberOf(round))}
             </li>
           ))}
         </ul>
@@ -444,7 +520,7 @@ export function TableGuestsLeft({
         operation = client.newOperation();
         operations.current.set(key, operation);
       }
-      const outcome = await client.resolve(current, round, operation, csrf);
+      const outcome = await client.resolve(current.ownerOf(round), round, operation, csrf);
       if (outcome === "Unknown" || outcome === "FullSignInRequired") {
         setProgress(null);
         setRun(outcome);
@@ -466,7 +542,7 @@ export function TableGuestsLeft({
       done += 1;
       setProgress({ done, total: Math.max(total, done) });
       try {
-        current = await client.load({ orderReference, diningSessionReference }, csrf);
+        current = await readPlan(client);
         // The list shows what is still open as each round goes.
         setLoad({ kind: "Ready", plan: current });
       } catch {
@@ -490,13 +566,14 @@ export function TableGuestsLeft({
     <section aria-label={t("Guests have left")} className="dining-table-guests-left">
       <h5>{t("If the guests have left")}</h5>
       <ul>
-        {plan.rounds.map((round) => (
+        {listed.map((round) => (
           <li key={round.orderBatchReference} data-round-state={round.state}>
             {guestsLeftRoundText(
               round,
               timeZone,
               now,
               previews.get(round.orderBatchReference) ?? null,
+              numberOf(round),
             )}
           </li>
         ))}
