@@ -16,6 +16,12 @@ import { LanguageRoot } from "../i18n/i18n.js";
 import { cartText } from "../journey/messages.js";
 import { clearSeenPrices } from "./seen-prices.js";
 import {
+  noteTableCheckingOut,
+  noteTableView,
+  resetTableCheckout,
+} from "../dining/table-checkout-state.js";
+import type { DiningSessionView } from "../dining/dining-session-client.js";
+import {
   setCustomerCsrfCredential,
   setTablePaymentTiming,
 } from "../session/customer-transaction-context.js";
@@ -1270,5 +1276,40 @@ describe("WP-2423 batch 29: a tap that ran into a round being sent for the table
     expect(say(false)).toContain(
       "Your table’s cart changed, so nothing was placed yet. Check it, then tap Place order.",
     );
+  });
+});
+
+// Batch 48 review: the screen-reader status on Cart says what the card says, never "checking out"
+// for a table whose bill is already paid.
+describe("Batch 48: Cart while the table checks out", () => {
+  afterEach(() => {
+    resetTableCheckout();
+    setCustomerCsrfCredential(null);
+  });
+  const checkingOut: CartState = {
+    status: "table-checking-out",
+    cart: null,
+    issueCodes: [],
+    retryAfterSeconds: null,
+    canRetrySameOperation: false,
+    fromRead: true,
+  };
+  const status = (html: string) =>
+    /aria-live="polite">([^<]*)<\/div>/u.exec(html)?.[1] ?? "(no status)";
+  it.each([
+    ["1413", "Your table is paying the bill. Ask staff if you want to add more."],
+    ["0", "Your table’s bill is paid. To order anything else, ask staff."],
+  ] as const)("with %s still due, the status says the card's words", (due, words) => {
+    setCustomerCsrfCredential("c".repeat(43));
+    noteTableCheckingOut(true);
+    const money = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
+    noteTableView({
+      paymentTiming: "PayLater",
+      rounds: [{ roundNumber: 1 }],
+      summary: { due: money(due), paid: money("0") },
+    } as unknown as DiningSessionView);
+    const html = renderPage(checkingOut);
+    expect(status(html)).toBe(words);
+    expect(html).not.toContain("checking out");
   });
 });

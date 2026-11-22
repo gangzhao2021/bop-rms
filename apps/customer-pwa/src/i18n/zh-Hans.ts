@@ -1379,7 +1379,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Order progress": "订单进度",
   "Payment received": "已收款",
   "Picked up": "已取餐",
-  "Your table is checking out.": "这桌正在结账。",
   // Batch 48: Menu, dish pages and Cart while the table checks out (no more dishes for it).
   "Your table is paying the bill. Ask staff if you want to add more.":
     "这桌正在结账。如需加点，请找店员。",

@@ -562,7 +562,8 @@ export const cartText = Object.freeze({
         : t("Another guest is checking out.");
     },
     get "table-checking-out"() {
-      return t("Your table is checking out.");
+      // Batch 48: Cart says the card's own words instead (paid or not, from the table read).
+      return t("Your table is paying the bill. Ask staff if you want to add more.");
     },
     get "participation-ended"() {
       return participationEndedText()[0];

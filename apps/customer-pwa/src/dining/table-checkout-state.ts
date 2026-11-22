@@ -19,6 +19,12 @@ export interface TableCheckout {
 }
 
 let state: { readonly credential: string; readonly checkout: TableCheckout } | null = null;
+/**
+ * The table read last made for this visit. Cart's own cart answer, which says the table is checking
+ * out, often lands after it (it reads participation, selection and catalog), and a paid table must
+ * say so at once, not one table read (15 s) later.
+ */
+let lastView: { readonly credential: string; readonly checkout: TableCheckout } | null = null;
 const listeners = new Set<() => void>();
 
 function publish(next: typeof state) {
@@ -40,19 +46,24 @@ export function noteTableCheckingOut(checkingOut: boolean): void {
     return;
   }
   if (state?.credential === credential) return;
-  publish({ credential, checkout: Object.freeze({ paid: null, payLater: null }) });
-}
-
-/** The table read while checking out: whether anything is still owed. */
-export function noteTableView(view: DiningSessionView): void {
-  const credential = getCustomerCsrfCredential();
-  if (state === null || credential === null || state.credential !== credential) return;
-  const paid =
-    view.rounds.length > 0 && view.summary !== null && /^0+$/u.test(view.summary.due.amountMinor);
   publish({
     credential,
-    checkout: Object.freeze({ paid, payLater: view.paymentTiming === "PayLater" }),
+    checkout:
+      lastView?.credential === credential
+        ? lastView.checkout
+        : Object.freeze({ paid: null, payLater: null }),
   });
+}
+
+/** A table read for this visit: whether anything is still owed, shown while checking out. */
+export function noteTableView(view: DiningSessionView): void {
+  const credential = getCustomerCsrfCredential();
+  if (credential === null) return;
+  const paid =
+    view.rounds.length > 0 && view.summary !== null && /^0+$/u.test(view.summary.due.amountMinor);
+  const checkout = Object.freeze({ paid, payLater: view.paymentTiming === "PayLater" });
+  lastView = { credential, checkout };
+  if (state !== null && state.credential === credential) publish({ credential, checkout });
 }
 
 export function getTableCheckout(): TableCheckout | null {
@@ -67,10 +78,11 @@ export function subscribeTableCheckout(listener: () => void): () => void {
 
 /** Tests start each case with no table checking out. */
 export function resetTableCheckout(): void {
+  lastView = null;
   publish(null);
 }
 
 export function useTableCheckout(enabled: boolean): TableCheckout | null {
-  const checkout = useSyncExternalStore(subscribeTableCheckout, getTableCheckout, () => null);
+  const checkout = useSyncExternalStore(subscribeTableCheckout, getTableCheckout, getTableCheckout);
   return enabled ? checkout : null;
 }

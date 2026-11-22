@@ -1571,6 +1571,8 @@ function OpenCartPage({
     return () => window.clearTimeout(timer);
   }, []);
   const timing = useTablePaymentTiming(cart?.orderType === "DineIn", diningClient);
+  // Batch 48: the status says what the card says (paying the bill, or paid), never "checking out".
+  const tableCheckout = useTableCheckout(state.status === "table-checking-out");
   // WP-2423 price-hold-dish-changes (DEC-PRICE-HOLD, M74): at a table that orders from the cart,
   // the cart on screen is the guest's checkout. Once per cart version it is priced, so the Store
   // keeps that price for the guest and says what changed since each dish was first priced (after
@@ -1817,7 +1819,9 @@ function OpenCartPage({
               : state.status === "ready" && cartShowsPriceChanges
                 ? // WP-2423 M74: never "up to date" while a dish's price changed since it was added.
                   cartText.pricesChangedSinceAdded
-                : (specificRefusal(state) ?? cartText.stateAnnouncement[state.status])}
+                : state.status === "table-checking-out"
+                  ? tableCheckoutText(tableCheckout ?? { paid: null, payLater: null }).whole
+                  : (specificRefusal(state) ?? cartText.stateAnnouncement[state.status])}
       </div>
     </CustomerPage>
   );

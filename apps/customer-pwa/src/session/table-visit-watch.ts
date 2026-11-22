@@ -9,7 +9,7 @@ import {
   subscribeCustomerCsrfContext,
 } from "./customer-transaction-context.js";
 import { settleEndedTableVisit } from "./session-bootstrap.js";
-import { getTableCheckout, noteTableView } from "../dining/table-checkout-state.js";
+import { noteTableView } from "../dining/table-checkout-state.js";
 import { createBrowserCustomerCartClient } from "../cart/cart-client.js";
 
 /**
@@ -79,21 +79,20 @@ export function useTableVisitEndWatch({
       lastAt = Date.now();
       try {
         const view = await reader.load(controller.signal);
-        // Batch 48: still seated. On Menu, search and a dish page, whether the table is checking
-        // out (staff started it, or its bill is paid and not closed yet) comes from the cart. It
-        // is asked beside the table read, never in its way: a slow cart answer delays no table read.
-        if (!/^\/cart\/?$/u.test(path.current)) {
-          if (cartPending === null) {
-            const cart = new AbortController();
-            cartPending = cart;
-            void cartCheck(cart.signal)
-              .catch(() => undefined)
-              .finally(() => {
-                if (cartPending === cart) cartPending = null;
-                if (!stopped && getTableCheckout() !== null) noteTableView(view);
-              });
-          }
-        } else if (getTableCheckout() !== null) noteTableView(view);
+        // Batch 48: still seated. Kept for whichever cart answer says the table is checking out
+        // (staff started it, or its bill is paid and not closed yet), before or after this read.
+        noteTableView(view);
+        // On Menu, search and a dish page the watch asks for the cart itself (Cart reads its own),
+        // beside the table read, never in its way: a slow cart answer delays no table read.
+        if (!/^\/cart\/?$/u.test(path.current) && cartPending === null) {
+          const cart = new AbortController();
+          cartPending = cart;
+          void cartCheck(cart.signal)
+            .catch(() => undefined)
+            .finally(() => {
+              if (cartPending === cart) cartPending = null;
+            });
+        }
       } catch (error) {
         if (stopped || controller.signal.aborted) return;
         if (!(error instanceof DiningSessionClientError) || !notAtTable.has(error.code)) return;

@@ -15,7 +15,11 @@ import {
   setMovedTableLabel,
 } from "./customer-transaction-context.js";
 import { tableVisitWatchMs, useTableVisitEndWatch } from "./table-visit-watch.js";
-import { getTableCheckout, resetTableCheckout } from "../dining/table-checkout-state.js";
+import {
+  getTableCheckout,
+  noteTableCheckingOut,
+  resetTableCheckout,
+} from "../dining/table-checkout-state.js";
 
 // Batch 47 (v15 b46 live): Menu (and a dish page, search, Cart) left open while staff closed and
 // cleaned the table kept offering + until a reload. These tabs read the table as Your table does;
@@ -238,4 +242,33 @@ it("Menu learns from the cart read that the table is checking out, then paid, th
   });
   await settle();
   expect(fetcher).not.toHaveBeenCalled();
+});
+
+// Batch 48 review: on Cart the page's own cart read says the table is checking out. That answer
+// (participation, selection and catalog) is often slower than the table read; a paid table still
+// says its bill is paid at once, from the table read already made, not 15 s later.
+it("Cart's checking-out answer after the table read still says at once that the bill is paid", async () => {
+  const money = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
+  const load = vi.fn(
+    async () =>
+      ({
+        tableLabel: "G48 P (TEST)",
+        paymentTiming: "PayLater",
+        rounds: [{ roundNumber: 1 }],
+        summary: {
+          paid: money("1413"),
+          refunded: money("0"),
+          refundPending: money("0"),
+          due: money("0"),
+        },
+      }) as unknown as DiningSessionView,
+  );
+  act(() => root.render(<Watch active pathname="/cart" client={{ load }} />));
+  await settle();
+  expect(load).toHaveBeenCalledTimes(1);
+  expect(getTableCheckout()).toBeNull();
+  // Cart's own read answers 409 cart_table_checking_out after the table read finished.
+  act(() => noteTableCheckingOut(true));
+  expect(getTableCheckout()).toEqual({ paid: true, payLater: true });
+  expect(load).toHaveBeenCalledTimes(1);
 });

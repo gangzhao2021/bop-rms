@@ -91,6 +91,8 @@ type Phase = "open" | "checkout-started" | "part-paid" | "paid";
 interface Table {
   phase: Phase;
   readonly asked: string[];
+  /** The cart answer comes this late (in real use it reads participation, selection, catalog). */
+  readonly cartDelayMs?: number;
 }
 
 const money = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
@@ -135,8 +137,9 @@ async function stubTable(page: Page, table: Table) {
     schemaVersion: 1,
     error: { code: "cart_table_checking_out", messageKey: "customer.cart.table_checking_out" },
   });
-  await page.route(/\/bff\/customer\/cart(?:\?.*)?$/u, (route) =>
-    route.fulfill(
+  await page.route(/\/bff\/customer\/cart(?:\?.*)?$/u, async (route) => {
+    if (table.cartDelayMs !== undefined) await new Promise((r) => setTimeout(r, table.cartDelayMs));
+    return route.fulfill(
       table.phase === "open"
         ? json(200, {
             schemaVersion: 1,
@@ -157,8 +160,8 @@ async function stubTable(page: Page, table: Table) {
             },
           })
         : checkingOut,
-    ),
-  );
+    );
+  });
   await page.route("**/api/v1/carts**", (route) =>
     route.fulfill(table.phase === "open" ? json(503, {}) : checkingOut),
   );
@@ -326,6 +329,25 @@ for (const width of [390, 1440])
         }
         // Nothing was offered, so nothing was tapped: no cart was started or changed.
         expect(table.asked.filter((line) => line.startsWith("POST "))).toEqual([]);
+      });
+
+      // Batch 48 review: the cart answer landed after the table read and Cart said "paying the
+      // bill" with See the bill for 15 s, although the bill was paid.
+      test("Cart opened directly on a paid table says so at once, though its cart answer is slow", async ({
+        page,
+      }) => {
+        const table: Table = { phase: "paid", asked: [], cartDelayMs: 1_500 };
+        await stubTable(page, table);
+        await open(page, "/cart", zh);
+        const text = words(zh, true);
+        const cart = page.getByRole("region", { name: text.heading });
+        await expect(cart).toBeVisible({ timeout: 6_000 });
+        await expect(cart.getByRole("link", { name: text.link })).toHaveAttribute(
+          "href",
+          "/dine-in/session",
+        );
+        await expect(page.getByText(words(zh, false).heading)).toHaveCount(0);
+        await expectNothingToAdd(page);
       });
 
       test("an open Menu drops + within one table read after Start checkout, and gets it back after Cancel checkout", async ({
