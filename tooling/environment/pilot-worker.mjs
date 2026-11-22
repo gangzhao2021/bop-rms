@@ -20,6 +20,8 @@ import {
  * events workload's health is `attention_required` while any remain (they retry, or wait for a
  * person once dead-lettered); a later successful delivery of the same consumer and event clears it.
  */
+/** Business events: after a cycle that delivered events, the next starts at once (10 in a row). */
+export const pilotEventFollowUp = Object.freeze({ delayMs: 0, maxConsecutive: 10 });
 export function createPilotDeliveryFailures(limit = 10_000) {
   const open = new Set();
   return Object.freeze({
@@ -220,6 +222,11 @@ export async function createInternalWorker(resources, observers = {}, options = 
       drainDeadlineMs: 25000,
     },
     pollIntervalMs: 1000,
+    // WP-2423 batch 50 (kitchen speed): a placed table round's OrderCreated, OrderConfirmed and
+    // KitchenWorkCreated go out one after another; without a prompt follow-up each waited a full
+    // poll (v15: about 3 s from placing to the kitchen read, design ≤2 s). An idle cycle still
+    // waits the poll, and ten busy cycles in a row are followed by one.
+    followUp: pilotEventFollowUp,
     drainDeadlineMs: 25000,
     supervision: supervisedCycleFailures,
   });

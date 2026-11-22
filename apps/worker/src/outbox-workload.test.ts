@@ -473,3 +473,84 @@ it("unsupervised workloads keep fail-fast semantics", async () => {
   await expect(work.start()).rejects.toThrow("OUTBOX_WORKLOAD_FAILED");
   await expect(work.completion).resolves.toBe("failed");
 });
+it("WP-2423 batch 50: a placed table round reaches the kitchen read within 2 s, not one poll per event", async () => {
+  vi.useFakeTimers();
+  // The v15 shape (2026-11-22, TM2): placing a pay-later round records OrderCreated v1 and
+  // OrderConfirmed v2 on the same Order in one transaction; v2 is claimable only once v1 is
+  // published. Delivering v2 creates the kitchen ticket and records KitchenWorkCreated, whose
+  // delivery refreshes the kitchen read. Each delivery took about 60 ms there.
+  const outbox: { type: string; aggregate: string; version: number }[] = [];
+  const deliveredAt = new Map<string, number>();
+  const runOnce = vi.fn(async () => {
+    const claimable = outbox.filter(
+      (event) =>
+        !outbox.some(
+          (other) => other.aggregate === event.aggregate && other.version < event.version,
+        ),
+    );
+    for (const event of claimable) {
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      outbox.splice(outbox.indexOf(event), 1);
+      deliveredAt.set(event.type, Date.now());
+      if (event.type === "OrderConfirmed")
+        outbox.push({ type: "KitchenWorkCreated", aggregate: "ticket", version: 1 });
+    }
+    return claimable.length;
+  });
+  const workload = createOutboxWorkload({
+    dispatcher: { runOnce, stop: async () => "drained" as const },
+    pollIntervalMs: 1000,
+    followUp: { delayMs: 0, maxConsecutive: 10 },
+    drainDeadlineMs: 1000,
+    supervision: supervisedCycleFailures,
+  });
+  await workload.start();
+  await vi.advanceTimersByTimeAsync(10);
+  const placedAt = Date.now();
+  outbox.push(
+    { type: "OrderCreated", aggregate: "order", version: 1 },
+    { type: "OrderConfirmed", aggregate: "order", version: 2 },
+  );
+  await vi.advanceTimersByTimeAsync(5000);
+  const kitchenAt = deliveredAt.get("KitchenWorkCreated") ?? Number.POSITIVE_INFINITY;
+  const createdAt = deliveredAt.get("OrderCreated") ?? Number.NEGATIVE_INFINITY;
+  // Design (Handoff 80.8): Kitchen projection normal ≤2 s. Before, each step waited a full poll
+  // after the previous cycle: 3.17 s here, about 3 s on v15.
+  expect(kitchenAt - placedAt).toBeLessThan(2000);
+  expect(kitchenAt - createdAt).toBeLessThan(200);
+  // An idle store still polls once a second.
+  const before = runOnce.mock.calls.length;
+  await vi.advanceTimersByTimeAsync(10_000);
+  expect(runOnce.mock.calls.length - before).toBe(10);
+  await workload.stop();
+});
+it("WP-2423 batch 50: busy follow-ups are bounded, then the poll interval applies", async () => {
+  vi.useFakeTimers();
+  const runOnce = vi.fn(async () => 1);
+  const workload = createOutboxWorkload({
+    dispatcher: { runOnce, stop: async () => "drained" as const },
+    pollIntervalMs: 1000,
+    followUp: { delayMs: 0, maxConsecutive: 10 },
+    drainDeadlineMs: 1000,
+  });
+  // Each prompt follow-up is a zero-delay timer (run as 1 ms, as Node does) after the last cycle.
+  await workload.start();
+  await vi.advanceTimersByTimeAsync(30);
+  expect(runOnce).toHaveBeenCalledTimes(11);
+  await vi.advanceTimersByTimeAsync(900);
+  expect(runOnce).toHaveBeenCalledTimes(11);
+  await vi.advanceTimersByTimeAsync(200);
+  expect(runOnce).toHaveBeenCalledTimes(22);
+  await workload.stop();
+  const dispatcher = { runOnce: async () => 0, stop: async () => "drained" as const };
+  for (const followUp of [
+    { delayMs: 1000, maxConsecutive: 1 },
+    { delayMs: -1, maxConsecutive: 1 },
+    { delayMs: 0, maxConsecutive: 0 },
+    { delayMs: 0, maxConsecutive: 101 },
+    { delayMs: 0.5, maxConsecutive: 1 },
+  ])
+    expect(() =>
+      createOutboxWorkload({ dispatcher, pollIntervalMs: 1000, drainDeadlineMs: 10, followUp }),
+    ).toThrow("OUTBOX_WORKLOAD_CONFIG_INVALID");
+});

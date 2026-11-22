@@ -114,6 +114,16 @@ export interface OutboxWorkloadSupervision {
   /** Delay between retries while attention is required; default 5 minutes. */
   readonly attentionRetryMs?: number;
 }
+/**
+ * WP-2423 batch 50 (kitchen speed): after a cycle that did work, the next one starts after
+ * `delayMs` instead of a full poll, at most `maxConsecutive` times in a row. Work one cycle
+ * records (a placed table round's OrderCreated, then its OrderConfirmed, then KitchenWorkCreated,
+ * each waiting for the one before) then goes out at once rather than one poll per step.
+ */
+export interface OutboxWorkloadFollowUp {
+  readonly delayMs: number;
+  readonly maxConsecutive: number;
+}
 /** WP-2423 pilot resilience: retry transient failures with capped backoff; keep the workload alive
  * (attention_required, slow retry) on others, so one workload never stops its siblings. */
 export const supervisedCycleFailures: OutboxWorkloadSupervision = Object.freeze({});
@@ -129,6 +139,8 @@ export function createOutboxWorkload(options: {
   };
   /** Supervised failure handling (pilot workers); mutually exclusive with `retry`. */
   readonly supervision?: OutboxWorkloadSupervision;
+  /** Opt-in prompt follow-up after a cycle that did work; omitted keeps one poll per cycle. */
+  readonly followUp?: OutboxWorkloadFollowUp;
   /** Best-effort diagnostics only; observer errors never change business execution. */
   readonly onSnapshot?: (snapshot: OutboxWorkloadSnapshot) => void;
 }): WorkerWorkload & {
@@ -156,7 +168,14 @@ export function createOutboxWorkload(options: {
         (options.supervision.maxBackoffMs ?? 30_000) > 300_000 ||
         !Number.isInteger(options.supervision.attentionRetryMs ?? 300_000) ||
         (options.supervision.attentionRetryMs ?? 300_000) < 1 ||
-        (options.supervision.attentionRetryMs ?? 300_000) > 3_600_000))
+        (options.supervision.attentionRetryMs ?? 300_000) > 3_600_000)) ||
+    (options.followUp !== undefined &&
+      (!Number.isInteger(options.followUp.delayMs) ||
+        options.followUp.delayMs < 0 ||
+        options.followUp.delayMs >= options.pollIntervalMs ||
+        !Number.isInteger(options.followUp.maxConsecutive) ||
+        options.followUp.maxConsecutive < 1 ||
+        options.followUp.maxConsecutive > 100))
   )
     throw new TypeError("OUTBOX_WORKLOAD_CONFIG_INVALID");
   const supervision = options.supervision;
@@ -253,13 +272,28 @@ export function createOutboxWorkload(options: {
     complete("failed");
   };
   const active = () => state === "running" || state === "attention_required";
+  let followUps = 0;
+  /** After a completed cycle: a prompt follow-up when it did work (bounded), else one poll. */
+  const afterCycle = (result: number) => {
+    const followUp = options.followUp;
+    if (followUp && result > 0 && followUps < followUp.maxConsecutive) {
+      followUps += 1;
+      schedule(followUp.delayMs);
+      return;
+    }
+    followUps = 0;
+    schedule();
+  };
   const schedule = (delayMs = options.pollIntervalMs) => {
     if (!active()) return;
     timer = setTimeout(() => {
       timer = undefined;
       if (!active()) return;
       cycle = runCycle();
-      void cycle.then(() => schedule(), handleFailure);
+      void cycle.then(afterCycle, () => {
+        followUps = 0;
+        return handleFailure();
+      });
     }, delayMs);
   };
   const handleFailure = (): boolean => {
@@ -292,8 +326,7 @@ export function createOutboxWorkload(options: {
       state = "running";
       cycle = runCycle();
       try {
-        await cycle;
-        schedule();
+        afterCycle(await cycle);
       } catch {
         if (!handleFailure()) throw new Error("OUTBOX_WORKLOAD_FAILED");
       }
