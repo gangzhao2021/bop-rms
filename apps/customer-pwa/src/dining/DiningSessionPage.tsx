@@ -1411,7 +1411,7 @@ export function DiningSessionScreen({
       state.status === "not-joined" ||
       paidOff ? null : tablePay?.checkingOut ? (
         <p className="order-status__back" role="note">
-          {t("Your table is checking out. To add dishes, ask a staff member.")}
+          {t("Your table is paying the bill. Ask staff if you want to add more.")}
         </p>
       ) : (
         <Link className="order-status__back" to="/menu">

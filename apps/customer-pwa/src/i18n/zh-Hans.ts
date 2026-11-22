@@ -1379,12 +1379,17 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Order progress": "订单进度",
   "Payment received": "已收款",
   "Picked up": "已取餐",
-  "Your table is checking out": "这桌正在结账",
-  "New dishes can’t be sent while the bill is being settled. To add more, ask a staff member.":
-    "结账期间不能再送新菜。要加菜请找店员。",
-  "Your table is checking out, so new dishes can’t be sent. To add more, ask a staff member.":
-    "这桌正在结账，不能再送新菜。要加菜请找店员。",
   "Your table is checking out.": "这桌正在结账。",
+  // Batch 48: Menu, dish pages and Cart while the table checks out (no more dishes for it).
+  "Your table is paying the bill. Ask staff if you want to add more.":
+    "这桌正在结账。如需加点，请找店员。",
+  "Your table’s bill is paid. To order anything else, ask staff.":
+    "这桌已结清。如需再点，请找店员。",
+  "Your table is paying the bill": "这桌正在结账",
+  "Ask staff if you want to add more.": "如需加点，请找店员。",
+  "Your table’s bill is paid": "这桌已结清",
+  "To order anything else, ask staff.": "如需再点，请找店员。",
+  "See the bill": "查看账单",
   "Cash rounding": "现金取整",
   "Item prices are before tax. ": "菜品价格为税前价格。",
   "The table paid once at the end. Cash is rounded to the nearest 5 cents; card payments are not rounded.":
@@ -1456,8 +1461,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "您结账时餐厅更新了菜单，因此没有向您收费。请在本桌页面付款。",
   "Tips were turned off while you were checking out, so this order hasn’t been charged. Go back to checkout to pay without a tip.":
     "您结账时门店关闭了小费，这一单没有扣款。请回到结账页，不加小费付款。",
-  "Your table is checking out. To add dishes, ask a staff member.":
-    "这桌正在结账，要加菜请找店员。",
   Closed: "不营业",
   "closed today": "今天不营业",
   today: "今天",

@@ -9,6 +9,16 @@ import {
   subscribeCustomerCsrfContext,
 } from "./customer-transaction-context.js";
 import { settleEndedTableVisit } from "./session-bootstrap.js";
+import { getTableCheckout, noteTableView } from "../dining/table-checkout-state.js";
+import { createBrowserCustomerCartClient } from "../cart/cart-client.js";
+
+/**
+ * Batch 48: a seated guest's Menu, search or dish page also asks for the cart (Cart reads its own
+ * every 4 s), because only the cart answer says the table is checking out. Tests inject theirs.
+ */
+export type TableCartCheck = (signal: AbortSignal) => Promise<unknown>;
+const browserCartCheck: TableCartCheck = (signal) =>
+  createBrowserCustomerCartClient().loadCurrent(signal);
 
 /** As often as Your table reads the table (DiningSessionPage's poll). */
 export const tableVisitWatchMs = 15_000;
@@ -30,11 +40,15 @@ export function useTableVisitEndWatch({
   active,
   pathname,
   client: provided,
+  cartCheck = browserCartCheck,
 }: {
   readonly active: boolean;
   readonly pathname: string;
   readonly client?: DiningSessionClient | undefined;
+  readonly cartCheck?: TableCartCheck | undefined;
 }): void {
+  const path = useRef(pathname);
+  path.current = pathname;
   const fallback = useRef<DiningSessionClient | null>(null);
   const check = useRef<(() => void) | null>(null);
   useEffect(() => {
@@ -46,6 +60,7 @@ export function useTableVisitEndWatch({
       }));
     let stopped = false;
     let pending: AbortController | null = null;
+    let cartPending: AbortController | null = null;
     let lastAt = Number.NEGATIVE_INFINITY;
     // This visit's credential was read as not seated at a table and its restore went on.
     let neverSeated: string | null = null;
@@ -63,7 +78,22 @@ export function useTableVisitEndWatch({
       pending = controller;
       lastAt = Date.now();
       try {
-        await reader.load(controller.signal);
+        const view = await reader.load(controller.signal);
+        // Batch 48: still seated. On Menu, search and a dish page, whether the table is checking
+        // out (staff started it, or its bill is paid and not closed yet) comes from the cart. It
+        // is asked beside the table read, never in its way: a slow cart answer delays no table read.
+        if (!/^\/cart\/?$/u.test(path.current)) {
+          if (cartPending === null) {
+            const cart = new AbortController();
+            cartPending = cart;
+            void cartCheck(cart.signal)
+              .catch(() => undefined)
+              .finally(() => {
+                if (cartPending === cart) cartPending = null;
+                if (!stopped && getTableCheckout() !== null) noteTableView(view);
+              });
+          }
+        } else if (getTableCheckout() !== null) noteTableView(view);
       } catch (error) {
         if (stopped || controller.signal.aborted) return;
         if (!(error instanceof DiningSessionClientError) || !notAtTable.has(error.code)) return;
@@ -88,12 +118,13 @@ export function useTableVisitEndWatch({
       stopped = true;
       check.current = null;
       pending?.abort();
+      cartPending?.abort();
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", tick);
       window.removeEventListener("online", tick);
       unsubscribe();
     };
-  }, [active, provided]);
+  }, [active, provided, cartCheck]);
   useEffect(() => {
     check.current?.();
   }, [active, provided, pathname]);

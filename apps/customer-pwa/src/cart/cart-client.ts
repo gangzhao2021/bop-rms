@@ -20,6 +20,7 @@ import {
   type ParticipationEndedReason,
 } from "../session/customer-transaction-context.js";
 import { recoverCustomerSession, settleEndedTableVisit } from "../session/session-bootstrap.js";
+import { noteTableCheckingOut } from "../dining/table-checkout-state.js";
 
 /** M126 I.2: the Store's reason, or null when it sent none this page knows. */
 export function participationReason(value: unknown): ParticipationEndedReason | null {
@@ -527,11 +528,15 @@ async function request(url: string, init: RequestInit, decode = parse): Promise<
   try {
     const result = await Promise.race([operation(), cancellation]);
     if (!contextCurrent()) throw new CartClientError("network_unknown");
+    // Batch 48: the Store answered the cart, so the table is not checking out.
+    noteTableCheckingOut(false);
     return result;
   } catch (error) {
     if (!contextCurrent()) throw new CartClientError("network_unknown");
     if (error instanceof CartClientError) {
       if (error.code === "cart_session_expired") setCustomerCartCsrfCredential(null);
+      // Batch 48: staff started the table's checkout; Menu and dish pages stop offering to add.
+      if (error.code === "cart_table_checking_out") noteTableCheckingOut(true);
       // Batch 47 (v15 b46 live): refused because the table's visit ended (staff closed, moved or
       // merged it while this page was open): the restore read says how, and the page shows that
       // card before this answer reaches it, never "your session expired" or "your visit ended".

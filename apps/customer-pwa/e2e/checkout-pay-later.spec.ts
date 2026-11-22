@@ -863,9 +863,7 @@ test.describe("@production Pay-later table, the round just placed", () => {
     const table = await stubTable(page, [], { checkingOut: true });
     await openCart(page);
     await placeOrder(page).click();
-    await expect(
-      page.getByText("New dishes can’t be sent while the bill is being settled."),
-    ).toBeVisible();
+    await expect(page.getByText("Ask staff if you want to add more.")).toBeVisible();
     // price-hold-dish-changes: only the cart on screen was priced (once); the tap priced nothing.
     expect(table.calls.filter((call) => call === "quote")).toHaveLength(1);
     expect(table.calls.indexOf("quote")).toBe(0);
@@ -2071,10 +2069,10 @@ for (const screen of [
         });
       });
       await page.clock.runFor(16_000);
-      await expect(page.getByRole("main")).toContainText(
-        "New dishes can’t be sent while the bill is being settled.",
-      );
-      await expect(page.getByRole("region", { name: "Your table is checking out" })).toBeVisible();
+      await expect(page.getByRole("main")).toContainText("Ask staff if you want to add more.");
+      await expect(
+        page.getByRole("region", { name: "Your table is paying the bill" }),
+      ).toBeVisible();
       expect(reads).toBeGreaterThanOrEqual(1);
       await expectNoInternalText(page);
       expect(failures).toEqual([]);

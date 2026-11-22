@@ -1,4 +1,6 @@
 import { ClosedStoreNotice } from "./ClosedStoreNotice.js";
+import { TableCheckoutNotice } from "./TableCheckoutNotice.js";
+import { useTableCheckout } from "../dining/table-checkout-state.js";
 import { clauseSeparator, listSeparator, sentenceEnd, t, wordGap } from "../i18n/i18n.js";
 import {
   activeMenuOptionRules,
@@ -490,12 +492,20 @@ export function MenuScreen({
   );
   // M116: a Store not taking orders now shows its menu to look at, with no cart and no adding.
   const closed = context?.closed;
+  // Batch 48: the table is checking out (or paid and not closed yet): the Store takes no more
+  // dishes for it, so nothing here offers to add one; the guest is told so, calmly, at the top.
+  const checkout = useTableCheckout(context?.channel === "DineIn" && closed === undefined);
   const readOnlyNotice =
     givenReadOnlyNotice ??
-    (closed === undefined ? undefined : <ClosedStoreNotice closed={closed} />);
+    (closed !== undefined ? (
+      <ClosedStoreNotice closed={closed} />
+    ) : checkout !== null ? (
+      <TableCheckoutNotice checkout={checkout} />
+    ) : undefined);
   // Its hours come from the entry answer: this phone may have no visit, or one at another Store.
   const storeProfile = closed === undefined ? givenStoreProfile : null;
-  const withCart = context !== undefined && mode !== "detail" && closed === undefined;
+  const withCart =
+    context !== undefined && mode !== "detail" && closed === undefined && checkout === null;
   const justAdded = useBackOnMenu(browseFound);
   const [quickMessage, setQuickMessage] = useState<string | null>(null);
   // v15 b17: a one-tap add that didn't go in stays long enough to read.
@@ -552,7 +562,7 @@ export function MenuScreen({
         >
           <div className={`menu-layout${withCart ? " menu-layout--with-cart" : ""}`}>
             <div className="menu-layout__main">
-              {closed !== undefined && mode !== "detail" ? (
+              {(closed !== undefined || checkout !== null) && mode !== "detail" ? (
                 <div className="menu-readonly-boundary menu-closed-notice" role="status">
                   {readOnlyNotice}
                 </div>
@@ -1080,9 +1090,7 @@ export function quickAddHeldText(state: ConfigureState): string | null {
     case "conflict":
       return t("Someone at your table just changed the cart.");
     case "table-checking-out":
-      return t(
-        "Your table is checking out, so new dishes can’t be sent. To add more, ask a staff member.",
-      );
+      return t("Your table is paying the bill. Ask staff if you want to add more.");
     default:
       return null;
   }
@@ -1563,9 +1571,7 @@ export function ConfigureStatus({
     "checkout-in-progress": checkoutInProgressMessage(
       "retryAfterSeconds" in state ? state.retryAfterSeconds : null,
     ),
-    "table-checking-out": t(
-      "Your table is checking out, so new dishes can’t be sent. To add more, ask a staff member.",
-    ),
+    "table-checking-out": t("Your table is paying the bill. Ask staff if you want to add more."),
     // WP-2423 M115: an open table this phone hasn't joined (e.g. after a reload): join it there.
     // Batch 42 (v15 b41 live): staff open this table; the start page waits for them.
     "not-seated": waitingToOpen

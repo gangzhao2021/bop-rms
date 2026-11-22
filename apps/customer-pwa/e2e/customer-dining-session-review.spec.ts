@@ -1933,7 +1933,7 @@ test.describe("@production DEC-DINE-IN-PAY-LATER S4 the guest pays the whole tab
     // Checking out: no more rounds from the phone; staff add dishes.
     await expect(page.getByRole("link", { name: "Order more from the menu" })).toHaveCount(0);
     await expect(
-      page.getByText("Your table is checking out. To add dishes, ask a staff member."),
+      page.getByText("Your table is paying the bill. Ask staff if you want to add more."),
     ).toBeVisible();
     // The tip is chosen once for the whole table: 15% of the bill before tax.
     await pay.getByRole("radio", { name: /15% · \$2\.70/u }).check();

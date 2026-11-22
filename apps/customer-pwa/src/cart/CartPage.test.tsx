@@ -1015,7 +1015,7 @@ describe("WP-2423 item 6: a table that pays at the end", () => {
     expect(closed).toContain("The store isn’t taking new orders right now");
     expect(closed).toContain("Back to your table");
     expect(page(ready, { status: "table-checking-out" })).toContain(
-      "New dishes can’t be sent while the bill is being settled.",
+      "Ask staff if you want to add more.",
     );
     expect(page(ready, { status: "session-ended" })).toContain("Your session ended.");
     const changed = page(ready, { status: "cart-changed" });

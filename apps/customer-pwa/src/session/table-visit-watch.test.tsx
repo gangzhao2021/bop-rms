@@ -15,6 +15,7 @@ import {
   setMovedTableLabel,
 } from "./customer-transaction-context.js";
 import { tableVisitWatchMs, useTableVisitEndWatch } from "./table-visit-watch.js";
+import { getTableCheckout, resetTableCheckout } from "../dining/table-checkout-state.js";
 
 // Batch 47 (v15 b46 live): Menu (and a dish page, search, Cart) left open while staff closed and
 // cleaned the table kept offering + until a reload. These tabs read the table as Your table does;
@@ -29,12 +30,20 @@ const restoreAnswer = (value: unknown) =>
     headers: { "content-type": "application/json", "cache-control": "no-store" },
   });
 
+const noCartCheck = async () => null;
 function Watch(props: {
   readonly active: boolean;
   readonly pathname: string;
   readonly client: DiningSessionClient;
+  /** Batch 48: the real browser cart read when "browser"; none by default. */
+  readonly cart?: "browser";
 }) {
-  useTableVisitEndWatch(props);
+  useTableVisitEndWatch({
+    active: props.active,
+    pathname: props.pathname,
+    client: props.client,
+    ...(props.cart === "browser" ? {} : { cartCheck: noCartCheck }),
+  });
   return null;
 }
 
@@ -55,6 +64,7 @@ afterEach(() => {
   setCustomerCsrfCredential(null);
   setEmptyTable(null);
   setMovedTableLabel(null);
+  resetTableCheckout();
 });
 const settle = async () => {
   for (let step = 0; step < 10; step += 1) await act(async () => Promise.resolve());
@@ -157,5 +167,75 @@ it("reads nothing while inactive (Your table reads for itself) or with no visit"
     await vi.advanceTimersByTimeAsync(tableVisitWatchMs * 2);
   });
   expect(load).not.toHaveBeenCalled();
+  expect(fetcher).not.toHaveBeenCalled();
+});
+
+// Batch 48 (v15 b47 live, guest-open-page-after-close leftOpen (d)): a joined guest's Menu kept
+// + while the table was checking out or paid in full. The cart read, in v15's 409 shape, says the
+// table is checking out; the table read says whether its bill is paid; a 200 after staff's
+// Cancel checkout gives + back. Cart reads its own cart, so the watch reads none there.
+it("Menu learns from the cart read that the table is checking out, then paid, then reopened", async () => {
+  const money = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
+  let due = "1413";
+  const load = vi.fn(
+    async () =>
+      ({
+        tableLabel: "G47 P (TEST)",
+        orderNumber: "21",
+        checkedAt: new Date().toISOString(),
+        paymentTiming: "PayLater",
+        rounds: [{ roundNumber: 1 }],
+        summary: {
+          paid: money(due === "0" ? "1413" : "0"),
+          refunded: money("0"),
+          refundPending: money("0"),
+          due: money(due),
+        },
+      }) as unknown as DiningSessionView,
+  );
+  let cart: "checking-out" | "open" = "checking-out";
+  const json = (status: number, body: unknown) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { "content-type": "application/json", "cache-control": "no-store" },
+    });
+  fetcher.mockImplementation(async (input) => {
+    expect(String(input)).toBe("/bff/customer/cart");
+    return cart === "checking-out"
+      ? json(409, {
+          schemaVersion: 1,
+          error: {
+            code: "cart_table_checking_out",
+            messageKey: "customer.cart.table_checking_out",
+          },
+        })
+      : json(200, { schemaVersion: 1, cart: null });
+  });
+  act(() => root.render(<Watch active pathname="/menu" client={{ load }} cart="browser" />));
+  await settle();
+  expect(load).toHaveBeenCalledTimes(1);
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(getTableCheckout()).toEqual({ paid: false, payLater: true });
+  // The guest paid the whole table; staff have not closed it yet.
+  due = "0";
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(tableVisitWatchMs);
+  });
+  await settle();
+  expect(getTableCheckout()).toEqual({ paid: true, payLater: true });
+  // (Another table, nothing paid) staff pressed Cancel checkout: the cart answers again.
+  cart = "open";
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(tableVisitWatchMs);
+  });
+  await settle();
+  expect(getTableCheckout()).toBeNull();
+  // On Cart the page reads its own cart every 4 s: the watch reads only the table there.
+  fetcher.mockClear();
+  act(() => root.render(<Watch active pathname="/cart" client={{ load }} cart="browser" />));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(tableVisitWatchMs);
+  });
+  await settle();
   expect(fetcher).not.toHaveBeenCalled();
 });

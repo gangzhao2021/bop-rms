@@ -1,6 +1,8 @@
 import { v7 as uuidv7 } from "uuid";
 import { AlreadyOrdered } from "../checkout/AlreadyOrdered.js";
 import { ClosedStoreNotice } from "../menu/ClosedStoreNotice.js";
+import { tableCheckoutText } from "../menu/TableCheckoutNotice.js";
+import { useTableCheckout } from "../dining/table-checkout-state.js";
 import {
   CHINESE_LOCALE,
   currentLanguage,
@@ -562,7 +564,23 @@ function ErrorState({
     getGuestTableStarter() === null &&
     tableWaitingToOpen() !== null;
   useGoOnWhenTableOpens(waitingToOpen);
+  const checkout = useTableCheckout(state.status === "table-checking-out");
   if (!("cart" in state) || !("issueCodes" in state)) return null;
+  // Batch 48 (v15 b47 live): the table is checking out, which is not a failure: nothing to refresh
+  // or retry (this page reads the cart again by itself, so a reopened table goes on); the guest
+  // is told to ask staff and where the bill, or once paid the receipt, is.
+  if (state.status === "table-checking-out") {
+    const text = tableCheckoutText(checkout ?? { paid: null, payLater: null });
+    return (
+      <StateMessage heading={text.heading}>
+        <p>{text.line}</p>
+        <div className="cart-state__actions">
+          <Link to="/dine-in/session">{text.link}</Link>
+          <Link to="/menu">{commonText.returnToMenu}</Link>
+        </div>
+      </StateMessage>
+    );
+  }
   const retry = state.status === "command-failed" && state.canRetrySameOperation;
   const failure = cartText.failure;
   const messages = {

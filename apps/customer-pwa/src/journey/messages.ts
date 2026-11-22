@@ -748,12 +748,8 @@ export const cartText = Object.freeze({
       return t("Join this table");
     },
     get tableCheckingOut() {
-      return [
-        t("Your table is checking out"),
-        t(
-          "New dishes can’t be sent while the bill is being settled. To add more, ask a staff member.",
-        ),
-      ] as const;
+      // Batch 48: said calmly, as Menu says it; Cart's own page adds where the bill is.
+      return [t("Your table is paying the bill"), t("Ask staff if you want to add more.")] as const;
     },
     // M126: said only when the visit really ended (a store that can't answer is "try again").
     get sessionExpired() {

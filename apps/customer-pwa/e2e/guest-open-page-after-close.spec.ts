@@ -244,6 +244,9 @@ async function open(page: Page, path: string, zh: boolean) {
   await page.goto(path);
   if (zh && (await page.getByRole("button", { name: "切换到中文" }).count()) > 0)
     await page.getByRole("button", { name: "切换到中文" }).click();
+  // Batch 48: a seated tab also reads the cart when it opens; staff close the table after the
+  // page has finished loading (a refusal mid-load is covered by the + and Add to cart taps).
+  await page.waitForLoadState("networkidle");
 }
 
 for (const width of [390, 1440])
