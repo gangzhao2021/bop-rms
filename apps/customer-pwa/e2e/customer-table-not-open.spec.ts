@@ -652,7 +652,7 @@ test.describe("@production CUST-ENTRY table not open", () => {
           .click();
         await page
           .getByRole("link", {
-            name: zh ? "查看 Synthetic tea" : "View Synthetic tea",
+            name: zh ? "查看Synthetic tea" : "View Synthetic tea",
             exact: true,
           })
           .click();
@@ -741,7 +741,7 @@ test.describe("@production CUST-ENTRY table not open", () => {
         if (reload) await page.reload();
         await expect(
           page.getByRole("link", {
-            name: zh ? "查看 Synthetic tea" : "View Synthetic tea",
+            name: zh ? "查看Synthetic tea" : "View Synthetic tea",
             exact: true,
           }),
         ).toBeVisible();

@@ -85,7 +85,7 @@ it("WP-2423 M122 (v15 live check): a voided waste record reads in Chinese, with 
   );
   await settle();
   const text = container.textContent ?? "";
-  expect(text).toContain("已由 你 作废（录入错误）");
+  expect(text).toContain("已由你作废（录入错误）");
   expect(text).toContain("1.5 升");
   expect(text).not.toMatch(/voided|reviewed|\bYou\b|\bL\b/u);
 });

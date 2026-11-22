@@ -1158,7 +1158,7 @@ describe("WP-2423 M06: the note after guest dishes were taken off a round", () =
     expect(tableCartRemovedNote([])).toBeNull();
     setLanguageForTest("zh-Hans");
     expect(tableCartRemovedNote([item(1, "酸梅汤"), item(2, "汤")])).toBe(
-      "请告诉客人：酸梅汤、汤 现在不供应，已从他们的点单里删掉。",
+      "请告诉客人：酸梅汤、汤现在不供应，已从他们的点单里删掉。",
     );
     setLanguageForTest("en");
   });

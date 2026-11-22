@@ -206,7 +206,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Cash, manual card entry, Staff Terminal and raw Provider UI are not offered here.":
     "这里不提供现金、手动输入卡号、员工终端或第三方原始界面付款。",
   "Change your cart": "修改购物车",
-  "Change {name} to {left}": "把 {name} 改为 {left} 份",
+  "Change {name} to {left}": "把{name}改为 {left} 份",
   "Check again": "再检查一次",
   "Check payment result": "查看付款结果",
   "Check payment status": "查看付款状态",
@@ -270,8 +270,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Cross-contact possible": "可能交叉接触",
   "DEMO payment": "演示付款",
   "Decrease quantity": "减少数量",
-  "Decrease {item} quantity": "减少 {item} 的数量",
-  "Remove {item}": "删除 {item}",
+  "Decrease {item} quantity": "减少{item}的数量",
+  "Remove {item}": "删除{item}",
   Delivery: "外送",
   "Delivery access denied": "无权查看外送",
   "Delivery confirmation": "外送确认",
@@ -334,7 +334,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "如果您已经输入银行卡，付款结果很快会显示在这里。如果您还没付款就离开了，请在下面完成付款——不会重复扣款。",
   "In the queue": "排队中",
   "Increase quantity": "增加数量",
-  "Increase {item} quantity": "增加 {item} 的数量",
+  "Increase {item} quantity": "增加{item}的数量",
   "Internal testing only. No real money is charged.": "仅供内部测试，不会产生真实扣款。",
   "Invite someone at your table": "邀请同桌的人",
   Issued: "签发时间",
@@ -516,17 +516,24 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Only the person who joined this table first can make codes. A staff member can give you one.":
     "只有最先加入这桌的人可以生成代码，店员也可以给您一个。",
   "Only {available} {name} can be made right now — this line has {quantity}. {value1} before checkout.":
-    "{name} 目前只能做 {available} 份——这一行是 {quantity} 份。结账前请{value1}。",
+    "{name}目前只能做 {available} 份——这一行是 {quantity} 份。结账前请{value1}。",
   "Only {available} {name} can be made right now, so we couldn’t add more. Your cart is unchanged.":
-    "{name} 目前只能做 {available} 份，所以没有再加。您的购物车没有变化。",
+    "{name}目前只能做 {available} 份，所以没有再加。您的购物车没有变化。",
   "Only {left} {name} can be made right now — you have {ordered} in your cart. {notCharged} {value1}, then try again.":
-    "{name} 目前只能做 {left} 份——您的购物车里有 {ordered} 份。{notCharged}请{value1}后重试。",
+    "{name}目前只能做 {left} 份——您的购物车里有 {ordered} 份。{notCharged}请{value1}后重试。",
   "Open now": "营业中",
-  // Batch 46 (v15 overnight 45): a day open 24 hours.
+  // Batch 46 (v15 overnight 45): a day open 24 hours, and whole sentences around a Store's name.
   "Open 24 hours": "24 小时营业",
   "open 24 hours": "24 小时营业",
   "Open 24 hours today.": "今天 24 小时营业。",
   "You can order again {day} at {time}.": "{day} {time} 起可以再点单。",
+  "{storeDisplayName} isn’t taking orders yet": "{storeDisplayName}暂时还不能下单",
+  "{storeDisplayName} isn’t taking new orders right now": "{storeDisplayName}现在不接新订单",
+  "Ask a staff member at {storeDisplayName}.": "请询问{storeDisplayName}的店员。",
+  "How {storeDisplayName} handles your contact details:":
+    "{storeDisplayName}如何处理您的联系方式：",
+  "{label} registration no. {number}": "{label}登记号 {number}",
+  "How many {name}": "{name}的数量",
   "Open the menu": "打开菜单",
   "Opening a new card payment…": "正在打开新的刷卡付款…",
   "Opening your order": "正在打开您的订单",
@@ -648,7 +655,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "本店不使用取餐码，取餐时请询问店员。",
   "Pickup contact": "取餐联系人",
   "Pickup email": "取餐邮箱",
-  "Pickup from {storeDisplayName} is selected.": "已选择在 {storeDisplayName} 自取。",
+  "Pickup from {storeDisplayName} is selected.": "已选择在{storeDisplayName}自取。",
   "Pickup name": "取餐人姓名",
   "Plain preparation requests only. Do not enter allergy, medical or other sensitive details; ask staff for assistance.":
     "只写普通的制作要求。请不要填写过敏、医疗或其他敏感信息，如需帮助请问店员。",
@@ -674,7 +681,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Privacy notice": "隐私声明",
   Promotion: "优惠",
   Quantity: "数量",
-  "Quantity for {item}": "{item} 的数量",
+  "Quantity for {item}": "{item}的数量",
   "Quantity must be between 1 and 100.": "数量必须在 1 到 100 之间。",
   "Questions about this order?": "对这笔订单有疑问？",
   "Questions about this order? Call the store.": "对这笔订单有疑问？请致电门店。",
@@ -735,18 +742,18 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Remaking an item": "正在重做一件商品",
   "Remaking part of your order": "正在重做部分订单",
   Remove: "删除",
-  "Remove every {name}": "删除所有 {name}",
+  "Remove every {name}": "删除所有{name}",
   "Remove my contact details": "删除我的联系方式",
   "Remove now": "立即删除",
-  "Remove one {name}": "删除一份 {name}",
+  "Remove one {name}": "删除一份{name}",
   "Remove them now? The store won’t be able to call or email you about this order. You can still collect it by showing your order number.":
     "现在删除吗？删除后门店将无法就这笔订单给您打电话或发邮件。您仍可以出示订单号取餐。",
-  "Remove {extra} of your {ordered} {name}": "从 {ordered} 份 {name} 中删除 {extra} 份",
-  "Remove {name}": "删除 {name}",
+  "Remove {extra} of your {ordered} {name}": "从 {ordered} 份{name}中删除 {extra} 份",
+  "Remove {name}": "删除{name}",
   "Removing…": "正在删除…",
   Required: "必选",
   "Required · choose {max}": "必选 · 选 {max} 项",
-  "Results in {name}": "{name} 中的结果",
+  "Results in {name}": "{name}中的结果",
   "Retrieving your receipt.": "正在获取您的收据。",
   "Retry checkout": "重试结账",
   "Retry pricing": "重新计价",
@@ -1011,12 +1018,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "This session isn’t part of the table any more, or only the person who started the table can restart this cart. Scan the table QR code again or ask staff for help.":
     "这个会话已不属于这一桌，或只有开这桌的人可以重开购物车。请重新扫描桌上的二维码或向店员求助。",
   "This size is sold out": "这个规格已售罄",
-  "{name} isn't available right now.": "{name} 现在不供应。",
+  "{name} isn't available right now.": "{name}现在不供应。",
   "Not available now": "现在不供应",
   "One of your choices isn’t available right now. Please choose another.":
     "您选的一项现在不供应，请另选。",
   "This item isn’t available right now.": "这道菜现在不供应。",
-  "{option} isn't available right now. Please choose another.": "{option} 现在不供应，请另选。",
+  "{option} isn't available right now. Please choose another.": "{option}现在不供应，请另选。",
   "This size is sold out right now. Please choose another size.":
     "这个规格目前已售罄，请选择其他规格。",
   "This table QR code is no longer in use": "这个桌台二维码已停用",
@@ -1069,7 +1076,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "View order status": "查看订单状态",
   "View receipt and support": "查看收据和帮助",
   "View your receipt": "查看您的收据",
-  "View {name}": "查看 {name}",
+  "View {name}": "查看{name}",
   "Waiting for payment": "等待付款",
   "Nothing is charged now. Your table pays once at the end.": "现在不收款。这桌最后一起结账。",
   Send: "送出",
@@ -1081,7 +1088,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "每一轮提交后直接送厨房。这桌最后一起结账，含税。",
   "Waiting for the store": "等待门店",
   "We can make only {left} {name} along with the rest of your order — some items use the same ingredients. {notCharged} {value1} or change other items, then try again.":
-    "结合您订单里的其他商品，{name} 只能做 {left} 份——有些商品用到相同的配料。{notCharged}请{value1}或修改其他商品后重试。",
+    "结合您订单里的其他商品，{name}只能做 {left} 份——有些商品用到相同的配料。{notCharged}请{value1}或修改其他商品后重试。",
   "We can’t make that many right now. Choose fewer.": "现在做不了那么多，请减少数量。",
   "We couldn’t add this right now. Please try again.": "暂时无法加入，请重试。",
   "We couldn’t confirm checkout. Retry to recover the same checkout.":
@@ -1123,7 +1130,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "We couldn’t update your order status. The details below may be out of date.":
     "无法更新订单状态，以下信息可能不是最新的。",
   "We don’t have enough left to make {name} along with the rest of your order — some items use the same ingredients. {notCharged} {value1} or change other items, then try again.":
-    "结合您订单里的其他商品，现在剩下的不够做 {name}——有些商品用到相同的配料。{notCharged}请{value1}或修改其他商品后重试。",
+    "结合您订单里的其他商品，现在剩下的不够做{name}——有些商品用到相同的配料。{notCharged}请{value1}或修改其他商品后重试。",
   "We don’t know which location you’re ordering from. Scan the QR code again to open the menu.":
     "不确定您在哪家门店点单，请重新扫描二维码打开菜单。",
   "We have your order. The store will confirm it shortly.": "已收到您的订单，门店很快会确认。",
@@ -1293,9 +1300,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{base} Try again in about {minutes} minute{value1}.": "{base}请约 {minutes} 分钟后再试。",
   "{base} Try again shortly.": "{base}请稍后再试。",
   "{count} items": "{count} 件商品",
-  "{item} quantity": "{item} 的数量",
-  "{name} allows at most {value1}.": "{name} 最多可选 {value1} 份。",
-  "{name} conflicts with another selected choice.": "{name} 与另一个已选项冲突。",
+  "{item} quantity": "{item}的数量",
+  "{name} allows at most {value1}.": "{name}最多可选 {value1} 份。",
+  "{name} conflicts with another selected choice.": "{name}与另一个已选项冲突。",
   "Not available right now. Remove it to order the rest.": "现在不供应。删除它后才能点其他的菜。",
   "The choices for this item have changed. Remove it, then add it again.":
     "这道菜的选项已变化，请删除后重新选择加入。",
@@ -1306,19 +1313,19 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Remove the dishes that aren’t available right now, then check out.":
     "先删除现在不供应的菜，再结账。",
   "The choices for {name} have changed, so this round hasn’t been sent. {value1}, then add it again with the new choices.":
-    "{name} 的选项已变化，这一轮还没有下单。请{value1}，再按新的选项加入。",
+    "{name}的选项已变化，这一轮还没有下单。请{value1}，再按新的选项加入。",
   "The choices for {name} have changed. {notCharged} {value1}, then add it again with the new choices.":
-    "{name} 的选项已变化。{notCharged}请{value1}，再按新的选项加入。",
+    "{name}的选项已变化。{notCharged}请{value1}，再按新的选项加入。",
   "{name} isn’t available right now, so this round hasn’t been sent. {value1}, then tap Place order.":
-    "{name} 现在不供应，这一轮还没有下单。请{value1}后再点“下单”。",
+    "{name}现在不供应，这一轮还没有下单。请{value1}后再点“下单”。",
   "{name} isn’t available right now. {notCharged} {value1} from your cart, then try again.":
-    "{name} 现在不供应。{notCharged}请从购物车{value1}后重试。",
+    "{name}现在不供应。{notCharged}请从购物车{value1}后重试。",
   "{name} just sold out. {notCharged} {value1} from your cart, then try again.":
-    "{name} 刚刚售罄。{notCharged}请从购物车{value1}后重试。",
-  "{name} just sold out. {value1} before checkout.": "{name} 刚刚售罄。结账前请{value1}。",
+    "{name}刚刚售罄。{notCharged}请从购物车{value1}后重试。",
+  "{name} just sold out. {value1} before checkout.": "{name}刚刚售罄。结账前请{value1}。",
   "{storeName} · Order": "{storeName} · 点单",
   "{store} keeps the phone number or email you gave only to contact you about this order, and deletes it 30 days after your order.":
-    "{store} 只会用您提供的手机号或邮箱就这笔订单联系您，并在下单 30 天后删除。",
+    "{store}只会用您提供的手机号或邮箱就这笔订单联系您，并在下单 30 天后删除。",
   "{value1} allows at most {maximumSelections}.": "{value1} 最多可选 {maximumSelections} 项。",
   "{value1} requires at least {minimumSelections}.": "{value1} 至少要选 {minimumSelections} 项。",
   "← Back to menu": "← 返回菜单",
@@ -1703,7 +1710,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Use {points} points for {amount} off the dishes? Tax is worked out on what’s left. You can’t undo this yourself.":
     "用 {points} 分抵菜品 {amount}？税按剩下的金额计算。确认后您不能自己撤销。",
   "Use {points} points to get {dish} free? You can’t undo this yourself.":
-    "用 {points} 分免费换 {dish}？确认后您不能自己撤销。",
+    "用 {points} 分免费换{dish}？确认后您不能自己撤销。",
   "Use my points": "使用积分",
   "Keep my points": "先不用",
   "Points to use": "要用的积分",
@@ -1711,7 +1718,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Use points": "用积分",
   "You can use points from {points} points, on dishes not already discounted.":
     "满 {points} 分可以使用，只能抵没有打过折的菜。",
-  "{dish} free for {points} points": "{points} 分免费换 {dish}",
+  "{dish} free for {points} points": "{points} 分免费换{dish}",
   "Earned on an order": "点餐获得",
   "Used on a bill": "抵扣账单",
   "Taken back after a refund": "退款后扣回",
@@ -1874,7 +1881,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "This dish just sold out.": "这道菜刚刚售罄了。",
   "This dish was just updated. Check the choices again.": "这道菜刚刚更新了，请重新看一下选项。",
   "Sold out today": "今天已售罄",
-  "Only {name} is left today": "今天只剩 {name}",
+  "Only {name} is left today": "今天只剩{name}",
   "I have an allergy question": "我想问过敏问题",
   "Last call for alcohol: orders close at 2:00.": "酒水最后点单：2:00 截止。",
   "Last call · until 2:00": "最后点单 · 2:00 截止",
@@ -1918,8 +1925,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Choose dishes to pay for": "选择要付的菜",
   "you added": "您加的",
   "{count} left": "还剩 {count} 份",
-  "One less {dish}": "{dish} 少一份",
-  "One more {dish}": "{dish} 多一份",
+  "One less {dish}": "{dish}少一份",
+  "One more {dish}": "{dish}多一份",
   "Amounts include tax.": "金额含税。",
   "Dishes you don’t choose stay for the others at your table. Amounts include tax.":
     "没选的菜留给同桌其他人付。金额含税。",

@@ -1886,7 +1886,7 @@ export function SellableConfigurator({
                 )}
                 {current.has(option.optionReference) && option.maximumQuantity > 1 ? (
                   <label className="configure-option__quantity">
-                    {t("How many")} {option.name}
+                    {t("How many {name}", { name: option.name })}
                     <input
                       type="number"
                       min={1}

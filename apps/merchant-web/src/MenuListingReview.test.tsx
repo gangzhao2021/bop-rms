@@ -70,7 +70,7 @@ it("names each renamed dish and each dish whose allergens changed, beside the pr
   const zh = render(base);
   expect(zh).toContain("改名：牛肉面 → 红烧牛肉面");
   expect(zh).toContain("：英语名称 Green tea → Tea");
-  expect(zh).toContain("过敏原有改动 · 可能含 芝麻");
+  expect(zh).toContain("过敏原有改动 · 可能含芝麻");
 });
 
 it("says when nothing else changed, when it could not compare names, and nothing for a first listing", () => {

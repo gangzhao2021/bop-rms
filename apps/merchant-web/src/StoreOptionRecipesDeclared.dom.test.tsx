@@ -101,7 +101,7 @@ describe("WP-2423 (b9): a choice answered on the Menu page reads as a declaratio
         "不增加过敏原（员工在菜单页申报；不是库存品）",
       );
       expect(declaredSummaryText({ declared: true, contains: ["芥末"], mayContain: [] })).toBe(
-        "增加 芥末（员工在菜单页申报；不是库存品）",
+        "增加芥末（员工在菜单页申报；不是库存品）",
       );
       // b13: allergens the registry names in English read in Chinese by their code (v15 b12 live:
       // "增加 Wheat and triticale、Crustaceans and molluscs" for Har gow).

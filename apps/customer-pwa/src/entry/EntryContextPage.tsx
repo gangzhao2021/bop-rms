@@ -1223,7 +1223,9 @@ function EntryState({
     return (
       <div className="entry-state entry-state--warning" role="alert">
         <StateHeading headingRef={headingRef}>
-          {state.storeDisplayName} {t("isn’t taking orders yet")}
+          {t("{storeDisplayName} isn’t taking orders yet", {
+            storeDisplayName: state.storeDisplayName,
+          })}
         </StateHeading>
         <p>
           {t("This store is still getting ready. Please ask a staff member, or try again later.")}
@@ -1238,7 +1240,9 @@ function EntryState({
     return (
       <div className="entry-state entry-state--warning" role="alert">
         <StateHeading headingRef={headingRef}>
-          {state.storeDisplayName} {t("isn’t taking new orders right now")}
+          {t("{storeDisplayName} isn’t taking new orders right now", {
+            storeDisplayName: state.storeDisplayName,
+          })}
         </StateHeading>
         <p>{t("Please ask a staff member for help.")}</p>
         <RetryAction onRetry={onRetry} />
@@ -1249,7 +1253,9 @@ function EntryState({
     return (
       <div className="entry-state entry-state--warning" role="alert">
         <StateHeading headingRef={headingRef}>
-          {state.storeDisplayName} {t("isn’t taking orders right now")}
+          {t("{storeDisplayName} isn’t taking orders right now", {
+            storeDisplayName: state.storeDisplayName,
+          })}
         </StateHeading>
         <p>
           {state.paused

@@ -352,7 +352,10 @@ function ReceiptContent({
         ) : null}
         {current.taxDetails?.taxRegistrations.map((registration) => (
           <p key={registration.label}>
-            {registration.label} {t("registration no.")} {registration.number}
+            {t("{label} registration no. {number}", {
+              label: registration.label,
+              number: registration.number,
+            })}
           </p>
         ))}
         <p>
@@ -450,14 +453,19 @@ function ReceiptContent({
         <section className="store-contact" aria-labelledby="store-contact-heading">
           <h2 id="store-contact-heading">{t("Questions about this order?")}</h2>
           <p>
-            {t("Ask a staff member at")} {current.storeDisplayName}.
+            {t("Ask a staff member at {storeDisplayName}.", {
+              storeDisplayName: current.storeDisplayName,
+            })}
           </p>
         </section>
       )}
       {/* WP-2423 Q16: the Store's own privacy notice, only once its Owner has entered one. */}
       {view.privacyNoticeUrl ? (
         <p className="receipt-page__privacy">
-          {t("How")} {current.storeDisplayName} {t("handles your contact details:")}{" "}
+          {t("How {storeDisplayName} handles your contact details:", {
+            storeDisplayName: current.storeDisplayName,
+          })}
+          {wordGap()}
           <PrivacyNoticeLink url={view.privacyNoticeUrl} />
         </p>
       ) : null}
