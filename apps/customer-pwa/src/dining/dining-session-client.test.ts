@@ -9,6 +9,7 @@ import {
 import {
   setCustomerCsrfCredential,
   setSettledTable,
+  setEmptyTable,
 } from "../session/customer-transaction-context.js";
 
 const cad = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
@@ -195,6 +196,25 @@ describe("WP-2423 Q8 dining session client", () => {
     } finally {
       setSettledTable(null);
     }
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  // Batch 45 (v15 b44 live): a table staff closed with nothing ordered is said ended, never
+  // "join your table first", and nothing is asked of the server.
+  it("says the visit ended for a guest whose table closed with nothing ordered", async () => {
+    setCustomerCsrfCredential(null);
+    const request = vi.fn();
+    const client = createHttpDiningSessionClient(request as unknown as typeof fetch);
+    setEmptyTable({ tableLabel: "V44 A (TEST)" });
+    try {
+      await expect(client.load()).rejects.toMatchObject({
+        code: "ended-empty",
+        tableLabel: "V44 A (TEST)",
+      });
+    } finally {
+      setEmptyTable(null);
+    }
+    await expect(client.load()).rejects.toMatchObject({ code: "not-joined" });
     expect(request).not.toHaveBeenCalled();
   });
 

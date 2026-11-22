@@ -605,6 +605,21 @@ describe("CUST-DINE-IN-SESSION (WP-2423 Q8)", () => {
     expect(free).not.toContain("Paid by");
   });
 
+  // Batch 45 (v15 b44 live, v-d-V1-390-ended-reload.png): a table closed with nothing ordered
+  // asked the guest for a join code. It says the visit ended and nothing was charged.
+  it("batch 45: a table closed with nothing ordered says its visit ended, never asks for a code", () => {
+    const html = render({ status: "ended-empty", tableLabel: "V44 A (TEST)" });
+    expect(html).toContain("This table’s visit has ended");
+    // A label that already names the table is said as it is (saidTable).
+    expect(html).toContain("Nothing was ordered at V44 A (TEST), so nothing was charged.");
+    expect(html).toContain("New party? Ask staff to seat you, then scan again.");
+    expect(html).not.toMatch(/join code|Join your table first|Join this table/iu);
+    expect(html).not.toContain("Loading receipt");
+    expect(html).not.toContain("Order more from the menu");
+    expect(html).not.toContain("Everything ordered at this table");
+    expect(keepsReadingTable({ status: "ended-empty", tableLabel: "T1" })).toBe(false);
+  });
+
   it("thanks a guest whose table was settled and loads the table's receipt", () => {
     const plain = render({ status: "settled", tableLabel: "DEMO-02" });
     expect(plain).toContain("Thank you for dining with us.");

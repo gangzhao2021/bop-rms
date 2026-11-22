@@ -355,6 +355,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Join your table first": "请先加入您的桌位",
   "Thank you for dining with us.": "谢谢光临",
   "Your meal at table {table} has ended.": "桌号 {table} 的用餐已结束。",
+  "Nothing was ordered at table {table}, so nothing was charged.":
+    "桌号 {table} 没有点单，所以没有扣款。",
   "From table {table}": "来自 {table} 桌",
   "Table {table} · rounds {rounds}": "{table} 桌 · 第 {rounds} 轮",
   "Order more": "再点一些",

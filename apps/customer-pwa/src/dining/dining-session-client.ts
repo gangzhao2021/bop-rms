@@ -6,6 +6,7 @@ import {
   getMovedTableLabel,
   getMovedTableMerged,
   getSettledTableLabel,
+  getEmptyTableLabel,
   setTablePaymentTiming,
 } from "../session/customer-transaction-context.js";
 
@@ -207,8 +208,9 @@ export interface DiningSessionView {
 /** "processing": the table's first round was just sent and its order is still being prepared. */
 /** "moved" (WP-2423 item 8 ⑧): staff moved the party to `tableLabel` after this phone joined. */
 /** "settled": the table was closed and its bill settled while this phone's guest sat at it. */
+/** "ended-empty" (batch 45): staff closed the table with nothing ordered; nothing was charged. */
 export type DiningSessionClientErrorCode =
-  "not-joined" | "processing" | "moved" | "settled" | "unavailable";
+  "not-joined" | "processing" | "moved" | "settled" | "ended-empty" | "unavailable";
 export class DiningSessionClientError extends Error {
   constructor(
     readonly code: DiningSessionClientErrorCode,
@@ -735,6 +737,8 @@ export function createHttpDiningSessionClient(
       if (moved !== null) throw new DiningSessionClientError("moved", moved, getMovedTableMerged());
       const settled = getSettledTableLabel();
       if (settled !== null) throw new DiningSessionClientError("settled", settled);
+      const empty = getEmptyTableLabel();
+      if (empty !== null) throw new DiningSessionClientError("ended-empty", empty);
       throw new DiningSessionClientError("not-joined");
     }
     let response: Response;

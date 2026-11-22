@@ -7,6 +7,7 @@ import {
   isCustomerSessionRestoreUnavailable,
   setCheckoutSessionReference,
   setEndedVisitReceiptAccess,
+  setEmptyTable,
   setMovedTableLabel,
   setSettledTable,
 } from "./customer-transaction-context.js";
@@ -258,6 +259,36 @@ export async function restoreCustomerSession(
         });
       return false;
     }
+    // Batch 45 (v15 b44 live): the table closed with nothing ordered (nothing was charged, no
+    // receipt): which table, and its Store for the header. Nothing to order or pay with.
+    if (
+      current() &&
+      value !== null &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      Object.keys(value).length === 2 &&
+      "schemaVersion" in value &&
+      value.schemaVersion === 1 &&
+      "emptyTable" in value
+    ) {
+      const empty = value.emptyTable;
+      const store =
+        empty !== null && typeof empty === "object" && "store" in empty
+          ? settledStore(empty.store)
+          : undefined;
+      if (
+        empty !== null &&
+        typeof empty === "object" &&
+        !Array.isArray(empty) &&
+        store !== null &&
+        Object.keys(empty).length === (store === undefined ? 1 : 2) &&
+        "tableLabel" in empty &&
+        typeof empty.tableLabel === "string" &&
+        /^[^\p{Cc}\p{Cf}<>{}$]{1,40}$/u.test(empty.tableLabel)
+      )
+        setEmptyTable({ tableLabel: empty.tableLabel, ...(store === undefined ? {} : { store }) });
+      return false;
+    }
     // v15 2026-10-30: staff moved the party after this phone joined: only where it sits now.
     if (
       current() &&
@@ -270,17 +301,24 @@ export async function restoreCustomerSession(
       "movedTable" in value
     ) {
       const moved = value.movedTable;
+      // Batch 45: a newer server names the Store too (for the header).
+      const store =
+        moved !== null && typeof moved === "object" && "store" in moved
+          ? settledStore(moved.store)
+          : undefined;
       if (
         moved !== null &&
         typeof moved === "object" &&
         !Array.isArray(moved) &&
-        Object.keys(moved).length === ("merged" in moved ? 2 : 1) &&
+        store !== null &&
+        Object.keys(moved).length ===
+          1 + ("merged" in moved ? 1 : 0) + (store === undefined ? 0 : 1) &&
         (!("merged" in moved) || moved.merged === true) &&
         "tableLabel" in moved &&
         typeof moved.tableLabel === "string" &&
         /^[^\p{Cc}\p{Cf}<>{}$]{1,40}$/u.test(moved.tableLabel)
       )
-        setMovedTableLabel(moved.tableLabel, "merged" in moved);
+        setMovedTableLabel(moved.tableLabel, "merged" in moved, store ?? null);
       return false;
     }
     if (

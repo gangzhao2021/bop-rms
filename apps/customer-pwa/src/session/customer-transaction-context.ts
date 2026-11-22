@@ -64,10 +64,18 @@ export function getParticipationEnded(): ParticipationEndedReason | null {
 }
 /** WP-2423 item 8 ⑨: staff merged the party into the party at that table (not just moved it). */
 let movedTableMerged = false;
+type RestoredStore = Readonly<{ brandDisplayName: string; storeDisplayName: string }>;
+/** Batch 45 (v15 b44 live): the moved party's Store, when the restore named it (the header). */
+let movedTableStore: RestoredStore | null = null;
 
-export function setMovedTableLabel(value: string | null, merged = false): void {
+export function setMovedTableLabel(
+  value: string | null,
+  merged = false,
+  store: RestoredStore | null = null,
+): void {
   movedTableLabel = value;
   movedTableMerged = value !== null && merged;
+  movedTableStore = value === null || store === null ? null : Object.freeze({ ...store });
 }
 
 export function getMovedTableMerged(): boolean {
@@ -107,6 +115,35 @@ export function setSettledTable(value: SettledTable | null): void {
 /** The settled table's Store (its names only), when the restore said which it is. */
 export function getSettledTableStore(): SettledTable["store"] | null {
   return settledTable?.store ?? null;
+}
+
+/**
+ * Batch 45 (v15 b44 live): staff closed this device's table with nothing ordered (nothing was
+ * charged, there is no receipt). Its label and Store only; nothing to act with. Memory only.
+ */
+interface EmptyTable {
+  readonly tableLabel: string;
+  readonly store?: RestoredStore;
+}
+let emptyTable: EmptyTable | null = null;
+
+export function setEmptyTable(value: EmptyTable | null): void {
+  emptyTable =
+    value === null
+      ? null
+      : Object.freeze({
+          tableLabel: value.tableLabel,
+          ...(value.store === undefined ? {} : { store: Object.freeze({ ...value.store }) }),
+        });
+}
+
+export function getEmptyTableLabel(): string | null {
+  return emptyTable?.tableLabel ?? null;
+}
+
+/** Batch 45: the Store of the table this device's visit ended at (settled, empty or moved). */
+export function getEndedTableStore(): RestoredStore | null {
+  return settledTable?.store ?? emptyTable?.store ?? movedTableStore;
 }
 
 export function getSettledTableLabel(): string | null {
@@ -388,8 +425,10 @@ export function setCustomerCsrfCredential(value: string | null): void {
   if (value !== null) {
     endedVisitReceipt = null;
     movedTableLabel = null;
+    movedTableStore = null;
     participationEnded = null;
     settledTable = null;
+    emptyTable = null;
     unseatedTableScan = false;
     // Batch 43: once this phone has a visit, a reload never waits for the table again.
     unseatedTableWait = null;

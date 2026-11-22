@@ -16,6 +16,10 @@ import {
   setSettledTable,
   getSettledTableReceiptCsrf,
   getSettledTableStore,
+  getEmptyTableLabel,
+  getEndedTableStore,
+  setEmptyTable,
+  getMovedTableMerged,
   isCustomerSessionRestoreUnavailable,
   setCustomerSessionRestoreUnavailable,
 } from "./customer-transaction-context.js";
@@ -25,6 +29,7 @@ afterEach(() => {
   setEndedVisitReceiptAccess(null);
   setMovedTableLabel(null);
   setSettledTable(null);
+  setEmptyTable(null);
 });
 const response = (
   value: unknown = { schemaVersion: 1, csrfToken: "B".repeat(43) },
@@ -343,6 +348,57 @@ it("batch 44: keeps the settled table's Store names for the header, when the res
   expect(getSettledTableStore()).toBeNull();
   setCustomerCsrfCredential("D".repeat(43));
   setCustomerCsrfCredential(null);
+});
+
+// Batch 45 (v15 b44 live, v-d-V1-390-ended-reload.png): staff closed and cleaned a table where
+// nothing was ordered; the restore says so (with the Store for the header) instead of "no visit".
+it("batch 45: keeps a table closed with nothing ordered, and a moved party's Store", async () => {
+  const store = {
+    brandDisplayName: "Test Merchant 2 - not production",
+    storeDisplayName: "Test Merchant 2 Main - not production",
+  };
+  const restore = (value: unknown) =>
+    restoreCustomerSession(vi.fn().mockResolvedValue(response(value)));
+  expect(
+    await restore({ schemaVersion: 1, emptyTable: { tableLabel: "V44 A (TEST)", store } }),
+  ).toBe(false);
+  expect(getCustomerCsrfCredential()).toBeNull();
+  expect(getEmptyTableLabel()).toBe("V44 A (TEST)");
+  expect(getSettledTableLabel()).toBeNull();
+  expect(getSettledTableReceiptCsrf()).toBeNull();
+  expect(getEndedTableStore()).toEqual(store);
+  // A new visit forgets it.
+  setCustomerCsrfCredential("D".repeat(43));
+  expect(getEmptyTableLabel()).toBeNull();
+  expect(getEndedTableStore()).toBeNull();
+  setCustomerCsrfCredential(null);
+  // Without names (an unreadable profile) the table is still known; malformed answers are not.
+  expect(await restore({ schemaVersion: 1, emptyTable: { tableLabel: "V44 A (TEST)" } })).toBe(
+    false,
+  );
+  expect(getEmptyTableLabel()).toBe("V44 A (TEST)");
+  expect(getEndedTableStore()).toBeNull();
+  setEmptyTable(null);
+  for (const bad of [
+    { tableLabel: "<b>" },
+    { tableLabel: "V44 A (TEST)", store: { brandDisplayName: "", storeDisplayName: "x" } },
+    { tableLabel: "V44 A (TEST)", csrfToken: "C".repeat(43) },
+  ]) {
+    expect(await restore({ schemaVersion: 1, emptyTable: bad })).toBe(false);
+    expect(getEmptyTableLabel()).toBeNull();
+  }
+  // A party moved or merged to another table: where it sits, and the Store for the header.
+  expect(
+    await restore({ schemaVersion: 1, movedTable: { tableLabel: "H4", merged: true, store } }),
+  ).toBe(false);
+  expect(getMovedTableLabel()).toBe("H4");
+  expect(getMovedTableMerged()).toBe(true);
+  expect(getEndedTableStore()).toEqual(store);
+  setMovedTableLabel(null);
+  expect(await restore({ schemaVersion: 1, movedTable: { tableLabel: "H4", store } })).toBe(false);
+  expect(getMovedTableLabel()).toBe("H4");
+  expect(getMovedTableMerged()).toBe(false);
+  expect(getEndedTableStore()).toEqual(store);
 });
 
 // M02 (v15 07b7a1b7): a reloaded table page stays at its own table.

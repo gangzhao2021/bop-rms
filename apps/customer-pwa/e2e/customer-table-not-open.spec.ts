@@ -339,7 +339,7 @@ test.describe("@production CUST-ENTRY table not open", () => {
         await expect(main.getByRole("heading", { name: heading })).toBeVisible();
         await expect(main).toContainText(waits);
         await expect(main).not.toContainText(zh ? "入桌码" : "join code");
-        await expect(main).not.toContainText(zh ? "请先加入" : "Join your table first");
+        await expect(main).not.toContainText(zh ? "请先加入您的桌位" : "Join your table first");
         await expect(main.getByRole("link", { name: back })).toBeVisible();
         await backOnFirstScreen(back);
         await fits();
@@ -463,7 +463,7 @@ test.describe("@production CUST-ENTRY table not open", () => {
           page.getByText(zh ? "扫描门店二维码开始点单" : "Scan the location QR code to begin"),
         ).toHaveCount(0);
         await expect(main).not.toContainText(zh ? "入桌码" : "join code");
-        await expect(main).not.toContainText(zh ? "请先加入" : "Join your table first");
+        await expect(main).not.toContainText(zh ? "请先加入您的桌位" : "Join your table first");
         await expect(main).not.toContainText(zh ? "购物车是空的" : "Your cart is empty");
         await expect(main).not.toContainText(zh ? "再扫" : "scan again");
         await expect(
@@ -848,6 +848,137 @@ test.describe("@production CUST-ENTRY table not open", () => {
         await expectNoInternalText(page);
         await page.screenshot({
           path: `test-results/b44-ended-reload-${zh ? "zh" : "en"}-${width}.png`,
+          fullPage: true,
+        });
+        if (zh) await page.getByRole("button", { name: "English" }).click();
+      }
+    });
+
+  // Batch 45 (v15 b44 live, guest-menu-wait-recheck v-d-V1-390-ended-reload.png): guests joined a
+  // table, added a dish and removed it; staff pressed Close and Cleaned with nothing ordered. A
+  // reload of Your table showed "Order / Scan the location QR code to begin" and "Join your table
+  // first. Ask a staff member … for your table's join code". The restore now says the visit
+  // ended with nothing ordered (and names the Store); a moved or merged party's page keeps the
+  // Store's header too.
+  const tm2 = {
+    brandDisplayName: "Test Merchant 2 - not production",
+    storeDisplayName: "Test Merchant 2 Main - not production",
+  };
+  for (const width of [390, 1440])
+    for (const zh of [false, true])
+      test(`a table closed with nothing ordered says the visit ended, after a reload (${zh ? "zh-Hans" : "en"} ${width})`, async ({
+        page,
+      }) => {
+        await page.setViewportSize({ width, height: 900 });
+        const writes: string[] = [];
+        page.on("request", (request) => {
+          if (request.method() !== "GET") writes.push(new URL(request.url()).pathname);
+        });
+        await page.route("**/api/v1/customer/session/csrf", (route) =>
+          route.fulfill({
+            status: 200,
+            headers: { "cache-control": "no-store" },
+            json: { schemaVersion: 1, emptyTable: { tableLabel: "V44 A (TEST)", store: tm2 } },
+          }),
+        );
+        const main = page.getByRole("main");
+        const banner = page.getByRole("banner");
+        await page.goto("/dine-in/session");
+        if (zh) await page.getByRole("button", { name: "切换到中文" }).click();
+        for (const reload of [false, true]) {
+          if (reload) await page.reload();
+          const card = main.getByRole("status").filter({
+            has: page.getByRole("heading", {
+              name: zh ? "这桌的用餐已结束" : "This table’s visit has ended",
+            }),
+          });
+          await expect(card).toBeVisible();
+          await expect(card).toContainText(
+            zh
+              ? "V44 A (TEST) 没有点单，所以没有扣款。"
+              : "Nothing was ordered at V44 A (TEST), so nothing was charged.",
+          );
+          await expect(card).toContainText(
+            zh
+              ? "新的一桌？请让店员带位，开台后再扫一次码。"
+              : "New party? Ask staff to seat you, then scan again.",
+          );
+          await expect(banner.getByRole("heading", { level: 1 })).toHaveText(tm2.storeDisplayName);
+          await expect(banner).toContainText(
+            `${tm2.brandDisplayName} · ${zh ? "堂食" : "Dine in"}`,
+          );
+          await expect(
+            page.getByText(zh ? "扫描门店二维码开始点单" : "Scan the location QR code to begin"),
+          ).toHaveCount(0);
+          await expect(main).not.toContainText(zh ? "入桌码" : "join code");
+          await expect(main).not.toContainText(zh ? "请先加入您的桌位" : "Join your table first");
+          await expect(main.getByRole("region", { name: zh ? "收据" : "Receipt" })).toHaveCount(0);
+          // Laid out inside the phone with room to spare (Linux fonts run wider: about 40 px).
+          const box = await card.boundingBox();
+          expect(box).not.toBeNull();
+          // Inside the 16 px gutter (a fraction of a pixel of rounding allowed).
+          expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(width - 15);
+          const overflow = await page.evaluate(
+            () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+          );
+          expect(overflow).toBeLessThanOrEqual(0);
+          const tight = await card.evaluate((element) =>
+            [...element.querySelectorAll("h2, p")].some(
+              (line) => line.scrollWidth > line.clientWidth,
+            ),
+          );
+          expect(tight).toBe(false);
+          await expectNoInternalText(page);
+          await page.screenshot({
+            path: `test-results/b45-empty-close-${zh ? "zh" : "en"}-${width}${reload ? "-reload" : ""}.png`,
+            fullPage: true,
+          });
+        }
+        // Nothing to order, pay or join with: the page wrote nothing.
+        expect(writes).toEqual([]);
+      });
+
+  for (const width of [390, 1440])
+    test(`a moved or merged party's table page keeps the Store's header (${width})`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 900 });
+      let merged = true;
+      await page.route("**/api/v1/customer/session/csrf", (route) =>
+        route.fulfill({
+          status: 200,
+          headers: { "cache-control": "no-store" },
+          json: {
+            schemaVersion: 1,
+            movedTable: {
+              tableLabel: "V44 B (TEST)",
+              ...(merged ? { merged: true } : {}),
+              store: tm2,
+            },
+          },
+        }),
+      );
+      const main = page.getByRole("main");
+      const banner = page.getByRole("banner");
+      for (const zh of [false, true]) {
+        merged = !zh;
+        await page.goto("/dine-in/session");
+        if (zh) await page.getByRole("button", { name: "切换到中文" }).click();
+        await page.reload();
+        await expect(main.getByRole("alert")).toContainText("V44 B (TEST)");
+        await expect(main).not.toContainText(zh ? "入桌码" : "join code");
+        await expect(banner.getByRole("heading", { level: 1 })).toHaveText(tm2.storeDisplayName);
+        await expect(banner).toContainText(`${tm2.brandDisplayName} · ${zh ? "堂食" : "Dine in"}`);
+        await expect(
+          page.getByText(zh ? "扫描门店二维码开始点单" : "Scan the location QR code to begin"),
+        ).toHaveCount(0);
+        const overflow = await page.evaluate(
+          () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        );
+        expect(overflow).toBeLessThanOrEqual(0);
+        await expectNoInternalText(page);
+        await page.screenshot({
+          path: `test-results/b45-moved-${zh ? "zh" : "en"}-${width}.png`,
           fullPage: true,
         });
         if (zh) await page.getByRole("button", { name: "English" }).click();

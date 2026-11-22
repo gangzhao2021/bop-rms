@@ -28,7 +28,7 @@ import { TablePayPanel, type TablePayStatus } from "./TablePayPanel.js";
 import {
   getGuestTableStarter,
   isGuestTableQuestion,
-  getSettledTableStore,
+  getEndedTableStore,
   getUnseatedTableWait,
   isUnseatedTableScan,
   subscribeCustomerCsrfContext,
@@ -803,6 +803,8 @@ export type DiningSessionState =
   | { readonly status: "moved"; readonly tableLabel: string; readonly merged: boolean }
   /** The table was closed and its bill settled while this phone's guest sat at it. */
   | { readonly status: "settled"; readonly tableLabel: string }
+  /** Batch 45: staff closed the table with nothing ordered (nothing charged, no receipt). */
+  | { readonly status: "ended-empty"; readonly tableLabel: string }
   | {
       readonly status: "unavailable";
       readonly view: DiningSessionView | null;
@@ -931,6 +933,12 @@ export function DiningSessionPage({
         error.tableLabel !== null
       )
         setState({ status: "settled", tableLabel: error.tableLabel });
+      else if (
+        error instanceof DiningSessionClientError &&
+        error.code === "ended-empty" &&
+        error.tableLabel !== null
+      )
+        setState({ status: "ended-empty", tableLabel: error.tableLabel });
       // Keep the last loaded table on screen; say it may be out of date.
       else
         setState((prior) => ({
@@ -1079,6 +1087,25 @@ function SettledTable({
   );
 }
 
+/**
+ * Batch 45 (v15 b44 live): staff closed the guest's table with nothing ordered (guests joined, a
+ * dish may have been added and removed). The visit is over and nothing was charged; there is no
+ * receipt, nothing to join and no code to ask anyone for. A new party is seated first.
+ */
+function EmptyClosedTable({ tableLabel }: { readonly tableLabel: string }) {
+  return (
+    <section className="order-status__card" role="status">
+      <h2>{t("This table’s visit has ended")}</h2>
+      <p>
+        {t("Nothing was ordered at table {table}, so nothing was charged.", {
+          table: saidTable(tableLabel),
+        })}
+      </p>
+      <p>{t("New party? Ask staff to seat you, then scan again.")}</p>
+    </section>
+  );
+}
+
 /** What the cart says it just did (router state; no private data). */
 export type RoundPlaced = "Sent" | "Held";
 const placedRound = (state: unknown): RoundPlaced | null => {
@@ -1158,11 +1185,15 @@ export function DiningSessionScreen({
     !paidOff &&
     tablePay?.checkingOut !== true;
   // Batch 44 (v15 b43 live): after a reload the ended meal's page still names its Store (the
-  // restore says which), never "scan the location QR code to begin".
-  const settledStore = state.status === "settled" ? getSettledTableStore() : null;
+  // restore says which), never "scan the location QR code to begin". Batch 45: so does a table
+  // closed with nothing ordered, and a party moved or merged to another table.
+  const settledStore =
+    state.status === "settled" || state.status === "ended-empty" || state.status === "moved"
+      ? getEndedTableStore()
+      : null;
   const pageStore: CustomerStoreContext | undefined =
     store ??
-    (settledStore === null || settledStore === undefined
+    (settledStore === null
       ? undefined
       : {
           storeName: settledStore.storeDisplayName,
@@ -1183,7 +1214,7 @@ export function DiningSessionScreen({
             : t("Your table")
         }
       >
-        {state.status === "settled" ? null : (
+        {state.status === "settled" || state.status === "ended-empty" ? null : (
           <p>{t("Everything ordered at this table, by you and the other guests.")}</p>
         )}
       </PageHeading>
@@ -1241,6 +1272,7 @@ export function DiningSessionScreen({
       {state.status === "settled" ? (
         <SettledTable tableLabel={state.tableLabel} receipt={settledReceipt} />
       ) : null}
+      {state.status === "ended-empty" ? <EmptyClosedTable tableLabel={state.tableLabel} /> : null}
       {state.status === "not-joined" ? (
         <section className="order-status__card" role="alert">
           {/* WP-2423 DEC-DINING-GUEST-TABLE-START: nobody seats these guests, so nobody is asked. */}
@@ -1404,6 +1436,7 @@ export function DiningSessionScreen({
       {/* A settled table's visit has ended: nothing more to order here. */}
       {/* b39: a table moved or merged away orders on its new table's code, never from here. */}
       {state.status === "settled" ||
+      state.status === "ended-empty" ||
       state.status === "moved" ||
       state.status === "not-joined" ||
       paidOff ? null : tablePay?.checkingOut ? (
