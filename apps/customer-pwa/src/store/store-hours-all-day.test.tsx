@@ -3,7 +3,13 @@ import { createElement } from "react";
 import { afterEach, expect, it } from "vitest";
 import { LanguageRoot } from "../i18n/i18n.js";
 import { parseStoreProfile, type StoreProfile } from "./store-profile-client.js";
-import { StoreIdentityCard, storeHoursLine, storeStatusLine } from "./StoreIdentity.js";
+import {
+  StoreIdentityCard,
+  storeHoursLine,
+  storeHoursLineShown,
+  storeStatusLine,
+} from "./StoreIdentity.js";
+import { formatClockTime, formatStoreLocalTime, keepTimeTogether } from "../journey/format.js";
 import { intervalsText, isOpenAllDay, opensAgainAtMidnight } from "./store-hours-text.js";
 
 /**
@@ -64,9 +70,11 @@ it("a Store open 00:00–23:59:59 reads open 24 hours, with the cut-off it reall
   const hours = hoursOf();
   expect(storeStatusLine(hours)).toEqual({
     label: "Open 24 hours today",
-    detail: "last orders 11:34 p.m.",
+    detail: "last orders 11:34\u00a0p.m.",
   });
   expect(storeHoursLine(hours)).toBe("open 24 hours");
+  // Batch 47 (v15 b46: "Today open 24 hours" under the status that already says it): no line.
+  expect(storeHoursLineShown(hours)).toBeNull();
   const card = renderToStaticMarkup(
     <StoreIdentityCard
       load={Object.assign(async () => parseStoreProfile(live()), {
@@ -75,7 +83,8 @@ it("a Store open 00:00–23:59:59 reads open 24 hours, with the cut-off it reall
     />,
   );
   expect(card).toContain("Open 24 hours today");
-  expect(card).toContain("<span>Today</span> open 24 hours");
+  expect(card.match(/24 hours/gu)).toHaveLength(1);
+  expect(card).not.toContain("store-identity__hours");
   expect(card).not.toContain("11:59");
   expect(card).not.toContain("12:00 a.m.");
   // A day without a cut-off has no last orders to name.
@@ -96,7 +105,8 @@ it("in Chinese a whole day reads 24 小时营业, never 营业至 23:59", () => 
       })}
     />,
   );
-  expect(card).toContain("<span>今天</span> 24 小时营业");
+  expect(card.match(/24 小时营业/gu)).toHaveLength(1);
+  expect(card).not.toContain("store-identity__hours");
   expect(card).not.toContain("23:59");
   expect(card).not.toContain("营业至");
 });
@@ -114,7 +124,9 @@ it("back-to-back periods and 00:00–23:59 cover the day; a gap or a late start 
   // Open past midnight: the end time still matters to a guest, so it stays written out.
   expect(isOpenAllDay([at("00:00:00", "11:59:59"), at("12:00:00", "02:00:00", true)])).toBe(false);
   expect(isOpenAllDay([at("00:00:00", "02:00:00", true)])).toBe(false);
-  expect(intervalsText([at("00:00:00", "02:00:00", true)])).toBe("12:00 a.m.–2:00 a.m. (next day)");
+  expect(intervalsText([at("00:00:00", "02:00:00", true)])).toBe(
+    "12:00\u00a0a.m.–2:00\u00a0a.m. (next day)",
+  );
   expect(isOpenAllDay([at("00:00:00", "22:00:00")])).toBe(false);
   expect(isOpenAllDay([at("00:00:00", "11:00:00"), at("12:00:00", "23:59:59")])).toBe(false);
   expect(isOpenAllDay([at("06:00:00", "23:59:59")])).toBe(false);
@@ -129,7 +141,11 @@ it("back-to-back periods and 00:00–23:59 cover the day; a gap or a late start 
     lastOrdersAt: "21:30:00",
   });
   expect(storeStatusLine(ordinary).label).toBe("Open now");
-  expect(storeStatusLine(ordinary).detail).toContain("until 10:00 p.m.");
+  expect(storeStatusLine(ordinary).detail).toContain("until 10:00\u00a0p.m.");
+  expect(storeHoursLineShown(ordinary)).toEqual({
+    lead: "Today",
+    text: "7:00\u00a0a.m.–10:00\u00a0p.m.",
+  });
 });
 
 it("a whole day closed tomorrow on its weekly hours never promises more than today", () => {
@@ -170,4 +186,27 @@ it("after a 24-hour day's last orders, ordering opens again at midnight, not 'cl
       "2026-11-22",
     ),
   ).toBe(false);
+});
+
+it("batch 47: a 24-hour day while ordering is paused says it once, as one phrase", () => {
+  const paused = hoursOf({ status: "Paused", pausedUntil: "12:30:00" });
+  expect(storeStatusLine(paused).label).toBe("Online ordering paused");
+  expect(storeHoursLineShown(paused)).toEqual({ lead: null, text: "Open 24 hours today" });
+  chinese();
+  expect(storeHoursLineShown(hoursOf())).toBeNull();
+  expect(storeHoursLineShown(paused)).toEqual({ lead: null, text: "今天 24 小时营业" });
+});
+
+it("batch 47: a written time keeps its a.m./p.m. on its line (no-break space)", () => {
+  expect(formatStoreLocalTime("23:34:59", "en-CA")).toBe("11:34\u00a0p.m.");
+  expect(formatClockTime("2026-11-22T04:34:00.000Z", "en-CA")).toMatch(
+    /^\d{1,2}:34\u00a0[ap]\.m\.$/u,
+  );
+  expect(formatStoreLocalTime("23:34:59", "zh-CN")).toBe("23:34");
+  expect(keepTimeTogether("until 9:30 p.m. · last orders 9:00 a.m.")).toBe(
+    "until 9:30\u00a0p.m. · last orders 9:00\u00a0a.m.",
+  );
+  // en-US's own narrow no-break space and words after a time are left as they are.
+  expect(keepTimeTogether("9:30\u202fPM")).toBe("9:30\u202fPM");
+  expect(keepTimeTogether("2 apples")).toBe("2 apples");
 });

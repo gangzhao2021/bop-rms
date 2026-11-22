@@ -95,6 +95,29 @@ async function noSidewaysScroll(page: Page) {
   );
 }
 
+/** Batch 47: a written time and its a.m./p.m. share one line box (a no-break space joins them). */
+async function expectTimeOnOneLine(locator: ReturnType<Page["locator"]>, time: string) {
+  const found = await locator.first().evaluate((element, wanted) => {
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+      const text = node.textContent ?? "";
+      const at = text.indexOf(wanted);
+      if (at < 0) continue;
+      const end = text.slice(at).search(/[ap]\.m\./u);
+      if (end < 0) return { joined: false, lines: 0 };
+      const range = document.createRange();
+      range.setStart(node, at);
+      range.setEnd(node, at + end + 4);
+      return {
+        joined: text.charAt(at + end - 1) !== " ",
+        lines: new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size,
+      };
+    }
+    return { joined: false, lines: 0 };
+  }, time);
+  expect(found).toEqual({ joined: true, lines: 1 });
+}
+
 /** A line that never wraps keeps about 40 px spare for wider Linux fonts. */
 async function fitsWithMargin(page: Page, selector: string) {
   await noSidewaysScroll(page);
@@ -133,7 +156,11 @@ for (const [language, locale] of [
             ? "今天 24 小时营业 · 厨房 23:34 停止接单"
             : "Open 24 hours today · last orders 11:34 p.m.",
         );
-        await expect(card).toContainText(zh ? "今天 24 小时营业" : "Today open 24 hours");
+        // "11:34 p.m." stays on one line, whatever the width (v15 b46 broke it at 390).
+        if (!zh) await expectTimeOnOneLine(card.locator(".store-identity__status"), "11:34");
+        // Batch 47 (v15 b46: "Today open 24 hours" / 今天 24 小时营业 a second time): said once.
+        expect((await card.innerText()).match(zh ? /24 小时营业/gu : /24 hours/gu)).toHaveLength(1);
+        await expect(card.locator(".store-identity__hours")).toHaveCount(0);
         await expect(card).not.toContainText(zh ? "23:59" : "11:59");
         await expect(card).not.toContainText(zh ? "营业至" : "until");
         await noSidewaysScroll(page);
@@ -146,7 +173,7 @@ for (const [language, locale] of [
         await expect(strip).not.toContainText(zh ? "23:59" : "11:59");
         await fitsWithMargin(page, ".store-strip__line");
         const info = page.locator("#store-info");
-        await expect(info).toContainText(zh ? "今天 24 小时营业" : "Today open 24 hours");
+        expect((await info.innerText()).match(zh ? /24 小时营业/gu : /24 hours/gu)).toHaveLength(1);
         await expectNoInternalText(page);
         await page.screenshot({ path: `test-results/b46-all-day-${language}-${width}.png` });
       });

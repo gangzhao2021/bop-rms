@@ -10,7 +10,7 @@ import {
 } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
 import { CustomerPage, PageHeading, type CustomerStoreContext } from "../journey/CustomerPage.js";
-import { formatClockTime, formatMoney } from "../journey/format.js";
+import { formatClockTime, formatMoney, keepTimeTogether } from "../journey/format.js";
 import { staffCancellationReasonText } from "../order-status/OrderStatusPage.js";
 import { orderStatusText } from "../journey/messages.js";
 import {
@@ -60,13 +60,15 @@ export function roundTime(instant: string, now = Date.now(), locale = dateLocale
   if (!Number.isFinite(ms)) return "";
   const day = (value: number) => new Date(value).toDateString();
   if (day(ms) === day(now)) return formatClockTime(instant, locale);
-  return new Intl.DateTimeFormat(locale, {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(new Date(ms));
+  return keepTimeTogether(
+    new Intl.DateTimeFormat(locale, {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(new Date(ms)),
+  );
 }
 
 /** How often the table view re-reads while something at the table is still in progress. */

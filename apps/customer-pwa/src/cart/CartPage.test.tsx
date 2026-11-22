@@ -1241,7 +1241,7 @@ describe("M116: the cart while only looking at a closed Store's menu", () => {
       </MemoryRouter>,
     );
     expect(html).toContain("Lane Dessert isn’t taking orders right now");
-    expect(html).toContain("Closed now · opens today at 12:00 p.m.");
+    expect(html).toContain("Closed now · opens today at 12:00\u00a0p.m.");
     expect(html).toContain('href="/menu"');
     expect(html).toContain("Check again");
     expect(html).not.toContain("couldn’t load your cart");

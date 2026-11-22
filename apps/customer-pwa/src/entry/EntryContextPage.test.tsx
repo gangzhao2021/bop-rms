@@ -329,11 +329,11 @@ describe("WP-2423 Q4 not accepting orders", () => {
     expect(closed).toContain("Synthetic Store isn’t taking orders right now");
     expect(closed).toContain("The store is closed now.");
     // WP-2423 M122: written like every other time on the guest's pages (Chinese: 24-hour).
-    expect(closed).toContain("Today’s hours: 11:00 a.m.–9:30 p.m.");
+    expect(closed).toContain("Today’s hours: 11:00\u00a0a.m.–9:30\u00a0p.m.");
     expect(formatStoreLocalTime("21:30:00", "zh-CN")).toBe("21:30");
     expect(closed).not.toContain("can’t be used");
     // Decision 16: when the Store opens next.
-    expect(closed).toContain("Opens tomorrow at 11:00 a.m.");
+    expect(closed).toContain("Opens tomorrow at 11:00\u00a0a.m.");
     const paused = render({
       kind: "NotAccepting",
       storeDisplayName: "Synthetic Store",
@@ -357,7 +357,7 @@ describe("WP-2423 Q4 not accepting orders", () => {
       localDate: "2026-12-25",
     });
     expect(holiday).toContain("The store is closed today for a holiday.");
-    expect(holiday).toContain("Opens tomorrow at 11:00 a.m.");
+    expect(holiday).toContain("Opens tomorrow at 11:00\u00a0a.m.");
     expect(holiday).not.toContain("Closed today.");
     const later = render({
       kind: "NotAccepting",
@@ -369,7 +369,7 @@ describe("WP-2423 Q4 not accepting orders", () => {
       localDate: "2026-12-25",
     });
     expect(later).toContain("The store is closed today.");
-    expect(later).toContain("Opens Tuesday, Dec 29 at 5:00 p.m.");
+    expect(later).toContain("Opens Tuesday, Dec 29 at 5:00\u00a0p.m.");
   });
 });
 

@@ -248,7 +248,7 @@ describe("M117: after midnight in last night's overnight period", () => {
       },
     },
   });
-  it("says open until 2:00 a.m. and tonight's hours, not the new date's", async () => {
+  it("says open until 2:00\u00a0a.m. and tonight's hours, not the new date's", async () => {
     const profile = parseStoreProfile(late());
     expect(profile.hours?.tonight).toEqual({
       startLocalTime: "11:00:00",
@@ -261,7 +261,7 @@ describe("M117: after midnight in last night's overnight period", () => {
       <StoreIdentityCard load={Object.assign(async () => profile, { last: () => profile })} />,
     );
     // Batch 40 (v15 cross-midnight): it is already the next day, so the line says until when the
-    // Store is open now and then today's own hours, never "Tonight 11:00 a.m.–2:00 a.m. (next day)".
+    // Store is open now and then today's own hours, never "Tonight 11:00\u00a0a.m.–2:00\u00a0a.m. (next day)".
     const line = (markup: string) =>
       /<p class="store-identity__hours">(.*?)<\/p>/u.exec(markup)?.[1]?.replace(/<[^>]+>/gu, "");
     expect(line(html)).toBe(
@@ -391,17 +391,17 @@ describe("WP-2423 store-service-controls (v15 M30/M34) the guest's own service",
     expect(table).toContain("Ordering from your phone is closed now.");
     expect(table).toContain("A staff member can help you.");
   });
-  it("M30 live check: a pause sentence ending with a time like 8:08 a.m. has one period", () => {
+  it("M30 live check: a pause sentence ending with a time like 8:08\u00a0a.m. has one period", () => {
     const hours = { ...publishedHours(), pausedUntil: "08:08:00" };
     const time = formatStoreLocalTime("08:08:00");
-    expect(time).toBe("8:08 a.m.");
+    expect(time).toBe("8:08\u00a0a.m.");
     const pickup = storeServiceNoticeText(hours, "Paused", null, "Pickup");
     expect(pickup).toEqual({
-      headline: "Online pickup ordering is paused until 8:08 a.m.",
-      detail: "You can order at the counter, or come back after 8:08 a.m.",
+      headline: "Online pickup ordering is paused until 8:08\u00a0a.m.",
+      detail: "You can order at the counter, or come back after 8:08\u00a0a.m.",
     });
     expect(storeServiceNoticeText(hours, "Paused", null, "DineIn")?.headline).toBe(
-      "Ordering from your phone is paused until 8:08 a.m.",
+      "Ordering from your phone is paused until 8:08\u00a0a.m.",
     );
     // A time without the abbreviation keeps the sentence's own period.
     const evening = storeServiceNoticeText(
@@ -410,7 +410,7 @@ describe("WP-2423 store-service-controls (v15 M30/M34) the guest's own service",
       null,
       "Pickup",
     );
-    expect(evening?.headline).toBe("Online pickup ordering is paused until 8:08 p.m.");
+    expect(evening?.headline).toBe("Online pickup ordering is paused until 8:08\u00a0p.m.");
   });
   it("M34 review: whenever the cart or checkout holds a new order back, there are words for why", () => {
     const base = publishedHours();

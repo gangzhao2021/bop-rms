@@ -906,7 +906,7 @@ describe("Owner 2026-11-03: one tap for a dish with nothing to choose", () => {
       },
     };
     const html = screen(withOptions, { context: closed });
-    expect(html).toContain("Closed now · opens tomorrow at 11:00 a.m.");
+    expect(html).toContain("Closed now · opens tomorrow at 11:00\u00a0a.m.");
     expect(html).toContain("You can look at the menu. You can order once the store opens.");
     expect(html).toMatch(/href="\/"[^>]*>Check again</u);
     expect(html).toContain("Latte");

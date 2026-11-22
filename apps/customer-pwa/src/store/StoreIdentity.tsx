@@ -161,17 +161,39 @@ function hoursGap(line: string): string {
   return currentLanguage() === "zh-Hans" && /^[\u3400-\u9fff]/u.test(line) ? "" : " ";
 }
 
+/**
+ * The card's "Today …" hours line, or null when the status just above already says it all. Batch
+ * 47 (v15 b46: "Open 24 hours today · last orders 11:34 p.m." then "Today open 24 hours", 今天 24
+ * 小时营业 twice): a Store open 24 hours today has no hours to add while it is open; otherwise
+ * (ordering paused) the line says it as one phrase, "Open 24 hours today".
+ */
+export function storeHoursLineShown(
+  hours: NonNullable<StoreProfile["hours"]>,
+): { readonly lead: string | null; readonly text: string } | null {
+  const allDay =
+    hours.todayKind === null && (hours.tonight ?? null) === null && isOpenAllDay(hours.todayHours);
+  if (allDay)
+    return hours.status === "Open" ? null : { lead: null, text: t("Open 24 hours today") };
+  return { lead: t("Today"), text: storeHoursLine(hours) };
+}
+
 function StoreDetails({ profile }: { readonly profile: StoreProfile }) {
-  const hoursLine = profile.hours === null ? null : storeHoursLine(profile.hours);
+  const hoursLine = profile.hours === null ? null : storeHoursLineShown(profile.hours);
   return (
     <>
-      {profile.hours === null || hoursLine === null ? null : (
+      {profile.hours === null ? null : (
         <>
-          <p className="store-identity__hours">
-            <span>{t("Today")}</span>
-            {hoursGap(hoursLine)}
-            {hoursLine}
-          </p>
+          {hoursLine === null ? null : (
+            <p className="store-identity__hours">
+              {hoursLine.lead === null ? null : (
+                <>
+                  <span>{hoursLine.lead}</span>
+                  {hoursGap(hoursLine.text)}
+                </>
+              )}
+              {hoursLine.text}
+            </p>
+          )}
           {profile.hours.upcoming.length === 0 ? null : (
             <div className="store-identity__upcoming">
               <h3>{t("Holidays and special hours this week")}</h3>

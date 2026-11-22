@@ -47,6 +47,15 @@ export function formatLocalityLine(address: {
 }
 
 /**
+ * Batch 47 (v15 b46: the store card at 390 wrapped "last orders 11:34" with "p.m." alone on the
+ * next line): a written time keeps its a.m./p.m. on its line. en-CA puts an ordinary space before
+ * "p.m."; it becomes a no-break space (en-US already writes U+202F).
+ */
+export function keepTimeTogether(text: string): string {
+  return text.replace(/(\d) (?=[ap]\.m\.|[AP]M\b)/gu, "$1\u00a0");
+}
+
+/**
  * "5:10 p.m." in the device's own zone: the customer is standing at the Store. Canadian and other
  * locales end the time with an abbreviation period, so a sentence that ends with a formatted time
  * must use {@link endSentence} instead of appending "." itself ("9:46 p.m.." otherwise).
@@ -54,8 +63,8 @@ export function formatLocalityLine(address: {
 export function formatClockTime(instant: string, locale = dateLocale()): string {
   const ms = Date.parse(instant);
   if (!Number.isFinite(ms)) return "";
-  return new Intl.DateTimeFormat(locale, { hour: "numeric", minute: "2-digit" }).format(
-    new Date(ms),
+  return keepTimeTogether(
+    new Intl.DateTimeFormat(locale, { hour: "numeric", minute: "2-digit" }).format(new Date(ms)),
   );
 }
 
@@ -78,19 +87,23 @@ export function formatRetryClockTime(instant: string, locale = dateLocale()): st
 export function formatStoreLocalTime(value: string, locale = dateLocale()): string {
   const match = /^([01][0-9]|2[0-3]):([0-5][0-9])/u.exec(value);
   if (!match) return "";
-  return new Intl.DateTimeFormat(locale, {
-    hour: "numeric",
-    minute: "2-digit",
-    timeZone: "UTC",
-  }).format(new Date(Date.UTC(2000, 0, 1, Number(match[1]), Number(match[2]))));
+  return keepTimeTogether(
+    new Intl.DateTimeFormat(locale, {
+      hour: "numeric",
+      minute: "2-digit",
+      timeZone: "UTC",
+    }).format(new Date(Date.UTC(2000, 0, 1, Number(match[1]), Number(match[2])))),
+  );
 }
 
 /** "2026-09-02, 12:51 p.m." for records such as receipts. End a sentence with {@link endSentence}. */
 export function formatDateTime(instant: string, locale = dateLocale()): string {
   const ms = Date.parse(instant);
   if (!Number.isFinite(ms)) return "";
-  return new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(
-    new Date(ms),
+  return keepTimeTogether(
+    new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(
+      new Date(ms),
+    ),
   );
 }
 
