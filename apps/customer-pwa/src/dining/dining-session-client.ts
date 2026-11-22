@@ -729,6 +729,11 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
 
 export function createHttpDiningSessionClient(
   request: typeof globalThis.fetch = globalThis.fetch,
+  /**
+   * Batch 47: a tab that only checks whether the phone is still at its table (table-visit-watch)
+   * reads without changing what the page knows of how the table pays.
+   */
+  options: { readonly learnsTiming?: boolean } = {},
 ): DiningSessionClient {
   const once = async (signal?: AbortSignal) => {
     const csrf = getCustomerCsrfCredential();
@@ -809,7 +814,7 @@ export function createHttpDiningSessionClient(
     if (!current()) throw new DiningSessionClientError("not-joined");
     const view = parseDiningSessionView(payload);
     // WP-2423 item 6: a table's timing is fixed when it opens, so the menu has learned it for the cart.
-    setTablePaymentTiming(view.paymentTiming);
+    if (options.learnsTiming !== false) setTablePaymentTiming(view.paymentTiming);
     return view;
   };
   return Object.freeze({

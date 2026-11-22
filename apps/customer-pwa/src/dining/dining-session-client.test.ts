@@ -596,3 +596,30 @@ describe("batch 41: a one-off table read waits out 'still being prepared'", () =
     expect(load).toHaveBeenCalledTimes(1);
   });
 });
+
+// Batch 47: the open tabs' "still at the table?" read (table-visit-watch) never changes how the
+// page thinks the table pays (a pay-at-the-end refusal taught the cart "Place order").
+it("batch 47: a read that only checks the table leaves the known table timing alone", async () => {
+  const { getTablePaymentTiming, setTablePaymentTiming } =
+    await import("../session/customer-transaction-context.js");
+  setCustomerCsrfCredential("A".repeat(43));
+  setTablePaymentTiming("PayLater");
+  const answer = () =>
+    new Response(
+      JSON.stringify({
+        ...payload(),
+        session: { ...payload().session, paymentTiming: "PayFirst" },
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  await createHttpDiningSessionClient(
+    vi.fn(async () => answer()),
+    {
+      learnsTiming: false,
+    },
+  ).load();
+  expect(getTablePaymentTiming()).toBe("PayLater");
+  await createHttpDiningSessionClient(vi.fn(async () => answer())).load();
+  expect(getTablePaymentTiming()).toBe("PayFirst");
+  setCustomerCsrfCredential(null);
+});

@@ -39,7 +39,11 @@ export function useTableVisitEndWatch({
   const check = useRef<(() => void) | null>(null);
   useEffect(() => {
     if (!active) return;
-    const reader = provided ?? (fallback.current ??= createHttpDiningSessionClient());
+    const reader =
+      provided ??
+      (fallback.current ??= createHttpDiningSessionClient(globalThis.fetch, {
+        learnsTiming: false,
+      }));
     let stopped = false;
     let pending: AbortController | null = null;
     let lastAt = Number.NEGATIVE_INFINITY;
