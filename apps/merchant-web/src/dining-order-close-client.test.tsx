@@ -144,6 +144,8 @@ it("WP-2423 B759: a refusal is told apart from a missing permission, with what i
   expect(notReady?.code).toBe("NotReady");
   expect(notReady?.reasons).toEqual(["REFUND_PENDING"]);
   expect((await refused(409, { error: "order_version_conflict" }))?.code).toBe("Conflict");
+  // Batch 46 (v15 b45 live): another device closed the table first; never "a payment came in".
+  expect((await refused(409, { error: "order_already_closed" }))?.code).toBe("AlreadyClosed");
   expect((await refused(403, { error: "order_close_permission_denied" }))?.code).toBe(
     "PermissionDenied",
   );

@@ -247,6 +247,8 @@ type Outcome =
   | null
   | "Unknown"
   | "Refused"
+  /** Batch 46: another device closed or changed the table first (a race, not a payment). */
+  | "ChangedElsewhere"
   | "Denied"
   | "Gone"
   | { readonly kind: "NotReady"; readonly reasons: readonly string[] };
@@ -266,6 +268,7 @@ export function TableSessionClose({
   onBusy,
   onClosed,
   onRefresh,
+  onChangedElsewhere,
   fetcher,
   timeZone,
   canResolveGuestsLeft = true,
@@ -292,6 +295,12 @@ export function TableSessionClose({
   readonly onClosed: () => void;
   /** After a refusal: re-read the tables (a step may have stopped ordering already). */
   readonly onRefresh: () => void;
+  /**
+   * Batch 46 (v15 b45 live): another device closed or changed this table at the same moment. Its
+   * close may not have committed yet when this device's refusal comes back, so the tables are read
+   * again until it settles (bounded), instead of once.
+   */
+  readonly onChangedElsewhere?: (() => void) | undefined;
   readonly fetcher?: typeof fetch | undefined;
 }) {
   const [check, setCheck] = useState<Check>(
@@ -460,6 +469,12 @@ export function TableSessionClose({
       // Refused: start over from what the table shows now. Steps already done (ordering stopped)
       // are read back from the table, so pressing Close again continues from there.
       steps.current = { done: new Set() };
+      // Batch 46 (v15 b45 live): when two devices press Close together, the one that loses is
+      // told the Order is already closed, or (at the table's own step) that the table changed.
+      // That is the other device's close, never a payment or refund.
+      const elsewhere =
+        (code === "AlreadyClosed" && error instanceof DiningOrderCloseClientError) ||
+        (code === "Conflict" && error instanceof DiningSessionCloseClientError);
       setOutcome(
         code === "PermissionDenied"
           ? "Denied"
@@ -467,11 +482,14 @@ export function TableSessionClose({
             ? "Gone"
             : code === "NotReady" && error instanceof DiningOrderCloseClientError
               ? { kind: "NotReady", reasons: error.reasons }
-              : "Refused",
+              : elsewhere
+                ? "ChangedElsewhere"
+                : "Refused",
       );
       onBusy(false);
       setAttempt((value) => value + 1);
       onRefresh();
+      if (elsewhere) onChangedElsewhere?.();
     } finally {
       if (pending.current === controller) pending.current = null;
       setSubmitting(false);
@@ -580,10 +598,16 @@ export function TableSessionClose({
             "This table's visit has already ended, or it isn't at this store. The tables have been read again.",
           )}
         </p>
+      ) : outcome === "ChangedElsewhere" ? (
+        <p role="alert">
+          {t(
+            "This table was just closed or changed on another device, so it wasn't closed here. It has been read again: check it before trying again.",
+          )}
+        </p>
       ) : outcome === "Refused" ? (
         <p role="alert">
           {t(
-            "The table wasn't closed: it changed while it was being closed (for example a payment or refund came in). It has been checked again; review it and try again.",
+            "The table wasn't closed: its order changed while it was being closed. It has been checked again; review it and try again.",
           )}{" "}
           {ordersLink}
         </p>

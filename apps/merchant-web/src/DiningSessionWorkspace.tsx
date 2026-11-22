@@ -152,6 +152,12 @@ export type TableFloorState = "Available" | "Unavailable" | "NeedsCleaning" | "S
  * WP-2423 follow-up: the table's real floor state. Its operational state only says whether the
  * table is blocked, so a table with an open session is "Seated", never "Available".
  */
+/**
+ * Batch 46: after another device closed or changed a table first, when (ms after each previous read)
+ * the tables are read again until its visit has left the table: about 6 s in all, then it stops.
+ */
+export const changedElsewhereRereadsMs = [300, 700, 1500, 3500] as const;
+
 export function tableFloorStatus(
   table: Pick<
     StaffDiningTable,
@@ -791,9 +797,9 @@ function DiningSessionWorkspaceBody({
    * v15 b12 (tables-list-paging): every table of the Store is read each time, page after page, so
    * "Needs action" and every count cover the whole floor, never only the first tables listed.
    */
-  const load = async (background = false) => {
+  const load = async (background = false): Promise<readonly StaffDiningTable[] | undefined> => {
     if ((pending.current && !pending.current.signal.aborted) || state === "Unknown" || hostLocked)
-      return;
+      return undefined;
     const controller = new AbortController();
     pending.current = controller;
     setState("Loading");
@@ -823,6 +829,7 @@ function DiningSessionWorkspaceBody({
         guestStartsNow.current = loaded.guestTableStart;
         if (loaded.items.length === 0) setMessage(noTablesMessage);
         void loadFacts(items, controller.signal);
+        return items;
       }
     } catch (error) {
       if (!controller.signal.aborted) {
@@ -856,10 +863,47 @@ function DiningSessionWorkspaceBody({
         setState("Idle");
       }
     }
+    return undefined;
   };
   const loadRef = useRef(load);
   loadRef.current = load;
   const reread = () => void loadRef.current(true);
+  // Batch 46 (v15 b45 live): two devices pressed Close on one table. The loser's refusal came back
+  // 7-66 ms before the winner's close committed, so its one re-read still showed the table open
+  // (with an active Close) for as long as staff looked. The tables are read again a few times,
+  // further apart, until this visit has left the table; then it says the other device closed it.
+  const settling = useRef<AbortController | null>(null);
+  useEffect(() => () => settling.current?.abort(), []);
+  const settleChangedElsewhere = (table: StaffDiningTable, frees: boolean) => {
+    settling.current?.abort();
+    const controller = new AbortController();
+    settling.current = controller;
+    const visit = table.currentDiningSessionReference;
+    void (async () => {
+      for (const wait of changedElsewhereRereadsMs) {
+        await new Promise((resolve) => setTimeout(resolve, wait));
+        if (controller.signal.aborted) return;
+        const items = await loadRef.current(true);
+        if (controller.signal.aborted) return;
+        const now = items?.find((entry) => entry.tableReference === table.tableReference);
+        if (now === undefined) continue;
+        if (now.currentDiningSessionReference !== visit) {
+          setResult({
+            text: frees
+              ? t("Table {table} was closed on another device and is free for the next guest.", {
+                  table: saidTable(table.stableLabel),
+                })
+              : t("Table {table} was closed on another device. Clean it, then mark it cleaned.", {
+                  table: saidTable(table.stableLabel),
+                }),
+          });
+          return;
+        }
+      }
+    })().finally(() => {
+      if (settling.current === controller) settling.current = null;
+    });
+  };
   useStaleRetry(stale?.attempts ?? firstReadFailures, reread);
   // v15 cbff9d6f: no reads once this screen's sign-in has ended.
   const live = useStaffSessionLive();
@@ -1657,6 +1701,12 @@ function DiningSessionWorkspaceBody({
                 setCheckoutRevision((value) => value + 1);
                 reread();
               }}
+              onChangedElsewhere={() =>
+                settleChangedElsewhere(
+                  selected,
+                  selected.guestStart != null && guestStarts !== null,
+                )
+              }
               onClosed={() => {
                 const frees = selected.guestStart != null && guestStarts !== null;
                 void loadRef.current(true).then(() =>
@@ -1760,6 +1810,7 @@ function TablePanel({
   onAvailability,
   onChanged,
   onClosed,
+  onChangedElsewhere,
   onReread,
   onSettled,
   hostTransferDisabled,
@@ -1809,6 +1860,8 @@ function TablePanel({
   readonly onAvailability: (action: "SetBlock" | "ClearBlock") => void;
   readonly onChanged: () => void;
   readonly onClosed: () => void;
+  /** Batch 46: another device closed or changed this table first; read until it settles. */
+  readonly onChangedElsewhere: () => void;
 }) {
   const seated = table.currentDiningSessionReference !== null;
   const notices = tableAttentionNotices(table, now, timeZone, canCloseSessions);
@@ -2016,6 +2069,7 @@ function TablePanel({
           onBusy={() => undefined}
           onClosed={onClosed}
           onRefresh={onReread}
+          onChangedElsewhere={onChangedElsewhere}
         />
       ) : seated && canCloseSessions ? (
         // v15 live check (4a): a table just opened is read again before its checkout and close

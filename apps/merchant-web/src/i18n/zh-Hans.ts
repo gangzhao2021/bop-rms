@@ -4889,8 +4889,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这桌的用餐已经结束，或不在本店。已重新读取桌台。",
   "This table's visit has already ended, or it isn't at this store. Refresh to see the tables as they are now.":
     "这桌的用餐已经结束，或不在本店。请刷新，查看桌台现在的情况。",
-  "The table wasn't closed: it changed while it was being closed (for example a payment or refund came in). It has been checked again; review it and try again.":
-    "桌台未关闭：关台过程中它发生了变化（例如收到付款或退款）。已重新检查；请核对后重试。",
+  "The table wasn't closed: its order changed while it was being closed. It has been checked again; review it and try again.":
+    "桌台未关闭：关台过程中这桌的订单有了变化。已重新检查，请核对后重试。",
+  "This table was just closed or changed on another device, so it wasn't closed here. It has been read again: check it before trying again.":
+    "这桌刚在另一台设备上关台或有改动，这里没有关台。已重新读取，请核对后再试。",
   "The tax this Store charges on each product for pickup and dine-in. Rates change only through the tax configuration, with registration and professional review evidence. Source as of":
     "本店对每件商品在自取和堂食时收取的税。税率只能通过附带登记和专业审核证明的税务配置更改。数据截至",
   "The template changed or the original save conflicts. Refresh or recover the original save; no version has been silently substituted.":
@@ -6605,6 +6607,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "No tables here.": "这里没有桌台。",
   "Table {table} is closed. Clean it, then mark it cleaned.":
     "{table} 号桌已关台。清洁后点“已清洁”。",
+  "Table {table} was closed on another device. Clean it, then mark it cleaned.":
+    "{table} 号桌已在另一台设备上关台。清洁后点“已清洁”。",
+  "Table {table} was closed on another device and is free for the next guest.":
+    "{table} 桌已在另一台设备上关闭，下一位客人可以直接用。",
   "Choose a table to serve it, take its payment or close it.": "选一桌来上菜、收款或关台。",
   "open {open}": "已开 {open}",
   "pays at the end": "最后一起付",

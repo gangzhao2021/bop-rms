@@ -13,7 +13,14 @@ export interface DiningOrderCloseCommand {
 }
 export class DiningOrderCloseClientError extends Error {
   constructor(
-    readonly code: "PermissionDenied" | "NotReady" | "Conflict" | "Unavailable" | "OutcomeUnknown",
+    readonly code:
+      | "PermissionDenied"
+      | "NotReady"
+      | "Conflict"
+      /** Batch 46: the Order was closed meanwhile (another device closed the table first). */
+      | "AlreadyClosed"
+      | "Unavailable"
+      | "OutcomeUnknown",
     /** NotReady: the server's reason codes (what is still outstanding). */
     readonly reasons: readonly string[] = [],
   ) {
@@ -36,6 +43,8 @@ async function refusal(response: Response): Promise<DiningOrderCloseClientError>
       )
     )
       return new DiningOrderCloseClientError("NotReady", Object.freeze([...body.reasons]));
+    if (body?.error === "order_already_closed")
+      return new DiningOrderCloseClientError("AlreadyClosed");
   } catch {
     // An unreadable body is still a refusal: re-check the table.
   }
