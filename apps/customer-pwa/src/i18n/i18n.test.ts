@@ -175,7 +175,7 @@ it("batch 42 (v15 b41 live): a table named in Latin letters keeps a space where 
         table: saidTable("包间"),
         storeDisplayName: "面馆",
       }),
-    ).toBe("面馆 的包间 还没开台");
+    ).toBe("面馆 的包间还没开台");
   } finally {
     renderToStaticMarkup(createElement(LanguageRoot, { initial: "en", children: () => null }));
   }
@@ -260,4 +260,48 @@ it("batch 40 (v15 cross-midnight): Chinese sentences end with “。”, never a
   expect(t("This round will be cancelled at {value1}. ", { value1: "21:46" })).toBe(
     "This round will be cancelled at 21:46. ",
   );
+});
+
+// Batch 46 (v15 b45 live, b-merged-G4-390.png): the merged page wrote "请扫 E45 A (TEST)的桌台二维码"
+// (no space: the name ends in ")") while the empty-close card wrote "E45 A (TEST) 没有点单". One
+// rule now: a half-width edge of a name meets Chinese text with one space, a Chinese name with
+// none (whatever space the sentence had), full-width punctuation with none.
+it("batch 46 (v15 b45 live): one spacing rule around a table name in every Chinese dining sentence", () => {
+  renderToStaticMarkup(createElement(LanguageRoot, { initial: "zh-Hans", children: () => null }));
+  try {
+    const merged = (label: string) =>
+      t(
+        "Staff joined your party to table {table}. Everything your table ordered is on that table's bill. Scan the code on table {table} to keep ordering and paying together.",
+        { table: saidTable(label) },
+      );
+    expect(merged("E45 A (TEST)")).toBe(
+      "店员已把您并到 E45 A (TEST)，您点过的菜都在那桌的账单上。请扫 E45 A (TEST) 的桌台二维码继续点餐和一起付款。",
+    );
+    expect(merged("包间")).toBe(
+      "店员已把您并到包间，您点过的菜都在那桌的账单上。请扫包间的桌台二维码继续点餐和一起付款。",
+    );
+    expect(merged("12")).toBe(
+      "店员已把您并到 12 桌，您点过的菜都在那桌的账单上。请扫 12 桌的桌台二维码继续点餐和一起付款。",
+    );
+    const empty = (label: string) =>
+      t("Nothing was ordered at table {table}, so nothing was charged.", {
+        table: saidTable(label),
+      });
+    expect(empty("E45 A (TEST)")).toBe("E45 A (TEST) 没有点单，所以没有扣款。");
+    expect(empty("包间")).toBe("包间没有点单，所以没有扣款。");
+    expect(t("Your meal at table {table} has ended.", { table: saidTable("E45 A (TEST)") })).toBe(
+      "E45 A (TEST) 的用餐已结束。",
+    );
+    expect(t("Your table moved to table {table}", { table: saidTable("E45 A (TEST)") })).toBe(
+      "您这桌已换到 E45 A (TEST)",
+    );
+  } finally {
+    renderToStaticMarkup(createElement(LanguageRoot, { initial: "en", children: () => null }));
+  }
+  // English keeps the sentence's own spaces.
+  expect(
+    t("Nothing was ordered at table {table}, so nothing was charged.", {
+      table: saidTable("E45 A (TEST)"),
+    }),
+  ).toBe("Nothing was ordered at E45 A (TEST), so nothing was charged.");
 });

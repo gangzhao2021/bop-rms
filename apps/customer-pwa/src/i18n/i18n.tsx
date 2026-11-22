@@ -37,8 +37,11 @@ function fill(text: string, values: Readonly<Record<string, string | number>> | 
 // v15 2026-11-01: as on the staff screens, a table the owner named is said as they wrote it.
 const NAME_OPEN = "\uE000",
   NAME_CLOSE = "\uE001";
+// Batch 46 (v15 b45 live): the spaces next to a name are part of the match, so one rule decides
+// them wherever the sentence put them ("请扫 E45 A (TEST)的桌台" and "E45 A (TEST) 没有点单"
+// read alike).
 const namedTable = new RegExp(
-  `(?:[Tt]able |桌号 ?)?${NAME_OPEN}([^${NAME_CLOSE}]*)${NAME_CLOSE}(?: ?桌)?`,
+  `( ?)(?:[Tt]able |桌号 ?)?${NAME_OPEN}([^${NAME_CLOSE}]*)${NAME_CLOSE}(?: ?桌)?( ?)`,
   "gu",
 );
 /** "Table 12", "table A1": the word only with a number or code; "Patio 3" as written. */
@@ -46,19 +49,25 @@ export function saidTable(label: string): string {
   return /^[A-Za-z0-9-]*[0-9][A-Za-z0-9-]*$/u.test(label) ? label : NAME_OPEN + label + NAME_CLOSE;
 }
 // Batch 42 (v15 b41 live "…not production 的L41V A (TEST) 还没开台"): a name said as written keeps
-// a space where it meets Chinese text and it starts or ends in Latin letters or digits, as a
-// Chinese sentence writes "的 L41V A (TEST) 还没开台"; Chinese names and punctuation get none.
+// a space where it meets Chinese text and it starts or ends in Latin letters, digits or other
+// half-width signs, as a Chinese sentence writes "的 L41V A (TEST) 还没开台"; Chinese names get
+// none, and nor does full-width punctuation ("并到 E45 A (TEST)，"). Batch 46: a name ending
+// in ")" is half-width too ("扫 E45 A (TEST) 的桌台"), and a sentence's own space next to a
+// Chinese name goes ("包间没有点单"). Elsewhere (English) the sentence's spaces stay as written.
 const han = /\p{Script=Han}/u;
-const latinEdge = /[\p{Script=Latin}0-9]/u;
+const latinEdge = /[!-~\p{Script=Latin}]/u;
 const said = (text: string) =>
   text.includes(NAME_OPEN)
-    ? text.replace(namedTable, (_whole, name: string, offset: number, whole: string) => {
-        const end = offset + _whole.length;
-        const before =
-          offset > 0 && han.test(whole[offset - 1] ?? "") && latinEdge.test(name[0] ?? "");
-        const after = han.test(whole[end] ?? "") && latinEdge.test(name.at(-1) ?? "");
-        return (before ? " " : "") + name + (after ? " " : "");
-      })
+    ? text.replace(
+        namedTable,
+        (whole: string, lead: string, name: string, trail: string, offset: number, all: string) => {
+          const before = all[offset - 1] ?? "";
+          const after = all[offset + whole.length] ?? "";
+          const gap = (neighbour: string, edge: string, written: string) =>
+            han.test(neighbour) ? (latinEdge.test(edge) ? " " : "") : written;
+          return gap(before, name[0] ?? "", lead) + name + gap(after, name.at(-1) ?? "", trail);
+        },
+      )
     : text;
 
 /** The customer's wording of an English text, in the chosen language. */
