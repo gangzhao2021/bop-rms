@@ -732,6 +732,8 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
  * once, and the next read a moment later answered the table. A read that fails for a reason the
  * server can't name (a 5xx without "still being prepared", or a dropped connection while online)
  * is read once more after this wait, quietly, before the page says it couldn't load the table.
+ * Refusals (any 4xx, an answer that isn't the table) are never read again, and neither is a read
+ * that ran out its own time: the guest is told after one wait, not two.
  */
 const quietRetryMs = 1000;
 
@@ -745,6 +747,13 @@ export function createHttpDiningSessionClient(
   options: { readonly learnsTiming?: boolean; readonly quietRetryMs?: number } = {},
 ): DiningSessionClient {
   const retryWaitMs = options.quietRetryMs ?? quietRetryMs;
+  // Only these failures (the server's own fault, or a connection that dropped) are read again.
+  const readAgain = new WeakSet<DiningSessionClientError>();
+  const outage = () => {
+    const error = new DiningSessionClientError("unavailable");
+    readAgain.add(error);
+    return error;
+  };
   const once = async (signal?: AbortSignal) => {
     const csrf = getCustomerCsrfCredential();
     const current = captureCustomerCsrfContext();
@@ -776,8 +785,11 @@ export function createHttpDiningSessionClient(
         headers: { accept: "application/json", "x-csrf-token": csrf },
         ...(signal === undefined ? {} : { signal }),
       });
-    } catch {
-      throw new DiningSessionClientError("unavailable");
+    } catch (error) {
+      // An abort here, with the page still open, is this read's own 15 s limit: not read again.
+      const timedOut =
+        error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError");
+      throw timedOut ? new DiningSessionClientError("unavailable") : outage();
     }
     if (!current()) throw new DiningSessionClientError("not-joined");
     if (response.status === 404 || response.status === 403 || response.status === 401)
@@ -814,6 +826,7 @@ export function createHttpDiningSessionClient(
         );
       }
     }
+    if (response.status >= 500) throw outage();
     if (response.status !== 200) throw new DiningSessionClientError("unavailable");
     let payload: unknown;
     try {
@@ -833,7 +846,7 @@ export function createHttpDiningSessionClient(
     } catch (error) {
       if (
         !(error instanceof DiningSessionClientError) ||
-        error.code !== "unavailable" ||
+        !readAgain.has(error) ||
         signal?.aborted === true ||
         (typeof navigator !== "undefined" && navigator.onLine === false)
       )

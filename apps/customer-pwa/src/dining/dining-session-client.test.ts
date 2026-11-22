@@ -334,6 +334,57 @@ describe("WP-2423 Q8 dining session client", () => {
       expect(request).toHaveBeenCalledTimes(2);
     });
 
+    it("refusals are read once only: 400, 409 that is not a move, 429, and a 200 that isn't JSON", async () => {
+      setCustomerCsrfCredential("c".repeat(43));
+      // Were any of them read again, the second read would answer the table.
+      const request = vi.fn<typeof fetch>(async () => answered());
+      const client = createHttpDiningSessionClient(request, { quietRetryMs: 0 });
+      const refusals = [
+        new Response(JSON.stringify({ error: { code: "request_origin_refused" } }), {
+          status: 400,
+        }),
+        new Response(JSON.stringify({ error: { code: "dining_session_conflict" } }), {
+          status: 409,
+        }),
+        new Response("{}", { status: 429, headers: { "retry-after": "1" } }),
+        new Response("<html>", { status: 200 }),
+      ];
+      for (const [index, refusal] of refusals.entries()) {
+        request.mockResolvedValueOnce(refusal);
+        await expect(client.load()).rejects.toMatchObject({ code: "unavailable" });
+        expect(request).toHaveBeenCalledTimes(index + 1);
+      }
+    });
+
+    it("a host that never answers is given up after one 15 s wait, not read again", async () => {
+      vi.useFakeTimers();
+      try {
+        setCustomerCsrfCredential("c".repeat(43));
+        const request = vi.fn<typeof fetch>(
+          (_input, init) =>
+            new Promise<Response>((_resolve, reject) => {
+              init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), {
+                once: true,
+              });
+            }),
+        );
+        const client = createHttpDiningSessionClient(request, { quietRetryMs: 1000 });
+        let settled = false;
+        const result = client.load().then(
+          (value) => ((settled = true), value),
+          (error: unknown) => ((settled = true), error),
+        );
+        await vi.advanceTimersByTimeAsync(14_999);
+        expect(settled).toBe(false);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(await result).toMatchObject({ code: "unavailable" });
+        await vi.advanceTimersByTimeAsync(20_000);
+        expect(request).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it("a page that went away during the wait reads nothing more", async () => {
       setCustomerCsrfCredential("c".repeat(43));
       const request = vi.fn<typeof fetch>(async () => unavailable());
