@@ -246,7 +246,9 @@ describe("WP-2423 Q8 dining session client", () => {
   it("sends only the CSRF header to the fixed route and maps refusals to not joined", async () => {
     setCustomerCsrfCredential("c".repeat(43));
     const request = vi.fn(async () => new Response(JSON.stringify(payload()), { status: 200 }));
-    const client = createHttpDiningSessionClient(request as unknown as typeof fetch);
+    const client = createHttpDiningSessionClient(request as unknown as typeof fetch, {
+      quietRetryMs: 0,
+    });
     await expect(client.load()).resolves.toMatchObject({ tableLabel: "12" });
     const [url, init] = request.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe("/api/v1/dine-in/session");
@@ -254,9 +256,110 @@ describe("WP-2423 Q8 dining session client", () => {
     request.mockResolvedValueOnce(new Response("{}", { status: 404 }));
     await expect(client.load()).rejects.toMatchObject({ code: "not-joined" });
     request.mockResolvedValueOnce(new Response("{}", { status: 503 }));
+    request.mockResolvedValueOnce(new Response("{}", { status: 503 }));
     await expect(client.load()).rejects.toMatchObject({ code: "unavailable" });
     request.mockRejectedValueOnce(new TypeError("offline"));
+    request.mockRejectedValueOnce(new TypeError("offline"));
     await expect(client.load()).rejects.toMatchObject({ code: "unavailable" });
+  });
+
+  // Batch 47 (v15 b46 live): while four guests joined TL46R A-D and ordered, one table read
+  // answered 503 and the next, a moment later, answered the table. The guest's read is made once
+  // more, quietly, before the page says it couldn't load the table.
+  describe("batch 47: a read that fails without a reason is made once more, quietly", () => {
+    const unavailable = () =>
+      new Response(
+        JSON.stringify({
+          schemaVersion: 1,
+          error: {
+            code: "dining_session_service_unavailable",
+            messageKey: "customer.dining.session.service_unavailable",
+          },
+        }),
+        { status: 503, headers: { "retry-after": "5" } },
+      );
+    const answered = () => new Response(JSON.stringify(payload()), { status: 200 });
+
+    it("a 503 then the table: the guest gets the table, from two reads", async () => {
+      setCustomerCsrfCredential("c".repeat(43));
+      const request = vi.fn<typeof fetch>();
+      request.mockResolvedValueOnce(unavailable()).mockResolvedValueOnce(answered());
+      const client = createHttpDiningSessionClient(request, { quietRetryMs: 0 });
+      await expect(client.load()).resolves.toMatchObject({ tableLabel: "12" });
+      expect(request).toHaveBeenCalledTimes(2);
+    });
+
+    it("a dropped connection then the table, the same", async () => {
+      setCustomerCsrfCredential("c".repeat(43));
+      const request = vi.fn<typeof fetch>();
+      request
+        .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+        .mockResolvedValueOnce(answered());
+      const client = createHttpDiningSessionClient(request, { quietRetryMs: 0 });
+      await expect(client.load()).resolves.toMatchObject({ tableLabel: "12" });
+      expect(request).toHaveBeenCalledTimes(2);
+    });
+
+    it("waits before the second read, and reads only once more", async () => {
+      vi.useFakeTimers();
+      try {
+        setCustomerCsrfCredential("c".repeat(43));
+        const request = vi.fn<typeof fetch>(async () => unavailable());
+        const client = createHttpDiningSessionClient(request, { quietRetryMs: 1000 });
+        const result = client.load().catch((error: unknown) => error);
+        await vi.advanceTimersByTimeAsync(999);
+        expect(request).toHaveBeenCalledTimes(1);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(await result).toMatchObject({ code: "unavailable" });
+        expect(request).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("answers that name themselves are not read again here", async () => {
+      setCustomerCsrfCredential("c".repeat(43));
+      const request = vi.fn<typeof fetch>(
+        async () =>
+          new Response(JSON.stringify({ error: { code: "dining_session_order_processing" } }), {
+            status: 503,
+            headers: { "retry-after": "2" },
+          }),
+      );
+      const client = createHttpDiningSessionClient(request, { quietRetryMs: 0 });
+      await expect(client.load()).rejects.toMatchObject({ code: "processing" });
+      expect(request).toHaveBeenCalledTimes(1);
+      request.mockResolvedValueOnce(new Response("{}", { status: 404 }));
+      await expect(client.load()).rejects.toMatchObject({ code: "not-joined" });
+      expect(request).toHaveBeenCalledTimes(2);
+    });
+
+    it("a page that went away during the wait reads nothing more", async () => {
+      setCustomerCsrfCredential("c".repeat(43));
+      const request = vi.fn<typeof fetch>(async () => unavailable());
+      const client = createHttpDiningSessionClient(request, { quietRetryMs: 10_000 });
+      const controller = new AbortController();
+      const result = client.load(controller.signal).catch((error: unknown) => error);
+      await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+      controller.abort();
+      expect(await result).toMatchObject({ code: "unavailable" });
+      expect(request).toHaveBeenCalledTimes(1);
+    });
+
+    it("an offline phone is told at once, with no second read", async () => {
+      setCustomerCsrfCredential("c".repeat(43));
+      vi.stubGlobal("navigator", { onLine: false });
+      try {
+        const request = vi.fn<typeof fetch>(async () => {
+          throw new TypeError("Failed to fetch");
+        });
+        const client = createHttpDiningSessionClient(request, { quietRetryMs: 0 });
+        await expect(client.load()).rejects.toMatchObject({ code: "unavailable" });
+        expect(request).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
   });
 
   it("WP-2423 item 8 ③ decision 13: decodes what Order again adds, and rejects anything else", () => {

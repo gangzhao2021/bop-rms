@@ -727,14 +727,24 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
   });
 }
 
+/**
+ * Batch 47 (v15 b46 live): one table read answered 503 while four guests joined and ordered at
+ * once, and the next read a moment later answered the table. A read that fails for a reason the
+ * server can't name (a 5xx without "still being prepared", or a dropped connection while online)
+ * is read once more after this wait, quietly, before the page says it couldn't load the table.
+ */
+const quietRetryMs = 1000;
+
 export function createHttpDiningSessionClient(
   request: typeof globalThis.fetch = globalThis.fetch,
   /**
    * Batch 47: a tab that only checks whether the phone is still at its table (table-visit-watch)
    * reads without changing what the page knows of how the table pays.
+   * quietRetryMs: batch 47 wait before the one quiet re-read (tests shorten it).
    */
-  options: { readonly learnsTiming?: boolean } = {},
+  options: { readonly learnsTiming?: boolean; readonly quietRetryMs?: number } = {},
 ): DiningSessionClient {
+  const retryWaitMs = options.quietRetryMs ?? quietRetryMs;
   const once = async (signal?: AbortSignal) => {
     const csrf = getCustomerCsrfCredential();
     const current = captureCustomerCsrfContext();
@@ -817,11 +827,37 @@ export function createHttpDiningSessionClient(
     if (options.learnsTiming !== false) setTablePaymentTiming(view.paymentTiming);
     return view;
   };
+  const readQuietly = async (signal?: AbortSignal) => {
+    try {
+      return await once(signal);
+    } catch (error) {
+      if (
+        !(error instanceof DiningSessionClientError) ||
+        error.code !== "unavailable" ||
+        signal?.aborted === true ||
+        (typeof navigator !== "undefined" && navigator.onLine === false)
+      )
+        throw error;
+      const waited = await new Promise<boolean>((resolve) => {
+        const stop = () => {
+          clearTimeout(timer);
+          resolve(false);
+        };
+        const timer = setTimeout(() => {
+          signal?.removeEventListener("abort", stop);
+          resolve(true);
+        }, retryWaitMs);
+        signal?.addEventListener("abort", stop, { once: true });
+      });
+      if (!waited) throw error;
+      return once(signal);
+    }
+  };
   return Object.freeze({
     async load(signal?: AbortSignal) {
       const started = captureCustomerCsrfContext();
       try {
-        return await once(signal);
+        return await readQuietly(signal);
       } catch (error) {
         // WP-2423 (v15 2026-10-27): the browser's session credential was replaced while this read
         // ran (right after a round was sent): read again with the current one, never "not joined".
