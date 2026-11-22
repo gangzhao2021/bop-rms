@@ -1108,7 +1108,7 @@ test("@production every guest item sold out: staff remove them and send just thi
   await page.getByRole("button", { name: "添加 Gyoza" }).click();
   await page.getByRole("button", { name: "发送订单" }).click();
   await expect(page.getByRole("alert")).toHaveText(
-    "这桌客人的共用购物车里还有没送出的菜。酸梅汤、手拉面 现在不供应。可以把它们从他们的点单里删掉，或者请客人在手机上修改。",
+    "这桌客人的共用购物车里还有没送出的菜。酸梅汤、手拉面现在不供应。可以把它们从他们的点单里删掉，或者请客人在手机上修改。",
   );
   const guestItems = page.getByRole("list", { name: "客人还没送出的菜" });
   await expect(guestItems.getByRole("listitem")).toHaveText([
@@ -1127,7 +1127,7 @@ test("@production every guest item sold out: staff remove them and send just thi
     includeTableCart: { expectedCartVersion: 6, removeUnavailable: [id(61), id(62)] },
   });
   await expect(page.getByRole("note").filter({ hasText: "请告诉客人" })).toHaveText(
-    "请告诉客人：酸梅汤、手拉面 现在不供应，已从他们的点单里删掉。",
+    "请告诉客人：酸梅汤、手拉面现在不供应，已从他们的点单里删掉。",
   );
 });
 

@@ -236,10 +236,10 @@ test("@production the refund page opens ready in Chinese: items loaded, record c
   await page.getByRole("button", { name: "全部退款" }).click();
   for (const [index, { quantity }] of dishes.entries())
     await expect(steppers.nth(index)).toHaveValue(String(quantity));
-  await page.getByRole("button", { name: "鲜肉小笼包 减一份" }).click();
+  await page.getByRole("button", { name: "鲜肉小笼包减一份" }).click();
   await expect(page.getByRole("spinbutton", { name: /鲜肉小笼包/u })).toHaveValue("2");
-  await page.getByRole("button", { name: "鲜肉小笼包 加一份" }).click();
-  await expect(page.getByRole("button", { name: "鲜肉小笼包 加一份" })).toBeDisabled();
+  await page.getByRole("button", { name: "鲜肉小笼包加一份" }).click();
+  await expect(page.getByRole("button", { name: "鲜肉小笼包加一份" })).toBeDisabled();
 
   await page.getByRole("combobox", { name: "原因" }).selectOption("QUALITY_ISSUE");
   await page.getByRole("button", { name: "核对退款", exact: true }).click();
