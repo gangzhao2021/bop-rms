@@ -160,3 +160,110 @@ test("@production WP-2423 batch 45: the kitchen display names a chosen work stat
     await expectNoInternalText(page);
   }
 });
+
+/**
+ * WP-2423 batch 46 (v15 batch 45 live check, kitchen-wide-tab-state): with an order search applied,
+ * switching the language (中文 / English) reloaded the page and dropped the search without a word.
+ * The board went back to every open work item. Live it was TM2's order 54 among others; here Half
+ * Sugar Tea's order 3 among order 7. Zh said Applied two ways (筛选 · 已应用 on the phone toggle,
+ * 查找订单 · 已筛选 on wide screens): it is 已应用 in both places.
+ */
+const order7 = workItem(93, {
+  localizedDisplayNames: dishes[0],
+  orderLabel: { orderNumber: "7", orderType: "Pickup", tableLabel: null },
+});
+
+async function searchFor(page: Page, zh: boolean, term: string) {
+  const row = page.locator('.kitchen-reference-search--desktop input[name="order"]');
+  if (await row.isVisible()) {
+    await row.fill(term);
+    return;
+  }
+  const opener = page
+    .locator(".kitchen-filter-toggle:visible, .kitchen-find-button:visible")
+    .first();
+  await opener.click();
+  const sheet = page.getByRole("dialog", { name: zh ? "筛选后厨工作" : "Filter Kitchen work" });
+  await sheet.getByLabel(zh ? "单号或桌台" : "Order number or table").fill(term);
+  await sheet.getByLabel(zh ? "单号或桌台" : "Order number or table").press("Enter");
+  if (await sheet.isVisible())
+    await sheet.getByRole("button", { name: zh ? "关闭" : "Close" }).click();
+}
+
+/** The search shows as applied, in this language, and only order 3 is listed. */
+async function expectSearchKept(
+  page: Page,
+  display: boolean,
+  zh: boolean,
+  width: number,
+  where: string,
+) {
+  const toggle = page.locator(".kitchen-filter-toggle");
+  const find = page.locator(".kitchen-board-heading__actions .kitchen-find-button");
+  const row = page.locator('.kitchen-reference-search--desktop input[name="order"]');
+  if (width === 390) {
+    await expect(toggle, where).toHaveText(zh ? "筛选 · 已应用" : "Filters · Applied");
+    // About 40 px spare for DejaVu: clear of the right side, or (where the toggle spans the
+    // phone's width, on the display) inside the toggle.
+    const { right, room } = await toggle.evaluate((node) => {
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      const box = node.getBoundingClientRect();
+      return { right: box.right, room: box.width - range.getBoundingClientRect().width };
+    });
+    expect(right <= width - 40 || room >= 40, `${where}: room for the toggle's words`).toBe(true);
+  } else if (display) {
+    await expect(find, where).toHaveText(zh ? "查找订单 · 已应用" : "Find an order · Applied");
+    await expectClear(page, ".kitchen-board-heading__actions .kitchen-find-button", where);
+  } else {
+    // The back office keeps its own search row, which holds the search.
+    await expect(row, where).toHaveValue("3");
+    const box = await row.evaluate((node) => node.getBoundingClientRect().toJSON() as DOMRect);
+    expect(box.right, `${where}: search row inside the gutter`).toBeLessThanOrEqual(width - 16);
+  }
+  await expect(ticketLine(page, 2).first(), where).toBeVisible();
+  await expect(ticketLine(page, 0), where).toHaveCount(0);
+}
+/** Order 3 has dishes 1-3; order 7 is Beef noodles (dish 0) only. */
+const dishName = (n: 0 | 2) => dishes[n]["en-CA"];
+/**
+ * A dish on an open ticket, by the English name its card shows in both languages (under the
+ * Chinese heading in zh); the Recently finished list names dishes too, in spans.
+ */
+const ticketLine = (page: Page, n: 0 | 2) =>
+  page.locator("section p:visible", { hasText: new RegExp(`^${escape(dishName(n))}$`, "u") });
+const escape = (text: string) => text.replace(/[()]/gu, "\\$&");
+
+for (const [surface, operator] of [
+  ["kitchen display", "Named"],
+  ["back office kitchen", "Unverified"],
+] as const)
+  test(`@production WP-2423 batch 46: the ${surface} keeps an applied order search across a language switch`, async ({
+    page,
+  }) => {
+    test.setTimeout(180_000);
+    await page.clock.setFixedTime(new Date(at));
+    const state = { reworks: [] as Record<string, unknown>[], commands: [] };
+    const display = operator === "Named";
+    await store(page, operator, state, { todays: [...order3, order7] });
+    for (const [width, height] of [[390, 844] as const, ...wide]) {
+      await page.goto("/operations/kitchen");
+      await atTop(page, width, height);
+      await expect(ticketLine(page, 0).first()).toBeVisible();
+      await searchFor(page, false, "3");
+      await expectSearchKept(page, display, false, width, `${width} en`);
+      // English → 中文: the reload brings the search back.
+      await chooseLanguage(page, "zh-Hans");
+      await atTop(page, width, height);
+      await expectSearchKept(page, display, true, width, `${width} en→zh-Hans`);
+      await page.screenshot({
+        path: `test-results/b46-search-kept-${operator}-${width}-zh-Hans.png`,
+      });
+      // 中文 → English: still there.
+      await chooseLanguage(page, "en");
+      await atTop(page, width, height);
+      await expectSearchKept(page, display, false, width, `${width} zh-Hans→en`);
+      await page.screenshot({ path: `test-results/b46-search-kept-${operator}-${width}-en.png` });
+      await expectNoInternalText(page);
+    }
+  });

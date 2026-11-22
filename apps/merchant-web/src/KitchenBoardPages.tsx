@@ -2000,6 +2000,13 @@ function WorkCard({
 
 /** Batch 43: the kitchen board's tab and filters, kept through the language switch's reload. */
 const KITCHEN_SCOPE_KEPT_KEY = "kitchenBoardScope";
+/** Batch 46 (v15 b45 live): an applied order search, kept through the language switch too. */
+const KITCHEN_SEARCH_KEPT_KEY = "kitchenBoardSearch";
+function restoredOrderSearch(value: unknown): string | null {
+  return typeof value === "string" && value.length <= 100 && kitchenOrderSearchTerm(value) !== null
+    ? value
+    : null;
+}
 
 interface KitchenQueueScope {
   readonly station: string;
@@ -2183,9 +2190,18 @@ export function KitchenBoardScreen({
   useEffect(() => keepThroughLanguageSwitch(KITCHEN_SCOPE_KEPT_KEY, () => scopeNow.current), []);
   // WP-2423: staff find an order by the number on its ticket or receipt (or its table), over the
   // board already loaded; the text stays on this screen and is never sent or put in the address.
-  const [orderInput, setOrderInput] = useState("");
-  const [orderSearch, setOrderSearch] = useState<string | null>(null);
+  // Batch 46 (v15 b45 live): the language switch reloads the page; a search applied before it
+  // comes back with it (it had been dropped without a word, showing every open work item).
+  const [restoredSearch] = useState(() =>
+    restoredOrderSearch(takeKeptThroughLanguageSwitch(KITCHEN_SEARCH_KEPT_KEY)),
+  );
+  useEffect(() => forgetKeptThroughLanguageSwitch(KITCHEN_SEARCH_KEPT_KEY), []);
+  const [orderInput, setOrderInput] = useState(restoredSearch ?? "");
+  const [orderSearch, setOrderSearch] = useState<string | null>(restoredSearch);
   const searchApplied = orderSearch !== null;
+  const searchNow = useRef<string | null>(null);
+  searchNow.current = orderSearch;
+  useEffect(() => keepThroughLanguageSwitch(KITCHEN_SEARCH_KEPT_KEY, () => searchNow.current), []);
   const filterSheetRef = useRef<HTMLDialogElement>(null);
   const [remakeTarget, setRemakeTarget] = useState<KitchenBoardItem | null>(null);
   const [cancelTarget, setCancelTarget] = useState<KitchenReworkView | null>(null);
