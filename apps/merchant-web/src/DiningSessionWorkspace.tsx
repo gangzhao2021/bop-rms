@@ -488,10 +488,17 @@ interface TableResult {
   readonly text: string;
   readonly undo?: (() => void) | undefined;
   /**
-   * Batch 47 (v15 b46 live): the table a step in its panel was about. Below the desktop width the
-   * panel sits under the whole table list, so the result is said in the panel, where staff are.
+   * Batch 47/48 (v15 b46, b47 live): the table the outcome is about. While that table is selected
+   * the outcome is said in its panel, where staff are looking, at every width: on a long floor the
+   * line above the list is out of view once staff have scrolled down to the table's row.
    */
   readonly table?: string | undefined;
+  /**
+   * Batch 48: the step was taken on the table's row in the list. Below the desktop width the panel
+   * sits under the whole list, so its outcome stays above the list, as before, instead of pulling
+   * staff away from the row they are working on.
+   */
+  readonly fromRow?: boolean | undefined;
 }
 
 /** Below the desktop width the selected table's panel sits under (or over) the list. */
@@ -541,6 +548,8 @@ function tableActionFailureText(error: unknown): string {
       return notConfirmedPressAgainText + " " + serverSideProblemText;
     case "Changed":
       return tableChangedText;
+    case "TableCheckingOut":
+      return tableCheckingOutText();
     case "NewGuestsPaused":
       return t(
         "New guests are paused for this restaurant by the platform, so no new table can be opened. Tables already seated carry on as usual: serve, take payment and refund. Ask the owner about it.",
@@ -551,6 +560,10 @@ function tableActionFailureText(error: unknown): string {
       return t("This didn't go through. The table has been read again: try again.");
   }
 }
+
+/** Batch 48 (v15 b47 live): no one new joins a table paying its bill (dining-qr-join.md). */
+const tableCheckingOutText = () =>
+  t("This table is paying the bill, so no one new can join and no new join code can be made.");
 
 /** M159: set when the Store has no tables at all (the empty floor says what to do next). */
 const noTablesMessage = "no-tables";
@@ -671,6 +684,8 @@ function DiningSessionWorkspaceBody({
       );
       setResult({
         text: t("Table {table}: marked as handled.", { table: saidTable(table.stableLabel) }),
+        table: table.tableReference,
+        fromRow: true,
       });
     } catch (error) {
       setResult({
@@ -681,6 +696,8 @@ function DiningSessionWorkspaceBody({
           : t("Table {table}: not confirmed. Check the connection and try again.", {
               table: saidTable(table.stableLabel),
             }),
+        table: table.tableReference,
+        fromRow: true,
       });
     } finally {
       setAnswering(null);
@@ -1078,6 +1095,7 @@ function DiningSessionWorkspaceBody({
             : t(
                 "The request already completed. Its code cannot be displayed again. Replace the join code to get a new one.",
               ),
+          table: table.tableReference,
         });
         readAgain = true;
       }
@@ -1087,7 +1105,7 @@ function DiningSessionWorkspaceBody({
         setState(unknown ? "Unknown" : "Idle");
         setUnknownAction(unknown ? "Session" : null);
         if (!unknown) operation.current = null;
-        setResult({ text: tableActionFailureText(error) });
+        setResult({ text: tableActionFailureText(error), table: table.tableReference });
         readAgain = !unknown;
       }
     } finally {
@@ -1102,6 +1120,7 @@ function DiningSessionWorkspaceBody({
     action: "SetBlock" | "ClearBlock",
     reason: string | null,
     undoable: boolean,
+    fromRow = false,
   ) => {
     if (
       paused ||
@@ -1159,8 +1178,10 @@ function DiningSessionWorkspaceBody({
               : t("Table {table} is available.", { table: saidTable(table.stableLabel) }),
           undo:
             undoable && cleaned
-              ? () => void setAvailability(updated, "SetBlock", "CLEANING", false)
+              ? () => void setAvailability(updated, "SetBlock", "CLEANING", false, fromRow)
               : undefined,
+          table: table.tableReference,
+          fromRow,
         });
       }
     } catch (error) {
@@ -1169,7 +1190,7 @@ function DiningSessionWorkspaceBody({
         setState(unknown ? "Unknown" : "Idle");
         setUnknownAction(unknown ? "Availability" : null);
         if (!unknown) availabilityOperations.current.delete(key);
-        setResult({ text: tableActionFailureText(error) });
+        setResult({ text: tableActionFailureText(error), table: table.tableReference, fromRow });
         readAgain = !unknown;
       }
     } finally {
@@ -1199,6 +1220,8 @@ function DiningSessionWorkspaceBody({
                 table: saidTable(table.stableLabel),
                 summary: serveReadySummary(done),
               }),
+        table: table.tableReference,
+        fromRow: true,
       });
       setCheckoutRevision((value) => value + 1);
     } catch (error) {
@@ -1213,6 +1236,8 @@ function DiningSessionWorkspaceBody({
           : t("Table {table}: nothing was marked served. Open the table and check its dishes.", {
               table: saidTable(table.stableLabel),
             }),
+        table: table.tableReference,
+        fromRow: true,
       });
     } finally {
       setServing(null);
@@ -1332,7 +1357,7 @@ function DiningSessionWorkspaceBody({
             type="button"
             className="table-row__text-step"
             disabled={busyRow(table)}
-            onClick={() => void setAvailability(table, "ClearBlock", null, true)}
+            onClick={() => void setAvailability(table, "ClearBlock", null, true, true)}
           >
             {t("Cleaned")}
           </button>
@@ -1489,12 +1514,14 @@ function DiningSessionWorkspaceBody({
         </ul>
       </section>
     );
-  // Batch 47: a step taken in the selected table's panel is answered in that panel while the panel
-  // sits under the list (a phone or tablet); on a wide screen the line stays above the list.
+  // Batch 47/48: an outcome about the selected table is said in its panel at every width (the
+  // panel is beside the list and stays in view on a wide screen, under it on a phone), except a
+  // step taken on the row while the panel sits under the list. Any other outcome is said above
+  // the list. Never both.
   const resultInPanel =
     result !== null &&
-    underList &&
     result.table !== undefined &&
+    !(result.fromRow === true && underList) &&
     selected !== null &&
     result.table === selected.tableReference &&
     !refused;
@@ -1731,7 +1758,7 @@ function DiningSessionWorkspaceBody({
                 // WP-2423 item 8 ⑧: the party sits at the other table now; show that table.
                 void loadRef.current(true).then(() => {
                   if (targetReference !== null) setSelectedReference(targetReference);
-                  if (text !== "") setResult({ text });
+                  if (text !== "") setResult({ text, table: targetReference ?? undefined });
                 });
               }}
               onSettled={(message) => {
@@ -1913,6 +1940,7 @@ function TablePanel({
   const unpaidHint = guestRoundCancelHint(table, now, canCancelUnpaidRounds);
   const eligible = table.lifecycle === "Published" && table.operationalState === "Available";
   const noCode = table.qrCodeValidUntil === null;
+  const checkingOut = table.session?.phase === "Closing";
   const hasOrder = Boolean(table.session?.orderReference);
   // WP-2423 item 8 ⑤ decision 4: which phone sent each round, from the table's phone list.
   const [roundPhones, setRoundPhones] = useState<ReadonlyMap<string, number | null>>(new Map());
@@ -2243,7 +2271,15 @@ function TablePanel({
           />
         ) : null}
         <section className="table-panel__more" aria-label={t("More for this table")}>
-          {seated && !noCode ? (
+          {/* Batch 48 (v15 b47 live): a table paying its bill takes no one new, so it is given no
+              new join code; the panel says why instead of offering a step that can't work. A code
+              whose result was lost is still offered, to settle it. */}
+          {seated &&
+          !noCode &&
+          checkingOut &&
+          !(state === "Unknown" && unknownAction === "Session") ? (
+            <p className="table-panel__meta">{tableCheckingOutText()}</p>
+          ) : seated && !noCode ? (
             <button
               type="button"
               className="table-panel__text-step"

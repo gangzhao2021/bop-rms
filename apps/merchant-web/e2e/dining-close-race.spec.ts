@@ -125,7 +125,7 @@ async function racedFloor(
           },
           ...Array.from({ length: fillers }, (_, n) => ({
             tableReference: id(200 + n),
-            stableLabel: `BR ${String.fromCharCode(65 + n)} (TEST)`,
+            stableLabel: `BR ${String(n + 1)} (TEST)`,
             areaCode: "MAIN",
             capacity: 4,
             lifecycle: "Published",
@@ -253,14 +253,31 @@ async function racedFloor(
     return route.fulfill({ status: 409, headers, json: { error: "order_already_closed" } });
   });
   await page.route("**/merchant/dining/closing", (route) => {
-    const body = route.request().postDataJSON() as { action: string };
+    const body = route.request().postDataJSON() as {
+      action: string;
+      expectedSessionVersion: number;
+    };
     sent.push(body.action);
     if (wins) {
+      // Batch 48: an empty table's close begins (Closing), then finishes (Closed).
+      if (body.action === "Begin")
+        return route.fulfill({
+          headers,
+          json: {
+            status: "Applied",
+            phase: "Closing",
+            sessionVersion: body.expectedSessionVersion + 1,
+          },
+        });
       // Closed here: every read from now on shows the table waiting to be cleaned.
       other.closedAt = Date.now();
       return route.fulfill({
         headers,
-        json: { status: "Applied", phase: "Closed", sessionVersion: 21 },
+        json: {
+          status: "Applied",
+          phase: "Closed",
+          sessionVersion: body.expectedSessionVersion + 1,
+        },
       });
     }
     refuse();
@@ -369,7 +386,8 @@ for (const language of ["en", "zh-Hans"] as const)
  * table's panel sits under the whole table list. Live (TM2, 78 tables) the line that says why the
  * table changed ("…was closed on another device…", and the winner's "…is closed…") was shown above
  * the list, so staff looking at the panel saw the table turn to Needs cleaning with no reason. The
- * outcome is shown where they are looking, at the panel, and on a wide screen stays above the list.
+ * outcome is shown where they are looking, at the panel. Batch 48 (v15 b47 live): the same holds on
+ * a wide screen, where the panel stays beside the list (see the long-floor test below).
  */
 for (const outcome of ["lost", "won"] as const)
   for (const language of ["en", "zh-Hans"] as const)
@@ -411,19 +429,18 @@ for (const outcome of ["lost", "won"] as const)
         const list = page.getByRole("region", {
           name: zh ? "按需要处理排列的桌台" : "Tables by what they need",
         });
-        if (width === 390) {
-          // In view, at the table's panel, not at the top of the 15-table list.
-          await expect(line).toBeInViewport();
-          await expect(panel.getByText(text)).toBeVisible();
-          await expect(panel).toContainText(zh ? "待清洁" : "Needs cleaning");
-        } else {
-          // The wide layout is unchanged: the line above the list, the panel beside it.
-          await expect(panel.getByText(text)).toHaveCount(0);
-          const lineBox = await line.boundingBox();
+        // In view, at the table's panel, not at the top of the 15-table list; said once.
+        await expect(line).toHaveCount(1);
+        await expect(line).toBeInViewport();
+        await expect(panel.getByText(text)).toBeVisible();
+        await expect(panel).toContainText(zh ? "待清洁" : "Needs cleaning");
+        if (width !== 390) {
+          // The wide layout is kept: the panel beside the list.
+          const panelBox = await panel.boundingBox();
           const listBox = await list.boundingBox();
-          expect(lineBox !== null && listBox !== null).toBe(true);
-          expect((lineBox?.y ?? 0) + (lineBox?.height ?? 0)).toBeLessThanOrEqual(
-            (listBox?.y ?? 0) + 1,
+          expect(panelBox !== null && listBox !== null).toBe(true);
+          expect(panelBox?.x ?? 0).toBeGreaterThanOrEqual(
+            (listBox?.x ?? 0) + (listBox?.width ?? 0) - 1,
           );
         }
         const box = await line.evaluate((node) => node.getBoundingClientRect().toJSON() as DOMRect);
@@ -437,3 +454,190 @@ for (const outcome of ["lost", "won"] as const)
         });
         await expectNoInternalText(page);
       });
+
+/**
+ * WP-2423 batch 48 (v15 batch 47 live check, guest-and-staff-wording (3b)): at 1440 on TM2 (84
+ * tables) the losing page had scrolled down the list (scrollY 599) to select W47 R2, an open table
+ * with no order. Its "…was closed on another device…" line was drawn above the list, out of view
+ * (top -446), and the panel beside the row said only "4 座 · 待清洁". The outcome of the selected
+ * table is said in its panel at every width, once, in view, at least 40 px from each edge of the
+ * panel's column (DejaVu fonts on Linux are wider).
+ */
+for (const outcome of ["lost", "won"] as const)
+  for (const language of ["en", "zh-Hans"] as const)
+    for (const [width, height] of widths)
+      test(`@production WP-2423 batch 48: on a long floor scrolled down to the table, the ${outcome} Close outcome is said in its panel, in view (${language}, ${width})`, async ({
+        page,
+      }) => {
+        const zh = language === "zh-Hans";
+        // 83 other tables waiting to be cleaned list first: the open table is far down, as live.
+        await racedFloor(page, "EmptyTable", language, {
+          closes: true,
+          fillers: 83,
+          wins: outcome === "won",
+        });
+        await page.setViewportSize({ width, height });
+        await page.goto("/operations/dining");
+        // Tables > All, as live.
+        await page.getByRole("button", { name: zh ? /^全部/u : /^All /u }).click();
+        const select = page.getByRole("button", { name: zh ? `选择 ${label}` : `Select ${label}` });
+        await select.scrollIntoViewIfNeeded();
+        await select.click();
+        const close = page.getByRole("button", { name: zh ? /^关闭 TL45/u : /^Close TL45/u });
+        await close.scrollIntoViewIfNeeded();
+        await expect(close).toBeInViewport();
+        // Staff have scrolled well down the floor: the top of the list is out of view.
+        expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(300);
+        await close.click();
+        const text =
+          outcome === "won"
+            ? zh
+              ? `${label} 已关台。清洁后点“已清洁”。`
+              : `${label} is closed. Clean it, then mark it cleaned.`
+            : zh
+              ? `${label} 已在另一台设备上关台。清洁后点“已清洁”。`
+              : `${label} was closed on another device. Clean it, then mark it cleaned.`;
+        const line = page.getByText(text);
+        await expect(line).toBeVisible({ timeout: 6_000 });
+        await expect(line).toHaveCount(1);
+        const panel = page.getByRole("complementary", {
+          name: zh ? "所选桌台详情" : "Selected table details",
+        });
+        await expect(panel.getByText(text)).toBeVisible();
+        await expect(line).toBeInViewport();
+        await expect(panel).toContainText(zh ? "待清洁" : "Needs cleaning");
+        const box = await line.evaluate((node) => node.getBoundingClientRect().toJSON() as DOMRect);
+        expect(box.top).toBeGreaterThanOrEqual(0);
+        expect(box.bottom).toBeLessThanOrEqual(height);
+        expect(box.left).toBeGreaterThanOrEqual(16);
+        expect(box.right).toBeLessThanOrEqual(width - 16);
+        // Room to spare for wider fonts: the text ends well inside the panel's column.
+        const room = await line.evaluate((node) => {
+          const range = document.createRange();
+          range.selectNodeContents(node);
+          const text = range.getBoundingClientRect();
+          const column = (node.parentElement as HTMLElement).getBoundingClientRect();
+          return column.right - text.right;
+        });
+        expect(room).toBeGreaterThanOrEqual(0);
+        expect(
+          await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+        ).toBe(true);
+        await page.screenshot({
+          path: `test-results/b48-long-floor-${outcome}-${language}-${width}.png`,
+        });
+        await expectNoInternalText(page);
+      });
+
+/**
+ * WP-2423 batch 48 (v15 batch 47 live check, guest-503-and-closed-capabilities): while a table was
+ * checking out, Manage this table still offered New join code. Pressing it was refused 409
+ * changed_while_loading, and staff read "This table changed. It has been read again." though
+ * nothing had changed. A table paying its bill takes no one new (dining-qr-join.md), so the panel
+ * says that instead of offering the step; a table that started checkout a moment ago, before this
+ * page read it again, is refused with that reason too.
+ */
+const paying = (zh: boolean) =>
+  zh
+    ? "这桌正在结账，不能再有人加入，也不能换新的入桌码。"
+    : "This table is paying the bill, so no one new can join and no new join code can be made.";
+for (const language of ["en", "zh-Hans"] as const)
+  for (const [width, height] of [
+    [390, 844],
+    [1440, 900],
+  ] as const) {
+    test(`@production WP-2423 batch 48: a table checking out offers no new join code and says why (${language}, ${width})`, async ({
+      page,
+    }) => {
+      const zh = language === "zh-Hans";
+      await racedFloor(page, "PaidTable", language, { closes: false });
+      const asked: string[] = [];
+      await page.route("**/merchant/dining/sessions/join-state", (route) => {
+        asked.push("join-state");
+        return route.fulfill({
+          status: 409,
+          headers,
+          json: { error: "dining_join_table_checking_out" },
+        });
+      });
+      await page.setViewportSize({ width, height });
+      await page.goto("/operations/dining");
+      await page.getByRole("button", { name: zh ? `选择 ${label}` : `Select ${label}` }).click();
+      const panel = page.getByRole("complementary", {
+        name: zh ? "所选桌台详情" : "Selected table details",
+      });
+      await panel.getByText(zh ? "管理这张桌" : "Manage this table").click();
+      const more = panel.getByRole("region", {
+        name: zh ? "这桌的其他操作" : "More for this table",
+      });
+      await expect(more).toBeVisible();
+      await expect(
+        more.getByRole("button", { name: zh ? "换入桌码" : "New join code" }),
+      ).toHaveCount(0);
+      const reason = more.getByText(paying(zh));
+      await expect(reason).toBeVisible();
+      await reason.scrollIntoViewIfNeeded();
+      const box = await reason.evaluate((node) => node.getBoundingClientRect().toJSON() as DOMRect);
+      expect(box.left).toBeGreaterThanOrEqual(16);
+      expect(box.right).toBeLessThanOrEqual(width - 16);
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      await expect(
+        page.getByText(
+          zh ? "这张桌子有变动，已重新读取。" : "This table changed. It has been read again.",
+        ),
+      ).toHaveCount(0);
+      expect(asked).toEqual([]);
+      await page.screenshot({ path: `test-results/b48-checkout-no-code-${language}-${width}.png` });
+      // The open Manage section's "Mark unavailable" is a staff word, as in dining-table-cart.
+      await expectNoInternalText(page, ["Mark unavailable"]);
+    });
+
+    test(`@production WP-2423 batch 48: a table that began checkout since it was read is refused a new join code as paying, not as changed (${language}, ${width})`, async ({
+      page,
+    }) => {
+      const zh = language === "zh-Hans";
+      // Shown open (Active), but its checkout began on a guest's phone a moment ago.
+      await racedFloor(page, "EmptyTable", language, { closes: false });
+      const regenerate: string[] = [];
+      await page.route("**/merchant/dining/sessions/join-state", (route) =>
+        route.fulfill({ status: 409, headers, json: { error: "dining_join_table_checking_out" } }),
+      );
+      await page.route("**/merchant/dining/sessions/regenerate", (route) => {
+        regenerate.push("regenerate");
+        return route.abort("failed");
+      });
+      await page.setViewportSize({ width, height });
+      await page.goto("/operations/dining");
+      await page.getByRole("button", { name: zh ? `选择 ${label}` : `Select ${label}` }).click();
+      const panel = page.getByRole("complementary", {
+        name: zh ? "所选桌台详情" : "Selected table details",
+      });
+      await panel.getByText(zh ? "管理这张桌" : "Manage this table").click();
+      await panel.getByRole("button", { name: zh ? "换入桌码" : "New join code" }).click();
+      const line = page.getByText(paying(zh));
+      await expect(line).toBeVisible();
+      await expect(line).toHaveCount(1);
+      // Said in the table's panel, in view.
+      await expect(panel.getByText(paying(zh))).toBeVisible();
+      await expect(line).toBeInViewport();
+      await expect(
+        page.getByText(
+          zh ? "这张桌子有变动，已重新读取。" : "This table changed. It has been read again.",
+        ),
+      ).toHaveCount(0);
+      expect(regenerate).toEqual([]);
+      const box = await line.evaluate((node) => node.getBoundingClientRect().toJSON() as DOMRect);
+      expect(box.left).toBeGreaterThanOrEqual(16);
+      expect(box.right).toBeLessThanOrEqual(width - 16);
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      await page.screenshot({
+        path: `test-results/b48-code-refused-paying-${language}-${width}.png`,
+      });
+      // The open Manage section's "Mark unavailable" is a staff word, as in dining-table-cart.
+      await expectNoInternalText(page, ["Mark unavailable"]);
+    });
+  }

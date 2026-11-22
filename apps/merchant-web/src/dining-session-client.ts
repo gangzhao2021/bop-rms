@@ -8,7 +8,9 @@ export class DiningSessionClientError extends Error {
       | "Changed"
       | "ServerProblem"
       /** WP-2423 item 13 ②: the platform paused new guests, so a free table is not opened. */
-      | "NewGuestsPaused",
+      | "NewGuestsPaused"
+      /** Batch 48: the table is paying its bill, so no one new joins and no new join code is made. */
+      | "TableCheckingOut",
   ) {
     super(t("Dining session request unavailable"));
   }
@@ -241,10 +243,13 @@ export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
       // WP-2423 item 10: another server got there first, or the table moved on: not a refusal.
       if (response.status === 409) {
         const answer = await response.json().catch(() => null);
+        const said = (answer as { error?: unknown } | null)?.error;
         throw new DiningSessionClientError(
-          (answer as { error?: unknown } | null)?.error === "new_guests_paused"
+          said === "new_guests_paused"
             ? "NewGuestsPaused"
-            : "Changed",
+            : said === "dining_join_table_checking_out"
+              ? "TableCheckingOut"
+              : "Changed",
         );
       }
       // The server answered, and failed. Told apart from no answer at all.
@@ -264,6 +269,7 @@ export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
         (error.code === "Denied" ||
           error.code === "Changed" ||
           error.code === "NewGuestsPaused" ||
+          error.code === "TableCheckingOut" ||
           error.code === "ServerProblem")
       )
         throw error;

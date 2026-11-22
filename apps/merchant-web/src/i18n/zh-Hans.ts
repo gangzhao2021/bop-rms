@@ -6612,6 +6612,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "No tables here.": "这里没有桌台。",
   "Table {table} is closed. Clean it, then mark it cleaned.":
     "{table} 号桌已关台。清洁后点“已清洁”。",
+  "This table is paying the bill, so no one new can join and no new join code can be made.":
+    "这桌正在结账，不能再有人加入，也不能换新的入桌码。",
   "Table {table} was closed on another device. Clean it, then mark it cleaned.":
     "{table} 号桌已在另一台设备上关台。清洁后点“已清洁”。",
   "Table {table} was closed on another device and is free for the next guest.":

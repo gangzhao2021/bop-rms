@@ -380,3 +380,23 @@ it("DEC-DINING-GUEST-TABLE-START: reads a table a guest started, and a table wit
   expect(started.items[0]?.guestStart).toEqual({ closesByItselfAt: at });
   expect(started.items[1]?.blockedSince).toBe(at);
 });
+// Batch 48 (v15 b47 live): a table paying its bill is refused a new join code with its own answer,
+// told apart from "the table changed".
+it("reads a join-state refusal for a table paying its bill as checking out, not as changed", async () => {
+  const conflict = (error: string) =>
+    new Response(JSON.stringify({ error }), {
+      status: 409,
+      headers: { "content-type": "application/json", "cache-control": "no-store" },
+    });
+  const f = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(conflict("dining_join_table_checking_out"))
+    .mockResolvedValueOnce(conflict("changed_while_loading"));
+  const client = createDiningSessionClient(f);
+  await expect(client.joinState(id(3), "A".repeat(43))).rejects.toMatchObject({
+    code: "TableCheckingOut",
+  });
+  await expect(client.joinState(id(3), "A".repeat(43))).rejects.toMatchObject({
+    code: "Changed",
+  });
+});
