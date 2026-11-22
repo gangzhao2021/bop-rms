@@ -3,7 +3,10 @@ import { createBrowserCustomerCartClient, setCustomerCartCsrfCredential } from "
 import { CartClientError, type CartView } from "./types.js";
 import {
   getCustomerCsrfCredential,
+  getEndedTable,
   setCustomerSessionRestoreUnavailable,
+  setEmptyTable,
+  subscribeCustomerCsrfContext,
 } from "../session/customer-transaction-context.js";
 
 const id = (n: number) => `018f5300-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
@@ -332,7 +335,50 @@ describe("Customer Cart browser client", () => {
         operationReference: id(20),
       }),
     ).rejects.toMatchObject({ code: "cart_session_expired" });
-    expect(fetch).toHaveBeenCalledTimes(1);
+    // Batch 47: the 401 asks the restore read once whether the table's visit ended (here the
+    // Store says nothing it knows, so the refusal stands); the cart itself is asked only once.
+    expect(fetch.mock.calls.map((call) => String((call as unknown[])[0]))).toEqual([
+      "/bff/customer/cart",
+      "/api/v1/customer/session/csrf",
+    ]);
+    expect(getCustomerCsrfCredential()).toBeNull();
+  });
+
+  // Batch 47 (v15 b46 live): a Menu left open while staff closed the table, then Add to cart:
+  // 401 cart_session_expired, and the page said "Your Store session expired. Scan the location QR
+  // code again." An open zh Cart got 409 cart_participant_ended (TableClosed). Before either
+  // reaches the page, the restore read says how the table's visit ended (the card App shows).
+  it("asks the restore read how the table's visit ended before a refusal reaches the page", async () => {
+    for (const refusal of [
+      { status: 401, body: { error: { code: "cart_session_expired" } } },
+      { status: 409, body: { error: { code: "cart_participant_ended", reason: "TableClosed" } } },
+    ]) {
+      const fetch = vi.fn(async (url: string) =>
+        url === "/api/v1/customer/session/csrf"
+          ? new Response(
+              JSON.stringify({ schemaVersion: 1, emptyTable: { tableLabel: "E46 N (TEST)" } }),
+              { headers: { "content-type": "application/json", "cache-control": "no-store" } },
+            )
+          : new Response(JSON.stringify(refusal.body), { status: refusal.status }),
+      );
+      vi.stubGlobal("fetch", fetch);
+      setCustomerCartCsrfCredential("c".repeat(43));
+      const ended: unknown[] = [];
+      const unsubscribe = subscribeCustomerCsrfContext(() => ended.push(getEndedTable()));
+      await expect(
+        createBrowserCustomerCartClient().addItem({
+          cart: cart(),
+          sellableReference: id(3),
+          operationReference: id(21),
+          draft: { quantity: 1, optionSelections: [], customerNote: null },
+        }),
+      ).rejects.toBeInstanceOf(CartClientError);
+      unsubscribe();
+      // The page was told the table's visit ended before the refusal reached it.
+      expect(ended.at(-1)).toEqual({ kind: "Empty", tableLabel: "E46 N (TEST)", store: null });
+      expect(getCustomerCsrfCredential()).toBeNull();
+      setEmptyTable(null);
+    }
   });
 
   it("maps rate-limit, malformed success and network ambiguity without inferring success", async () => {

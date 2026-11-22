@@ -3,6 +3,7 @@ import {
   recoverCustomerSession,
   restoreCustomerSession,
   restoreCustomerSessionUntilAnswered,
+  settleEndedTableVisit,
 } from "./session-bootstrap.js";
 import {
   getCustomerCsrfCredential,
@@ -23,6 +24,8 @@ import {
   getEndedTable,
   isCustomerSessionRestoreUnavailable,
   setCustomerSessionRestoreUnavailable,
+  setCheckoutSessionReference,
+  subscribeCustomerCsrfContext,
 } from "./customer-transaction-context.js";
 afterEach(() => {
   setCustomerSessionRestoreUnavailable(false);
@@ -659,4 +662,124 @@ it("batch 46: one ended-table answer for every tab, with a moved party that orde
   // A visit on this phone again: nothing ended.
   setCustomerCsrfCredential("D".repeat(43));
   expect(getEndedTable()).toBeNull();
+});
+
+// Batch 47 (v15 b46 live): a tab left open while staff closed, moved or merged the table was
+// refused (401 cart_session_expired, or the cart read's "your place ended") and said "Your Store
+// session expired. Scan the location QR code again." The restore read is asked instead; only a
+// table's ended answer ends the visit on the page, anything else changes nothing.
+it("batch 47: an open visit takes only the table's ended answer from the restore read", async () => {
+  const store = {
+    brandDisplayName: "Test Merchant 2 - not production",
+    storeDisplayName: "Test Merchant 2 Main - not production",
+  };
+  const told: (string | null)[] = [];
+  const unsubscribe = subscribeCustomerCsrfContext(() => {
+    told.push(getCustomerCsrfCredential());
+  });
+  try {
+    for (const [answer, kind] of [
+      [{ schemaVersion: 1, emptyTable: { tableLabel: "E46 N (TEST)", store } }, "Empty"],
+      [
+        {
+          schemaVersion: 1,
+          settledTable: { tableLabel: "E46 P (TEST)", csrfToken: "C".repeat(43), store },
+        },
+        "Settled",
+      ],
+      [
+        { schemaVersion: 1, movedTable: { tableLabel: "E46 A (TEST)", merged: true, store } },
+        "Moved",
+      ],
+    ] as const) {
+      setCustomerCsrfCredential("A".repeat(43));
+      told.length = 0;
+      const fetcher = vi.fn().mockResolvedValue(response(answer));
+      expect(await settleEndedTableVisit(fetcher)).toBe(true);
+      expect(fetcher).toHaveBeenCalledWith(
+        "/api/v1/customer/session/csrf",
+        expect.objectContaining({ credentials: "same-origin", cache: "no-store" }),
+      );
+      expect(getCustomerCsrfCredential()).toBeNull();
+      expect(getEndedTable()?.kind).toBe(kind);
+      // Every page is told the visit ended here (App swaps the tab to the card).
+      expect(told).toEqual([null]);
+      setMovedTableLabel(null);
+      setSettledTable(null);
+      setEmptyTable(null);
+    }
+    // The visit goes on, or the answer is something else: nothing on the page changes.
+    for (const answer of [
+      {
+        schemaVersion: 1,
+        csrfToken: "B".repeat(43),
+        checkoutSessionReference: "0190fa21-0000-7000-8000-000000000001",
+      },
+      {
+        schemaVersion: 1,
+        endedVisit: {
+          csrfToken: "C".repeat(43),
+          order: {
+            orderReference: "0190fa21-0000-7000-8000-000000000002",
+            orderNumber: "7",
+            orderType: "DineIn",
+          },
+          receiptAvailableUntil: "2026-11-22T12:00:00.000Z",
+        },
+      },
+    ]) {
+      setCustomerCsrfCredential("A".repeat(43));
+      setCheckoutSessionReference("0190fa21-0000-7000-8000-000000000009");
+      told.length = 0;
+      expect(await settleEndedTableVisit(vi.fn().mockResolvedValue(response(answer)))).toBe(false);
+      expect(getCustomerCsrfCredential()).toBe("A".repeat(43));
+      expect(getCheckoutSessionReference()).toBe("0190fa21-0000-7000-8000-000000000009");
+      expect(getEndedVisitReceiptAccess("0190fa21-0000-7000-8000-000000000002", 0)).toBeNull();
+      expect(told).toEqual([]);
+    }
+    for (const failure of [
+      vi.fn().mockResolvedValue(new Response(null, { status: 204 })),
+      vi.fn().mockResolvedValue(new Response(null, { status: 503 })),
+      vi.fn().mockRejectedValue(new TypeError("offline")),
+    ]) {
+      setCustomerCsrfCredential("A".repeat(43));
+      expect(await settleEndedTableVisit(failure)).toBe(false);
+      expect(getCustomerCsrfCredential()).toBe("A".repeat(43));
+      // Not knowing is never "the visit ended" and never "the Store is busy" for an open visit.
+      expect(isCustomerSessionRestoreUnavailable()).toBe(false);
+    }
+  } finally {
+    unsubscribe();
+  }
+});
+
+it("batch 47: the table's ended answer still counts when the cart dropped the credential meanwhile", async () => {
+  setCustomerCsrfCredential("A".repeat(43));
+  let answer: (value: Response) => void = () => undefined;
+  const fetcher = vi.fn().mockReturnValue(
+    new Promise<Response>((resolve) => {
+      answer = resolve;
+    }),
+  );
+  const asked = settleEndedTableVisit(fetcher);
+  // The cart read was refused at the same moment (401): it dropped the credential and asks too.
+  setCustomerCsrfCredential(null);
+  const alsoAsked = settleEndedTableVisit(fetcher);
+  answer(response({ schemaVersion: 1, emptyTable: { tableLabel: "E46 N (TEST)" } }));
+  expect(await asked).toBe(true);
+  expect(await alsoAsked).toBe(true);
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(getEndedTable()).toEqual({ kind: "Empty", tableLabel: "E46 N (TEST)", store: null });
+  // A new visit meanwhile (a join, a round placed) makes the answer out of date.
+  setEmptyTable(null);
+  setCustomerCsrfCredential("A".repeat(43));
+  const late = settleEndedTableVisit(
+    vi.fn().mockImplementation(async () => {
+      setCustomerCsrfCredential("E".repeat(43));
+      return response({ schemaVersion: 1, emptyTable: { tableLabel: "E46 N (TEST)" } });
+    }),
+  );
+  expect(await late).toBe(false);
+  expect(getCustomerCsrfCredential()).toBe("E".repeat(43));
+  expect(getEmptyTableLabel()).toBeNull();
 });

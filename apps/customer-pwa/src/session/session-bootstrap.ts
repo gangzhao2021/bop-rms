@@ -148,15 +148,39 @@ export async function restoreCustomerSession(
   onMenuContext?: (context: MenuJourneyContext) => void,
   onCurrentOrder?: (order: CustomerCurrentOrder) => void,
   onVisit?: (visit: CustomerRestoredVisit) => void,
-  options: { readonly timeoutMs?: number } = {},
+  options: {
+    readonly timeoutMs?: number;
+    /**
+     * Batch 47: asked by a page that still holds a visit (a background read or an action was
+     * refused): only a table's ended answer (settled, empty, moved or merged) is taken, and it
+     * ends the visit on this page; any other answer changes nothing.
+     */
+    readonly endedOnly?: boolean;
+  } = {},
 ): Promise<boolean> {
-  if (getCustomerCsrfCredential() !== null) return true;
-  const current = captureCustomerCsrfContext();
+  const endedOnly = options.endedOnly === true;
+  if (!endedOnly && getCustomerCsrfCredential() !== null) return true;
+  // Batch 47: an ended-table check still counts when another refusal dropped this page's
+  // credential meanwhile (the cart read and the table read are refused at the same moment); a
+  // new visit's credential (a join, a round placed) makes its answer out of date.
+  const asked = getCustomerCsrfCredential();
+  const context = captureCustomerCsrfContext();
+  const current = endedOnly
+    ? () => {
+        const now = getCustomerCsrfCredential();
+        return now === null || now === asked;
+      }
+    : context;
+  /** The table's visit ended: this page has no visit any more (every listener is told). */
+  const tableEnded = () => {
+    if (endedOnly) setCustomerCsrfCredential(null);
+    return endedOnly;
+  };
   // WP-2423 (rush-reads-and-orders-changes): whether the Store answered at all. A restore that
   // got no usable answer leaves the page not knowing whether its visit goes on (see
   // setCustomerSessionRestoreUnavailable); a real answer ("no visit", "this visit") settles it.
   const settle = (unavailable: boolean) => {
-    if (current()) setCustomerSessionRestoreUnavailable(unavailable);
+    if (!endedOnly && current()) setCustomerSessionRestoreUnavailable(unavailable);
   };
   try {
     const response = await fetcher("/api/v1/customer/session/csrf", {
@@ -218,7 +242,7 @@ export async function restoreCustomerSession(
       "endedVisit" in value
     ) {
       const ended = endedVisit(value.endedVisit);
-      if (ended !== null) setEndedVisitReceiptAccess(ended);
+      if (ended !== null && !endedOnly) setEndedVisitReceiptAccess(ended);
       return false;
     }
     // Coordinator 2026-10-30: the table was settled while this guest sat at it, with the ended
@@ -251,12 +275,14 @@ export async function restoreCustomerSession(
         "csrfToken" in settled &&
         typeof settled.csrfToken === "string" &&
         /^[A-Za-z0-9_-]{43}$/u.test(settled.csrfToken)
-      )
+      ) {
         setSettledTable({
           tableLabel: settled.tableLabel,
           csrfToken: settled.csrfToken,
           ...(store === undefined ? {} : { store }),
         });
+        return tableEnded();
+      }
       return false;
     }
     // Batch 45 (v15 b44 live): the table closed with nothing ordered (nothing was charged, no
@@ -285,8 +311,10 @@ export async function restoreCustomerSession(
         "tableLabel" in empty &&
         typeof empty.tableLabel === "string" &&
         /^[^\p{Cc}\p{Cf}<>{}$]{1,40}$/u.test(empty.tableLabel)
-      )
+      ) {
         setEmptyTable({ tableLabel: empty.tableLabel, ...(store === undefined ? {} : { store }) });
+        return tableEnded();
+      }
       return false;
     }
     // v15 2026-10-30: staff moved the party after this phone joined: only where it sits now.
@@ -322,15 +350,19 @@ export async function restoreCustomerSession(
         "tableLabel" in moved &&
         typeof moved.tableLabel === "string" &&
         /^[^\p{Cc}\p{Cf}<>{}$]{1,40}$/u.test(moved.tableLabel)
-      )
+      ) {
         setMovedTableLabel(
           moved.tableLabel,
           "merged" in moved,
           store ?? null,
           "nothingOrdered" in moved,
         );
+        return tableEnded();
+      }
       return false;
     }
+    // Batch 47: the visit goes on (or the answer is not one this page knows): nothing changes.
+    if (endedOnly) return false;
     if (
       !current() ||
       value === null ||
@@ -413,6 +445,25 @@ export function recoverCustomerSession(fetcher: typeof fetch = fetch): Promise<v
       recovery = null;
     });
   return recovery;
+}
+
+let endedCheck: Promise<boolean> | null = null;
+/**
+ * Batch 47 (v15 b46 live): a page with a dine-in visit was refused (401, or "your place at the
+ * table ended") or its table read said the phone is no longer at a table. The restore read is
+ * asked once (one at a time): when it says the table's visit ended (settled, closed empty, moved
+ * or merged), this page's visit ends here and every tab shows the same card a reload shows,
+ * never "your session expired, scan the QR code again". True when that happened.
+ */
+export function settleEndedTableVisit(fetcher: typeof fetch = fetch): Promise<boolean> {
+  endedCheck ??= restoreCustomerSession(fetcher, undefined, undefined, undefined, {
+    endedOnly: true,
+  })
+    .catch(() => false)
+    .finally(() => {
+      endedCheck = null;
+    });
+  return endedCheck;
 }
 
 /** How long the page waits before it asks for its visit again, as the Store's Retry-After says. */

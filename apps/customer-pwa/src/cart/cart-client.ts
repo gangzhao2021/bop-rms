@@ -19,7 +19,7 @@ import {
   setParticipationEnded,
   type ParticipationEndedReason,
 } from "../session/customer-transaction-context.js";
-import { recoverCustomerSession } from "../session/session-bootstrap.js";
+import { recoverCustomerSession, settleEndedTableVisit } from "../session/session-bootstrap.js";
 
 /** M126 I.2: the Store's reason, or null when it sent none this page knows. */
 export function participationReason(value: unknown): ParticipationEndedReason | null {
@@ -532,6 +532,11 @@ async function request(url: string, init: RequestInit, decode = parse): Promise<
     if (!contextCurrent()) throw new CartClientError("network_unknown");
     if (error instanceof CartClientError) {
       if (error.code === "cart_session_expired") setCustomerCartCsrfCredential(null);
+      // Batch 47 (v15 b46 live): refused because the table's visit ended (staff closed, moved or
+      // merged it while this page was open): the restore read says how, and the page shows that
+      // card before this answer reaches it, never "your session expired" or "your visit ended".
+      if (error.code === "cart_session_expired" || error.code === "cart_participant_ended")
+        await settleEndedTableVisit();
       // An unavailable or malformed write response may follow a committed command.
       if (init.method !== "GET" && error.code === "cart_service_unavailable")
         throw new CartClientError("network_unknown");
