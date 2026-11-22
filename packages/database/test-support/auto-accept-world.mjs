@@ -1253,6 +1253,8 @@ export async function withAutoAcceptWorld({ caseId, orderType }, work) {
           businessDayStart: "00:00:00",
           prefix: "01a6ab00",
           allWeek: true,
+          // Readable for two days ahead, so a case can read it at the next midnight boundary.
+          validUntil: time(minutes(48 * 60)),
         });
         await seedStoreKitchenInEffect({
           admin,
@@ -1277,6 +1279,7 @@ export async function withAutoAcceptWorld({ caseId, orderType }, work) {
           ...scope,
           lookupEvidenceReference: fresh(),
           validFrom: publishedAt,
+          validUntil: time(minutes(48 * 60)),
         };
         operating.real = (transaction) =>
           createPersistentEntryOperatingReader({
@@ -1285,6 +1288,16 @@ export async function withAutoAcceptWorld({ caseId, orderType }, work) {
             operating: options,
           });
       };
+      /** What the Store's operating reader says at `evaluatedAt`, in a worker transaction. */
+      const readOperatingAt = (evaluatedAt) =>
+        worker().run((tx) =>
+          resources.operatingReader(tx).readCurrent({
+            brandReference: scope.brandReference,
+            storeReference: scope.storeReference,
+            publicStoreReference: resources.publicProfile.binding.publicStoreReference,
+            evaluatedAt,
+          }),
+        );
       /** The Store's own pause and resume records, as Pause ordering writes them. */
       const pauseOperation = async (kind, content) => {
         const operation = fresh();
@@ -1363,6 +1376,7 @@ export async function withAutoAcceptWorld({ caseId, orderType }, work) {
         provider,
         pauseStore,
         query,
+        readOperatingAt,
         releaseStock,
         resumeStore,
         scope,

@@ -660,6 +660,17 @@ export async function seedJourneyAcceptance(
 }
 
 /**
+ * Batch 47: a day open all day, as two periods with no gap. A period can't end at the time it
+ * starts, so 00:00:00-23:59:59 alone leaves 23:59:59-24:00 closed: a read in that second (an
+ * automatic acceptance, a guest entry) would say the Store is not open. The second period runs
+ * from 23:59:59 to midnight, so the Store reads open at every instant of every day.
+ */
+const allDayPeriods = Object.freeze([
+  ["00:00:00", "23:59:59", false],
+  ["23:59:59", "00:00:00", true],
+]);
+
+/**
  * Published Store configuration whose business day starts at `businessDayStart` (local time), so
  * a refund requested now is on a later business date than a capture before that instant.
  * Synthetic test-only Store facts; actual published owner records/proof.
@@ -703,16 +714,24 @@ export async function seedJourneyStorePublication({
     enabledServiceModes: ["DineIn", "Pickup"],
     weeklySchedule: Array.from({ length: 7 }, (_, i) => ({
       isoWeekday: i + 1,
-      intervals:
-        i === 0 || allWeek
+      intervals: allWeek
+        ? allDayPeriods.map(([startLocalTime, endLocalTime, endsNextDay]) => ({
+            startLocalTime,
+            endLocalTime,
+            endsNextDay,
+            serviceModes: ["DineIn", "Pickup"],
+            orderCutoffSeconds: 0,
+            leadTimeSeconds: 0,
+          }))
+        : i === 0
           ? [
               {
-                startLocalTime: allWeek ? "00:00:00" : "09:00:00",
-                endLocalTime: allWeek ? "23:59:59" : "22:00:00",
+                startLocalTime: "09:00:00",
+                endLocalTime: "22:00:00",
                 endsNextDay: false,
                 serviceModes: ["DineIn", "Pickup"],
-                orderCutoffSeconds: allWeek ? 0 : 900,
-                leadTimeSeconds: allWeek ? 0 : 1200,
+                orderCutoffSeconds: 900,
+                leadTimeSeconds: 1200,
               },
             ]
           : [],
@@ -771,10 +790,21 @@ export async function seedJourneyStorePublication({
   );
   if (allWeek)
     for (let weekday = 1; weekday <= 7; weekday += 1)
-      await client.query(
-        "INSERT INTO rms_store.store_weekly_service_period VALUES($1,$2,$3,$4,$5,1,'00:00:00','23:59:59',false,ARRAY['DineIn','Pickup'],0,0,'ConfigurationMetadata')",
-        [id(20 + weekday), scope.brandReference, scope.storeReference, id(1), weekday],
-      );
+      for (const [index, [start, end, nextDay]] of allDayPeriods.entries())
+        await client.query(
+          "INSERT INTO rms_store.store_weekly_service_period VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,ARRAY['DineIn','Pickup'],0,0,'ConfigurationMetadata')",
+          [
+            id(20 + weekday + index * 16),
+            scope.brandReference,
+            scope.storeReference,
+            id(1),
+            weekday,
+            index + 1,
+            start,
+            end,
+            nextDay,
+          ],
+        );
   else
     await client.query(
       "INSERT INTO rms_store.store_weekly_service_period VALUES($1,$2,$3,$4,1,1,'09:00:00','22:00:00',false,ARRAY['DineIn','Pickup'],900,1200,'ConfigurationMetadata')",

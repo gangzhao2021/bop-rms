@@ -811,6 +811,58 @@ it("the pilot's own operating reader, in the worker's transaction: open sends, p
   });
 });
 
+/** The first instant after `after` that is `localTime` on a Toronto wall clock (a fixed base). */
+const nextTorontoInstant = (localTime, after = Date.now()) => {
+  const format = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Toronto",
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+  const parts = (at) =>
+    Object.fromEntries(format.formatToParts(at).map((part) => [part.type, part.value]));
+  // Toronto's offset from UTC at an instant, in milliseconds (whole seconds).
+  const offsetAt = (at) => {
+    const p = parts(at);
+    const wall = Date.parse(`${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}:${p.second}Z`);
+    return wall - (at - (at % 1000));
+  };
+  for (let days = 0; days <= 2; days += 1) {
+    const day = parts(after + days * 86_400_000);
+    const wall = Date.parse(`${day.year}-${day.month}-${day.day}T${localTime}Z`);
+    const instant = wall - offsetAt(wall - offsetAt(wall));
+    if (instant > after) return new Date(instant).toISOString();
+  }
+  throw new Error("no such Toronto instant");
+};
+
+// Batch 47 (b46 build notes): the fixture's all-day hours were 00:00:00-23:59:59, so a run whose
+// clock read 23:59:59 in Toronto found the Store not open (StoreNotOpen) for that one second. The
+// pilot's own reader, at fixed instants on the boundary (the next ones in Toronto, within the
+// publication's two days), reads the Store open at each of them, whatever the time of the run.
+it("the pilot's own operating reader reads the all-day Store open at every second of the day", async () => {
+  await withAutoAcceptWorld({ caseId: "wp2423_aap_day", orderType: "Pickup" }, async (world) => {
+    const { assert, readOperatingAt } = world;
+    await world.useRealOperatingReader();
+    for (const localTime of [
+      "23:59:59.000",
+      "23:59:59.500",
+      "23:59:59.999",
+      "00:00:00.000",
+      "12:00:00.000",
+    ]) {
+      const at = nextTorontoInstant(localTime);
+      const status = await readOperatingAt(at);
+      assert.equal(status?.state, "Open", `${localTime} Toronto (${at})`);
+      assert.ok(status.availableServiceModes.includes("Pickup"), `${localTime} Toronto Pickup`);
+    }
+  });
+});
+
 it("a reader that can't say reads as not open, and is reported once per payment", async () => {
   await withAutoAcceptWorld({ caseId: "wp2423_aap_null", orderType: "Pickup" }, async (world) => {
     const { assert, paid, operating, query, seedPaidPickup, worker } = world;
