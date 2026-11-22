@@ -33,6 +33,7 @@ import {
   staffCallReasonText,
   tableInTab,
   tableNeed,
+  tableSettled,
   tablesFreeingSoon,
   tableTabs,
   type TableNeed,
@@ -499,6 +500,11 @@ interface TableResult {
    * staff away from the row they are working on.
    */
   readonly fromRow?: boolean | undefined;
+  /**
+   * Batch 49 (v15 b48 live): the table is checking out, so no one new can join. Said here, the
+   * panel does not say it again further down.
+   */
+  readonly checkingOut?: true | undefined;
 }
 
 /** Below the desktop width the selected table's panel sits under (or over) the list. */
@@ -564,6 +570,9 @@ function tableActionFailureText(error: unknown): string {
 /** Batch 48 (v15 b47 live): no one new joins a table paying its bill (dining-qr-join.md). */
 const tableCheckingOutText = () =>
   t("This table is paying the bill, so no one new can join and no new join code can be made.");
+/** Batch 49 (v15 b48 live): the same, once the bill is paid (or nothing was owed). */
+const tableSettledText = () =>
+  t("This table's bill is settled, so no one new can join and no new join code can be made.");
 
 /** M159: set when the Store has no tables at all (the empty floor says what to do next). */
 const noTablesMessage = "no-tables";
@@ -1105,7 +1114,13 @@ function DiningSessionWorkspaceBody({
         setState(unknown ? "Unknown" : "Idle");
         setUnknownAction(unknown ? "Session" : null);
         if (!unknown) operation.current = null;
-        setResult({ text: tableActionFailureText(error), table: table.tableReference });
+        setResult({
+          text: tableActionFailureText(error),
+          table: table.tableReference,
+          ...(error instanceof DiningSessionClientError && error.code === "TableCheckingOut"
+            ? { checkingOut: true as const }
+            : {}),
+        });
         readAgain = !unknown;
       }
     } finally {
@@ -1247,16 +1262,20 @@ function DiningSessionWorkspaceBody({
   const rows = useMemo(
     () =>
       tables
-        .map((table) => ({
-          table,
-          need: tableNeed(
+        .map((table) => {
+          const facts = listFactsOf(table, orderFacts, billFacts, queueRead, kitchenFacts);
+          return {
             table,
-            listFactsOf(table, orderFacts, billFacts, queueRead, kitchenFacts),
-            now,
-            table.session?.orderReference != null && billUnread.has(table.session.orderReference),
-            deviceBillOf(table),
-          ),
-        }))
+            facts,
+            need: tableNeed(
+              table,
+              facts,
+              now,
+              table.session?.orderReference != null && billUnread.has(table.session.orderReference),
+              deviceBillOf(table),
+            ),
+          };
+        })
         .sort(compareTables),
     [tables, orderFacts, billFacts, billUnread, queueRead, kitchenFacts, now],
   );
@@ -1735,6 +1754,11 @@ function DiningSessionWorkspaceBody({
               canTakeOrders={canTakeTableRounds ?? canTakeOrders}
               guestStartsOn={guestStarts !== null}
               tableQrHref={tableQrHref}
+              settled={tableSettled(
+                rows.find((row) => row.table.tableReference === selected.tableReference)?.facts ??
+                  null,
+              )}
+              checkoutSaid={resultInPanel && result.checkingOut === true}
               checkoutRevision={checkoutRevision}
               refreshKey={String(loadedAt.current)}
               onPartySize={(session, size) =>
@@ -1873,6 +1897,8 @@ function TablePanel({
   canTakeOrders,
   guestStartsOn,
   tableQrHref,
+  settled,
+  checkoutSaid,
   checkoutRevision,
   refreshKey,
   blockReasonCode,
@@ -1923,6 +1949,10 @@ function TablePanel({
   readonly canOperateTables: boolean;
   readonly canTakeOrders: boolean;
   readonly tableQrHref: string | undefined;
+  /** Batch 49: the bill of the table checking out is paid, or nothing is owed. */
+  readonly settled: boolean;
+  /** Batch 49: the outcome line at the top of the panel already says it is checking out. */
+  readonly checkoutSaid: boolean;
   readonly checkoutRevision: number;
   readonly refreshKey: string;
   readonly blockReasonCode: string;
@@ -1942,6 +1972,16 @@ function TablePanel({
   const noCode = table.qrCodeValidUntil === null;
   const checkingOut = table.session?.phase === "Closing";
   const hasOrder = Boolean(table.session?.orderReference);
+  // Batch 49 (v15 b48 live): that no one new can join a table checking out is said once in the
+  // panel: in the outcome line when a refused step just said it, else where the phones are, else
+  // (no phones block for this role) where New join code was.
+  const phonesShown = seated && canOperateTables && table.currentDiningSessionReference !== null;
+  const checkoutNote =
+    !seated || !checkingOut || checkoutSaid
+      ? null
+      : settled
+        ? tableSettledText()
+        : tableCheckingOutText();
   // WP-2423 item 8 ⑤ decision 4: which phone sent each round, from the table's phone list.
   const [roundPhones, setRoundPhones] = useState<ReadonlyMap<string, number | null>>(new Map());
   // The per-head charge is shown in two places on the panel; a change in one reads the other again.
@@ -2251,6 +2291,8 @@ function TablePanel({
           <TablePanelPhones
             key={table.currentDiningSessionReference}
             diningSessionReference={table.currentDiningSessionReference}
+            checkingOut={checkingOut}
+            checkoutNote={checkoutNote}
             csrf={csrf}
             timeZone={timeZone}
             now={now}
@@ -2278,7 +2320,9 @@ function TablePanel({
           !noCode &&
           checkingOut &&
           !(state === "Unknown" && unknownAction === "Session") ? (
-            <p className="table-panel__meta">{tableCheckingOutText()}</p>
+            checkoutNote !== null && !phonesShown ? (
+              <p className="table-panel__meta">{checkoutNote}</p>
+            ) : null
           ) : seated && !noCode ? (
             <button
               type="button"

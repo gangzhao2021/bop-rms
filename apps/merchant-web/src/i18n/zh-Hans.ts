@@ -6614,6 +6614,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "{table} 号桌已关台。清洁后点“已清洁”。",
   "This table is paying the bill, so no one new can join and no new join code can be made.":
     "这桌正在结账，不能再有人加入，也不能换新的入桌码。",
+  "This table's bill is settled, so no one new can join and no new join code can be made.":
+    "这桌已结清，不能再有人加入，也不能换新的入桌码。",
   "Table {table} was closed on another device. Clean it, then mark it cleaned.":
     "{table} 号桌已在另一台设备上关台。清洁后点“已清洁”。",
   "Table {table} was closed on another device and is free for the next guest.":
@@ -6937,6 +6939,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Remove phone {number} from this table": "把手机 {number} 移出这桌",
   "Check it belongs to this table. If not, remove it below. To stop it joining again by scan, also pause joining by scan.":
     "检查它是不是这桌的。不是的话在下面移出；要防止它再扫码加入，还要暂停扫码加入。",
+  "Check it belongs to this table. If not, remove it below.":
+    "检查它是不是这桌的。不是的话在下面移出。",
   "Also pause joining by scan": "也暂停扫码加入",
   Hidden: "已隐藏",
   "Missing a name": "缺中文名或英文名",

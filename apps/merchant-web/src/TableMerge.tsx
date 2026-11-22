@@ -253,7 +253,9 @@ export function TableMerge({
       setBusy(false);
     }
   };
-  if (others.length === 0) return null;
+  // Batch 49 (v15 b48 live): a table checking out is said once in the panel ("…no one new can
+  // join…"); merging is not offered then, rather than said again as a reason here.
+  if (others.length === 0 || table.session?.phase === "Closing") return null;
   return (
     <section className="table-move" aria-label={t("Merge this party into another table")}>
       {blocked !== null ? (

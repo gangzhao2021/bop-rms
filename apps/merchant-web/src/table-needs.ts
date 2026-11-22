@@ -107,6 +107,14 @@ const cad = (minor: string) => orderMoney({ amountMinor: minor, currencyCode: "C
 const minutesAgo = (since: string, now: number) =>
   Math.max(0, Math.floor((now - Date.parse(since)) / 60_000));
 
+/**
+ * Batch 49: the bill of a table checking out is paid, or nothing is owed on it (points, comps or a
+ * write-off took it to zero). False while its bill is not read.
+ */
+export function tableSettled(order: TableOrderFacts | null): boolean {
+  return Boolean(order?.bill?.paid) || order?.bill?.totalMinor === "0";
+}
+
 export function tableNeed(
   table: StaffDiningTable,
   order: TableOrderFacts | null,

@@ -574,8 +574,15 @@ for (const language of ["en", "zh-Hans"] as const)
       await expect(
         more.getByRole("button", { name: zh ? "换入桌码" : "New join code" }),
       ).toHaveCount(0);
-      const reason = more.getByText(paying(zh));
+      // Batch 49: this table has paid (cash), so the panel says its bill is settled, once, where
+      // its phones are (dining-checkout-joining.spec.ts has the phones and the unpaid case).
+      const settled = zh
+        ? "这桌已结清，不能再有人加入，也不能换新的入桌码。"
+        : "This table's bill is settled, so no one new can join and no new join code can be made.";
+      const reason = panel.getByText(settled);
       await expect(reason).toBeVisible();
+      await expect(page.getByText(settled)).toHaveCount(1);
+      await expect(page.getByText(paying(zh))).toHaveCount(0);
       await reason.scrollIntoViewIfNeeded();
       const box = await reason.evaluate((node) => node.getBoundingClientRect().toJSON() as DOMRect);
       expect(box.left).toBeGreaterThanOrEqual(16);

@@ -102,3 +102,79 @@ describe("Table phones: remove, then stop it joining again", () => {
     expect(buttonNamed(container, "Resume joining by scan")).toBeDefined();
   });
 });
+
+// Batch 49 (v15 b48 live): a table checking out takes no one new whether joining by scan is paused
+// or not, so the block says that once (given by the panel) and offers no pause, before and after a
+// removal; the phones are still listed and can still be taken off the table.
+describe("Table phones while the table is checking out", () => {
+  const note =
+    "This table is paying the bill, so no one new can join and no new join code can be made.";
+  it("says no one new can join, with no pause step and no advice to pause", async () => {
+    const { fetcher, bodies } = server();
+    const { container } = await mount(
+      <TablePanelPhones
+        diningSessionReference={id(1)}
+        checkingOut
+        checkoutNote={note}
+        csrf={csrf}
+        timeZone="America/Toronto"
+        now={Date.now()}
+        locked={false}
+        refreshKey="1"
+        fetcher={fetcher}
+      />,
+    );
+    await settle();
+    const text = container.textContent ?? "";
+    expect(text.split(note)).toHaveLength(2);
+    expect(text).not.toContain("Guests join by scanning the table's QR code.");
+    expect(text).not.toMatch(/pause joining by scan/iu);
+    expect(text).toContain("Check it belongs to this table. If not, remove it below.");
+    await click(buttonNamed(container, "Remove phone 2 from this table"));
+    await click(buttonNamed(container, "Remove phone 2"));
+    await settle();
+    expect(container.textContent).not.toMatch(/pause joining by scan/iu);
+    expect(bodies.map((body) => (body as { action: string }).action)).toEqual(["State", "Remove"]);
+  });
+
+  it("says nothing about joining when the panel already said it", async () => {
+    const { fetcher } = server();
+    const { container } = await mount(
+      <TablePanelPhones
+        diningSessionReference={id(1)}
+        checkingOut
+        checkoutNote={null}
+        csrf={csrf}
+        timeZone="America/Toronto"
+        now={Date.now()}
+        locked={false}
+        refreshKey="1"
+        fetcher={fetcher}
+      />,
+    );
+    await settle();
+    expect(container.textContent).not.toContain(note);
+    expect(container.textContent).not.toContain("Guests join by scanning the table's QR code.");
+    expect(container.textContent).toContain("2 phones at this table");
+  });
+
+  it("still says the note when the phones can't be read", async () => {
+    const fetcher = vi.fn<typeof fetch>(async () => new Response("{}", { status: 503 }));
+    const { container } = await mount(
+      <TablePanelPhones
+        diningSessionReference={id(1)}
+        checkingOut
+        checkoutNote={note}
+        csrf={csrf}
+        timeZone="America/Toronto"
+        now={Date.now()}
+        locked={false}
+        refreshKey="1"
+        fetcher={fetcher}
+      />,
+    );
+    await settle();
+    expect(container.textContent).toContain(note);
+    expect(container.textContent).toContain("The phones at this table could not be read.");
+  });
+});

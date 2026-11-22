@@ -30,9 +30,14 @@ export function newPhones(phones: readonly TablePhone[], now: number): readonly 
  * table, numbered in the order they joined. A phone that just joined is pointed out (its row
  * has "Remove phone N from this table"; the heading has "Pause joining by scan"). Staff can pause or resume
  * joining by scan at any time; while paused, new guests need a code from staff or the host.
+ * Batch 49 (v15 b48 live): a table checking out takes no one new, whether joining by scan is paused
+ * or not (the QR issue refuses it as checking out first), so then the block says that instead and
+ * offers no pause; the phones are still listed and can still be taken off the table.
  */
 export function TablePanelPhones({
   diningSessionReference,
+  checkingOut = false,
+  checkoutNote = null,
   csrf,
   timeZone,
   now,
@@ -42,6 +47,10 @@ export function TablePanelPhones({
   fetcher,
 }: {
   readonly diningSessionReference: string;
+  /** The table is checking out: no one new joins, so pausing joining by scan changes nothing. */
+  readonly checkingOut?: boolean | undefined;
+  /** What to say about joining while checking out (null: said elsewhere in the panel). */
+  readonly checkoutNote?: string | null | undefined;
   readonly csrf: string;
   readonly timeZone: string | undefined;
   readonly now: number;
@@ -83,8 +92,17 @@ export function TablePanelPhones({
       });
     return () => controller.abort();
   }, [client, csrf, diningSessionReference, refreshKey]);
+  const note =
+    checkingOut && checkoutNote !== null ? (
+      <p className="table-phones__mode">{checkoutNote}</p>
+    ) : null;
   if (hidden || state === null)
-    return problem ? <p className="table-panel__notice">{problem}</p> : null;
+    return problem || note ? (
+      <>
+        {note}
+        {problem ? <p className="table-panel__notice">{problem}</p> : null}
+      </>
+    ) : null;
   const run = async (
     key: string,
     action: (reference: string) => Promise<TablePhones>,
@@ -137,9 +155,11 @@ export function TablePanelPhones({
       {fresh.map((phone) => (
         <p key={phone.participantReference} className="table-phones__new" role="note">
           <strong>{t("Phone {number} just joined.", { number: String(phone.phoneNumber) })}</strong>{" "}
-          {t(
-            "Check it belongs to this table. If not, remove it below. To stop it joining again by scan, also pause joining by scan.",
-          )}
+          {checkingOut
+            ? t("Check it belongs to this table. If not, remove it below.")
+            : t(
+                "Check it belongs to this table. If not, remove it below. To stop it joining again by scan, also pause joining by scan.",
+              )}
         </p>
       ))}
       <header className="table-phones__head">
@@ -148,15 +168,21 @@ export function TablePanelPhones({
             ? t("1 phone at this table")
             : t("{count} phones at this table", { count: String(atTable) })}
         </h3>
-        <button type="button" disabled={disabled} onClick={() => pause(!state.paused)}>
-          {state.paused ? t("Resume joining by scan") : t("Pause joining by scan")}
-        </button>
+        {checkingOut ? null : (
+          <button type="button" disabled={disabled} onClick={() => pause(!state.paused)}>
+            {state.paused ? t("Resume joining by scan") : t("Pause joining by scan")}
+          </button>
+        )}
       </header>
-      <p className="table-phones__mode">
-        {state.paused
-          ? t("Joining by scan is paused. New guests need a join code from you or the host.")
-          : t("Guests join by scanning the table's QR code.")}
-      </p>
+      {checkingOut ? (
+        note
+      ) : (
+        <p className="table-phones__mode">
+          {state.paused
+            ? t("Joining by scan is paused. New guests need a join code from you or the host.")
+            : t("Guests join by scanning the table's QR code.")}
+        </p>
+      )}
       <ul className="table-phones__list">
         {state.phones.map((phone) => (
           <li key={phone.participantReference}>
@@ -172,7 +198,7 @@ export function TablePanelPhones({
                     })}
             </span>
             {phone.left ? (
-              justRemoved === phone.participantReference && !state.paused ? (
+              justRemoved === phone.participantReference && !state.paused && !checkingOut ? (
                 <button type="button" disabled={disabled} onClick={() => pause(true)}>
                   {t("Also pause joining by scan")}
                 </button>
