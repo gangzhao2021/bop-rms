@@ -161,7 +161,17 @@ export function installMerchantDiningRoutes(
           joinKind: r.joinKind,
         }),
       )
-      .catch((error: unknown) => failed(response, error));
+      .catch((error: unknown) => {
+        // Batch 48: the table is paying its bill, so no one new joins and no new code is made.
+        if (merchantFailureCode(error) === "DINING_JOIN_STATE_CHECKING_OUT") {
+          response
+            .status(409)
+            .set("Cache-Control", NO_STORE)
+            .json({ error: "dining_join_table_checking_out" });
+          return;
+        }
+        failed(response, error);
+      });
   });
   // WP-2423 item 8 ⑤ decisions 5–7: a guest round waiting for staff — send it or cancel it.
   router.post("/dining/held-round", sameOriginMutation(options), (request, response) => {

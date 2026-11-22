@@ -75,6 +75,9 @@ const changedCodes: ReadonlySet<string> = new Set([
   "ORDINARY_REFUND_WITHDRAW_EVERYTHING",
   "ORDINARY_REFUND_WITHDRAW_NEEDS_SENDER",
   "ORDINARY_REFUND_WITHDRAW_STOCK_NOT_RELEASABLE",
+  // Batch 48: a table paying its bill gets no new join code (the join-state route answers it 409
+  // dining_join_table_checking_out; anywhere else it is a conflict, never "try again").
+  "DINING_JOIN_STATE_CHECKING_OUT",
 ]);
 const retryCodes: ReadonlySet<string> = new Set([
   "Unavailable",

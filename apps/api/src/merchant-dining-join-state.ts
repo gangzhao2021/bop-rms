@@ -43,6 +43,9 @@ export function createMerchantDiningJoinState(options: {
         diningSessionReference: reference,
         observedAt: current.context.resolvedAt,
       });
+      // Batch 48 (v15 b47 live): a table paying its bill takes no one new (dining-qr-join.md), so
+      // it gets no new join code. Said as that, not as "the table changed": nothing had changed.
+      if (session.phase === "Closing") throw new Error("DINING_JOIN_STATE_CHECKING_OUT");
       if (session.phase !== "Active") return fail();
       const owner = createPostgresDiningJoinRegenerationStore(
           { run: (work) => work(tx) },

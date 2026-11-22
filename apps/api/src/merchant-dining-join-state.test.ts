@@ -68,6 +68,15 @@ it.each(["Closing", "Closed"])("rejects %s session", async (phase) => {
   await expect(f.read(f.input)).rejects.toThrow();
   expect(m.state).not.toHaveBeenCalled();
 });
+// Batch 48 (v15 b47 live): a table paying its bill (Closing) takes no one new, so no new join code.
+// That is said as its own refusal, not "the table changed": nothing had changed.
+it("refuses a table that is checking out as checking out, not as changed", async () => {
+  const f = setup();
+  m.fence.mockResolvedValue({ ...f.session, phase: "Closing", version: 3 });
+  await expect(f.read(f.input)).rejects.toThrow("DINING_JOIN_STATE_CHECKING_OUT");
+  m.fence.mockResolvedValue({ ...f.session, phase: "Closed", version: 4 });
+  await expect(f.read(f.input)).rejects.toThrow("DINING_JOIN_STATE_CHANGED");
+});
 it("rejects owner drift", async () => {
   const f = setup();
   m.state.mockResolvedValue({ session: { ...f.session, version: 3 }, capability: {} });

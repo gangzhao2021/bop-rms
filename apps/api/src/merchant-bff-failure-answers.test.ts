@@ -457,6 +457,25 @@ describe("each route tells a refusal from a failure", () => {
     expect(failing.reported).toHaveLength(1);
   });
 
+  it("a new join code for a table that is paying its bill is refused as checking out", async () => {
+    // Batch 48 (v15 b47 live): this answered 409 changed_while_loading, so staff were told the
+    // table had changed and been read again, though nothing had changed.
+    const paying = await serve({
+      diningJoinState: rejecting(new Error("DINING_JOIN_STATE_CHECKING_OUT")),
+    } as never);
+    const answer = await paying.post("/dining/sessions/join-state");
+    expect(answer.status).toBe(409);
+    expect(answer.headers.get("cache-control")).toBe("no-store");
+    expect(await answer.json()).toEqual({ error: "dining_join_table_checking_out" });
+    expect(paying.reported).toEqual([]);
+    const moved = await serve({
+      diningJoinState: rejecting(new Error("DINING_JOIN_STATE_CHANGED")),
+    } as never);
+    const changed = await moved.post("/dining/sessions/join-state");
+    expect(changed.status).toBe(409);
+    expect(await changed.json()).toEqual({ error: "changed_while_loading" });
+  });
+
   it("a service's own rewrite around an ended sign-in still sends them to sign in", async () => {
     const ended = withCause(
       new Error("MERCHANT_TASK_INBOX_UNAVAILABLE"),
