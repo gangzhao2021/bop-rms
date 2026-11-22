@@ -239,14 +239,27 @@ const renderForm = (view: ReturnType<typeof hoursView>) =>
       />
     </MemoryRouter>,
   );
+it("says the time zone and day start in the editor only when they are not the published ones", () => {
+  // Batch 46/49: as the published hours read it, with one sentence end.
+  const sentence =
+    "Times are in Eastern Time (Toronto, Ottawa and Montréal). The business day starts at 5:00\u00a0a.m.<";
+  const html = renderForm(
+    hoursView({ ...configuration("Draft"), businessDayStartLocalTime: "05:00:00" }),
+  );
+  expect(html).toContain(sentence);
+  const same = renderForm(hoursView({ ...configuration("Draft") }));
+  expect(same).not.toContain("Times are in");
+});
 it("edits hours without effective dates, business-day start or a typed reason code", () => {
   const html = renderForm(hoursView(null));
   expect(html).not.toContain("Effective from");
   expect(html).not.toContain("Effective until");
   expect(html).not.toContain("Change reason code");
   expect(html).not.toContain('type="datetime-local"');
-  // Batch 46: as the published hours above it read it, with one sentence end.
-  expect(html).toContain("The business day starts at 4:00\u00a0a.m.<");
+  // Batch 49 (v15 b48): the time zone and day start of the published hours are said once, under
+  // Published hours, not again in the editor.
+  expect(html).not.toContain("Times are in");
+  expect(html).not.toContain("The business day starts");
   // Batch 47: hours and minutes as the page writes them, never a browser time field with seconds.
   expect(html).not.toContain('type="time"');
   expect(html).toContain('<option value="9" selected="">9</option>');

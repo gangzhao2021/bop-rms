@@ -1463,7 +1463,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "配置已批准。发布前已发布的营业时间保持不变。",
   "Configuration checked.": "配置已核对。",
   "Configuration created from the saved setup.": "已根据已保存的设置创建配置。",
-  "Configuration loaded.": "配置已加载。",
   "Configuration published.": "配置已发布。",
   "Configuration request unavailable.": "暂时无法提交配置请求。",
   "Configuration response unavailable.": "暂时无法读取配置结果。",
@@ -3532,6 +3531,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Releasing…": "正在释放…",
   Reload: "重新加载",
   "Reload configuration": "重新加载配置",
+  "Reloaded the latest saved hours.": "已重新加载最新保存的营业时间。",
   "Reload the list": "重新加载列表",
   "Reload the saved configuration before reviewing this action.":
     "审核此操作前，请先重新加载已保存的配置。",

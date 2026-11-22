@@ -180,6 +180,10 @@ export function StoreConfigurationEditor({ store, csrf }: { store: string; csrf:
     if (running.current || pending.current) return;
     running.current = true;
     setBusy(true);
+    // Batch 49 (v15 b48: "Configuration loaded." stood over the form it had just shown): the first
+    // load is answered by the form itself; only a reload, which may change nothing visible, says
+    // what it did.
+    const reloading = view !== null;
     const active = new AbortController();
     controller.current = active;
     try {
@@ -187,7 +191,7 @@ export function StoreConfigurationEditor({ store, csrf }: { store: string; csrf:
       if (active.signal.aborted) return;
       setView(next);
       setDraft(storeConfigurationEditBase(next));
-      setMessage(t("Configuration loaded."));
+      setMessage(reloading ? t("Reloaded the latest saved hours.") : "");
     } catch {
       if (!active.signal.aborted)
         setMessage(t("Configuration unavailable. Check your access and retry."));
@@ -379,6 +383,18 @@ export function StoreConfigurationEditor({ store, csrf }: { store: string; csrf:
     }
   }
   const disabled = busy || !online || uncertain;
+  const actions = (
+    <div className="hours-editor-head__actions">
+      <button type="button" disabled={disabled} onClick={() => void load()}>
+        {view ? t("Reload configuration") : t("Edit operating hours")}
+      </button>
+      {uncertain && (
+        <button type="button" disabled={busy || !online} onClick={() => void save()}>
+          {t("Retry configuration request")}
+        </button>
+      )}
+    </div>
+  );
   return (
     <section aria-labelledby="configuration-editor-title" aria-busy={busy}>
       <h2 id="configuration-editor-title">{t("Operating hours draft")}</h2>
@@ -388,16 +404,13 @@ export function StoreConfigurationEditor({ store, csrf }: { store: string; csrf:
         )}
       </p>
       {!online && <p role="status">{t("Offline read-only.")}</p>}
-      <p role="status">{systemText(message)}</p>
-      <button type="button" disabled={disabled} onClick={() => void load()}>
-        {view ? t("Reload configuration") : t("Edit operating hours")}
-      </button>
-      {uncertain && (
-        <button type="button" disabled={busy || !online} onClick={() => void save()}>
-          {t("Retry configuration request")}
-        </button>
-      )}
-      {view && draft && (
+      {/* Batch 49 (v15 b48): the head reads status, the latest change, then the actions, each a
+          step apart. The status stays mounted, empty and without space, so a reload's result is
+          still read out politely. */}
+      <p role="status" aria-live="polite" className="hours-editor-head__status">
+        {systemText(message)}
+      </p>
+      {view && draft ? (
         <StoreHoursDraftForm
           view={view}
           draft={draft}
@@ -405,7 +418,10 @@ export function StoreConfigurationEditor({ store, csrf }: { store: string; csrf:
           onDraftChange={setDraft}
           onCommand={(command) => void save(command)}
           onWithdraw={(reason) => void withdraw(reason)}
+          actions={actions}
         />
+      ) : (
+        actions
       )}
       {view && draft && (
         <StoreHoursOwnApproval
@@ -427,6 +443,7 @@ export function StoreHoursDraftForm({
   onDraftChange: setDraft,
   onCommand,
   onWithdraw,
+  actions,
 }: {
   readonly view: StoreConfigurationView;
   readonly draft: StoreConfigurationSnapshot;
@@ -436,6 +453,8 @@ export function StoreHoursDraftForm({
   /** WP-2423 (v15 D2/D3): withdraw your own open change, or decline someone else's (optional
    * reason, after confirming). */
   onWithdraw?(declineReason?: StoreConfigurationDeclineReason): void;
+  /** Batch 49: the editor's own actions (reload, retry), after the latest change. */
+  readonly actions?: ReactNode;
 }) {
   const [declining, setDeclining] = useState(false),
     [declineReason, setDeclineReason] = useState<StoreConfigurationDeclineReason | "">("");
@@ -497,7 +516,10 @@ export function StoreHoursDraftForm({
         </p>
       )}
       {open === "SomeoneElse" && view.latest && (
-        <section aria-label={t("Change waiting from someone else")}>
+        <section
+          aria-label={t("Change waiting from someone else")}
+          className="hours-editor-head__change"
+        >
           <p>
             {t(
               "{value}’s change (version {configurationVersion}, {value2}) is still open. It is shown below. A new change cannot be saved until it is {value3}, or declined. {view}",
@@ -571,7 +593,7 @@ export function StoreHoursDraftForm({
         </section>
       )}
       {open === "Yours" && view.latest && (
-        <section aria-label={t("Your change waiting")}>
+        <section aria-label={t("Your change waiting")} className="hours-editor-head__change">
           <p>
             {t(
               "You are editing your own change (version {configurationVersion}, {value}). Saving again replaces it; it then needs to be sent and approved again.",
@@ -588,15 +610,23 @@ export function StoreHoursDraftForm({
           )}
         </section>
       )}
-      <p>
-        {withOneSentenceEnd(
-          t("Times are in {timeZone}. The business day starts at {value}.", {
-            timeZone: timeZoneLabel(draft.timeZone),
-            // Batch 46: written as the published hours above it are ("4:00 a.m.", "4:00").
-            value: wallClockTime(draft.businessDayStartLocalTime),
-          }),
-        )}
-      </p>
+      {actions}
+      {/* Batch 49 (v15 b48: said under Published hours and again here): the time zone and the
+          start of the business day are said once, under Published hours. The editor says them
+          only when its hours are not in the published ones (nothing published yet, or Store setup
+          changed them). */}
+      {(view.current?.timeZone !== draft.timeZone ||
+        view.current.businessDayStartLocalTime !== draft.businessDayStartLocalTime) && (
+        <p>
+          {withOneSentenceEnd(
+            t("Times are in {timeZone}. The business day starts at {value}.", {
+              timeZone: timeZoneLabel(draft.timeZone),
+              // Batch 46: written as the published hours above it are ("4:00 a.m.", "4:00").
+              value: wallClockTime(draft.businessDayStartLocalTime),
+            }),
+          )}
+        </p>
+      )}
       {draft.setupBasis !== undefined && <StoreConfigurationFeeBasisView configuration={draft} />}
       {view.current?.setupBasis !== undefined &&
         view.current.configurationReference !== draft.configurationReference && (

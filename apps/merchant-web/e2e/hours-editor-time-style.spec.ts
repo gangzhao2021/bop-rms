@@ -206,18 +206,16 @@ for (const language of ["en", "zh-Hans"] as const) {
       await openEditor(page, zh);
       const text = await editor(page).innerText();
       if (zh) {
-        expect(text).toContain(
-          "时间使用北美东部时间（多伦多、渥太华和蒙特利尔）。营业日从 4:00 开始。",
-        );
+        // Batch 49: the time zone and day start are said under Published hours, not again here.
+        expect(text).not.toContain("时间使用");
         expect(text).toContain("日期使用北美东部时间（多伦多、渥太华和蒙特利尔）。");
         expect(text).toContain(
           "你已于 11月16日 5:17 撤回你的更改。下一项更改将基于已发布的营业时间。",
         );
         expect(text).not.toContain("它已被");
       } else {
-        expect(text).toContain(
-          "Times are in Eastern Time (Toronto, Ottawa and Montréal). The business day starts at 4:00\u00a0a.m.",
-        );
+        // Batch 49: the time zone and day start are said under Published hours, not again here.
+        expect(text).not.toContain("Times are in");
         expect(text).toContain(
           "You withdrew your change on Nov 16, 5:17\u00a0a.m. The next change starts from the published hours.",
         );
@@ -426,5 +424,89 @@ for (const language of ["en", "zh-Hans"] as const) {
       );
       expect(text).not.toContain(zh ? "最近更改：" : "Latest change:");
     });
+  });
+}
+
+/**
+ * Batch 49 (v15 batch 48 live, Lane Dessert, Edit operating hours): the editor head stacked
+ * "Configuration loaded." / "配置已加载。", the "Reload configuration" button and "You withdrew your
+ * change …" with no gap between the button and the sentence, at 390 and 1440 in both languages;
+ * and "Times are in Eastern Time … The business day starts at 4:00 a.m." repeated the time zone
+ * and business-day start that Published hours had just given.
+ */
+for (const language of ["en", "zh-Hans"] as const) {
+  const zh = language === "zh-Hans";
+  test.describe(`@production batch 49 hours editor head (${language})`, () => {
+    test.use({ locale: "en-CA" });
+    for (const [width, height] of [
+      [390, 844],
+      [1024, 768],
+      [1440, 900],
+    ] as const) {
+      test(`the head reads status, latest change, then actions, spaced, and the day start is said once, at ${width}`, async ({
+        page,
+      }) => {
+        await page.setViewportSize({ width, height });
+        await open(page, language);
+        await openEditor(page, zh);
+        const head = editor(page);
+        const sentence = head.getByText(
+          zh ? "你已于 11月16日 5:17 撤回你的更改。" : "You withdrew your change on Nov 16,",
+        );
+        const reload = head.getByRole("button", {
+          name: zh ? "重新加载配置" : "Reload configuration",
+        });
+        await expect(sentence).toBeVisible();
+        await expect(reload).toBeVisible();
+        // Once loaded, the form itself says so: no "Configuration loaded." line.
+        const text = await head.innerText();
+        expect(text).not.toContain(zh ? "配置已加载" : "Configuration loaded");
+        // Order: the latest-change sentence, then the actions, with at least an 8 px step between.
+        const said = await sentence.boundingBox();
+        const button = await reload.boundingBox();
+        expect(said).not.toBeNull();
+        expect(button).not.toBeNull();
+        const gap = (button?.y ?? 0) - ((said?.y ?? 0) + (said?.height ?? 0));
+        expect(gap).toBeGreaterThanOrEqual(8);
+        // The intro above the sentence keeps its own step too.
+        const intro = head.getByText(zh ? "保存更改以待审核。" : "Save changes for review.", {
+          exact: false,
+        });
+        const introBox = await intro.boundingBox();
+        expect(
+          (said?.y ?? 0) - ((introBox?.y ?? 0) + (introBox?.height ?? 0)),
+        ).toBeGreaterThanOrEqual(8);
+        // The time zone and the start of the business day are said once on the page, under
+        // Published hours.
+        const page_ = await page.locator("main").innerText();
+        const dayStart = zh ? /营业日从 4:00 开始/gu : /business day starts at 4:00/giu;
+        expect(page_.match(dayStart)?.length ?? 0).toBe(1);
+        expect(text).not.toContain(zh ? "时间使用" : "Times are in");
+        await expect(
+          page.locator("section[aria-labelledby='published-hours-title']"),
+        ).toContainText(zh ? "北美东部时间（多伦多、渥太华和蒙特利尔）" : "Eastern Time (Toronto");
+        // Nothing runs off the screen; the button keeps about 40 px spare for Linux fonts.
+        const spare = await reload.evaluate((element) => {
+          const box = (element.closest("section") ?? element).getBoundingClientRect();
+          return Math.min(box.right, window.innerWidth) - element.getBoundingClientRect().right;
+        });
+        expect(spare).toBeGreaterThanOrEqual(40);
+        const overflow = await page.evaluate(
+          () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        );
+        expect(overflow).toBeLessThanOrEqual(0);
+        // A reload still answers in a polite live region.
+        await reload.click();
+        const status = head.locator("[role='status'][aria-live='polite']");
+        await expect(status).toHaveText(
+          zh ? "已重新加载最新保存的营业时间。" : "Reloaded the latest saved hours.",
+        );
+        await sentence.scrollIntoViewIfNeeded();
+        await page.screenshot({
+          path: `test-results/b49-hours-editor-head-${language}-${width}.png`,
+        });
+        await expectNoInternalText(page);
+      });
+    }
   });
 }

@@ -11268,3 +11268,21 @@ tr[data-drop-target="true"] {
 .time-of-day__fields select.time-of-day__hour--end-of-day {
   width: auto;
 }
+
+/* Batch 49 (v15 b48): the hours editor head reads status, the latest change, then its actions,
+   each a step apart; an empty status takes no space but stays a live region. */
+.hours-editor-head__status:empty {
+  margin: 0;
+}
+.hours-editor-head__change {
+  margin-bottom: var(--bop-space-4);
+}
+.hours-editor-head__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--bop-space-2);
+  margin: var(--bop-space-4) 0 var(--bop-space-6);
+}
+.hours-editor-head__actions > button + button {
+  margin-left: 0;
+}
