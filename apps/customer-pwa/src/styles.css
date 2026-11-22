@@ -2750,8 +2750,9 @@
 .customer-page .store-identity__links {
   margin: 0;
 }
+/* Batch 46 (v15 overnight 45): the gap after "Today" is the text's own (a space in English, none
+   before Chinese words, see hoursGap()); a margin here read "今天 营业至 1:00". */
 .store-identity__hours span {
-  margin-inline-end: var(--bop-space-1);
   color: var(--bop-color-text-muted);
 }
 .store-identity__address {
