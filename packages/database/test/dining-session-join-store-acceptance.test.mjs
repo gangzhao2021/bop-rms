@@ -666,6 +666,35 @@ it("consumes Join credentials and creates Participant, Host and admission atomic
         ],
       );
       assert.equal(await joinReader.resolveJoinState(duplicate.selectorHash), null);
+      // WP-2423 (cancelled-round-guest-join): another open visit's earlier, used code equal to
+      // this table's current code (six digits repeat) no longer hides it: the code presented is
+      // read as this table's current one.
+      await configure(23);
+      const current = await service().start(command(23, 94));
+      const earlier = {
+        ...ambiguousStart.capability,
+        capabilityReference: id(93),
+        selectorHash: current.capability.selectorHash,
+        generation: 3,
+        status: "Consumed",
+        version: 2,
+        consumedAt: at(1),
+      };
+      await admin.query(
+        "INSERT INTO rms_dining.dining_join_capability (capability_id,tenant_id,brand_id,store_id,session_id,version,status,capability_snapshot) VALUES ($1,$2,$3,$4,$5,2,'Consumed',$6::jsonb)",
+        [
+          id(93),
+          id(1),
+          id(2),
+          id(3),
+          ambiguousStart.session.diningSessionReference,
+          JSON.stringify(earlier),
+        ],
+      );
+      assert.deepEqual(await joinReader.resolveJoinState(current.capability.selectorHash), {
+        session: current.session,
+        capability: current.capability,
+      });
       assert.equal(active, 0);
     } finally {
       await admin.end();

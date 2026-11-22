@@ -213,15 +213,29 @@ export function createPostgresDiningSessionJoinStore(
       try {
         return await runner.run(async (tx) => {
           await context(tx);
+          // WP-2423 (cancelled-round-guest-join): a table code is six digits, and every code an
+          // open visit was ever given stays on record (used or replaced). A fresh code equal to an
+          // earlier one of any open visit in the Store matched twice, and the guest holding the
+          // table's current code was told it was not accepted. The visit's current code (Active,
+          // its latest generation) is the one a code presented now means; an earlier, used or
+          // replaced code is read only when nothing current matches. Two current codes alike, or
+          // two earlier ones, stay ambiguous and are never chosen between.
           const found = rows(
             await tx.query(
-              "SELECT s.session_snapshot AS session,c.capability_snapshot AS capability FROM rms_dining.dining_join_capability c JOIN rms_dining.dining_session s ON s.tenant_id=c.tenant_id AND s.brand_id=c.brand_id AND s.store_id=c.store_id AND s.session_id=c.session_id WHERE c.tenant_id=$1 AND c.brand_id=$2 AND c.store_id=$3 AND c.capability_snapshot->>'selectorHash'=$4 AND s.phase='Active' LIMIT 2",
+              "SELECT s.session_snapshot AS session,c.capability_snapshot AS capability,(c.status='Active' AND NOT EXISTS (SELECT 1 FROM rms_dining.dining_join_capability n WHERE n.tenant_id=c.tenant_id AND n.brand_id=c.brand_id AND n.store_id=c.store_id AND n.session_id=c.session_id AND (n.capability_snapshot->>'generation')::numeric>(c.capability_snapshot->>'generation')::numeric)) AS current FROM rms_dining.dining_join_capability c JOIN rms_dining.dining_session s ON s.tenant_id=c.tenant_id AND s.brand_id=c.brand_id AND s.store_id=c.store_id AND s.session_id=c.session_id WHERE c.tenant_id=$1 AND c.brand_id=$2 AND c.store_id=$3 AND c.capability_snapshot->>'selectorHash'=$4 AND s.phase='Active' ORDER BY current DESC LIMIT 2",
               [tenant, brand, store, selector],
             ),
             2,
-          );
-          if (found.length !== 1) return null;
-          const raw = closed(found[0], ["session", "capability"]),
+          ) as readonly Record<string, unknown>[];
+          const currentOf = (row: Record<string, unknown> | undefined) => row?.current === true;
+          const chosen =
+            found.length === 1 || (currentOf(found[0]) && !currentOf(found[1]))
+              ? found[0]
+              : undefined;
+          if (chosen === undefined) return null;
+          const { current, ...pair } = chosen;
+          if (current !== undefined && typeof current !== "boolean") return sessionDependency();
+          const raw = closed(pair, ["session", "capability"]),
             session = parseDiningSession(raw.session),
             capability = parseDiningJoinCapability(raw.capability);
           if (

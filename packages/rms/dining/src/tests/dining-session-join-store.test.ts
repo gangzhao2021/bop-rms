@@ -138,6 +138,34 @@ describe("WP-2278 scoped Guest Join storage", () => {
     });
     expect(await store.resolveJoinState(capability.selectorHash as never)).toBeNull();
   });
+  it("reads the visit's current code when an earlier code of an open visit is alike", async () => {
+    // WP-2423 (cancelled-round-guest-join): six-digit codes repeat; the current one is meant.
+    const { session, capability } = record();
+    const { store, query } = fixture({
+      rows: [
+        { session, capability, current: true },
+        { session, capability, current: false },
+      ],
+    });
+    expect(await store.resolveJoinState(capability.selectorHash as never)).toEqual({
+      session,
+      capability,
+    });
+    expect(query.mock.calls.at(-1)?.[0]).toContain("ORDER BY current DESC LIMIT 2");
+  });
+  it.each([
+    [true, true],
+    [false, false],
+  ])("withholds two alike codes that are both current (%s) or both earlier", async (a, b) => {
+    const { session, capability } = record();
+    const { store } = fixture({
+      rows: [
+        { session, capability, current: a },
+        { session, capability, current: b },
+      ],
+    });
+    expect(await store.resolveJoinState(capability.selectorHash as never)).toBeNull();
+  });
   it.each(["brandReference", "storeReference", "diningSessionReference"])(
     "denies inconsistent current %s",
     async (field) => {
