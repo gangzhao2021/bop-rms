@@ -215,6 +215,54 @@ it("thanks a guest whose table was settled, with the ended visit's read-only rec
   expect((await f.request()).status).toBe(503);
 });
 
+// Batch 45 (v15 b44 live): staff closed and cleaned a table where nothing was ordered; a guest's
+// reload of Your table heard "no visit" (204) and was asked for a join code under "Scan the
+// location QR code to begin". The restore says the visit ended with nothing ordered, and names
+// the Store, with nothing to act with.
+it("tells a guest whose table closed with nothing ordered that its visit ended, with the Store", async () => {
+  const f = await setup();
+  f.read.mockRejectedValue(new GuestSessionError("GUEST_SESSION_UNAVAILABLE"));
+  const tm2 = {
+    brandDisplayName: "Test Merchant 2 - not production",
+    storeDisplayName: "Test Merchant 2 Main - not production",
+  };
+  f.readSettledTable.mockResolvedValue({
+    tableLabel: "V44 A (TEST)",
+    nothingOrdered: true,
+    store: tm2,
+  });
+  const r = await f.request();
+  expect(r.status).toBe(200);
+  expect(r.headers.get("set-cookie")).toBeNull();
+  expect(await r.json()).toEqual({
+    schemaVersion: 1,
+    emptyTable: { tableLabel: "V44 A (TEST)", store: tm2 },
+  });
+  expect(f.readEndedVisit).not.toHaveBeenCalled();
+  // Without readable names the answer stays; a label that isn't plain text is nothing.
+  f.readSettledTable.mockResolvedValue({ tableLabel: "V44 A (TEST)", nothingOrdered: true });
+  expect(await (await f.request()).json()).toEqual({
+    schemaVersion: 1,
+    emptyTable: { tableLabel: "V44 A (TEST)" },
+  });
+  f.readSettledTable.mockResolvedValue({ tableLabel: "<b>", nothingOrdered: true, store: tm2 });
+  expect((await f.request()).status).toBe(204);
+  // A moved (or merged) party's answer names the Store too, for the page's header.
+  f.readMovedTable.mockResolvedValue({ tableLabel: "V44 B (TEST)", merged: true, store: tm2 });
+  expect(await (await f.request()).json()).toEqual({
+    schemaVersion: 1,
+    movedTable: { tableLabel: "V44 B (TEST)", merged: true, store: tm2 },
+  });
+  f.readMovedTable.mockResolvedValue({
+    tableLabel: "V44 B (TEST)",
+    store: { brandDisplayName: "", storeDisplayName: "x" },
+  });
+  expect(await (await f.request()).json()).toEqual({
+    schemaVersion: 1,
+    movedTable: { tableLabel: "V44 B (TEST)" },
+  });
+});
+
 it("WP-2423 (rush-reads-and-orders-changes): a Session read the store could not answer is busy, never an ended visit", async () => {
   // v15 2026-11-13: in a rush the Session read found no free connection. Identity said so
   // (`dependencyFailure`), but the answer was the ended-visit 204, so a pickup guest's checkout

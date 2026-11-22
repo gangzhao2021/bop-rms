@@ -66,6 +66,15 @@ export function createCustomerSessionBootstrapRead(
       return null;
     }
   };
+  /** Batch 45 (v15 b44 live): an ended table's answer with the Store's names (the header). */
+  const withStoreNames = async <T extends object>(
+    transaction: Transaction,
+    guest: { readonly publicStoreReference: unknown; readonly locale: string },
+    answer: T,
+  ) => {
+    const store = await settledTableStore(transaction, guest);
+    return store === null ? answer : { ...answer, store };
+  };
   return {
     async read(sessionCredential: string) {
       return options.transactions.run(async (transaction) => {
@@ -195,15 +204,18 @@ export function createCustomerSessionBootstrapRead(
             String(guest.diningSessionReference),
           ])
         ).get(String(guest.diningSessionReference));
+        // Batch 45 (v15 b44 live): with the Store's published names, so the page keeps its header.
+        const withStore = <T extends object>(answer: T) =>
+          withStoreNames(transaction, guest, answer);
         if (merged !== undefined)
           return merged.phase === "Active" || merged.phase === "Closing"
-            ? { tableLabel: merged.tableLabel, merged: true }
+            ? withStore({ tableLabel: merged.tableLabel, merged: true as const })
             : null;
         const moved = await loadDiningParticipantMove(transaction as never, options.scope, {
           diningSessionReference: String(guest.diningSessionReference),
           participantReference: String(guest.diningParticipantReference),
         });
-        return moved === null ? null : { tableLabel: moved.tableLabel };
+        return moved === null ? null : withStore({ tableLabel: moved.tableLabel });
       });
     },
     /**
@@ -211,7 +223,9 @@ export function createCustomerSessionBootstrapRead(
      * it was closed normally (its bill settled) while the guest was still at it — so a guest who
      * paid and reloads is thanked instead of asked to join. A merged-away party is told at the
      * table it was merged into once that one closed. Only the label; nothing the phone can act
-     * with. Null: still open, cancelled, removed by staff, never joined, or closed with no order.
+     * with. Batch 45 (v15 b44 live): a table closed with nothing ordered says just that
+     * (nothingOrdered, no receipt access), so the guest isn't asked to join or for a join code.
+     * Null: still open, cancelled, removed by staff or never joined.
      */
     async readSettledTable(sessionCredential: string) {
       return options.transactions.run(async (transaction) => {
@@ -242,8 +256,12 @@ export function createCustomerSessionBootstrapRead(
         const merged = (
           await listDiningSessionMergedInto(transaction as never, options.scope, [session])
         ).get(session);
+        // Batch 45: the Store's names come with every ended table's answer (the page's header).
+        const named = <T extends object>(answer: T) => withStoreNames(transaction, guest, answer);
         if (merged !== undefined)
-          return merged.phase === "Closed" ? { tableLabel: merged.tableLabel, ...receipt } : null;
+          return merged.phase === "Closed"
+            ? named({ tableLabel: merged.tableLabel, ...receipt })
+            : null;
         const settled = await loadDiningParticipantSettledTable(
           transaction as never,
           options.scope,
@@ -253,15 +271,15 @@ export function createCustomerSessionBootstrapRead(
           },
         );
         if (settled === null) return null;
-        // A party that left without ordering had nothing to settle.
+        // A party that left without ordering had nothing to settle: no receipt, nothing charged.
         const orders = await listStoreDiningSessionOrders(transaction as never, options.scope, [
           session,
         ]);
-        if (!orders.has(session)) return null;
+        if (!orders.has(session))
+          return named({ tableLabel: settled.tableLabel, nothingOrdered: true as const });
         // Batch 44 (v15 b43 live): the Store's published names, so the guest's page still names
         // the Store after a reload. Public fields only; an unreadable profile leaves them out.
-        const store = await settledTableStore(transaction, guest);
-        return { ...settled, ...receipt, ...(store === null ? {} : { store }) };
+        return named({ ...settled, ...receipt });
       });
     },
     /**
@@ -345,17 +363,31 @@ export function createCustomerSessionBootstrapHandler(options?: {
       order: { orderReference: string; orderNumber: string; orderType: "Pickup" | "DineIn" };
       receiptAvailableUntil: string;
     }>;
-    /** The table this guest sat at when it was closed and settled (absent or null: not so). */
-    readSettledTable?(sessionCredential: string): Promise<{
+    /**
+     * The table this guest sat at when it was closed and settled (absent or null: not so), or
+     * (batch 45) closed with nothing ordered: no receipt, nothing to act with.
+     */
+    readSettledTable?(sessionCredential: string): Promise<
+      | {
+          tableLabel: string;
+          csrfToken: string;
+          /** Batch 44: the Store's published names (absent: not readable). */
+          store?: { brandDisplayName: string; storeDisplayName: string };
+        }
+      | {
+          tableLabel: string;
+          nothingOrdered: true;
+          store?: { brandDisplayName: string; storeDisplayName: string };
+        }
+      | null
+    >;
+    /** v15 2026-10-30: the table the guest's party was moved to (absent or null: not moved). */
+    readMovedTable?(sessionCredential: string): Promise<{
       tableLabel: string;
-      csrfToken: string;
-      /** Batch 44: the Store's published names (absent: not readable). */
+      merged?: boolean;
+      /** Batch 45: the Store's published names (absent: not readable). */
       store?: { brandDisplayName: string; storeDisplayName: string };
     } | null>;
-    /** v15 2026-10-30: the table the guest's party was moved to (absent or null: not moved). */
-    readMovedTable?(
-      sessionCredential: string,
-    ): Promise<{ tableLabel: string; merged?: boolean } | null>;
   };
 }): RequestHandler {
   const origin = options && new URL(options.allowedOrigin).origin;
@@ -425,12 +457,31 @@ export function createCustomerSessionBootstrapHandler(options?: {
         return null;
       }
     };
+    /** Batch 44/45: the Store's names for the page's header, when well formed (else left out). */
+    const storeNames = (
+      store: { brandDisplayName: string; storeDisplayName: string } | undefined,
+    ) =>
+      store !== undefined &&
+      [store.brandDisplayName, store.storeDisplayName].every(
+        (name) => typeof name === "string" && name.trim() !== "" && name.length <= 200,
+      )
+        ? {
+            store: {
+              brandDisplayName: store.brandDisplayName,
+              storeDisplayName: store.storeDisplayName,
+            },
+          }
+        : {};
     const readMovedTable = async (sessionCredential: string) => {
       if (options.port.readMovedTable === undefined) return null;
       try {
         const moved = await options.port.readMovedTable(sessionCredential);
         return moved !== null && /^[^\p{Cc}\p{Cf}<>{}$]{1,40}$/u.test(moved.tableLabel)
-          ? { tableLabel: moved.tableLabel, ...(moved.merged === true ? { merged: true } : {}) }
+          ? {
+              tableLabel: moved.tableLabel,
+              ...(moved.merged === true ? { merged: true } : {}),
+              ...storeNames(moved.store),
+            }
           : null;
       } catch (error) {
         return notReadable(error);
@@ -446,21 +497,23 @@ export function createCustomerSessionBootstrapHandler(options?: {
       }
       if (settled === null || !/^[^\p{Cc}\p{Cf}<>{}$]{1,40}$/u.test(settled.tableLabel))
         return null;
-      const csrfToken = wellFormed(() => parseGuestRawCredential(settled.csrfToken));
-      // Batch 44: the Store's names for the page's header, when well formed (else left out).
-      const store =
-        settled.store !== undefined &&
-        [settled.store.brandDisplayName, settled.store.storeDisplayName].every(
-          (name) => typeof name === "string" && name.trim() !== "" && name.length <= 200,
-        )
+      // Batch 45: closed with nothing ordered: the label and the Store, never receipt access.
+      if ("nothingOrdered" in settled)
+        return settled.nothingOrdered === true
           ? {
-              brandDisplayName: settled.store.brandDisplayName,
-              storeDisplayName: settled.store.storeDisplayName,
+              emptyTable: { tableLabel: settled.tableLabel, ...storeNames(settled.store) },
             }
-          : undefined;
+          : null;
+      const csrfToken = wellFormed(() => parseGuestRawCredential(settled.csrfToken));
       return csrfToken === null
         ? null
-        : { tableLabel: settled.tableLabel, csrfToken, ...(store === undefined ? {} : { store }) };
+        : {
+            settledTable: {
+              tableLabel: settled.tableLabel,
+              csrfToken,
+              ...storeNames(settled.store),
+            },
+          };
     };
     /** The ended visit's receipt access, validated; null when there is none to give. */
     const readEndedVisit = async (sessionCredential: string) => {
@@ -593,9 +646,10 @@ export function createCustomerSessionBootstrapHandler(options?: {
           }
           // The table was settled while this guest sat at it: thank them, with the table's
           // receipt (read only), instead of asking them to join.
+          // Batch 45: or it closed with nothing ordered: the visit ended, nothing was charged.
           const settled = await readSettledTable(credential);
           if (settled !== null) {
-            response.status(200).json({ schemaVersion: 1, settledTable: settled });
+            response.status(200).json({ schemaVersion: 1, ...settled });
             return;
           }
           // WP-2423 (v15 3cd0f8dd M5): a guest who left can still open their receipt here.
