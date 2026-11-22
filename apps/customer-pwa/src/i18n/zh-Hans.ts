@@ -57,7 +57,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Staff have opened this table. Join it, then add the dish again.":
     "店员已经开台。请先加入这一桌，再重新加这道菜。",
   "{name} wasn’t added yet. Join this table, then add it again.":
-    "{name} 还没加进购物车。请先加入这一桌，再重新加一次。",
+    "{name}还没加进购物车。请先加入这一桌，再重新加一次。",
   "We couldn’t join you to this table just now. Try again, or ask staff. Your choices are kept here.":
     "暂时无法加入这一桌。请再试一次，或询问店员。您的选择会保留在这里。",
   "You’re paying for round {round}. It goes to the kitchen once it’s paid.":

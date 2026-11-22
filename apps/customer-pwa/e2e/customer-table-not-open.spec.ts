@@ -679,7 +679,9 @@ test.describe("@production CUST-ENTRY table not open", () => {
         ).toBeVisible();
         await expect(main.getByRole("status").filter({ hasText: "Synthetic tea" })).toHaveText(
           zh
-            ? "Synthetic tea 还没加进购物车。请先加入这一桌，再重新加一次。"
+            ? // Batch 45 (v15 b44 live): no Latin space after the dish name, as the other
+              // "not added" notice writes it ("{name}还没加入购物车").
+              "Synthetic tea还没加进购物车。请先加入这一桌，再重新加一次。"
             : "Synthetic tea wasn’t added yet. Join this table, then add it again.",
         );
         await expect(main).not.toContainText(zh ? "还没开台" : "isn’t open yet");
