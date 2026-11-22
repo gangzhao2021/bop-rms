@@ -123,14 +123,8 @@ it("batch 47: the hours editor joins a Chinese zone name to its sentence, and sp
       value: "4:00",
     }),
   ).toBe(`时间使用${zone}。营业日从 4:00 开始。`);
-  expect(
-    t("Dates use {timeZone}. An exception with no intervals is closed for that date.", {
-      timeZone: zone,
-    }),
-  ).toBe(`日期使用${zone}。没有时段的例外表示当天停业。`);
-  expect(
-    t("Dates use {timeZone}. An exception with no intervals is closed for that date.", {
-      timeZone: "UTC",
-    }),
-  ).toBe("日期使用 UTC。没有时段的例外表示当天停业。");
+  // Batch 50: the special dates sentence no longer names the zone; it is said once above.
+  expect(t("An exception with no intervals is closed for that date.")).toBe(
+    "没有时段的例外表示当天停业。",
+  );
 });

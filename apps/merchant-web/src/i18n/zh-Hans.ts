@@ -873,6 +873,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Amount per one chosen ({unitCode})": "每选一份的数量（{unitCode}）",
   "Amount refunded": "退款金额",
   "Amount unavailable": "金额不可用",
+  "An exception with no intervals is closed for that date.": "没有时段的例外表示当天停业。",
   "An Owner will review and approve this change; you’ll see it here once it is published.":
     "店主会审核并批准此更改；发布后你会在这里看到。",
   "An earlier payment save must be recovered before another save.":
@@ -1647,8 +1648,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Data may be out of date · last checked ": "数据可能已过时 · 最近检查 ",
   "Date and time": "日期和时间",
   "Dated exceptions": "特定日期例外",
-  "Dates use {timeZone}. An exception with no intervals is closed for that date.":
-    "日期使用{timeZone}。没有时段的例外表示当天停业。",
   "Dawson City, Yukon": "道森市，育空地区",
   "Dawson Creek, British Columbia": "道森克里克，不列颠哥伦比亚省",
   Day: "日",
@@ -5266,7 +5265,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Up to {perOptionMaximum} of each, {total} in total{need}":
     "每项最多 {perOptionMaximum}，共 {total}{need}",
   Updated: "已更新",
-  "Updated {value} · {timeZone}": "更新于 {value} · {timeZone}",
+  "Updated {value}": "更新于 {value}",
   "Updating availability…": "正在更新可用性…",
   "Updating the table…": "正在更新这桌…",
   "Updating remake": "正在更新重做",

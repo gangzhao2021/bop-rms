@@ -405,10 +405,11 @@ export function StoreServiceControlPanel({ store, csrf }: { store: string; csrf:
           {view && (
             <>
               <p>
-                {/* Batch 46: in the app's language and the Store's zone, never the browser's. */}
-                {t("Updated {value} · {timeZone}", {
+                {/* Batch 46: in the app's language and the Store's zone, never the browser's.
+                    Batch 50: the zone itself is said once, under Published hours, which shows
+                    whenever this read does. */}
+                {t("Updated {value}", {
                   value: storeTime(view.observedAt, view.timeZone, true, "Guest"),
-                  timeZone: timeZoneLabel(view.timeZone),
                 })}
               </p>
               <fieldset disabled={disabled}>

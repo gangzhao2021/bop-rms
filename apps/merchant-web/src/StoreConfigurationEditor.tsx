@@ -679,11 +679,10 @@ export function StoreHoursDraftForm({
 
           <fieldset>
             <legend>{t("Dated exceptions")}</legend>
-            <p>
-              {t("Dates use {timeZone}. An exception with no intervals is closed for that date.", {
-                timeZone: timeZoneLabel(draft.timeZone),
-              })}
-            </p>
+            {/* Batch 50 (v15 b49: "Dates use Eastern Time …" after Published hours had said it):
+                dates are in the time zone said once above, under Published hours, or in the
+                editor's own sentence when the draft's zone is not the published one. */}
+            <p>{t("An exception with no intervals is closed for that date.")}</p>
             {draft.exceptions.map((exception, n) => (
               <fieldset key={n}>
                 <legend>{t("Exception {value}", { value: n + 1 })}</legend>

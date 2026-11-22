@@ -153,9 +153,9 @@ test("@production Hours & ordering reads in the guests' time style, today on, in
   expect(hours).not.toMatch(/\d{4}-\d{2}-\d{2}/u);
   expect(hours).not.toMatch(/\d (AM|PM)\b/u);
   const controls = await controlsText(page);
-  expect(controls).toContain(
-    "Updated Nov 22, 2026, 12:12\u00a0a.m. · Eastern Time (Toronto, Ottawa and Montréal)",
-  );
+  // Batch 50: the time zone is said once, under Published hours, not again here.
+  expect(controls).toContain("Updated Nov 22, 2026, 12:12\u00a0a.m.");
+  expect(controls).not.toContain("Eastern Time");
   expect(controls).toContain("All services — until Nov 22, 2026, 12:40\u00a0a.m.");
   expect(controls).not.toMatch(/\d (AM|PM)\b/u);
   await fitsEveryWidth(page, "hours-en");
@@ -179,9 +179,9 @@ test("@production Hours & ordering reads as natural Chinese, today on", async ({
   expect(hours).not.toMatch(/\d{4}-\d{2}-\d{2}/u);
   expect(hours).not.toMatch(/[A-Za-z]/u);
   const controls = await controlsText(page);
-  expect(controls).toContain(
-    "更新于 2026年11月22日 0:12 · 北美东部时间（多伦多、渥太华和蒙特利尔）",
-  );
+  // Batch 50: the time zone is said once, under Published hours, not again here.
+  expect(controls).toContain("更新于 2026年11月22日 0:12");
+  expect(controls).not.toContain("北美东部时间");
   expect(controls).toContain("所有服务 — 至 2026年11月22日 0:40");
   expect(controls).not.toMatch(/\b(?:Nov|a\.m\.|p\.m\.|AM|PM)\b/u);
   await fitsEveryWidth(page, "hours-zh");

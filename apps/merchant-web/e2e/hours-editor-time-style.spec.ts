@@ -208,7 +208,9 @@ for (const language of ["en", "zh-Hans"] as const) {
       if (zh) {
         // Batch 49: the time zone and day start are said under Published hours, not again here.
         expect(text).not.toContain("时间使用");
-        expect(text).toContain("日期使用北美东部时间（多伦多、渥太华和蒙特利尔）。");
+        // Batch 50: nor again in the special dates part.
+        expect(text).not.toContain("日期使用");
+        expect(text).toContain("没有时段的例外表示当天停业。");
         expect(text).toContain(
           "你已于 11月16日 5:17 撤回你的更改。下一项更改将基于已发布的营业时间。",
         );
@@ -506,6 +508,82 @@ for (const language of ["en", "zh-Hans"] as const) {
           path: `test-results/b49-hours-editor-head-${language}-${width}.png`,
         });
         await expectNoInternalText(page);
+      });
+    }
+  });
+}
+
+/**
+ * Batch 50 (v15 batch 49 live, Test Merchant 2 at 1024 zh-Hans, Edit operating hours): the head
+ * no longer repeated the time zone, but the special dates part (特定日期例外) still said
+ * "日期使用北美东部时间（多伦多、渥太华和蒙特利尔）。…", so the page named the time zone under Published
+ * hours and again at the foot of the editor. Read-only: the editor is opened, nothing is saved.
+ */
+for (const language of ["en", "zh-Hans"] as const) {
+  const zh = language === "zh-Hans";
+  test.describe(`@production batch 50 hours editor says the time zone once (${language})`, () => {
+    test.use({ locale: "en-CA" });
+    for (const [width, height] of [
+      [390, 844],
+      [1024, 768],
+      [1440, 900],
+    ] as const) {
+      test(`the special dates part does not repeat the time zone, at ${width}`, async ({
+        page,
+      }) => {
+        await page.setViewportSize({ width, height });
+        await open(page, language);
+        // Read-only: any hours or service write is stopped and recorded (added
+        // after the page's own reads, so it is asked first).
+        const writes: string[] = [];
+        for (const path of ["**/merchant/store-configuration**", "**/merchant/service-control**"])
+          await page.route(path, (route) => {
+            if (route.request().method() === "GET") return route.fallback();
+            writes.push(route.request().method() + " " + new URL(route.request().url()).pathname);
+            return route.abort();
+          });
+        await openEditor(page, zh);
+        const main = await page.locator("main").innerText();
+        const zone = zh ? "北美东部时间（多伦多、渥太华和蒙特利尔）" : "Eastern Time (Toronto";
+        expect(main.split(zone).length - 1).toBe(1);
+        await expect(
+          page.locator("section[aria-labelledby='published-hours-title']"),
+        ).toContainText(zone);
+        const exceptions = editor(page).getByRole("group", {
+          name: zh ? "特定日期例外" : "Dated exceptions",
+          exact: true,
+        });
+        await expect(exceptions).toBeVisible();
+        const said = exceptions.getByText(
+          zh
+            ? "没有时段的例外表示当天停业。"
+            : "An exception with no intervals is closed for that date.",
+          { exact: true },
+        );
+        await expect(said).toBeVisible();
+        const text = await exceptions.innerText();
+        expect(text).not.toContain(zh ? "日期使用" : "Dates use");
+        // The sentence wraps inside its part and nothing runs off the screen.
+        const clipped = await said.evaluate((element) => {
+          const box = element.getBoundingClientRect();
+          const part = (element.closest("fieldset") ?? element).getBoundingClientRect();
+          return box.right - Math.min(part.right, window.innerWidth);
+        });
+        expect(clipped).toBeLessThanOrEqual(0);
+        const overflow = await page.evaluate(
+          () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        );
+        expect(overflow).toBeLessThanOrEqual(0);
+        await exceptions.scrollIntoViewIfNeeded();
+        await page.screenshot({
+          path: `test-results/b50-hours-editor-dates-${language}-${width}.png`,
+        });
+        await page.screenshot({
+          path: `test-results/b50-hours-page-${language}-${width}.png`,
+          fullPage: true,
+        });
+        await expectNoInternalText(page);
+        expect(writes).toEqual([]);
       });
     }
   });
