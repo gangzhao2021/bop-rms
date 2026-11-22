@@ -251,10 +251,18 @@ async function guestTable(admin, store, server) {
       const entered = await pipeline.enter({ tableReference, requestedAt: now() });
       assert.equal(entered.status, "Established");
       const issued = await pipeline.openTable(as, { tableReference });
-      const joined = await pipeline.join(entered.credentials, {
-        joinCredential: issued.joinCredential,
-        operationReference: reference(),
-      });
+      assert.equal(issued.status, "Opened");
+      // The pipeline keeps the owner's answer as a cause the runner doesn't print: name it.
+      const joined = await pipeline
+        .join(entered.credentials, {
+          joinCredential: issued.joinCredential,
+          operationReference: reference(),
+        })
+        .catch((error) => {
+          throw new Error("guest join failed: " + String(error?.cause?.code ?? error?.message), {
+            cause: error,
+          });
+        });
       return (
         await pipeline.bind(entered.credentials, {
           operationReference: reference(),
