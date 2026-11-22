@@ -1348,7 +1348,7 @@ describe("Figma v1 (2026-10-25): Home lists what needs attention now", () => {
     );
     expect(html).toContain("do not resume ordering yet");
     expect(html).toContain("when today&#x27;s business day ends");
-    expect(html).toContain("Check passed Nov 6, 2026, 8:08 PM");
+    expect(html).toContain("Check passed Nov 6, 2026, 8:08\u00a0PM");
     expect(html).toContain("Wait for BOP support");
     // The next business day it is gone, and Home is quiet again.
     const nextDay = renderToStaticMarkup(

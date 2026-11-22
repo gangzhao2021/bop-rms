@@ -177,7 +177,7 @@ it("WP-2423 item 4: a recorded card-machine refund shows its slip reference in s
     );
   const html = render("RF4821");
   expect(html).toContain("Refunded $5.93 on the store&#x27;s card machine");
-  expect(html).toContain("Oct 15, 2026, 1:52 PM");
+  expect(html).toContain("Oct 15, 2026, 1:52\u00a0PM");
   expect(html).toContain("Slip reference: RF4821.");
   expect(html).not.toContain(id(1));
   expect(render(null)).toContain("No slip reference was entered.");
@@ -193,7 +193,7 @@ it("WP-2423 item 4: recording the machine refund confirms it plainly, with the c
       "America/Toronto",
     ),
   ).toBe(
-    "Card-machine refund recorded: $5.93 refunded on the card machine at Oct 15, 2026, 1:52 PM. The card machine's refund slip is the customer's receipt.",
+    "Card-machine refund recorded: $5.93 refunded on the card machine at Oct 15, 2026, 1:52\u00a0PM. The card machine's refund slip is the customer's receipt.",
   );
   expect(
     cardMachineRefundRecordedText({ ...result, receipt: "Issued" }, "$5.93", "593", "UTC"),

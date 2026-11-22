@@ -702,7 +702,7 @@ test("@production A merchant's Home says nothing about a monitor it cannot start
     }),
   ).toBeVisible();
   await expect(needs.getByText("Urgent", { exact: true })).toBeVisible();
-  await expect(needs.getByText(/as of Oct 15, 2026, 12:00 PM/u)).toBeVisible();
+  await expect(needs.getByText(/as of Oct 15, 2026, 12:00\sPM/u)).toBeVisible();
   await expect(page.getByText("The alert monitor")).toHaveCount(0);
   await expect(card.getByText("Store system: needs attention")).toBeVisible();
 

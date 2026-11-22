@@ -75,7 +75,7 @@ describe("Shared tablets & PINs", () => {
     );
     expect(html).toContain("Front counter");
     expect(html).toContain("Mia Manager");
-    expect(html).toContain("Oct 14, 2:00 PM");
+    expect(html).toContain("Oct 14, 2:00\u00a0PM");
     expect(html).toContain("Not used yet");
     expect(html).toContain('aria-label="Remove Front counter"');
     expect(html).toContain("Locked until 3:45 PM");

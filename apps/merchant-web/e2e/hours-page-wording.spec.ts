@@ -137,10 +137,12 @@ test("@production Hours & ordering reads in the guests' time style, today on, in
   await open(page, "en");
   const hours = await hoursText(page);
   expect(hours).toContain(
-    "5:00 p.m.–12:00 a.m. (next day) · Dine-in · last orders 30 minutes before closing · ready in 15 minutes",
+    "5:00\u00a0p.m.–12:00\u00a0a.m. (next day) · Dine-in · last orders 30 minutes before closing · ready in 15 minutes",
   );
-  expect(hours).toContain("11:30 a.m.–2:30 p.m. · Dine-in · last orders 25 minutes before closing");
-  expect(hours).toContain("Business day starts at 4:00 a.m.");
+  expect(hours).toContain(
+    "11:30\u00a0a.m.–2:30\u00a0p.m. · Dine-in · last orders 25 minutes before closing",
+  );
+  expect(hours).toContain("Business day starts at 4:00\u00a0a.m.");
   expect(hours).not.toContain("a.m..");
   expect(hours).toMatch(/Store configuration · Eastern Time \(Toronto, Ottawa and Montréal\)/u);
   // Past special dates are not listed; today's (the business day before 4:00) and later ones are.
@@ -152,9 +154,9 @@ test("@production Hours & ordering reads in the guests' time style, today on, in
   expect(hours).not.toMatch(/\d (AM|PM)\b/u);
   const controls = await controlsText(page);
   expect(controls).toContain(
-    "Updated Nov 22, 2026, 12:12 a.m. · Eastern Time (Toronto, Ottawa and Montréal)",
+    "Updated Nov 22, 2026, 12:12\u00a0a.m. · Eastern Time (Toronto, Ottawa and Montréal)",
   );
-  expect(controls).toContain("All services — until Nov 22, 2026, 12:40 a.m.");
+  expect(controls).toContain("All services — until Nov 22, 2026, 12:40\u00a0a.m.");
   expect(controls).not.toMatch(/\d (AM|PM)\b/u);
   await fitsEveryWidth(page, "hours-en");
 });

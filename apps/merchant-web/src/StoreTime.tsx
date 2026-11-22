@@ -1,4 +1,4 @@
-import { displayLocale, guestLocale, t } from "./i18n/i18n.js";
+import { displayLocale, guestLocale, keepTimeTogether, t } from "./i18n/i18n.js";
 import { createContext, useContext } from "react";
 
 /** WP-2423: the selected Store's IANA time zone, provided once by the workspace. */
@@ -42,7 +42,7 @@ export function storeTime(
       hour: "numeric",
       minute: "2-digit",
     }).format(new Date(instant));
-    return timeZone === undefined ? text + " UTC" : text;
+    return keepTimeTogether(timeZone === undefined ? text + " UTC" : text);
   }
   if (withDate) {
     const text = new Intl.DateTimeFormat(displayLocale(), {
@@ -53,7 +53,7 @@ export function storeTime(
       hour: "numeric",
       minute: "2-digit",
     }).format(new Date(instant));
-    return timeZone === undefined ? text + " UTC" : text;
+    return keepTimeTogether(timeZone === undefined ? text + " UTC" : text);
   }
   if (timeZone === undefined) return instant.slice(11, 16) + " UTC";
   const parts = Object.fromEntries(
@@ -158,17 +158,21 @@ export function SourceTime({
   );
 }
 
-/** "Oct 14, 3:00 PM" in the Store's time zone; the year is added when it is not this year. */
+/**
+ * "Oct 14, 3:00 PM" in the Store's time zone; the year is added when it is not this year. In the
+ * "Guest" style (batch 47: Hours & ordering): "Oct 14, 3:00 p.m." / "10月14日 15:00".
+ */
 export function friendlyStoreTime(
   instant: string,
   timeZone: string | undefined,
   now: Date = new Date(),
+  style: ClockStyle = "Staff",
 ): string {
   const zone = timeZone ?? "UTC";
   const year = (at: Date) =>
     new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric" }).format(at);
   const date = new Date(instant);
-  const text = new Intl.DateTimeFormat(displayLocale(), {
+  const text = new Intl.DateTimeFormat(style === "Guest" ? guestLocale() : displayLocale(), {
     timeZone: zone,
     month: "short",
     day: "numeric",
@@ -176,7 +180,7 @@ export function friendlyStoreTime(
     hour: "numeric",
     minute: "2-digit",
   }).format(date);
-  return timeZone === undefined ? text + " UTC" : text;
+  return keepTimeTogether(timeZone === undefined ? text + " UTC" : text);
 }
 
 /**
@@ -200,11 +204,13 @@ export function storeDayTime(
   const today = day(now);
   const [y, m, d] = today.split("-").map(Number) as [number, number, number];
   const tomorrow = new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10);
-  const time = new Intl.DateTimeFormat(displayLocale(), {
-    timeZone: zone,
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(date);
+  const time = keepTimeTogether(
+    new Intl.DateTimeFormat(displayLocale(), {
+      timeZone: zone,
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(date),
+  );
   const suffix = timeZone === undefined ? " UTC" : "";
   if (day(date) === today) return t("{time}{suffix} today", { time: time, suffix: suffix });
   if (day(date) === tomorrow) return t("{time}{suffix} tomorrow", { time: time, suffix: suffix });
@@ -231,12 +237,17 @@ export function CheckedTime({
   );
 }
 
-/** A staff-facing instant such as "Oct 14, 3:00 PM"; the exact instant stays in the title. */
+/**
+ * A staff-facing instant such as "Oct 14, 3:00 PM"; the exact instant stays in the title. Batch 47
+ * (v15: Hours & ordering read "Nov 16, 5:17 AM" beside "4:00 a.m."): written in the screen's
+ * clock style.
+ */
 export function StaffTime({ instant }: { readonly instant: string }) {
   const timeZone = useContext(StoreTimeZoneContext);
+  const style = useContext(ClockStyleContext);
   return (
     <time dateTime={instant} title={instant}>
-      {friendlyStoreTime(instant, timeZone)}
+      {friendlyStoreTime(instant, timeZone, new Date(), style)}
     </time>
   );
 }

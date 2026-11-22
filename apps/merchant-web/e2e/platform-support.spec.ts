@@ -143,7 +143,7 @@ test("@production support picks a Store, reads it masked, and changes only what 
   await expect(page.getByRole("button", { name: "Turn pickup off" })).toHaveCount(0);
   await expect(page.getByRole("cell", { name: "S…" })).toBeVisible();
   // The Store's own time, and a language switch.
-  await expect(page.getByRole("cell", { name: /1:00 PM/u })).toBeVisible();
+  await expect(page.getByRole("cell", { name: /1:00\sPM/u })).toBeVisible();
   await expect(page.locator(".store-support__head").getByRole("button")).toBeVisible();
   // In staff language, never the raw code.
   await expect(page.getByRole("cell", { name: "Refused and refunded" })).toBeVisible();

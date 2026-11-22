@@ -69,17 +69,17 @@ it("WP-2423 item 5: warns before a staff round's payment time ends, urgently in 
   expect(staffRoundPaymentNotice(table, now, "America/Toronto")).toBeNull();
   expect(staffRoundPaymentNotice(waiting, now, "America/Toronto")).toEqual({
     tier: "warning",
-    text: "A round entered by staff is waiting for its card-machine payment. Record it by 8:30 a.m.; the kitchen starts once it is recorded.",
+    text: "A round entered by staff is waiting for its card-machine payment. Record it by 8:30\u00a0a.m.; the kitchen starts once it is recorded.",
   });
   expect(
     staffRoundPaymentNotice(waiting, Date.parse(payBy) - 4 * 60_000 - 1, "America/Toronto"),
   ).toEqual({
     tier: "urgent",
-    text: "5 min left: record the card-machine payment for the round entered by staff by 8:30 a.m., or it is cancelled.",
+    text: "5 min left: record the card-machine payment for the round entered by staff by 8:30\u00a0a.m., or it is cancelled.",
   });
   const ended = staffRoundPaymentNotice(waiting, Date.parse(payBy), "America/Toronto");
   expect(ended?.tier).toBe("urgent");
-  expect(ended?.text).toContain("wasn't paid by 8:30 a.m. and is being cancelled");
+  expect(ended?.text).toContain("wasn't paid by 8:30\u00a0a.m. and is being cancelled");
   expect(ended?.text).toContain("refund it on the machine");
   const two = { ...waiting, staffRoundsAwaitingPayment: [{ payBy }, { payBy }] };
   expect(staffRoundPaymentNotice(two, now, "America/Toronto")?.text).toMatch(
@@ -91,7 +91,7 @@ it("WP-2423 item 5: warns before a staff round's payment time ends, urgently in 
     staffRoundsAwaitingPayment: Array.from({ length: 9 }, () => ({ payBy })),
   };
   expect(staffRoundPaymentNotice(nine, Date.parse(payBy), "America/Toronto")?.text).toBe(
-    "9 rounds entered by staff weren't paid by 8:30 a.m. and are being cancelled; they won't go to the kitchen. If the card machine was charged, refund it on the machine.",
+    "9 rounds entered by staff weren't paid by 8:30\u00a0a.m. and are being cancelled; they won't go to the kitchen. If the card machine was charged, refund it on the machine.",
   );
   // v15 batch 8: in Chinese every word is Chinese (no "awaits", "the round" or "it is").
   setLanguageForTest("zh-Hans");
@@ -162,16 +162,16 @@ it("WP-2423 abandoned payment: warns staff before an unpaid guest round is cance
   expect(guestRoundPaymentNotice(table, now, "America/Toronto")).toBeNull();
   expect(guestRoundPaymentNotice(waiting, now, "America/Toronto")).toEqual({
     tier: "warning",
-    text: "Round 1 isn't paid yet. The guest pays on their phone (their table page has a pay button); unpaid at 8:30 a.m., it is cancelled and nobody is charged. If their phone can't start the payment, cancel this round, take the order for the table and charge it on the card machine.",
+    text: "Round 1 isn't paid yet. The guest pays on their phone (their table page has a pay button); unpaid at 8:30\u00a0a.m., it is cancelled and nobody is charged. If their phone can't start the payment, cancel this round, take the order for the table and charge it on the card machine.",
   });
   expect(
     guestRoundPaymentNotice(waiting, Date.parse(payBy) - 4 * 60_000 - 1, "America/Toronto"),
   ).toEqual({
     tier: "urgent",
-    text: "5 min left: Round 1 isn't paid. Ask the guest to finish paying on their phone by 8:30 a.m., or it is cancelled.",
+    text: "5 min left: Round 1 isn't paid. Ask the guest to finish paying on their phone by 8:30\u00a0a.m., or it is cancelled.",
   });
   const ended = guestRoundPaymentNotice(waiting, Date.parse(payBy), "America/Toronto");
-  expect(ended?.text).toContain("wasn't paid by 8:30 a.m. and is being cancelled");
+  expect(ended?.text).toContain("wasn't paid by 8:30\u00a0a.m. and is being cancelled");
   expect(ended?.text).not.toMatch(/[0-9a-f]{8}-/u);
   // Still listed 5 minutes after the deadline: the card provider couldn't confirm the payment, so
   // staff decide with the guest (before that it is still "being cancelled").
@@ -182,7 +182,7 @@ it("WP-2423 abandoned payment: warns staff before an unpaid guest round is cance
     guestRoundPaymentNotice(waiting, Date.parse(payBy) + 5 * 60_000, "America/Toronto"),
   ).toEqual({
     tier: "urgent",
-    text: "Round 1: the card provider couldn't confirm the guest's payment (due by 8:30 a.m.), so it wasn't cancelled automatically. Ask the guest whether their card was charged. If it wasn't, cancel the round; a charge that still comes through is refunded automatically.",
+    text: "Round 1: the card provider couldn't confirm the guest's payment (due by 8:30\u00a0a.m.), so it wasn't cancelled automatically. Ask the guest whether their card was charged. If it wasn't, cancel the round; a charge that still comes through is refunded automatically.",
   });
 });
 

@@ -29,14 +29,14 @@ describe("WP-2423 item availability page helpers", () => {
     );
     // A late business day ends at 4:00 the next morning.
     expect(soldOutText("2026-10-15T08:00:00.000Z", "America/Toronto", evening)).toBe(
-      "Sold out until 4:00 AM tomorrow",
+      "Sold out until 4:00\u00a0AM tomorrow",
     );
     // After midnight, the same business day ends later today.
     expect(
       soldOutText("2026-10-15T08:00:00.000Z", "America/Toronto", new Date("2026-10-15T05:30:00Z")),
-    ).toBe("Sold out until 4:00 AM today");
+    ).toBe("Sold out until 4:00\u00a0AM today");
     expect(soldOutText("2026-10-17T08:00:00.000Z", "America/Toronto", evening)).toBe(
-      "Sold out until Oct 17, 4:00 AM",
+      "Sold out until Oct 17, 4:00\u00a0AM",
     );
     expect(soldOutText(null, "America/Toronto")).toBe("Sold out until brought back");
     for (const until of ["2026-10-15T04:00:00.000Z", "2026-10-15T08:00:00.000Z"])

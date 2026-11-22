@@ -9,7 +9,7 @@ import { isOpenAllDay, lastOrdersTime } from "./open-all-day.js";
 /**
  * Batch 46 (v15 overnight 45): Test Merchant 2's published hours, as v15 stores them: every day
  * 00:00–23:59:59, Dine-in and Pickup, and on Sunday a 25-minute cut-off. Staff read
- * "12:00 AM–11:59 PM" and "last orders 25 minutes before closing" for a Store that never closes.
+ * "12:00\u00a0AM–11:59\u00a0PM" and "last orders 25 minutes before closing" for a Store that never closes.
  */
 const day = (isoWeekday: number) => ({
   isoWeekday,
@@ -51,13 +51,15 @@ it("Hours & ordering says a whole day is open 24 hours, and when its orders stop
     />,
   );
   expect(html).toContain("<li>Open 24 hours · Dine-in, Pickup</li>");
-  expect(html).toContain("<li>Open 24 hours · Dine-in, Pickup · no orders after 11:34 p.m.</li>");
+  expect(html).toContain(
+    "<li>Open 24 hours · Dine-in, Pickup · no orders after 11:34\u00a0p.m.</li>",
+  );
   const weekly = html.slice(0, html.indexOf("Exceptions and holidays"));
-  expect(weekly).not.toContain("11:59 p.m.");
+  expect(weekly).not.toContain("11:59\u00a0p.m.");
   expect(html).not.toContain("before closing");
   // Back-to-back periods: said once above them, each period still listed for staff.
   expect(html).toContain(
-    "<p>Open 24 hours</p><ul><li>12:00 a.m.–12:00 p.m. · Dine-in, Pickup</li>",
+    "<p>Open 24 hours</p><ul><li>12:00\u00a0a.m.–12:00\u00a0p.m. · Dine-in, Pickup</li>",
   );
   setLanguageForTest("zh-Hans");
   const zh = renderToStaticMarkup(
@@ -118,7 +120,7 @@ it("a period from midnight to 2:00 the next day keeps its end time on staff scre
       observedAt="2026-11-22T05:14:00.000Z"
     />,
   );
-  expect(html).toContain("<li>12:00 a.m.–2:00 a.m. (next day) · Dine-in, Pickup</li>");
+  expect(html).toContain("<li>12:00\u00a0a.m.–2:00\u00a0a.m. (next day) · Dine-in, Pickup</li>");
   expect(html).not.toContain("Open 24 hours");
   expect(openingHoursLines(overnight as never)[0]).not.toContain("open 24 hours");
 });

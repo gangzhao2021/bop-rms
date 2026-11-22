@@ -248,11 +248,21 @@ export function guestLocale(): string {
  * "0:30"), in the Store's time zone when given.
  */
 export function clockTime(at: number, timeZone?: string): string {
-  return new Intl.DateTimeFormat(guestLocale(), {
-    hour: "numeric",
-    minute: "2-digit",
-    ...(timeZone === undefined ? {} : { timeZone }),
-  }).format(new Date(at));
+  return keepTimeTogether(
+    new Intl.DateTimeFormat(guestLocale(), {
+      hour: "numeric",
+      minute: "2-digit",
+      ...(timeZone === undefined ? {} : { timeZone }),
+    }).format(new Date(at)),
+  );
+}
+/**
+ * Batch 47 (v15 b46: "no orders after 11:34" with "p.m." alone on the next line, at 1024 and
+ * 1440): a written time keeps its a.m./p.m. on its line. The guests' en-CA style puts an ordinary
+ * space before "p.m." (en-US already writes U+202F); it becomes a no-break space.
+ */
+export function keepTimeTogether(text: string): string {
+  return text.replace(/(\d) (?=[ap]\.m\.|[AP]M\b)/gu, "$1\u00a0");
 }
 /**
  * Batch 46 (v15 overnight check: Hours & ordering read "5:00 PM–12:00 AM" and "00:00" where guests

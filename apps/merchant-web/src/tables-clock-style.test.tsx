@@ -9,7 +9,7 @@ import { setLanguageForTest } from "./i18n/i18n.js";
 import { ClockStyleContext, SourceTime, StoreTimeZoneContext, storeTime } from "./StoreTime.js";
 import { StaleReadNotice, type StaleRead } from "./stale-read.js";
 
-// b40 review: Tables mixed "12:30 a.m." (notices), "Nov 21, 2026, 12:30 AM" (checkout) and
+// b40 review: Tables mixed "12:30\u00a0a.m." (notices), "Nov 21, 2026, 12:30\u00a0AM" (checkout) and
 // "01:23" (round headings). Every time on Tables reads as on the guest's phone at that table.
 const zone = "America/Toronto";
 const halfPastMidnight = "2026-11-21T05:30:00.000Z";
@@ -18,9 +18,9 @@ afterEach(() => setLanguageForTest("en"));
 
 it("writes a time in the guests' style when asked, with or without the date", () => {
   expect(storeTime(halfPastMidnight, zone)).toBe("00:30");
-  expect(storeTime(halfPastMidnight, zone, false, "Guest")).toBe("12:30 a.m.");
-  expect(storeTime(halfPastMidnight, zone, true, "Guest")).toBe("Nov 21, 2026, 12:30 a.m.");
-  expect(storeTime(halfPastMidnight, undefined, false, "Guest")).toBe("5:30 a.m. UTC");
+  expect(storeTime(halfPastMidnight, zone, false, "Guest")).toBe("12:30\u00a0a.m.");
+  expect(storeTime(halfPastMidnight, zone, true, "Guest")).toBe("Nov 21, 2026, 12:30\u00a0a.m.");
+  expect(storeTime(halfPastMidnight, undefined, false, "Guest")).toBe("5:30\u00a0a.m. UTC");
   setLanguageForTest("zh-Hans");
   expect(storeTime(halfPastMidnight, zone, false, "Guest")).toBe("0:30");
 });
@@ -67,7 +67,7 @@ it("the shared order lines and record times follow the screen's style", () => {
         </StoreTimeZoneContext.Provider>
       </ClockStyleContext.Provider>,
     );
-  expect(html("Guest")).toContain(">12:30 a.m.</time>");
+  expect(html("Guest")).toContain(">12:30\u00a0a.m.</time>");
   expect(html("Guest")).not.toContain("00:30");
   // Orders and other back-office screens keep their own style.
   expect(html("Staff")).toContain(">00:30</time>");
@@ -81,7 +81,7 @@ it("a sentence ending in a guest-style time has one period, and comps say their 
     timeZone: zone,
     clockStyle: "Guest",
   });
-  expect(ended.text).toContain("ended at 12:30 a.m. It was not sent");
+  expect(ended.text).toContain("ended at 12:30\u00a0a.m. It was not sent");
   expect(ended.text).not.toContain("a.m..");
   expect(
     compRecordText(
@@ -89,7 +89,7 @@ it("a sentence ending in a guest-style time has one period, and comps say their 
       zone,
       "Guest",
     ),
-  ).toBe("Comped · by Li, 12:30 a.m.");
+  ).toBe("Comped · by Li, 12:30\u00a0a.m.");
 });
 
 it("every time a Tables-only screen writes is in the guests' style", () => {
@@ -130,7 +130,7 @@ it("the offline and server-problem notice on Tables says its time in the guests'
   };
   for (const reason of ["Offline", "ServerProblem"] as const) {
     const stale = { reason, lastLoadedAt: halfPastMidnight, attempts: 1 };
-    expect(html(stale, "Guest")).toContain(">12:30 a.m.</time>");
+    expect(html(stale, "Guest")).toContain(">12:30\u00a0a.m.</time>");
     expect(html(stale, "Guest")).not.toContain("00:30");
     expect(html(stale, "Guest")).not.toContain("a.m.</time>.");
     // Every other screen keeps the back office's style.

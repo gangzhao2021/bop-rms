@@ -628,7 +628,7 @@ test("@production v15 catalog pages show staff words: recipe, option recipes, op
   ).toBeVisible();
   await expect(page.getByText("0.018 kg")).toBeVisible();
   await expect(page.getByText("Approved by Noah on Oct 16, 2026, 10:05 AM")).toBeVisible();
-  await expect(page.getByText(/since Oct 16, 2026, 10:05 AM/u)).toBeVisible();
+  await expect(page.getByText(/since Oct 16, 2026, 10:05\sAM/u)).toBeVisible();
   await expect(page.getByText(/You wrote this version and you are the only person/u)).toBeVisible();
   await expect(page.getByText(/\[0\]|Staff \d{4}/u)).toHaveCount(0);
   await expectNoInternalText(page);
@@ -866,7 +866,7 @@ test("@production v15 catalog pages show staff words: recipe, option recipes, op
     }),
   );
   await page.goto(`/app/commerce/products/${id(71)}/edit`);
-  await expect(page.getByText(/updated Oct 16, 2026, 10:05 AM/u)).toBeVisible();
+  await expect(page.getByText(/updated Oct 16, 2026, 10:05\sAM/u)).toBeVisible();
   await expect(page.getByRole("option", { name: /Dine-in 13%/u })).toHaveCount(1);
   await expectNoInternalText(page);
 

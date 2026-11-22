@@ -45,18 +45,18 @@ describe("WP-2423 P1 settlement report", () => {
     const html = render(settlementViewFixture());
     expect(html).toContain("Business day: Mon, Sep 21");
     expect(html).toContain(">Closed<");
-    expect(html).toContain("Sep 21, 2026, 4:00 AM");
+    expect(html).toContain("Sep 21, 2026, 4:00\u00a0AM");
     expect(html).toContain("$1,234.50");
     expect(html).toContain("14 payments");
     expect(html).toContain("$11.30");
     expect(html).toContain("$1,223.20");
     expect(html).toContain("Settled · the day&#x27;s totals match the provider statement");
-    expect(html).toContain("Settlement run Sep 22, 2026, 8:00 AM");
+    expect(html).toContain("Settlement run Sep 22, 2026, 8:00\u00a0AM");
     // WP-2423: plain words for the statement, never the internal statement reference.
     expect(html).toContain("Provider statement for Mon, Sep 21");
     expect(html).not.toContain("SETTLE-2026-09-21-01");
     expect(html).toContain("$1,234.50 / $1,234.50");
-    expect(html).toContain("14 payments checked in 240 runs · last Sep 22, 2026, 3:58 AM");
+    expect(html).toContain("14 payments checked in 240 runs · last Sep 22, 2026, 3:58\u00a0AM");
     expect(html).toContain("12 matched · 1 unresolved · 1 difference");
     expect(html).toContain("Payments needing attention");
     expect(html).toContain("Difference · Refund differs");

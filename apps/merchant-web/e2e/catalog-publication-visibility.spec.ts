@@ -274,7 +274,7 @@ test("@production a published menu lists items not offered at this Store and off
     ),
   ).toBeVisible();
   await expect(page.getByText("Customers now see this menu.")).toHaveCount(0);
-  await expect(page.getByText(/last published Oct 16, 2:05 PM/u)).toBeVisible();
+  await expect(page.getByText(/last published Oct 16, 2:05\sPM/u)).toBeVisible();
   await expect(page.getByRole("link", { name: "Item availability" })).toBeVisible();
   await expectNoInternalText(page);
   await noOverflow(page, "menu-not-offered-here");

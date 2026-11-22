@@ -8,10 +8,10 @@ afterEach(() => setLanguageForTest("en"));
 const text = (html: string) => html.replace(/<[^>]+>/gu, "\n");
 
 it("WP-2423 Q4, batch 46: writes published hours in staff language, as guests read times", () => {
-  expect(serviceTime("09:00:00")).toBe("9:00 a.m.");
-  expect(serviceTime("00:00:00")).toBe("12:00 a.m.");
-  expect(serviceTime("12:30:00")).toBe("12:30 p.m.");
-  expect(serviceTime("23:59:59")).toBe("11:59 p.m.");
+  expect(serviceTime("09:00:00")).toBe("9:00\u00a0a.m.");
+  expect(serviceTime("00:00:00")).toBe("12:00\u00a0a.m.");
+  expect(serviceTime("12:30:00")).toBe("12:30\u00a0p.m.");
+  expect(serviceTime("23:59:59")).toBe("11:59\u00a0p.m.");
   const interval = {
     startLocalTime: "11:00:00",
     endLocalTime: "21:30:00",
@@ -38,9 +38,9 @@ it("WP-2423 Q4, batch 46: writes published hours in staff language, as guests re
     />,
   );
   expect(html).toContain(
-    "11:00 a.m.–9:30 p.m. · Dine-in, Pickup · last orders 15 minutes before closing",
+    "11:00\u00a0a.m.–9:30\u00a0p.m. · Dine-in, Pickup · last orders 15 minutes before closing",
   );
-  expect(html).toContain("Business day starts at 4:00 a.m.<");
+  expect(html).toContain("Business day starts at 4:00\u00a0a.m.<");
   expect(html).not.toContain("DineIn");
   expect(html).not.toContain("0 seconds");
   expect(html).toContain("<h3>Tuesday</h3><p>Closed</p>");

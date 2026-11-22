@@ -107,7 +107,9 @@ it("DEC-TABLE-CLOSE-GUESTS-LEFT: words each round for staff, with amounts and no
   );
   expect(texts[1]).toContain("refund it on the card machine");
   expect(texts[2]).toContain("already refunded in full");
-  expect(texts[3]).toContain("It will be cancelled now (otherwise automatically at 3:20 p.m.)");
+  expect(texts[3]).toContain(
+    "It will be cancelled now (otherwise automatically at 3:20\u00a0p.m.)",
+  );
   // v15 batch 8: in Chinese the time reads as Chinese, with no English "at".
   setLanguageForTest("zh-Hans");
   try {

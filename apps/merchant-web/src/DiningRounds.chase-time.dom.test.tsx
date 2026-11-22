@@ -5,12 +5,12 @@ import { click, mount, until } from "./dom-test-kit.fixture.js";
 import { ClockStyleContext, StoreTimeZoneContext, type ClockStyle } from "./StoreTime.js";
 
 // b40 review: "You can chase it again at {time}" used the device's locale and time zone, so a
-// device set to another zone said the wrong hour, and Tables mixed "2:05 PM" with "2:05 p.m.".
+// device set to another zone said the wrong hour, and Tables mixed "2:05\u00a0PM" with "2:05\u00a0p.m.".
 // It now says the Store's time in the screen's style, as every other time on that screen.
 
 const csrf = "A".repeat(43);
 const orderReference = "01909968-0000-7000-8000-000000000001";
-// 05:05 UTC is 2:05 p.m. in Tokyo (no daylight time), whatever zone this machine is in.
+// 05:05 UTC is 2:05\u00a0p.m. in Tokyo (no daylight time), whatever zone this machine is in.
 const exactMinute = "2026-11-21T05:05:00.000Z";
 
 afterEach(() => {
@@ -64,7 +64,7 @@ async function chasedTooSoon(style: ClockStyle, retryAt = exactMinute) {
 
 it("on Tables, says when a round can be chased again in the Store's time, as guests read it", async () => {
   expect(await chasedTooSoon("Guest")).toBe(
-    "This round was chased a moment ago. You can chase it again at 2:05 p.m.",
+    "This round was chased a moment ago. You can chase it again at 2:05\u00a0p.m.",
   );
 });
 
@@ -74,12 +74,12 @@ it("on Orders, says it in the back office's style, still in the Store's time", a
   );
 });
 
-// Batch 42 (v15: retryAt 15:04:47Z read "10:04 a.m.", and a chase at 10:04:10 was refused again):
+// Batch 42 (v15: retryAt 15:04:47Z read "10:04\u00a0a.m.", and a chase at 10:04:10 was refused again):
 // a time with seconds is shown as the next whole minute, so staff are never told a time that is
 // still too soon; a time on the minute stays as it is.
 it("rounds a chase-again time with seconds up to the next minute, never down", async () => {
   expect(await chasedTooSoon("Guest", "2026-11-21T05:04:47.000Z")).toBe(
-    "This round was chased a moment ago. You can chase it again at 2:05 p.m.",
+    "This round was chased a moment ago. You can chase it again at 2:05\u00a0p.m.",
   );
   document.body.innerHTML = "";
   expect(await chasedTooSoon("Staff", "2026-11-21T05:04:00.001Z")).toBe(
