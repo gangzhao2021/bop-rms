@@ -10,6 +10,7 @@ import {
   leavingWithUnsavedWork,
 } from "./i18n/i18n.js";
 import { wordGap } from "./word-gap.js";
+import { businessDateLabel, useStoreBusinessDay } from "./StoreBusinessDay.js";
 import { isOpenAllDay } from "./open-all-day.js";
 export { wordGap };
 import { StoreConfigurationOrdinaryPanel } from "./StoreConfigurationOrdinaryPanel.js";
@@ -861,6 +862,38 @@ export function storeSetupKeptEdits(
     return "Outdated";
   return { content, inputs: i as unknown as StoreSetupEditorInputs, step: k.step };
 }
+/**
+ * The special dates a setup draft keeps. Batch 47 (v15 b46 remaining: "2026-11-05 · Holiday"):
+ * each date reads as on Hours & ordering ("Today · Sat, Nov 21", "Fri, Jan 1, 2027").
+ */
+export function SavedSpecialDates({
+  exceptions,
+  today,
+}: {
+  readonly exceptions: Extract<StoreSetupContent["exceptions"], { state: "Configured" }>["value"];
+  /** The Store's current business date, when known. */
+  readonly today: string | null;
+}) {
+  return (
+    <ul>
+      {exceptions.map((value) => (
+        <li key={value.localDate}>
+          <time dateTime={value.localDate}>{businessDateLabel(value.localDate, today)}</time>
+          {" · "}
+          {value.kind === "Holiday" ? t("Holiday") : t("Special hours")}
+          {" · "}
+          {value.intervals.length === 0
+            ? t("closed")
+            : t("{length} opening period{value}", {
+                length: value.intervals.length,
+                value: value.intervals.length === 1 ? "" : "s",
+              })}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function StoreSetupDraftPage({
   storeReference,
   csrf,
@@ -895,6 +928,8 @@ export function StoreSetupDraftPage({
 }) {
   const { id } = useParams(),
     { search, hash } = useLocation(),
+    // Batch 47: saved special dates read as on Hours & ordering ("Today · Sat, Nov 21").
+    setupToday = useStoreBusinessDay()?.businessDate ?? null,
     client = useMemo(() => injected ?? createStoreSetupClient(), [injected]),
     feeClient = useMemo(() => createStoreSetupClient(), []);
   // b19: a link to a section (#sole-operator from Approvals) brings it into view once it loads.
@@ -2096,20 +2131,7 @@ export function StoreSetupDraftPage({
                     {content.exceptions.value.length === 0 ? (
                       <p>{t("No special dates selected.")}</p>
                     ) : (
-                      <ul>
-                        {content.exceptions.value.map((value) => (
-                          <li key={value.localDate}>
-                            {value.localDate} ·{" "}
-                            {value.kind === "Holiday" ? t("Holiday") : t("Special hours")} ·{" "}
-                            {value.intervals.length === 0
-                              ? t("closed")
-                              : t("{length} opening period{value}", {
-                                  length: value.intervals.length,
-                                  value: value.intervals.length === 1 ? "" : "s",
-                                })}
-                          </li>
-                        ))}
-                      </ul>
+                      <SavedSpecialDates exceptions={content.exceptions.value} today={setupToday} />
                     )}
                     <p>
                       {t(

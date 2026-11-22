@@ -304,19 +304,29 @@ export function StoreBusinessDayProvider({
 const dayMs = 86_400_000;
 const dateValue = (businessDate: string) => Date.parse(`${businessDate}T00:00:00.000Z`);
 
-/** "Wed, Oct 14" for a business date (a date label, independent of any time zone). */
-export function businessDateText(businessDate: string): string {
+/**
+ * "Wed, Oct 14" for a business date (a date label, independent of any time zone); "Fri, Jan 1,
+ * 2027" with its year when asked.
+ */
+export function businessDateText(businessDate: string, withYear = false): string {
   return new Intl.DateTimeFormat(displayLocale(), {
     timeZone: "UTC",
     weekday: "short",
+    ...(withYear ? { year: "numeric" } : {}),
     month: "short",
     day: "numeric",
   }).format(new Date(dateValue(businessDate)));
 }
 
-/** "Today · Wed, Oct 14", "Yesterday · Tue, Oct 13" or "Mon, Oct 12" against the current day. */
+/**
+ * "Today · Wed, Oct 14", "Yesterday · Tue, Oct 13" or "Mon, Oct 12" against the current day.
+ * Batch 47 (v15 b46: a special date next New Year's Day read "Fri, Jan 1"): a date in another
+ * year than the current day (or, when that is not known, this device's) says its year.
+ */
 export function businessDateLabel(businessDate: string, today: string | null | undefined): string {
-  const text = businessDateText(businessDate);
+  const currentYear =
+    today === null || today === undefined ? String(new Date().getFullYear()) : today.slice(0, 4);
+  const text = businessDateText(businessDate, businessDate.slice(0, 4) !== currentYear);
   if (today === null || today === undefined) return text;
   const difference = Math.round((dateValue(today) - dateValue(businessDate)) / dayMs);
   return difference === 0

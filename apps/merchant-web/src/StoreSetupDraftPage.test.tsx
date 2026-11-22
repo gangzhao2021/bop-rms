@@ -11,6 +11,7 @@ import { MemoryRouter } from "react-router";
 import { setLanguageForTest } from "./i18n/i18n.js";
 import type { StoreConfigurationSnapshot } from "./store-configuration-client.js";
 import {
+  SavedSpecialDates,
   StoreSetupDraftPage,
   StoreSetupHeader,
   storeSetupPlaceHref,
@@ -1838,4 +1839,31 @@ it("b25: the standard tax class reads 标准税率 on a Chinese page when the br
   }
   expect(taxClassificationName({ "en-CA": "Standard" }, "en-CA", "STANDARD")).toBe("Standard");
   expect(taxClassificationName({ "zh-Hans": "标准" }, "zh-Hans", "STANDARD")).toBe("Standard rate");
+});
+
+it("batch 47: saved special dates read as on Hours & ordering, with the year when it is not this one", () => {
+  const exceptions = [
+    { localDate: "2026-11-22", kind: "Override" as const, intervals: [] },
+    { localDate: "2026-12-25", kind: "Holiday" as const, intervals: [] },
+    { localDate: "2027-01-01", kind: "Holiday" as const, intervals: [] },
+  ];
+  const html = renderToStaticMarkup(
+    <SavedSpecialDates exceptions={exceptions} today="2026-11-22" />,
+  );
+  expect(html).toContain(
+    '<time dateTime="2026-11-22">Today · Sun, Nov 22</time> · Special hours · closed',
+  );
+  expect(html).toContain('<time dateTime="2026-12-25">Fri, Dec 25</time> · Holiday · closed');
+  expect(html).toContain('<time dateTime="2027-01-01">Fri, Jan 1, 2027</time>');
+  expect(html).not.toMatch(/>\d{4}-\d{2}-\d{2}</u);
+  setLanguageForTest("zh-Hans");
+  try {
+    const zh = renderToStaticMarkup(
+      <SavedSpecialDates exceptions={exceptions} today="2026-11-22" />,
+    );
+    expect(zh).toContain("2027年1月1日周五");
+    expect(zh).toContain(">12月25日周五<");
+  } finally {
+    setLanguageForTest("en");
+  }
 });
