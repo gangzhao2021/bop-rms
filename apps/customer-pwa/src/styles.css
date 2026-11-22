@@ -927,7 +927,10 @@
   font: inherit;
   font-weight: 600;
 }
-.menu-search-primary button[type="submit"] {
+/* Batch 49 (v15 b48 live: white words on white): Search is the form's primary action, filled like
+   Add to cart and Place order; the shared white-control rule below leaves it out. */
+.menu-search-primary button[type="submit"]:not(:disabled) {
+  border-color: var(--bop-color-brand-primary);
   color: var(--bop-color-on-primary);
   background: var(--bop-color-brand-primary);
 }
@@ -2891,7 +2894,7 @@
     .order-status__actions button,
     .payment-retry__secondary,
     .pwa-update button,
-    .menu-search-primary button,
+    .menu-search-primary button:not([type="submit"]:enabled),
     .cart-item__actions button,
     .cart-state button,
     .checkout-continue > button:not(.checkout-continue__button),
