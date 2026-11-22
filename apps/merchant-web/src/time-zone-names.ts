@@ -1,5 +1,5 @@
 import { storeOpeningTimeZones } from "./store-opening-client.js";
-import { displayLocale, t } from "./i18n/i18n.js";
+import { currentLanguage, displayLocale, t } from "./i18n/i18n.js";
 /**
  * Staff choose and read a store's time zone by name and place ("Eastern Time (Toronto, Ottawa
  * and Montréal)"), never by its IANA identifier. The identifier stays the submitted/stored value;
@@ -67,7 +67,9 @@ function placeFromId(timeZone: string): string {
 export function timeZoneLabel(timeZone: string, at: Date = new Date()): string {
   const place = canadianPlace.get(timeZone) ?? placeFromId(timeZone);
   const name = genericName(timeZone, at);
-  return name ? `${name} (${place})` : place;
+  // Batch 46: Chinese text takes full-width brackets with no space ("北美东部时间（多伦多…）").
+  if (!name) return place;
+  return currentLanguage() === "zh-Hans" ? `${name}（${place}）` : `${name} (${place})`;
 }
 
 export interface TimeZoneChoice {

@@ -145,3 +145,14 @@ it("b21 review: an older id and the zone's own id are separate options", () => {
     setLanguageForTest("en");
   }
 });
+
+it("batch 46 (v15 Hours & ordering): a time zone label in Chinese uses full-width brackets", () => {
+  expect(timeZoneLabel("America/Toronto", at)).toBe("Eastern Time (Toronto, Ottawa and Montréal)");
+  setLanguageForTest("zh-Hans");
+  try {
+    expect(timeZoneLabel("America/Toronto", at)).toMatch(/^北美东部时间（[^（）()]+）$/u);
+    expect(timeZoneLabel("Africa/Abidjan", at)).toMatch(/^[^ ()]+（Abidjan）$/u);
+  } finally {
+    setLanguageForTest("en");
+  }
+});
