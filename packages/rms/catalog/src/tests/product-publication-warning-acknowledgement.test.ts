@@ -644,6 +644,8 @@ it.each([
   const { receipt } = fixture();
   expect(() => buildEvent(receipt, { ...auditInput(receipt), ...patch })).toThrow();
 });
+// Builds and hashes a 1000-finding receipt: about 1 s locally, but a busy CI
+// runner under turbo parallelism has taken over 30 s (PR 199, 2026-11-22).
 it("bounds independently valid receipts by PostgreSQL text bytes including spaces", () => {
   const f = fixture();
   const make = (count: number) => {
@@ -679,4 +681,4 @@ it("bounds independently valid receipts by PostgreSQL text bytes including space
   // independently bounded persisted receipt envelope is too large.
   expect(new TextEncoder().encode(JSON.stringify(large)).length).toBeGreaterThan(2_097_152);
   expect(() => parseReceipt(large)).toThrow();
-});
+}, 120_000);
