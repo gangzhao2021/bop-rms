@@ -35,7 +35,13 @@ const settled = (zh: boolean) =>
     ? "这桌已结清，不能再有人加入，也不能换新的入桌码。"
     : "This table's bill is settled, so no one new can join and no new join code can be made.";
 
-async function checkoutFloor(page: Page, floor: Floor, language: "en" | "zh-Hans") {
+async function checkoutFloor(
+  page: Page,
+  floor: Floor,
+  language: "en" | "zh-Hans",
+  /** A role that can't operate tables (no phones block), at a table with no QR code. */
+  { viewOnlyNoCode = false }: { readonly viewOnlyNoCode?: boolean } = {},
+) {
   if (language === "zh-Hans")
     await page.addInitScript(() => window.localStorage.setItem("bop.merchant.language", "zh-Hans"));
   const scope = {
@@ -71,15 +77,16 @@ async function checkoutFloor(page: Page, floor: Floor, language: "en" | "zh-Hans
     }),
   );
   // Another device started checkout: from the refused join code on, every read shows Closing.
-  const state = { refused: false };
+  // The guest pays later on the StaleThenPaying floor (state.paid, set by the test).
+  const state = { refused: false, paid: false };
   const phaseNow = () =>
     floor === "Active" || (floor === "StaleThenPaying" && !state.refused) ? "Active" : "Closing";
-  const paid = floor === "Paid";
+  const paidNow = () => floor === "Paid" || state.paid;
   await page.route("**/merchant/dining/tables", (route) =>
     route.fulfill({
       headers,
       json: {
-        canOperateTables: true,
+        canOperateTables: !viewOnlyNoCode,
         canCloseSessions: true,
         canCancelUnpaidRounds: true,
         items: [
@@ -94,13 +101,14 @@ async function checkoutFloor(page: Page, floor: Floor, language: "en" | "zh-Hans
             qrCodeValidUntil: "2027-04-12T13:00:00.000Z",
             staffRoundsAwaitingPayment: [],
             paymentTiming: "PayLater",
+            ...(viewOnlyNoCode ? { qrCodeValidUntil: null } : {}),
             currentDiningSessionReference: id(2),
             elapsedMinutes: 6,
             session: {
               phase: phaseNow(),
               version: phaseNow() === "Closing" ? 20 : 19,
               orderReference: id(3),
-              paymentStarted: paid,
+              paymentStarted: paidNow(),
               mergedTables: [],
             },
           },
@@ -235,10 +243,10 @@ async function checkoutFloor(page: Page, floor: Floor, language: "en" | "zh-Hans
     subtotalMinor: "1250",
     taxMinor: "163",
     totalMinor: "1413",
-    paid,
   };
-  await page.route("**/merchant/dining/table-bill", (route) =>
-    route.fulfill({
+  await page.route("**/merchant/dining/table-bill", (route) => {
+    const paid = paidNow();
+    return route.fulfill({
       headers,
       json: {
         diningSessionReference: id(2),
@@ -247,7 +255,7 @@ async function checkoutFloor(page: Page, floor: Floor, language: "en" | "zh-Hans
         paymentTiming: "PayLater",
         tableLabel: label,
         orderReference: id(3),
-        rounds: [round],
+        rounds: [{ ...round, paid }],
         owed: paid
           ? { subtotalMinor: "0", taxMinor: "0", totalMinor: "0" }
           : { subtotalMinor: "1250", taxMinor: "163", totalMinor: "1413" },
@@ -266,9 +274,9 @@ async function checkoutFloor(page: Page, floor: Floor, language: "en" | "zh-Hans
             }
           : null,
       },
-    }),
-  );
-  return { phones };
+    });
+  });
+  return { phones, state };
 }
 
 async function openManage(page: Page, zh: boolean) {
@@ -305,7 +313,10 @@ async function expectNoJoiningSteps(page: Page, zh: boolean) {
   await expect(page.getByText(zh ? /现在不能并桌/u : /Merging isn't available/u)).toHaveCount(0);
 }
 
-/** In view, inside the panel's column with room for wider Linux fonts, and no sideways scroll. */
+/**
+ * In view, inside the panel's column, and no sideways scroll; and with room for wider Linux fonts:
+ * laid out 40 px narrower than it is, the line still wraps inside itself with nothing cut off.
+ */
 async function expectFits(page: Page, text: string, width: number) {
   const line = page.getByText(text);
   await line.scrollIntoViewIfNeeded();
@@ -318,10 +329,22 @@ async function expectFits(page: Page, text: string, width: number) {
     range.selectNodeContents(node);
     const words = range.getBoundingClientRect();
     const own = node.getBoundingClientRect();
-    return { overflow: node.scrollWidth - node.clientWidth, room: own.right - words.right };
+    const element = node as HTMLElement;
+    const before = element.style.cssText;
+    element.style.boxSizing = "border-box";
+    element.style.width = `${own.width - 40}px`;
+    element.style.maxWidth = `${own.width - 40}px`;
+    const narrower = element.scrollWidth - element.clientWidth;
+    element.style.cssText = before;
+    return {
+      overflow: node.scrollWidth - node.clientWidth,
+      room: own.right - words.right,
+      narrower,
+    };
   });
   expect(fit.overflow).toBeLessThanOrEqual(0);
   expect(fit.room).toBeGreaterThanOrEqual(0);
+  expect(fit.narrower).toBeLessThanOrEqual(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   );
@@ -403,6 +426,54 @@ for (const language of ["en", "zh-Hans"] as const)
       ).toHaveCount(0);
       await expectFits(page, paying(zh), width);
       await page.screenshot({ path: `test-results/b49-stale-code-once-${language}-${width}.png` });
+      await expectNoInternalText(page, ["Mark unavailable"]);
+    });
+
+    test(`@production WP-2423 batch 49: a stale New join code refused during checkout gives way to settled once the bill is paid (${language}, ${width})`, async ({
+      page,
+    }) => {
+      const zh = language === "zh-Hans";
+      const { state } = await checkoutFloor(page, "StaleThenPaying", language);
+      await page.setViewportSize({ width, height });
+      await page.goto("/operations/dining");
+      const { panel, phonesBlock } = await openManage(page, zh);
+      await panel.getByRole("button", { name: zh ? "换入桌码" : "New join code" }).click();
+      await expect(page.getByText(paying(zh))).toHaveCount(1);
+      await expect(page.getByText(paying(zh))).toBeInViewport();
+      // The guest pays; the tables are read again (as when this tab comes back into view).
+      state.paid = true;
+      await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+      // Nothing still says the table is paying; that the bill is settled is said once.
+      await expect(page.getByText(settled(zh))).toHaveCount(1);
+      await expect(phonesBlock.getByText(settled(zh))).toBeVisible();
+      await expect(page.getByText(paying(zh))).toHaveCount(0);
+      await expectNoJoiningSteps(page, zh);
+      await expectFits(page, settled(zh), width);
+      await page.screenshot({
+        path: `test-results/b49-stale-code-then-paid-${language}-${width}.png`,
+      });
+      await expectNoInternalText(page, ["Mark unavailable"]);
+    });
+
+    test(`@production WP-2423 batch 49: a role that can't operate tables still reads the checkout fact at a table with no QR code (${language}, ${width})`, async ({
+      page,
+    }) => {
+      const zh = language === "zh-Hans";
+      await checkoutFloor(page, "Paying", language, { viewOnlyNoCode: true });
+      await page.setViewportSize({ width, height });
+      await page.goto("/operations/dining");
+      await page.getByRole("button", { name: zh ? `选择 ${label}` : `Select ${label}` }).click();
+      const panel = page.getByRole("complementary", {
+        name: zh ? "所选桌台详情" : "Selected table details",
+      });
+      await panel.getByText(zh ? "管理这张桌" : "Manage this table").click();
+      await expect(panel.getByText(paying(zh))).toBeVisible();
+      await expect(page.getByText(paying(zh))).toHaveCount(1);
+      await expect(
+        page.getByRole("region", { name: zh ? "这桌的手机" : "Phones at this table" }),
+      ).toHaveCount(0);
+      await expectNoJoiningSteps(page, zh);
+      await expectFits(page, paying(zh), width);
       await expectNoInternalText(page, ["Mark unavailable"]);
     });
 

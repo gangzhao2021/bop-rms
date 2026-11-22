@@ -606,11 +606,18 @@ for (const language of ["en", "zh-Hans"] as const)
     }) => {
       const zh = language === "zh-Hans";
       // Shown open (Active), but its checkout began on a guest's phone a moment ago.
-      await racedFloor(page, "EmptyTable", language, { closes: false });
+      const { other } = await racedFloor(page, "EmptyTable", language, { closes: false });
       const regenerate: string[] = [];
-      await page.route("**/merchant/dining/sessions/join-state", (route) =>
-        route.fulfill({ status: 409, headers, json: { error: "dining_join_table_checking_out" } }),
-      );
+      await page.route("**/merchant/dining/sessions/join-state", (route) => {
+        // Batch 49 review: from the refusal on, every read shows the table checking out (Closing),
+        // as it is; the refusal's line holds only while that stays true.
+        other.closedAt = Number.MAX_SAFE_INTEGER;
+        return route.fulfill({
+          status: 409,
+          headers,
+          json: { error: "dining_join_table_checking_out" },
+        });
+      });
       await page.route("**/merchant/dining/sessions/regenerate", (route) => {
         regenerate.push("regenerate");
         return route.abort("failed");

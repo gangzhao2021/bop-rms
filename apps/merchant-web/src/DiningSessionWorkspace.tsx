@@ -505,6 +505,11 @@ interface TableResult {
    * panel does not say it again further down.
    */
   readonly checkingOut?: true | undefined;
+  /**
+   * Batch 49 review: the tables read the refusal came after (the list may not show the checkout
+   * yet). Only a newer read can show that the table is no longer checking out.
+   */
+  readonly checkingOutSince?: string | null | undefined;
 }
 
 /** Below the desktop width the selected table's panel sits under (or over) the list. */
@@ -1118,7 +1123,7 @@ function DiningSessionWorkspaceBody({
           text: tableActionFailureText(error),
           table: table.tableReference,
           ...(error instanceof DiningSessionClientError && error.code === "TableCheckingOut"
-            ? { checkingOut: true as const }
+            ? { checkingOut: true as const, checkingOutSince: loadedAt.current }
             : {}),
         });
         readAgain = !unknown;
@@ -1279,6 +1284,22 @@ function DiningSessionWorkspaceBody({
         .sort(compareTables),
     [tables, orderFacts, billFacts, billUnread, queueRead, kitchenFacts, now],
   );
+  // Batch 49 review: a refused step's "paying the bill" line holds only while that is true. Once
+  // that table's bill reads settled, or a read newer than the refusal shows the table no longer
+  // checking out, the line goes and the panel says what is true now in its usual place.
+  const checkoutResultStale = (() => {
+    if (result?.checkingOut !== true) return false;
+    const row = rows.find((entry) => entry.table.tableReference === result.table);
+    const closing = row?.table.session?.phase === "Closing";
+    if (closing && tableSettled(row?.facts ?? null)) return true;
+    return !closing && loadedAt.current !== result.checkingOutSince;
+  })();
+  useEffect(() => {
+    if (!checkoutResultStale) return;
+    const stale = result;
+    setResult((current) => (current === stale ? null : current));
+  }, [checkoutResultStale, result]);
+  const said = checkoutResultStale ? null : result;
   // b39: a table left open from an earlier business day is listed apart, never among today's.
   const readAt = loadedAt.current === null ? now : Date.parse(loadedAt.current);
   const dayStart = businessDay?.startsAt == null ? Number.NaN : Date.parse(businessDay.startsAt);
@@ -1538,23 +1559,23 @@ function DiningSessionWorkspaceBody({
   // step taken on the row while the panel sits under the list. Any other outcome is said above
   // the list. Never both.
   const resultInPanel =
-    result !== null &&
-    result.table !== undefined &&
-    !(result.fromRow === true && underList) &&
+    said !== null &&
+    said.table !== undefined &&
+    !(said.fromRow === true && underList) &&
     selected !== null &&
-    result.table === selected.tableReference &&
+    said.table === selected.tableReference &&
     !refused;
   const resultLine = (ref?: Ref<HTMLParagraphElement>) =>
-    result ? (
+    said ? (
       <p ref={ref} className="table-result" role="status">
-        {result.text}
-        {result.undo ? (
+        {said.text}
+        {said.undo ? (
           <button
             type="button"
             className="table-row__text-step"
             disabled={locked || paused}
             onClick={() => {
-              const undo = result.undo;
+              const undo = said.undo;
               setResult(null);
               undo?.();
             }}
@@ -1661,7 +1682,7 @@ function DiningSessionWorkspaceBody({
           ))}
         </nav>
       )}
-      {result && !resultInPanel ? resultLine() : null}
+      {said && !resultInPanel ? resultLine() : null}
       <div className="dining-floor-layout">
         <section className="table-list" aria-label={t("Tables by what they need")}>
           {tables.length === 0 ? (
@@ -1758,7 +1779,7 @@ function DiningSessionWorkspaceBody({
                 rows.find((row) => row.table.tableReference === selected.tableReference)?.facts ??
                   null,
               )}
-              checkoutSaid={resultInPanel && result.checkingOut === true}
+              checkoutSaid={resultInPanel && said.checkingOut === true}
               checkoutRevision={checkoutRevision}
               refreshKey={String(loadedAt.current)}
               onPartySize={(session, size) =>
@@ -2316,10 +2337,7 @@ function TablePanel({
           {/* Batch 48 (v15 b47 live): a table paying its bill takes no one new, so it is given no
               new join code; the panel says why instead of offering a step that can't work. A code
               whose result was lost is still offered, to settle it. */}
-          {seated &&
-          !noCode &&
-          checkingOut &&
-          !(state === "Unknown" && unknownAction === "Session") ? (
+          {seated && checkingOut && !(state === "Unknown" && unknownAction === "Session") ? (
             checkoutNote !== null && !phonesShown ? (
               <p className="table-panel__meta">{checkoutNote}</p>
             ) : null
