@@ -23,6 +23,7 @@ import { TableHeldRounds } from "./TablePhones.js";
 import { TableSplitControls } from "./TableSplit.js";
 import { notConfirmedPressAgainText, paymentNotConfirmedText } from "./failure-words.js";
 import { printRegion } from "./print-region.js";
+import { isStaffSignInEndedRefusal, useStaffSessionLive } from "./staff-session-reads.js";
 
 const cad = (minor: string | bigint) =>
   orderMoney({ amountMinor: String(minor), currencyCode: "CAD" });
@@ -59,6 +60,12 @@ export const stopPhoneCeilingMs = 30_000;
 
 /** The stop of a phone payment had no answer within its ceiling. */
 class StopNotAnswered extends Error {}
+
+/** Batch 50: a bill read refused (401/403): not an outage, so nothing is said to be retrying. */
+const billReadRefusedText = () =>
+  t(
+    "The bill wasn't read: your access doesn't allow it, or you have been signed out. Sign in again or ask a manager.",
+  );
 
 function errorText(error: unknown): string {
   const code =
@@ -286,6 +293,18 @@ export function TableCheckout({
   // merchant-outage-recovery M100: why the bill could not be read again, apart from what an action
   // said. The next read that works clears it.
   const [readProblem, setReadProblem] = useState<string | null>(null);
+  // Batch 50 (v15 b49 live): once this screen's sign-in has ended (here or on another screen),
+  // the bill is neither read nor kept on screen, and nothing says it is being tried again: staff
+  // are told to sign in again. Signed in again (Check again), it is read at once.
+  const live = useStaffSessionLive();
+  const wasLive = useRef(live);
+  useEffect(() => {
+    if (!live) {
+      setBill(null);
+      setReadProblem(null);
+    } else if (!wasLive.current) setReload((value) => value + 1);
+    wasLive.current = live;
+  }, [live]);
   // M89: said once a phone payment was stopped, until the next action.
   const [stoppedPhone, setStoppedPhone] = useState(false);
   // v15 batch 11: while a phone payment is being stopped, the payment company is asked; the bill's
@@ -330,6 +349,7 @@ export function TableCheckout({
       setBill(null);
       return;
     }
+    if (!live) return;
     const controller = new AbortController();
     const stopsBefore = stops.current;
     billReading.current = true;
@@ -350,8 +370,16 @@ export function TableCheckout({
         setReadProblem(null);
       })
       .catch((error: unknown) => {
-        if (!controller.signal.aborted && stops.current === stopsBefore)
-          setReadProblem(errorText(error));
+        if (controller.signal.aborted || stops.current !== stopsBefore) return;
+        // Batch 50: not sent because the sign-in ended: said by `live` below, never "trying again".
+        if (isStaffSignInEndedRefusal(error)) return;
+        // A refused read (401/403) is not an outage: the sign-in is checked at once (the fetch
+        // gate), and staff are told what to do rather than that it is being tried again.
+        setReadProblem(
+          error instanceof TableCheckoutError && error.code === "PermissionDenied"
+            ? billReadRefusedText()
+            : errorText(error),
+        );
       })
       .finally(() => {
         window.clearTimeout(ceiling);
@@ -362,14 +390,15 @@ export function TableCheckout({
       controller.abort();
       billReading.current = false;
     };
-  }, [client, csrf, sessionReference, session.phase, session.version, reload]);
+  }, [client, csrf, sessionReference, session.phase, session.version, reload, live]);
 
   // S4: while a guest pays on their phone, the bill is read again until it ends.
   const paidNow = bill?.settlement != null || (bill?.split != null && bill.split.paidInFull);
   // Owner 2026-11-03 walkthrough: a guest can start or finish paying (a part too) at any moment,
   // so an open bill keeps being read while the table checks out.
   useEffect(() => {
-    if (session.phase !== "Closing" || paidNow || bill?.writeOff != null || stoppingPhone) return;
+    if (session.phase !== "Closing" || paidNow || bill?.writeOff != null || stoppingPhone || !live)
+      return;
     // v15 2026-11-11: a read still running is never cut off by the next one. On a busy evening a
     // merged table's bill took 7–8 s, so restarting every 5 s left staff on "Reading the bill…"
     // until one read happened to finish in time (and each cut-off read still loaded the server).
@@ -377,7 +406,7 @@ export function TableCheckout({
       if (!billReading.current) setReload((value) => value + 1);
     }, 5000);
     return () => window.clearInterval(timer);
-  }, [session.phase, paidNow, bill?.writeOff, stoppingPhone]);
+  }, [session.phase, paidNow, bill?.writeOff, stoppingPhone, live]);
   // M100: once the table has paid, a warning left by an earlier lost answer no longer applies.
   useEffect(() => {
     if (paidNow) setProblem(null);
@@ -748,9 +777,15 @@ export function TableCheckout({
             ? t("Paid")
             : t("Checkout")}
       </h3>
-      {readProblem !== null ? (
+      {!live ? (
         <p className="table-checkout__stale" role="status">
-          {bill === null
+          {t(
+            "Your sign-in on this screen has ended, so the bill isn't being read. Sign in again to keep working.",
+          )}
+        </p>
+      ) : readProblem !== null ? (
+        <p className="table-checkout__stale" role="status">
+          {bill === null || readProblem === billReadRefusedText()
             ? readProblem
             : t(
                 "The bill could not be read again; showing the last update. Trying again by itself.",
@@ -758,7 +793,7 @@ export function TableCheckout({
         </p>
       ) : null}
       {bill === null ? (
-        problem || readProblem !== null ? null : (
+        problem || readProblem !== null || !live ? null : (
           <>
             <p role="status">{t("Reading the bill…")}</p>
             {/* v15 2026-11-11: on a busy evening a merged table's bill took 7–8 s to read, with only

@@ -336,6 +336,12 @@ const moveRegion = (zh: boolean) =>
   zh ? "把这桌客人换到另一张桌" : "Move this party to another table";
 const mergeRegion = (zh: boolean) =>
   zh ? "把这桌客人并到另一桌" : "Merge this party into another table";
+/** Batch 50: what the checkout says once this screen's sign-in has ended. */
+const signedOutBill = (zh: boolean) =>
+  zh
+    ? "这台设备上的登录已结束，所以账单没有在读取。请重新登录后继续工作。"
+    : "Your sign-in on this screen has ended, so the bill isn't being read. Sign in again to keep working.";
+
 async function openManage(page: Page, zh: boolean) {
   await page.getByRole("button", { name: zh ? `选择 ${label}` : `Select ${label}` }).click();
   const panel = page.getByRole("complementary", {
@@ -624,5 +630,35 @@ for (const language of ["en", "zh-Hans"] as const)
       await expectFits(page, paying(zh), width);
       await page.screenshot({ path: `test-results/b50-stale-move-${language}-${width}.png` });
       await expectNoInternalText(page, ["Mark unavailable"]);
+    });
+
+    test(`@production WP-2423 batch 50: signed out on another screen during checkout says so, never a retrying outage (${language}, ${width})`, async ({
+      page,
+    }) => {
+      const zh = language === "zh-Hans";
+      const { state } = await checkoutFloor(page, "Paying", language);
+      await page.setViewportSize({ width, height });
+      await page.goto("/operations/dining");
+      await page.getByRole("button", { name: zh ? `选择 ${label}` : `Select ${label}` }).click();
+      const panel = page.getByRole("complementary", {
+        name: zh ? "所选桌台详情" : "Selected table details",
+      });
+      await expect(panel.getByText("Beef noodles (TEST)").first()).toBeVisible();
+      // Pushed out on another screen (v15 b49 live): reads 403, the sign-in check 401.
+      state.ended = true;
+      const dialog = page.getByRole("dialog", {
+        name: zh ? "你已退出登录" : "You’ve been signed out",
+      });
+      await expect(dialog).toBeVisible({ timeout: 15_000 });
+      await expect(
+        dialog.getByRole("link", { name: zh ? "重新登录" : "Sign in again" }),
+      ).toBeVisible();
+      // Nothing on the page, under the cover either, says it is retrying an outage.
+      await expect(page.getByText(signedOutBill(zh))).toHaveCount(1);
+      await expect(page.getByText(zh ? /正在自动重试|自动重试/u : /Trying again/u)).toHaveCount(0);
+      await expect(page.getByText(zh ? /无法重新读取/u : /could not be read again/u)).toHaveCount(
+        0,
+      );
+      await page.screenshot({ path: `test-results/b50-signed-out-${language}-${width}.png` });
     });
   }

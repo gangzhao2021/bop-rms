@@ -9026,6 +9026,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Counter orders still go through. Cancel any unpaid counter order whose customer has left: it holds a place.":
     "柜台单照常可以下。顾客已离开、还没付款的柜台单请取消：它占着名额。",
 
+  "Your sign-in on this screen has ended, so the bill isn't being read. Sign in again to keep working.":
+    "这台设备上的登录已结束，所以账单没有在读取。请重新登录后继续工作。",
+  "The bill wasn't read: your access doesn't allow it, or you have been signed out. Sign in again or ask a manager.":
+    "账单没有读取：你的权限不能读取它，或者已经退出登录。请重新登录，或找店长。",
   "The bill could not be read again; showing the last update. Trying again by itself.":
     "账单暂时无法重新读取，显示的是上次的内容，正在自动重试。",
   "The network dropped, so this may not have gone through. Once you're connected, check whether the change is there before you do it again.":
