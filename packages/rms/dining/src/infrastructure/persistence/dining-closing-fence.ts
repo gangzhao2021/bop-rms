@@ -8,6 +8,19 @@ import type { DiningTableTransaction, DiningTableStoreScope } from "./dining-tab
 const fail = (): never => {
   throw new DiningClosingError("DINING_CLOSING_DEPENDENCY_UNAVAILABLE");
 };
+// Batch 45 (v15 b44 live 2026-11-22 01:33:25 UTC): what the caller is told as a refusal, never as
+// an outage (503 and an ops alert): a table visit this Store has no record of, and a session that
+// another device or the guests changed while this request waited for the table's lock.
+const notFound = (): never => {
+  throw new DiningClosingError("DINING_CLOSING_SESSION_NOT_FOUND");
+};
+const changed = (): never => {
+  throw new DiningClosingError("DINING_CLOSING_VERSION_CONFLICT");
+};
+const refusal = (error: unknown) =>
+  error instanceof DiningClosingError &&
+  (error.code === "DINING_CLOSING_SESSION_NOT_FOUND" ||
+    error.code === "DINING_CLOSING_VERSION_CONFLICT");
 /** Caller retains transaction through evidence collection and closing commit.
  * Same table/admission lock order as Dining admission consumption; no phase mutation. */
 export function createPostgresDiningClosingFence(options: {
@@ -39,13 +52,15 @@ export function createPostgresDiningClosingFence(options: {
         return value as Record<string, unknown>[];
       };
       const read = async (lock: boolean) => {
-        const row = rows(
-          await tx.query(
-            "SELECT session_snapshot AS session FROM rms_dining.dining_session WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND session_id=$4" +
-              (lock ? " FOR UPDATE" : ""),
-            [tenant, brand, store, reference],
-          ),
-        )[0];
+        const result: unknown = await tx.query(
+          "SELECT session_snapshot AS session FROM rms_dining.dining_session WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND session_id=$4" +
+            (lock ? " FOR UPDATE" : ""),
+          [tenant, brand, store, reference],
+        );
+        // Sessions are never deleted: no row is no such visit at this Store (RLS scopes the read).
+        const found = (result as { rows?: unknown } | null)?.rows;
+        if (Array.isArray(found) && found.length === 0) return notFound();
+        const row = rows(result)[0];
         const session = parseDiningSession(row?.session);
         if (
           session.diningSessionReference !== reference ||
@@ -74,10 +89,11 @@ export function createPostgresDiningClosingFence(options: {
         current.version !== before.version ||
         current.phase !== before.phase
       )
-        return fail();
+        return changed();
       await authorize();
       return current;
-    } catch {
+    } catch (error) {
+      if (refusal(error)) throw error;
       return fail();
     }
   };

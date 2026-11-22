@@ -53,20 +53,48 @@ it.each(["tableReference", "tableAssignmentVersion", "version", "phase"] as cons
     if (key === "tableReference") f.current.tableReference = id(8);
     else if (key === "phase") f.current.phase = "Closed";
     else f.current[key]++;
-    await expect(f.run()).rejects.toThrow();
+    // Batch 45: changed while this request waited for the table's lock is "the table changed"
+    // (409, read again), never "unavailable" (503 and an ops alert).
+    await expect(f.run()).rejects.toMatchObject({
+      name: "DiningClosingError",
+      code: "DINING_CLOSING_VERSION_CONFLICT",
+    });
   },
 );
 it("denies before IO and after permission revocation", async () => {
   const f = setup();
+  const unavailable = { code: "DINING_CLOSING_DEPENDENCY_UNAVAILABLE" };
   f.authorize.mockResolvedValueOnce(false);
-  await expect(f.run()).rejects.toThrow();
+  await expect(f.run()).rejects.toMatchObject(unavailable);
   expect(f.query).not.toHaveBeenCalled();
   f.authorize.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
-  await expect(f.run()).rejects.toThrow();
+  await expect(f.run()).rejects.toMatchObject(unavailable);
 });
-it("fails missing session instead of locking an invented table", async () => {
+it("refuses a session this Store has no record of as not found, locking no invented table", async () => {
   const f = setup();
+  // v15 b44 live (2026-11-22 01:33:25 UTC): the session read at this Store finds no row.
   f.query.mockResolvedValue({ rows: [] });
-  await expect(f.run()).rejects.toThrow();
+  await expect(f.run()).rejects.toMatchObject({
+    name: "DiningClosingError",
+    code: "DINING_CLOSING_SESSION_NOT_FOUND",
+  });
   expect(f.query.mock.calls.some((c) => c[0].includes("advisory"))).toBe(false);
+});
+it("keeps a broken read, a missing table row and a failed query as unavailable", async () => {
+  const unavailable = { code: "DINING_CLOSING_DEPENDENCY_UNAVAILABLE" };
+  const twoRows = setup();
+  twoRows.query.mockImplementation(async (sql: string) => ({
+    rows: sql.includes("session_snapshot")
+      ? [{ session: twoRows.session }, { session: twoRows.session }]
+      : [],
+  }));
+  await expect(twoRows.run()).rejects.toMatchObject(unavailable);
+  const noTable = setup();
+  noTable.query.mockImplementation(async (sql: string) => ({
+    rows: sql.includes("session_snapshot") ? [{ session: noTable.session }] : [],
+  }));
+  await expect(noTable.run()).rejects.toMatchObject(unavailable);
+  const down = setup();
+  down.query.mockRejectedValue(Object.assign(new Error("connection lost"), { code: "08006" }));
+  await expect(down.run()).rejects.toMatchObject(unavailable);
 });

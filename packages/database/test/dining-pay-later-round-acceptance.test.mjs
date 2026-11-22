@@ -1774,7 +1774,7 @@ async function journey(journeyEnding) {
           });
 
         // The table's checkout (Dining's closing command, as the merchant API composes it).
-        const closing = (who, action) =>
+        const closing = (who, action, reference = sessionReference) =>
           rows("SELECT version FROM rms_dining.dining_session WHERE session_id=$1", [
             sessionReference,
           ]).then(([row]) =>
@@ -1794,7 +1794,7 @@ async function journey(journeyEnding) {
               ...as(who),
               command: {
                 action,
-                diningSessionReference: sessionReference,
+                diningSessionReference: reference,
                 operationReference: fresh(),
                 expectedSessionVersion: Number(row.version),
               },
@@ -1802,7 +1802,69 @@ async function journey(journeyEnding) {
           );
         // ── Checkout started, then cancelled: the guests want more (DEC rule 3). Back to Active,
         // recorded with who did it; then the table orders round 2 and checkout starts again.
-        assert.equal((await closing(server, "Begin")).phase, "Closing");
+        if (ending === "Paid") {
+          // Batch 45 (v15 b44 live 2026-11-22 01:33:25 UTC): a close for a table this Store has no
+          // record of (a stale panel after a store switch) is "not found" (404), and two staff
+          // devices pressing Start checkout at the same moment leave the slower one "the table
+          // changed" (409, it reads again): neither is "unavailable, try again" (503, level 50).
+          // The closing fence read the session, then waited for the table's lock; the session the
+          // other press had just changed read as an outage. A barrier holds the table's lock until
+          // both presses wait on it, each having read the session at the same version.
+          await assert.rejects(closing(server, "Begin", fresh()), {
+            name: "DiningClosingError",
+            code: "DINING_CLOSING_SESSION_NOT_FOUND",
+          });
+          const [held] = await rows(
+            "SELECT tenant_id::text AS tenant,brand_id::text AS brand,store_id::text AS store,session_snapshot->>'tableReference' AS table_ref FROM rms_dining.dining_session WHERE session_id=$1",
+            [sessionReference],
+          );
+          const tableKey = `DiningTable:${held.tenant}:${held.brand}:${held.store}:${held.table_ref}`;
+          const waitingOnTable = async () =>
+            (
+              await admin.query(
+                "SELECT count(*)::int n FROM pg_locks WHERE locktype='advisory' AND NOT granted AND ((classid::bigint<<32)|objid::bigint)=hashtextextended($1,0)",
+                [tableKey],
+              )
+            ).rows[0].n;
+          const holder = new Client(context.clientConfig);
+          await holder.connect();
+          let presses;
+          try {
+            await holder.query("BEGIN");
+            await holder.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [tableKey]);
+            const press = () =>
+              closing(server, "Begin").then(
+                (result) => result,
+                (error) => error,
+              );
+            const first = press(),
+              second = press();
+            let queued = 0;
+            for (let tries = 0; tries < 200 && queued < 2; tries += 1) {
+              queued = await waitingOnTable();
+              if (queued < 2) await new Promise((resolve) => setTimeout(resolve, 25));
+            }
+            assert.equal(queued, 2, "both presses wait on the table's lock");
+            await holder.query("COMMIT");
+            presses = await Promise.all([first, second]);
+          } finally {
+            await holder.end();
+          }
+          const won = presses.filter((result) => !(result instanceof Error));
+          const lost = presses.filter((result) => result instanceof Error);
+          assert.equal(won.length, 1, String(lost.map((error) => error.code ?? error)));
+          assert.equal(won[0].phase, "Closing");
+          assert.equal(lost.length, 1);
+          assert.equal(lost[0].name, "DiningClosingError");
+          assert.equal(lost[0].code, "DINING_CLOSING_VERSION_CONFLICT");
+          assert.deepEqual(
+            await rows(
+              "SELECT count(*)::int AS n FROM rms_dining.dining_closing_operation WHERE session_id=$1 AND action='Begin'",
+              [sessionReference],
+            ),
+            [{ n: 1 }],
+          );
+        } else assert.equal((await closing(server, "Begin")).phase, "Closing");
         const reopened = await closing(server, "Cancel");
         assert.equal(reopened.phase, "Active");
         assert.deepEqual(
