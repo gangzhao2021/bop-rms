@@ -20,6 +20,8 @@ export class DiningSessionCloseClientError extends Error {
       | "NotReady"
       | "AlreadyPaid"
       | "GuestPaying"
+      /** Batch 45: this table's visit has ended or is not at this store (404): read the tables again. */
+      | "NotFound"
       | "Unavailable"
       | "OutcomeUnknown",
   ) {
@@ -110,6 +112,8 @@ export function createDiningSessionCloseClient(
           if (controller.signal.aborted) throw new DiningSessionCloseClientError("OutcomeUnknown");
           if (response.status === 401 || response.status === 403)
             throw new DiningSessionCloseClientError("PermissionDenied");
+          // Batch 45: a refusal, never a lost answer to send again.
+          if (response.status === 404) throw new DiningSessionCloseClientError("NotFound");
           if (response.status === 409) {
             const error = ((await response.json().catch(() => null)) as { error?: unknown } | null)
               ?.error;

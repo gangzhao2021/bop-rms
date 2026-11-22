@@ -67,9 +67,11 @@ function errorText(error: unknown): string {
       : error instanceof DiningSessionCloseClientError
         ? error.code === "Conflict" || error.code === "NotReady"
           ? "SessionChanged"
-          : error.code === "Unavailable"
-            ? "Unavailable"
-            : error.code
+          : error.code === "NotFound"
+            ? "SessionGone"
+            : error.code === "Unavailable"
+              ? "Unavailable"
+              : error.code
         : "OutcomeUnknown";
   switch (code) {
     case "PermissionDenied":
@@ -114,6 +116,10 @@ function errorText(error: unknown): string {
       return t("Every dish must be served or cancelled first.");
     case "SessionChanged":
       return t("This table changed since it was shown. It has been read again: try again.");
+    case "SessionGone":
+      return t(
+        "This table's visit has already ended, or it isn't at this store. The tables have been read again.",
+      );
     case "OutcomeUnknown":
       return t(
         "We couldn't confirm the result. Press the button again: it is never recorded twice.",

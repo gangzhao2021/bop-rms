@@ -22,7 +22,9 @@ export function DiningSessionCloseAction({
   readonly onClosed: () => void;
 }) {
   const [confirmed, setConfirmed] = useState(false),
-    [state, setState] = useState<"Idle" | "Submitting" | "Unknown" | "Denied" | "NotReady">("Idle");
+    [state, setState] = useState<
+      "Idle" | "Submitting" | "Unknown" | "Denied" | "NotReady" | "Gone"
+    >("Idle");
   const operation = useRef<Operation | null>(null),
     pending = useRef<AbortController | null>(null);
   useEffect(() => () => pending.current?.abort(), []);
@@ -55,7 +57,9 @@ export function DiningSessionCloseAction({
             ? "Unknown"
             : error instanceof DiningSessionCloseClientError && error.code === "NotReady"
               ? "NotReady"
-              : "Denied",
+              : error instanceof DiningSessionCloseClientError && error.code === "NotFound"
+                ? "Gone"
+                : "Denied",
         );
         if (!unknown) onBusy(false);
       }
@@ -84,7 +88,7 @@ export function DiningSessionCloseAction({
           ? t("I confirm the guests have finished ordering")
           : t("I confirm the guests have left and the table can be closed")}
       </label>
-      {state !== "Denied" && state !== "NotReady" ? (
+      {state !== "Denied" && state !== "NotReady" && state !== "Gone" ? (
         <button
           disabled={state === "Submitting" || (state !== "Unknown" && (!confirmed || locked))}
           onClick={() => void submit()}
@@ -104,6 +108,12 @@ export function DiningSessionCloseAction({
         <p role="status">
           {t(
             "This table can't be closed yet: a dish has not been served. Serve it, or resolve it on the Tables page, then close the table.",
+          )}
+        </p>
+      ) : state === "Gone" ? (
+        <p role="status">
+          {t(
+            "This table's visit has already ended, or it isn't at this store. Refresh to see the tables as they are now.",
           )}
         </p>
       ) : state === "Denied" ? (

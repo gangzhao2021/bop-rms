@@ -142,3 +142,19 @@ it("v15 b11: a table with a dish still to serve is refused as not ready (said), 
       .execute("A".repeat(43)),
   ).rejects.toMatchObject({ code: "Conflict" });
 });
+
+it("batch 45: a table visit the store has no record of is not found, never a lost answer sent again", async () => {
+  // v15 b44 live (2026-11-22 01:33:25 UTC): the route now answers 404 where it answered 503.
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+    new Response(JSON.stringify({ error: "dining_session_not_found" }), {
+      status: 404,
+      headers: { "content-type": "application/json", "cache-control": "no-store" },
+    }),
+  );
+  await expect(
+    createDiningSessionCloseClient(fetcher, { delaysMs: [0, 0], recheckTimeoutMs: 1000 })
+      .prepare(command("Finalize"))
+      .execute("A".repeat(43)),
+  ).rejects.toMatchObject({ code: "NotFound" });
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});

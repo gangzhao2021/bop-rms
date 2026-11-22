@@ -248,6 +248,7 @@ type Outcome =
   | "Unknown"
   | "Refused"
   | "Denied"
+  | "Gone"
   | { readonly kind: "NotReady"; readonly reasons: readonly string[] };
 
 /**
@@ -462,9 +463,11 @@ export function TableSessionClose({
       setOutcome(
         code === "PermissionDenied"
           ? "Denied"
-          : code === "NotReady" && error instanceof DiningOrderCloseClientError
-            ? { kind: "NotReady", reasons: error.reasons }
-            : "Refused",
+          : code === "NotFound" && error instanceof DiningSessionCloseClientError
+            ? "Gone"
+            : code === "NotReady" && error instanceof DiningOrderCloseClientError
+              ? { kind: "NotReady", reasons: error.reasons }
+              : "Refused",
       );
       onBusy(false);
       setAttempt((value) => value + 1);
@@ -570,6 +573,12 @@ export function TableSessionClose({
       ) : outcome === "Denied" ? (
         <p role="alert">
           {t("Your role can't close tables. Ask the owner or a manager to close it.")}
+        </p>
+      ) : outcome === "Gone" ? (
+        <p role="alert">
+          {t(
+            "This table's visit has already ended, or it isn't at this store. The tables have been read again.",
+          )}
         </p>
       ) : outcome === "Refused" ? (
         <p role="alert">

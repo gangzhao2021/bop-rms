@@ -4886,6 +4886,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "The system couldn't send this round for {table} (a problem on our side, not with the order). Nothing was sent to the kitchen or charged. Send it once more. If it fails again, take the order on paper, charge it on the card machine and enter it under Paper order later. Home shows any alert.":
     '系统无法为{table}发送这一轮（是我们这边的问题，不是订单的问题）。没有发送到后厨，也没有收费。请再发送一次。如果仍然失败，请用纸质记录订单，在刷卡机上收款，之后在"纸质订单"中录入。首页会显示提醒。',
   "The table wasn't closed yet:": "桌台尚未关闭：",
+  "This table's visit has already ended, or it isn't at this store. The tables have been read again.":
+    "这桌的用餐已经结束，或不在本店。已重新读取桌台。",
+  "This table's visit has already ended, or it isn't at this store. Refresh to see the tables as they are now.":
+    "这桌的用餐已经结束，或不在本店。请刷新，查看桌台现在的情况。",
   "The table wasn't closed: it changed while it was being closed (for example a payment or refund came in). It has been checked again; review it and try again.":
     "桌台未关闭：关台过程中它发生了变化（例如收到付款或退款）。已重新检查；请核对后重试。",
   "The tax this Store charges on each product for pickup and dine-in. Rates change only through the tax configuration, with registration and professional review evidence. Source as of":
