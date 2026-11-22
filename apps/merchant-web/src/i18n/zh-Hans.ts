@@ -6064,7 +6064,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "{subject}有新的一轮尚未接单 — 请在订单页接单。",
   "{subject} is not accepted yet — accept it on Orders.": "{subject}尚未接单 — 请在订单页接单。",
   "{text} The table's rounds and payments are on the Orders page.":
-    "{text} 该桌的各轮次和付款在订单页。",
+    "{text}该桌的各轮次和付款在订单页。",
   "{times} ({services}; last orders {orderCutoffSeconds} min before closing; preparation {leadTimeSeconds} min)":
     "{times}（{services}；打烊前 {orderCutoffSeconds} 分钟最后点单；制作 {leadTimeSeconds} 分钟）",
   "{time}{suffix} today": "今天 {time}{suffix}",

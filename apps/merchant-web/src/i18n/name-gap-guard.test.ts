@@ -96,6 +96,9 @@ const filledWithNames: Readonly<Record<string, Record<string, string>>> = {
   },
   "{item} at {store}: the option {value} has no published recipe change for the recipe used there. Set, review and publish it under Option recipes, then list it again.":
     { item: "担担面", store: "面馆", value: "加辣" },
+  "{text} The table's rounds and payments are on the Orders page.": {
+    text: "这桌还有未付款的一轮。",
+  },
 };
 
 it("a list or name filled into a staff text meets the Chinese around it directly", () => {
