@@ -261,6 +261,22 @@ it("tells a guest whose table closed with nothing ordered that its visit ended, 
     schemaVersion: 1,
     movedTable: { tableLabel: "V44 B (TEST)" },
   });
+  // Batch 46 (v15 b45 live): a party that had ordered nothing is said so (and only as true).
+  f.readMovedTable.mockResolvedValue({
+    tableLabel: "E45 A (TEST)",
+    merged: true,
+    nothingOrdered: true,
+    store: tm2,
+  });
+  expect(await (await f.request()).json()).toEqual({
+    schemaVersion: 1,
+    movedTable: { tableLabel: "E45 A (TEST)", merged: true, nothingOrdered: true, store: tm2 },
+  });
+  f.readMovedTable.mockResolvedValue({ tableLabel: "E45 A (TEST)", nothingOrdered: false });
+  expect(await (await f.request()).json()).toEqual({
+    schemaVersion: 1,
+    movedTable: { tableLabel: "E45 A (TEST)" },
+  });
 });
 
 it("WP-2423 (rush-reads-and-orders-changes): a Session read the store could not answer is busy, never an ended visit", async () => {

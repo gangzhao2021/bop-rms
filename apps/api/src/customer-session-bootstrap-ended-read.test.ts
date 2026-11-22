@@ -10,6 +10,7 @@ const f = vi.hoisted(() => ({
   settled: vi.fn(),
   moved: vi.fn(),
   orders: vi.fn(),
+  mergedIn: vi.fn(),
 }));
 vi.mock("@bop/identity", async (original) => ({
   ...(await original<typeof import("@bop/identity")>()),
@@ -26,6 +27,7 @@ vi.mock("@rms/ordering", async (original) => ({
 vi.mock("@rms/dining", async (original) => ({
   ...(await original<typeof import("@rms/dining")>()),
   listDiningSessionMergedInto: f.merged,
+  listDiningSessionsMergedIn: f.mergedIn,
   loadDiningParticipantSettledTable: f.settled,
   loadDiningParticipantMove: f.moved,
 }));
@@ -71,6 +73,7 @@ beforeEach(() => {
   f.moved.mockResolvedValue(null);
   f.settled.mockResolvedValue({ tableLabel: "V44 A (TEST)", tableReference: ref(7) });
   f.orders.mockResolvedValue(new Map());
+  f.mergedIn.mockResolvedValue([]);
 });
 
 it("a table closed with nothing ordered says so with the Store's names, and gives nothing to act with", async () => {
@@ -98,6 +101,8 @@ it("a settled table with orders keeps its receipt access (unchanged)", async () 
 });
 
 it("a party merged into a table that then closed is thanked there, with the Store's names", async () => {
+  // The merged table had ordered (its Order is on the table the party was merged into).
+  f.orders.mockResolvedValue(new Map([[ref(9), ref(8)]]));
   f.merged.mockResolvedValue(
     new Map([
       [
@@ -112,6 +117,8 @@ it("a party merged into a table that then closed is thanked there, with the Stor
 });
 
 it("a party moved or merged into an open table is told where, with the Store's names", async () => {
+  // The party had ordered (batch 46: one that hadn't is told so, below).
+  f.orders.mockResolvedValue(new Map([[ref(5), ref(8)]]));
   f.moved.mockResolvedValue({ tableLabel: "V44 B (TEST)", fromTableLabel: "V44 A (TEST)" });
   expect(await createCustomerSessionBootstrapRead(options).readMovedTable("A".repeat(43))).toEqual({
     tableLabel: "V44 B (TEST)",
@@ -134,5 +141,73 @@ it("a party moved or merged into an open table is told where, with the Store's n
   expect(await createCustomerSessionBootstrapRead(options).readMovedTable("A".repeat(43))).toEqual({
     tableLabel: "H4",
     merged: true,
+  });
+});
+
+// Batch 46 (v15 b45 live, b-merged-then-closed-G4-390.png): a party merged into E45 A (TEST),
+// which then closed with nothing ordered by anyone, was thanked "for dining with us" with no
+// receipt. It is told what a table of its own is told: the visit ended, nothing was charged.
+it("a party merged into a table that then closed with nothing ordered is told nothing was charged", async () => {
+  f.merged.mockResolvedValue(
+    new Map([
+      [
+        ref(5),
+        {
+          diningSessionReference: ref(9),
+          tableLabel: "E45 A (TEST)",
+          fromTableLabel: "E45 C (TEST)",
+          phase: "Closed",
+        },
+      ],
+    ]),
+  );
+  f.mergedIn.mockResolvedValue([ref(5)]);
+  const answer = await createCustomerSessionBootstrapRead(options).readSettledTable("A".repeat(43));
+  expect(answer).toEqual({ tableLabel: "E45 A (TEST)", nothingOrdered: true, store: tm2 });
+  expect(JSON.stringify(answer)).not.toContain("C".repeat(43));
+  // Every party at that table was asked about: the target and the parties merged into it.
+  expect(f.mergedIn).toHaveBeenCalledWith(tx, options.scope, ref(9));
+  expect(f.orders).toHaveBeenCalledWith(tx, options.scope, [ref(9), ref(5)]);
+  // An Order of the merged-in party alone still keeps the receipt.
+  f.orders.mockResolvedValue(new Map([[ref(5), ref(8)]]));
+  expect(
+    await createCustomerSessionBootstrapRead(options).readSettledTable("A".repeat(43)),
+  ).toEqual({ tableLabel: "E45 A (TEST)", csrfToken: "C".repeat(43), store: tm2 });
+});
+
+it("a moved or merged party that ordered nothing is told so (no 'everything you ordered')", async () => {
+  f.merged.mockResolvedValue(
+    new Map([
+      [
+        ref(5),
+        {
+          diningSessionReference: ref(9),
+          tableLabel: "E45 A (TEST)",
+          fromTableLabel: "E45 C (TEST)",
+          phase: "Active",
+        },
+      ],
+    ]),
+  );
+  expect(await createCustomerSessionBootstrapRead(options).readMovedTable("A".repeat(43))).toEqual({
+    tableLabel: "E45 A (TEST)",
+    merged: true,
+    nothingOrdered: true,
+    store: tm2,
+  });
+  expect(f.orders).toHaveBeenCalledWith(tx, options.scope, [ref(5)]);
+  f.orders.mockResolvedValue(new Map([[ref(5), ref(8)]]));
+  expect(await createCustomerSessionBootstrapRead(options).readMovedTable("A".repeat(43))).toEqual({
+    tableLabel: "E45 A (TEST)",
+    merged: true,
+    store: tm2,
+  });
+  f.merged.mockResolvedValue(new Map());
+  f.moved.mockResolvedValue({ tableLabel: "E45 B (TEST)", fromTableLabel: "E45 A (TEST)" });
+  f.orders.mockResolvedValue(new Map());
+  expect(await createCustomerSessionBootstrapRead(options).readMovedTable("A".repeat(43))).toEqual({
+    tableLabel: "E45 B (TEST)",
+    nothingOrdered: true,
+    store: tm2,
   });
 });

@@ -8,6 +8,7 @@ import {
 import { createPublicStoreProfileService, parseGetPublicStoreRequest } from "@rms/store";
 import {
   listDiningSessionMergedInto,
+  listDiningSessionsMergedIn,
   loadDiningParticipantMove,
   loadDiningParticipantSettledTable,
 } from "@rms/dining";
@@ -74,6 +75,19 @@ export function createCustomerSessionBootstrapRead(
   ) => {
     const store = await settledTableStore(transaction, guest);
     return store === null ? answer : { ...answer, store };
+  };
+  /**
+   * Batch 46 (v15 b45 live): whether nothing was ordered by this party (its session and every
+   * party merged into it): the ordering Domain's lookup of each session's Order.
+   */
+  const nothingOrderedBy = async (transaction: Transaction, session: string) => {
+    const sessions = [
+      session,
+      ...(await listDiningSessionsMergedIn(transaction as never, options.scope, session)),
+    ];
+    return (
+      (await listStoreDiningSessionOrders(transaction as never, options.scope, sessions)).size === 0
+    );
   };
   return {
     async read(sessionCredential: string) {
@@ -207,15 +221,27 @@ export function createCustomerSessionBootstrapRead(
         // Batch 45 (v15 b44 live): with the Store's published names, so the page keeps its header.
         const withStore = <T extends object>(answer: T) =>
           withStoreNames(transaction, guest, answer);
+        // Batch 46 (v15 b45 live): a party that had ordered nothing isn't told its orders went
+        // along to the other table's bill.
+        const nothing = async () =>
+          (await nothingOrderedBy(transaction, String(guest.diningSessionReference)))
+            ? { nothingOrdered: true as const }
+            : {};
         if (merged !== undefined)
           return merged.phase === "Active" || merged.phase === "Closing"
-            ? withStore({ tableLabel: merged.tableLabel, merged: true as const })
+            ? withStore({
+                tableLabel: merged.tableLabel,
+                merged: true as const,
+                ...(await nothing()),
+              })
             : null;
         const moved = await loadDiningParticipantMove(transaction as never, options.scope, {
           diningSessionReference: String(guest.diningSessionReference),
           participantReference: String(guest.diningParticipantReference),
         });
-        return moved === null ? null : withStore({ tableLabel: moved.tableLabel });
+        return moved === null
+          ? null
+          : withStore({ tableLabel: moved.tableLabel, ...(await nothing()) });
       });
     },
     /**
@@ -258,10 +284,15 @@ export function createCustomerSessionBootstrapRead(
         ).get(session);
         // Batch 45: the Store's names come with every ended table's answer (the page's header).
         const named = <T extends object>(answer: T) => withStoreNames(transaction, guest, answer);
+        // Batch 46 (v15 b45 live): the table this party was merged into closed with nothing
+        // ordered there by anyone (its own party, this one or another merged in): the visit ended
+        // and nothing was charged, as at a table of its own, not "thank you" with no receipt.
         if (merged !== undefined)
-          return merged.phase === "Closed"
-            ? named({ tableLabel: merged.tableLabel, ...receipt })
-            : null;
+          return merged.phase !== "Closed"
+            ? null
+            : (await nothingOrderedBy(transaction, merged.diningSessionReference))
+              ? named({ tableLabel: merged.tableLabel, nothingOrdered: true as const })
+              : named({ tableLabel: merged.tableLabel, ...receipt });
         const settled = await loadDiningParticipantSettledTable(
           transaction as never,
           options.scope,
@@ -385,6 +416,8 @@ export function createCustomerSessionBootstrapHandler(options?: {
     readMovedTable?(sessionCredential: string): Promise<{
       tableLabel: string;
       merged?: boolean;
+      /** Batch 46: the party had ordered nothing at its own table. */
+      nothingOrdered?: boolean;
       /** Batch 45: the Store's published names (absent: not readable). */
       store?: { brandDisplayName: string; storeDisplayName: string };
     } | null>;
@@ -480,6 +513,7 @@ export function createCustomerSessionBootstrapHandler(options?: {
           ? {
               tableLabel: moved.tableLabel,
               ...(moved.merged === true ? { merged: true } : {}),
+              ...(moved.nothingOrdered === true ? { nothingOrdered: true } : {}),
               ...storeNames(moved.store),
             }
           : null;
