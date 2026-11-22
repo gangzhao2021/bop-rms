@@ -16,6 +16,21 @@ const { Client } = pg;
 const id = (n) => "01a1e000-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const sha = "sha256:" + "a".repeat(64);
 const minutes = (n) => n * 60_000;
+const torontoHour = (instant) =>
+  Number(
+    new Intl.DateTimeFormat("en-GB", {
+      timeZone: "America/Toronto",
+      hour: "2-digit",
+      hourCycle: "h23",
+    }).format(new Date(instant)),
+  );
+const torontoDate = (instant) =>
+  new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Toronto",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(instant));
 
 /**
  * WP-2423 Q7 (v15): the day-end settlement of the open business day, with payments taken on the
@@ -98,22 +113,25 @@ it("loads the open business day's settlement with card-machine payments, also wh
         // Catalog v17: the settlement read has its own permission; exceptions keep theirs.
         extraPermissions: ["operations.order-exception.manage", "payment.settlement.read"],
       });
-      // Published days back so yesterday (the across-midnight case) is a business day too.
+      // WP-2423 (batch 46): the Store's business day starts twelve hours from now (Toronto), so
+      // the payments minutes ago, the refund now and every read of "today" fall on one business
+      // date. A fixed 00:00 start put a run between 00:00 and about 00:03 Toronto (05:0x UTC on
+      // CI in winter) across the day's start: the payments landed on the day before "today".
+      const startHour = (torontoHour(Date.now()) + 12) % 24;
+      // The business date an instant falls in (its local time less the start, ±12 h from any
+      // midnight, so a DST hour never moves it).
+      const businessDateOf = (instant) => torontoDate(Date.parse(instant) - startHour * 3_600_000);
+      // Published days back so yesterday (the across-the-day's-start case) is a business day too.
       const publishedAt = new Date(Date.now() - minutes(3 * 24 * 60)).toISOString();
       await seedJourneyStorePublication({
         client: admin,
         scope: ownerScope,
         publishedAt,
         validUntil: new Date(Date.now() + minutes(24 * 60)).toISOString(),
-        businessDayStart: "00:00:00",
+        businessDayStart: String(startHour).padStart(2, "0") + ":00:00",
         prefix: "01a1e100",
       });
-      const today = new Intl.DateTimeFormat("en-CA", {
-        timeZone: "America/Toronto",
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-      }).format(new Date());
+      const today = businessDateOf(now());
 
       // Two counter payments today (one entered after an outage) and one refund on the machine.
       const takenAt = new Date(Date.now() - minutes(2)).toISOString();
@@ -278,12 +296,7 @@ it("loads the open business day's settlement with card-machine payments, also wh
       // an answer naming the first covered day, after the caller's scope is resolved; the first
       // covered day itself reads normally. WP-2423 M160: that first day is the Store's own (the
       // business day its first configuration took effect in), not a composition option.
-      const firstDay = new Intl.DateTimeFormat("en-CA", {
-        timeZone: "America/Toronto",
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-      }).format(new Date(publishedAt));
+      const firstDay = businessDateOf(publishedAt);
       const covered = createPersistentMerchantSettlement({
         persistence: {
           ...session.persistence,
@@ -374,15 +387,16 @@ it("loads the open business day's settlement with card-machine payments, also wh
       await released;
       assert.deepEqual((await read(compose())).cardMachine, expected);
 
-      // WP-2423 (2026-10-17), across midnight: a Provider charge matching no Order, taken
-      // yesterday, refunded with the Provider creating the refund at 23:59:59 and its result
-      // observed at 00:00:00.400 today. The Provider statement and day-end settlement count the
-      // refund yesterday (its creation time); the Settlement page now does the same instead of
-      // putting it on today (the time it was observed).
+      // WP-2423 (2026-10-17), across the business day's start (midnight at a Store whose day
+      // starts then): a Provider charge matching no Order, taken yesterday, refunded with the
+      // Provider creating the refund a second before today's start and its result observed
+      // 0.4 s after it. The Provider statement and day-end settlement count the refund yesterday
+      // (its creation time); the Settlement page now does the same instead of putting it on
+      // today (the time it was observed).
       const dayStart = (
         await admin.query(
-          "SELECT (($1::date)::timestamp AT TIME ZONE 'America/Toronto') AS start",
-          [today],
+          "SELECT (($1::date + $2::time)::timestamp AT TIME ZONE 'America/Toronto') AS start",
+          [today, String(startHour).padStart(2, "0") + ":00:00"],
         )
       ).rows[0].start.getTime();
       const yesterday = new Date(Date.parse(today + "T12:00:00.000Z") - 86_400_000)

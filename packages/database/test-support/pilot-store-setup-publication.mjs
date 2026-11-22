@@ -145,8 +145,19 @@ export async function exercisePilotStoreSetupPublication(input) {
     };
 
     // The Store as installed: a published V1 configuration (no recorded authoring), its release
-    // and the approved synthetic go-live check (TEST-ONLY), one hour ago.
-    const installedAt = new Date(Date.now() - 3600000).toISOString();
+    // and the approved synthetic go-live check (TEST-ONLY), one hour ago, but never before the
+    // start (04:00 Toronto) of the business day the test runs in: a Store installed "today" has
+    // no closed business day yet (the monitors' "opened today: nothing to say"). An hour back
+    // from a run between 04:00 and 05:00 Toronto was the day before, already closed (batch 46).
+    const currentDayStart = (
+      await admin.query(
+        "SELECT (((($1::timestamptz AT TIME ZONE 'America/Toronto') - interval '4 hours')::date + time '04:00') AT TIME ZONE 'America/Toronto') AS start",
+        [new Date().toISOString()],
+      )
+    ).rows[0].start.getTime();
+    const installedAt = new Date(
+      Math.max(Date.now() - 3600000, Math.floor((currentDayStart + Date.now()) / 2)),
+    ).toISOString();
     const prefix = "01a9e000";
     await seedJourneyStorePublication({
       client: admin,
