@@ -2392,6 +2392,11 @@ test.describe("@production 同桌结账 guests pay by dish at a table that pays 
       readonly summary?: Record<string, unknown>;
       /** v15 batch 7: once `on`, staff have split the bill evenly in two (read live). */
       readonly evenSplit?: { on: boolean };
+      /**
+       * v15 b49 live: nothing of this phone's is left to pay (`mine` null), because it added no
+       * dish on the bill (its only dish is still in the cart), or because its dishes are paid.
+       */
+      readonly nothingOfMine?: "NoneAdded" | "AllPaid";
     },
   ) => {
     await page.route("**/bff/customer/payment-configuration", (route) =>
@@ -2484,7 +2489,18 @@ test.describe("@production 同桌结账 guests pay by dish at a table that pays 
                   }
                 : null,
             choices:
-              paying === null ? choicesOf(options.defaultScope ?? "WholeTable", others) : null,
+              paying !== null
+                ? null
+                : options.nothingOfMine === undefined
+                  ? choicesOf(options.defaultScope ?? "WholeTable", others)
+                  : {
+                      ...choicesOf(options.defaultScope ?? "WholeTable", others),
+                      mine: null,
+                      addedAny: options.nothingOfMine === "AllPaid",
+                      dishes: choicesOf(options.defaultScope ?? "WholeTable", others).dishes.map(
+                        (dish) => ({ ...dish, mine: false }),
+                      ),
+                    },
             receipt: null,
             ...(options.evenSplit?.on === true
               ? {
@@ -2660,6 +2676,62 @@ test.describe("@production 同桌结账 guests pay by dish at a table that pays 
       expect(starts.at(-1)?.choice).toEqual({ kind: "Rest" });
       await expectNoInternalText(page);
     });
+
+  // v15 b49 live (guest-cart-open-through-checkout): a zh guest who had sent nothing (their only
+  // dish still in the cart, 已付 $0.00) read "only what I added (the dishes you added have all
+  // been paid by someone)". Each reason "only what I added" is off now says only what is true.
+  for (const [width, height] of [
+    [390, 844],
+    [1440, 900],
+  ] as const)
+    for (const zh of [false, true])
+      test(`only what I added, with nothing of yours to pay, says why truthfully (${zh ? "zh-Hans" : "en"} ${width})`, async ({
+        page,
+      }) => {
+        await page.setViewportSize({ width, height });
+        const said = {
+          NoneAdded: zh
+            ? "只付我加的（账单上没有您加的菜）"
+            : "Only what I added (you have no dishes on the bill)",
+          AllPaid: zh
+            ? "只付我加的（没有您要付的菜）"
+            : "Only what I added (nothing of yours is left to pay)",
+        } as const;
+        for (const nothingOfMine of ["NoneAdded", "AllPaid"] as const) {
+          const { pay } = await tableWith(page, {
+            nothingOfMine,
+            othersPaidNoodles: nothingOfMine === "AllPaid",
+          });
+          const toZh = page.getByRole("button", { name: "切换到中文" });
+          if (zh && (await toZh.count()) > 0) await toZh.click();
+          const scope = zh ? page.getByRole("region", { name: "结账付款" }) : pay;
+          const option = scope.getByRole("radio", { name: said[nothingOfMine], exact: true });
+          await expect(option).toBeVisible();
+          await expect(option).toBeDisabled();
+          await expect(
+            page.getByText(nothingOfMine === "NoneAdded" ? said.AllPaid : said.NoneAdded),
+          ).toHaveCount(0);
+          // Never a claim that someone paid what nobody paid.
+          await expect(page.getByText("已有人付")).toHaveCount(0);
+          // The words stay inside the page gutter, with room for wider Linux (DejaVu) fonts: the
+          // label wraps rather than runs out.
+          const label = option.locator("xpath=..");
+          const box = await label.boundingBox();
+          expect(box).not.toBeNull();
+          expect(box?.x ?? 0).toBeGreaterThanOrEqual(15);
+          expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(width - 15);
+          expect(
+            await label.evaluate((node) => node.scrollWidth - node.clientWidth),
+          ).toBeLessThanOrEqual(0);
+          await expectNoHorizontalOverflow(page);
+          await page.screenshot({
+            path: `test-results/b50-pay-mine-${nothingOfMine}-${zh ? "zh" : "en"}-${width}.png`,
+          });
+          await expectNoInternalText(page);
+          await page.unrouteAll({ behavior: "ignoreErrors" });
+          await page.goto("about:blank");
+        }
+      });
 
   // v15 batch 7: staff split the bill evenly while the guest looks at the table; "Refresh now"
   // reads the pay section too, so it offers the parts, never the whole table, at once.

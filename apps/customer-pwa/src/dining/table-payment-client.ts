@@ -100,6 +100,11 @@ export interface TablePaymentView {
     /** The Store's setting: what this phone starts with. */
     readonly defaultScope: "WholeTable" | "OwnDishes";
     readonly mine: null | { readonly count: number; readonly amountMinor: string };
+    /**
+     * v15 b49 live: this phone added a dish on the bill (paid, being paid or not); null from an
+     * older server. With `mine` null it says why: none of the dishes are theirs, or none is left.
+     */
+    readonly addedAny: boolean | null;
     readonly dishes: readonly {
       readonly orderItemReference: string;
       readonly displayName: string;
@@ -306,6 +311,12 @@ function choicesOf(value: unknown): TablePaymentView["choices"] {
                 : fail(),
             amountMinor: amount(mine.amountMinor),
           }),
+    addedAny:
+      raw.addedAny === undefined || raw.addedAny === null
+        ? null
+        : typeof raw.addedAny === "boolean"
+          ? raw.addedAny
+          : fail(),
     dishes: Object.freeze(
       raw.dishes.map((value: unknown) => {
         const dish = value as Record<string, unknown>;

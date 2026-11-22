@@ -130,4 +130,18 @@ describe("Which dishes this phone pays", () => {
     expect(view.split?.parts[0]?.byYou).toBe(true);
     expect(paySelection(view, "Whole", new Map())?.choice).toEqual({ kind: "Rest" });
   });
+
+  it("batch 50: says whether this phone added any dish on the bill (older server: unknown)", () => {
+    const of = (addedAny: unknown) => {
+      const raw = wire();
+      return parseTablePaymentView({
+        ...raw,
+        payment: { ...raw.payment, choices: { ...raw.payment.choices, mine: null, addedAny } },
+      }).choices;
+    };
+    expect(of(false)).toMatchObject({ mine: null, addedAny: false });
+    expect(of(true)).toMatchObject({ mine: null, addedAny: true });
+    expect(of(undefined)?.addedAny).toBeNull();
+    expect(() => of("yes")).toThrow();
+  });
 });

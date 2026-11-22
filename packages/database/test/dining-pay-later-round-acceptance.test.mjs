@@ -7306,6 +7306,10 @@ async function journey(journeyEnding) {
           const viewB = await payments.read(b);
           assert.equal(viewB.choices.mine, null);
           assert.equal(viewB.choices.dishes[0].mine, false);
+          // Batch 50 (v15 b49 live): why "only what I added" is off says only what is true. B added
+          // no dish on the bill; A did.
+          assert.equal(viewA.choices.addedAny, true);
+          assert.equal(viewB.choices.addedAny, false);
           // "Only what I added" on a phone that added nothing: nothing to pay.
           await assert.rejects(
             payments.start(b, { operationReference: fresh(), tip: none, choice: { kind: "Mine" } }),
@@ -7453,6 +7457,10 @@ async function journey(journeyEnding) {
           for (const intent of new Set(intents.values()))
             if (intent.status === "RequiresCustomerAction") intent.status = "Captured";
           const paidB = await payments.refresh(b);
+          // B paid one of A's dishes: B still added none; A's other one is left to pay.
+          assert.equal(paidB.choices.addedAny, false);
+          const afterB = await payments.read(a);
+          assert.deepEqual([afterB.choices.addedAny, afterB.choices.mine?.count], [true, 1]);
           const half = await bill();
           assert.equal(half.split.mode, "ByGuests");
           assert.equal(half.split.paidInFull, false);

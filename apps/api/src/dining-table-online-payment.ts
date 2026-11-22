@@ -140,6 +140,11 @@ export interface DiningTableOnlinePaymentView {
     /** The Store's setting: the whole table, or only what this phone added, chosen to start. */
     readonly defaultScope: "WholeTable" | "OwnDishes";
     readonly mine: null | { readonly count: number; readonly amountMinor: string };
+    /**
+     * v15 b49 live: whether this phone added any dish on the bill (paid, being paid or not), so
+     * "only what I added" with nothing left says why: none were theirs, or theirs are taken care of.
+     */
+    readonly addedAny: boolean;
     readonly dishes: readonly {
       readonly orderItemReference: string;
       readonly displayName: string;
@@ -272,6 +277,9 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
     return Object.freeze({
       defaultScope: current.guestChoices.defaultScope,
       mine: mine === null ? null : Object.freeze(mine),
+      addedAny:
+        participant !== null &&
+        [...current.dishAdders.values()].some((adder) => adder === participant),
       dishes: Object.freeze(
         current.guestChoices.dishes.map((dish) =>
           Object.freeze({

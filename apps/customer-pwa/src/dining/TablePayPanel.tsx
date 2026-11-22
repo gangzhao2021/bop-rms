@@ -972,7 +972,9 @@ function TablePayDishes({
             onChange={() => onScope("Mine")}
           />{" "}
           {choices.mine === null
-            ? t("Only what I added (nothing of yours is left to pay)")
+            ? choices.addedAny === false
+              ? t("Only what I added (you have no dishes on the bill)")
+              : t("Only what I added (nothing of yours is left to pay)")
             : t("Only what I added ({count} · {amount})", {
                 count: String(choices.mine.count),
                 amount: money(choices.mine.amountMinor),

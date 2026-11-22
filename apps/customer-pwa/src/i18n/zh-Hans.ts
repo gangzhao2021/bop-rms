@@ -1922,7 +1922,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "The rest of the table (1 dish · {amount})": "付剩下的（1 道菜 · {amount}）",
   "The whole table (1 dish · {amount})": "付全桌（1 道菜 · {amount}）",
   "The whole table (1 dish)": "付全桌（1 道菜）",
-  "Only what I added (nothing of yours is left to pay)": "只付我加的（您加的菜都已有人付）",
+  // v15 b49 live: says only what is true. Nothing of theirs is left (paid, or being paid), or
+  // none of the bill's dishes were added on this phone (its dishes may still be in the cart).
+  "Only what I added (nothing of yours is left to pay)": "只付我加的（没有您要付的菜）",
+  "Only what I added (you have no dishes on the bill)": "只付我加的（账单上没有您加的菜）",
   "Only what I added ({count} · {amount})": "只付我加的（{count} 道 · {amount}）",
   "Choose dishes to pay for": "选择要付的菜",
   "you added": "您加的",
