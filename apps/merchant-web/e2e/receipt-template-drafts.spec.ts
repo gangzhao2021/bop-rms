@@ -60,7 +60,20 @@ const respond = (route: Route, v: unknown, status = 200) =>
     headers: { "cache-control": "no-store" },
     body: JSON.stringify(v),
   });
+// The journal lives in IndexedDB, which outlives a reload. A route handler can read it while the
+// page is reloading (a request sent as the old document unloads), and Playwright then reports a
+// destroyed execution context; read again once the new document has loaded.
 async function cursors(page: Page, submission: boolean | "Lifecycle" | "Setup" = false) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await readCursors(page, submission);
+    } catch (error) {
+      if (attempt >= 3 || !String(error).includes("Execution context was destroyed")) throw error;
+      await page.waitForLoadState("domcontentloaded");
+    }
+  }
+}
+async function readCursors(page: Page, submission: boolean | "Lifecycle" | "Setup") {
   return page.evaluate(
     (submission) =>
       new Promise<unknown[]>((resolve, reject) => {
