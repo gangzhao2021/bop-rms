@@ -1877,7 +1877,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Finalize uploaded media": "完成媒体上传",
   Find: "查找",
   "Find a table": "查找桌台",
-  "Find an order · Applied": "查找订单 · 已筛选",
+  "Find an order · Applied": "查找订单 · 已应用",
   "Find an order": "查找订单",
   "Finding the sign-in page…": "正在查找登录页面…",
   "Close the table. Every order, payment and open problem is checked before the table is free for the next guests.":

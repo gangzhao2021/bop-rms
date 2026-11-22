@@ -119,7 +119,8 @@ test("@production WP-2423 batch 45: the kitchen display names a chosen work stat
     if (language === "zh-Hans") await chooseLanguage(page, language);
     const zh = language === "zh-Hans";
     const plain = zh ? "查找订单" : "Find an order";
-    const applied = zh ? "查找订单 · 已筛选" : "Find an order · Applied";
+    // Batch 46 (v15 b45 live): one Chinese word for Applied, as the phone's Filters toggle says.
+    const applied = zh ? "查找订单 · 已应用" : "Find an order · Applied";
     await atTop(page, 1440, 900);
     await expect(find).toHaveText(plain);
     await expect(shown).toHaveCount(0);
