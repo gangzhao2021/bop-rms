@@ -176,6 +176,8 @@ export function installMerchantOperationsRoutes(
           // DEC-CLOSING-SUMMARY: when this business day closes; neither when it can't be read.
           closesAt: day.closesAt ?? null,
           closedToday: day.closedToday ?? false,
+          // Batch 47 fix-up: a period is still open when the day ends, so closesAt is its end.
+          openAtDayEnd: day.openAtDayEnd ?? false,
         }),
       )
       .catch((error: unknown) => failed(response, error));

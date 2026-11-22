@@ -43,6 +43,7 @@ export function closingReminderPhase(
     readonly endsAt: string | null;
     readonly closesAt?: string | null;
     readonly closedToday?: boolean;
+    readonly openAtDayEnd?: boolean;
   } | null,
   now: number,
 ): ClosingReminderPhase {
@@ -50,11 +51,12 @@ export function closingReminderPhase(
   if (day.closedToday === true) return "UnpaidTablesOnly";
   if (day.closesAt === undefined || day.closesAt === null)
     return inClosingWindow(day.endsAt, now) ? "BeforeClosing" : "Hidden";
-  const closes = Date.parse(day.closesAt);
   // Batch 47 review: a Store still open when its business day ends (open 24 hours) does not close;
-  // as on Tables (tablesClosingAlert), its closing is the day's end, and Home says nothing of it.
-  const ends = day.endsAt === null ? Number.NaN : Date.parse(day.endsAt);
-  if (Number.isFinite(ends) && closes >= ends) return "Hidden";
+  // its closing is only the day's end, and Home says nothing of it (Tables tells its tables when
+  // the day ends). Fix-up: a Store whose last period ends exactly as the day ends (18:00 to 4:00,
+  // day from 4:00) really closes then, and is reminded from 3:00 as before batch 47.
+  if (day.openAtDayEnd === true) return "Hidden";
+  const closes = Date.parse(day.closesAt);
   if (now < closes - closingReminderLeadMinutes * 60_000) return "Hidden";
   if (now < closes) return "BeforeClosing";
   return now < closes + closingReminderAfterMinutes * 60_000 ? "AfterClosing" : "UnpaidTablesOnly";

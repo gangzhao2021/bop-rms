@@ -178,7 +178,12 @@ describe("Batch 36: the open gate, the guest hours and Home agree at every momen
     expect(at.businessDate).toBe("2026-11-19");
     // Batch 47: its business day (Nov 19 4:00 to Nov 20 4:00) closes when it ends, not at the end
     // of Nov 20 as v15 sent (closesAt 2026-11-24T04:59:59Z for the Nov 22 business day).
-    expect(at.closing).toEqual({ kind: "Closes", localDate: "2026-11-20", localTime: "04:00:00" });
+    expect(at.closing).toEqual({
+      kind: "Closes",
+      localDate: "2026-11-20",
+      localTime: "04:00:00",
+      openAtDayEnd: true,
+    });
   });
 
   it("closes the business day at the end of a period carried past its start", () => {
@@ -191,7 +196,12 @@ describe("Batch 36: the open gate, the guest hours and Home agree at every momen
         weeklySchedule: closedWednesday.schedule,
         exceptions: [],
       }),
-    ).toEqual({ kind: "Closes", localDate: "2026-12-23", localTime: "05:00:00" });
+    ).toEqual({
+      kind: "Closes",
+      localDate: "2026-12-23",
+      localTime: "05:00:00",
+      openAtDayEnd: false,
+    });
     expect(answers(closedWednesday.schedule, [], "04:00:00", "2026-12-23", "04:30:00").gate).toBe(
       "Open",
     );
@@ -206,7 +216,12 @@ describe("Batch 36: the open gate, the guest hours and Home agree at every momen
         weeklySchedule: holiday.schedule,
         exceptions: holiday.exceptions,
       }),
-    ).toEqual({ kind: "Closes", localDate: "2026-12-25", localTime: "00:00:00" });
+    ).toEqual({
+      kind: "Closes",
+      localDate: "2026-12-25",
+      localTime: "00:00:00",
+      openAtDayEnd: false,
+    });
     const after = answers(
       holiday.schedule,
       holiday.exceptions,

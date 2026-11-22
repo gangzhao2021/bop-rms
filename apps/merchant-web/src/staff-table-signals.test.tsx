@@ -199,12 +199,20 @@ describe("b39 warn before the business day ends with tables open", () => {
   });
   it("batch 47: a Store open 24 hours is told when the day ends, never that it is closing", () => {
     // /merchant/business-day for Test Merchant 2: open all day, so it closes with the day.
-    const allDay = { endsAt: day.endsAt, closesAt: day.endsAt };
+    const allDay = { endsAt: day.endsAt, closesAt: day.endsAt, openAtDayEnd: true };
     expect(tablesClosingAlert(allDay, Date.parse("2026-11-21T07:00:00.000Z"), 2, zone)).toBeNull();
     const last = tablesClosingAlert(allDay, Date.parse("2026-11-21T08:30:00.000Z"), 2, zone);
     expect(last?.tone).toBe("past");
     expect(last?.text).toMatch(/^The business day ends at 4:00\sa\.m\.: 2 tables still open\./u);
     expect(last?.text).not.toMatch(/Clos/u);
+  });
+  it("batch 47 fix-up: a Store that closes exactly as its day ends is told it is closing", () => {
+    // 18:00 to 4:00 the next morning, business day from 4:00: it closes at 4:00, as Home says.
+    const toFour = { endsAt: day.endsAt, closesAt: day.endsAt, openAtDayEnd: false };
+    expect(tablesClosingAlert(toFour, Date.parse("2026-11-21T07:59:00.000Z"), 2, zone)).toBeNull();
+    const soon = tablesClosingAlert(toFour, Date.parse("2026-11-21T08:30:00.000Z"), 2, zone);
+    expect(soon?.tone).toBe("soon");
+    expect(soon?.text).toMatch(/^Closing at 4:00\sa\.m\.: 2 tables still open\./u);
   });
   it("without published hours, warns in the day's last hour", () => {
     const open = { endsAt: day.endsAt, closesAt: null };

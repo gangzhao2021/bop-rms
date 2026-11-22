@@ -15,6 +15,11 @@ export interface StoreBusinessDay {
   readonly closesAt?: string | null;
   /** Hours are published and this day has none (a holiday, a day off). */
   readonly closedToday?: boolean;
+  /**
+   * Batch 47 fix-up: a period is still open when the day ends (open 24 hours), so closesAt is
+   * only the day's end, not a time the Store closes.
+   */
+  readonly openAtDayEnd?: boolean;
 }
 
 const datePattern = /^\d{4}-\d{2}-\d{2}$/u;
@@ -38,6 +43,7 @@ export function parseStoreBusinessDay(value: unknown): StoreBusinessDay & {
   readonly lastOrdersAt: string | null;
   readonly closesAt: string | null;
   readonly closedToday: boolean;
+  readonly openAtDayEnd: boolean;
 } {
   const raw = value as Record<string, unknown> | null;
   const keys = [
@@ -54,6 +60,9 @@ export function parseStoreBusinessDay(value: unknown): StoreBusinessDay & {
       : []),
     ...(raw !== null && typeof raw === "object" && Object.hasOwn(raw, "closedToday")
       ? ["closedToday"]
+      : []),
+    ...(raw !== null && typeof raw === "object" && Object.hasOwn(raw, "openAtDayEnd")
+      ? ["openAtDayEnd"]
       : []),
   ];
   if (
@@ -72,6 +81,7 @@ export function parseStoreBusinessDay(value: unknown): StoreBusinessDay & {
     (raw.lastOrdersAt !== undefined && raw.lastOrdersAt !== null && !isInstant(raw.lastOrdersAt)) ||
     (raw.closesAt !== undefined && raw.closesAt !== null && !isInstant(raw.closesAt)) ||
     (raw.closedToday !== undefined && typeof raw.closedToday !== "boolean") ||
+    (raw.openAtDayEnd !== undefined && typeof raw.openAtDayEnd !== "boolean") ||
     !(raw.startsAt <= raw.observedAt && raw.observedAt < raw.endsAt) ||
     // A business day lasts 23 to 25 hours (daylight-saving changes included).
     Date.parse(raw.endsAt) - Date.parse(raw.startsAt) < 23 * 3_600_000 ||
@@ -87,6 +97,7 @@ export function parseStoreBusinessDay(value: unknown): StoreBusinessDay & {
     lastOrdersAt: (raw.lastOrdersAt as string | null | undefined) ?? null,
     closesAt: (raw.closesAt as string | null | undefined) ?? null,
     closedToday: raw.closedToday === true,
+    openAtDayEnd: raw.openAtDayEnd === true,
   });
 }
 
@@ -159,6 +170,7 @@ export function trackStoreBusinessDay(options: {
     endsAt: string;
     closesAt?: string | null;
     closedToday?: boolean;
+    openAtDayEnd?: boolean;
   }>;
   onDay(day: StoreBusinessDay): void;
   /** A read failed (it is tried again after BUSINESS_DAY_RETRY_MS). */
@@ -192,6 +204,7 @@ export function trackStoreBusinessDay(options: {
           endsAt: value.endsAt,
           ...(value.closesAt === undefined ? {} : { closesAt: value.closesAt }),
           ...(value.closedToday === undefined ? {} : { closedToday: value.closedToday }),
+          ...(value.openAtDayEnd === undefined ? {} : { openAtDayEnd: value.openAtDayEnd }),
         }),
       );
       // A day the Store says has already ended by this device's clock (a device clock running
@@ -267,7 +280,8 @@ export function StoreBusinessDayProvider({
           previous.startsAt === value.startsAt &&
           previous.endsAt === value.endsAt &&
           previous.closesAt === value.closesAt &&
-          previous.closedToday === value.closedToday
+          previous.closedToday === value.closedToday &&
+          previous.openAtDayEnd === value.openAtDayEnd
             ? previous
             : value,
         );

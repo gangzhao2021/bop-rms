@@ -72,6 +72,8 @@ describe("Batch 36: Home's closing after midnight follows the Store's open perio
     // a day after this business day ended): still open when the day ends, it closes with the day.
     expect(day.closesAt).toBe(day.endsAt);
     expect(day.closesAt).toBe("2026-11-20T09:00:00.000Z");
+    // Batch 47 fix-up: and it says the day's end capped it, so Home does not remind it to close.
+    expect(day.openAtDayEnd).toBe(true);
     expect(Date.parse(day.closesAt ?? "")).toBeGreaterThan(Date.parse("2026-11-20T05:49:00.000Z"));
   });
 
@@ -83,5 +85,18 @@ describe("Batch 36: Home's closing after midnight follows the Store's open perio
       })),
     );
     expect(day.closesAt).toBe("2026-11-20T03:00:00.000Z");
+    expect(day.openAtDayEnd).toBe(false);
+  });
+
+  it("batch 47 fix-up: a Store closing exactly as its day ends really closes then", async () => {
+    // 18:00 to 4:00 the next morning, business day from 4:00: closing is the day's end, uncapped.
+    const day = await read(
+      [1, 2, 3, 4, 5, 6, 7].map((isoWeekday) => ({
+        isoWeekday,
+        intervals: [period("18:00:00", "04:00:00", true)],
+      })),
+    );
+    expect(day.closesAt).toBe(day.endsAt);
+    expect(day.openAtDayEnd).toBe(false);
   });
 });

@@ -2,7 +2,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
 import { setLanguageForTest } from "./i18n/i18n.js";
-import { closingReminderPhase, inClosingWindow } from "./ClosingReminder.js";
+import {
+  closingReminderPhase,
+  closingReminderScreen,
+  closingReminderShows,
+  inClosingWindow,
+} from "./ClosingReminder.js";
 import { storeClosingNow } from "./PickupNotCollectedAction.js";
 import { parseTonightSummary } from "./store-reports-client.js";
 import { tonightProblems, TonightSummaryView } from "./TonightSummary.js";
@@ -364,6 +369,7 @@ describe("WP-2423 item 8 ② tonight's closing summary", () => {
       endsAt: "2026-11-24T09:00:00.000Z",
       closesAt: "2026-11-24T09:00:00.000Z",
       closedToday: false,
+      openAtDayEnd: true,
     };
     for (const instant of [
       "2026-11-24T05:00:00.000Z",
@@ -373,10 +379,26 @@ describe("WP-2423 item 8 ② tonight's closing summary", () => {
     ])
       expect(closingReminderPhase(day, Date.parse(instant))).toBe("Hidden");
     // A Store that does close before the day ends is still reminded.
-    const closes = { ...day, closesAt: "2026-11-24T08:30:00.000Z" };
+    const closes = { ...day, closesAt: "2026-11-24T08:30:00.000Z", openAtDayEnd: false };
     expect(closingReminderPhase(closes, Date.parse("2026-11-24T08:00:00.000Z"))).toBe(
       "BeforeClosing",
     );
+  });
+  it("batch 47 fix-up: reminds a Store whose last period ends exactly as its day ends", () => {
+    // 18:00 to 4:00 the next morning, business day from 4:00 (09:00Z): it really closes at 4:00,
+    // so from 3:00 Home says to look over today's summary before closing, as at 059864869.
+    const day = {
+      endsAt: "2026-11-24T09:00:00.000Z",
+      closesAt: "2026-11-24T09:00:00.000Z",
+      closedToday: false,
+      openAtDayEnd: false,
+    };
+    expect(closingReminderPhase(day, Date.parse("2026-11-24T07:59:00.000Z"))).toBe("Hidden");
+    for (const instant of ["2026-11-24T08:00:00.000Z", "2026-11-24T08:59:00.000Z"])
+      expect(closingReminderPhase(day, Date.parse(instant))).toBe("BeforeClosing");
+    expect(
+      closingReminderShows([closingReminderScreen], day, Date.parse("2026-11-24T08:30:00.000Z")),
+    ).toBe(true);
   });
 });
 

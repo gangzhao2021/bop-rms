@@ -13,6 +13,8 @@ export function tablesClosingAlert(
   day: {
     readonly endsAt: string | null;
     readonly closesAt?: string | null;
+    /** A period is still open when the day ends (open 24 hours): closesAt is only its end. */
+    readonly openAtDayEnd?: boolean;
   } | null,
   now: number,
   /** Today's tables still seated (not those left from earlier days, which are listed apart). */
@@ -28,8 +30,9 @@ export function tablesClosingAlert(
   const closesAt =
     day.closesAt === undefined || day.closesAt === null ? Number.NaN : Date.parse(day.closesAt);
   // Batch 47: a Store still open when the business day ends (open 24 hours) closes with the day;
-  // it is not "closing at 4:00 a.m.", so its tables are told when the day ends.
-  const closes = Number.isFinite(ends) && closesAt >= ends ? Number.NaN : closesAt;
+  // it is not "closing at 4:00 a.m.", so its tables are told when the day ends. Fix-up: only when
+  // the read says so; a Store whose last period ends exactly then is closing then, as Home says.
+  const closes = day.openAtDayEnd === true ? Number.NaN : closesAt;
   const tables = countOf(openTables, "table");
   if (Number.isFinite(closes) && now >= closes - lead && now < closes)
     return {

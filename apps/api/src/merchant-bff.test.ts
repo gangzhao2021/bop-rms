@@ -3237,6 +3237,8 @@ describe("WP-2423 Q21 merchant business-day read route", () => {
     // DEC-CLOSING-SUMMARY: when this business day closes.
     closesAt: "2026-10-15T02:00:00.000Z",
     closedToday: false,
+    // Batch 47 fix-up: whether a period is still open when the day ends (open 24 hours).
+    openAtDayEnd: false,
   };
   const headers = {
     cookie: "__Host-bop-merchant=" + sessionCookie,

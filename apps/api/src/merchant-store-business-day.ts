@@ -38,6 +38,7 @@ export function createMerchantStoreBusinessDay(options: {
     readonly lastOrdersAt: string | null;
     readonly closesAt: string | null;
     readonly closedToday: boolean;
+    readonly openAtDayEnd: boolean;
   }
 > {
   const setupSnapshotReferences = {
@@ -137,8 +138,13 @@ function businessDayClosing(
   timeZone: string,
   businessDate: string,
   businessDayStartLocalTime: string,
-): { readonly closesAt: string | null; readonly closedToday: boolean } {
-  const unknown = { closesAt: null, closedToday: false };
+): {
+  readonly closesAt: string | null;
+  readonly closedToday: boolean;
+  /** Batch 47 fix-up: closesAt is only the day's end, a period still being open then. */
+  readonly openAtDayEnd: boolean;
+} {
+  const unknown = { closesAt: null, closedToday: false, openAtDayEnd: false };
   if (published === undefined) return unknown;
   try {
     const closing = describeStoreBusinessDayClosing({
@@ -151,7 +157,8 @@ function businessDayClosing(
         typeof describeStoreBusinessDayClosing
       >[0]["exceptions"],
     });
-    if (closing.kind === "ClosedToday") return { closesAt: null, closedToday: true };
+    if (closing.kind === "ClosedToday")
+      return { closesAt: null, closedToday: true, openAtDayEnd: false };
     if (closing.kind === "NoPublishedHours") return unknown;
     return {
       closesAt: String(
@@ -162,6 +169,7 @@ function businessDayClosing(
         }).instant,
       ),
       closedToday: false,
+      openAtDayEnd: closing.openAtDayEnd,
     };
   } catch {
     return unknown;
@@ -178,6 +186,7 @@ export function merchantBusinessDayView(day: {
   readonly lastOrdersAt?: string | null;
   readonly closesAt?: string | null;
   readonly closedToday?: boolean;
+  readonly openAtDayEnd?: boolean;
 }) {
   return Object.freeze({
     businessDate: String(day.businessDate),
@@ -188,5 +197,6 @@ export function merchantBusinessDayView(day: {
     lastOrdersAt: day.lastOrdersAt ?? null,
     closesAt: day.closesAt ?? null,
     closedToday: day.closedToday ?? false,
+    openAtDayEnd: day.openAtDayEnd ?? false,
   });
 }

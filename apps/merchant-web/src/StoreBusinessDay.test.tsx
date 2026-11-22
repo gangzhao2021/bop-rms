@@ -29,7 +29,12 @@ describe("WP-2423 Q21: the Store business day read", () => {
       lastOrdersAt: null,
       closesAt: null,
       closedToday: false,
+      openAtDayEnd: false,
     });
+    // Batch 47 fix-up: a Store still open when its day ends (open 24 hours) says so.
+    expect(
+      parseStoreBusinessDay({ ...day, closesAt: day.endsAt, openAtDayEnd: true }).openAtDayEnd,
+    ).toBe(true);
     // DEC-CLOSING-SUMMARY: when the day closes, or that it doesn't open.
     expect(
       parseStoreBusinessDay({ ...day, closesAt: "2026-10-15T02:00:00.000Z", closedToday: false }),
@@ -37,7 +42,7 @@ describe("WP-2423 Q21: the Store business day read", () => {
     expect(parseStoreBusinessDay({ ...day, closesAt: null, closedToday: true }).closedToday).toBe(
       true,
     );
-    for (const bad of [{ closesAt: "22:00" }, { closedToday: "yes" }])
+    for (const bad of [{ closesAt: "22:00" }, { closedToday: "yes" }, { openAtDayEnd: 1 }])
       expect(() => parseStoreBusinessDay({ ...day, ...bad })).toThrow("BUSINESS_DAY_INVALID");
     // A 25-hour day (clocks fall back) and a 23-hour day (spring forward) are real days.
     expect(

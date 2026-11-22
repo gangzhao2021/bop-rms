@@ -201,7 +201,17 @@ export type StoreBusinessDayClosing =
    * The end of the day's last period, or of the business day when a period is still open then;
    * the local date is the next one when it runs past midnight.
    */
-  | { readonly kind: "Closes"; readonly localDate: string; readonly localTime: string };
+  | {
+      readonly kind: "Closes";
+      readonly localDate: string;
+      readonly localTime: string;
+      /**
+       * Batch 47 fix-up: a period is still open when the business day ends (open 24 hours, or
+       * running past the next day's start), so the closing is only the day's end, not a time the
+       * Store closes. False for a Store whose last period ends exactly as the day ends.
+       */
+      readonly openAtDayEnd: boolean;
+    };
 
 /**
  * WP-2423 DEC-CLOSING-SUMMARY: when the Store closes on one business day.
@@ -243,6 +253,7 @@ export function describeStoreBusinessDayClosing(
   const dayStart = seconds(input.businessDayStartLocalTime);
   const dayEnd = dayStart + 86_400;
   let end: number | null = null;
+  let openAtDayEnd = false;
   for (const offset of [-1, 0, 1]) {
     const localDate = shiftDate(input.businessDate, offset);
     const nextHasException = exception(shiftDate(localDate, 1)) !== undefined;
@@ -257,8 +268,10 @@ export function describeStoreBusinessDayClosing(
       // end of the next calendar day, a day after its business day ended): a period still open
       // when the business day ends closes this day at its end; the next day says the rest.
       const closes = Math.min(until, dayEnd);
-      if (from < dayEnd && until > dayStart && until > from && (end === null || closes > end))
-        end = closes;
+      if (from < dayEnd && until > dayStart && until > from) {
+        if (until > dayEnd) openAtDayEnd = true;
+        if (end === null || closes > end) end = closes;
+      }
     }
   }
   if (end === null) return Object.freeze({ kind: "ClosedToday" });
@@ -266,5 +279,6 @@ export function describeStoreBusinessDayClosing(
     kind: "Closes",
     localDate: shiftDate(input.businessDate, Math.floor(end / 86_400)),
     localTime: clock(end),
+    openAtDayEnd,
   });
 }
