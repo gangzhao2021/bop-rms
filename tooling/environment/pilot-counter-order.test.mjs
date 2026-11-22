@@ -345,7 +345,9 @@ it("logs an unexpected failure as its code and source frames only", async () => 
         code: "CARD_MACHINE_UNAVAILABLE",
       }),
     ]);
-    expect(log.mock.calls.join("\n")).not.toMatch(/Jane|555|free text/u);
+    // Match the planted phone number, not a bare "555": log lines carry a millisecond
+    // timestamp, and ".555Z" failed this on PR 199 CI (2026-11-22).
+    expect(log.mock.calls.join("\n")).not.toMatch(/Jane|202 555 0123|555 0123|free text/u);
   } finally {
     log.mockRestore();
   }
