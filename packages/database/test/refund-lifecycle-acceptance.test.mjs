@@ -23,6 +23,20 @@ import { refundAuthorityCurrent } from "../../../tooling/environment/pilot-refun
  * pickup may decline it before accepting ("Can't make it"), refunded in full in their name, and the
  * acceptance deadline never refunds it a second time (nor the other way round).
  */
+// The Store's business day starts twelve hours from now (Toronto), so a payment minutes ago and a
+// request now always fall on one business date. A fixed 00:00 start made a run between 00:02 and
+// 00:06 Toronto (05:0x UTC on CI) cross midnight between them, which escalates as
+// DifferentBusinessDate exactly as it should for a real Store.
+const businessDayStartAwayFromNow = (now) => {
+  const hour = Number(
+    new Intl.DateTimeFormat("en-GB", {
+      timeZone: "America/Toronto",
+      hour: "2-digit",
+      hourCycle: "h23",
+    }).format(new Date(now)),
+  );
+  return String((hour + 12) % 24).padStart(2, "0") + ":00:00";
+};
 const frontOfHouse = async (world, prefix) => {
   const staff = await world.session([], prefix);
   const queue = createPersistentMerchantOrderQueue({
@@ -537,7 +551,7 @@ it("a cashier's refund request is recorded, never sent by them, and listed for a
       client: world.admin,
       scope: world.ownerScope,
       publishedAt: world.time(-world.minutes(24 * 60)),
-      businessDayStart: "00:00:00",
+      businessDayStart: businessDayStartAwayFromNow(Date.parse(world.now())),
       prefix: "01a6ab30",
       allWeek: true,
     });
@@ -594,6 +608,7 @@ it("a cashier's refund request is recorded, never sent by them, and listed for a
       world.clock.offset = 0;
     }
     assert.equal(recorded.status, "Created");
+    assert.deepEqual(recorded.escalationReasons, []);
     assert.equal(recorded.approvalRequired, false);
     // Recorded in the cashier's name with the reason; nothing prepared.
     assert.deepEqual(
