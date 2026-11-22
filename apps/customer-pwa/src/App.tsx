@@ -2,9 +2,9 @@ import { createHttpContactRemovalClient } from "./order-status/contact-removal-c
 import { createHttpReceiptClient } from "./receipt/receipt-client.js";
 import { createReceiptController } from "./receipt/receipt-controller.js";
 import type { DiningAdmissionUi } from "./dining/DiningAdmissionPanel.js";
-import { Route, Routes, useParams } from "react-router";
+import { Route, Routes, useLocation, useParams } from "react-router";
 import type { CustomerCurrentOrder } from "./session/session-bootstrap.js";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { menuLocale, useLanguage } from "./i18n/i18n.js";
 import { CartPage } from "./cart/CartPage.js";
 import { CheckoutPage } from "./checkout/CheckoutPage.js";
@@ -32,6 +32,14 @@ import type { CustomerStoreContext } from "./journey/CustomerPage.js";
 import { MemberPage } from "./member/MemberPage.js";
 import { EndedTablePage, endedTableHere } from "./dining/EndedTable.js";
 import { t } from "./i18n/i18n.js";
+import { useTableVisitEndWatch } from "./session/table-visit-watch.js";
+import {
+  getEndedTable,
+  subscribeCustomerCsrfContext,
+} from "./session/customer-transaction-context.js";
+
+/** Batch 47: the tabs a guest may leave open at the table (Your table reads the table itself). */
+const watchedTab = /^\/(?:menu(?:\/search|\/items\/[^/]+)?|cart)\/?$/u;
 
 function useDemoForOrderRoute(
   demo: CustomerDemoDependencies | undefined,
@@ -192,6 +200,22 @@ export function App({
   // has no visit or Store context now: Menu, a dish page and Cart say how it ended, with the
   // Store's header, as Your table does, never "scan the code to begin" or "your visit ended".
   const ended = menuContext === undefined && demo === undefined ? endedTableHere() : null;
+  // Batch 47 (v15 b46 live): the table's visit ended while a tab stayed open (the table read or
+  // a refused action asked the restore read, which said how): the tab shows that card at once.
+  useEffect(
+    () =>
+      demo === undefined
+        ? subscribeCustomerCsrfContext(() => {
+            if (getEndedTable() !== null) setMenuContext(undefined);
+          })
+        : undefined,
+    [demo],
+  );
+  const { pathname } = useLocation();
+  useTableVisitEndWatch({
+    active: demo === undefined && menuContext?.channel === "DineIn" && watchedTab.test(pathname),
+    pathname,
+  });
   return (
     <>
       <ConnectivityBanner />
