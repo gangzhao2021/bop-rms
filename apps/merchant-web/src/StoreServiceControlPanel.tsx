@@ -8,7 +8,7 @@ import {
   withOneSentenceEnd,
 } from "./i18n/i18n.js";
 import { businessDateLabel } from "./StoreBusinessDay.js";
-import { storeTime } from "./StoreTime.js";
+import { ClockStyleContext, storeTime } from "./StoreTime.js";
 import { StatePanel } from "@bop-rms/ui";
 import { StoreConfigurationEditor } from "./StoreConfigurationEditor.js";
 import { WorkspacePage } from "./WorkspacePage.js";
@@ -368,111 +368,114 @@ export function StoreServiceControlPanel({ store, csrf }: { store: string; csrf:
     );
   const disabled = busy || !online || uncertain;
   return (
-    <WorkspacePage title={t("Hours & ordering")}>
-      {view && (
-        <ServiceHoursSummary
-          hours={view.hours}
-          timeZone={view.timeZone}
-          observedAt={view.observedAt}
-        />
-      )}
-      {configurable ? (
-        <StoreConfigurationEditor key={store + csrf} store={store} csrf={csrf} />
-      ) : null}
-      <section aria-labelledby="service-controls-title" aria-busy={busy}>
-        <h2 id="service-controls-title">{t("Service controls")}</h2>
-        <p>
-          {t(
-            "Pause new service for a limited time. Existing paid orders and occupied dining tables remain active.",
-          )}
-        </p>
-        {!online && (
-          <p role="status">{t("Offline read-only. Reconnect before changing service.")}</p>
-        )}
-        <p role="status" aria-live="polite">
-          {systemText(message)}
-        </p>
-        <button type="button" onClick={() => void load()} disabled={busy || !online || uncertain}>
-          {t("Refresh service status")}
-        </button>
-        {uncertain && (
-          <button type="button" onClick={() => void submit()} disabled={busy || !online}>
-            {t("Retry same request")}
-          </button>
-        )}
+    // Batch 47: every time on Hours & ordering, the editor's included, in the guests' style.
+    <ClockStyleContext.Provider value="Guest">
+      <WorkspacePage title={t("Hours & ordering")}>
         {view && (
-          <>
-            <p>
-              {/* Batch 46: in the app's language and the Store's zone, never the browser's. */}
-              {t("Updated {value} · {timeZone}", {
-                value: storeTime(view.observedAt, view.timeZone, true, "Guest"),
-                timeZone: timeZoneLabel(view.timeZone),
-              })}
-            </p>
-            <fieldset disabled={disabled}>
-              <legend>{t("Pause service")}</legend>
-              <label htmlFor="pause-duration">{t("Pause duration (minutes)")}</label>
-              <input
-                id="pause-duration"
-                type="number"
-                min="1"
-                max="240"
-                step="1"
-                value={minutes}
-                onChange={(event) => setMinutes(event.target.value)}
-              />
-              <label htmlFor="pause-mode">{t("Service")}</label>
-              <select
-                id="pause-mode"
-                value={mode}
-                onChange={(event) => setMode(event.target.value)}
-              >
-                <option value="All">{t("All services")}</option>
-                {view.enabledServiceModes.map((value) => (
-                  <option key={value} value={value}>
-                    {serviceModeText(value)}
-                  </option>
-                ))}
-              </select>
-              <button type="button" onClick={pause}>
-                {t("Pause service")}
-              </button>
-            </fieldset>
-            <h3>{t("Active pauses")}</h3>
-            {view.activePauses.length === 0 ? (
-              <p>{t("No active pauses.")}</p>
-            ) : (
-              <ul>
-                {view.activePauses.map((item) => (
-                  <li key={item.closureReference}>
-                    <span>
-                      {t("{value} — until {value2}", {
-                        value:
-                          item.serviceModes?.map(serviceModeText).join(listSeparator()) ??
-                          t("All services"),
-                        value2: storeTime(item.effectiveUntil, view.timeZone, true, "Guest"),
-                      })}
-                    </span>{" "}
-                    <button
-                      type="button"
-                      disabled={disabled}
-                      onClick={() => resume(item.closureReference)}
-                    >
-                      {t("Resume {value}", {
-                        value:
-                          item.serviceModes?.map(serviceModeText).join(listSeparator()) ??
-                          t("all services"),
-                      })}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </>
+          <ServiceHoursSummary
+            hours={view.hours}
+            timeZone={view.timeZone}
+            observedAt={view.observedAt}
+          />
         )}
-      </section>
-      {/* WP-2423 DEC-DINE-IN-PAY-LATER: when dine-in guests pay (Owner, Store Manager). */}
-      <DiningPaymentTimingPanel csrf={csrf} />
-    </WorkspacePage>
+        {configurable ? (
+          <StoreConfigurationEditor key={store + csrf} store={store} csrf={csrf} />
+        ) : null}
+        <section aria-labelledby="service-controls-title" aria-busy={busy}>
+          <h2 id="service-controls-title">{t("Service controls")}</h2>
+          <p>
+            {t(
+              "Pause new service for a limited time. Existing paid orders and occupied dining tables remain active.",
+            )}
+          </p>
+          {!online && (
+            <p role="status">{t("Offline read-only. Reconnect before changing service.")}</p>
+          )}
+          <p role="status" aria-live="polite">
+            {systemText(message)}
+          </p>
+          <button type="button" onClick={() => void load()} disabled={busy || !online || uncertain}>
+            {t("Refresh service status")}
+          </button>
+          {uncertain && (
+            <button type="button" onClick={() => void submit()} disabled={busy || !online}>
+              {t("Retry same request")}
+            </button>
+          )}
+          {view && (
+            <>
+              <p>
+                {/* Batch 46: in the app's language and the Store's zone, never the browser's. */}
+                {t("Updated {value} · {timeZone}", {
+                  value: storeTime(view.observedAt, view.timeZone, true, "Guest"),
+                  timeZone: timeZoneLabel(view.timeZone),
+                })}
+              </p>
+              <fieldset disabled={disabled}>
+                <legend>{t("Pause service")}</legend>
+                <label htmlFor="pause-duration">{t("Pause duration (minutes)")}</label>
+                <input
+                  id="pause-duration"
+                  type="number"
+                  min="1"
+                  max="240"
+                  step="1"
+                  value={minutes}
+                  onChange={(event) => setMinutes(event.target.value)}
+                />
+                <label htmlFor="pause-mode">{t("Service")}</label>
+                <select
+                  id="pause-mode"
+                  value={mode}
+                  onChange={(event) => setMode(event.target.value)}
+                >
+                  <option value="All">{t("All services")}</option>
+                  {view.enabledServiceModes.map((value) => (
+                    <option key={value} value={value}>
+                      {serviceModeText(value)}
+                    </option>
+                  ))}
+                </select>
+                <button type="button" onClick={pause}>
+                  {t("Pause service")}
+                </button>
+              </fieldset>
+              <h3>{t("Active pauses")}</h3>
+              {view.activePauses.length === 0 ? (
+                <p>{t("No active pauses.")}</p>
+              ) : (
+                <ul>
+                  {view.activePauses.map((item) => (
+                    <li key={item.closureReference}>
+                      <span>
+                        {t("{value} — until {value2}", {
+                          value:
+                            item.serviceModes?.map(serviceModeText).join(listSeparator()) ??
+                            t("All services"),
+                          value2: storeTime(item.effectiveUntil, view.timeZone, true, "Guest"),
+                        })}
+                      </span>{" "}
+                      <button
+                        type="button"
+                        disabled={disabled}
+                        onClick={() => resume(item.closureReference)}
+                      >
+                        {t("Resume {value}", {
+                          value:
+                            item.serviceModes?.map(serviceModeText).join(listSeparator()) ??
+                            t("all services"),
+                        })}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
+          )}
+        </section>
+        {/* WP-2423 DEC-DINE-IN-PAY-LATER: when dine-in guests pay (Owner, Store Manager). */}
+        <DiningPaymentTimingPanel csrf={csrf} />
+      </WorkspacePage>
+    </ClockStyleContext.Provider>
   );
 }

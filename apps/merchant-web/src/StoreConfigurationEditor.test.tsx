@@ -13,6 +13,7 @@ import {
   storeHoursSubmittedMessage,
   storeConfigurationOpenChange,
   storeConfigurationStateLabel,
+  withdrawalSentence,
 } from "./StoreConfigurationEditor.js";
 import {
   parseStoreConfigurationSnapshot,
@@ -245,7 +246,10 @@ it("edits hours without effective dates, business-day start or a typed reason co
   expect(html).not.toContain("Change reason code");
   expect(html).not.toContain('type="datetime-local"');
   // Batch 46: as the published hours above it read it, with one sentence end.
-  expect(html).toContain("The business day starts at 4:00 a.m.<");
+  expect(html).toContain("The business day starts at 4:00\u00a0a.m.<");
+  // Batch 47: hours and minutes as the page writes them, never a browser time field with seconds.
+  expect(html).not.toContain('type="time"');
+  expect(html).toContain('<option value="9" selected="">9</option>');
   expect(html).not.toMatch(/<label>Business day starts/u);
   expect(html).toContain("No pending change. Customers see the published hours.");
   expect(html).not.toContain("Published version");
@@ -420,7 +424,9 @@ it("WP-2423 v15: names who made the open change, and declining it is confirmed w
       />
     </MemoryRouter>,
   );
-  expect(closed).toContain("(Talk to me before changing this)");
+  expect(closed).toContain(
+    'It was declined on <time dateTime="2026-08-15T14:00:00.000Z" title="2026-08-15T14:00:00.000Z">Aug 15, 2:00\u00a0PM UTC</time>. Reason: Talk to me before changing this. The next change starts from the published hours.',
+  );
   expect(() =>
     parseStoreConfigurationView(
       {
@@ -724,4 +730,37 @@ it("v15: someone else's change is described from its current state", () => {
   expect(approved).not.toContain("once it is sent");
   for (const text of [draftOwner, pendingOwner, pendingManager, approved])
     expect(findInternalText([text])).toEqual([]);
+});
+
+it("batch 47: the withdrawal line is one whole sentence per language, never English word order", () => {
+  const withdrawn = {
+    kind: "Withdrawn" as const,
+    withdrawnAt: "2026-11-16T10:17:00.000Z",
+    byYou: true,
+  };
+  expect(withdrawalSentence(withdrawn, "Nov 16, 5:17\u00a0a.m.")).toBe(
+    "You withdrew it on Nov 16, 5:17\u00a0a.m. The next change starts from the published hours.",
+  );
+  expect(
+    withdrawalSentence(
+      { ...withdrawn, kind: "Declined", byYou: false, reason: "NotNeeded" },
+      "Nov 16, 5:17\u00a0a.m.",
+    ),
+  ).toBe(
+    "It was declined on Nov 16, 5:17\u00a0a.m. Reason: It is not needed. The next change starts from the published hours.",
+  );
+  setLanguageForTest("zh-Hans");
+  try {
+    expect(withdrawalSentence(withdrawn, "11月16日 5:17")).toBe(
+      "你已于 11月16日 5:17 撤回。下一项更改将基于已发布的营业时间。",
+    );
+    expect(withdrawalSentence({ ...withdrawn, byYou: false }, "11月16日 5:17")).toBe(
+      "提出更改的人已于 11月16日 5:17 撤回。下一项更改将基于已发布的营业时间。",
+    );
+    expect(withdrawalSentence({ ...withdrawn, kind: "Declined" }, "11月16日 5:17")).toBe(
+      "你已于 11月16日 5:17 拒绝。下一项更改将基于已发布的营业时间。",
+    );
+  } finally {
+    setLanguageForTest("en");
+  }
 });

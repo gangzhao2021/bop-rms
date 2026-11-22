@@ -41,6 +41,9 @@ const names = [
   "entry",
   "retiringEntry",
   "assigneeReference",
+  // Batch 47 (v15: "时间使用 北美东部时间（…）"): a time zone's name.
+  "timeZone",
+  "zone",
 ];
 // "Table {label}" is a table's own label; " · Remade {item}×" counts dishes.
 const notNames = new Set(["Table {label}", " · Remade {item}×"]);
@@ -109,4 +112,25 @@ it("a list or name filled into a staff text meets the Chinese around it directly
   expect(spaced.map(([english, values]) => t(english, values))).toEqual([]);
   expect(t("Contains {value}", { value: "花生、芝麻" })).toBe("含有花生、芝麻");
   expect(t("May contain {value}", { value: "Sesame" })).toBe("可能含有 Sesame");
+});
+
+it("batch 47: the hours editor joins a Chinese zone name to its sentence, and spaces a Latin one", () => {
+  setLanguageForTest("zh-Hans");
+  const zone = "北美东部时间（多伦多、渥太华和蒙特利尔）";
+  expect(
+    t("Times are in {timeZone}. The business day starts at {value}.", {
+      timeZone: zone,
+      value: "4:00",
+    }),
+  ).toBe(`时间使用${zone}。营业日从 4:00 开始。`);
+  expect(
+    t("Dates use {timeZone}. An exception with no intervals is closed for that date.", {
+      timeZone: zone,
+    }),
+  ).toBe(`日期使用${zone}。没有时段的例外表示当天停业。`);
+  expect(
+    t("Dates use {timeZone}. An exception with no intervals is closed for that date.", {
+      timeZone: "UTC",
+    }),
+  ).toBe("日期使用 UTC。没有时段的例外表示当天停业。");
 });

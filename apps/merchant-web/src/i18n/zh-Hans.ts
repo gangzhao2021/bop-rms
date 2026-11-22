@@ -244,7 +244,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   " and why": " 及原因",
   " and {machine} to refund on the card machine": "，并需在刷卡机上退款 {machine}",
   " at {observedAt}": " 于 {observedAt}",
-  " by you": " 由你",
   " in {currencyCode},": " 以 {currencyCode} 计，",
   " instead of {stableCode}": " （代替 {stableCode}）",
   " of the kitchen steps": " 的后厨步骤",
@@ -1650,7 +1649,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Date and time": "日期和时间",
   "Dated exceptions": "特定日期例外",
   "Dates use {timeZone}. An exception with no intervals is closed for that date.":
-    "日期使用 {timeZone}。没有时段的例外表示当天停业。",
+    "日期使用{timeZone}。没有时段的例外表示当天停业。",
   "Dawson City, Yukon": "道森市，育空地区",
   "Dawson Creek, British Columbia": "道森克里克，不列颠哥伦比亚省",
   Day: "日",
@@ -1992,6 +1991,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Host transfer recorded at {value}. Refresh participants to see the current host.":
     "已于 {value} 记录主持人转让。刷新参与者查看当前主持人。",
   Hour: "小时",
+  // Batch 47: the hours editor's time control (shown in English only).
+  "a.m. or p.m.": "上午或下午",
   Hours: "营业时间",
   "Hours & ordering": "营业时间与点单",
   "Hours & service": "营业时间与服务",
@@ -2178,7 +2179,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "It was paid on the store's card machine: refund {value} on the card machine, then record it here.":
     "这笔订单是用门店刷卡机付款的：请在刷卡机上退款 {value}，再在此记录。",
   "It was refunded on the store's card machine.": "已在门店刷卡机上退款。",
-  "It was {value}{value2}": "它已被{value}{value2}",
   "It will be recorded as approved by you alone.": "它会被记录为由你单独批准。",
   Item: "品项",
   "Item actions": "品项操作",
@@ -5185,7 +5185,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Time zone, business day start, service modes, opening hours, order limits and the receipt template not set in this setup: the live Store’s are used when you choose “Use the live Store’s settings”.":
     '此设置中未设置的时区、营业日开始时间、服务方式、营业时间、订单限制和收据模板：选择"使用当前门店的设置"时会使用当前门店的。',
   "Times are in {timeZone}. The business day starts at {value}.":
-    "时间使用 {timeZone}。营业日从 {value} 开始。",
+    "时间使用{timeZone}。营业日从 {value} 开始。",
   Timezone: "时区",
   Tip: "小费",
   "Tip amount ($)": "小费金额（$）",
@@ -5664,7 +5664,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "count the stock": "清点库存",
   "counter-section-{sectionReference}": "counter-section-{sectionReference}",
   "declaration out of date — declare again under Allergens": '申报已过期 — 请在"过敏原"中重新申报',
-  declined: "拒绝",
   "description changed": "描述已更改",
   "descriptions changed": "描述已更改",
   "different from the live Store": "与当前门店不同",
@@ -5802,7 +5801,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "up to {maximum}": "最多 {maximum}",
   waiting: "等待中",
   "was due ": "截止 ",
-  withdrawn: "撤回",
   "workspace-nav-{copy}-{group}": "workspace-nav-{copy}-{group}",
   "yet: it has no table QR code, so guests can't join.": "：它没有桌台二维码，顾客无法加入。",
   "yet: it has no table QR code.": "：它没有桌台二维码。",
@@ -6113,8 +6111,13 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{value}. Don't serve it until the kitchen marks the remake done; tell the guest it's being remade.":
     "{value}。后厨标记重做完成前不要上桌；请告诉顾客正在重做。",
   "{value}. Sub-recipes add their own.": "{value}。子配方会添加自己的过敏原。",
-  "{value}. The next change starts from the published hours.":
-    "{value}。下一项更改将基于已发布的营业时间。",
+  // Batch 47: who withdrew or declined the latest hours change and when, as whole sentences.
+  "You withdrew it on {time}.": "你已于 {time} 撤回。",
+  "The person who made it withdrew it on {time}.": "提出更改的人已于 {time} 撤回。",
+  "You declined it on {time}.": "你已于 {time} 拒绝。",
+  "It was declined on {time}.": "已于 {time} 被拒绝。",
+  "Reason: {reason}.": "原因：{reason}。",
+  "The next change starts from the published hours.": "下一项更改将基于已发布的营业时间。",
   "{value}: the card provider couldn't confirm the guest's payment (due by {payBy}), so it wasn't cancelled automatically. Ask the guest whether their card was charged. If it wasn't, cancel the round; a charge that still comes through is refunded automatically.":
     "{value}：发卡方无法确认顾客的付款（截止 {payBy}），因此没有自动取消。请问顾客卡上是否已扣款。如未扣款，请取消这一轮；之后仍到账的扣款会自动退回。",
   "{value}: {value2} working on {value3}. Replace and print {value4} before then.":

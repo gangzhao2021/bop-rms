@@ -6,9 +6,10 @@ import {
   wallClockTime,
   withOneSentenceEnd,
 } from "./i18n/i18n.js";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { timeZoneLabel } from "./time-zone-names.js";
+import { TimeOfDayInput } from "./TimeOfDayInput.js";
 import { wordGap } from "./word-gap.js";
 import {
   createStoreConfigurationClient,
@@ -25,7 +26,7 @@ import {
   type StoreConfigurationDeclineReason,
 } from "./store-configuration-client.js";
 import { SoleOperatorSelfApproval } from "./SoleOperatorSelfApproval.js";
-import { StaffTime } from "./StoreTime.js";
+import { ClockStyleContext, friendlyStoreTime, StoreTimeZoneContext } from "./StoreTime.js";
 import {
   serviceOperationReference,
   type ServiceMode,
@@ -494,20 +495,7 @@ export function StoreHoursDraftForm({
             ? t("No pending change. Customers see the published hours.")
             : t("No published hours yet.")}
       </p>
-      {withdrawn && (
-        <p>
-          {t("It was {value}{value2}", {
-            value: withdrawn.kind === "Withdrawn" ? t("withdrawn") : t("declined"),
-            value2: withdrawn.byYou ? t(" by you") : "",
-          })}{" "}
-          <StaffTime instant={withdrawn.withdrawnAt} />
-          {t("{value}. The next change starts from the published hours.", {
-            value: withdrawn.reason
-              ? ` (${storeConfigurationDeclineReasonText[withdrawn.reason]})`
-              : "",
-          })}
-        </p>
-      )}
+      {withdrawn && <WithdrawalLine withdrawal={withdrawn} />}
       {open === "SomeoneElse" && view.latest && (
         <section aria-label={t("Change waiting from someone else")}>
           <p>
@@ -906,6 +894,54 @@ export function StoreHoursOwnApproval({
   );
 }
 
+/**
+ * Batch 47 (v15 b46: "它已被撤回 由你 11月16日 5:17", "It was withdrawn by you Nov 16, 5:17 AM"):
+ * who withdrew or declined the latest change and when, as one whole sentence per language, its
+ * time in the screen's clock style ("5:17 a.m." on Hours & ordering).
+ */
+export function withdrawalSentence(
+  withdrawal: NonNullable<StoreConfigurationView["latestWithdrawal"]>,
+  time: string,
+): string {
+  const when =
+    withdrawal.kind === "Withdrawn"
+      ? withdrawal.byYou
+        ? t("You withdrew it on {time}.", { time })
+        : t("The person who made it withdrew it on {time}.", { time })
+      : withdrawal.byYou
+        ? t("You declined it on {time}.", { time })
+        : t("It was declined on {time}.", { time });
+  const reason = withdrawal.reason
+    ? t("Reason: {reason}.", { reason: storeConfigurationDeclineReasonText[withdrawal.reason] })
+    : null;
+  return [withOneSentenceEnd(when), reason, t("The next change starts from the published hours.")]
+    .filter((part) => part !== null)
+    .join(wordGap());
+}
+
+function WithdrawalLine({
+  withdrawal,
+}: {
+  readonly withdrawal: NonNullable<StoreConfigurationView["latestWithdrawal"]>;
+}) {
+  const timeZone = useContext(StoreTimeZoneContext);
+  const style = useContext(ClockStyleContext);
+  const time = friendlyStoreTime(withdrawal.withdrawnAt, timeZone, new Date(), style);
+  const sentence = withdrawalSentence(withdrawal, time);
+  // The time keeps its exact instant in a <time> element, inside the sentence it belongs to.
+  const at = sentence.indexOf(time);
+  if (at < 0) return <p>{sentence}</p>;
+  return (
+    <p>
+      {sentence.slice(0, at)}
+      <time dateTime={withdrawal.withdrawnAt} title={withdrawal.withdrawnAt}>
+        {time}
+      </time>
+      {sentence.slice(at + time.length)}
+    </p>
+  );
+}
+
 export function IntervalEditor({
   interval,
   index: i,
@@ -925,36 +961,18 @@ export function IntervalEditor({
   return (
     <fieldset>
       <legend>{t("Interval {value}", { value: i + 1 })}</legend>
-      <label>
-        {t("Start {value}", { value: i + 1 })}
-        <input
-          type="time"
-          required
-          step="1"
-          value={interval.startLocalTime}
-          onChange={(event) =>
-            onChange({
-              startLocalTime:
-                event.target.value.length === 5 ? event.target.value + ":00" : event.target.value,
-            })
-          }
-        />
-      </label>
-      <label>
-        {t("End {value}", { value: i + 1 })}
-        <input
-          type="time"
-          required
-          step="1"
-          value={interval.endLocalTime}
-          onChange={(event) =>
-            onChange({
-              endLocalTime:
-                event.target.value.length === 5 ? event.target.value + ":00" : event.target.value,
-            })
-          }
-        />
-      </label>
+      {/* Batch 47: hours and minutes in the page's own time style, never the browser's
+      "12:00:00 PM"; a value saved with seconds (23:59:59) is kept until staff change it. */}
+      <TimeOfDayInput
+        label={t("Start {value}", { value: i + 1 })}
+        value={interval.startLocalTime}
+        onChange={(startLocalTime) => onChange({ startLocalTime })}
+      />
+      <TimeOfDayInput
+        label={t("End {value}", { value: i + 1 })}
+        value={interval.endLocalTime}
+        onChange={(endLocalTime) => onChange({ endLocalTime })}
+      />
       <label>
         <input
           type="checkbox"

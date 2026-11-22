@@ -11239,3 +11239,22 @@ tr[data-drop-target="true"] {
   background: none;
   font-size: 14px;
 }
+/* Batch 47: the hours editor's time control, hours and minutes (and a.m./p.m. in English) as the
+   page writes times; its parts stay on one line and wrap together on a narrow phone. */
+.time-of-day {
+  display: grid;
+  gap: var(--bop-space-1);
+  min-width: 0;
+  margin-block-end: var(--bop-space-3);
+}
+.time-of-day__fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--bop-space-2);
+}
+.time-of-day__fields select {
+  width: auto;
+  min-width: 0;
+  min-height: 44px;
+}
