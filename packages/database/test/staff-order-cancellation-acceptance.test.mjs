@@ -182,8 +182,26 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
       );
       const time = (offset) => new Date(base + offset).toISOString();
       const baseTime = time;
+      // Every seeded Order is "today's": one business date for all of them. The seeded rounds are
+      // allocated from 40 to 12 minutes before now, so a business day starting at Toronto midnight
+      // split them when the run started between 00:12 and 00:40 there (CI 2026-11-19 05:27Z and
+      // 2026-11-22 05:23Z): the later Orders' stored date was the previous day, their allocation
+      // no longer resolved to it, and Ordering rightly refused to read them (ORDER_CREATE_INPUT_INVALID
+      // behind "unavailable"). Ordering writes the date it resolves from the allocation instant, so
+      // a real Order cannot carry this. The fixture's business day starts at 04:00 or 16:00 Toronto
+      // time, whichever is farther from now (at least six hours from every seeded instant).
+      const torontoHour = Number(
+        new Intl.DateTimeFormat("en-CA", {
+          timeZone: "America/Toronto",
+          hour: "2-digit",
+          hourCycle: "h23",
+        }).format(new Date(base)),
+      );
+      const businessDayStartHour = torontoHour >= 10 && torontoHour < 22 ? 4 : 16;
+      const businessDayStart = String(businessDayStartHour).padStart(2, "0") + ":00";
+      // Away from the boundary, the business date is the local date one start-length earlier.
       const businessDate = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Toronto" }).format(
-        new Date(time(-minutes(40))),
+        new Date(base - minutes(40) - minutes(60 * businessDayStartHour)),
       );
       const owner = (tx) => createPostgresStockReservationStore({ run: (work) => work(tx) }, scope);
 
@@ -500,7 +518,7 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
             "(order_id,brand_id,store_id,business_date,sequence,order_number,allocated_at," +
             "business_date_configuration_id,business_date_configuration_version,business_date_content_digest," +
             "time_zone,business_day_start,business_date_boundary_at,boundary_disambiguation) " +
-            "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,1,$9,'America/Toronto','00:00',$4::date::timestamp AT TIME ZONE 'America/Toronto','Exact')",
+            "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,1,$9,'America/Toronto',$10::time,($4::date + $10::time) AT TIME ZONE 'America/Toronto','Exact')",
           [
             order.order,
             brand,
@@ -511,6 +529,7 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
             time(-minutes(40)),
             id(50),
             hash("bd"),
+            businessDayStart,
           ],
         );
         await admin.query(
