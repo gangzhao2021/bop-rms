@@ -1926,6 +1926,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   // none of the bill's dishes were added on this phone (its dishes may still be in the cart).
   "Only what I added (nothing of yours is left to pay)": "只付我加的（没有您要付的菜）",
   "Only what I added (you have no dishes on the bill)": "只付我加的（账单上没有您加的菜）",
+  // batch 50: their dishes are unpaid but can't be worked out as their own part on this read.
+  "Only what I added (can’t be worked out right now — please ask staff)":
+    "只付我加的（暂时算不出来，请找店员）",
   "Only what I added ({count} · {amount})": "只付我加的（{count} 道 · {amount}）",
   "Choose dishes to pay for": "选择要付的菜",
   "you added": "您加的",

@@ -105,6 +105,11 @@ export interface TablePaymentView {
      * older server. With `mine` null it says why: none of the dishes are theirs, or none is left.
      */
     readonly addedAny: boolean | null;
+    /**
+     * batch 50: this phone's dishes are unpaid but can't be priced on this read; null (unknown)
+     * from an older server, which then reads as before.
+     */
+    readonly mineUnavailable: boolean | null;
     readonly dishes: readonly {
       readonly orderItemReference: string;
       readonly displayName: string;
@@ -316,6 +321,12 @@ function choicesOf(value: unknown): TablePaymentView["choices"] {
         ? null
         : typeof raw.addedAny === "boolean"
           ? raw.addedAny
+          : fail(),
+    mineUnavailable:
+      raw.mineUnavailable === undefined || raw.mineUnavailable === null
+        ? null
+        : typeof raw.mineUnavailable === "boolean"
+          ? raw.mineUnavailable
           : fail(),
     dishes: Object.freeze(
       raw.dishes.map((value: unknown) => {

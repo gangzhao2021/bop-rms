@@ -145,6 +145,12 @@ export interface DiningTableOnlinePaymentView {
      * "only what I added" with nothing left says why: none were theirs, or theirs are taken care of.
      */
     readonly addedAny: boolean;
+    /**
+     * batch 50: this phone has dishes still to pay, but what they come to can't be worked out on
+     * this read (the bill changed under parts already paid), so "only what I added" is off for that
+     * reason, not because nothing of theirs is left.
+     */
+    readonly mineUnavailable: boolean;
     readonly dishes: readonly {
       readonly orderItemReference: string;
       readonly displayName: string;
@@ -265,6 +271,7 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
     const participant = authority.participantReference ?? null;
     const mineUnits = participant === null ? [] : diningTableFreeUnits(current, participant);
     let mine: { count: number; amountMinor: string } | null = null;
+    let mineUnavailable = false;
     if (mineUnits.length > 0)
       try {
         mine = {
@@ -272,7 +279,9 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
           amountMinor: diningTableGuestPart(current, mineUnits).part.amountMinor.toString(),
         };
       } catch {
+        // Their dishes are unpaid; they just can't be priced as a part on this read.
         mine = null;
+        mineUnavailable = true;
       }
     return Object.freeze({
       defaultScope: current.guestChoices.defaultScope,
@@ -280,6 +289,7 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
       addedAny:
         participant !== null &&
         [...current.dishAdders.values()].some((adder) => adder === participant),
+      mineUnavailable,
       dishes: Object.freeze(
         current.guestChoices.dishes.map((dish) =>
           Object.freeze({

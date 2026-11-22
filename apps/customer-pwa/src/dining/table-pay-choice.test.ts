@@ -144,4 +144,21 @@ describe("Which dishes this phone pays", () => {
     expect(of(undefined)?.addedAny).toBeNull();
     expect(() => of("yes")).toThrow();
   });
+
+  it("batch 50: says when this phone's dishes can't be priced now (older server: unknown)", () => {
+    const of = (mineUnavailable: unknown) => {
+      const raw = wire();
+      return parseTablePaymentView({
+        ...raw,
+        payment: {
+          ...raw.payment,
+          choices: { ...raw.payment.choices, mine: null, addedAny: true, mineUnavailable },
+        },
+      }).choices;
+    };
+    expect(of(true)).toMatchObject({ mine: null, mineUnavailable: true });
+    expect(of(false)?.mineUnavailable).toBe(false);
+    expect(of(undefined)?.mineUnavailable).toBeNull();
+    expect(() => of("yes")).toThrow();
+  });
 });

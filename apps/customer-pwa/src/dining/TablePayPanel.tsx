@@ -128,6 +128,26 @@ const saveTip = (choice: TipChoice | null) => {
  * Batch 42: the dishes one split part pays for, as the guest's language lists names ("2 × Har gow,
  * Soy milk" / "2 × 虾饺、豆浆"), with "(shared)" where asked.
  */
+/**
+ * The "only what I added" option, saying only what is true: what it comes to, or why it is off —
+ * none of the bill's dishes came from this phone, theirs can't be priced right now (batch 50: still
+ * unpaid, so staff can help), or nothing of theirs is left to pay.
+ */
+export function onlyMineText(
+  choices: Pick<NonNullable<TablePaymentView["choices"]>, "mine" | "addedAny" | "mineUnavailable">,
+): string {
+  if (choices.mine !== null)
+    return t("Only what I added ({count} · {amount})", {
+      count: String(choices.mine.count),
+      amount: money(choices.mine.amountMinor),
+    });
+  if (choices.mineUnavailable === true)
+    return t("Only what I added (can’t be worked out right now — please ask staff)");
+  return choices.addedAny === false
+    ? t("Only what I added (you have no dishes on the bill)")
+    : t("Only what I added (nothing of yours is left to pay)");
+}
+
 export function splitPartDishesText(
   dishes: readonly {
     readonly displayName: string;
@@ -971,14 +991,7 @@ function TablePayDishes({
             disabled={choices.mine === null}
             onChange={() => onScope("Mine")}
           />{" "}
-          {choices.mine === null
-            ? choices.addedAny === false
-              ? t("Only what I added (you have no dishes on the bill)")
-              : t("Only what I added (nothing of yours is left to pay)")
-            : t("Only what I added ({count} · {amount})", {
-                count: String(choices.mine.count),
-                amount: money(choices.mine.amountMinor),
-              })}
+          {onlyMineText(choices)}
         </label>
         <label>
           <input
