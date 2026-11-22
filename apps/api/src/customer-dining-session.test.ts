@@ -48,7 +48,7 @@ function view(): CustomerDiningSessionView {
     summary: { paid: cad(3390n), refunded: cad(0n), refundPending: cad(0n), due: cad(0n) },
   };
 }
-async function setup(enabled = true, processingRereadMs: readonly number[] = [1, 1]) {
+async function setup(enabled = true, processingRereadMs: readonly number[] | "default" = [1, 1]) {
   const read = vi.fn().mockResolvedValue(view());
   const server = createServer(
     createApp(
@@ -57,7 +57,7 @@ async function setup(enabled = true, processingRereadMs: readonly number[] = [1,
             customerDiningSession: new CustomerDiningSessionHandler({
               allowedOrigin: "https://pilot.example",
               port: { read },
-              processingRereadMs,
+              ...(processingRereadMs === "default" ? {} : { processingRereadMs }),
             }),
           }
         : {},
@@ -174,7 +174,27 @@ it("serializes only customer-safe fields and is unavailable when unconfigured", 
   expect(response.status).toBe(200);
   expect(await response.text()).not.toContain("private");
   const off = await setup(false);
-  expect((await off.send()).status).toBe(503);
+  // Batch 47: every 503 says why in one line with a code, so a live check can name it.
+  const lines: string[] = [];
+  const write = vi
+    .spyOn(process.stderr, "write")
+    .mockImplementation((line: string | Uint8Array) => {
+      lines.push(String(line));
+      return true;
+    });
+  try {
+    expect((await off.send()).status).toBe(503);
+  } finally {
+    write.mockRestore();
+  }
+  const found = lines
+    .filter((line) => line.includes("CUSTOMER_DINING_SESSION_NOT_CONFIGURED"))
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+  expect(found).toEqual([
+    expect.objectContaining({ level: 50, code: "DINING_SESSION_READ_NOT_CONFIGURED" }),
+  ]);
+  expect(lines.join("")).not.toContain("s".repeat(43));
+  expect(lines.join("")).not.toContain("c".repeat(43));
 });
 
 it("WP-2423 D5: sends item prices before tax and the round and table subtotal and tax as strings", async () => {
@@ -350,15 +370,31 @@ it("batch 43: a table read in the status view's gap is read again and answers 20
   expect(f.read.mock.calls.every((call) => call[1] === locale)).toBe(true);
 });
 
-it("batch 43: the default waits cover the 1.1 s seen live, then still 'order processing'", async () => {
-  const f = await setup(true, [400, 800]);
+// Batch 47 (v15 b46 live, TM2 10:07Z): four guests placed rounds at once; three table reads took
+// 1.22-1.29 s and the third answered 503 "order processing" after the last wait (1.2 s in all),
+// and api.log had 29 more such reads at 1.27-1.35 s since 11-20 that answered 200 just in time.
+// The waits now run to 2 s, so a status view that far behind still answers the guest's table.
+it("batch 47: the default waits run to 2 s: a status view 1.3 s behind answers the table", async () => {
+  const f = await setup(true, "default");
+  const written = Date.now();
+  f.read.mockImplementation(async () => {
+    if (Date.now() - written < 1300) throw new DiningOrderStillProcessingError();
+    return view();
+  });
+  const response = await f.send();
+  expect(response.status).toBe(200);
+  expect(f.read).toHaveBeenCalledTimes(4);
+});
+
+it("batch 47: a status view behind for longer than the waits still says 'order processing'", async () => {
+  const f = await setup(true, "default");
   f.read.mockRejectedValue(new DiningOrderStillProcessingError());
   const started = Date.now();
   const response = await f.send();
   expect(response.status).toBe(503);
   expect(response.headers.get("retry-after")).toBe("2");
-  expect(f.read).toHaveBeenCalledTimes(3);
-  expect(Date.now() - started).toBeGreaterThanOrEqual(1150);
+  expect(f.read).toHaveBeenCalledTimes(4);
+  expect(Date.now() - started).toBeGreaterThanOrEqual(1950);
 });
 
 it("batch 43: other failures are never read again", async () => {

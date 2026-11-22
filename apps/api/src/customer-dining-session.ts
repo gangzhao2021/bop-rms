@@ -73,7 +73,9 @@ interface DiningSessionPort {
  * table with the new round instead of a 503 in that gap. Only a status view still behind after
  * them answers "order processing" (the page reads again by itself).
  */
-const processingRereadMs: readonly number[] = [400, 800];
+// Batch 47 (v15 b46 live): the status view now takes a round up to 1.35 s after it is written when
+// several tables order at once (29 reads at 1.27-1.35 s, one 503 at 1.22 s); the waits run to 2 s.
+const processingRereadMs: readonly number[] = [400, 800, 800];
 export class CustomerDiningSessionHandler {
   readonly #origin: string;
   readonly #port: DiningSessionPort;
@@ -339,5 +341,11 @@ export class CustomerDiningSessionHandler {
     };
   }
 }
-export const unavailableCustomerDiningSessionHandler: RequestHandler = (_request, response) =>
+/** Batch 47: a pilot without the table read wired answers 503 and says so, at failure level. */
+export const unavailableCustomerDiningSessionHandler: RequestHandler = (_request, response) => {
+  logGuestFailure(
+    "CUSTOMER_DINING_SESSION_NOT_CONFIGURED",
+    new Error("DINING_SESSION_READ_NOT_CONFIGURED"),
+  );
   reject(response, 503);
+};
