@@ -47,6 +47,58 @@ it("no Chinese text puts a space between a filled-in name and a Chinese characte
   expect(found).toEqual([]);
 });
 
+/**
+ * Batch 47 (v15 b46 live): a numbered placeholder is as often a name or a list of names as a
+ * number. Live the guest menu read "含有 花生、芝麻、大豆、小麦和黑小麦" and "可能含有 芝麻", Chinese
+ * joined to a Chinese list with a space, because "{value1}" was not checked. These keep their
+ * space because what is filled in is a number, a time or a pickup code.
+ */
+const numberedNotNames = new Set([
+  "Choice group {value1}",
+  "Order {orderNumber}. Pickup code {value1}",
+  "Served {value1} of {quantity}",
+  "This round will be cancelled at {value1}. ",
+  " If it isn't paid by {value1}, it is cancelled and nobody is charged.",
+  "Pay by {value1}, or it is cancelled and nobody is charged.",
+  "You’ve made a lot of codes in the last few minutes. You can make another at {value1}, or ask a staff member for one.",
+  "opens at {value1}",
+  "until {value1}",
+  "{name} allows at most {value1}.",
+]);
+
+it("no Chinese text puts a space between a numbered placeholder and a Chinese character", () => {
+  const han = "[\\u3400-\\u9fff（）：，。“”、]";
+  const spaced = new RegExp(`\\{value[0-9]*\\} (?=${han})|(?<=${han}) \\{value[0-9]*\\}`, "u");
+  const found = Object.entries(zhHans)
+    .filter(([english, chinese]) => !numberedNotNames.has(english) && spaced.test(chinese))
+    .map(([english]) => english);
+  expect(found).toEqual([]);
+  // Each kept entry still exists, so the list does not outlive its texts.
+  expect([...numberedNotNames].filter((english) => zhHans[english] === undefined)).toEqual([]);
+});
+
+it("reads the live allergen lines with the list joined to the Chinese around it", () => {
+  renderToStaticMarkup(createElement(LanguageRoot, { initial: "zh-Hans", children: () => null }));
+  // As live on the TM2 menu (担担面), joined by the guest list separator.
+  expect(t("Contains {value1}", { value1: "花生、芝麻、大豆、小麦和黑小麦" })).toBe(
+    "含有花生、芝麻、大豆、小麦和黑小麦",
+  );
+  expect(t("May contain {value1}", { value1: "芝麻" })).toBe("可能含有芝麻");
+  expect(t("contains {value1}", { value1: "花生" })).toBe("含有花生");
+  expect(t("may contain {value1}", { value1: "芝麻" })).toBe("可能含有芝麻");
+  // An allergen the owner wrote in Latin letters keeps the b12 space.
+  expect(t("Contains {value1}", { value1: "MSG" })).toBe("含有 MSG");
+  expect(
+    t("{value1} allows at most {maximumSelections}.", { value1: "辣度", maximumSelections: 1 }),
+  ).toBe("辣度最多可选 1 项。");
+  expect(
+    t("{value1} requires at least {minimumSelections}.", {
+      value1: "Toppings",
+      minimumSelections: 2,
+    }),
+  ).toBe("Toppings 至少要选 2 项。");
+});
+
 it("a sentence about the Store is one translated text, never a name joined to a piece with a space", () => {
   const root = new URL("..", import.meta.url).pathname;
   const files = (dir: string): string[] =>

@@ -88,14 +88,14 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Not now": "先不用",
   "Applied to {done} of {total}. Keep this screen on.": "已应用 {done} / {total}。请保持屏幕常亮。",
   "Stopped at {item}. {reason} What was applied stays; try again to carry on.":
-    "在{item}停下了。{reason} 已应用的保留；重试会接着做。",
+    "在{item}停下了。{reason}已应用的保留；重试会接着做。",
   "Applied to {dishes}. Guests see it when the menu is listed.":
     "已应用到 {dishes}。菜单上架后客人能看到。",
   "Still waiting for allergens: {items}.": "还在等申报过敏原：{items}。",
   "Use {group} on other dishes": "把{group}用到其他菜品",
   "{item} saved. Declare its allergens, then list it.": "{item}已保存。请申报过敏原，然后上架。",
   "{marks} could not be set. Open the dish with Edit and set it.":
-    "{marks} 没有设置成功。请点编辑打开这道菜再设置。",
+    "{marks}没有设置成功。请点编辑打开这道菜再设置。",
   "Added {count}.": "已添加 {count} 道。",
   "1 needs allergens.": "1 道需要申报过敏原。",
   "{count} need allergens.": "{count} 道需要申报过敏原。",
@@ -168,7 +168,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{item} at {store} uses a recipe for another Store only. Open it under Recipes and use it for the whole Brand, or answer its allergens in this menu.":
     "{item}在{store}用的是只给另一家店的配方。请在“配方”里改为全品牌使用，或在本菜单里回答它的过敏原。",
   "{item} at {store}: the option {value} has no published recipe change for the recipe used there. Set, review and publish it under Option recipes, then list it again.":
-    "{item}（{store}）：选项 {value} 对那里使用的配方没有已发布的配方变化。请在“选项配方”里设置、审核并发布，然后重新上架。",
+    "{item}（{store}）：选项{value}对那里使用的配方没有已发布的配方变化。请在“选项配方”里设置、审核并发布，然后重新上架。",
   "  not split by item": "  未按商品拆分",
   "  of which cash rounding": "  其中现金取整",
   "  of which sales": "  其中销售额",
@@ -650,7 +650,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{displayName} was not recorded. Tap it again.": "{displayName}没记上，请再点一次。",
   "Cancelled · don't make it": "已取消 · 别做了",
   "Combo: {comboName} · last dish of it": "套餐：{comboName} · 这道做好就齐了",
-  "Combo: {comboName} · also {dishes}": "套餐：{comboName} · 还差 {dishes}",
+  "Combo: {comboName} · also {dishes}": "套餐：{comboName} · 还差{dishes}",
   "Combo: {comboName} · {count} more dishes": "套餐：{comboName} · 还差 {count} 道",
   "Added · {ago}": "加菜 · {ago}",
   "{count} more": "还有 {count} 条",
@@ -1511,11 +1511,11 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Contact name": "联系人姓名",
   Contacts: "联系方式",
   Contains: "含有",
-  "Contains {value}": "含有 {value}",
+  "Contains {value}": "含有{value}",
   "Contains: {value}": "含有：{value}",
-  "Whole combo contains {value}": "整个套餐含有 {value}",
+  "Whole combo contains {value}": "整个套餐含有{value}",
   "Whole combo contains: {value}": "整个套餐含有：{value}",
-  "Whole combo may contain {value}": "整个套餐可能含有 {value}",
+  "Whole combo may contain {value}": "整个套餐可能含有{value}",
   "Whole combo may contain: {value}": "整个套餐可能含有：{value}",
   "Continue draft": "继续编辑草稿",
   "Continue draft {code}": "继续编辑草稿 {code}",
@@ -2375,7 +2375,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "与日结一致：已收 {settlementCollectedMinor}，已退 {settlementRefundedMinor}。",
   "Matches the payment provider": "与支付方一致",
   "May contain (cross-contact)": "可能含有（交叉接触）",
-  "May contain {value}": "可能含有 {value}",
+  "May contain {value}": "可能含有{value}",
   "May contain: {value}": "可能含有：{value}",
   "Membership {membershipStatus} · Store assignment {storeAssignmentStatus}":
     "成员状态 {membershipStatus} · 门店分配 {storeAssignmentStatus}",
@@ -3345,7 +3345,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   Reason: "原因",
   "Reason (optional)": "原因（可选）",
   "Reason for turning it {value}": "{value}的原因",
-  "Reason {value}": "原因 {value}",
+  "Reason {value}": "{value}的原因",
   "Reason: {value}": "原因：{value}",
   "Reason: {value} ·": "原因：{value} ·",
   "Reassign the {memberCount} staff holding this role before deactivating it.":
@@ -5480,7 +5480,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "已撤回。请编辑新草稿并重新提交审核。",
   "Within the last 3 days. The order is marked “Recorded after outage” and its payment counts on the day it was paid.":
     '限最近 3 天内。订单会标记为"停电/断网后补录"，其付款计入实际付款当天。',
-  "Without {from}": "不含 {from}",
+  "Without {from}": "不含{from}",
   "Work email": "工作邮箱",
   "Work item": "工作项",
   "Work item changed": "工作项已变更",

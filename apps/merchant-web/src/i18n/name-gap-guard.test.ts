@@ -75,3 +75,35 @@ it("a Chinese name meets the sentence directly and a Latin one keeps the b12 spa
     }),
   ).toBe("Mia 申请，你批准 · 20:30");
 });
+
+/**
+ * Batch 47 (v15 b46 live, guest "含有 花生、…"): the staff texts filled with a list or a name under
+ * a generic placeholder ({value}, {dishes}, {from}, {marks}, {reason}) follow the same rule, so the
+ * kitchen and dish screens read "含有花生、芝麻", never "含有 花生、芝麻".
+ */
+const filledWithNames: Readonly<Record<string, Record<string, string>>> = {
+  "Contains {value}": { value: "花生、芝麻" },
+  "May contain {value}": { value: "芝麻" },
+  "Whole combo contains {value}": { value: "花生、芝麻" },
+  "Whole combo may contain {value}": { value: "芝麻" },
+  "Combo: {comboName} · also {dishes}": { comboName: "双人餐", dishes: "担担面、凉面" },
+  "Without {from}": { from: "香菜" },
+  "Reason {value}": { value: "牛肉" },
+  "{marks} could not be set. Open the dish with Edit and set it.": { marks: "辣、素" },
+  "Stopped at {item}. {reason} What was applied stays; try again to carry on.": {
+    item: "担担面",
+    reason: "这道菜已被别人改过。",
+  },
+  "{item} at {store}: the option {value} has no published recipe change for the recipe used there. Set, review and publish it under Option recipes, then list it again.":
+    { item: "担担面", store: "面馆", value: "加辣" },
+};
+
+it("a list or name filled into a staff text meets the Chinese around it directly", () => {
+  setLanguageForTest("zh-Hans");
+  const spaced = Object.entries(filledWithNames).filter(([english, values]) =>
+    /[㐀-鿿（）：，。、] [㐀-鿿（）：，。、]/u.test(t(english, values)),
+  );
+  expect(spaced.map(([english, values]) => t(english, values))).toEqual([]);
+  expect(t("Contains {value}", { value: "花生、芝麻" })).toBe("含有花生、芝麻");
+  expect(t("May contain {value}", { value: "Sesame" })).toBe("可能含有 Sesame");
+});
