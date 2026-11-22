@@ -1,5 +1,14 @@
 import { DiningPaymentTimingPanel } from "./DiningPaymentTimingPanel.js";
-import { serviceModeText, listSeparator, currentLanguage, systemText, t } from "./i18n/i18n.js";
+import {
+  serviceModeText,
+  listSeparator,
+  systemText,
+  t,
+  wallClockTime,
+  withOneSentenceEnd,
+} from "./i18n/i18n.js";
+import { businessDateLabel } from "./StoreBusinessDay.js";
+import { storeTime } from "./StoreTime.js";
 import { StatePanel } from "@bop-rms/ui";
 import { StoreConfigurationEditor } from "./StoreConfigurationEditor.js";
 import { WorkspacePage } from "./WorkspacePage.js";
@@ -21,14 +30,13 @@ import {
   type ServiceInterval,
 } from "./service-control-client.js";
 
-/** "09:00:00" → "9:00 AM"; "23:59:59" → "11:59 PM". */
+/**
+ * "09:00:00" → "9:00 a.m."; "00:00:00" → "12:00 a.m." (Chinese "0:00"). Batch 46: the Store's
+ * hours read as guests read them on their phones (the b40 convention for times guests also see,
+ * as on Tables), never "9:00 AM" beside a guest's "9:00 a.m.".
+ */
 export function serviceTime(value: string): string {
-  const [hour = 0, minute = 0] = value.split(":").map(Number);
-  // Chinese: the 24-hour clock ("23:59"), as the customer side writes it.
-  if (currentLanguage() === "zh-Hans")
-    return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
-  const suffix = hour < 12 ? "AM" : "PM";
-  return `${hour % 12 === 0 ? 12 : hour % 12}:${String(minute).padStart(2, "0")} ${suffix}`;
+  return wallClockTime(value);
 }
 const exceptionKindLabel = (kind: string) =>
   kind === "TemporaryClosure"
@@ -36,8 +44,44 @@ const exceptionKindLabel = (kind: string) =>
     : kind === "Override"
       ? t("Special hours")
       : kind === "Holiday"
-        ? "Holiday"
+        ? t("Holiday")
         : kind;
+
+/**
+ * Batch 46: the Store's operating day at an instant — its local date, or the day before while the
+ * time is before the business-day start (00:12 with a 4:00 start is still the evening's day, whose
+ * special hours may still be running).
+ */
+export function operatingDate(at: string, timeZone: string, businessDayStart: string): string {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    })
+      .formatToParts(new Date(at))
+      .map((part) => [part.type, part.value]),
+  );
+  const date = `${parts.year}-${parts.month}-${parts.day}`;
+  const time = `${parts.hour}:${parts.minute}:${parts.second}`;
+  if (time >= businessDayStart) return date;
+  const day = new Date(`${date}T00:00:00.000Z`);
+  day.setUTCDate(day.getUTCDate() - 1);
+  return day.toISOString().slice(0, 10);
+}
+
+/**
+ * Pieces of one published period, "11:30–14:30 · 堂食". In Chinese a full-width bracket already
+ * carries its own space, so the separator after "（次日）" drops the extra one.
+ */
+function joinPieces(pieces: readonly string[]): string {
+  return pieces.reduce((text, piece) => text + (text.endsWith("）") ? "· " : " · ") + piece);
+}
 const serviceModeLabel = (mode: string) => serviceModeText(mode);
 const serviceMinutes = (seconds: number) => {
   const minutes = Math.round(seconds / 60);
@@ -47,9 +91,12 @@ const serviceMinutes = (seconds: number) => {
 export function ServiceHoursSummary({
   hours,
   timeZone,
+  observedAt,
 }: {
   hours: ServiceHours;
   timeZone: string;
+  /** When the hours were read: special dates before that operating day are no longer listed. */
+  observedAt: string;
 }) {
   const days = [
     t("Monday"),
@@ -60,21 +107,30 @@ export function ServiceHoursSummary({
     t("Saturday"),
     t("Sunday"),
   ];
-  // WP-2423 Q4: hours in staff language — 9:00 AM, Dine-in, minutes; zero settings are left out.
+  // WP-2423 Q4: hours in staff language — 9:00 a.m., Dine-in, minutes; zero settings are left out.
+  // Batch 46: each piece is one whole phrase per language ("打烊前 30 分钟停止点单").
   const describe = (interval: ServiceInterval) =>
-    [
+    joinPieces([
       serviceTime(interval.startLocalTime) +
         "–" +
         serviceTime(interval.endLocalTime) +
         (interval.endsNextDay ? t(" (next day)") : ""),
       interval.serviceModes.map(serviceModeLabel).join(listSeparator()),
       ...(interval.orderCutoffSeconds > 0
-        ? [t("last orders ") + serviceMinutes(interval.orderCutoffSeconds) + t(" before closing")]
+        ? [
+            t("last orders {minutes} before closing", {
+              minutes: serviceMinutes(interval.orderCutoffSeconds),
+            }),
+          ]
         : []),
       ...(interval.leadTimeSeconds > 0
-        ? [t("ready in ") + serviceMinutes(interval.leadTimeSeconds)]
+        ? [t("ready in {minutes}", { minutes: serviceMinutes(interval.leadTimeSeconds) })]
         : []),
-    ].join(" · ");
+    ]);
+  // Batch 46 (v15: "2026-11-05 · Special hours" 17 days after the date): only today's and later
+  // special dates are listed; earlier ones stay in the published configuration's own record.
+  const today = operatingDate(observedAt, timeZone, hours.businessDayStartLocalTime);
+  const exceptions = hours.exceptions.filter((exception) => exception.localDate >= today);
   return (
     <section aria-labelledby="published-hours-title">
       <h2 id="published-hours-title">{t("Published hours")}</h2>
@@ -85,9 +141,11 @@ export function ServiceHoursSummary({
         · {timeZoneLabel(timeZone)}
       </p>
       <p>
-        {t("Business day starts at {businessDayStartLocalTime}.", {
-          businessDayStartLocalTime: serviceTime(hours.businessDayStartLocalTime),
-        })}
+        {withOneSentenceEnd(
+          t("Business day starts at {businessDayStartLocalTime}.", {
+            businessDayStartLocalTime: serviceTime(hours.businessDayStartLocalTime),
+          }),
+        )}
       </p>
       <div className="detail-section-grid">
         {hours.weeklySchedule.map((day) => (
@@ -106,12 +164,15 @@ export function ServiceHoursSummary({
         ))}
       </div>
       <h3>{t("Exceptions and holidays")}</h3>
-      {hours.exceptions.length ? (
+      {exceptions.length ? (
         <ul>
-          {hours.exceptions.map((exception) => (
+          {exceptions.map((exception) => (
             <li key={exception.localDate}>
               <strong>
-                {exception.localDate} · {exceptionKindLabel(exception.kind)}
+                <time dateTime={exception.localDate}>
+                  {businessDateLabel(exception.localDate, today)}
+                </time>
+                {" · " + exceptionKindLabel(exception.kind)}
               </strong>
               {exception.intervals.length ? (
                 <ul>
@@ -126,7 +187,7 @@ export function ServiceHoursSummary({
           ))}
         </ul>
       ) : (
-        <p>{t("No published exceptions.")}</p>
+        <p>{t("No special dates or holidays coming up.")}</p>
       )}
     </section>
   );
@@ -292,7 +353,13 @@ export function StoreServiceControlPanel({ store, csrf }: { store: string; csrf:
   const disabled = busy || !online || uncertain;
   return (
     <WorkspacePage title={t("Hours & ordering")}>
-      {view && <ServiceHoursSummary hours={view.hours} timeZone={view.timeZone} />}
+      {view && (
+        <ServiceHoursSummary
+          hours={view.hours}
+          timeZone={view.timeZone}
+          observedAt={view.observedAt}
+        />
+      )}
       {configurable ? (
         <StoreConfigurationEditor key={store + csrf} store={store} csrf={csrf} />
       ) : null}
@@ -320,12 +387,9 @@ export function StoreServiceControlPanel({ store, csrf }: { store: string; csrf:
         {view && (
           <>
             <p>
-              {t("Updated {value} ({timeZone})", {
-                value: new Intl.DateTimeFormat(undefined, {
-                  timeZone: view.timeZone,
-                  dateStyle: "medium",
-                  timeStyle: "short",
-                }).format(new Date(view.observedAt)),
+              {/* Batch 46: in the app's language and the Store's zone, never the browser's. */}
+              {t("Updated {value} · {timeZone}", {
+                value: storeTime(view.observedAt, view.timeZone, true, "Guest"),
                 timeZone: timeZoneLabel(view.timeZone),
               })}
             </p>
@@ -370,11 +434,7 @@ export function StoreServiceControlPanel({ store, csrf }: { store: string; csrf:
                         value:
                           item.serviceModes?.map(serviceModeText).join(listSeparator()) ??
                           t("All services"),
-                        value2: new Intl.DateTimeFormat(undefined, {
-                          timeZone: view.timeZone,
-                          dateStyle: "medium",
-                          timeStyle: "short",
-                        }).format(new Date(item.effectiveUntil)),
+                        value2: storeTime(item.effectiveUntil, view.timeZone, true, "Guest"),
                       })}
                     </span>{" "}
                     <button

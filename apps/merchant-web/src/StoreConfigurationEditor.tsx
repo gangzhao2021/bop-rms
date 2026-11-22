@@ -1,4 +1,11 @@
-import { serviceModeText, systemText, t, listSeparator } from "./i18n/i18n.js";
+import {
+  serviceModeText,
+  systemText,
+  t,
+  listSeparator,
+  wallClockTime,
+  withOneSentenceEnd,
+} from "./i18n/i18n.js";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { timeZoneLabel } from "./time-zone-names.js";
@@ -594,10 +601,13 @@ export function StoreHoursDraftForm({
         </section>
       )}
       <p>
-        {t("Times are in {timeZone}. The business day starts at {value}.", {
-          timeZone: timeZoneLabel(draft.timeZone),
-          value: draft.businessDayStartLocalTime.slice(0, 5),
-        })}
+        {withOneSentenceEnd(
+          t("Times are in {timeZone}. The business day starts at {value}.", {
+            timeZone: timeZoneLabel(draft.timeZone),
+            // Batch 46: written as the published hours above it are ("4:00 a.m.", "4:00").
+            value: wallClockTime(draft.businessDayStartLocalTime),
+          }),
+        )}
       </p>
       {draft.setupBasis !== undefined && <StoreConfigurationFeeBasisView configuration={draft} />}
       {view.current?.setupBasis !== undefined &&

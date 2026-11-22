@@ -254,6 +254,15 @@ export function clockTime(at: number, timeZone?: string): string {
     ...(timeZone === undefined ? {} : { timeZone }),
   }).format(new Date(at));
 }
+/**
+ * Batch 46 (v15 overnight check: Hours & ordering read "5:00 PM–12:00 AM" and "00:00" where guests
+ * read "5:00 p.m.–12:00 a.m." and "0:00"): a Store wall-clock time ("17:00:00") in the same house
+ * style as clockTime.
+ */
+export function wallClockTime(localTime: string): string {
+  const [hour = 0, minute = 0] = localTime.split(":").map(Number);
+  return clockTime(Date.UTC(2000, 0, 1, hour, minute), "UTC");
+}
 /** A clockTime that ends a sentence: its own "a.m." period ends it ("ends at 4:00 a.m."). */
 export function clockTimeEndingSentence(at: number, timeZone?: string): string {
   const time = clockTime(at, timeZone);

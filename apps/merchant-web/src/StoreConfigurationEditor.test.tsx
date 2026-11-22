@@ -244,7 +244,8 @@ it("edits hours without effective dates, business-day start or a typed reason co
   expect(html).not.toContain("Effective until");
   expect(html).not.toContain("Change reason code");
   expect(html).not.toContain('type="datetime-local"');
-  expect(html).toContain("The business day starts at 04:00.");
+  // Batch 46: as the published hours above it read it, with one sentence end.
+  expect(html).toContain("The business day starts at 4:00 a.m.<");
   expect(html).not.toMatch(/<label>Business day starts/u);
   expect(html).toContain("No pending change. Customers see the published hours.");
   expect(html).not.toContain("Published version");
