@@ -1371,14 +1371,18 @@ export function installMerchantDiningRoutes(
               ? ([409, "table_guest_paying"] as const)
               : code === "DINING_CLOSING_PERMISSION_DENIED"
                 ? ([403, "dining_closing_permission_denied"] as const)
-                : code === "DINING_CLOSING_VERSION_CONFLICT" ||
-                    code === "DINING_CLOSING_PHASE_CONFLICT" ||
-                    code === "DINING_CLOSING_IDEMPOTENCY_CONFLICT"
-                  ? ([409, "dining_session_changed"] as const)
-                  : code === "DINING_CLOSING_TASK_REQUIRED" ||
-                      code === "DINING_CLOSING_BATCH_NOT_TERMINAL"
-                    ? ([409, "dining_session_not_ready"] as const)
-                    : ([503, "dining_closing_unavailable"] as const);
+                : // Batch 45: a table visit this Store has no record of (a stale panel after a
+                  // store switch) is not found, never "unavailable"; the page reads the tables again.
+                  code === "DINING_CLOSING_SESSION_NOT_FOUND"
+                  ? ([404, "dining_session_not_found"] as const)
+                  : code === "DINING_CLOSING_VERSION_CONFLICT" ||
+                      code === "DINING_CLOSING_PHASE_CONFLICT" ||
+                      code === "DINING_CLOSING_IDEMPOTENCY_CONFLICT"
+                    ? ([409, "dining_session_changed"] as const)
+                    : code === "DINING_CLOSING_TASK_REQUIRED" ||
+                        code === "DINING_CLOSING_BATCH_NOT_TERMINAL"
+                      ? ([409, "dining_session_not_ready"] as const)
+                      : ([503, "dining_closing_unavailable"] as const);
         response.status(status).set("Cache-Control", NO_STORE).json({ error: body });
       });
   });

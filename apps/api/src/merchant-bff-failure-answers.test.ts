@@ -1,6 +1,7 @@
 import { Buffer } from "node:buffer";
 import { request as httpRequest, type Server } from "node:http";
 import { BrowserSessionError } from "@bop/identity";
+import { DiningClosingError } from "@rms/dining";
 import express from "express";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMerchantBffRouter, type MerchantBffRouterOptions } from "./merchant-bff.js";
@@ -523,6 +524,25 @@ describe("dining routes with their own answers refuse an ended sign-in as the ot
     expect(await failed.json()).toEqual({ error: unavailable });
     expect(failing.reported).toHaveLength(1);
   });
+});
+
+// Batch 45 (v15 b44 live 2026-11-22 01:33:25 UTC): a close for a table visit this Store has no
+// record of answered 503 "unavailable" and logged a level-50 fault; so did a close whose table
+// another device or the guests changed while it waited for the table's lock. They are refusals
+// the page reads again on (404, 409), reported as nothing; a real fault keeps its 503.
+it.each([
+  ["DINING_CLOSING_SESSION_NOT_FOUND", 404, "dining_session_not_found"],
+  ["DINING_CLOSING_VERSION_CONFLICT", 409, "dining_session_changed"],
+  ["DINING_CLOSING_DEPENDENCY_UNAVAILABLE", 503, "dining_closing_unavailable"],
+] as const)("POST /dining/closing refused with %s answers %i", async (code, status, body) => {
+  const app = await serve(
+    option("diningClosing", rejecting(new DiningClosingError(code))) as never,
+  );
+  const response = await app.post("/dining/closing", {});
+  expect(response.status).toBe(status);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(await response.json()).toEqual({ error: body });
+  expect(app.reported).toHaveLength(status === 503 ? 1 : 0);
 });
 
 // WP-2423 (v15 fabf0261): a paper paid-at well before the table's last live round is a refusal
