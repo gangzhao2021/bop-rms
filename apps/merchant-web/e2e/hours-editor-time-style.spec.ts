@@ -290,6 +290,23 @@ for (const language of ["en", "zh-Hans"] as const) {
               : Math.min(box.right, window.innerWidth) - Math.max(row.left, last.right);
           });
         expect(spare).toBeGreaterThanOrEqual(40);
+        // Batch 47 review: the whole day ends at the end of the day, not at 11:59 p.m., and that
+        // choice fits its row too.
+        const end = editor(page)
+          .getByRole("group", { name: zh ? "结束 1" : "End 1", exact: true })
+          .first();
+        await expect(end.locator("select")).toHaveCount(1);
+        expect(
+          await end
+            .locator("select")
+            .evaluate((select) => (select as HTMLSelectElement).selectedOptions[0]?.text),
+        ).toBe(zh ? "24:00（当天结束）" : "Midnight (end of day)");
+        const endSpare = await end.evaluate((group) => {
+          const last = group.querySelector("select")?.getBoundingClientRect();
+          const box = (group.closest("fieldset") ?? group).getBoundingClientRect();
+          return last === undefined ? -1 : Math.min(box.right, window.innerWidth) - last.right;
+        });
+        expect(endSpare).toBeGreaterThanOrEqual(40);
         await page.screenshot({
           path: `test-results/b47-hours-editor-${language}-${width}.png`,
           fullPage: true,

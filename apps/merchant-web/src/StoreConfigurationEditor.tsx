@@ -9,7 +9,7 @@ import {
 import { useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { timeZoneLabel } from "./time-zone-names.js";
-import { TimeOfDayInput } from "./TimeOfDayInput.js";
+import { endOfDayLocalTime, TimeOfDayInput } from "./TimeOfDayInput.js";
 import { wordGap } from "./word-gap.js";
 import {
   createStoreConfigurationClient,
@@ -971,12 +971,21 @@ export function IntervalEditor({
       <TimeOfDayInput
         label={t("End {value}", { value: i + 1 })}
         value={interval.endLocalTime}
-        onChange={(endLocalTime) => onChange({ endLocalTime })}
+        endOfDay
+        onChange={(endLocalTime) =>
+          // The end of the day ends that day; "next day" would end a day later.
+          onChange(
+            endLocalTime === endOfDayLocalTime
+              ? { endLocalTime, endsNextDay: false }
+              : { endLocalTime },
+          )
+        }
       />
       <label>
         <input
           type="checkbox"
           checked={interval.endsNextDay}
+          disabled={interval.endLocalTime === endOfDayLocalTime && !interval.endsNextDay}
           onChange={(event) => onChange({ endsNextDay: event.target.checked })}
         />
         {t("Ends next day")}

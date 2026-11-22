@@ -53,10 +53,18 @@ export function wallClockStyle(): {
 
 const minutes = Array.from({ length: 60 }, (_, minute) => minute);
 
+/**
+ * Batch 47 review: the end of the day, as the hours model writes a whole day (00:00–23:59:59). A
+ * period can't end at the time it starts, so a day open from midnight can't end at 12:00 a.m.;
+ * picked to the minute it would end at 11:59 p.m. and turn guests away in the day's last minute.
+ */
+export const endOfDayLocalTime = "23:59:59";
+
 export function TimeOfDayInput({
   label,
   value,
   onChange,
+  endOfDay = false,
 }: {
   /** The field's name, "Start 1". */
   readonly label: string;
@@ -64,11 +72,14 @@ export function TimeOfDayInput({
   readonly value: string;
   /** Called with "HH:MM:00" when staff pick another hour, minute or half of the day. */
   readonly onChange: (value: string) => void;
+  /** An end field: also offers the end of the day ("Midnight (end of day)", "24:00（当天结束）"). */
+  readonly endOfDay?: boolean;
 }) {
   const labelId = useId();
   const parts = wallClockParts(value);
   const style = wallClockStyle();
   const afternoon = parts.hour >= 12;
+  const atEndOfDay = endOfDay && value === endOfDayLocalTime;
   const change = (next: Partial<WallClockParts>) => onChange(wallClockValue({ ...parts, ...next }));
   return (
     <div className="time-of-day" role="group" aria-labelledby={labelId}>
@@ -78,10 +89,18 @@ export function TimeOfDayInput({
       <span className="time-of-day__fields">
         <select
           aria-label={t("Hour")}
-          value={style.twelveHour ? parts.hour % 12 : parts.hour}
+          value={atEndOfDay ? "end" : style.twelveHour ? parts.hour % 12 : parts.hour}
           onChange={(event) => {
+            if (event.target.value === "end") {
+              onChange(endOfDayLocalTime);
+              return;
+            }
             const picked = Number(event.target.value);
-            change({ hour: style.twelveHour ? picked + (afternoon ? 12 : 0) : picked });
+            // From the end of the day, an hour picked is that evening's, on the hour.
+            change({
+              hour: style.twelveHour ? picked + (afternoon ? 12 : 0) : picked,
+              ...(atEndOfDay ? { minute: 0 } : {}),
+            });
           }}
         >
           {(style.twelveHour
@@ -92,30 +111,35 @@ export function TimeOfDayInput({
               {style.twelveHour ? (hour === 0 ? 12 : hour) : hour}
             </option>
           ))}
+          {endOfDay && <option value="end">{t("Midnight (end of day)")}</option>}
         </select>
-        <span aria-hidden="true">:</span>
-        <select
-          aria-label={t("Minute")}
-          value={parts.minute}
-          onChange={(event) => change({ minute: Number(event.target.value) })}
-        >
-          {minutes.map((minute) => (
-            <option key={minute} value={minute}>
-              {String(minute).padStart(2, "0")}
-            </option>
-          ))}
-        </select>
-        {style.twelveHour && (
-          <select
-            aria-label={t("a.m. or p.m.")}
-            value={afternoon ? "pm" : "am"}
-            onChange={(event) =>
-              change({ hour: (parts.hour % 12) + (event.target.value === "pm" ? 12 : 0) })
-            }
-          >
-            <option value="am">{style.am}</option>
-            <option value="pm">{style.pm}</option>
-          </select>
+        {atEndOfDay ? null : (
+          <>
+            <span aria-hidden="true">:</span>
+            <select
+              aria-label={t("Minute")}
+              value={parts.minute}
+              onChange={(event) => change({ minute: Number(event.target.value) })}
+            >
+              {minutes.map((minute) => (
+                <option key={minute} value={minute}>
+                  {String(minute).padStart(2, "0")}
+                </option>
+              ))}
+            </select>
+            {style.twelveHour && (
+              <select
+                aria-label={t("a.m. or p.m.")}
+                value={afternoon ? "pm" : "am"}
+                onChange={(event) =>
+                  change({ hour: (parts.hour % 12) + (event.target.value === "pm" ? 12 : 0) })
+                }
+              >
+                <option value="am">{style.am}</option>
+                <option value="pm">{style.pm}</option>
+              </select>
+            )}
+          </>
         )}
       </span>
     </div>

@@ -1789,6 +1789,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   Year: "年",
   Month: "月",
   "Hour of day": "时",
+  // Batch 47 review: the hours editor's end of the day, saved as 23:59:59.
+  "Midnight (end of day)": "24:00（当天结束）",
   Minute: "分",
   "{label}: {part}": "{label}：{part}",
   "Ends next day": "次日结束",
