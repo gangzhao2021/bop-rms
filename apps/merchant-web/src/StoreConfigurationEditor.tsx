@@ -115,14 +115,11 @@ export function storeConfigurationOthersChangeText(
   const lifecycle = view.latest?.lifecycle,
     mayApprove = storeConfigurationViewerMayApprove(view) === true,
     who = author ?? t("the person who made it");
+  // Batch 48: its state is already said beside its version ("waiting for approval", "approved,
+  // waiting to be published"); this says only what can happen next.
   if (lifecycle === "PendingApproval")
-    return mayApprove
-      ? t("It has been sent for approval. You can approve or decline it.")
-      : t("It has been sent for approval and is waiting for an Owner to approve it.");
-  if (lifecycle === "Approved")
-    return t(
-      "It has been approved and can now be published. Customers see the new hours once it is published.",
-    );
+    return mayApprove ? t("You can approve or decline it.") : t("Only an Owner can approve it.");
+  if (lifecycle === "Approved") return t("Customers see the new hours once it is published.");
   return (
     t("Only {who} can check it or send it for approval. ", { who: who }) +
     (mayApprove
@@ -363,8 +360,9 @@ export function StoreConfigurationEditor({ store, csrf }: { store: string; csrf:
       setDraft(storeConfigurationEditBase(next));
       setMessage(
         (kind === "Withdrawn"
-          ? t("Your change was withdrawn. The next change starts from the published hours.")
-          : t("The change was declined. The next change starts from the published hours.")) +
+          ? // Batch 48: what comes next is said once, by the withdrawal line under it.
+            t("Your change was withdrawn.")
+          : t("The change was declined.")) +
           // WP-2423 (2026-10-16 v15): Store setup no longer holds the withdrawn hours either.
           (setupHoursRestored ? t(" Store setup is back to the published opening hours too.") : ""),
       );
@@ -483,19 +481,21 @@ export function StoreHoursDraftForm({
         if (open !== "SomeoneElse") onCommand("SaveDraft");
       }}
     >
-      <p>
-        {view.latest && view.latest.lifecycle !== "Published"
-          ? t("Latest change: ") +
-            (withdrawn
-              ? withdrawn.kind === "Withdrawn"
-                ? t("Withdrawn by the person who made it")
-                : t("Declined")
-              : storeConfigurationStateLabel(view.latest.lifecycle))
-          : view.current
-            ? t("No pending change. Customers see the published hours.")
-            : t("No published hours yet.")}
-      </p>
-      {withdrawn && <WithdrawalLine withdrawal={withdrawn} />}
+      {/* Batch 48 (v15 b47: "Latest change: Withdrawn by the person who made it" stood above "You
+          withdrew it on …"): the latest change is described once. A withdrawn or declined one by
+          its sentence (who and when), an open one by the section about it below; the state line
+          is only for a change nobody's section speaks of. */}
+      {withdrawn ? (
+        <WithdrawalLine withdrawal={withdrawn} />
+      ) : open === "Yours" || open === "SomeoneElse" ? null : (
+        <p>
+          {view.latest && view.latest.lifecycle !== "Published"
+            ? t("Latest change: ") + storeConfigurationStateLabel(view.latest.lifecycle)
+            : view.current
+              ? t("No pending change. Customers see the published hours.")
+              : t("No published hours yet.")}
+        </p>
+      )}
       {open === "SomeoneElse" && view.latest && (
         <section aria-label={t("Change waiting from someone else")}>
           <p>
@@ -903,14 +903,15 @@ export function withdrawalSentence(
   withdrawal: NonNullable<StoreConfigurationView["latestWithdrawal"]>,
   time: string,
 ): string {
+  // Batch 48: the only line about the latest change, so it names the change as well.
   const when =
     withdrawal.kind === "Withdrawn"
       ? withdrawal.byYou
-        ? t("You withdrew it on {time}.", { time })
-        : t("The person who made it withdrew it on {time}.", { time })
+        ? t("You withdrew your change on {time}.", { time })
+        : t("The person who made the latest change withdrew it on {time}.", { time })
       : withdrawal.byYou
-        ? t("You declined it on {time}.", { time })
-        : t("It was declined on {time}.", { time });
+        ? t("You declined the latest change on {time}.", { time })
+        : t("Someone with approval access declined the latest change on {time}.", { time });
   const reason = withdrawal.reason
     ? t("Reason: {reason}.", { reason: storeConfigurationDeclineReasonText[withdrawal.reason] })
     : null;

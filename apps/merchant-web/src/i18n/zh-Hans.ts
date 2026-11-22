@@ -2155,12 +2155,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "开票方、门店、单号、开票时间、商品、小计、折扣、费用、税、小费、合计、付款状态和已退款合计。尚未经过专业和法律审核。",
   "It could not be checked right now. If an action is refused, sign in again.":
     "目前无法检查。如果操作被拒绝，请重新登录。",
-  "It has been approved and can now be published. Customers see the new hours once it is published.":
-    "它已被批准，现在可以发布。发布后顾客会看到新的营业时间。",
-  "It has been sent for approval and is waiting for an Owner to approve it.":
-    "它已提交审批，正在等待店主批准。",
-  "It has been sent for approval. You can approve or decline it.":
-    "它已提交审批。你可以批准或拒绝。",
   "It has left the kitchen board. Its ingredients are recorded as used. The order and its payment are unchanged.":
     "它已从后厨看板移除。配料已记为已使用。订单及其付款不变。",
   "It has left the kitchen board. Nothing is recorded as used. The order and its payment are unchanged — cancel or refund it in Orders if the guest should get money back.":
@@ -4551,8 +4545,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这一轮是店员录入的，还没有人记录它的刷卡机收款。",
   "Cancelling means it never goes to the kitchen and its items go back to stock. If the card machine was charged for it, don't cancel: choose “Keep round”, then “Record card-machine payment”, so the kitchen makes it.":
     "取消后这一轮不会送去厨房，菜品退回库存。如果刷卡机已经为它收过款，请不要取消：点“保留这一轮”，再点“记录刷卡机付款”记下这笔收款，后厨才会制作。",
-  "The change was declined. The next change starts from the published hours.":
-    "更改已被拒绝。下一项更改将基于已发布的营业时间。",
   "The change was refused because the input is invalid.": "输入无效，更改被拒绝。",
   "The change was refused. No role or permission outcome was inferred.":
     "更改被拒绝。未推断任何角色或权限结果。",
@@ -5476,7 +5468,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Withdraw request": "撤回申请",
   "Withdraw to make changes": "撤回以修改",
   "Withdraw version {configurationVersion}": "撤回版本 {configurationVersion}",
-  "Withdrawn by the person who made it": "已由提出更改的人撤回",
   "Withdrawn, will not be published": "已撤回，不会发布",
   "Withdrawn. Edit the new draft and submit it for review again.":
     "已撤回。请编辑新草稿并重新提交审核。",
@@ -5581,8 +5572,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Your PIN is set.": "你的 PIN 已设置。",
   "Your PIN was reset. Set a new one.": "你的 PIN 已被重置。请设置新的 PIN。",
   "Your change waiting": "你的更改在等待",
-  "Your change was withdrawn. The next change starts from the published hours.":
-    "你的更改已撤回。下一项更改将基于已发布的营业时间。",
   "Your check of the refund is recorded. Refresh the page to see whether the case is closed.":
     "你对退款的核对已记录。刷新页面查看案件是否已关闭。",
   "Your configuration waiting": "你的配置在等待",
@@ -6113,12 +6102,20 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{value}. Don't serve it until the kitchen marks the remake done; tell the guest it's being remade.":
     "{value}。后厨标记重做完成前不要上桌；请告诉顾客正在重做。",
   "{value}. Sub-recipes add their own.": "{value}。子配方会添加自己的过敏原。",
-  // Batch 47: who withdrew or declined the latest hours change and when, as whole sentences.
-  "You withdrew it on {time}.": "你已于 {time} 撤回。",
-  "The person who made it withdrew it on {time}.": "提出更改的人已于 {time} 撤回。",
-  "You declined it on {time}.": "你已于 {time} 拒绝。",
-  "It was declined on {time}.": "已于 {time} 被拒绝。",
+  // Batch 47/48: who withdrew or declined the latest hours change and when, as whole sentences.
+  "You withdrew your change on {time}.": "你已于 {time} 撤回你的更改。",
+  "The person who made the latest change withdrew it on {time}.":
+    "提出最近更改的人已于 {time} 撤回。",
+  "You declined the latest change on {time}.": "你已于 {time} 拒绝最近的更改。",
+  "Someone with approval access declined the latest change on {time}.":
+    "有审批权限的人已于 {time} 拒绝最近的更改。",
   "Reason: {reason}.": "原因：{reason}。",
+  // Batch 48: the latest change is described once; these say only what comes next.
+  "Your change was withdrawn.": "你的更改已撤回。",
+  "The change was declined.": "更改已被拒绝。",
+  "You can approve or decline it.": "你可以批准或拒绝。",
+  "Only an Owner can approve it.": "只有店主可以批准。",
+  "Customers see the new hours once it is published.": "发布后顾客会看到新的营业时间。",
   "The next change starts from the published hours.": "下一项更改将基于已发布的营业时间。",
   "{value}: the card provider couldn't confirm the guest's payment (due by {payBy}), so it wasn't cancelled automatically. Ask the guest whether their card was charged. If it wasn't, cancel the round; a charge that still comes through is refunded automatically.":
     "{value}：发卡方无法确认顾客的付款（截止 {payBy}），因此没有自动取消。请问顾客卡上是否已扣款。如未扣款，请取消这一轮；之后仍到账的扣款会自动退回。",

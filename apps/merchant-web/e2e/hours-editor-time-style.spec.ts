@@ -192,14 +192,16 @@ for (const language of ["en", "zh-Hans"] as const) {
           "时间使用北美东部时间（多伦多、渥太华和蒙特利尔）。营业日从 4:00 开始。",
         );
         expect(text).toContain("日期使用北美东部时间（多伦多、渥太华和蒙特利尔）。");
-        expect(text).toContain("你已于 11月16日 5:17 撤回。下一项更改将基于已发布的营业时间。");
+        expect(text).toContain(
+          "你已于 11月16日 5:17 撤回你的更改。下一项更改将基于已发布的营业时间。",
+        );
         expect(text).not.toContain("它已被");
       } else {
         expect(text).toContain(
           "Times are in Eastern Time (Toronto, Ottawa and Montréal). The business day starts at 4:00\u00a0a.m.",
         );
         expect(text).toContain(
-          "You withdrew it on Nov 16, 5:17\u00a0a.m. The next change starts from the published hours.",
+          "You withdrew your change on Nov 16, 5:17\u00a0a.m. The next change starts from the published hours.",
         );
         expect(text).not.toContain("AM");
       }

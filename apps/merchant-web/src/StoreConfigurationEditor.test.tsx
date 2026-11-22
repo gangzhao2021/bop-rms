@@ -322,9 +322,10 @@ it("shows another person's open change, blocks saving over it and offers to decl
   // v15 D9: no decline offered unless the server says you may decline.
   expect(html).not.toContain("Decline this change");
   // v15: sent for approval, so no draft-only wording.
-  expect(html).toContain(
-    "It has been sent for approval and is waiting for an Owner to approve it.",
-  );
+  // Batch 48: its state is said once, beside its version; then only what can happen next.
+  expect(html).toContain("Only an Owner can approve it.");
+  expect(html).not.toContain("It has been sent for approval");
+  expect(html).not.toContain("Latest change:");
   expect(html).not.toContain("can check it or send it");
   expect(html).toMatch(/<button type="submit" disabled="">Save hours draft<\/button>/u);
   expect(findInternalText([staticText(html)])).toEqual([]);
@@ -357,7 +358,9 @@ it("shows another person's open change, blocks saving over it and offers to decl
       />
     </MemoryRouter>,
   );
-  expect(closed).toContain("Latest change: Declined");
+  // Batch 48: said once, by who and when, never also as "Latest change: Declined".
+  expect(closed).toContain("You declined the latest change on ");
+  expect(closed).not.toContain("Latest change:");
   expect(closed).not.toContain("Approve reviewed configuration");
   // A malformed withdrawal is refused.
   expect(() =>
@@ -425,7 +428,7 @@ it("WP-2423 v15: names who made the open change, and declining it is confirmed w
     </MemoryRouter>,
   );
   expect(closed).toContain(
-    'It was declined on <time dateTime="2026-08-15T14:00:00.000Z" title="2026-08-15T14:00:00.000Z">Aug 15, 2:00\u00a0PM UTC</time>. Reason: Talk to me before changing this. The next change starts from the published hours.',
+    'Someone with approval access declined the latest change on <time dateTime="2026-08-15T14:00:00.000Z" title="2026-08-15T14:00:00.000Z">Aug 15, 2:00\u00a0PM UTC</time>. Reason: Talk to me before changing this. The next change starts from the published hours.',
   );
   expect(() =>
     parseStoreConfigurationView(
@@ -714,17 +717,16 @@ it("v15: someone else's change is described from its current state", () => {
     "Only Mia can check it or send it for approval. Ask an Owner to approve or decline it.",
   );
   const pendingOwner = render("PendingApproval", true);
-  expect(pendingOwner).toContain("It has been sent for approval. You can approve or decline it.");
+  expect(pendingOwner).toContain("waiting for approval) is still open");
+  expect(pendingOwner).toContain("You can approve or decline it.");
   expect(pendingOwner).toContain("Approve reviewed configuration");
   expect(pendingOwner).not.toContain("Only Mia can check it");
   const pendingManager = render("PendingApproval", false);
-  expect(pendingManager).toContain(
-    "It has been sent for approval and is waiting for an Owner to approve it.",
-  );
+  expect(pendingManager).toContain("Only an Owner can approve it.");
   expect(pendingManager).not.toContain("Approve reviewed configuration");
   const approved = render("Approved", true);
   expect(approved).toContain(
-    "A new change cannot be saved until it is published, or declined. It has been approved and can now be published. Customers see the new hours once it is published.",
+    "A new change cannot be saved until it is published, or declined. Customers see the new hours once it is published.",
   );
   expect(approved).not.toContain("Only Mia can check it");
   expect(approved).not.toContain("once it is sent");
@@ -739,7 +741,7 @@ it("batch 47: the withdrawal line is one whole sentence per language, never Engl
     byYou: true,
   };
   expect(withdrawalSentence(withdrawn, "Nov 16, 5:17\u00a0a.m.")).toBe(
-    "You withdrew it on Nov 16, 5:17\u00a0a.m. The next change starts from the published hours.",
+    "You withdrew your change on Nov 16, 5:17\u00a0a.m. The next change starts from the published hours.",
   );
   expect(
     withdrawalSentence(
@@ -747,20 +749,95 @@ it("batch 47: the withdrawal line is one whole sentence per language, never Engl
       "Nov 16, 5:17\u00a0a.m.",
     ),
   ).toBe(
-    "It was declined on Nov 16, 5:17\u00a0a.m. Reason: It is not needed. The next change starts from the published hours.",
+    "Someone with approval access declined the latest change on Nov 16, 5:17\u00a0a.m. Reason: It is not needed. The next change starts from the published hours.",
   );
   setLanguageForTest("zh-Hans");
   try {
     expect(withdrawalSentence(withdrawn, "11月16日 5:17")).toBe(
-      "你已于 11月16日 5:17 撤回。下一项更改将基于已发布的营业时间。",
+      "你已于 11月16日 5:17 撤回你的更改。下一项更改将基于已发布的营业时间。",
     );
     expect(withdrawalSentence({ ...withdrawn, byYou: false }, "11月16日 5:17")).toBe(
-      "提出更改的人已于 11月16日 5:17 撤回。下一项更改将基于已发布的营业时间。",
+      "提出最近更改的人已于 11月16日 5:17 撤回。下一项更改将基于已发布的营业时间。",
     );
     expect(withdrawalSentence({ ...withdrawn, kind: "Declined" }, "11月16日 5:17")).toBe(
-      "你已于 11月16日 5:17 拒绝。下一项更改将基于已发布的营业时间。",
+      "你已于 11月16日 5:17 拒绝最近的更改。下一项更改将基于已发布的营业时间。",
     );
   } finally {
     setLanguageForTest("en");
+  }
+});
+
+it("batch 48: each latest-change state is said once, in one voice, in English and Chinese", () => {
+  // v15 b47 live: "Latest change: Withdrawn by the person who made it" stood above "You withdrew it
+  // on Nov 16, 5:17 a.m."; an open change also said its state in the line and again in its section.
+  const render = (
+    lifecycle: "Draft" | "PendingApproval" | "Approved" | "Published",
+    viewer: number,
+    withdrawal: null | { kind: "Withdrawn" | "Declined"; byYou: boolean } = null,
+  ) => {
+    const base = hoursView({ ...configuration(lifecycle), authoredByReference: id(40) });
+    const view = parseStoreConfigurationView(
+      {
+        ...base,
+        viewerActorReference: id(viewer),
+        latestWithdrawal:
+          withdrawal === null ? null : { ...withdrawal, withdrawnAt: "2026-11-16T10:17:00.000Z" },
+      },
+      id(3),
+    );
+    return staticText(
+      renderToStaticMarkup(
+        <MemoryRouter>
+          <StoreHoursDraftForm
+            view={view}
+            draft={storeConfigurationEditBase(view) as NonNullable<typeof view.current>}
+            disabled={false}
+            onDraftChange={() => undefined}
+            onCommand={() => undefined}
+            onWithdraw={() => undefined}
+          />
+        </MemoryRouter>,
+      ),
+    ).replace(/\s+/gu, " ");
+  };
+  const count = (text: string, part: string) =>
+    text.toLowerCase().split(part.toLowerCase()).length - 1;
+  for (const zh of [false, true]) {
+    setLanguageForTest(zh ? "zh-Hans" : "en");
+    try {
+      const latest = zh ? "最近更改：" : "Latest change:";
+      for (const lifecycle of ["Draft", "PendingApproval", "Approved"] as const)
+        for (const viewer of [40, 10]) {
+          const text = render(lifecycle, viewer);
+          // Yours or someone else's: its section says the state, so no state line above it.
+          expect(count(text, latest)).toBe(0);
+          expect(count(text, storeConfigurationStateLabel(lifecycle))).toBe(1);
+        }
+      const withdrawn = render("PendingApproval", 40, { kind: "Withdrawn", byYou: true });
+      expect(count(withdrawn, latest)).toBe(0);
+      expect(count(withdrawn, zh ? "撤回" : "withdr")).toBe(1);
+      expect(withdrawn).toContain(zh ? "撤回你的更改。" : "You withdrew your change on ");
+      const theirs = render("PendingApproval", 10, { kind: "Withdrawn", byYou: false });
+      expect(count(theirs, zh ? "撤回" : "withdr")).toBe(1);
+      expect(theirs).toContain(
+        zh ? "提出最近更改的人已于" : "The person who made the latest change withdrew it on",
+      );
+      for (const byYou of [true, false]) {
+        const declined = render("PendingApproval", 10, { kind: "Declined", byYou });
+        expect(count(declined, latest)).toBe(0);
+        expect(count(declined, zh ? "拒绝" : "declined")).toBe(1);
+      }
+      // Published, or replaced by a newer version: one line, nothing else about it.
+      const published = render("Published", 40);
+      expect(count(published, latest)).toBe(0);
+      expect(
+        count(
+          published,
+          zh ? "没有待处理的更改" : "No pending change. Customers see the published hours.",
+        ),
+      ).toBe(1);
+    } finally {
+      setLanguageForTest("en");
+    }
   }
 });
