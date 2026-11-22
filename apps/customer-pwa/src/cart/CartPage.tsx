@@ -982,6 +982,11 @@ function CartContent({
         <p>{commonText.checkingYourCart}</p>
       </StateMessage>
     );
+  // Batch 49 (v15 b48 live): the table is checking out or paid. The cart read before that is
+  // kept for when staff cancel checkout, but none of it is shown: no dishes, summary, shopping
+  // buttons or "nothing is charged now". A Cart left open shows what one opened now shows.
+  if (state.status === "table-checking-out")
+    return <ErrorState state={state} controller={controller} />;
   if (
     state.status === "empty" ||
     (state.status === "ready" &&
@@ -1572,7 +1577,8 @@ function OpenCartPage({
   }, []);
   const timing = useTablePaymentTiming(cart?.orderType === "DineIn", diningClient);
   // Batch 48: the status says what the card says (paying the bill, or paid), never "checking out".
-  const tableCheckout = useTableCheckout(state.status === "table-checking-out");
+  const checkingOut = state.status === "table-checking-out";
+  const tableCheckout = useTableCheckout(checkingOut);
   // WP-2423 price-hold-dish-changes (DEC-PRICE-HOLD, M74): at a table that orders from the cart,
   // the cart on screen is the guest's checkout. Once per cart version it is priced, so the Store
   // keeps that price for the guest and says what changed since each dish was first priced (after
@@ -1781,13 +1787,13 @@ function OpenCartPage({
             onRetry={() => place("cart" in state ? state.cart : null, null)}
           />
         ) : null}
-        {lastOrder === null ? null : (
+        {lastOrder === null || checkingOut ? null : (
           <LastOrderPlaced
             held={lastOrder.held}
             cartHoldsMore={lastOrder.cartRead && (cart?.items.length ?? 0) > 0}
           />
         )}
-        {cart?.tablePay !== undefined && timing !== "PayLater" ? (
+        {cart?.tablePay !== undefined && timing !== "PayLater" && !checkingOut ? (
           <TableWaitingDishes tablePay={cart.tablePay} />
         ) : null}
         <TableSettling.Provider value={tableSettling}>
