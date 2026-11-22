@@ -253,14 +253,16 @@ for (const [surface, operator] of [
       await searchFor(page, false, "3");
       await expectSearchKept(page, display, false, width, `${width} en`);
       // English → 中文: the reload brings the search back.
-      await chooseLanguage(page, "zh-Hans");
+      // The switch reloads the page: wait for the reload before reading it.
+      await Promise.all([page.waitForEvent("load"), chooseLanguage(page, "zh-Hans")]);
       await atTop(page, width, height);
       await expectSearchKept(page, display, true, width, `${width} en→zh-Hans`);
       await page.screenshot({
         path: `test-results/b46-search-kept-${operator}-${width}-zh-Hans.png`,
       });
       // 中文 → English: still there.
-      await chooseLanguage(page, "en");
+      // The switch reloads the page: wait for the reload before reading it.
+      await Promise.all([page.waitForEvent("load"), chooseLanguage(page, "en")]);
       await atTop(page, width, height);
       await expectSearchKept(page, display, false, width, `${width} zh-Hans→en`);
       await page.screenshot({ path: `test-results/b46-search-kept-${operator}-${width}-en.png` });

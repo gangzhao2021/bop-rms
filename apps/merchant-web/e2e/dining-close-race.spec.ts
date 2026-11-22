@@ -286,6 +286,9 @@ for (const language of ["en", "zh-Hans"] as const)
     test.setTimeout(30_000);
     const zh = language === "zh-Hans";
     const { other } = await racedFloor(page, "EmptyTable", language, { closes: false });
+    // On a phone in Chinese, on a wide screen in English.
+    const width = zh ? 390 : 1440;
+    await page.setViewportSize({ width, height: zh ? 844 : 900 });
     await page.goto("/operations/dining");
     await page.getByRole("button", { name: zh ? `选择 ${label}` : `Select ${label}` }).click();
     await page
@@ -309,4 +312,17 @@ for (const language of ["en", "zh-Hans"] as const)
     await page.waitForTimeout(1_500);
     expect(other.readsAfterRefusal).toBe(reads);
     await expect(page.getByText(zh ? /付款或退款/u : /payment or refund/u)).toHaveCount(0);
+    // The table is still open, so Close can be pressed again once staff have looked.
+    await expect(
+      page.getByRole("button", { name: zh ? /^关闭 TL45/u : /^Close TL45/u }),
+    ).toBeEnabled();
+    const box = await alert.evaluate((node) => node.getBoundingClientRect().toJSON() as DOMRect);
+    expect(box.left).toBeGreaterThanOrEqual(16);
+    expect(box.right).toBeLessThanOrEqual(width - 16);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await alert.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `test-results/b46-close-race-changed-${language}-${width}.png` });
+    await expectNoInternalText(page);
   });
