@@ -357,6 +357,27 @@ describe("WP-2423 item 8 ② tonight's closing summary", () => {
     expect(closingReminderPhase(before, at)).toBe("AfterClosing");
     expect(storeClosingNow(before, at)).toBe(true);
   });
+  it("batch 47 review: says nothing about closing to a Store open all day as its day ends", () => {
+    // Test Merchant 2 as the business day read now gives it: the day's closing is capped at the
+    // end of the business day (04:00 Toronto, 09:00Z), so closing and the day's end are the same.
+    const day = {
+      endsAt: "2026-11-24T09:00:00.000Z",
+      closesAt: "2026-11-24T09:00:00.000Z",
+      closedToday: false,
+    };
+    for (const instant of [
+      "2026-11-24T05:00:00.000Z",
+      "2026-11-24T08:00:00.000Z",
+      "2026-11-24T08:30:00.000Z",
+      "2026-11-24T08:59:00.000Z",
+    ])
+      expect(closingReminderPhase(day, Date.parse(instant))).toBe("Hidden");
+    // A Store that does close before the day ends is still reminded.
+    const closes = { ...day, closesAt: "2026-11-24T08:30:00.000Z" };
+    expect(closingReminderPhase(closes, Date.parse("2026-11-24T08:00:00.000Z"))).toBe(
+      "BeforeClosing",
+    );
+  });
 });
 
 describe("M117: after the Store closes, before the business day ends", () => {
