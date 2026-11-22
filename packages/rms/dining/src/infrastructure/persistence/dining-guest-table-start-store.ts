@@ -14,7 +14,11 @@ import {
   type DiningSessionStartCredentials,
 } from "../../application/dining-session-service.js";
 import { parseDiningPaymentTiming } from "../../domain/dining-payment-timing.js";
-import { captureSessionData } from "../../application/dining-session-snapshot.js";
+import {
+  captureSessionData,
+  DiningJoinCodeInUse,
+  diningJoinCodeAttempts,
+} from "../../application/dining-session-snapshot.js";
 import { createPostgresDiningSessionStartStore } from "./dining-session-start-store.js";
 import type {
   DiningTableStoreScope,
@@ -536,42 +540,58 @@ export function createPostgresDiningGuestTableStartStore(
           });
         }
         const operationReference = options.newReference();
-        const started = buildDiningSessionStartRecord({
-          credentials: options.credentials,
-          pepperVersion: options.pepperVersion,
-          brandReference: brand,
-          storeReference: store,
-          tableReference: table,
-          assignmentVersion: free.aggregateVersion,
-          actorReference: guest,
-          operationReference,
-          joinKind: "HumanCode",
-          requestedAt: instant,
-        });
-        await createPostgresDiningSessionStartStore(
+        const draw = () =>
+          buildDiningSessionStartRecord({
+            credentials: options.credentials,
+            pepperVersion: options.pepperVersion,
+            brandReference: brand,
+            storeReference: store,
+            tableReference: table,
+            assignmentVersion: free.aggregateVersion,
+            actorReference: guest,
+            operationReference,
+            joinKind: "HumanCode",
+            requestedAt: instant,
+          });
+        const starts = createPostgresDiningSessionStartStore(
           { run: (work) => work(tx) },
           { tenantReference: tenant, brandReference: brand, storeReference: store },
           options.credentials,
-        ).start({
-          record: started.record,
-          expectedAssignmentVersion: free.aggregateVersion,
-          audit: {
-            auditId: options.newReference(),
-            brandId: brand,
-            storeId: store,
-            actor: { type: "System" },
-            actionCode: "DINING_SESSION_START",
-            targetType: "DiningTable",
-            targetId: table,
-            reasonCode: guestTableStartAuditReason,
-            correlationId: operationReference,
-            occurredAt: instant,
-            sourceChannel: "CUSTOMER_PWA",
-            dataClassification: "Restricted",
-            retentionPolicyCode: options.retentionPolicyCode,
-            retentionPolicyVersion: options.retentionPolicyVersion,
-          },
-        });
+        );
+        const startWith = (drawn: ReturnType<typeof draw>) =>
+          starts.start({
+            record: drawn.record,
+            expectedAssignmentVersion: free.aggregateVersion,
+            audit: {
+              auditId: options.newReference(),
+              brandId: brand,
+              storeId: store,
+              actor: { type: "System" },
+              actionCode: "DINING_SESSION_START",
+              targetType: "DiningTable",
+              targetId: table,
+              reasonCode: guestTableStartAuditReason,
+              correlationId: operationReference,
+              occurredAt: instant,
+              sourceChannel: "CUSTOMER_PWA",
+              dataClassification: "Restricted",
+              retentionPolicyCode: options.retentionPolicyCode,
+              retentionPolicyVersion: options.retentionPolicyVersion,
+            },
+          });
+        // WP-2423 (join-code-unique): the first code is never one another open table's guest
+        // could present now; the start store found it in use and wrote nothing, so draw again.
+        let started = draw();
+        for (let attempt = 1; ; attempt += 1) {
+          try {
+            await startWith(started);
+            break;
+          } catch (error) {
+            if (!(error instanceof DiningJoinCodeInUse)) throw error;
+            if (attempt >= diningJoinCodeAttempts) return fail();
+          }
+          started = draw();
+        }
         const inserted = (await tx.query(
           "INSERT INTO rms_dining.dining_session_guest_start (tenant_id,brand_id,store_id,session_id,table_id,guest_session_id,operation_id,service_setting_version,started_at,ended_session_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
           [

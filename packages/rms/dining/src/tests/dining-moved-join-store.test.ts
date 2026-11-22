@@ -3,6 +3,7 @@ import {
   reissueDiningJoinCapabilityAfterMove,
 } from "@bop/public-capability";
 import { movedJoinAssignment } from "../application/dining-moved-join-record.js";
+import { DiningJoinCodeInUse } from "../application/dining-session-snapshot.js";
 import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -179,6 +180,8 @@ function fixture() {
   };
   const query = vi.fn<(sql: string, values: readonly unknown[]) => Promise<unknown>>(
     async (sql) => {
+      // No other open table's guest holds this code now.
+      if (sql.startsWith("SELECT 1 AS taken")) return { rows: [] };
       if (sql.includes("FROM rms_dining.dining_session s"))
         return { rows: [{ session: move.session, capability: current, move }] };
       if (sql.includes("FROM rms_dining.dining_table "))
@@ -265,7 +268,22 @@ describe("Dining Move-backed fresh Join persistence", () => {
     expect(locks).toEqual([
       `DiningJoinRegeneration:${id(1)}:${id(2)}:${id(3)}:${id(22)}`,
       `DiningTable:${id(1)}:${id(2)}:${id(3)}:${id(6)}`,
+      `DiningJoinCode:${id(1)}:${id(2)}:${id(3)}:${x.input.replacement.selectorHash}`,
     ]);
+  });
+  it("writes nothing and asks for another code when another open table's guest holds this one", async () => {
+    const x = fixture();
+    const handler = x.query.getMockImplementation();
+    if (!handler) throw new Error("fixture missing query");
+    x.query.mockImplementation(async (sql, values) =>
+      sql.startsWith("SELECT 1 AS taken") ? { rows: [{ taken: 1 }] } : handler(sql, values),
+    );
+    await expect(x.store.reissueAfterMove(x.input)).rejects.toBeInstanceOf(DiningJoinCodeInUse);
+    expect(
+      x.query.mock.calls.every(
+        ([sql]) => sql.startsWith("SELECT") && !sql.includes("audit_chain_head"),
+      ),
+    ).toBe(true);
   });
   it("converges to original history without another write", async () => {
     const x = fixture();

@@ -9,8 +9,10 @@ import { createDiningTable } from "../../domain/dining-table.js";
 import { parseStaffRegenerationRecord } from "../../application/dining-staff-record.js";
 import {
   captureSessionData,
+  DiningJoinCodeInUse,
   sessionDependency,
 } from "../../application/dining-session-snapshot.js";
+import { diningJoinCodeInUse } from "./dining-session-start-store.js";
 import type {
   DiningCredentialPort,
   DiningSessionStorePort,
@@ -61,6 +63,7 @@ function reference(value: unknown) {
   }
 }
 function failure(error: unknown): never {
+  if (error instanceof DiningJoinCodeInUse) throw error;
   if (
     error instanceof DiningSessionError &&
     ["DINING_SESSION_VERSION_CONFLICT", "DINING_SESSION_IDEMPOTENCY_CONFLICT"].includes(error.code)
@@ -314,6 +317,15 @@ export function createPostgresDiningJoinRegenerationStore(
           }
           if (!same(transition.previous, old) || !same(transition.current, record.capability))
             return conflict();
+          // WP-2423 (join-code-unique): never a code another open table's guest could present now.
+          if (
+            await diningJoinCodeInUse(
+              tx,
+              { tenant, brand, store },
+              String(record.capability.selectorHash),
+            )
+          )
+            throw new DiningJoinCodeInUse();
           if (current.status === "Active")
             changed(
               await tx.query(

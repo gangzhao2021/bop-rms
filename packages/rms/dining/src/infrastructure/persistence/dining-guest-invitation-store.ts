@@ -29,7 +29,11 @@ import {
   type DiningGuestInvitationCommand,
   type DiningGuestInvitationRefusal,
 } from "../../domain/dining-guest-invitation.js";
-import { captureSessionData } from "../../application/dining-session-snapshot.js";
+import {
+  captureSessionData,
+  diningJoinCodeAttempts,
+} from "../../application/dining-session-snapshot.js";
+import { diningJoinCodeInUse } from "./dining-session-start-store.js";
 import type { DiningCredentialPort } from "../../application/ports/dining-session-ports.js";
 import {
   createPostgresDiningParticipantFence,
@@ -321,17 +325,30 @@ export function createPostgresDiningGuestInvitationStore(
             return refused("TableChanged", null);
           const observedAt = accepted.observedAt;
           if (String(latest.issuedAt) > observedAt) return fail();
-          const raw = credentials.generateJoinCredential(latest.kind);
-          const joinCredential =
-            latest.kind === "Invitation"
-              ? parseDiningJoinInvitationCredential(raw)
-              : parseDiningJoinHumanCode(raw);
+          // WP-2423 (join-code-unique): never the table's previous code, nor a code another open
+          // table's guest could present now (six digits repeat); draw again, then an outage.
+          let joinCredential: DiningJoinInvitationCredential | DiningJoinHumanCode;
+          let selectorHash: string;
+          for (let attempt = 1; ; attempt += 1) {
+            const raw = credentials.generateJoinCredential(latest.kind);
+            joinCredential =
+              latest.kind === "Invitation"
+                ? parseDiningJoinInvitationCredential(raw)
+                : parseDiningJoinHumanCode(raw);
+            selectorHash = String(credentials.hashJoinCredential(latest.kind, joinCredential));
+            if (
+              selectorHash !== String(latest.selectorHash) &&
+              !(await diningJoinCodeInUse(tx, { tenant, brand, store }, selectorHash))
+            )
+              break;
+            if (attempt >= diningJoinCodeAttempts) return fail();
+          }
           const replacement = parseDiningJoinCapability({
             ...latest,
             capabilityReference: parsePublicCapabilityReference(
               credentials.generateReference("JoinCapability"),
             ),
-            selectorHash: credentials.hashJoinCredential(latest.kind, joinCredential),
+            selectorHash,
             pepperVersion: options.pepperVersion,
             generation: latest.generation + 1,
             status: "Active",

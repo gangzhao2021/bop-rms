@@ -1,4 +1,9 @@
-import { captureSessionData, sessionDependency } from "./dining-session-snapshot.js";
+import {
+  captureSessionData,
+  DiningJoinCodeInUse,
+  diningJoinCodeAttempts,
+  sessionDependency,
+} from "./dining-session-snapshot.js";
 import { parseDiningJoinRecord } from "./dining-join-record.js";
 import { parseStaffStartRecord, parseStaffRegenerationRecord } from "./dining-staff-record.js";
 import { movedJoinAssignment, parseMovedJoinState } from "./dining-moved-join-record.js";
@@ -254,6 +259,27 @@ async function sessionAsync<T>(action: () => Promise<T>): Promise<T> {
     return await action();
   } catch (error) {
     return storeFailure(error);
+  }
+}
+
+/**
+ * WP-2423 (join-code-unique): issue a code, drawing a fresh one (`draw`) each time the store finds
+ * the drawn code in use at the Store (it wrote nothing); bounded, then an outage.
+ */
+async function issueFreshCode<D, T>(
+  draw: () => D | null,
+  write: (drawn: D) => Promise<T>,
+): Promise<Readonly<{ drawn: D; persisted: T }>> {
+  for (let attempt = 1; ; attempt += 1) {
+    const drawn = draw();
+    if (drawn !== null) {
+      try {
+        return Object.freeze({ drawn, persisted: await write(drawn) });
+      } catch (error) {
+        if (!(error instanceof DiningJoinCodeInUse)) return storeFailure(error);
+      }
+    }
+    if (attempt >= diningJoinCodeAttempts) return sessionDependency();
   }
 }
 
@@ -684,24 +710,29 @@ export function createDiningSessionService(ports: DiningSessionPorts) {
       ) {
         throw new DiningSessionError("DINING_SESSION_UNAVAILABLE");
       }
-      const { record: generated, joinCredential } = buildDiningSessionStartRecord({
-        credentials: ports.credentials,
-        pepperVersion: ports.pepperVersion,
-        brandReference: staff.table.brandReference,
-        storeReference: staff.table.storeReference,
-        tableReference: staff.table.tableReference,
-        assignmentVersion: staff.table.assignmentVersion,
-        actorReference: staff.actorReference,
-        operationReference,
-        joinKind,
-        requestedAt,
-      });
-      const persistedValue = await sessionAsync(() =>
-        ports.store.start({
-          record: generated,
-          expectedAssignmentVersion,
-          audit: staff.audit,
-        }),
+      const {
+        drawn: { record: generated, joinCredential },
+        persisted: persistedValue,
+      } = await issueFreshCode(
+        () =>
+          buildDiningSessionStartRecord({
+            credentials: ports.credentials,
+            pepperVersion: ports.pepperVersion,
+            brandReference: staff.table.brandReference,
+            storeReference: staff.table.storeReference,
+            tableReference: staff.table.tableReference,
+            assignmentVersion: staff.table.assignmentVersion,
+            actorReference: staff.actorReference,
+            operationReference,
+            joinKind,
+            requestedAt,
+          }),
+        (drawn) =>
+          ports.store.start({
+            record: drawn.record,
+            expectedAssignmentVersion,
+            audit: staff.audit,
+          }),
       );
       const persisted = parseStaffStartRecord(persistedValue, scope);
       if (
@@ -841,38 +872,46 @@ export function createDiningSessionService(ports: DiningSessionPorts) {
       ) {
         throw new DiningSessionError("DINING_SESSION_UNAVAILABLE");
       }
-      const joinCredential = sessionPort(() =>
-        rawCredential(previous.kind, ports.credentials.generateJoinCredential(previous.kind)),
-      );
-      const replacement = sessionPort(() =>
-        parseDiningJoinCapability({
-          ...previous,
-          tableReference: session.tableReference,
-          assignmentVersion: session.tableAssignmentVersion,
-          pepperVersion: ports.pepperVersion,
-          capabilityReference: ports.credentials.generateReference("JoinCapability"),
-          selectorHash: ports.credentials.hashJoinCredential(previous.kind, joinCredential),
-          generation: previous.generation + 1,
-          status: "Active",
-          version: 1,
-          issuedAt: requestedAt,
-          expiresAt: plus(requestedAt, fifteenMinutes),
-          consumedAt: null,
-          revokedAt: null,
-        }),
-      );
-      const transition = sessionPort(() =>
-        moved === null
-          ? regenerateDiningJoinCapability({ previous, replacement, observedAt: requestedAt })
-          : reissueDiningJoinCapabilityAfterMove({
-              previous,
-              replacement,
-              assignment: movedJoinAssignment(moved.move),
-              currentPepperVersion: ports.pepperVersion,
-              observedAt: requestedAt,
-            }),
-      );
-      const persistedValue = await sessionAsync(() =>
+      const draw = () => {
+        const joinCredential = sessionPort(() =>
+          rawCredential(previous.kind, ports.credentials.generateJoinCredential(previous.kind)),
+        );
+        const replacement = sessionPort(() =>
+          parseDiningJoinCapability({
+            ...previous,
+            tableReference: session.tableReference,
+            assignmentVersion: session.tableAssignmentVersion,
+            pepperVersion: ports.pepperVersion,
+            capabilityReference: ports.credentials.generateReference("JoinCapability"),
+            selectorHash: ports.credentials.hashJoinCredential(previous.kind, joinCredential),
+            generation: previous.generation + 1,
+            status: "Active",
+            version: 1,
+            issuedAt: requestedAt,
+            expiresAt: plus(requestedAt, fifteenMinutes),
+            consumedAt: null,
+            revokedAt: null,
+          }),
+        );
+        // The table's previous code again is never a new code: draw another.
+        if (String(replacement.selectorHash) === String(previous.selectorHash)) return null;
+        const transition = sessionPort(() =>
+          moved === null
+            ? regenerateDiningJoinCapability({ previous, replacement, observedAt: requestedAt })
+            : reissueDiningJoinCapabilityAfterMove({
+                previous,
+                replacement,
+                assignment: movedJoinAssignment(moved.move),
+                currentPepperVersion: ports.pepperVersion,
+                observedAt: requestedAt,
+              }),
+        );
+        return Object.freeze({ joinCredential, replacement, transition });
+      };
+      const {
+        drawn: { joinCredential, replacement },
+        persisted: persistedValue,
+      } = await issueFreshCode(draw, ({ transition }) =>
         moved !== null && movedPort !== undefined
           ? movedPort.reissueAfterMove({
               session,

@@ -10,6 +10,10 @@ import {
   type DiningSessionPorts,
   type DiningStartRecord,
 } from "../index.js";
+import {
+  DiningJoinCodeInUse,
+  diningJoinCodeAttempts,
+} from "../application/dining-session-snapshot.js";
 
 const ids = {
   actor: "018f2000-0000-7000-8000-000000000001",
@@ -1489,5 +1493,70 @@ describe("WP-2303 owner-selected current Join versions", () => {
       joinUnavailable,
     );
     expect(await f.service.joinCurrent(currentJoinInput)).toMatchObject({ status: "Joined" });
+  });
+});
+
+describe("WP-2423 join-code-unique: a fresh code is never one in use at the Store", () => {
+  it("draws another code when the store finds the first in use, and gives staff that one", async () => {
+    const { service, ports } = fixture();
+    const write = ports.store.start.bind(ports.store);
+    const start = vi
+      .spyOn(ports.store, "start")
+      .mockRejectedValueOnce(new DiningJoinCodeInUse())
+      .mockImplementation(write);
+    const started = await service.start({
+      tableReference: ids.table,
+      expectedAssignmentVersion: 7,
+      operationReference: ids.startOperation,
+      joinKind: "Invitation",
+      requestedAt: startAt,
+    });
+    expect(start).toHaveBeenCalledTimes(2);
+    expect(started).toMatchObject({
+      status: "Issued",
+      joinCredential: nextCredential,
+      capability: { selectorHash: hash("b") },
+    });
+  });
+  it("is an outage, never a refusal, once every draw is in use", async () => {
+    const { service, ports } = fixture();
+    vi.spyOn(ports.credentials, "generateJoinCredential").mockReturnValue(firstCredential as never);
+    const start = vi.spyOn(ports.store, "start").mockRejectedValue(new DiningJoinCodeInUse());
+    await expect(
+      service.start({
+        tableReference: ids.table,
+        expectedAssignmentVersion: 7,
+        operationReference: ids.startOperation,
+        joinKind: "Invitation",
+        requestedAt: startAt,
+      }),
+    ).rejects.toMatchObject({ code: "DINING_SESSION_DEPENDENCY_UNAVAILABLE" });
+    expect(start).toHaveBeenCalledTimes(diningJoinCodeAttempts);
+  });
+  it("never regenerates the table's previous code", async () => {
+    const { service, ports } = fixture();
+    await service.start({
+      tableReference: ids.table,
+      expectedAssignmentVersion: 7,
+      operationReference: ids.startOperation,
+      joinKind: "Invitation",
+      requestedAt: startAt,
+    });
+    vi.spyOn(ports.credentials, "generateJoinCredential")
+      .mockReturnValueOnce(firstCredential as never)
+      .mockReturnValueOnce(nextCredential as never);
+    const regenerate = vi.spyOn(ports.store, "regenerate");
+    const regenerated = await service.regenerate({
+      diningSessionReference: ids.session,
+      tableReference: ids.table,
+      expectedAssignmentVersion: 7,
+      expectedSessionVersion: 1,
+      expectedCapabilityVersion: 1,
+      expectedGeneration: 1,
+      operationReference: ids.regenerateOperation,
+      requestedAt: regenerateAt,
+    });
+    expect(regenerated).toMatchObject({ status: "Issued", joinCredential: nextCredential });
+    expect(regenerate).toHaveBeenCalledTimes(1);
   });
 });

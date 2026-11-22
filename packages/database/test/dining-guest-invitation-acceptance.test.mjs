@@ -134,10 +134,12 @@ it("lets the table Host invite the next guest with a one-time, scoped, expiring 
           },
         };
       }
+      // Codes queued by a case first (to force a repeat), then distinct six-digit ones.
+      const queued = [];
       const credentials = {
         generateReference: () => id(++sequence),
         // Six-digit table codes, as the pilot issues (HumanCode); distinct per issuance.
-        generateJoinCredential: () => String(++code),
+        generateJoinCredential: () => queued.shift() ?? String(++code),
         hashJoinCredential: (kind, value) =>
           createHmac("sha256", "synthetic-test-only-pepper")
             .update(`DiningJoin:${kind}:${value}`)
@@ -619,8 +621,13 @@ it("lets the table Host invite the next guest with a one-time, scoped, expiring 
       const secondId = second.session.diningSessionReference;
       const secondHost = (await join(second.joinCredential, 90, 60, 44)).participant
         .participantReference;
+      // WP-2423 (join-code-unique): the Host's invitation is never the table's previous code (the
+      // one the Host just joined with): it draws again instead of failing.
+      queued.push(second.joinCredential, "424242");
       const pending = await invite(secondHost, secondId, 180, 45);
       assert.equal(pending.status, "Issued");
+      assert.equal(pending.joinCredential, "424242");
+      assert.deepEqual(queued, []);
       const hashes = { hashIntent: digest, equals: (left, right) => left === right };
       const closingReader = createPostgresDiningClosingStore(
         runner({ readOnly: true }),

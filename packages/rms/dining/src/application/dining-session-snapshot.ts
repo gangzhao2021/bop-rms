@@ -4,6 +4,21 @@ export function sessionDependency(): never {
   throw new DiningSessionError("DINING_SESSION_DEPENDENCY_UNAVAILABLE");
 }
 
+/**
+ * WP-2423 (join-code-unique): a table code is six digits, so a fresh one can equal a code a guest
+ * could present now at another open table of the Store; the join would then match two visits and
+ * refuse the guest holding the right code. The store that issues a code finds this under its lock
+ * and throws this, having written nothing; the issuer draws another code. Internal to Dining: it
+ * never names the code, and after `diningJoinCodeAttempts` draws the issue is an outage.
+ */
+export class DiningJoinCodeInUse extends Error {
+  constructor() {
+    super("dining join code is in use");
+    this.name = "DiningJoinCodeInUse";
+  }
+}
+export const diningJoinCodeAttempts = 8;
+
 /** Capture only bounded plain data without invoking dependency accessors. */
 export function captureSessionData<T>(value: T): T {
   let count = 0;

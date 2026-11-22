@@ -9,6 +9,7 @@ import { guestTableStartAuditReason } from "../../domain/dining-guest-table-star
 import { parseStaffStartRecord } from "../../application/dining-staff-record.js";
 import {
   captureSessionData,
+  DiningJoinCodeInUse,
   sessionDependency,
 } from "../../application/dining-session-snapshot.js";
 import type {
@@ -76,12 +77,39 @@ function reference(value: unknown) {
   }
 }
 function failure(error: unknown): never {
+  if (error instanceof DiningJoinCodeInUse) throw error;
   if (
     error instanceof DiningSessionError &&
     ["DINING_SESSION_VERSION_CONFLICT", "DINING_SESSION_IDEMPOTENCY_CONFLICT"].includes(error.code)
   )
     throw new DiningSessionError(error.code);
   return sessionDependency();
+}
+
+/**
+ * WP-2423 (join-code-unique): whether a code being issued now equals one a guest could present
+ * now at this Store: an Active code of an open visit (Active, or Closing, which can go back to
+ * Active). Called inside the issuing transaction, under the table's lock, before anything is
+ * written. The code's selector is locked for the transaction first, so two tables issuing the same
+ * code at once are serialized and the second sees the first. Reads only the selector, never the
+ * code.
+ */
+export async function diningJoinCodeInUse(
+  tx: DiningTableTransaction,
+  scope: Readonly<{ tenant: string; brand: string; store: string }>,
+  selectorHash: string,
+): Promise<boolean> {
+  const { tenant, brand, store } = scope;
+  await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+    `DiningJoinCode:${tenant}:${brand}:${store}:${selectorHash}`,
+  ]);
+  const found = rows(
+    await tx.query(
+      "SELECT 1 AS taken FROM rms_dining.dining_join_capability c JOIN rms_dining.dining_session s ON s.tenant_id=c.tenant_id AND s.brand_id=c.brand_id AND s.store_id=c.store_id AND s.session_id=c.session_id WHERE c.tenant_id=$1 AND c.brand_id=$2 AND c.store_id=$3 AND c.capability_snapshot->>'selectorHash'=$4 AND c.status='Active' AND s.phase IN ('Active','Closing') LIMIT 1",
+      [tenant, brand, store, selectorHash],
+    ),
+  );
+  return found.length === 1;
 }
 
 /** Read-only Dining-owned Session lookup; callers still establish current authorization. */
@@ -303,6 +331,14 @@ export function createPostgresDiningSessionStartStore(
             return sessionDependency();
           if (current.aggregateVersion !== accepted.session.tableAssignmentVersion)
             throw new DiningSessionError("DINING_SESSION_VERSION_CONFLICT");
+          if (
+            await diningJoinCodeInUse(
+              tx,
+              { tenant, brand, store },
+              String(accepted.capability.selectorHash),
+            )
+          )
+            throw new DiningJoinCodeInUse();
           const occupied = assignStartedDiningSession(
             accepted.session,
             current,

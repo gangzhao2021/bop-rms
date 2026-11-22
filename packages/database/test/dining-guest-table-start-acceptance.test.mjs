@@ -1295,6 +1295,57 @@ async function startedAgo({ transactions, credentials }, table, minutesAgo) {
   return answer.diningSessionReference;
 }
 
+// WP-2423 (join-code-unique, batch 46): the code a guest-started table is given (its first guest
+// joins with it at once) is never one another open table's guest could present now; the generator
+// is injected to force the collision. After the bound it is an outage and nothing is written.
+it("a guest-started table never gets a code another open table's guest holds now", async () => {
+  await withIsolatedDatabase({ caseId: "wp2423_gs_code" }, async (context) => {
+    const { admin, transactions, credentials } = await setup(context);
+    try {
+      await setSwitch(transactions, true);
+      for (const n of [30, 31, 32]) await seedTable(admin, n);
+      const queued = [];
+      const drawing = {
+        ...credentials,
+        generateJoinCredential: (kind) =>
+          queued.shift() ?? credentials.generateJoinCredential(kind),
+      };
+      const activeSelectors = async (table) =>
+        (
+          await admin.query(
+            "SELECT c.capability_snapshot->>'selectorHash' AS selector FROM rms_dining.dining_join_capability c JOIN rms_dining.dining_session s ON s.session_id=c.session_id WHERE s.table_id=$1 AND s.phase='Active' AND c.status='Active'",
+            [id(table)],
+          )
+        ).rows.map((row) => row.selector);
+      queued.push("135791");
+      await startedAgo({ transactions, credentials: drawing }, 30, 1);
+      const held = credentials.hashJoinCredential("HumanCode", "135791");
+      assert.deepEqual(await activeSelectors(30), [held]);
+      queued.push("135791", "246802");
+      await startedAgo({ transactions, credentials: drawing }, 31, 1);
+      assert.deepEqual(queued, []);
+      assert.deepEqual(await activeSelectors(31), [
+        credentials.hashJoinCredential("HumanCode", "246802"),
+      ]);
+      for (let n = 0; n < 8; n += 1) queued.push("135791");
+      await assert.rejects(startedAgo({ transactions, credentials: drawing }, 32, 1), {
+        code: "DINING_SESSION_DEPENDENCY_UNAVAILABLE",
+      });
+      assert.deepEqual(queued, []);
+      assert.equal(
+        await count(
+          admin,
+          "SELECT count(*)::int AS n FROM rms_dining.dining_session WHERE table_id=$1",
+          [id(32)],
+        ),
+        0,
+      );
+    } finally {
+      await admin.end();
+    }
+  });
+}, 300_000);
+
 it("a table with no order frees itself after 20 quiet minutes; held tables don't keep the next from being reached", async () => {
   await withIsolatedDatabase({ caseId: "wp2423_gs_quiet" }, async (context) => {
     const { admin, transactions, credentials } = await setup(context);
