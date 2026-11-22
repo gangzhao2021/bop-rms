@@ -87,8 +87,14 @@ export function TimeOfDayInput({
         {label}
       </span>
       <span className="time-of-day__fields">
+        {/* Batch 48 (v15 b47: the end Hour select took the width of its end-of-day choice, 168 px
+            against 36 px, so "1 : 00 a.m." stood in a long empty field): hours and minutes keep
+            one compact width, and the end-of-day choice widens its field only while it is shown. */}
         <select
           aria-label={t("Hour")}
+          className={
+            atEndOfDay ? "time-of-day__hour time-of-day__hour--end-of-day" : "time-of-day__hour"
+          }
           value={atEndOfDay ? "end" : style.twelveHour ? parts.hour % 12 : parts.hour}
           onChange={(event) => {
             if (event.target.value === "end") {
@@ -118,6 +124,7 @@ export function TimeOfDayInput({
             <span aria-hidden="true">:</span>
             <select
               aria-label={t("Minute")}
+              className="time-of-day__minute"
               value={parts.minute}
               onChange={(event) => change({ minute: Number(event.target.value) })}
             >

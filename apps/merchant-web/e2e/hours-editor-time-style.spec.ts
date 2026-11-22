@@ -87,7 +87,16 @@ async function open(
   {
     weeklySchedule = week(dessert),
     withdrawal = true,
-  }: { weeklySchedule?: ReturnType<typeof week>; withdrawal?: boolean } = {},
+    declined = false,
+    openChange,
+  }: {
+    weeklySchedule?: ReturnType<typeof week>;
+    withdrawal?: boolean;
+    /** Batch 48: the latest change was declined by someone else, not withdrawn by you. */
+    declined?: boolean;
+    /** Batch 48: an open change (no withdrawal), yours or someone else's. */
+    openChange?: { lifecycle: "PendingApproval" | "Approved"; yours: boolean };
+  } = {},
 ) {
   if (language === "zh-Hans")
     await page.addInitScript(() => {
@@ -119,21 +128,30 @@ async function open(
         screenId: "STORE-HOURS-SERVICE",
         storeReference: store,
         current: { ...configuration(1, "Published"), weeklySchedule },
-        latest: withdrawal
-          ? { ...configuration(2, "PendingApproval"), weeklySchedule }
-          : { ...configuration(1, "Published"), weeklySchedule },
-        expectedVersion: withdrawal ? 2 : 1,
+        latest: openChange
+          ? {
+              ...configuration(2, openChange.lifecycle),
+              weeklySchedule,
+              authoredByReference: openChange.yours ? viewer : id(31),
+            }
+          : withdrawal
+            ? { ...configuration(2, "PendingApproval"), weeklySchedule }
+            : { ...configuration(1, "Published"), weeklySchedule },
+        expectedVersion: withdrawal || openChange ? 2 : 1,
         observedAt: "2026-11-22T10:09:00.000Z",
         viewerActorReference: viewer,
         // Withdrawn by the viewer at 5:17 a.m. Toronto on Mon Nov 16, as live.
-        latestWithdrawal: withdrawal
-          ? {
-              kind: "Withdrawn",
-              withdrawnAt: "2026-11-16T10:17:00.000Z",
-              byYou: true,
-              reason: null,
-            }
-          : null,
+        latestWithdrawal:
+          withdrawal && !openChange
+            ? {
+                kind: declined ? "Declined" : "Withdrawn",
+                withdrawnAt: "2026-11-16T10:17:00.000Z",
+                byYou: !declined,
+                reason: null,
+              }
+            : null,
+        viewerMayApprove: true,
+        viewerMayDecline: true,
         latestAuthorName: null,
         soleOperator: null,
       },
@@ -325,5 +343,88 @@ for (const language of ["en", "zh-Hans"] as const) {
         }
       });
     }
+
+    for (const [width, height] of [
+      [390, 844],
+      [1024, 768],
+      [1440, 900],
+    ] as const) {
+      test(`batch 48: start and end times are the same width, and the withdrawal is said once, at ${width}`, async ({
+        page,
+      }) => {
+        // v15 b47 live (Lane Dessert, 12:00 p.m.–1:00 a.m., withdrawn by the viewer Nov 16): the
+        // end Hour select was sized to its "Midnight (end of day)" choice (168 px en, 151 px zh,
+        // against 36–39 px), and "Latest change: Withdrawn by the person who made it" stood above
+        // "You withdrew it on Nov 16, 5:17 a.m.".
+        await page.setViewportSize({ width, height });
+        await open(page, language);
+        await openEditor(page, zh);
+        const monday = editor(page).getByRole("group", { name: zh ? "星期一" : "Monday" });
+        const field = (name: string) =>
+          monday.getByRole("group", { name, exact: true }).getByRole("combobox", {
+            name: zh ? "小时" : "Hour",
+          });
+        const startHour = await field(zh ? "开始 1" : "Start 1").boundingBox();
+        const endHour = await field(zh ? "结束 1" : "End 1").boundingBox();
+        expect(startHour).not.toBeNull();
+        expect(endHour).not.toBeNull();
+        expect(Math.abs((endHour?.width ?? 0) - (startHour?.width ?? 0))).toBeLessThanOrEqual(1);
+        expect(endHour?.width ?? 999).toBeLessThanOrEqual(72);
+        // The end of the day is still offered, by its whole name.
+        await expect(
+          field(zh ? "结束 1" : "End 1").locator("option", {
+            hasText: zh ? "24:00（当天结束）" : "Midnight (end of day)",
+          }),
+        ).toHaveCount(1);
+        // Said once, as one whole sentence naming who and when.
+        const text = await editor(page).innerText();
+        const sentence = zh
+          ? "你已于 11月16日 5:17 撤回你的更改。下一项更改将基于已发布的营业时间。"
+          : "You withdrew your change on Nov 16, 5:17\u00a0a.m. The next change starts from the published hours.";
+        expect(text).toContain(sentence);
+        expect(text).not.toContain(zh ? "最近更改：" : "Latest change:");
+        expect(text.split(zh ? "撤回" : "withdr").length - 1).toBe(1);
+        const overflow = await page.evaluate(
+          () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        );
+        expect(overflow).toBeLessThanOrEqual(0);
+        await monday.scrollIntoViewIfNeeded();
+        await page.screenshot({ path: `test-results/b48-hours-editor-${language}-${width}.png` });
+      });
+    }
+
+    test("batch 48: the end of the day shows its whole name, and other latest changes are said once", async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width: 390, height: 844 });
+      await open(page, language, {
+        weeklySchedule: week(wholeDay),
+        openChange: { lifecycle: "PendingApproval", yours: true },
+      });
+      await openEditor(page, zh);
+      const end = editor(page)
+        .getByRole("group", { name: zh ? "结束 1" : "End 1", exact: true })
+        .first()
+        .getByRole("combobox", { name: zh ? "小时" : "Hour" });
+      const fits = await end.evaluate((select) => {
+        const element = select as HTMLSelectElement;
+        const style = getComputedStyle(element);
+        const context = document.createElement("canvas").getContext("2d");
+        if (context === null) return -1;
+        context.font = `${style.fontSize} ${style.fontFamily}`;
+        const label = element.selectedOptions[0]?.text ?? "";
+        return element.getBoundingClientRect().width - context.measureText(label).width;
+      });
+      // Room for the label and the arrow.
+      expect(fits).toBeGreaterThanOrEqual(16);
+      // Your change waiting for approval: its state is said once, in your words.
+      const text = await editor(page).innerText();
+      expect(text).toContain(
+        zh
+          ? "你正在编辑你自己的更改（版本 2，等待批准）"
+          : "You are editing your own change (version 2, waiting for approval)",
+      );
+      expect(text).not.toContain(zh ? "最近更改：" : "Latest change:");
+    });
   });
 }

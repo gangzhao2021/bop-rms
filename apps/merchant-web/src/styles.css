@@ -11258,3 +11258,13 @@ tr[data-drop-target="true"] {
   min-width: 0;
   min-height: 44px;
 }
+/* Batch 48: a native select is as wide as its widest choice, so the end field's "Midnight (end of
+   day)" made its Hour 4 times wider than the start's. Hours and minutes share one width that fits
+   two digits and the arrow with any font; the end-of-day choice takes its own width when picked. */
+.time-of-day__fields select.time-of-day__hour,
+.time-of-day__fields select.time-of-day__minute {
+  width: 3.5em;
+}
+.time-of-day__fields select.time-of-day__hour--end-of-day {
+  width: auto;
+}
