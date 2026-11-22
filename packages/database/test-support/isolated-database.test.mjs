@@ -6,6 +6,7 @@ import {
   allocatePort,
   composeDiagnostic,
   composeStartAttempts,
+  describeHiddenCauses,
   isComposePortConflict,
   isPortBindable,
   isolatedComposeOverride,
@@ -109,6 +110,33 @@ try {
   assert(claimed.port < leasePortRange.first + leasePortRange.count);
 } finally {
   await rm(claimed.lease, { force: true, recursive: true });
+}
+
+// WP-2423 (batch 46): a failing test names the causes vitest does not print: the non-enumerable
+// `Symbol.for("bop.failure.cause")` and a plain-object `cause`; never the database password.
+{
+  const inner = new Error("ORDER_CREATE_INPUT_INVALID at synthetic-secret");
+  inner.code = "ORDER_CREATE_INPUT_INVALID";
+  const outer = new Error("ORDER_CREATE_DEPENDENCY_UNAVAILABLE");
+  outer.code = "ORDER_CREATE_DEPENDENCY_UNAVAILABLE";
+  Object.defineProperty(outer, Symbol.for("bop.failure.cause"), { value: inner });
+  const top = new Error("guest join failed", {
+    cause: new Error("TABLE_GUEST_PIPELINE_UNAVAILABLE", {
+      cause: { code: "RefusedCodeNotAccepted" },
+    }),
+  });
+  const symbolLines = describeHiddenCauses(outer, ["synthetic-secret"]);
+  assert.match(symbolLines, /bop\.failure\.cause: Error ORDER_CREATE_INPUT_INVALID/u);
+  assert(!symbolLines.includes("synthetic-secret"));
+  const objectLines = describeHiddenCauses(top);
+  assert.match(objectLines, /cause: Error: TABLE_GUEST_PIPELINE_UNAVAILABLE/u);
+  assert.match(objectLines, /cause: \{"code":"RefusedCodeNotAccepted"\}/u);
+  // Nothing hidden (an ordinary Error chain vitest prints itself): nothing added.
+  assert.equal(describeHiddenCauses(new Error("a", { cause: new Error("b") })), "");
+  const cyclic = new Error("loop");
+  cyclic.cause = { again: true };
+  cyclic.cause.cause = cyclic;
+  assert.match(describeHiddenCauses(cyclic), /\{"again":true/u);
 }
 
 process.stdout.write("WP-0024 isolated database unit contract passed\n");

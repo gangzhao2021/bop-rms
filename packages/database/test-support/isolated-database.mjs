@@ -40,6 +40,69 @@ class IsolatedDatabaseError extends Error {
   }
 }
 
+const failureCauseKey = Symbol.for("bop.failure.cause");
+
+/**
+ * WP-2423 (batch 46): the causes a failing test's runner does not print. Product code keeps the
+ * real cause of an outage under the non-enumerable `Symbol.for("bop.failure.cause")`, and some
+ * layers carry a plain object as `cause`; vitest prints neither, so CI showed only the outer
+ * `*_UNAVAILABLE`. Walks the chain (bounded) and names every layer when any of it is hidden.
+ * Test-only output; the run's database password is redacted.
+ */
+export function describeHiddenCauses(error, secrets = []) {
+  const lines = [];
+  const seen = new Set();
+  let hidden = false;
+  const text = (value) => {
+    let out = String(value);
+    for (const secret of secrets) if (secret) out = out.split(secret).join("[redacted]");
+    return out.length > 600 ? out.slice(0, 600) + "…" : out;
+  };
+  const plain = (value) => {
+    const within = new WeakSet();
+    try {
+      return JSON.stringify(value, (_, inner) => {
+        if (typeof inner === "bigint") return inner.toString();
+        if (inner !== null && typeof inner === "object") {
+          if (within.has(inner)) return "[cycle]";
+          within.add(inner);
+        }
+        return inner;
+      });
+    } catch {
+      return Object.prototype.toString.call(value);
+    }
+  };
+  const visit = (value, via, depth) => {
+    if (value === null || value === undefined || depth > 10 || lines.length >= 20) return;
+    if (typeof value === "object" || typeof value === "function") {
+      if (seen.has(value)) return;
+      seen.add(value);
+    }
+    const isError = value instanceof Error;
+    if (depth > 0) {
+      if (via !== "cause" || !isError) hidden = true;
+      const code =
+        typeof value === "object" && value !== null && "code" in value ? " " + value.code : "";
+      lines.push(
+        "  ".repeat(depth) +
+          via +
+          ": " +
+          text(isError ? value.name + code + ": " + value.message : plain(value)),
+      );
+    }
+    if (typeof value !== "object") return;
+    const symbol = Object.getOwnPropertyDescriptor(value, failureCauseKey);
+    if (symbol && "value" in symbol) visit(symbol.value, "bop.failure.cause", depth + 1);
+    const cause = Object.getOwnPropertyDescriptor(value, "cause");
+    if (cause && "value" in cause) visit(cause.value, "cause", depth + 1);
+    if (Array.isArray(value.errors))
+      for (const inner of value.errors.slice(0, 5)) visit(inner, "errors[]", depth + 1);
+  };
+  visit(error, "error", 0);
+  return hidden ? lines.join("\n") : "";
+}
+
 function normalizeCaseId(value) {
   if (typeof value !== "string" || !casePattern.test(value))
     throw new IsolatedDatabaseError("ISOLATED_DB_USAGE", "usage", "caseId is invalid");
@@ -645,13 +708,17 @@ export async function withIsolatedDatabase(options, testBody) {
       timeoutFailure,
     ]).finally(() => clearTimeout(timeout));
   } catch (error) {
+    const hidden =
+      error instanceof IsolatedDatabaseError ? "" : describeHiddenCauses(error, [password]);
     primaryError =
       error instanceof IsolatedDatabaseError
         ? error
         : new IsolatedDatabaseError(
             "ISOLATED_DB_INTERNAL",
             "internal",
-            "isolated database operation failed",
+            hidden
+              ? "isolated database operation failed; hidden causes:\n" + hidden
+              : "isolated database operation failed",
             error,
           );
   } finally {
