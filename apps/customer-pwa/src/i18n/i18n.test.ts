@@ -9,9 +9,11 @@ import {
   LanguageRoot,
   LanguageSwitch,
   initialLanguage,
+  keepWords,
   menuLocale,
   saidTable,
   t,
+  tWords,
   withNameLocale,
 } from "./i18n.js";
 import { zhHans } from "./zh-Hans.js";
@@ -38,7 +40,8 @@ function translatedTexts(under: string = root) {
       file.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
     );
     const visit = (node: ts.Node): void => {
-      if (ts.isCallExpression(node) && node.expression.getText() === "t") {
+      // tWords is t with Chinese short words kept whole across line breaks (batch 49).
+      if (ts.isCallExpression(node) && ["t", "tWords"].includes(node.expression.getText())) {
         const text = node.arguments[0];
         if (text && (ts.isStringLiteral(text) || ts.isNoSubstitutionTemplateLiteral(text)))
           keys.add(text.text);
@@ -211,7 +214,9 @@ it("batch 40 (v15 cross-midnight): Chinese sentences end with “。”, never a
       if (inValues && ts.isCallExpression(node) && node.expression.getText() === "endSentence")
         finished.push(`${file}:${String(source.getLineAndCharacterOfPosition(node.pos).line + 1)}`);
       const values =
-        ts.isCallExpression(node) && node.expression.getText() === "t" ? node.arguments[1] : null;
+        ts.isCallExpression(node) && ["t", "tWords"].includes(node.expression.getText())
+          ? node.arguments[1]
+          : null;
       ts.forEachChild(node, (child) => visit(child, inValues || child === values));
     };
     visit(source, false);
@@ -304,4 +309,42 @@ it("batch 46 (v15 b45 live): one spacing rule around a table name in every Chine
       table: saidTable("E45 A (TEST)"),
     }),
   ).toBe("Nothing was ordered at E45 A (TEST), so nothing was charged.");
+});
+
+// Batch 49 (v15 b48 live, 390 px zh-Hans): "…Lane Dessert (TEST) 自" / "取。" split a two-character
+// word. Short Chinese words next to a name are kept whole; the words read the same.
+it("keeps short Chinese words around a name whole, and leaves English as it is", () => {
+  const zh = (render: () => unknown) =>
+    renderToStaticMarkup(
+      createElement(LanguageRoot, {
+        initial: "zh-Hans",
+        children: () => createElement("p", null, render() as string),
+      }),
+    );
+  try {
+    const pickup = zh(() =>
+      tWords("Pickup from {storeDisplayName} is selected.", {
+        storeDisplayName: "巷口糖水 Lane Dessert (TEST)",
+      }),
+    );
+    expect(pickup).toContain('<span class="zh-word">自取。</span>');
+    expect(pickup.replace(/<[^>]+>/gu, "")).toBe("已选择在巷口糖水 Lane Dessert (TEST) 自取。");
+    expect(
+      zh(() => tWords("{store} takes dine-in orders only", { store: "Half Sugar Tea" })),
+    ).toContain('<span class="zh-word">只做堂食</span>');
+    // A longer run is kept word by word, so the line can still break inside it.
+    const ended = zh(() =>
+      tWords("Your meal at table {table} has ended.", { table: saidTable("G48 C (TEST)") }),
+    );
+    expect(ended.replace(/<[^>]+>/gu, "")).toBe("G48 C (TEST) 的用餐已结束。");
+    expect(ended).toMatch(/<span class="zh-word">结束。<\/span>/u);
+    expect(ended).not.toContain('<span class="zh-word">的用餐已结束。</span>');
+    // One Chinese character alone needs nothing.
+    expect(zh(() => keepWords("A 好 B"))).toBe("<p>A 好 B</p>");
+  } finally {
+    renderToStaticMarkup(createElement(LanguageRoot, { initial: "en", children: () => null }));
+  }
+  expect(keepWords("Pickup from Lane Dessert is selected.")).toBe(
+    "Pickup from Lane Dessert is selected.",
+  );
 });

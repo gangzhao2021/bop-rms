@@ -6,6 +6,9 @@ import { routeStorefrontReads, syntheticStoreProfile } from "./storefront-reads"
 //     rgb(255,255,255) on rgb(255,255,255), an empty box next to the field, because the shared
 //     white-control rule outranked the submit rule. Every control on the main guest pages now
 //     reads at WCAG AA (4.5:1, 3:1 for large text), checked from computed colours.
+// (2) open-store-leftovers new finding 1: at 390 in zh-Hans "已选择在巷口糖水 Lane Dessert (TEST)
+//     自取。" broke inside 自取, leaving 取。 alone. A short Chinese word next to a name now moves as
+//     one piece.
 // Synthetic HTTP interception on the production PWA, in the shapes v15 answered (TM2 table guest,
 // Lane Dessert and Half Sugar Tea pickup guests).
 test.beforeEach(({ context }) => routeStorefrontReads(context));
@@ -273,6 +276,53 @@ async function lowContrastControls(page: Page) {
   });
 }
 
+/**
+ * Line breaks that fall between two Chinese characters of a short word (a run of two to four
+ * Chinese characters between spaces, Latin letters or punctuation, as "自取" in "… (TEST) 自取。").
+ */
+async function splitShortChineseWords(page: Page, selector: string) {
+  return page.locator(selector).evaluateAll((elements) => {
+    const han = /\p{Script=Han}/u;
+    const found: string[] = [];
+    for (const element of elements) {
+      const characters: { node: Text; at: number; char: string }[] = [];
+      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+        const text = node.textContent ?? "";
+        for (let at = 0; at < text.length; at += 1)
+          characters.push({ node: node as Text, at, char: text.charAt(at) });
+      }
+      const top = ({ node, at }: { node: Text; at: number }) => {
+        const range = document.createRange();
+        range.setStart(node, at);
+        range.setEnd(node, at + 1);
+        return Math.round(range.getBoundingClientRect().top);
+      };
+      const isHan = (index: number) => han.test(characters[index]?.char ?? "");
+      let start = 0;
+      while (start < characters.length) {
+        if (!isHan(start)) {
+          start += 1;
+          continue;
+        }
+        let end = start;
+        while (end + 1 < characters.length && isHan(end + 1)) end += 1;
+        const run = characters.slice(start, end + 1);
+        if (run.length >= 2 && run.length <= 4)
+          for (const [index, character] of run.slice(0, -1).entries()) {
+            const next = run[index + 1];
+            if (next !== undefined && top(character) !== top(next))
+              found.push(
+                `${run.map((c) => c.char).join("")} in "${(element.textContent ?? "").trim()}"`,
+              );
+          }
+        start = end + 1;
+      }
+    }
+    return found;
+  });
+}
+
 async function chooseChinese(page: Page) {
   const button = page.getByRole("button", { name: "切换到中文" });
   if ((await button.count()) > 0) await button.click();
@@ -358,4 +408,24 @@ for (const width of [390, 1440])
         low.push(...(await lowContrastControls(page)).map((line) => `entry: ${line}`));
         expect(low).toEqual([]);
       });
+
+      for (const store of ["巷口糖水 Lane Dessert (TEST)", "半糖奶茶 Half Sugar Tea (TEST)"])
+        test(`the pickup start line keeps its short words whole at ${store}`, async ({ page }) => {
+          await enterPickup(page, store);
+          if (zh) await chooseChinese(page);
+          const line = page.locator(".entry-context").first();
+          await expect(line).toHaveText(
+            zh ? `已选择在${store} 自取。` : `Pickup from ${store} is selected.`,
+          );
+          // The store card's "厨房 21:30 停止接单" split the same way with Linux fonts (DejaVu).
+          expect(
+            await splitShortChineseWords(page, ".entry-context, .store-identity__status"),
+          ).toEqual([]);
+          await page.screenshot({
+            path: `test-results/b49-pickup-${store.split(" ")[1]}-${zh ? "zh" : "en"}-${width}.png`,
+          });
+          expect(
+            await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+          ).toBe(true);
+        });
     });

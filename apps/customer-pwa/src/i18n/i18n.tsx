@@ -100,6 +100,57 @@ export function t(text: string, values?: Readonly<Record<string, string | number
   return said(fill(text, values));
 }
 
+/**
+ * Batch 49 (v15 b48 live, 390 px zh-Hans: "已选择在巷口糖水 Lane Dessert (TEST) 自" / "取。"): a
+ * Chinese line may break between any two characters, so the short words around a name written in
+ * Latin letters split. In Chinese, each short run of two to four Chinese characters (with the
+ * punctuation that closes it) and each word of a longer run moves to the next line as one piece; the
+ * words themselves are unchanged. English is returned as it is.
+ */
+const hanRun = /\p{Script=Han}+[。，、；：！？）」』]*/gu;
+const wordSegmenter =
+  typeof Intl !== "undefined" && "Segmenter" in Intl
+    ? new Intl.Segmenter("zh-Hans", { granularity: "word" })
+    : null;
+function keptRun(run: string): string[] {
+  const letters = run.replace(/[。，、；：！？）」』]+$/u, "").length;
+  if (letters <= 4 || wordSegmenter === null) return [run];
+  const words = [...wordSegmenter.segment(run)].map((part) => part.segment);
+  // Closing punctuation stays with the word before it.
+  return words.reduce<string[]>((joined, word) => {
+    if (/^[。，、；：！？）」』]+$/u.test(word) && joined.length > 0)
+      joined[joined.length - 1] += word;
+    else joined.push(word);
+    return joined;
+  }, []);
+}
+export function keepWords(text: string): ReactNode {
+  if (current !== "zh-Hans" || !hanCharacter.test(text)) return text;
+  const parts: ReactNode[] = [];
+  let at = 0;
+  for (const match of text.matchAll(hanRun)) {
+    if (match.index > at) parts.push(text.slice(at, match.index));
+    for (const word of keptRun(match[0]))
+      parts.push(
+        word.replace(/[。，、；：！？）」』]+$/u, "").length >= 2 ? (
+          <span className="zh-word" key={parts.length}>
+            {word}
+          </span>
+        ) : (
+          word
+        ),
+      );
+    at = match.index + match[0].length;
+  }
+  if (at < text.length) parts.push(text.slice(at));
+  return <>{parts}</>;
+}
+
+/** {@link t}, with Chinese short words kept whole across line breaks ({@link keepWords}). */
+export function tWords(text: string, values?: Readonly<Record<string, string | number>>) {
+  return keepWords(t(text, values));
+}
+
 export function currentLanguage(): CustomerLanguage {
   return current;
 }

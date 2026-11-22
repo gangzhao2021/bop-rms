@@ -143,7 +143,7 @@ function isTranslatedText(node: ts.Node): boolean {
   const parent = node.parent;
   return (
     ts.isCallExpression(parent) &&
-    parent.expression.getText() === "t" &&
+    ["t", "tWords"].includes(parent.expression.getText()) &&
     parent.arguments[0] === node
   );
 }

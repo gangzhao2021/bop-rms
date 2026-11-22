@@ -1,5 +1,5 @@
 import { Link } from "react-router";
-import { saidTable, t } from "../i18n/i18n.js";
+import { saidTable, t, tWords } from "../i18n/i18n.js";
 import {
   CustomerPage,
   PageHeading,
@@ -39,7 +39,7 @@ export function SettledTableCard({
     <section className="order-status__card" role="status">
       <h2>{t("Thank you for dining with us.")}</h2>
       {/* b13: a table comped to nothing closes too; "paid" is the receipt's to say. */}
-      <p>{t("Your meal at table {table} has ended.", { table: saidTable(tableLabel) })}</p>
+      <p>{tWords("Your meal at table {table} has ended.", { table: saidTable(tableLabel) })}</p>
       {/* Batch 44: the same words as the start page (a new party is seated first). */}
       <p>{t("New party? Ask staff to seat you, then scan again.")}</p>
       {receiptLink ? (
@@ -61,7 +61,7 @@ export function EmptyClosedTableCard({ tableLabel }: { readonly tableLabel: stri
     <section className="order-status__card" role="status">
       <h2>{t("This table’s visit has ended")}</h2>
       <p>
-        {t("Nothing was ordered at table {table}, so nothing was charged.", {
+        {tWords("Nothing was ordered at table {table}, so nothing was charged.", {
           table: saidTable(tableLabel),
         })}
       </p>
@@ -89,14 +89,14 @@ export function MovedTableCard({
     <section className="order-status__card" role="status">
       {merged ? (
         <>
-          <h2>{t("Your table was merged into table {table}", { table })}</h2>
+          <h2>{tWords("Your table was merged into table {table}", { table })}</h2>
           <p>
             {nothingOrdered
-              ? t(
+              ? tWords(
                   "Staff joined your party to table {table}. Scan the code on table {table} to keep ordering and paying together.",
                   { table },
                 )
-              : t(
+              : tWords(
                   "Staff joined your party to table {table}. Everything your table ordered is on that table's bill. Scan the code on table {table} to keep ordering and paying together.",
                   { table },
                 )}
@@ -104,14 +104,14 @@ export function MovedTableCard({
         </>
       ) : (
         <>
-          <h2>{t("Your table moved to table {table}", { table })}</h2>
+          <h2>{tWords("Your table moved to table {table}", { table })}</h2>
           <p>
             {nothingOrdered
-              ? t(
+              ? tWords(
                   "Staff moved your party to table {table}. Scan the code on table {table} to keep ordering and paying together.",
                   { table },
                 )
-              : t(
+              : tWords(
                   "Staff moved your party to table {table}. Everything your table ordered moved with you. Scan the code on table {table} to keep ordering and paying together.",
                   { table },
                 )}

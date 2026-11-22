@@ -1,4 +1,4 @@
-import { listSeparator, t, saidTable, wordGap } from "../i18n/i18n.js";
+import { keepWords, listSeparator, t, saidTable, tWords, wordGap } from "../i18n/i18n.js";
 import { EndedTableCard, endedTableHere, endedTableStore } from "../dining/EndedTable.js";
 import {
   admissionStateForFailure,
@@ -857,11 +857,11 @@ export function EntryContextView({
         at.channel !== "Pickup") ? (
         <p className="entry-context entry-kept-elsewhere" role="note">
           {keptElsewhere.payBy === undefined
-            ? t(
+            ? tWords(
                 "Your order at {storeDisplayName} is kept on this phone. Scan {storeDisplayName}’s pickup QR code again to go back to it.",
                 { storeDisplayName: keptElsewhere.storeDisplayName },
               )
-            : t(
+            : tWords(
                 "Your order at {storeDisplayName} isn’t paid yet. Pay by {time}, or it is cancelled and you won’t be charged. Scan {storeDisplayName}’s pickup QR code again to pay for it.",
                 {
                   storeDisplayName: keptElsewhere.storeDisplayName,
@@ -1223,7 +1223,7 @@ function EntryState({
     return (
       <div className="entry-state entry-state--warning" role="alert">
         <StateHeading headingRef={headingRef}>
-          {t("{storeDisplayName} isn’t taking orders yet", {
+          {tWords("{storeDisplayName} isn’t taking orders yet", {
             storeDisplayName: state.storeDisplayName,
           })}
         </StateHeading>
@@ -1240,7 +1240,7 @@ function EntryState({
     return (
       <div className="entry-state entry-state--warning" role="alert">
         <StateHeading headingRef={headingRef}>
-          {t("{storeDisplayName} isn’t taking new orders right now", {
+          {tWords("{storeDisplayName} isn’t taking new orders right now", {
             storeDisplayName: state.storeDisplayName,
           })}
         </StateHeading>
@@ -1253,7 +1253,7 @@ function EntryState({
     return (
       <div className="entry-state entry-state--warning" role="alert">
         <StateHeading headingRef={headingRef}>
-          {t("{storeDisplayName} isn’t taking orders right now", {
+          {tWords("{storeDisplayName} isn’t taking orders right now", {
             storeDisplayName: state.storeDisplayName,
           })}
         </StateHeading>
@@ -1335,7 +1335,7 @@ function EntryState({
             <StateHeading headingRef={headingRef}>
               {waitRefused
                 ? t("This QR code can’t be used")
-                : tableNotOpenHeading(state.context.storeDisplayName, state.tableLabel)}
+                : keepWords(tableNotOpenHeading(state.context.storeDisplayName, state.tableLabel))}
             </StateHeading>
             {/* WP-2423 (guest-waits-and-refund-lock): what the page waits for, and when it stopped. */}
             <p className="entry-context" role="status">
@@ -1353,7 +1353,7 @@ function EntryState({
             </p>
             {state.tableLabel === undefined || waitRefused ? null : (
               <p className="entry-context">
-                {t(
+                {tWords(
                   "Not sitting at table {table}? Tell staff, so they can give you the code for your table.",
                   {
                     table: saidTable(state.tableLabel),
@@ -1368,7 +1368,7 @@ function EntryState({
               {t("Thank you for dining with us.")}
             </StateHeading>
             <p className="entry-context">
-              {t("Your meal at table {table} has ended.", { table: saidTable(settled) })}
+              {tWords("Your meal at table {table} has ended.", { table: saidTable(settled) })}
             </p>
             <SettledTableReceiptPanel />
             <p>{t("New party? Ask staff to seat you, then scan again.")}</p>
@@ -1409,12 +1409,14 @@ function EntryState({
           {context.alreadyAtTable === true
             ? t("You’re already at this table.")
             : context.channel === "DineIn"
-              ? t("Welcome to {storeDisplayName}", { storeDisplayName: context.storeDisplayName })
+              ? tWords("Welcome to {storeDisplayName}", {
+                  storeDisplayName: context.storeDisplayName,
+                })
               : t("Ready to order")}
         </StateHeading>
         {context.channel === "DineIn" ? null : (
           <p className="entry-context">
-            {t("Pickup from {storeDisplayName} is selected.", {
+            {tWords("Pickup from {storeDisplayName} is selected.", {
               storeDisplayName: context.storeDisplayName,
             })}
           </p>
@@ -1448,7 +1450,7 @@ function EntryState({
               {t("Thank you for dining with us.")}
             </StateHeading>
             <p className="entry-context">
-              {t("Your meal at table {table} has ended.", { table: saidTable(settled) })}
+              {tWords("Your meal at table {table} has ended.", { table: saidTable(settled) })}
             </p>
             <SettledTableReceiptPanel />
           </>
@@ -1523,7 +1525,7 @@ function EntryState({
               {t("Thank you for dining with us.")}
             </StateHeading>
             <p className="entry-context">
-              {t("Your meal at table {table} has ended.", { table: saidTable(settled) })}
+              {tWords("Your meal at table {table} has ended.", { table: saidTable(settled) })}
             </p>
             <SettledTableReceiptPanel />
             <p>{t("After you answer, this receipt won’t open on this phone.")}</p>
@@ -1557,7 +1559,7 @@ function EntryState({
     return (
       <div className="entry-state entry-state--warning" role="alert">
         <StateHeading headingRef={headingRef}>
-          {t("{store} takes dine-in orders only", { store: state.storeDisplayName })}
+          {tWords("{store} takes dine-in orders only", { store: state.storeDisplayName })}
         </StateHeading>
         <p>
           {t(
@@ -1633,12 +1635,12 @@ function EntryState({
     <div>
       <StateHeading headingRef={headingRef}>
         {context.channel === "DineIn"
-          ? t("Welcome to {storeDisplayName}", { storeDisplayName: context.storeDisplayName })
+          ? tWords("Welcome to {storeDisplayName}", { storeDisplayName: context.storeDisplayName })
           : t("Ready to order")}
       </StateHeading>
       {context.channel === "DineIn" ? null : (
         <p className="entry-context">
-          {t("Pickup from {storeDisplayName} is selected.", {
+          {tWords("Pickup from {storeDisplayName} is selected.", {
             storeDisplayName: context.storeDisplayName,
           })}
         </p>

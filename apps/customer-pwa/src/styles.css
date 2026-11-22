@@ -264,6 +264,10 @@
   text-decoration: underline;
   text-underline-offset: 3px;
 }
+/* Batch 49: a short Chinese word around a name moves to the next line whole (keepWords). */
+.zh-word {
+  white-space: nowrap;
+}
 .customer-page p {
   margin: 0 0 var(--bop-space-2);
 }

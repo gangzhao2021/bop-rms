@@ -1,4 +1,4 @@
-import { currentLanguage, listSeparator, t, wordGap } from "../i18n/i18n.js";
+import { currentLanguage, keepWords, listSeparator, t, wordGap } from "../i18n/i18n.js";
 import { useEffect, useState } from "react";
 import { endSentence, formatLocalityLine, formatStoreLocalTime } from "../journey/format.js";
 import { formatStorePhone } from "../journey/StoreContact.js";
@@ -301,7 +301,7 @@ export function StoreInfoSection({ load }: { readonly load: StoreProfileLoader |
           >
             {status.label}
           </strong>
-          {status.detail === null ? null : <span> · {status.detail}</span>}
+          {status.detail === null ? null : <span> · {keepWords(status.detail)}</span>}
         </p>
       )}
       <StoreDetails profile={profile} />
@@ -328,7 +328,7 @@ export function StoreIdentityCard({ load }: { readonly load: StoreProfileLoader 
           >
             {status.label}
           </strong>
-          {status.detail === null ? null : <span> · {status.detail}</span>}
+          {status.detail === null ? null : <span> · {keepWords(status.detail)}</span>}
         </p>
       )}
       <StoreDetails profile={profile} />

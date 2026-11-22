@@ -1,4 +1,4 @@
-import { t, useReloadOnLanguageChange, wordGap } from "../i18n/i18n.js";
+import { t, useReloadOnLanguageChange, wordGap, tWords } from "../i18n/i18n.js";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { Link, useParams } from "react-router";
 import {
@@ -453,7 +453,7 @@ function ReceiptContent({
         <section className="store-contact" aria-labelledby="store-contact-heading">
           <h2 id="store-contact-heading">{t("Questions about this order?")}</h2>
           <p>
-            {t("Ask a staff member at {storeDisplayName}.", {
+            {tWords("Ask a staff member at {storeDisplayName}.", {
               storeDisplayName: current.storeDisplayName,
             })}
           </p>
@@ -462,7 +462,7 @@ function ReceiptContent({
       {/* WP-2423 Q16: the Store's own privacy notice, only once its Owner has entered one. */}
       {view.privacyNoticeUrl ? (
         <p className="receipt-page__privacy">
-          {t("How {storeDisplayName} handles your contact details:", {
+          {tWords("How {storeDisplayName} handles your contact details:", {
             storeDisplayName: current.storeDisplayName,
           })}
           {wordGap()}

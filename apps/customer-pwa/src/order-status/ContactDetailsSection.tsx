@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { keepWords } from "../i18n/i18n.js";
 import { orderStatusText } from "../journey/messages.js";
 import { PrivacyNoticeLink } from "../journey/PrivacyNotice.js";
 import {
@@ -65,7 +66,7 @@ export function ContactDetailsSection({
         <p role="status">{outcomeText[outcome]}</p>
       ) : contactDetails === "Stored" ? (
         <>
-          <p>{text.storeKeeps(store)}</p>
+          <p>{keepWords(text.storeKeeps(store))}</p>
           {client !== undefined && !confirming ? (
             <button type="button" onClick={() => setConfirming(true)}>
               {text.remove}

@@ -1,5 +1,13 @@
 import { createTablePaymentClient } from "./table-payment-client.js";
-import { dateLocale, t, useReloadOnLanguageChange, saidTable, wordGap } from "../i18n/i18n.js";
+import {
+  dateLocale,
+  keepWords,
+  saidTable,
+  t,
+  tWords,
+  useReloadOnLanguageChange,
+  wordGap,
+} from "../i18n/i18n.js";
 import {
   useCallback,
   useEffect,
@@ -1214,7 +1222,7 @@ export function DiningSessionScreen({
       {view?.movedFromTableLabel === undefined || !view.tableLabel ? null : (
         // WP-2423 table-move-payment: staff moved the party after this phone joined; it follows.
         <p className="dining-session__moved" role="status">
-          {t(
+          {tWords(
             "Staff moved your party from table {from} to table {table}. Keep ordering and paying on this phone.",
             { from: saidTable(view.movedFromTableLabel), table: saidTable(view.tableLabel) },
           )}
@@ -1259,7 +1267,9 @@ export function DiningSessionScreen({
           ) : unseated?.kind === "NotOpen" ? (
             // Batch 42: staff open this table; nobody hands out a code. The start page's words.
             <>
-              <h2>{tableNotOpenHeading(unseated.storeDisplayName, unseated.tableLabel)}</h2>
+              <h2>
+                {keepWords(tableNotOpenHeading(unseated.storeDisplayName, unseated.tableLabel))}
+              </h2>
               <p role="status">{tableNotOpenWaitText()}</p>
             </>
           ) : unseated?.kind === "BeingCleaned" ? (
