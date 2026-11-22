@@ -27,12 +27,15 @@ export type DiningQrJoinRefusedState =
 const refusalText: Readonly<Record<DiningAdmissionRefusedState, string>> = {
   get CodeUsed() {
     return t(
-      "This code was already used. Ask staff, or the person who invited you, for a new one.",
+      "This join code was already used. Ask staff, or the person who invited you, for a new one.",
     );
   },
+  // Batch 47 (v15 b46 live): a code staff replaced can never work again, and the server gives a
+  // wrong code and a replaced one the same answer, so the guest is sent for the table's current
+  // code instead of asked to check and retype it.
   get CodeNotAccepted() {
     return t(
-      "That code didn’t work. Check it and try again, or ask staff or the person who invited you for a new one.",
+      "That join code doesn’t work for this table now. Ask staff, or the person who joined your table first, for the table’s current join code.",
     );
   },
   get TooManyAttempts() {

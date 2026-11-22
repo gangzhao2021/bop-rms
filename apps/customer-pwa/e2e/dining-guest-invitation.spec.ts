@@ -311,7 +311,7 @@ test.describe("@production guests invite each other at the table", () => {
     await third.page.getByLabel("Join code or invitation", { exact: true }).fill(issuedCode);
     await third.page.getByRole("button", { name: "Join with this code", exact: true }).click();
     await expect(third.page.getByRole("alert")).toContainText(
-      "This code was already used. Ask staff, or the person who invited you, for a new one.",
+      "This join code was already used. Ask staff, or the person who invited you, for a new one.",
     );
     expect(table.joined).toBe(1);
 

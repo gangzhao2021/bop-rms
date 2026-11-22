@@ -300,7 +300,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Enter a valid amount with up to two decimal places.": "请输入有效金额，最多两位小数。",
   "Enter an amount in dollars. Your tip is fixed when you continue to payment.":
     "请输入金额（加元）。点击去付款后小费即确定。",
-  "Enter the six-digit code you were given.": "请输入您拿到的六位数代码。",
+  "Enter the six-digit code you were given.": "请输入您拿到的六位入桌码。",
   "Entered by staff": "由店员录入",
   "Estimated arrival is not available yet.": "暂时无法预计送达时间。",
   "Estimated arrival {earliestUtc} – {latestUtc}": "预计送达 {earliestUtc} – {latestUtc}",
@@ -877,8 +877,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Test tax (internal testing only)": "测试税率（仅限内部测试）",
   "Thank you. Your order has been sent to the kitchen.": "谢谢，您的订单已送到厨房。",
   "Thank you. Your payment went through.": "谢谢，付款成功。",
-  "That code didn’t work. Check it and try again, or ask staff or the person who invited you for a new one.":
-    "这个代码无效。请检查后重试，或向店员或邀请您的人要一个新的。",
+  "That join code doesn’t work for this table now. Ask staff, or the person who joined your table first, for the table’s current join code.":
+    "这个入桌码现在不能加入这一桌。请向店员或同桌先加入的人要这桌现在的入桌码。",
   "The Provider IDR and public Guest Payment adapter are not available.":
     "第三方付款接口暂不可用。",
   "The connection dropped before we could confirm. Retry to check.":
@@ -961,8 +961,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这个代码已过期。如果还有人要加入，请生成新的。",
   "This code no longer works. A staff member can give a code to someone joining.":
     "这个代码已失效，店员可以给要加入的人一个代码。",
-  "This code was already used. Ask staff, or the person who invited you, for a new one.":
-    "这个代码已经用过了。请向店员或邀请您的人要一个新的。",
+  "This join code was already used. Ask staff, or the person who invited you, for a new one.":
+    "这个入桌码已经用过了。请向店员或邀请您的人要一个新的。",
   "This code was replaced. Make a new one.": "这个代码已被替换，请生成新的。",
   "This entry link can’t be used": "这个入口链接无法使用",
   "This item can’t be ordered as selected. Review your choices.":

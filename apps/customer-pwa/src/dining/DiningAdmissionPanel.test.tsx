@@ -7,6 +7,8 @@ import {
   type DiningAdmissionUiState,
 } from "./DiningAdmissionPanel.js";
 import { DiningAdmissionJourneyError } from "./dining-admission-journey.js";
+import { createElement } from "react";
+import { LanguageRoot } from "../i18n/i18n.js";
 describe("contextual Dining admission screen", () => {
   it("defaults to unavailable without runtime injection", () => {
     const html = renderToStaticMarkup(<DiningAdmissionPanel />);
@@ -91,11 +93,11 @@ describe("contextual Dining admission screen", () => {
   it.each([
     [
       "CodeUsed",
-      "This code was already used. Ask staff, or the person who invited you, for a new one.",
+      "This join code was already used. Ask staff, or the person who invited you, for a new one.",
     ],
     [
       "CodeNotAccepted",
-      "Check it and try again, or ask staff or the person who invited you for a new one.",
+      "Ask staff, or the person who joined your table first, for the table’s current join code.",
     ],
     ["TooManyAttempts", "Wait a few minutes before trying again, or ask staff for help."],
   ] as const)("returns to code entry with plain guidance for refused %s", (state, text) => {
@@ -127,6 +129,28 @@ describe("contextual Dining admission screen", () => {
       const html = renderToStaticMarkup(<DiningAdmissionView state={state} online={false} />);
       expect(html).toContain("Joining and recovery are paused");
       expect(html).toContain('disabled=""');
+    },
+  );
+  // Batch 47 (v15 b46 live): the refusal said "这个代码无效。请检查后重试…" while the form, its
+  // button and staff call it 入桌码, and a replaced code can never work again.
+  it.each(["CodeNotAccepted", "CodeUsed", "Invalid"] as const)(
+    "names the %s code a 入桌码 in Chinese and never asks to check and retry it",
+    (state) => {
+      renderToStaticMarkup(
+        createElement(LanguageRoot, { initial: "zh-Hans", children: () => null }),
+      );
+      try {
+        const html = renderToStaticMarkup(<DiningAdmissionView state={state} online />);
+        const alert = /role="alert">([^<]*)</u.exec(html)?.[1] ?? "";
+        expect(alert).toContain("入桌码");
+        expect(alert).not.toMatch(/代码|检查后重试/u);
+        if (state === "CodeNotAccepted")
+          expect(alert).toBe(
+            "这个入桌码现在不能加入这一桌。请向店员或同桌先加入的人要这桌现在的入桌码。",
+          );
+      } finally {
+        renderToStaticMarkup(createElement(LanguageRoot, { initial: "en", children: () => null }));
+      }
     },
   );
 });
