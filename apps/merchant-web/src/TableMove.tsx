@@ -97,6 +97,7 @@ export function TableMove({
   csrf,
   locked,
   onMoved,
+  onCheckingOut,
   client: provided,
 }: {
   readonly table: StaffDiningTable;
@@ -105,6 +106,12 @@ export function TableMove({
   readonly locked: boolean;
   /** After a move: read the tables again (the party sits at the other table now). */
   readonly onMoved: (message: string, targetReference: string | null) => void;
+  /**
+   * Batch 50 (v15 b49 live): checkout began on another device after this screen loaded, and the
+   * move was refused for it. The panel says so once (in its outcome line) and reads again, so
+   * Move is no longer offered; without it the refusal is said here.
+   */
+  readonly onCheckingOut?: () => void;
   readonly client?: TableMoveClient;
 }) {
   const [client] = useState(() => provided ?? createTableMoveClient());
@@ -143,6 +150,10 @@ export function TableMove({
     } catch (error) {
       const code = error instanceof TableMoveError ? error.code : "Unavailable";
       if (code !== "Unavailable") operation.current = null;
+      if (code === "CheckingOut" && onCheckingOut !== undefined) {
+        onCheckingOut();
+        return;
+      }
       setProblem(
         code === "TargetOccupied"
           ? t("That table has a party now. Two parties can't share a table; choose a free one.")

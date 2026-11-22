@@ -108,7 +108,7 @@ describe("Table phones: remove, then stop it joining again", () => {
 // removal; the phones are still listed and can still be taken off the table.
 describe("Table phones while the table is checking out", () => {
   const note =
-    "This table is paying the bill, so no one new can join and no new join code can be made.";
+    "This table is paying the bill, so it can't be moved or merged, no one new can join and no new join code can be made.";
   it("says no one new can join, with no pause step and no advice to pause", async () => {
     const { fetcher, bodies } = server();
     const { container } = await mount(

@@ -26,14 +26,15 @@ const widths = [
 
 type Floor = "Paying" | "Paid" | "Active" | "StaleThenPaying";
 
+// Batch 50 (v15 b49 live): the same one statement also says the party can't be moved or merged.
 const paying = (zh: boolean) =>
   zh
-    ? "这桌正在结账，不能再有人加入，也不能换新的入桌码。"
-    : "This table is paying the bill, so no one new can join and no new join code can be made.";
+    ? "这桌正在结账，不能换桌或并桌，不能再有人加入，也不能换新的入桌码。"
+    : "This table is paying the bill, so it can't be moved or merged, no one new can join and no new join code can be made.";
 const settled = (zh: boolean) =>
   zh
-    ? "这桌已结清，不能再有人加入，也不能换新的入桌码。"
-    : "This table's bill is settled, so no one new can join and no new join code can be made.";
+    ? "这桌已结清，不能换桌或并桌，不能再有人加入，也不能换新的入桌码。"
+    : "This table's bill is settled, so it can't be moved or merged, no one new can join and no new join code can be made.";
 
 async function checkoutFloor(
   page: Page,
@@ -78,12 +79,47 @@ async function checkoutFloor(
   );
   // Another device started checkout: from the refused join code on, every read shows Closing.
   // The guest pays later on the StaleThenPaying floor (state.paid, set by the test).
-  const state = { refused: false, paid: false };
+  // Batch 50: `cancelled` is Cancel checkout pressed on another device (reads show Active again);
+  // `ended` is this screen's sign-in ended elsewhere (v15 b49 live: pushed out on another screen).
+  const state = { refused: false, paid: false, cancelled: false, ended: false, moves: 0 };
   const phaseNow = () =>
-    floor === "Active" || (floor === "StaleThenPaying" && !state.refused) ? "Active" : "Closing";
+    floor === "Active" || state.cancelled || (floor === "StaleThenPaying" && !state.refused)
+      ? "Active"
+      : "Closing";
+  // v15 b49 live, once the sign-in ended: every signed-in read answered 403 request_denied and
+  // the deadline check 401 session_ended (too many screens).
+  const ended = () => state.ended;
+  const deniedRead = { status: 403, headers, json: { error: "request_denied" } };
+  await page.route(/\/merchant\/session\/(?:expiry|activity)$/u, (route) =>
+    ended()
+      ? route.fulfill({
+          status: 401,
+          headers,
+          json: { error: "session_ended", reason: "too_many_screens" },
+        })
+      : route.fulfill({
+          headers,
+          json: {
+            idleExpiresAt: new Date(Date.now() + 30 * 60_000).toISOString(),
+            absoluteExpiresAt: new Date(Date.now() + 8 * 60 * 60_000).toISOString(),
+            idleTimeoutMinutes: 30,
+            serverTime: new Date().toISOString(),
+          },
+        }),
+  );
+  await page.route("**/merchant/sign-in-entry", (route) =>
+    route.fulfill({ headers, json: { path: "/internal-test/staff", testOnly: true } }),
+  );
+  // A stale "Move to…" pressed after checkout began on another device (the server rule).
+  await page.route("**/merchant/dining/table-move", (route) => {
+    state.moves += 1;
+    state.refused = true;
+    return route.fulfill({ status: 409, headers, json: { error: "table_move_checking_out" } });
+  });
   const paidNow = () => floor === "Paid" || state.paid;
-  await page.route("**/merchant/dining/tables", (route) =>
-    route.fulfill({
+  await page.route("**/merchant/dining/tables", (route) => {
+    if (ended()) return route.fulfill(deniedRead);
+    return route.fulfill({
       headers,
       json: {
         canOperateTables: !viewOnlyNoCode,
@@ -134,11 +170,27 @@ async function checkoutFloor(
               mergedTables: [],
             },
           },
+          // Batch 50: a free table with a QR code, so "Move to…" has somewhere to go.
+          {
+            tableReference: id(51),
+            stableLabel: "ZV49 E (TEST)",
+            areaCode: "MAIN",
+            capacity: 4,
+            lifecycle: "Published",
+            operationalState: "Available",
+            aggregateVersion: 3,
+            qrCodeValidUntil: "2027-04-12T13:00:00.000Z",
+            staffRoundsAwaitingPayment: [],
+            paymentTiming: "PayLater",
+            currentDiningSessionReference: null,
+            elapsedMinutes: null,
+            session: null,
+          },
         ],
         nextAfterTableReference: null,
       },
-    }),
-  );
+    });
+  });
   // The live phones read: one phone joined by scan a minute ago and sent round 1; not paused.
   const phones: string[] = [];
   await page.route("**/merchant/dining/sessions/qr-join", (route) => {
@@ -245,6 +297,7 @@ async function checkoutFloor(
     totalMinor: "1413",
   };
   await page.route("**/merchant/dining/table-bill", (route) => {
+    if (ended()) return route.fulfill(deniedRead);
     const paid = paidNow();
     return route.fulfill({
       headers,
@@ -279,6 +332,10 @@ async function checkoutFloor(
   return { phones, state };
 }
 
+const moveRegion = (zh: boolean) =>
+  zh ? "把这桌客人换到另一张桌" : "Move this party to another table";
+const mergeRegion = (zh: boolean) =>
+  zh ? "把这桌客人并到另一桌" : "Merge this party into another table";
 async function openManage(page: Page, zh: boolean) {
   await page.getByRole("button", { name: zh ? `选择 ${label}` : `Select ${label}` }).click();
   const panel = page.getByRole("complementary", {
@@ -498,6 +555,74 @@ for (const language of ["en", "zh-Hans"] as const)
       ).toBeVisible();
       await expect(page.getByText(paying(zh))).toHaveCount(0);
       await expect(page.getByText(settled(zh))).toHaveCount(0);
+      await expectNoInternalText(page, ["Mark unavailable"]);
+    });
+
+    test(`@production WP-2423 batch 50: a table paying the bill offers no Move and says once it can't be moved (${language}, ${width})`, async ({
+      page,
+    }) => {
+      const zh = language === "zh-Hans";
+      const { state } = await checkoutFloor(page, "Paying", language);
+      await page.setViewportSize({ width, height });
+      await page.goto("/operations/dining");
+      const { panel, phonesBlock } = await openManage(page, zh);
+      await expect(phonesBlock.getByText(paying(zh))).toBeVisible();
+      await expect(page.getByText(paying(zh))).toHaveCount(1);
+      // No step that the server refuses only on submit.
+      await expect(panel.getByRole("region", { name: moveRegion(zh) })).toHaveCount(0);
+      await expect(panel.getByRole("combobox", { name: zh ? "换到…" : "Move to…" })).toHaveCount(0);
+      await expect(panel.getByRole("region", { name: mergeRegion(zh) })).toHaveCount(0);
+      expect(state.moves).toBe(0);
+      await expectFits(page, paying(zh), width);
+      await page.screenshot({ path: `test-results/b50-no-move-${language}-${width}.png` });
+      await expectNoInternalText(page, ["Mark unavailable"]);
+    });
+
+    test(`@production WP-2423 batch 50: Cancel checkout on another device brings Move back (${language}, ${width})`, async ({
+      page,
+    }) => {
+      const zh = language === "zh-Hans";
+      const { state } = await checkoutFloor(page, "Paying", language);
+      await page.setViewportSize({ width, height });
+      await page.goto("/operations/dining");
+      const { panel } = await openManage(page, zh);
+      await expect(panel.getByRole("region", { name: moveRegion(zh) })).toHaveCount(0);
+      // Checkout is cancelled; the tables are read again (as when this tab comes back into view).
+      state.cancelled = true;
+      await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+      await expect(panel.getByRole("combobox", { name: zh ? "换到…" : "Move to…" })).toBeVisible();
+      await expect(page.getByText(paying(zh))).toHaveCount(0);
+      await expect(page.getByText(settled(zh))).toHaveCount(0);
+      await expect(
+        panel.getByRole("button", { name: zh ? "换入桌码" : "New join code" }),
+      ).toBeVisible();
+    });
+
+    test(`@production WP-2423 batch 50: a stale Move refused during checkout says the fact once, in view (${language}, ${width})`, async ({
+      page,
+    }) => {
+      const zh = language === "zh-Hans";
+      const { state } = await checkoutFloor(page, "StaleThenPaying", language);
+      await page.setViewportSize({ width, height });
+      await page.goto("/operations/dining");
+      const { panel } = await openManage(page, zh);
+      // Loaded while the table was still ordering; another device then started checkout.
+      const move = panel.getByRole("region", { name: moveRegion(zh) });
+      await move
+        .getByRole("combobox", { name: zh ? "换到…" : "Move to…" })
+        .selectOption({ label: zh ? "ZV49 E (TEST) · 4 座" : "ZV49 E (TEST) · seats 4" });
+      await move.getByRole("button", { name: zh ? /^换到 /u : /^Move to /u }).click();
+      await expect.poll(() => state.moves).toBe(1);
+      await expect(page.getByText(paying(zh))).toHaveCount(1);
+      await expect(page.getByText(paying(zh))).toBeInViewport();
+      await expect(panel.getByRole("region", { name: moveRegion(zh) })).toHaveCount(0);
+      await expect(
+        page.getByText(
+          zh ? "这桌正在结账，不能换桌。" : "This table is checking out, so it stays where it is.",
+        ),
+      ).toHaveCount(0);
+      await expectFits(page, paying(zh), width);
+      await page.screenshot({ path: `test-results/b50-stale-move-${language}-${width}.png` });
       await expectNoInternalText(page, ["Mark unavailable"]);
     });
   }

@@ -572,12 +572,20 @@ function tableActionFailureText(error: unknown): string {
   }
 }
 
-/** Batch 48 (v15 b47 live): no one new joins a table paying its bill (dining-qr-join.md). */
+/**
+ * Batch 48 (v15 b47 live): no one new joins a table paying its bill (dining-qr-join.md). Batch 50
+ * (v15 b49 live): nor is the party moved or merged then (the move and merge refuse a table that is
+ * not Active), so the one statement says that too, instead of steps that fail on submit.
+ */
 const tableCheckingOutText = () =>
-  t("This table is paying the bill, so no one new can join and no new join code can be made.");
+  t(
+    "This table is paying the bill, so it can't be moved or merged, no one new can join and no new join code can be made.",
+  );
 /** Batch 49 (v15 b48 live): the same, once the bill is paid (or nothing was owed). */
 const tableSettledText = () =>
-  t("This table's bill is settled, so no one new can join and no new join code can be made.");
+  t(
+    "This table's bill is settled, so it can't be moved or merged, no one new can join and no new join code can be made.",
+  );
 
 /** M159: set when the Store has no tables at all (the empty floor says what to do next). */
 const noTablesMessage = "no-tables";
@@ -1806,6 +1814,17 @@ function DiningSessionWorkspaceBody({
                   if (text !== "") setResult({ text, table: targetReference ?? undefined });
                 });
               }}
+              onMoveCheckingOut={() => {
+                // Batch 50 (v15 b49 live): as a refused New join code (batch 49), the checkout
+                // fact is said once, in the outcome line, and the table is read again.
+                setResult({
+                  text: tableCheckingOutText(),
+                  table: selected.tableReference,
+                  checkingOut: true,
+                  checkingOutSince: loadedAt.current,
+                });
+                reread();
+              }}
               onSettled={(message) => {
                 setResult({ text: message, table: selected.tableReference });
                 // The table's row says paid right away, not at the next read.
@@ -1936,6 +1955,7 @@ function TablePanel({
   onPartySize,
   tables,
   onMoved,
+  onMoveCheckingOut,
 }: {
   /** DEC-DINING-GUEST-TABLE-START: guests can start free tables at this Store now. */
   readonly guestStartsOn: boolean;
@@ -1943,6 +1963,8 @@ function TablePanel({
   readonly tables: readonly StaffDiningTable[];
   /** After a move (target null when only the tables are read again). */
   readonly onMoved: (message: string, targetReference: string | null) => void;
+  /** Batch 50: a stale Move was refused because this table checks out now. */
+  readonly onMoveCheckingOut: () => void;
   /** The Order host transfer's own retry stays pressable while it holds the page. */
   readonly hostTransferDisabled: boolean;
   /** v15 2026-10-29: a party size just recorded, for the table list. */
@@ -2286,8 +2308,13 @@ function TablePanel({
             }}
           />
         ) : null}
-        {seated && canOperateTables && table.currentDiningSessionReference !== null ? (
-          // WP-2423 item 8 ⑧ (Owner decision 3): move the party to another free table.
+        {seated &&
+        canOperateTables &&
+        !checkingOut &&
+        table.currentDiningSessionReference !== null ? (
+          // WP-2423 item 8 ⑧ (Owner decision 3): move the party to another free table. Batch 50
+          // (v15 b49 live): not offered while the table checks out, which the move refuses; the
+          // checkout statement says so once. Cancel checkout brings it back.
           <TableMove
             key={"move:" + table.currentDiningSessionReference}
             table={table}
@@ -2295,6 +2322,7 @@ function TablePanel({
             csrf={csrf}
             locked={locked}
             onMoved={onMoved}
+            onCheckingOut={onMoveCheckingOut}
           />
         ) : null}
         {seated && canOperateTables && table.currentDiningSessionReference !== null ? (

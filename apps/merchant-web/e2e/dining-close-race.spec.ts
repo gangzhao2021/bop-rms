@@ -539,8 +539,8 @@ for (const outcome of ["lost", "won"] as const)
  */
 const paying = (zh: boolean) =>
   zh
-    ? "这桌正在结账，不能再有人加入，也不能换新的入桌码。"
-    : "This table is paying the bill, so no one new can join and no new join code can be made.";
+    ? "这桌正在结账，不能换桌或并桌，不能再有人加入，也不能换新的入桌码。"
+    : "This table is paying the bill, so it can't be moved or merged, no one new can join and no new join code can be made.";
 for (const language of ["en", "zh-Hans"] as const)
   for (const [width, height] of [
     [390, 844],
@@ -577,8 +577,8 @@ for (const language of ["en", "zh-Hans"] as const)
       // Batch 49: this table has paid (cash), so the panel says its bill is settled, once, where
       // its phones are (dining-checkout-joining.spec.ts has the phones and the unpaid case).
       const settled = zh
-        ? "这桌已结清，不能再有人加入，也不能换新的入桌码。"
-        : "This table's bill is settled, so no one new can join and no new join code can be made.";
+        ? "这桌已结清，不能换桌或并桌，不能再有人加入，也不能换新的入桌码。"
+        : "This table's bill is settled, so it can't be moved or merged, no one new can join and no new join code can be made.";
       const reason = panel.getByText(settled);
       await expect(reason).toBeVisible();
       await expect(page.getByText(settled)).toHaveCount(1);
