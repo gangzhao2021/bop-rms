@@ -10,7 +10,7 @@ import { clearLastBills, loadLastBills, saveLastBills } from "./table-last-bills
 import { UnpaidRoundCancelAction, isPaymentUnconfirmed } from "./UnpaidRoundCancelAction.js";
 import { paidRoundWait, tableRoundWaitText, type PaidRoundWaitTier } from "./paid-round-wait.js";
 import { DiningHostTransferAction } from "./DiningHostTransferAction.js";
-import { useContext, useEffect, useMemo, useRef, useState } from "react";
+import { useContext, useEffect, useMemo, useRef, useState, type Ref } from "react";
 import { StaffCallsWaitingContext } from "./approvals-waiting.js";
 import { DiningServeReadyClientError } from "./dining-serve-ready-client.js";
 import { serveReadySummary } from "./dining-serve-ready.js";
@@ -487,6 +487,30 @@ export function DiningEntryCode({
 interface TableResult {
   readonly text: string;
   readonly undo?: (() => void) | undefined;
+  /**
+   * Batch 47 (v15 b46 live): the table a step in its panel was about. Below the desktop width the
+   * panel sits under the whole table list, so the result is said in the panel, where staff are.
+   */
+  readonly table?: string | undefined;
+}
+
+/** Below the desktop width the selected table's panel sits under (or over) the list. */
+const panelUnderList = "(max-width: 1023px)";
+function usePanelUnderList() {
+  const query = () =>
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia(panelUnderList).matches;
+  const [under, setUnder] = useState(query);
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const media = window.matchMedia(panelUnderList);
+    const changed = () => setUnder(media.matches);
+    changed();
+    media.addEventListener?.("change", changed);
+    return () => media.removeEventListener?.("change", changed);
+  }, []);
+  return under;
 }
 
 /**
@@ -580,6 +604,12 @@ function DiningSessionWorkspaceBody({
   orderFactsNow.current = orderFacts;
   const [tab, setTab] = useState<TableTab>("Needs");
   const detailRef = useRef<HTMLElement | null>(null);
+  const panelResultRef = useRef<HTMLParagraphElement | null>(null);
+  const underList = usePanelUnderList();
+  // Said in the panel: brought into view if the panel has moved (it shrinks when a table closes).
+  useEffect(() => {
+    panelResultRef.current?.scrollIntoView?.({ block: "nearest" });
+  }, [result]);
   const pending = useRef<AbortController | null>(null),
     operation = useRef<{ table: string; prepared: Operation } | null>(null),
     availabilityOperations = useRef(new Map<string, AvailabilityOperation>()),
@@ -896,6 +926,7 @@ function DiningSessionWorkspaceBody({
               : t("Table {table} was closed on another device. Clean it, then mark it cleaned.", {
                   table: saidTable(table.stableLabel),
                 }),
+            table: table.tableReference,
           });
           return;
         }
@@ -971,7 +1002,7 @@ function DiningSessionWorkspaceBody({
     }
     setSelectedReference(table.tableReference);
     // Presentation only: below the desktop width the table opens under (or over) the list.
-    if (typeof window.matchMedia === "function" && window.matchMedia("(max-width: 1023px)").matches)
+    if (typeof window.matchMedia === "function" && window.matchMedia(panelUnderList).matches)
       requestAnimationFrame(() => detailRef.current?.scrollIntoView?.({ block: "start" }));
   };
   /** Open a free table (or give a seated one a new join code). Not confirmed: it says the code. */
@@ -1458,6 +1489,35 @@ function DiningSessionWorkspaceBody({
         </ul>
       </section>
     );
+  // Batch 47: a step taken in the selected table's panel is answered in that panel while the panel
+  // sits under the list (a phone or tablet); on a wide screen the line stays above the list.
+  const resultInPanel =
+    result !== null &&
+    underList &&
+    result.table !== undefined &&
+    selected !== null &&
+    result.table === selected.tableReference &&
+    !refused;
+  const resultLine = (ref?: Ref<HTMLParagraphElement>) =>
+    result ? (
+      <p ref={ref} className="table-result" role="status">
+        {result.text}
+        {result.undo ? (
+          <button
+            type="button"
+            className="table-row__text-step"
+            disabled={locked || paused}
+            onClick={() => {
+              const undo = result.undo;
+              setResult(null);
+              undo?.();
+            }}
+          >
+            {t("Undo")}
+          </button>
+        ) : null}
+      </p>
+    ) : null;
   return (
     <WorkspacePage
       className="dining-floor tables-v3"
@@ -1555,25 +1615,7 @@ function DiningSessionWorkspaceBody({
           ))}
         </nav>
       )}
-      {result ? (
-        <p className="table-result" role="status">
-          {result.text}
-          {result.undo ? (
-            <button
-              type="button"
-              className="table-row__text-step"
-              disabled={locked || paused}
-              onClick={() => {
-                const undo = result.undo;
-                setResult(null);
-                undo?.();
-              }}
-            >
-              {t("Undo")}
-            </button>
-          ) : null}
-        </p>
-      ) : null}
+      {result && !resultInPanel ? resultLine() : null}
       <div className="dining-floor-layout">
         <section className="table-list" aria-label={t("Tables by what they need")}>
           {tables.length === 0 ? (
@@ -1643,6 +1685,7 @@ function DiningSessionWorkspaceBody({
           aria-label={t("Selected table details")}
           hidden={refused}
         >
+          {resultInPanel ? resultLine(panelResultRef) : null}
           {selected ? (
             <TablePanel
               key={selected.tableReference}
@@ -1692,7 +1735,7 @@ function DiningSessionWorkspaceBody({
                 });
               }}
               onSettled={(message) => {
-                setResult({ text: message });
+                setResult({ text: message, table: selected.tableReference });
                 // The table's row says paid right away, not at the next read.
                 void loadRef.current(true);
               }}
@@ -1718,6 +1761,7 @@ function DiningSessionWorkspaceBody({
                       : t("Table {table} is closed. Clean it, then mark it cleaned.", {
                           table: saidTable(selected.stableLabel),
                         }),
+                    table: selected.tableReference,
                   }),
                 );
               }}
@@ -1739,6 +1783,7 @@ function DiningSessionWorkspaceBody({
                   ),
                 );
                 setResult({
+                  table: selected.tableReference,
                   text:
                     codes.length === 0
                       ? t("Table {table}: no allergies marked.", {

@@ -31,7 +31,17 @@ async function racedFloor(
   page: Page,
   race: Race,
   language: "en" | "zh-Hans",
-  { closes }: { readonly closes: boolean },
+  {
+    closes,
+    fillers = 0,
+    wins = false,
+  }: {
+    readonly closes: boolean;
+    /** Batch 47: other tables waiting to be cleaned, as on the live floor (a long list). */
+    readonly fillers?: number;
+    /** Batch 47: this device's close goes through (the winner of the race). */
+    readonly wins?: boolean;
+  },
 ) {
   if (language === "zh-Hans")
     await page.addInitScript(() => window.localStorage.setItem("bop.merchant.language", "zh-Hans"));
@@ -113,6 +123,20 @@ async function racedFloor(
                       },
                 }),
           },
+          ...Array.from({ length: fillers }, (_, n) => ({
+            tableReference: id(200 + n),
+            stableLabel: `BR ${String.fromCharCode(65 + n)} (TEST)`,
+            areaCode: "MAIN",
+            capacity: 4,
+            lifecycle: "Published",
+            aggregateVersion: 4,
+            qrCodeValidUntil: "2027-04-12T13:00:00.000Z",
+            staffRoundsAwaitingPayment: [],
+            operationalState: "TemporarilyBlocked",
+            blockReasonCode: "CLEANING",
+            currentDiningSessionReference: null,
+            elapsedMinutes: null,
+          })),
         ],
         nextAfterTableReference: null,
       },
@@ -220,12 +244,25 @@ async function racedFloor(
   const sent: string[] = [];
   await page.route("**/merchant/orders/close", (route) => {
     sent.push("order close");
+    if (wins)
+      return route.fulfill({
+        headers,
+        json: { status: "Committed", closureVersion: 1, closedOrderVersion: 11 },
+      });
     refuse();
     return route.fulfill({ status: 409, headers, json: { error: "order_already_closed" } });
   });
   await page.route("**/merchant/dining/closing", (route) => {
     const body = route.request().postDataJSON() as { action: string };
     sent.push(body.action);
+    if (wins) {
+      // Closed here: every read from now on shows the table waiting to be cleaned.
+      other.closedAt = Date.now();
+      return route.fulfill({
+        headers,
+        json: { status: "Applied", phase: "Closed", sessionVersion: 21 },
+      });
+    }
     refuse();
     return route.fulfill({ status: 409, headers, json: { error: "dining_session_changed" } });
   });
@@ -326,3 +363,77 @@ for (const language of ["en", "zh-Hans"] as const)
     await page.screenshot({ path: `test-results/b46-close-race-changed-${language}-${width}.png` });
     await expectNoInternalText(page);
   });
+
+/**
+ * WP-2423 batch 47 (v15 batch 46 live check, close-race-and-kitchen-search): on a phone the selected
+ * table's panel sits under the whole table list. Live (TM2, 78 tables) the line that says why the
+ * table changed ("…was closed on another device…", and the winner's "…is closed…") was shown above
+ * the list, so staff looking at the panel saw the table turn to Needs cleaning with no reason. The
+ * outcome is shown where they are looking, at the panel, and on a wide screen stays above the list.
+ */
+for (const outcome of ["lost", "won"] as const)
+  for (const language of ["en", "zh-Hans"] as const)
+    for (const [width, height] of [
+      [390, 844],
+      [1440, 900],
+    ] as const)
+      test(`@production WP-2423 batch 47: the ${outcome} Close outcome on a long floor shows where staff are looking (${language}, ${width})`, async ({
+        page,
+      }) => {
+        const zh = language === "zh-Hans";
+        const { sent } = await racedFloor(page, "PaidTable", language, {
+          closes: true,
+          fillers: 14,
+          wins: outcome === "won",
+        });
+        await page.setViewportSize({ width, height });
+        await page.goto("/operations/dining");
+        await page.getByRole("button", { name: zh ? `选择 ${label}` : `Select ${label}` }).click();
+        const close = page.getByRole("button", { name: zh ? /^关闭 TL45/u : /^Close TL45/u });
+        // Staff are at the table's panel, with its Close step in view.
+        await close.scrollIntoViewIfNeeded();
+        await expect(close).toBeInViewport();
+        await close.click();
+        const text =
+          outcome === "won"
+            ? zh
+              ? `${label} 已关台。清洁后点“已清洁”。`
+              : `${label} is closed. Clean it, then mark it cleaned.`
+            : zh
+              ? `${label} 已在另一台设备上关台。清洁后点“已清洁”。`
+              : `${label} was closed on another device. Clean it, then mark it cleaned.`;
+        const line = page.getByText(text);
+        await expect(line).toBeVisible({ timeout: 5_000 });
+        expect(sent[0]).toBe("order close");
+        const panel = page.getByRole("complementary", {
+          name: zh ? "所选桌台详情" : "Selected table details",
+        });
+        const list = page.getByRole("region", {
+          name: zh ? "按需要处理排列的桌台" : "Tables by what they need",
+        });
+        if (width === 390) {
+          // In view, at the table's panel, not at the top of the 15-table list.
+          await expect(line).toBeInViewport();
+          await expect(panel.getByText(text)).toBeVisible();
+          await expect(panel).toContainText(zh ? "待清洁" : "Needs cleaning");
+        } else {
+          // The wide layout is unchanged: the line above the list, the panel beside it.
+          await expect(panel.getByText(text)).toHaveCount(0);
+          const lineBox = await line.boundingBox();
+          const listBox = await list.boundingBox();
+          expect(lineBox !== null && listBox !== null).toBe(true);
+          expect((lineBox?.y ?? 0) + (lineBox?.height ?? 0)).toBeLessThanOrEqual(
+            (listBox?.y ?? 0) + 1,
+          );
+        }
+        const box = await line.evaluate((node) => node.getBoundingClientRect().toJSON() as DOMRect);
+        expect(box.left).toBeGreaterThanOrEqual(16);
+        expect(box.right).toBeLessThanOrEqual(width - 16);
+        expect(
+          await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+        ).toBe(true);
+        await page.screenshot({
+          path: `test-results/b47-close-outcome-${outcome}-${language}-${width}.png`,
+        });
+        await expectNoInternalText(page);
+      });
