@@ -73,7 +73,9 @@ export function isOpenAllDay(intervals: readonly StoreLocalInterval[]): boolean 
   let reached = 0;
   for (const interval of sorted) {
     if (secondsOf(interval.startLocalTime) > reached + 60) return false;
-    const end = interval.endsNextDay ? 86_400 : secondsOf(interval.endLocalTime);
+    const end = secondsOf(interval.endLocalTime) + (interval.endsNextDay ? 86_400 : 0);
+    // A period past midnight ("(next day) 2:00 a.m.") keeps its own end time in words.
+    if (end > 86_400) return false;
     reached = Math.max(reached, end);
   }
   return reached >= 86_400 - 60;

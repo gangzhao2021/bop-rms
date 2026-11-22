@@ -63,7 +63,7 @@ afterEach(() => {
 it("a Store open 00:00–23:59:59 reads open 24 hours, with the cut-off it really has", () => {
   const hours = hoursOf();
   expect(storeStatusLine(hours)).toEqual({
-    label: "Open 24 hours",
+    label: "Open 24 hours today",
     detail: "last orders 11:34 p.m.",
   });
   expect(storeHoursLine(hours)).toBe("open 24 hours");
@@ -74,7 +74,7 @@ it("a Store open 00:00–23:59:59 reads open 24 hours, with the cut-off it reall
       })}
     />,
   );
-  expect(card).toContain("Open 24 hours");
+  expect(card).toContain("Open 24 hours today");
   expect(card).toContain("<span>Today</span> open 24 hours");
   expect(card).not.toContain("11:59");
   expect(card).not.toContain("12:00 a.m.");
@@ -85,7 +85,10 @@ it("a Store open 00:00–23:59:59 reads open 24 hours, with the cut-off it reall
 it("in Chinese a whole day reads 24 小时营业, never 营业至 23:59", () => {
   chinese();
   const hours = hoursOf();
-  expect(storeStatusLine(hours)).toEqual({ label: "24 小时营业", detail: "厨房 23:34 停止接单" });
+  expect(storeStatusLine(hours)).toEqual({
+    label: "今天 24 小时营业",
+    detail: "厨房 23:34 停止接单",
+  });
   const card = renderToStaticMarkup(
     <StoreIdentityCard
       load={Object.assign(async () => parseStoreProfile(live()), {
@@ -107,7 +110,11 @@ it("back-to-back periods and 00:00–23:59 cover the day; a gap or a late start 
   expect(isOpenAllDay([at("00:00:00", "23:59:59")])).toBe(true);
   expect(isOpenAllDay([at("00:00:00", "23:59:00")])).toBe(true);
   expect(isOpenAllDay([at("12:00:00", "23:59:59"), at("00:00:00", "12:00:00")])).toBe(true);
-  expect(isOpenAllDay([at("00:00:00", "11:59:59"), at("12:00:00", "02:00:00", true)])).toBe(true);
+  expect(isOpenAllDay([at("00:00:00", "11:59:59"), at("12:00:00", "00:00:00", true)])).toBe(true);
+  // Open past midnight: the end time still matters to a guest, so it stays written out.
+  expect(isOpenAllDay([at("00:00:00", "11:59:59"), at("12:00:00", "02:00:00", true)])).toBe(false);
+  expect(isOpenAllDay([at("00:00:00", "02:00:00", true)])).toBe(false);
+  expect(intervalsText([at("00:00:00", "02:00:00", true)])).toBe("12:00 a.m.–2:00 a.m. (next day)");
   expect(isOpenAllDay([at("00:00:00", "22:00:00")])).toBe(false);
   expect(isOpenAllDay([at("00:00:00", "11:00:00"), at("12:00:00", "23:59:59")])).toBe(false);
   expect(isOpenAllDay([at("06:00:00", "23:59:59")])).toBe(false);
@@ -123,6 +130,15 @@ it("back-to-back periods and 00:00–23:59 cover the day; a gap or a late start 
   });
   expect(storeStatusLine(ordinary).label).toBe("Open now");
   expect(storeStatusLine(ordinary).detail).toContain("until 10:00 p.m.");
+});
+
+it("a whole day closed tomorrow on its weekly hours never promises more than today", () => {
+  // 23:50 on a 00:00–23:59:59 day; tomorrow is an ordinary closed day, which an open profile
+  // doesn't carry (nextOpening is null while open, upcoming lists only holidays).
+  const hours = hoursOf({ lastOrdersAt: null });
+  expect(storeStatusLine(hours).label).toBe("Open 24 hours today");
+  chinese();
+  expect(storeStatusLine(hoursOf({ lastOrdersAt: null })).label).toBe("今天 24 小时营业");
 });
 
 it("after a 24-hour day's last orders, ordering opens again at midnight, not 'closes at 11:59 p.m.'", () => {

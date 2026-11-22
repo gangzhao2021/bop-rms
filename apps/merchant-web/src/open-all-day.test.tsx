@@ -88,6 +88,26 @@ it("a whole day is 00:00–23:59:59, 00:00–23:59 or periods back to back", () 
   expect(isOpenAllDay([at("00:00:00", "22:00:00")])).toBe(false);
   expect(isOpenAllDay([at("00:00:00", "11:00:00"), at("12:00:00", "23:59:59")])).toBe(false);
   expect(isOpenAllDay([at("17:00:00", "02:00:00", true)])).toBe(false);
+  // Past midnight: staff still see when the extra hours end.
+  expect(isOpenAllDay([at("00:00:00", "02:00:00", true)])).toBe(false);
+  expect(isOpenAllDay([at("00:00:00", "11:59:59"), at("12:00:00", "02:00:00", true)])).toBe(false);
+  expect(isOpenAllDay([at("00:00:00", "11:59:59"), at("12:00:00", "00:00:00", true)])).toBe(true);
   expect(lastOrdersTime(at("00:00:00", "23:59:59"), 1500)).toBe("23:34:59");
   expect(lastOrdersTime(at("17:00:00", "00:30:00", true), 1800)).toBe("00:00:00");
+});
+
+it("a period from midnight to 2:00 the next day keeps its end time on staff screens", () => {
+  const overnight = [1, 2, 3, 4, 5, 6, 7].map((isoWeekday) => ({
+    isoWeekday,
+    intervals: [{ ...day(1).intervals[0], endLocalTime: "02:00:00", endsNextDay: true }],
+  }));
+  const html = renderToStaticMarkup(
+    <ServiceHoursSummary
+      timeZone="America/Toronto"
+      hours={{ ...live, weeklySchedule: overnight, exceptions: [] } as never}
+    />,
+  );
+  expect(html).toContain("<li>12:00 AM–2:00 AM (next day) · Dine-in, Pickup</li>");
+  expect(html).not.toContain("Open 24 hours");
+  expect(openingHoursLines(overnight as never)[0]).not.toContain("open 24 hours");
 });

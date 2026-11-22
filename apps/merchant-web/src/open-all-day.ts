@@ -23,7 +23,10 @@ export function isOpenAllDay(periods: readonly DayPeriod[]): boolean {
   let reached = 0;
   for (const period of sorted) {
     if (secondsOf(period.startLocalTime) > reached + 60) return false;
-    reached = Math.max(reached, period.endsNextDay ? 86_400 : secondsOf(period.endLocalTime));
+    const end = secondsOf(period.endLocalTime) + (period.endsNextDay ? 86_400 : 0);
+    // A period past midnight ("(next day) 2:00") keeps its own end time in words.
+    if (end > 86_400) return false;
+    reached = Math.max(reached, end);
   }
   return reached >= 86_400 - 60;
 }

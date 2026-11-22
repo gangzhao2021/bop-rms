@@ -523,7 +523,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "{name}目前只能做 {left} 份——您的购物车里有 {ordered} 份。{notCharged}请{value1}后重试。",
   "Open now": "营业中",
   // Batch 46 (v15 overnight 45): a day open 24 hours, and whole sentences around a Store's name.
-  "Open 24 hours": "24 小时营业",
+  "Open 24 hours today": "今天 24 小时营业",
   "open 24 hours": "24 小时营业",
   "Open 24 hours today.": "今天 24 小时营业。",
   "You can order again {day} at {time}.": "{day} {time} 起可以再点单。",

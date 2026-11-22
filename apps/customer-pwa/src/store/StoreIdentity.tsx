@@ -88,11 +88,13 @@ export function storeStatusLine(
           : // Its own words: "until" alone reads as the opening hours in Chinese ("营业至").
             t("resumes at {time}", { time: formatStoreLocalTime(hours.pausedUntil) }),
     };
-  // Batch 46 (v15 overnight 45): a day open 24 hours says so, never "until 11:59 p.m.".
+  // Batch 46 (v15 overnight 45): a day open 24 hours says so, never "until 11:59 p.m.". Only
+  // today: while open the profile doesn't say whether tomorrow starts at midnight, and a Store
+  // closed tomorrow still closes at the end of today.
   const allDay = (hours.tonight ?? null) === null && isOpenAllDay(hours.todayHours);
   if (hours.status === "Open")
     return {
-      label: allDay ? t("Open 24 hours") : t("Open now"),
+      label: allDay ? t("Open 24 hours today") : t("Open now"),
       detail:
         [
           hours.closesAt === null || allDay
