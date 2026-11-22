@@ -2526,6 +2526,12 @@ export function KitchenBoardScreen({
   );
   const boardFreshness = (
     <p className="kitchen-board-freshness">
+      {/* Batch 45 (v15 b44 live): the kitchen display names a chosen work state beside its count.
+          At 1024/1440 its Filters button is hidden and "Find an order · Applied" was the only
+          sign that Held or Being made was chosen. The back office marks it in its tabs. */}
+      {workspaceFrame || status === "Active" ? null : (
+        <span className="kitchen-queue-state">{kitchenWorkStateLabel(status)}</span>
+      )}
       {workspaceFrame ? null : queueCount}
       <Freshness
         status={stale ? "Stale" : view.freshnessStatus}
@@ -2539,13 +2545,18 @@ export function KitchenBoardScreen({
     </p>
   );
   // Held work is rare: its tab shows only while there is some, or while it is chosen.
+  // Batch 45 (v15 b44 live): any state chosen in the phone's Filters sheet keeps its own marked
+  // tab, as Held does. Being made chosen at 390 and the window widened left no tab marked while
+  // the list read "Nothing being made".
   const statusTabs: readonly (readonly [string, string])[] = [
     ["Active", t("Open work")],
     ["Queued", t("To make")],
+    ...(status === "In Progress" ? ([["In Progress", t("Being made")]] as const) : []),
     ...(status === "Held" || itemsInStatus("Held").length > 0
       ? ([["Held", t("Held")]] as const)
       : []),
     ["Completed", t("Completed")],
+    ...(status === "Cancelled" ? ([["Cancelled", t("Cancelled")]] as const) : []),
     ["All", t("All")],
   ];
   // Batch 40 (v15 b39 live): the back office folds its earlier-day list into one line under the
@@ -3067,7 +3078,8 @@ export function KitchenBoardScreen({
                 aria-haspopup="dialog"
                 onClick={openFilterSheet}
               >
-                {searchApplied || hasFilters ? t("Find an order · Applied") : t("Find an order")}
+                {/* Applied only for a search or a ticket filter; the work state is named by the count. */}
+                {searchApplied || ticketFilters ? t("Find an order · Applied") : t("Find an order")}
               </button>
             )}
             {soldOutHref ? (
