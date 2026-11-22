@@ -1,4 +1,5 @@
 import { listSeparator, t, saidTable, wordGap } from "../i18n/i18n.js";
+import { EndedTableCard, endedTableHere, endedTableStore } from "../dining/EndedTable.js";
 import {
   admissionStateForFailure,
   DiningAdmissionPanel,
@@ -797,6 +798,9 @@ export function EntryContextView({
   // phone (or one not read) is told at the counter.
   const profile = established !== null && established.channel === "Pickup" ? service.profile : null;
   const callable = established?.channel === "Pickup" && profile !== null && profile.phone !== null;
+  // Batch 46 (v15 b45 live): opened without a scan after this phone's table visit ended: how it
+  // ended, with the Store's header, as every other tab says it (not "scan the location QR code").
+  const ended = state.kind === "Missing" ? endedTableHere() : null;
   return (
     <CustomerPage
       step="entry"
@@ -807,34 +811,38 @@ export function EntryContextView({
               brandName: at.brandDisplayName,
               serviceMode: at.channel,
             }
-          : undefined
+          : endedTableStore(ended)
       }
       className="entry-page"
       fallbackTitle={t("Start your order")}
       // WP-2423 (rush-logging-and-entry): a page still checking the code it was opened with (or
       // waiting out a busy store) never asks the guest to scan one.
-      askToScan={state.kind !== "Loading"}
+      askToScan={state.kind !== "Loading" && ended === null}
       // M116: no visit was started, so there is no cart or order to go to.
       browseOnly={state.kind === "NotAccepting"}
     >
       <section className="entry-card" aria-live="polite" aria-busy={state.kind === "Loading"}>
-        <EntryState
-          diningAdmission={diningAdmission}
-          headingRef={headingRef}
-          onContinue={onContinue}
-          onRetry={onRetry}
-          onAnswer={onAnswer}
-          onSeated={onSeated}
-          waitStopped={waitStopped}
-          waitRefused={waitRefused}
-          waitTrouble={waitTrouble}
-          autoJoin={autoJoin}
-          starting={starting}
-          state={state}
-          busy={busy}
-          onRetryNow={onRetryNow}
-          service={deciding === null ? undefined : service}
-        />
+        {ended !== null ? (
+          <EndedTableCard ended={ended} />
+        ) : (
+          <EntryState
+            diningAdmission={diningAdmission}
+            headingRef={headingRef}
+            onContinue={onContinue}
+            onRetry={onRetry}
+            onAnswer={onAnswer}
+            onSeated={onSeated}
+            waitStopped={waitStopped}
+            waitRefused={waitRefused}
+            waitTrouble={waitTrouble}
+            autoJoin={autoJoin}
+            starting={starting}
+            state={state}
+            busy={busy}
+            onRetryNow={onRetryNow}
+            service={deciding === null ? undefined : service}
+          />
+        )}
       </section>
       {/* M105 (B.3): a notice, not a block: the order at the other Store is still on this phone. */}
       {/* Also at a table of the same Store: the pickup order is not this table's. */}

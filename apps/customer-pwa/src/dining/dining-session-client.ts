@@ -5,6 +5,7 @@ import {
   getCustomerCsrfCredential,
   getMovedTableLabel,
   getMovedTableMerged,
+  getMovedTableNothingOrdered,
   getSettledTableLabel,
   getEmptyTableLabel,
   setTablePaymentTiming,
@@ -219,6 +220,8 @@ export class DiningSessionClientError extends Error {
     readonly merged = false,
     /** v15 b17 review: "processing": how long the server asked to wait before reading again. */
     readonly retryAfterSeconds = 2,
+    /** Batch 46: "moved": the party had ordered nothing at its own table. */
+    readonly nothingOrdered = false,
   ) {
     super("dining session is " + code);
     this.name = "DiningSessionClientError";
@@ -734,7 +737,14 @@ export function createHttpDiningSessionClient(
     // staff moved its party since it joined (v15 2026-10-30: told on restoring the visit).
     if (csrf === null || !credential.test(csrf)) {
       const moved = getMovedTableLabel();
-      if (moved !== null) throw new DiningSessionClientError("moved", moved, getMovedTableMerged());
+      if (moved !== null)
+        throw new DiningSessionClientError(
+          "moved",
+          moved,
+          getMovedTableMerged(),
+          2,
+          getMovedTableNothingOrdered(),
+        );
       const settled = getSettledTableLabel();
       if (settled !== null) throw new DiningSessionClientError("settled", settled);
       const empty = getEmptyTableLabel();

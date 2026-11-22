@@ -42,6 +42,7 @@ import { createHttpDiningSessionClient } from "../../../apps/customer-pwa/src/di
 import {
   getMovedTableLabel,
   getMovedTableMerged,
+  getMovedTableNothingOrdered,
   setCustomerCsrfCredential,
 } from "../../../apps/customer-pwa/src/session/customer-transaction-context.ts";
 import { createMerchantDiningTeaCharge } from "../../../apps/api/src/merchant-dining-tea-charge.ts";
@@ -2668,6 +2669,9 @@ async function journey(journeyEnding) {
           };
           assert.deepEqual(await restoreOnReload(), ["moved", dining.table.stableLabel]);
           assert.equal(getMovedTableMerged(), true);
+          // Batch 46: T-M ordered (its round is on this table's bill), so its phone is told so;
+          // read under the pilot API role (the merges into T-M and each session's Order).
+          assert.equal(getMovedTableNothingOrdered(), false);
           setCustomerCsrfCredential("x".repeat(43));
           setCustomerCsrfCredential(null);
           // The kitchen: T-M's dishes go to this table, "merged from T-M".

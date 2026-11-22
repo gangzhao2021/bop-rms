@@ -20,6 +20,7 @@ import {
   getEndedTableStore,
   setEmptyTable,
   getMovedTableMerged,
+  getEndedTable,
   isCustomerSessionRestoreUnavailable,
   setCustomerSessionRestoreUnavailable,
 } from "./customer-transaction-context.js";
@@ -618,4 +619,44 @@ it("WP-2423 (rush-reads-and-orders-changes review): a store that answers at once
   });
   expect(busyShown).toBe(1);
   expect(fetcher).toHaveBeenCalledTimes(2);
+});
+
+// Batch 46 (v15 b45 live): every guest tab reads one answer for how the table visit ended, and a
+// moved or merged party that had ordered nothing is told so.
+it("batch 46: one ended-table answer for every tab, with a moved party that ordered nothing", async () => {
+  const store = {
+    brandDisplayName: "Test Merchant 2 - not production",
+    storeDisplayName: "Test Merchant 2 Main - not production",
+  };
+  const restore = (value: unknown) =>
+    restoreCustomerSession(vi.fn().mockResolvedValue(response(value)));
+  expect(getEndedTable()).toBeNull();
+  await restore({
+    schemaVersion: 1,
+    movedTable: { tableLabel: "E45 A (TEST)", merged: true, nothingOrdered: true, store },
+  });
+  expect(getEndedTable()).toEqual({
+    kind: "Moved",
+    tableLabel: "E45 A (TEST)",
+    merged: true,
+    nothingOrdered: true,
+    store,
+  });
+  setMovedTableLabel(null);
+  // Only "true" is an answer; anything else is malformed and says nothing.
+  for (const nothingOrdered of [false, "yes", 1]) {
+    await restore({ schemaVersion: 1, movedTable: { tableLabel: "E45 A (TEST)", nothingOrdered } });
+    expect(getEndedTable()).toBeNull();
+  }
+  await restore({ schemaVersion: 1, emptyTable: { tableLabel: "E45 A (TEST)", store } });
+  expect(getEndedTable()).toEqual({ kind: "Empty", tableLabel: "E45 A (TEST)", store });
+  setEmptyTable(null);
+  await restore({
+    schemaVersion: 1,
+    settledTable: { tableLabel: "12", csrfToken: "C".repeat(43) },
+  });
+  expect(getEndedTable()).toEqual({ kind: "Settled", tableLabel: "12", store: null });
+  // A visit on this phone again: nothing ended.
+  setCustomerCsrfCredential("D".repeat(43));
+  expect(getEndedTable()).toBeNull();
 });

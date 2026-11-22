@@ -312,13 +312,23 @@ export async function restoreCustomerSession(
         !Array.isArray(moved) &&
         store !== null &&
         Object.keys(moved).length ===
-          1 + ("merged" in moved ? 1 : 0) + (store === undefined ? 0 : 1) &&
+          1 +
+            ("merged" in moved ? 1 : 0) +
+            ("nothingOrdered" in moved ? 1 : 0) +
+            (store === undefined ? 0 : 1) &&
         (!("merged" in moved) || moved.merged === true) &&
+        // Batch 46: the party had ordered nothing at its own table (a newer server says so).
+        (!("nothingOrdered" in moved) || moved.nothingOrdered === true) &&
         "tableLabel" in moved &&
         typeof moved.tableLabel === "string" &&
         /^[^\p{Cc}\p{Cf}<>{}$]{1,40}$/u.test(moved.tableLabel)
       )
-        setMovedTableLabel(moved.tableLabel, "merged" in moved, store ?? null);
+        setMovedTableLabel(
+          moved.tableLabel,
+          "merged" in moved,
+          store ?? null,
+          "nothingOrdered" in moved,
+        );
       return false;
     }
     if (

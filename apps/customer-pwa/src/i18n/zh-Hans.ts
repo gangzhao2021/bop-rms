@@ -1634,6 +1634,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Staff moved your party from table {from} to table {table}. Keep ordering and paying on this phone.":
     "店员已把您从 {from} 桌换到 {table} 桌，继续用这部手机点餐和付款即可。",
   "Your table was merged into table {table}": "您这桌已并到 {table} 桌",
+  // Batch 46 (v15 b45 live): a party that had ordered nothing isn't told its orders went along.
+  "Staff joined your party to table {table}. Scan the code on table {table} to keep ordering and paying together.":
+    "店员已把您并到 {table} 桌。请扫 {table} 桌的桌台二维码继续点餐和一起付款。",
+  "Staff moved your party to table {table}. Scan the code on table {table} to keep ordering and paying together.":
+    "店员已把您这桌换到 {table} 桌。请扫 {table} 桌的桌台二维码，继续一起点单和付款。",
+  "See the receipt": "查看收据",
   "Staff joined your party to table {table}. Everything your table ordered is on that table's bill. Scan the code on table {table} to keep ordering and paying together.":
     "店员已把您并到 {table} 桌，您点过的菜都在那桌的账单上。请扫 {table} 桌的桌台二维码继续点餐和一起付款。",
   "Staff moved your party to table {table}. Everything your table ordered moved with you. Scan the code on table {table} to keep ordering and paying together.":

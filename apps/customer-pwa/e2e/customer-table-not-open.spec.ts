@@ -967,7 +967,9 @@ test.describe("@production CUST-ENTRY table not open", () => {
         await page.goto("/dine-in/session");
         if (zh) await page.getByRole("button", { name: "切换到中文" }).click();
         await page.reload();
-        await expect(main.getByRole("alert")).toContainText("V44 B (TEST)");
+        // Batch 46: a calm status, not an alert (nothing went wrong).
+        await expect(main.getByRole("status").filter({ hasText: "V44 B (TEST)" })).toBeVisible();
+        await expect(main.getByRole("alert")).toHaveCount(0);
         await expect(main).not.toContainText(zh ? "入桌码" : "join code");
         await expect(banner.getByRole("heading", { level: 1 })).toHaveText(tm2.storeDisplayName);
         await expect(banner).toContainText(`${tm2.brandDisplayName} · ${zh ? "堂食" : "Dine in"}`);
@@ -986,4 +988,172 @@ test.describe("@production CUST-ENTRY table not open", () => {
         if (zh) await page.getByRole("button", { name: "English" }).click();
       }
     });
+});
+
+// Batch 46 (v15 b45 live, v-cart-after-close-G1-390.png and b-merged-G4-390.png): after staff
+// closed a table where nothing was ordered, Your table showed the ended card with the Store, but
+// Cart and Menu on the same phone fell back to "Order / Scan the location QR code to begin", a
+// red-dot "Your visit on this phone has ended", a "Refresh cart" that cannot help, and "Your
+// session ended". Every tab now gives the same calm answer with the Store's header. A merged
+// party that ordered nothing is not told "everything your table ordered is on that table's bill"
+// under a subtitle with no list, and a Chinese sentence spaces a Latin table name alike.
+test.describe("@production CUST-DINE-IN after the table's visit ended", () => {
+  test.use({ serviceWorkers: "block" });
+  const tm2 = {
+    brandDisplayName: "Test Merchant 2 - not production",
+    storeDisplayName: "Test Merchant 2 Main - not production",
+  };
+  const tabs = [
+    { path: "/menu", en: "Menu", zh: "菜单" },
+    { path: `/menu/items/${id(3)}`, en: "Menu", zh: "菜单" },
+    { path: "/cart", en: "Your cart", zh: "您的购物车" },
+    { path: "/dine-in/session", en: "Your table", zh: "您的桌位" },
+  ];
+  async function expectCalmCard(page: Page, heading: string, width: number) {
+    const main = page.getByRole("main");
+    const card = main
+      .getByRole("status")
+      .filter({ has: page.getByRole("heading", { name: heading }) });
+    await expect(card).toBeVisible();
+    await expect(main.getByRole("alert")).toHaveCount(0);
+    const box = await card.boundingBox();
+    expect(box).not.toBeNull();
+    // Inside the 16 px gutter, and on the first screen with room to spare (Linux fonts run wider).
+    expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(width - 15);
+    expect((box?.y ?? 0) + (box?.height ?? 0)).toBeLessThanOrEqual(844 - 40);
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow).toBeLessThanOrEqual(0);
+    const tight = await card.evaluate((element) =>
+      [...element.querySelectorAll("h2, p, a")].some((line) => line.scrollWidth > line.clientWidth),
+    );
+    expect(tight).toBe(false);
+    await expectNoInternalText(page);
+    return card;
+  }
+  async function expectStoreHeader(page: Page, zh: boolean) {
+    const banner = page.getByRole("banner");
+    await expect(banner.getByRole("heading", { level: 1 })).toHaveText(tm2.storeDisplayName);
+    await expect(banner).toContainText(`${tm2.brandDisplayName} · ${zh ? "堂食" : "Dine in"}`);
+    for (const wrong of zh
+      ? ["扫描门店二维码", "您在这部手机上的用餐已结束", "刷新购物车", "会话", "入桌码"]
+      : [
+          "Scan the location QR code",
+          "Your visit on this phone has ended",
+          "Refresh cart",
+          "session",
+          "join code",
+        ])
+      await expect(page.getByText(wrong)).toHaveCount(0);
+  }
+
+  for (const width of [390, 1440])
+    for (const zh of [false, true])
+      test(`every tab after a table closed with nothing ordered says the visit ended (${zh ? "zh-Hans" : "en"} ${width})`, async ({
+        page,
+      }) => {
+        await page.setViewportSize({ width, height: 844 });
+        const asked: string[] = [];
+        page.on("request", (request) => {
+          const path = new URL(request.url()).pathname;
+          if (
+            request.method() !== "GET" ||
+            /^\/(api|bff)\/.*\/(cart|carts|entry|dine-in)(\/|$)/u.test(path)
+          )
+            asked.push(`${request.method()} ${path}`);
+        });
+        await page.route("**/api/v1/customer/session/csrf", (route) =>
+          route.fulfill({
+            status: 200,
+            headers: { "cache-control": "no-store" },
+            json: { schemaVersion: 1, emptyTable: { tableLabel: "E45 A (TEST)", store: tm2 } },
+          }),
+        );
+        await page.goto("/dine-in/session");
+        if (zh) await page.getByRole("button", { name: "切换到中文" }).click();
+        for (const tab of tabs)
+          for (const reload of [false, true]) {
+            if (reload) await page.reload();
+            else await page.goto(tab.path);
+            await expect(
+              page
+                .getByRole("main")
+                .getByRole("heading", { name: zh ? tab.zh : tab.en, exact: true }),
+            ).toBeVisible();
+            const card = await expectCalmCard(
+              page,
+              zh ? "这桌的用餐已结束" : "This table’s visit has ended",
+              width,
+            );
+            await expect(card).toContainText(
+              zh
+                ? "E45 A (TEST) 没有点单，所以没有扣款。"
+                : "Nothing was ordered at E45 A (TEST), so nothing was charged.",
+            );
+            await expect(card).toContainText(
+              zh
+                ? "新的一桌？请让店员带位，开台后再扫一次码。"
+                : "New party? Ask staff to seat you, then scan again.",
+            );
+            // Nothing that cannot help: no buttons at all on the card.
+            await expect(card.getByRole("button")).toHaveCount(0);
+            await expectStoreHeader(page, zh);
+            await page.screenshot({
+              path: `test-results/b46-empty-${tab.path.split("/")[1]}-${zh ? "zh" : "en"}-${width}${reload ? "-reload" : ""}.png`,
+              fullPage: true,
+            });
+          }
+        // Nothing was read or written for a cart, a join or a visit the phone no longer has.
+        expect(asked).toEqual([]);
+      });
+
+  for (const width of [390, 1440])
+    for (const zh of [false, true])
+      test(`a merged party that ordered nothing reads where to go, with one spacing rule (${zh ? "zh-Hans" : "en"} ${width})`, async ({
+        page,
+      }) => {
+        await page.setViewportSize({ width, height: 844 });
+        await page.route("**/api/v1/customer/session/csrf", (route) =>
+          route.fulfill({
+            status: 200,
+            headers: { "cache-control": "no-store" },
+            json: {
+              schemaVersion: 1,
+              movedTable: {
+                tableLabel: "E45 A (TEST)",
+                merged: true,
+                nothingOrdered: true,
+                store: tm2,
+              },
+            },
+          }),
+        );
+        await page.goto("/dine-in/session");
+        if (zh) await page.getByRole("button", { name: "切换到中文" }).click();
+        for (const path of ["/dine-in/session", "/cart", "/menu"]) {
+          await page.goto(path);
+          const card = await expectCalmCard(
+            page,
+            zh ? "您这桌已并到 E45 A (TEST)" : "Your table was merged into E45 A (TEST)",
+            width,
+          );
+          await expect(card).toHaveText(
+            zh
+              ? "您这桌已并到 E45 A (TEST)店员已把您并到 E45 A (TEST)。请扫 E45 A (TEST) 的桌台二维码继续点餐和一起付款。"
+              : "Your table was merged into E45 A (TEST)Staff joined your party to E45 A (TEST). Scan the code on E45 A (TEST) to keep ordering and paying together.",
+          );
+          const main = page.getByRole("main");
+          // No subtitle over a list that isn't there, and no bill line when nothing was ordered.
+          await expect(main).not.toContainText(
+            zh ? "您和同桌其他客人在这桌点的所有东西" : "Everything ordered at this table",
+          );
+          await expect(main).not.toContainText(zh ? "账单上" : "on that table's bill");
+          await expectStoreHeader(page, zh);
+          await page.screenshot({
+            path: `test-results/b46-merged-${path.split("/")[1]}-${zh ? "zh" : "en"}-${width}.png`,
+            fullPage: true,
+          });
+        }
+      });
 });

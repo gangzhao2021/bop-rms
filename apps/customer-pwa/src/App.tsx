@@ -30,6 +30,8 @@ import { DiningSessionPage } from "./dining/DiningSessionPage.js";
 import type { CustomerDemoDependencies } from "./customer-demo.js";
 import type { CustomerStoreContext } from "./journey/CustomerPage.js";
 import { MemberPage } from "./member/MemberPage.js";
+import { EndedTablePage, endedTableHere } from "./dining/EndedTable.js";
+import { t } from "./i18n/i18n.js";
 
 function useDemoForOrderRoute(
   demo: CustomerDemoDependencies | undefined,
@@ -186,6 +188,10 @@ export function App({
           }),
     );
   }, []);
+  // Batch 46 (v15 b45 live): this phone's table visit ended (closed, paid, moved or merged) and it
+  // has no visit or Store context now: Menu, a dish page and Cart say how it ended, with the
+  // Store's header, as Your table does, never "scan the code to begin" or "your visit ended".
+  const ended = menuContext === undefined && demo === undefined ? endedTableHere() : null;
   return (
     <>
       <ConnectivityBanner />
@@ -216,37 +222,49 @@ export function App({
         <Route
           path="/menu"
           element={
-            <MenuBrowsePage
-              context={localizedMenuContext}
-              client={demo?.menuClient}
-              readOnlyNotice={demo?.menuReadOnlyNotice}
-              cartSummary={demoCartSummary}
-              storeProfile={demo ? null : undefined}
-            />
+            ended !== null ? (
+              <EndedTablePage step="menu" title={t("Menu")} ended={ended} />
+            ) : (
+              <MenuBrowsePage
+                context={localizedMenuContext}
+                client={demo?.menuClient}
+                readOnlyNotice={demo?.menuReadOnlyNotice}
+                cartSummary={demoCartSummary}
+                storeProfile={demo ? null : undefined}
+              />
+            )
           }
         />
         <Route
           path="/menu/search"
           element={
-            <MenuSearchPage
-              context={localizedMenuContext}
-              client={demo?.menuClient}
-              readOnlyNotice={demo?.menuReadOnlyNotice}
-              cartSummary={demoCartSummary}
-              storeProfile={demo ? null : undefined}
-            />
+            ended !== null ? (
+              <EndedTablePage step="menu" title={t("Menu")} ended={ended} />
+            ) : (
+              <MenuSearchPage
+                context={localizedMenuContext}
+                client={demo?.menuClient}
+                readOnlyNotice={demo?.menuReadOnlyNotice}
+                cartSummary={demoCartSummary}
+                storeProfile={demo ? null : undefined}
+              />
+            )
           }
         />
         <Route
           path="/menu/items/:sellableId"
           element={
-            <SellableDetailPage
-              context={localizedMenuContext}
-              client={demo?.menuClient}
-              readOnlyNotice={demo?.menuReadOnlyNotice}
-              // The local demo reads no Store identity (it makes no application requests).
-              storeProfile={demo ? null : undefined}
-            />
+            ended !== null ? (
+              <EndedTablePage step="menu" title={t("Menu")} ended={ended} />
+            ) : (
+              <SellableDetailPage
+                context={localizedMenuContext}
+                client={demo?.menuClient}
+                readOnlyNotice={demo?.menuReadOnlyNotice}
+                // The local demo reads no Store identity (it makes no application requests).
+                storeProfile={demo ? null : undefined}
+              />
+            )
           }
         />
         <Route
@@ -262,14 +280,18 @@ export function App({
         <Route
           path="/cart"
           element={
-            <CartPage
-              store={store}
-              menuContext={localizedMenuContext}
-              menuClient={demo?.menuClient}
-              // The local demo reads no Store hours (it makes no application requests).
-              storeProfile={demo ? null : undefined}
-              {...(demo ? { controller: demo.cartController } : {})}
-            />
+            ended !== null ? (
+              <EndedTablePage step="cart" title={t("Your cart")} ended={ended} />
+            ) : (
+              <CartPage
+                store={store}
+                menuContext={localizedMenuContext}
+                menuClient={demo?.menuClient}
+                // The local demo reads no Store hours (it makes no application requests).
+                storeProfile={demo ? null : undefined}
+                {...(demo ? { controller: demo.cartController } : {})}
+              />
+            )
           }
         />
         <Route

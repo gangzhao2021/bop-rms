@@ -40,6 +40,7 @@ import {
   useGoOnWhenTableOpens,
 } from "../entry/table-wait-away.js";
 import { SettledTableReceiptPanel, type SettledTableReceiptClient } from "./SettledTableReceipt.js";
+import { EmptyClosedTableCard, MovedTableCard, SettledTableCard } from "./EndedTable.js";
 import { DiningStaffCallPanel } from "./DiningStaffCallPanel.js";
 import type { DiningStaffCallClient } from "./dining-staff-call-client.js";
 import type { DiningInvitationClient } from "./dining-invitation-client.js";
@@ -800,7 +801,13 @@ export type DiningSessionState =
   | { readonly status: "loading" }
   | { readonly status: "not-joined" }
   /** WP-2423 item 8 ⑧: staff moved the party to this table after this phone joined. */
-  | { readonly status: "moved"; readonly tableLabel: string; readonly merged: boolean }
+  | {
+      readonly status: "moved";
+      readonly tableLabel: string;
+      readonly merged: boolean;
+      /** Batch 46: the party had ordered nothing at its own table. */
+      readonly nothingOrdered: boolean;
+    }
   /** The table was closed and its bill settled while this phone's guest sat at it. */
   | { readonly status: "settled"; readonly tableLabel: string }
   /** Batch 45: staff closed the table with nothing ordered (nothing charged, no receipt). */
@@ -926,7 +933,12 @@ export function DiningSessionPage({
         error.code === "moved" &&
         error.tableLabel !== null
       )
-        setState({ status: "moved", tableLabel: error.tableLabel, merged: error.merged });
+        setState({
+          status: "moved",
+          tableLabel: error.tableLabel,
+          merged: error.merged,
+          nothingOrdered: error.nothingOrdered,
+        });
       else if (
         error instanceof DiningSessionClientError &&
         error.code === "settled" &&
@@ -1075,34 +1087,9 @@ function SettledTable({
 }) {
   return (
     <>
-      <section className="order-status__card" role="status">
-        <h2>{t("Thank you for dining with us.")}</h2>
-        {/* b13: a table comped to nothing closes too; "paid" is the receipt's to say. */}
-        <p>{t("Your meal at table {table} has ended.", { table: saidTable(tableLabel) })}</p>
-        {/* Batch 44: the same words as the start page (a new party is seated first). */}
-        <p>{t("New party? Ask staff to seat you, then scan again.")}</p>
-      </section>
+      <SettledTableCard tableLabel={tableLabel} />
       <SettledTableReceiptPanel {...(receipt === undefined ? {} : { client: receipt })} />
     </>
-  );
-}
-
-/**
- * Batch 45 (v15 b44 live): staff closed the guest's table with nothing ordered (guests joined, a
- * dish may have been added and removed). The visit is over and nothing was charged; there is no
- * receipt, nothing to join and no code to ask anyone for. A new party is seated first.
- */
-function EmptyClosedTable({ tableLabel }: { readonly tableLabel: string }) {
-  return (
-    <section className="order-status__card" role="status">
-      <h2>{t("This table’s visit has ended")}</h2>
-      <p>
-        {t("Nothing was ordered at table {table}, so nothing was charged.", {
-          table: saidTable(tableLabel),
-        })}
-      </p>
-      <p>{t("New party? Ask staff to seat you, then scan again.")}</p>
-    </section>
   );
 }
 
@@ -1214,7 +1201,11 @@ export function DiningSessionScreen({
             : t("Your table")
         }
       >
-        {state.status === "settled" || state.status === "ended-empty" ? null : (
+        {/* Batch 46 (v15 b45 live): said only above a table's list, never over an ended or
+            moved table's card with nothing under it. */}
+        {state.status === "settled" ||
+        state.status === "ended-empty" ||
+        state.status === "moved" ? null : (
           <p>{t("Everything ordered at this table, by you and the other guests.")}</p>
         )}
       </PageHeading>
@@ -1238,41 +1229,18 @@ export function DiningSessionScreen({
         </section>
       ) : null}
       {state.status === "moved" ? (
-        <section className="order-status__card" role="alert">
-          {state.merged ? (
-            // WP-2423 item 8 ⑨: staff merged this table into the party at that table.
-            <>
-              <h2>
-                {t("Your table was merged into table {table}", {
-                  table: saidTable(state.tableLabel),
-                })}
-              </h2>
-              <p>
-                {t(
-                  "Staff joined your party to table {table}. Everything your table ordered is on that table's bill. Scan the code on table {table} to keep ordering and paying together.",
-                  { table: saidTable(state.tableLabel) },
-                )}
-              </p>
-            </>
-          ) : (
-            <>
-              <h2>
-                {t("Your table moved to table {table}", { table: saidTable(state.tableLabel) })}
-              </h2>
-              <p>
-                {t(
-                  "Staff moved your party to table {table}. Everything your table ordered moved with you. Scan the code on table {table} to keep ordering and paying together.",
-                  { table: saidTable(state.tableLabel) },
-                )}
-              </p>
-            </>
-          )}
-        </section>
+        <MovedTableCard
+          tableLabel={state.tableLabel}
+          merged={state.merged}
+          nothingOrdered={state.nothingOrdered}
+        />
       ) : null}
       {state.status === "settled" ? (
         <SettledTable tableLabel={state.tableLabel} receipt={settledReceipt} />
       ) : null}
-      {state.status === "ended-empty" ? <EmptyClosedTable tableLabel={state.tableLabel} /> : null}
+      {state.status === "ended-empty" ? (
+        <EmptyClosedTableCard tableLabel={state.tableLabel} />
+      ) : null}
       {state.status === "not-joined" ? (
         <section className="order-status__card" role="alert">
           {/* WP-2423 DEC-DINING-GUEST-TABLE-START: nobody seats these guests, so nobody is asked. */}

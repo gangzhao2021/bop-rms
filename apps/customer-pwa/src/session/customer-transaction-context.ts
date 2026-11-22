@@ -67,15 +67,23 @@ let movedTableMerged = false;
 type RestoredStore = Readonly<{ brandDisplayName: string; storeDisplayName: string }>;
 /** Batch 45 (v15 b44 live): the moved party's Store, when the restore named it (the header). */
 let movedTableStore: RestoredStore | null = null;
+/** Batch 46 (v15 b45 live): the moved or merged party had ordered nothing at its own table. */
+let movedTableNothingOrdered = false;
 
 export function setMovedTableLabel(
   value: string | null,
   merged = false,
   store: RestoredStore | null = null,
+  nothingOrdered = false,
 ): void {
   movedTableLabel = value;
   movedTableMerged = value !== null && merged;
   movedTableStore = value === null || store === null ? null : Object.freeze({ ...store });
+  movedTableNothingOrdered = value !== null && nothingOrdered;
+}
+
+export function getMovedTableNothingOrdered(): boolean {
+  return movedTableNothingOrdered;
 }
 
 export function getMovedTableMerged(): boolean {
@@ -144,6 +152,48 @@ export function getEmptyTableLabel(): string | null {
 /** Batch 45: the Store of the table this device's visit ended at (settled, empty or moved). */
 export function getEndedTableStore(): RestoredStore | null {
   return settledTable?.store ?? emptyTable?.store ?? movedTableStore;
+}
+
+/**
+ * Batch 46 (v15 b45 live): how this phone's table visit ended, as the restore said: one answer
+ * for every guest tab (Menu, Cart, Your table, a dish page), so none falls back to "scan the
+ * code to begin" or "your visit ended" with a refresh button. Null while a visit goes on.
+ */
+export type EndedTable = Readonly<
+  | { kind: "Settled"; tableLabel: string; store: RestoredStore | null }
+  | { kind: "Empty"; tableLabel: string; store: RestoredStore | null }
+  | {
+      kind: "Moved";
+      tableLabel: string;
+      merged: boolean;
+      nothingOrdered: boolean;
+      store: RestoredStore | null;
+    }
+>;
+
+export function getEndedTable(): EndedTable | null {
+  if (csrfCredential !== null) return null;
+  if (movedTableLabel !== null)
+    return Object.freeze({
+      kind: "Moved",
+      tableLabel: movedTableLabel,
+      merged: movedTableMerged,
+      nothingOrdered: movedTableNothingOrdered,
+      store: movedTableStore,
+    });
+  if (settledTable !== null)
+    return Object.freeze({
+      kind: "Settled",
+      tableLabel: settledTable.tableLabel,
+      store: settledTable.store ?? null,
+    });
+  if (emptyTable !== null)
+    return Object.freeze({
+      kind: "Empty",
+      tableLabel: emptyTable.tableLabel,
+      store: emptyTable.store ?? null,
+    });
+  return null;
 }
 
 export function getSettledTableLabel(): string | null {
@@ -426,6 +476,7 @@ export function setCustomerCsrfCredential(value: string | null): void {
     endedVisitReceipt = null;
     movedTableLabel = null;
     movedTableStore = null;
+    movedTableNothingOrdered = false;
     participationEnded = null;
     settledTable = null;
     emptyTable = null;
