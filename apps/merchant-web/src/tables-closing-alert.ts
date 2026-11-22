@@ -25,8 +25,11 @@ export function tablesClosingAlert(
   const timeAtEnd = (at: number) => clockTimeEndingSentence(at, timeZone);
   const lead = tablesClosingLeadMinutes * 60_000;
   const ends = day.endsAt === null ? Number.NaN : Date.parse(day.endsAt);
-  const closes =
+  const closesAt =
     day.closesAt === undefined || day.closesAt === null ? Number.NaN : Date.parse(day.closesAt);
+  // Batch 47: a Store still open when the business day ends (open 24 hours) closes with the day;
+  // it is not "closing at 4:00 a.m.", so its tables are told when the day ends.
+  const closes = Number.isFinite(ends) && closesAt >= ends ? Number.NaN : closesAt;
   const tables = countOf(openTables, "table");
   if (Number.isFinite(closes) && now >= closes - lead && now < closes)
     return {

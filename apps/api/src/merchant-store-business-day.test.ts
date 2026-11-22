@@ -68,8 +68,10 @@ describe("Batch 36: Home's closing after midnight follows the Store's open perio
       })),
     );
     expect(day.closedToday).toBe(false);
-    // Friday's 00:00-23:59:59 began inside Thursday's business day, so the day closes with it.
-    expect(day.closesAt).toBe("2026-11-21T04:59:59.000Z");
+    // Batch 47 (v15 b46: closesAt was the end of the next calendar day, 2026-11-21T04:59:59Z,
+    // a day after this business day ended): still open when the day ends, it closes with the day.
+    expect(day.closesAt).toBe(day.endsAt);
+    expect(day.closesAt).toBe("2026-11-20T09:00:00.000Z");
     expect(Date.parse(day.closesAt ?? "")).toBeGreaterThan(Date.parse("2026-11-20T05:49:00.000Z"));
   });
 

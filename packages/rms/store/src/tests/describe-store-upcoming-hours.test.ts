@@ -168,6 +168,42 @@ describe("WP-2423 DEC-CLOSING-SUMMARY: when the Store closes on a business day",
       ]),
     ).toEqual({ kind: "Closes", localDate: "2026-12-22", localTime: "16:00:00" });
   });
+  it("batch 47: closes within its own business day when a period is still open at its end", () => {
+    // Test Merchant 2 as v15 publishes it: 00:00-23:59:59 every day, business day from 4:00.
+    const allDay = [1, 2, 3, 4, 5, 6, 7].map((isoWeekday) => ({
+      isoWeekday,
+      intervals: [period("00:00:00", "23:59:59")],
+    }));
+    expect(closing("2026-11-22", allDay)).toEqual({
+      kind: "Closes",
+      localDate: "2026-11-23",
+      localTime: "04:00:00",
+    });
+    // 18:00 to 5:00 the next morning: Tuesday's day ends at 4:00; Wednesday's says 5:00.
+    const late = [2, 3].map((isoWeekday) => ({
+      isoWeekday,
+      intervals: [{ ...period("18:00:00", "05:00:00"), endsNextDay: true }],
+    }));
+    expect(closing("2026-12-22", late)).toEqual({
+      kind: "Closes",
+      localDate: "2026-12-23",
+      localTime: "04:00:00",
+    });
+    expect(closing("2026-12-23", late)).toEqual({
+      kind: "Closes",
+      localDate: "2026-12-24",
+      localTime: "04:00:00",
+    });
+    // Closing at the business day's start time is still inside the day.
+    const toFour = [
+      { isoWeekday: 2, intervals: [{ ...period("18:00:00", "04:00:00"), endsNextDay: true }] },
+    ];
+    expect(closing("2026-12-22", toFour)).toEqual({
+      kind: "Closes",
+      localDate: "2026-12-23",
+      localTime: "04:00:00",
+    });
+  });
   it("says nothing is published rather than closed when no hours exist", () => {
     expect(closing("2026-12-22", [])).toEqual({ kind: "NoPublishedHours" });
     expect(closing("2026-12-22", [{ isoWeekday: 2, intervals: [] }])).toEqual({

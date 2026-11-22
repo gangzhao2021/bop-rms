@@ -197,7 +197,10 @@ export type StoreBusinessDayClosing =
   | { readonly kind: "NoPublishedHours" }
   /** Hours are published and this day has none (a holiday, a closure, a day off). */
   | { readonly kind: "ClosedToday" }
-  /** The end of the day's last period; the local date is the next one when it runs past midnight. */
+  /**
+   * The end of the day's last period, or of the business day when a period is still open then;
+   * the local date is the next one when it runs past midnight.
+   */
   | { readonly kind: "Closes"; readonly localDate: string; readonly localTime: string };
 
 /**
@@ -210,7 +213,9 @@ export type StoreBusinessDayClosing =
  * on the next date, or a Store open all day). Each ends as the open gate ends it: a period that
  * runs past midnight stops at midnight when the next date has its own dated exception. The
  * closing is the latest end, so the Store's own screens never say it has closed while the open
- * gate still takes orders, and say so once it has stopped.
+ * gate still takes orders, and say so once it has stopped. The closing is never after the business
+ * day ends: a Store still open then (open 24 hours, or a period running past the start of the next
+ * business day) closes this business day at its end.
  */
 export function describeStoreBusinessDayClosing(
   input: Pick<StoreUpcomingHoursInput, "weeklySchedule" | "exceptions"> & {
@@ -248,8 +253,12 @@ export function describeStoreBusinessDayClosing(
         (interval.endsNextDay
           ? 86_400 + (nextHasException ? 0 : seconds(interval.endLocalTime))
           : seconds(interval.endLocalTime));
-      if (from < dayEnd && until > dayStart && until > from && (end === null || until > end))
-        end = until;
+      // Batch 47 (v15 b46: Test Merchant 2, open 00:00-23:59:59 every day, read closesAt at the
+      // end of the next calendar day, a day after its business day ended): a period still open
+      // when the business day ends closes this day at its end; the next day says the rest.
+      const closes = Math.min(until, dayEnd);
+      if (from < dayEnd && until > dayStart && until > from && (end === null || closes > end))
+        end = closes;
     }
   }
   if (end === null) return Object.freeze({ kind: "ClosedToday" });
