@@ -7,7 +7,13 @@ import {
   type StoreProfile,
   type StoreProfileLoader,
 } from "./store-profile-client.js";
-import { dayKindLabel, intervalsText, nextOpeningText, storeDayName } from "./store-hours-text.js";
+import {
+  dayKindLabel,
+  intervalsText,
+  isOpenAllDay,
+  nextOpeningText,
+  storeDayName,
+} from "./store-hours-text.js";
 import {
   nextStoreBoundaryMs,
   storeServicePhase,
@@ -82,12 +88,14 @@ export function storeStatusLine(
           : // Its own words: "until" alone reads as the opening hours in Chinese ("营业至").
             t("resumes at {time}", { time: formatStoreLocalTime(hours.pausedUntil) }),
     };
+  // Batch 46 (v15 overnight 45): a day open 24 hours says so, never "until 11:59 p.m.".
+  const allDay = (hours.tonight ?? null) === null && isOpenAllDay(hours.todayHours);
   if (hours.status === "Open")
     return {
-      label: t("Open now"),
+      label: allDay ? t("Open 24 hours") : t("Open now"),
       detail:
         [
-          hours.closesAt === null
+          hours.closesAt === null || allDay
             ? null
             : t("until {value1}", { value1: formatStoreLocalTime(hours.closesAt) }),
           // WP-2423 item 8 ③ (decision 16): the kitchen's last orders, when the Store set them.
@@ -115,17 +123,10 @@ export function storeStatusLine(
   };
 }
 
-/** "7:00 a.m.–11:00 a.m., 1:00 p.m.–6:00 p.m." or "Closed today". */
+/** "7:00 a.m.–11:00 a.m., 1:00 p.m.–6:00 p.m.", "open 24 hours" or "Closed today". */
 export function todayHoursText(hours: NonNullable<StoreProfile["hours"]>): string {
   if (hours.todayHours.length === 0) return t("Closed today");
-  return hours.todayHours
-    .map(
-      (interval) =>
-        `${formatStoreLocalTime(interval.startLocalTime)}–${formatStoreLocalTime(interval.endLocalTime)}${
-          interval.endsNextDay ? t(" (next day)") : ""
-        }`,
-    )
-    .join(listSeparator());
+  return intervalsText(hours.todayHours);
 }
 
 /**

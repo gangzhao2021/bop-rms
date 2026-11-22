@@ -18,6 +18,7 @@ import { createStoreConfigurationClient } from "./store-configuration-client.js"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router";
 import { timeZoneLabel } from "./time-zone-names.js";
+import { isOpenAllDay, lastOrdersTime } from "./open-all-day.js";
 import {
   createServiceControlClient,
   serviceOperationReference,
@@ -108,25 +109,38 @@ export function ServiceHoursSummary({
     t("Sunday"),
   ];
   // WP-2423 Q4: hours in staff language — 9:00 a.m., Dine-in, minutes; zero settings are left out.
-  // Batch 46: each piece is one whole phrase per language ("打烊前 30 分钟停止点单").
-  const describe = (interval: ServiceInterval) =>
-    joinPieces([
-      serviceTime(interval.startLocalTime) +
-        "–" +
-        serviceTime(interval.endLocalTime) +
-        (interval.endsNextDay ? t(" (next day)") : ""),
+  // Batch 46: each piece is one whole phrase per language ("打烊前 30 分钟停止点单"); a period open
+  // all day reads "Open 24 hours", and its last orders as the time they stop (there is no closing
+  // for "before closing" to count from).
+  const describe = (interval: ServiceInterval) => {
+    const allDay = isOpenAllDay([interval]);
+    return joinPieces([
+      allDay
+        ? t("Open 24 hours")
+        : serviceTime(interval.startLocalTime) +
+          "–" +
+          serviceTime(interval.endLocalTime) +
+          (interval.endsNextDay ? t(" (next day)") : ""),
       interval.serviceModes.map(serviceModeLabel).join(listSeparator()),
       ...(interval.orderCutoffSeconds > 0
         ? [
-            t("last orders {minutes} before closing", {
-              minutes: serviceMinutes(interval.orderCutoffSeconds),
-            }),
+            allDay
+              ? t("no orders after {time}", {
+                  time: serviceTime(lastOrdersTime(interval, interval.orderCutoffSeconds)),
+                })
+              : t("last orders {minutes} before closing", {
+                  minutes: serviceMinutes(interval.orderCutoffSeconds),
+                }),
           ]
         : []),
       ...(interval.leadTimeSeconds > 0
         ? [t("ready in {minutes}", { minutes: serviceMinutes(interval.leadTimeSeconds) })]
         : []),
     ]);
+  };
+  /** Periods back to back that cover the day: said once above them. */
+  const allDayAbove = (intervals: readonly ServiceInterval[]) =>
+    intervals.length > 1 && isOpenAllDay(intervals) ? <p>{t("Open 24 hours")}</p> : null;
   // Batch 46 (v15: "2026-11-05 · Special hours" 17 days after the date): only today's and later
   // special dates are listed; earlier ones stay in the published configuration's own record.
   const today = operatingDate(observedAt, timeZone, hours.businessDayStartLocalTime);
@@ -151,6 +165,7 @@ export function ServiceHoursSummary({
         {hours.weeklySchedule.map((day) => (
           <section key={day.isoWeekday}>
             <h3>{days[day.isoWeekday - 1]}</h3>
+            {allDayAbove(day.intervals)}
             {day.intervals.length ? (
               <ul>
                 {day.intervals.map((interval, index) => (
@@ -174,6 +189,7 @@ export function ServiceHoursSummary({
                 </time>
                 {" · " + exceptionKindLabel(exception.kind)}
               </strong>
+              {allDayAbove(exception.intervals)}
               {exception.intervals.length ? (
                 <ul>
                   {exception.intervals.map((interval, index) => (

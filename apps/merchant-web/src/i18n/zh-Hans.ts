@@ -1417,6 +1417,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Close ticket": "关闭票据",
   "Close {orderLabel} from {day}?": "关闭 {day} 的{orderLabel}？",
   Closed: "已关闭",
+  // Batch 46 (v15 overnight 45): a day open midnight to midnight.
+  "Open 24 hours": "24 小时营业",
+  "open 24 hours": "24 小时营业",
+  "no orders after {time}": "{time} 后停止点单",
   "Closed as not collected after the pickup hold. It was not refunded automatically; a manager can still grant a refund from payments.":
     "取餐保留时间过后作为未取餐关闭。没有自动退款；店长仍可在付款页中退款。",
   "Closed as not collected.": "已作为未取餐关闭。",

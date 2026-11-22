@@ -10,6 +10,7 @@ import {
   leavingWithUnsavedWork,
 } from "./i18n/i18n.js";
 import { wordGap } from "./word-gap.js";
+import { isOpenAllDay } from "./open-all-day.js";
 export { wordGap };
 import { StoreConfigurationOrdinaryPanel } from "./StoreConfigurationOrdinaryPanel.js";
 import type { StoreConfigurationSnapshot } from "./store-configuration-client.js";
@@ -4459,9 +4460,12 @@ type WeeklySchedule = StoreConfigurationSnapshot["weeklySchedule"];
 type ScheduleInterval = WeeklySchedule[number]["intervals"][number];
 const clock = (value: string) => value.slice(0, 5);
 function intervalText(interval: ScheduleInterval, detailed: boolean): string {
-  const times = `${clock(interval.startLocalTime)}\u2013${clock(interval.endLocalTime)}${
-    interval.endsNextDay ? t(" (next day)") : ""
-  }`;
+  // Batch 46 (v15 overnight 45): a period open midnight to midnight, in words.
+  const times = isOpenAllDay([interval])
+    ? t("open 24 hours")
+    : `${clock(interval.startLocalTime)}\u2013${clock(interval.endLocalTime)}${
+        interval.endsNextDay ? t(" (next day)") : ""
+      }`;
   if (!detailed) return times;
   const services = interval.serviceModes.map(serviceModeText).join(listSeparator());
   return t(

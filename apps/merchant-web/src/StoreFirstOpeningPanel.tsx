@@ -49,6 +49,7 @@ import {
 } from "./StorePublicProfilePanel.js";
 import { receiptPrivacyFieldErrors } from "./StoreReceiptPrivacyPanel.js";
 import { timeZoneLabel } from "./time-zone-names.js";
+import { isOpenAllDay } from "./open-all-day.js";
 
 /**
  * WP-2423 item 14 (DEC-STORE-FIRST-OPENING): a first Store's page. The Owner answers what only they
@@ -132,7 +133,10 @@ export function openingHoursLines(
   const words = schedule.map((day) =>
     day.intervals.length === 0
       ? t("closed")
-      : day.intervals.map(intervalWords).join(listSeparator()),
+      : // Batch 46 (v15 overnight 45): a day open midnight to midnight, in words.
+        isOpenAllDay(day.intervals)
+        ? t("open 24 hours")
+        : day.intervals.map(intervalWords).join(listSeparator()),
   );
   const first = words[0];
   if (first !== undefined && words.every((text) => text === first))

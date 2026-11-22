@@ -37,7 +37,12 @@ import {
 } from "../store/StoreIdentity.js";
 import type { StoreProfile } from "../store/store-profile-client.js";
 import { takesNewOrders, type StoreServicePhase } from "../store/store-service.js";
-import { nextOpeningText, storeDayName } from "../store/store-hours-text.js";
+import {
+  isOpenAllDay,
+  nextOpeningText,
+  opensAgainAtMidnight,
+  storeDayName,
+} from "../store/store-hours-text.js";
 import { endSentence, formatClockTime, formatStoreLocalTime } from "../journey/format.js";
 import { unpaidPickup } from "../order-status/OrderStatusPage.js";
 import { createHttpOrderStatusClient } from "../order-status/order-status-client.js";
@@ -925,6 +930,12 @@ function closesAndOpensText(hours: NonNullable<StoreProfile["hours"]>): string |
   if (hours.closesAt === null) return null;
   const close = formatStoreLocalTime(hours.closesAt);
   if (hours.nextOpening === null) return t("The store closes at {close}.", { close });
+  // Batch 46 (v15 overnight 45): a Store open 24 hours doesn't close; only orders stop a while.
+  if (opensAgainAtMidnight(hours.closesAt, hours.nextOpening, hours.localDate))
+    return t("You can order again {day} at {time}.", {
+      day: storeDayName(hours.nextOpening.localDate, hours.localDate),
+      time: formatStoreLocalTime(hours.nextOpening.startLocalTime),
+    });
   return t("The store closes at {close} and opens again {day} at {time}.", {
     close,
     day: storeDayName(hours.nextOpening.localDate, hours.localDate),
@@ -1260,16 +1271,24 @@ function EntryState({
           <p>
             {state.todayHours.length === 0
               ? t("Closed today.")
-              : t("Today’s hours: ") +
-                state.todayHours
-                  .map(
-                    (interval) =>
-                      entryClock(interval.start) +
-                      "–" +
-                      entryClock(interval.end) +
-                      (interval.endsNextDay ? t(" (next day)") : ""),
+              : isOpenAllDay(
+                    state.todayHours.map((interval) => ({
+                      startLocalTime: interval.start,
+                      endLocalTime: interval.end,
+                      endsNextDay: interval.endsNextDay,
+                    })),
                   )
-                  .join(listSeparator())}
+                ? t("Open 24 hours today.")
+                : t("Today’s hours: ") +
+                  state.todayHours
+                    .map(
+                      (interval) =>
+                        entryClock(interval.start) +
+                        "–" +
+                        entryClock(interval.end) +
+                        (interval.endsNextDay ? t(" (next day)") : ""),
+                    )
+                    .join(listSeparator())}
           </p>
         )}
         {/* M116: the menu to look at first; asking again whether it's open comes second. */}
