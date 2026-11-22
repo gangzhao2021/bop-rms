@@ -30,6 +30,8 @@ interface Table {
   phase: Phase;
   /** One dish this phone added and has not sent yet. */
   readonly unsent: boolean;
+  /** Batch 50: the cart reads this page made, counted while a test looks. */
+  cartReads?: number;
 }
 
 const money = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
@@ -63,8 +65,9 @@ async function stubTable(page: Page, table: Table) {
     schemaVersion: 1,
     error: { code: "cart_table_checking_out", messageKey: "customer.cart.table_checking_out" },
   });
-  await page.route(/\/bff\/customer\/cart(?:\?.*)?$/u, (route) =>
-    route.fulfill(
+  await page.route(/\/bff\/customer\/cart(?:\?.*)?$/u, (route) => {
+    if (table.cartReads !== undefined && route.request().method() === "GET") table.cartReads += 1;
+    return route.fulfill(
       table.phase === "open"
         ? json(200, {
             schemaVersion: 1,
@@ -98,8 +101,8 @@ async function stubTable(page: Page, table: Table) {
             },
           })
         : checkingOut,
-    ),
-  );
+    );
+  });
   // The cart's own price check and any change: refused while checking out, busy otherwise (a
   // failed price check changes nothing on the page).
   await page.route("**/api/v1/carts**", (route) =>
@@ -241,6 +244,17 @@ async function runUntil(page: Page, check: () => Promise<void>) {
   await check();
 }
 
+/**
+ * Batch 50: moves the page's fake clock on in half-second steps, letting each answer arrive
+ * (real time) before the clock moves again, so the reads keep the cadence the page sets.
+ */
+async function advance(page: Page, ms: number) {
+  for (let done = 0; done < ms; done += 500) {
+    await page.clock.runFor(500);
+    await page.waitForTimeout(25);
+  }
+}
+
 const mainText = (page: Page) =>
   page
     .getByRole("main")
@@ -367,6 +381,55 @@ for (const width of [390, 1024, 1440])
         expect(after).toBe(before);
         expect(after).toBe(await freshText(browser, table, "/cart", zh, width));
       });
+
+      // Batch 50 (v15 b49 live, guest-cart-open-through-checkout): every 409 "checking out" answer
+      // was counted as a failed read, so the open Cart's reads backed off to 8/16/32/60 s. After a
+      // real checkout of a few minutes, Cancel checkout (or the payment) reached the Cart up to a
+      // minute late. Checking out is a known state, read every 4 s like any other.
+      for (const after of ["Cancel checkout", "paid in full"] as const)
+        test(`after a checkout of over two minutes, ${after} reaches the open Cart within one read`, async ({
+          page,
+        }) => {
+          test.setTimeout(150_000);
+          const table: Table = { phase: "open", unsent: true };
+          await page.clock.install();
+          await stubTable(page, table);
+          await open(page, "/cart", zh);
+          await expect(page.getByRole("main").getByText(dish).first()).toBeVisible();
+          await expectPayLaterCart(page);
+          await page.waitForLoadState("networkidle");
+          const before = await mainText(page);
+
+          table.phase = "checkout-started";
+          await runUntil(page, () => expectCardOnly(page, zh, "checkout-started", width));
+          // Staff take their time with the bill: 150 s, the Cart on screen the whole while.
+          table.cartReads = 0;
+          await advance(page, 150_000);
+          // One read about every 4 s (over 30), never a minute's silence (backing off: about 6).
+          expect(table.cartReads).toBeGreaterThanOrEqual(25);
+          await expectCardOnly(page, zh, "checkout-started", width);
+
+          if (after === "Cancel checkout") {
+            table.phase = "open";
+            // The next normal read (4 s) brings the cart back as it was.
+            await advance(page, 4_500);
+            await expect(page.getByRole("main").getByText(dish).first()).toBeVisible({
+              timeout: 2_000,
+            });
+            await expect(page.getByText(words(zh, "checkout-started").heading)).toHaveCount(0);
+            await expectPayLaterCart(page);
+            await page.waitForLoadState("networkidle");
+            expect(await mainText(page)).toBe(before);
+          } else {
+            table.phase = "paid";
+            // The table read (every 15 s) says the bill is paid; the Cart says so with it.
+            await advance(page, 15_500);
+            await expectCardOnly(page, zh, "paid", width);
+          }
+          await page.screenshot({
+            path: `test-results/b50-cart-after-long-checkout-${after === "paid in full" ? "paid" : "cancel"}-${zh ? "zh" : "en"}-${width}.png`,
+          });
+        });
 
       test("Your table left open says the bill, then the paid bill, as it does opened afresh", async ({
         page,

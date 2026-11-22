@@ -303,6 +303,24 @@ describe("WP-1205 in-memory Cart state", () => {
     expect(f.controller.getState()).not.toHaveProperty("fromRead");
   });
 
+  it("batch 50: the table checking out is a read that worked, so the table poll keeps its 4 s", async () => {
+    const f = fixture();
+    await f.controller.load();
+    f.failLoad(new CartClientError("cart_table_checking_out"));
+    // v15 b49 live: each of these counted as a failure and the reads backed off to a minute.
+    expect(await f.controller.refresh()).toBe(true);
+    expect(await f.controller.refresh()).toBe(true);
+    expect(f.controller.getState()).toMatchObject({ status: "table-checking-out", fromRead: true });
+    // The cart read before stays, for Cancel checkout.
+    expect(f.controller.getState()).toHaveProperty("cart.cart.cartReference");
+    // An outage is still a failure (the poll backs off).
+    f.failLoad(new CartClientError("cart_service_unavailable"));
+    expect(await f.controller.refresh()).toBe(false);
+    f.failLoad(null);
+    expect(await f.controller.refresh()).toBe(true);
+    expect(f.controller.getState()).toMatchObject({ status: "ready" });
+  });
+
   it("WP-2423 item 6: with nothing on screen yet a quiet read is a load", async () => {
     const f = fixture();
     f.failLoad(new CartClientError("cart_service_unavailable"));

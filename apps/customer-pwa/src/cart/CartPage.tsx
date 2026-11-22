@@ -1403,6 +1403,9 @@ export function cartPollShouldRead(
     visibility === "visible" &&
     (cart.status === "ready" ||
       cart.status === "offline-readonly" ||
+      // Batch 50: however the page learnt the table is checking out (a read, or a change it
+      // refused), it keeps reading, so Cancel checkout brings the cart back by itself.
+      cart.status === "table-checking-out" ||
       ("fromRead" in cart && cart.fromRead === true)) &&
     round.status !== "sending" &&
     !(round.status === "unconfirmed" && round.mayBePlaced)

@@ -1154,6 +1154,17 @@ describe("WP-2423 item 6: a table that pays at the end", () => {
     expect(cartPollShouldRead("visible", { status: "idle" }, failedChange)).toBe(false);
     expect(cartPollShouldRead("visible", { status: "sending" }, failedRead)).toBe(false);
     expect(cartPollShouldRead("hidden", { status: "idle" }, offline)).toBe(false);
+    // Batch 50: a change refused because the table is checking out leaves only the card, and the
+    // cart is read again so Cancel checkout brings it back by itself.
+    const refusedChange: CartState = {
+      status: "table-checking-out",
+      cart: tableCart(),
+      issueCodes: [],
+      retryAfterSeconds: null,
+      canRetrySameOperation: false,
+    };
+    expect(cartPollShouldRead("visible", { status: "idle" }, refusedChange)).toBe(true);
+    expect(cartPollShouldRead("visible", { status: "sending" }, refusedChange)).toBe(false);
   });
 
   it("another guest placing an order never reads as paying, in either language", () => {

@@ -60,7 +60,8 @@ export interface CartStateController {
   /**
    * Reads the cart again with what's on screen kept there (and the guest's place on the page with it);
    * a failed read changes nothing. With nothing on screen yet it is a load. Resolves whether the
-   * read worked (WP-2423 same-table-ordering: the table poll waits longer after a failure).
+   * read worked (WP-2423 same-table-ordering: the table poll waits longer after a failure). The
+   * table checking out is an answer, not a failure (batch 50).
    */
   refresh(): Promise<boolean>;
   removeItem(cartItemReference: string): Promise<void>;
@@ -128,7 +129,10 @@ export function createCartStateController({
       if (!online) publish({ status: "offline-readonly", cart: priorCart });
       else if (pending !== null) mapError(new CartClientError("network_unknown"), priorCart, true);
       else if (!keep || quietlyShown(error)) mapError(error, priorCart, false, null, true);
-      return false;
+      // Batch 50 (v15 b49 live): "the table is checking out" is the Store answering, about a
+      // state it expects to change (Cancel checkout, the bill paid): a read that worked. Counted as
+      // a failure, the table poll backed off to a minute and a reopened table came back late.
+      return pending === null && online && knownTableState(error);
     }
   };
   // WP-2423 (guest-cart-503): a quiet re-read keeps a passing fault off the page, but the guest's
@@ -139,6 +143,8 @@ export function createCartStateController({
       error.code === "cart_participant_ended" ||
       error.code === "cart_session_expired" ||
       error.code === "cart_replacement_forbidden");
+  const knownTableState = (error: unknown) =>
+    error instanceof CartClientError && error.code === "cart_table_checking_out";
   const load = async () => {
     await read(false);
   };
