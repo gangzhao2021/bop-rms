@@ -22,16 +22,37 @@ let current: CustomerLanguage = "en";
  * writes a time) takes the place of the sentence's own period after it, so a sentence never ends
  * "a.m.." (WP-2423 store-service-controls, v15 live check).
  */
-function fill(text: string, values: Readonly<Record<string, string | number>> | undefined) {
+function fill(
+  text: string,
+  values: Readonly<Record<string, string | number>> | undefined,
+  chinese = false,
+) {
   if (values === undefined) return text;
   return text.replace(
     /\{([a-zA-Z][a-zA-Z0-9]*)\}(\.(?!\.))?/gu,
-    (whole, name: string, stop?: string) => {
+    (whole, name: string, stop: string | undefined, at: number, sentence: string) => {
       if (!Object.hasOwn(values, name)) return whole;
-      const value = String(values[name]);
+      const value = chinese
+        ? spacedInChinese(sentence[at - 1], String(values[name]), sentence[at + name.length + 2])
+        : String(values[name]);
       return stop !== undefined && !value.endsWith(".") ? value + stop : value;
     },
   );
+}
+
+/**
+ * Batch 46 (v15 overnight 45), one rule with the staff screens (v15 b12): a value filled into
+ * Chinese text meets a Chinese character directly when its own edge is Chinese ("牛肉面现在不供应",
+ * "可能含芝麻"), and with a space when its edge is Latin letters or digits ("已选择在 Lane Dessert
+ * (TEST) 自取"). Templates write no space of their own next to a name.
+ */
+const hanCharacter = /\p{Script=Han}/u;
+const latinStart = /^[A-Za-z0-9]/u;
+const latinEnd = /[A-Za-z0-9)]$/u;
+function spacedInChinese(before: string | undefined, value: string, after: string | undefined) {
+  const lead = before !== undefined && hanCharacter.test(before) && latinStart.test(value);
+  const trail = after !== undefined && hanCharacter.test(after) && latinEnd.test(value);
+  return (lead ? " " : "") + value + (trail ? " " : "");
 }
 
 // v15 2026-11-01: as on the staff screens, a table the owner named is said as they wrote it.
@@ -74,7 +95,7 @@ const said = (text: string) =>
 export function t(text: string, values?: Readonly<Record<string, string | number>>): string {
   if (current === "zh-Hans") {
     const translated = zhHans[text];
-    if (translated !== undefined) return said(fill(translated, values));
+    if (translated !== undefined) return said(fill(translated, values, true));
   }
   return said(fill(text, values));
 }

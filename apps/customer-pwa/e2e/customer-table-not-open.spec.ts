@@ -652,7 +652,7 @@ test.describe("@production CUST-ENTRY table not open", () => {
           .click();
         await page
           .getByRole("link", {
-            name: zh ? "查看Synthetic tea" : "View Synthetic tea",
+            name: zh ? "查看 Synthetic tea" : "View Synthetic tea",
             exact: true,
           })
           .click();
@@ -681,7 +681,7 @@ test.describe("@production CUST-ENTRY table not open", () => {
           zh
             ? // Batch 45 (v15 b44 live): no Latin space after the dish name, as the other
               // "not added" notice writes it ("{name}还没加入购物车").
-              "Synthetic tea还没加进购物车。请先加入这一桌，再重新加一次。"
+              "Synthetic tea 还没加进购物车。请先加入这一桌，再重新加一次。"
             : "Synthetic tea wasn’t added yet. Join this table, then add it again.",
         );
         await expect(main).not.toContainText(zh ? "还没开台" : "isn’t open yet");
@@ -741,7 +741,7 @@ test.describe("@production CUST-ENTRY table not open", () => {
         if (reload) await page.reload();
         await expect(
           page.getByRole("link", {
-            name: zh ? "查看Synthetic tea" : "View Synthetic tea",
+            name: zh ? "查看 Synthetic tea" : "View Synthetic tea",
             exact: true,
           }),
         ).toBeVisible();

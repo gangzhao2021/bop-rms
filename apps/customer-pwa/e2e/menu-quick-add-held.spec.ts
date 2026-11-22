@@ -239,7 +239,7 @@ for (const [answers, language] of [
     const zh = language === "zh-Hans";
     await page
       .getByRole("button", {
-        name: zh ? "把Synthetic tea加入购物车" : "Add Synthetic tea to your cart",
+        name: zh ? "把 Synthetic tea 加入购物车" : "Add Synthetic tea to your cart",
         exact: true,
       })
       .click();
@@ -254,7 +254,7 @@ for (const [answers, language] of [
       await expect(
         page.getByRole("status").filter({
           hasText: zh
-            ? "同桌另一位客人正在为这笔订单付款。Synthetic tea还没加入购物车，请稍后再点 +。"
+            ? "同桌另一位客人正在为这笔订单付款。Synthetic tea 还没加入购物车，请稍后再点 +。"
             : "Another guest at your table is paying for this order. Synthetic tea wasn’t added. Tap + again in a moment.",
         }),
       ).toBeVisible();

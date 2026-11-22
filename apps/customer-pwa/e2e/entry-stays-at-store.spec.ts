@@ -237,7 +237,7 @@ test.describe("@production M02 a phone stays at the Store and table it scanned",
     await noHorizontalOverflow(page);
     await page.screenshot({ path: "test-results/m02-pickup-reload-390.png", fullPage: true });
     await page.getByRole("button", { name: "切换到中文" }).click();
-    await expect(page.getByRole("main")).toContainText("已选择在Lane Dessert自取");
+    await expect(page.getByRole("main")).toContainText("已选择在 Lane Dessert 自取");
     await expect(page.getByRole("button", { name: "继续点单" })).toBeVisible();
   });
 

@@ -226,7 +226,7 @@ for (const language of ["en", "zh-Hans"] as const)
     });
     const zh = language === "zh-Hans";
     const add = page.getByRole("button", {
-      name: zh ? "把Synthetic tea加入购物车" : "Add Synthetic tea to your cart",
+      name: zh ? "把 Synthetic tea 加入购物车" : "Add Synthetic tea to your cart",
       exact: true,
     });
     await add.click();

@@ -148,5 +148,5 @@ it("v15 2026-11-11 b10: a rename says what the name was and is, or which other l
       dish: "牛肉面",
       renamed: [{ locale: "en-CA", from: "Beef noodles", to: "Braised beef noodles" }],
     }),
-  ).toBe("牛肉面的英文名称从Beef noodles改为Braised beef noodles。您看到的名称没有变。");
+  ).toBe("牛肉面的英文名称从 Beef noodles 改为 Braised beef noodles。您看到的名称没有变。");
 });

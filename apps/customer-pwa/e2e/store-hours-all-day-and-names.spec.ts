@@ -9,7 +9,8 @@ test.beforeEach(({ context }) => routeStorefrontReads(context));
  * (1) Test Merchant 2 publishes 00:00–23:59:59 every day; guests read "Open now · until 11:59 p.m."
  *     and "Today 12:00 a.m.–11:59 p.m." for a Store that never closes.
  * (2) zh sentences spaced a Store's name three ways ("已选择在 巷口糖水 Lane Dessert (TEST) 自取。",
- *     "… (TEST) 现在不接单" joined in code, "…(TEST)只做堂食"); now one rule, no space.
+ *     "… (TEST) 现在不接单" joined in code, "…(TEST)只做堂食"); now the staff screens' rule (b12):
+ *     a Chinese name meets Chinese directly, Latin letters or digits get one space.
  * (3) "今天营业至 1:00" rendered as "今天 营业至" because a margin undid the no-gap rule.
  * Layout checks keep about 40 px spare so Linux CI fonts (DejaVu) still fit.
  */
@@ -128,7 +129,9 @@ for (const [language, locale] of [
         await enterPickup(page, name);
         const card = page.getByRole("region", { name }).first();
         await expect(card).toContainText(
-          zh ? "24 小时营业 · 厨房 23:34 停止接单" : "Open 24 hours · last orders 11:34 p.m.",
+          zh
+            ? "今天 24 小时营业 · 厨房 23:34 停止接单"
+            : "Open 24 hours today · last orders 11:34 p.m.",
         );
         await expect(card).toContainText(zh ? "今天 24 小时营业" : "Today open 24 hours");
         await expect(card).not.toContainText(zh ? "23:59" : "11:59");
@@ -138,7 +141,7 @@ for (const [language, locale] of [
         const strip = page.getByRole("region", {
           name: zh ? "营业时间和地址" : "Store hours and address",
         });
-        await expect(strip).toContainText(zh ? "24 小时营业" : "Open 24 hours");
+        await expect(strip).toContainText(zh ? "今天 24 小时营业" : "Open 24 hours today");
         await expect(strip).toContainText(zh ? "厨房 23:34 停止接单" : "Last orders 11:34 p.m.");
         await expect(strip).not.toContainText(zh ? "23:59" : "11:59");
         await fitsWithMargin(page, ".store-strip__line");
@@ -196,10 +199,10 @@ for (const [language, locale] of [
       });
       if (zh) expect(gap).toBeLessThan(1);
       else expect(gap).toBeGreaterThan(2);
-      // Pickup is said with the Store's name joined directly in Chinese.
+      // Pickup is said with the Store's name set off where its Latin letters meet Chinese.
       await expect(page.locator(".entry-context").first()).toHaveText(
         zh
-          ? "已选择在巷口糖水 Lane Dessert (TEST)自取。"
+          ? "已选择在巷口糖水 Lane Dessert (TEST) 自取。"
           : "Pickup from 巷口糖水 Lane Dessert (TEST) is selected.",
       );
       await noSidewaysScroll(page);
@@ -236,7 +239,7 @@ for (const [language, locale] of [
         const heading = page.locator("#entry-heading");
         await expect(heading).toHaveText(
           zh
-            ? "半糖奶茶 Half Sugar Tea (TEST)现在不接单"
+            ? "半糖奶茶 Half Sugar Tea (TEST) 现在不接单"
             : "半糖奶茶 Half Sugar Tea (TEST) isn’t taking orders right now",
         );
         expect(

@@ -7,10 +7,12 @@ import { LanguageRoot, t } from "./i18n.js";
 import { zhHans } from "./zh-Hans.js";
 
 /**
- * Batch 46 (v15 overnight 45): one rule for a name or label filled into a Chinese sentence: no
- * space between it and the Chinese characters before or after it ("已选择在巷口糖水 Lane Dessert
- * (TEST)自取。", like "围炉火锅 Fireside Hotpot (TEST)只做堂食"). Live, the same kind of sentence had
- * three spacings, one of them a name joined to a translated piece with a space in code.
+ * Batch 46 (v15 overnight 45): one rule for a name or label filled into a Chinese sentence, the
+ * same as on the staff screens (v15 b12): the template has no space of its own next to it, so a
+ * Chinese name meets the sentence directly ("牛肉面现在不供应") and a name whose edge is Latin
+ * letters or digits gets one space where it meets Chinese ("已选择在 Lane Dessert (TEST) 自取。").
+ * Live, the same kind of sentence had three spacings, one of them a name joined to a translated
+ * piece with a space in code.
  *
  * Times, numbers and amounts keep their spaces ("营业至 {time}"), and a table's own label keeps
  * the batch 42 rule (a space where its Latin letters meet Chinese). The dining-table sentences
@@ -66,19 +68,26 @@ it("a sentence about the Store is one translated text, never a name joined to a 
   expect(found).toEqual([]);
 });
 
-it("reads the live sentences with the Store's name joined directly", () => {
+it("reads the live sentences with the Store's name spaced as on the staff screens", () => {
   renderToStaticMarkup(createElement(LanguageRoot, { initial: "zh-Hans", children: () => null }));
   expect(
     t("Pickup from {storeDisplayName} is selected.", {
       storeDisplayName: "巷口糖水 Lane Dessert (TEST)",
     }),
-  ).toBe("已选择在巷口糖水 Lane Dessert (TEST)自取。");
+  ).toBe("已选择在巷口糖水 Lane Dessert (TEST) 自取。");
   expect(
     t("{storeDisplayName} isn’t taking orders right now", {
       storeDisplayName: "半糖奶茶 Half Sugar Tea (TEST)",
     }),
-  ).toBe("半糖奶茶 Half Sugar Tea (TEST)现在不接单");
+  ).toBe("半糖奶茶 Half Sugar Tea (TEST) 现在不接单");
   expect(t("{name} isn't available right now.", { name: "牛肉面" })).toBe("牛肉面现在不供应。");
+  expect(
+    t("Pickup from {storeDisplayName} is selected.", { storeDisplayName: "Lane Dessert" }),
+  ).toBe("已选择在 Lane Dessert 自取。");
+  // A Latin dish name, as staff read it ("Mia 申请").
+  expect(t("{name} isn't available right now.", { name: "Dan dan noodles" })).toBe(
+    "Dan dan noodles 现在不供应。",
+  );
   expect(
     t("How {storeDisplayName} handles your contact details:", { storeDisplayName: "面馆" }),
   ).toBe("面馆如何处理您的联系方式：");

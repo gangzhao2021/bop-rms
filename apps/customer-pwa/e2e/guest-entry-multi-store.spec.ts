@@ -427,7 +427,7 @@ for (const width of [390, 1024, 1440])
       await expectNoInternalText(page);
       await page.screenshot({ path: `test-results/closed-cart-${width}.png`, fullPage: true });
       await page.getByRole("button", { name: "切换到中文" }).click();
-      await expect(main).toContainText("Lane Dessert现在不接单");
+      await expect(main).toContainText("Lane Dessert 现在不接单");
       await page.getByRole("button", { name: "Switch to English" }).click();
       // Reloaded at /cart (a bookmark): no visit at any Store, so no cart, and no failure.
       await page.goto("/cart");
