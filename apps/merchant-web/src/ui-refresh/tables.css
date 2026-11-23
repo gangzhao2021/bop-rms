@@ -351,7 +351,8 @@
   border: 1px solid var(--bop-color-border-default);
   border-radius: var(--bop-radius-surface);
   background: var(--bop-color-surface-default);
-  scroll-margin-top: var(--bop-space-4);
+  /* Opened under the list on a phone: below the warnings pinned to the top, with room. */
+  scroll-margin-top: calc(var(--bop-pinned-top, 0px) + var(--bop-space-4));
 }
 .workspace-page.dining-floor .dining-session-detail > h2 {
   margin: 0;

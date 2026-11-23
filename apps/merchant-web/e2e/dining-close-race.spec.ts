@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
+import { expectRoomAbove } from "./outcome-line-room";
 import { tableClosePlanResponse } from "../../../apps/api/src/merchant-dining-table-close-plan-response.js";
 
 /**
@@ -432,6 +433,8 @@ for (const outcome of ["lost", "won"] as const)
         // In view, at the table's panel, not at the top of the 15-table list; said once.
         await expect(line).toHaveCount(1);
         await expect(line).toBeInViewport();
+        // b52: with room above it, never flush on the top edge of a phone.
+        await expectRoomAbove(line);
         await expect(panel.getByText(text)).toBeVisible();
         await expect(panel).toContainText(zh ? "待清洁" : "Needs cleaning");
         if (width !== 390) {
@@ -505,6 +508,7 @@ for (const outcome of ["lost", "won"] as const)
         });
         await expect(panel.getByText(text)).toBeVisible();
         await expect(line).toBeInViewport();
+        await expectRoomAbove(line);
         await expect(panel).toContainText(zh ? "待清洁" : "Needs cleaning");
         const box = await line.evaluate((node) => node.getBoundingClientRect().toJSON() as DOMRect);
         expect(box.top).toBeGreaterThanOrEqual(0);
@@ -636,6 +640,7 @@ for (const language of ["en", "zh-Hans"] as const)
       // Said in the table's panel, in view.
       await expect(panel.getByText(paying(zh))).toBeVisible();
       await expect(line).toBeInViewport();
+      await expectRoomAbove(line);
       await expect(
         page.getByText(
           zh ? "这张桌子有变动，已重新读取。" : "This table changed. It has been read again.",

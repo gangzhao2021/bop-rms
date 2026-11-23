@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
+import { expectRoomAbove } from "./outcome-line-room";
 import { tableClosePlanResponse } from "../../../apps/api/src/merchant-dining-table-close-plan-response.js";
 
 /**
@@ -668,6 +669,8 @@ for (const language of ["en", "zh-Hans"] as const)
       await expect.poll(() => state.moves).toBe(1);
       await expect(page.getByText(paying(zh))).toHaveCount(1);
       await expect(page.getByText(paying(zh))).toBeInViewport();
+      // b52: with room above it, never flush on the top edge of a phone.
+      await expectRoomAbove(page.getByText(paying(zh)));
       await expect(panel.getByRole("region", { name: moveRegion(zh) })).toHaveCount(0);
       await expect(
         page.getByText(
@@ -794,6 +797,8 @@ for (const language of ["en", "zh-Hans"] as const)
       // The fact is said once, where staff are looking, and the tables are read again at once.
       await expect(page.getByText(otherPaying(zh))).toHaveCount(1);
       await expect(page.getByText(otherPaying(zh))).toBeInViewport();
+      // b52 (v15 b51 live, zh 390 at top -0.3 px): with room above it, not flush on the edge.
+      await expectRoomAbove(page.getByText(otherPaying(zh)));
       await expect.poll(() => state.tableReads, { timeout: 3_000 }).toBeGreaterThan(readsBefore);
       await expect(page.getByText(oldMergeRefusal(zh))).toHaveCount(0);
       // The paying table is no longer offered: it says why, and the button no longer names it.
@@ -831,6 +836,7 @@ for (const language of ["en", "zh-Hans"] as const)
       await expect.poll(() => state.tableReads, { timeout: 3_000 }).toBeGreaterThan(readsBefore);
       await expect(page.getByText(paying(zh))).toHaveCount(1);
       await expect(page.getByText(paying(zh))).toBeInViewport();
+      await expectRoomAbove(page.getByText(paying(zh)));
       await expect(panel.getByRole("region", { name: mergeRegion(zh) })).toHaveCount(0);
       await expect(panel.getByRole("region", { name: moveRegion(zh) })).toHaveCount(0);
       await expect(page.getByText(oldMergeRefusal(zh))).toHaveCount(0);
