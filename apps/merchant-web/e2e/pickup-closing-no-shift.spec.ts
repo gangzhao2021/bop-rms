@@ -168,7 +168,10 @@ for (const [width, height] of [
     );
     expect(overflow).toBeLessThanOrEqual(0);
     await page.screenshot({ path: `test-results/b34-pickup-closing-${width}-en.png` });
-    await page.getByRole("button", { name: "切换到中文" }).first().click();
+    await Promise.all([
+      page.waitForEvent("load"),
+      page.getByRole("button", { name: "切换到中文" }).first().click(),
+    ]);
     await expect(page.getByRole("button", { name: "全部标记未取餐（4）" })).toBeVisible();
     await page.screenshot({ path: `test-results/b34-pickup-closing-${width}-zh-Hans.png` });
     await expectNoInternalText(page);
@@ -219,7 +222,10 @@ for (const [width, height] of [
     ]);
     expect((filters?.y ?? 0) - ((header?.y ?? 0) + (header?.height ?? 0))).toBeLessThan(44);
     await page.screenshot({ path: `test-results/b36/pickup-day-unread-${width}-en.png` });
-    await page.getByRole("button", { name: "切换到中文" }).first().click();
+    await Promise.all([
+      page.waitForEvent("load"),
+      page.getByRole("button", { name: "切换到中文" }).first().click(),
+    ]);
     await expect(page.locator("main article")).toHaveCount(4);
     await expect(page.locator(".pickup-queue__tools")).toHaveCount(0);
     await page.screenshot({ path: `test-results/b36/pickup-day-unread-${width}-zh-Hans.png` });
@@ -289,7 +295,10 @@ for (const pauseShown of [true, false])
       expect(overflow).toBeLessThanOrEqual(0);
       if (pauseShown) {
         await page.screenshot({ path: `test-results/b35/pickup-closing-${width}-en.png` });
-        await page.getByRole("button", { name: "切换到中文" }).first().click();
+        await Promise.all([
+          page.waitForEvent("load"),
+          page.getByRole("button", { name: "切换到中文" }).first().click(),
+        ]);
         await expect(page.getByRole("button", { name: "全部标记未取餐（4）" })).toBeVisible({
           timeout: 6_000,
         });
