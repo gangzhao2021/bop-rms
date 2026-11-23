@@ -944,6 +944,35 @@ export function kitchenSlotCovered(box: KitchenSlotBox, before: readonly Kitchen
       Math.min(box.bottom, other.bottom) - Math.max(box.top, other.top) > 0,
   );
 }
+/**
+ * Batch 53 (v15 b52 live, Test Merchant 2): whether the cook can see a ticket, so a finger can be
+ * aimed at it. A ticket in a closed section (the 53 earlier days' tickets under "Needs attention"),
+ * hidden, of no size or wholly off the screen still has a box, which made every new order count as
+ * arriving where a ticket was and refuse its first Finished.
+ */
+export function kitchenSlotSeen(
+  box: KitchenSlotBox,
+  screen: { readonly width: number; readonly height: number },
+  hidden: boolean,
+): boolean {
+  if (hidden || box.right - box.left <= 0 || box.bottom - box.top <= 0) return false;
+  return box.right > 0 && box.bottom > 0 && box.left < screen.width && box.top < screen.height;
+}
+/** Whether a ticket is out of sight: inside a closed section (not its summary) or hidden. */
+export function kitchenSlotHidden(element: HTMLElement): boolean {
+  for (
+    let details = element.closest("details");
+    details !== null;
+    details = details.parentElement?.closest("details") ?? null
+  ) {
+    if (details.open) continue;
+    const summary = details.querySelector(":scope > summary");
+    if (summary === null || !summary.contains(element)) return true;
+  }
+  return typeof element.checkVisibility === "function"
+    ? !element.checkVisibility({ visibilityProperty: true })
+    : false;
+}
 export function kitchenSlotPosition(element: HTMLElement): KitchenSlotPosition {
   const box = element.getBoundingClientRect();
   return {
@@ -2968,6 +2997,10 @@ export function KitchenBoardScreen({
       typeof window === "undefined" ? "" : `${window.innerWidth}x${window.innerHeight}`;
     const resized = slotViewport.current !== "" && slotViewport.current !== viewport;
     slotViewport.current = viewport;
+    const screen =
+      typeof window === "undefined"
+        ? { width: Infinity, height: Infinity }
+        : { width: window.innerWidth, height: window.innerHeight };
     // A scroll the page forced (it got shorter than where it was scrolled to) is not the cook's:
     // then where a ticket is on the screen alone decides.
     const pulled = kitchenScrollPulledBack(slotScrolls.current);
@@ -2978,7 +3011,8 @@ export function KitchenBoardScreen({
       const place = kitchenSlotPosition(element);
       places.set(key, place);
       const box = kitchenSlotBox(element);
-      boxes.set(key, box);
+      // Batch 53: only a ticket the cook can see is one a tap may have been aimed at.
+      if (kitchenSlotSeen(box, screen, kitchenSlotHidden(element))) boxes.set(key, box);
       const before = slotPlaces.current.get(key);
       if (!resized && before !== undefined && kitchenSlotMoved(before, place, pulled))
         slots.current.set(key, {

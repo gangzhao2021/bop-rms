@@ -49,6 +49,7 @@ interface StepBody {
 async function mockBoard(
   page: Page,
   source: readonly ReturnType<typeof dish>[] | (() => readonly ReturnType<typeof dish>[]),
+  extra: Record<string, unknown> = {},
 ) {
   let items = typeof source === "function" ? source() : source;
   await page.clock.setFixedTime(new Date(at));
@@ -93,6 +94,7 @@ async function mockBoard(
         partial: false,
         stale: false,
         freshnessStatus: "Fresh",
+        ...extra,
         items,
         nextCursor: null,
       },
@@ -1221,5 +1223,145 @@ for (const language of ["en", "zh-Hans"] as const)
       await ticket.locator(".kitchen-ticket__next").click();
       await expect(ticket.locator(".kitchen-ticket__top")).toContainText(words.done);
       await expect.poll(() => taps.length, { timeout: holdMs + 4_000 }).toBe(1);
+    });
+  }
+
+/**
+ * Batch 53 (v15 batch 52 live, Test Merchant 2 orders 21, 22, 24 and 25): the store had 53 tickets
+ * from earlier days in the collapsed "Needs attention" section and nothing else on the board. Those
+ * cards still had boxes on the screen though nobody could see them, so every new order counted as
+ * arriving where a ticket was and its first Finished said "Moved. Tap again.". Only tickets the
+ * cook can see count: a closed section's cards do not, an open section's do.
+ */
+const backlogText = {
+  en: { finished: "Finished", go: "Continue — Finished" },
+  "zh-Hans": { finished: "做好了", go: "继续 — 做好了" },
+} as const;
+const earlierDish = (n: number) =>
+  dish(n, `TEST old dish ${n}`, {
+    ticketReference: id(700 + n),
+    orderReference: id(800 + n),
+    orderItemReference: id(900 + n),
+    orderLabel: { orderNumber: String(n - 20), orderType: "Pickup", tableLabel: null },
+    workItemCreatedAt: "2026-10-24T22:00:00.000Z",
+    businessDate: "2026-10-24",
+  });
+async function backlogBoard(page: Page, language: "en" | "zh-Hans", width: number) {
+  if (language === "zh-Hans")
+    await page.addInitScript(() => window.localStorage.setItem("bop.merchant.language", "zh-Hans"));
+  await page.setViewportSize({ width, height: 900 });
+  // TM2 kept 53 such tickets; a dozen fill every spot where the first new ticket lands.
+  const backlog = Array.from({ length: 12 }, (_, index) => earlierDish(index + 21));
+  const arriving = {
+    ...pickupDish(3, "TEST beef noodles", "21", 9),
+    businessDate: "2026-10-26",
+  };
+  const second = { ...pickupDish(4, "TEST pork buns", "22", 11), businessDate: "2026-10-26" };
+  let items: readonly ReturnType<typeof dish>[] = backlog;
+  const board = await mockBoard(page, () => items, { canCloseEarlierDayTickets: true });
+  await page.route("**/merchant/business-day", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        businessDate: "2026-10-26",
+        startsAt: "2026-10-26T08:00:00.000Z",
+        endsAt: "2026-10-27T08:00:00.000Z",
+        timeZone: "America/Toronto",
+        observedAt: at,
+      },
+    }),
+  );
+  await page.goto("/operations/kitchen");
+  const section = page.locator("details.kitchen-earlier-days");
+  await expect(section).toBeVisible();
+  await expect(section.locator(".kitchen-earlier-ticket")).toHaveCount(12);
+  await expect(page.locator(".kitchen-ticket")).toHaveCount(0);
+  return {
+    ...board,
+    section,
+    arrive: async () => {
+      items = [...backlog, arriving];
+      await page
+        .getByRole("button", { name: arrivalText[language].refresh, exact: true })
+        .first()
+        .click();
+      const ticket = page.locator(".kitchen-ticket").filter({ hasText: "TEST beef noodles" });
+      await expect(ticket).toBeVisible();
+      return ticket;
+    },
+    /** A second new order, once the first left the board (its tap went through). */
+    arriveNext: async () => {
+      items = [...backlog, second];
+      await page
+        .getByRole("button", { name: arrivalText[language].refresh, exact: true })
+        .first()
+        .click();
+      const ticket = page.locator(".kitchen-ticket").filter({ hasText: "TEST pork buns" });
+      await expect(ticket).toBeVisible();
+      return ticket;
+    },
+  };
+}
+const noSideScroll = (page: Page) =>
+  page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
+for (const language of ["en", "zh-Hans"] as const)
+  for (const width of [390, 1024, 1440] as const) {
+    test(`@production with earlier days' tickets collapsed, a new order takes its first tap, ${language} at ${width} wide`, async ({
+      page,
+    }) => {
+      const words = arrivalText[language];
+      const { taps, section, arrive } = await backlogBoard(page, language, width);
+      await expect(section).not.toHaveAttribute("open", "");
+      await page.waitForTimeout(slotSettleMs);
+      const ticket = await arrive();
+      // Tapped the moment it shows: nothing the cook could see was on that spot.
+      await ticket.locator(".kitchen-ticket__next").click();
+      await expect(ticket.locator(".kitchen-ticket__top")).toContainText(words.done);
+      await expect(ticket.locator(".kitchen-ticket__top")).not.toContainText(words.moved);
+      expect(await noSideScroll(page)).toBe(true);
+      await page.screenshot({
+        path: `test-results/kitchen-backlog-collapsed-first-tap-${language}-${width}.png`,
+      });
+      await expect.poll(() => taps.length, { timeout: holdMs + 4_000 }).toBe(1);
+      expect(taps[0]?.lines[0]?.workItemReference).toBe(id(3));
+    });
+
+    test(`@production with earlier days' tickets open, a new order below them takes its first tap and they still take theirs, ${language} at ${width} wide`, async ({
+      page,
+    }) => {
+      const words = arrivalText[language];
+      const backlogWords = backlogText[language];
+      const { taps, section, arrive, arriveNext } = await backlogBoard(page, language, width);
+      await section.locator("summary").click();
+      await expect(section).toHaveAttribute("open", "");
+      const first = section.locator(".kitchen-earlier-ticket").first();
+      await expect(first).toBeVisible();
+      await page.waitForTimeout(slotSettleMs);
+      const ticket = await arrive();
+      await ticket.locator(".kitchen-ticket__next").click();
+      await expect(ticket.locator(".kitchen-ticket__top")).toContainText(words.done);
+      await expect(ticket.locator(".kitchen-ticket__top")).not.toContainText(words.moved);
+      // An open earlier day's ticket still asks first, then takes its step.
+      await first.getByRole("button", { name: backlogWords.finished, exact: true }).click();
+      await page.getByRole("button", { name: backlogWords.go, exact: true }).click();
+      await expect(first).toContainText(words.done);
+      expect(await noSideScroll(page)).toBe(true);
+      await page.screenshot({
+        path: `test-results/kitchen-backlog-open-first-tap-${language}-${width}.png`,
+      });
+      await expect.poll(() => taps.length, { timeout: holdMs + 4_000 }).toBe(2);
+      expect(taps.map((tap) => tap.lines[0]?.workItemReference).sort()).toEqual(
+        [id(21), id(3)].sort(),
+      );
+      // Closed again, its cards are out of sight: the next new order takes its first tap too.
+      await section.locator("summary").click();
+      await expect(section).not.toHaveAttribute("open", "");
+      await page.waitForTimeout(slotSettleMs);
+      const next = await arriveNext();
+      await next.locator(".kitchen-ticket__next").click();
+      await expect(next.locator(".kitchen-ticket__top")).toContainText(words.done);
+      await expect(next.locator(".kitchen-ticket__top")).not.toContainText(words.moved);
+      await expect.poll(() => taps.length, { timeout: holdMs + 4_000 }).toBe(3);
+      expect(taps[2]?.lines[0]?.workItemReference).toBe(id(4));
     });
   }
