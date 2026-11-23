@@ -554,3 +554,131 @@ it("WP-2423 batch 50: busy follow-ups are bounded, then the poll interval applie
       createOutboxWorkload({ dispatcher, pollIntervalMs: 1000, drainDeadlineMs: 10, followUp }),
     ).toThrow("OUTBOX_WORKLOAD_CONFIG_INVALID");
 });
+it("WP-2423 batch 51: an accepted paid pickup reaches the kitchen read within 2 s, its OrderConfirmed not waiting a poll", async () => {
+  vi.useFakeTimers();
+  // The v15 shape (2026-11-23, TM2 pickups 56, 57, 62): staff accept (the request commits in about
+  // 70 ms); the payment-wait workload's next cycle (1 s poll) resumes the paid wait and records
+  // OrderConfirmed; the business events workload (1 s poll, a sibling started just before it)
+  // delivers it, which creates the ticket and records KitchenWorkCreated, whose delivery refreshes
+  // the kitchen read. Each delivery or resume took about 60 ms there.
+  const { createPaymentAcceptanceWaitWorkload } =
+    await import("./payment-acceptance-wait-workload.js");
+  const outbox: { type: string; recordedAt: number }[] = [];
+  const delivered = new Map<string, { recordedAt: number; at: number }>();
+  let acceptedAt = Number.POSITIVE_INFINITY;
+  let waiting = true;
+  const events = createOutboxWorkload({
+    dispatcher: {
+      runOnce: async () => {
+        const claimable = [...outbox];
+        for (const event of claimable) {
+          await new Promise((resolve) => setTimeout(resolve, 60));
+          outbox.splice(outbox.indexOf(event), 1);
+          delivered.set(event.type, { recordedAt: event.recordedAt, at: Date.now() });
+          if (event.type === "OrderConfirmed")
+            outbox.push({ type: "KitchenWorkCreated", recordedAt: Date.now() });
+        }
+        return claimable.length;
+      },
+      stop: async () => "drained" as const,
+    },
+    pollIntervalMs: 1000,
+    followUp: { delayMs: 0, maxConsecutive: 10 },
+    drainDeadlineMs: 1000,
+    supervision: supervisedCycleFailures,
+  });
+  const paymentWait = createPaymentAcceptanceWaitWorkload({
+    discover: async () => (waiting ? ["paid-pickup"] : []),
+    // As tooling/environment/pilot-worker.mjs: a resume that settles the wait wakes the events.
+    resume: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      if (Date.now() < acceptedAt) return { status: "AwaitingOrderAcceptance" };
+      waiting = false;
+      outbox.push({ type: "OrderConfirmed", recordedAt: Date.now() });
+      events.wake();
+      return { status: "OrderConfirmed" };
+    },
+    pageSize: 5,
+    pollIntervalMs: 1000,
+    drainDeadlineMs: 1000,
+    supervision: supervisedCycleFailures,
+  });
+  const group = createCompositeWorkerWorkload([events, paymentWait]);
+  const starting = group.start();
+  // Staff accept just after a payment-wait cycle, the slowest case seen live (about 1 s).
+  await vi.advanceTimersByTimeAsync(1130);
+  await starting;
+  acceptedAt = Date.now();
+  await vi.advanceTimersByTimeAsync(5000);
+  const never = { recordedAt: 0, at: Number.POSITIVE_INFINITY };
+  const confirmed = delivered.get("OrderConfirmed") ?? never;
+  const kitchen = delivered.get("KitchenWorkCreated") ?? never;
+  // Design (Handoff 80.8): Kitchen/Pickup projection normal ≤2 s. Before, OrderConfirmed waited
+  // for the next events poll after being recorded: 0.88 s here (1.0-1.35 s on v15, with slower
+  // cycles), and the whole path took 1.99 s here (2.12-2.35 s on v15); now 0.06 s and 1.17 s.
+  expect(confirmed.at - confirmed.recordedAt).toBeLessThan(200);
+  expect(kitchen.at - acceptedAt).toBeLessThan(2000);
+  // An idle Store still polls once a second; nothing committed wakes nothing.
+  const before = delivered.size;
+  await vi.advanceTimersByTimeAsync(10_000);
+  expect(delivered.size).toBe(before);
+  await group.stop();
+});
+it("WP-2423 batch 51: a wake cuts only the ordinary poll short, once, and never a failure backoff", async () => {
+  vi.useFakeTimers();
+  let release!: () => void;
+  let block = false;
+  const runOnce = vi.fn(async () => {
+    if (block) await new Promise<void>((resolve) => (release = resolve));
+    return 0;
+  });
+  const workload = createOutboxWorkload({
+    dispatcher: { runOnce, stop: async () => "drained" as const },
+    pollIntervalMs: 1000,
+    drainDeadlineMs: 1000,
+  });
+  workload.wake(); // Not started: nothing happens.
+  await workload.start();
+  expect(runOnce).toHaveBeenCalledTimes(1);
+  // Waiting for the poll: one cycle at once; repeated wakes coalesce into it.
+  workload.wake();
+  workload.wake();
+  await vi.advanceTimersByTimeAsync(5);
+  expect(runOnce).toHaveBeenCalledTimes(2);
+  // The poll interval then applies again.
+  await vi.advanceTimersByTimeAsync(900);
+  expect(runOnce).toHaveBeenCalledTimes(2);
+  await vi.advanceTimersByTimeAsync(200);
+  expect(runOnce).toHaveBeenCalledTimes(3);
+  // During a cycle (it may have read before the commit): exactly one more cycle follows at once.
+  block = true;
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(runOnce).toHaveBeenCalledTimes(4);
+  block = false;
+  workload.wake();
+  workload.wake();
+  release();
+  await vi.advanceTimersByTimeAsync(5);
+  expect(runOnce).toHaveBeenCalledTimes(5);
+  await vi.advanceTimersByTimeAsync(900);
+  expect(runOnce).toHaveBeenCalledTimes(5);
+  await workload.stop();
+  workload.wake();
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(runOnce).toHaveBeenCalledTimes(5);
+  // A supervised failure's backoff is never cut short.
+  const failing = vi.fn().mockResolvedValueOnce(0).mockRejectedValue(new Error("x"));
+  const supervised = createOutboxWorkload({
+    dispatcher: { runOnce: failing, stop: async () => "drained" as const },
+    pollIntervalMs: 1000,
+    drainDeadlineMs: 1000,
+    supervision: { classify: () => "Transient" },
+  });
+  await supervised.start();
+  await vi.advanceTimersByTimeAsync(1005);
+  expect(failing).toHaveBeenCalledTimes(2);
+  supervised.wake();
+  await vi.advanceTimersByTimeAsync(500);
+  expect(failing).toHaveBeenCalledTimes(2);
+  await supervised.stop();
+});

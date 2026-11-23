@@ -146,6 +146,15 @@ export function createOutboxWorkload(options: {
 }): WorkerWorkload & {
   readonly completion: Promise<"stopped" | "failed">;
   snapshot(): OutboxWorkloadSnapshot;
+  /**
+   * WP-2423 batch 51 (pickup speed): work this process just committed for this workload (a paid
+   * pickup's OrderConfirmed, recorded by the payment-wait workload once staff accept) is taken at
+   * once instead of at the next poll. Waiting for the poll: the next cycle starts now. During a
+   * cycle (which may have read the outbox before that commit): one more cycle follows at once.
+   * Failure backoff and stopping are never shortened. Wakes coalesce, so each costs at most one
+   * cycle, and an idle Store with nothing committed polls exactly as before.
+   */
+  wake(): void;
 } {
   if (
     !Number.isInteger(options.pollIntervalMs) ||
@@ -273,8 +282,17 @@ export function createOutboxWorkload(options: {
   };
   const active = () => state === "running" || state === "attention_required";
   let followUps = 0;
+  /** A wake arrived during the cycle in flight: the next cycle starts at once. */
+  let wakeRequested = false;
+  /** The pending timer is the ordinary poll (never a failure backoff), so a wake may cut it short. */
+  let pollPending = false;
   /** After a completed cycle: a prompt follow-up when it did work (bounded), else one poll. */
   const afterCycle = (result: number) => {
+    if (wakeRequested) {
+      wakeRequested = false;
+      schedule(0);
+      return;
+    }
     const followUp = options.followUp;
     if (followUp && result > 0 && followUps < followUp.maxConsecutive) {
       followUps += 1;
@@ -283,15 +301,19 @@ export function createOutboxWorkload(options: {
     }
     followUps = 0;
     schedule();
+    pollPending = true;
   };
   const schedule = (delayMs = options.pollIntervalMs) => {
+    pollPending = false;
     if (!active()) return;
     timer = setTimeout(() => {
       timer = undefined;
+      pollPending = false;
       if (!active()) return;
       cycle = runCycle();
       void cycle.then(afterCycle, () => {
         followUps = 0;
+        wakeRequested = false;
         return handleFailure();
       });
     }, delayMs);
@@ -321,6 +343,17 @@ export function createOutboxWorkload(options: {
   return Object.freeze({
     completion,
     snapshot,
+    wake() {
+      if (!active()) return;
+      if (cycleInFlight) {
+        wakeRequested = true;
+        return;
+      }
+      if (timer === undefined || !pollPending) return;
+      clearTimeout(timer);
+      timer = undefined;
+      schedule(0);
+    },
     async start() {
       if (state !== "idle") throw new Error("OUTBOX_WORKLOAD_ALREADY_STARTED");
       state = "running";
@@ -328,6 +361,7 @@ export function createOutboxWorkload(options: {
       try {
         afterCycle(await cycle);
       } catch {
+        wakeRequested = false;
         if (!handleFailure()) throw new Error("OUTBOX_WORKLOAD_FAILED");
       }
     },

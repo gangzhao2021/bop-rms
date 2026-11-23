@@ -81,5 +81,13 @@ export function createPersistentConsumerWorker(options: {
   const workload = options.additionalWorkloads?.length
     ? createCompositeWorkerWorkload([eventWorkload, ...options.additionalWorkloads])
     : eventWorkload;
-  return Object.freeze({ ...runtime, eventing, consumerRetries, parkedRetries, workload });
+  return Object.freeze({
+    ...runtime,
+    eventing,
+    consumerRetries,
+    parkedRetries,
+    workload,
+    /** Events this process just committed are dispatched now, not at the next poll (see wake). */
+    wakeEvents: () => eventWorkload.wake(),
+  });
 }

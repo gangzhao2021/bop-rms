@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import process from "node:process";
 import {
   createInternalWorker,
@@ -151,4 +151,38 @@ test("WP-2423 M16: the business worker always runs the refund follow-through, wi
     },
   });
   expect(made).toEqual([[storeReference, undefined]]);
+});
+
+test("WP-2423 batch 51: a payment wait settled by acceptance wakes the business events at once; one still waiting does not", async () => {
+  setEnvironment("development", undefined);
+  vi.useFakeTimers();
+  let accepted = false;
+  const { worker, contexts } = await composeWorker({
+    createInternalPaidOutcome: async () => ({
+      listUnresolved: async () => ["0190fa46-0000-7000-8000-0000000000aa"],
+      // v15: the resume after staff accept records OrderConfirmed ("OrderConfirmed"); before that
+      // the paid pickup is still waiting ("AwaitingOrderAcceptance").
+      resume: async () => ({ status: accepted ? "OrderConfirmed" : "AwaitingOrderAcceptance" }),
+    }),
+  });
+  try {
+    // Each events cycle claims the Store's and the Brand's events (see the first test).
+    await worker.workload.start();
+    const started = contexts.length;
+    await vi.advanceTimersByTimeAsync(1050);
+    const polled = contexts.length - started;
+    expect(polled).toBeGreaterThan(0);
+    // Still waiting for staff: one events cycle a second, as before.
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(contexts.length - started).toBe(2 * polled);
+    // Accepted: the resume that records OrderConfirmed is followed at once by an events cycle
+    // (before the fix the event waited for the next poll: one cycle in this second, not two).
+    accepted = true;
+    const before = contexts.length;
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(contexts.length - before).toBe(2 * polled);
+  } finally {
+    await worker.workload.stop();
+    vi.useRealTimers();
+  }
 });

@@ -57,6 +57,8 @@ export async function createInternalWorker(resources, observers = {}, options = 
     createInternalWorkerServices,
   } = dependencies;
   const services = await createInternalWorkerServices(resources, { persistentWaiting: true });
+  /** The business events workload, once created below (a sibling of the payment wait). */
+  const events = { wake: () => undefined };
   const paid = await createInternalPaidOutcome(resources, { persistentWaiting: true });
   // WP-2423 M04: one paid wait that keeps failing is retried on its own; the Store's other paid
   // orders still reach the kitchen. While any fails, the health says attention (a count only).
@@ -68,7 +70,20 @@ export async function createInternalWorker(resources, observers = {}, options = 
         : (snapshot) => observers.paymentWait(paymentWaitHealth(snapshot, stuck.count())),
     discover: (limit, after) =>
       resources.transactions.run((tx) => paid.listUnresolved(tx, limit, after)),
-    resume: (event) => resources.transactions.run((tx) => paid.resume(tx, event)),
+    // WP-2423 batch 51 (pickup speed): once staff accept a paid pickup, this resume records its
+    // OrderConfirmed. On v15 that event then waited 1.0-1.35 s for the next events poll (pickup
+    // acceptance to the kitchen read 2.1-2.35 s, design ≤2 s); the events workload now takes it
+    // as soon as the resume has committed. A wait still awaiting acceptance wakes nothing.
+    resume: async (event) => {
+      const result = await resources.transactions.run((tx) => paid.resume(tx, event));
+      if (result?.status !== "AwaitingOrderAcceptance")
+        try {
+          events.wake();
+        } catch {
+          /* The resume committed; a missed wake only waits for the poll. */
+        }
+      return result;
+    },
     onWaitFailure: ({ failures, stuckWaits }, error) =>
       console.error(
         JSON.stringify({
@@ -230,6 +245,7 @@ export async function createInternalWorker(resources, observers = {}, options = 
     drainDeadlineMs: 25000,
     supervision: supervisedCycleFailures,
   });
+  events.wake = runtime.wakeEvents;
   const recoveryRegistry = createManualOutboxRecoveryRegistry(
     services.map((service) => service.registration),
   );
