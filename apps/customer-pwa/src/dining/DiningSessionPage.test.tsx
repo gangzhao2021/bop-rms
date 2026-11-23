@@ -1290,6 +1290,85 @@ describe("batch 52 (v15 b51 live): the Table total names what the table owes one
   });
 });
 
+describe("batch 53 (v15 b52 live): the Table total note says how a split bill was paid", () => {
+  // The v15 b52 read: guest A paid their own dish online (14.13), guest C the rest (14.12).
+  const note = (
+    language: "en" | "zh-Hans",
+    paid: string,
+    due: string,
+    splitParts: { count: number | null; paid: number },
+  ) => {
+    const state = {
+      status: "ready",
+      refreshing: false,
+      view: view({
+        paymentTiming: "PayLater",
+        summary: {
+          paid: cad(paid),
+          refunded: cad("0"),
+          refundPending: cad("0"),
+          due: cad(due),
+          tableTip: cad("0"),
+          cashRounding: cad("0"),
+          splitParts,
+        },
+      }),
+    } as const;
+    const html = renderToStaticMarkup(
+      <LanguageRoot initial={language}>
+        {() => (
+          <MemoryRouter initialEntries={["/dine-in/session"]}>
+            <DiningSessionScreen state={state} store={store} onRefresh={() => undefined} />
+          </MemoryRouter>
+        )}
+      </LanguageRoot>,
+    )
+      .replace(/<[^>]+>/gu, " ")
+      .replace(/\s+/gu, " ");
+    renderToStaticMarkup(<LanguageRoot initial="en">{() => null}</LanguageRoot>);
+    return html;
+  };
+  it("paid in full by dish in 2 payments: never paid once at the end (en, zh)", () => {
+    const en = note("en", "2825", "0", { count: null, paid: 2 });
+    expect(en).toContain(
+      "The table paid by dish, in 2 payments. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
+    );
+    expect(en).not.toContain("paid once at the end");
+    expect(en).not.toContain("paying by dish");
+    const zh = note("zh-Hans", "2825", "0", { count: null, paid: 2 });
+    expect(zh).toContain("这桌已按菜分 2 笔付清。现金按 5 分取整，刷卡不取整。");
+    expect(zh).not.toContain("最后一起付清");
+    expect(zh).not.toContain("按菜付款");
+  });
+  it("staff's split paid in full: paid in its parts; one payment by dish: one payment", () => {
+    expect(note("en", "2825", "0", { count: 3, paid: 3 })).toContain(
+      "The table paid the bill in 3 parts.",
+    );
+    expect(note("zh-Hans", "2825", "0", { count: 3, paid: 3 })).toContain("这桌已分 3 份付清。");
+    expect(note("en", "2825", "0", { count: null, paid: 1 })).toContain(
+      "The table paid in one payment.",
+    );
+    expect(note("zh-Hans", "2825", "0", { count: null, paid: 1 })).toContain("这桌已一笔付清。");
+  });
+  it("part paid: rounding is said only for cash at the counter, never for the rest paid online", () => {
+    const en = note("en", "1413", "1412", { count: null, paid: 1 });
+    expect(en).toContain(
+      "The table is paying by dish; 1 paid so far. Cash at the counter is rounded to the nearest 5 cents; card and phone payments are not.",
+    );
+    expect(en).not.toMatch(/so far\. Cash is rounded/u);
+    const zh = note("zh-Hans", "1413", "1412", { count: null, paid: 1 });
+    expect(zh).toContain(
+      "这桌按菜付款，已付 1 笔。在柜台付现金按 5 分取整，刷卡和手机付款不取整。",
+    );
+    expect(note("en", "1413", "1412", { count: 2, paid: 1 })).toContain(
+      "The table is paying the bill in 2 parts; 1 paid so far. Cash at the counter is rounded to the nearest 5 cents; card and phone payments are not.",
+    );
+    expect(note("zh-Hans", "1413", "1412", { count: 2, paid: 1 })).toContain(
+      "这桌分成 2 份付款，已付 1 份。在柜台付现金按 5 分取整，刷卡和手机付款不取整。",
+    );
+  });
+});
+
 describe("WP-2423 item 8 ④ v15 a: a table paying its split bill in parts", () => {
   it("shows what is still to pay and says the table pays in parts", () => {
     const html = render({

@@ -659,6 +659,11 @@ function TableSummary({ view }: { readonly view: DiningSessionView }) {
   // A table paying at the end that has paid everything it owes (staff closing a bill say so).
   const allPaid =
     payLater && summary.closedByStaff !== true && !nonZero(summary.due) && nonZero(summary.paid);
+  // Batch 53: the split's parts once the bill is paid in full (the server keeps them).
+  const splitPaid =
+    summary.splitParts !== undefined && summary.splitParts.paid > 0 && !nonZero(summary.due)
+      ? summary.splitParts
+      : null;
   return (
     <section
       className="order-status__card order-status__summary dining-session__summary"
@@ -784,32 +789,52 @@ function TableSummary({ view }: { readonly view: DiningSessionView }) {
           : payLater
             ? t("Item prices are before tax. ")
             : t("Item prices are before tax. Dishes refunded or never charged are not included. ")}
-        {payLater && summary.splitParts !== undefined && summary.splitParts.count === null
-          ? t(
-              "The table is paying by dish; {paid} paid so far. Cash is rounded to the nearest 5 cents.",
-              { paid: String(summary.splitParts.paid) },
-            )
-          : payLater && summary.splitParts !== undefined
+        {/* Batch 53 (v15 b52 live): a bill paid in parts says so once it is paid, never "paid
+            once at the end"; while parts are left, rounding is said only for cash at the counter
+            (the rest paid on a phone or by card is never rounded). */}
+        {payLater && splitPaid !== null
+          ? splitPaid.count === null && splitPaid.paid === 1
             ? t(
-                "The table is paying the bill in {count} parts; {paid} paid so far. Cash is rounded to the nearest 5 cents.",
-                { count: String(summary.splitParts.count), paid: String(summary.splitParts.paid) },
+                "The table paid in one payment. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
               )
-            : payLater
-              ? summary.cashRounding !== undefined
-                ? t(
-                    "The table paid once at the end. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
-                  )
-                : summary.bill !== undefined &&
-                    summary.bill.total.amountMinor === "0" &&
-                    summary.bill.items.amountMinor !== "0"
-                  ? // b13: a bill comped to nothing owes nothing, said as that.
-                    t("The restaurant took everything off: there is nothing to pay.")
-                  : t(
-                      "Rounds go to the kitchen when they are sent. The table pays once at the end, with tax.",
-                    )
+            : splitPaid.count === null
+              ? t(
+                  "The table paid by dish, in {paid} payments. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
+                  { paid: String(splitPaid.paid) },
+                )
               : t(
-                  "Paid amounts include tax and any tip. Amounts waiting for payment include tax, before any tip. Each guest pays for the rounds they order.",
-                )}
+                  "The table paid the bill in {count} parts. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
+                  { count: String(splitPaid.count) },
+                )
+          : payLater && summary.splitParts !== undefined && summary.splitParts.count === null
+            ? t(
+                "The table is paying by dish; {paid} paid so far. Cash at the counter is rounded to the nearest 5 cents; card and phone payments are not.",
+                { paid: String(summary.splitParts.paid) },
+              )
+            : payLater && summary.splitParts !== undefined
+              ? t(
+                  "The table is paying the bill in {count} parts; {paid} paid so far. Cash at the counter is rounded to the nearest 5 cents; card and phone payments are not.",
+                  {
+                    count: String(summary.splitParts.count),
+                    paid: String(summary.splitParts.paid),
+                  },
+                )
+              : payLater
+                ? summary.cashRounding !== undefined
+                  ? t(
+                      "The table paid once at the end. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
+                    )
+                  : summary.bill !== undefined &&
+                      summary.bill.total.amountMinor === "0" &&
+                      summary.bill.items.amountMinor !== "0"
+                    ? // b13: a bill comped to nothing owes nothing, said as that.
+                      t("The restaurant took everything off: there is nothing to pay.")
+                    : t(
+                        "Rounds go to the kitchen when they are sent. The table pays once at the end, with tax.",
+                      )
+                : t(
+                    "Paid amounts include tax and any tip. Amounts waiting for payment include tax, before any tip. Each guest pays for the rounds they order.",
+                  )}
       </p>
     </section>
   );

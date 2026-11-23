@@ -15,6 +15,12 @@ import { routeStorefrontReads } from "./storefront-reads";
 // Nothing" once all was paid); at 1024/1440 its amounts sat in left-hand columns while Total sat at
 // the far right; and every visit to Your table at a Store with calling staff off asked for the
 // staff call again and got 409 (TM2's setting, not the checkout).
+//
+// Batch 53 (v15 b52 live, guest-table-total-wording-and-staff-call new findings): once the bill was
+// paid in full in 2 by-dish payments, the note under the Table total read "The table paid once at
+// the end" (这桌已在最后一起付清): the server stopped sending the split's parts once paid in full.
+// And while part paid, the note said "Cash is rounded to the nearest 5 cents." although the rest
+// is paid on a phone, unrounded: rounding is now said only for cash at the counter.
 test.beforeEach(({ context }) => routeStorefrontReads(context));
 test.use({ serviceWorkers: "block" });
 const id = (n: number) => "018f8a51-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -283,10 +289,12 @@ function sessionView(table: Table) {
           tax: money("325"),
           total: money("2825"),
         },
-        // Paid in full, a split is no longer spoken of (customerSplitParts).
-        ...(table.paid === "nobody" || table.paid === "all"
+        // v15 adds the table's payments' tip and cash rounding once any part is paid.
+        ...(table.paid === "nobody" ? {} : { tableTip: money("0"), cashRounding: money("0") }),
+        // Batch 53: the split's parts, also once paid in full (customerSplitParts).
+        ...(table.paid === "nobody"
           ? {}
-          : { splitParts: { count: null, paid: 1 } }),
+          : { splitParts: { count: null, paid: table.paid === "all" ? 2 : 1 } }),
       },
     },
   };
@@ -403,6 +411,14 @@ function words(zh: boolean) {
     noTip: zh ? "不加小费" : "No tip",
     payMine: zh ? "支付 $14.13" : "Pay $14.13",
     paySecurely: zh ? "安全付款" : "Pay securely",
+    partNote: zh
+      ? "这桌按菜付款，已付 1 笔。在柜台付现金按 5 分取整，刷卡和手机付款不取整。"
+      : "The table is paying by dish; 1 paid so far. Cash at the counter is rounded to the nearest 5 cents; card and phone payments are not.",
+    oldPartRounding: zh ? "已付 1 笔。现金按 5 分取整" : "1 paid so far. Cash is rounded",
+    allNote: zh
+      ? "这桌已按菜分 2 笔付清。现金按 5 分取整，刷卡不取整。"
+      : "The table paid by dish, in 2 payments. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
+    oldAllNote: zh ? "最后一起" : "once at the end",
   };
 }
 
@@ -599,6 +615,10 @@ for (const width of [390, 1024, 1440])
             [text.paidSoFar, "$14.12"],
             [text.stillToPay, "$14.13"],
           ]);
+        // Batch 53: the rest is paid on a phone, unrounded: rounding is said for cash only.
+        const { summary: partSummary } = await totals(page, zh);
+        await expect(partSummary).toContainText(text.partNote);
+        await expect(partSummary).not.toContainText(text.oldPartRounding);
         await expectOneAmountColumn(page, zh);
         await expectLayout(page, zh, width);
         await page.screenshot({
@@ -620,6 +640,9 @@ for (const width of [390, 1024, 1440])
         const { summary } = await totals(page, zh);
         for (const gone of [text.toPayAtEnd, text.stillToPay, text.nothing])
           await expect(summary.getByText(gone, { exact: true })).toHaveCount(0);
+        // Batch 53: paid in 2 by-dish payments, as the pay section says: never once at the end.
+        await expect(summary).toContainText(text.allNote);
+        await expect(summary).not.toContainText(text.oldAllNote);
         await expectOneAmountColumn(page, zh);
         await expectLayout(page, zh, width);
         await page.screenshot({

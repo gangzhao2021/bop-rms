@@ -1510,10 +1510,16 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Tip (for your part)": "小费（按您这一份）",
   "Every part of the bill is paid ({count} parts). Thank you!": "账单 {count} 份都已付清，谢谢！",
   "Still to pay": "还剩",
-  "The table is paying the bill in {count} parts; {paid} paid so far. Cash is rounded to the nearest 5 cents.":
-    "这桌分成 {count} 份付款，已付 {paid} 份。现金按 5 分取整。",
-  "The table is paying by dish; {paid} paid so far. Cash is rounded to the nearest 5 cents.":
-    "这桌按菜付款，已付 {paid} 笔。现金按 5 分取整。",
+  "The table is paying the bill in {count} parts; {paid} paid so far. Cash at the counter is rounded to the nearest 5 cents; card and phone payments are not.":
+    "这桌分成 {count} 份付款，已付 {paid} 份。在柜台付现金按 5 分取整，刷卡和手机付款不取整。",
+  "The table is paying by dish; {paid} paid so far. Cash at the counter is rounded to the nearest 5 cents; card and phone payments are not.":
+    "这桌按菜付款，已付 {paid} 笔。在柜台付现金按 5 分取整，刷卡和手机付款不取整。",
+  "The table paid in one payment. Cash is rounded to the nearest 5 cents; card payments are not rounded.":
+    "这桌已一笔付清。现金按 5 分取整，刷卡不取整。",
+  "The table paid by dish, in {paid} payments. Cash is rounded to the nearest 5 cents; card payments are not rounded.":
+    "这桌已按菜分 {paid} 笔付清。现金按 5 分取整，刷卡不取整。",
+  "The table paid the bill in {count} parts. Cash is rounded to the nearest 5 cents; card payments are not rounded.":
+    "这桌已分 {count} 份付清。现金按 5 分取整，刷卡不取整。",
   "Staff have paused joining by scan at this table. Ask staff, or the person who joined first, for the table’s join code.":
     "店员暂停了这桌的扫码加入。请向店员或先入桌的人要入桌码。",
   "This table isn’t open yet. Please ask staff to seat you.": "这张桌还没开台，请找店员。",
