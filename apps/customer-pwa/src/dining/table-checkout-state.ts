@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 import { getCustomerCsrfCredential } from "../session/customer-transaction-context.js";
 import type { DiningSessionView } from "./dining-session-client.js";
+import { tableBillOutcome, type ClosedBillPaid } from "./table-bill-outcome.js";
 
 /**
  * Batch 48 (v15 b47 live, guest-open-page-after-close leftOpen (d)): once staff start a table's
@@ -16,6 +17,11 @@ export interface TableCheckout {
   readonly paid: boolean | null;
   /** The table pays at the end, so Your table holds its receipt once paid. */
   readonly payLater: boolean | null;
+  /**
+   * Batch 55: staff closed the bill when the guests left (what was paid, the rest not charged);
+   * `paid` is then true (nothing more is owed) but the bill was not paid. Null otherwise.
+   */
+  readonly closedByStaff: ClosedBillPaid | null;
 }
 
 let state: { readonly credential: string; readonly checkout: TableCheckout } | null = null;
@@ -31,7 +37,8 @@ function publish(next: typeof state) {
   if (
     next?.credential === state?.credential &&
     next?.checkout.paid === state?.checkout.paid &&
-    next?.checkout.payLater === state?.checkout.payLater
+    next?.checkout.payLater === state?.checkout.payLater &&
+    JSON.stringify(next?.checkout.closedByStaff) === JSON.stringify(state?.checkout.closedByStaff)
   )
     return;
   state = next;
@@ -51,17 +58,22 @@ export function noteTableCheckingOut(checkingOut: boolean): void {
     checkout:
       lastView?.credential === credential
         ? lastView.checkout
-        : Object.freeze({ paid: null, payLater: null }),
+        : Object.freeze({ paid: null, payLater: null, closedByStaff: null }),
   });
 }
 
-/** A table read for this visit: whether anything is still owed, shown while checking out. */
+/** A table read for this visit: whether anything is still owed (or staff closed the bill). */
 export function noteTableView(view: DiningSessionView): void {
   const credential = getCustomerCsrfCredential();
   if (credential === null) return;
-  const paid =
-    view.rounds.length > 0 && view.summary !== null && /^0+$/u.test(view.summary.due.amountMinor);
-  const checkout = Object.freeze({ paid, payLater: view.paymentTiming === "PayLater" });
+  // Batch 55: one reading of how the bill ended, the one Your table uses (never "paid" for a bill
+  // staff closed when the guests left, whatever it still owed).
+  const outcome = tableBillOutcome(view);
+  const checkout = Object.freeze({
+    paid: outcome.kind !== "Owing",
+    payLater: view.paymentTiming === "PayLater",
+    closedByStaff: outcome.kind === "ClosedByStaff" ? outcome.paid : null,
+  });
   lastView = { credential, checkout };
   if (state !== null && state.credential === credential) publish({ credential, checkout });
 }

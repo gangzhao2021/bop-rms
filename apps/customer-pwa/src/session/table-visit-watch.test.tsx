@@ -219,14 +219,14 @@ it("Menu learns from the cart read that the table is checking out, then paid, th
   await settle();
   expect(load).toHaveBeenCalledTimes(1);
   expect(fetcher).toHaveBeenCalledTimes(1);
-  expect(getTableCheckout()).toEqual({ paid: false, payLater: true });
+  expect(getTableCheckout()).toEqual({ paid: false, payLater: true, closedByStaff: null });
   // The guest paid the whole table; staff have not closed it yet.
   due = "0";
   await act(async () => {
     await vi.advanceTimersByTimeAsync(tableVisitWatchMs);
   });
   await settle();
-  expect(getTableCheckout()).toEqual({ paid: true, payLater: true });
+  expect(getTableCheckout()).toEqual({ paid: true, payLater: true, closedByStaff: null });
   // (Another table, nothing paid) staff pressed Cancel checkout: the cart answers again.
   cart = "open";
   await act(async () => {
@@ -269,6 +269,6 @@ it("Cart's checking-out answer after the table read still says at once that the 
   expect(getTableCheckout()).toBeNull();
   // Cart's own read answers 409 cart_table_checking_out after the table read finished.
   act(() => noteTableCheckingOut(true));
-  expect(getTableCheckout()).toEqual({ paid: true, payLater: true });
+  expect(getTableCheckout()).toEqual({ paid: true, payLater: true, closedByStaff: null });
   expect(load).toHaveBeenCalledTimes(1);
 });

@@ -1388,6 +1388,15 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Your table’s bill is paid": "这桌已结清",
   "To order anything else, ask staff.": "如需再点，请找店员。",
   "See the bill": "查看账单",
+  // Batch 55 (v15 b54 live): a bill staff closed when the guests left, on Menu, dish pages and Cart.
+  "Staff closed your table’s bill": "店员已关闭本桌账单",
+  "Nothing was charged. To order anything else, ask staff.": "未收取任何费用。如需再点，请找店员。",
+  "Staff closed your table’s bill; nothing was charged. To order anything else, ask staff.":
+    "店员已关闭本桌账单，未收取任何费用。如需再点，请找店员。",
+  "What was paid stays paid, and the rest is not charged to you. To order anything else, ask staff.":
+    "已付的款项不变，其余不向您收取。如需再点，请找店员。",
+  "Staff closed your table’s bill: what was paid stays paid, and the rest is not charged to you. To order anything else, ask staff.":
+    "店员已关闭本桌账单：已付的款项不变，其余不向您收取。如需再点，请找店员。",
   "Cash rounding": "现金取整",
   "Item prices are before tax. ": "菜品价格为税前价格。",
   "The table paid once at the end. Cash is rounded to the nearest 5 cents; card payments are not rounded.":

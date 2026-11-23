@@ -1,4 +1,5 @@
 import { createTablePaymentClient } from "./table-payment-client.js";
+import { tableBillOutcome } from "./table-bill-outcome.js";
 import {
   dateLocale,
   keepWords,
@@ -656,9 +657,12 @@ function TableSummary({ view }: { readonly view: DiningSessionView }) {
   const summary = view.summary;
   if (summary === null) return null;
   const nonZero = (value: DiningMoney) => value.amountMinor !== "0";
+  // Batch 54 (v15 b53 live): staff closed the bill when the guests left; what was paid stays
+  // paid and the rest is not charged. Said as that, never as paid in full. Batch 55: read as Menu,
+  // dish pages and Cart read it.
+  const closedByStaff = tableBillOutcome(view).kind === "ClosedByStaff";
   // A table paying at the end that has paid everything it owes (staff closing a bill say so).
-  const allPaid =
-    payLater && summary.closedByStaff !== true && !nonZero(summary.due) && nonZero(summary.paid);
+  const allPaid = payLater && !closedByStaff && !nonZero(summary.due) && nonZero(summary.paid);
   // Batch 53: the split's parts once the bill is paid in full (the server keeps them). Paid in
   // full only when the table paid all it owes (never a bill staff closed by writing off the rest)
   // and, for staff's split, every part was paid (never the rest taken off after 1 of 3 parts).
@@ -669,9 +673,6 @@ function TableSummary({ view }: { readonly view: DiningSessionView }) {
     (summary.splitParts.count === null || summary.splitParts.paid >= summary.splitParts.count)
       ? summary.splitParts
       : null;
-  // Batch 54 (v15 b53 live): staff closed the bill when the guests left; what was paid stays
-  // paid and the rest is not charged. Said as that, never as paid in full.
-  const closedByStaff = summary.closedByStaff === true;
   // Batch 53 review: parts were paid and nothing is left to pay, but not by paying in full.
   const splitEnded =
     splitPaid === null &&
@@ -1259,9 +1260,12 @@ export function DiningSessionScreen({
   // Dishes can be added while the table orders: not while it checks out, after it paid, or once
   // everything is closed. A table paying at the end can still order after everything is served.
   // Batch 54: a bill staff closed (the guests left) takes nothing more either, paid or not.
+  // Batch 55: how the bill ended, read as Menu, dish pages and Cart read it.
+  const outcome = view === null ? null : tableBillOutcome(view);
+  const closedBill = outcome?.kind === "ClosedByStaff" ? outcome.paid : null;
   const paidOff =
     tablePay?.paid === true ||
-    view?.summary?.closedByStaff === true ||
+    closedBill !== null ||
     (view?.paymentTiming === "PayLater" &&
       view.summary !== null &&
       view.summary.due.amountMinor === "0" &&

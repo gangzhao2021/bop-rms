@@ -1,7 +1,7 @@
 import { v7 as uuidv7 } from "uuid";
 import { AlreadyOrdered } from "../checkout/AlreadyOrdered.js";
 import { ClosedStoreNotice } from "../menu/ClosedStoreNotice.js";
-import { tableCheckoutText } from "../menu/TableCheckoutNotice.js";
+import { tableCheckoutText, unreadTableCheckout } from "../menu/TableCheckoutNotice.js";
 import { useTableCheckout } from "../dining/table-checkout-state.js";
 import {
   CHINESE_LOCALE,
@@ -583,7 +583,7 @@ function ErrorState({
   // or retry (this page reads the cart again by itself, so a reopened table goes on); the guest
   // is told to ask staff and where the bill, or once paid the receipt, is.
   if (state.status === "table-checking-out") {
-    const text = tableCheckoutText(checkout ?? { paid: null, payLater: null });
+    const text = tableCheckoutText(checkout ?? unreadTableCheckout);
     return (
       <StateMessage heading={text.heading}>
         <p>{text.line}</p>
@@ -1842,7 +1842,7 @@ function OpenCartPage({
                 ? // WP-2423 M74: never "up to date" while a dish's price changed since it was added.
                   cartText.pricesChangedSinceAdded
                 : state.status === "table-checking-out"
-                  ? tableCheckoutText(tableCheckout ?? { paid: null, payLater: null }).whole
+                  ? tableCheckoutText(tableCheckout ?? unreadTableCheckout).whole
                   : (specificRefusal(state) ?? cartText.stateAnnouncement[state.status])}
       </div>
     </CustomerPage>
