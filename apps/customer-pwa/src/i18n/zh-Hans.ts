@@ -1349,7 +1349,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Something for the table (water, cutlery, napkins)": "桌上需要东西（水、餐具、纸巾）",
   "A problem with my order": "我点的菜有问题",
   "We're ready to pay": "可以买单了",
-  "Staff have closed this bill": "店员已结束这笔账单",
   "Staff have been asked to come to your table": "已请店员到您的桌边",
   "Asked at {time} · {reason}": "{time} 呼叫 · {reason}",
   "Everyone at your table sees this. Someone will come over as soon as they can.":
@@ -1520,10 +1519,16 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这桌已按菜分 {paid} 笔付清。现金按 5 分取整，刷卡不取整。",
   "The table paid the bill in {count} parts. Cash is rounded to the nearest 5 cents; card payments are not rounded.":
     "这桌已分 {count} 份付清。现金按 5 分取整，刷卡不取整。",
-  "Staff closed this bill; the table paid by dish, {paid} paid. Cash is rounded to the nearest 5 cents; card payments are not rounded.":
-    "店员已结这张单；这桌按菜付了 {paid} 笔。现金按 5 分取整，刷卡不取整。",
-  "Staff closed this bill; the table paid {paid} of the {count} parts. Cash is rounded to the nearest 5 cents; card payments are not rounded.":
-    "店员已结这张单；这桌 {count} 份付了 {paid} 份。现金按 5 分取整，刷卡不取整。",
+  "Staff closed this bill: the table paid by dish ({paid} paid), and the rest is not charged. Cash is rounded to the nearest 5 cents; card payments are not rounded.":
+    "店员已关闭这张账单：这桌按菜付了 {paid} 笔，其余不再收取。现金按 5 分取整，刷卡不取整。",
+  "Staff closed this bill: the table paid {paid} of the {count} parts, and the rest is not charged. Cash is rounded to the nearest 5 cents; card payments are not rounded.":
+    "店员已关闭这张账单：这桌 {count} 份付了 {paid} 份，其余不再收取。现金按 5 分取整，刷卡不取整。",
+  "Staff closed this bill: what the table paid stays paid, and the rest is not charged. Cash is rounded to the nearest 5 cents; card payments are not rounded.":
+    "店员已关闭这张账单：已付的款项不变，其余不再收取。现金按 5 分取整，刷卡不取整。",
+  "Staff closed this bill; nothing was charged.": "店员已关闭这张账单，未收取任何费用。",
+  "Rest of the bill": "其余账款",
+  "The bill": "账单",
+  "Not charged to you": "不向您收取",
   "The table paid by dish, {paid} paid; nothing is left to pay. Cash is rounded to the nearest 5 cents; card payments are not rounded.":
     "这桌按菜付了 {paid} 笔，已无需再付。现金按 5 分取整，刷卡不取整。",
   "The table paid {paid} of the {count} parts; nothing is left to pay. Cash is rounded to the nearest 5 cents; card payments are not rounded.":
