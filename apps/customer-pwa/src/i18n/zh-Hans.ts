@@ -1520,6 +1520,14 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这桌已按菜分 {paid} 笔付清。现金按 5 分取整，刷卡不取整。",
   "The table paid the bill in {count} parts. Cash is rounded to the nearest 5 cents; card payments are not rounded.":
     "这桌已分 {count} 份付清。现金按 5 分取整，刷卡不取整。",
+  "Staff closed this bill; the table paid by dish, {paid} paid. Cash is rounded to the nearest 5 cents; card payments are not rounded.":
+    "店员已结这张单；这桌按菜付了 {paid} 笔。现金按 5 分取整，刷卡不取整。",
+  "Staff closed this bill; the table paid {paid} of the {count} parts. Cash is rounded to the nearest 5 cents; card payments are not rounded.":
+    "店员已结这张单；这桌 {count} 份付了 {paid} 份。现金按 5 分取整，刷卡不取整。",
+  "The table paid by dish, {paid} paid; nothing is left to pay. Cash is rounded to the nearest 5 cents; card payments are not rounded.":
+    "这桌按菜付了 {paid} 笔，已无需再付。现金按 5 分取整，刷卡不取整。",
+  "The table paid {paid} of the {count} parts; nothing is left to pay. Cash is rounded to the nearest 5 cents; card payments are not rounded.":
+    "这桌 {count} 份付了 {paid} 份，已无需再付。现金按 5 分取整，刷卡不取整。",
   "Staff have paused joining by scan at this table. Ask staff, or the person who joined first, for the table’s join code.":
     "店员暂停了这桌的扫码加入。请向店员或先入桌的人要入桌码。",
   "This table isn’t open yet. Please ask staff to seat you.": "这张桌还没开台，请找店员。",

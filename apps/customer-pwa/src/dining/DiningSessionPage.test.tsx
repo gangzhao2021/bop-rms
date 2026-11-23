@@ -1297,6 +1297,7 @@ describe("batch 53 (v15 b52 live): the Table total note says how a split bill wa
     paid: string,
     due: string,
     splitParts: { count: number | null; paid: number },
+    closedByStaff = false,
   ) => {
     const state = {
       status: "ready",
@@ -1311,6 +1312,7 @@ describe("batch 53 (v15 b52 live): the Table total note says how a split bill wa
           tableTip: cad("0"),
           cashRounding: cad("0"),
           splitParts,
+          ...(closedByStaff ? { closedByStaff: true as const } : {}),
         },
       }),
     } as const;
@@ -1365,6 +1367,36 @@ describe("batch 53 (v15 b52 live): the Table total note says how a split bill wa
     );
     expect(note("zh-Hans", "1413", "1412", { count: 2, paid: 1 })).toContain(
       "这桌分成 2 份付款，已付 1 份。在柜台付现金按 5 分取整，刷卡和手机付款不取整。",
+    );
+  });
+  it("staff wrote off the rest after part was paid: never says the table paid in full", () => {
+    // The write-off read: staff closed the bill after an unpaid departure (owed 0, closedByStaff).
+    const byDish = note("en", "1413", "0", { count: null, paid: 1 }, true);
+    expect(byDish).toContain(
+      "Staff closed this bill; the table paid by dish, 1 paid. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
+    );
+    expect(byDish).not.toContain("The table paid in one payment.");
+    expect(note("zh-Hans", "1413", "0", { count: null, paid: 1 }, true)).toContain(
+      "店员已结这张单；这桌按菜付了 1 笔。现金按 5 分取整，刷卡不取整。",
+    );
+    const fixed = note("en", "1413", "0", { count: 3, paid: 1 }, true);
+    expect(fixed).toContain(
+      "Staff closed this bill; the table paid 1 of the 3 parts. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
+    );
+    expect(fixed).not.toContain("The table paid the bill in 3 parts.");
+    expect(note("zh-Hans", "1413", "0", { count: 3, paid: 1 }, true)).toContain(
+      "店员已结这张单；这桌 3 份付了 1 份。现金按 5 分取整，刷卡不取整。",
+    );
+  });
+  it("the rest taken off after 1 of 3 parts was paid: says 1 of 3, never paid in 3 parts", () => {
+    const en = note("en", "1413", "0", { count: 3, paid: 1 });
+    expect(en).toContain(
+      "The table paid 1 of the 3 parts; nothing is left to pay. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
+    );
+    expect(en).not.toContain("The table paid the bill in 3 parts.");
+    expect(en).not.toContain("paid so far");
+    expect(note("zh-Hans", "1413", "0", { count: 3, paid: 1 })).toContain(
+      "这桌 3 份付了 1 份，已无需再付。现金按 5 分取整，刷卡不取整。",
     );
   });
 });

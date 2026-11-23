@@ -659,9 +659,22 @@ function TableSummary({ view }: { readonly view: DiningSessionView }) {
   // A table paying at the end that has paid everything it owes (staff closing a bill say so).
   const allPaid =
     payLater && summary.closedByStaff !== true && !nonZero(summary.due) && nonZero(summary.paid);
-  // Batch 53: the split's parts once the bill is paid in full (the server keeps them).
+  // Batch 53: the split's parts once the bill is paid in full (the server keeps them). Paid in
+  // full only when the table paid all it owes (never a bill staff closed by writing off the rest)
+  // and, for staff's split, every part was paid (never the rest taken off after 1 of 3 parts).
   const splitPaid =
-    summary.splitParts !== undefined && summary.splitParts.paid > 0 && !nonZero(summary.due)
+    allPaid &&
+    summary.splitParts !== undefined &&
+    summary.splitParts.paid > 0 &&
+    (summary.splitParts.count === null || summary.splitParts.paid >= summary.splitParts.count)
+      ? summary.splitParts
+      : null;
+  // Batch 53 review: parts were paid and nothing is left to pay, but not by paying in full.
+  const splitEnded =
+    splitPaid === null &&
+    summary.splitParts !== undefined &&
+    summary.splitParts.paid > 0 &&
+    !nonZero(summary.due)
       ? summary.splitParts
       : null;
   return (
@@ -806,35 +819,55 @@ function TableSummary({ view }: { readonly view: DiningSessionView }) {
                   "The table paid the bill in {count} parts. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
                   { count: String(splitPaid.count) },
                 )
-          : payLater && summary.splitParts !== undefined && summary.splitParts.count === null
-            ? t(
-                "The table is paying by dish; {paid} paid so far. Cash at the counter is rounded to the nearest 5 cents; card and phone payments are not.",
-                { paid: String(summary.splitParts.paid) },
-              )
-            : payLater && summary.splitParts !== undefined
-              ? t(
-                  "The table is paying the bill in {count} parts; {paid} paid so far. Cash at the counter is rounded to the nearest 5 cents; card and phone payments are not.",
-                  {
-                    count: String(summary.splitParts.count),
-                    paid: String(summary.splitParts.paid),
-                  },
-                )
-              : payLater
-                ? summary.cashRounding !== undefined
-                  ? t(
-                      "The table paid once at the end. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
-                    )
-                  : summary.bill !== undefined &&
-                      summary.bill.total.amountMinor === "0" &&
-                      summary.bill.items.amountMinor !== "0"
-                    ? // b13: a bill comped to nothing owes nothing, said as that.
-                      t("The restaurant took everything off: there is nothing to pay.")
-                    : t(
-                        "Rounds go to the kitchen when they are sent. The table pays once at the end, with tax.",
-                      )
+          : payLater && splitEnded !== null
+            ? summary.closedByStaff === true
+              ? splitEnded.count === null
+                ? t(
+                    "Staff closed this bill; the table paid by dish, {paid} paid. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
+                    { paid: String(splitEnded.paid) },
+                  )
                 : t(
-                    "Paid amounts include tax and any tip. Amounts waiting for payment include tax, before any tip. Each guest pays for the rounds they order.",
-                  )}
+                    "Staff closed this bill; the table paid {paid} of the {count} parts. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
+                    { count: String(splitEnded.count), paid: String(splitEnded.paid) },
+                  )
+              : splitEnded.count === null
+                ? t(
+                    "The table paid by dish, {paid} paid; nothing is left to pay. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
+                    { paid: String(splitEnded.paid) },
+                  )
+                : t(
+                    "The table paid {paid} of the {count} parts; nothing is left to pay. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
+                    { count: String(splitEnded.count), paid: String(splitEnded.paid) },
+                  )
+            : payLater && summary.splitParts !== undefined && summary.splitParts.count === null
+              ? t(
+                  "The table is paying by dish; {paid} paid so far. Cash at the counter is rounded to the nearest 5 cents; card and phone payments are not.",
+                  { paid: String(summary.splitParts.paid) },
+                )
+              : payLater && summary.splitParts !== undefined
+                ? t(
+                    "The table is paying the bill in {count} parts; {paid} paid so far. Cash at the counter is rounded to the nearest 5 cents; card and phone payments are not.",
+                    {
+                      count: String(summary.splitParts.count),
+                      paid: String(summary.splitParts.paid),
+                    },
+                  )
+                : payLater
+                  ? summary.cashRounding !== undefined
+                    ? t(
+                        "The table paid once at the end. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
+                      )
+                    : summary.bill !== undefined &&
+                        summary.bill.total.amountMinor === "0" &&
+                        summary.bill.items.amountMinor !== "0"
+                      ? // b13: a bill comped to nothing owes nothing, said as that.
+                        t("The restaurant took everything off: there is nothing to pay.")
+                      : t(
+                          "Rounds go to the kitchen when they are sent. The table pays once at the end, with tax.",
+                        )
+                  : t(
+                      "Paid amounts include tax and any tip. Amounts waiting for payment include tax, before any tip. Each guest pays for the rounds they order.",
+                    )}
       </p>
     </section>
   );
