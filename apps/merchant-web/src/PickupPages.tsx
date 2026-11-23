@@ -795,21 +795,44 @@ export function PickupQueuePage(props: {
     current || (sameQueue && stored.state.kind === "Found") ? stored.state : { kind: "Loading" };
   const refreshButtonRef = useRef<HTMLButtonElement>(null),
     focusAfterLoad = useRef(false);
+  // Batch 52 review: Refresh pressed while a read is still out must not throw that read's answer
+  // away. The answer that comes first is shown if it is for the same list and nothing newer has
+  // been shown yet; a later, newer answer still replaces it. Only the latest read reports failures.
+  const reads = useRef<{
+    started: number;
+    shown: number;
+    queueKey: string;
+    load: typeof load | null;
+    mounted: boolean;
+  }>({ started: 0, shown: 0, queueKey: "", load: null, mounted: true });
+  useEffect(() => {
+    reads.current.mounted = true;
+    return () => {
+      reads.current.mounted = false;
+    };
+  }, []);
   useEffect(() => {
     let active = true;
+    const tracker = reads.current;
+    const seq = ++tracker.started;
+    tracker.queueKey = queueKey;
+    tracker.load = load;
     void load()
       .then((view) => {
-        if (active)
-          setStored({
-            key,
-            queueKey,
-            load,
-            failures: 0,
-            state: { kind: "Found", view, loadedAt: new Date().toISOString() },
-          });
+        const sameList = tracker.queueKey === queueKey && tracker.load === load;
+        if (!tracker.mounted || (!active && !sameList) || seq <= tracker.shown) return;
+        tracker.shown = seq;
+        setStored({
+          key,
+          queueKey,
+          load,
+          failures: 0,
+          state: { kind: "Found", view, loadedAt: new Date().toISOString() },
+        });
       })
       .catch((error) => {
-        if (!active) return;
+        if (!active || seq <= tracker.shown) return;
+        tracker.shown = seq;
         const reason = readFailureReason(
           error instanceof PickupClientError ? error.code : "Unavailable",
         );
@@ -859,12 +882,6 @@ export function PickupQueuePage(props: {
     }, pickupRefreshIntervalMs);
     return () => window.clearInterval(timer);
   }, [live, signedIn]);
-  useEffect(() => {
-    if (current && state.kind !== "Loading" && focusAfterLoad.current) {
-      refreshButtonRef.current?.focus();
-      focusAfterLoad.current = false;
-    }
-  }, [current, state.kind, key]);
   const refresh = () => {
     focusAfterLoad.current = true;
     setRevision((value) => value + 1);
@@ -883,7 +900,19 @@ export function PickupQueuePage(props: {
     !daySettled &&
     !pauseShown &&
     state.view.items.some((item) => item.phase === "Ready" && item.execution !== undefined);
-  if (state.kind !== "Found" || heldForDay)
+  // Focus returns to Refresh once the asked-for read answers, or as soon as a list replaces the
+  // loading screen (that Refresh button is gone), whichever read brought it.
+  const listShown = state.kind === "Found" && !heldForDay;
+  const listWasShown = useRef(listShown);
+  useEffect(() => {
+    const arrived = listShown && !listWasShown.current;
+    listWasShown.current = listShown;
+    if ((current || arrived) && state.kind !== "Loading" && focusAfterLoad.current) {
+      refreshButtonRef.current?.focus();
+      focusAfterLoad.current = false;
+    }
+  }, [current, state.kind, key, listShown]);
+  if (!listShown)
     return (
       <WorkspacePage
         className="pickup-queue"

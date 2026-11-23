@@ -7,7 +7,8 @@ import { notPausedServiceControl } from "./service-control-state";
  * counter saw no order and no Refresh for about 3 s. The list waited for the Store's hours read
  * (up to 2 s) although the closing step it waits for has its own line for staff shown Pause
  * ordering, and the loading screen had no Refresh. Now the page and Refresh show at once and the
- * list shows as soon as its own read answers. Synthetic HTTP interception on the production build,
+ * list shows as soon as its own read answers; Refresh pressed during a slow read keeps whichever
+ * answer comes first. Synthetic HTTP interception on the production build,
  * TEST-only data; no pickup code is part of the queue read.
  */
 const id = (n: number) => "0190b052-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -184,5 +185,35 @@ for (const language of ["en", "zh-Hans"] as const)
       expect(reads()).toBe(2);
       await expect(main.getByRole("button", { name: text.refresh, exact: true })).toBeFocused();
       await noOverflow(page);
+    });
+
+    test(`@production Refresh pressed during a slow Pickup read keeps the answer that comes first, ${language} at ${width}`, async ({
+      page,
+    }) => {
+      const text = words[language];
+      if (language === "zh-Hans")
+        await page.addInitScript(() =>
+          window.localStorage.setItem("bop.merchant.language", "zh-Hans"),
+        );
+      await page.setViewportSize({ width, height });
+      // The first read is slow but answers after 2 s; staff press Refresh at 1 s, and the read
+      // Refresh sends is slower still. The first answer is not thrown away.
+      const { answered, reads } = await counter(page, { dayMs: 100, queueMs: [2_000, 60_000] });
+      await page.goto("/operations/pickup");
+      const main = page.getByRole("main");
+      await expect.poll(reads).toBe(1);
+      const firstAskedAt = Date.now();
+      const refresh = main.getByRole("button", { name: text.refresh, exact: true });
+      await expect(refresh).toBeEnabled({ timeout: 1_000 });
+      await page.waitForTimeout(Math.max(0, 1_000 - (Date.now() - firstAskedAt)));
+      expect(answered.queue).toEqual([]);
+      await refresh.click({ timeout: 1_000 });
+      await expect.poll(reads).toBe(2);
+      await expect(main.locator("article")).toHaveCount(1, { timeout: 3_000 });
+      expect(answered.queue.length).toBe(1);
+      expect(Date.now() - (answered.queue[0] ?? 0)).toBeLessThan(1_000);
+      await expect(main.getByRole("button", { name: text.refresh, exact: true })).toBeFocused();
+      await noOverflow(page);
+      await expectNoInternalText(page);
     });
   }
