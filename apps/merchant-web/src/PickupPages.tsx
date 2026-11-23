@@ -231,6 +231,9 @@ function PickupCard({
       hidden={hidden}
       data-wait={tier}
       data-completed={completed}
+      // Batch 53: a number of up to 4 digits fits the number column; a longer label (a public
+      // reference) takes its own line, so the waiting time still starts where every other row's does.
+      data-long-number={orderLabel.length > 4 ? "true" : undefined}
     >
       <h3 className="pickup-queue__number">
         <span className="pickup-queue__number-word">{t("Order")} </span>
