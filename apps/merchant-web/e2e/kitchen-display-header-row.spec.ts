@@ -65,9 +65,10 @@ async function oneLine(locator: Locator, label: string) {
   expect(lines, `${label}: one line`).toBeLessThan(1.6);
 }
 
+/** The switch reloads once the store system answered: wait for that reload. */
 async function chooseLanguage(page: Page, language: "en" | "zh-Hans") {
-  if (language === "zh-Hans") await page.getByRole("button", { name: "切换到中文" }).click();
-  else await page.getByRole("button", { name: "Switch to English" }).click();
+  const name = language === "zh-Hans" ? "切换到中文" : "Switch to English";
+  await Promise.all([page.waitForEvent("load"), page.getByRole("button", { name }).click()]);
 }
 
 const sizes = [
