@@ -7424,6 +7424,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这桌客人的购物车里还有没送出的菜。请客人先送出或清空购物车。",
   "Together the parties would be more than 99 guests.": "两桌合起来会超过 99 位。",
   "Only tables that pay at the end can be merged.": "只有吃完再付的桌才能并桌。",
+  "Table {table} is paying the bill, so this party can't be merged into it.":
+    "{table} 桌正在结账，不能把这桌客人并过去。",
   "One of the tables is checking out. Merge before checking out.":
     "其中一桌正在结账。请在结账前并桌。",
   "The merge wasn't confirmed: this device is offline. Retry.":

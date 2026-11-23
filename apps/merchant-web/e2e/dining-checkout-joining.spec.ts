@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type Route } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
 import { tableClosePlanResponse } from "../../../apps/api/src/merchant-dining-table-close-plan-response.js";
 
@@ -41,7 +41,17 @@ async function checkoutFloor(
   floor: Floor,
   language: "en" | "zh-Hans",
   /** A role that can't operate tables (no phones block), at a table with no QR code. */
-  { viewOnlyNoCode = false }: { readonly viewOnlyNoCode?: boolean } = {},
+  {
+    viewOnlyNoCode = false,
+    mergeRefuses = "Self",
+  }: {
+    readonly viewOnlyNoCode?: boolean;
+    /**
+     * Batch 51 (v15 b50 live): which table had begun checkout on another device when this screen's
+     * stale Merge was pressed: this one, or the table it was merged into.
+     */
+    readonly mergeRefuses?: "Self" | "Other";
+  } = {},
 ) {
   if (language === "zh-Hans")
     await page.addInitScript(() => window.localStorage.setItem("bop.merchant.language", "zh-Hans"));
@@ -51,16 +61,21 @@ async function checkoutFloor(
     storeReference: id(99),
     timeZone: "America/Toronto",
   };
-  await page.route("**/merchant/session", (route) =>
-    route.fulfill({
+  // Batch 51: the Store a sign-in made on another screen chose (v15 b50 live: TM2, or another).
+  const otherScope = { ...scope, storeLabel: "TM3", storeReference: id(98) };
+  const scopeNow = () => (state.signedInAgain === "OtherStore" ? otherScope : scope);
+  await page.route("**/merchant/session", (route) => {
+    state.sessionReads += 1;
+    return route.fulfill({
       headers,
       json: {
         authenticated: true,
-        csrf,
+        // A sign-in made again on another screen of this browser has its own value.
+        csrf: state.signedInAgain === null ? csrf : "b".repeat(43),
         workspace: {
           screenId: "HOME-OVERVIEW",
-          selectedScope: scope,
-          authorizedStores: [scope],
+          selectedScope: scopeNow(),
+          authorizedStores: [scopeNow()],
           businessDate: "2026-11-22",
           storeStatus: "Open",
           freshness: "Current",
@@ -75,37 +90,58 @@ async function checkoutFloor(
           ],
         },
       },
-    }),
-  );
+    });
+  });
   // Another device started checkout: from the refused join code on, every read shows Closing.
   // The guest pays later on the StaleThenPaying floor (state.paid, set by the test).
   // Batch 50: `cancelled` is Cancel checkout pressed on another device (reads show Active again);
   // `ended` is this screen's sign-in ended elsewhere (v15 b49 live: pushed out on another screen).
-  const state = { refused: false, paid: false, cancelled: false, ended: false, moves: 0 };
+  // Batch 51: `otherPaying` is checkout begun on ZV49 D (TEST) on another device; `signedInAgain`
+  // is a sign-in made again on another screen of this browser, as the same staff at this Store,
+  // at another Store, or one that no longer sees this table.
+  const state = {
+    refused: false,
+    paid: false,
+    cancelled: false,
+    ended: false,
+    moves: 0,
+    merges: 0,
+    otherPaying: false,
+    tableReads: 0,
+    billReads: 0,
+    sessionReads: 0,
+    signedInAgain: null as null | "Same" | "OtherStore" | "TableGone",
+  };
   const phaseNow = () =>
     floor === "Active" || state.cancelled || (floor === "StaleThenPaying" && !state.refused)
       ? "Active"
       : "Closing";
   // v15 b49 live, once the sign-in ended: every signed-in read answered 403 request_denied and
   // the deadline check 401 session_ended (too many screens).
-  const ended = () => state.ended;
+  const ended = () => state.ended && state.signedInAgain === null;
   const deniedRead = { status: 403, headers, json: { error: "request_denied" } };
+  // Batch 51 (v15 b50 live): once signed in again on another tab, this screen still sent the
+  // ended sign-in's value, and the browser's new sign-in refused it (403).
+  const endedValue = (route: Route) =>
+    state.signedInAgain !== null && route.request().headers()["x-bop-csrf"] === csrf;
   await page.route(/\/merchant\/session\/(?:expiry|activity)$/u, (route) =>
-    ended()
-      ? route.fulfill({
-          status: 401,
-          headers,
-          json: { error: "session_ended", reason: "too_many_screens" },
-        })
-      : route.fulfill({
-          headers,
-          json: {
-            idleExpiresAt: new Date(Date.now() + 30 * 60_000).toISOString(),
-            absoluteExpiresAt: new Date(Date.now() + 8 * 60 * 60_000).toISOString(),
-            idleTimeoutMinutes: 30,
-            serverTime: new Date().toISOString(),
-          },
-        }),
+    endedValue(route)
+      ? route.fulfill(deniedRead)
+      : ended()
+        ? route.fulfill({
+            status: 401,
+            headers,
+            json: { error: "session_ended", reason: "too_many_screens" },
+          })
+        : route.fulfill({
+            headers,
+            json: {
+              idleExpiresAt: new Date(Date.now() + 30 * 60_000).toISOString(),
+              absoluteExpiresAt: new Date(Date.now() + 8 * 60 * 60_000).toISOString(),
+              idleTimeoutMinutes: 30,
+              serverTime: new Date().toISOString(),
+            },
+          }),
   );
   await page.route("**/merchant/sign-in-entry", (route) =>
     route.fulfill({ headers, json: { path: "/internal-test/staff", testOnly: true } }),
@@ -116,9 +152,19 @@ async function checkoutFloor(
     state.refused = true;
     return route.fulfill({ status: 409, headers, json: { error: "table_move_checking_out" } });
   });
+  // A stale "Merge into…" pressed after checkout began on another device (the server rule:
+  // either table not Active is refused with one code).
+  await page.route("**/merchant/dining/table-merge", (route) => {
+    state.merges += 1;
+    if (mergeRefuses === "Other") state.otherPaying = true;
+    else state.refused = true;
+    return route.fulfill({ status: 409, headers, json: { error: "table_merge_checking_out" } });
+  });
   const paidNow = () => floor === "Paid" || state.paid;
   await page.route("**/merchant/dining/tables", (route) => {
-    if (ended()) return route.fulfill(deniedRead);
+    if (ended() || endedValue(route)) return route.fulfill(deniedRead);
+    state.tableReads += 1;
+    const gone = state.signedInAgain === "OtherStore" || state.signedInAgain === "TableGone";
     return route.fulfill({
       headers,
       json: {
@@ -163,8 +209,8 @@ async function checkoutFloor(
             currentDiningSessionReference: id(12),
             elapsedMinutes: 20,
             session: {
-              phase: "Active",
-              version: 4,
+              phase: state.otherPaying ? "Closing" : "Active",
+              version: state.otherPaying ? 5 : 4,
               orderReference: id(13),
               paymentStarted: false,
               mergedTables: [],
@@ -186,7 +232,7 @@ async function checkoutFloor(
             elapsedMinutes: null,
             session: null,
           },
-        ],
+        ].filter((table) => !gone || table.tableReference !== id(1)),
         nextAfterTableReference: null,
       },
     });
@@ -297,7 +343,8 @@ async function checkoutFloor(
     totalMinor: "1413",
   };
   await page.route("**/merchant/dining/table-bill", (route) => {
-    if (ended()) return route.fulfill(deniedRead);
+    if (ended() || endedValue(route)) return route.fulfill(deniedRead);
+    state.billReads += 1;
     const paid = paidNow();
     return route.fulfill({
       headers,
@@ -660,5 +707,104 @@ for (const language of ["en", "zh-Hans"] as const)
         0,
       );
       await page.screenshot({ path: `test-results/b50-signed-out-${language}-${width}.png` });
+    });
+  }
+
+/**
+ * WP-2423 batch 51 (v15 batch 50 live check, table-panel-move-and-signed-out). (1) A second device
+ * that loaded before checkout began elsewhere pressed its armed "Merge into TPM50 A (TEST)": the
+ * 409 table_merge_checking_out was said inside the merge block, below the fold (top 908 at
+ * 1440x900), and nothing was read again, so the select still offered the paying table. (2) After
+ * the signed-out cover, staff signed in again on another tab and pressed Check again: the cover
+ * lifted but the selected table was dropped ("Choose a table to serve it…"), costing a tap.
+ */
+const widths51 = [
+  [390, 844],
+  [1024, 768],
+  [1440, 900],
+] as const;
+const otherLabel = "ZV49 D (TEST)";
+/** The table this party was to be merged into began checkout on another device. */
+const otherPaying = (zh: boolean) =>
+  zh
+    ? `${otherLabel} 正在结账，不能把这桌客人并过去。`
+    : `${otherLabel} is paying the bill, so this party can't be merged into it.`;
+const oldMergeRefusal = (zh: boolean) =>
+  zh
+    ? "其中一桌正在结账。请在结账前并桌。"
+    : "One of the tables is checking out. Merge before checking out.";
+async function pressStaleMerge(page: Page, zh: boolean) {
+  const panel = page.getByRole("complementary", {
+    name: zh ? "所选桌台详情" : "Selected table details",
+  });
+  const merge = panel.getByRole("region", { name: mergeRegion(zh) });
+  await merge
+    .getByRole("combobox", { name: zh ? "并到…" : "Merge into…" })
+    .selectOption({ label: otherLabel });
+  await merge
+    .getByRole("button", { name: zh ? `并到 ${otherLabel}` : `Merge into ${otherLabel}` })
+    .click();
+  return { panel, merge };
+}
+
+for (const language of ["en", "zh-Hans"] as const)
+  for (const [width, height] of widths51) {
+    test(`@production WP-2423 batch 51: a stale Merge into a table that began checkout says so in view and reads the tables again (${language}, ${width})`, async ({
+      page,
+    }) => {
+      const zh = language === "zh-Hans";
+      const { state } = await checkoutFloor(page, "Active", language, { mergeRefuses: "Other" });
+      await page.setViewportSize({ width, height });
+      await page.goto("/operations/dining");
+      await openManage(page, zh);
+      const readsBefore = state.tableReads;
+      const { merge } = await pressStaleMerge(page, zh);
+      await expect.poll(() => state.merges).toBe(1);
+      // The fact is said once, where staff are looking, and the tables are read again at once.
+      await expect(page.getByText(otherPaying(zh))).toHaveCount(1);
+      await expect(page.getByText(otherPaying(zh))).toBeInViewport();
+      await expect.poll(() => state.tableReads, { timeout: 3_000 }).toBeGreaterThan(readsBefore);
+      await expect(page.getByText(oldMergeRefusal(zh))).toHaveCount(0);
+      // The paying table is no longer offered: it says why, and the button no longer names it.
+      const option = merge.locator("option", { hasText: otherLabel });
+      await expect(option).toHaveJSProperty("disabled", true);
+      await expect(option).toHaveText(
+        zh ? `${otherLabel}——正在结账` : `${otherLabel} — checking out`,
+      );
+      await expect(
+        merge.getByRole("button", { name: zh ? `并到 ${otherLabel}` : `Merge into ${otherLabel}` }),
+      ).toHaveCount(0);
+      await expect(merge.getByRole("button", { name: zh ? "并桌" : "Merge" })).toBeDisabled();
+      // This table is still ordering: it says nothing about itself paying.
+      await expect(page.getByText(paying(zh))).toHaveCount(0);
+      await expectFits(page, otherPaying(zh), width);
+      await page.screenshot({
+        path: `test-results/b51-stale-merge-other-${language}-${width}.png`,
+      });
+      await expectNoInternalText(page, ["Mark unavailable"]);
+    });
+
+    test(`@production WP-2423 batch 51: a stale Merge refused because this table began checkout says the checkout fact once, in view (${language}, ${width})`, async ({
+      page,
+    }) => {
+      const zh = language === "zh-Hans";
+      const { state } = await checkoutFloor(page, "StaleThenPaying", language, {
+        mergeRefuses: "Self",
+      });
+      await page.setViewportSize({ width, height });
+      await page.goto("/operations/dining");
+      const { panel } = await openManage(page, zh);
+      const readsBefore = state.tableReads;
+      await pressStaleMerge(page, zh);
+      await expect.poll(() => state.merges).toBe(1);
+      await expect.poll(() => state.tableReads, { timeout: 3_000 }).toBeGreaterThan(readsBefore);
+      await expect(page.getByText(paying(zh))).toHaveCount(1);
+      await expect(page.getByText(paying(zh))).toBeInViewport();
+      await expect(panel.getByRole("region", { name: mergeRegion(zh) })).toHaveCount(0);
+      await expect(panel.getByRole("region", { name: moveRegion(zh) })).toHaveCount(0);
+      await expect(page.getByText(oldMergeRefusal(zh))).toHaveCount(0);
+      await expectFits(page, paying(zh), width);
+      await page.screenshot({ path: `test-results/b51-stale-merge-self-${language}-${width}.png` });
+      await expectNoInternalText(page, ["Mark unavailable"]);
     });
   }

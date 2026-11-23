@@ -139,6 +139,7 @@ export function TableMerge({
   csrf,
   locked,
   onMerged,
+  onCheckingOut,
   client: provided,
   tea: providedTea,
 }: {
@@ -148,6 +149,13 @@ export function TableMerge({
   readonly locked: boolean;
   /** After a merge: read the tables again (the guests are at the other table now). */
   readonly onMerged: (message: string, targetReference: string | null) => void;
+  /**
+   * Batch 51 (v15 b50 live): checkout began on another device, at this table or the chosen one,
+   * after this screen loaded, and the merge was refused for it. The panel reads the tables again
+   * and says which table is paying in its outcome line, in view; without it the refusal is said
+   * here.
+   */
+  readonly onCheckingOut?: (targetReference: string) => void;
   readonly client?: TableMergeClient;
   readonly tea?: TableTeaClient;
 }) {
@@ -166,10 +174,12 @@ export function TableMerge({
         other.currentDiningSessionReference !== null,
     )
     .sort((a, b) => a.stableLabel.localeCompare(b.stableLabel, undefined, { numeric: true }));
-  const chosen = others.find((other) => other.tableReference === target) ?? null;
+  // Batch 51: a table read again as unable to take the party (e.g. checking out) is no longer
+  // the choice: its option says why, and the button no longer names it.
+  const picked = others.find((other) => other.tableReference === target) ?? null;
+  const chosen = picked !== null && mergeTargetProblem(table, picked) === null ? picked : null;
   const merge = async () => {
     if (chosen === null || busy || locked || blocked !== null) return;
-    if (mergeTargetProblem(table, chosen) !== null) return;
     const key = `${table.aggregateVersion}:${chosen.tableReference}:${chosen.aggregateVersion}`;
     if (operation.current?.key !== key)
       operation.current = { key, reference: newOperationReference() };
@@ -225,6 +235,10 @@ export function TableMerge({
     } catch (error) {
       const code = error instanceof TableMergeError ? error.code : "Unavailable";
       if (code !== "Unavailable" && code !== "Offline") operation.current = null;
+      if (code === "CheckingOut" && onCheckingOut !== undefined) {
+        onCheckingOut(chosen.tableReference);
+        return;
+      }
       setProblem(
         code === "PaymentStarted"
           ? t("Something on one of the bills was paid or split. Those tables can't be merged.")
@@ -267,7 +281,7 @@ export function TableMerge({
           <label className="table-move__field">
             <span>{t("Merge into…")}</span>
             <select
-              value={target}
+              value={chosen === null ? "" : target}
               disabled={busy || locked}
               onChange={(event) => {
                 setTarget(event.currentTarget.value);

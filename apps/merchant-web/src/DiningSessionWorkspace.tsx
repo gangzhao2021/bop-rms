@@ -1825,6 +1825,43 @@ function DiningSessionWorkspaceBody({
                 });
                 reread();
               }}
+              onMergeCheckingOut={(targetReference) => {
+                // Batch 51 (v15 b50 live): a stale Merge refused because one of the tables began
+                // checkout elsewhere. The tables are read again at once, and the outcome line,
+                // in view, says which one: this table's checkout fact once (as a stale Move), or
+                // that the chosen table is paying, which the merge select now says too.
+                const source = selected.tableReference;
+                const since = loadedAt.current;
+                void loadRef.current(true).then((items) => {
+                  const own = items?.find((entry) => entry.tableReference === source);
+                  const other = items?.find((entry) => entry.tableReference === targetReference);
+                  if (own?.session?.phase === "Closing")
+                    setResult({
+                      text: tableCheckingOutText(),
+                      table: source,
+                      checkingOut: true,
+                      checkingOutSince: since,
+                    });
+                  else if (other?.session?.phase === "Closing")
+                    setResult({
+                      text: t(
+                        "Table {table} is paying the bill, so this party can't be merged into it.",
+                        { table: saidTable(other.stableLabel) },
+                      ),
+                      table: source,
+                    });
+                  else
+                    setResult({
+                      text:
+                        items === undefined
+                          ? t("One of the tables is checking out. Merge before checking out.")
+                          : t(
+                              "The tables changed meanwhile. They are read again: check and retry.",
+                            ),
+                      table: source,
+                    });
+                });
+              }}
               onSettled={(message) => {
                 setResult({ text: message, table: selected.tableReference });
                 // The table's row says paid right away, not at the next read.
@@ -1956,6 +1993,7 @@ function TablePanel({
   tables,
   onMoved,
   onMoveCheckingOut,
+  onMergeCheckingOut,
 }: {
   /** DEC-DINING-GUEST-TABLE-START: guests can start free tables at this Store now. */
   readonly guestStartsOn: boolean;
@@ -1965,6 +2003,8 @@ function TablePanel({
   readonly onMoved: (message: string, targetReference: string | null) => void;
   /** Batch 50: a stale Move was refused because this table checks out now. */
   readonly onMoveCheckingOut: () => void;
+  /** Batch 51: a stale Merge was refused because this table or the chosen one checks out now. */
+  readonly onMergeCheckingOut: (targetReference: string) => void;
   /** The Order host transfer's own retry stays pressable while it holds the page. */
   readonly hostTransferDisabled: boolean;
   /** v15 2026-10-29: a party size just recorded, for the table list. */
@@ -2334,6 +2374,7 @@ function TablePanel({
             csrf={csrf}
             locked={locked}
             onMerged={onMoved}
+            onCheckingOut={onMergeCheckingOut}
           />
         ) : null}
         {seated && canOperateTables && table.currentDiningSessionReference !== null ? (
