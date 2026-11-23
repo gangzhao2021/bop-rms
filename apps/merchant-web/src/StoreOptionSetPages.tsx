@@ -662,7 +662,7 @@ function OptionSetEditor({
         ) : null}
         {/* Beside the button just pressed, where the owner is looking (the page may be long). */}
         {newChoices !== null && message?.tone === "neutral" ? (
-          <p role="status" className="option-set__new-choices" ref={newChoicesPrompt}>
+          <p role="status" ref={newChoicesPrompt}>
             {t("{choice} is not on any dish yet.", { choice: newChoices.names.join(t(", ")) })}{" "}
             <Link to="/app/commerce/menus" state={{ applyChoice: newChoices }}>
               {t("Add it to dishes")}

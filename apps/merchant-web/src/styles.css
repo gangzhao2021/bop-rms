@@ -10723,15 +10723,18 @@ tr[data-drop-target="true"] {
 .store-setup-draft-page .bop-shell__header--in-workspace .bop-shell__header-extra {
   display: none;
 }
-/* What a screen brings into view by itself (an outcome line, a question, the panel it opens) lands
-   whole: below the warnings pinned to the top with room above it, never flush on the screen edge
-   (WP-2423 b52: a refused Merge's line sat at top -0.3 px on a phone), and with a little room under
-   it (never cut by a fraction of a pixel at the bottom of the screen). */
-.table-result,
-.store-features__message,
-.option-set__new-choices,
-.pay-later-remove,
-.paper-slip-confirm {
+/* A save's answer is scrolled into view whole, with a little room under it (never cut by a
+   fraction of a pixel at the bottom of the screen). */
+.store-features__message {
+  scroll-margin-block: var(--bop-space-2);
+}
+/* The Tables outcome line (a refused Merge or Move, a Close race, a refused join code) is brought
+   into view by itself: below the warnings pinned to the top with room above it, never flush on the
+   screen edge (WP-2423 b52: on a phone it sat at top -0.3 px), and a little room under it. From
+   1024 px the line is the first thing in the side panel's own scroller (already below the pinned
+   warnings), so that scroller stops at its top whatever the margin: the pinned height counted
+   there moves nothing. */
+.table-result {
   scroll-margin-block: calc(var(--bop-pinned-top, 0px) + var(--bop-space-4)) var(--bop-space-2);
 }
 /* b18 review: the steps read as one row of accent text links, left-aligned like the places above
