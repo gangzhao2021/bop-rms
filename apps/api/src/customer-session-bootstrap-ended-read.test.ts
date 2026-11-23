@@ -1,4 +1,4 @@
-import { beforeEach, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 // Batch 45 (v15 b44 live, guest-menu-wait-recheck extra finding): how the visit restore answers a
 // dine-in guest whose table's visit ended, read by read. The loaders are stubbed with the shapes
 // the pilot returned (TM2 names, "V44 A (TEST)"); the queries themselves are unchanged.
@@ -11,6 +11,8 @@ const f = vi.hoisted(() => ({
   moved: vi.fn(),
   orders: vi.fn(),
   mergedIn: vi.fn(),
+  writeOffs: vi.fn(),
+  settlementScope: vi.fn(),
 }));
 vi.mock("@bop/identity", async (original) => ({
   ...(await original<typeof import("@bop/identity")>()),
@@ -30,6 +32,13 @@ vi.mock("@rms/dining", async (original) => ({
   listDiningSessionsMergedIn: f.mergedIn,
   loadDiningParticipantSettledTable: f.settled,
   loadDiningParticipantMove: f.moved,
+}));
+vi.mock("@rms/payment", async (original) => ({
+  ...(await original<typeof import("@rms/payment")>()),
+  createPostgresDiningTableSettlementStore: (options: unknown) => {
+    f.settlementScope(options);
+    return { listWriteOffsByOrders: f.writeOffs };
+  },
 }));
 vi.mock("@rms/store", async (original) => ({
   ...(await original<typeof import("@rms/store")>()),
@@ -74,6 +83,7 @@ beforeEach(() => {
   f.settled.mockResolvedValue({ tableLabel: "V44 A (TEST)", tableReference: ref(7) });
   f.orders.mockResolvedValue(new Map());
   f.mergedIn.mockResolvedValue([]);
+  f.writeOffs.mockResolvedValue([]);
 });
 
 it("a table closed with nothing ordered says so with the Store's names, and gives nothing to act with", async () => {
@@ -209,5 +219,84 @@ it("a moved or merged party that ordered nothing is told so (no 'everything you 
     tableLabel: "E45 B (TEST)",
     nothingOrdered: true,
     store: tm2,
+  });
+});
+
+// Batch 55 review (v15 b54, TM2 L54 GB2 (TEST), order 59): staff recorded "Guests left without
+// paying" and then closed the table. The restore gave the settled table's receipt access, so
+// Menu, dish pages and Cart said "Thank you for dining with us … See the receipt", and Your table
+// showed nothing (the settled receipt read refuses a written-off bill). The write-off record is
+// Payment's, in the shape v15 holds (priced 1413, captured 0, written off 1413).
+describe("a bill staff closed when the guests left", () => {
+  const withTenant = {
+    ...options,
+    publicProfile: { binding: { tenantReference: ref(10) } },
+  } as unknown as Parameters<typeof createCustomerSessionBootstrapRead>[0];
+  const writeOff = (captured: bigint, priced = 1413n) => ({
+    orderReference: ref(8),
+    reasonCode: "GUEST_LEFT_UNPAID",
+    pricedOrderTotalMinor: priced,
+    capturedOrderAllocationMinor: captured,
+    writtenOffMinor: priced - captured,
+  });
+  beforeEach(() => {
+    f.orders.mockResolvedValue(new Map([[ref(5), ref(8)]]));
+  });
+
+  it("nothing paid (order 59): says so, with no receipt access", async () => {
+    f.writeOffs.mockResolvedValue([writeOff(0n)]);
+    const answer = await createCustomerSessionBootstrapRead(withTenant).readSettledTable(
+      "A".repeat(43),
+    );
+    expect(answer).toEqual({ tableLabel: "V44 A (TEST)", closedByStaff: "Nothing", store: tm2 });
+    expect(JSON.stringify(answer)).not.toContain("C".repeat(43));
+    // Payment's own record of this table's Order, under the Store's tenant.
+    expect(f.writeOffs).toHaveBeenCalledWith(tx, [ref(8)]);
+    expect(f.settlementScope).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scope: { tenantReference: ref(10), brandReference: ref(1), storeReference: ref(2) },
+      }),
+    );
+  });
+
+  it("a dish paid first (order 55, $14.13 of $28.25): what was paid, still no receipt access", async () => {
+    f.writeOffs.mockResolvedValue([writeOff(1413n, 2825n)]);
+    const answer = await createCustomerSessionBootstrapRead(withTenant).readSettledTable(
+      "A".repeat(43),
+    );
+    expect(answer).toEqual({ tableLabel: "V44 A (TEST)", closedByStaff: "Some", store: tm2 });
+    expect(JSON.stringify(answer)).not.toContain("C".repeat(43));
+  });
+
+  it("a party merged into a table whose bill staff closed is told the same", async () => {
+    f.merged.mockResolvedValue(
+      new Map([
+        [
+          ref(5),
+          {
+            diningSessionReference: ref(9),
+            tableLabel: "H4",
+            fromTableLabel: "H3",
+            phase: "Closed",
+          },
+        ],
+      ]),
+    );
+    f.orders.mockResolvedValue(new Map([[ref(9), ref(8)]]));
+    f.writeOffs.mockResolvedValue([writeOff(0n)]);
+    expect(
+      await createCustomerSessionBootstrapRead(withTenant).readSettledTable("A".repeat(43)),
+    ).toEqual({ tableLabel: "H4", closedByStaff: "Nothing", store: tm2 });
+  });
+
+  it("a settled bill (no write-off) keeps its receipt access", async () => {
+    expect(
+      await createCustomerSessionBootstrapRead(withTenant).readSettledTable("A".repeat(43)),
+    ).toEqual({
+      tableLabel: "V44 A (TEST)",
+      tableReference: ref(7),
+      csrfToken: "C".repeat(43),
+      store: tm2,
+    });
   });
 });

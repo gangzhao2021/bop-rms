@@ -247,6 +247,26 @@ it("tells a guest whose table closed with nothing ordered that its visit ended, 
   });
   f.readSettledTable.mockResolvedValue({ tableLabel: "<b>", nothingOrdered: true, store: tm2 });
   expect((await f.request()).status).toBe(204);
+  // Batch 55 review (v15 b54, order 59): staff closed the bill when the guests left. No receipt,
+  // so no receipt access: which table, whether anything was paid first, and the Store.
+  f.readSettledTable.mockResolvedValue({
+    tableLabel: "L54 GB2 (TEST)",
+    closedByStaff: "Nothing",
+    store: tm2,
+  });
+  const closed = await f.request();
+  expect(closed.status).toBe(200);
+  expect(await closed.json()).toEqual({
+    schemaVersion: 1,
+    closedTable: { tableLabel: "L54 GB2 (TEST)", paid: "Nothing", store: tm2 },
+  });
+  f.readSettledTable.mockResolvedValue({ tableLabel: "L54 GB2 (TEST)", closedByStaff: "Some" });
+  expect(await (await f.request()).json()).toEqual({
+    schemaVersion: 1,
+    closedTable: { tableLabel: "L54 GB2 (TEST)", paid: "Some" },
+  });
+  f.readSettledTable.mockResolvedValue({ tableLabel: "L54 GB2 (TEST)", closedByStaff: "All" });
+  expect((await f.request()).status).toBe(204);
   // A moved (or merged) party's answer names the Store too, for the page's header.
   f.readMovedTable.mockResolvedValue({ tableLabel: "V44 B (TEST)", merged: true, store: tm2 });
   expect(await (await f.request()).json()).toEqual({

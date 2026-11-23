@@ -4922,6 +4922,26 @@ async function journey(journeyEnding) {
             [sessionReference],
           );
           assert.deepEqual(table, { state: "TemporarilyBlocked", reason: "CLEANING" });
+          // Batch 55 review (v15 b54, order 59): a guest at this table who reloads is told staff
+          // closed the bill and nothing was paid, never given receipt access (a written-off bill
+          // has no receipt). The real visit restore, as the pilot API role, reading Payment's
+          // write-off through its own store.
+          const restored = await createCustomerSessionBootstrapRead({
+            scope,
+            transactions: transactions(),
+            credentials: tablePhone.identity.session.credentials,
+            now: () => new Date().toISOString(),
+            binding: () => ({ validate: async () => "Unavailable" }),
+            publicProfile: {
+              binding: {
+                ...ownerScope,
+                validUntil: new Date(Date.now() + 3_600_000).toISOString(),
+              },
+              authorize: async () => true,
+            },
+          }).readSettledTable(tablePhone.sessionCredential);
+          assert.equal(restored?.closedByStaff, "Nothing");
+          assert.equal("csrfToken" in (restored ?? {}), false);
         }
         /**
          * S4: the guest pays the whole table on their phone. The Provider is a test-only stand-in

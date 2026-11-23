@@ -6,6 +6,7 @@ import {
   parseOrderingReference,
 } from "@rms/ordering";
 import { createPublicStoreProfileService, parseGetPublicStoreRequest } from "@rms/store";
+import { createPostgresDiningTableSettlementStore } from "@rms/payment";
 import {
   listDiningSessionMergedInto,
   listDiningSessionsMergedIn,
@@ -30,6 +31,13 @@ import {
 } from "@bop/identity";
 import type { CustomerCheckoutSessionAuthorizationOptions } from "./customer-checkout-session-authorization.js";
 export const customerSessionBootstrapRoute = "/api/v1/customer/session/csrf";
+/**
+ * Batch 55 review (v15 b54): what a guest whose table closed is told was paid on a bill staff
+ * closed when the guests left, from Payment's write-off record of it.
+ */
+export const closedBillPaid = (writeOff: {
+  readonly capturedOrderAllocationMinor: bigint;
+}): "Nothing" | "Some" => (writeOff.capturedOrderAllocationMinor > 0n ? "Some" : "Nothing");
 export function createCustomerSessionBootstrapRead(
   options: CustomerCheckoutSessionAuthorizationOptions & {
     publicProfile?: PersistentPublicStoreProfileOptions;
@@ -88,6 +96,29 @@ export function createCustomerSessionBootstrapRead(
     return (
       (await listStoreDiningSessionOrders(transaction as never, options.scope, sessions)).size === 0
     );
+  };
+  /**
+   * Batch 55 review (v15 b54): whether staff closed this bill when the guests left (Payment's
+   * write-off of what was still owed), and whether anything was paid on it first. Such a bill has
+   * no receipt (the settled receipt read refuses it), so the guest is told how it ended instead
+   * of "Thank you … See the receipt". Null: no write-off, or the tenant isn't known here.
+   */
+  const closedByStaff = async (
+    transaction: Transaction,
+    session: string,
+  ): Promise<"Nothing" | "Some" | null> => {
+    const tenantReference = options.publicProfile?.binding?.tenantReference;
+    if (tenantReference === undefined) return null;
+    const order = (
+      await listStoreDiningSessionOrders(transaction as never, options.scope, [session])
+    ).get(session);
+    if (order === undefined) return null;
+    const [writeOff] = await createPostgresDiningTableSettlementStore({
+      scope: { tenantReference: String(tenantReference), ...options.scope },
+      // The guest sat at this closed table (proven by the caller); its own bill's Order only.
+      authorize: async (_tx, value) => value.orderReference === order,
+    }).listWriteOffsByOrders(transaction as never, [order]);
+    return writeOff === undefined ? null : closedBillPaid(writeOff);
   };
   return {
     async read(sessionCredential: string) {
@@ -284,6 +315,13 @@ export function createCustomerSessionBootstrapRead(
         ).get(session);
         // Batch 45: the Store's names come with every ended table's answer (the page's header).
         const named = <T extends object>(answer: T) => withStoreNames(transaction, guest, answer);
+        // Batch 55 review: a bill staff closed has no receipt; how it ended, never receipt access.
+        const closedOr = async (tableLabel: string, billSession: string) => {
+          const closed = await closedByStaff(transaction, billSession);
+          return closed === null
+            ? named({ tableLabel, ...receipt })
+            : named({ tableLabel, closedByStaff: closed });
+        };
         // Batch 46 (v15 b45 live): the table this party was merged into closed with nothing
         // ordered there by anyone (its own party, this one or another merged in): the visit ended
         // and nothing was charged, as at a table of its own, not "thank you" with no receipt.
@@ -292,7 +330,7 @@ export function createCustomerSessionBootstrapRead(
             ? null
             : (await nothingOrderedBy(transaction, merged.diningSessionReference))
               ? named({ tableLabel: merged.tableLabel, nothingOrdered: true as const })
-              : named({ tableLabel: merged.tableLabel, ...receipt });
+              : await closedOr(merged.tableLabel, merged.diningSessionReference);
         const settled = await loadDiningParticipantSettledTable(
           transaction as never,
           options.scope,
@@ -310,6 +348,9 @@ export function createCustomerSessionBootstrapRead(
           return named({ tableLabel: settled.tableLabel, nothingOrdered: true as const });
         // Batch 44 (v15 b43 live): the Store's published names, so the guest's page still names
         // the Store after a reload. Public fields only; an unreadable profile leaves them out.
+        const closed = await closedByStaff(transaction, session);
+        if (closed !== null)
+          return named({ tableLabel: settled.tableLabel, closedByStaff: closed });
         return named({ ...settled, ...receipt });
       });
     },
@@ -408,6 +449,12 @@ export function createCustomerSessionBootstrapHandler(options?: {
       | {
           tableLabel: string;
           nothingOrdered: true;
+          store?: { brandDisplayName: string; storeDisplayName: string };
+        }
+      | {
+          tableLabel: string;
+          /** Batch 55 review: staff closed the bill when the guests left (no receipt). */
+          closedByStaff: "Nothing" | "Some";
           store?: { brandDisplayName: string; storeDisplayName: string };
         }
       | null
@@ -536,6 +583,18 @@ export function createCustomerSessionBootstrapHandler(options?: {
         return settled.nothingOrdered === true
           ? {
               emptyTable: { tableLabel: settled.tableLabel, ...storeNames(settled.store) },
+            }
+          : null;
+      // Batch 55 review (v15 b54): staff closed the bill when the guests left. There is no
+      // receipt, so no receipt access: which table, whether anything was paid, and the Store.
+      if ("closedByStaff" in settled)
+        return settled.closedByStaff === "Nothing" || settled.closedByStaff === "Some"
+          ? {
+              closedTable: {
+                tableLabel: settled.tableLabel,
+                paid: settled.closedByStaff,
+                ...storeNames(settled.store),
+              },
             }
           : null;
       const csrfToken = wellFormed(() => parseGuestRawCredential(settled.csrfToken));
