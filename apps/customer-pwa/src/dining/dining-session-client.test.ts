@@ -218,6 +218,27 @@ describe("WP-2423 Q8 dining session client", () => {
     expect(request).not.toHaveBeenCalled();
   });
 
+  // Batch 55 review (v15 b54, order 59): staff closed the bill when the guests left, then the
+  // table. Your table says how the bill ended (no receipt), never "settled".
+  it("says staff closed the bill for a guest whose table closed that way, and what was paid", async () => {
+    setCustomerCsrfCredential(null);
+    const request = vi.fn();
+    const client = createHttpDiningSessionClient(request as unknown as typeof fetch);
+    try {
+      for (const paid of ["Nothing", "Some"] as const) {
+        setEmptyTable({ tableLabel: "L54 GB2 (TEST)", closedByStaff: paid });
+        await expect(client.load()).rejects.toMatchObject({
+          code: "ended-closed",
+          tableLabel: "L54 GB2 (TEST)",
+          closedPaid: paid,
+        });
+      }
+    } finally {
+      setEmptyTable(null);
+    }
+    expect(request).not.toHaveBeenCalled();
+  });
+
   // v15 b17 review: "still processing" carries the server's Retry-After, so phones read again
   // when the server asks (5 s in a burst), within 1 to 30 seconds, and 2 s when it does not say.
   it.each([

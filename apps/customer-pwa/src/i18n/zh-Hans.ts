@@ -1399,9 +1399,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "店员已关闭本桌账单：已付的款项不变，其余不向您收取。如需再点，请找店员。",
   // Batch 55: a round's payment once staff closed the bill (never "On the table's bill").
   "Unpaid part not charged to you": "未付部分不向您收取",
+  // Batch 55 review: the ended table's card after staff closed a bill some of which was paid.
+  "Staff closed your table’s bill: what was paid stays paid, and the rest is not charged to you.":
+    "店员已关闭本桌账单：已付的款项不变，其余不向您收取。",
   // A no-break space keeps 份 with its number on a narrow round card.
-  "{paid} of {count} parts paid; the rest not charged":
-    "{count}\u00a0份付了 {paid}\u00a0份，其余不收取",
+  "{paid} of {count} parts paid; the rest not charged to you":
+    "{count}\u00a0份付了 {paid}\u00a0份，其余不向您收取",
   "Cash rounding": "现金取整",
   "Item prices are before tax. ": "菜品价格为税前价格。",
   "The table paid once at the end. Cash is rounded to the nearest 5 cents; card payments are not rounded.":
@@ -1533,13 +1536,13 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这桌已按菜分 {paid} 笔付清。现金按 5 分取整，刷卡不取整。",
   "The table paid the bill in {count} parts. Cash is rounded to the nearest 5 cents; card payments are not rounded.":
     "这桌已分 {count} 份付清。现金按 5 分取整，刷卡不取整。",
-  "Staff closed this bill: the table paid by dish ({paid} paid), and the rest is not charged. Cash is rounded to the nearest 5 cents; card payments are not rounded.":
-    "店员已关闭这张账单：这桌按菜付了 {paid} 笔，其余不再收取。现金按 5 分取整，刷卡不取整。",
-  "Staff closed this bill: the table paid {paid} of the {count} parts, and the rest is not charged. Cash is rounded to the nearest 5 cents; card payments are not rounded.":
-    "店员已关闭这张账单：这桌 {count} 份付了 {paid} 份，其余不再收取。现金按 5 分取整，刷卡不取整。",
-  "Staff closed this bill: what the table paid stays paid, and the rest is not charged. Cash is rounded to the nearest 5 cents; card payments are not rounded.":
-    "店员已关闭这张账单：已付的款项不变，其余不再收取。现金按 5 分取整，刷卡不取整。",
-  "Staff closed this bill; nothing was charged.": "店员已关闭这张账单，未收取任何费用。",
+  "Staff closed your table’s bill: the table paid by dish ({paid} paid), and the rest is not charged to you. Cash is rounded to the nearest 5 cents; card payments are not rounded.":
+    "店员已关闭本桌账单：这桌按菜付了 {paid} 笔，其余不向您收取。现金按 5 分取整，刷卡不取整。",
+  "Staff closed your table’s bill: the table paid {paid} of the {count} parts, and the rest is not charged to you. Cash is rounded to the nearest 5 cents; card payments are not rounded.":
+    "店员已关闭本桌账单：这桌 {count} 份付了 {paid} 份，其余不向您收取。现金按 5 分取整，刷卡不取整。",
+  "Staff closed your table’s bill: what the table paid stays paid, and the rest is not charged to you. Cash is rounded to the nearest 5 cents; card payments are not rounded.":
+    "店员已关闭本桌账单：已付的款项不变，其余不向您收取。现金按 5 分取整，刷卡不取整。",
+  "Staff closed your table’s bill; nothing was charged.": "店员已关闭本桌账单，未收取任何费用。",
   "Rest of the bill": "其余账款",
   "The bill": "账单",
   "Not charged to you": "不向您收取",

@@ -317,6 +317,44 @@ export async function restoreCustomerSession(
       }
       return false;
     }
+    // Batch 55 review (v15 b54): staff closed the bill when the guests left, then the table.
+    // There is no receipt: which table, whether anything was paid first, and its Store.
+    if (
+      current() &&
+      value !== null &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      Object.keys(value).length === 2 &&
+      "schemaVersion" in value &&
+      value.schemaVersion === 1 &&
+      "closedTable" in value
+    ) {
+      const closed = value.closedTable;
+      const store =
+        closed !== null && typeof closed === "object" && "store" in closed
+          ? settledStore(closed.store)
+          : undefined;
+      if (
+        closed !== null &&
+        typeof closed === "object" &&
+        !Array.isArray(closed) &&
+        store !== null &&
+        Object.keys(closed).length === (store === undefined ? 2 : 3) &&
+        "tableLabel" in closed &&
+        typeof closed.tableLabel === "string" &&
+        /^[^\p{Cc}\p{Cf}<>{}$]{1,40}$/u.test(closed.tableLabel) &&
+        "paid" in closed &&
+        (closed.paid === "Nothing" || closed.paid === "Some")
+      ) {
+        setEmptyTable({
+          tableLabel: closed.tableLabel,
+          closedByStaff: closed.paid,
+          ...(store === undefined ? {} : { store }),
+        });
+        return tableEnded();
+      }
+      return false;
+    }
     // v15 2026-10-30: staff moved the party after this phone joined: only where it sits now.
     if (
       current() &&

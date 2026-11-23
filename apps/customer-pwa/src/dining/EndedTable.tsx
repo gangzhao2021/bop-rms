@@ -6,7 +6,11 @@ import {
   type CustomerJourneyStep,
   type CustomerStoreContext,
 } from "../journey/CustomerPage.js";
-import { getEndedTable, type EndedTable } from "../session/customer-transaction-context.js";
+import {
+  getEndedTable,
+  type ClosedBillPaid,
+  type EndedTable,
+} from "../session/customer-transaction-context.js";
 
 /**
  * Batch 46 (v15 b45 live): how this phone's table visit ended, when it has no visit now. Every
@@ -71,6 +75,35 @@ export function EmptyClosedTableCard({ tableLabel }: { readonly tableLabel: stri
 }
 
 /**
+ * Batch 55 review (v15 b54, order 59): staff closed the bill when the guests left, then closed the
+ * table. Before, every guest tab said "Thank you for dining with us … See the receipt", and Your
+ * table showed no receipt: a bill closed this way has none. It says how the bill ended, in the
+ * words Menu, Cart and Your table use while the table is still open; nothing to follow.
+ */
+export function ClosedBillTableCard({
+  tableLabel,
+  paid,
+}: {
+  readonly tableLabel: string;
+  readonly paid: ClosedBillPaid;
+}) {
+  return (
+    <section className="order-status__card" role="status">
+      <h2>{t("This table’s visit has ended")}</h2>
+      <p>{tWords("Your meal at table {table} has ended.", { table: saidTable(tableLabel) })}</p>
+      <p>
+        {paid === "Nothing"
+          ? t("Staff closed your table’s bill; nothing was charged.")
+          : t(
+              "Staff closed your table’s bill: what was paid stays paid, and the rest is not charged to you.",
+            )}
+      </p>
+      <p>{t("New party? Ask staff to seat you, then scan again.")}</p>
+    </section>
+  );
+}
+
+/**
  * WP-2423 item 8 ⑧/⑨: staff moved this phone's party to another table, or merged it into the
  * party there. The phone joins that table by its code. Batch 46: a party that had ordered
  * nothing isn't told its orders went along.
@@ -128,6 +161,8 @@ export function EndedTableCard({ ended }: { readonly ended: EndedTable }) {
     <SettledTableCard tableLabel={ended.tableLabel} receiptLink />
   ) : ended.kind === "Empty" ? (
     <EmptyClosedTableCard tableLabel={ended.tableLabel} />
+  ) : ended.kind === "ClosedByStaff" ? (
+    <ClosedBillTableCard tableLabel={ended.tableLabel} paid={ended.paid} />
   ) : (
     <MovedTableCard
       tableLabel={ended.tableLabel}

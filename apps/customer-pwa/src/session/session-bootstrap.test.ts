@@ -664,6 +664,54 @@ it("batch 46: one ended-table answer for every tab, with a moved party that orde
   expect(getEndedTable()).toBeNull();
 });
 
+// Batch 55 review (v15 b54, order 59): staff closed the bill when the guests left, then the
+// table. The restore says so (no receipt access), and every tab shows how the bill ended.
+it("batch 55 review: keeps a table whose bill staff closed, with what was paid and no receipt", async () => {
+  const store = {
+    brandDisplayName: "Test Merchant 2 - not production",
+    storeDisplayName: "Test Merchant 2 Main - not production",
+  };
+  const restore = (value: unknown) =>
+    restoreCustomerSession(vi.fn().mockResolvedValue(response(value)));
+  expect(
+    await restore({
+      schemaVersion: 1,
+      closedTable: { tableLabel: "L54 GB2 (TEST)", paid: "Nothing", store },
+    }),
+  ).toBe(false);
+  expect(getCustomerCsrfCredential()).toBeNull();
+  expect(getEndedTable()).toEqual({
+    kind: "ClosedByStaff",
+    tableLabel: "L54 GB2 (TEST)",
+    paid: "Nothing",
+    store,
+  });
+  expect(getSettledTableLabel()).toBeNull();
+  expect(getSettledTableReceiptCsrf()).toBeNull();
+  expect(getEndedTableStore()).toEqual(store);
+  setEmptyTable(null);
+  await restore({ schemaVersion: 1, closedTable: { tableLabel: "L54 GB2 (TEST)", paid: "Some" } });
+  expect(getEndedTable()).toEqual({
+    kind: "ClosedByStaff",
+    tableLabel: "L54 GB2 (TEST)",
+    paid: "Some",
+    store: null,
+  });
+  // A new visit forgets it.
+  setCustomerCsrfCredential("D".repeat(43));
+  expect(getEndedTable()).toBeNull();
+  setCustomerCsrfCredential(null);
+  for (const bad of [
+    { tableLabel: "L54 GB2 (TEST)" },
+    { tableLabel: "L54 GB2 (TEST)", paid: "All" },
+    { tableLabel: "<b>", paid: "Nothing" },
+    { tableLabel: "L54 GB2 (TEST)", paid: "Nothing", csrfToken: "C".repeat(43) },
+  ]) {
+    expect(await restore({ schemaVersion: 1, closedTable: bad })).toBe(false);
+    expect(getEndedTable()).toBeNull();
+  }
+});
+
 // Batch 47 (v15 b46 live): a tab left open while staff closed, moved or merged the table was
 // refused (401 cart_session_expired, or the cart read's "your place ended") and said "Your Store
 // session expired. Scan the location QR code again." The restore read is asked instead; only a
@@ -680,6 +728,10 @@ it("batch 47: an open visit takes only the table's ended answer from the restore
   try {
     for (const [answer, kind] of [
       [{ schemaVersion: 1, emptyTable: { tableLabel: "E46 N (TEST)", store } }, "Empty"],
+      [
+        { schemaVersion: 1, closedTable: { tableLabel: "L54 GB2 (TEST)", paid: "Nothing", store } },
+        "ClosedByStaff",
+      ],
       [
         {
           schemaVersion: 1,

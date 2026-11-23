@@ -1,4 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
+import { MemoryRouter } from "react-router";
+import { EndedTableCard } from "./EndedTable.js";
 import { afterEach, describe, expect, it } from "vitest";
 import type { DiningRound, DiningSessionView } from "./dining-session-client.js";
 import { tableBillOutcome } from "./table-bill-outcome.js";
@@ -207,5 +209,39 @@ describe("batch 55: Menu, dish pages and Cart say what Your table says", () => {
       payLater: true,
       closedByStaff: { kind: "ByDish", payments: 1 },
     });
+  });
+});
+
+// Batch 55 review (v15 b54, order 59): once staff also closed the table, Menu, dish pages and Cart
+// showed the settled card, "Thank you for dining with us … See the receipt", for a bill that has
+// no receipt. They say how the bill ended, in the words they used while the table was open.
+describe("the ended table's card after staff closed the bill", () => {
+  const card = (paid: "Nothing" | "Some", initial: "en" | "zh-Hans" = "en") => {
+    const html = renderToStaticMarkup(
+      <LanguageRoot initial={initial}>
+        {() => (
+          <MemoryRouter>
+            <EndedTableCard
+              ended={{ kind: "ClosedByStaff", tableLabel: "L54 GB2 (TEST)", paid, store: null }}
+            />
+          </MemoryRouter>
+        )}
+      </LanguageRoot>,
+    );
+    renderToStaticMarkup(<LanguageRoot initial="en">{() => null}</LanguageRoot>);
+    return html;
+  };
+  it("says nothing was charged, or that what was paid stays paid; never a receipt", () => {
+    expect(card("Nothing")).toContain("Staff closed your table’s bill; nothing was charged.");
+    expect(card("Some")).toContain(
+      "Staff closed your table’s bill: what was paid stays paid, and the rest is not charged to you.",
+    );
+    expect(card("Nothing", "zh-Hans")).toContain("店员已关闭本桌账单，未收取任何费用。");
+    expect(card("Some", "zh-Hans")).toContain(
+      "店员已关闭本桌账单：已付的款项不变，其余不向您收取。",
+    );
+    for (const html of [card("Nothing"), card("Some"), card("Some", "zh-Hans")]) {
+      expect(html).not.toMatch(/receipt|Thank you for dining|<a |收据|谢谢光临|已结清/iu);
+    }
   });
 });

@@ -49,7 +49,12 @@ import {
   useGoOnWhenTableOpens,
 } from "../entry/table-wait-away.js";
 import { SettledTableReceiptPanel, type SettledTableReceiptClient } from "./SettledTableReceipt.js";
-import { EmptyClosedTableCard, MovedTableCard, SettledTableCard } from "./EndedTable.js";
+import {
+  ClosedBillTableCard,
+  EmptyClosedTableCard,
+  MovedTableCard,
+  SettledTableCard,
+} from "./EndedTable.js";
 import { DiningStaffCallPanel } from "./DiningStaffCallPanel.js";
 import type { DiningStaffCallClient } from "./dining-staff-call-client.js";
 import type { DiningInvitationClient } from "./dining-invitation-client.js";
@@ -395,7 +400,7 @@ function ComboLine({
 function closedRoundPaymentText(round: DiningRound, closed: ClosedBillPaid | null): string | null {
   if (closed === null) return null;
   if (closed.kind === "Parts" && (round.payment === "OnTableBill" || round.payment === "Paid"))
-    return t("{paid} of {count} parts paid; the rest not charged", {
+    return t("{paid} of {count} parts paid; the rest not charged to you", {
       paid: String(closed.paid),
       count: String(closed.count),
     });
@@ -846,22 +851,22 @@ function TableSummary({ view }: { readonly view: DiningSessionView }) {
             charged; never that the table paid in full. */}
         {closedByStaff
           ? !nonZero(summary.paid)
-            ? t("Staff closed this bill; nothing was charged.")
+            ? t("Staff closed your table’s bill; nothing was charged.")
             : summary.splitParts !== undefined && summary.splitParts.count === null
               ? t(
-                  "Staff closed this bill: the table paid by dish ({paid} paid), and the rest is not charged. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
+                  "Staff closed your table’s bill: the table paid by dish ({paid} paid), and the rest is not charged to you. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
                   { paid: String(summary.splitParts.paid) },
                 )
               : summary.splitParts !== undefined
                 ? t(
-                    "Staff closed this bill: the table paid {paid} of the {count} parts, and the rest is not charged. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
+                    "Staff closed your table’s bill: the table paid {paid} of the {count} parts, and the rest is not charged to you. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
                     {
                       count: String(summary.splitParts.count),
                       paid: String(summary.splitParts.paid),
                     },
                   )
                 : t(
-                    "Staff closed this bill: what the table paid stays paid, and the rest is not charged. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
+                    "Staff closed your table’s bill: what the table paid stays paid, and the rest is not charged to you. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
                   )
           : payLater && splitPaid !== null
             ? splitPaid.count === null && splitPaid.paid === 1
@@ -936,6 +941,12 @@ export type DiningSessionState =
   | { readonly status: "settled"; readonly tableLabel: string }
   /** Batch 45: staff closed the table with nothing ordered (nothing charged, no receipt). */
   | { readonly status: "ended-empty"; readonly tableLabel: string }
+  /** Batch 55 review: staff closed the bill when the guests left, then the table (no receipt). */
+  | {
+      readonly status: "ended-closed";
+      readonly tableLabel: string;
+      readonly paid: "Nothing" | "Some";
+    }
   | {
       readonly status: "unavailable";
       readonly view: DiningSessionView | null;
@@ -1075,6 +1086,12 @@ export function DiningSessionPage({
         error.tableLabel !== null
       )
         setState({ status: "ended-empty", tableLabel: error.tableLabel });
+      else if (
+        error instanceof DiningSessionClientError &&
+        error.code === "ended-closed" &&
+        error.tableLabel !== null
+      )
+        setState({ status: "ended-closed", tableLabel: error.tableLabel, paid: error.closedPaid });
       // Keep the last loaded table on screen; say it may be out of date.
       else
         setState((prior) => ({
@@ -1304,7 +1321,10 @@ export function DiningSessionScreen({
   // restore says which), never "scan the location QR code to begin". Batch 45: so does a table
   // closed with nothing ordered, and a party moved or merged to another table.
   const settledStore =
-    state.status === "settled" || state.status === "ended-empty" || state.status === "moved"
+    state.status === "settled" ||
+    state.status === "ended-empty" ||
+    state.status === "ended-closed" ||
+    state.status === "moved"
       ? getEndedTableStore()
       : null;
   const pageStore: CustomerStoreContext | undefined =
@@ -1334,6 +1354,7 @@ export function DiningSessionScreen({
             moved table's card with nothing under it. */}
         {state.status === "settled" ||
         state.status === "ended-empty" ||
+        state.status === "ended-closed" ||
         state.status === "moved" ? null : (
           <p>{t("Everything ordered at this table, by you and the other guests.")}</p>
         )}
@@ -1369,6 +1390,9 @@ export function DiningSessionScreen({
       ) : null}
       {state.status === "ended-empty" ? (
         <EmptyClosedTableCard tableLabel={state.tableLabel} />
+      ) : null}
+      {state.status === "ended-closed" ? (
+        <ClosedBillTableCard tableLabel={state.tableLabel} paid={state.paid} />
       ) : null}
       {state.status === "not-joined" ? (
         <section className="order-status__card" role="alert">
@@ -1537,6 +1561,7 @@ export function DiningSessionScreen({
       {/* b39: a table moved or merged away orders on its new table's code, never from here. */}
       {state.status === "settled" ||
       state.status === "ended-empty" ||
+      state.status === "ended-closed" ||
       state.status === "moved" ||
       state.status === "not-joined" ||
       paidOff ? null : tablePay?.checkingOut ? (

@@ -8,6 +8,7 @@ import {
   getMovedTableNothingOrdered,
   getSettledTableLabel,
   getEmptyTableLabel,
+  getEmptyTableClosedByStaff,
   setTablePaymentTiming,
 } from "../session/customer-transaction-context.js";
 
@@ -210,8 +211,15 @@ export interface DiningSessionView {
 /** "moved" (WP-2423 item 8 ⑧): staff moved the party to `tableLabel` after this phone joined. */
 /** "settled": the table was closed and its bill settled while this phone's guest sat at it. */
 /** "ended-empty" (batch 45): staff closed the table with nothing ordered; nothing was charged. */
+/** "ended-closed" (batch 55 review): staff closed the bill when the guests left (no receipt). */
 export type DiningSessionClientErrorCode =
-  "not-joined" | "processing" | "moved" | "settled" | "ended-empty" | "unavailable";
+  | "not-joined"
+  | "processing"
+  | "moved"
+  | "settled"
+  | "ended-empty"
+  | "ended-closed"
+  | "unavailable";
 export class DiningSessionClientError extends Error {
   constructor(
     readonly code: DiningSessionClientErrorCode,
@@ -222,6 +230,8 @@ export class DiningSessionClientError extends Error {
     readonly retryAfterSeconds = 2,
     /** Batch 46: "moved": the party had ordered nothing at its own table. */
     readonly nothingOrdered = false,
+    /** Batch 55 review: "ended-closed": whether anything was paid before staff closed it. */
+    readonly closedPaid: "Nothing" | "Some" = "Nothing",
   ) {
     super("dining session is " + code);
     this.name = "DiningSessionClientError";
@@ -772,6 +782,9 @@ export function createHttpDiningSessionClient(
       const settled = getSettledTableLabel();
       if (settled !== null) throw new DiningSessionClientError("settled", settled);
       const empty = getEmptyTableLabel();
+      const closed = getEmptyTableClosedByStaff();
+      if (empty !== null && closed !== null)
+        throw new DiningSessionClientError("ended-closed", empty, false, 2, false, closed);
       if (empty !== null) throw new DiningSessionClientError("ended-empty", empty);
       throw new DiningSessionClientError("not-joined");
     }

@@ -132,7 +132,14 @@ export function getSettledTableStore(): SettledTable["store"] | null {
 interface EmptyTable {
   readonly tableLabel: string;
   readonly store?: RestoredStore;
+  /**
+   * Batch 55 review (v15 b54): staff closed the bill when the guests left, after nothing or some
+   * of it was paid. Such a bill has no receipt either. Absent: nothing was ordered.
+   */
+  readonly closedByStaff?: ClosedBillPaid;
 }
+/** What was paid on a bill staff closed when the guests left. */
+export type ClosedBillPaid = "Nothing" | "Some";
 let emptyTable: EmptyTable | null = null;
 
 export function setEmptyTable(value: EmptyTable | null): void {
@@ -142,11 +149,17 @@ export function setEmptyTable(value: EmptyTable | null): void {
       : Object.freeze({
           tableLabel: value.tableLabel,
           ...(value.store === undefined ? {} : { store: Object.freeze({ ...value.store }) }),
+          ...(value.closedByStaff === undefined ? {} : { closedByStaff: value.closedByStaff }),
         });
 }
 
 export function getEmptyTableLabel(): string | null {
   return emptyTable?.tableLabel ?? null;
+}
+
+/** Batch 55 review: the ended table's bill was closed by staff (what was paid), else null. */
+export function getEmptyTableClosedByStaff(): ClosedBillPaid | null {
+  return emptyTable?.closedByStaff ?? null;
 }
 
 /** Batch 45: the Store of the table this device's visit ended at (settled, empty or moved). */
@@ -162,6 +175,8 @@ export function getEndedTableStore(): RestoredStore | null {
 export type EndedTable = Readonly<
   | { kind: "Settled"; tableLabel: string; store: RestoredStore | null }
   | { kind: "Empty"; tableLabel: string; store: RestoredStore | null }
+  /** Batch 55 review: staff closed the bill when the guests left; there is no receipt. */
+  | { kind: "ClosedByStaff"; tableLabel: string; paid: ClosedBillPaid; store: RestoredStore | null }
   | {
       kind: "Moved";
       tableLabel: string;
@@ -186,6 +201,13 @@ export function getEndedTable(): EndedTable | null {
       kind: "Settled",
       tableLabel: settledTable.tableLabel,
       store: settledTable.store ?? null,
+    });
+  if (emptyTable?.closedByStaff !== undefined)
+    return Object.freeze({
+      kind: "ClosedByStaff",
+      tableLabel: emptyTable.tableLabel,
+      paid: emptyTable.closedByStaff,
+      store: emptyTable.store ?? null,
     });
   if (emptyTable !== null)
     return Object.freeze({

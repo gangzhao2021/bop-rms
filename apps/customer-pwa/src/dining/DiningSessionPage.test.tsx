@@ -567,7 +567,7 @@ describe("CUST-DINE-IN-SESSION (WP-2423 Q8)", () => {
         },
       }),
     });
-    expect(html).toContain("Staff closed this bill; nothing was charged.");
+    expect(html).toContain("Staff closed your table’s bill; nothing was charged.");
     expect(html).not.toContain("To pay at the end");
     expect(html).not.toContain("<dt>Waiting for payment</dt>");
   });
@@ -618,6 +618,53 @@ describe("CUST-DINE-IN-SESSION (WP-2423 Q8)", () => {
     expect(html).not.toContain("Order more from the menu");
     expect(html).not.toContain("Everything ordered at this table");
     expect(keepsReadingTable({ status: "ended-empty", tableLabel: "T1" })).toBe(false);
+  });
+
+  // Batch 55 review (v15 b54, order 59): after staff closed the bill the guests left and then the
+  // table, the restore gave receipt access: "Thank you for dining with us", then no receipt (the
+  // read refuses a written-off bill). Your table says how the bill ended, with no receipt.
+  it("batch 55 review: a table whose bill staff closed says so after it closes, with no receipt", () => {
+    const nothing = render({
+      status: "ended-closed",
+      tableLabel: "L54 GB2 (TEST)",
+      paid: "Nothing",
+    });
+    expect(nothing).toContain("This table’s visit has ended");
+    expect(nothing).toContain("Your meal at L54 GB2 (TEST) has ended.");
+    expect(nothing).toContain("Staff closed your table’s bill; nothing was charged.");
+    expect(nothing).toContain("New party? Ask staff to seat you, then scan again.");
+    for (const html of [
+      nothing,
+      render({ status: "ended-closed", tableLabel: "L54 GB2 (TEST)", paid: "Some" }),
+    ]) {
+      expect(html).not.toMatch(/receipt|Thank you for dining|is paid|Loading/iu);
+      expect(html).not.toContain("Order more from the menu");
+      expect(html).not.toContain("Everything ordered at this table");
+    }
+    expect(
+      render({ status: "ended-closed", tableLabel: "L54 GB2 (TEST)", paid: "Some" }),
+    ).toContain(
+      "Staff closed your table’s bill: what was paid stays paid, and the rest is not charged to you.",
+    );
+    const zh = renderToStaticMarkup(
+      <LanguageRoot initial="zh-Hans">
+        {() => (
+          <MemoryRouter initialEntries={["/dine-in/session"]}>
+            <DiningSessionScreen
+              state={{ status: "ended-closed", tableLabel: "L54 GB2 (TEST)", paid: "Some" }}
+              store={store}
+              onRefresh={() => undefined}
+            />
+          </MemoryRouter>
+        )}
+      </LanguageRoot>,
+    );
+    renderToStaticMarkup(<LanguageRoot initial="en">{() => null}</LanguageRoot>);
+    expect(zh).toContain("店员已关闭本桌账单：已付的款项不变，其余不向您收取。");
+    expect(zh).not.toMatch(/收据|已结清|谢谢光临/u);
+    expect(keepsReadingTable({ status: "ended-closed", tableLabel: "T1", paid: "Nothing" })).toBe(
+      false,
+    );
   });
 
   it("thanks a guest whose table was settled and loads the table's receipt", () => {
@@ -1375,21 +1422,21 @@ describe("batch 53 (v15 b52 live): the Table total note says how a split bill wa
     // charged; never "paid in one payment" or 结 (which reads as settled).
     const byDish = note("en", "1413", "0", { count: null, paid: 1 }, true);
     expect(byDish).toContain(
-      "Staff closed this bill: the table paid by dish (1 paid), and the rest is not charged. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
+      "Staff closed your table’s bill: the table paid by dish (1 paid), and the rest is not charged to you. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
     );
     expect(byDish).not.toContain("The table paid in one payment.");
     const zhByDish = note("zh-Hans", "1413", "0", { count: null, paid: 1 }, true);
     expect(zhByDish).toContain(
-      "店员已关闭这张账单：这桌按菜付了 1 笔，其余不再收取。现金按 5 分取整，刷卡不取整。",
+      "店员已关闭本桌账单：这桌按菜付了 1 笔，其余不向您收取。现金按 5 分取整，刷卡不取整。",
     );
     expect(zhByDish).not.toMatch(/付清|结这张单/u);
     const fixed = note("en", "942", "0", { count: 3, paid: 1 }, true);
     expect(fixed).toContain(
-      "Staff closed this bill: the table paid 1 of the 3 parts, and the rest is not charged. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
+      "Staff closed your table’s bill: the table paid 1 of the 3 parts, and the rest is not charged to you. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
     );
     expect(fixed).not.toContain("The table paid the bill in 3 parts.");
     expect(note("zh-Hans", "942", "0", { count: 3, paid: 1 }, true)).toContain(
-      "店员已关闭这张账单：这桌 3 份付了 1 份，其余不再收取。现金按 5 分取整，刷卡不取整。",
+      "店员已关闭本桌账单：这桌 3 份付了 1 份，其余不向您收取。现金按 5 分取整，刷卡不取整。",
     );
   });
   it("the rest taken off after 1 of 3 parts was paid: says 1 of 3, never paid in 3 parts", () => {
@@ -1456,7 +1503,7 @@ describe("batch 54 (v15 b53 live): a bill staff closed after the guests left", (
       ["Rest of the bill", "Not charged to you"],
     ]);
     expect(en.text).toContain(
-      "Staff closed this bill: the table paid by dish (1 paid), and the rest is not charged.",
+      "Staff closed your table’s bill: the table paid by dish (1 paid), and the rest is not charged to you.",
     );
     expect(en.text).not.toMatch(/Paid so far|paid in one payment|paid in full|Nothing/u);
     const zh = closed("zh-Hans", "1413", { count: null, paid: 1 });
@@ -1464,7 +1511,7 @@ describe("batch 54 (v15 b53 live): a bill staff closed after the guests left", (
       ["已付款", "$14.13"],
       ["其余账款", "不向您收取"],
     ]);
-    expect(zh.text).toContain("店员已关闭这张账单：这桌按菜付了 1 笔，其余不再收取。");
+    expect(zh.text).toContain("店员已关闭本桌账单：这桌按菜付了 1 笔，其余不向您收取。");
     expect(zh.text).not.toMatch(/付清|结这张单|已付 |无$/u);
   });
   it("staff's split, 1 of 3 parts paid: says 1 of 3 and the rest not charged (en, zh)", () => {
@@ -1474,21 +1521,21 @@ describe("batch 54 (v15 b53 live): a bill staff closed after the guests left", (
       ["Rest of the bill", "Not charged to you"],
     ]);
     expect(en.text).toContain(
-      "Staff closed this bill: the table paid 1 of the 3 parts, and the rest is not charged.",
+      "Staff closed your table’s bill: the table paid 1 of the 3 parts, and the rest is not charged to you.",
     );
     const zh = closed("zh-Hans", "942", { count: 3, paid: 1 });
     expect(zh.rows).toEqual([
       ["已付款", "$9.42"],
       ["其余账款", "不向您收取"],
     ]);
-    expect(zh.text).toContain("店员已关闭这张账单：这桌 3 份付了 1 份，其余不再收取。");
+    expect(zh.text).toContain("店员已关闭本桌账单：这桌 3 份付了 1 份，其余不向您收取。");
   });
   it("a payment on the whole bill, then closed: what was paid stays paid (en, zh)", () => {
     expect(closed("en", "1000").text).toContain(
-      "Staff closed this bill: what the table paid stays paid, and the rest is not charged.",
+      "Staff closed your table’s bill: what the table paid stays paid, and the rest is not charged to you.",
     );
     expect(closed("zh-Hans", "1000").text).toContain(
-      "店员已关闭这张账单：已付的款项不变，其余不再收取。",
+      "店员已关闭本桌账单：已付的款项不变，其余不向您收取。",
     );
   });
   it("nobody paid: nothing was charged; never 'pays once at the end' (en, zh)", () => {
@@ -1497,7 +1544,7 @@ describe("batch 54 (v15 b53 live): a bill staff closed after the guests left", (
       ["Paid", "$0.00"],
       ["The bill", "Not charged to you"],
     ]);
-    expect(en.text).toContain("Staff closed this bill; nothing was charged.");
+    expect(en.text).toContain("Staff closed your table’s bill; nothing was charged.");
     expect(en.text).not.toMatch(/pays once at the end|To pay at the end|Cash is rounded/u);
     // Staff closed the bill: nothing more is ordered here (no menu link, no "paying" note).
     expect(en.page).not.toContain("Order more from the menu");
@@ -1509,7 +1556,7 @@ describe("batch 54 (v15 b53 live): a bill staff closed after the guests left", (
       ["已付款", "$0.00"],
       ["账单", "不向您收取"],
     ]);
-    expect(zh.text).toContain("店员已关闭这张账单，未收取任何费用。");
+    expect(zh.text).toContain("店员已关闭本桌账单，未收取任何费用。");
     expect(zh.text).not.toMatch(/最后一起|最后结账|取整/u);
   });
 });
@@ -1716,12 +1763,12 @@ describe("batch 55 (v15 b54 live): round cards once staff closed the bill", () =
     const closed = { closedByStaff: true as const, splitParts: { count: 2, paid: 1 } };
     const rounds = [noodles(1, "Paid"), noodles(2, "OnTableBill")];
     expect(payments("en", rounds, "1413", closed)).toEqual([
-      "1 of 2 parts paid; the rest not charged",
-      "1 of 2 parts paid; the rest not charged",
+      "1 of 2 parts paid; the rest not charged to you",
+      "1 of 2 parts paid; the rest not charged to you",
     ]);
     expect(payments("zh-Hans", rounds, "1413", closed)).toEqual([
-      "2\u00a0份付了 1\u00a0份，其余不收取",
-      "2\u00a0份付了 1\u00a0份，其余不收取",
+      "2\u00a0份付了 1\u00a0份，其余不向您收取",
+      "2\u00a0份付了 1\u00a0份，其余不向您收取",
     ]);
   });
   it("ordinary bills keep their round payments (batch 53/54)", () => {

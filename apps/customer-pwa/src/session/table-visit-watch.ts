@@ -26,7 +26,7 @@ export const tableVisitWatchMs = 15_000;
 export const tableVisitWatchOnOpenMs = 3_000;
 
 /** The table read says this phone is no longer seated there (closed, moved, merged, or never). */
-const notAtTable = new Set(["not-joined", "moved", "settled", "ended-empty"]);
+const notAtTable = new Set(["not-joined", "moved", "settled", "ended-empty", "ended-closed"]);
 
 /**
  * Batch 47 (v15 b46 live): Menu, search, a dish page and Cart left open while staff close, move or
