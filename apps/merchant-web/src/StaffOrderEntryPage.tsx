@@ -50,7 +50,15 @@ import {
   paymentUrgentMinutes,
   paymentWindowNotice,
 } from "./counter-payment.js";
-import { cashTotalMinor } from "./table-checkout-client.js";
+import { cashTotalMinor, createTableCheckoutClient } from "./table-checkout-client.js";
+import { tableFactsFromBill } from "./table-order-facts.js";
+import { tableSettled } from "./table-needs.js";
+import {
+  staffRoundOffer,
+  staffRoundRefusedText,
+  type StaffRoundOffer,
+} from "./staff-round-offer.js";
+import type { StaffDiningTable } from "./dining-session-client.js";
 import {
   CounterOrderClientError,
   counterMenuFamilies,
@@ -914,7 +922,9 @@ export function StaffOrderEntryPage({
   // DEC-DINE-IN-PAY-LATER: the table pays once at the end — no tip and no charge per round.
   const [tablePaysLater, setTablePaysLater] = useState(false);
   const [menu, setMenu] = useState<
-    { kind: "Loading" } | { kind: "Error"; code: string } | { kind: "Ready"; menu: CounterMenu }
+    | { kind: "Loading" }
+    | { kind: "Error"; code: string; checkout?: "CheckingOut" | "Paid" }
+    | { kind: "Ready"; menu: CounterMenu }
   >({ kind: "Loading" });
   const [reload, setReload] = useState(0);
   // v15 b12: switching the language reloads the page; the order being taken comes back with it.
@@ -1086,6 +1096,28 @@ export function StaffOrderEntryPage({
     return () => clearInterval(timer);
   }, [phase]);
 
+  /**
+   * Batch 55 (v15 b54 live): whether this table takes a round now (`staffRoundOffer`); for a table
+   * checking out, its own bill (as its Tables panel reads it) says whether it is paid. A bill that
+   * can't be read is said as checking out, whose wording covers both.
+   */
+  const roundOfferOf = useCallback(
+    async (found: StaffDiningTable, signal?: AbortSignal): Promise<StaffRoundOffer> => {
+      const offer = staffRoundOffer(found, false);
+      if (offer !== "CheckingOut" || found.currentDiningSessionReference === null) return offer;
+      try {
+        const bill = await createTableCheckoutClient(fetcher).bill(
+          csrf,
+          found.currentDiningSessionReference,
+          signal,
+        );
+        return staffRoundOffer(found, tableSettled(tableFactsFromBill(bill)));
+      } catch {
+        return offer;
+      }
+    },
+    [csrf, fetcher],
+  );
   useEffect(() => {
     const controller = new AbortController();
     setMenu({ kind: "Loading" });
@@ -1093,8 +1125,8 @@ export function StaffOrderEntryPage({
       setMenu({ kind: "Error", code: "TableUnknown" });
       return () => controller.abort();
     }
-    const loadTable = async () => {
-      if (tableReference === null) return;
+    const loadTable = async (): Promise<"CheckingOut" | "Paid" | undefined> => {
+      if (tableReference === null) return undefined;
       // The table's name as staff know it, from the Tables list (paged, at most 1,000 tables).
       const tables = createDiningSessionClient(fetcher);
       let after: string | null = null;
@@ -1102,10 +1134,12 @@ export function StaffOrderEntryPage({
         const result = await tables.tables(csrf, after, controller.signal);
         const found = result.items.find((table) => table.tableReference === tableReference);
         if (found !== undefined) {
-          if (found.lifecycle !== "Published" || found.operationalState !== "Available")
-            throw new CounterOrderClientError("TableUnavailable");
-          if (found.qrCodeValidUntil === null) throw new CounterOrderClientError("TableHasNoQr");
+          // Batch 55: the rule the Tables panel offers this screen by (and the send checks).
+          const offer = await roundOfferOf(found, controller.signal);
+          if (offer === "Unavailable") throw new CounterOrderClientError("TableUnavailable");
+          if (offer === "NoCode") throw new CounterOrderClientError("TableHasNoQr");
           setTableLabel(found.stableLabel);
+          if (offer !== "Offered") return offer;
           setTablePaysLater(found.paymentTiming === "PayLater");
           setTableSession(found.currentDiningSessionReference);
           return;
@@ -1116,8 +1150,12 @@ export function StaffOrderEntryPage({
       throw new CounterOrderClientError("TableUnavailable");
     };
     Promise.all([client.loadMenu(controller.signal, tableMode ? "DineIn" : "Pickup"), loadTable()])
-      .then(([value]) => {
+      .then(([value, checkout]) => {
         if (controller.signal.aborted) return;
+        if (checkout !== undefined) {
+          setMenu({ kind: "Error", code: "TableCheckingOut", checkout });
+          return;
+        }
         setMenu({ kind: "Ready", menu: value });
         // An order kept through a language switch is named as the menu just read names it.
         setLines((current) => (current.length === 0 ? current : rebindLines(current, value).lines));
@@ -1136,7 +1174,7 @@ export function StaffOrderEntryPage({
         });
       });
     return () => controller.abort();
-  }, [client, reload, csrf, fetcher, tableMode, tableReference]);
+  }, [client, reload, csrf, fetcher, tableMode, tableReference, roundOfferOf]);
   useEffect(() => {
     if (phase === "Charge" || phase === "Sent") chargeHeading.current?.focus();
   }, [phase]);
@@ -1251,7 +1289,8 @@ export function StaffOrderEntryPage({
   // failed read keeps the last list and says so (the send is still checked by the server).
   // A table that was free when this screen opened may have been seated since.
   /** The table's party now (its dining session; null when free), or undefined when unread. */
-  const findTableSession = useCallback(async (): Promise<string | null | undefined> => {
+  /** This table as the Tables list reads it now (undefined: not found or not read). */
+  const findTable = useCallback(async (): Promise<StaffDiningTable | undefined> => {
     if (tableReference === null) return undefined;
     try {
       const tables = createDiningSessionClient(fetcher);
@@ -1259,10 +1298,7 @@ export function StaffOrderEntryPage({
       for (let page = 0; page < 10; page += 1) {
         const result = await tables.tables(csrf, after);
         const found = result.items.find((table) => table.tableReference === tableReference);
-        if (found !== undefined) {
-          setTableSession(found.currentDiningSessionReference);
-          return found.currentDiningSessionReference;
-        }
+        if (found !== undefined) return found;
         if (result.next === null) return undefined;
         after = result.next;
       }
@@ -1271,6 +1307,32 @@ export function StaffOrderEntryPage({
     }
     return undefined;
   }, [csrf, fetcher, tableReference]);
+  const findTableSession = useCallback(async (): Promise<string | null | undefined> => {
+    const found = await findTable();
+    if (found === undefined) return undefined;
+    setTableSession(found.currentDiningSessionReference);
+    return found.currentDiningSessionReference;
+  }, [findTable]);
+  /**
+   * Batch 55 (v15 b54 live): a send refused because the table can't take a round. When the table
+   * started checking out (or was paid) while staff built the round, staff read why and what to do
+   * next by the same rule the Tables panel offers the round by; the order stays as it is.
+   */
+  const refusalRead = useRef(0);
+  const explainTableRefusal = useCallback(async () => {
+    refusalRead.current += 1;
+    const read = refusalRead.current;
+    const found = await findTable();
+    const offer = found === undefined ? undefined : await roundOfferOf(found);
+    if (read !== refusalRead.current || phaseNow.current !== "Building") return;
+    if (found === undefined || (offer !== "CheckingOut" && offer !== "Paid")) return;
+    setTableLabel(found.stableLabel);
+    setProblem(
+      staffRoundRefusedText(offer, found.stableLabel) +
+        " " +
+        t("Nothing was sent or charged, and this order is still here."),
+    );
+  }, [findTable, roundOfferOf]);
   const readGuestCart = useCallback(() => {
     if (tableSession === null) return;
     guestRead.current?.abort();
@@ -1436,6 +1498,7 @@ export function StaffOrderEntryPage({
   ) => {
     const chosenTip = tipChoice();
     if (!canSend || chosenTip === null) return;
+    refusalRead.current += 1;
     // WP-2423 M35: every guest line on screen goes with a decision, against the cart version read.
     const decided =
       includeTableCart === null &&
@@ -1695,6 +1758,7 @@ export function StaffOrderEntryPage({
       if (!unanswered) unansweredLines.current = [];
       setProblemNeedsTableCode(failure.code === "TableHasNoQr");
       setPartyChanged(failure.code === "TablePartyChanged");
+      if (failure.code === "TableUnavailable" && tableMode) void explainTableRefusal();
       // v15 batch-5 review: the paper paid-at was refused before anything was placed; staff
       // correct it where they typed it.
       if (failure.code === "TakenBeforeRecords" || failure.code === "PaidAtOutOfRange") {
@@ -1913,7 +1977,13 @@ export function StaffOrderEntryPage({
       </WorkspacePage>
     );
   if (menu.kind === "Error") {
-    const [heading, text] = menuError[menu.code] ?? (menuError.Unavailable as [string, string]);
+    const [heading, text] =
+      menu.checkout !== undefined && tableLabel !== null
+        ? [
+            t("No round can be added for this table now"),
+            staffRoundRefusedText(menu.checkout, tableLabel),
+          ]
+        : (menuError[menu.code] ?? (menuError.Unavailable as [string, string]));
     const createCode = menu.code === "TableHasNoQr" ? tableQrHref : undefined;
     return (
       <WorkspacePage title={pageTitle} meta={storeLabel}>
