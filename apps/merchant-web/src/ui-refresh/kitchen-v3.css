@@ -45,6 +45,8 @@
   font-weight: 600;
 }
 .kitchen-shell .bop-shell__header .language-switch {
+  /* Batch 55 (v15 batch 54 live): "中文" alone made a 40 px wide target; 44 px like the back office. */
+  min-width: 44px;
   color: var(--bop-color-text-muted);
   font-weight: 400;
 }
