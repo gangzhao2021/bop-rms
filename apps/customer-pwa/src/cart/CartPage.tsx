@@ -164,6 +164,10 @@ function CartItem({
   // WP-2423 (same-table-ordering, M36): the phone that added it has left the table; anyone may
   // change or remove it.
   const stranded = item.warnings.includes("ADDER_LEFT_TABLE");
+  // Batch 51 (v15 b50 live): a line another guest added, which only they may change (the Store
+  // refuses anyone else's change or removal), shows its quantity alone. Its −, + and Remove were
+  // drawn as outlined boxes next to "Only they can change this item", which read as offered.
+  const locked = foreign && !stranded && !unsellable;
   const ownershipDescription = `cart-item-ownership-${item.cartItemReference}`;
   const configuration = describeConfiguration(item);
   const updateQuantity = (quantity: number) =>
@@ -215,46 +219,55 @@ function CartItem({
           {warning}
         </p>
       ))}
-      <div
-        className="cart-item__actions"
-        aria-label={cartText.line.quantityGroupLabel(item.displayName)}
-      >
-        <button
-          type="button"
-          aria-describedby={foreign ? ownershipDescription : undefined}
-          disabled={
-            readOnly || (foreign && !stranded) || pending || unsellable || item.quantity <= 1
-          }
-          aria-label={cartText.line.decreaseLabel(item.displayName)}
-          onClick={() => void updateQuantity(item.quantity - 1)}
+      {locked ? (
+        <p className="cart-item__actions cart-item__actions--locked">
+          <span>{cartText.line.quantity}</span>
+          <output aria-live="off" aria-label={cartText.line.quantityLabel(item.displayName)}>
+            {item.quantity}
+          </output>
+        </p>
+      ) : (
+        <div
+          className="cart-item__actions"
+          aria-label={cartText.line.quantityGroupLabel(item.displayName)}
         >
-          −
-        </button>
-        <output aria-live="off" aria-label={cartText.line.quantityLabel(item.displayName)}>
-          {item.quantity}
-        </output>
-        <button
-          type="button"
-          aria-describedby={foreign ? ownershipDescription : undefined}
-          disabled={
-            readOnly || (foreign && !stranded) || pending || unsellable || item.quantity >= 100
-          }
-          aria-label={cartText.line.increaseLabel(item.displayName)}
-          onClick={() => void updateQuantity(item.quantity + 1)}
-        >
-          +
-        </button>
-        <button
-          className="cart-link-button"
-          type="button"
-          aria-describedby={foreign ? ownershipDescription : undefined}
-          disabled={readOnly || (foreign && !unsellable && !stranded) || pending}
-          aria-label={cartText.line.removeLabel(item.displayName)}
-          onClick={() => void controller.removeItem(item.cartItemReference)}
-        >
-          {cartText.line.remove}
-        </button>
-      </div>
+          <button
+            type="button"
+            aria-describedby={foreign ? ownershipDescription : undefined}
+            disabled={
+              readOnly || (foreign && !stranded) || pending || unsellable || item.quantity <= 1
+            }
+            aria-label={cartText.line.decreaseLabel(item.displayName)}
+            onClick={() => void updateQuantity(item.quantity - 1)}
+          >
+            −
+          </button>
+          <output aria-live="off" aria-label={cartText.line.quantityLabel(item.displayName)}>
+            {item.quantity}
+          </output>
+          <button
+            type="button"
+            aria-describedby={foreign ? ownershipDescription : undefined}
+            disabled={
+              readOnly || (foreign && !stranded) || pending || unsellable || item.quantity >= 100
+            }
+            aria-label={cartText.line.increaseLabel(item.displayName)}
+            onClick={() => void updateQuantity(item.quantity + 1)}
+          >
+            +
+          </button>
+          <button
+            className="cart-link-button"
+            type="button"
+            aria-describedby={foreign ? ownershipDescription : undefined}
+            disabled={readOnly || (foreign && !unsellable && !stranded) || pending}
+            aria-label={cartText.line.removeLabel(item.displayName)}
+            onClick={() => void controller.removeItem(item.cartItemReference)}
+          >
+            {cartText.line.remove}
+          </button>
+        </div>
+      )}
     </article>
   );
 }

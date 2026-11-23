@@ -1360,6 +1360,15 @@
   font-variant-numeric: tabular-nums;
   font-weight: 600;
 }
+/* Batch 51: a line only the guest who added it can change: its quantity, no controls. */
+.cart-item__actions--locked {
+  gap: var(--bop-space-1);
+  margin-bottom: 0;
+}
+.cart-item__actions--locked output {
+  min-width: 0;
+  text-align: start;
+}
 .cart-link-button {
   margin-inline-start: auto;
   font-size: 0.9375rem !important;

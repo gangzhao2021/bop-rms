@@ -116,12 +116,11 @@ for (const screen of [
         page.getByText("Synthetic foreign note must remain hidden", { exact: false }),
       ).toHaveCount(0);
       await expect(page.getByText("OTHER_PARTICIPANT_ITEM", { exact: false })).toHaveCount(0);
-      for (const button of await foreign.getByRole("button").all()) {
-        await expect(button).toBeDisabled();
-        await expect(button).toHaveAccessibleDescription(explanation);
-        const box = await button.boundingBox();
-        expect(box?.height).toBeGreaterThanOrEqual(44);
-      }
+      // Batch 51: only its adder can change it, so it shows its quantity and no controls.
+      await expect(foreign.getByRole("button")).toHaveCount(0);
+      await expect(
+        foreign.getByRole("status", { name: "Synthetic shared tea quantity" }),
+      ).toHaveText("2");
       await expect(
         own.getByRole("button", { name: "Increase Synthetic own tea quantity" }),
       ).toBeEnabled();

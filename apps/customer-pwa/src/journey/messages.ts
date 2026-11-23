@@ -658,6 +658,10 @@ export const cartText = Object.freeze({
     quantityGroupLabel: (item: string) => t("Quantity for {item}", { item }),
     decreaseLabel: (item: string) => t("Decrease {item} quantity", { item }),
     quantityLabel: (item: string) => t("{item} quantity", { item }),
+    /** Batch 51: a line only the guest who added it can change shows its quantity, no controls. */
+    get quantity() {
+      return t("Quantity");
+    },
     increaseLabel: (item: string) => t("Increase {item} quantity", { item }),
     get remove() {
       return t("Remove");

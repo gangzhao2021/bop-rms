@@ -97,7 +97,7 @@ function renderPage(state: CartState): string {
 }
 
 describe("CUST-CART page contract", () => {
-  it("explains foreign ownership, disables all row controls and suppresses a supplied foreign note", () => {
+  it("explains foreign ownership, offers no row controls and suppresses a supplied foreign note", () => {
     const base = cart();
     const item = base.cart.items[0];
     if (item === undefined) throw new Error("synthetic item missing");
@@ -120,9 +120,15 @@ describe("CUST-CART page contract", () => {
     expect(html).toContain("Added by another guest. Only they can change this item.");
     expect(html).not.toContain("Synthetic restricted foreign note");
     expect(html).not.toContain("OTHER_PARTICIPANT_ITEM");
-    expect(
-      html.match(new RegExp(`aria-describedby="cart-item-ownership-${id(2)}" disabled=""`, "gu")),
-    ).toHaveLength(3);
+    // Batch 51 (v15 b50 live): only the guest who added it can change it, so no −, + or Remove
+    // is drawn next to that sentence (they read as offered); the quantity is said instead.
+    expect(html).not.toContain(`aria-describedby="cart-item-ownership-${id(2)}"`);
+    expect(html).not.toContain("Decrease Synthetic");
+    expect(html).not.toContain("Increase Synthetic");
+    expect(html).not.toMatch(/>Remove</u);
+    expect(html).toMatch(
+      /<span>Quantity<\/span><output aria-live="off" aria-label="[^"]+ quantity">2<\/output>/u,
+    );
   });
   it("keeps current-participant notes and controls available", () => {
     const base = cart();
