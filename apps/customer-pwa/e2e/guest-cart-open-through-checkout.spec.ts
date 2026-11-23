@@ -255,11 +255,20 @@ async function advance(page: Page, ms: number) {
   }
 }
 
+// The last-orders countdown follows the wall clock against the fixed 21:30 in storefront-reads
+// (and the page clock moves on in the long-checkout test), so a comparison across a minute
+// boundary saw "20 min left" then "18 min left": mask the count, compare everything else.
 const mainText = (page: Page) =>
   page
     .getByRole("main")
     .innerText()
-    .then((text) => text.replace(/\s+/gu, " ").trim());
+    .then((text) =>
+      text
+        .replace(/\s+/gu, " ")
+        .trim()
+        .replace(/\d+ min left/u, "N min left")
+        .replace(/还剩 \d+ 分钟/u, "还剩 N 分钟"),
+    );
 
 /** A table cart with a dish in it once the page knows the table pays at the end. */
 async function expectPayLaterCart(page: Page) {
