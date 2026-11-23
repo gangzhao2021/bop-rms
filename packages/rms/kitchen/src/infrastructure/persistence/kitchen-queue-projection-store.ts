@@ -24,6 +24,14 @@ function unavailable(): never {
   throw new KitchenQueueProjectionError("KITCHEN_QUEUE_DEPENDENCY_UNAVAILABLE");
 }
 
+/** A change to one ticket, by the ticket version it produced or the ready result it recorded. */
+export interface KitchenQueueTicketReflection {
+  readonly transaction: ConsumerTransaction;
+  readonly ticketReference: string;
+  readonly ticketVersion: bigint | null;
+  readonly readyResultReference: string | null;
+}
+
 /** Caller owns the transaction and tenant context; all generation changes use the
  * same Store advisory lock as the projection consumer. Rows/history are immutable.
  */
@@ -37,7 +45,9 @@ export function createPostgresKitchenQueueProjectionStore(options: {
     tx: ConsumerTransaction,
     bundle: KitchenQueueStoredProjectionBundle,
   ): Promise<boolean>;
-}): KitchenQueueProjectionPorts["projections"] {
+}): KitchenQueueProjectionPorts["projections"] & {
+  reflectsTicket(input: KitchenQueueTicketReflection): Promise<boolean>;
+} {
   const brand = parseKitchenTicketReference(options.brandReference);
   const store = parseKitchenTicketReference(options.storeReference);
   if (!Number.isSafeInteger(options.maxRows) || options.maxRows < 1 || options.maxRows > 100000)
@@ -88,6 +98,40 @@ export function createPostgresKitchenQueueProjectionStore(options: {
     }
   }
   return {
+    /**
+     * WP-2423 batch 52 (kitchen ready speed): whether the active Fresh generation was built from
+     * a snapshot holding this ticket at the given version or later (a ready result: the ticket
+     * version its ready publication recorded). One indexed read instead of a full rebuild
+     * snapshot; anything unknown (ticket not on the board, no publication) answers false.
+     */
+    reflectsTicket: (input) =>
+      guard(async () => {
+        const ticket = parseKitchenTicketReference(input.ticketReference);
+        const version = input.ticketVersion;
+        const ready =
+          input.readyResultReference === null
+            ? null
+            : parseKitchenTicketReference(input.readyResultReference);
+        if (
+          (version === null) === (ready === null) ||
+          (version !== null &&
+            (typeof version !== "bigint" || version < 1n || version > 9_223_372_036_854_775_807n))
+        )
+          return unavailable();
+        await authorize(input.transaction, "Load");
+        const result = await input.transaction.query(
+          "SELECT 1 AS reflected FROM rms_kitchen.kitchen_work_queue_projection_generation g" +
+            " JOIN rms_kitchen.kitchen_work_queue_projection p ON p.brand_id=g.brand_id AND p.store_id=g.store_id" +
+            " AND p.projection_generation_id=g.projection_generation_id" +
+            " WHERE g.brand_id=$1 AND g.store_id=$2 AND g.generation_status='Active' AND g.freshness_status='Fresh'" +
+            " AND p.kitchen_ticket_id=$3 AND p.ticket_aggregate_version >= COALESCE($4::bigint," +
+            " (SELECT r.ticket_version FROM rms_kitchen.kitchen_ready_publication r WHERE r.brand_id=$1" +
+            " AND r.store_id=$2 AND r.kitchen_ticket_id=$3 AND r.ready_result_id=$5::uuid))" +
+            " LIMIT 1",
+          [brand, store, ticket, version === null ? null : version.toString(), ready],
+        );
+        return result.rows.length === 1;
+      }),
     loadActive: (input) =>
       guard(async () => {
         scope(input);

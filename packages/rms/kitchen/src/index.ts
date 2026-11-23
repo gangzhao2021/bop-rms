@@ -446,7 +446,10 @@ export {
 
 export { createKitchenQueueRebuildSource } from "./application/kitchen-queue-rebuild-source.js";
 
-export { createPostgresKitchenQueueReadModel } from "./infrastructure/kitchen-queue-read-model.js";
+export {
+  createPostgresKitchenQueueReadModel,
+  type KitchenQueueRefreshChange,
+} from "./infrastructure/kitchen-queue-read-model.js";
 export { createPostgresKdsOperatorShiftStore } from "./infrastructure/persistence/kds-operator-shift-store.js";
 // WP-2423 Q26 (Handoff Section 26.6): Rework work items for dishes that are made again.
 export {

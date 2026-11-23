@@ -144,6 +144,114 @@ it("one tap Finish on a new dish records accept, start, complete and ready under
   });
 });
 
+/**
+ * WP-2423 batch 52 (v15 2026-11-23): one Finished tap records KitchenWorkAccepted, Started,
+ * ItemCompleted (ticket versions 2-4), KitchenItemReady and KitchenOrderReady (version 4). The
+ * kitchen board consumer refreshed the whole board for each, about 0.25 s apiece one after
+ * another, so KitchenOrderReady (last in the ticket's order) reached pickup 2-3 s after the tap.
+ * The first refresh already shows the ticket at version 4; the other four answer from the board.
+ */
+it("after a Finished tap the board is rebuilt once, and its other events answer from the board", async () => {
+  await withFixture("wp2423_ks_reflect", async (f) => {
+    const { kitchenQueueChange } =
+      await import("../../../tooling/environment/pilot-kitchen-consumers.mjs");
+    const cook = f.id(0x700);
+    // A v15-sized board (DEMO Store: 20 tickets, 25 dishes): finished and open tickets.
+    for (let n = 0; n < 12; n += 1) {
+      const round = await f.createTicket({ lines: n % 3 === 0 ? 2 : 1 });
+      await f.tap({ step: "Finish", actor: cook, lines: linesOf(round) });
+    }
+    for (let n = 0; n < 6; n += 1) await f.createTicket({ lines: 1 });
+    const round = await f.createTicket({ lines: 1 });
+    let snapshotReads = 0;
+    const board = f.board({
+      authorize: async () => {
+        snapshotReads += 1;
+        return true;
+      },
+    });
+    assert.equal(await board.refresh(), 1);
+    const correlation = f.next();
+    await f.tap({
+      step: "Finish",
+      actor: cook,
+      lines: linesOf(round),
+      correlationReference: correlation,
+    });
+    // The events as the outbox holds them, in the order the dispatcher claims them.
+    const events = (
+      await f.rows(
+        "SELECT event_type,aggregate_type,aggregate_id::text AS aggregate,aggregate_version::text AS version,payload_json FROM platform_eventing.outbox_event WHERE correlation_id=$1 ORDER BY recorded_at,event_id",
+        [correlation],
+      )
+    ).map((row) => ({
+      eventType: row.event_type,
+      aggregateType: row.aggregate_type,
+      aggregateId: row.aggregate,
+      aggregateVersion: BigInt(row.version),
+      payload: row.payload_json,
+    }));
+    assert.deepEqual(events.map((event) => event.eventType).sort(), [
+      "KitchenItemCompleted",
+      "KitchenItemReady",
+      "KitchenOrderReady",
+      "KitchenWorkAccepted",
+      "KitchenWorkStarted",
+    ]);
+    const changes = events.map((event) => kitchenQueueChange(event));
+    assert.ok(changes.every((change) => change?.ticketReference === round.ticket));
+
+    /** The refresh's answer, whether it read the owner snapshot, and how long it took. */
+    const refresh = async (change) => {
+      const before = snapshotReads;
+      const at = performance.now();
+      const result = await board.refresh(change);
+      return { result, read: snapshotReads > before, ms: Math.round(performance.now() - at) };
+    };
+    // The board still shows the ticket before the tap: the first event rebuilds it.
+    const started = events.findIndex((event) => event.eventType === "KitchenWorkStarted");
+    const rebuilt = await refresh(changes[started]);
+    assert.deepEqual([rebuilt.result, rebuilt.read], [1, true]);
+    // Every event of the tap, the first one again included, now answers without a rebuild.
+    const reflected = [];
+    for (const change of changes) reflected.push(await refresh(change));
+    assert.deepEqual(
+      reflected.map(({ result, read }) => [result, read]),
+      changes.map(() => [0, false]),
+    );
+    assert.deepEqual(
+      await f.rows(
+        "SELECT p.status,p.ticket_aggregate_version::text AS version FROM rms_kitchen.kitchen_work_queue_projection p JOIN rms_kitchen.kitchen_work_queue_projection_generation g ON g.projection_generation_id=p.projection_generation_id WHERE g.generation_status='Active' AND p.kitchen_ticket_id=$1",
+        [round.ticket],
+      ),
+      [{ status: "Completed", version: "4" }],
+    );
+    // A board refresh without a change (the kitchen worker's poll) still reads the snapshot.
+    const polled = await refresh(undefined);
+    assert.deepEqual([polled.result, polled.read], [0, true]);
+    console.info(
+      JSON.stringify({
+        rebuildMs: rebuilt.ms,
+        unchangedFullRefreshMs: polled.ms,
+        reflectedMs: reflected.map(({ ms }) => ms),
+      }),
+    );
+
+    // A ticket the board does not show yet, or a later version than it shows, reads the snapshot.
+    const later = await f.createTicket({ lines: 1 });
+    const unseen = await refresh({ ticketReference: later.ticket, ticketVersion: 1n });
+    assert.deepEqual([unseen.result, unseen.read], [1, true]);
+    const ahead = await refresh({ ticketReference: round.ticket, ticketVersion: 5n });
+    assert.deepEqual([ahead.result, ahead.read], [0, true]);
+    // A ready result the Store never recorded is not taken as shown.
+    const unknown = await refresh({
+      ticketReference: round.ticket,
+      readyResultReference: f.next(),
+    });
+    assert.deepEqual([unknown.result, unknown.read], [0, true]);
+  });
+});
+
 it("an explicit Start stays distinguishable from a Start implied by a one-tap finish", async () => {
   await withFixture("wp2423_ks_start", async (f) => {
     const cook = f.id(0x700);

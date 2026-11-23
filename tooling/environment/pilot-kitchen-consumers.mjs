@@ -7,6 +7,29 @@ import {
   parseKitchenTicketClosedEnvelope,
 } from "../../packages/rms/kitchen/src/index.ts";
 import { isPilotRuntime } from "./pilot-environment.mjs";
+/** Kitchen ticket events whose aggregate version is the ticket version they produced. */
+const ticketVersionEvents = new Set([
+  "KitchenWorkAccepted",
+  "KitchenWorkStarted",
+  "KitchenItemProgressRecorded",
+  "KitchenItemCompleted",
+  "KitchenOrderReady",
+]);
+/**
+ * WP-2423 batch 52 (kitchen ready speed): the ticket change an event refreshes the board for, so a
+ * board that already shows it is not rebuilt again (see the Kitchen read model's refresh). A
+ * created, cancelled or closed ticket always refreshes in full.
+ */
+export function kitchenQueueChange(event) {
+  if (event.aggregateType === "KitchenTicket" && ticketVersionEvents.has(event.eventType))
+    return { ticketReference: event.aggregateId, ticketVersion: event.aggregateVersion };
+  if (event.eventType === "KitchenItemReady")
+    return {
+      ticketReference: event.payload.kitchenTicketReference,
+      readyResultReference: event.payload.readyResultReference,
+    };
+  return undefined;
+}
 export function createInternalKitchenConsumers(resources, { createQueue }) {
   if (!isPilotRuntime()) throw new Error("INTERNAL_KITCHEN_ONLY");
   const parsers = {
@@ -45,11 +68,11 @@ export function createInternalKitchenConsumers(resources, { createQueue }) {
       sideEffect: "refresh_kitchen_queue_from_owner_snapshot",
       replaySafe: true,
       handler: async ({ transaction, envelope }) => {
-        authorized(envelope);
+        const event = authorized(envelope);
         await createQueue({
           ...resources,
           transactions: { run: (work) => work(transaction) },
-        }).refresh();
+        }).refresh(kitchenQueueChange(event));
         return { status: "completed" };
       },
     });

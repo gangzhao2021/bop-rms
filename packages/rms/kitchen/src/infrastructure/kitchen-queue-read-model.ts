@@ -10,6 +10,14 @@ import { createPostgresKitchenQueueSourceReader } from "./persistence/kitchen-qu
 import { createPostgresKitchenQueueProjectionStore } from "./persistence/kitchen-queue-projection-store.js";
 import { createPostgresKitchenQueueQueries } from "./persistence/kitchen-queue-queries.js";
 
+/**
+ * WP-2423 batch 52: the change an event consumer refreshes the board for. When the active board
+ * already shows that ticket at or after the change, the refresh answers 0 without a rebuild.
+ */
+export type KitchenQueueRefreshChange =
+  | { readonly ticketReference: string; readonly ticketVersion: bigint }
+  | { readonly ticketReference: string; readonly readyResultReference: string };
+
 /** Scoped PostgreSQL rebuild/read composition. Transactions must provide a bounded
  * consistent read snapshot; query authority and every authorization remain explicit.
  * Event consumers are deliberately not exposed until incremental sources are configured.
@@ -41,6 +49,13 @@ export function createPostgresKitchenQueueReadModel(options: {
   const unavailable = async (): Promise<never> => {
     throw new KitchenQueueProjectionError("KITCHEN_QUEUE_DEPENDENCY_UNAVAILABLE");
   };
+  const projections = createPostgresKitchenQueueProjectionStore({
+    ...scope,
+    maxRows: options.maxRows,
+    sha256,
+    authorize: options.authorizeProjection,
+    validateCurrentSource: source.validateCurrentSource,
+  });
   const ports: KitchenQueueProjectionPorts = {
     ...options.ports,
     digests: { sha256 },
@@ -54,17 +69,18 @@ export function createPostgresKitchenQueueReadModel(options: {
       compareIncremental: unavailable,
       compareLifecycleIncremental: unavailable,
     },
-    projections: createPostgresKitchenQueueProjectionStore({
-      ...scope,
-      maxRows: options.maxRows,
-      sha256,
-      authorize: options.authorizeProjection,
-      validateCurrentSource: source.validateCurrentSource,
-    }),
+    projections,
     queries: createPostgresKitchenQueueQueries({ ...scope, authorize: options.authorizeQuery }),
   };
   const service = createKitchenQueueProjectionService(ports);
-  async function refresh(): Promise<0 | 1> {
+  /**
+   * Rebuilds the board from the owner snapshot when its content changed. With `change` (an
+   * event consumer): one Kitchen tap records up to five events (accepted, started, completed,
+   * item ready, order ready) and each refreshed the whole board, about 0.25 s apiece on v15, one
+   * after another, so the order-ready event reached pickup 2-3 s after the tap. The first
+   * refresh already shows the ticket at its new version; later ones now answer 0 at once.
+   */
+  async function refresh(change?: KitchenQueueRefreshChange): Promise<0 | 1> {
     const observedAt = ports.clock.now();
     const rebuildReference = options.nextRebuildReference();
     if (
@@ -91,6 +107,17 @@ export function createPostgresKitchenQueueReadModel(options: {
         projectionName: "kitchen_work_queue_v1",
         transaction,
       });
+      if (
+        change !== undefined &&
+        (await projections.reflectsTicket({
+          transaction,
+          ticketReference: change.ticketReference,
+          ticketVersion: "ticketVersion" in change ? change.ticketVersion : null,
+          readyResultReference:
+            "readyResultReference" in change ? change.readyResultReference : null,
+        }))
+      )
+        return 0;
       const loaded = await ports.projections.loadActive({ ...scope, transaction });
       const active =
         loaded.status === "NotFound"
