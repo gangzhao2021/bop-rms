@@ -11,6 +11,7 @@ const order = (
     readonly acceptBy?: string | null;
     readonly roundSentAt?: string;
     readonly day?: string;
+    readonly earlierOpen?: boolean;
   } = {},
 ): Item =>
   ({
@@ -21,7 +22,7 @@ const order = (
     acceptBy: options.acceptBy ?? null,
     listedBusinessDate: options.day ?? "2026-11-06",
     heldStock: null,
-    earlierOpenPickup: false,
+    earlierOpenPickup: options.earlierOpen === true,
     batches: [
       {
         orderBatchReference: number + "-1",
@@ -80,5 +81,25 @@ describe("merchant-outage-recovery M43: orders to accept come first, the longest
       "Y2",
       "Y1",
     ]);
+  });
+
+  // Batch 55 (v15 batch 54 live, Test Merchant 2): the server sends the earlier days' unfinished
+  // pickups first (earlierDayItems), 46 of them, and a New order sat about 15,000 px down a phone.
+  it("lists today's orders, the New order to accept on top, before the earlier days' unfinished ones", () => {
+    const earlier = ["2026-11-04", "2026-11-05", "2026-11-04"].map((day, index) =>
+      order(day.slice(5) + "-" + (index + 1), day + "T21:33:01.000Z", { day, earlierOpen: true }),
+    );
+    const today = [
+      order("51", "2026-11-06T18:20:00.000Z", {
+        awaiting: true,
+        acceptBy: "2026-11-06T18:50:00.000Z",
+      }),
+      order("49", "2026-11-06T18:10:00.000Z"),
+      order("48", "2026-11-06T18:09:00.000Z"),
+    ];
+    const sorted = awaitingFirst([...earlier, ...today]).map((item) => item.orderNumber);
+    expect(sorted).toEqual(["51", "49", "48", "11-04-1", "11-05-2", "11-04-3"]);
+    // Every order stays listed.
+    expect(sorted).toHaveLength(earlier.length + today.length);
   });
 });

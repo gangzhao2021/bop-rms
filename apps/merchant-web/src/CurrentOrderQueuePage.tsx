@@ -2192,12 +2192,17 @@ export function awaitingSince(order: CurrentOrderQueue["items"][number]): string
  * merchant-outage-recovery M43: within each day group of the list (the server's order), the orders
  * still waiting for acceptance come first, the one waiting longest on top, so a new order lands at
  * the end of that group instead of pushing the others down. The rest keep the server's order.
+ *
+ * Batch 55 (v15 batch 54 live, 46 earlier-day pickups still open): the earlier days' unfinished
+ * orders follow the day groups instead of leading the list, so today's orders, and a New order to
+ * accept at their top, are on the first screen at every width. They stay listed, as one group under
+ * their own heading, and "Needs attention" above the list still names them.
  */
 export function awaitingFirst<T extends CurrentOrderQueue["items"][number]>(
   items: readonly T[],
 ): readonly T[] {
-  const group = (order: T) =>
-    order.heldStock !== null || order.earlierOpenPickup ? "held" : (order.listedBusinessDate ?? "");
+  const unfinished = (order: T) => order.heldStock !== null || order.earlierOpenPickup;
+  const group = (order: T) => (unfinished(order) ? "held" : (order.listedBusinessDate ?? ""));
   const result: T[] = [];
   let run: T[] = [];
   const flush = () => {
@@ -2209,7 +2214,10 @@ export function awaitingFirst<T extends CurrentOrderQueue["items"][number]>(
     result.push(...waiting, ...run.filter((order) => !isAwaitingAcceptance(order)));
     run = [];
   };
-  for (const order of items) {
+  for (const order of [
+    ...items.filter((order) => !unfinished(order)),
+    ...items.filter(unfinished),
+  ]) {
     if (run.length > 0 && group(run[0] as T) !== group(order)) flush();
     run.push(order);
   }
@@ -3385,7 +3393,8 @@ export function CurrentOrderQueueRows({
     // WP-2423 D4: an older table's Order with a round today is listed under today.
     const day = order.listedBusinessDate;
     if (day === null) continue;
-    // WP-2423 (2026-10-16): earlier-day orders still holding stock lead the list as one group.
+    // WP-2423 (2026-10-16): earlier-day orders still holding stock are listed as one group; since
+    // batch 55 after the day groups (awaitingFirst).
     const unfinished = order.heldStock !== null || order.earlierOpenPickup;
     const group = unfinished ? "held" : day;
     if (group !== previous)
@@ -3746,27 +3755,39 @@ function OrderAttention({
   );
   const outage = view.items.some((order) => order.acceptanceHold !== null);
   if (holding.length === 0 && unfinished.length === 0 && !outage) return null;
+  const unfinishedList = (
+    <ul>
+      {unfinished.map((order) => (
+        <li key={order.orderReference}>
+          <div>
+            <p>
+              {t("Order {orderNumber} from an earlier day isn't finished.", {
+                orderNumber: orderLabel(order, today),
+              })}
+            </p>
+            <p className="order-attention__hint">{earlierOpenPickupText(order)}</p>
+          </div>
+          <button type="button" onClick={() => onOpen(order)}>
+            {t("Show order {orderNumber}", { orderNumber: orderLabel(order, today) })}
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
   return (
     <section className="order-attention" aria-labelledby="order-attention-heading">
       <h2 id="order-attention-heading">{t("Needs attention")}</h2>
-      {unfinished.length === 0 ? null : (
-        <ul>
-          {unfinished.map((order) => (
-            <li key={order.orderReference}>
-              <div>
-                <p>
-                  {t("Order {orderNumber} from an earlier day isn't finished.", {
-                    orderNumber: orderLabel(order, today),
-                  })}
-                </p>
-                <p className="order-attention__hint">{earlierOpenPickupText(order)}</p>
-              </div>
-              <button type="button" onClick={() => onOpen(order)}>
-                {t("Show order {orderNumber}", { orderNumber: orderLabel(order, today) })}
-              </button>
-            </li>
-          ))}
-        </ul>
+      {unfinished.length === 0 ? null : unfinished.length === 1 ? (
+        unfinishedList
+      ) : (
+        // Batch 55 (v15 batch 54 live, 46 of them): as on the kitchen display, many earlier days'
+        // orders are one line that opens, so today's orders stay on the first screen.
+        <details className="order-attention__earlier">
+          <summary>
+            {t("{count} orders from earlier days aren't finished", { count: unfinished.length })}
+          </summary>
+          {unfinishedList}
+        </details>
       )}
       {holding.length === 0 ? null : (
         <ul>

@@ -6163,6 +6163,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这单在较早营业日做好了，但一直没有交付。顾客回来就交给他们；否则由店长在自取页标记为未取餐。",
   "Order {orderNumber} from an earlier day isn't finished.":
     "较早营业日的订单 {orderNumber} 还没有完成。",
+  "{count} orders from earlier days aren't finished": "{count} 张较早营业日的订单还没有完成",
   "Still open from an earlier day and never finished. Contact the guest if you can. Make it and hand it over if they come back; otherwise cancel it and they are refunded.":
     "这单来自较早营业日，一直没有做完。能联系上顾客就先联系。顾客回来就做好交付；否则取消，顾客会收到退款。",
   "Exceptions overdue": "异常已超时",

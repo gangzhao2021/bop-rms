@@ -114,6 +114,47 @@
   color: var(--bop-color-text-muted);
   font-size: 13px;
 }
+/* Batch 55: many earlier days' orders are one line that opens, as on the kitchen display. */
+.orders-page .order-attention__earlier > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  position: relative;
+  padding-inline-start: 20px;
+  list-style: none;
+  cursor: pointer;
+}
+.orders-page .order-attention__earlier > summary::-webkit-details-marker {
+  display: none;
+}
+.orders-page .order-attention__earlier > summary::before {
+  content: "";
+  position: absolute;
+  top: calc(50% - 4px);
+  left: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--bop-color-danger-mark);
+}
+/* The same arrow as the kitchen's earlier days, so the line says it opens. */
+.orders-page .order-attention__earlier > summary::after {
+  content: "";
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform var(--bop-motion-fast);
+}
+.orders-page .order-attention__earlier[open] > summary::after {
+  transform: rotate(45deg);
+}
+.orders-page .order-attention__earlier > ul {
+  margin-bottom: var(--bop-space-3);
+}
 .orders-page .order-attention li > button,
 .orders-page .order-hold-notice > button {
   min-height: 44px;
