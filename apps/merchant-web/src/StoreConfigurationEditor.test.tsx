@@ -14,6 +14,7 @@ import {
   storeConfigurationOpenChange,
   storeConfigurationStateLabel,
   withdrawalSentence,
+  type PublishedHoursShown,
 } from "./StoreConfigurationEditor.js";
 import {
   parseStoreConfigurationSnapshot,
@@ -227,7 +228,10 @@ const hoursView = (latest: ReturnType<typeof configuration> | null) => {
     id(3),
   );
 };
-const renderForm = (view: ReturnType<typeof hoursView>) =>
+const renderForm = (
+  view: ReturnType<typeof hoursView>,
+  shown?: { publishedHours: PublishedHoursShown },
+) =>
   renderToStaticMarkup(
     <MemoryRouter>
       <StoreHoursDraftForm
@@ -236,6 +240,7 @@ const renderForm = (view: ReturnType<typeof hoursView>) =>
         disabled={false}
         onDraftChange={() => undefined}
         onCommand={() => undefined}
+        {...shown}
       />
     </MemoryRouter>,
   );
@@ -249,6 +254,23 @@ it("says the time zone and day start in the editor only when they are not the pu
   expect(html).toContain(sentence);
   const same = renderForm(hoursView({ ...configuration("Draft") }));
   expect(same).not.toContain("Times are in");
+  // Batch 51 (v15 b50 live): the page's Published hours part is not drawn while the
+  // service-status read loads or has failed, so the editor says the zone itself; once Published
+  // hours says the same zone and day start, it does not repeat them.
+  const toronto =
+    "Times are in Eastern Time (Toronto, Ottawa and Montréal). The business day starts at 4:00\u00a0a.m.<";
+  const missing = renderForm(hoursView({ ...configuration("Draft") }), { publishedHours: null });
+  expect(missing).toContain(toronto);
+  expect(missing.split("Eastern Time").length - 1).toBe(1);
+  const shown = { timeZone: "America/Toronto", businessDayStartLocalTime: "04:00:00" };
+  expect(
+    renderForm(hoursView({ ...configuration("Draft") }), { publishedHours: shown }),
+  ).not.toContain("Times are in");
+  expect(
+    renderForm(hoursView({ ...configuration("Draft"), timeZone: "America/Vancouver" }), {
+      publishedHours: shown,
+    }),
+  ).toMatch(/Times are in Pacific Time[^<]*\(Vancouver, British Columbia\)\. The business day/u);
 });
 it("edits hours without effective dates, business-day start or a typed reason code", () => {
   const html = renderForm(hoursView(null));

@@ -379,7 +379,20 @@ export function StoreServiceControlPanel({ store, csrf }: { store: string; csrf:
           />
         )}
         {configurable ? (
-          <StoreConfigurationEditor key={store + csrf} store={store} csrf={csrf} />
+          <StoreConfigurationEditor
+            key={store + csrf}
+            store={store}
+            csrf={csrf}
+            // Batch 51: the editor says the zone itself while Published hours is not drawn.
+            publishedHours={
+              view
+                ? {
+                    timeZone: view.timeZone,
+                    businessDayStartLocalTime: view.hours.businessDayStartLocalTime,
+                  }
+                : null
+            }
+          />
         ) : null}
         <section aria-labelledby="service-controls-title" aria-busy={busy}>
           <h2 id="service-controls-title">{t("Service controls")}</h2>

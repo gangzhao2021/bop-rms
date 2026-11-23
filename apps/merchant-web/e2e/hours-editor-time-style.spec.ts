@@ -89,6 +89,8 @@ async function open(
     withdrawal = true,
     declined = false,
     openChange,
+    service = "Published",
+    draftTimeZone,
   }: {
     weeklySchedule?: ReturnType<typeof week>;
     withdrawal?: boolean;
@@ -96,6 +98,10 @@ async function open(
     declined?: boolean;
     /** Batch 48: an open change (no withdrawal), yours or someone else's. */
     openChange?: { lifecycle: "PendingApproval" | "Approved"; yours: boolean };
+    /** Batch 51: how the service-status read ends (Published hours is drawn only from it). */
+    service?: ServiceState;
+    /** Batch 51: the open change moves the Store to another time zone. */
+    draftTimeZone?: string;
   } = {},
 ) {
   if (language === "zh-Hans")
@@ -127,12 +133,15 @@ async function open(
       json: {
         screenId: "STORE-HOURS-SERVICE",
         storeReference: store,
-        current: { ...configuration(1, "Published"), weeklySchedule },
+        // Batch 51: nothing published yet, as v15 reads a Store whose first hours are a draft.
+        current:
+          service === "NotPublished" ? null : { ...configuration(1, "Published"), weeklySchedule },
         latest: openChange
           ? {
               ...configuration(2, openChange.lifecycle),
               weeklySchedule,
               authoredByReference: openChange.yours ? viewer : id(31),
+              ...(draftTimeZone ? { timeZone: draftTimeZone } : {}),
             }
           : withdrawal
             ? { ...configuration(2, "PendingApproval"), weeklySchedule }
@@ -157,8 +166,19 @@ async function open(
       },
     }),
   );
-  await page.route("**/merchant/service-control", (route) =>
-    route.fulfill({
+  await page.route("**/merchant/service-control", (route) => {
+    // Batch 51 (v15 b50 live): the read is cut off (outage), never answers while the page is
+    // looked at (still loading), or is refused because nothing is published yet.
+    if (service === "Outage") return route.abort();
+    // Left unanswered: the read is still loading.
+    if (service === "Loading") return;
+    if (service === "NotPublished")
+      return route.fulfill({
+        status: 503,
+        headers,
+        json: { error: "Service request unavailable." },
+      });
+    return route.fulfill({
       headers,
       json: {
         hours: {
@@ -178,11 +198,24 @@ async function open(
         expectedVersion: 3,
         activePauses: [],
       },
-    }),
-  );
+    });
+  });
   await page.goto("/app/organization/stores/" + store + "/service");
-  await expect(page.locator("#published-hours-title")).toBeVisible();
+  if (service === "Published") await expect(page.locator("#published-hours-title")).toBeVisible();
+  else
+    await expect(
+      page.locator("section[aria-labelledby='service-controls-title'] [role='status']"),
+    ).toHaveText(
+      service === "Loading"
+        ? language === "zh-Hans"
+          ? "正在加载服务状态…"
+          : "Loading service status…"
+        : language === "zh-Hans"
+          ? "无法加载当前服务状态。请检查网络后刷新。"
+          : "Unable to load current service status. Check your connection and refresh.",
+    );
 }
+type ServiceState = "Published" | "Outage" | "Loading" | "NotPublished";
 
 const editor = (page: Page) =>
   page.locator("section[aria-labelledby='configuration-editor-title']");
@@ -586,5 +619,94 @@ for (const language of ["en", "zh-Hans"] as const) {
         expect(writes).toEqual([]);
       });
     }
+  });
+  test.describe(`@production batch 51 hours editor says the time zone in every state (${language})`, () => {
+    test.use({ locale: "en-CA" });
+    // v15 b50 live: with the service-status read failing, Published hours was not drawn and the
+    // editor hid its "Times are in …" (draft zone = published zone), so the zone was said 0 times.
+    // Each state of Hours & ordering, with where the zone is said (once each).
+    const toronto = zh ? "北美东部时间（多伦多、渥太华和蒙特利尔）" : "Eastern Time (Toronto";
+    const vancouver = zh ? "温哥华，不列颠哥伦比亚省" : "Vancouver, British Columbia";
+    const states = [
+      { state: "Loading", service: "Loading", said: { [toronto]: "Editor" } },
+      { state: "Outage", service: "Outage", said: { [toronto]: "Editor" } },
+      { state: "NotPublished", service: "NotPublished", said: { [toronto]: "Editor" } },
+      { state: "Published", service: "Published", said: { [toronto]: "Published" } },
+      {
+        state: "DraftZoneDiffers",
+        service: "Published",
+        draftTimeZone: "America/Vancouver",
+        said: { [toronto]: "Published", [vancouver]: "Editor" },
+      },
+    ] as const;
+    for (const { state, service, said, ...rest } of states)
+      for (const [width, height] of [
+        [390, 844],
+        [1024, 768],
+        [1440, 900],
+      ] as const)
+        test(`${state}: the zone is said once with the editor open, at ${width}`, async ({
+          page,
+        }) => {
+          await page.setViewportSize({ width, height });
+          const draftTimeZone = "draftTimeZone" in rest ? rest.draftTimeZone : undefined;
+          await open(page, language, {
+            service,
+            ...(draftTimeZone
+              ? {
+                  draftTimeZone,
+                  withdrawal: false,
+                  openChange: { lifecycle: "PendingApproval", yours: true },
+                }
+              : {}),
+          });
+          // Read-only: any hours or service write is stopped and recorded.
+          const writes: string[] = [];
+          for (const path of ["**/merchant/store-configuration**", "**/merchant/service-control**"])
+            await page.route(path, (route) => {
+              if (route.request().method() === "GET") return route.fallback();
+              writes.push(route.request().method() + " " + new URL(route.request().url()).pathname);
+              return route.abort();
+            });
+          await openEditor(page, zh);
+          const main = await page.locator("main").innerText();
+          const published = page.locator("section[aria-labelledby='published-hours-title']");
+          await expect(published).toHaveCount(service === "Published" ? 1 : 0);
+          const sentence = editor(page).locator("p", {
+            hasText: zh ? /^时间使用/u : /^Times are in /u,
+          });
+          for (const [zone, where] of Object.entries(said)) {
+            expect(main.split(zone).length - 1, zone).toBe(1);
+            await expect(where === "Published" ? published : sentence).toContainText(zone);
+          }
+          await expect(sentence).toHaveCount(
+            "draftTimeZone" in rest || service !== "Published" ? 1 : 0,
+          );
+          if (service !== "Published") {
+            await expect(sentence).toContainText(
+              zh ? "营业日从 4:00 开始" : "business day starts at 4:00 a.m.",
+            );
+            // The sentence wraps inside the editor, about 40 px clear of the screen edge.
+            const room = await sentence.evaluate((element) => ({
+              right: window.innerWidth - element.getBoundingClientRect().right,
+              spill: element.scrollWidth - element.clientWidth,
+            }));
+            expect(room.spill).toBeLessThanOrEqual(0);
+            expect(room.right).toBeGreaterThanOrEqual(16);
+          }
+          const overflow = await page.evaluate(
+            () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+          );
+          expect(overflow).toBeLessThanOrEqual(0);
+          // Where the zone is said in the editor (or under Published hours), for review by eye.
+          await (
+            Object.values(said).includes("Editor") ? sentence : published
+          ).scrollIntoViewIfNeeded();
+          await page.screenshot({
+            path: `test-results/b51-hours-zone-${state}-${language}-${width}.png`,
+          });
+          await expectNoInternalText(page);
+          expect(writes).toEqual([]);
+        });
   });
 }

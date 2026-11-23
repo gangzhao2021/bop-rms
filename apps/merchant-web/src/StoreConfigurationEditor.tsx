@@ -153,7 +153,26 @@ const newInterval = (modes: readonly ServiceMode[]): ServiceInterval => ({
   leadTimeSeconds: 0,
 });
 
-export function StoreConfigurationEditor({ store, csrf }: { store: string; csrf: string }) {
+/**
+ * Batch 51: the time zone and business-day start the page says above the editor, under Published
+ * hours; null while that part is not drawn (service status loading, its read failed, or nothing
+ * published yet). Undefined when the editor stands alone: the published configuration is then
+ * what it compares with.
+ */
+export type PublishedHoursShown = {
+  readonly timeZone: string;
+  readonly businessDayStartLocalTime: string;
+} | null;
+
+export function StoreConfigurationEditor({
+  store,
+  csrf,
+  publishedHours,
+}: {
+  store: string;
+  csrf: string;
+  publishedHours?: PublishedHoursShown;
+}) {
   const client = useMemo(() => createStoreConfigurationClient(), []);
   const [view, setView] = useState<StoreConfigurationView | null>(null);
   const [draft, setDraft] = useState<StoreConfigurationSnapshot | null>(null);
@@ -419,6 +438,7 @@ export function StoreConfigurationEditor({ store, csrf }: { store: string; csrf:
           onCommand={(command) => void save(command)}
           onWithdraw={(reason) => void withdraw(reason)}
           actions={actions}
+          {...(publishedHours === undefined ? {} : { publishedHours })}
         />
       ) : (
         actions
@@ -444,6 +464,7 @@ export function StoreHoursDraftForm({
   onCommand,
   onWithdraw,
   actions,
+  publishedHours = view.current,
 }: {
   readonly view: StoreConfigurationView;
   readonly draft: StoreConfigurationSnapshot;
@@ -455,6 +476,8 @@ export function StoreHoursDraftForm({
   onWithdraw?(declineReason?: StoreConfigurationDeclineReason): void;
   /** Batch 49: the editor's own actions (reload, retry), after the latest change. */
   readonly actions?: ReactNode;
+  /** Batch 51: what Published hours says above the editor; see PublishedHoursShown. */
+  readonly publishedHours?: PublishedHoursShown;
 }) {
   const [declining, setDeclining] = useState(false),
     [declineReason, setDeclineReason] = useState<StoreConfigurationDeclineReason | "">("");
@@ -614,9 +637,12 @@ export function StoreHoursDraftForm({
       {/* Batch 49 (v15 b48: said under Published hours and again here): the time zone and the
           start of the business day are said once, under Published hours. The editor says them
           only when its hours are not in the published ones (nothing published yet, or Store setup
-          changed them). */}
-      {(view.current?.timeZone !== draft.timeZone ||
-        view.current.businessDayStartLocalTime !== draft.businessDayStartLocalTime) && (
+          changed them).
+          Batch 51 (v15 b50 live: with the service-status read failing Published hours was not
+          drawn, and the zone was said nowhere): it is compared with what Published hours says on
+          this page, so the editor says it whenever that part is missing. */}
+      {(publishedHours?.timeZone !== draft.timeZone ||
+        publishedHours.businessDayStartLocalTime !== draft.businessDayStartLocalTime) && (
         <p>
           {withOneSentenceEnd(
             t("Times are in {timeZone}. The business day starts at {value}.", {
