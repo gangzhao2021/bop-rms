@@ -48,26 +48,127 @@
   color: var(--bop-color-text-muted);
   font-weight: 400;
 }
+/*
+ * Batch 54 (v15 batch 53 live, 1024 zh-Hans): the display's links sat beside the header in a grid
+ * column of their own, so a long Store name and the screen-awake note pushed them to a second row
+ * and the language switch to a third, alone. The links are now drawn inside the bar (AppFrame
+ * navigationInHeader) and every part of the bar has its own place:
+ *   1280 and wider: name · Kitchen display · links · screen note · Hand over · switch, one row;
+ *   1024: the same row without the "Kitchen display" label (the current link says it), the note
+ *         on a line under it;
+ *   768: name and switch, then the links and Hand over, then the note;
+ *   phone: name and switch, then the links, the note and Hand over, each on its own line.
+ * The switch is always top-right beside the name (Owner rule), never on a line of its own.
+ */
+.kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "title lang"
+    "nav nav"
+    "note note"
+    "handover handover"
+    "failed failed";
+  gap: 0 16px;
+  padding: 4px 16px;
+}
+.kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header > h1 {
+  grid-area: title;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header > p {
+  grid-area: desc;
+}
+.kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header .bop-shell__nav {
+  grid-area: nav;
+  display: flex;
+  align-items: center;
+  gap: 0 20px;
+  padding: 0;
+  overflow: visible;
+  background: none;
+}
+/* A navigation whose every link is the current page offers nowhere to go. */
+.kitchen-shell:not(.kitchen-shell--workspace)
+  .bop-shell__header
+  .bop-shell__nav:not(:has(a:not([aria-current="page"]))) {
+  display: none;
+}
+.kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header-status,
+.kitchen-shell:not(.kitchen-shell--workspace) .kitchen-display-controls {
+  display: contents;
+}
+.kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header .kitchen-screen-awake {
+  grid-area: note;
+  max-width: none;
+}
+.kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header .kitchen-handover-button {
+  grid-area: handover;
+  justify-self: start;
+}
+.kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header .kitchen-handover-failed {
+  grid-area: failed;
+}
+.kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header-extra {
+  grid-area: lang;
+  align-self: start;
+  justify-self: end;
+  margin: 0;
+}
+.kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header .kitchen-display-nav-link,
+.kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header .kitchen-handover-button,
+.kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header .language-switch {
+  white-space: nowrap;
+}
+/* The label is said by the current link below 1280 px; it is still read out. */
+@media (max-width: 1279px) {
+  .kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header:has(.bop-shell__nav) > p {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
 @media (min-width: 768px) {
-  .kitchen-shell:not(.kitchen-shell--workspace) {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-areas:
-      "header nav"
-      "main main";
-    align-content: start;
-    border-bottom: 0;
-  }
   .kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header {
-    grid-area: header;
+    grid-template-areas:
+      "title lang"
+      "nav handover"
+      "note note"
+      "failed failed";
+    padding: 4px 24px;
   }
-  .kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__nav {
-    grid-area: nav;
-    align-items: center;
-    padding: 0 24px 0 0;
+  .kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header .kitchen-handover-button {
+    justify-self: end;
   }
-  .kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__main {
-    grid-area: main;
+}
+@media (min-width: 1024px) {
+  .kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header {
+    grid-template-columns: minmax(0, max-content) auto minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      "title nav . handover lang"
+      "note note note note note"
+      "failed failed failed failed failed";
+    gap: 0 24px;
+  }
+  .kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header-extra {
+    align-self: center;
+  }
+}
+@media (min-width: 1280px) {
+  .kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header {
+    grid-template-columns: minmax(0, max-content) auto auto minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      "title desc nav note handover lang"
+      "failed failed failed failed failed failed";
+  }
+  .kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header .kitchen-screen-awake {
+    justify-self: end;
+    text-align: end;
+    text-wrap: balance;
   }
 }
 .kitchen-shell .bop-shell__nav a.kitchen-display-nav-link {
@@ -528,27 +629,8 @@
   .kitchen-shell .bop-shell__main {
     padding: 0 16px 48px;
   }
-  /* b40 CI (390x844, Linux fonts): a remake's buttons must be on the first screen of a phone. The
-     language switch takes the top-right corner beside the display's name instead of a row of its
-     own, and the screen-awake note and Hand over keep the full width under them. */
-  .kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 2px 16px;
-    padding: 4px 16px;
-  }
-  .kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header-extra {
-    grid-column: 2;
-    grid-row: 1 / span 2;
-    align-self: start;
-  }
-  .kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header-status {
-    grid-column: 1 / -1;
-    margin-inline-start: 0;
-  }
-  .kitchen-shell:not(.kitchen-shell--workspace) .kitchen-display-controls {
-    justify-content: flex-start;
-  }
+  /* b40 CI (390x844, Linux fonts): a remake's buttons must be on the first screen of a phone; the
+     display's bar (see "Batch 54" above) keeps the switch beside the name for that reason too. */
   /* The board's own rows sit a little closer on a phone, for the same first screen. */
   .kitchen-shell:not(.kitchen-shell--workspace) .kitchen-board-workspace {
     gap: 12px;

@@ -147,6 +147,7 @@ export function StoreAvailabilityPage({
         title: kitchenDisplay.storeLabel,
         description: t("Kitchen display"),
         className: "kitchen-shell",
+        navigationInHeader: true,
         navigation: (
           <KitchenDisplayNavigation current="SoldOut" soldOutHref={kitchenDisplay.soldOutHref} />
         ),

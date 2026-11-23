@@ -680,6 +680,7 @@ function KitchenFrame({
       title={title}
       description={t("Kitchen display")}
       navigation={navigation}
+      navigationInHeader
       headerStatus={headerStatus}
       className="kitchen-shell"
     >
