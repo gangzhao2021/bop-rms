@@ -41,8 +41,16 @@ const wide = [
 ] as const;
 
 async function chooseLanguage(page: Page, language: "en" | "zh-Hans") {
-  if (language === "zh-Hans") await page.getByRole("button", { name: "切换到中文" }).click();
-  else await page.getByRole("button", { name: "Switch to English" }).click();
+  if (language === "zh-Hans")
+    await Promise.all([
+      page.waitForEvent("load"),
+      page.getByRole("button", { name: "切换到中文" }).click(),
+    ]);
+  else
+    await Promise.all([
+      page.waitForEvent("load"),
+      page.getByRole("button", { name: "Switch to English" }).click(),
+    ]);
 }
 
 /** On a phone: the Filters sheet, as staff chose it live. */

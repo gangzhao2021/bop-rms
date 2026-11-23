@@ -4,6 +4,7 @@ import ts from "typescript";
 import { afterEach, expect, it, vi } from "vitest";
 import {
   chooseLanguage,
+  prepareLanguageSwitch,
   countOf,
   displayLocale,
   keepThroughLanguageSwitch,
@@ -291,6 +292,44 @@ it("b21: a language switch that cannot keep an unsaved edit asks before reloadin
     expect(confirm).toHaveBeenCalledTimes(1);
     expect(reload).toHaveBeenCalledTimes(1);
     expect(takeKeptThroughLanguageSwitch("storeSetup:s")).toEqual({ businessStart: "04:30" });
+  } finally {
+    stop();
+    setLanguageForTest("en");
+    vi.unstubAllGlobals();
+  }
+});
+
+// b55 (v15 b54 live, kitchen display offline): the switch asks about unsaved work on the tap,
+// then reloads only once the store system answered; when it does not, what was kept for the reload
+// is removed and nothing changes.
+it("b55: a prepared language switch that is called off writes nothing and does not reload", () => {
+  const reload = vi.fn();
+  const stored = new Map<string, string>();
+  const chosen = new Map<string, string>();
+  vi.stubGlobal("location", { reload });
+  vi.stubGlobal("confirm", () => true);
+  vi.stubGlobal("localStorage", {
+    setItem: (key: string, value: string) => void chosen.set(key, value),
+    getItem: () => null,
+  });
+  vi.stubGlobal("sessionStorage", {
+    getItem: (key: string) => stored.get(key) ?? null,
+    setItem: (key: string, value: string) => void stored.set(key, value),
+    removeItem: (key: string) => void stored.delete(key),
+  });
+  const stop = keepThroughLanguageSwitch("kitchen:scope", () => ({ section: "Wok" }));
+  try {
+    const prepared = prepareLanguageSwitch("zh-Hans");
+    expect(stored.size).toBe(1);
+    prepared?.cancel();
+    expect(stored.size).toBe(0);
+    expect(chosen.size).toBe(0);
+    expect(reload).not.toHaveBeenCalled();
+    expect(t("Orders")).toBe("Orders");
+    prepareLanguageSwitch("zh-Hans")?.switchNow();
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(chosen.get("bop.merchant.language")).toBe("zh-Hans");
+    expect(takeKeptThroughLanguageSwitch("kitchen:scope")).toEqual({ section: "Wok" });
   } finally {
     stop();
     setLanguageForTest("en");

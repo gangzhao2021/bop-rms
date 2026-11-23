@@ -9708,6 +9708,23 @@ body:has(.product-complete-draft) .bop-shell__header,
 .language-switch:hover {
   border-color: var(--bop-color-text-default);
 }
+/* Batch 55: the switch could not reload (no connection); the screen stays as it was. */
+.language-switch-note {
+  position: fixed;
+  right: var(--bop-space-4);
+  bottom: var(--bop-space-4);
+  left: var(--bop-space-4);
+  z-index: 65;
+  max-width: 36rem;
+  margin: 0 auto;
+  padding: var(--bop-space-3) var(--bop-space-4);
+  border: 1px solid var(--bop-color-border-default);
+  border-left: 6px solid var(--bop-color-warning);
+  border-radius: var(--bop-radius-card);
+  background: var(--bop-color-surface-default);
+  color: var(--bop-color-text-default);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 16%);
+}
 .bop-shell__header-extra {
   margin-left: auto;
   align-self: center;

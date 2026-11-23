@@ -82,7 +82,11 @@ const asciiStopAfterChinese = /[㐀-鿿”）]\./u;
  */
 async function switchLanguage(page: Page, name: string) {
   await expect(async () => {
-    await page.getByRole("button", { name }).click({ timeout: 2_000 });
+    // The switch reloads once it has heard from the store system: wait for that reload.
+    await Promise.all([
+      page.waitForEvent("load", { timeout: 8_000 }),
+      page.getByRole("button", { name }).click({ timeout: 2_000 }),
+    ]);
   }).toPass({ timeout: 20_000 });
 }
 async function toChinese(page: Page) {

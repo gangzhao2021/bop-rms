@@ -9621,6 +9621,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这些选项还没回答是否会加过敏原：{choices}。在你逐一回答“加过敏原吗？”之前，顾客会被提醒先问店员。",
   "What you typed here is not saved yet. Switching the language reloads the page and loses it. Switch anyway?":
     "这里填写的内容还没保存。切换语言会重新加载页面，内容会丢失。仍要切换吗？",
+  "Can't reach the system right now, so the language can't change. This screen stays as it is; try again once connected.":
+    "现在连不上系统，语言暂时换不了。这一页保持不变，联网后再试。",
   "Table ordering": "堂食点单",
   "Delivery ordering": "外送点单",
   "Table and pickup ordering": "堂食和自取点单",

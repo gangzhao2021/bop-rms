@@ -28,8 +28,16 @@ const widths = [
 ] as const;
 
 async function chooseLanguage(page: Page, language: "en" | "zh-Hans") {
-  if (language === "zh-Hans") await page.getByRole("button", { name: "切换到中文" }).click();
-  else await page.getByRole("button", { name: "Switch to English" }).click();
+  if (language === "zh-Hans")
+    await Promise.all([
+      page.waitForEvent("load"),
+      page.getByRole("button", { name: "切换到中文" }).click(),
+    ]);
+  else
+    await Promise.all([
+      page.waitForEvent("load"),
+      page.getByRole("button", { name: "Switch to English" }).click(),
+    ]);
 }
 
 test("@production WP-2423 batch 42: a work-state tab with nothing in it is quiet, not a filter to clear (back office)", async ({

@@ -67,7 +67,10 @@ test("@production WP-2423 batch 40: on the back office Kitchen page a remake com
   ).toEqual([]);
 
   // The same in Chinese.
-  await page.getByRole("button", { name: "切换到中文" }).click();
+  await Promise.all([
+    page.waitForEvent("load"),
+    page.getByRole("button", { name: "切换到中文" }).click(),
+  ]);
   const zhAttention = page.locator(".kitchen-office-earlier");
   await expect(zhAttention.locator("summary")).toContainText("需要处理");
   await expect(zhAttention.locator("summary")).toContainText("53");
@@ -122,7 +125,11 @@ test("@production WP-2423 batch 40: on a 390 px phone a remake's buttons are on 
   await expect(lane).toBeVisible();
   await expect(page.getByText("Pause ordering")).toBeVisible();
   for (const language of ["en", "zh"] as const) {
-    if (language === "zh") await page.getByRole("button", { name: "切换到中文" }).click();
+    if (language === "zh")
+      await Promise.all([
+        page.waitForEvent("load"),
+        page.getByRole("button", { name: "切换到中文" }).click(),
+      ]);
     await atTop(page, 390, 844);
     const names =
       language === "en" ? ["Start remake", "Cancel remake"] : ["开始重做", /^取消重做/u];

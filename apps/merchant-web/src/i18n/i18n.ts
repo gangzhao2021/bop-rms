@@ -422,13 +422,28 @@ function keepForSwitch(written: string[]): boolean {
   return kept;
 }
 
-/** Chooses a language for this device and reloads, so every text follows it. */
-export function chooseLanguage(language: StaffLanguage): void {
+/**
+ * Asks first about work the reload would lose (as `chooseLanguage`) and writes what screens keep
+ * through it. Batch 55: the reload itself waits for `switchNow`, so the switch can find out first
+ * whether the store system answers; `cancel` undoes what was written when it does not. Null when
+ * staff chose to stay (nothing written) or the language is already this one.
+ */
+export function prepareLanguageSwitch(
+  language: StaffLanguage,
+): { readonly switchNow: () => void; readonly cancel: () => void } | null {
   const written: string[] = [];
   // b21: what a screen keeps through the reload is written first; if it cannot be, that work is
   // lost by the reload too, so the switch asks first, as it does for other unsaved work.
   const kept = language === current || keepForSwitch(written);
   const losing = language !== current && (unsavedWork.size > 0 || !kept);
+  const cancel = () => {
+    for (const key of written)
+      try {
+        globalThis.sessionStorage.removeItem(key);
+      } catch {
+        // Nothing more to undo.
+      }
+  };
   if (
     losing &&
     !globalThis.confirm(
@@ -437,21 +452,34 @@ export function chooseLanguage(language: StaffLanguage): void {
       ),
     )
   ) {
-    for (const key of written)
+    cancel();
+    return null;
+  }
+  if (language === current) return null;
+  return {
+    cancel,
+    switchNow: () => {
       try {
-        globalThis.sessionStorage.removeItem(key);
+        globalThis.localStorage.setItem(STORAGE_KEY, language);
       } catch {
-        // Nothing more to undo.
+        // Private browsing: the choice holds until the reload below only.
       }
+      current = language;
+      leavingOnPurpose = true;
+      globalThis.location.reload();
+    },
+  };
+}
+
+/** Chooses a language for this device and reloads, so every text follows it. */
+export function chooseLanguage(language: StaffLanguage): void {
+  if (language === current) {
+    try {
+      globalThis.localStorage.setItem(STORAGE_KEY, language);
+    } catch {
+      // Private browsing: nothing to keep.
+    }
     return;
   }
-  try {
-    globalThis.localStorage.setItem(STORAGE_KEY, language);
-  } catch {
-    // Private browsing: the choice holds until the reload below only.
-  }
-  if (language === current) return;
-  current = language;
-  leavingOnPurpose = true;
-  globalThis.location.reload();
+  prepareLanguageSwitch(language)?.switchNow();
 }

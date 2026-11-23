@@ -42,8 +42,16 @@ const order1 = [
 ];
 
 async function chooseLanguage(page: Page, language: "en" | "zh-Hans") {
-  if (language === "zh-Hans") await page.getByRole("button", { name: "切换到中文" }).click();
-  else await page.getByRole("button", { name: "Switch to English" }).click();
+  if (language === "zh-Hans")
+    await Promise.all([
+      page.waitForEvent("load"),
+      page.getByRole("button", { name: "切换到中文" }).click(),
+    ]);
+  else
+    await Promise.all([
+      page.waitForEvent("load"),
+      page.getByRole("button", { name: "Switch to English" }).click(),
+    ]);
 }
 
 async function chooseWorkState(page: Page, zh: boolean, value: string) {

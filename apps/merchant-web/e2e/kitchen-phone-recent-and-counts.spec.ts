@@ -60,7 +60,11 @@ for (const surface of ["display", "display with sections", "back office"] as con
     });
     await page.goto("/operations/kitchen");
     for (const language of ["en", "zh-Hans"] as const) {
-      if (language === "zh-Hans") await page.getByRole("button", { name: "切换到中文" }).click();
+      if (language === "zh-Hans")
+        await Promise.all([
+          page.waitForEvent("load"),
+          page.getByRole("button", { name: "切换到中文" }).click(),
+        ]);
       const summaryText = language === "en" ? "Recently finished · 4" : "最近完成 · 4";
       const remakeName = language === "en" ? /^Remake /u : /^重做/u;
       if (surface === "display with sections")
@@ -131,7 +135,11 @@ test("@production WP-2423 batch 41: a waiting remake is counted as work, and the
     });
     await page.goto("/operations/kitchen");
     for (const language of ["en", "zh-Hans"] as const) {
-      if (language === "zh-Hans") await page.getByRole("button", { name: "切换到中文" }).click();
+      if (language === "zh-Hans")
+        await Promise.all([
+          page.waitForEvent("load"),
+          page.getByRole("button", { name: "切换到中文" }).click(),
+        ]);
       const zh = language === "zh-Hans";
       await expect(
         page.getByRole("region", { name: zh ? "重做" : "Remakes" }).getByRole("article"),
@@ -172,7 +180,10 @@ test("@production WP-2423 batch 41: a waiting remake is counted as work, and the
       }
       await expectNoInternalText(page);
     }
-    await page.getByRole("button", { name: "Switch to English" }).click();
+    await Promise.all([
+      page.waitForEvent("load"),
+      page.getByRole("button", { name: "Switch to English" }).click(),
+    ]);
   }
 });
 
@@ -193,7 +204,11 @@ test("@production WP-2423 batch 41: earlier-day tickets have one name on both sc
       ".kitchen-office-earlier > summary, .kitchen-earlier-days > summary",
     );
     for (const language of ["en", "zh-Hans"] as const) {
-      if (language === "zh-Hans") await page.getByRole("button", { name: "切换到中文" }).click();
+      if (language === "zh-Hans")
+        await Promise.all([
+          page.waitForEvent("load"),
+          page.getByRole("button", { name: "切换到中文" }).click(),
+        ]);
       const zh = language === "zh-Hans";
       await expect(summary).toHaveText(
         zh
@@ -217,7 +232,10 @@ test("@production WP-2423 batch 41: earlier-day tickets have one name on both sc
       }
       await expectNoInternalText(page);
     }
-    await page.getByRole("button", { name: "Switch to English" }).click();
+    await Promise.all([
+      page.waitForEvent("load"),
+      page.getByRole("button", { name: "Switch to English" }).click(),
+    ]);
   }
 });
 
