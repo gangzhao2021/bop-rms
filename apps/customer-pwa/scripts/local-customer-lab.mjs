@@ -324,11 +324,10 @@ async function verifySharedTable(browser, origin, dining, cart) {
       await page.getByText("2 items", { exact: true }).waitFor();
       const foreign = foreignItem(page);
       assert.equal(await foreign.count(), 1);
+      // Batch 51: a line only its adder can change shows its quantity and no controls at all
+      // (disabled buttons read as offered).
       for (const button of ["Increase Latte quantity", "Decrease Latte quantity", "Remove Latte"])
-        assert.equal(
-          await foreign.getByRole("button", { name: button, exact: true }).isDisabled(),
-          true,
-        );
+        assert.equal(await foreign.getByRole("button", { name: button, exact: true }).count(), 0);
       assert.equal(await page.getByText(`Note: ${notes[index]}`, { exact: true }).count(), 1);
       assert.equal(await page.getByText(`Note: ${notes[1 - index]}`, { exact: true }).count(), 0);
       assert.equal(
