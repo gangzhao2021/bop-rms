@@ -148,6 +148,24 @@ for (const language of ["en", "zh-Hans"] as const)
       });
       // On the first screen, with room for wider Linux fonts (DejaVu Sans) above it.
       expect(box.bottom, JSON.stringify(box)).toBeLessThanOrEqual(height - 40);
+      // The "New order" mark never runs into what the order is (1024/1440 put it under "51").
+      const mark = await fresh.evaluate((row) => {
+        const word = row.querySelector(".order-row__new")?.getBoundingClientRect();
+        const what = row.querySelector(".order-row__what")?.getBoundingClientRect();
+        const status = row.querySelector(".order-row__status")?.getBoundingClientRect();
+        return {
+          right: word?.right ?? 0,
+          bottom: word?.bottom ?? 0,
+          whatLeft: what?.left ?? 0,
+          whatTop: what?.top ?? 0,
+          statusTop: status?.top ?? 0,
+        };
+      });
+      expect(
+        mark.right <= mark.whatLeft - 8 ||
+          mark.bottom <= Math.min(mark.whatTop, mark.statusTop) + 1,
+        JSON.stringify(mark),
+      ).toBe(true);
       // Every order stays listed: today's first, then the earlier days' under their own heading.
       const order_ = await rows.evaluateAll((list) =>
         list.map((row) => row.querySelector(".order-row__open")?.textContent ?? ""),

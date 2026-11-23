@@ -1612,6 +1612,22 @@
   border-radius: 50%;
   background: var(--bop-color-accent);
 }
+/* Batch 55 (New orders first on the screen): beside "51" the mark ran into the items at 1024 and
+   1440 (DejaVu Sans: "New order" over "Pickup"). Wider lists put it under the number, in the
+   number's own column; phones already give the label its own line (data-long-number). */
+@container order-list (min-width: 513px) {
+  .orders-page .order-row__new {
+    display: flex;
+    width: max-content;
+    margin: 2px 0 0;
+    gap: 5px;
+    line-height: 1.3;
+  }
+  .orders-page .order-row__new::before {
+    width: 7px;
+    height: 7px;
+  }
+}
 .orders-page .order-accept-all {
   display: flex;
   flex-wrap: wrap;
