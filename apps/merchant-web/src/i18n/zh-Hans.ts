@@ -10492,4 +10492,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "More Brands": "更多品牌",
   "Store totals, Catalogue, Theme and configuration summaries are not available in this discovery view.":
     "这里只用来选品牌，看不到门店汇总、菜单、外观和配置概要。",
+  // Batch 55 (v15 b54 live): a table checking out or paid takes no staff round.
+  "Table {table}'s bill is paid, so no more rounds can be added to it. If the guests want to order more, close the table and press Cleaned, then take their order: it starts a new bill.":
+    "{table} 号桌的账单已付清，不能再加单。客人如还要点，请先关台，再按“已清洁”，然后为他们点单：这会开一张新账单。",
+  "Table {table} is checking out, so no round can be added to its bill. If the guests want to order more, press Cancel checkout on the table before anyone pays. Once someone has paid, finish the checkout, close the table and press Cleaned, then take their order as a new bill.":
+    "{table} 号桌正在结账，不能再往这张账单加单。客人如还要点，在有人付款前请在这桌按“取消结账”。如果已经有人付款，请先结完账、关台并按“已清洁”，再为他们点单，算作一张新账单。",
+  "No round can be added for this table now": "这桌现在不能加单",
+  "Nothing was sent or charged, and this order is still here.":
+    "没有下单，也没有收款；这张单还在这里。",
 });

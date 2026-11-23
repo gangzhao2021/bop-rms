@@ -28,6 +28,7 @@ import {
   prepareServeAllReady,
   type TableOrderFacts,
 } from "./table-order-facts.js";
+import { staffRoundOffer, staffRoundRefusedText } from "./staff-round-offer.js";
 import {
   compareTables,
   staffCallReasonText,
@@ -2153,6 +2154,7 @@ function TablePanel({
   const noCode = table.qrCodeValidUntil === null;
   const checkingOut = table.session?.phase === "Closing";
   const hasOrder = Boolean(table.session?.orderReference);
+  const roundOffer = staffRoundOffer(table, settled);
   // Batch 49 (v15 b48 live): that no one new can join a table checking out is said once in the
   // panel: in the outcome line when a refused step just said it, else where the phones are, else
   // (no phones block for this role) where New join code was.
@@ -2415,7 +2417,7 @@ function TablePanel({
           )}
         </section>
       ) : null}
-      {canTakeOrders && eligible && !noCode ? (
+      {canTakeOrders && roundOffer === "Offered" ? (
         // WP-2423 Q7 slice 2: a round for guests who can't or won't order on a phone (or a
         // paper order entered after an outage); it joins the table's order, or opens the table.
         <Link
@@ -2426,6 +2428,12 @@ function TablePanel({
             stableLabel: saidTable(table.stableLabel),
           })}
         </Link>
+      ) : canTakeOrders && (roundOffer === "Paid" || roundOffer === "CheckingOut") ? (
+        // Batch 55 (v15 b54 live): a table checking out takes no round (the send refuses it);
+        // staff read why and what to do instead of a link that fails on Send.
+        <p role="note" className="dining-close-who">
+          {staffRoundRefusedText(roundOffer, table.stableLabel)}
+        </p>
       ) : null}
       {/* Owner 2026-11-03 walkthrough: dishes, payment and closing come first; the rest is here. */}
       <details className="table-panel__manage" open={!seated}>
