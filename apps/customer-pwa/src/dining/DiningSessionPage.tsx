@@ -1258,8 +1258,10 @@ export function DiningSessionScreen({
   const [tablePayment] = useState(() => tablePaymentClient ?? createTablePaymentClient());
   // Dishes can be added while the table orders: not while it checks out, after it paid, or once
   // everything is closed. A table paying at the end can still order after everything is served.
+  // Batch 54: a bill staff closed (the guests left) takes nothing more either, paid or not.
   const paidOff =
     tablePay?.paid === true ||
+    view?.summary?.closedByStaff === true ||
     (view?.paymentTiming === "PayLater" &&
       view.summary !== null &&
       view.summary.due.amountMinor === "0" &&

@@ -1446,6 +1446,7 @@ describe("batch 54 (v15 b53 live): a bill staff closed after the guests left", (
         row[2],
       ]),
       text: section.replace(/<[^>]+>/gu, " ").replace(/\s+/gu, " "),
+      page: html,
     };
   };
   it("by dish, one dish paid: Paid, the rest not charged, and why (en, zh)", () => {
@@ -1498,6 +1499,11 @@ describe("batch 54 (v15 b53 live): a bill staff closed after the guests left", (
     ]);
     expect(en.text).toContain("Staff closed this bill; nothing was charged.");
     expect(en.text).not.toMatch(/pays once at the end|To pay at the end|Cash is rounded/u);
+    // Staff closed the bill: nothing more is ordered here (no menu link, no "paying" note).
+    expect(en.page).not.toContain("Order more from the menu");
+    expect(closed("en", "1413", { count: null, paid: 1 }).page).not.toContain(
+      "Order more from the menu",
+    );
     const zh = closed("zh-Hans", "0");
     expect(zh.rows).toEqual([
       ["已付款", "$0.00"],
