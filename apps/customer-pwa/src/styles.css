@@ -2230,8 +2230,28 @@
   font-weight: 700;
 }
 /* ---------- WP-2423 Q8: dine-in table (CUST-DINE-IN-SESSION) ---------- */
-.dining-session__summary dl {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+/* Batch 52 (v15 b51 live): the table total is a bill. At every width each line keeps its label on
+   the left and its amount on the right, so Subtotal, Tax, Total, Paid so far and Still to pay line
+   up in one column, as on each round and the receipt. */
+.order-status__summary.dining-session__summary dl {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+}
+.order-status__summary.dining-session__summary dl div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--bop-space-3);
+  font-variant-numeric: tabular-nums;
+}
+.order-status__summary.dining-session__summary dl dd {
+  margin: 0;
+  text-align: end;
+}
+@media (min-width: 40rem) {
+  .order-status__summary.dining-session__summary dl div {
+    padding: var(--bop-space-1) 0;
+  }
 }
 .dining-session__summary > p:last-child {
   margin: var(--bop-space-3) 0 0;
@@ -2306,8 +2326,7 @@
   opacity: 0.6;
 }
 @media (max-width: 24rem) {
-  .dining-session__round-facts,
-  .dining-session__summary dl {
+  .dining-session__round-facts {
     grid-template-columns: 1fr;
   }
 }

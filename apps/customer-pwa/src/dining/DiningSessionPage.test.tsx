@@ -1252,6 +1252,44 @@ it("WP-2423 D5: a round from another day shows its date, today's only its time",
   expect(dated).not.toBe(formatClockTime(earlier));
 });
 
+describe("batch 52 (v15 b51 live): the Table total names what the table owes one way per moment", () => {
+  const owed = (paid: string, due: string, splitParts?: { count: null; paid: number }) =>
+    render({
+      status: "ready",
+      view: view({
+        paymentTiming: "PayLater",
+        summary: {
+          paid: cad(paid),
+          refunded: cad("0"),
+          refundPending: cad("0"),
+          due: cad(due),
+          ...(splitParts === undefined ? {} : { splitParts }),
+        },
+      }),
+      refreshing: false,
+    })
+      .replace(/<[^>]+>/gu, " ")
+      .replace(/\s+/gu, " ");
+  it("nothing paid: paid at the end", () => {
+    const html = owed("0", "2825");
+    expect(html).toContain("Paid so far $0.00 To pay at the end $28.25");
+    expect(html).not.toContain("Still to pay");
+  });
+  it("a part paid: still to pay", () => {
+    const html = owed("1413", "1412", { count: null, paid: 1 });
+    expect(html).toContain("Paid so far $14.13 Still to pay $14.12");
+    expect(html).not.toContain("To pay at the end");
+  });
+  it("all paid (the split is no longer spoken of): paid, and no line for what is left", () => {
+    const html = owed("2825", "0");
+    expect(html).toContain("Paid $28.25");
+    expect(html).not.toContain("Paid so far");
+    expect(html).not.toContain("To pay at the end");
+    expect(html).not.toContain("Still to pay");
+    expect(html).not.toContain("Nothing");
+  });
+});
+
 describe("WP-2423 item 8 ④ v15 a: a table paying its split bill in parts", () => {
   it("shows what is still to pay and says the table pays in parts", () => {
     const html = render({

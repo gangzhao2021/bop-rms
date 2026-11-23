@@ -656,6 +656,9 @@ function TableSummary({ view }: { readonly view: DiningSessionView }) {
   const summary = view.summary;
   if (summary === null) return null;
   const nonZero = (value: DiningMoney) => value.amountMinor !== "0";
+  // A table paying at the end that has paid everything it owes (staff closing a bill say so).
+  const allPaid =
+    payLater && summary.closedByStaff !== true && !nonZero(summary.due) && nonZero(summary.paid);
   return (
     <section
       className="order-status__card order-status__summary dining-session__summary"
@@ -741,21 +744,26 @@ function TableSummary({ view }: { readonly view: DiningSessionView }) {
       ) : null}
       <dl>
         <div>
-          <dt>{t("Paid so far")}</dt>
+          <dt>{allPaid ? t("Paid") : t("Paid so far")}</dt>
           <dd>{money(summary.paid)}</dd>
         </div>
-        <div>
-          <dt>
-            {summary.closedByStaff === true
-              ? t("Staff have closed this bill")
-              : summary.splitParts !== undefined
-                ? t("Still to pay")
-                : payLater
-                  ? t("To pay at the end")
-                  : t("Waiting for payment")}
-          </dt>
-          <dd>{nonZero(summary.due) ? money(summary.due) : t("Nothing")}</dd>
-        </div>
+        {/* Batch 52 (v15 b51 live): one name per moment for what the table still owes. Before
+            anyone pays it is what the table pays at the end; once a part is paid, what is still to
+            pay; once it is all paid there is nothing left to name (the pay section thanks them). */}
+        {allPaid ? null : (
+          <div>
+            <dt>
+              {summary.closedByStaff === true
+                ? t("Staff have closed this bill")
+                : summary.splitParts !== undefined || (payLater && nonZero(summary.paid))
+                  ? t("Still to pay")
+                  : payLater
+                    ? t("To pay at the end")
+                    : t("Waiting for payment")}
+            </dt>
+            <dd>{nonZero(summary.due) ? money(summary.due) : t("Nothing")}</dd>
+          </div>
+        )}
         {nonZero(summary.refunded) ? (
           <div>
             <dt>{t("Refunded")}</dt>

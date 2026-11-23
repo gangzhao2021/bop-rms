@@ -9,6 +9,12 @@ import { routeStorefrontReads } from "./storefront-reads";
 // next 15 s read. The pay section learns of a payment (this phone's or another guest's) from its
 // own read; the table's total and rounds come from the table read, which now runs at once too.
 // Synthetic HTTP interception on the production PWA, in the shapes v15 answered (TM2, G50 Pay).
+//
+// Batch 52 (v15 b51 live, guest-table-total-after-part-pay): the Table total named what the table
+// owes three ways for one line ("To pay at the end", then "Still to pay", then "To pay at the end ·
+// Nothing" once all was paid); at 1024/1440 its amounts sat in left-hand columns while Total sat at
+// the far right; and every visit to Your table at a Store with calling staff off asked for the
+// staff call again and got 409 (TM2's setting, not the checkout).
 test.beforeEach(({ context }) => routeStorefrontReads(context));
 test.use({ serviceWorkers: "block" });
 const id = (n: number) => "018f8a51-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -39,8 +45,11 @@ const syntheticStripe = `window.Stripe = function() { return {
   confirmPayment: async function() { return { paymentIntent: { status: "succeeded" } }; }
 }; };`;
 
-/** Who paid a part of the bill: nobody yet, this phone (round 1), or another guest (round 2). */
-type Paid = "nobody" | "me" | "other";
+/**
+ * Who paid a part of the bill: nobody yet, this phone (round 1), another guest (round 2), or the
+ * whole bill by dish (both parts).
+ */
+type Paid = "nobody" | "me" | "other" | "all";
 interface Table {
   /** Another guest started paying their own dish before this page was opened. */
   readonly otherPaying: boolean;
@@ -59,8 +68,13 @@ const dishOf = (round: 1 | 2) => ({
   unitMinor: [round === 1 ? "1413" : "1412"],
   unitSubtotalMinor: ["1250"],
 });
-const partOf = (round: 1 | 2, status: "Paid" | "Mine" | "Paying", byYou: boolean) => ({
-  partNumber: 1,
+const partOf = (
+  round: 1 | 2,
+  status: "Paid" | "Mine" | "Paying",
+  byYou: boolean,
+  partNumber = 1,
+) => ({
+  partNumber,
   amountMinor: round === 1 ? "1413" : "1412",
   subtotalMinor: "1250",
   dishes: [{ displayName: dish, quantity: 1, shared: false }],
@@ -72,6 +86,33 @@ const partOf = (round: 1 | 2, status: "Paid" | "Mine" | "Paying", byYou: boolean
 
 /** The table's payment view as v15 answered it to guest A at each moment. */
 function paymentView(table: Table) {
+  if (table.paid === "all")
+    // As v15 answered once both guests had paid their own dish (order 64).
+    return {
+      schemaVersion: 1,
+      payment: {
+        refundedMinor: "0",
+        tableLabel,
+        checkingOut: true,
+        rounds: [],
+        owed: { subtotalMinor: "0", taxMinor: "0", totalMinor: "0", taxRoundingMinor: "0" },
+        consistent: true,
+        matchesOrderApartFromSplit: true,
+        tips: { enabled: true, tierPercents: [10, 15, 18] },
+        state: "Paid",
+        attempt: null,
+        split: {
+          mode: "ByGuests",
+          stale: false,
+          paidInFull: true,
+          paidParts: 2,
+          remainingMinor: "0",
+          parts: [partOf(1, "Paid", true, 1), partOf(2, "Paid", false, 2)],
+        },
+        choices: null,
+        receipt: null,
+      },
+    };
   const paidRound = table.paid === "me" ? 1 : table.paid === "other" ? 2 : null;
   const owedMinor = paidRound === 1 ? "1412" : paidRound === 2 ? "1413" : "2825";
   const owedTax = paidRound === 1 ? "162" : paidRound === 2 ? "163" : "325";
@@ -168,7 +209,10 @@ function sessionView(table: Table) {
   const round = (number: 1 | 2) => {
     const total = number === 1 ? "1413" : "1412";
     const tax = number === 1 ? "163" : "162";
-    const paid = (table.paid === "me" && number === 1) || (table.paid === "other" && number === 2);
+    const paid =
+      table.paid === "all" ||
+      (table.paid === "me" && number === 1) ||
+      (table.paid === "other" && number === 2);
     return {
       roundNumber: number,
       orderedBy: number === 1 ? "You" : "AnotherGuest",
@@ -200,8 +244,22 @@ function sessionView(table: Table) {
       },
     };
   };
-  const paidMinor = table.paid === "me" ? "1413" : table.paid === "other" ? "1412" : "0";
-  const dueMinor = table.paid === "me" ? "1412" : table.paid === "other" ? "1413" : "2825";
+  const paidMinor =
+    table.paid === "all"
+      ? "2825"
+      : table.paid === "me"
+        ? "1413"
+        : table.paid === "other"
+          ? "1412"
+          : "0";
+  const dueMinor =
+    table.paid === "all"
+      ? "0"
+      : table.paid === "me"
+        ? "1412"
+        : table.paid === "other"
+          ? "1413"
+          : "2825";
   return {
     schemaVersion: 1,
     session: {
@@ -216,11 +274,26 @@ function sessionView(table: Table) {
         refundPending: money("0"),
         due: money(dueMinor),
         ordered: { subtotal: money("2500"), tax: money("325"), total: money("2825") },
-        ...(table.paid === "nobody" ? {} : { splitParts: { count: null, paid: 1 } }),
+        // v15 sends the table's bill as staff print it (b13); the Table total shows it.
+        bill: {
+          items: money("2500"),
+          takenOff: money("0"),
+          pointsUsed: money("0"),
+          subtotal: money("2500"),
+          tax: money("325"),
+          total: money("2825"),
+        },
+        // Paid in full, a split is no longer spoken of (customerSplitParts).
+        ...(table.paid === "nobody" || table.paid === "all"
+          ? {}
+          : { splitParts: { count: null, paid: 1 } }),
       },
     },
   };
 }
+
+/** Each GET of the staff call this page made. */
+const staffCallReads = new WeakMap<Page, number>();
 
 async function stubTable(page: Page, table: Table) {
   const json = (status: number, body: unknown) => ({
@@ -283,14 +356,21 @@ async function stubTable(page: Page, table: Table) {
     else if (table.started && table.confirmed && table.paid === "nobody") table.paid = "me";
     return route.fulfill(json(200, paymentView(table)));
   });
-  await page.route("**/api/v1/dine-in/staff-call", (route) =>
-    route.fulfill(
-      json(200, {
+  // TM2 has calling staff turned off (v15 rms_dining.dining_service_setting): v15 answers 409.
+  staffCallReads.set(page, 0);
+  await page.route("**/api/v1/dine-in/staff-call", (route) => {
+    if (route.request().method() === "GET")
+      staffCallReads.set(page, (staffCallReads.get(page) ?? 0) + 1);
+    return route.fulfill(
+      json(409, {
         schemaVersion: 1,
-        staffCall: { open: null, recentlyClosed: null, nextCallAt: null },
+        error: {
+          code: "dining_staff_call_not_offered",
+          messageKey: "customer.dining.staff_call.not_offered",
+        },
       }),
-    ),
-  );
+    );
+  });
   await page.route("**/api/v1/dine-in/invitation", (route) =>
     route.fulfill(json(200, { schemaVersion: 1, invitation: { canInvite: false } })),
   );
@@ -304,7 +384,13 @@ function words(zh: boolean) {
     pay: zh ? "结账付款" : "Pay the bill",
     total: zh ? "本桌合计" : "Table total",
     paidSoFar: zh ? "已付" : "Paid so far",
-    stillToPay: zh ? "还要付" : "Still to pay",
+    stillToPay: zh ? "还剩" : "Still to pay",
+    toPayAtEnd: zh ? "最后结账" : "To pay at the end",
+    paidAll: zh ? "已付款" : "Paid",
+    nothing: zh ? "无" : "Nothing",
+    allPaid: zh
+      ? "账单都已付清（共 2 笔），谢谢！"
+      : "Everything on the bill is paid (2 payments). Thank you!",
     paidRound: zh ? "已付款" : "Paid",
     onBill: zh ? "记入本桌账单" : "On the table's bill",
     progress: zh
@@ -331,6 +417,51 @@ async function totals(page: Page, zh: boolean) {
     paid: line(text.paidSoFar).locator("dd"),
     due: line(text.stillToPay).locator("dd"),
   };
+}
+
+/** The Table total's lines as label/amount pairs, top to bottom. */
+async function totalLines(page: Page, zh: boolean) {
+  const { summary } = await totals(page, zh);
+  return summary
+    .locator("dl > div, p.order-status__total")
+    .evaluateAll((rows) =>
+      rows.map((row) => [
+        (row.firstElementChild?.textContent ?? "").trim(),
+        (row.lastElementChild?.textContent ?? "").trim(),
+      ]),
+    );
+}
+
+/**
+ * Every amount of the Table total sits in one column: right edges within 1 px, and each label
+ * leaves at least 40 px before its amount (room for wider Linux fonts).
+ */
+async function expectOneAmountColumn(page: Page, zh: boolean) {
+  const { summary } = await totals(page, zh);
+  const rows = await summary.locator("dl > div, p.order-status__total").evaluateAll((all) =>
+    all.map((row) => {
+      const label = (row.firstElementChild as HTMLElement).getBoundingClientRect();
+      const amount = (row.lastElementChild as HTMLElement).getBoundingClientRect();
+      const range = document.createRange();
+      range.selectNodeContents(row.lastElementChild as HTMLElement);
+      const text = range.getBoundingClientRect();
+      const labelText = document.createRange();
+      labelText.selectNodeContents(row.firstElementChild as HTMLElement);
+      return {
+        row: (row.textContent ?? "").trim(),
+        amountRight: text.right,
+        gap: text.left - labelText.getBoundingClientRect().right,
+        sameLine: Math.abs(amount.top - label.top) < 12,
+      };
+    }),
+  );
+  expect(rows.length).toBeGreaterThanOrEqual(4);
+  const right = rows[0]?.amountRight ?? 0;
+  for (const row of rows) {
+    expect(Math.abs(row.amountRight - right), row.row).toBeLessThanOrEqual(1);
+    expect(row.gap, row.row).toBeGreaterThanOrEqual(40);
+    expect(row.sameLine, row.row).toBe(true);
+  }
 }
 
 /** Round N's "Payment" line on its card. */
@@ -428,6 +559,107 @@ for (const width of [390, 1024, 1440])
           path: `test-results/b51-total-after-my-part-${zh ? "zh" : "en"}-${width}.png`,
           fullPage: true,
         });
+      });
+
+      test("batch 52: what the table owes has one name per moment; amounts line up; staff call asked once", async ({
+        page,
+      }) => {
+        test.setTimeout(60_000);
+        const text = words(zh);
+        const table: Table = {
+          otherPaying: false,
+          started: false,
+          confirmed: false,
+          paid: "nobody",
+        };
+        const pay = await openTable(page, table, zh);
+        const total = zh ? "合计" : "Total";
+        // Nothing paid yet: the table pays this at the end.
+        await expect
+          .poll(() => totalLines(page, zh))
+          .toEqual([
+            [zh ? "小计" : "Subtotal", "$25.00"],
+            [zh ? "税" : "Tax", "$3.25"],
+            [total, "$28.25"],
+            [text.paidSoFar, "$0.00"],
+            [text.toPayAtEnd, "$28.25"],
+          ]);
+        await expectOneAmountColumn(page, zh);
+        await expectLayout(page, zh, width);
+        // Another guest pays their dish: what is left is still to pay.
+        table.paid = "other";
+        await advance(page, 3_500);
+        await expect(pay).toContainText(text.otherProgress);
+        await expect
+          .poll(() => totalLines(page, zh), { timeout: 2_000 })
+          .toEqual([
+            [zh ? "小计" : "Subtotal", "$25.00"],
+            [zh ? "税" : "Tax", "$3.25"],
+            [total, "$28.25"],
+            [text.paidSoFar, "$14.12"],
+            [text.stillToPay, "$14.13"],
+          ]);
+        await expectOneAmountColumn(page, zh);
+        await expectLayout(page, zh, width);
+        await page.screenshot({
+          path: `test-results/b52-total-part-paid-${zh ? "zh" : "en"}-${width}.png`,
+          fullPage: true,
+        });
+        // The rest is paid: the bill says it was paid, and names nothing left to pay.
+        table.paid = "all";
+        await advance(page, 3_500);
+        await expect(pay).toContainText(text.allPaid);
+        await expect
+          .poll(() => totalLines(page, zh), { timeout: 2_000 })
+          .toEqual([
+            [zh ? "小计" : "Subtotal", "$25.00"],
+            [zh ? "税" : "Tax", "$3.25"],
+            [total, "$28.25"],
+            [text.paidAll, "$28.25"],
+          ]);
+        const { summary } = await totals(page, zh);
+        for (const gone of [text.toPayAtEnd, text.stillToPay, text.nothing])
+          await expect(summary.getByText(gone, { exact: true })).toHaveCount(0);
+        await expectOneAmountColumn(page, zh);
+        await expectLayout(page, zh, width);
+        await page.screenshot({
+          path: `test-results/b52-total-all-paid-${zh ? "zh" : "en"}-${width}.png`,
+          fullPage: true,
+        });
+        // TM2 has calling staff off: asked once on opening, never again while paying.
+        expect(staffCallReads.get(page)).toBe(1);
+        await expect(
+          page.getByRole("heading", { name: zh ? "需要店员吗？" : "Need a staff member?" }),
+        ).toHaveCount(0);
+      });
+
+      test("batch 52: going to the menu and back while paying does not ask for the staff call again", async ({
+        page,
+      }) => {
+        test.setTimeout(60_000);
+        const table: Table = {
+          otherPaying: false,
+          started: false,
+          confirmed: false,
+          paid: "other",
+        };
+        await openTable(page, table, zh);
+        expect(staffCallReads.get(page)).toBe(1);
+        const nav = page.getByRole("navigation");
+        for (let visit = 0; visit < 3; visit += 1) {
+          await nav.getByRole("link", { name: zh ? "菜单" : "Menu", exact: true }).click();
+          await expect(page).toHaveURL(/\/menu/u);
+          await nav
+            .getByRole("link", { name: zh ? "您的桌位" : "Your table", exact: true })
+            .click();
+          await expect(page.getByRole("region", { name: words(zh).total })).toBeVisible();
+          await advance(page, 1_000);
+        }
+        // The Store's answer (calling staff off) still holds: no 409 on every visit.
+        expect(staffCallReads.get(page)).toBe(1);
+        await expect(
+          page.getByRole("heading", { name: zh ? "需要店员吗？" : "Need a staff member?" }),
+        ).toHaveCount(0);
       });
 
       test("another guest pays their own dish: the Table total follows the pay section at once", async ({
