@@ -135,6 +135,8 @@ export async function store(
     readonly todays?: readonly Record<string, unknown>[];
     readonly finished?: readonly Record<string, unknown>[];
     readonly kitchenSections?: readonly string[];
+    /** Batch 54 review: a sign-in with fewer screens (for example the kitchen alone). */
+    readonly navigation?: readonly (typeof navigation)[number][];
   } = {},
 ) {
   await page.addInitScript(() => localStorage.setItem("bop.kitchen.sound", "off"));
@@ -152,7 +154,7 @@ export async function store(
           storeStatus: "Open",
           freshness: "Current",
           dashboardAvailability: "UnavailableUntilWP1905",
-          navigation,
+          navigation: options.navigation ?? navigation,
         },
       },
     }),

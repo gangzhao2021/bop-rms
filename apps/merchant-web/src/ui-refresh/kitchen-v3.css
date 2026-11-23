@@ -56,6 +56,9 @@
  *   1280 and wider: name · Kitchen display · links · screen note · Hand over · switch, one row;
  *   1024: the same row without the "Kitchen display" label (the current link says it), the note
  *         on a line under it;
+ * With no link to another screen (the board still loading, the outage screen, a sign-in that can
+ * only work the board) the bar shows no links and the label takes their place, so the bar still
+ * names the screen and the switch keeps its corner.
  *   768: name and switch, then the links and Hand over, then the note;
  *   phone: name and switch, then the links, the note and Hand over, each on its own line.
  * The switch is always top-right beside the name (Owner rule), never on a line of its own.
@@ -77,8 +80,12 @@
   min-width: 0;
   overflow-wrap: anywhere;
 }
+/* The label takes the links' place below 1280 px; there it is only shown when they are not. */
 .kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header > p {
-  grid-area: desc;
+  grid-area: nav;
+  align-self: center;
+  min-width: 0;
+  white-space: nowrap;
 }
 .kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header .bop-shell__nav {
   grid-area: nav;
@@ -121,9 +128,11 @@
 .kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header .language-switch {
   white-space: nowrap;
 }
-/* The label is said by the current link below 1280 px; it is still read out. */
+/* Below 1280 px the current link says it while there are links; the label is still read out. */
 @media (max-width: 1279px) {
-  .kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header:has(.bop-shell__nav) > p {
+  .kitchen-shell:not(.kitchen-shell--workspace)
+    .bop-shell__header:has(.bop-shell__nav a:not([aria-current="page"]))
+    > p {
     position: absolute;
     width: 1px;
     height: 1px;
@@ -164,6 +173,9 @@
     grid-template-areas:
       "title desc nav note handover lang"
       "failed failed failed failed failed failed";
+  }
+  .kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header > p {
+    grid-area: desc;
   }
   .kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header .kitchen-screen-awake {
     justify-self: end;

@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
-import { at, store } from "./kitchen-tm2-fixture";
+import { at, headers, navigation, store } from "./kitchen-tm2-fixture";
 
 /**
  * WP-2423 batch 54 (v15 batch 53 live check, kitchen-first-tap-earlier-day-slots): Test Merchant
@@ -74,6 +74,7 @@ const sizes = [
   [390, 844],
   [768, 1024],
   [1024, 768],
+  [1280, 800],
   [1440, 900],
 ] as const;
 
@@ -160,8 +161,17 @@ for (const awake of ["Unsupported", "Held"] as const)
           // The browser's own words about the screen: in the row's spare room at 1440 (no more
           // than two lines), under the row at 1024; never pushing a control off the row.
           const noteBox = await textBox(note);
-          if (width >= 1280) expect(noteBox.height, `${where}: note in two lines`).toBeLessThan(44);
-          else expect(noteBox.top, `${where}: note under the row`).toBeGreaterThanOrEqual(lang.top);
+          if (width >= 1280) {
+            expect(noteBox.height, `${where}: note in two lines`).toBeLessThan(44);
+            // Between the links and Hand over, never over either of them.
+            expect(noteBox.left, `${where}: note after the links`).toBeGreaterThanOrEqual(
+              (boxes[1] as Box).right + 16,
+            );
+            expect(noteBox.right, `${where}: note before Hand over`).toBeLessThanOrEqual(
+              (boxes[2] as Box).left,
+            );
+          } else
+            expect(noteBox.top, `${where}: note under the row`).toBeGreaterThanOrEqual(lang.top);
         } else {
           // Phone and 768: the links and Hand over sit under the name, each on one line.
           for (const n of [0, 1, 2])
@@ -173,6 +183,96 @@ for (const awake of ["Unsupported", "Held"] as const)
         const bar = await box(header, `${where} bar`);
         const board = await box(page.locator(".kitchen-board-heading").first(), `${where} board`);
         expect(board.top, `${where}: board under the bar`).toBeGreaterThanOrEqual(bar.bottom - 1);
+      }
+      await expectNoInternalText(page);
+    }
+  });
+
+/**
+ * Review of batch 54: the bar has no links while the board is loading, when the kitchen cannot be
+ * read (the outage screen staff rely on), and the links are hidden when the only one would be the
+ * current page (a cook whose sign-in cannot mark items sold out). The display's label
+ * ("Kitchen display") then names the screen on the bar at every width, and the switch stays
+ * top-right beside the Store's name.
+ */
+for (const state of ["Loading", "Unavailable", "Kitchen only"] as const)
+  test(`@production WP-2423 batch 54: the kitchen display's top bar keeps the switch top-right with no links (${state})`, async ({
+    page,
+  }) => {
+    test.setTimeout(180_000);
+    await page.clock.setFixedTime(new Date(at));
+    // "Kitchen only": the same sign-in without "Item availability", so the only link is the board.
+    await store(
+      page,
+      "Named",
+      { reworks: [], commands: [] },
+      state === "Kitchen only"
+        ? { navigation: navigation.filter((item) => item.screenId === "KIT-KITCHEN-QUEUE") }
+        : {},
+    );
+    if (state === "Loading")
+      // The board never answers: the bar shows what it has while the first read is under way.
+      await page.route("**/merchant/kitchen/query", () => new Promise<void>(() => undefined));
+    if (state === "Unavailable")
+      await page.route("**/merchant/kitchen/query", (route) =>
+        route.fulfill({ status: 503, headers, json: { code: "UNAVAILABLE" } }),
+      );
+    await page.goto("/operations/kitchen");
+    const header = page.locator(".kitchen-shell .bop-shell__header");
+    for (const language of ["en", "zh-Hans"] as const) {
+      if (language === "zh-Hans") await chooseLanguage(page, language);
+      const zh = language === "zh-Hans";
+      if (state === "Unavailable")
+        await expect(
+          page.getByText(zh ? "这个页面暂时用不了" : "This screen isn't working"),
+        ).toBeVisible();
+      if (state === "Kitchen only")
+        await expect(
+          header.getByRole("button", { name: zh ? "交接 / 退出" : "Hand over / sign out" }),
+        ).toBeVisible();
+      const title = header.getByRole("heading", { level: 1 });
+      const label = header.locator(":scope > p");
+      await expect(label).toHaveText(zh ? "后厨屏" : "Kitchen display");
+      const switcher = header.getByRole("button", {
+        name: zh ? "Switch to English" : "切换到中文",
+      });
+      for (const [width, height] of sizes) {
+        const where = `${state} ${width} ${language}`;
+        await page.setViewportSize({ width, height });
+        await page.evaluate(() => window.scrollTo(0, 0));
+        await page.screenshot({
+          path: `test-results/b54-header-nolinks-${state.replace(" ", "-")}-${width}-${language}.png`,
+        });
+        expect(
+          await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+          `${where}: no sideways scroll`,
+        ).toBe(true);
+        const lang = await box(switcher, `${where} switch`);
+        const titleBox = await box(title, `${where} title`);
+        const labelCell = await box(label, `${where} label`);
+        // Its words, not its grid cell (which spans the bar on a phone).
+        const labelBox = await textBox(label);
+        expect(lang.height, `${where}: 44 px target`).toBeGreaterThanOrEqual(44);
+        expect(lang.right, `${where}: switch at the right edge`).toBeGreaterThan(width - 48);
+        expect(lang.right, `${where}: switch inside the screen`).toBeLessThanOrEqual(width - 8);
+        expect(sameRow(titleBox, lang), `${where}: title beside the switch`).toBe(true);
+        expect(lang.top, `${where}: switch in the top row`).toBeLessThanOrEqual(titleBox.top + 1);
+        // The label names the screen, in sight and on one line, left of the switch.
+        expect(labelCell.right - labelCell.left, `${where}: label in sight`).toBeGreaterThan(24);
+        expect(labelBox.right, `${where}: label left of the switch`).toBeLessThanOrEqual(lang.left);
+        await oneLine(label, `${where} label`);
+        if (width >= 768) await oneLine(title, `${where} title`);
+        if (width >= 1024) expect(sameRow(labelBox, lang), `${where}: label in the row`).toBe(true);
+        else {
+          // Under the name, from the bar's start.
+          expect(labelBox.top, `${where}: label under the name`).toBeGreaterThanOrEqual(
+            titleBox.bottom - 1,
+          );
+          expect(
+            Math.abs(labelBox.left - titleBox.left),
+            `${where}: label at the start`,
+          ).toBeLessThan(2);
+        }
       }
       await expectNoInternalText(page);
     }
