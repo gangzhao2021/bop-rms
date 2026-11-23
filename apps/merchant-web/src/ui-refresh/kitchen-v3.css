@@ -164,7 +164,9 @@
       "title nav . handover lang"
       "note note note note note"
       "failed failed failed failed failed";
-    gap: 0 24px;
+    /* 16 px between items at 1024: with 24 px the Store's name wrapped on the Linux CI runner's
+       wider fonts once the language switch became 44 px wide (batch 55). From 1280, 24 px. */
+    gap: 0 16px;
   }
   .kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header-extra {
     align-self: center;
@@ -173,6 +175,7 @@
 @media (min-width: 1280px) {
   .kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header {
     grid-template-columns: minmax(0, max-content) auto auto minmax(0, 1fr) auto auto;
+    gap: 0 24px;
     grid-template-areas:
       "title desc nav . handover lang"
       "note note note note note note"
