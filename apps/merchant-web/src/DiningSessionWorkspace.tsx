@@ -587,6 +587,59 @@ const tableSettledText = () =>
     "This table's bill is settled, so it can't be moved or merged, no one new can join and no new join code can be made.",
   );
 
+/**
+ * Batch 51 (v15 b50 live): the table staff had open when this screen's sign-in ended, kept in this
+ * tab for a few minutes, so signing in again (Check again or Sign in again reopens the page) comes
+ * back to it with its bill read at once, instead of an empty panel. A per-tab convenience only:
+ * nothing breaks without storage, and nothing of the bill is kept.
+ */
+const REOPEN_TABLE_KEY = "bop.tables.openWhenSignedOut.v1";
+const REOPEN_TABLE_MAX_AGE_MS = 15 * 60_000;
+interface ReopenTable {
+  readonly table: string;
+  readonly label: string;
+  readonly store: string;
+  readonly storeLabel: string;
+}
+function keepTableForSignIn(open: ReopenTable | null) {
+  try {
+    if (open === null) globalThis.sessionStorage?.removeItem(REOPEN_TABLE_KEY);
+    else
+      globalThis.sessionStorage?.setItem(
+        REOPEN_TABLE_KEY,
+        JSON.stringify({ ...open, at: Date.now() }),
+      );
+  } catch {
+    /* Storage blocked: the page opens with no table chosen, as before. */
+  }
+}
+// Taken from storage once per page load: the workspace may mount more than once while the page
+// opens, and the table is chosen again by the first read that succeeds.
+let reopenTaken: ReopenTable | null | undefined;
+function takeTableForSignIn(): ReopenTable | null {
+  if (reopenTaken === undefined) reopenTaken = readTableForSignIn();
+  return reopenTaken;
+}
+function readTableForSignIn(now = Date.now()): ReopenTable | null {
+  try {
+    const raw = globalThis.sessionStorage?.getItem(REOPEN_TABLE_KEY) ?? null;
+    if (raw === null) return null;
+    globalThis.sessionStorage?.removeItem(REOPEN_TABLE_KEY);
+    const value = JSON.parse(raw) as Partial<Record<keyof ReopenTable | "at", unknown>> | null;
+    return typeof value?.table === "string" &&
+      typeof value.label === "string" &&
+      typeof value.store === "string" &&
+      typeof value.storeLabel === "string" &&
+      typeof value.at === "number" &&
+      now - value.at >= 0 &&
+      now - value.at <= REOPEN_TABLE_MAX_AGE_MS
+      ? { table: value.table, label: value.label, store: value.store, storeLabel: value.storeLabel }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 /** M159: set when the Store has no tables at all (the empty floor says what to do next). */
 const noTablesMessage = "no-tables";
 /** Batch 38: the floor read was refused; worded at render, by who is signed in. */
@@ -679,6 +732,8 @@ function DiningSessionWorkspaceBody({
   const [now, setNow] = useState(() => Date.now());
   const businessDay = useStoreBusinessDay();
   const selected = tables.find((table) => table.tableReference === selectedReference) ?? null;
+  // Batch 51: before the effects below clear it, take the table open when the sign-in ended.
+  takeTableForSignIn();
   const anySeated = tables.some(
     (table) =>
       table.currentDiningSessionReference !== null ||
@@ -897,6 +952,33 @@ function DiningSessionWorkspaceBody({
         setGuestStarts(loaded.guestTableStart);
         guestStartsNow.current = loaded.guestTableStart;
         if (loaded.items.length === 0) setMessage(noTablesMessage);
+        // Batch 51: the table open before the sign-in ended, chosen again after the first read.
+        const reopen = takeTableForSignIn();
+        if (reopen !== null) {
+          reopenTaken = null;
+          // Batch 51 (v15 b50 live): signed in again, the table staff had open is open again
+          // (its panel reads the bill at once); one this sign-in doesn't see is said plainly.
+          if (reopen.store !== storeReference)
+            setResult({
+              text: t(
+                "You're signed in at {store} now, so table {table} at {previous} isn't shown here.",
+                {
+                  store: storeLabel,
+                  table: saidTable(reopen.label),
+                  previous: reopen.storeLabel,
+                },
+              ),
+            });
+          else if (items.some((table) => table.tableReference === reopen.table))
+            setSelectedReference(reopen.table);
+          else
+            setResult({
+              text: t(
+                "Table {table} isn't on the floor for this sign-in (it was removed, or this sign-in can't see it). Choose a table from the list.",
+                { table: saidTable(reopen.label) },
+              ),
+            });
+        }
         void loadFacts(items, controller.signal);
         return items;
       }
@@ -977,6 +1059,22 @@ function DiningSessionWorkspaceBody({
   useStaleRetry(stale?.attempts ?? firstReadFailures, reread);
   // v15 cbff9d6f: no reads once this screen's sign-in has ended.
   const live = useStaffSessionLive();
+  const selectedNow = useRef(selected);
+  selectedNow.current = selected;
+  useEffect(() => {
+    // Batch 51: the table open now is the one to come back to once signed in again.
+    const open = selectedNow.current;
+    keepTableForSignIn(
+      live || open === null
+        ? null
+        : {
+            table: open.tableReference,
+            label: open.stableLabel,
+            store: storeReference,
+            storeLabel,
+          },
+    );
+  }, [live, storeReference, storeLabel]);
   useEffect(() => {
     // Signed out: the bills don't stay on a shared device for the next person, and none is read.
     if (live) return;

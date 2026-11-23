@@ -476,8 +476,12 @@ export function StaffSessionGuard({
   }, []);
   // b13: staff signed in again on another screen of this browser: this page opens again with it.
   const [signedInElsewhere, setSignedInElsewhere] = useState(false);
+  // Batch 51 (v15 b50 live): what the last Check again found when the cover stays (nothing at all
+  // was said before, so a press looked like it did nothing).
+  const [checkFound, setCheckFound] = useState<"StillSignedOut" | "NotChecked" | null>(null);
   const checkAgain = async () => {
     setChecking(true);
+    setCheckFound(null);
     try {
       const read = await source.expiry(csrf).catch(() => null);
       if (read !== null && !isSessionEnded(read)) {
@@ -494,11 +498,13 @@ export function StaffSessionGuard({
       // v15 b12 live: after signing in again in another tab, this screen still sent the ended
       // sign-in's value and its check was refused (403), so the cover never went. The browser's
       // own sign-in is read: a new one opens this page again with it, on the page staff were on.
-      const now = await source.currentSignIn?.().catch(() => null);
+      const now = await source.currentSignIn?.().catch(() => undefined);
       if (typeof now === "string" && now !== csrf) {
         setSignedInElsewhere(true);
         (reopenPage ?? (() => window.location.reload()))();
+        return;
       }
+      setCheckFound(read === null && now === undefined ? "NotChecked" : "StillSignedOut");
     } finally {
       setChecking(false);
     }
@@ -533,6 +539,12 @@ export function StaffSessionGuard({
           </p>
           {signedInElsewhere ? (
             <p role="status">{t("Signed in again. Opening this page with that sign-in…")}</p>
+          ) : checkFound !== null ? (
+            <p role="status">
+              {checkFound === "StillSignedOut"
+                ? t("Still signed out on this screen. Sign in again to keep working.")
+                : t("The sign-in couldn't be checked just now. Check again in a moment.")}
+            </p>
           ) : null}
           <StaffSignInLink client={source} label={t("Sign in again")} returnTo={path} />
           <button type="button" disabled={checking} onClick={() => void checkAgain()}>

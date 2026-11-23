@@ -73,8 +73,36 @@ it("b13: Check again with no new sign-in stays on the cover and opens nothing", 
     await settle(10);
     expect(reopenPage).not.toHaveBeenCalled();
     expect(container.textContent).toContain("You’ve been signed out");
+    // Batch 51 (v15 b50 live): the press says what it found, instead of seeming to do nothing.
+    expect(container.textContent).toContain(
+      "Still signed out on this screen. Sign in again to keep working.",
+    );
     root.unmount();
   }
+});
+
+it("batch 51: Check again that can't reach the sign-in check says so, not that staff are signed out", async () => {
+  const client = signedOut(async () => {
+    throw new Error("offline");
+  });
+  const reopenPage = vi.fn();
+  const { container } = await mount(
+    <StaffSessionGuard
+      csrf={old}
+      path="/operations/dining"
+      timeZone="America/Toronto"
+      client={client}
+      reopenPage={reopenPage}
+    />,
+  );
+  await settle(10);
+  await click(button(container, "Check again"));
+  await settle(10);
+  expect(reopenPage).not.toHaveBeenCalled();
+  expect(container.textContent).toContain(
+    "The sign-in couldn't be checked just now. Check again in a moment.",
+  );
+  expect(container.textContent).not.toContain("Still signed out on this screen.");
 });
 
 it("b13: Sign in again comes back to the page it was pressed on, once and only soon after", async () => {

@@ -7426,6 +7426,14 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Only tables that pay at the end can be merged.": "只有吃完再付的桌才能并桌。",
   "Table {table} is paying the bill, so this party can't be merged into it.":
     "{table} 桌正在结账，不能把这桌客人并过去。",
+  "You're signed in at {store} now, so table {table} at {previous} isn't shown here.":
+    "现在登录的是{store}，所以这里不显示{previous}的 {table} 桌。",
+  "Table {table} isn't on the floor for this sign-in (it was removed, or this sign-in can't see it). Choose a table from the list.":
+    "这次登录看不到 {table} 桌（可能已删除，或这次登录没有权限看）。请从列表里选一桌。",
+  "Still signed out on this screen. Sign in again to keep working.":
+    "这台设备仍未登录。请重新登录后继续工作。",
+  "The sign-in couldn't be checked just now. Check again in a moment.":
+    "暂时无法检查登录状态，请稍后再检查。",
   "One of the tables is checking out. Merge before checking out.":
     "其中一桌正在结账。请在结账前并桌。",
   "The merge wasn't confirmed: this device is offline. Retry.":

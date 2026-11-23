@@ -733,6 +733,21 @@ const oldMergeRefusal = (zh: boolean) =>
   zh
     ? "其中一桌正在结账。请在结账前并桌。"
     : "One of the tables is checking out. Merge before checking out.";
+const stillSignedOut = (zh: boolean) =>
+  zh
+    ? "这台设备仍未登录。请重新登录后继续工作。"
+    : "Still signed out on this screen. Sign in again to keep working.";
+const otherStore = (zh: boolean) =>
+  zh
+    ? `现在登录的是 TM3，所以这里不显示 TM2 的 ${label}。`
+    : `You're signed in at TM3 now, so ${label} at TM2 isn't shown here.`;
+const tableGone = (zh: boolean) =>
+  zh
+    ? `这次登录看不到 ${label}（可能已删除，或这次登录没有权限看）。请从列表里选一桌。`
+    : `${label} isn't on the floor for this sign-in (it was removed, or this sign-in can't see it). Choose a table from the list.`;
+const noTableChosen = (zh: boolean) =>
+  zh ? "选一桌来上菜、收款或关台。" : "Choose a table to serve it, take its payment or close it.";
+
 async function pressStaleMerge(page: Page, zh: boolean) {
   const panel = page.getByRole("complementary", {
     name: zh ? "所选桌台详情" : "Selected table details",
@@ -745,6 +760,22 @@ async function pressStaleMerge(page: Page, zh: boolean) {
     .getByRole("button", { name: zh ? `并到 ${otherLabel}` : `Merge into ${otherLabel}` })
     .click();
   return { panel, merge };
+}
+
+async function signOutWithTableOpen(page: Page, zh: boolean, state: { ended: boolean }) {
+  await page.getByRole("button", { name: zh ? `选择 ${label}` : `Select ${label}` }).click();
+  const panel = page.getByRole("complementary", {
+    name: zh ? "所选桌台详情" : "Selected table details",
+  });
+  await expect(panel.getByText("Beef noodles (TEST)").first()).toBeVisible();
+  // Signed out on another screen (v15 b50 live: POST /merchant/logout from a second tab).
+  state.ended = true;
+  const dialog = page.getByRole("dialog", {
+    name: zh ? "你已退出登录" : "You’ve been signed out",
+  });
+  await expect(dialog).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(signedOutBill(zh))).toHaveCount(1);
+  return { panel, dialog };
 }
 
 for (const language of ["en", "zh-Hans"] as const)
@@ -805,6 +836,118 @@ for (const language of ["en", "zh-Hans"] as const)
       await expect(page.getByText(oldMergeRefusal(zh))).toHaveCount(0);
       await expectFits(page, paying(zh), width);
       await page.screenshot({ path: `test-results/b51-stale-merge-self-${language}-${width}.png` });
+      await expectNoInternalText(page, ["Mark unavailable"]);
+    });
+
+    test(`@production WP-2423 batch 51: Check again while still signed out says so and keeps the cover (${language}, ${width})`, async ({
+      page,
+    }) => {
+      const zh = language === "zh-Hans";
+      const { state } = await checkoutFloor(page, "Paying", language);
+      await page.setViewportSize({ width, height });
+      await page.goto("/operations/dining");
+      const { dialog } = await signOutWithTableOpen(page, zh, state);
+      const sessionReads = state.sessionReads;
+      await dialog.getByRole("button", { name: zh ? "再次检查" : "Check again" }).click();
+      await expect(dialog.getByText(stillSignedOut(zh))).toBeVisible();
+      await expect.poll(() => state.sessionReads).toBeGreaterThan(sessionReads);
+      await expect(dialog).toBeVisible();
+      await expect(page.getByText("Beef noodles (TEST)")).toHaveCount(0);
+      await expect(page.getByText(zh ? /自动重试/u : /Trying again/u)).toHaveCount(0);
+      await expectFits(page, stillSignedOut(zh), width);
+      await page.screenshot({
+        path: `test-results/b51-check-again-still-${language}-${width}.png`,
+      });
+    });
+
+    test(`@production WP-2423 batch 51: Check again after signing in again as the same staff keeps the table and reads its bill at once (${language}, ${width})`, async ({
+      page,
+    }) => {
+      const zh = language === "zh-Hans";
+      const { state } = await checkoutFloor(page, "Paying", language);
+      await page.setViewportSize({ width, height });
+      await page.goto("/operations/dining");
+      const { dialog } = await signOutWithTableOpen(page, zh, state);
+      // Signed in again on another tab of this browser, as the same staff at this Store.
+      state.signedInAgain = "Same";
+      const bills = state.billReads;
+      await dialog.getByRole("button", { name: zh ? "再次检查" : "Check again" }).click();
+      await expect(
+        page.getByRole("dialog", { name: zh ? "你已退出登录" : "You’ve been signed out" }),
+      ).toHaveCount(0, { timeout: 10_000 });
+      const panel = page.getByRole("complementary", {
+        name: zh ? "所选桌台详情" : "Selected table details",
+      });
+      await expect(
+        page.getByRole("button", { name: zh ? `选择 ${label}` : `Select ${label}` }),
+      ).toHaveAttribute("aria-pressed", "true");
+      await expect(panel.getByText("Beef noodles (TEST)").first()).toBeVisible({ timeout: 3_000 });
+      expect(state.billReads).toBeGreaterThan(bills);
+      await expect(page.getByText(noTableChosen(zh))).toHaveCount(0);
+      await expect(page.getByText(signedOutBill(zh))).toHaveCount(0);
+      await expect(page.getByText(paying(zh))).toHaveCount(1);
+      await page.screenshot({ path: `test-results/b51-check-again-same-${language}-${width}.png` });
+      await expectNoInternalText(page, ["Mark unavailable"]);
+    });
+
+    test(`@production WP-2423 batch 51: Check again finding the sign-in live after all keeps the table and reads its bill at once (${language}, ${width})`, async ({
+      page,
+    }) => {
+      const zh = language === "zh-Hans";
+      const { state } = await checkoutFloor(page, "Paying", language);
+      await page.setViewportSize({ width, height });
+      await page.goto("/operations/dining");
+      const { dialog, panel } = await signOutWithTableOpen(page, zh, state);
+      state.ended = false;
+      const bills = state.billReads;
+      await dialog.getByRole("button", { name: zh ? "再次检查" : "Check again" }).click();
+      await expect(dialog).toHaveCount(0);
+      await expect(panel.getByText("Beef noodles (TEST)").first()).toBeVisible({ timeout: 3_000 });
+      expect(state.billReads).toBeGreaterThan(bills);
+      await expect(page.getByText(signedOutBill(zh))).toHaveCount(0);
+      await expect(page.getByText(noTableChosen(zh))).toHaveCount(0);
+    });
+
+    test(`@production WP-2423 batch 51: Check again after signing in at another Store says plainly why the table isn't shown (${language}, ${width})`, async ({
+      page,
+    }) => {
+      const zh = language === "zh-Hans";
+      const { state } = await checkoutFloor(page, "Paying", language);
+      await page.setViewportSize({ width, height });
+      await page.goto("/operations/dining");
+      const { dialog } = await signOutWithTableOpen(page, zh, state);
+      state.signedInAgain = "OtherStore";
+      await dialog.getByRole("button", { name: zh ? "再次检查" : "Check again" }).click();
+      await expect(
+        page.getByRole("dialog", { name: zh ? "你已退出登录" : "You’ve been signed out" }),
+      ).toHaveCount(0, { timeout: 10_000 });
+      await expect(page.getByText(otherStore(zh))).toHaveCount(1);
+      await expect(page.getByText(otherStore(zh))).toBeInViewport();
+      await expect(page.getByText("Beef noodles (TEST)")).toHaveCount(0);
+      await expectFits(page, otherStore(zh), width);
+      await page.screenshot({
+        path: `test-results/b51-check-again-store-${language}-${width}.png`,
+      });
+      await expectNoInternalText(page, ["Mark unavailable"]);
+    });
+
+    test(`@production WP-2423 batch 51: Check again when the new sign-in no longer sees the table says so plainly (${language}, ${width})`, async ({
+      page,
+    }) => {
+      const zh = language === "zh-Hans";
+      const { state } = await checkoutFloor(page, "Paying", language);
+      await page.setViewportSize({ width, height });
+      await page.goto("/operations/dining");
+      const { dialog } = await signOutWithTableOpen(page, zh, state);
+      state.signedInAgain = "TableGone";
+      await dialog.getByRole("button", { name: zh ? "再次检查" : "Check again" }).click();
+      await expect(
+        page.getByRole("dialog", { name: zh ? "你已退出登录" : "You’ve been signed out" }),
+      ).toHaveCount(0, { timeout: 10_000 });
+      await expect(page.getByText(tableGone(zh))).toHaveCount(1);
+      await expect(page.getByText(tableGone(zh))).toBeInViewport();
+      await expectFits(page, tableGone(zh), width);
+      await page.screenshot({ path: `test-results/b51-check-again-gone-${language}-${width}.png` });
       await expectNoInternalText(page, ["Mark unavailable"]);
     });
   }
