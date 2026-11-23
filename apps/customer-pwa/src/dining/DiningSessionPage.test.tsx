@@ -1637,3 +1637,112 @@ describe("DEC-DINING-GUEST-TABLE-START: a table a guest started", () => {
     expect(remade({ orderNumber: "12" })).toContain("bring it to your table");
   });
 });
+
+describe("batch 55 (v15 b54 live): round cards once staff closed the bill", () => {
+  // The v15 b54 reads at TM2: order 59 (nothing paid), 55 (guest A paid their own dish), 67 (staff
+  // split evenly in 2, part 1 paid; the server tied that part to round 1), then a write-off of the
+  // rest; and order 66, both dishes paid (no closedByStaff).
+  const noodles = (roundNumber: number, payment: DiningRound["payment"]) =>
+    round({
+      roundNumber,
+      orderedBy: roundNumber === 1 ? "You" : "AnotherGuest",
+      status: "Served",
+      payment,
+      items: [
+        {
+          displayName: "Beef noodles (TEST)",
+          quantity: 1,
+          servedQuantity: 1,
+          cancelled: false,
+          lineTotal: cad(roundNumber === 1 ? "1413" : "1412"),
+        },
+      ],
+      itemsTotal: cad(roundNumber === 1 ? "1413" : "1412"),
+    });
+  const payments = (
+    language: "en" | "zh-Hans",
+    rounds: readonly DiningRound[],
+    paid: string,
+    extra: Partial<NonNullable<DiningSessionView["summary"]>>,
+  ) => {
+    const state = {
+      status: "ready",
+      refreshing: false,
+      view: view({
+        paymentTiming: "PayLater",
+        rounds,
+        summary: {
+          paid: cad(paid),
+          refunded: cad("0"),
+          refundPending: cad("0"),
+          due: cad("0"),
+          ...extra,
+        },
+      }),
+    } as const;
+    const html = renderToStaticMarkup(
+      <LanguageRoot initial={language}>
+        {() => (
+          <MemoryRouter initialEntries={["/dine-in/session"]}>
+            <DiningSessionScreen state={state} store={store} onRefresh={() => undefined} />
+          </MemoryRouter>
+        )}
+      </LanguageRoot>,
+    );
+    renderToStaticMarkup(<LanguageRoot initial="en">{() => null}</LanguageRoot>);
+    const label = language === "en" ? "Payment" : zhHans["Payment"];
+    // Round 1 first (the page lists the newest round first).
+    return [...html.matchAll(new RegExp(`<dt>${label}</dt><dd>(.*?)</dd>`, "gu"))]
+      .map((row) => (row[1] ?? "").replace(/<[^>]+>/gu, "").replace(/&#x27;/gu, "'"))
+      .reverse();
+  };
+  it("order 59, nothing paid: the round is not charged, never on the table's bill", () => {
+    const closed = { closedByStaff: true as const };
+    expect(payments("en", [noodles(1, "OnTableBill")], "0", closed)).toEqual([
+      "Not charged to you",
+    ]);
+    expect(payments("zh-Hans", [noodles(1, "OnTableBill")], "0", closed)).toEqual(["不向您收取"]);
+  });
+  it("order 55, by dish: the dish paid stays Paid, the unpaid one is not charged", () => {
+    const closed = { closedByStaff: true as const, splitParts: { count: null, paid: 1 } };
+    const rounds = [noodles(1, "Paid"), noodles(2, "OnTableBill")];
+    expect(payments("en", rounds, "1413", closed)).toEqual([
+      "Paid",
+      "Unpaid part not charged to you",
+    ]);
+    expect(payments("zh-Hans", rounds, "1413", closed)).toEqual(["已付款", "未付部分不向您收取"]);
+  });
+  it("order 67, 1 of 2 equal parts: no round reads Paid as if it was what was paid", () => {
+    const closed = { closedByStaff: true as const, splitParts: { count: 2, paid: 1 } };
+    const rounds = [noodles(1, "Paid"), noodles(2, "OnTableBill")];
+    expect(payments("en", rounds, "1413", closed)).toEqual([
+      "1 of 2 parts paid; the rest not charged",
+      "1 of 2 parts paid; the rest not charged",
+    ]);
+    expect(payments("zh-Hans", rounds, "1413", closed)).toEqual([
+      "2\u00a0份付了 1\u00a0份，其余不收取",
+      "2\u00a0份付了 1\u00a0份，其余不收取",
+    ]);
+  });
+  it("ordinary bills keep their round payments (batch 53/54)", () => {
+    // Order 66: paid by dish in full; order 63: one payment; an open split with 1 of 2 paid.
+    const byDish = { splitParts: { count: null, paid: 2 } };
+    expect(payments("en", [noodles(1, "Paid"), noodles(2, "Paid")], "2825", byDish)).toEqual([
+      "Paid",
+      "Paid",
+    ]);
+    expect(payments("zh-Hans", [noodles(1, "Paid"), noodles(2, "Paid")], "2825", {})).toEqual([
+      "已付款",
+      "已付款",
+    ]);
+    expect(
+      payments("en", [noodles(1, "Paid"), noodles(2, "OnTableBill")], "1413", {
+        due: cad("1412"),
+        splitParts: { count: 2, paid: 1 },
+      }),
+    ).toEqual(["Paid", "On the table's bill"]);
+    expect(payments("zh-Hans", [noodles(1, "OnTableBill")], "0", { due: cad("1413") })).toEqual([
+      "记入本桌账单",
+    ]);
+  });
+});

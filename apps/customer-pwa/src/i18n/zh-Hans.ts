@@ -1397,6 +1397,11 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "已付的款项不变，其余不向您收取。如需再点，请找店员。",
   "Staff closed your table’s bill: what was paid stays paid, and the rest is not charged to you. To order anything else, ask staff.":
     "店员已关闭本桌账单：已付的款项不变，其余不向您收取。如需再点，请找店员。",
+  // Batch 55: a round's payment once staff closed the bill (never "On the table's bill").
+  "Unpaid part not charged to you": "未付部分不向您收取",
+  // A no-break space keeps 份 with its number on a narrow round card.
+  "{paid} of {count} parts paid; the rest not charged":
+    "{count}\u00a0份付了 {paid}\u00a0份，其余不收取",
   "Cash rounding": "现金取整",
   "Item prices are before tax. ": "菜品价格为税前价格。",
   "The table paid once at the end. Cash is rounded to the nearest 5 cents; card payments are not rounded.":

@@ -1,5 +1,5 @@
 import { createTablePaymentClient } from "./table-payment-client.js";
-import { tableBillOutcome } from "./table-bill-outcome.js";
+import { tableBillOutcome, type ClosedBillPaid } from "./table-bill-outcome.js";
 import {
   dateLocale,
   keepWords,
@@ -385,6 +385,24 @@ function ComboLine({
   );
 }
 
+/**
+ * Batch 55 (v15 b54 live): a round's payment once staff closed the bill when the guests left. A
+ * round still on the bill is not owed any more (never "On the table's bill"); under staff's equal
+ * parts, which pay the whole bill and no round in particular, every round says what the parts
+ * did (never one round "Paid" as if that round was what was paid). By dish, a guest's own dish
+ * they paid for stays Paid. Null: the round's own payment says it.
+ */
+function closedRoundPaymentText(round: DiningRound, closed: ClosedBillPaid | null): string | null {
+  if (closed === null) return null;
+  if (closed.kind === "Parts" && (round.payment === "OnTableBill" || round.payment === "Paid"))
+    return t("{paid} of {count} parts paid; the rest not charged", {
+      paid: String(closed.paid),
+      count: String(closed.count),
+    });
+  if (round.payment !== "OnTableBill") return null;
+  return closed.kind === "Nothing" ? t("Not charged to you") : t("Unpaid part not charged to you");
+}
+
 function RoundCard({
   round,
   onOrderAgain,
@@ -392,8 +410,11 @@ function RoundCard({
   menu = null,
   collectOrderNumber = null,
   note = null,
+  closedBill = null,
 }: {
   readonly round: DiningRound;
+  /** Batch 55: staff closed the table's bill (what was paid); null while it is open or paid. */
+  readonly closedBill?: ClosedBillPaid | null;
   /** A guest started this table, so nobody brings a finished dish over: it is called by number. */
   readonly collectOrderNumber?: string | null;
   /** WP-2423 item 8b: says what the charge is, on the card guests will ask about. */
@@ -407,6 +428,7 @@ function RoundCard({
 }) {
   const headingId = `dining-round-${round.roundNumber}`;
   const charge = staffCharge(round);
+  const closedPayment = closedRoundPaymentText(round, closedBill);
   // v15 batch-5: cancelled before anyone paid, so nothing is owed for it: no tax, no total.
   // v15 b20: so is a round staff took off a table's bill before it paid (never charged): its
   // dishes' own subtotal, tax and total must not read as owed.
@@ -451,9 +473,12 @@ function RoundCard({
           <dd>
             {/* b26 (live25): a round in the kitchen the bill charges nothing for (comped) has
                 nothing to pay; "Not charged" stays for rounds that never went to the kitchen. */}
-            {round.payment === "NotCharged" && !settledOrWaiting.has(round.status)
-              ? t("Nothing to pay")
-              : paymentText[round.payment]}
+            {/* Batch 55: Chinese short words stay whole in the narrow column. */}
+            {closedPayment !== null
+              ? keepWords(closedPayment)
+              : round.payment === "NotCharged" && !settledOrWaiting.has(round.status)
+                ? t("Nothing to pay")
+                : paymentText[round.payment]}
           </dd>
         </div>
       </dl>
@@ -1461,6 +1486,7 @@ export function DiningSessionScreen({
               <RoundCard
                 key={round.roundNumber}
                 round={round}
+                closedBill={closedBill}
                 menu={menu}
                 collectOrderNumber={view.startedByGuest === true ? view.orderNumber : null}
                 note={
