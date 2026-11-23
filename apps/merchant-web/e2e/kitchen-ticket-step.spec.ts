@@ -1123,3 +1123,103 @@ test("@production on a phone with wide type, Recently finished arriving after a 
   await expect.poll(() => taps.length, { timeout: holdMs + 3_000 }).toBe(1);
   await page.screenshot({ path: "test-results/kitchen-recent-after-failed-read-390.png" });
 });
+
+/**
+ * Batch 52 (v15 batch 51 live, Test Merchant 2 order 68): a new pickup order came onto the board
+ * below the others and the first Finished on it was not taken ("Moved. Tap again."), although
+ * nothing had been on that spot of the screen; it needed a second tap. A ticket that arrives
+ * where no ticket was takes its first tap; one that arrives where another ticket was still waits.
+ */
+const arrivalText = {
+  en: { done: "Marked done", moved: "Moved. Tap again.", refresh: "Refresh" },
+  "zh-Hans": { done: "已做好", moved: "刚移动，请再点", refresh: "刷新" },
+} as const;
+const pickupDish = (n: number, name: string, orderNumber: string, minute: number) =>
+  dish(n, name, {
+    ticketReference: id(300 + n),
+    orderReference: id(400 + n),
+    orderItemReference: id(500 + n),
+    orderLabel: { orderNumber, orderType: "Pickup", tableLabel: null },
+    workItemCreatedAt: `2026-10-26T22:${String(minute).padStart(2, "0")}:00.000Z`,
+  });
+for (const language of ["en", "zh-Hans"] as const)
+  for (const width of [390, 1024, 1440] as const) {
+    test(`@production a new order that arrives below the others takes its first tap, ${language} at ${width} wide`, async ({
+      page,
+    }) => {
+      const words = arrivalText[language];
+      if (language === "zh-Hans")
+        await page.addInitScript(() =>
+          window.localStorage.setItem("bop.merchant.language", "zh-Hans"),
+        );
+      await page.setViewportSize({ width, height: 900 });
+      const older = [
+        pickupDish(1, "TEST noodles", "66", 1),
+        pickupDish(2, "TEST dumplings", "67", 2),
+      ];
+      const arriving = pickupDish(3, "TEST beef noodles", "68", 9);
+      let items: readonly ReturnType<typeof dish>[] = older;
+      const { taps } = await mockBoard(page, () => items);
+      await page.goto("/operations/kitchen");
+      await expect(page.locator(".kitchen-ticket")).toHaveCount(2);
+      await page.waitForTimeout(slotSettleMs);
+      // The new order arrives with the next read, after the ones already on the board.
+      items = [...older, arriving];
+      await page.getByRole("button", { name: words.refresh, exact: true }).first().click();
+      const ticket = page.locator(".kitchen-ticket").filter({ hasText: "TEST beef noodles" });
+      await expect(ticket).toBeVisible();
+      // Tapped the moment it shows, as the staff kit (and a cook already reaching) does.
+      await ticket.locator(".kitchen-ticket__next").click();
+      await expect(ticket.locator(".kitchen-ticket__top")).toContainText(words.done);
+      await expect(ticket.locator(".kitchen-ticket__top")).not.toContainText(words.moved);
+      await expect(ticket.locator(".kitchen-work-item").first()).toHaveAttribute(
+        "data-pending",
+        "Holding",
+      );
+      // The older tickets did not move, so they take taps too.
+      const first = page.locator(".kitchen-ticket").filter({ hasText: "TEST noodles" }).first();
+      await first.locator(".kitchen-ticket__next").click();
+      await expect(first.locator(".kitchen-ticket__top")).toContainText(words.done);
+      await page.screenshot({
+        path: `test-results/kitchen-arrival-first-tap-${language}-${width}.png`,
+      });
+      await expect.poll(() => taps.length, { timeout: holdMs + 4_000 }).toBe(2);
+      expect(taps.map((tap) => tap.lines[0]?.workItemReference).sort()).toEqual(
+        [id(1), id(3)].sort(),
+      );
+    });
+
+    test(`@production a new order that arrives where another ticket was still waits a moment and says so, ${language} at ${width} wide`, async ({
+      page,
+    }) => {
+      const words = arrivalText[language];
+      if (language === "zh-Hans")
+        await page.addInitScript(() =>
+          window.localStorage.setItem("bop.merchant.language", "zh-Hans"),
+        );
+      await page.setViewportSize({ width, height: 900 });
+      const leaving = pickupDish(1, "TEST noodles", "66", 1);
+      const staying = pickupDish(2, "TEST dumplings", "67", 2);
+      const arriving = pickupDish(3, "TEST beef noodles", "68", 9);
+      let items: readonly ReturnType<typeof dish>[] = [leaving, staying];
+      const { taps } = await mockBoard(page, () => items);
+      await page.goto("/operations/kitchen");
+      await expect(page.locator(".kitchen-ticket")).toHaveCount(2);
+      await page.waitForTimeout(slotSettleMs);
+      // Order 66 is finished elsewhere and leaves; 67 moves into its place and 68 arrives in 67's.
+      items = [staying, arriving];
+      await page.getByRole("button", { name: words.refresh, exact: true }).first().click();
+      const ticket = page.locator(".kitchen-ticket").filter({ hasText: "TEST beef noodles" });
+      await expect(ticket).toBeVisible();
+      await ticket.locator(".kitchen-ticket__next").click();
+      await expect(ticket.locator(".kitchen-ticket__top")).toContainText(words.moved);
+      await expect(ticket.locator(".kitchen-work-item").first()).not.toHaveAttribute(
+        "data-pending",
+        /./u,
+      );
+      await page.waitForTimeout(slotSettleMs + 100);
+      await ticket.locator(".kitchen-ticket__next").click();
+      await expect(ticket.locator(".kitchen-ticket__top")).toContainText(words.done);
+      await expect.poll(() => taps.length, { timeout: holdMs + 4_000 }).toBe(1);
+    });
+  }

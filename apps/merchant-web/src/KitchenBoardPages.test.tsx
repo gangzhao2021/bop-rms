@@ -29,6 +29,7 @@ import {
   kitchenArrivalsUnattended,
   kitchenSlowTapsAt,
   kitchenSlotMoved,
+  kitchenSlotCovered,
   kitchenScrollOffsets,
   kitchenScrollPulledBack,
   kitchenStatusOrder,
@@ -2360,6 +2361,28 @@ describe("kitchenSlotMoved (WP-2423 batch 32)", () => {
   it("counts a ticket the page pulled down the screen as moved, though its place on the page stayed", () => {
     expect(kitchenSlotMoved(at("16,433", "16,21"), at("16,433", "16,157"), true)).toBe(true);
     expect(kitchenSlotMoved(at("16,433", "16,157"), at("16,501", "16,157"), true)).toBe(false);
+  });
+});
+
+describe("kitchenSlotCovered (WP-2423 batch 52)", () => {
+  const box = (left: number, top: number, right: number, bottom: number) => ({
+    left,
+    top,
+    right,
+    bottom,
+  });
+  it("a new ticket where no ticket was takes its first tap; one where another ticket was waits", () => {
+    const before = [box(16, 120, 374, 300), box(16, 316, 374, 496)];
+    // v15 b51 order 68: it came onto the board below the last ticket.
+    expect(kitchenSlotCovered(box(16, 512, 374, 692), before)).toBe(false);
+    // In the second column of a wide board, beside nothing.
+    expect(kitchenSlotCovered(box(390, 120, 748, 300), before)).toBe(false);
+    // Where a ticket that just left was, or overlapping one that moved.
+    expect(kitchenSlotCovered(box(16, 316, 374, 496), before)).toBe(true);
+    expect(kitchenSlotCovered(box(16, 400, 374, 580), before)).toBe(true);
+    // Touching edges only is not covering, and an empty board covers nothing.
+    expect(kitchenSlotCovered(box(16, 496, 374, 676), before)).toBe(false);
+    expect(kitchenSlotCovered(box(16, 120, 374, 300), [])).toBe(false);
   });
 });
 

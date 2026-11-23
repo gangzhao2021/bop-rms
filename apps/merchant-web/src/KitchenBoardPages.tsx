@@ -922,6 +922,28 @@ export interface KitchenSlotPosition {
   readonly page: string;
   readonly screen: string;
 }
+/** Where a ticket covers the screen (viewport pixels). */
+export interface KitchenSlotBox {
+  readonly left: number;
+  readonly top: number;
+  readonly right: number;
+  readonly bottom: number;
+}
+export function kitchenSlotBox(element: HTMLElement): KitchenSlotBox {
+  const box = element.getBoundingClientRect();
+  return { left: box.left, top: box.top, right: box.right, bottom: box.bottom };
+}
+/**
+ * Batch 52: whether a ticket that just arrived sits where another ticket was when the board was
+ * last measured: only then can a tap aimed at that one land on it.
+ */
+export function kitchenSlotCovered(box: KitchenSlotBox, before: readonly KitchenSlotBox[]) {
+  return before.some(
+    (other) =>
+      Math.min(box.right, other.right) - Math.max(box.left, other.left) > 0 &&
+      Math.min(box.bottom, other.bottom) - Math.max(box.top, other.top) > 0,
+  );
+}
 export function kitchenSlotPosition(element: HTMLElement): KitchenSlotPosition {
   const box = element.getBoundingClientRect();
   return {
@@ -2930,6 +2952,7 @@ export function KitchenBoardScreen({
   // it is on the screen as well as on the board (kitchenSlotMoved), so the cook's scrolling is never
   // a move, and the page pulling a scrolled board back down the screen is (kitchenScrollPulledBack).
   const slotPlaces = useRef(new Map<string, KitchenSlotPosition>());
+  const slotBoxes = useRef(new Map<string, KitchenSlotBox>());
   const slotElements = useRef(new Map<string, HTMLElement>());
   const slotRef = (key: string) => (element: HTMLElement | null) => {
     if (element) slotElements.current.set(key, element);
@@ -2950,17 +2973,35 @@ export function KitchenBoardScreen({
     const pulled = kitchenScrollPulledBack(slotScrolls.current);
     slotScrolls.current = kitchenScrollOffsets(slotElements.current.values());
     const places = new Map<string, KitchenSlotPosition>();
+    const boxes = new Map<string, KitchenSlotBox>();
     for (const [key, element] of slotElements.current) {
       const place = kitchenSlotPosition(element);
       places.set(key, place);
+      const box = kitchenSlotBox(element);
+      boxes.set(key, box);
       const before = slotPlaces.current.get(key);
       if (!resized && before !== undefined && kitchenSlotMoved(before, place, pulled))
         slots.current.set(key, {
           signature: slots.current.get(key)?.signature ?? "",
           changedAt: now,
         });
+      // Batch 52 (v15 b51 live, order 68): a ticket that just arrived took no tap for a moment
+      // wherever it appeared, so the first Finished on a new order at the end of the board said
+      // "Moved. Tap again." although nothing had been there. It now waits only when it appeared
+      // where another ticket was on the screen (a finger aimed at that one may land on it).
+      const known = slots.current.get(key);
+      if (
+        before === undefined &&
+        known !== undefined &&
+        Number.isFinite(known.changedAt) &&
+        !resized &&
+        !pulled &&
+        !kitchenSlotCovered(box, [...slotBoxes.current.values()])
+      )
+        slots.current.set(key, { signature: known.signature, changedAt: -Infinity });
     }
     slotPlaces.current = places;
+    slotBoxes.current = boxes;
   }, []);
   useLayoutEffect(measureSlots);
   // Scrolling (the page or a lane) is the cook's own: where each ticket is on the screen is taken
