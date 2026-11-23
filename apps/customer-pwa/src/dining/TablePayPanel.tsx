@@ -296,14 +296,19 @@ export function TablePayPanel({
   // The table page (its total, its "order more") follows checkout and payment.
   const status =
     view === null ? null : { checkingOut: view.checkingOut, paid: view.state === "Paid" };
+  // Batch 51 (v15 b50 live): a part of the bill paid (by this phone or another) changes neither
+  // fact above, so the table's total lower on the page kept "Paid so far $0.00" until its next
+  // 15 s read while this section already said "1 paid so far". What has been paid is part of what
+  // is reported, so the page reads its total again as soon as this section learns of a payment.
+  const paidSoFar = view?.split?.paidParts ?? 0;
   const reported = useRef<string | null>(null);
   useEffect(() => {
     if (status === null) return;
-    const key = JSON.stringify(status);
+    const key = JSON.stringify([status, paidSoFar]);
     if (reported.current === key) return;
     reported.current = key;
     onStatus?.(status);
-  }, [status, onStatus]);
+  }, [status, paidSoFar, onStatus]);
   // After the card was submitted (or while another guest pays), the result is read again.
   useEffect(() => {
     if (view?.state !== "Paying" && view?.state !== "AnotherGuestPaying") return;
