@@ -171,12 +171,12 @@ function PickupCard({
   earlier = false,
   onHandedOver,
   onNotCollected,
-  onRefresh,
+  onChanged,
 }: {
   /** WP-2423: the order was closed as not collected; the queue re-reads at once. */
   readonly onNotCollected?: ((orderLabel: string) => void) | undefined;
   /** Re-read the queue (after code checks were locked, to offer the in-person check). */
-  readonly onRefresh?: (() => void) | undefined;
+  readonly onChanged?: (() => void) | undefined;
   /** WP-2423: the handover was recorded; the queue re-reads and confirms it. */
   readonly onHandedOver?: ((orderLabel: string) => void) | undefined;
   /** IDR-0039: offline or stale; actions stay on screen but cannot be used. */
@@ -327,7 +327,7 @@ function PickupCard({
                 csrf={proofContext.csrf}
                 storeReference={proofContext.storeReference}
                 onRecorded={recorded}
-                onLocked={onRefresh}
+                onLocked={onChanged}
               />
               {item.phase === "Ready" && workstation ? (
                 // WP-2423: the code is still valid but the customer can't show it (phone dead,
@@ -371,6 +371,21 @@ function PickupCard({
     </article>
   );
 }
+/** How far the Pickup page's queue reads have got (sequence numbers of reads started). */
+export interface PickupReadsTracker {
+  /** The last read started. */
+  started: number;
+  /** The newest read whose answer or failure is on screen. */
+  shown: number;
+  /** Reads up to this one started before a write on this screen and are never shown. */
+  notBefore: number;
+}
+
+/** Batch 52 fix-up: a read's answer (or failure) is dropped when newer is shown or a write followed it. */
+export function pickupReadOutdated(tracker: PickupReadsTracker, seq: number): boolean {
+  return seq <= tracker.shown || seq <= tracker.notBefore;
+}
+
 export function PickupQueueScreen({
   view,
   onRefresh,
@@ -386,8 +401,11 @@ export function PickupQueueScreen({
   onHandedOver,
   notCollected,
   onNotCollected,
+  onChanged = onRefresh,
 }: {
   readonly view: PickupQueueView;
+  /** A write on this screen succeeded (closing, a locked code): re-read, ignoring older reads. */
+  readonly onChanged?: (() => void) | undefined;
   /** WP-2423: the order just closed as not collected on this device (plain confirmation). */
   readonly notCollected?: string | null | undefined;
   readonly onNotCollected?: ((orderLabel: string) => void) | undefined;
@@ -520,7 +538,7 @@ export function PickupQueueScreen({
                 paused={readOnly || stale !== undefined}
                 csrf={proofContext.csrf}
                 storeReference={proofContext.storeReference}
-                onDone={onRefresh}
+                onDone={onChanged}
               />
             ) : null}
           </div>
@@ -662,7 +680,7 @@ export function PickupQueueScreen({
                 earlier={fromEarlierDay(item, today)}
                 onHandedOver={onHandedOver}
                 onNotCollected={onNotCollected}
-                onRefresh={onRefresh}
+                onChanged={onChanged}
               />
             ))}
           </div>
@@ -695,7 +713,7 @@ export function PickupQueueScreen({
                   earlier
                   onHandedOver={onHandedOver}
                   onNotCollected={onNotCollected}
-                  onRefresh={onRefresh}
+                  onChanged={onChanged}
                 />
               ))}
             </div>
@@ -798,13 +816,24 @@ export function PickupQueuePage(props: {
   // Batch 52 review: Refresh pressed while a read is still out must not throw that read's answer
   // away. The answer that comes first is shown if it is for the same list and nothing newer has
   // been shown yet; a later, newer answer still replaces it. Only the latest read reports failures.
-  const reads = useRef<{
-    started: number;
-    shown: number;
-    queueKey: string;
-    load: typeof load | null;
-    mounted: boolean;
-  }>({ started: 0, shown: 0, queueKey: "", load: null, mounted: true });
+  // A read started before a write on this screen (handover, not collected, closing, a locked code)
+  // is never shown, so the order does not come back next to "handed over".
+  const reads = useRef<
+    PickupReadsTracker & { queueKey: string; load: typeof load | null; mounted: boolean }
+  >({
+    started: 0,
+    shown: 0,
+    notBefore: 0,
+    queueKey: "",
+    load: null,
+    mounted: true,
+  });
+  /** A write succeeded: every read started so far is older than it; read again at once. */
+  const reread = () => {
+    reads.current.notBefore = reads.current.started;
+    focusAfterLoad.current = true;
+    setRevision((value) => value + 1);
+  };
   useEffect(() => {
     reads.current.mounted = true;
     return () => {
@@ -820,7 +849,7 @@ export function PickupQueuePage(props: {
     void load()
       .then((view) => {
         const sameList = tracker.queueKey === queueKey && tracker.load === load;
-        if (!tracker.mounted || (!active && !sameList) || seq <= tracker.shown) return;
+        if (!tracker.mounted || (!active && !sameList) || pickupReadOutdated(tracker, seq)) return;
         tracker.shown = seq;
         setStored({
           key,
@@ -831,7 +860,7 @@ export function PickupQueuePage(props: {
         });
       })
       .catch((error) => {
-        if (!active || seq <= tracker.shown) return;
+        if (!active || pickupReadOutdated(tracker, seq)) return;
         tracker.shown = seq;
         const reason = readFailureReason(
           error instanceof PickupClientError ? error.code : "Unavailable",
@@ -939,6 +968,7 @@ export function PickupQueuePage(props: {
           : undefined
       }
       onRefresh={refresh}
+      onChanged={reread}
       refreshButtonRef={refreshButtonRef}
       stale={stale}
       checkedAt={state.loadedAt}
@@ -946,15 +976,13 @@ export function PickupQueuePage(props: {
       onHandedOver={(orderLabel) => {
         // Re-read at once so the order leaves Waiting without anyone pressing Refresh.
         setHandedOver(orderLabel);
-        focusAfterLoad.current = true;
-        setRevision((value) => value + 1);
+        reread();
       }}
       notCollected={notCollected}
       onNotCollected={(orderLabel) => {
         // WP-2423: re-read at once, like a handover, instead of waiting for the next poll.
         setNotCollected(orderLabel);
-        focusAfterLoad.current = true;
-        setRevision((value) => value + 1);
+        reread();
       }}
       includeCompleted={includeCompleted}
       onCompletedChange={(value) => {

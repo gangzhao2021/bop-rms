@@ -22,8 +22,26 @@ const scope = {
 };
 const observedAt = "2026-11-23T07:09:00.000Z";
 const words = {
-  en: { heading: "Pickup", refresh: "Refresh", loading: "Loading pickups…" },
-  "zh-Hans": { heading: "自取", refresh: "刷新", loading: "正在加载取餐…" },
+  en: {
+    heading: "Pickup",
+    refresh: "Refresh",
+    loading: "Loading pickups…",
+    order: "Order 42",
+    mark: "Mark not collected",
+    checked: "I checked the pickup shelf and nobody collected this order",
+    close: "Close as not collected",
+    closed: "Order 42 closed as not collected.",
+  },
+  "zh-Hans": {
+    heading: "自取",
+    refresh: "刷新",
+    loading: "正在加载取餐…",
+    order: "订单 42",
+    mark: "标记未取餐",
+    checked: "我已检查取餐架，没有人取走这笔订单",
+    close: "作为未取餐关闭",
+    closed: "订单 42 已作为未取餐关闭。",
+  },
 } as const;
 /** One paid pickup order the kitchen just finished (Beef noodles), as at Test Merchant 2. */
 const queue = {
@@ -217,3 +235,168 @@ for (const language of ["en", "zh-Hans"] as const)
       await expectNoInternalText(page);
     });
   }
+
+/**
+ * Batch 52 fix-up (review of 929d03902): a queue read that was already out when staff closed an
+ * order as not collected must not be taken as the list after that close. Before, its answer was
+ * shown as the latest check, after the close, with the order still waiting beside the "closed"
+ * confirmation. Now every read started before a write on this screen is dropped; the read the
+ * close sends shows the order gone. Synthetic HTTP interception, TEST-only data.
+ */
+async function closingCounter(page: Page, queueMs: readonly number[]) {
+  const answered: { at: number; waiting: boolean }[] = [];
+  const now = Date.now();
+  let closed = false;
+  let closedAt = 0;
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope: scope,
+          authorizedStores: [scope],
+          businessDate: "2026-11-22",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          pauseOrderingShown: true,
+          navigation: [
+            {
+              screenId: "FUL-PICKUP-QUEUE",
+              label: "Pickup",
+              href: "/operations/pickup",
+              permission: "fulfillment.operate",
+            },
+          ],
+        },
+      },
+    }),
+  );
+  await page.route("**/merchant/business-day", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        businessDate: "2026-11-22",
+        startsAt: new Date(now - 4 * 3_600_000).toISOString(),
+        endsAt: new Date(now + 10 * 3_600_000).toISOString(),
+        timeZone: scope.timeZone,
+        observedAt: new Date(now).toISOString(),
+      },
+    }),
+  );
+  await page.route("**/merchant/service-control", (route) =>
+    route.fulfill({ headers, json: notPausedServiceControl(store, scope.timeZone) }),
+  );
+  let reads = 0;
+  await page.route("**/merchant/pickup/query", async (route) => {
+    const wait = queueMs[Math.min(reads, queueMs.length - 1)] ?? 0;
+    reads += 1;
+    // The server reads the queue when the request arrives; the answer may come much later.
+    const waiting = !closed;
+    const at = Date.now();
+    const json = {
+      source: "CurrentFulfillment",
+      workstation: { deviceReference: id(10), pickupLocationReference: id(11) },
+      storeReference: store,
+      observedAt: new Date(at).toISOString(),
+      nextAfterFulfillmentReference: null,
+      items: waiting
+        ? [
+            {
+              fulfillmentReference: id(1),
+              orderReference: id(3),
+              phase: "Ready",
+              aggregateVersion: "7",
+              readyAt: new Date(now - 70 * 60_000).toISOString(),
+              publicOrderReference: "D".repeat(22),
+              orderNumber: "42",
+              proof: {
+                kind: "HumanCode",
+                generation: 1,
+                expiresAt: new Date(now - 10 * 60_000).toISOString(),
+              },
+              items: [
+                {
+                  fulfillmentItemReference: id(4),
+                  orderedQuantity: 1,
+                  readyQuantity: 1,
+                  handedOverQuantity: 0,
+                  name: "Beef noodles (TEST)",
+                  options: [],
+                },
+              ],
+            },
+          ]
+        : [],
+    };
+    await new Promise((resolve) => setTimeout(resolve, wait));
+    answered.push({ at: Date.now(), waiting });
+    return route.fulfill({ headers, json }).catch(() => undefined);
+  });
+  await page.route("**/merchant/pickup/not-collected", async (route) => {
+    closed = true;
+    closedAt = Date.now();
+    await route.fulfill({
+      headers,
+      json: { status: "Applied", fulfillmentReference: id(1), closedAt: new Date().toISOString() },
+    });
+  });
+  return { answered, reads: () => reads, closedAt: () => closedAt };
+}
+
+for (const language of ["en", "zh-Hans"] as const)
+  for (const [width, height] of [
+    [390, 844],
+    [1024, 768],
+    [1440, 900],
+  ] as const)
+    test(`@production A Pickup read already out when an order is closed as not collected does not bring it back, ${language} at ${width}`, async ({
+      page,
+    }) => {
+      const text = words[language];
+      if (language === "zh-Hans")
+        await page.addInitScript(() =>
+          window.localStorage.setItem("bop.merchant.language", "zh-Hans"),
+        );
+      await page.setViewportSize({ width, height });
+      // Read 1 answers at once; the Refresh read is slow (2.5 s) and answers after the close; the
+      // read the close sends is slower still (5 s).
+      const { answered, reads, closedAt } = await closingCounter(page, [0, 2_500, 5_000]);
+      await page.goto("/operations/pickup");
+      const main = page.getByRole("main");
+      const card = main.getByRole("heading", { name: text.order });
+      await expect(card).toBeVisible();
+      const checked = main.locator(".workspace-page__freshness time");
+      const firstChecked = await checked.getAttribute("datetime");
+      await main.getByRole("button", { name: text.refresh, exact: true }).click();
+      await expect.poll(reads).toBe(2);
+      await main.getByRole("button", { name: text.mark, exact: true }).click();
+      const dialog = page.getByRole("dialog");
+      await dialog.getByLabel(text.checked).check();
+      await dialog.getByRole("button", { name: text.close, exact: true }).click();
+      await expect(page.getByRole("status").filter({ hasText: text.closed })).toBeVisible();
+      await expect.poll(reads).toBe(3);
+      await page.keyboard.press("Escape");
+      // The Refresh read, asked before the close, answers now with the order still waiting.
+      await expect.poll(() => answered.length, { timeout: 5_000 }).toBe(2);
+      expect(answered[1]?.waiting).toBe(true);
+      expect(answered[1]?.at ?? 0).toBeGreaterThan(closedAt());
+      await page.waitForTimeout(300);
+      // It is not taken as the list after the close: the screen does not say it checked the queue
+      // after the close while showing the order as waiting.
+      expect(await checked.getAttribute("datetime")).toBe(firstChecked);
+      // The read the close sent shows the order gone, and nothing brings it back.
+      await expect(card).toHaveCount(0, { timeout: 6_000 });
+      await expect(page.getByRole("status").filter({ hasText: text.closed })).toBeVisible();
+      await page.waitForTimeout(500);
+      await expect(card).toHaveCount(0);
+      expect(Date.parse((await checked.getAttribute("datetime")) ?? "")).toBeGreaterThan(
+        closedAt(),
+      );
+      await noOverflow(page);
+      await page.screenshot({ path: `test-results/b52/pickup-closed-${language}-${width}.png` });
+      await expectNoInternalText(page);
+    });

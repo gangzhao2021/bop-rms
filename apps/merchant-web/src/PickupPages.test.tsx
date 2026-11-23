@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   mergedPickupLines,
   pickupOfflineState,
+  pickupReadOutdated,
   pickupRefreshIntervalMs,
   pickupRetryAttempts,
   PickupQueueScreen,
@@ -569,4 +570,16 @@ it("WP-2423 M121: ?order=3 finds order 3 only, never 13 or 30", () => {
   } finally {
     host.location = previous;
   }
+});
+
+it("Batch 52 fix-up: a queue read started before a handover or not-collected is never shown", () => {
+  // Read 1 is out; Refresh starts read 2; nothing is shown yet, so read 1 may still be shown.
+  expect(pickupReadOutdated({ started: 2, shown: 0, notBefore: 0 }, 1)).toBe(false);
+  // Read 2 answered first: the older read 1 is dropped.
+  expect(pickupReadOutdated({ started: 2, shown: 2, notBefore: 0 }, 1)).toBe(true);
+  // Staff handed over while reads 1 and 2 were out: both are older than the write; read 3 is not.
+  const afterWrite = { started: 3, shown: 0, notBefore: 2 };
+  expect(pickupReadOutdated(afterWrite, 1)).toBe(true);
+  expect(pickupReadOutdated(afterWrite, 2)).toBe(true);
+  expect(pickupReadOutdated(afterWrite, 3)).toBe(false);
 });
