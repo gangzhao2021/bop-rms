@@ -682,3 +682,78 @@ it("WP-2423 batch 51: a wake cuts only the ordinary poll short, once, and never 
   expect(failing).toHaveBeenCalledTimes(2);
   await supervised.stop();
 });
+it("WP-2423 batch 53: a Finished tap committed by the API waits one poll at most; a tap during a busy cycle waits none", async () => {
+  vi.useFakeTimers();
+  // The v15 shape (2026-11-23 11:48:12Z, TM2 Pickup 10): the API commits a Finished tap's five
+  // events in its own process, so nothing wakes this workload; the idle poll (about 1 s, cycles of
+  // 5-9 ms) takes them. Per aggregate one version goes out per cycle. Live delivery times: the
+  // first ticket event rebuilds the kitchen board (332 ms), the ready result 355 ms (one slow
+  // pickup-readiness delivery, 269 ms), the rest about 10 ms each.
+  interface Event {
+    tap: number;
+    type: string;
+    aggregate: string;
+    version: number;
+    ms: number;
+  }
+  const outbox: (Event & { recordedAt: number })[] = [];
+  const published = new Map<string, number>();
+  const runOnce = vi.fn(async () => {
+    const claimable = outbox.filter(
+      (event) =>
+        !outbox.some(
+          (other) => other.aggregate === event.aggregate && other.version < event.version,
+        ),
+    );
+    for (const event of claimable) {
+      await new Promise((resolve) => setTimeout(resolve, event.ms));
+      outbox.splice(outbox.indexOf(event), 1);
+      published.set(event.tap + " " + event.type, Date.now() - event.recordedAt);
+    }
+    return claimable.length;
+  });
+  const tap = (n: number) => {
+    const ticket = "ticket-" + n;
+    for (const event of [
+      { type: "KitchenWorkAccepted", aggregate: ticket, version: 2, ms: 332 },
+      { type: "KitchenItemReady", aggregate: "ready-" + n, version: 1, ms: 355 },
+      { type: "KitchenWorkStarted", aggregate: ticket, version: 3, ms: 35 },
+      { type: "KitchenItemCompleted", aggregate: ticket, version: 4, ms: 10 },
+      { type: "KitchenOrderReady", aggregate: ticket, version: 4, ms: 80 },
+    ])
+      outbox.push({ ...event, tap: n, recordedAt: Date.now() });
+  };
+  const workload = createOutboxWorkload({
+    dispatcher: { runOnce, stop: async () => "drained" as const },
+    pollIntervalMs: 1000,
+    followUp: { delayMs: 0, maxConsecutive: 10 },
+    drainDeadlineMs: 1000,
+    supervision: supervisedCycleFailures,
+  });
+  await workload.start();
+  // The idle poll ran 0.2 s before the commit and nothing wakes it, so the tap waits 0.8 s.
+  await vi.advanceTimersByTimeAsync(200);
+  tap(10);
+  await vi.advanceTimersByTimeAsync(6000);
+  // Live: 1.133 s to KitchenWorkAccepted (0.8 s poll phase plus the one board rebuild) and 1.762 s
+  // to KitchenOrderReady. One poll plus the deliveries, within the 2 s design (Handoff 80.8).
+  expect(published.get("10 KitchenWorkAccepted")).toBeGreaterThan(1000);
+  expect(published.get("10 KitchenOrderReady")).toBeGreaterThan(1500);
+  expect(published.get("10 KitchenOrderReady")).toBeLessThan(2000);
+  // A second tap commits while the first tap's cycle is delivering: the prompt follow-up takes it
+  // at once, so it never waits a further poll.
+  tap(11);
+  const calls = runOnce.mock.calls.length;
+  while (runOnce.mock.calls.length === calls) await vi.advanceTimersByTimeAsync(10);
+  await vi.advanceTimersByTimeAsync(100);
+  expect(workload.snapshot().cycleInFlight).toBe(true);
+  tap(12);
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(published.get("12 KitchenWorkAccepted")).toBeLessThan(1000);
+  expect(published.get("12 KitchenOrderReady")).toBeLessThan(2000);
+  // Idle cost is unchanged: one cycle a second once the taps are out.
+  const before = runOnce.mock.calls.length;
+  await vi.advanceTimersByTimeAsync(10_000);
+  expect(runOnce.mock.calls.length - before).toBe(10);
+  await workload.stop();
+});
