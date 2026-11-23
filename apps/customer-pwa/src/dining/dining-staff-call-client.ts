@@ -62,6 +62,17 @@ const credential = /^[A-Za-z0-9_-]{43}$/u;
 const reference = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const instant = /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z$/u;
 
+/**
+ * Batch 52 (v15 b51 live): a Store with calling staff turned off answers every read 409
+ * (not_offered), and the panel is read again each time the guest comes back to Your table (Menu,
+ * Cart and Your table are separate pages). That answer is the Store's setting, not a failure: this
+ * tab keeps it for a short while, per visit credential, instead of asking on every visit to the
+ * page. A reload, a new visit credential or the end of the wait reads it again, so a Store that
+ * turns calling staff on is offered within {@link diningStaffCallNotOfferedRecheckMs}.
+ */
+export const diningStaffCallNotOfferedRecheckMs = 120_000;
+let notOffered: { readonly credential: string; readonly until: number } | null = null;
+
 const unavailable = (): never => {
   throw new DiningStaffCallClientError("unavailable");
 };
@@ -117,6 +128,13 @@ export function createHttpDiningStaffCallClient(
     const csrf = getCustomerCsrfCredential();
     const current = captureCustomerCsrfContext();
     if (csrf === null || !credential.test(csrf)) throw new DiningStaffCallClientError("not-joined");
+    if (
+      init.method === "GET" &&
+      notOffered !== null &&
+      notOffered.credential === csrf &&
+      Date.now() < notOffered.until
+    )
+      throw new DiningStaffCallClientError("not-offered");
     let response: Response;
     try {
       response = await boundedFetch(request, path, {
@@ -130,9 +148,16 @@ export function createHttpDiningStaffCallClient(
       return unavailable();
     }
     if (!current()) throw new DiningStaffCallClientError("not-joined");
-    if (response.status === 404 || response.status === 401)
+    if (response.status === 404 || response.status === 401 || response.status === 409) {
+      // A refusal carries nothing the page shows: let its body go.
+      void response.body?.cancel().catch(() => undefined);
+      if (response.status === 409) {
+        notOffered = { credential: csrf, until: Date.now() + diningStaffCallNotOfferedRecheckMs };
+        throw new DiningStaffCallClientError("not-offered");
+      }
       throw new DiningStaffCallClientError("not-joined");
-    if (response.status === 409) throw new DiningStaffCallClientError("not-offered");
+    }
+    notOffered = null;
     let payload: unknown;
     try {
       payload = await response.json();

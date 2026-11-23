@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  diningStaffCallNotOfferedRecheckMs,
   createHttpDiningStaffCallClient,
   parseDiningStaffCallView,
 } from "./dining-staff-call-client.js";
@@ -59,5 +60,48 @@ describe("WP-2423 Q28 staff call answer", () => {
       ),
     );
     await expect(client.read()).rejects.toMatchObject({ code: "not-offered" });
+  });
+  it("batch 52 (v15 b51 live): the Store's 'not offered' is kept a while, not asked on every visit", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2026-11-23T07:00:00.000Z"));
+      setCustomerCsrfCredential("b".repeat(43));
+      const asked: string[] = [];
+      const request = async (_input: RequestInfo | URL, init?: RequestInit) => {
+        asked.push(init?.method ?? "GET");
+        return Response.json(
+          {
+            schemaVersion: 1,
+            error: {
+              code: "dining_staff_call_not_offered",
+              messageKey: "customer.dining.staff_call.not_offered",
+            },
+          },
+          { status: 409 },
+        );
+      };
+      // Each visit to Your table makes its own client, as the panel does.
+      await expect(createHttpDiningStaffCallClient(request).read()).rejects.toMatchObject({
+        code: "not-offered",
+      });
+      await expect(createHttpDiningStaffCallClient(request).read()).rejects.toMatchObject({
+        code: "not-offered",
+      });
+      expect(asked).toEqual(["GET"]);
+      // Later on, the Store may have turned calling staff on: it is asked again.
+      vi.setSystemTime(Date.now() + diningStaffCallNotOfferedRecheckMs);
+      await expect(createHttpDiningStaffCallClient(request).read()).rejects.toMatchObject({
+        code: "not-offered",
+      });
+      expect(asked).toEqual(["GET", "GET"]);
+      // A new visit (another credential) asks at once.
+      setCustomerCsrfCredential("c".repeat(43));
+      await expect(createHttpDiningStaffCallClient(request).read()).rejects.toMatchObject({
+        code: "not-offered",
+      });
+      expect(asked).toEqual(["GET", "GET", "GET"]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
