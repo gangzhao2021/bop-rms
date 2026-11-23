@@ -869,24 +869,32 @@ export function PickupQueuePage(props: {
     focusAfterLoad.current = true;
     setRevision((value) => value + 1);
   };
-  // Batch 34 (v15 b33 live): "Mark all not collected" depends on the Store's hours for the day;
-  // the first list waits for that read (a moment, at most BUSINESS_DAY_SETTLE_MS) so the control
-  // and the list arrive together and nothing moves once the list shows.
+  // Batch 34 (v15 b33 live): "Mark all not collected" depends on the Store's hours for the day.
+  // Batch 52 (v15 b51 live, Test Merchant 2): the list waited for that read (up to
+  // BUSINESS_DAY_SETTLE_MS) for everyone, so a slow hours read under load kept the counter's list
+  // and Refresh off the screen for about 2 s. Staff shown Pause ordering always have the tools line
+  // the closing step joins, so their list shows the moment it is read; only staff without that line
+  // and with ready orders still wait for the hours (at most the cap), so the step cannot push the
+  // list down once it shows.
   const daySettled = useStoreBusinessDaySettled();
-  if (state.kind !== "Found" || !daySettled)
+  const pauseShown = useContext(PauseOrderingShownContext) !== false;
+  const heldForDay =
+    state.kind === "Found" &&
+    !daySettled &&
+    !pauseShown &&
+    state.view.items.some((item) => item.phase === "Ready" && item.execution !== undefined);
+  if (state.kind !== "Found" || heldForDay)
     return (
       <WorkspacePage
         className="pickup-queue"
         title={t("Pickup")}
         meta={props.storeLabel}
         actions={
-          // Batch 35: no Refresh while the panel says it is loading (the list already read, held
-          // for the day's hours, is still loading as far as staff can see).
-          state.kind !== "Loading" && state.kind !== "Found" ? (
-            <button ref={refreshButtonRef} onClick={refresh}>
-              {t("Refresh")}
-            </button>
-          ) : null
+          // Batch 52: Refresh is there from the first moment, also while the list is loading, so
+          // staff at the counter can ask again instead of waiting on a slow read.
+          <button ref={refreshButtonRef} onClick={refresh}>
+            {t("Refresh")}
+          </button>
         }
       >
         <PickupStatePanel state={state.kind === "Found" ? "Loading" : state.kind} />

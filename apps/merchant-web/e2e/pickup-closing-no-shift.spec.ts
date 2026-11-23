@@ -5,9 +5,10 @@ import { notPausedServiceControl } from "./service-control-state";
 /**
  * Batch 34 (v15 b33 live minor): after closing, Pickup sometimes first showed its list and 35-55 ms
  * later inserted "Mark all not collected (N)" above it (the control depends on the Store's hours for
- * the day, read apart from the queue), pushing the list down 44 px. The list now waits for that
- * read, so the control and the list arrive together and nothing moves; a failed read holds nothing
- * back. Synthetic HTTP interception on the production build, TEST-only data.
+ * the day, read apart from the queue), pushing the list down 44 px. Nothing moves now: for staff
+ * shown Pause ordering the control joins that line when the hours answer (batch 52: their list no
+ * longer waits for the hours); for staff without that line the list waits for the hours, at most
+ * BUSINESS_DAY_SETTLE_MS. A failed read holds nothing back. Synthetic HTTP interception on the production build, TEST-only data.
  */
 const id = (n: number) => "0190a7f3-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const headers = { "cache-control": "no-store" };
@@ -158,7 +159,9 @@ for (const [width, height] of [
     await page.waitForTimeout(1_000);
     const seen = await samples(page);
     expect(seen.length).toBeGreaterThan(0);
-    expect(seen.every((entry) => entry.closing)).toBe(true);
+    // Batch 52: staff shown Pause ordering see the list as soon as it is read; the closing step
+    // joins Pause ordering's line when the hours answer, so the list still never moves.
+    expect(seen.some((entry) => entry.closing)).toBe(true);
     expect(new Set(seen.map((entry) => entry.top)).size).toBe(1);
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
@@ -227,8 +230,8 @@ for (const [width, height] of [
  * Batch 35 (v15 b34 live minor): when the day's hours take longer than BUSINESS_DAY_SETTLE_MS
  * (2 s), the list shows first and "Mark all not collected" arrives later. It used to be inserted
  * above the list and push it from 282 to 326 px; it now takes its place on Pause ordering's line,
- * so the list stays where it first showed for 8 s. The loading panel shows no Refresh, and the
- * closing step starts at the page's edge like Pause ordering.
+ * so the list stays where it first showed for 8 s. The closing step starts at the page's edge like
+ * Pause ordering. Batch 52: the loading panel offers Refresh.
  */
 for (const pauseShown of [true, false])
   for (const [width, height] of [
@@ -257,8 +260,9 @@ for (const pauseShown of [true, false])
       const refresh = await page.evaluate(
         () => (window as unknown as { refreshWhileLoading: boolean[] }).refreshWhileLoading,
       );
-      expect(refresh.length).toBeGreaterThan(0);
-      expect(refresh.some(Boolean)).toBe(false);
+      // Batch 52: Refresh is on the loading screen too, so staff can ask again at once.
+      if (!pauseShown) expect(refresh.length).toBeGreaterThan(0);
+      expect(refresh.every(Boolean)).toBe(true);
       // Text actions start at the page's edge, with no inset of their own: the closing step lines
       // up with the filters, or follows Pause ordering on its line when that shows.
       const left = async (selector: string) =>
