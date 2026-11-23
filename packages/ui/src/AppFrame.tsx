@@ -21,6 +21,11 @@ export interface AppFrameProps {
   navigation?: ReactNode;
   /** Accessible name of the navigation landmark ("Primary" when omitted). */
   navigationLabel?: string;
+  /**
+   * Draw the navigation inside the top bar, before its status and language switch, instead of as a
+   * row of its own, so one bar can hold the title, the links and the switch top-right.
+   */
+  navigationInHeader?: boolean;
   mobileBrandTitle?: string;
   title: string;
 }
@@ -31,12 +36,19 @@ export function AppFrame({
   headerStatus,
   mobileBrandTitle,
   navigation,
+  navigationInHeader = false,
   navigationLabel,
   title,
 }: AppFrameProps) {
   const skipLinkProvided = useContext(SkipLinkProvidedContext);
   const inWorkspace = useContext(WorkspaceFrameContext);
   const text = useUiText();
+  const nav = navigation ? (
+    <nav className="bop-shell__nav" aria-label={navigationLabel ?? text.primaryNavigation}>
+      {navigation}
+    </nav>
+  ) : null;
+  const navInHeader = navigationInHeader && !inWorkspace;
   return (
     <div
       className={`bop-shell${className ? ` ${className}` : ""}`}
@@ -70,6 +82,7 @@ export function AppFrame({
             </span>
           ) : null}
           <p>{description}</p>
+          {navInHeader ? nav : null}
           {headerStatus === undefined ? null : (
             <div className="bop-shell__header-status">{headerStatus}</div>
           )}
@@ -78,11 +91,7 @@ export function AppFrame({
           )}
         </header>
       )}
-      {navigation ? (
-        <nav className="bop-shell__nav" aria-label={navigationLabel ?? text.primaryNavigation}>
-          {navigation}
-        </nav>
-      ) : null}
+      {navInHeader ? null : nav}
       <main className="bop-shell__main" id="main-content" tabIndex={-1}>
         {children}
       </main>

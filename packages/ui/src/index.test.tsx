@@ -69,4 +69,23 @@ describe("shared UI foundation", () => {
       ),
     ).toContain('aria-label="Primary"');
   });
+
+  it("can draw its navigation inside the top bar, before the status", () => {
+    const html = renderToStaticMarkup(
+      <AppFrame
+        title="Store"
+        description="Kitchen display"
+        navigation={<a href="/operations/kitchen">Kitchen</a>}
+        navigationInHeader
+        headerStatus={<button type="button">Hand over</button>}
+      >
+        <p>Body</p>
+      </AppFrame>,
+    );
+    const header = html.slice(html.indexOf("<header"), html.indexOf("</header>"));
+    expect(header).toContain(
+      '<p>Kitchen display</p><nav class="bop-shell__nav" aria-label="Primary"><a href="/operations/kitchen">Kitchen</a></nav><div class="bop-shell__header-status">',
+    );
+    expect(html.match(/<nav /gu)).toHaveLength(1);
+  });
 });
