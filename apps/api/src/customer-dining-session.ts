@@ -220,6 +220,9 @@ export class CustomerDiningSessionHandler {
                   refunded: money(view.summary.refunded),
                   refundPending: money(view.summary.refundPending),
                   due: money(view.summary.due),
+                  // Batch 54 (v15 b53 live): staff closed the bill (the guests left and the rest
+                  // was written off). Without it every guest phone said the table paid in full.
+                  ...(view.summary.closedByStaff === true ? { closedByStaff: true } : {}),
                   // WP-2423 item 8 ④: the table pays in parts (how many, how many paid).
                   ...(view.summary.splitParts === undefined
                     ? {}

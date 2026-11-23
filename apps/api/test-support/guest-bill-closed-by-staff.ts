@@ -1,0 +1,174 @@
+/**
+ * Batch 54 (v15 b53 live, table-total-note-after-by-dish-pay): a table paying at the end whose
+ * guests left, in the shapes v15 read for TM2's L53 WO4 (TEST), order 52. Two guests each ordered
+ * Beef noodles (TEST) ($14.13 and $14.12 with tax); staff pressed Start checkout; guest A paid
+ * their own dish online; staff then recorded "Guests left without paying the rest" (a
+ * GUEST_LEFT_UNPAID write-off: priced 2825, captured 1413, written off 1412).
+ *
+ * Plain data only (type imports): the api HTTP test composes it with the real read and handler
+ * from source, and the customer browser spec serves it through the same handler on a local server.
+ */
+import type { CustomerDiningSessionFacts } from "../src/customer-dining-session-read.js";
+import type { readDiningTableBill } from "../src/merchant-dining-table-checkout.js";
+
+type Order = NonNullable<CustomerDiningSessionFacts["order"]>;
+type TableBill = Awaited<ReturnType<typeof readDiningTableBill>>;
+
+/**
+ * open-after-one-dish: guest A paid their dish, the rest is still owed (before staff act).
+ * by-dish-written-off: then staff wrote off the rest (order 52).
+ * parts-written-off: staff split the bill in 3 equal parts; 1 was paid, then the rest written off.
+ * nothing-paid-written-off: the guests left before anyone paid; the whole bill written off.
+ */
+export type GuestBillScenario =
+  "open-after-one-dish" | "by-dish-written-off" | "parts-written-off" | "nothing-paid-written-off";
+
+const id = (n: number) => "0198b054-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+const cad = (amountMinor: bigint) => ({ amountMinor, currencyCode: "CAD" });
+const sentAt = "2026-11-22T16:06:00.000Z";
+const rounds = [
+  { batch: id(0x30), item: id(0x31), totalMinor: 1413n, taxMinor: 163n, mine: true },
+  { batch: id(0x40), item: id(0x41), totalMinor: 1412n, taxMinor: 162n, mine: false },
+] as const;
+
+/** The table bill as staff checkout reads it (readDiningTableBill), the fields the guest uses. */
+function tableBill(scenario: GuestBillScenario): TableBill {
+  const byDishPaid = scenario === "open-after-one-dish" || scenario === "by-dish-written-off";
+  const paidMinor = byDishPaid ? 1413n : scenario === "parts-written-off" ? 942n : 0n;
+  const owedMinor = 2825n - paidMinor;
+  return {
+    rounds: rounds.map((round, index) => ({
+      roundNumber: index + 1,
+      orderReference: id(1),
+      orderBatchReference: round.batch,
+      submissionReference: id(0x50 + index),
+      items: [
+        {
+          orderItemReference: round.item,
+          quantity: 1,
+          displayName: "Beef noodles (TEST)",
+          subtotalMinor: "1250",
+          totalMinor: String(round.totalMinor),
+          reduction: null,
+        },
+      ],
+      subtotalMinor: "1250",
+      taxMinor: String(round.taxMinor),
+      totalMinor: String(round.totalMinor),
+      taxRoundingMinor: "0",
+      // By dish, guest A's own round was paid in full; a fixed part pays no round on its own.
+      paid: byDishPaid && round.mine,
+      orderedBy: null,
+      fromTableLabel: null,
+      liveOrderedAt: null,
+    })),
+    owed: { totalMinor: String(owedMinor) },
+    taxRoundingMinor: "0",
+    split:
+      scenario === "nothing-paid-written-off"
+        ? null
+        : {
+            mode: scenario === "parts-written-off" ? "Even" : "ByGuests",
+            stale: false,
+            paidInFull: false,
+          },
+    writeOff:
+      scenario === "open-after-one-dish"
+        ? null
+        : { amountMinor: String(owedMinor), decidedAt: "2026-11-22T16:08:33.000Z" },
+  } as unknown as TableBill;
+}
+
+/**
+ * The guest read's facts for this table (customer-dining-session-read's reader output), with the
+ * table bill's own facts left to `customerTableBillFacts` so the real mapping runs.
+ */
+export function guestBillClosedByStaffFacts(scenario: GuestBillScenario): {
+  readonly facts: Omit<CustomerDiningSessionFacts, "order"> & {
+    readonly order: Omit<Order, "tableBill">;
+  };
+  readonly bill: TableBill;
+} {
+  const paid =
+    scenario === "open-after-one-dish" || scenario === "by-dish-written-off"
+      ? [1413n]
+      : scenario === "parts-written-off"
+        ? [942n]
+        : [];
+  return {
+    bill: tableBill(scenario),
+    facts: {
+      diningSessionReference: id(0x20),
+      tableLabel: "L53 WO4 (TEST)",
+      checkedAt: "2026-11-22T16:09:00.000Z",
+      paymentTiming: "PayLater",
+      order: {
+        orderNumber: "52",
+        batches: rounds.map((round) => ({
+          orderBatchReference: round.batch,
+          submittedAt: sentAt,
+          items: [
+            {
+              orderItemReference: round.item,
+              displayName: "Beef noodles (TEST)",
+              quantity: 1,
+              lineTotal: cad(round.totalMinor),
+            },
+          ],
+        })),
+        authorship: new Map(rounds.map((round) => [round.batch, round.mine])),
+        delivery: new Map(
+          rounds.map((round) => [
+            round.item,
+            { phase: "Fulfilled" as never, deliveredQuantity: 1 },
+          ]),
+        ),
+        paymentOutcomes: new Map(),
+        paymentDeadlines: new Map(),
+        payLaterRounds: new Set(rounds.map((round) => round.batch)),
+        // A part of a split settles no round on its own (the bill was not paid in full).
+        settledRounds: new Set(),
+        tableSettlement: paid.length === 0 ? null : { tipMinor: 0n, roundingMinor: 0n },
+        splitParts:
+          scenario === "nothing-paid-written-off"
+            ? null
+            : { count: scenario === "parts-written-off" ? 3 : null, paid: 1 },
+        unpaidCancellations: new Set(),
+        staffCancellations: new Map(),
+        itemCancellations: [],
+        itemPrices: new Map(
+          rounds.map((round) => [round.item, { subtotal: cad(1250n), tax: cad(round.taxMinor) }]),
+        ),
+        payments: paid.map((amountMinor) => ({
+          status: "Succeeded" as const,
+          amount: cad(amountMinor),
+        })),
+        refunds: { confirmedMinor: 0n, pendingMinor: 0n },
+      },
+    },
+  };
+}
+
+/** What v15 sent for order 52 after the write-off (GET /api/v1/dine-in/session, summary). */
+export const liveWrittenOffSummaryWithoutClosedByStaff = {
+  paid: { amountMinor: "1413", currencyCode: "CAD" },
+  refunded: { amountMinor: "0", currencyCode: "CAD" },
+  refundPending: { amountMinor: "0", currencyCode: "CAD" },
+  due: { amountMinor: "0", currencyCode: "CAD" },
+  splitParts: { count: null, paid: 1 },
+  bill: {
+    items: { amountMinor: "2500", currencyCode: "CAD" },
+    takenOff: { amountMinor: "0", currencyCode: "CAD" },
+    pointsUsed: { amountMinor: "0", currencyCode: "CAD" },
+    subtotal: { amountMinor: "2500", currencyCode: "CAD" },
+    tax: { amountMinor: "325", currencyCode: "CAD" },
+    total: { amountMinor: "2825", currencyCode: "CAD" },
+  },
+  tableTip: { amountMinor: "0", currencyCode: "CAD" },
+  cashRounding: { amountMinor: "0", currencyCode: "CAD" },
+  ordered: {
+    subtotal: { amountMinor: "2500", currencyCode: "CAD" },
+    tax: { amountMinor: "325", currencyCode: "CAD" },
+    total: { amountMinor: "2825", currencyCode: "CAD" },
+  },
+} as const;
