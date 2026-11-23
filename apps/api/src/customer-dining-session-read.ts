@@ -176,6 +176,12 @@ export interface CustomerDiningSessionFacts {
       readonly roundTaxRounding?: ReadonlyMap<string, bigint>;
       /** b39 review: a merged table's rounds, by round, with the table they were ordered at. */
       readonly fromTables?: ReadonlyMap<string, string>;
+      /**
+       * Batch 51 (v15 b50 live): rounds the bill counts as paid in full while the rest of the table
+       * is still to pay — every dish of it paid by guests paying by dish, or every part holding it
+       * paid. The bill's own per-round fact; a round only partly paid is never in it.
+       */
+      readonly paidRounds?: ReadonlySet<string>;
     };
     /**
      * WP-2423 item 8 ④ (v15 2026-10-28 a): a split bill being paid part by part — how many parts
@@ -766,7 +772,8 @@ export function composeCustomerDiningSession(
     } else if (
       outcome === undefined &&
       order.payLaterRounds?.has(reference) === true &&
-      order.settledRounds?.has(reference) === true
+      (order.settledRounds?.has(reference) === true ||
+        order.tableBill?.paidRounds?.has(reference) === true)
     ) {
       payment = "Paid";
       status = kitchenStatus();
@@ -895,6 +902,7 @@ export function composeCustomerDiningSession(
       // worked out once), so the round cards add up to the Table total and the paid bill.
       ...((payment === "OnTableBill" ||
         order.settledRounds?.has(reference) === true ||
+        order.tableBill?.paidRounds?.has(reference) === true ||
         nothingToPay) &&
       order.tableBill?.rounds?.get(reference) !== undefined
         ? { bill: billView(order.tableBill.rounds.get(reference) as CustomerTableBillLines) }
@@ -1746,6 +1754,14 @@ export function customerTableBillFacts(
     roundTaxRounding: new Map(
       bill.rounds.map((round) => [round.orderBatchReference, BigInt(round.taxRoundingMinor)]),
     ),
+    // Batch 51: a round paid in full by its parts reads Paid, never "On the table's bill".
+    ...(bill.rounds.some((round) => round.paid)
+      ? {
+          paidRounds: new Set(
+            bill.rounds.filter((round) => round.paid).map((round) => round.orderBatchReference),
+          ),
+        }
+      : {}),
     ...(bill.rounds.some((round) => round.fromTableLabel !== null)
       ? {
           fromTables: new Map(

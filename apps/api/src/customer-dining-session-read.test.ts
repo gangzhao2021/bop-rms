@@ -516,6 +516,69 @@ describe("WP-2423 Q8 composeCustomerDiningSession", () => {
     expect(view.summary?.paid).toEqual(cad(4410n));
   });
 
+  // Batch 51 (v15 b50 live, G50 Pay): guest A paid only their own dish ($14.13, round 1) by dish;
+  // guest C's round 2 ($14.12) was still to pay. A's round 1 kept "On the table's bill" after its
+  // only dish was paid, even after a reload. The bill says which rounds are paid in full; a round
+  // only partly paid stays on the table's bill.
+  it("batch 51: a round paid in full by dish reads Paid; one still (partly) owed stays on the bill", () => {
+    const round = (batch: number, totalMinor: string, paid: boolean) => ({
+      roundNumber: batch / 10 - 2,
+      orderReference: id(1),
+      orderBatchReference: id(batch),
+      submissionReference: id(batch + 1),
+      items: [
+        {
+          orderItemReference: id(batch + 2),
+          quantity: 1,
+          displayName: "Beef noodles (TEST)",
+          subtotalMinor: "1250",
+          totalMinor,
+          reduction: null,
+        },
+      ],
+      subtotalMinor: "1250",
+      taxMinor: String(Number(totalMinor) - 1250),
+      totalMinor,
+      taxRoundingMinor: "0",
+      paid,
+      orderedBy: null,
+      fromTableLabel: null,
+      liveOrderedAt: null,
+    });
+    const bill = (firstPaid: boolean) =>
+      ({
+        rounds: [round(30, "1413", firstPaid), round(40, "1412", false)],
+        owed: { totalMinor: firstPaid ? "1412" : "2825" },
+        taxRoundingMinor: "0",
+        split: null,
+        writeOff: null,
+      }) as unknown as Parameters<typeof customerTableBillFacts>[0];
+    expect(customerTableBillFacts(bill(false)).paidRounds).toBeUndefined();
+    const view = (firstPaid: boolean) =>
+      composeCustomerDiningSession({
+        ...facts({
+          paymentOutcomes: new Map(),
+          payments: firstPaid ? [{ status: "Succeeded", amount: cad(1413n) }] : [],
+          payLaterRounds: new Set([id(30), id(40)]),
+          tableBill: customerTableBillFacts(bill(firstPaid)),
+          // A part of a by-dish bill settles no round on its own (the bill isn't paid in full).
+          settledRounds: new Set(),
+          splitParts: firstPaid ? { count: null, paid: 1 } : null,
+        }),
+        paymentTiming: "PayLater",
+      });
+    expect(view(false).rounds.map((entry) => entry.payment)).toEqual([
+      "OnTableBill",
+      "OnTableBill",
+    ]);
+    const paid = view(true);
+    expect(paid.rounds.map((entry) => entry.payment)).toEqual(["Paid", "OnTableBill"]);
+    // The paid round still shows its bill lines; the summary agrees with it.
+    expect(paid.rounds[0]?.bill?.total).toEqual(cad(1413n));
+    expect(paid.summary?.paid).toEqual(cad(1413n));
+    expect(paid.summary?.due).toEqual(cad(1412n));
+  });
+
   // WP-2423 M04: the guest page said "已送到厨房" for 8 to 19 minutes while the kitchen had nothing.
   it("says a paid round accepted but not yet in the kitchen was received, never sent", () => {
     const round = (kitchenPending: ReadonlySet<string> | undefined) =>
