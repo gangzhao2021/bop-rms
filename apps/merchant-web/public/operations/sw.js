@@ -7,7 +7,8 @@
 // worker that never finished installing) the store system's own answer is shown, and with no
 // answer at all a short built-in page says what to do.
 // v6 (b25): the offline page says "Wi-Fi" as the app does; a new cache makes tablets fetch it again.
-const CACHE = "bop-merchant-offline-v6";
+// v7 (b55): the kitchen display's offline page gives kitchen steps, not the floor's.
+const CACHE = "bop-merchant-offline-v7";
 const OFFLINE = "/operations/offline.html";
 const FILES = [OFFLINE, "/operations/offline.js", "/operations/offline.css"];
 

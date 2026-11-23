@@ -39,8 +39,9 @@ function worker(input: {
 const page = () => new Request("https://store.test/operations/dining");
 
 // b25: the offline page's words changed ("Check the Wi-Fi"), so a tablet must fetch it again.
+// b55: the kitchen's own steps, again a new cache.
 it("names a new cache, so a tablet holding the old worker takes this one", () => {
-  expect(source).toContain('const CACHE = "bop-merchant-offline-v6";');
+  expect(source).toContain('const CACHE = "bop-merchant-offline-v7";');
 });
 
 it("shows the cached offline page when the connection is down", async () => {

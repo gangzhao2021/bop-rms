@@ -2,6 +2,9 @@
 // Owner 2026-11-03 (operating continuity): see sw.js. Reads what the Tables page last saved on this
 // device (src/table-last-bills.ts) and reads nothing else; it returns by itself when the connection
 // does. The steps are the same as src/TablesOfflineGuide.tsx.
+// Batch 55 (v15 batch 54 live): the kitchen display (and its sold-out page) reloaded offline showed
+// the floor's steps and last bills; the kitchen gets its own steps (as src/failure-words.ts says
+// when the system is down: cook from the paper slips the floor brings) and no bills.
 (function () {
   var words = {
     "zh-Hans": {
@@ -16,6 +19,11 @@
         "每道菜上桌后在纸单上打勾。",
         "免单或折让由店长决定：在纸单上写明哪道菜、减多少、原因和店长姓名。",
         "照常用刷卡机或现金收这桌的钱。记下桌号、金额、小费、时间和刷卡单上的单号（现金记实收和找零）。不要记卡号。",
+      ],
+      kitchenSteps: [
+        "照纸单做菜：楼面会把新点的菜写在纸单上送来（桌号或单号，第几轮）。",
+        "菜做好后在纸单上打勾，连同纸单交给楼面。",
+        "断网前屏幕上没做完的菜照常做完；记不清的，和楼面核对纸单。",
       ],
       bills: "断网前最后看到的账单",
       asOf: "更新于 ",
@@ -39,6 +47,11 @@
         "Tick each dish on the slip when it is served.",
         "A comp or discount is the manager's decision: write the dish, how much and the reason on the slip, with the manager's name.",
         "Take the table's payment on the card machine or in cash as usual. Write the table, amount, tip, time and the slip's reference code (cash: received and change). Never write a card number.",
+      ],
+      kitchenSteps: [
+        "Cook from the paper slips the floor brings (table or order number, and the round).",
+        "When a dish is ready, tick it on the slip and pass it to the floor with the slip.",
+        "Finish what was on this screen when the connection dropped; if unsure, check the slips with the floor.",
       ],
       bills: "Last bills seen before the connection dropped",
       asOf: "As of ",
@@ -67,6 +80,10 @@
         ? "zh-Hans"
         : "en";
   var w = words[language];
+  // The kitchen display and the sold-out page opened from it (?from=kitchen).
+  var kitchen =
+    /^\/operations\/kitchen(\/|$)/.test(location.pathname) ||
+    /(^|&)from=kitchen(&|$)/.test(location.search.slice(1));
   document.documentElement.lang = language;
   var main = document.getElementById("offline");
   var el = function (tag, text, parent, className) {
@@ -100,60 +117,65 @@
   });
   el("h2", w.guide);
   var list = el("ul", null);
-  w.steps.forEach(function (step) {
+  (kitchen ? w.kitchenSteps : w.steps).forEach(function (step) {
     el("li", step, list);
   });
-  var saved;
-  try {
-    saved = JSON.parse(localStorage.getItem("bop.tables.lastBills.v1") || "null");
-    if (saved && !(Date.now() - Date.parse(saved.savedAt) <= 12 * 60 * 60 * 1000)) saved = null;
-  } catch {
-    saved = null;
-  }
-  el("h2", w.bills);
-  if (!saved || !Array.isArray(saved.tables) || saved.tables.length === 0) el("p", w.none);
-  else {
-    el(
-      "p",
-      w.asOf +
-        new Date(saved.savedAt).toLocaleTimeString(language) +
-        // b13: which Store these bills are from (a table label repeats across Stores).
-        (typeof saved.storeLabel === "string" && saved.storeLabel ? " · " + saved.storeLabel : "") +
-        " · " +
-        w.note,
-      null,
-      "quiet",
-    );
-    saved.tables.forEach(function (table) {
-      var details = el("details", null);
-      var summary = el("summary", null, details);
-      el("span", w.table + table.label, summary);
-      el("strong", table.settled ? w.settled : w.owed + " " + money(table.owedMinor), summary);
-      table.rounds.forEach(function (round) {
-        el(
-          "h3",
-          w.round.replace("{n}", String(round.number)) + " · " + money(round.totalMinor),
-          details,
-        );
-        var lines = el("dl", null, details);
-        round.items.forEach(function (item) {
-          var row = el("div", null, lines);
-          el("dt", item.name, row);
-          el("dd", money(item.subtotalMinor), row);
+  // The last bills are the floor's: the kitchen has nothing to do with them.
+  if (!kitchen) {
+    var saved;
+    try {
+      saved = JSON.parse(localStorage.getItem("bop.tables.lastBills.v1") || "null");
+      if (saved && !(Date.now() - Date.parse(saved.savedAt) <= 12 * 60 * 60 * 1000)) saved = null;
+    } catch {
+      saved = null;
+    }
+    el("h2", w.bills);
+    if (!saved || !Array.isArray(saved.tables) || saved.tables.length === 0) el("p", w.none);
+    else {
+      el(
+        "p",
+        w.asOf +
+          new Date(saved.savedAt).toLocaleTimeString(language) +
+          // b13: which Store these bills are from (a table label repeats across Stores).
+          (typeof saved.storeLabel === "string" && saved.storeLabel
+            ? " · " + saved.storeLabel
+            : "") +
+          " · " +
+          w.note,
+        null,
+        "quiet",
+      );
+      saved.tables.forEach(function (table) {
+        var details = el("details", null);
+        var summary = el("summary", null, details);
+        el("span", w.table + table.label, summary);
+        el("strong", table.settled ? w.settled : w.owed + " " + money(table.owedMinor), summary);
+        table.rounds.forEach(function (round) {
+          el(
+            "h3",
+            w.round.replace("{n}", String(round.number)) + " · " + money(round.totalMinor),
+            details,
+          );
+          var lines = el("dl", null, details);
+          round.items.forEach(function (item) {
+            var row = el("div", null, lines);
+            el("dt", item.name, row);
+            el("dd", money(item.subtotalMinor), row);
+          });
         });
+        // DEC-TAX-WHOLE-RECEIPT: each round as ordered, and the bill's one rounding line.
+        if (
+          !table.settled &&
+          typeof table.taxRoundingMinor === "string" &&
+          /^-?[1-9][0-9]{0,15}$/.test(table.taxRoundingMinor)
+        ) {
+          var rounding = el("dl", null, details);
+          var row = el("div", null, rounding);
+          el("dt", w.taxRounding, row);
+          el("dd", money(table.taxRoundingMinor), row);
+        }
       });
-      // DEC-TAX-WHOLE-RECEIPT: each round as ordered, and the bill's one rounding line.
-      if (
-        !table.settled &&
-        typeof table.taxRoundingMinor === "string" &&
-        /^-?[1-9][0-9]{0,15}$/.test(table.taxRoundingMinor)
-      ) {
-        var rounding = el("dl", null, details);
-        var row = el("div", null, rounding);
-        el("dt", w.taxRounding, row);
-        el("dd", money(table.taxRoundingMinor), row);
-      }
-    });
+    }
   }
   window.addEventListener("online", function () {
     location.reload();
