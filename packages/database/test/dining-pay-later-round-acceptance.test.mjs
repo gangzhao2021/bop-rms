@@ -7520,6 +7520,20 @@ async function journey(journeyEnding) {
           assert.equal(rest.status, "Recorded");
           assert.equal(rest.bill.split.paidInFull, true);
           assert.equal(rest.bill.owed.totalMinor, "0");
+          // Batch 53 (v15 b52 live): once paid in full, every guest's table page still reads that
+          // the table paid by dish in 2 payments, never that it paid once at the end.
+          const paidPayments = await transactions({ guc: true }).run((tx) =>
+            readCustomerTablePayments(
+              tx,
+              createPostgresDiningTableSettlementStore({
+                scope: ownerScope,
+                authorize: async () => true,
+              }),
+              orderReference,
+            ),
+          );
+          assert.equal(paidPayments.splitPaid, true);
+          assert.deepEqual(paidPayments.splitParts, { count: null, paid: 2 });
           assert.ok(rest.bill.rounds.every((round) => round.paid || round.totalMinor === "0"));
           assert.ok(rest.bill.consistent);
           assert.equal(rest.bill.guestChoices.dishes.length, 0);

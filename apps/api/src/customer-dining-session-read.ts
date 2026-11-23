@@ -505,7 +505,9 @@ const movedFrom = (facts: CustomerDiningSessionFacts) =>
  * WP-2423 item 8 ④ / 同桌结账: a bill being paid part by part, as the table page says it. Staff's
  * split (Even, ByRounds, ByItems) has a fixed number of parts; guests paying by dish (ByGuests)
  * add a part with each payment, so there is no count to say until the bill is paid (`count`
- * null). `paid`: the payments recorded so far. Null once paid in full or with no split.
+ * null). `paid`: the payments recorded so far. Null with no split. Batch 53 (v15 b52 live): kept
+ * once the bill is paid in full, so the page can say it was paid in parts (or by dish) and never
+ * "paid once at the end".
  */
 /** b13: a bill or round for the guest, as printed (taken off and points before tax). */
 export interface CustomerBillView {
@@ -532,9 +534,8 @@ export interface CustomerSplitParts {
 export function customerSplitParts(
   plan: { readonly mode: string; readonly parts: readonly unknown[] } | undefined,
   settlements: readonly { readonly part: unknown }[],
-  paidInFull: boolean,
 ): CustomerSplitParts | null {
-  if (plan === undefined || plan.mode === "Whole" || paidInFull) return null;
+  if (plan === undefined || plan.mode === "Whole") return null;
   return {
     count: plan.mode === "ByGuests" ? null : plan.parts.length,
     paid: settlements.filter((settlement) => settlement.part !== null).length,
@@ -566,7 +567,7 @@ export async function readCustomerTablePayments(
   return {
     tableSettlements,
     splitPaid,
-    splitParts: customerSplitParts(splitPlan, tableSettlements, splitPaid),
+    splitParts: customerSplitParts(splitPlan, tableSettlements),
   };
 }
 

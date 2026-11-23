@@ -10,6 +10,7 @@ import {
   customerTableBillFacts,
   customerTableBillLines,
   mergeBillOrderFacts,
+  readCustomerTablePayments,
   type CustomerDiningSessionDependencies,
   type CustomerDiningSessionFacts,
 } from "./customer-dining-session-read.js";
@@ -1075,19 +1076,71 @@ describe("WP-2423 item 8 ④ v15 a: a split bill paid part by part", () => {
 });
 
 describe("v15 batch 7 table-pay-by-dish: what the table page says about the parts", () => {
-  it("gives staff's split its count, guests paying by dish none, and nothing once paid", () => {
+  it("gives staff's split its count, guests paying by dish none, and nothing without a split", () => {
     const paidOne = [{ part: null }, { part: { partNumber: 1 } }];
-    expect(customerSplitParts({ mode: "Even", parts: [1, 2, 3] }, paidOne, false)).toEqual({
+    expect(customerSplitParts({ mode: "Even", parts: [1, 2, 3] }, paidOne)).toEqual({
       count: 3,
       paid: 1,
     });
-    expect(customerSplitParts({ mode: "ByGuests", parts: [1] }, paidOne, false)).toEqual({
+    expect(customerSplitParts({ mode: "ByGuests", parts: [1] }, paidOne)).toEqual({
       count: null,
       paid: 1,
     });
-    expect(customerSplitParts({ mode: "ByGuests", parts: [1, 2] }, paidOne, true)).toBeNull();
-    expect(customerSplitParts({ mode: "Whole", parts: [] }, [], false)).toBeNull();
-    expect(customerSplitParts(undefined, [], false)).toBeNull();
+    expect(customerSplitParts({ mode: "Whole", parts: [] }, [])).toBeNull();
+    expect(customerSplitParts(undefined, [])).toBeNull();
+  });
+
+  it("batch 53 (v15 b52 live): a bill paid in full by dish still says it was paid in 2 parts", async () => {
+    // v15 b52 live: guest A paid their own dish online (1413), guest C paid the rest (1412); the
+    // plan's second part took the last of the bill, so the split is paid in full.
+    const plan = "split-plan-1";
+    const settlements = [1, 2].map((partNumber) => ({
+      part: { splitPlanReference: plan, partNumber },
+      tipMinor: 0n,
+      roundingMinor: 0n,
+    }));
+    const store = (mode: "ByGuests" | "Even") => ({
+      listByOrders: async () => settlements,
+      listSplitPlans: async () => [
+        {
+          splitPlanReference: plan,
+          mode,
+          parts: [{ partNumber: 1 }, { partNumber: 2 }],
+          guestParts: [
+            { partNumber: 1, completesBill: false, withdrawn: null },
+            { partNumber: 2, completesBill: true, withdrawn: null },
+          ],
+        },
+      ],
+    });
+    const read = (mode: "ByGuests" | "Even") =>
+      readCustomerTablePayments(
+        {} as never,
+        store(mode) as unknown as Parameters<typeof readCustomerTablePayments>[1],
+        "order-1" as never,
+      );
+    const byDish = await read("ByGuests");
+    expect(byDish.splitPaid).toBe(true);
+    expect(byDish.splitParts).toEqual({ count: null, paid: 2 });
+    expect((await read("Even")).splitParts).toEqual({ count: 2, paid: 2 });
+    const summary = composeCustomerDiningSession({
+      ...facts({
+        paymentOutcomes: new Map(),
+        payments: [
+          { status: "Succeeded", amount: cad(1413n) },
+          { status: "Succeeded", amount: cad(1412n) },
+        ],
+        payLaterRounds: new Set([id(30), id(40)]),
+        tableBill: { owedMinor: 0n, pointsUsedMinor: 0n, takenOffMinor: 0n, taxRoundingMinor: 0n },
+        tableSettlement: { tipMinor: 0n, roundingMinor: 0n },
+        splitParts: byDish.splitParts,
+      }),
+      paymentTiming: "PayLater",
+    }).summary;
+    expect(summary).toMatchObject({
+      paid: { amountMinor: 2825n },
+      splitParts: { count: null, paid: 2 },
+    });
   });
 });
 
