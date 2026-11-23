@@ -53,7 +53,8 @@
  * column of their own, so a long Store name and the screen-awake note pushed them to a second row
  * and the language switch to a third, alone. The links are now drawn inside the bar (AppFrame
  * navigationInHeader) and every part of the bar has its own place:
- *   1280 and wider: name · Kitchen display · links · screen note · Hand over · switch, one row;
+ *   1440 and wider: name · Kitchen display · links · screen note · Hand over · switch, one row;
+ *   1280: the same row with the note on a line under it;
  *   1024: the same row without the "Kitchen display" label (the current link says it), the note
  *         on a line under it;
  * With no link to another screen (the board still loading, the outage screen, a sign-in that can
@@ -171,11 +172,22 @@
   .kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header {
     grid-template-columns: minmax(0, max-content) auto auto minmax(0, 1fr) auto auto;
     grid-template-areas:
-      "title desc nav note handover lang"
+      "title desc nav . handover lang"
+      "note note note note note note"
       "failed failed failed failed failed failed";
   }
   .kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header > p {
     grid-area: desc;
+  }
+}
+/* The screen note joins the row only from 1440 px: at 1280 the room between the links and Hand
+   over is too narrow for the browser's words in wider fonts (three lines on the Linux CI runner),
+   so there it sits under the row as at 1024. */
+@media (min-width: 1440px) {
+  .kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header {
+    grid-template-areas:
+      "title desc nav note handover lang"
+      "failed failed failed failed failed failed";
   }
   .kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header .kitchen-screen-awake {
     justify-self: end;

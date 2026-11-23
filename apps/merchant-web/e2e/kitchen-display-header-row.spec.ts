@@ -156,12 +156,13 @@ for (const awake of ["Unsupported", "Held"] as const)
           const name = await textBox(title);
           const leftEnd = Math.max(name.right, (boxes[1] as Box).right);
           const free = (boxes[2] as Box).left - leftEnd;
-          if (awake === "Held" || width < 1280)
+          if (awake === "Held" || width < 1440)
             expect(free, `${where}: room to spare`).toBeGreaterThanOrEqual(40);
           // The browser's own words about the screen: in the row's spare room at 1440 (no more
-          // than two lines), under the row at 1024; never pushing a control off the row.
+          // than two lines), under the row at 1024 and 1280 (three lines there on the Linux CI
+          // runner); never pushing a control off the row.
           const noteBox = await textBox(note);
-          if (width >= 1280) {
+          if (width >= 1440) {
             expect(noteBox.height, `${where}: note in two lines`).toBeLessThan(44);
             // Between the links and Hand over, never over either of them.
             expect(noteBox.left, `${where}: note after the links`).toBeGreaterThanOrEqual(
