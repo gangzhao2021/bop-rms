@@ -1481,11 +1481,13 @@
 }
 
 /* Live check 2026-10-26 (2), phones: every amount ends on the same right edge. The row's next step
-   takes the second line's right end, under the amount, instead of a column of its own. */
+   takes the second line's right end, under the amount, instead of a column of its own. Batch 53:
+   the number column is at least four digits wide (3.25rem at 16px, Inter or DejaVu Sans), so the
+   status of order 10 starts where order 9's does; a longer label still widens its own row. */
 @container order-list (max-width: 512px) {
   .orders-page .order-row {
     position: relative;
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-columns: minmax(3.25rem, max-content) minmax(0, 1fr) auto;
     grid-template-areas:
       "num status amount"
       "what what next";
