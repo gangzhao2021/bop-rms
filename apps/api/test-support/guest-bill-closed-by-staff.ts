@@ -19,23 +19,44 @@ type TableBill = Awaited<ReturnType<typeof readDiningTableBill>>;
  * by-dish-written-off: then staff wrote off the rest (order 52).
  * parts-written-off: staff split the bill in 3 equal parts; 1 was paid, then the rest written off.
  * nothing-paid-written-off: the guests left before anyone paid; the whole bill written off.
+ * Batch 55 (v15 b54 live, TM2):
+ * one-round-nothing-paid-written-off: order 59, one round ($14.13), nobody paid, all written off.
+ * half-split-written-off: order 67, staff split evenly in 2; part 1 ($14.13) was paid, and the
+ *   bill read tied that part to round 1 (round 1 paid); then the rest ($14.12) written off.
  */
 export type GuestBillScenario =
-  "open-after-one-dish" | "by-dish-written-off" | "parts-written-off" | "nothing-paid-written-off";
+  | "open-after-one-dish"
+  | "by-dish-written-off"
+  | "parts-written-off"
+  | "nothing-paid-written-off"
+  | "one-round-nothing-paid-written-off"
+  | "half-split-written-off";
 
 const id = (n: number) => "0198b054-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const cad = (amountMinor: bigint) => ({ amountMinor, currencyCode: "CAD" });
 const sentAt = "2026-11-22T16:06:00.000Z";
-const rounds = [
+const allRounds = [
   { batch: id(0x30), item: id(0x31), totalMinor: 1413n, taxMinor: 163n, mine: true },
   { batch: id(0x40), item: id(0x41), totalMinor: 1412n, taxMinor: 162n, mine: false },
 ] as const;
+const roundsOf = (scenario: GuestBillScenario): readonly (typeof allRounds)[number][] =>
+  scenario === "one-round-nothing-paid-written-off" ? allRounds.slice(0, 1) : allRounds;
+/** What the table paid, payment by payment. */
+const paidOf = (scenario: GuestBillScenario): bigint[] =>
+  scenario === "open-after-one-dish" ||
+  scenario === "by-dish-written-off" ||
+  scenario === "half-split-written-off"
+    ? [1413n]
+    : scenario === "parts-written-off"
+      ? [942n]
+      : [];
 
 /** The table bill as staff checkout reads it (readDiningTableBill), the fields the guest uses. */
 function tableBill(scenario: GuestBillScenario): TableBill {
   const byDishPaid = scenario === "open-after-one-dish" || scenario === "by-dish-written-off";
-  const paidMinor = byDishPaid ? 1413n : scenario === "parts-written-off" ? 942n : 0n;
-  const owedMinor = 2825n - paidMinor;
+  const rounds = roundsOf(scenario);
+  const paidMinor = paidOf(scenario).reduce<bigint>((sum, amount) => sum + amount, 0n);
+  const owedMinor = rounds.reduce<bigint>((sum, round) => sum + round.totalMinor, 0n) - paidMinor;
   return {
     rounds: rounds.map((round, index) => ({
       roundNumber: index + 1,
@@ -56,8 +77,9 @@ function tableBill(scenario: GuestBillScenario): TableBill {
       taxMinor: String(round.taxMinor),
       totalMinor: String(round.totalMinor),
       taxRoundingMinor: "0",
-      // By dish, guest A's own round was paid in full; a fixed part pays no round on its own.
-      paid: byDishPaid && round.mine,
+      // By dish, guest A's own round was paid in full; a fixed part of 3 pays no round on its
+      // own, but v15 tied order 67's part 1 of 2 to round 1 (its slice was all of round 1).
+      paid: (byDishPaid || scenario === "half-split-written-off") && round.mine,
       orderedBy: null,
       fromTableLabel: null,
       liveOrderedAt: null,
@@ -65,10 +87,13 @@ function tableBill(scenario: GuestBillScenario): TableBill {
     owed: { totalMinor: String(owedMinor) },
     taxRoundingMinor: "0",
     split:
-      scenario === "nothing-paid-written-off"
+      scenario === "nothing-paid-written-off" || scenario === "one-round-nothing-paid-written-off"
         ? null
         : {
-            mode: scenario === "parts-written-off" ? "Even" : "ByGuests",
+            mode:
+              scenario === "parts-written-off" || scenario === "half-split-written-off"
+                ? "Even"
+                : "ByGuests",
             stale: false,
             paidInFull: false,
           },
@@ -89,21 +114,29 @@ export function guestBillClosedByStaffFacts(scenario: GuestBillScenario): {
   };
   readonly bill: TableBill;
 } {
-  const paid =
-    scenario === "open-after-one-dish" || scenario === "by-dish-written-off"
-      ? [1413n]
-      : scenario === "parts-written-off"
-        ? [942n]
-        : [];
+  const paid = paidOf(scenario);
+  const rounds = roundsOf(scenario);
+  const nothingPaid =
+    scenario === "nothing-paid-written-off" || scenario === "one-round-nothing-paid-written-off";
   return {
     bill: tableBill(scenario),
     facts: {
       diningSessionReference: id(0x20),
-      tableLabel: "L53 WO4 (TEST)",
+      tableLabel:
+        scenario === "one-round-nothing-paid-written-off"
+          ? "L54 GB2 (TEST)"
+          : scenario === "half-split-written-off"
+            ? "L54 GB5 (TEST)"
+            : "L53 WO4 (TEST)",
       checkedAt: "2026-11-22T16:09:00.000Z",
       paymentTiming: "PayLater",
       order: {
-        orderNumber: "52",
+        orderNumber:
+          scenario === "one-round-nothing-paid-written-off"
+            ? "59"
+            : scenario === "half-split-written-off"
+              ? "67"
+              : "52",
         batches: rounds.map((round) => ({
           orderBatchReference: round.batch,
           submittedAt: sentAt,
@@ -129,10 +162,17 @@ export function guestBillClosedByStaffFacts(scenario: GuestBillScenario): {
         // A part of a split settles no round on its own (the bill was not paid in full).
         settledRounds: new Set(),
         tableSettlement: paid.length === 0 ? null : { tipMinor: 0n, roundingMinor: 0n },
-        splitParts:
-          scenario === "nothing-paid-written-off"
-            ? null
-            : { count: scenario === "parts-written-off" ? 3 : null, paid: 1 },
+        splitParts: nothingPaid
+          ? null
+          : {
+              count:
+                scenario === "parts-written-off"
+                  ? 3
+                  : scenario === "half-split-written-off"
+                    ? 2
+                    : null,
+              paid: 1,
+            },
         unpaidCancellations: new Set(),
         staffCancellations: new Map(),
         itemCancellations: [],

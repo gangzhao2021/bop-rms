@@ -204,3 +204,31 @@ describe("batch 54: the guest table reply sends every field the read builds", ()
     ]).toEqual([]);
   });
 });
+
+describe("batch 55: the v15 b54 shapes the guest pages read after a staff close", () => {
+  const payments = (session: Record<string, unknown>) =>
+    (session.rounds as { payment: string }[]).map((round) => round.payment);
+  it("order 59: one round, nothing paid, written off: closed, paid 0, the round on the bill", async () => {
+    const session = await serve(() => guestRead("one-round-nothing-paid-written-off"));
+    expect(payments(session)).toEqual(["OnTableBill"]);
+    const summary = session.summary as Record<string, unknown>;
+    expect(summary.closedByStaff).toBe(true);
+    expect(summary.paid).toEqual({ amountMinor: "0", currencyCode: "CAD" });
+    expect(summary.due).toEqual({ amountMinor: "0", currencyCode: "CAD" });
+    expect(summary.splitParts).toBeUndefined();
+  });
+  it("order 67: part 1 of 2 paid is tied to round 1, which the read sends as Paid", async () => {
+    const session = await serve(() => guestRead("half-split-written-off"));
+    expect(payments(session)).toEqual(["Paid", "OnTableBill"]);
+    const summary = session.summary as Record<string, unknown>;
+    expect(summary.closedByStaff).toBe(true);
+    expect(summary.paid).toEqual({ amountMinor: "1413", currencyCode: "CAD" });
+    expect(summary.splitParts).toEqual({ count: 2, paid: 1 });
+  });
+  it("order 55 (by dish, as order 52): round 1 Paid, round 2 still on the bill", async () => {
+    expect(payments(await serve(() => guestRead("by-dish-written-off")))).toEqual([
+      "Paid",
+      "OnTableBill",
+    ]);
+  });
+});
