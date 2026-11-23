@@ -1526,6 +1526,15 @@
     outline: 3px solid var(--bop-color-focus);
     outline-offset: -3px;
   }
+  /* Batch 54 (v15 b53 live: "11/4 · 43" put its status 113.5px right of today's rows): a label
+     longer than four characters, or one with "New order" beside it, takes the whole first line;
+     the status starts under it in the shared column, the amount at the same right edge. */
+  .orders-page .order-row[data-long-number="true"] {
+    grid-template-areas:
+      "num num num"
+      ". status amount"
+      "what what next";
+  }
 }
 /* Without a Payment section the payment links start their own group. */
 .orders-page

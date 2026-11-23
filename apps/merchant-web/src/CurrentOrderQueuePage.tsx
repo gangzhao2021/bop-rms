@@ -3429,6 +3429,8 @@ export function CurrentOrderQueueRows({
               const age = now === undefined ? null : orderAgeText(order, now);
               // WP-2423 M175: an order placed after midnight says its own date and the day it counts for.
               const when = orderWhenText(order.submittedAt, order.businessDate, today, timeZone);
+              const label = orderLabel(order, today);
+              const isFresh = fresh?.has(order.orderReference) === true;
               return (
                 <Fragment key={order.orderReference}>
                   {dayHeadings.has(order.orderReference) ? (
@@ -3441,7 +3443,11 @@ export function CurrentOrderQueueRows({
                   <li
                     className="order-row"
                     data-open={isOpen ? "true" : undefined}
-                    data-new={fresh?.has(order.orderReference) === true ? "true" : undefined}
+                    data-new={isFresh ? "true" : undefined}
+                    // Batch 54 (as Pickup in batch 53): on phones a label longer than four
+                    // characters ("11/4 · 43", a public reference) or one with "New order" beside
+                    // it takes its own line, so the status still starts where every other row's does.
+                    data-long-number={label.length > 4 || isFresh ? "true" : undefined}
                     hidden={!listed(order)}
                   >
                     <div className="order-row__summary">
@@ -3457,17 +3463,17 @@ export function CurrentOrderQueueRows({
                           }}
                           onClick={() => (isOpen ? close() : open(order))}
                         >
-                          {orderLabel(order, today)}
+                          {label}
                         </button>
                         {/* The heading stays the order number; the word is said with the row. */}
-                        {fresh?.has(order.orderReference) === true ? (
+                        {isFresh ? (
                           <span className="order-row__new" aria-hidden="true">
                             {t("New order")}
                           </span>
                         ) : null}
                       </h3>
                       <span className="order-row__what">
-                        {fresh?.has(order.orderReference) === true ? (
+                        {isFresh ? (
                           <span className="visually-hidden">{t("New order")} </span>
                         ) : null}
                         {/* Orders v2: what it is (its items), then who and when. */}
