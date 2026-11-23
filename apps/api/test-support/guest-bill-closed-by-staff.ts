@@ -105,6 +105,28 @@ function tableBill(scenario: GuestBillScenario): TableBill {
 }
 
 /**
+ * Batch 55 review: Payment's write-off record of this bill (priced, captured before it, written
+ * off), as v15 holds it; null while the bill is open. The visit restore reads it once the table
+ * closed (session phase Closed).
+ */
+export function guestBillWriteOff(scenario: GuestBillScenario): {
+  readonly reasonCode: "GUEST_LEFT_UNPAID";
+  readonly pricedOrderTotalMinor: bigint;
+  readonly capturedOrderAllocationMinor: bigint;
+  readonly writtenOffMinor: bigint;
+} | null {
+  if (scenario === "open-after-one-dish") return null;
+  const priced = roundsOf(scenario).reduce<bigint>((sum, round) => sum + round.totalMinor, 0n);
+  const captured = paidOf(scenario).reduce<bigint>((sum, amount) => sum + amount, 0n);
+  return {
+    reasonCode: "GUEST_LEFT_UNPAID",
+    pricedOrderTotalMinor: priced,
+    capturedOrderAllocationMinor: captured,
+    writtenOffMinor: priced - captured,
+  };
+}
+
+/**
  * The guest read's facts for this table (customer-dining-session-read's reader output), with the
  * table bill's own facts left to `customerTableBillFacts` so the real mapping runs.
  */

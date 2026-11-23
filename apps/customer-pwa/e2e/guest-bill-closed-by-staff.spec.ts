@@ -255,14 +255,14 @@ function words(zh: boolean) {
     orderMore: zh ? "继续从菜单点单" : "Order more from the menu",
     partNote: zh ? "这桌按菜付款，已付 1 笔。" : "The table is paying by dish; 1 paid so far.",
     byDishClosed: zh
-      ? "店员已关闭这张账单：这桌按菜付了 1 笔，其余不再收取。"
-      : "Staff closed this bill: the table paid by dish (1 paid), and the rest is not charged.",
+      ? "店员已关闭本桌账单：这桌按菜付了 1 笔，其余不向您收取。"
+      : "Staff closed your table’s bill: the table paid by dish (1 paid), and the rest is not charged to you.",
     partsClosed: zh
-      ? "店员已关闭这张账单：这桌 3 份付了 1 份，其余不再收取。"
-      : "Staff closed this bill: the table paid 1 of the 3 parts, and the rest is not charged.",
+      ? "店员已关闭本桌账单：这桌 3 份付了 1 份，其余不向您收取。"
+      : "Staff closed your table’s bill: the table paid 1 of the 3 parts, and the rest is not charged to you.",
     nothingClosed: zh
-      ? "店员已关闭这张账单，未收取任何费用。"
-      : "Staff closed this bill; nothing was charged.",
+      ? "店员已关闭本桌账单，未收取任何费用。"
+      : "Staff closed your table’s bill; nothing was charged.",
     // What v15 said (and anything else claiming the bill was paid in full).
     paidInFull: zh
       ? /一笔付清|付清|最后一起|结这张单/u

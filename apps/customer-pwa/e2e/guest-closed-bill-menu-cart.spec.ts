@@ -10,6 +10,11 @@ import { routeStorefrontReads } from "./storefront-reads";
 // for orders 59, 55 and 67, composed by the real read and answered by the real HTTP app on a local
 // server). The cart's refusal, the pay section (closed), the menu and the storefront reads are
 // synthetic, in the shapes v15 answered.
+//
+// Batch 55 review: once staff then closed the table, the restore gave receipt access and every tab
+// said "Thank you for dining with us … See the receipt" for a bill that has no receipt. After the
+// close, the visit restore is the real HTTP handler on the same local server (session over, the
+// bill's write-off in the v15 shape).
 type Scenario =
   "one-round-nothing-paid-written-off" | "by-dish-written-off" | "half-split-written-off";
 interface GuestBillHttp {
@@ -17,6 +22,8 @@ interface GuestBillHttp {
   close(): Promise<void>;
 }
 let scenario: Scenario = "one-round-nothing-paid-written-off";
+/** Staff closed the table after closing its bill (the guest's Session is over). */
+let tableClosed = false;
 let api: GuestBillHttp;
 test.beforeAll(async () => {
   // A variable path: the API's source is loaded at run time, outside this app's typecheck.
@@ -27,7 +34,10 @@ test.beforeAll(async () => {
   api = await startGuestBillHttp("http://127.0.0.1", () => scenario);
 });
 test.afterAll(async () => api?.close());
-test.beforeEach(({ context }) => routeStorefrontReads(context));
+test.beforeEach(({ context }) => {
+  tableClosed = false;
+  return routeStorefrontReads(context);
+});
 test.use({ serviceWorkers: "block" });
 
 const id = (n: number) => "0198b055-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -110,8 +120,21 @@ async function stubTable(page: Page, asked: string[]) {
     const path = new URL(request.url()).pathname;
     if (/^\/(api|bff)\//u.test(path)) asked.push(`${request.method()} ${path}`);
   });
-  await page.route("**/api/v1/customer/session/csrf", (route) =>
-    route.fulfill(
+  await page.route("**/api/v1/customer/session/csrf", async (route) => {
+    if (tableClosed) {
+      // The real restore handler answers for the closed table.
+      const response = await route.fetch({
+        url: api.url + new URL(route.request().url()).pathname,
+        headers: {
+          "sec-fetch-site": "same-origin",
+          "x-bop-session-bootstrap": "1",
+          cookie: "__Host-bop-guest=" + "s".repeat(43),
+        },
+      });
+      await route.fulfill({ response });
+      return;
+    }
+    await route.fulfill(
       json(200, {
         schemaVersion: 1,
         csrfToken: "d".repeat(43),
@@ -124,8 +147,8 @@ async function stubTable(page: Page, asked: string[]) {
         },
         visit: { publicTableReference: id(5), joined: true },
       }),
-    ),
-  );
+    );
+  });
   await page.route("**/api/v1/customer/order-messages", (route) =>
     route.fulfill(json(200, { schemaVersion: 1, messages: [] })),
   );
@@ -233,6 +256,16 @@ function words(zh: boolean, nothingPaid: boolean) {
     // What v15 said on Menu and Cart: the bill paid, with its receipt.
     wrong: zh ? /已结清|付清|收据/u : /bill is paid|paid in full|See the receipt/u,
     tableTotal: zh ? "本桌合计" : "Table total",
+    // Batch 55 review: after staff also closed the table.
+    endedTitle: zh ? "这桌的用餐已结束" : "This table’s visit has ended",
+    ended: nothingPaid
+      ? zh
+        ? "店员已关闭本桌账单，未收取任何费用。"
+        : "Staff closed your table’s bill; nothing was charged."
+      : zh
+        ? "店员已关闭本桌账单：已付的款项不变，其余不向您收取。"
+        : "Staff closed your table’s bill: what was paid stays paid, and the rest is not charged to you.",
+    endedWrong: zh ? /谢谢光临|收据|已结清/u : /Thank you for dining|receipt|is paid/u,
     payment: zh ? "付款" : "Payment",
   };
 }
@@ -306,8 +339,11 @@ const cases: readonly {
     nothingPaid: false,
     rounds: (zh) =>
       zh
-        ? ["2\u00a0份付了 1\u00a0份，其余不收取", "2\u00a0份付了 1\u00a0份，其余不收取"]
-        : ["1 of 2 parts paid; the rest not charged", "1 of 2 parts paid; the rest not charged"],
+        ? ["2\u00a0份付了 1\u00a0份，其余不向您收取", "2\u00a0份付了 1\u00a0份，其余不向您收取"]
+        : [
+            "1 of 2 parts paid; the rest not charged to you",
+            "1 of 2 parts paid; the rest not charged to you",
+          ],
   },
 ];
 
@@ -347,6 +383,7 @@ for (const width of [390, 1024, 1440])
           await expect(dishNotice).toBeVisible();
           await expect(dishNotice.getByRole("link", { name: text.link })).toBeVisible();
           await expect(page.getByRole("main")).not.toContainText(text.wrong);
+          await expectFits(dishNotice, width);
           await expectNothingToAdd(page);
           await page.screenshot({ path: `test-results/b55-dish-${tag}.png`, fullPage: true });
 
@@ -378,6 +415,29 @@ for (const width of [390, 1024, 1440])
           ).toBe(false);
           await expectNothingToAdd(page);
           await page.screenshot({ path: `test-results/b55-table-${tag}.png`, fullPage: true });
+
+          // Batch 55 review: staff then close the table. Every tab says how the bill ended, in
+          // the same words, with no receipt and nothing to follow.
+          tableClosed = true;
+          for (const [where, path] of [
+            ["menu", "/menu"],
+            ["dish", `/menu/items/${sellable}`],
+            ["cart", "/cart"],
+            ["table", "/dine-in/session"],
+          ] as const) {
+            await open(page, path, zh);
+            const card = page.getByRole("main").getByRole("status").filter({ hasText: text.ended });
+            await expect(card).toBeVisible();
+            await expect(card).toContainText(text.endedTitle);
+            await expect(card.getByRole("link")).toHaveCount(0);
+            await expect(page.getByRole("main")).not.toContainText(text.endedWrong);
+            await expectFits(card, width);
+            await expectNothingToAdd(page);
+            await page.screenshot({
+              path: `test-results/b55-closed-${where}-${tag}.png`,
+              fullPage: true,
+            });
+          }
 
           // Nothing was offered, so nothing was tapped: no cart was started or changed (the pay
           // section's own read is a POST).

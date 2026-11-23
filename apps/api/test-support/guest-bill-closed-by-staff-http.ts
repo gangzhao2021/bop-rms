@@ -8,21 +8,57 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createApp } from "../src/app.js";
 import { CustomerDiningSessionHandler } from "../src/customer-dining-session.js";
+import { GuestSessionError } from "@bop/identity";
+import {
+  closedBillPaid,
+  createCustomerSessionBootstrapHandler,
+} from "../src/customer-session-bootstrap.js";
 import {
   composeCustomerDiningSession,
   customerTableBillFacts,
 } from "../src/customer-dining-session-read.js";
 import {
   guestBillClosedByStaffFacts,
+  guestBillWriteOff,
   type GuestBillScenario,
 } from "./guest-bill-closed-by-staff.js";
 
+/**
+ * Batch 55 review: once staff also closed the table (`tableClosed`), the visit restore answers as
+ * the real handler does for a closed session whose bill was written off: the Session is over, no
+ * party moved, and the settled-table read finds Payment's write-off of this bill.
+ */
 export async function startGuestBillHttp(
   allowedOrigin: string,
   scenario: () => GuestBillScenario,
 ): Promise<{ readonly url: string; close(): Promise<void> }> {
   const server: Server = createServer(
     createApp({
+      customerSessionBootstrap: createCustomerSessionBootstrapHandler({
+        allowedOrigin,
+        port: {
+          read: async () => {
+            throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+          },
+          readMovedTable: async () => null,
+          readSettledTable: async () => {
+            const { facts } = guestBillClosedByStaffFacts(scenario());
+            const writeOff = guestBillWriteOff(scenario());
+            if (writeOff === null || facts.tableLabel === null) return null;
+            return {
+              tableLabel: facts.tableLabel,
+              closedByStaff: closedBillPaid(writeOff),
+              store: {
+                brandDisplayName: "Test Merchant 2 - not production",
+                storeDisplayName: "Test Merchant 2 Main - not production",
+              },
+            };
+          },
+          readEndedVisit: async () => {
+            throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+          },
+        },
+      }),
       customerDiningSession: new CustomerDiningSessionHandler({
         allowedOrigin,
         port: {
