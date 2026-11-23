@@ -440,6 +440,50 @@ for (const width of [390, 1024, 1440])
           });
         });
 
+      // Batch 51 (b50 reviewer, not run live): an empty Cart (nobody at the table has an unsent
+      // dish) left open through a checkout of over two minutes, then Cancel checkout. Batch 49 saw
+      // about 29 s; it reads every 4 s like the Cart with a dish in it, and comes back as it was.
+      test("an empty Cart kept open through a checkout of over two minutes comes back after Cancel", async ({
+        page,
+      }) => {
+        test.setTimeout(150_000);
+        const table: Table = { phase: "open", unsent: false };
+        await page.clock.install();
+        await stubTable(page, table);
+        await open(page, "/cart", zh);
+        await expect(page.getByRole("main").getByRole("heading").first()).toBeVisible();
+        await page.waitForLoadState("networkidle");
+        const before = await mainText(page);
+
+        table.phase = "checkout-started";
+        await runUntil(page, () => expectCardOnly(page, zh, "checkout-started", width));
+        table.cartReads = 0;
+        await advance(page, 150_000);
+        expect(table.cartReads).toBeGreaterThanOrEqual(25);
+        await expectCardOnly(page, zh, "checkout-started", width);
+
+        table.phase = "open";
+        await advance(page, 4_500);
+        await expect(page.getByText(words(zh, "checkout-started").heading)).toHaveCount(0, {
+          timeout: 2_000,
+        });
+        await page.waitForLoadState("networkidle");
+        // The same empty Cart as before checkout, word for word (no card, no stale checkout line).
+        await expect(
+          page.getByRole("heading", { name: zh ? "购物车是空的" : "Your cart is empty" }),
+        ).toBeVisible();
+        expect(await mainText(page)).toBe(before);
+        expect(
+          await page.evaluate(
+            () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+          ),
+        ).toBeLessThanOrEqual(0);
+        await expectNoInternalText(page);
+        await page.screenshot({
+          path: `test-results/b51-empty-cart-after-long-checkout-${zh ? "zh" : "en"}-${width}.png`,
+        });
+      });
+
       test("Your table left open says the bill, then the paid bill, as it does opened afresh", async ({
         page,
         browser,

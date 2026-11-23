@@ -2396,7 +2396,7 @@ test.describe("@production 同桌结账 guests pay by dish at a table that pays 
        * v15 b49 live: nothing of this phone's is left to pay (`mine` null), because it added no
        * dish on the bill (its only dish is still in the cart), or because its dishes are paid.
        */
-      readonly nothingOfMine?: "NoneAdded" | "AllPaid";
+      readonly nothingOfMine?: "NoneAdded" | "AllPaid" | "Unavailable";
     },
   ) => {
     await page.route("**/bff/customer/payment-configuration", (route) =>
@@ -2496,7 +2496,9 @@ test.describe("@production 同桌结账 guests pay by dish at a table that pays 
                   : {
                       ...choicesOf(options.defaultScope ?? "WholeTable", others),
                       mine: null,
-                      addedAny: options.nothingOfMine === "AllPaid",
+                      addedAny: options.nothingOfMine !== "NoneAdded",
+                      // batch 50: this phone's dishes are unpaid but its part can't be worked out.
+                      mineUnavailable: options.nothingOfMine === "Unavailable",
                       dishes: choicesOf(options.defaultScope ?? "WholeTable", others).dishes.map(
                         (dish) => ({ ...dish, mine: false }),
                       ),
@@ -2682,6 +2684,7 @@ test.describe("@production 同桌结账 guests pay by dish at a table that pays 
   // been paid by someone)". Each reason "only what I added" is off now says only what is true.
   for (const [width, height] of [
     [390, 844],
+    [1024, 900],
     [1440, 900],
   ] as const)
     for (const zh of [false, true])
@@ -2696,8 +2699,13 @@ test.describe("@production 同桌结账 guests pay by dish at a table that pays 
           AllPaid: zh
             ? "只付我加的（没有您要付的菜）"
             : "Only what I added (nothing of yours is left to pay)",
+          // Batch 51 (b50 reviewer, not run live): the server couldn't work out this phone's part
+          // (mine null, addedAny true, mineUnavailable true): never "nothing of yours is left".
+          Unavailable: zh
+            ? "只付我加的（暂时算不出来，请找店员）"
+            : "Only what I added (can’t be worked out right now — please ask staff)",
         } as const;
-        for (const nothingOfMine of ["NoneAdded", "AllPaid"] as const) {
+        for (const nothingOfMine of ["NoneAdded", "AllPaid", "Unavailable"] as const) {
           const { pay } = await tableWith(page, {
             nothingOfMine,
             othersPaidNoodles: nothingOfMine === "AllPaid",
@@ -2708,9 +2716,8 @@ test.describe("@production 同桌结账 guests pay by dish at a table that pays 
           const option = scope.getByRole("radio", { name: said[nothingOfMine], exact: true });
           await expect(option).toBeVisible();
           await expect(option).toBeDisabled();
-          await expect(
-            page.getByText(nothingOfMine === "NoneAdded" ? said.AllPaid : said.NoneAdded),
-          ).toHaveCount(0);
+          for (const other of ["NoneAdded", "AllPaid", "Unavailable"] as const)
+            if (other !== nothingOfMine) await expect(page.getByText(said[other])).toHaveCount(0);
           // Never a claim that someone paid what nobody paid.
           await expect(page.getByText("已有人付")).toHaveCount(0);
           // The words stay inside the page gutter, with room for wider Linux (DejaVu) fonts: the
