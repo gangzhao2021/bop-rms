@@ -29,6 +29,26 @@ export interface MerchantSettlementWriteOffs extends MerchantSettlementAmount {
     readonly amountMinor: string;
   }[];
 }
+/**
+ * WP-2423 item 8 ① segment 2: the day-end line of comps and discounts managers decided — every
+ * record's amount (with the tax it took off), counted by dish line as Reports' compCount counts
+ * them: a line comped in two parts (1 of 2 bowls, then the other) is one dish ("道菜"), and a line
+ * of two bowls comped at once was always one. A member's points are not a manager's comp.
+ */
+export function managerCompsTakenOff(
+  decided: readonly {
+    readonly orderItemReference: string;
+    readonly totalMinor: bigint;
+    readonly reasonCode: string;
+  }[],
+): MerchantSettlementAmount {
+  const comps = decided.filter((record) => record.reasonCode !== "POINTS_REDEMPTION");
+  return {
+    count: new Set(comps.map((record) => record.orderItemReference)).size,
+    amountMinor: comps.reduce((sum, record) => sum + record.totalMinor, 0n).toString(),
+    currencyCode: "CAD",
+  };
+}
 /** The day's reconciliation facts without the window the view already carries. */
 export type MerchantSettlementReconciliation = Pick<
   PaymentReconciliationDay,

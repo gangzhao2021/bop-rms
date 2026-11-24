@@ -1,6 +1,6 @@
 import { expect, it, vi } from "vitest";
 import type { ConsumerTransaction } from "@bop/eventing";
-import { createMerchantSettlementRead } from "./merchant-settlement-read.js";
+import { createMerchantSettlementRead, managerCompsTakenOff } from "./merchant-settlement-read.js";
 const id = (n: number) => "0190ed90-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const emptyDay = {
   settlement: null,
@@ -336,4 +336,27 @@ it("a closed day before the Store's day-end checks start is NotCovered, never No
       })
     ).dayEndCheck,
   ).toBeNull();
+});
+
+// Batch 60: the day-end "Taken off bills" line counts dish lines, as Reports' compCount does.
+it("counts a line comped 1 of 2, then the other, as one dish, with both amounts", () => {
+  const line = id(0x51),
+    other = id(0x52);
+  const comp = (orderItemReference: string, totalMinor: bigint, reasonCode = "SERVICE_RECOVERY") =>
+    ({ orderItemReference, totalMinor, reasonCode }) as const;
+  expect(managerCompsTakenOff([comp(line, 1413n), comp(line, 1412n)])).toEqual({
+    count: 1,
+    amountMinor: "2825",
+    currencyCode: "CAD",
+  });
+  // Another line is another dish; a member's points are not a manager's comp.
+  expect(
+    managerCompsTakenOff([
+      comp(line, 1413n),
+      comp(line, 1412n),
+      comp(other, 500n),
+      comp(id(0x53), 300n, "POINTS_REDEMPTION"),
+    ]),
+  ).toEqual({ count: 2, amountMinor: "3325", currencyCode: "CAD" });
+  expect(managerCompsTakenOff([])).toEqual({ count: 0, amountMinor: "0", currencyCode: "CAD" });
 });

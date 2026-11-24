@@ -20,6 +20,7 @@ import {
 } from "./merchant-transaction-authorization.js";
 import {
   createMerchantSettlementRead,
+  managerCompsTakenOff,
   merchantSettlementReadPermission,
   type MerchantSettlementScope,
   type MerchantSettlementWindow,
@@ -582,20 +583,14 @@ export function createPersistentMerchantSettlement(options: {
         optional(async () => {
           if (!(await guard(scope)(tx))) return null;
           // v15 M130: a member's points are not a manager's comp (Reports list them apart too).
-          const decided = (
-            await listStorePriceReductionsDecided(
-              tx,
-              { brandReference: scope.brandReference, storeReference: scope.storeReference },
-              window,
-            )
-          ).filter((record) => record.reasonCode !== "POINTS_REDEMPTION");
+          const decided = await listStorePriceReductionsDecided(
+            tx,
+            { brandReference: scope.brandReference, storeReference: scope.storeReference },
+            window,
+          );
           if (!(await guard(scope)(tx))) return null;
-          return {
-            // Batch 60: dish lines, as Reports count them (a line comped in two parts is one).
-            count: new Set(decided.map((record) => record.orderItemReference)).size,
-            amountMinor: decided.reduce((sum, record) => sum + record.totalMinor, 0n).toString(),
-            currencyCode: "CAD" as const,
-          };
+          // Batch 60: by dish line, as Reports count them (a line comped in two parts is one).
+          return managerCompsTakenOff(decided);
         }),
       // DEC-DINE-IN-PAY-LATER (cash): tables paid in cash, cash given back, net and rounding.
       // WP-2423 M52: with the counter's cash sales (walk-up and pickup) and cash given back there.

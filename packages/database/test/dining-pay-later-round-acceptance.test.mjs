@@ -79,6 +79,7 @@ import {
 } from "../../rms/customer-loyalty/src/index.ts";
 import { createMerchantDiningOrderCloseCommand } from "../../../apps/api/src/merchant-dining-order-close-command.ts";
 import { loadStoreSalesReportSources } from "../../../apps/api/src/persistent-merchant-store-reports.ts";
+import { managerCompsTakenOff } from "../../../apps/api/src/merchant-settlement-read.ts";
 import {
   readCustomerTableBillFacts,
   readCustomerTablePayments,
@@ -7135,6 +7136,13 @@ async function journey(journeyEnding) {
               [1412n, 1, 2],
             ],
           );
+          // The day-end "Taken off bills" line reads the same: one dish (道菜), $28.25, as Reports.
+          assert.deepEqual(managerCompsTakenOff(decided), {
+            count: report.summary.compCount,
+            amountMinor: report.summary.compsWithTaxMinor,
+            currencyCode: "CAD",
+          });
+          assert.equal(managerCompsTakenOff(decided).count, 1);
         }
 
         async function compedWholeEnding() {
