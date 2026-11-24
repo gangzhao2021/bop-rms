@@ -109,9 +109,11 @@ function Table({
 }
 
 function SummaryLines({ summary }: { readonly summary: StoreReportSummary }) {
-  const lines: [string, string, boolean?][] = [
+  // b59 (live58): a taken-off amount keeps its sign beside it ("−" never alone on a line).
+  const minus = (minor: string) => <span className="bop-amount">{"−" + money(minor)}</span>;
+  const lines: [string, ReactNode, boolean?][] = [
     [t("Gross sales"), money(summary.grossSalesMinor)],
-    [t("Discounts"), "−" + money(summary.discountsMinor)],
+    [t("Discounts"), minus(summary.discountsMinor)],
   ];
   // WP-2423 item 8 ① segment 2: comps and discounts a manager decided, always on their own line.
   if (summary.compCount > 0)
@@ -120,17 +122,18 @@ function SummaryLines({ summary }: { readonly summary: StoreReportSummary }) {
         dishes: countOf(summary.compCount, "dish"),
       }),
       // v15 M149: before tax, like every sales line; with its tax said beside it.
-      "−" +
-        money(summary.compsMinor) +
-        (summary.compsWithTaxMinor === summary.compsMinor
+      <>
+        {minus(summary.compsMinor)}
+        {summary.compsWithTaxMinor === summary.compsMinor
           ? ""
-          : " " + t("({amount} with tax)", { amount: money(summary.compsWithTaxMinor) })),
+          : " " + t("({amount} with tax)", { amount: money(summary.compsWithTaxMinor) })}
+      </>,
     ]);
   // v15 M130: a member's points are the guest's own balance, not a manager's comp.
   if (summary.pointsCount > 0 || summary.pointsUsedMinor !== "0")
     lines.push([
       t("Points used · {dishes}", { dishes: countOf(summary.pointsCount, "dish") }),
-      "−" + money(summary.pointsUsedMinor),
+      minus(summary.pointsUsedMinor),
     ]);
   lines.push([t("Net sales"), money(summary.netSalesMinor), true]);
   if (summary.serviceChargesMinor !== "0")
@@ -154,7 +157,7 @@ function SummaryLines({ summary }: { readonly summary: StoreReportSummary }) {
     ]);
   lines.push([
     t("Refunds ({refundCount})", { refundCount: countOf(summary.refundCount, "refund") }),
-    "−" + money(summary.refundsMinor),
+    minus(summary.refundsMinor),
   ]);
   if (summary.refundsMinor !== "0") {
     lines.push([t("  of which sales"), money(summary.refunds.salesMinor)]);

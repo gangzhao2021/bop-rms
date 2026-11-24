@@ -111,7 +111,9 @@ export function BrandStoresReport({
                     <td data-label={t("Tax")}>{money(s.taxMinor)}</td>
                     <td data-label={t("Tips")}>{money(s.tipsMinor)}</td>
                     <td data-label={t("Taken")}>{money(s.collectedMinor)}</td>
-                    <td data-label={t("Refunds")}>{minusMoney(s.refundsMinor)}</td>
+                    <td data-label={t("Refunds")}>
+                      <span className="bop-amount">{minusMoney(s.refundsMinor)}</span>
+                    </td>
                     <td data-label={t("Net taken")}>{money(s.netCollectedMinor)}</td>
                     <td data-label={t("Still to take")}>
                       {money(row.summary.openTablesOwedMinor)}
@@ -149,7 +151,9 @@ export function BrandStoresReport({
             <td data-label={t("Tips")}>{money(total((x) => x.report.summary.tipsMinor))}</td>
             <td data-label={t("Taken")}>{money(total((x) => x.report.summary.collectedMinor))}</td>
             <td data-label={t("Refunds")}>
-              {minusMoney(total((x) => x.report.summary.refundsMinor))}
+              <span className="bop-amount">
+                {minusMoney(total((x) => x.report.summary.refundsMinor))}
+              </span>
             </td>
             <td data-label={t("Net taken")}>
               {money(total((x) => x.report.summary.netCollectedMinor))}

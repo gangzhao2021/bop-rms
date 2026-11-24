@@ -1354,7 +1354,8 @@ function CompRecordsNote({
               " · " +
               compRecordText(comp, timeZone)}
           </span>{" "}
-          <span>
+          {/* b59 (live58): sign, amount and tax note never break apart ("−" / "$14.13"). */}
+          <span className="bop-amount">
             {"−" +
               orderMoney({ amountMinor: comp.amountMinor, currencyCode: "CAD" }) +
               " " +
@@ -1369,7 +1370,7 @@ function CompRecordsNote({
       detail.order.tableBill.rounds === undefined ? (
         <li>
           <span>{t("Tax worked out again after comps")}</span>{" "}
-          <span>{signedCad(detail.order.tableBill.taxRoundingMinor)}</span>
+          <span className="bop-amount">{signedCad(detail.order.tableBill.taxRoundingMinor)}</span>
         </li>
       ) : null}
     </ul>

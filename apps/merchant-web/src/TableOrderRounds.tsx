@@ -223,7 +223,9 @@ export function TableOrderRounds({
                   {names.get(comp.orderItemReference)?.name ?? t("Dish")} ·{" "}
                   {compRecordText(comp, timeZone, "Guest")}
                 </span>
-                <span>−{orderMoney({ amountMinor: comp.amountMinor, currencyCode: "CAD" })}</span>
+                <span className="bop-amount">
+                  −{orderMoney({ amountMinor: comp.amountMinor, currencyCode: "CAD" })}
+                </span>
               </li>
             ))}
             {/* b13 (DEC-TAX-WHOLE-RECEIPT), from an older server only: its rounds above say what
@@ -237,7 +239,7 @@ export function TableOrderRounds({
             bill.taxRoundingMinor !== undefined ? (
               <li className="table-order-rounds__rounding">
                 <span>{t("Tax worked out again after comps")}</span>
-                <span>
+                <span className="bop-amount">
                   {BigInt(bill.taxRoundingMinor) < 0n ? "−" : "+"}
                   {orderMoney({
                     amountMinor: (BigInt(bill.taxRoundingMinor) < 0n

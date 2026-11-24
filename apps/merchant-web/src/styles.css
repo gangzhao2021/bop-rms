@@ -24,6 +24,13 @@
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
+/* b59 (live58): a signed amount (sign, currency, digits and its tax note) never breaks across
+   lines, so "−" never ends one line with "$14.13" on the next to read as money in; the words
+   before it wrap instead. */
+.bop-amount,
+.order-line-amount {
+  white-space: nowrap;
+}
 
 .local-demo-notice {
   display: flex;

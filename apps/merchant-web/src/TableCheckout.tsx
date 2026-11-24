@@ -1491,7 +1491,12 @@ function TableReceipt({
                 {item.reduction.points === true
                   ? t("Points used")
                   : compedText(item.reduction.kind, item.reduction.percent)}
-                {item.reduction.netMinor === null ? null : <> −{cad(item.reduction.netMinor)}</>}
+                {item.reduction.netMinor === null ? null : (
+                  <>
+                    {" "}
+                    <span className="bop-amount">−{cad(item.reduction.netMinor)}</span>
+                  </>
+                )}
               </span>
             ) : null}
           </li>
