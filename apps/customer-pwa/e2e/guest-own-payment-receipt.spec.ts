@@ -255,7 +255,7 @@ async function expectOnFirstScreen(line: Locator) {
 function words(zh: boolean, item: Scenario) {
   return {
     receipt: zh ? "您的收据" : "Your receipt",
-    youPaid: zh ? "您已在这部手机上刷卡支付 $14.13。" : "You paid $14.13 by card on this phone.",
+    youPaid: zh ? "您已在这部手机上在线支付 $14.13。" : "You paid $14.13 by card on this phone.",
     covers:
       item === "by-dish-written-off"
         ? zh
@@ -265,7 +265,7 @@ function words(zh: boolean, item: Scenario) {
           ? "本桌账单共\u00a02\u00a0份，这是第\u00a01\u00a0份"
           : "Part 1 of 2 of your table’s bill",
     total: zh ? "您实付合计" : "Total paid by you",
-    method: zh ? "本机刷卡" : "Card on this phone",
+    method: zh ? "本机在线付款" : "Card on this phone",
     only: zh
       ? "这张收据只包括您的付款。本桌账单的其余部分已由店员关闭，不向您收取。"
       : "This receipt is for your payment only. Staff closed the rest of your table’s bill; it is not charged to you.",
@@ -274,6 +274,9 @@ function words(zh: boolean, item: Scenario) {
       ? /已全部付清|已结清|谢谢光临|\$14\.12/u
       : /paid in full|bill is paid|Thank you|\$14\.12/u,
     link: zh ? "查看您的收据" : "See your receipt",
+    // Batch 56 review: the table is still open after staff closed the rest (Menu, dish, Cart).
+    openNotice: zh ? "店员已关闭本桌账单" : "Staff closed your table’s bill",
+    billLink: zh ? "查看账单" : "See the bill",
     ended: zh
       ? "店员已关闭本桌账单：已付的款项不变，其余不向您收取。"
       : "Staff closed your table’s bill: what was paid stays paid, and the rest is not charged to you.",
@@ -322,6 +325,32 @@ for (const width of [390, 1024, 1440])
           await open(page, "/dine-in/session", zh);
           await expectOwnReceipt(page, zh, item.scenario, width);
           await page.screenshot({ path: `test-results/b56-open-${tag}.png`, fullPage: true });
+
+          // Batch 56 review: still open, the guest usually still at the table: Menu, a dish page
+          // and Cart say what this phone paid too, and link to its receipt (not to "the bill").
+          for (const [where, path] of [
+            ["menu", "/menu"],
+            ["dish", `/menu/items/${sellable}`],
+            ["cart", "/cart"],
+          ] as const) {
+            await open(page, path, zh);
+            const main = page.getByRole("main");
+            await expect(main).toContainText(text.openNotice);
+            await expect(main).toContainText(text.youPaid);
+            const link = main.getByRole("link", { name: text.link });
+            await expect(link).toHaveAttribute("href", "/dine-in/session");
+            await expect(main.getByRole("link", { name: text.billLink })).toHaveCount(0);
+            await expect(main).not.toContainText(text.wrong);
+            await expectInside(main.getByText(text.youPaid), width);
+            await expectOnFirstScreen(link);
+            await page.screenshot({
+              path: `test-results/b56-open-${where}-${tag}.png`,
+              fullPage: true,
+            });
+          }
+          await page.getByRole("main").getByRole("link", { name: text.link }).click();
+          await expect(page).toHaveURL(/\/dine-in\/session$/u);
+          await expectOwnReceipt(page, zh, item.scenario, width);
 
           // Staff closed and cleaned the table: every tab says what this phone paid, and the
           // others link to its receipt, which Your table still shows.
@@ -385,6 +414,14 @@ for (const width of [390, 1024, 1440])
           await expect(page.getByRole("region", { name: text.receipt })).toHaveCount(0);
           await expect(page.getByRole("main")).not.toContainText(text.anyReceipt);
           await page.screenshot({ path: `test-results/b56-open-${tag}.png`, fullPage: true });
+          // Still open: Menu and Cart say how the bill ended and link to the bill, nothing more.
+          for (const path of ["/menu", "/cart"]) {
+            await open(page, path, zh);
+            const main = page.getByRole("main");
+            await expect(main).toContainText(text.openNotice);
+            await expect(main.getByRole("link", { name: text.billLink })).toBeVisible();
+            await expect(main).not.toContainText(text.anyReceipt);
+          }
           phone = { payer: false, tableClosed: true };
           for (const path of ["/menu", "/cart", "/dine-in/session"]) {
             await open(page, path, zh);

@@ -1,7 +1,11 @@
 import { v7 as uuidv7 } from "uuid";
 import { AlreadyOrdered } from "../checkout/AlreadyOrdered.js";
 import { ClosedStoreNotice } from "../menu/ClosedStoreNotice.js";
-import { tableCheckoutText, unreadTableCheckout } from "../menu/TableCheckoutNotice.js";
+import {
+  tableCheckoutText,
+  unreadTableCheckout,
+  useTableCheckoutOwnPaid,
+} from "../menu/TableCheckoutNotice.js";
 import { useTableCheckout } from "../dining/table-checkout-state.js";
 import {
   CHINESE_LOCALE,
@@ -578,6 +582,7 @@ function ErrorState({
     tableWaitingToOpen() !== null;
   useGoOnWhenTableOpens(waitingToOpen);
   const checkout = useTableCheckout(state.status === "table-checking-out");
+  const own = useTableCheckoutOwnPaid(checkout);
   if (!("cart" in state) || !("issueCodes" in state)) return null;
   // Batch 48 (v15 b47 live): the table is checking out, which is not a failure: nothing to refresh
   // or retry (this page reads the cart again by itself, so a reopened table goes on); the guest
@@ -587,8 +592,9 @@ function ErrorState({
     return (
       <StateMessage heading={text.heading}>
         <p>{text.line}</p>
+        {own.yourPaid === null ? null : <p>{own.yourPaid}</p>}
         <div className="cart-state__actions">
-          <Link to="/dine-in/session">{text.link}</Link>
+          <Link to="/dine-in/session">{own.link ?? text.link}</Link>
           <Link to="/menu">{commonText.returnToMenu}</Link>
         </div>
       </StateMessage>

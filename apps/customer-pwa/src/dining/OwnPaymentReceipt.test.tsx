@@ -14,8 +14,11 @@ import {
   OwnPaymentReceiptError,
   createOwnPaymentReceiptClient,
   parseOwnPaymentReceipt,
+  resetOwnPaidAtTable,
   type OwnPaymentReceiptClient,
 } from "./OwnPaymentReceipt.js";
+import { TableCheckoutNotice } from "../menu/TableCheckoutNotice.js";
+import type { TableCheckout } from "./table-checkout-state.js";
 import type { DiningRound, DiningSessionView } from "./dining-session-client.js";
 
 // Batch 56 (v15 b55 live, guest-closed-bill-menu-cart): a guest who paid part of a bill (their
@@ -77,6 +80,7 @@ afterEach(() => {
   container.remove();
   setCustomerCsrfCredential(null);
   setEmptyTable(null);
+  resetOwnPaidAtTable();
   vi.unstubAllGlobals();
 });
 const text = () => (container.textContent ?? "").replace(/\s+/gu, " ");
@@ -185,11 +189,11 @@ describe("batch 56: the guest who paid part of a bill staff closed keeps their o
       "zh-Hans",
     );
     expect(text()).toContain("您的收据");
-    expect(text()).toContain("您已在这部手机上刷卡支付 $14.13。");
+    expect(text()).toContain("您已在这部手机上在线支付 $14.13。");
     expect(text()).toContain("您付款的菜品");
     expect(text()).toContain("Beef noodles (TEST)");
     expect(text()).toContain("您实付合计$14.13");
-    expect(text()).toContain("付款方式本机刷卡");
+    expect(text()).toContain("付款方式本机在线付款");
     expect(text()).toContain(
       "这张收据只包括您的付款。本桌账单的其余部分已由店员关闭，不向您收取。",
     );
@@ -252,7 +256,7 @@ describe("batch 56: the guest who paid part of a bill staff closed keeps their o
       />,
       "zh-Hans",
     );
-    expect(text()).toContain("您已在这部手机上刷卡支付 $14.13。");
+    expect(text()).toContain("您已在这部手机上在线支付 $14.13。");
     expect(container.querySelector("a")?.textContent).toBe("查看您的收据");
     expect(container.querySelector("a")?.getAttribute("href")).toBe("/dine-in/session");
   });
@@ -313,5 +317,86 @@ describe("batch 56: the own-payment read", () => {
       },
     ])
       expect(() => parseOwnPaymentReceipt(bad)).toThrow(OwnPaymentReceiptError);
+  });
+});
+
+// Batch 56 review: while the table is still open after staff closed the rest (the guest usually
+// still at the table), Menu, dish pages and Cart said only "what was paid stays paid … See the
+// bill" to the payer, while Your table showed their receipt: two different messages.
+describe("batch 56 review: the closed-bill notice while the table is still open", () => {
+  const closedSome: TableCheckout = {
+    paid: true,
+    payLater: true,
+    closedByStaff: { kind: "Parts", paid: 1, count: 2 },
+  };
+  const answering = (status: number, body: unknown) => {
+    const fetch = vi
+      .fn()
+      .mockImplementation(async () =>
+        Response.json(body, { status, headers: { "cache-control": "no-store" } }),
+      );
+    vi.stubGlobal("fetch", fetch);
+    return fetch;
+  };
+  const asked = (fetch: ReturnType<typeof vi.fn>) =>
+    fetch.mock.calls.filter(([url]) => String(url).endsWith("/api/v1/dine-in/table-payment"));
+
+  it("the payer reads what they paid and goes to their own receipt (en, zh-Hans)", async () => {
+    setCustomerCsrfCredential("d".repeat(43));
+    const fetch = answering(200, evenPart);
+    await show(<TableCheckoutNotice checkout={closedSome} />);
+    expect(text()).toContain(
+      "Staff closed your table’s bill: what was paid stays paid, and the rest is not charged to you.",
+    );
+    expect(text()).toContain("You paid $14.13 by card on this phone.");
+    expect(container.querySelector("a")?.textContent).toBe("See your receipt");
+    expect(container.querySelector("a")?.getAttribute("href")).toBe("/dine-in/session");
+    const [[, init]] = asked(fetch) as [[string, RequestInit]];
+    expect(JSON.parse(String(init.body))).toMatchObject({ action: "OwnPayment" });
+    expect(new Headers(init.headers).get("x-csrf-token")).toBe("d".repeat(43));
+    // Moving to a dish page or Cart asks nothing again: a payment on a closed bill is final.
+    await show(<TableCheckoutNotice checkout={closedSome} />, "zh-Hans");
+    expect(text()).toContain("您已在这部手机上在线支付 $14.13。");
+    expect(container.querySelector("a")?.textContent).toBe("查看您的收据");
+    expect(asked(fetch)).toHaveLength(1);
+  });
+
+  it("another guest's phone reads the bill's words and its link only; nothing paid asks nothing", async () => {
+    setCustomerCsrfCredential("e".repeat(43));
+    const other = answering(404, {
+      schemaVersion: 1,
+      error: { code: "guest_session_unavailable" },
+    });
+    await show(<TableCheckoutNotice checkout={closedSome} />);
+    expect(asked(other)).toHaveLength(1);
+    expect(text()).not.toMatch(/You paid|receipt/iu);
+    expect(container.querySelector("a")?.textContent).toBe("See the bill");
+    resetOwnPaidAtTable();
+    const nothing = answering(200, evenPart);
+    await show(
+      <TableCheckoutNotice
+        checkout={{ paid: true, payLater: true, closedByStaff: { kind: "Nothing" } }}
+      />,
+    );
+    expect(asked(nothing)).toHaveLength(0);
+    expect(text()).not.toMatch(/You paid/u);
+    // A table still paying (staff closed nothing) asks nothing either.
+    await show(
+      <TableCheckoutNotice checkout={{ paid: false, payLater: true, closedByStaff: null }} />,
+    );
+    expect(asked(nothing)).toHaveLength(0);
+  });
+
+  it("a failed read leaves the bill's words; the next tab asks again", async () => {
+    setCustomerCsrfCredential("d".repeat(43));
+    const down = answering(503, { schemaVersion: 1, error: { code: "unavailable" } });
+    await show(<TableCheckoutNotice checkout={closedSome} />);
+    expect(text()).not.toMatch(/You paid/u);
+    expect(container.querySelector("a")?.textContent).toBe("See the bill");
+    const back = answering(200, evenPart);
+    await show(<TableCheckoutNotice checkout={closedSome} />);
+    expect(asked(down)).toHaveLength(1);
+    expect(asked(back)).toHaveLength(1);
+    expect(text()).toContain("You paid $14.13 by card on this phone.");
   });
 });

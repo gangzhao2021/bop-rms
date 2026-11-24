@@ -1,7 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { t, useReloadOnLanguageChange, nameLocale } from "../i18n/i18n.js";
 import { formatMoney } from "../journey/format.js";
 import { boundedJsonFetch } from "../network/bounded-fetch.js";
+import {
+  getCustomerCsrfCredential,
+  subscribeCustomerCsrfContext,
+} from "../session/customer-transaction-context.js";
 import { splitPartDishesText } from "./TablePayPanel.js";
 
 /**
@@ -148,6 +152,75 @@ export function createOwnPaymentReceiptClient(
 }
 
 const money = (amountMinor: string) => formatMoney(amountMinor, "CAD");
+
+/**
+ * Batch 56 review: while the table is still open after staff closed the rest, Menu, dish pages and
+ * Cart say what this phone paid too, as Your table's receipt does (the payer otherwise read two
+ * different things depending on whether staff had finished the table yet). One read per table
+ * visit, kept in memory for this visit's credential: a payment on a closed bill no longer changes,
+ * so moving between tabs asks nothing again. Another guest's phone is answered "nothing here".
+ */
+let ownPaidAtTable: {
+  readonly credential: string;
+  readonly status: "loading" | "ready" | "none" | "unavailable";
+  readonly amountMinor: string | null;
+} | null = null;
+const ownPaidListeners = new Set<() => void>();
+function setOwnPaidAtTable(next: typeof ownPaidAtTable) {
+  ownPaidAtTable = next;
+  for (const listener of ownPaidListeners) listener();
+}
+const subscribeOwnPaid = (listener: () => void) => {
+  ownPaidListeners.add(listener);
+  return () => {
+    ownPaidListeners.delete(listener);
+  };
+};
+const getOwnPaid = () => ownPaidAtTable;
+
+/** Tests start each case with nothing read. */
+export function resetOwnPaidAtTable(): void {
+  setOwnPaidAtTable(null);
+}
+
+/**
+ * What this phone paid on its table's bill (minor units), read only while `enabled` (staff closed a
+ * bill some of which was paid); null while unread, when it paid nothing, or when the read failed
+ * (Your table's receipt then offers to try again).
+ */
+export function useOwnPaidAtTable(enabled: boolean): string | null {
+  const credential = useSyncExternalStore(
+    subscribeCustomerCsrfContext,
+    getCustomerCsrfCredential,
+    getCustomerCsrfCredential,
+  );
+  const known = useSyncExternalStore(subscribeOwnPaid, getOwnPaid, getOwnPaid);
+  useEffect(() => {
+    if (!enabled || credential === null) return;
+    const kept = getOwnPaid();
+    if (kept?.credential === credential && kept.status !== "unavailable") return;
+    setOwnPaidAtTable({ credential, status: "loading", amountMinor: null });
+    const settle = (status: "ready" | "none" | "unavailable", amountMinor: string | null) => {
+      if (getOwnPaid()?.credential === credential)
+        setOwnPaidAtTable({ credential, status, amountMinor });
+    };
+    createOwnPaymentReceiptClient(() => credential)
+      .read()
+      .then(
+        (receipt) => settle("ready", receipt.totalMinor),
+        (error: unknown) =>
+          settle(
+            error instanceof OwnPaymentReceiptError && error.code === "none"
+              ? "none"
+              : "unavailable",
+            null,
+          ),
+      );
+  }, [enabled, credential]);
+  return enabled && known?.credential === credential && known.status === "ready"
+    ? known.amountMinor
+    : null;
+}
 
 /** "You paid $14.13 by card on this phone." — the one line every tab says to the payer. */
 export const youPaidText = (amountMinor: string) =>

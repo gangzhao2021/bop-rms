@@ -1403,7 +1403,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Staff closed your table’s bill: what was paid stays paid, and the rest is not charged to you.":
     "店员已关闭本桌账单：已付的款项不变，其余不向您收取。",
   // Batch 56 (v15 b55 live): the guest who paid part of a bill staff closed keeps their receipt.
-  "You paid {amount} by card on this phone.": "您已在这部手机上刷卡支付 {amount}。",
+  "You paid {amount} by card on this phone.": "您已在这部手机上在线支付 {amount}。",
   "See your receipt": "查看您的收据",
   "Your receipt": "您的收据",
   "Your table’s whole bill": "本桌全部账单",
@@ -1412,7 +1412,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Part {number} of {count} of your table’s bill":
     "本桌账单共\u00a0{count}\u00a0份，这是第\u00a0{number}\u00a0份",
   "Total paid by you": "您实付合计",
-  "Card on this phone": "本机刷卡",
+  "Card on this phone": "本机在线付款",
   "This receipt is for your payment only. Staff closed the rest of your table’s bill; it is not charged to you.":
     "这张收据只包括您的付款。本桌账单的其余部分已由店员关闭，不向您收取。",
   "This receipt is for your payment only, not your table’s whole bill.":

@@ -1,6 +1,7 @@
 import { Link } from "react-router";
 import type { TableCheckout } from "../dining/table-checkout-state.js";
 import { t } from "../i18n/i18n.js";
+import { useOwnPaidAtTable, youPaidText } from "../dining/OwnPaymentReceipt.js";
 
 /** Not read yet: the table is checking out, and whether it is paid is not known. */
 export const unreadTableCheckout: TableCheckout = Object.freeze({
@@ -58,12 +59,33 @@ export function tableCheckoutText(checkout: TableCheckout): {
       };
 }
 
+/**
+ * Batch 56 review: staff closed a bill some of which was paid, and the table is still open: the
+ * phone that paid part of it reads what it paid and goes to its own receipt on Your table, as it
+ * does once the table closed. Another guest's phone reads the bill's words only.
+ */
+export function useTableCheckoutOwnPaid(checkout: TableCheckout | null): {
+  readonly yourPaid: string | null;
+  readonly link: string | null;
+} {
+  const own = useOwnPaidAtTable(
+    checkout?.closedByStaff !== null &&
+      checkout?.closedByStaff !== undefined &&
+      checkout.closedByStaff.kind !== "Nothing",
+  );
+  return own === null
+    ? { yourPaid: null, link: null }
+    : { yourPaid: youPaidText(own), link: t("See your receipt") };
+}
+
 export function TableCheckoutNotice({ checkout }: { readonly checkout: TableCheckout }) {
   const text = tableCheckoutText(checkout);
+  const own = useTableCheckoutOwnPaid(checkout);
   return (
     <>
       <p className="menu-closed-notice__line">{text.whole}</p>
-      <Link to="/dine-in/session">{text.link}</Link>
+      {own.yourPaid === null ? null : <p className="menu-closed-notice__line">{own.yourPaid}</p>}
+      <Link to="/dine-in/session">{own.link ?? text.link}</Link>
     </>
   );
 }
