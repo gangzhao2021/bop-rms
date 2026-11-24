@@ -314,6 +314,40 @@ describe("WP-2423 item 8 ② tonight's closing summary", () => {
     first.standing = "Settled";
     expect(() => parseTonightSummary(wrong)).toThrow();
   });
+  it("batch 61 (v15 b60 live, 390): rows listing tables let the names wrap; amounts never do", () => {
+    const fixture = tonightSummaryFixture();
+    (fixture.openTables as Record<string, unknown>[]).push(
+      ...["L60P A (TEST)", "L60P B (TEST)", "Patio window (TEST)", "Booth by the door (TEST)"].map(
+        (tableLabel) => ({
+          tableLabel,
+          phase: "Active",
+          paymentTiming: "PayLater",
+          owedMinor: "0",
+          openedMinutes: 30,
+          standing: "Paid",
+        }),
+      ),
+    );
+    (fixture.openTables as Record<string, unknown>[]).push(
+      ...(["NothingOrdered", "NothingToCollect"] as const).map((standing, index) => ({
+        tableLabel: "Garden " + String(index + 1) + " (TEST)",
+        phase: "Active",
+        paymentTiming: "PayLater",
+        owedMinor: "0",
+        openedMinutes: 20,
+        standing,
+      })),
+    );
+    const html = render(fixture);
+    const rowOf = (label: string) => {
+      const at = html.lastIndexOf('<div class="tonight__row"', html.indexOf(label));
+      return html.slice(at, html.indexOf(">", at) + 1);
+    };
+    expect(rowOf("Paid, guests still seated")).toContain('data-list="true"');
+    expect(rowOf("Seated, nothing ordered")).toContain('data-list="true"');
+    expect(rowOf("Cancelled, nothing to collect")).toContain('data-list="true"');
+    expect(rowOf("Gross sales")).not.toContain("data-list");
+  });
   it("times the closing reminder by the Store's published closing", () => {
     const endsAt = "2026-10-28T08:00:00.000Z"; // 04:00 the next morning, Toronto.
     const at = (instant: string) => Date.parse(instant);

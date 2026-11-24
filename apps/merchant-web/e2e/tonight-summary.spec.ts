@@ -255,3 +255,78 @@ test("@production a lunch-only Store: an unpaid table still surfaces after closi
   // Read on this page's answer: once every table is paid the reminder has nothing to say.
   await expect.poll(async () => page.getByRole("region", { name: /closing/u }).count()).toBe(0);
 });
+
+// Batch 61 (v15 b60 live, TM2 at 390): "Paid, guests still seated · 4 tables" listed the table
+// names on one unbreakable line beside the label, so the label was squeezed one letter wide
+// (about 1,000 px tall) and the page scrolled sideways (scrollWidth 483 en / 502 zh-Hans).
+for (const language of ["en", "zh-Hans"] as const) {
+  test(`@production a row listing six tables wraps their names under its label (${language})`, async ({
+    page,
+  }) => {
+    const zh = language === "zh-Hans";
+    if (zh)
+      await page.addInitScript(() => {
+        try {
+          window.localStorage.setItem("bop.merchant.language", "zh-Hans");
+        } catch {
+          // The page still renders in English.
+        }
+      });
+    await workspace(page);
+    const fixture = tonightSummaryFixture();
+    const names = [
+      "L60P A (TEST)",
+      "L60P B (TEST)",
+      "Patio by the window (TEST)",
+      "Booth by the door (TEST)",
+      "Long banquet table (TEST)",
+      "Private room east (TEST)",
+    ];
+    (fixture.openTables as Record<string, unknown>[]).push(
+      ...names.map((tableLabel) => ({
+        tableLabel,
+        phase: "Active",
+        paymentTiming: "PayLater",
+        owedMinor: "0",
+        openedMinutes: 40,
+        standing: "Paid",
+      })),
+    );
+    await page.route("**/merchant/reports/tonight", (route) =>
+      route.fulfill({ headers, json: fixture }),
+    );
+    await page.goto("/app/reports/operations");
+    const label = zh ? "已付清，客人还在座" : "Paid, guests still seated";
+    const row = page.locator(".tonight__row", { hasText: label });
+    await expect(row).toContainText(names[5] as string);
+    for (const width of [1440, 1024, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      const shape = await row.evaluate((element) => {
+        const dt = (element.querySelector("dt") as HTMLElement).getBoundingClientRect();
+        const dd = (element.querySelector("dd") as HTMLElement).getBoundingClientRect();
+        const box = element.getBoundingClientRect();
+        return {
+          labelWidth: dt.width,
+          labelHeight: dt.height,
+          namesInside: dd.right <= box.right + 0.5 && dd.left >= box.left - 0.5,
+          namesBelow: dd.top >= dt.bottom - 0.5,
+          height: box.height,
+        };
+      });
+      // The label keeps its words on one or two lines (it was one letter wide), and every name
+      // stays inside the row; at a phone width they go under the label.
+      expect(shape.labelWidth, JSON.stringify(shape)).toBeGreaterThan(140);
+      expect(shape.labelHeight, JSON.stringify(shape)).toBeLessThan(60);
+      expect(shape.namesInside, JSON.stringify(shape)).toBe(true);
+      expect(shape.height, JSON.stringify(shape)).toBeLessThan(200);
+      if (width === 390) expect(shape.namesBelow, JSON.stringify(shape)).toBe(true);
+      await page.screenshot({
+        path: `test-results/tonight-seated-${language}-${width}.png`,
+        fullPage: true,
+      });
+    }
+  });
+}

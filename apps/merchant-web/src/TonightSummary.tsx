@@ -146,6 +146,7 @@ function Row({
   strong = false,
   muted = false,
   tone,
+  list = false,
 }: {
   readonly label: string;
   readonly detail?: string | null;
@@ -153,9 +154,20 @@ function Row({
   readonly strong?: boolean;
   readonly muted?: boolean;
   readonly tone?: "action" | undefined;
+  /**
+   * Batch 61 (v15 b60 live, 390): the value is a list of names (tables), not an amount: it wraps,
+   * under the label when the row is too narrow, instead of squeezing the label to a letter wide.
+   */
+  readonly list?: boolean;
 }) {
   return (
-    <div className="tonight__row" data-strong={strong} data-muted={muted} data-tone={tone}>
+    <div
+      className="tonight__row"
+      data-strong={strong}
+      data-muted={muted}
+      data-tone={tone}
+      data-list={list ? "true" : undefined}
+    >
       <dt>
         {label}
         {detail ? <span className="tonight__detail">{detail}</span> : null}
@@ -444,6 +456,7 @@ export function TonightSummaryView({
               detail={countOf(paidSeated.length, "table")}
               value={tableNames(paidSeated)}
               muted
+              list
             />
           </dl>
         ) : null}
@@ -454,6 +467,7 @@ export function TonightSummaryView({
               detail={countOf(nothingOrdered.length, "table")}
               value={tableNames(nothingOrdered)}
               muted
+              list
             />
           </dl>
         ) : null}
@@ -464,6 +478,7 @@ export function TonightSummaryView({
               detail={countOf(nothingToCollect.length, "table")}
               value={tableNames(nothingToCollect)}
               muted
+              list
             />
           </dl>
         ) : null}

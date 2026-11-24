@@ -533,6 +533,20 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+/* Batch 61 (v15 b60 live, 390): a row listing tables ("Paid, guests still seated · 4 tables")
+   wraps its names, under the label when they don't fit beside it; the label keeps its width. */
+.tonight__row[data-list="true"] {
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+.tonight__row[data-list="true"] dt {
+  flex: 0 1 auto;
+}
+.tonight__row[data-list="true"] dd {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .tonight__row[data-strong="true"] {
   border-top: 1px solid var(--bop-color-row-divider);
   font-size: 16px;
