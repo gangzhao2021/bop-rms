@@ -6701,6 +6701,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Fewer of these dishes are left to comp than you chose. Refresh the table, then choose again.":
     "可以免单的份数比你选的少了。请刷新这桌，再重新选。",
   "{dish} ({count} comped already)": "{dish}（已免单 {count} 份）",
+  "{dishes}: comped in part already, so the rest can only be comped (free).":
+    "{dishes}已免单一部分，剩下的只能免单。",
   "Dishes to comp": "免单份数",
   "{comped} of {quantity}": "{quantity} 份中的 {comped} 份",
   "{comped} of {quantity} × {dish} comped": "{dish} · 免单 {quantity} 份中的 {comped} 份",

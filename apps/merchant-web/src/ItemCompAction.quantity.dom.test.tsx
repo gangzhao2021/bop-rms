@@ -238,6 +238,65 @@ it("offers the bowl left after one was comped, and nothing to choose for one bow
   expect(previews.at(-1)).not.toHaveProperty("compQuantities");
 });
 
+// Batch 60 review: the server refuses a percentage or an amount off on a line comped in part, so
+// the panel never offers one there: under those choices the line is gone and a note says why.
+it("offers the rest of a line comped in part only as a comp, and says so", async () => {
+  const { previews, fetcher } = server();
+  const { container } = await open([firstBowl], fetcher);
+  await click(buttonNamed(container, "Comp or discount"));
+  await pause();
+  await tick(container, "Beef noodles");
+  await tick(container, "Tea");
+  const choose = async (index: number) => {
+    await click(container.querySelectorAll('input[name="item-comp-choice"]')[index]);
+    await pause();
+  };
+  const note = () =>
+    [...container.querySelectorAll('[role="note"]')]
+      .map((entry) => entry.textContent)
+      .find((text) => text?.includes("comped in part"));
+  expect(note()).toBeUndefined();
+  await choose(1);
+  expect(dishLabels(container).map((label) => label?.split(" · ")[0])).toEqual(["1 × Tea"]);
+  expect(note()).toBe(
+    "Beef noodles (TEST): comped in part already, so the rest can only be comped (free).",
+  );
+  await click(container.querySelector(".table-checkout__field input"));
+  const percent = container.querySelector<HTMLInputElement>(".table-checkout__field input");
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    setter?.call(percent, "50");
+    percent?.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await pause();
+  // The ticked noodles are left out of what is asked: only the tea is discounted.
+  expect(previews.filter((asked) => asked.kind === "Percent").at(-1)?.orderItemReferences).toEqual([
+    tea,
+  ]);
+  expect(
+    previews.some((asked) => asked.kind !== "Comp" && asked.orderItemReferences.includes(noodles)),
+  ).toBe(false);
+  await choose(2);
+  expect(dishLabels(container).map((label) => label?.split(" · ")[0])).toEqual(["1 × Tea"]);
+  // Back to Comp, the bowl left is offered (still ticked) again.
+  await choose(0);
+  expect(note()).toBeUndefined();
+  expect(dishLabels(container)[0]?.startsWith("1 × Beef noodles (TEST) (1 comped already)")).toBe(
+    true,
+  );
+  setLanguageForTest("zh-Hans");
+  const zh = await open([firstBowl], fetcher);
+  await click(buttonNamed(zh.container, "免单或折让"));
+  await pause();
+  await click(zh.container.querySelectorAll('input[name="item-comp-choice"]')[1]);
+  await pause();
+  expect(
+    [...zh.container.querySelectorAll('[role="note"]')]
+      .map((entry) => entry.textContent)
+      .find((text) => text?.includes("剩下的只能免单")),
+  ).toBe("Beef noodles (TEST) 已免单一部分，剩下的只能免单。");
+});
+
 it("no longer offers a line whose every bowl was comped", async () => {
   const { fetcher } = server();
   const { container } = await open(

@@ -215,8 +215,13 @@ export function ItemCompAction({
   const offered = lines.filter(
     (line) => compable.has(line.orderItemReference) && compDishesLeft(line, comps) > 0,
   );
-  const chosen = offered.filter((line) => selected.has(line.orderItemReference));
   const leftOf = (line: CurrentOrderLine) => compDishesLeft(line, comps);
+  // Batch 60 review: the rest of a line comped in part can only be comped too (a percentage or an
+  // amount off is for a whole line), so under those choices it isn't offered and a note says why.
+  const partlyComped = (line: CurrentOrderLine) => leftOf(line) < line.quantity;
+  const listed = choice === "Comp" ? offered : offered.filter((line) => !partlyComped(line));
+  const compOnly = choice === "Comp" ? [] : offered.filter(partlyComped);
+  const chosen = listed.filter((line) => selected.has(line.orderItemReference));
   // Batch 60: a comp of fewer dishes than are left on a line names them; the rest goes as before.
   const compQuantitiesFor = (items: readonly CurrentOrderLine[]) =>
     choice !== "Comp"
@@ -270,7 +275,7 @@ export function ItemCompAction({
     (choice === "Amount" && amountOffMinor !== null);
   const dishKeyFor = (line: CurrentOrderLine) =>
     (order.currentVersion ?? "") + "|" + JSON.stringify(askedFor([line]));
-  const dishKeys = open && choiceKnown ? offered.map((line) => dishKeyFor(line)) : [];
+  const dishKeys = open && choiceKnown ? listed.map((line) => dishKeyFor(line)) : [];
   const dishKeysText = JSON.stringify(dishKeys);
   // v15 b16 (DEC-COMP-BILL-CENT): the server works out what really comes off the bill (the bill's
   // tax is worked out once over the whole bill, so it can differ by a cent from the dishes' own).
@@ -478,7 +483,7 @@ export function ItemCompAction({
     >
       <p>{compIntroText()}</p>
       <ul className="pay-later-remove__lines">
-        {offered.map((line) => {
+        {listed.map((line) => {
           const left = leftOf(line);
           const ticked = selected.has(line.orderItemReference);
           const billDown = choiceKnown
@@ -562,6 +567,13 @@ export function ItemCompAction({
           </label>
         ))}
       </fieldset>
+      {compOnly.length > 0 ? (
+        <p role="note">
+          {t("{dishes}: comped in part already, so the rest can only be comped (free).", {
+            dishes: compOnly.map((line) => line.name).join(listSeparator()),
+          })}
+        </p>
+      ) : null}
       {choice === "Percent" ? (
         <label className="table-checkout__field">
           {t("Percent off (1–99)")}
