@@ -148,8 +148,11 @@ async function openTable(page: Page, zh: boolean) {
       }),
     ),
   );
+  // Batch 56: this phone's own-payment read is "not found" (it paid nothing), as the API answers.
   await page.route("**/api/v1/dine-in/table-payment", (route) =>
-    route.fulfill(json(200, paymentView())),
+    (route.request().postDataJSON() as { action?: unknown } | null)?.action === "OwnPayment"
+      ? route.fulfill(json(404, { schemaVersion: 1, error: { code: "table_not_found" } }))
+      : route.fulfill(json(200, paymentView())),
   );
   await page.route("**/api/v1/dine-in/staff-call", (route) =>
     route.fulfill(

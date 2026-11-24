@@ -177,28 +177,31 @@ async function stubTable(page: Page, asked: string[]) {
       }),
     ),
   );
-  // The pay section of a bill staff closed hides itself (state Closed, no receipt).
+  // The pay section of a bill staff closed hides itself (state Closed, no receipt). Batch 56:
+  // this phone paid nothing itself, so its own-payment read is "not found", as the API answers.
   await page.route("**/api/v1/dine-in/table-payment", (route) =>
-    route.fulfill(
-      json(200, {
-        schemaVersion: 1,
-        payment: {
-          refundedMinor: "0",
-          tableLabel: "L54 GB (TEST)",
-          checkingOut: true,
-          rounds: [],
-          owed: { subtotalMinor: "0", taxMinor: "0", totalMinor: "0", taxRoundingMinor: "0" },
-          consistent: true,
-          matchesOrderApartFromSplit: true,
-          tips: { enabled: true, tierPercents: [10, 15, 18] },
-          state: "Closed",
-          attempt: null,
-          split: null,
-          choices: null,
-          receipt: null,
-        },
-      }),
-    ),
+    (route.request().postDataJSON() as { action?: unknown } | null)?.action === "OwnPayment"
+      ? route.fulfill(json(404, { schemaVersion: 1, error: { code: "table_not_found" } }))
+      : route.fulfill(
+          json(200, {
+            schemaVersion: 1,
+            payment: {
+              refundedMinor: "0",
+              tableLabel: "L54 GB (TEST)",
+              checkingOut: true,
+              rounds: [],
+              owed: { subtotalMinor: "0", taxMinor: "0", totalMinor: "0", taxRoundingMinor: "0" },
+              consistent: true,
+              matchesOrderApartFromSplit: true,
+              tips: { enabled: true, tierPercents: [10, 15, 18] },
+              state: "Closed",
+              attempt: null,
+              split: null,
+              choices: null,
+              receipt: null,
+            },
+          }),
+        ),
   );
   await page.route("**/api/v1/dine-in/staff-call", (route) =>
     route.fulfill(
