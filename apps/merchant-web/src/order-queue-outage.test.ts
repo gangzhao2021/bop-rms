@@ -3,8 +3,10 @@ import {
   awaitingFirst,
   awaitingSince,
   earlierDayWaiting,
+  orderCountText,
   ordersSummary,
   statusTabCount,
+  viewOrderCount,
 } from "./CurrentOrderQueuePage.js";
 import type { CurrentOrderQueue } from "./current-order-queue-client.js";
 
@@ -262,5 +264,57 @@ describe("batch 57: the Orders header and tabs count what they say", () => {
     } as CurrentOrderQueue;
     expect(statusTabCount(whole, null, filters)).toBe(4);
     expect(statusTabCount(whole, null, { ...filters, phase: "AwaitingAcceptance" })).toBe(1);
+  });
+});
+
+// Batch 58 (v15 batch 57 live, Test Merchant 2 at 04:06 Toronto, business date 2026-11-24).
+describe("batch 58: the Orders footer counts what Today shows", () => {
+  const day = { businessDate: "2026-11-24", startsAt: "2026-11-24T09:00:00.000Z" };
+  // The 11/4 table order still waiting, 45 earlier-day open pickups, today's 3 (one to accept) and
+  // the newest 47 of yesterday's 104, all handed over.
+  const leftover = order("2", "2026-11-05T01:47:04.758Z", {
+    awaiting: true,
+    day: "2026-11-24",
+    opened: "2026-11-04",
+  });
+  const pickups = Array.from({ length: 45 }, (_, i) =>
+    order(String(20 + i), "2026-11-04T21:33:01.000Z", { day: "2026-11-04", earlierOpen: true }),
+  );
+  const todays = [
+    order("3", "2026-11-24T09:05:00.000Z", { day: "2026-11-24", awaiting: true }),
+    order("2", "2026-11-24T09:02:00.000Z", { day: "2026-11-24" }),
+    order("1", "2026-11-24T09:01:00.000Z", { day: "2026-11-24" }),
+  ];
+  const yesterdays = Array.from({ length: 47 }, (_, i) =>
+    order(String(104 - i), "2026-11-24T03:00:00.000Z", { day: "2026-11-23" }),
+  );
+  const view = {
+    unreadable: [],
+    items: [leftover, ...pickups, ...todays, ...yesterdays],
+    nextAfterOrderReference: "58",
+    todayOrderCount: 3,
+  } as unknown as CurrentOrderQueue;
+
+  it("counts the 49 rows Today shows, as All does, never yesterday's hidden ones", () => {
+    const filters = {
+      orderNumber: "",
+      type: "All",
+      channel: "All",
+      phase: "All",
+      day: "Today" as const,
+      today: "2026-11-24",
+    };
+    expect(statusTabCount(view, null, filters)).toBe(49);
+    // Before: "2 of 96 orders on this page match" (the whole loaded page).
+    const total = viewOrderCount(view.items, "", "Today", "2026-11-24");
+    expect(total).toBe(49);
+    expect(
+      orderCountText({ shown: 2, total, filtered: true, olderPage: false, morePages: true }),
+    ).toBe("2 of 49 orders on this page match. Other pages are not searched.");
+    // All days, or an order number (it looks at every loaded day): every loaded row.
+    expect(viewOrderCount(view.items, "", "All", "2026-11-24")).toBe(96);
+    expect(viewOrderCount(view.items, " 104 ", "Today", "2026-11-24")).toBe(96);
+    // The business day not known yet: nothing is hidden.
+    expect(viewOrderCount(view.items, "", "Today", null)).toBe(96);
   });
 });

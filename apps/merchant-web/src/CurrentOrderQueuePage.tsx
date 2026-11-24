@@ -1771,6 +1771,29 @@ export function orderCountText(input: {
     ? t("{total} (the oldest).", { total: orders(input.total) })
     : `${orders(input.total)}.`;
 }
+/**
+ * Batch 58 (v15 batch 57 live, Test Merchant 2 early in a new business day): with To accept chosen
+ * the footer read "2 of 96 orders on this page match" while Today listed 49 rows and All said 49.
+ * The 96 counted the whole loaded page: 47 of yesterday's finished orders that Today hides, plus
+ * today's 3 and the 46 earlier-day orders listed with them. "This page" is what staff can see
+ * without the status, type and channel filters: Today's rows under Today, every loaded row under
+ * All days or while an order number is searched (the search looks at every loaded day).
+ */
+export function viewOrderCount(
+  items: CurrentOrderQueue["items"],
+  orderNumber: string,
+  day: "Today" | "All",
+  today: string | null,
+): number {
+  return filterCurrentOrderItems(items, {
+    orderNumber: "",
+    type: "All",
+    channel: "All",
+    phase: "All",
+    day: orderNumber.trim() === "" ? day : "All",
+    today,
+  }).length;
+}
 /** WP-2423 item 5: minutes before an unpaid round's cancellation when staff are warned urgently. */
 export const unpaidRoundUrgentMinutes = 10;
 
@@ -5234,7 +5257,12 @@ export function CurrentOrderQueuePage({
                       ? t("Today's earlier orders are on the next page.")
                       : orderCountText({
                           shown: filteredOrders.length,
-                          total: state.view.items.length,
+                          total: viewOrderCount(
+                            state.view.items,
+                            orderNumberSearch,
+                            dayFilter,
+                            today,
+                          ),
                           filtered: hasOrderFilters,
                           olderPage: after !== null,
                           morePages: state.view.nextAfterOrderReference !== null,
