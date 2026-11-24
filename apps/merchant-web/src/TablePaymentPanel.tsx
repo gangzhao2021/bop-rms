@@ -166,6 +166,21 @@ export function parseTablePayments(value: unknown): readonly TablePayment[] {
   ]);
 }
 
+/**
+ * The card refund made from this panel: the newest of that amount among those listed after it
+ * (refunds are only ever added). null when it is not listed (yet).
+ */
+export function sentRefundOf(
+  payment: TablePayment,
+  sent: { readonly amountMinor: string; readonly before: number } | null,
+): TablePayment["onlineRefunds"][number] | null {
+  if (sent === null || payment.onlineRefunds.length <= sent.before) return null;
+  const newest = [...payment.onlineRefunds]
+    .filter((refund) => refund.amountMinor === sent.amountMinor)
+    .sort((a, b) => Date.parse(b.requestedAt) - Date.parse(a.requestedAt))[0];
+  return newest ?? null;
+}
+
 async function post(fetcher: typeof fetch, path: string, csrf: string, body: unknown) {
   const response = await fetcher(path, {
     method: "POST",
@@ -216,10 +231,16 @@ export function TablePaymentPanel({
   const sending = payments.some((payment) =>
     payment.onlineRefunds.some((refund) => refund.state === "Sending"),
   );
+  // b59 (live58): the card company usually answers within seconds, so the first read comes soon
+  // after the refund is made; then every 15 s until it answers.
   useEffect(() => {
     if (!sending) return;
+    const soon = setTimeout(() => setReload((value) => value + 1), 3000);
     const timer = setInterval(() => setReload((value) => value + 1), 15000);
-    return () => clearInterval(timer);
+    return () => {
+      clearTimeout(soon);
+      clearInterval(timer);
+    };
   }, [sending]);
 
   return (
@@ -262,6 +283,11 @@ function TablePaymentBlock({
   // Owner 2026-11-03: money is confirmed before it is recorded, and said once it is.
   const [reviewing, setReviewing] = useState(false);
   const [done, setDone] = useState<string | null>(null);
+  /**
+   * b59 (live58): a card refund just made. What is said about it follows its state as read
+   * (on its way, gone back, refused), never the moment it was sent, so one refund has one state.
+   */
+  const [sent, setSent] = useState<{ amountMinor: string; before: number } | null>(null);
   // On a PIN sign-in the server asks who it is first; their role is fine.
   const [confirmIdentity, setConfirmIdentity] = useState(false);
   const operation = useRef<{ key: string; reference: string } | null>(null);
@@ -326,9 +352,11 @@ function TablePaymentBlock({
         operation.current = null;
         setConfirmIdentity(false);
         onChanged(parseTablePayments(payload));
+        if (online)
+          setSent({ amountMinor: amountMinor.toString(), before: payment.onlineRefunds.length });
         setDone(
           online
-            ? t("{amount} is going back to the guest's card.", { amount: cad(amountMinor) })
+            ? null
             : onMachine
               ? t("Recorded {amount} refunded on the card machine.", { amount: cad(amountMinor) })
               : t("Recorded {amount} given back in cash. Give it to the guest now.", {
@@ -388,6 +416,15 @@ function TablePaymentBlock({
     }
   };
   const canRefund = refundable > 0n;
+  const sentRefund = sentRefundOf(payment, sent);
+  const sentText =
+    sentRefund === null
+      ? null
+      : sentRefund.state === "Sending"
+        ? t("{amount} is going back to the guest's card.", { amount: cad(sentRefund.amountMinor) })
+        : sentRefund.state === "Refunded"
+          ? t("{amount} went back to the guest's card.", { amount: cad(sentRefund.amountMinor) })
+          : null;
   const openLabel = online
     ? t("Refund to the card")
     : onMachine
@@ -632,6 +669,7 @@ function TablePaymentBlock({
             type="button"
             onClick={() => {
               setDone(null);
+              setSent(null);
               setRefunding(true);
             }}
           >
@@ -642,6 +680,7 @@ function TablePaymentBlock({
       {confirmIdentity ? <FullSignInPrompt csrf={csrf} fetcher={fetcher} /> : null}
       {problem ? <p role="alert">{problem}</p> : null}
       {done ? <p role="status">{done}</p> : null}
+      {sentText ? <p role="status">{sentText}</p> : null}
     </section>
   );
 }

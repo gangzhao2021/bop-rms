@@ -443,3 +443,161 @@ for (const language of ["en", "zh-Hans"] as const)
       await section.screenshot({ path: `test-results/b58-refund-by-${language}-${width}.png` });
     }
   });
+
+/**
+ * b59 (live58, TM2 order 26): ~12 s after a $5.00 card refund the payment section read "Refunded
+ * to the card · Guest asked · … −$5.00" and, under it, "$5.00 is going back to the guest's card."
+ * although Payment had the refund Succeeded. The sentence said after the write was fixed at "on
+ * its way" whatever Payment answered. One refund has one state: the sentence follows the refund's
+ * state as read, and a refund still on its way is read again shortly after it was made.
+ */
+const sentence = (zh: boolean, state: "Sending" | "Refunded") =>
+  zh
+    ? state === "Sending"
+      ? "$5.00 正在退回客人的卡。"
+      : "$5.00 已退回客人的卡。"
+    : state === "Sending"
+      ? "$5.00 is going back to the guest's card."
+      : "$5.00 went back to the guest's card.";
+const partPaid = {
+  ...payment,
+  partNumber: 1,
+  roundsMinor: "1413",
+  tipMinor: "0",
+  totalMinor: "1413",
+  refundableMinor: "1413",
+};
+const live = (state: string) => ({
+  amountMinor: "500",
+  reasonCode: "CUSTOMER_REQUEST",
+  requestedAt: "2026-11-24T13:41:00.000Z",
+  state,
+  byLabel: "You",
+});
+const afterRefund = (state: string) => ({
+  ...partPaid,
+  onlineRefunds: [live(state)],
+  refundableMinor: "913",
+});
+
+async function refundFive(page: Page, zh: boolean) {
+  await page
+    .getByRole("button", { name: zh ? "退回客人的卡" : "Refund to the card", exact: true })
+    .click();
+  await page.getByLabel(zh ? "退款金额" : "Amount to refund").fill("5");
+  await page.getByRole("combobox").last().selectOption("CUSTOMER_REQUEST");
+  await page
+    .getByRole("button", { name: zh ? "退 $5.00 到客人的卡" : "Refund $5.00 to the card" })
+    .click();
+  await page
+    .getByRole("button", { name: zh ? "确认退回卡上 $5.00" : "Confirm: refund $5.00 to the card" })
+    .click();
+}
+const zhFirst = async (page: Page, zh: boolean) => {
+  if (zh)
+    await page.addInitScript(() => {
+      try {
+        window.localStorage.setItem("bop.merchant.language", "zh-Hans");
+      } catch {
+        /* the page falls back to English */
+      }
+    });
+};
+const fits = async (page: Page) =>
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+    ),
+  ).toBe(true);
+
+for (const language of ["en", "zh-Hans"] as const)
+  for (const [width, height] of [
+    [1440, 900],
+    [1024, 768],
+    [390, 844],
+  ] as const) {
+    test(`@production b59: a card refund Payment already answered says it went back, once (${language}, ${width})`, async ({
+      page,
+    }) => {
+      const zh = language === "zh-Hans";
+      await zhFirst(page, zh);
+      await page.setViewportSize({ width, height });
+      let refunded = false;
+      await orderPage(
+        page,
+        () => ({
+          orderReference: id(1),
+          payment: refunded ? afterRefund("Refunded") : partPaid,
+          parts: [],
+        }),
+        refunded ? "500" : undefined,
+      );
+      await page.route("**/merchant/orders/table-payment/online-refund", (route) => {
+        refunded = true;
+        return route.fulfill({
+          headers,
+          json: {
+            status: "Recorded",
+            orderReference: id(1),
+            payment: afterRefund("Refunded"),
+            parts: [],
+          },
+        });
+      });
+      await page.goto("/operations/orders");
+      await refundFive(page, zh);
+      const section = page.locator("section.table-payment").first();
+      await expect(
+        section.locator("dt").filter({ hasText: zh ? "已退到卡上" : "Refunded to the card" }),
+      ).toBeVisible();
+      await expect(section.getByRole("status")).toHaveText(sentence(zh, "Refunded"));
+      await expect(section).not.toContainText(sentence(zh, "Sending"));
+      await page.waitForTimeout(4_000);
+      await expect(section).not.toContainText(sentence(zh, "Sending"));
+      await fits(page);
+      await section.screenshot({ path: `test-results/b59-refund-done-${language}-${width}.png` });
+    });
+
+    test(`@production b59: a card refund still on its way says so, then says it went back once Payment answers (${language}, ${width})`, async ({
+      page,
+    }) => {
+      const zh = language === "zh-Hans";
+      await zhFirst(page, zh);
+      await page.setViewportSize({ width, height });
+      let state: "None" | "Sending" | "Refunded" = "None";
+      await orderPage(page, () => ({
+        orderReference: id(1),
+        payment: state === "None" ? partPaid : afterRefund(state),
+        parts: [],
+      }));
+      await page.route("**/merchant/orders/table-payment/online-refund", (route) => {
+        state = "Sending";
+        return route.fulfill({
+          headers,
+          json: {
+            status: "Recorded",
+            orderReference: id(1),
+            payment: afterRefund("Sending"),
+            parts: [],
+          },
+        });
+      });
+      await page.goto("/operations/orders");
+      await refundFive(page, zh);
+      const section = page.locator("section.table-payment").first();
+      await expect(
+        section.locator("dt").filter({ hasText: zh ? "正在退回卡上" : "Going back to the card" }),
+      ).toBeVisible();
+      await expect(section).toContainText(sentence(zh, "Sending"));
+      // Payment's outcome arrives after the write: the panel reads it again without a reload.
+      state = "Refunded";
+      await expect(
+        section.locator("dt").filter({ hasText: zh ? "已退到卡上" : "Refunded to the card" }),
+      ).toBeVisible({
+        timeout: 8_000,
+      });
+      await expect(section).toContainText(sentence(zh, "Refunded"));
+      await expect(section).not.toContainText(sentence(zh, "Sending"));
+      await fits(page);
+    });
+  }

@@ -6466,6 +6466,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Confirm: record {amount} refunded": "确认登记退款 {amount}",
   "Confirm: give back {amount} in cash": "确认退还现金 {amount}",
   "{amount} is going back to the guest's card.": "{amount} 正在退回客人的卡。",
+  "{amount} went back to the guest's card.": "{amount} 已退回客人的卡。",
   "Recorded {amount} refunded on the card machine.": "已登记刷卡机退款 {amount}。",
   "Recorded {amount} given back in cash. Give it to the guest now.":
     "已记下退还现金 {amount}。请把钱交给客人。",

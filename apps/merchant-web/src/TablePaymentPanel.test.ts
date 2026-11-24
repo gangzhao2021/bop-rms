@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cashRefundNickel, parseTablePayments } from "./TablePaymentPanel.js";
+import { cashRefundNickel, parseTablePayments, sentRefundOf } from "./TablePaymentPanel.js";
 
 describe("v15 M131: cash goes back in whole nickels", () => {
   it("rounds the Canadian way and never above what is left of the cash", () => {
@@ -65,5 +65,36 @@ describe("parseTablePayments", () => {
       }),
     ).toThrow();
     expect(() => parseTablePayments({ payment: { ...payment, totalMinor: "46.00" } })).toThrow();
+  });
+});
+
+describe("b59 (live58): the card refund just made is the one its sentence follows", () => {
+  const read = (states: readonly string[]) => {
+    const [first] = parseTablePayments({
+      payment: {
+        ...payment,
+        onlineRefunds: states.map((state, index) => ({
+          amountMinor: "500",
+          reasonCode: "CUSTOMER_REQUEST",
+          requestedAt: `2026-11-24T13:4${index}:00.000Z`,
+          state,
+          byLabel: "You",
+        })),
+      },
+    });
+    if (first === undefined) throw new Error("no payment");
+    return first;
+  };
+  it("follows the newest of that amount, as Payment answered it", () => {
+    expect(
+      sentRefundOf(read(["Refused", "Refunded"]), { amountMinor: "500", before: 1 })?.state,
+    ).toBe("Refunded");
+    expect(sentRefundOf(read(["Sending"]), { amountMinor: "500", before: 0 })?.state).toBe(
+      "Sending",
+    );
+  });
+  it("says nothing before the refund is listed or when none was made here", () => {
+    expect(sentRefundOf(read(["Refunded"]), { amountMinor: "500", before: 1 })).toBeNull();
+    expect(sentRefundOf(read(["Refunded"]), null)).toBeNull();
   });
 });
