@@ -414,7 +414,8 @@ export function computeBillTaxRounding(
  * `rounds` is the bill as it stands (earlier reductions included); `planned` are the new
  * reductions with their dish shares. Returns each planned dish's cent share (0 for most). Only a
  * dish that is taxed (Taxable at a rate) takes a share, and a share never makes a reduction's tax
- * negative.
+ * negative. Batch 60: a dish line already comped in part (some of its dishes) takes the new comp on
+ * top of what it has; its earlier comps keep their own cents.
  */
 export function billReductionTaxRoundingShares(
   rounds: readonly BillTaxRoundingRound[],
@@ -438,9 +439,7 @@ export function billReductionTaxRoundingShares(
   const taxed = [...planned]
     .filter((line) => {
       const item = itemOf.get(line.orderItemReference);
-      return (
-        item !== undefined && item.reduction === null && item.taxComponents.some(taxedComponent)
-      );
+      return item !== undefined && item.taxComponents.some(taxedComponent);
     })
     // The carrier's dishes last, so they are the first to take a cent.
     .sort((a, b) => {
@@ -458,13 +457,15 @@ export function billReductionTaxRoundingShares(
         ...round,
         items: round.items.map((item) => {
           const line = plannedOf.get(item.orderItemReference);
-          if (line === undefined || item.reduction !== null) return item;
+          if (line === undefined) return item;
+          const earlier = item.reduction ?? { netMinor: 0n, taxMinor: 0n, taxRoundingMinor: 0n };
+          const share = shares.get(item.orderItemReference) ?? 0n;
           return {
             ...item,
             reduction: {
-              netMinor: line.netMinor,
-              taxMinor: line.taxMinor + (shares.get(item.orderItemReference) ?? 0n),
-              taxRoundingMinor: shares.get(item.orderItemReference) ?? 0n,
+              netMinor: earlier.netMinor + line.netMinor,
+              taxMinor: earlier.taxMinor + line.taxMinor + share,
+              taxRoundingMinor: (earlier.taxRoundingMinor ?? 0n) + share,
             },
           };
         }),

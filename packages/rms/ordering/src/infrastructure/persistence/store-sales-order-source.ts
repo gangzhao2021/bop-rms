@@ -6,6 +6,7 @@ import {
 } from "../../domain/order-item-snapshot-codec.js";
 import {
   listOrderPriceReductions,
+  orderItemReductions,
   orderPointsRedemptionReason,
 } from "./order-item-price-reduction-store.js";
 import { listOrdersTaxRoundingLines } from "./order-tax-rounding-store.js";
@@ -118,14 +119,9 @@ export function createPostgresStoreSalesOrderSource(options: {
       for (let part = 0; part < chunk.length; part += 200)
         for (const record of await removals.listByOrders(tx, chunk.slice(part, part + 200)))
           for (const line of record.orderItemReferences) removed.add(line);
-      const reductions = new Map(
-        (
-          await listOrderPriceReductions(
-            tx,
-            { brandReference: brand, storeReference: store },
-            chunk,
-          )
-        ).map((record) => [record.orderItemReference, record]),
+      // Batch 60: a line comped in part has a comp for each decision, read as one.
+      const reductions = orderItemReductions(
+        await listOrderPriceReductions(tx, { brandReference: brand, storeReference: store }, chunk),
       );
       const byOrder = new Map<string, Map<string, StoreSalesOrderItem[]>>();
       for (const row of items.rows as readonly Record<string, unknown>[]) {

@@ -375,6 +375,46 @@ describe("v15 b16 DEC-COMP-BILL-CENT: a reduction takes off exactly what the bil
     expect(billOf(second.next)).toBe(0n);
   });
 
+  it("batch 60: comps 1 of 2 Beef noodles, then the other, on top of the first comp", () => {
+    // A line of two bowls ($25.00, its own tax $3.25) and a $3.80 tea ($0.49): the bill is
+    // $25.00 + $3.80 at 13% = $3.74 tax, $32.54 (the rounds were charged $3.74 too).
+    const rounds: BillTaxRoundingRound[] = [round(1, 2500n, 325n), round(2, 380n, 49n)];
+    expect(billOf(rounds)).toBe(3254n);
+    const comp = (current: BillTaxRoundingRound[], netMinor: bigint, taxMinor: bigint) => {
+      const item = (current[0] as BillTaxRoundingRound).items[0] as BillTaxRoundingItemLike;
+      const shares = billReductionTaxRoundingShares(current, [
+        { orderItemReference: item.orderItemReference, netMinor, taxMinor },
+      ]);
+      const share = shares.get(item.orderItemReference) ?? 0n;
+      const earlier = item.reduction ?? { netMinor: 0n, taxMinor: 0n, taxRoundingMinor: 0n };
+      const next: BillTaxRoundingRound[] = [
+        {
+          ...(current[0] as BillTaxRoundingRound),
+          items: [
+            {
+              ...item,
+              reduction: {
+                netMinor: earlier.netMinor + netMinor,
+                taxMinor: earlier.taxMinor + taxMinor + share,
+                taxRoundingMinor: (earlier.taxRoundingMinor ?? 0n) + share,
+              },
+            },
+          ],
+        },
+        ...current.slice(1),
+      ];
+      return { recordMinor: netMinor + taxMinor + share, next };
+    };
+    // 1 of 2: $12.50 and its half-up share of the line's tax, $1.63.
+    const first = comp(rounds, 1250n, 163n);
+    expect(first.recordMinor + billOf(first.next)).toBe(3254n);
+    // The other bowl, on top of the first comp: $12.50 and the $1.62 left of the line's tax.
+    const second = comp(first.next, 1250n, 162n);
+    expect(first.recordMinor + second.recordMinor + billOf(second.next)).toBe(3254n);
+    // Only the tea is left to pay, at what it costs alone.
+    expect(billOf(second.next)).toBe(429n);
+  });
+
   it("takes the whole bill's extra cent off when the bill had been charged one more", () => {
     // Three $3.80 rounds: 49¢ tax each (147¢); the whole bill's tax is 11.40 × 13% = 148¢.
     const rounds = [round(1, 380n, 49n), round(2, 380n, 49n), round(3, 380n, 49n)];

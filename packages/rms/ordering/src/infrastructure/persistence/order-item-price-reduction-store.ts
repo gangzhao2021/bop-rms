@@ -54,6 +54,13 @@ export interface OrderPriceReductionRecord {
   readonly reasonCode: OrderPriceReductionReasonCode | typeof orderPointsRedemptionReason;
   readonly actorReference: string;
   readonly decidedAt: string;
+  /**
+   * Batch 60: how many of the line's dishes this comp covers ("1 of 2 × Beef noodles"); null for
+   * a reduction of the whole line recorded before batch 60, a percentage, an amount off or points.
+   */
+  readonly compedQuantity: number | null;
+  /** Batch 60: how many dishes the line has (its order quantity). */
+  readonly lineQuantity: number;
 }
 export interface OrderPriceReductionPlan {
   readonly orderReference: string;
@@ -68,12 +75,26 @@ export interface OrderPriceReductionPlan {
     readonly totalMinor: bigint;
     /** v15 b16: the whole bill's tax cent on this dish (see {@link withBillTaxRoundingShares}). */
     readonly taxRoundingMinor: bigint;
+    /** Batch 60: the dishes of the line a manager's comp covers (null: the whole line). */
+    readonly compedQuantity: number | null;
+    readonly lineQuantity: number;
   }[];
   readonly totalMinor: bigint;
 }
 
+/**
+ * Batch 60: "NotThatMany" — a comp asked for more of a line's dishes than are left to comp (another
+ * comp took some meanwhile). "AlreadyReduced" — nothing is left to comp on the line, or it has a
+ * percentage, an amount off or points (which cover the line alone).
+ */
 export type OrderPriceReductionNotEligibleReason =
-  "NotFound" | "NotPayLater" | "Closed" | "ItemCancelled" | "AlreadyReduced" | "InvalidAmount";
+  | "NotFound"
+  | "NotPayLater"
+  | "Closed"
+  | "ItemCancelled"
+  | "AlreadyReduced"
+  | "NotThatMany"
+  | "InvalidAmount";
 
 export class OrderPriceReductionError extends Error {
   constructor(
@@ -139,6 +160,136 @@ export function orderPriceReductionAmounts(
 }
 
 /**
+ * Batch 60: a comp of `quantity` dishes of a line of `lineQuantity`, after `priorQuantity` of them
+ * were comped: net, tax and fee each in proportion to the dishes covered so far, half up to the
+ * cent (dishes 1..c come to round(amount × c / lineQuantity)), so the whole line comes to its
+ * price exactly and comps of each of its dishes add up to it (the database's rule, 2000_998).
+ * Null when the line has nothing left to comp of that size, or the comp would take nothing off.
+ */
+export function orderItemCompAmounts(
+  price: { readonly netMinor: bigint; readonly taxMinor: bigint; readonly feeMinor: bigint },
+  line: {
+    readonly lineQuantity: number;
+    readonly priorQuantity: number;
+    readonly quantity: number;
+  },
+): {
+  netMinor: bigint;
+  taxMinor: bigint;
+  feeMinor: bigint;
+  totalMinor: bigint;
+  taxRoundingMinor: bigint;
+} | null {
+  const { lineQuantity, priorQuantity, quantity } = line;
+  if (
+    ![lineQuantity, priorQuantity, quantity].every(Number.isSafeInteger) ||
+    lineQuantity < 1 ||
+    lineQuantity > 999 ||
+    priorQuantity < 0 ||
+    quantity < 1 ||
+    priorQuantity + quantity > lineQuantity ||
+    price.netMinor <= 0n ||
+    price.taxMinor < 0n ||
+    price.feeMinor < 0n
+  )
+    return null;
+  const q = BigInt(lineQuantity);
+  const upTo = (amount: bigint, covered: number) => (amount * BigInt(covered) * 2n + q) / (2n * q);
+  const part = (amount: bigint) =>
+    upTo(amount, priorQuantity + quantity) - upTo(amount, priorQuantity);
+  const net = part(price.netMinor);
+  if (net < 1n) return null;
+  const tax = part(price.taxMinor),
+    fee = part(price.feeMinor);
+  return {
+    netMinor: net,
+    taxMinor: tax,
+    feeMinor: fee,
+    totalMinor: net + tax + fee,
+    taxRoundingMinor: 0n,
+  };
+}
+
+/**
+ * Batch 60: a line's reductions as one, by dish line — what the bill, the split, the reports and
+ * the receipts take off the line. A line has one reduction, or (since batch 60) one comp or more,
+ * each covering some of its dishes; their amounts add up. The latest decides the kind, reason,
+ * actor and time said for the line; `compedQuantity` is the dishes the comps cover (null: the
+ * whole line, by a reduction that names no dishes) and `remainingQuantity` what is left to comp.
+ */
+export interface OrderItemReduction {
+  readonly orderReference: string;
+  readonly orderBatchReference: string;
+  readonly orderItemReference: string;
+  readonly kind: OrderPriceReductionKind;
+  readonly percent: number | null;
+  readonly netMinor: bigint;
+  readonly taxMinor: bigint;
+  readonly feeMinor: bigint;
+  readonly totalMinor: bigint;
+  readonly taxRoundingMinor: bigint;
+  readonly reasonCode: OrderPriceReductionRecord["reasonCode"];
+  readonly actorReference: string;
+  readonly decidedAt: string;
+  readonly compedQuantity: number | null;
+  readonly lineQuantity: number;
+  readonly remainingQuantity: number;
+  readonly records: readonly OrderPriceReductionRecord[];
+}
+export function orderItemReductions(
+  records: readonly OrderPriceReductionRecord[],
+): ReadonlyMap<string, OrderItemReduction> {
+  const byItem = new Map<string, OrderPriceReductionRecord[]>();
+  for (const record of records)
+    byItem.set(record.orderItemReference, [
+      ...(byItem.get(record.orderItemReference) ?? []),
+      record,
+    ]);
+  const merged = new Map<string, OrderItemReduction>();
+  for (const [item, list] of byItem) {
+    const ordered = [...list].sort((a, b) =>
+      a.decidedAt === b.decidedAt
+        ? a.reductionReference < b.reductionReference
+          ? -1
+          : 1
+        : a.decidedAt < b.decidedAt
+          ? -1
+          : 1,
+    );
+    const latest = ordered[ordered.length - 1] as OrderPriceReductionRecord;
+    const sum = (field: "netMinor" | "taxMinor" | "feeMinor" | "totalMinor" | "taxRoundingMinor") =>
+      ordered.reduce((total, record) => total + record[field], 0n);
+    const compedQuantity = ordered.every((record) => record.compedQuantity !== null)
+      ? ordered.reduce((total, record) => total + (record.compedQuantity ?? 0), 0)
+      : null;
+    merged.set(
+      item,
+      Object.freeze({
+        orderReference: latest.orderReference,
+        orderBatchReference: latest.orderBatchReference,
+        orderItemReference: item,
+        kind: latest.kind,
+        percent: latest.percent,
+        netMinor: sum("netMinor"),
+        taxMinor: sum("taxMinor"),
+        feeMinor: sum("feeMinor"),
+        totalMinor: sum("totalMinor"),
+        taxRoundingMinor: sum("taxRoundingMinor"),
+        reasonCode: latest.reasonCode,
+        actorReference: latest.actorReference,
+        decidedAt: latest.decidedAt,
+        compedQuantity,
+        lineQuantity: latest.lineQuantity,
+        remainingQuantity:
+          compedQuantity === null ? 0 : Math.max(0, latest.lineQuantity - compedQuantity),
+        records: Object.freeze(ordered),
+      }),
+    );
+  }
+  return merged;
+}
+
+/**
  * v15 b16 (DEC-COMP-BILL-CENT, docs/spec/design/comp-bill-cent-b16.md): the plan with the whole
  * bill's tax cent on its dishes (from `billReductionTaxRoundingShares`), so what it records is what
  * the bill goes down by. A share is a few cents at most and never makes a dish's tax negative.
@@ -171,8 +322,15 @@ export function withBillTaxRoundingShares(
 }
 const recordSelect = `SELECT reduction_id::text AS reduction,operation_id::text AS operation,order_id::text AS "order",
  order_batch_id::text AS batch,order_item_id::text AS item,kind,percent,net_minor::text AS net,tax_minor::text AS tax,
- fee_minor::text AS fee,total_minor::text AS total,tax_rounding_minor::text AS tax_rounding,reason_code,actor_id::text AS actor,decided_at
- FROM rms_ordering.order_item_price_reduction WHERE brand_id=$1 AND store_id=$2`;
+ fee_minor::text AS fee,total_minor::text AS total,tax_rounding_minor::text AS tax_rounding,reason_code,actor_id::text AS actor,decided_at,
+ comped_quantity,(SELECT i.quantity FROM rms_ordering.order_item i WHERE i.brand_id=r.brand_id AND i.store_id=r.store_id
+  AND i.order_id=r.order_id AND i.order_item_id=r.order_item_id) AS line_quantity
+ FROM rms_ordering.order_item_price_reduction r WHERE brand_id=$1 AND store_id=$2`;
+const dishCount = (value: unknown) => {
+  const count = Number(value);
+  if (!Number.isSafeInteger(count) || count < 1 || count > 999) return unavailable();
+  return count;
+};
 function recordFrom(row: Record<string, unknown>): OrderPriceReductionRecord {
   const kind = row.kind;
   const reason = row.reason_code;
@@ -200,8 +358,14 @@ function recordFrom(row: Record<string, unknown>): OrderPriceReductionRecord {
     reasonCode: reason as OrderPriceReductionRecord["reasonCode"],
     actorReference: String(parseOrderingReference(row.actor)),
     decidedAt: instant(row.decided_at),
+    compedQuantity: row.comped_quantity === null ? null : dishCount(row.comped_quantity),
+    lineQuantity: dishCount(row.line_quantity),
   };
-  if (record.totalMinor !== record.netMinor + record.taxMinor + record.feeMinor)
+  if (
+    record.totalMinor !== record.netMinor + record.taxMinor + record.feeMinor ||
+    (record.compedQuantity !== null &&
+      (record.kind !== "Comp" || record.compedQuantity > record.lineQuantity))
+  )
     return unavailable();
   return Object.freeze(record);
 }
@@ -287,6 +451,11 @@ export function createPostgresOrderPriceReductionStore(options: {
     order: string,
     selected: readonly string[],
     choice: OrderPriceReductionChoice,
+    /**
+     * Batch 60: a manager's comp names how many of each line's dishes it covers (absent from the
+     * map: every dish still left on the line). Undefined: a reduction of the whole line (points).
+     */
+    quantities?: ReadonlyMap<string, number>,
   ): Promise<
     | { status: "Ready"; plan: OrderPriceReductionPlan }
     | { status: "NotEligible"; reason: OrderPriceReductionNotEligibleReason }
@@ -315,7 +484,10 @@ export function createPostgresOrderPriceReductionStore(options: {
           "EXISTS (SELECT 1 FROM rms_ordering.order_item_staff_cancellation c WHERE c.brand_id=i.brand_id AND c.store_id=i.store_id AND c.order_id=i.order_id AND i.order_item_id::uuid=ANY(c.order_item_ids)) " +
           "OR EXISTS (SELECT 1 FROM rms_ordering.order_staff_cancellation c WHERE c.brand_id=i.brand_id AND c.store_id=i.store_id AND c.order_id=i.order_id AND c.order_batch_id=i.order_batch_id) " +
           "OR EXISTS (SELECT 1 FROM rms_ordering.order_batch_checkout_cancellation c WHERE c.brand_id=i.brand_id AND c.store_id=i.store_id AND c.order_id=i.order_id AND c.order_batch_id=i.order_batch_id) AS cancelled," +
-          "EXISTS (SELECT 1 FROM rms_ordering.order_item_price_reduction r WHERE r.brand_id=i.brand_id AND r.store_id=i.store_id AND r.order_item_id=i.order_item_id) AS reduced " +
+          "i.quantity AS line_quantity," +
+          "(SELECT count(*) FROM rms_ordering.order_item_price_reduction r WHERE r.brand_id=i.brand_id AND r.store_id=i.store_id AND r.order_item_id=i.order_item_id)::int AS reduced," +
+          "(SELECT bool_or(r.comped_quantity IS NULL) FROM rms_ordering.order_item_price_reduction r WHERE r.brand_id=i.brand_id AND r.store_id=i.store_id AND r.order_item_id=i.order_item_id) AS reduced_whole," +
+          "(SELECT COALESCE(sum(r.comped_quantity),0) FROM rms_ordering.order_item_price_reduction r WHERE r.brand_id=i.brand_id AND r.store_id=i.store_id AND r.order_item_id=i.order_item_id)::int AS comped " +
           "FROM rms_ordering.order_item i WHERE i.brand_id=$1 AND i.store_id=$2 AND i.order_id=$3 AND i.order_item_id=ANY($4::uuid[]) ORDER BY i.order_item_id",
         [brand, store, order, selected],
       )
@@ -325,26 +497,44 @@ export function createPostgresOrderPriceReductionStore(options: {
     for (const row of items) {
       if (row.pay_later !== true) return notEligible("NotPayLater");
       if (row.cancelled === true) return notEligible("ItemCancelled");
-      if (row.reduced === true) return notEligible("AlreadyReduced");
+      const lineQuantity = dishCount(row.line_quantity);
+      const reducedCount = Number(row.reduced);
+      const comped = Number(row.comped);
+      if (!Number.isSafeInteger(reducedCount) || !Number.isSafeInteger(comped))
+        return unavailable();
+      // Batch 60: only a manager's comp may join a comp of some of the line's dishes; a
+      // reduction of the whole line (an older comp, a percentage, an amount off, points) stands
+      // alone.
+      const byDishes = choice.kind === "Comp" && quantities !== undefined;
+      if (reducedCount > 0 && (!byDishes || row.reduced_whole === true))
+        return notEligible("AlreadyReduced");
+      const left = lineQuantity - comped;
+      if (left < 1) return notEligible("AlreadyReduced");
+      const asked = byDishes ? (quantities.get(String(row.item)) ?? left) : null;
+      if (asked !== null && (!Number.isSafeInteger(asked) || asked < 1)) return unavailable();
+      if (asked !== null && asked > left) return notEligible("NotThatMany");
       if (row.quote_version !== "1" && row.quote_version !== "2") return unavailable();
       const snapshot = (
         row.quote_version === "2" ? decodeConfiguredOrderItemSnapshot : decodeOrderItemSnapshot
       )(row.snapshot);
       if (snapshot.orderItemReference !== String(row.item)) return unavailable();
-      const amounts = orderPriceReductionAmounts(
-        {
-          netMinor: snapshot.pricing.subtotal.amountMinor - snapshot.pricing.discount.amountMinor,
-          taxMinor: snapshot.pricing.tax.amountMinor,
-          feeMinor: snapshot.pricing.fee.amountMinor,
-        },
-        choice,
-      );
+      const price = {
+        netMinor: snapshot.pricing.subtotal.amountMinor - snapshot.pricing.discount.amountMinor,
+        taxMinor: snapshot.pricing.tax.amountMinor,
+        feeMinor: snapshot.pricing.fee.amountMinor,
+      };
+      const amounts =
+        asked === null
+          ? orderPriceReductionAmounts(price, choice)
+          : orderItemCompAmounts(price, { lineQuantity, priorQuantity: comped, quantity: asked });
       if (amounts === null) return notEligible("InvalidAmount");
       lines.push(
         Object.freeze({
           orderBatchReference: String(parseOrderingReference(row.batch)),
           orderItemReference: String(parseOrderingReference(row.item)),
           ...amounts,
+          compedQuantity: asked,
+          lineQuantity,
         }),
       );
     }
@@ -369,6 +559,25 @@ export function createPostgresOrderPriceReductionStore(options: {
     // An amount off is for one dish; a comp or a percentage may cover several.
     if (choice.kind === "Amount" && selected.length !== 1) return unavailable();
     return selected.sort();
+  };
+  // Batch 60: a manager's comp always names the dishes it covers (every dish left by default).
+  const compQuantitiesOf = (
+    choice: OrderPriceReductionChoice,
+    selected: readonly string[],
+    given: ReadonlyMap<string, number> | undefined,
+  ): ReadonlyMap<string, number> | undefined => {
+    if (choice.kind !== "Comp") {
+      if (given !== undefined && given.size > 0) return unavailable();
+      return undefined;
+    }
+    const quantities = new Map<string, number>();
+    for (const [item, quantity] of given ?? new Map<string, number>()) {
+      const reference = String(parseOrderingReference(item));
+      if (!selected.includes(reference) || !Number.isSafeInteger(quantity) || quantity < 1)
+        return unavailable();
+      quantities.set(reference, quantity);
+    }
+    return quantities;
   };
 
   return Object.freeze({
@@ -603,6 +812,8 @@ export function createPostgresOrderPriceReductionStore(options: {
               reasonCode: orderPointsRedemptionReason,
               actorReference: actor,
               decidedAt,
+              compedQuantity: null,
+              lineQuantity: line.lineQuantity,
             }),
           );
         }
@@ -620,17 +831,23 @@ export function createPostgresOrderPriceReductionStore(options: {
         orderReference: string;
         orderItemReferences: readonly string[];
         choice: OrderPriceReductionChoice;
+        /**
+         * Batch 60: for a comp, how many of each line's dishes (absent: every dish left on it).
+         * Only for a comp; a percentage or an amount off covers a whole line.
+         */
+        compQuantities?: ReadonlyMap<string, number>;
       },
     ) {
       const order = String(parseOrderingReference(input.orderReference));
       const selected = parseSelection(input.orderItemReferences, input.choice);
+      const quantities = compQuantitiesOf(input.choice, selected, input.compQuantities);
       await allowed(tx, order);
       await tx.query(
         "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
         [brand, store],
       );
       await fence(tx, order);
-      const result = await evaluate(tx, order, selected, input.choice);
+      const result = await evaluate(tx, order, selected, input.choice, quantities);
       await allowed(tx, order);
       return Object.freeze(result);
     },
@@ -660,11 +877,20 @@ export function createPostgresOrderPriceReductionStore(options: {
           : plan.choice.kind === "Amount"
             ? { kind: "Amount", netMinor: plan.lines[0]?.netMinor ?? 0n }
             : { kind: "Comp" };
+      // Batch 60: a manager's comp names the dishes of each line it covers (every comp since).
       const current = await evaluate(
         tx,
         plan.orderReference,
         plan.lines.map((line) => line.orderItemReference),
         choice,
+        choice.kind === "Comp"
+          ? new Map(
+              plan.lines.map((line) => [
+                line.orderItemReference,
+                line.compedQuantity ?? unavailable(),
+              ]),
+            )
+          : undefined,
       );
       const digest = (value: OrderPriceReductionPlan) =>
         JSON.stringify(value, (_key, entry: unknown) =>
@@ -685,8 +911,8 @@ export function createPostgresOrderPriceReductionStore(options: {
           const audit = String(parseOrderingReference(input.nextReference()));
           const inserted = await tx.query(
             "INSERT INTO rms_ordering.order_item_price_reduction (reduction_id,operation_id,brand_id,store_id,order_id,order_batch_id,order_item_id," +
-              "kind,percent,net_minor,tax_minor,fee_minor,total_minor,currency_code,reason_code,actor_id,permission_code,audit_id,decided_at,tax_rounding_minor) " +
-              "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'CAD',$14,$15,$16,$17,$18,$19)",
+              "kind,percent,net_minor,tax_minor,fee_minor,total_minor,currency_code,reason_code,actor_id,permission_code,audit_id,decided_at,tax_rounding_minor,comped_quantity) " +
+              "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'CAD',$14,$15,$16,$17,$18,$19,$20)",
             [
               reduction,
               operation,
@@ -707,6 +933,7 @@ export function createPostgresOrderPriceReductionStore(options: {
               audit,
               decidedAt,
               line.taxRoundingMinor.toString(),
+              line.compedQuantity,
             ],
           );
           if (inserted.rowCount !== 1) return conflict();
@@ -728,6 +955,9 @@ export function createPostgresOrderPriceReductionStore(options: {
               afterSummary: {
                 kind: plan.choice.kind,
                 percent: plan.choice.percent,
+                ...(line.compedQuantity === null
+                  ? {}
+                  : { compedQuantity: line.compedQuantity, lineQuantity: line.lineQuantity }),
                 reductionMinor: line.totalMinor.toString(),
                 sourceDigest: "sha256:" + createHash("sha256").update(digest(plan)).digest("hex"),
               },
@@ -769,7 +999,7 @@ export async function listOrderRoundDishes(
     await tx.query(
       "SELECT i.order_batch_id::text AS batch,sum(((i.transaction_snapshot_json->'pricing'->'subtotal'->>'amountMinor')::bigint)-" +
         "((i.transaction_snapshot_json->'pricing'->'discount'->>'amountMinor')::bigint)-" +
-        "COALESCE((SELECT r.net_minor FROM rms_ordering.order_item_price_reduction r WHERE r.brand_id=i.brand_id AND r.store_id=i.store_id AND r.order_item_id=i.order_item_id),0))::text AS net " +
+        "COALESCE((SELECT sum(r.net_minor) FROM rms_ordering.order_item_price_reduction r WHERE r.brand_id=i.brand_id AND r.store_id=i.store_id AND r.order_item_id=i.order_item_id),0))::text AS net " +
         "FROM rms_ordering.order_item i WHERE i.brand_id=$1 AND i.store_id=$2 AND i.order_id=$3 GROUP BY i.order_batch_id",
       [brand, store, order],
     )
