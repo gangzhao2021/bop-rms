@@ -129,6 +129,8 @@ export function createCustomerSessionBootstrapRead(
     readonly ownPaidMinor: bigint;
     /** Batch 57 (Q36): of it, refunded or on its way back to the card (a refused one: not). */
     readonly ownRefundedMinor: bigint;
+    /** Batch 60: of that, still on its way (the Provider has not answered yet). */
+    readonly ownRefundPendingMinor: bigint;
   } | null> => {
     const tenantReference = options.publicProfile?.binding?.tenantReference;
     if (tenantReference === undefined) return null;
@@ -181,17 +183,19 @@ export function createCustomerSessionBootstrapRead(
     );
     // Batch 57 (Q36): Payment's refunds of those payments to their card, as the own receipt reads.
     const ownPayments = new Set(own.map((attempt) => attempt.onlinePaymentReference));
-    const ownRefundedMinor =
+    const ownRefunds =
       own.length === 0
-        ? 0n
-        : (await payment.listOnlineRefundsByOrders(transaction as never, [order]))
-            .filter(
-              (refund) =>
-                ownPayments.has(refund.onlinePaymentReference) &&
-                refund.outcome?.status !== "Failed",
-            )
-            .reduce((sum, refund) => sum + refund.amountMinor, 0n);
-    return { paid, ownPaidMinor, ownRefundedMinor };
+        ? []
+        : (await payment.listOnlineRefundsByOrders(transaction as never, [order])).filter(
+            (refund) =>
+              ownPayments.has(refund.onlinePaymentReference) && refund.outcome?.status !== "Failed",
+          );
+    const ownRefundedMinor = ownRefunds.reduce((sum, refund) => sum + refund.amountMinor, 0n);
+    // Batch 60 (v15 b59 live): the ended page says "went back" only once the Provider confirmed.
+    const ownRefundPendingMinor = ownRefunds
+      .filter((refund) => refund.outcome === null)
+      .reduce((sum, refund) => sum + refund.amountMinor, 0n);
+    return { paid, ownPaidMinor, ownRefundedMinor, ownRefundPendingMinor };
   };
   return {
     async read(sessionCredential: string) {
@@ -406,6 +410,9 @@ export function createCustomerSessionBootstrapRead(
                     ...(closed.ownRefundedMinor > 0n
                       ? { refundedMinor: closed.ownRefundedMinor.toString() }
                       : {}),
+                    ...(closed.ownRefundPendingMinor > 0n
+                      ? { refundPendingMinor: closed.ownRefundPendingMinor.toString() }
+                      : {}),
                   },
                   ...receipt,
                 }
@@ -559,6 +566,8 @@ export function createCustomerSessionBootstrapHandler(options?: {
             method: "Online";
             /** Batch 57: of it, refunded or on its way back (absent: none). */
             refundedMinor?: string;
+            /** Batch 60: of that, still on its way to the card (absent: none). */
+            refundPendingMinor?: string;
           };
           csrfToken?: string;
         }
@@ -713,12 +722,19 @@ export function createCustomerSessionBootstrapHandler(options?: {
           /^[1-9][0-9]{0,15}$/u.test(own.amountMinor) &&
           (own.refundedMinor === undefined ||
             (/^[1-9][0-9]{0,15}$/u.test(own.refundedMinor) &&
-              BigInt(own.refundedMinor) <= BigInt(own.amountMinor)))
+              BigInt(own.refundedMinor) <= BigInt(own.amountMinor))) &&
+          (own.refundPendingMinor === undefined ||
+            (own.refundedMinor !== undefined &&
+              /^[1-9][0-9]{0,15}$/u.test(own.refundPendingMinor) &&
+              BigInt(own.refundPendingMinor) <= BigInt(own.refundedMinor)))
             ? {
                 yourPayment: {
                   amountMinor: own.amountMinor,
                   method: own.method,
                   ...(own.refundedMinor === undefined ? {} : { refundedMinor: own.refundedMinor }),
+                  ...(own.refundPendingMinor === undefined
+                    ? {}
+                    : { refundPendingMinor: own.refundPendingMinor }),
                 },
                 csrfToken: ownCsrf,
               }

@@ -354,11 +354,18 @@ describe("a bill staff closed when the guests left", () => {
     const answer = await createCustomerSessionBootstrapRead(withTenant).readSettledTable(
       "A".repeat(43),
     );
+    // Batch 60 (v15 b59 live): of it, the $3.00 the Provider has not answered is on its way, so
+    // the ended page says only what Payment confirmed went back.
     expect(answer).toEqual({
       tableLabel: "V44 A (TEST)",
       closedByStaff: "Some",
       store: tm2,
-      yourPayment: { amountMinor: "1413", method: "Online", refundedMinor: "800" },
+      yourPayment: {
+        amountMinor: "1413",
+        method: "Online",
+        refundedMinor: "800",
+        refundPendingMinor: "300",
+      },
       csrfToken: "C".repeat(43),
     });
     expect(f.onlineRefunds).toHaveBeenCalledWith(tx, [ref(8)]);
