@@ -6708,6 +6708,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "{dishes}已免单一部分，剩下的只能免单。",
   "Dishes to comp": "免单份数",
   "{comped} of {quantity}": "{quantity} 份中的 {comped} 份",
+  "{comped} of {quantity} × {dish}": "{dish} · {quantity} 份中的 {comped} 份",
   "{comped} of {quantity} × {dish} comped": "{dish} · 免单 {quantity} 份中的 {comped} 份",
   "{comped} of {quantity} comped": "免单 {quantity} 份中的 {comped} 份",
   "This table changed since it was shown. Refresh it, then try again.":

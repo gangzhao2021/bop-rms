@@ -323,7 +323,13 @@ for (const zh of [false, true]) {
     await count.selectOption("1");
     const confirm = group.getByRole("button", { name: zh ? "免单 $14.13" : "Comp $14.13" });
     await expect(confirm).toBeVisible();
-    await expect(dishes.nth(0)).toHaveText(`2 × Beef noodles (TEST) · ${down("$14.13")}`);
+    // Batch 61 (v15 b60 live): the dish follows the count chosen, with what that count takes off
+    // (the amount the button names and the comp records).
+    await expect(dishes.nth(0)).toHaveText(
+      zh
+        ? `Beef noodles (TEST) · 2 份中的 1 份 · ${down("$14.13")}`
+        : `1 of 2 × Beef noodles (TEST) · ${down("$14.13")}`,
+    );
     await group.getByRole("radio", { name: zh ? "上错菜" : "Wrong dish served" }).check();
     // The panel with the count holds at every width (no sideways scroll; the count's row keeps
     // room to spare for wider fonts).

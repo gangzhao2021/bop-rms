@@ -45,7 +45,7 @@ const line = (
   cancellation: null,
 });
 /** The round as the server sends it: Beef noodles (TEST) $12.50 a bowl, two on one line. */
-const detail = (compedItems: unknown[], compableItems = [noodles, tea]) =>
+const detail = (compedItems: unknown[], compableItems = [noodles, tea], bowls = 2) =>
   parseCurrentOrderDetail(
     {
       screenId: "OPS-ORDER-DETAIL",
@@ -83,7 +83,9 @@ const detail = (compedItems: unknown[], compableItems = [noodles, tea]) =>
       },
       lines: {
         items: [
-          line(noodles, "Beef noodles (TEST)", 2, "2500", "325", "2825"),
+          bowls === 3
+            ? line(noodles, "Beef noodles (TEST)", 3, "3750", "488", "4238")
+            : line(noodles, "Beef noodles (TEST)", 2, "2500", "325", "2825"),
           line(tea, "Tea", 1, "380", "49", "429"),
         ],
         totals: {
@@ -155,8 +157,8 @@ const server = (refuse?: string) => {
   }) as typeof fetch;
   return { previews, commands, fetcher };
 };
-const open = async (comps: unknown[], fetcher: typeof fetch, compable?: string[]) => {
-  const { order, lines } = detail(comps, compable);
+const open = async (comps: unknown[], fetcher: typeof fetch, compable?: string[], bowls = 2) => {
+  const { order, lines } = detail(comps, compable, bowls);
   const mounted = await mount(
     <ItemCompAction
       order={order}
@@ -210,7 +212,10 @@ it("comps 1 of 2 Beef noodles: the panel asks how many, and the button says one 
   await selectValue(quantity, "1");
   await pause();
   expect(previews.at(-1)?.compQuantities).toEqual([{ orderItemReference: noodles, quantity: 1 }]);
-  expect(dishLabels(container)[0]).toBe("2 × Beef noodles (TEST) · bill goes down $14.13 with tax");
+  // Batch 61 (v15 b60 live): the dish says the count chosen and what that count takes off.
+  expect(dishLabels(container)[0]).toBe(
+    "1 of 2 × Beef noodles (TEST) · bill goes down $14.13 with tax",
+  );
   await reason(container, "Wrong dish served");
   await click(buttonNamed(container, "Comp $14.13"));
   await settle(10);
@@ -336,6 +341,27 @@ it("in Chinese the count reads 2 份中的 1 份", async () => {
   expect(
     [...(label?.querySelectorAll("option") ?? [])].map((option) => option.textContent),
   ).toEqual(["2 份中的 2 份", "2 份中的 1 份"]);
+  // Batch 61: the whole line by default; the dish follows the count chosen.
+  expect(dishLabels(container)[0]).toBe("2 × Beef noodles (TEST) · 账单减 $28.25（含税）");
+  await selectValue(label?.querySelector("select") ?? null, "1");
+  await pause();
+  expect(dishLabels(container)[0]).toBe(
+    "Beef noodles (TEST) · 2 份中的 1 份 · 账单减 $14.13（含税）",
+  );
+});
+
+it("batch 61: a line comped in part says the count chosen of the dishes left", async () => {
+  // v15 b60 verify, order 54: 3 × Beef noodles (TEST), 1 comped; 1 of the 2 left is chosen.
+  const { fetcher } = server();
+  const { container } = await open([{ ...firstBowl, lineQuantity: 3 }], fetcher, undefined, 3);
+  await click(buttonNamed(container, "Comp or discount"));
+  await pause();
+  await tick(container, "Beef noodles");
+  await selectValue(container.querySelector(".item-comp__quantity select"), "1");
+  await pause();
+  expect(dishLabels(container)[0]).toBe(
+    "1 of 2 × Beef noodles (TEST) (1 comped already) · bill goes down $14.13 with tax",
+  );
 });
 
 it("a comp of some of a line's dishes is said with the dish, in both languages", () => {

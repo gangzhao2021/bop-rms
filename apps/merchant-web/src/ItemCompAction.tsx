@@ -517,6 +517,11 @@ export function ItemCompAction({
                       : line.name,
                   billDownMinor: left < line.quantity && billDown === null ? undefined : billDown,
                   total: line.total,
+                  // Batch 61: the count chosen in "Dishes to comp" below.
+                  chosen:
+                    ticked && choice === "Comp"
+                      ? quantities.get(line.orderItemReference)
+                      : undefined,
                 })}
               </label>
               {/* Batch 60 (v15 b59 live): one bowl of two was wrong or came late: comp it alone. */}

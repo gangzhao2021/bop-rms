@@ -189,8 +189,20 @@ export function payLaterRemoveDishText(input: {
   /** The preview for this dish alone: a string, null when it couldn't be worked out, or absent. */
   readonly billDownMinor: string | null | undefined;
   readonly total: { readonly amountMinor: string; readonly currencyCode: string };
+  /**
+   * Batch 61 (v15 b60 live): a comp of fewer than `quantity` of the dishes says the count chosen
+   * ("1 of 2 × Beef noodles"), so the amount beside it reads as that count's.
+   */
+  readonly chosen?: number | undefined;
 }): string {
-  const dish = input.quantity + " × " + input.name;
+  const dish =
+    input.chosen !== undefined && input.chosen < input.quantity
+      ? t("{comped} of {quantity} × {dish}", {
+          comped: String(input.chosen),
+          quantity: String(input.quantity),
+          dish: input.name,
+        })
+      : input.quantity + " × " + input.name;
   if (input.billDownMinor === undefined) return dish;
   return (
     dish +
