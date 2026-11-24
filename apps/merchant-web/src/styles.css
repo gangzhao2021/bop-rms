@@ -9709,20 +9709,33 @@ body:has(.product-complete-draft) .bop-shell__header,
   border-color: var(--bop-color-text-default);
 }
 /* Batch 55: the switch could not reload (no connection); the screen stays as it was. */
+/* Batch 56: in the page under the bar that holds the switch, so it covers no ticket or control. */
+.language-switch-note-slot:empty {
+  display: none;
+}
+.language-switch-note-slot {
+  padding: var(--bop-space-2) clamp(16px, 4vw, 24px) 0;
+}
 .language-switch-note {
+  max-width: 36rem;
+  margin: 0;
+  padding: var(--bop-space-2) var(--bop-space-3);
+  border-left: 4px solid var(--bop-color-warning);
+  background: var(--bop-color-surface-default);
+  color: var(--bop-color-text-default);
+}
+/* A page with no bar above its content keeps the note at the bottom of the screen. */
+.language-switch-note--floating {
   position: fixed;
   right: var(--bop-space-4);
   bottom: var(--bop-space-4);
   left: var(--bop-space-4);
   z-index: 65;
-  max-width: 36rem;
   margin: 0 auto;
   padding: var(--bop-space-3) var(--bop-space-4);
   border: 1px solid var(--bop-color-border-default);
   border-left: 6px solid var(--bop-color-warning);
   border-radius: var(--bop-radius-card);
-  background: var(--bop-color-surface-default);
-  color: var(--bop-color-text-default);
   box-shadow: 0 8px 24px rgb(0 0 0 / 16%);
 }
 .bop-shell__header-extra {

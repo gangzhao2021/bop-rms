@@ -83,6 +83,27 @@ for (const language of ["en", "zh-Hans"] as const)
           hasText: zh ? "现在连不上系统，语言暂时换不了" : "Can't reach the system right now",
         }),
       ).toBeVisible();
+      // Batch 56 (v15 batch 55 live, zh-Hans 390): the note sat fixed over the bottom of the first
+      // ticket's 做好了 / Finished button for 8 s. It now covers no control of the screen at any
+      // width, and stays a status the screen reader announces.
+      const covered = await page.evaluate(() => {
+        const note = document.querySelector(".language-switch-note");
+        if (note === null) return ["no note"];
+        const box = note.getBoundingClientRect();
+        return [...document.querySelectorAll("button, a[href], input, select, summary")]
+          .filter((control) => !note.contains(control))
+          .filter((control) => {
+            const r = control.getBoundingClientRect();
+            if (r.width === 0 || r.height === 0) return false;
+            if (getComputedStyle(control).visibility === "hidden") return false;
+            return (
+              r.left < box.right && r.right > box.left && r.top < box.bottom && r.bottom > box.top
+            );
+          })
+          .map((control) => (control.textContent ?? "").trim().slice(0, 40));
+      });
+      expect(covered, `${language} ${width}: controls under the note`).toEqual([]);
+      await expect(page.locator(".language-switch-note")).toHaveAttribute("role", "status");
       await page.waitForTimeout(2_000);
       expect(navigations, `${language} ${width}: no reload`).toBe(before);
       await expect(header).toBeVisible();

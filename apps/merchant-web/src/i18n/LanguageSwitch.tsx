@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { currentLanguage, prepareLanguageSwitch, t, type StaffLanguage } from "./i18n.js";
 
@@ -39,11 +39,36 @@ export async function systemAnswersForReload(
   }
 }
 
+/**
+ * Batch 56 (v15 batch 55 live, kitchen display at 390 in zh-Hans): fixed at the bottom of the
+ * screen, the "can't switch now" note covered the first ticket's 做好了 / Finished button for 8 s.
+ * It now takes its own place in the page, right under the bar that holds the switch (the
+ * workspace's top bar, else the screen's own header), so it pushes the screen down instead of
+ * covering any of it. Only a page with neither keeps the note at the bottom of the screen.
+ * The kitchen board already treats a ticket moved under a finger as "Moved. Tap again.".
+ */
+export function languageNoteAnchor(button: Element): Element | null {
+  const workspace = button.ownerDocument.querySelector(".workspace-content > .workspace-topbar");
+  if (workspace !== null) return workspace;
+  return button.closest("header");
+}
+const NOTE_SLOT = "language-switch-note-slot";
+function languageNoteSlot(anchor: Element): HTMLElement {
+  const after = anchor.nextElementSibling;
+  if (after instanceof HTMLElement && after.classList.contains(NOTE_SLOT)) return after;
+  const slot = anchor.ownerDocument.createElement("div");
+  slot.className = NOTE_SLOT;
+  anchor.after(slot);
+  return slot;
+}
+
 /** "中文" / "English": switches the whole back office on this device. */
 export function LanguageSwitch({ className }: { readonly className?: string }) {
   const next: StaffLanguage = currentLanguage() === "zh-Hans" ? "en" : "zh-Hans";
   const [refused, setRefused] = useState(false);
+  const [slot, setSlot] = useState<HTMLElement | null>(null);
   const asking = useRef(false);
+  const button = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (!refused) return;
     const clear = () => setRefused(false);
@@ -52,6 +77,17 @@ export function LanguageSwitch({ className }: { readonly className?: string }) {
     return () => {
       globalThis.clearTimeout(timer);
       globalThis.removeEventListener("online", clear);
+    };
+  }, [refused]);
+  // Placed before the screen is painted, so the note never shows at the bottom first.
+  useLayoutEffect(() => {
+    if (!refused) return;
+    const anchor = button.current === null ? null : languageNoteAnchor(button.current);
+    const placed = anchor === null ? null : languageNoteSlot(anchor);
+    setSlot(placed);
+    return () => {
+      setSlot(null);
+      if (placed !== null && placed.childElementCount === 0) placed.remove();
     };
   }, [refused]);
   const choose = async () => {
@@ -78,7 +114,14 @@ export function LanguageSwitch({ className }: { readonly className?: string }) {
     }
   };
   const note = refused ? (
-    <p className="language-switch-note" role="status">
+    <p
+      className={
+        slot === null
+          ? "language-switch-note language-switch-note--floating"
+          : "language-switch-note"
+      }
+      role="status"
+    >
       {t(
         "Can't reach the system right now, so the language can't change. This screen stays as it is; try again once connected.",
       )}
@@ -91,12 +134,15 @@ export function LanguageSwitch({ className }: { readonly className?: string }) {
         className={className === undefined ? "language-switch" : `language-switch ${className}`}
         lang={next === "zh-Hans" ? "zh-Hans" : "en"}
         aria-label={next === "zh-Hans" ? "切换到中文" : "Switch to English"}
+        ref={button}
         onClick={() => void choose()}
       >
         {next === "zh-Hans" ? "中文" : "English"}
       </button>
-      {/* Outside the bar, so the note never moves a control of the screen it sits on. */}
-      {note !== null && typeof document !== "undefined" ? createPortal(note, document.body) : null}
+      {/* Outside the bar, under it, so the note never covers a control of the screen. */}
+      {note !== null && typeof document !== "undefined"
+        ? createPortal(note, slot ?? document.body)
+        : null}
     </>
   );
 }
