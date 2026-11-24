@@ -1223,6 +1223,144 @@ test("@production split bill: staff collect one part in cash while the others ar
 });
 
 /**
+ * Batch 58 (v15 b57 live, Test Merchant 2): the bill split evenly in two, part 1 paid on a guest's
+ * phone ($14.13), part 2 still to pay ($14.12). The guest's phone read "2 份付了 1 份 · 还差
+ * $14.12"; the staff panel read "已付 1/2 份 · 还差 $14.12". Staff now say it as the guest does.
+ */
+for (const language of ["en", "zh-Hans"] as const)
+  test(`@production b58: a split's progress reads as on the guest's phone (${language})`, async ({
+    page,
+  }) => {
+    const zh = language === "zh-Hans";
+    if (zh)
+      await page.addInitScript(() => {
+        try {
+          window.localStorage.setItem("bop.merchant.language", "zh-Hans");
+        } catch {
+          /* the page falls back to English */
+        }
+      });
+    await floor(page, { phase: "Closing", version: 7 });
+    await page.route("**/merchant/dining/table-close-plan", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          orderReference: id(3),
+          diningSessionReference: id(2),
+          orderVersion: 4,
+          observedAt: "2026-10-15T19:00:00.000Z",
+          rounds: [],
+          closeBlockers: [],
+          totals: { onlineMinor: "1413", cardMachineMinor: "0" },
+        },
+      }),
+    );
+    const round = (n: number, taxMinor: string, totalMinor: string) => ({
+      roundNumber: n,
+      orderBatchReference: id(20 + n),
+      submissionReference: id(30 + n),
+      items: [
+        {
+          orderItemReference: id(900 + n),
+          quantity: 1,
+          displayName: "Beef noodles (TEST)",
+          subtotalMinor: "1250",
+          totalMinor,
+          reduction: null,
+        },
+      ],
+      subtotalMinor: "1250",
+      taxMinor,
+      totalMinor,
+      paid: false,
+      orderedBy: n,
+    });
+    const part = (n: number, amountMinor: string, taxMinor: string, payment: unknown) => ({
+      partNumber: n,
+      amountMinor,
+      subtotalMinor: "1250",
+      taxMinor,
+      roundNumbers: [1, 2],
+      dishes: [],
+      payment,
+      guestPaying: false,
+    });
+    await page.route("**/merchant/dining/table-bill", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          diningSessionReference: id(2),
+          sessionPhase: "Closing",
+          sessionVersion: 7,
+          paymentTiming: "PayLater",
+          tableLabel: "T2",
+          orderReference: id(3),
+          rounds: [round(1, "163", "1413"), round(2, "162", "1412")],
+          owed: { subtotalMinor: "2500", taxMinor: "325", totalMinor: "2825" },
+          consistent: true,
+          settlement: null,
+          split: {
+            mode: "Even",
+            stale: false,
+            dishChoices: [],
+            paidParts: 1,
+            remainingMinor: "1412",
+            parts: [
+              part(1, "1413", "163", {
+                method: "Online",
+                tipMinor: "0",
+                roundingMinor: "0",
+                totalMinor: "1413",
+                tenderedMinor: null,
+                changeMinor: null,
+                recordedAt: "2026-10-15T18:55:00.000Z",
+                recordedAfterOutage: false,
+              }),
+              part(2, "1412", "162", null),
+            ],
+          },
+          writeOff: null,
+          onlinePayment: null,
+        },
+      }),
+    );
+    await page.goto("/operations/dining");
+    await page.getByRole("button", { name: zh ? "选择 T2" : "Select T2", exact: true }).click();
+    const checkout = page.getByRole("region", { name: zh ? "结账" : "Checkout" });
+    const progress = checkout.locator(".table-split__progress");
+    for (const [width, height] of [
+      [1440, 900],
+      [1024, 768],
+      [390, 844],
+    ] as const) {
+      await page.setViewportSize({ width, height });
+      await expect(progress).toHaveText(
+        zh ? "2\u00a0份付了 1\u00a0份 · 还差 $14.12" : "1 of 2 parts paid · $14.12 to go",
+      );
+      await expect(checkout).not.toContainText(/已付 \d+\/\d+/u);
+      // Room to spare for wider Linux fonts (DejaVu): one line, ending 40 px inside the panel.
+      const fit = await progress.evaluate((node) => {
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        const rects = [...range.getClientRects()];
+        const box = node.getBoundingClientRect();
+        return {
+          lines: new Set(rects.map((rect) => Math.round(rect.top))).size,
+          room: box.right - Math.max(...rects.map((rect) => rect.right)),
+        };
+      });
+      expect(fit.lines).toBe(1);
+      expect(fit.room).toBeGreaterThanOrEqual(40);
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      await checkout.screenshot({
+        path: `test-results/b58-split-progress-${language}-${width}.png`,
+      });
+    }
+  });
+
+/**
  * WP-2423 同桌结账 (DEC-OWNER-DEFAULTS-2026-11-06): guests pay by dish on their phones — one paid
  * the noodles online, another is paying the dumplings — and staff take the dishes nobody chose at
  * the counter: the rest's own amount, the browser sending no part (the server appends it).

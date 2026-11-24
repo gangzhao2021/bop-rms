@@ -6236,7 +6236,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     " · 另有 {count} 单来自较早营业日（{waiting} 单待接）",
   "Needs attention": "需要处理",
   "Part {number} paid by": "第 {number} 份付款方式",
-  "{amount} to go · {paid} of {count} parts paid": "还差 {amount} · 已付 {paid}/{count} 份",
+  // Batch 58 (v15 b57 live): parts paid said as on the guest's phone; a no-break space keeps 份
+  // with its number.
+  "{amount} to go · {paid} of {count} parts paid":
+    "还差 {amount} · {count}\u00a0份付了 {paid}\u00a0份",
   "{amount} to go · paying by dish, {paid} paid": "还差 {amount} · 按菜付，已付 {paid} 笔",
   "A guest is choosing which of these dishes to pay, until {time}. Taking a dish out ends their choice: their phone asks them to choose again.":
     "有位客人正在选这些菜里要付哪几道，保留到 {time}。删掉一道菜会结束他的选择，他的手机会请他重新选。",
@@ -6868,7 +6871,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "A guest is paying on their phone": "客人正在手机上付",
   "To collect": "待收",
   "Collect this part": "收这一份",
-  "{paid} of {count} parts paid · {amount} to go": "已付 {paid}/{count} 份 · 还差 {amount}",
+  // Batch 58 (v15 b57 live): as the guest's phone says it.
+  "{paid} of {count} parts paid · {amount} to go":
+    "{count}\u00a0份付了 {paid}\u00a0份 · 还差 {amount}",
   "The table closes when every part is paid. If the network is down, take each part as usual, note the part number on paper and record it later.":
     "每一份都付清才能关台。断网时照常收，在纸上记下份号，恢复后逐份补录。",
   "A part is already paid or a guest is paying, so the split can't change now.":
@@ -8801,11 +8806,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Not accepted in time": "未及时接单",
   "refunded automatically": "已自动退款",
   "Paid after the order had closed": "订单关闭后才付款",
-  "{time} by {person}": "{time} 经办{person}",
+  // Batch 58 (v15 b57 live, "4:09 经办你"): who did it, said as a sentence.
+  "{time} by {person}": "{time} 由{person}经办",
   "Can still be refunded": "还可退",
   "Hand over {cash} (rounded to 5¢)": "交给客人 {cash}（按 5 分取整）",
   "incl. tax": "（含税）",
-  "by {person}, {time}": "{person} {time}",
+  "by {person}, {time}": "由{person}经办，{time}",
   "Merged into another table · paid there": "已并入另一桌 · 在那里付清",
   "Merged into another table · on that bill": "已并入另一桌 · 记在那张账单上",
   "Merged into {table} · paid there": "已并入 {table} · 在那里付清",

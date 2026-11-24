@@ -372,3 +372,74 @@ for (const width of [1440, 1024, 390])
     expect(lines).toBe(1);
     await page.screenshot({ path: `test-results/orders-table-refund-row-${width}.png` });
   });
+
+/**
+ * Batch 58 (v15 b57 live, Test Merchant 2 table L57R A): part 1 paid on the guest's phone
+ * ($14.13), $8.00 refunded to the card by the signed-in manager. Orders said "… 4:09 AM by You",
+ * in Chinese "… 4:09 经办你". The line now says who did it as a sentence.
+ */
+for (const language of ["en", "zh-Hans"] as const)
+  test(`@production b58: a refund line says who made it as a sentence (${language})`, async ({
+    page,
+  }) => {
+    const zh = language === "zh-Hans";
+    if (zh)
+      await page.addInitScript(() => {
+        try {
+          window.localStorage.setItem("bop.merchant.language", "zh-Hans");
+        } catch {
+          /* the page falls back to English */
+        }
+      });
+    await orderPage(
+      page,
+      () => ({
+        orderReference: id(1),
+        payment: {
+          ...payment,
+          partNumber: 1,
+          roundsMinor: "1413",
+          tipMinor: "0",
+          totalMinor: "1413",
+          onlineRefunds: [
+            {
+              amountMinor: "800",
+              reasonCode: "CUSTOMER_REQUEST",
+              requestedAt: "2026-11-02T20:09:00.000Z",
+              state: "Refunded",
+              byLabel: "You",
+            },
+            {
+              amountMinor: "100",
+              reasonCode: "CUSTOMER_REQUEST",
+              requestedAt: "2026-11-02T20:12:00.000Z",
+              state: "Refunded",
+              byLabel: "Mei",
+            },
+          ],
+          refundableMinor: "513",
+        },
+        parts: [],
+      }),
+      "900",
+    );
+    await page.goto("/operations/orders");
+    const section = page.locator("section.table-payment").first();
+    const mine = section.locator("dt", { hasText: zh ? "已退到卡上" : "Refunded to the card" });
+    for (const [width, height] of [
+      [1440, 900],
+      [1024, 768],
+      [390, 844],
+    ] as const) {
+      await page.setViewportSize({ width, height });
+      await expect(mine.first()).toContainText(zh ? /由你经办$/u : /by You$/u);
+      await expect(mine.nth(1)).toContainText(zh ? /由 Mei 经办$/u : /by Mei$/u);
+      await expect(section).not.toContainText("经办你");
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+        ),
+      ).toBe(true);
+      await section.screenshot({ path: `test-results/b58-refund-by-${language}-${width}.png` });
+    }
+  });
