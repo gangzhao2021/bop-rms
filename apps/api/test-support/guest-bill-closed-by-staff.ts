@@ -27,6 +27,9 @@ type TableBill = Awaited<ReturnType<typeof readDiningTableBill>>;
  * half-split-open: the same even split of 2 with part 1 ($14.13) paid, before staff closed
  *   anything: the bill read still ties part 1 to round 1 (round 1 paid, round 2 on the bill).
  * half-split-paid: then part 2 ($14.12) was paid too; the bill is paid in full.
+ * Batch 57 (v15 b56 live, TM2 L56P D, order 101):
+ * whole-table-paid-online: one phone paid "The whole table" ($28.25) online, no split, no tip;
+ *   the bill is paid in full by that one payment (the table's settlement, method Online).
  */
 export type GuestBillScenario =
   | "open-after-one-dish"
@@ -36,7 +39,8 @@ export type GuestBillScenario =
   | "one-round-nothing-paid-written-off"
   | "half-split-written-off"
   | "half-split-open"
-  | "half-split-paid";
+  | "half-split-paid"
+  | "whole-table-paid-online";
 
 const id = (n: number) => "0198b054-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const cad = (amountMinor: bigint) => ({ amountMinor, currencyCode: "CAD" });
@@ -55,18 +59,24 @@ const evenHalves = (scenario: GuestBillScenario) =>
 const notWrittenOff = (scenario: GuestBillScenario) =>
   scenario === "open-after-one-dish" ||
   scenario === "half-split-open" ||
-  scenario === "half-split-paid";
+  scenario === "half-split-paid" ||
+  scenario === "whole-table-paid-online";
+/** Every round paid: by both parts of the split, or by one payment for the whole table. */
+const paidInFull = (scenario: GuestBillScenario) =>
+  scenario === "half-split-paid" || scenario === "whole-table-paid-online";
 /** What the table paid, payment by payment. */
 const paidOf = (scenario: GuestBillScenario): bigint[] =>
   scenario === "half-split-paid"
     ? [1413n, 1412n]
-    : scenario === "open-after-one-dish" ||
-        scenario === "by-dish-written-off" ||
-        evenHalves(scenario)
-      ? [1413n]
-      : scenario === "parts-written-off"
-        ? [942n]
-        : [];
+    : scenario === "whole-table-paid-online"
+      ? [2825n]
+      : scenario === "open-after-one-dish" ||
+          scenario === "by-dish-written-off" ||
+          evenHalves(scenario)
+        ? [1413n]
+        : scenario === "parts-written-off"
+          ? [942n]
+          : [];
 
 /** The table bill as staff checkout reads it (readDiningTableBill), the fields the guest uses. */
 function tableBill(scenario: GuestBillScenario): TableBill {
@@ -96,7 +106,7 @@ function tableBill(scenario: GuestBillScenario): TableBill {
       taxRoundingMinor: "0",
       // By dish, guest A's own round was paid in full; a fixed part of 3 pays no round on its
       // own, but v15 tied order 67's part 1 of 2 to round 1 (its slice was all of round 1).
-      paid: scenario === "half-split-paid" || ((byDishPaid || evenHalves(scenario)) && round.mine),
+      paid: paidInFull(scenario) || ((byDishPaid || evenHalves(scenario)) && round.mine),
       orderedBy: null,
       fromTableLabel: null,
       liveOrderedAt: null,
@@ -104,7 +114,9 @@ function tableBill(scenario: GuestBillScenario): TableBill {
     owed: { totalMinor: String(owedMinor) },
     taxRoundingMinor: "0",
     split:
-      scenario === "nothing-paid-written-off" || scenario === "one-round-nothing-paid-written-off"
+      scenario === "nothing-paid-written-off" ||
+      scenario === "one-round-nothing-paid-written-off" ||
+      scenario === "whole-table-paid-online"
         ? null
         : {
             mode: scenario === "parts-written-off" || evenHalves(scenario) ? "Even" : "ByGuests",
@@ -162,9 +174,11 @@ export function guestBillClosedByStaffFacts(scenario: GuestBillScenario): {
           ? "L54 GB2 (TEST)"
           : scenario === "half-split-written-off"
             ? "L54 GB5 (TEST)"
-            : evenHalves(scenario)
-              ? "L55 CB3 (TEST)"
-              : "L53 WO4 (TEST)",
+            : scenario === "whole-table-paid-online"
+              ? "L56P D (TEST)"
+              : evenHalves(scenario)
+                ? "L55 CB3 (TEST)"
+                : "L53 WO4 (TEST)",
       checkedAt: "2026-11-22T16:09:00.000Z",
       paymentTiming: "PayLater",
       order: {
@@ -173,9 +187,11 @@ export function guestBillClosedByStaffFacts(scenario: GuestBillScenario): {
             ? "59"
             : scenario === "half-split-written-off"
               ? "67"
-              : evenHalves(scenario)
-                ? "80"
-                : "52",
+              : scenario === "whole-table-paid-online"
+                ? "101"
+                : evenHalves(scenario)
+                  ? "80"
+                  : "52",
         batches: rounds.map((round) => ({
           orderBatchReference: round.batch,
           submittedAt: sentAt,
@@ -200,16 +216,15 @@ export function guestBillClosedByStaffFacts(scenario: GuestBillScenario): {
         payLaterRounds: new Set(rounds.map((round) => round.batch)),
         // A part of a split settles no round on its own (the bill was not paid in full); once
         // every part is paid, the settlements settle every round.
-        settledRounds: new Set(
-          scenario === "half-split-paid" ? rounds.map((round) => round.batch) : [],
-        ),
+        settledRounds: new Set(paidInFull(scenario) ? rounds.map((round) => round.batch) : []),
         tableSettlement: paid.length === 0 ? null : { tipMinor: 0n, roundingMinor: 0n },
-        splitParts: nothingPaid
-          ? null
-          : {
-              count: scenario === "parts-written-off" ? 3 : evenHalves(scenario) ? 2 : null,
-              paid: paid.length,
-            },
+        splitParts:
+          nothingPaid || scenario === "whole-table-paid-online"
+            ? null
+            : {
+                count: scenario === "parts-written-off" ? 3 : evenHalves(scenario) ? 2 : null,
+                paid: paid.length,
+              },
         unpaidCancellations: new Set(),
         staffCancellations: new Map(),
         itemCancellations: [],
@@ -257,9 +272,11 @@ type PaymentView = import("../src/dining-table-online-payment.js").DiningTableOn
  * part of on their phone — by dish (ByGuests part 1: their Beef noodles) or part 1 of staff's even
  * split in 2 — as v15 holds it: split plan part 1, captured 1413, tip 0; the rest (1412) written
  * off. `payer`: the phone that paid (its own captured payment); otherwise another guest's phone.
+ * Batch 57 (v15 b56 live, L56 SRL1 order 88): `half-split-open` is the same even split before
+ * staff closed anything: part 1 paid on a phone, part 2 ($14.12) still to pay, nothing written off.
  */
 export function guestOwnPaymentView(
-  scenario: "by-dish-written-off" | "half-split-written-off",
+  scenario: "by-dish-written-off" | "half-split-written-off" | "half-split-open",
   payer: boolean,
   sessionPhase: "Closing" | "Closed" = "Closing",
 ): PaymentView {
@@ -342,7 +359,10 @@ export function guestOwnPaymentView(
         paidParts: 1,
         remainingMinor: "1412",
       },
-      writeOff: { amountMinor: "1412", decidedAt: "2026-11-24T00:35:10.000Z" },
+      writeOff:
+        scenario === "half-split-open"
+          ? null
+          : { amountMinor: "1412", decidedAt: "2026-11-24T00:35:10.000Z" },
       onlinePayment: null,
     } as unknown as PaymentView["bill"],
     attempt: null,
@@ -361,5 +381,72 @@ export function guestOwnPaymentView(
           },
         ]
       : [],
+  };
+}
+
+/**
+ * Batch 57 (v15 b56 live, TM2 L56P D, order 101): the guest table-payment view of a table one
+ * phone paid in full ("The whole table", $28.25 online, no tip): the table's settlement, method
+ * Online, captured 2825; no split, nothing written off. While open (Closing) the pay panel shows
+ * the whole-table receipt; once staff closed the table (Closed) the settled receipt reads it.
+ */
+export function guestWholeTablePaidView(sessionPhase: "Closing" | "Closed"): PaymentView {
+  const { facts } = guestBillClosedByStaffFacts("whole-table-paid-online");
+  return {
+    bill: {
+      diningSessionReference: id(0x20),
+      sessionPhase,
+      sessionVersion: 6,
+      paymentTiming: "PayLater",
+      tableLabel: facts.tableLabel,
+      orderReference: id(1),
+      rounds: allRounds.map((round, index) => ({
+        roundNumber: index + 1,
+        orderReference: id(1),
+        orderBatchReference: round.batch,
+        submissionReference: id(0x50 + index),
+        items: [
+          {
+            orderItemReference: round.item,
+            quantity: 1,
+            displayName: "Beef noodles (TEST)",
+            subtotalMinor: "1250",
+            totalMinor: String(round.totalMinor),
+            reduction: null,
+          },
+        ],
+        subtotalMinor: "1250",
+        taxMinor: String(round.taxMinor),
+        totalMinor: String(round.totalMinor),
+        taxRoundingMinor: "0",
+        paid: true,
+        orderedBy: null,
+        fromTableLabel: null,
+        liveOrderedAt: null,
+      })),
+      taxRoundingMinor: "0",
+      owed: { subtotalMinor: "0", taxMinor: "0", totalMinor: "0" },
+      consistent: true,
+      tips: { enabled: true, tierPercents: [10, 15, 18] },
+      settlement: {
+        method: "Online",
+        roundsMinor: "2825",
+        tipMinor: "0",
+        roundingMinor: "0",
+        totalMinor: "2825",
+        tenderedMinor: null,
+        changeMinor: null,
+        recordedAt: "2026-11-24T05:12:40.000Z",
+        recordedAfterOutage: false,
+      },
+      split: null,
+      writeOff: null,
+      onlinePayment: null,
+    } as unknown as PaymentView["bill"],
+    attempt: null,
+    lastOwnDeclined: null,
+    paidByMe: [],
+    choices: null,
+    ownPayments: [],
   };
 }

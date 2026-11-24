@@ -26,6 +26,7 @@ import {
   guestBillClosedByStaffFacts,
   guestBillWriteOff,
   guestOwnPaymentView,
+  guestWholeTablePaidView,
   type GuestBillScenario,
 } from "./guest-bill-closed-by-staff.js";
 
@@ -53,10 +54,13 @@ export async function startGuestBillHttp(
 ): Promise<{ readonly url: string; close(): Promise<void> }> {
   const paidPart = () => {
     const current = scenario();
-    return current === "by-dish-written-off" || current === "half-split-written-off"
+    return current === "by-dish-written-off" ||
+      current === "half-split-written-off" ||
+      current === "half-split-open"
       ? current
       : null;
   };
+  const wholeTablePaid = () => scenario() === "whole-table-paid-online";
   // Batch 56: the guest's table-payment reads (the bill, and this phone's own payment), as the
   // real port answers them: the payer's own captured payment only, and "not found" for any other
   // phone; once the table closed, only with the ended visit's value.
@@ -65,9 +69,21 @@ export async function startGuestBillHttp(
     port: {
       read: async () => {
         const part = paidPart();
-        if (part === null || phone().tableClosed)
-          throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+        if (phone().tableClosed) throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+        // Batch 57: a table one phone paid in full, still open: the whole-table receipt.
+        if (wholeTablePaid()) return guestWholeTablePaidView("Closing");
+        if (part === null) throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
         return guestOwnPaymentView(part, phone().payer);
+      },
+      // Batch 57: once staff closed a table paid in full, its settled receipt (ended visit only).
+      settledReceipt: async (credentials: { csrfCredential: string }) => {
+        if (
+          !wholeTablePaid() ||
+          !phone().tableClosed ||
+          String(credentials.csrfCredential) !== endedCsrf
+        )
+          throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+        return guestWholeTablePaidView("Closed");
       },
       ownPayment: async (credentials: { csrfCredential: string }) => {
         const part = paidPart();
@@ -95,6 +111,16 @@ export async function startGuestBillHttp(
           readMovedTable: async () => null,
           readSettledTable: async () => {
             const { facts } = guestBillClosedByStaffFacts(scenario());
+            // Batch 57: a table paid in full: its label and read-only receipt access.
+            if (wholeTablePaid() && facts.tableLabel !== null)
+              return {
+                tableLabel: facts.tableLabel,
+                csrfToken: endedCsrf,
+                store: {
+                  brandDisplayName: "Test Merchant 2 - not production",
+                  storeDisplayName: "Test Merchant 2 Main - not production",
+                },
+              };
             const writeOff = guestBillWriteOff(scenario());
             if (writeOff === null || facts.tableLabel === null) return null;
             return {
