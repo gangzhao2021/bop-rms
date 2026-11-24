@@ -328,6 +328,11 @@ it("a split table that paid one part and left is written off for the rest", () =
 // table is open and, once it closed, with the ended visit's value — and no other phone does.
 it("a guest who paid one part on their phone keeps its receipt after staff close the rest", () =>
   journey("SplitPhoneWrittenOff"));
+// Batch 56 review (v15 b55 live, L55 CB2 order 76): a guest paid one dish on their phone (by dish,
+// another phone's card declined on the other dish), then staff closed the rest. That guest's own
+// receipt names the dish, its before-tax and tax, from the real composition; no other phone reads it.
+it("a guest who paid their dish on their phone keeps its receipt after staff close the rest", () =>
+  journey("ByGuestsPhoneWrittenOff"));
 // WP-2423 item 8 ⑤ DEC-DINING-QR-JOIN decisions 5–7: with the Store's "a new phone's first round
 // waits for staff" on, each guest's first round waits: it is not sent to the kitchen (the database
 // refuses that and a cancellation without staff), asking again finds the same hold, and staff send
@@ -1201,17 +1206,19 @@ async function journey(journeyEnding) {
                                                       ? "wp2423_plsplwo"
                                                       : ending === "SplitPhoneWrittenOff"
                                                         ? "wp2423_plsplpwo"
-                                                        : ending === "Held"
-                                                          ? "wp2423_plheld"
-                                                          : ending === "HeldAtCheckout"
-                                                            ? "wp2423_plheldco"
-                                                            : ending === "TipsOff"
-                                                              ? "wp2423_pltips"
-                                                              : ending === "Moved"
-                                                                ? "wp2423_plmove"
-                                                                : ending === "Merged"
-                                                                  ? "wp2423_plmerge"
-                                                                  : "wp2423_plon",
+                                                        : ending === "ByGuestsPhoneWrittenOff"
+                                                          ? "wp2423_plbgpwo"
+                                                          : ending === "Held"
+                                                            ? "wp2423_plheld"
+                                                            : ending === "HeldAtCheckout"
+                                                              ? "wp2423_plheldco"
+                                                              : ending === "TipsOff"
+                                                                ? "wp2423_pltips"
+                                                                : ending === "Moved"
+                                                                  ? "wp2423_plmove"
+                                                                  : ending === "Merged"
+                                                                    ? "wp2423_plmerge"
+                                                                    : "wp2423_plon",
     },
     async (context) => {
       const admin = new Client(context.clientConfig);
@@ -7280,6 +7287,57 @@ async function journey(journeyEnding) {
           return { intents, stripe, created: () => created };
         }
         /**
+         * Batch 56: a guest's own-payment read and the closed table's visit restore, as the pilot
+         * API composes them (the real port and public body, under the pilot API role), with the
+         * Payment service `paymentsOf` gives.
+         */
+        const ownPaymentReads = (paymentsOf) => {
+          const guestPort = (bound) =>
+            createCustomerDiningTablePayment({
+              access: {
+                scope,
+                transactions: transactions(),
+                credentials: tablePhone.identity.session.credentials,
+                now: () => new Date().toISOString(),
+                binding: () => ({ validate: async () => bound }),
+              },
+              payments: paymentsOf(),
+              providerEnvironment: "Test",
+            });
+          const ownBody = async (phone, csrfCredential, bound) =>
+            customerOwnPaymentBody(
+              await guestPort(bound).ownPayment({
+                sessionCredential: phone.sessionCredential,
+                csrfCredential,
+              }),
+            ).ownPayment;
+          const restoreFor = (phone) =>
+            createCustomerSessionBootstrapRead({
+              scope,
+              transactions: transactions(),
+              credentials: phone.identity.session.credentials,
+              now: () => new Date().toISOString(),
+              binding: () => ({ validate: async () => "Unavailable" }),
+              publicProfile: {
+                binding: {
+                  ...ownerScope,
+                  validUntil: new Date(Date.now() + 3_600_000).toISOString(),
+                },
+                authorize: async () => true,
+              },
+            }).readSettledTable(phone.sessionCredential);
+          /** The body without the table's label and each payment's time (checked to be one). */
+          const shape = (body) => ({
+            ...body,
+            tableLabel: undefined,
+            payments: body.payments.map(({ paidAt, ...rest }) => {
+              assert.ok(Number.isFinite(Date.parse(paidAt)));
+              return rest;
+            }),
+          });
+          return { guestPort, ownBody, restoreFor, shape };
+        };
+        /**
          * WP-2423 同桌结账 (DEC-OWNER-DEFAULTS-2026-11-06, pay at the end): guests pay by dish as
          * they go. Two phones choosing the same dish at once: one part wins, the other is told
          * someone just started paying for it (its Provider transaction cancelled); the database
@@ -7498,6 +7556,95 @@ async function journey(journeyEnding) {
           );
           assert.equal(half.owed.totalMinor, (totalMinor - unitMinor).toString());
           assert.equal(half.rounds[0].paid, false);
+          // Batch 56 review: B's own receipt, from Payment's record and the bill's ByGuests plan,
+          // names the dish it paid for, its before-tax and tax, whatever the table does next.
+          const [partB] = await rows(
+            "SELECT subtotal_minor::text AS subtotal,tax_minor::text AS tax FROM rms_payment.dining_table_split_part WHERE split_plan_id=$1 AND part_number=2",
+            [plan.plan],
+          );
+          const reads = ownPaymentReads(() => payments);
+          const ownB = (restClosedByStaff, tablePaidInFull) => ({
+            restClosedByStaff,
+            tablePaidInFull,
+            payments: [
+              {
+                covers: "Dishes",
+                partNumber: 2,
+                partCount: null,
+                dishes: [{ displayName: dish.displayName, quantity: 1, shared: false }],
+                subtotalMinor: partB.subtotal,
+                taxMinor: partB.tax,
+                paidForMinor: unitMinor.toString(),
+                tipMinor: "0",
+                totalMinor: unitMinor.toString(),
+                method: "Online",
+              },
+            ],
+            totalMinor: unitMinor.toString(),
+          });
+          assert.equal(BigInt(partB.subtotal) + BigInt(partB.tax), unitMinor);
+          assert.deepEqual(reads.shape(customerOwnPaymentBody(await payments.read(b)).ownPayment), {
+            ...ownB(false, false),
+            tableLabel: undefined,
+          });
+          // A paid nothing yet: never B's payment.
+          assert.deepEqual((await payments.read(a)).ownPayments, []);
+          if (ending === "ByGuestsPhoneWrittenOff") {
+            // A later guest append on the same plan: A starts paying the other dish and its card
+            // is declined (that part is withdrawn). B's receipt keeps its dish and amounts.
+            const later = await payments.start(a, {
+              operationReference: fresh(),
+              tip: none,
+              choice: chosen(1),
+            });
+            assert.equal(later.attempt.partNumber, 3);
+            for (const intent of new Set(intents.values()))
+              if (intent.status === "RequiresCustomerAction") intent.status = "Failed";
+            assert.equal((await payments.refresh(a)).attempt, null);
+            assert.deepEqual(
+              (await parts()).map((part) => [part.part_number, part.withdrawn]),
+              [
+                [1, "PaymentFailed"],
+                [2, null],
+                [3, "PaymentFailed"],
+              ],
+            );
+            // The guests leave: staff close the rest (A's dish written off).
+            const served = await cookAndServeRound1();
+            assert.ok(await departure(manager, served.currentOrderVersion));
+            // While the table is open: B reads its own payment by its phone, through the real
+            // port; the host's phone, which paid nothing, is told "not found".
+            const openBody = await reads.ownBody(tablePhone, tablePhone.csrfCredential, "Current");
+            assert.deepEqual(reads.shape(openBody), {
+              ...ownB(true, false),
+              tableLabel: undefined,
+            });
+            assert.doesNotMatch(
+              JSON.stringify(openBody),
+              /[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}|pi_|ch_|provider|actor/iu,
+            );
+            await assert.rejects(reads.ownBody(hostPhone, hostPhone.csrfCredential, "Current"), {
+              code: "GUEST_SESSION_UNAVAILABLE",
+            });
+            // The table closes: the restore tells B what it paid, with the ended visit's value,
+            // and the same receipt reads with it; the host's phone is told how the bill ended.
+            assert.equal((await closing(manager, "Finalize")).phase, "Closed");
+            const payer = await reads.restoreFor(tablePhone);
+            assert.equal(payer?.closedByStaff, "Some");
+            assert.deepEqual(payer?.yourPayment, {
+              amountMinor: unitMinor.toString(),
+              method: "Online",
+            });
+            const host = await reads.restoreFor(hostPhone);
+            assert.equal("yourPayment" in (host ?? {}), false);
+            assert.equal("csrfToken" in (host ?? {}), false);
+            const endedBody = await reads.ownBody(tablePhone, payer.csrfToken, "Unavailable");
+            assert.deepEqual(reads.shape(endedBody), {
+              ...ownB(true, false),
+              tableLabel: undefined,
+            });
+            return;
+          }
           // v15 batch 7: the Tables list says what is left and how many paid by dish, never a
           // number of parts ("1 of 1 parts paid" while money is still due).
           const halfQueued = await createPersistentMerchantOrderQueue({
@@ -7548,6 +7695,12 @@ async function journey(journeyEnding) {
           assert.equal(rest.status, "Recorded");
           assert.equal(rest.bill.split.paidInFull, true);
           assert.equal(rest.bill.owed.totalMinor, "0");
+          // Batch 56 review: after staff's part (the rest, in cash), B's receipt still names its
+          // dish and amounts, and now says the table paid in full.
+          assert.deepEqual(reads.shape(customerOwnPaymentBody(await payments.read(b)).ownPayment), {
+            ...ownB(false, true),
+            tableLabel: undefined,
+          });
           // Batch 53 (v15 b52 live): once paid in full, every guest's table page still reads that
           // the table paid by dish in 2 payments, never that it paid once at the end.
           const paidPayments = await transactions({ guc: true }).run((tx) =>
@@ -8884,7 +9037,7 @@ async function journey(journeyEnding) {
           ]),
           [[true, null]],
         );
-        if (ending === "PaidByGuests") {
+        if (ending === "PaidByGuests" || ending === "ByGuestsPhoneWrittenOff") {
           await paidByGuestsEnding();
           return;
         }
@@ -9145,25 +9298,9 @@ async function journey(journeyEnding) {
             const served = await cookAndServeRound1();
             assert.ok(await departure(manager, served.currentOrderVersion));
             // The guest's own-payment read: the real port and public body, as the pilot API role.
-            const guestPort = (bound) =>
-              createCustomerDiningTablePayment({
-                access: {
-                  scope,
-                  transactions: transactions(),
-                  credentials: tablePhone.identity.session.credentials,
-                  now: () => new Date().toISOString(),
-                  binding: () => ({ validate: async () => bound }),
-                },
-                payments: payments(provider),
-                providerEnvironment: "Test",
-              });
-            const ownBody = async (phone, csrfCredential, bound) =>
-              customerOwnPaymentBody(
-                await guestPort(bound).ownPayment({
-                  sessionCredential: phone.sessionCredential,
-                  csrfCredential,
-                }),
-              ).ownPayment;
+            const { guestPort, ownBody, restoreFor, shape } = ownPaymentReads(() =>
+              payments(provider),
+            );
             const expected = {
               restClosedByStaff: true,
               tablePaidInFull: false,
@@ -9183,14 +9320,6 @@ async function journey(journeyEnding) {
               ],
               totalMinor: parts[0].amountMinor,
             };
-            const shape = (body) => ({
-              ...body,
-              tableLabel: undefined,
-              payments: body.payments.map(({ paidAt, ...rest }) => {
-                assert.ok(Number.isFinite(Date.parse(paidAt)));
-                return rest;
-              }),
-            });
             // While the table is open: the payer reads its own payment, and only it.
             const openBody = await ownBody(tablePhone, tablePhone.csrfCredential, "Current");
             assert.deepEqual(shape(openBody), { ...expected, tableLabel: undefined });
@@ -9205,21 +9334,6 @@ async function journey(journeyEnding) {
             // ── The table closes. The restore tells the payer what it paid, with the ended
             // visit's value for its own receipt; the other phone is told how the bill ended only.
             assert.equal((await closing(manager, "Finalize")).phase, "Closed");
-            const restoreFor = (phone) =>
-              createCustomerSessionBootstrapRead({
-                scope,
-                transactions: transactions(),
-                credentials: phone.identity.session.credentials,
-                now: () => new Date().toISOString(),
-                binding: () => ({ validate: async () => "Unavailable" }),
-                publicProfile: {
-                  binding: {
-                    ...ownerScope,
-                    validUntil: new Date(Date.now() + 3_600_000).toISOString(),
-                  },
-                  authorize: async () => true,
-                },
-              }).readSettledTable(phone.sessionCredential);
             const payer = await restoreFor(tablePhone);
             assert.equal(payer?.closedByStaff, "Some");
             assert.deepEqual(payer?.yourPayment, {
