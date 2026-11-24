@@ -168,7 +168,11 @@ export async function startGuestBillHttp(
         allowedOrigin,
         port: {
           read: async () => {
-            const { facts, bill } = guestBillClosedByStaffFacts(scenario());
+            // Batch 58: the table's refunds are a table fact: every phone's read carries them.
+            const { facts, bill } = guestBillClosedByStaffFacts(
+              scenario(),
+              paidPart() === null ? "None" : (phone().refunds ?? "None"),
+            );
             return composeCustomerDiningSession({
               ...facts,
               order: { ...facts.order, tableBill: customerTableBillFacts(bill) },

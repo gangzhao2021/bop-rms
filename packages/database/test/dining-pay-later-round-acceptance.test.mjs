@@ -9395,7 +9395,26 @@ async function journey(journeyEnding) {
                 })),
               };
             };
+            // Batch 58 (v15 b57 live): what every guest phone's Table total reads of the table's
+            // refunds (Payment's records, through its public settlement store, as the pilot API
+            // role with the guest read's Store scope).
+            const tableRefundedForGuests = async () =>
+              (
+                await transactions({ guc: true }).run((tx) =>
+                  readCustomerTablePayments(
+                    tx,
+                    createPostgresDiningTableSettlementStore({
+                      scope: ownerScope,
+                      authorize: async () => true,
+                    }),
+                    orderReference,
+                  ),
+                )
+              ).refundedMinor;
+            assert.equal(await tableRefundedForGuests(), 0n);
             assert.equal((await refundOwnPart("300")).status, "Recorded");
+            // On its way back to the card: already not what the table paid.
+            assert.equal(await tableRefundedForGuests(), 300n);
             const pendingBody = await ownBody(tablePhone, tablePhone.csrfCredential, "Current");
             assert.deepEqual(
               refundShape(pendingBody),
@@ -9426,6 +9445,8 @@ async function journey(journeyEnding) {
               "300",
             );
             assert.deepEqual(refundShape(refundedBody), refundedExpected);
+            // Confirmed, and a refused one that moved nothing: the table paid 300 less.
+            assert.equal(await tableRefundedForGuests(), 300n);
             assert.doesNotMatch(
               JSON.stringify(refundedBody),
               /[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}|pi_|ch_|re_|provider|actor|FOOD_ISSUE/iu,
@@ -9493,6 +9514,22 @@ async function journey(journeyEnding) {
               authentication: manager.authentication,
             })({ ...as(manager), query: { diningSessionReference: sessionReference } });
             assert.equal(refundedBill.refundedMinor, "500");
+            // Batch 58: and every guest phone's Table total reads the same cash given back.
+            assert.equal(
+              (
+                await transactions({ guc: true }).run((tx) =>
+                  readCustomerTablePayments(
+                    tx,
+                    createPostgresDiningTableSettlementStore({
+                      scope: ownerScope,
+                      authorize: async () => true,
+                    }),
+                    orderReference,
+                  ),
+                )
+              ).refundedMinor,
+              500n,
+            );
             // The guests leave: what is written off is exactly the parts not paid.
             const served = await cookAndServeRound1();
             const left = await departure(manager, served.currentOrderVersion);

@@ -155,7 +155,14 @@ export function guestBillWriteOff(scenario: GuestBillScenario): {
  * The guest read's facts for this table (customer-dining-session-read's reader output), with the
  * table bill's own facts left to `customerTableBillFacts` so the real mapping runs.
  */
-export function guestBillClosedByStaffFacts(scenario: GuestBillScenario): {
+export function guestBillClosedByStaffFacts(
+  scenario: GuestBillScenario,
+  /**
+   * Batch 58 (v15 b57 live, L57R A/B): what staff refunded of the table's payments, as the read
+   * sums Payment's refund records of the table (readCustomerTablePayments); absent: nothing.
+   */
+  tableRefunds: GuestOwnRefunds = "None",
+): {
   readonly facts: Omit<CustomerDiningSessionFacts, "order"> & {
     readonly order: Omit<Order, "tableBill">;
   };
@@ -217,7 +224,19 @@ export function guestBillClosedByStaffFacts(scenario: GuestBillScenario): {
         // A part of a split settles no round on its own (the bill was not paid in full); once
         // every part is paid, the settlements settle every round.
         settledRounds: new Set(paidInFull(scenario) ? rounds.map((round) => round.batch) : []),
-        tableSettlement: paid.length === 0 ? null : { tipMinor: 0n, roundingMinor: 0n },
+        tableSettlement:
+          paid.length === 0
+            ? null
+            : {
+                tipMinor: 0n,
+                roundingMinor: 0n,
+                ...(() => {
+                  const refundedMinor = guestOwnRefunds(tableRefunds)
+                    .filter((refund) => refund.status !== "Failed")
+                    .reduce((sum, refund) => sum + BigInt(refund.amountMinor), 0n);
+                  return refundedMinor === 0n ? {} : { refundedMinor };
+                })(),
+              },
         splitParts:
           nothingPaid || scenario === "whole-table-paid-online"
             ? null

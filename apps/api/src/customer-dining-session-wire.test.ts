@@ -55,8 +55,11 @@ async function serve(view: () => CustomerDiningSessionView) {
 }
 
 /** The guest read for a scenario, through the real bill mapping and composition. */
-function guestRead(scenario: GuestBillScenario) {
-  const { facts, bill } = guestBillClosedByStaffFacts(scenario);
+function guestRead(
+  scenario: GuestBillScenario,
+  tableRefunds: Parameters<typeof guestBillClosedByStaffFacts>[1] = "None",
+) {
+  const { facts, bill } = guestBillClosedByStaffFacts(scenario, tableRefunds);
   return composeCustomerDiningSession({
     ...facts,
     order: { ...facts.order, tableBill: customerTableBillFacts(bill) },
@@ -159,6 +162,7 @@ const everyRound: Every<Round> = {
 };
 const everySummary: Every<Summary> = {
   paid: cad(1413n),
+  paidAfterRefunds: cad(613n),
   refunded: cad(0n),
   refundPending: cad(0n),
   due: cad(0n),
@@ -230,5 +234,37 @@ describe("batch 55: the v15 b54 shapes the guest pages read after a staff close"
       "Paid",
       "OnTableBill",
     ]);
+  });
+});
+
+// Batch 58 (v15 b57 live, L57R A and L57R B): after staff refunded part 1's phone payment, part
+// of it or all of it, every phone's Table total still said "Paid $14.13". Through the real read
+// composition and HTTP reply: the table says what it paid after refunds, and nothing else of who.
+describe("batch 58: the table's paid figure after staff refunded a phone payment", () => {
+  it("a part refund and a full refund send what the table paid after refunds", async () => {
+    const partial = (await serve(() => guestRead("half-split-written-off", "Partial")))
+      .summary as Record<string, unknown>;
+    expect(partial.paid).toEqual({ amountMinor: "1413", currencyCode: "CAD" });
+    // $5.00 back and $3.00 on its way count; the $2.00 the Provider refused moved nothing.
+    expect(partial.paidAfterRefunds).toEqual({ amountMinor: "613", currencyCode: "CAD" });
+    const full = (await serve(() => guestRead("by-dish-written-off", "Full"))).summary as Record<
+      string,
+      unknown
+    >;
+    expect(full.paidAfterRefunds).toEqual({ amountMinor: "0", currencyCode: "CAD" });
+    // The dish refunds and their pending line are not the table's refunds: unchanged.
+    expect([full.refunded, full.refundPending]).toEqual([
+      { amountMinor: "0", currencyCode: "CAD" },
+      { amountMinor: "0", currencyCode: "CAD" },
+    ]);
+    // Never who was refunded or a refund's reason or reference.
+    expect(JSON.stringify(full)).not.toMatch(/re_|reason|CUSTOMER_REQUEST|onlinePayment/iu);
+  });
+  it("no refund: the reply is as before, with no paid-after-refunds figure", async () => {
+    const summary = (await serve(() => guestRead("half-split-written-off"))).summary as Record<
+      string,
+      unknown
+    >;
+    expect(Object.hasOwn(summary, "paidAfterRefunds")).toBe(false);
   });
 });

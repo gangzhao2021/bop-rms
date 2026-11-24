@@ -145,8 +145,17 @@ export interface CustomerDiningSessionFacts {
     readonly settledRounds?: ReadonlySet<string>;
     /** WP-2423 item 8 ⑤: rounds waiting for staff before the kitchen, and why. */
     readonly heldRounds?: ReadonlyMap<string, OrderRoundHoldReason>;
-    /** DEC-DINE-IN-PAY-LATER: the tip and cash rounding of the table's one payment (if paid). */
-    readonly tableSettlement?: { readonly tipMinor: bigint; readonly roundingMinor: bigint } | null;
+    /**
+     * DEC-DINE-IN-PAY-LATER: the tip and cash rounding of the table's one payment (if paid).
+     * Batch 58 (v15 b57 live): `refundedMinor`, what staff gave back of the table's payments
+     * (cash given back, card-machine refunds and refunds to a guest's card on their way or
+     * confirmed; a refused one moved nothing), Payment's own records of the table.
+     */
+    readonly tableSettlement?: {
+      readonly tipMinor: bigint;
+      readonly roundingMinor: bigint;
+      readonly refundedMinor?: bigint;
+    } | null;
     /**
      * v15 2026-11-02: a table paying at the end, from the table's bill (what the pay panel and staff
      * read), so the summary can never owe a different amount from them: still owed, what points and
@@ -359,6 +368,12 @@ export interface CustomerDiningSessionView {
   /** Null until the table has ordered. Due is the item total of rounds still waiting for payment. */
   readonly summary: null | {
     readonly paid: CustomerMoney;
+    /**
+     * Batch 58 (v15 b57 live): once staff gave back any of the table's payments (cash, card
+     * machine or a guest's card), what the table has paid after those refunds; absent before.
+     * A table fact: never who was refunded or how much each one got back.
+     */
+    readonly paidAfterRefunds?: CustomerMoney;
     readonly refunded: CustomerMoney;
     readonly refundPending: CustomerMoney;
     readonly due: CustomerMoney;
@@ -554,7 +569,11 @@ export async function readCustomerTablePayments(
   >[0],
   store: Pick<
     ReturnType<typeof createPostgresDiningTableSettlementStore>,
-    "listByOrders" | "listSplitPlans"
+    | "listByOrders"
+    | "listSplitPlans"
+    | "listCashRefundsByOrders"
+    | "listCardRefundsByOrders"
+    | "listOnlineRefundsByOrders"
   >,
   orderReference: Parameters<
     ReturnType<typeof createPostgresDiningTableSettlementStore>["listByOrders"]
@@ -564,10 +583,26 @@ export async function readCustomerTablePayments(
   const [splitPlan] = await store.listSplitPlans(transaction, [orderReference]);
   const splitPaid =
     splitPlan !== undefined && diningTableSplitPaidInFull(splitPlan, tableSettlements);
+  // Batch 58 (v15 b57 live): what staff gave back of these payments, as staff's table reads count
+  // it (tableRefundedMinor): cash given back, card-machine refunds, and refunds to a guest's card
+  // once approved (on its way or confirmed; one the Provider refused gave nothing back).
+  let refundedMinor = 0n;
+  if (tableSettlements.length > 0) {
+    const orders = [orderReference];
+    for (const refund of [
+      ...(await store.listCashRefundsByOrders(transaction, orders)),
+      ...(await store.listCardRefundsByOrders(transaction, orders)),
+      ...(await store.listOnlineRefundsByOrders(transaction, orders)).filter(
+        (refund) => refund.outcome?.status !== "Failed",
+      ),
+    ])
+      refundedMinor += refund.amountMinor;
+  }
   return {
     tableSettlements,
     splitPaid,
     splitParts: customerSplitParts(splitPlan, tableSettlements),
+    refundedMinor,
   };
 }
 
@@ -932,6 +967,10 @@ export function composeCustomerDiningSession(
   const refunded = order.refunds.confirmedMinor,
     refundPending = order.refunds.pendingMinor;
   if (refunded < 0n || refundPending < 0n || refunded + refundPending > paid) return unavailable();
+  // Batch 58 (v15 b57 live): money staff gave back of the table's payments. "Paid" said the gross
+  // amount after all of it went back to the card; the table now says what it paid after refunds.
+  const tableRefunded = order.tableSettlement?.refundedMinor ?? 0n;
+  if (tableRefunded < 0n || refunded + refundPending + tableRefunded > paid) return unavailable();
   return Object.freeze({
     tableLabel: facts.tableLabel,
     orderNumber: order.orderNumber,
@@ -959,6 +998,7 @@ export function composeCustomerDiningSession(
       // its own (older pages still read one from an older server).
       ...(order.tableBill?.bill === undefined ? {} : { bill: billView(order.tableBill.bill) }),
       paid: money(paid),
+      ...(tableRefunded === 0n ? {} : { paidAfterRefunds: money(paid - tableRefunded) }),
       refunded: money(refunded),
       refundPending: money(refundPending),
       due: money(due + (order.tableBill?.owedMinor ?? 0n)),
@@ -1564,9 +1604,9 @@ function postgresDependencies(
                 authorize: async (_tx, value) =>
                   value.orderReference === orderReference && (await stillAuthorized()),
               });
-        const { tableSettlements, splitPaid, splitParts } =
+        const { tableSettlements, splitPaid, splitParts, refundedMinor } =
           tableStore === null
-            ? { tableSettlements: [], splitPaid: false, splitParts: null }
+            ? { tableSettlements: [], splitPaid: false, splitParts: null, refundedMinor: 0n }
             : await readCustomerTablePayments(transaction, tableStore, orderReference);
         // WP-2423 item 8b: which lines are a charge. A convenience: it has its own savepoint, so a
         // failure here never takes the table page down at any table. Whatever was read before the
@@ -1655,6 +1695,7 @@ function postgresDependencies(
                     (sum, entry) => sum + entry.roundingMinor,
                     0n,
                   ),
+                  ...(refundedMinor === 0n ? {} : { refundedMinor }),
                 },
           unpaidCancellations,
           guestStoppedRounds,

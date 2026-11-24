@@ -217,6 +217,11 @@ export class CustomerDiningSessionHandler {
               ? null
               : {
                   paid: money(view.summary.paid),
+                  // Batch 58 (v15 b57 live): what the table paid after staff's refunds (absent
+                  // while nothing went back).
+                  ...(view.summary.paidAfterRefunds === undefined
+                    ? {}
+                    : { paidAfterRefunds: money(view.summary.paidAfterRefunds) }),
                   refunded: money(view.summary.refunded),
                   refundPending: money(view.summary.refundPending),
                   due: money(view.summary.due),

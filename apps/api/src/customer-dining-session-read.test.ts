@@ -1101,6 +1101,9 @@ describe("v15 batch 7 table-pay-by-dish: what the table page says about the part
     }));
     const store = (mode: "ByGuests" | "Even") => ({
       listByOrders: async () => settlements,
+      listCashRefundsByOrders: async () => [],
+      listCardRefundsByOrders: async () => [],
+      listOnlineRefundsByOrders: async () => [],
       listSplitPlans: async () => [
         {
           splitPlanReference: plan,
@@ -1141,6 +1144,117 @@ describe("v15 batch 7 table-pay-by-dish: what the table page says about the part
       paid: { amountMinor: 2825n },
       splitParts: { count: null, paid: 2 },
     });
+  });
+});
+
+describe("batch 58 (v15 b57 live): the table total after staff refunded a payment", () => {
+  // v15 b57 live, TM2 L57R A (order 2) and L57R B (order 6): even split in 2, phone A paid part 1
+  // online (1413), staff wrote off the rest (1412), then a manager refunded 800 of part 1 (A) or
+  // all 1413 (B) to the card; the Provider answered Succeeded. Every phone's Table total still
+  // said "Paid $14.13". The refund records are Payment's (rms_payment.dining_table_online_refund
+  // and _outcome) in the store's read shape.
+  const online = (amountMinor: bigint, status: "Succeeded" | "Failed" | null) => ({
+    onlineRefundReference: "online-refund-" + amountMinor,
+    operationReference: "operation-" + amountMinor,
+    intentDigest: "sha256:" + "0".repeat(64),
+    settlementReference: "settlement-1",
+    onlinePaymentReference: "online-payment-1",
+    orderReference: "order-1",
+    amountMinor,
+    reasonCode: "CUSTOMER_REQUEST",
+    approvedByActorReference: "actor-1",
+    providerIdempotencyKey: "table-online-refund:operation-" + amountMinor,
+    requestedAt: "2026-11-24T09:09:12.104Z",
+    outcome:
+      status === null
+        ? null
+        : {
+            status,
+            providerRefundReference: status === "Succeeded" ? "re_TEST" : null,
+            providerCreatedAt: null,
+            recordedAt: "2026-11-24T09:09:12.123Z",
+          },
+  });
+  const read = (refunds: {
+    cash?: readonly { amountMinor: bigint }[];
+    card?: readonly { amountMinor: bigint }[];
+    online?: readonly ReturnType<typeof online>[];
+    settled?: boolean;
+  }) =>
+    readCustomerTablePayments(
+      {} as never,
+      {
+        listByOrders: async () =>
+          refunds.settled === false
+            ? []
+            : [{ part: { splitPlanReference: "plan-1", partNumber: 1 }, tipMinor: 0n }],
+        listSplitPlans: async () => [
+          {
+            splitPlanReference: "plan-1",
+            mode: "Even",
+            parts: [{ partNumber: 1 }, { partNumber: 2 }],
+            guestParts: [],
+          },
+        ],
+        listCashRefundsByOrders: async () => refunds.cash ?? [],
+        listCardRefundsByOrders: async () => refunds.card ?? [],
+        listOnlineRefundsByOrders: async () => refunds.online ?? [],
+      } as unknown as Parameters<typeof readCustomerTablePayments>[1],
+      "order-1" as never,
+    );
+  const summaryWith = (refundedMinor: bigint) =>
+    composeCustomerDiningSession({
+      ...facts({
+        paymentOutcomes: new Map(),
+        payments: [{ status: "Succeeded", amount: cad(1413n) }],
+        payLaterRounds: new Set([id(30), id(40)]),
+        tableBill: {
+          owedMinor: 0n,
+          pointsUsedMinor: 0n,
+          takenOffMinor: 0n,
+          taxRoundingMinor: 0n,
+          closedByStaff: true,
+        },
+        tableSettlement: {
+          tipMinor: 0n,
+          roundingMinor: 0n,
+          ...(refundedMinor === 0n ? {} : { refundedMinor }),
+        },
+        splitParts: { count: 2, paid: 1 },
+      }),
+      paymentTiming: "PayLater",
+    }).summary;
+
+  it("reads Payment's refunds of the table's payments: on its way or back counts, refused not", async () => {
+    expect((await read({ online: [online(800n, "Succeeded")] })).refundedMinor).toBe(800n);
+    expect((await read({ online: [online(1413n, "Succeeded")] })).refundedMinor).toBe(1413n);
+    expect(
+      (
+        await read({
+          online: [online(500n, "Succeeded"), online(300n, null), online(200n, "Failed")],
+        })
+      ).refundedMinor,
+    ).toBe(800n);
+    // Cash given back and card-machine refunds are the table's refunds too.
+    expect(
+      (await read({ cash: [{ amountMinor: 100n }], card: [{ amountMinor: 50n }] })).refundedMinor,
+    ).toBe(150n);
+    expect((await read({})).refundedMinor).toBe(0n);
+    // Nothing paid at the table: nothing to have been refunded (and nothing read).
+    expect((await read({ settled: false, online: [online(1n, "Succeeded")] })).refundedMinor).toBe(
+      0n,
+    );
+  });
+
+  it("the table says what it paid after refunds once any went back, and only then", () => {
+    expect(summaryWith(800n)).toMatchObject({
+      paid: { amountMinor: 1413n },
+      paidAfterRefunds: { amountMinor: 613n },
+    });
+    expect(summaryWith(1413n)).toMatchObject({ paidAfterRefunds: { amountMinor: 0n } });
+    expect(summaryWith(0n)).not.toHaveProperty("paidAfterRefunds");
+    // More back than was paid is never shown.
+    expect(() => summaryWith(1414n)).toThrow();
   });
 });
 
