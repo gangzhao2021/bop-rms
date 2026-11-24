@@ -136,6 +136,20 @@ export interface DiningTableOnlinePaymentView {
    */
   /** WP-2423 同桌结账: the parts of the bill this phone paid for (by dish), by part number. */
   readonly paidByMe: readonly number[];
+  /**
+   * Batch 56 (v15 b55 live): the payments this phone made on this bill that Payment captured,
+   * oldest first — so a guest who paid part of a bill (their dishes, or one of staff's parts) keeps
+   * a record of their own payment, also once staff closed the rest. Only this phone's: never
+   * another guest's amounts. `samePlan`: the part belongs to the bill's current split.
+   */
+  readonly ownPayments?: readonly {
+    readonly partNumber: number | null;
+    readonly samePlan: boolean;
+    readonly roundsMinor: string;
+    readonly tipMinor: string;
+    readonly totalMinor: string;
+    readonly paidAt: string;
+  }[];
   readonly choices: null | {
     /** The Store's setting: the whole table, or only what this phone added, chosen to start. */
     readonly defaultScope: "WholeTable" | "OwnDishes";
@@ -347,6 +361,27 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
           .map((part) => part.partNumber),
       ),
       choices: choicesOf(current, authority),
+      ownPayments: Object.freeze(
+        attempts.flatMap((attempt) =>
+          authority.guestSessionReference !== null &&
+          attempt.guestSessionReference === authority.guestSessionReference &&
+          attempt.outcome?.status === "Captured"
+            ? [
+                Object.freeze({
+                  partNumber: attempt.part?.partNumber ?? null,
+                  samePlan:
+                    attempt.part === null ||
+                    attempt.part.splitPlanReference ===
+                      (splitPlanRecord?.splitPlanReference ?? null),
+                  roundsMinor: attempt.roundsMinor.toString(),
+                  tipMinor: attempt.tipMinor.toString(),
+                  totalMinor: (attempt.outcome.capturedMinor ?? attempt.totalMinor).toString(),
+                  paidAt: attempt.outcome.occurredAt,
+                }),
+              ]
+            : [],
+        ),
+      ),
       attempt:
         open === undefined
           ? null

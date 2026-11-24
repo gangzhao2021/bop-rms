@@ -117,30 +117,56 @@ export function createCustomerDiningTablePayment(options: CustomerDiningTablePay
       guestSessionReference: participant.guestSessionReference,
     });
   };
+  /** The ended visit's read-only authority over the bill its table closed with. */
+  const endedAuthority = async (
+    credentials: Credentials,
+    displayLocale?: string | null,
+  ): Promise<TableOnlinePaymentAuthority> => {
+    const first = await options.access.transactions.run((tx) => settledIn(tx, credentials));
+    return Object.freeze({
+      ...first,
+      displayLocale,
+      allowed: async (tx: ConsumerTransaction) => {
+        try {
+          const again = await settledIn(tx, credentials);
+          return (
+            again.diningSessionReference === first.diningSessionReference &&
+            again.guestSessionReference === first.guestSessionReference
+          );
+        } catch {
+          return false;
+        }
+      },
+    });
+  };
   return Object.freeze({
     async read(credentials: Credentials, displayLocale?: string | null) {
       return options.payments.refresh({ ...(await authority(credentials)), displayLocale });
     },
+    /**
+     * Batch 56 (v15 b55 live): this phone's own captured payments on its table's bill and what each
+     * paid for — while the guest is at the table, and once the table closed (with the ended
+     * visit's value). A guest who paid part of a bill staff then closed had no record of it at all.
+     * A phone that paid nothing here is told "not found": it never sees another guest's payment.
+     */
+    async ownPayment(credentials: Credentials, displayLocale?: string | null) {
+      let at: TableOnlinePaymentAuthority;
+      try {
+        at = { ...(await authority(credentials)), displayLocale };
+      } catch (error) {
+        if (!/GUEST_SESSION|PERMISSION|DENIED/u.test(String((error as { code?: unknown })?.code)))
+          throw error;
+        // The table closed: the ended visit's read-only value reads the bill it closed with.
+        at = await endedAuthority(credentials, displayLocale);
+      }
+      const view = await options.payments.read(at);
+      if ((view.ownPayments ?? []).length === 0)
+        throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+      return view;
+    },
     /** The settled table's bill and how it was paid, for a guest whose visit ended with it. */
     async settledReceipt(credentials: Credentials, displayLocale?: string | null) {
-      const first = await options.access.transactions.run((tx) => settledIn(tx, credentials));
-      const view = await options.payments.read(
-        Object.freeze({
-          ...first,
-          displayLocale,
-          allowed: async (tx: ConsumerTransaction) => {
-            try {
-              const again = await settledIn(tx, credentials);
-              return (
-                again.diningSessionReference === first.diningSessionReference &&
-                again.guestSessionReference === first.guestSessionReference
-              );
-            } catch {
-              return false;
-            }
-          },
-        }),
-      );
+      const view = await options.payments.read(await endedAuthority(credentials, displayLocale));
       const bill = view.bill;
       const paidInFull = bill.settlement !== null || (bill.split !== null && bill.split.paidInFull);
       // v15 b15: a table whose every dish the restaurant comped owed nothing and closed without a
@@ -426,6 +452,61 @@ export function customerSettledTableReceiptBody(view: DiningTableOnlinePaymentVi
   };
 }
 
+/**
+ * Batch 56 (v15 b55 live): this phone's own payments on its table's bill, in public fields only —
+ * what each paid for (the whole table; one of staff's parts, of how many; or the dishes it chose),
+ * before tax, tax, tip and the amount captured, and how (on this phone). Whether staff closed the
+ * rest of the bill, and whether the table paid in full, so the receipt never claims more than this
+ * phone paid. Never another guest's amounts, names, references, card details or codes.
+ */
+export function customerOwnPaymentBody(view: DiningTableOnlinePaymentView) {
+  const bill = view.bill;
+  const split = bill.split;
+  const own = view.ownPayments ?? [];
+  return {
+    schemaVersion: 1,
+    ownPayment: {
+      tableLabel: bill.tableLabel,
+      restClosedByStaff: bill.writeOff !== null,
+      tablePaidInFull: bill.settlement !== null || (split !== null && split.paidInFull),
+      payments: own.map((entry) => {
+        const part =
+          entry.partNumber === null || !entry.samePlan || split === null
+            ? null
+            : (split.parts.find((candidate) => candidate.partNumber === entry.partNumber) ?? null);
+        return {
+          covers:
+            entry.partNumber === null
+              ? "WholeTable"
+              : split?.mode === "ByGuests"
+                ? "Dishes"
+                : "Part",
+          partNumber: entry.partNumber,
+          // ByGuests parts grow as guests pay; "of how many" is said only for staff's split.
+          partCount:
+            part === null || split === null || split.mode === "ByGuests"
+              ? null
+              : split.parts.length,
+          dishes: (part?.dishes ?? []).map((dish) => ({
+            displayName: dish.displayName,
+            quantity: dish.quantity,
+            shared: dish.shared,
+          })),
+          // Before tax and tax of what this payment paid for (its part), when the part is known.
+          subtotalMinor: part === null ? null : part.subtotalMinor,
+          taxMinor: part === null ? null : part.taxMinor,
+          paidForMinor: entry.roundsMinor,
+          tipMinor: entry.tipMinor,
+          totalMinor: entry.totalMinor,
+          method: "Online" as const,
+          paidAt: entry.paidAt,
+        };
+      }),
+      totalMinor: own.reduce((sum, entry) => sum + BigInt(entry.totalMinor), 0n).toString(),
+    },
+  };
+}
+
 const uuidV7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 /**
  * WP-2423 同桌结账: {kind: "Mine"} / {kind: "Rest"} / {kind: "Chosen", dishes: [{orderItemReference,
@@ -551,6 +632,7 @@ export class CustomerDiningTablePaymentHandler {
         let command:
           | { action: "Read"; displayLocale: string | null }
           | { action: "SettledReceipt"; displayLocale: string | null }
+          | { action: "OwnPayment"; displayLocale: string | null }
           | {
               action: "Start";
               operationReference: string;
@@ -574,14 +656,14 @@ export class CustomerDiningTablePaymentHandler {
                 raw.locale === undefined ? {} : { locale: raw.locale },
               ),
             };
-          } else if (body.action === "SettledReceipt") {
+          } else if (body.action === "SettledReceipt" || body.action === "OwnPayment") {
             const raw = readClosedRecord(
               body,
               body.locale === undefined ? ["action"] : ["action", "locale"],
             );
             // Owner 2026-11-03 walkthrough: a receipt in the language the guest chose.
             command = {
-              action: "SettledReceipt",
+              action: body.action,
               displayLocale: customerDisplayLocale(
                 raw.locale === undefined ? {} : { locale: raw.locale },
               ),
@@ -649,6 +731,16 @@ export class CustomerDiningTablePaymentHandler {
           return;
         }
         try {
+          if (command.action === "OwnPayment") {
+            response
+              .status(200)
+              .json(
+                customerOwnPaymentBody(
+                  await this.#port.ownPayment(credentials, command.displayLocale),
+                ),
+              );
+            return;
+          }
           if (command.action === "SettledReceipt") {
             response
               .status(200)

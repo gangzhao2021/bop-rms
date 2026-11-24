@@ -6,7 +6,12 @@
  */
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import express from "express";
 import { createApp } from "../src/app.js";
+import {
+  CustomerDiningTablePaymentHandler,
+  customerDiningTablePaymentRoute,
+} from "../src/customer-dining-table-payment.js";
 import { CustomerDiningSessionHandler } from "../src/customer-dining-session.js";
 import { GuestSessionError } from "@bop/identity";
 import {
@@ -20,8 +25,21 @@ import {
 import {
   guestBillClosedByStaffFacts,
   guestBillWriteOff,
+  guestOwnPaymentView,
   type GuestBillScenario,
 } from "./guest-bill-closed-by-staff.js";
+
+/**
+ * Batch 56 (v15 b55 live): which phone is asking — the one that paid part of the bill (`payer`)
+ * or another guest's — and whether staff then closed the table. The guest's table visit value is
+ * "d"×43; the ended visit's read-only value, which the restore gives the payer only, is "C"×43.
+ */
+export interface GuestBillPhone {
+  readonly payer: boolean;
+  readonly tableClosed: boolean;
+}
+const visitCsrf = "d".repeat(43);
+const endedCsrf = "C".repeat(43);
 
 /**
  * Batch 55 review: once staff also closed the table (`tableClosed`), the visit restore answers as
@@ -31,8 +49,42 @@ import {
 export async function startGuestBillHttp(
   allowedOrigin: string,
   scenario: () => GuestBillScenario,
+  phone: () => GuestBillPhone = () => ({ payer: false, tableClosed: true }),
 ): Promise<{ readonly url: string; close(): Promise<void> }> {
-  const server: Server = createServer(
+  const paidPart = () => {
+    const current = scenario();
+    return current === "by-dish-written-off" || current === "half-split-written-off"
+      ? current
+      : null;
+  };
+  // Batch 56: the guest's table-payment reads (the bill, and this phone's own payment), as the
+  // real port answers them: the payer's own captured payment only, and "not found" for any other
+  // phone; once the table closed, only with the ended visit's value.
+  const tablePayment = new CustomerDiningTablePaymentHandler({
+    allowedOrigin,
+    port: {
+      read: async () => {
+        const part = paidPart();
+        if (part === null || phone().tableClosed)
+          throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+        return guestOwnPaymentView(part, phone().payer);
+      },
+      ownPayment: async (credentials: { csrfCredential: string }) => {
+        const part = paidPart();
+        const { payer, tableClosed } = phone();
+        if (
+          part === null ||
+          !payer ||
+          String(credentials.csrfCredential) !== (tableClosed ? endedCsrf : visitCsrf)
+        )
+          throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+        return guestOwnPaymentView(part, true, tableClosed ? "Closed" : "Closing");
+      },
+    } as never,
+  });
+  const outer = express();
+  outer.post(customerDiningTablePaymentRoute, ...tablePayment.handler());
+  outer.use(
     createApp({
       customerSessionBootstrap: createCustomerSessionBootstrapHandler({
         allowedOrigin,
@@ -52,6 +104,13 @@ export async function startGuestBillHttp(
                 brandDisplayName: "Test Merchant 2 - not production",
                 storeDisplayName: "Test Merchant 2 Main - not production",
               },
+              // Batch 56: the phone that paid part of it (Payment's captured payment, 1413).
+              ...(phone().payer && paidPart() !== null
+                ? {
+                    yourPayment: { amountMinor: "1413", method: "Online" as const },
+                    csrfToken: endedCsrf,
+                  }
+                : {}),
             };
           },
           readEndedVisit: async () => {
@@ -73,6 +132,7 @@ export async function startGuestBillHttp(
       }),
     }),
   );
+  const server: Server = createServer(outer);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   return {
     url: "http://127.0.0.1:" + (server.address() as AddressInfo).port,

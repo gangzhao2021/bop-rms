@@ -12,6 +12,7 @@ const f = vi.hoisted(() => ({
   orders: vi.fn(),
   mergedIn: vi.fn(),
   writeOffs: vi.fn(),
+  onlinePayments: vi.fn(),
   settlementScope: vi.fn(),
 }));
 vi.mock("@bop/identity", async (original) => ({
@@ -37,7 +38,7 @@ vi.mock("@rms/payment", async (original) => ({
   ...(await original<typeof import("@rms/payment")>()),
   createPostgresDiningTableSettlementStore: (options: unknown) => {
     f.settlementScope(options);
-    return { listWriteOffsByOrders: f.writeOffs };
+    return { listWriteOffsByOrders: f.writeOffs, listOnlinePaymentsByOrders: f.onlinePayments };
   },
 }));
 vi.mock("@rms/store", async (original) => ({
@@ -84,6 +85,7 @@ beforeEach(() => {
   f.orders.mockResolvedValue(new Map());
   f.mergedIn.mockResolvedValue([]);
   f.writeOffs.mockResolvedValue([]);
+  f.onlinePayments.mockResolvedValue([]);
 });
 
 it("a table closed with nothing ordered says so with the Store's names, and gives nothing to act with", async () => {
@@ -259,8 +261,56 @@ describe("a bill staff closed when the guests left", () => {
     );
   });
 
-  it("a dish paid first (order 55, $14.13 of $28.25): what was paid, still no receipt access", async () => {
+  it("a dish another guest paid first (order 55, $14.13 of $28.25): what was paid, no receipt access", async () => {
     f.writeOffs.mockResolvedValue([writeOff(1413n, 2825n)]);
+    const answer = await createCustomerSessionBootstrapRead(withTenant).readSettledTable(
+      "A".repeat(43),
+    );
+    expect(answer).toEqual({ tableLabel: "V44 A (TEST)", closedByStaff: "Some", store: tm2 });
+    expect(JSON.stringify(answer)).not.toContain("C".repeat(43));
+  });
+
+  // Batch 56 (v15 b55 live, L55 CB2/CB3 orders 76 and 80): Payment's record of the phone
+  // payments on that bill, in the shape v15 holds (part 1 of the split plan, captured 1413).
+  const phonePayment = (guestSessionReference: string, status: string) => ({
+    onlinePaymentReference: ref(20),
+    orderReference: ref(8),
+    guestSessionReference,
+    roundsMinor: 1413n,
+    tipMinor: 0n,
+    totalMinor: 1413n,
+    part: { splitPlanReference: ref(21), partNumber: 1 },
+    outcome: {
+      status,
+      capturedMinor: status === "Captured" ? 1413n : null,
+      providerTransactionReference: null,
+      occurredAt: "2026-11-24T00:34:40.000Z",
+      recordedAt: "2026-11-24T00:34:40.000Z",
+    },
+  });
+  it("batch 56: the phone that paid part of it is told what it paid, with its own receipt's access", async () => {
+    f.writeOffs.mockResolvedValue([writeOff(1413n, 2825n)]);
+    f.onlinePayments.mockResolvedValue([phonePayment(guest.sessionReference, "Captured")]);
+    const answer = await createCustomerSessionBootstrapRead(withTenant).readSettledTable(
+      "A".repeat(43),
+    );
+    // Before: { tableLabel, closedByStaff: "Some", store } — nothing said the $14.13 was theirs.
+    expect(answer).toEqual({
+      tableLabel: "V44 A (TEST)",
+      closedByStaff: "Some",
+      store: tm2,
+      yourPayment: { amountMinor: "1413", method: "Online" },
+      csrfToken: "C".repeat(43),
+    });
+    expect(f.onlinePayments).toHaveBeenCalledWith(tx, [ref(8)]);
+  });
+
+  it("batch 56: another guest's payment, or a declined one, is never this phone's", async () => {
+    f.writeOffs.mockResolvedValue([writeOff(1413n, 2825n)]);
+    f.onlinePayments.mockResolvedValue([
+      phonePayment(ref(30), "Captured"),
+      phonePayment(guest.sessionReference, "Failed"),
+    ]);
     const answer = await createCustomerSessionBootstrapRead(withTenant).readSettledTable(
       "A".repeat(43),
     );

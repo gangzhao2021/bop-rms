@@ -267,6 +267,41 @@ it("tells a guest whose table closed with nothing ordered that its visit ended, 
   });
   f.readSettledTable.mockResolvedValue({ tableLabel: "L54 GB2 (TEST)", closedByStaff: "All" });
   expect((await f.request()).status).toBe(204);
+  // Batch 56 (v15 b55 live, L55 CB3 order 80): the phone that paid part 1 ($14.13) is told what
+  // it paid, with read-only access to its own payment's receipt; malformed, it is left out.
+  f.readSettledTable.mockResolvedValue({
+    tableLabel: "L55 CB3 (TEST)",
+    closedByStaff: "Some",
+    store: tm2,
+    yourPayment: { amountMinor: "1413", method: "Online" },
+    csrfToken: "C".repeat(43),
+  });
+  expect(await (await f.request()).json()).toEqual({
+    schemaVersion: 1,
+    closedTable: {
+      tableLabel: "L55 CB3 (TEST)",
+      paid: "Some",
+      store: tm2,
+      yourPayment: { amountMinor: "1413", method: "Online" },
+      csrfToken: "C".repeat(43),
+    },
+  });
+  for (const yourPayment of [
+    { amountMinor: "0", method: "Online" },
+    { amountMinor: "14.13", method: "Online" },
+    { amountMinor: "1413", method: "Cash" },
+  ]) {
+    f.readSettledTable.mockResolvedValue({
+      tableLabel: "L55 CB3 (TEST)",
+      closedByStaff: "Some",
+      yourPayment,
+      csrfToken: "C".repeat(43),
+    });
+    expect(await (await f.request()).json()).toEqual({
+      schemaVersion: 1,
+      closedTable: { tableLabel: "L55 CB3 (TEST)", paid: "Some" },
+    });
+  }
   // A moved (or merged) party's answer names the Store too, for the page's header.
   f.readMovedTable.mockResolvedValue({ tableLabel: "V44 B (TEST)", merged: true, store: tm2 });
   expect(await (await f.request()).json()).toEqual({

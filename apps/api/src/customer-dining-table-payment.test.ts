@@ -3,8 +3,11 @@ import type { AddressInfo } from "node:net";
 import express from "express";
 import { afterEach, expect, it, vi } from "vitest";
 import { createPostgresOrderPricedAmountSource } from "@rms/ordering";
+import { GuestSessionError } from "@bop/identity";
+import { guestOwnPaymentView } from "../test-support/guest-bill-closed-by-staff.js";
 import {
   CustomerDiningTablePaymentHandler,
+  customerOwnPaymentBody,
   customerSettledTableReceiptBody,
   customerTablePaymentBody,
 } from "./customer-dining-table-payment.js";
@@ -62,6 +65,7 @@ async function setup() {
     }),
     handoff: vi.fn(),
     ownAttempt: vi.fn(),
+    ownPayment: vi.fn(),
     settledReceipt: vi.fn().mockResolvedValue({
       bill: {
         ...bill,
@@ -536,4 +540,76 @@ it("b39: a merged table's bill split by rounds says which table's rounds each pa
     expect(customerTablePaymentBody(view(mode, merged)).payment.split?.parts[0]).not.toHaveProperty(
       "tables",
     );
+});
+
+// Batch 56 (v15 b55 live, guest-closed-bill-menu-cart): a guest who paid part of a bill (their dish
+// by phone, L55 CB2 order 76; part 1 of staff's even split in 2, L55 CB3 order 80) and whose
+// staff then closed the rest saw only the table's "Paid $14.13": no "you paid", no method and no
+// receipt on any page — the table-payment read said only "Closed" with receipt null, and the
+// settled receipt read refuses a written-off bill. The views are v15's (split plan part 1,
+// captured 1413, tip 0; 1412 written off).
+it("batch 56: the payer's own receipt says what it paid for, never that the table paid in full", () => {
+  const even = customerOwnPaymentBody(guestOwnPaymentView("half-split-written-off", true));
+  expect(even).toEqual({
+    schemaVersion: 1,
+    ownPayment: {
+      tableLabel: "L54 GB5 (TEST)",
+      restClosedByStaff: true,
+      tablePaidInFull: false,
+      payments: [
+        {
+          covers: "Part",
+          partNumber: 1,
+          partCount: 2,
+          dishes: [],
+          subtotalMinor: "1250",
+          taxMinor: "163",
+          paidForMinor: "1413",
+          tipMinor: "0",
+          totalMinor: "1413",
+          method: "Online",
+          paidAt: "2026-11-24T00:34:40.000Z",
+        },
+      ],
+      totalMinor: "1413",
+    },
+  });
+  const byDish = customerOwnPaymentBody(guestOwnPaymentView("by-dish-written-off", true));
+  expect(byDish.ownPayment.payments).toEqual([
+    expect.objectContaining({
+      covers: "Dishes",
+      partNumber: 1,
+      // Guests' own parts grow as they pay: never "of how many".
+      partCount: null,
+      dishes: [{ displayName: "Beef noodles (TEST)", quantity: 1, shared: false }],
+      totalMinor: "1413",
+    }),
+  ]);
+  // Only this phone's payment: never part 2, other guests' amounts, references or Provider ids.
+  for (const body of [even, byDish])
+    expect(JSON.stringify(body)).not.toMatch(
+      /1412|0198b054|orderReference|guestSession|pi_|provider|tendered|actor/iu,
+    );
+});
+
+it("batch 56: the payer reads its own receipt; a phone that paid nothing is told not found", async () => {
+  const f = await setup();
+  f.port.ownPayment.mockResolvedValue(guestOwnPaymentView("half-split-written-off", true));
+  const mine = await f.send({ action: "OwnPayment", locale: "zh-Hans" });
+  expect(mine.status).toBe(200);
+  expect(mine.headers.get("cache-control")).toBe("no-store");
+  expect(((await mine.json()) as { ownPayment: unknown }).ownPayment).toMatchObject({
+    totalMinor: "1413",
+    restClosedByStaff: true,
+  });
+  expect(f.port.ownPayment).toHaveBeenCalledWith(
+    { sessionCredential: "s".repeat(43), csrfCredential: "c".repeat(43) },
+    "zh-Hans",
+  );
+  f.port.ownPayment.mockRejectedValue(new GuestSessionError("GUEST_SESSION_UNAVAILABLE"));
+  const other = await f.send({ action: "OwnPayment" });
+  expect(other.status).toBe(404);
+  expect(await other.json()).toEqual({ schemaVersion: 1, error: { code: "table_not_found" } });
+  // Nothing else is taken with it.
+  expect((await f.send({ action: "OwnPayment", partNumber: 2 })).status).toBe(400);
 });

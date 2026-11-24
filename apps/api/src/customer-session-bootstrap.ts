@@ -106,19 +106,41 @@ export function createCustomerSessionBootstrapRead(
   const closedByStaff = async (
     transaction: Transaction,
     session: string,
-  ): Promise<"Nothing" | "Some" | null> => {
+    guestSessionReference: string,
+  ): Promise<{
+    readonly paid: "Nothing" | "Some";
+    readonly ownPaidMinor: bigint;
+  } | null> => {
     const tenantReference = options.publicProfile?.binding?.tenantReference;
     if (tenantReference === undefined) return null;
     const order = (
       await listStoreDiningSessionOrders(transaction as never, options.scope, [session])
     ).get(session);
     if (order === undefined) return null;
-    const [writeOff] = await createPostgresDiningTableSettlementStore({
+    const payment = createPostgresDiningTableSettlementStore({
       scope: { tenantReference: String(tenantReference), ...options.scope },
       // The guest sat at this closed table (proven by the caller); its own bill's Order only.
       authorize: async (_tx, value) => value.orderReference === order,
-    }).listWriteOffsByOrders(transaction as never, [order]);
-    return writeOff === undefined ? null : closedBillPaid(writeOff);
+    });
+    const [writeOff] = await payment.listWriteOffsByOrders(transaction as never, [order]);
+    if (writeOff === undefined) return null;
+    const paid = closedBillPaid(writeOff);
+    // Batch 56 (v15 b55 live): what this phone itself paid on that bill before staff closed the
+    // rest (Payment's captured phone payments of this guest's Session; never another guest's).
+    const ownPaidMinor =
+      paid === "Nothing"
+        ? 0n
+        : (await payment.listOnlinePaymentsByOrders(transaction as never, [order]))
+            .filter(
+              (attempt) =>
+                attempt.guestSessionReference === guestSessionReference &&
+                attempt.outcome?.status === "Captured",
+            )
+            .reduce(
+              (sum, attempt) => sum + (attempt.outcome?.capturedMinor ?? attempt.totalMinor),
+              0n,
+            );
+    return { paid, ownPaidMinor };
   };
   return {
     async read(sessionCredential: string) {
@@ -315,12 +337,31 @@ export function createCustomerSessionBootstrapRead(
         ).get(session);
         // Batch 45: the Store's names come with every ended table's answer (the page's header).
         const named = <T extends object>(answer: T) => withStoreNames(transaction, guest, answer);
-        // Batch 55 review: a bill staff closed has no receipt; how it ended, never receipt access.
+        // Batch 55 review: a bill staff closed has no receipt for the table; how it ended. Batch
+        // 56: a phone that paid part of it gets read-only access to its own payment's receipt.
+        const guestSession = String(guest.sessionReference);
+        const closedAnswer = (
+          tableLabel: string,
+          closed: NonNullable<Awaited<ReturnType<typeof closedByStaff>>>,
+        ) =>
+          named({
+            tableLabel,
+            closedByStaff: closed.paid,
+            ...(closed.ownPaidMinor > 0n
+              ? {
+                  yourPayment: {
+                    amountMinor: closed.ownPaidMinor.toString(),
+                    method: "Online" as const,
+                  },
+                  ...receipt,
+                }
+              : {}),
+          });
         const closedOr = async (tableLabel: string, billSession: string) => {
-          const closed = await closedByStaff(transaction, billSession);
+          const closed = await closedByStaff(transaction, billSession, guestSession);
           return closed === null
             ? named({ tableLabel, ...receipt })
-            : named({ tableLabel, closedByStaff: closed });
+            : closedAnswer(tableLabel, closed);
         };
         // Batch 46 (v15 b45 live): the table this party was merged into closed with nothing
         // ordered there by anyone (its own party, this one or another merged in): the visit ended
@@ -348,9 +389,8 @@ export function createCustomerSessionBootstrapRead(
           return named({ tableLabel: settled.tableLabel, nothingOrdered: true as const });
         // Batch 44 (v15 b43 live): the Store's published names, so the guest's page still names
         // the Store after a reload. Public fields only; an unreadable profile leaves them out.
-        const closed = await closedByStaff(transaction, session);
-        if (closed !== null)
-          return named({ tableLabel: settled.tableLabel, closedByStaff: closed });
+        const closed = await closedByStaff(transaction, session, guestSession);
+        if (closed !== null) return closedAnswer(settled.tableLabel, closed);
         return named({ ...settled, ...receipt });
       });
     },
@@ -456,6 +496,12 @@ export function createCustomerSessionBootstrapHandler(options?: {
           /** Batch 55 review: staff closed the bill when the guests left (no receipt). */
           closedByStaff: "Nothing" | "Some";
           store?: { brandDisplayName: string; storeDisplayName: string };
+          /**
+           * Batch 56: what this phone itself paid on that bill, with read-only access to its own
+           * payment's receipt (absent: this phone paid nothing on it).
+           */
+          yourPayment?: { amountMinor: string; method: "Online" };
+          csrfToken?: string;
         }
       | null
     >;
@@ -587,16 +633,34 @@ export function createCustomerSessionBootstrapHandler(options?: {
           : null;
       // Batch 55 review (v15 b54): staff closed the bill when the guests left. There is no
       // receipt, so no receipt access: which table, whether anything was paid, and the Store.
-      if ("closedByStaff" in settled)
-        return settled.closedByStaff === "Nothing" || settled.closedByStaff === "Some"
-          ? {
-              closedTable: {
-                tableLabel: settled.tableLabel,
-                paid: settled.closedByStaff,
-                ...storeNames(settled.store),
-              },
-            }
-          : null;
+      if ("closedByStaff" in settled) {
+        if (settled.closedByStaff !== "Nothing" && settled.closedByStaff !== "Some") return null;
+        // Batch 56 (v15 b55 live): the phone that paid part of it: what it paid and read-only
+        // access to that payment's receipt. Anything malformed is left out (the bill's end stays).
+        const own = settled.yourPayment;
+        const ownCsrf =
+          own === undefined || settled.csrfToken === undefined
+            ? null
+            : wellFormed(() => parseGuestRawCredential(settled.csrfToken));
+        const yours =
+          own !== undefined &&
+          ownCsrf !== null &&
+          own.method === "Online" &&
+          /^[1-9][0-9]{0,15}$/u.test(own.amountMinor)
+            ? {
+                yourPayment: { amountMinor: own.amountMinor, method: own.method },
+                csrfToken: ownCsrf,
+              }
+            : {};
+        return {
+          closedTable: {
+            tableLabel: settled.tableLabel,
+            paid: settled.closedByStaff,
+            ...storeNames(settled.store),
+            ...yours,
+          },
+        };
+      }
       const csrfToken = wellFormed(() => parseGuestRawCredential(settled.csrfToken));
       return csrfToken === null
         ? null

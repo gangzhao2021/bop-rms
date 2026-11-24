@@ -234,3 +234,117 @@ export const liveWrittenOffSummaryWithoutClosedByStaff = {
     total: { amountMinor: "2825", currencyCode: "CAD" },
   },
 } as const;
+
+type PaymentView = import("../src/dining-table-online-payment.js").DiningTableOnlinePaymentView;
+/**
+ * Batch 56 (v15 b55 live, L55 CB2 order 76 and L55 CB3 order 80): the guest table-payment view
+ * (createDiningTableOnlinePayments' read) once staff closed the rest of a bill one guest paid
+ * part of on their phone — by dish (ByGuests part 1: their Beef noodles) or part 1 of staff's even
+ * split in 2 — as v15 holds it: split plan part 1, captured 1413, tip 0; the rest (1412) written
+ * off. `payer`: the phone that paid (its own captured payment); otherwise another guest's phone.
+ */
+export function guestOwnPaymentView(
+  scenario: "by-dish-written-off" | "half-split-written-off",
+  payer: boolean,
+  sessionPhase: "Closing" | "Closed" = "Closing",
+): PaymentView {
+  const byDish = scenario === "by-dish-written-off";
+  const dish = { displayName: "Beef noodles (TEST)", quantity: 1, shared: false };
+  const paidPart = {
+    partNumber: 1,
+    amountMinor: "1413",
+    subtotalMinor: "1250",
+    taxMinor: "163",
+    roundNumbers: [1],
+    dishes: byDish ? [dish] : [],
+    payment: {
+      method: "Online" as const,
+      tipMinor: "0",
+      roundingMinor: "0",
+      totalMinor: "1413",
+      tenderedMinor: null,
+      changeMinor: null,
+      recordedAt: "2026-11-24T00:34:40.000Z",
+      recordedAfterOutage: false,
+    },
+    guestPaying: false,
+    ...(byDish ? { choice: "Mine" as const } : {}),
+  };
+  const restPart = {
+    partNumber: 2,
+    amountMinor: "1412",
+    subtotalMinor: "1250",
+    taxMinor: "162",
+    roundNumbers: [2],
+    dishes: [],
+    payment: null,
+    guestPaying: false,
+  };
+  return {
+    bill: {
+      diningSessionReference: id(0x20),
+      sessionPhase,
+      sessionVersion: 7,
+      paymentTiming: "PayLater",
+      // The same table as the guest table read of this scenario.
+      tableLabel: guestBillClosedByStaffFacts(scenario).facts.tableLabel,
+      orderReference: id(1),
+      rounds: allRounds.map((round, index) => ({
+        roundNumber: index + 1,
+        orderReference: id(1),
+        orderBatchReference: round.batch,
+        submissionReference: id(0x50 + index),
+        items: [
+          {
+            orderItemReference: round.item,
+            quantity: 1,
+            displayName: "Beef noodles (TEST)",
+            subtotalMinor: "1250",
+            totalMinor: String(round.totalMinor),
+            reduction: null,
+          },
+        ],
+        subtotalMinor: "1250",
+        taxMinor: String(round.taxMinor),
+        totalMinor: String(round.totalMinor),
+        taxRoundingMinor: "0",
+        paid: round.mine,
+        orderedBy: null,
+        fromTableLabel: null,
+        liveOrderedAt: null,
+      })),
+      taxRoundingMinor: "0",
+      owed: { subtotalMinor: "1250", taxMinor: "162", totalMinor: "1412" },
+      consistent: true,
+      tips: { enabled: true, tierPercents: [10, 15, 18] },
+      settlement: null,
+      split: {
+        mode: byDish ? "ByGuests" : "Even",
+        stale: false,
+        paidInFull: false,
+        dishChoices: [],
+        parts: byDish ? [paidPart] : [paidPart, restPart],
+        paidParts: 1,
+        remainingMinor: "1412",
+      },
+      writeOff: { amountMinor: "1412", decidedAt: "2026-11-24T00:35:10.000Z" },
+      onlinePayment: null,
+    } as unknown as PaymentView["bill"],
+    attempt: null,
+    lastOwnDeclined: null,
+    paidByMe: payer && byDish ? [1] : [],
+    choices: null,
+    ownPayments: payer
+      ? [
+          {
+            partNumber: 1,
+            samePlan: true,
+            roundsMinor: "1413",
+            tipMinor: "0",
+            totalMinor: "1413",
+            paidAt: "2026-11-24T00:34:40.000Z",
+          },
+        ]
+      : [],
+  };
+}
