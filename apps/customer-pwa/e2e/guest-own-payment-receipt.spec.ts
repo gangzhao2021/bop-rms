@@ -18,7 +18,10 @@ interface GuestBillHttp {
 }
 let scenario: Scenario = "by-dish-written-off";
 /** Which phone asks (the payer, or another guest at the table), and whether the table closed. */
-let phone = { payer: true, tableClosed: false };
+let phone: { payer: boolean; tableClosed: boolean; refunds?: "None" | "Partial" | "Full" } = {
+  payer: true,
+  tableClosed: false,
+};
 let api: GuestBillHttp;
 test.beforeAll(async () => {
   // A variable path: the API's source is loaded at run time, outside this app's typecheck.
@@ -27,7 +30,7 @@ test.beforeAll(async () => {
     startGuestBillHttp(
       origin: string,
       scenario: () => Scenario,
-      phone: () => { payer: boolean; tableClosed: boolean },
+      phone: () => { payer: boolean; tableClosed: boolean; refunds?: "None" | "Partial" | "Full" },
     ): Promise<GuestBillHttp>;
   };
   api = await startGuestBillHttp(
@@ -446,6 +449,119 @@ for (const width of [390, 1024, 1440])
           });
         });
       }
+
+      // Batch 57 (WP-2423 Q36, b56 remaining): staff refunded part of the payer's own phone
+      // payment ($5.00 back, $3.00 on its way, $2.00 refused) or all of it. Before, the payer's
+      // own receipt still said only "You paid $14.13 … Total paid by you $14.13". The own-payment
+      // read and the restore are the real API handlers answering Payment's refund records.
+      test("staff refunded the payer's own payment: each refund and the net, while open and after close", async ({
+        page,
+      }) => {
+        test.setTimeout(90_000);
+        scenario = "half-split-written-off";
+        phone = { payer: true, tableClosed: false, refunds: "Partial" };
+        await stubTable(page, []);
+        const tag = `refund-partial-${zh ? "zh" : "en"}-${width}`;
+        const youPaid = zh
+          ? "您已在这部手机上在线支付 $14.13。退回您的卡 $8.00 后，您实付 $6.13。"
+          : "You paid $14.13 by card on this phone. After $8.00 back to your card, you paid $6.13.";
+        const lines = zh
+          ? [
+              /，\$5\.00 已退回您的卡。银行可能要过几天才显示。$/u,
+              /^\$3\.00 正在退回您的卡（.+ 发出），发卡银行还没有确认。$/u,
+              /^.+ 发出的 \$2\.00 退款没有成功，没有钱退回您的卡。请找店员。$/u,
+            ]
+          : [
+              /^On .+, \$5\.00 went back to your card\. Your bank may take a few days to show it\.$/u,
+              /^\$3\.00 is on its way back to your card \(sent .+\)\. Your card issuer has not confirmed it yet\.$/u,
+              /^A refund of \$2\.00 sent on .+ did not go through, so nothing went back to your card\. Please ask staff\.$/u,
+            ];
+        const expectRefunds = async () => {
+          const receipt = page.getByRole("region", { name: zh ? "您的收据" : "Your receipt" });
+          await expect(receipt).toContainText(youPaid);
+          await expect(receipt).toContainText((zh ? "您实付合计" : "Total paid by you") + "$14.13");
+          await expect(receipt).toContainText(
+            (zh ? "退回您的卡" : "Refunded to your card") + "−$8.00",
+          );
+          await expect(receipt).toContainText(
+            (zh ? "退款后合计" : "Total after refunds") + "$6.13",
+          );
+          const list = receipt.getByRole("list", {
+            name: zh ? "您这笔付款的退款" : "Refunds of your payment",
+          });
+          const items = list.getByRole("listitem");
+          await expect(items).toHaveCount(3);
+          for (const [index, line] of lines.entries())
+            expect(((await items.nth(index).textContent()) ?? "").replace(/\s+/gu, " ")).toMatch(
+              line,
+            );
+          // Never the reason, who approved it, another guest's part or a reference.
+          await expect(receipt).not.toContainText(
+            zh ? /\$14\.12|食物|原因|re_/u : /\$14\.12|FOOD|reason|approved|re_/iu,
+          );
+          await expectInside(receipt, width);
+          await expectOnFirstScreen(receipt.getByText(youPaid));
+        };
+        await open(page, "/dine-in/session", zh);
+        await expectRefunds();
+        await page.screenshot({ path: `test-results/b57-open-${tag}.png`, fullPage: true });
+        // Menu and Cart say what the payer paid net, and link to the receipt.
+        for (const path of ["/menu", "/cart"]) {
+          await open(page, path, zh);
+          const main = page.getByRole("main");
+          await expect(main).toContainText(youPaid);
+          await expectInside(main.getByText(youPaid), width);
+          await expectOnFirstScreen(
+            main.getByRole("link", { name: zh ? "查看您的收据" : "See your receipt" }),
+          );
+        }
+        // The table closed and was cleaned: the restore and the receipt say the same.
+        phone = { payer: true, tableClosed: true, refunds: "Partial" };
+        await open(page, "/menu", zh);
+        const card = page.getByRole("main").getByRole("status").filter({ hasText: youPaid });
+        await expect(card).toBeVisible();
+        await expectInside(card, width);
+        await page.screenshot({ path: `test-results/b57-closed-menu-${tag}.png`, fullPage: true });
+        await open(page, "/dine-in/session", zh);
+        await expectRefunds();
+        await expectNoInternalText(page);
+        await page.screenshot({ path: `test-results/b57-closed-${tag}.png`, fullPage: true });
+      });
+
+      test("staff refunded all of the payer's dish: the receipt says all of it goes back; another phone sees none of it", async ({
+        page,
+      }) => {
+        test.setTimeout(90_000);
+        scenario = "by-dish-written-off";
+        phone = { payer: true, tableClosed: true, refunds: "Full" };
+        await stubTable(page, []);
+        const tag = `refund-full-${zh ? "zh" : "en"}-${width}`;
+        const youPaid = zh
+          ? "您已在这部手机上在线支付 $14.13。这笔款项全部退回您的卡。"
+          : "You paid $14.13 by card on this phone. All of it goes back to your card.";
+        await open(page, "/dine-in/session", zh);
+        const receipt = page.getByRole("region", { name: zh ? "您的收据" : "Your receipt" });
+        await expect(receipt).toContainText(youPaid);
+        await expect(receipt).toContainText((zh ? "退款后合计" : "Total after refunds") + "$0.00");
+        await expect(receipt.getByRole("listitem")).toHaveCount(1);
+        await expectInside(receipt, width);
+        await expectOnFirstScreen(receipt.getByText(youPaid));
+        await page.screenshot({ path: `test-results/b57-closed-${tag}.png`, fullPage: true });
+        await open(page, "/cart", zh);
+        await expect(page.getByRole("main").getByRole("status")).toContainText(youPaid);
+        // Another phone at the table: no one's payment and no refund.
+        phone = { payer: false, tableClosed: true, refunds: "Full" };
+        await open(page, "/dine-in/session", zh);
+        await expect(
+          page
+            .getByRole("main")
+            .getByRole("status")
+            .filter({ hasText: words(zh, scenario).ended }),
+        ).toBeVisible();
+        await expect(page.getByRole("main")).not.toContainText(
+          zh ? /收据|您已在这部手机上|退回/u : /receipt|You paid|back to your card/iu,
+        );
+      });
     });
 
 // Batch 57 (v15 b56 live, payer-own-payment-record): the same phone payment was named two ways —
