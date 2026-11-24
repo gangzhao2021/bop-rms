@@ -400,3 +400,185 @@ describe("batch 56 review: the closed-bill notice while the table is still open"
     expect(text()).toContain("You paid $14.13 online on this phone.");
   });
 });
+
+// Batch 57 (WP-2423 Q36, b56 remaining): staff refunded part of the payer's own phone payment and
+// the payer's own receipt still said only "You paid $14.13 … Total paid by you $14.13": no refund,
+// no net. The bodies are what the API's own-payment read answers for Payment's refund records
+// (customer-dining-table-payment.test.ts builds them from the v15 shapes): $5.00 back to the card,
+// $3.00 on its way (no Provider answer yet), $2.00 refused; or all of it back.
+const refundedPart = {
+  ...evenPart,
+  ownPayment: {
+    ...evenPart.ownPayment,
+    payments: [
+      {
+        ...evenPart.ownPayment.payments[0],
+        refunds: [
+          {
+            amountMinor: "500",
+            status: "Refunded",
+            requestedAt: "2026-11-24T00:40:17.521Z",
+            answeredAt: "2026-11-24T00:40:17.565Z",
+          },
+          {
+            amountMinor: "300",
+            status: "Pending",
+            requestedAt: "2026-11-24T00:41:02.104Z",
+            answeredAt: null,
+          },
+          {
+            amountMinor: "200",
+            status: "Failed",
+            requestedAt: "2026-11-24T00:41:40.250Z",
+            answeredAt: "2026-11-24T00:41:40.311Z",
+          },
+        ],
+        refundedMinor: "800",
+      },
+    ],
+    refundedMinor: "800",
+    netMinor: "613",
+  },
+};
+const fullyRefunded = {
+  ...byDish,
+  ownPayment: {
+    ...byDish.ownPayment,
+    payments: [
+      {
+        ...byDish.ownPayment.payments[0],
+        refunds: [
+          {
+            amountMinor: "1413",
+            status: "Refunded",
+            requestedAt: "2026-11-24T00:40:03.609Z",
+            answeredAt: "2026-11-24T00:40:03.643Z",
+          },
+        ],
+        refundedMinor: "1413",
+      },
+    ],
+    refundedMinor: "1413",
+    netMinor: "0",
+  },
+};
+
+describe("batch 57: refunds of the payer's own payment", () => {
+  it("each refund is said as Payment recorded it, with what the payer paid net (en)", async () => {
+    setCustomerCsrfCredential("d".repeat(43));
+    await show(
+      <DiningSessionScreen
+        state={closedTable({ count: 2, paid: 1 })}
+        onRefresh={() => undefined}
+        ownPaymentReceipt={payer(refundedPart)}
+      />,
+    );
+    expect(text()).toContain(
+      "You paid $14.13 by card on this phone. After $8.00 back to your card, you paid $6.13.",
+    );
+    expect(text()).toContain("Total paid by you$14.13");
+    expect(text()).toContain("Refunded to your card−$8.00");
+    expect(text()).toContain("Total after refunds$6.13");
+    const refunds = [...container.querySelectorAll(".dining-session__own-refunds li")].map((line) =>
+      (line.textContent ?? "").replace(/\s+/gu, " "),
+    );
+    expect(refunds).toHaveLength(3);
+    expect(refunds[0]).toMatch(
+      /^On .+, \$5\.00 went back to your card\. Your bank may take a few days to show it\.$/u,
+    );
+    expect(refunds[1]).toMatch(
+      /^\$3\.00 is on its way back to your card \(sent .+\)\. Your card issuer has not confirmed it yet\.$/u,
+    );
+    expect(refunds[2]).toMatch(
+      /^A refund of \$2\.00 sent on .+ did not go through, so nothing went back to your card\. Please ask staff\.$/u,
+    );
+    expect(
+      container.querySelector(".dining-session__own-refunds")?.getAttribute("aria-label"),
+    ).toBe("Refunds of your payment");
+  });
+
+  it("all of it back (zh-Hans), and the line Menu, dish pages and Cart say", async () => {
+    setCustomerCsrfCredential("d".repeat(43));
+    await show(
+      <DiningSessionScreen
+        state={closedTable({ count: null, paid: 1 })}
+        onRefresh={() => undefined}
+        ownPaymentReceipt={payer(fullyRefunded)}
+      />,
+      "zh-Hans",
+    );
+    expect(text()).toContain("您已在这部手机上在线支付 $14.13。这笔款项全部退回您的卡。");
+    expect(text()).toContain("退回您的卡−$14.13");
+    expect(text()).toContain("退款后合计$0.00");
+    expect(container.querySelector(".dining-session__own-refunds li")?.textContent).toMatch(
+      /^.+，\$14\.13 已退回您的卡。银行可能要过几天才显示。$/u,
+    );
+    // Once the table closed, the restore says what went back too.
+    await show(
+      <EndedTableCard
+        ended={{
+          kind: "ClosedByStaff",
+          tableLabel: "L55 CB3 (TEST)",
+          paid: "Some",
+          store: null,
+          yourPaidMinor: "1413",
+          yourRefundedMinor: "800",
+        }}
+      />,
+      "zh-Hans",
+    );
+    expect(text()).toContain(
+      "您已在这部手机上在线支付 $14.13。退回您的卡 $8.00 后，您实付 $6.13。",
+    );
+  });
+
+  it("the closed-bill notice says the net; a refund read on Your table shows there next", async () => {
+    setCustomerCsrfCredential("d".repeat(43));
+    const fetch = vi.fn().mockImplementation(async () => Response.json(evenPart, { status: 200 }));
+    vi.stubGlobal("fetch", fetch);
+    const checkout: TableCheckout = {
+      paid: true,
+      payLater: true,
+      closedByStaff: { kind: "Parts", paid: 1, count: 2 },
+    };
+    await show(<TableCheckoutNotice checkout={checkout} />);
+    expect(text()).toContain("You paid $14.13 by card on this phone.");
+    // Staff refund meanwhile; the guest opens Your table, whose receipt reads it afresh.
+    await show(
+      <DiningSessionScreen
+        state={closedTable({ count: 2, paid: 1 })}
+        onRefresh={() => undefined}
+        ownPaymentReceipt={payer(refundedPart)}
+      />,
+    );
+    await show(<TableCheckoutNotice checkout={checkout} />);
+    expect(text()).toContain(
+      "You paid $14.13 by card on this phone. After $8.00 back to your card, you paid $6.13.",
+    );
+  });
+
+  it("a refund body that does not add up is never shown; an older server's body has none", () => {
+    for (const bad of [
+      { ownPayment: { ...refundedPart.ownPayment, netMinor: "1413" } },
+      { ownPayment: { ...refundedPart.ownPayment, refundedMinor: "1414", netMinor: "0" } },
+      {
+        ownPayment: {
+          ...refundedPart.ownPayment,
+          payments: [
+            {
+              ...refundedPart.ownPayment.payments[0],
+              refunds: [{ amountMinor: "500", status: "Sent", requestedAt: "x", answeredAt: null }],
+            },
+          ],
+        },
+      },
+    ])
+      expect(() => parseOwnPaymentReceipt(bad)).toThrow(OwnPaymentReceiptError);
+    const older = parseOwnPaymentReceipt(evenPart);
+    expect([older.refundedMinor, older.netMinor, older.payments[0]?.refunds]).toEqual([
+      "0",
+      "1413",
+      [],
+    ]);
+  });
+});

@@ -75,7 +75,7 @@ export function useTableCheckoutOwnPaid(checkout: TableCheckout | null): {
   );
   return own === null
     ? { yourPaid: null, link: null }
-    : { yourPaid: youPaidText(own), link: t("See your receipt") };
+    : { yourPaid: youPaidText(own.paidMinor, own.refundedMinor), link: t("See your receipt") };
 }
 
 export function TableCheckoutNotice({ checkout }: { readonly checkout: TableCheckout }) {

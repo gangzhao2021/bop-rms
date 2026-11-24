@@ -3240,6 +3240,16 @@
   flex: none;
   white-space: nowrap;
 }
+/* Batch 57 (Q36): each refund of the payer's own payment, one plain sentence each, under it. */
+.dining-session__own-refunds {
+  margin: var(--bop-space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.dining-session__own-refunds li {
+  padding: var(--bop-space-1) 0;
+  overflow-wrap: break-word;
+}
 
 /* M111 (200% zoom on a phone is a 195 CSS px wide page): the guest app never forces a wider page
    than the screen (the shared tokens keep 320 px for the staff app), and the cart bar wraps

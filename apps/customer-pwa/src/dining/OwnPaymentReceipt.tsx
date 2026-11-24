@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { t, useReloadOnLanguageChange, nameLocale } from "../i18n/i18n.js";
-import { formatMoney } from "../journey/format.js";
+import { formatDateTime, formatMoney } from "../journey/format.js";
 import { boundedJsonFetch } from "../network/bounded-fetch.js";
 import {
   getCustomerCsrfCredential,
@@ -35,8 +35,25 @@ export interface OwnPaymentReceipt {
     readonly taxMinor: string | null;
     readonly tipMinor: string;
     readonly totalMinor: string;
+    /**
+     * Batch 57 (WP-2423 Q36): each refund of this payment back to its card, as Payment recorded
+     * it, oldest first; a refused one is listed and was not taken off.
+     */
+    readonly refunds: readonly OwnPaymentRefund[];
+    /** Refunded or on its way back to the card. */
+    readonly refundedMinor: string;
   }[];
   readonly totalMinor: string;
+  /** Batch 57: of `totalMinor`, refunded or on its way back, and what this phone paid net. */
+  readonly refundedMinor: string;
+  readonly netMinor: string;
+}
+export interface OwnPaymentRefund {
+  readonly amountMinor: string;
+  /** Pending: on its way (the card issuer has not confirmed it yet); Failed: nothing went back. */
+  readonly status: "Pending" | "Refunded" | "Failed";
+  readonly requestedAt: string;
+  readonly answeredAt: string | null;
 }
 
 export class OwnPaymentReceiptError extends Error {
@@ -56,6 +73,10 @@ const record = (value: unknown): Record<string, unknown> =>
     : fail();
 const list = (value: unknown, maximum: number): readonly unknown[] =>
   Array.isArray(value) && value.length <= maximum ? value : fail();
+const instant = (value: unknown) =>
+  typeof value === "string" && value.length <= 40 && Number.isFinite(Date.parse(value))
+    ? value
+    : fail();
 const count = (value: unknown) =>
   Number.isSafeInteger(value) && (value as number) >= 1 && (value as number) <= 1000
     ? (value as number)
@@ -90,9 +111,34 @@ export function parseOwnPaymentReceipt(payload: unknown): OwnPaymentReceipt {
       taxMinor: payment.taxMinor === null ? null : minor(payment.taxMinor),
       tipMinor: minor(payment.tipMinor),
       totalMinor: minor(payment.totalMinor),
+      // A server from before batch 57 sends no refunds: none are said (as before).
+      refunds:
+        payment.refunds === undefined
+          ? []
+          : list(payment.refunds, 100).map((value) => {
+              const refund = record(value);
+              return Object.freeze({
+                amountMinor: minor(refund.amountMinor),
+                status:
+                  refund.status === "Pending" ||
+                  refund.status === "Refunded" ||
+                  refund.status === "Failed"
+                    ? refund.status
+                    : fail(),
+                requestedAt: instant(refund.requestedAt),
+                answeredAt: refund.answeredAt === null ? null : instant(refund.answeredAt),
+              });
+            }),
+      refundedMinor: payment.refundedMinor === undefined ? "0" : minor(payment.refundedMinor),
     });
   });
   if (payments.length === 0) fail("none");
+  const totalMinor = minor(own.totalMinor);
+  const refundedMinor = own.refundedMinor === undefined ? "0" : minor(own.refundedMinor);
+  // Never more back than was paid, and the net is what was paid less it.
+  if (BigInt(refundedMinor) > BigInt(totalMinor)) fail();
+  const netMinor = (BigInt(totalMinor) - BigInt(refundedMinor)).toString();
+  if (own.netMinor !== undefined && minor(own.netMinor) !== netMinor) fail();
   return Object.freeze({
     tableLabel:
       own.tableLabel === null
@@ -103,7 +149,9 @@ export function parseOwnPaymentReceipt(payload: unknown): OwnPaymentReceipt {
     restClosedByStaff: typeof own.restClosedByStaff === "boolean" ? own.restClosedByStaff : fail(),
     tablePaidInFull: typeof own.tablePaidInFull === "boolean" ? own.tablePaidInFull : fail(),
     payments,
-    totalMinor: minor(own.totalMinor),
+    totalMinor,
+    refundedMinor,
+    netMinor,
   });
 }
 
@@ -160,10 +208,15 @@ const money = (amountMinor: string) => formatMoney(amountMinor, "CAD");
  * visit, kept in memory for this visit's credential: a payment on a closed bill no longer changes,
  * so moving between tabs asks nothing again. Another guest's phone is answered "nothing here".
  */
+export interface OwnPaid {
+  readonly paidMinor: string;
+  /** Batch 57: of it, refunded or on its way back to the card ("0": none). */
+  readonly refundedMinor: string;
+}
 let ownPaidAtTable: {
   readonly credential: string;
   readonly status: "loading" | "ready" | "none" | "unavailable";
-  readonly amountMinor: string | null;
+  readonly paid: OwnPaid | null;
 } | null = null;
 const ownPaidListeners = new Set<() => void>();
 function setOwnPaidAtTable(next: typeof ownPaidAtTable) {
@@ -184,11 +237,24 @@ export function resetOwnPaidAtTable(): void {
 }
 
 /**
- * What this phone paid on its table's bill (minor units), read only while `enabled` (staff closed a
- * bill some of which was paid); null while unread, when it paid nothing, or when the read failed
- * (Your table's receipt then offers to try again).
+ * Batch 57: Your table's receipt read this phone's payment afresh (a refund staff made since shows
+ * there): the other tabs say the same from then on.
  */
-export function useOwnPaidAtTable(enabled: boolean): string | null {
+function keepOwnPaid(credential: string | null, receipt: OwnPaymentReceipt) {
+  if (credential === null) return;
+  setOwnPaidAtTable({
+    credential,
+    status: "ready",
+    paid: { paidMinor: receipt.totalMinor, refundedMinor: receipt.refundedMinor },
+  });
+}
+
+/**
+ * What this phone paid on its table's bill (minor units) and how much of it went back, read only
+ * while `enabled` (staff closed a bill some of which was paid); null while unread, when it paid
+ * nothing, or when the read failed (Your table's receipt then offers to try again).
+ */
+export function useOwnPaidAtTable(enabled: boolean): OwnPaid | null {
   const credential = useSyncExternalStore(
     subscribeCustomerCsrfContext,
     getCustomerCsrfCredential,
@@ -199,15 +265,15 @@ export function useOwnPaidAtTable(enabled: boolean): string | null {
     if (!enabled || credential === null) return;
     const kept = getOwnPaid();
     if (kept?.credential === credential && kept.status !== "unavailable") return;
-    setOwnPaidAtTable({ credential, status: "loading", amountMinor: null });
-    const settle = (status: "ready" | "none" | "unavailable", amountMinor: string | null) => {
-      if (getOwnPaid()?.credential === credential)
-        setOwnPaidAtTable({ credential, status, amountMinor });
+    setOwnPaidAtTable({ credential, status: "loading", paid: null });
+    const settle = (status: "ready" | "none" | "unavailable", paid: OwnPaid | null) => {
+      if (getOwnPaid()?.credential === credential) setOwnPaidAtTable({ credential, status, paid });
     };
     createOwnPaymentReceiptClient(() => credential)
       .read()
       .then(
-        (receipt) => settle("ready", receipt.totalMinor),
+        (receipt) =>
+          settle("ready", { paidMinor: receipt.totalMinor, refundedMinor: receipt.refundedMinor }),
         (error: unknown) =>
           settle(
             error instanceof OwnPaymentReceiptError && error.code === "none"
@@ -218,13 +284,54 @@ export function useOwnPaidAtTable(enabled: boolean): string | null {
       );
   }, [enabled, credential]);
   return enabled && known?.credential === credential && known.status === "ready"
-    ? known.amountMinor
+    ? known.paid
     : null;
 }
 
-/** "You paid $14.13 online on this phone." — the one line every tab says to the payer. */
-export const youPaidText = (amountMinor: string) =>
-  t("You paid {amount} online on this phone.", { amount: money(amountMinor) });
+/**
+ * "You paid $14.13 online on this phone." — the one line every tab says to the payer. Batch 57
+ * (Q36): with what went back to the card (refunded or on its way), and what they paid net.
+ */
+export const youPaidText = (amountMinor: string, refundedMinor = "0") => {
+  const refunded = BigInt(refundedMinor);
+  if (refunded <= 0n)
+    return t("You paid {amount} online on this phone.", { amount: money(amountMinor) });
+  if (refunded >= BigInt(amountMinor))
+    return t("You paid {amount} online on this phone. All of it goes back to your card.", {
+      amount: money(amountMinor),
+    });
+  return t(
+    "You paid {amount} online on this phone. After {refund} back to your card, you paid {net}.",
+    {
+      amount: money(amountMinor),
+      refund: money(refundedMinor),
+      net: money((BigInt(amountMinor) - refunded).toString()),
+    },
+  );
+};
+
+/** One refund of this phone's payment, in plain words: where the money is and what to do. */
+export function refundText(refund: OwnPaymentRefund): string {
+  const amount = money(refund.amountMinor);
+  // The time is never last in a sentence ("12:21 p.m.." in English).
+  if (refund.status === "Refunded")
+    return t(
+      "On {date}, {amount} went back to your card. Your bank may take a few days to show it.",
+      {
+        amount,
+        date: formatDateTime(refund.answeredAt ?? refund.requestedAt),
+      },
+    );
+  if (refund.status === "Pending")
+    return t(
+      "{amount} is on its way back to your card (sent {date}). Your card issuer has not confirmed it yet.",
+      { amount, date: formatDateTime(refund.requestedAt) },
+    );
+  return t(
+    "A refund of {amount} sent on {date} did not go through, so nothing went back to your card. Please ask staff.",
+    { amount, date: formatDateTime(refund.requestedAt) },
+  );
+}
 
 function coversText(payment: OwnPaymentReceipt["payments"][number]): string {
   if (payment.covers === "WholeTable") return t("Your table’s whole bill");
@@ -244,7 +351,7 @@ export function OwnPaymentReceiptView({ receipt }: { readonly receipt: OwnPaymen
       aria-labelledby="own-payment-receipt"
     >
       <h2 id="own-payment-receipt">{t("Your receipt")}</h2>
-      <p>{youPaidText(receipt.totalMinor)}</p>
+      <p>{youPaidText(receipt.totalMinor, receipt.refundedMinor)}</p>
       {receipt.payments.map((payment, index) => (
         <div key={index}>
           <h3>{coversText(payment)}</h3>
@@ -276,7 +383,29 @@ export function OwnPaymentReceiptView({ receipt }: { readonly receipt: OwnPaymen
               <dt>{t("Paid by")}</dt>
               <dd>{t("Online by phone")}</dd>
             </div>
+            {/* Batch 57 (Q36): what went back to the card, and what this payment came to net. */}
+            {payment.refundedMinor === "0" ? null : (
+              <>
+                <div>
+                  <dt>{t("Refunded to your card")}</dt>
+                  <dd>−{money(payment.refundedMinor)}</dd>
+                </div>
+                <div>
+                  <dt>{t("Total after refunds")}</dt>
+                  <dd>
+                    {money((BigInt(payment.totalMinor) - BigInt(payment.refundedMinor)).toString())}
+                  </dd>
+                </div>
+              </>
+            )}
           </dl>
+          {payment.refunds.length === 0 ? null : (
+            <ul className="dining-session__own-refunds" aria-label={t("Refunds of your payment")}>
+              {payment.refunds.map((refund, number) => (
+                <li key={number}>{refundText(refund)}</li>
+              ))}
+            </ul>
+          )}
         </div>
       ))}
       {receipt.tablePaidInFull ? null : (
@@ -302,7 +431,10 @@ export function OwnPaymentReceiptPanel({ client }: { readonly client: OwnPayment
   >({ status: "loading" });
   const load = useCallback(async () => {
     try {
-      setState({ status: "ready", receipt: await client.read() });
+      const receipt = await client.read();
+      setState({ status: "ready", receipt });
+      // Batch 57: a refund read here shows on Menu, dish pages and Cart from now on too.
+      keepOwnPaid(getCustomerCsrfCredential(), receipt);
     } catch (error) {
       setState({
         status:

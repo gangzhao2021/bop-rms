@@ -142,7 +142,12 @@ interface EmptyTable {
    * phone) and the ended visit's read-only value for its own payment's receipt. Absent: it paid
    * nothing there.
    */
-  readonly yourPayment?: { readonly amountMinor: string; readonly csrfToken: string };
+  readonly yourPayment?: {
+    readonly amountMinor: string;
+    /** Batch 57 (Q36): of it, refunded or on its way back to the card (absent: none). */
+    readonly refundedMinor?: string;
+    readonly csrfToken: string;
+  };
 }
 /** What was paid on a bill staff closed when the guests left. */
 export type ClosedBillPaid = "Nothing" | "Some";
@@ -197,6 +202,8 @@ export type EndedTable = Readonly<
       store: RestoredStore | null;
       /** Batch 56: what this phone paid on that bill (minor units); null or absent: nothing. */
       yourPaidMinor?: string | null;
+      /** Batch 57: of it, refunded or on its way back to the card (absent: none). */
+      yourRefundedMinor?: string;
     }
   | {
       kind: "Moved";
@@ -231,7 +238,12 @@ export function getEndedTable(): EndedTable | null {
       store: emptyTable.store ?? null,
       ...(emptyTable.yourPayment === undefined
         ? {}
-        : { yourPaidMinor: emptyTable.yourPayment.amountMinor }),
+        : {
+            yourPaidMinor: emptyTable.yourPayment.amountMinor,
+            ...(emptyTable.yourPayment.refundedMinor === undefined
+              ? {}
+              : { yourRefundedMinor: emptyTable.yourPayment.refundedMinor }),
+          }),
     });
   if (emptyTable !== null)
     return Object.freeze({

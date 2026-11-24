@@ -1421,6 +1421,19 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这张收据只包括您的付款，不是本桌的全部账单。",
   "We couldn’t load your receipt. Check your connection and try again.":
     "暂时没能加载您的收据，请检查网络后再试。",
+  // Batch 57 (Q36): refunds of the payer's own payment, on their own receipt and every tab.
+  "You paid {amount} by card on this phone. All of it goes back to your card.":
+    "您已在这部手机上在线支付 {amount}。这笔款项全部退回您的卡。",
+  "You paid {amount} by card on this phone. After {refund} back to your card, you paid {net}.":
+    "您已在这部手机上在线支付 {amount}。退回您的卡 {refund} 后，您实付 {net}。",
+  "Refunded to your card": "退回您的卡",
+  "Refunds of your payment": "您这笔付款的退款",
+  "On {date}, {amount} went back to your card. Your bank may take a few days to show it.":
+    "{date}，{amount} 已退回您的卡。银行可能要过几天才显示。",
+  "{amount} is on its way back to your card (sent {date}). Your card issuer has not confirmed it yet.":
+    "{amount} 正在退回您的卡（{date} 发出），发卡银行还没有确认。",
+  "A refund of {amount} sent on {date} did not go through, so nothing went back to your card. Please ask staff.":
+    "{date} 发出的 {amount} 退款没有成功，没有钱退回您的卡。请找店员。",
   // A no-break space keeps 份 with its number on a narrow round card.
   // Batch 56: a round's payment while staff's equal parts are being paid (the bill still open).
   "{paid} of {count} parts paid": "{count}\u00a0份付了 {paid}\u00a0份",

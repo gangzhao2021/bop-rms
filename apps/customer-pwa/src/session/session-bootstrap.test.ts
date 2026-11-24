@@ -750,6 +750,38 @@ it("batch 56: keeps what this phone paid on a bill staff closed, and its own rec
   }
 });
 
+// Batch 57 (WP-2423 Q36): staff refunded part of it to the card; the restore says how much went
+// back (never more than it paid), so every tab tells the payer what they paid net.
+it("batch 57: keeps what went back to this phone's card from a bill staff closed", async () => {
+  const restore = (value: unknown) =>
+    restoreCustomerSession(vi.fn().mockResolvedValue(response(value)));
+  const closed = {
+    tableLabel: "L55 CB3 (TEST)",
+    paid: "Some",
+    yourPayment: { amountMinor: "1413", method: "Online", refundedMinor: "800" },
+    csrfToken: "C".repeat(43),
+  };
+  expect(await restore({ schemaVersion: 1, closedTable: closed })).toBe(false);
+  expect(getEndedTable()).toEqual({
+    kind: "ClosedByStaff",
+    tableLabel: "L55 CB3 (TEST)",
+    paid: "Some",
+    store: null,
+    yourPaidMinor: "1413",
+    yourRefundedMinor: "800",
+  });
+  expect(getClosedTableOwnReceiptCsrf()).toBe("C".repeat(43));
+  setEmptyTable(null);
+  for (const refundedMinor of ["1414", "0", "8.00", 800])
+    expect(
+      await restore({
+        schemaVersion: 1,
+        closedTable: { ...closed, yourPayment: { ...closed.yourPayment, refundedMinor } },
+      }),
+    ).toBe(false);
+  expect(getEndedTable()).toBeNull();
+});
+
 // Batch 47 (v15 b46 live): a tab left open while staff closed, moved or merged the table was
 // refused (401 cart_session_expired, or the cart read's "your place ended") and said "Your Store
 // session expired. Scan the location QR code again." The restore read is asked instead; only a

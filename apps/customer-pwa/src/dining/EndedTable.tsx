@@ -85,6 +85,7 @@ export function ClosedBillTableCard({
   tableLabel,
   paid,
   yourPaidMinor = null,
+  yourRefundedMinor = "0",
   receiptLink = false,
 }: {
   readonly tableLabel: string;
@@ -94,6 +95,8 @@ export function ClosedBillTableCard({
    * own payment, never another guest's); null: it paid nothing there.
    */
   readonly yourPaidMinor?: string | null;
+  /** Batch 57 (Q36): of it, refunded or on its way back to the card. */
+  readonly yourRefundedMinor?: string;
   /** Batch 56: a tab other than Your table links to this phone's own receipt there. */
   readonly receiptLink?: boolean;
 }) {
@@ -108,7 +111,9 @@ export function ClosedBillTableCard({
               "Staff closed your table’s bill: what was paid stays paid, and the rest is not charged to you.",
             )}
       </p>
-      {yourPaidMinor === null || paid === "Nothing" ? null : <p>{youPaidText(yourPaidMinor)}</p>}
+      {yourPaidMinor === null || paid === "Nothing" ? null : (
+        <p>{youPaidText(yourPaidMinor, yourRefundedMinor)}</p>
+      )}
       <p>{t("New party? Ask staff to seat you, then scan again.")}</p>
       {yourPaidMinor !== null && paid !== "Nothing" && receiptLink ? (
         <Link className="order-status__back" to="/dine-in/session">
@@ -182,6 +187,7 @@ export function EndedTableCard({ ended }: { readonly ended: EndedTable }) {
       tableLabel={ended.tableLabel}
       paid={ended.paid}
       yourPaidMinor={ended.yourPaidMinor ?? null}
+      yourRefundedMinor={ended.yourRefundedMinor ?? "0"}
       receiptLink
     />
   ) : (
