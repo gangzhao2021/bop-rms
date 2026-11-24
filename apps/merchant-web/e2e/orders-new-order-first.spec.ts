@@ -422,3 +422,134 @@ for (const language of ["en", "zh-Hans"] as const)
       ).toBe(0);
       await expectNoInternalText(page);
     });
+
+/**
+ * Batch 57 (v15 batch 56 live, Test Merchant 2, business date 2026-11-23, 89 then 100 orders
+ * that day): the header read "89 orders today · 1 to accept · 46 from earlier days" while the one
+ * order to accept was the 11/4 table order listed under the earlier days, as if one of today's 89
+ * still waited. The status tabs under it read "All 96 · To accept 1 · In progress 41 · Ready 5 ·
+ * Picked up / served 49": the loaded rows (50 of today's plus the 46 earlier-day ones), neither
+ * today's count nor today's plus the earlier days'. In zh-Hans the same earlier-day group was
+ * named four ways (之前营业日 · 还没做完 / 之前营业日的单 · 还没接 / 较早营业日 · 未完成 / 另有 46 单是之前的).
+ * The header now says which group the order to accept is in; "All" counts today's orders (the
+ * server's count) plus the earlier days' listed with them; a tab whose rows are only partly loaded
+ * shows no number that could pass for the day's; zh-Hans names the group 较早营业日 throughout.
+ * Every order stays listed.
+ */
+for (const language of ["en", "zh-Hans"] as const)
+  for (const [width, height] of [
+    [390, 844],
+    [1024, 768],
+    [1440, 900],
+  ] as const)
+    test(`@production Orders header and tabs count what they say with a day bigger than one page, ${language} at ${width}`, async ({
+      page,
+    }) => {
+      const en = language === "en";
+      if (!en)
+        await page.addInitScript(() =>
+          window.localStorage.setItem("bop.merchant.language", "zh-Hans"),
+        );
+      await page.setViewportSize({ width, height });
+      await page.clock.install();
+      const now = Date.now();
+      // Today's newest 50 of 89 (none waiting): 41 being made, 5 ready, 4 picked up.
+      const todays = Array.from({ length: 50 }, (_, i) => {
+        const row = order(
+          349 - i,
+          String(89 - i),
+          today,
+          new Date(now - (i + 1) * 4 * 60_000).toISOString(),
+          false,
+        );
+        return i < 41
+          ? row
+          : i < 46
+            ? { ...row, kitchenPhase: "Ready" }
+            : { ...row, currentPhase: "Fulfilled", currentVersion: 3 };
+      });
+      const answer = {
+        earlierDayItems: tm2Earlier,
+        items: todays,
+        nextAfterOrderReference: id(300),
+        todayOrderCount: 89,
+      };
+      await page.route("**/merchant/session", (route) => route.fulfill({ headers, json: session }));
+      await page.route("**/merchant/business-day", (route) =>
+        route.fulfill({
+          headers,
+          json: {
+            businessDate: today,
+            startsAt: new Date(now - 20 * 3_600_000).toISOString(),
+            endsAt: new Date(now + 4 * 3_600_000).toISOString(),
+            timeZone: "America/Toronto",
+            observedAt: new Date(now).toISOString(),
+          },
+        }),
+      );
+      for (const pattern of ["**/merchant/orders?*", "**/merchant/orders"])
+        await page.route(pattern, (route) => route.fulfill({ headers, json: answer }));
+      await page.goto("/operations/orders");
+      const rows = page.locator("li.order-row:not([hidden])");
+      await expect(rows).toHaveCount(96);
+      const meta = page.locator(".workspace-page__meta");
+      // The one to accept is the earlier days' table order, and the header says so.
+      await expect(meta).toHaveText(
+        en
+          ? "89 orders today · 46 from earlier days (1 to accept)"
+          : "今天 89 单 · 另有 46 单来自较早营业日（1 单待接）",
+      );
+      // "All": today's 89 (the server's count) and the 46 earlier-day orders listed with them.
+      const tabs = page.locator(".order-status-filters button");
+      const tab = (name: string) => tabs.filter({ hasText: name });
+      await expect(tab(en ? "All" : "全部").locator(".order-status-filters__count")).toHaveText(
+        "135",
+      );
+      // The other tabs' rows are partly on the next page: no number that reads as the day's.
+      for (const name of en
+        ? ["To accept", "In progress", "Ready", "Picked up / served"]
+        : ["待接单", "进行中", "已做好", "已取餐/上桌"])
+        await expect(tab(name).locator(".order-status-filters__count"), name).toHaveCount(0);
+      // One name for the earlier days' group in Chinese: heading, row tags, Needs attention.
+      const list = page.locator(".order-workbench");
+      if (!en) {
+        await expect(list).toContainText("较早营业日 · 未完成");
+        const table = rows.filter({ hasText: /11\/4 · 2(?!\d)/u });
+        await expect(table).toContainText("较早营业日 · 待接单");
+        await expect(page.locator(".order-attention")).toContainText(
+          "46 张较早营业日的订单还没有完成",
+        );
+        const text = (await page.locator("body").innerText()).replaceAll(/\s+/gu, "");
+        expect(text).not.toContain("之前营业日");
+        expect(text).not.toContain("是之前的");
+        expect(text).not.toContain("还没接");
+      }
+      // The header line and the tabs fit with room to spare for Linux fonts.
+      const fits = await page.evaluate(() => {
+        const right = document.documentElement.clientWidth;
+        return [".workspace-page__meta", ".order-status-filters"].map((selector) => {
+          const box = document.querySelector(selector)?.getBoundingClientRect();
+          return box === undefined ? -1 : right - box.right;
+        });
+      });
+      for (const spare of fits) expect(spare).toBeGreaterThanOrEqual(0);
+      // Today's newest order is still on the first screen under the longer header line.
+      await page.evaluate(() => window.scrollTo(0, 0));
+      const first = await rows
+        .first()
+        .evaluate((row) => row.getBoundingClientRect().bottom + window.scrollY);
+      expect(first, `${language} ${width}`).toBeLessThanOrEqual(height - 40);
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        ),
+      ).toBe(0);
+      await page.screenshot({
+        path: test.info().outputPath(`orders-counts-${language}-${width}.png`),
+      });
+      // The To accept tab still lists the earlier days' order (never hidden).
+      await tab(en ? "To accept" : "待接单").click();
+      await expect(rows).toHaveCount(1);
+      await expect(rows.first()).toContainText("11/4 · 2");
+      await expectNoInternalText(page);
+    });

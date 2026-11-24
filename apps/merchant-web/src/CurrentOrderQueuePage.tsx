@@ -212,6 +212,43 @@ export function filterCurrentOrderItems(
                           order.kitchenPhase === null)))),
   );
 }
+/**
+ * Batch 57 (v15 batch 56 live, Test Merchant 2, 100 orders that day): the status tabs read "All 96
+ * · To accept 1 · In progress 41 · Ready 5 · Picked up / served 49" under "100 orders today": they
+ * counted the loaded rows (the newest 50 of today's plus 46 earlier-day orders), and staff could
+ * read 49 as the day's pickups and servings. A tab's number is only shown when it is true for what
+ * the tab filters: every row is loaded (one page holds them all), or, for "All" on today's first
+ * page, the server's count of today's orders plus the earlier days' orders listed with them. Any
+ * other tab whose rows are partly on a later page shows no number (null). Nothing is hidden: the
+ * rows and the next page stay as they are.
+ */
+export function statusTabCount(
+  view: Pick<CurrentOrderQueue, "items" | "nextAfterOrderReference" | "todayOrderCount">,
+  after: string | null,
+  filters: CurrentOrderFilters,
+): number | null {
+  if (after === null && view.nextAfterOrderReference === null)
+    return filterCurrentOrderItems(view.items, filters).length;
+  const today = filters.today ?? null;
+  if (
+    after !== null ||
+    today === null ||
+    view.todayOrderCount === undefined ||
+    filters.phase !== "All" ||
+    filters.day !== "Today" ||
+    filters.orderNumber.trim() !== "" ||
+    filters.type !== "All" ||
+    filters.channel !== "All"
+  )
+    return null;
+  // Today's orders are the server's count; the earlier days' listed with them are all on page 1.
+  return (
+    view.todayOrderCount +
+    filterCurrentOrderItems(view.items, filters).filter(
+      (order) => (order.businessDate ?? order.listedBusinessDate) !== today,
+    ).length
+  );
+}
 const ordersListPhases: ReadonlySet<string> = new Set([
   "AwaitingAcceptance",
   "InProgress",
@@ -5019,28 +5056,29 @@ export function CurrentOrderQueuePage({
                       role="group"
                       aria-label={t("Show orders")}
                     >
-                      {segments.map(([phase, label]) => (
-                        <button
-                          key={phase}
-                          type="button"
-                          aria-pressed={phaseFilter === phase}
-                          onClick={() => setPhaseFilter(phase)}
-                        >
-                          {label}
-                          <span className="order-status-filters__count">
-                            {
-                              filterCurrentOrderItems(state.view.items, {
-                                orderNumber: orderNumberSearch,
-                                type: typeFilter,
-                                channel: channelFilter,
-                                phase,
-                                day: dayFilter,
-                                today,
-                              }).length
-                            }
-                          </span>
-                        </button>
-                      ))}
+                      {segments.map(([phase, label]) => {
+                        const count = statusTabCount(state.view, after, {
+                          orderNumber: orderNumberSearch,
+                          type: typeFilter,
+                          channel: channelFilter,
+                          phase,
+                          day: dayFilter,
+                          today,
+                        });
+                        return (
+                          <button
+                            key={phase}
+                            type="button"
+                            aria-pressed={phaseFilter === phase}
+                            onClick={() => setPhaseFilter(phase)}
+                          >
+                            {label}
+                            {count === null ? null : (
+                              <span className="order-status-filters__count">{count}</span>
+                            )}
+                          </button>
+                        );
+                      })}
                     </div>
                     <div className="order-toolbar__tools">
                       <div className="order-filter">

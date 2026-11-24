@@ -4,6 +4,7 @@ import {
   awaitingSince,
   earlierDayWaiting,
   ordersSummary,
+  statusTabCount,
 } from "./CurrentOrderQueuePage.js";
 import type { CurrentOrderQueue } from "./current-order-queue-client.js";
 
@@ -182,6 +183,14 @@ describe("batch 56: an earlier day's order still waiting to be accepted is liste
 // Batch 57 (v15 batch 56 live, Test Merchant 2, business date 2026-11-23).
 describe("batch 57: the Orders header and tabs count what they say", () => {
   const day = { businessDate: "2026-11-23", startsAt: "2026-11-23T09:00:00.000Z" };
+  const filters = {
+    orderNumber: "",
+    type: "All",
+    channel: "All",
+    phase: "All",
+    day: "Today" as const,
+    today: "2026-11-23",
+  };
   // The 11/4 table order still waiting, 45 earlier-day open pickups, and today's newest 50 of 89
   // with none to accept.
   const leftover = order("2", "2026-11-05T01:47:04.758Z", {
@@ -207,5 +216,31 @@ describe("batch 57: the Orders header and tabs count what they say", () => {
     expect(ordersSummary(view, "2026-11-23", 1, day)).toBe(
       "89 orders today · 46 from earlier days (1 to accept)",
     );
+  });
+
+  it("counts All as today's orders and the earlier days' listed with them, and no partial tab", () => {
+    // Before: "All 96" (the loaded rows), and every tab a count of the loaded rows only.
+    expect(statusTabCount(view, null, filters)).toBe(89 + 46);
+    expect(statusTabCount(view, null, { ...filters, phase: "AwaitingAcceptance" })).toBeNull();
+    expect(statusTabCount(view, null, { ...filters, phase: "Fulfilled" })).toBeNull();
+    // A narrowed list, a later page or no server count: no number that reads as the day's.
+    expect(statusTabCount(view, null, { ...filters, type: "Pickup" })).toBeNull();
+    expect(statusTabCount(view, null, { ...filters, day: "All" })).toBeNull();
+    expect(statusTabCount(view, "40", filters)).toBeNull();
+    const older = Object.fromEntries(
+      Object.entries(view).filter(([key]) => key !== "todayOrderCount"),
+    ) as CurrentOrderQueue;
+    expect(statusTabCount(older, null, filters)).toBeNull();
+  });
+
+  it("counts every tab when the whole list is loaded", () => {
+    const whole = {
+      ...view,
+      items: [leftover, ...todays.slice(0, 3)],
+      nextAfterOrderReference: null,
+      todayOrderCount: 3,
+    } as CurrentOrderQueue;
+    expect(statusTabCount(whole, null, filters)).toBe(4);
+    expect(statusTabCount(whole, null, { ...filters, phase: "AwaitingAcceptance" })).toBe(1);
   });
 });
