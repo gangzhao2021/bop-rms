@@ -209,7 +209,7 @@ for (const language of ["en", "zh-Hans"] as const)
       );
     } else {
       await expect(reminder).toContainText("$86.40");
-      await expect(reminder).toContainText("之前营业日开的，还没关 · $95.96，不计入今天的数字");
+      await expect(reminder).toContainText("较早营业日开的，还没关 · $95.96，不计入今天的数字");
       await expect(reminder).toContainText("请在“桌台”里收款或登记客人未付离开，然后逐桌关台。");
     }
     await page.setViewportSize({ width: 390, height: 844 });

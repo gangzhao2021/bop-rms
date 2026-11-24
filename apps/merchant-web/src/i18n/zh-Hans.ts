@@ -1751,7 +1751,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Each menu item and size, before tax. Options chosen with an item are included in its price. Refunds include dishes cancelled after payment.":
     "每件菜单商品及规格，税前。随商品选择的选项计入其价格。退款包括付款后取消的菜品。",
   "Earlier check of {businessDate}": "{businessDate} 的较早核对",
-  "Earlier days · still holding stock": "较早的营业日 · 仍占用库存",
+  "Earlier days · still holding stock": "较早营业日 · 仍占用库存",
   "Earlier payment save did not commit. You can save again.":
     "之前的付款保存未提交。你可以再次保存。",
   "Earlier save confirmed. Choose this saved configuration to use it in the setup draft.":
@@ -1916,7 +1916,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "魁北克税务局签发，例如 1234567890TQ0001。魁北克以外请留空。",
   "From a set date and time": "从指定日期和时间起",
   "From an earlier business day. Check whether it was collected, then close it.":
-    "来自较早的营业日。请核对是否已被取走，然后关闭。",
+    "来自较早营业日。请核对是否已被取走，然后关闭。",
   "1 ticket from earlier days": "1 张较早营业日的票据",
   "{length} tickets from earlier days": "{length} 张较早营业日的票据",
   "1 ticket from earlier days to check and close": "1 张较早营业日的票据待核对并关闭",
@@ -4741,7 +4741,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "The payment save could not be confirmed. Recover the original save before making another change.":
     "无法确认付款保存。再做其他更改前，请先恢复原来的保存。",
   "The payment was made more than 24 hours ago": "付款已超过 24 小时",
-  "The payment was made on an earlier business day": "付款发生在较早的营业日",
+  "The payment was made on an earlier business day": "付款发生在较早营业日",
   "The payment was refunded automatically; this order cannot be accepted.":
     "付款已自动退回；这笔订单不能接单。",
   "The payment, including any tip, is being refunded in full.": "付款（包括小费）正在全额退回。",
@@ -4938,7 +4938,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "These items have no price in the price book this Store uses; customers cannot be quoted for them: {value}.":
     "这些商品在本店使用的价目表中没有价格；无法为顾客报价：{value}。",
   "These orders are from an earlier business day. Their numbers may repeat today's. If the customer collected the order, hand it over with the code or in person; if not, a manager closes it as not collected.":
-    "这些订单来自较早的营业日，单号可能与今天的重复。如果顾客来取，请用取餐码或当面核对后交付；如果没有，由店长作为未取餐关闭。",
+    "这些订单来自较早营业日，单号可能与今天的重复。如果顾客来取，请用取餐码或当面核对后交付；如果没有，由店长作为未取餐关闭。",
   "These orders were taken before stock ran short (a count found less, or waste was recorded) and keep their ingredients. New orders can't use these items until it is fixed. For each order: get more and record the delivery under":
     "这些订单是在库存不足之前下的（盘点发现数量更少，或记录了报损），会保留其配料。在修正之前，新订单不能使用这些品项。对于每笔订单：补货并在以下位置记录收货：",
   "These products use a tax class that comes from this Store’s tax configuration and has no name in the Brand’s list above. Tax review shows its rates. To give products a named class, add it above, then choose it on each product once the tax configuration sets its rates.":
@@ -6326,11 +6326,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "to cancel or refund {order} from {day}.": "页取消或退款：{day} 的 {order}。",
   "Open work": "进行中",
   "Show kitchen work": "显示后厨工作",
-  "· {count} more from earlier days": "· 另有 {count} 张是之前的",
+  // Batch 58: one name, 较早营业日, for earlier days on every staff screen.
+  "· {count} more from earlier days": "· 另有 {count} 张来自较早营业日",
   "{orderLabel} · {day} · not finished": "{orderLabel} · {day} · 还没有做完",
   "Order {orderNumber} is from {date} and still holds its ingredients.":
     "{orderNumber} 号单是{date}的，还没做完，占着它的食材。",
-  "an earlier day": "之前营业日",
+  "an earlier day": "较早营业日",
   "It is finished, but its ingredients are still set aside. Release them from the order.":
     "订单已做完，但食材仍被占着。请在订单里释放食材。",
   "Make it and hand it over if the guest comes back; otherwise cancel it — the guest is refunded and the ingredients go back to stock.":
@@ -8208,7 +8209,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{count} order updates are being retried (failing for {duration}). Ready orders may not show for pickup yet, and kitchen or payment changes may be late.":
     "有 {count} 条订单更新正在重试（已失败{duration}）。做好的订单可能还没显示可取餐，后厨或付款的变更也可能延迟。",
   "{count} orders from earlier days still have ingredients set aside (the oldest for {duration}). Items made from them can show as sold out to guests although the stock is on the shelf.":
-    "有 {count} 笔往日订单还占用着配料（最久的已占用{duration}）。用这些配料做的菜可能对客人显示售罄，其实货架上还有。",
+    "有 {count} 笔较早营业日的订单还占用着配料（最久的已占用{duration}）。用这些配料做的菜可能对客人显示售罄，其实货架上还有。",
   "No pickup times are set up for now, so guests cannot place pickup orders online and staff cannot take them at the counter. Dine-in is not affected.":
     "现在没有设好的自取时间，所以客人无法在线下自取订单，员工也无法在柜台接自取订单。堂食不受影响。",
   "Pickup times are set up only for the next {duration}. After that, guests cannot place pickup orders online and staff cannot take them at the counter.":
@@ -10313,7 +10314,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Your role can't approve this change, or you made it yourself. Someone else must approve it: the owner, or a manager who can approve changes.":
     "你的角色不能批准这项更改，或这项更改是你提出的。需要由别人批准：店主，或能批准更改的店长。",
   // b39 (v15 b38 sweep): tables and tickets from earlier days, and the closing alert on Tables.
-  "Tables still open from earlier days": "之前营业日没关的桌",
+  "Tables still open from earlier days": "较早营业日没关的桌",
   "All paid or nothing to pay; close each one when its guests have left":
     "都已付款或不用付款，客人离开后逐张关台",
   "{settled} paid, only to close": "{settled} 张已付款，只需关台",
@@ -10324,13 +10325,13 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "到桌台页逐张看账单：还没付的先收款，客人离开后关台",
   "Take the payment, or record that the guests left without paying, then close the table":
     "收款，或登记客人未付离开，然后关台",
-  "From earlier days": "之前营业日的",
-  "{tables} from earlier days": "{tables}是之前营业日的",
+  "From earlier days": "较早营业日",
+  "{tables} from earlier days": "{tables}来自较早营业日",
   "These tables were opened on an earlier day and never closed. Open each one: take the payment, or record that the guests left without paying, then close it. Nothing is closed or written off by itself.":
-    "这些桌是之前营业日开的，一直没关。逐桌打开：收款，或登记客人未付离开，然后关台。系统不会自动关台或核销。",
+    "这些桌是较早营业日开的，一直没关。逐桌打开：收款，或登记客人未付离开，然后关台。系统不会自动关台或核销。",
   "{tables} · not in today's figures": "{tables} · 不计入今天的数字",
   "Opened on an earlier day and never closed. On Tables, take the payment or record that the guests left without paying, then close each one. Nothing is closed or written off by itself.":
-    "这些桌是之前营业日开的，一直没关。请在“桌台”里收款或登记客人未付离开，然后逐桌关台。系统不会自动关台或核销。",
+    "这些桌是较早营业日开的，一直没关。请在“桌台”里收款或登记客人未付离开，然后逐桌关台。系统不会自动关台或核销。",
   "Closing at {time}: {tables} still open. Take each table's payment and close it when the guests leave.":
     "{time} 打烊：还有 {tables}没关。请逐桌收款，客人走后关台。",
   "Closed at {time}: {tables} still open. Take the payment, or record that the guests left without paying, and close each table before the day ends at {end}.":
@@ -10343,9 +10344,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Before closing: today's tables are all paid": "打烊前：今天的桌都结完了",
   "After closing: today's tables are all paid": "打烊后：今天的桌都结完了",
   "Also open from earlier days: {tables} · {amount}, not in today's figures. On Tables, take the payment or record that the guests left without paying, then close each one.":
-    "另有 {tables}是之前营业日开的，还没关 · {amount}，不计入今天的数字。请在“桌台”里收款或登记客人未付离开，然后逐桌关台。",
+    "另有 {tables}是较早营业日开的，还没关 · {amount}，不计入今天的数字。请在“桌台”里收款或登记客人未付离开，然后逐桌关台。",
   "Also open from earlier days: {tables}, nothing owed. On Tables, close each one.":
-    "另有 {tables}是之前营业日开的，还没关，没有欠款。请在“桌台”里逐桌关台。",
+    "另有 {tables}是较早营业日开的，还没关，没有欠款。请在“桌台”里逐桌关台。",
   // Batch 40: the Brand configuration panel (ORG-BRAND-DETAIL).
   "The request is invalid. Check the configuration fields.": "填写有误，请检查配置各项。",
   "Someone else changed this brand's configuration. Recover the change still waiting here, then refresh before making a new one.":
@@ -10423,7 +10424,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Revision {revision} · {state} · {recordedAt}": "修订 {revision} · {state} · {recordedAt}",
   "Older configuration history": "更早的配置记录",
   // b40 (v15 b39 live): Home counts tonight's tables apart from earlier days'.
-  "Not counted: {tables} from earlier days": "不计入：{tables}是之前营业日的",
+  "Not counted: {tables} from earlier days": "不计入：{tables}来自较早营业日",
   // b40: a dish taken off because it sold out says why, as the guest's page does.
   "Sold out · taken off the bill, not charged": "已售罄 · 已从账单删除，不收费",
   // b41 (v15 b40 live): the Brand pages' frame and its states, in staff words.

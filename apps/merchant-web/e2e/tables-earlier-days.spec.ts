@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 // b39 (v15 b38 dinner sweep): on Tables, a guest's call says what they chose, a table left open
 // from an earlier business day is listed apart (out of "need you"), its wait reads in days with no
@@ -15,10 +15,16 @@ const headers = { "cache-control": "no-store" };
 // 21:30 in Toronto; the Store closes at 22:00 and the business day ends at 04:00.
 const now = "2026-11-21T02:30:00.000Z";
 
-test("@production b39: Tables keeps earlier days apart, says what a guest asked for and warns before closing", async ({
-  page,
-}) => {
+async function tables(page: Page, language: "en" | "zh-Hans" = "en") {
   await page.clock.setFixedTime(new Date(now));
+  if (language === "zh-Hans")
+    await page.addInitScript(() => {
+      try {
+        window.localStorage.setItem("bop.merchant.language", "zh-Hans");
+      } catch {
+        /* the page falls back to English */
+      }
+    });
   await page.route("**/merchant/session", (route) =>
     route.fulfill({
       headers,
@@ -115,7 +121,12 @@ test("@production b39: Tables keeps earlier days apart, says what a guest asked 
   await page.route("**/merchant/dining/staff-calls/count", (route) =>
     route.fulfill({ headers, json: { open: 1 } }),
   );
+}
 
+test("@production b39: Tables keeps earlier days apart, says what a guest asked for and warns before closing", async ({
+  page,
+}) => {
+  await tables(page);
   await page.goto("/operations/dining");
   const list = page.getByRole("region", { name: "Tables by what they need" });
   const rows = list.locator(".table-row");
@@ -167,3 +178,43 @@ test("@production b39: Tables keeps earlier days apart, says what a guest asked 
     });
   }
 });
+
+// Batch 58 (v15 b57: Orders said 较早营业日, Tables still 之前营业日): one name for earlier days.
+for (const language of ["en", "zh-Hans"] as const)
+  test(`@production b58: Tables names earlier days as Orders does, in ${language}`, async ({
+    page,
+  }) => {
+    const zh = language === "zh-Hans";
+    await tables(page, language);
+    await page.goto("/operations/dining");
+    const list = page.getByRole("region", {
+      name: zh ? "按需要处理排列的桌台" : "Tables by what they need",
+    });
+    const heading = list.getByRole("heading", { name: zh ? "较早营业日" : "From earlier days" });
+    const summary = page.getByText(zh ? "1 张桌台来自较早营业日" : "1 table from earlier days");
+    for (const [width, height] of [
+      [1440, 900],
+      [1024, 768],
+      [390, 844],
+    ] as const) {
+      await page.setViewportSize({ width, height });
+      await expect(heading).toBeVisible();
+      await expect(summary).toBeVisible();
+      await expect(page.locator("body")).not.toContainText("之前营业日");
+      await expect(page.locator("body")).not.toContainText("是之前的");
+      // Room to spare for wider Linux fonts (DejaVu): the summary ends 40 px inside the page.
+      const right = await summary.evaluate((node) => {
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        return Math.max(...[...range.getClientRects()].map((rect) => rect.right));
+      });
+      expect(right).toBeLessThanOrEqual(width - 40);
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      await page.screenshot({
+        path: `test-results/b58-tables-earlier-days-${language}-${width}.png`,
+        fullPage: true,
+      });
+    }
+  });

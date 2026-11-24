@@ -972,8 +972,9 @@ describe("WP-2423 3cd0f8dd: tables to close, earlier-day pickups and the day che
     expect(tonight).toContain('<strong class="overview-count__value">1</strong>');
     const zh = render(earlierTables, "zh-Hans");
     expect(zh).not.toContain("待关闭的桌台");
-    expect(zh).toContain("之前营业日没关的桌");
-    expect(zh).toContain("不计入：8 张桌台是之前营业日的");
+    expect(zh).toContain("较早营业日没关的桌");
+    expect(zh).toContain("不计入：8 张桌台来自较早营业日");
+    expect(zh).not.toContain("之前营业日");
   });
   it("b41 (v15 b40 live): Home says how many earlier-day tables are paid and only need closing", () => {
     // Fireside Hotpot, Sat Nov 21: 5 of the 8 earlier-day tables read "Paid · close when the

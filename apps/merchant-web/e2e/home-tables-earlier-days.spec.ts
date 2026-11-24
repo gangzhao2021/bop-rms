@@ -264,7 +264,7 @@ for (const language of ["en", "zh-Hans"] as const)
     const needs = page.getByRole("region", { name: zh ? "需要处理" : "Needs attention" });
     await expect(needs).toBeVisible();
     const row = needs.locator(".overview-attention > li", {
-      hasText: zh ? "之前营业日没关的桌" : "Tables still open from earlier days",
+      hasText: zh ? "较早营业日没关的桌" : "Tables still open from earlier days",
     });
     await expect(row).toBeVisible();
     await expect(row).toContainText(zh ? "8 张桌台" : "8 tables");
@@ -275,7 +275,7 @@ for (const language of ["en", "zh-Hans"] as const)
     const reminder = page.getByRole("region", { name: zh ? "打烊后" : "After closing" });
     if (zh) {
       await expect(reminder).toContainText("打烊后：今天的桌都结完了");
-      await expect(reminder).toContainText("之前营业日开的，还没关 · $146.72，不计入今天的数字");
+      await expect(reminder).toContainText("较早营业日开的，还没关 · $146.72，不计入今天的数字");
     } else {
       await expect(reminder).toContainText("After closing: today's tables are all paid");
       await expect(reminder).toContainText(
@@ -288,7 +288,7 @@ for (const language of ["en", "zh-Hans"] as const)
     });
     await expect(count.locator(".overview-count__value")).toHaveText("0");
     await expect(count).toContainText(
-      zh ? "不计入：8 张桌台是之前营业日的" : "Not counted: 8 tables from earlier days",
+      zh ? "不计入：8 张桌台来自较早营业日" : "Not counted: 8 tables from earlier days",
     );
     await expectNoInternalText(page);
     for (const [width, height] of [
@@ -297,6 +297,8 @@ for (const language of ["en", "zh-Hans"] as const)
       [390, 844],
     ] as const) {
       await page.setViewportSize({ width, height });
+      // b58 (v15 b57): one name for earlier days, as on Orders.
+      await expect(page.locator("body")).not.toContainText("之前营业日");
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
       ).toBe(true);

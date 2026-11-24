@@ -280,3 +280,41 @@ test("@production WP-2423 batch 44: To make with dishes on the stove says they a
     await expect(page.locator(".kitchen-queue-count")).toHaveText(zh ? "3 项工作" : "3 work items");
   }
 });
+
+// Batch 58 (v15 b57: Orders said 较早营业日, the kitchen back office header "另有 53 张是之前的"):
+// one name for earlier days, with Test Merchant 2's 53 earlier-day tickets.
+test("@production b58: the back office kitchen header names earlier days as Orders does", async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  await page.clock.setFixedTime(new Date(at));
+  const state = { reworks: [] as Record<string, unknown>[], commands: [] };
+  await store(page, "Unverified", state);
+  await page.goto("/operations/kitchen");
+  const meta = page.locator(".kitchen-board-heading .workspace-page__meta");
+  for (const language of ["en", "zh-Hans"] as const) {
+    if (language === "zh-Hans") await chooseLanguage(page, language);
+    const zh = language === "zh-Hans";
+    for (const [width, height] of widths) {
+      await atTop(page, width, height);
+      await expect(meta).toContainText(
+        zh ? "· 另有 53 张来自较早营业日" : "· 53 more from earlier days",
+      );
+      await expect(page.locator("body")).not.toContainText("是之前的");
+      await expect(page.locator("body")).not.toContainText("之前营业日");
+      // Room to spare for wider Linux fonts (DejaVu): the line ends 40 px inside the page.
+      const right = await meta.evaluate((node) => {
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        return Math.max(...[...range.getClientRects()].map((rect) => rect.right));
+      });
+      expect(right, `${width} ${language}`).toBeLessThanOrEqual(width - 40);
+      await expectWithin(
+        page,
+        ".kitchen-board-heading .workspace-page__meta",
+        `${width} ${language}`,
+      );
+      await page.screenshot({ path: `test-results/b58-kitchen-earlier-${language}-${width}.png` });
+    }
+  }
+});
