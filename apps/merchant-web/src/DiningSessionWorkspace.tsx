@@ -698,6 +698,12 @@ function DiningSessionWorkspaceBody({
   const location = useLocation();
   const navigate = useNavigate();
   const linkedTable = useRef(readTablesOpenTable(location.state));
+  // Batch 59 (v15 b58 live): at 390 the linked table's panel opened 7880 px down a 156-table list
+  // with the page left at the top and focus on BODY. The scroll ran in a frame queued with the
+  // first read's state, which on a slow phone came before React drew the list, so it scrolled a
+  // short page. Arriving from the link now waits until the table's panel is drawn, then does what
+  // Select does (panel under the list: to the top) and moves focus to the panel's heading.
+  const [arrival, setArrival] = useState<string | null>(null);
   const panelResultRef = useRef<HTMLParagraphElement | null>(null);
   const underList = usePanelUnderList();
   // Said in the panel: brought into view if the panel has moved (it shrinks when a table closes).
@@ -738,6 +744,22 @@ function DiningSessionWorkspaceBody({
   const [now, setNow] = useState(() => Date.now());
   const businessDay = useStoreBusinessDay();
   const selected = tables.find((table) => table.tableReference === selectedReference) ?? null;
+  useEffect(() => {
+    if (arrival === null) return;
+    if (selected?.tableReference !== arrival) {
+      // Chosen otherwise before the panel was drawn (a tap, a sign-in): nothing to bring in.
+      if (selectedReference !== arrival) setArrival(null);
+      return;
+    }
+    const heading = detailRef.current?.querySelector<HTMLElement>(".table-panel__head h2");
+    if (heading === null || heading === undefined) return;
+    setArrival(null);
+    // Instant, as Select is, so it never animates for staff who turned motion off.
+    if (typeof window.matchMedia === "function" && window.matchMedia(panelUnderList).matches)
+      detailRef.current?.scrollIntoView?.({ block: "start" });
+    else heading.scrollIntoView?.({ block: "nearest" });
+    heading.focus({ preventScroll: true });
+  }, [arrival, selected, selectedReference]);
   // Batch 51: before the effects below clear it, take the table open when the sign-in ended.
   takeTableForSignIn();
   const anySeated = tables.some(
@@ -967,11 +989,8 @@ function DiningSessionWorkspaceBody({
           void navigate(".", { replace: true, state: null });
           if (reopen === null && items.some((table) => table.tableReference === linked)) {
             setSelectedReference(linked);
-            if (
-              typeof window.matchMedia === "function" &&
-              window.matchMedia(panelUnderList).matches
-            )
-              requestAnimationFrame(() => detailRef.current?.scrollIntoView?.({ block: "start" }));
+            // Batch 59 (v15 b58 live): brought into view once the list and the panel are drawn.
+            setArrival(linked);
           }
         }
         if (reopen !== null) {
@@ -2199,7 +2218,10 @@ function TablePanel({
   return (
     <>
       <header className="table-panel__head">
-        <h2>{t("Table {stableLabel}", { stableLabel: saidTable(table.stableLabel) })}</h2>
+        {/* Batch 59: focus lands here when a link opens this table (tabIndex -1: never a Tab stop). */}
+        <h2 tabIndex={-1}>
+          {t("Table {stableLabel}", { stableLabel: saidTable(table.stableLabel) })}
+        </h2>
         <p className="table-panel__meta">
           {[
             t("Seats {capacity}", { capacity: table.capacity }),
