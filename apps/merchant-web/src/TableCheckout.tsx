@@ -19,7 +19,7 @@ import {
   type TableBill,
 } from "./table-checkout-client.js";
 import type { StaffDiningTable, StaffDiningTableSession } from "./dining-session-client.js";
-import { compedText } from "./ItemCompAction.js";
+import { compedText, partCompedText } from "./ItemCompAction.js";
 import { TableHeldRounds } from "./TablePhones.js";
 import { TableSplitControls } from "./TableSplit.js";
 import { notConfirmedPressAgainText, paymentNotConfirmedText } from "./failure-words.js";
@@ -823,7 +823,10 @@ export function TableCheckout({
                             {" · "}
                             {item.reduction.points === true
                               ? t("Points used")
-                              : compedText(item.reduction.kind, item.reduction.percent)}{" "}
+                              : item.reduction.compedQuantity !== undefined
+                                ? // Batch 60: "1 of 2 comped"; the line stays at its price.
+                                  partCompedText(item.reduction.compedQuantity, item.quantity)
+                                : compedText(item.reduction.kind, item.reduction.percent)}{" "}
                             <span className="table-checkout__comp-amount">
                               {/* b26 (live25): before tax, like the dish's price beside it, so
                                   the round's dishes, comps and Tax line add up to its total. */}
@@ -1490,7 +1493,9 @@ function TableReceipt({
               <span className="table-receipt__reduction">
                 {item.reduction.points === true
                   ? t("Points used")
-                  : compedText(item.reduction.kind, item.reduction.percent)}
+                  : item.reduction.compedQuantity !== undefined
+                    ? partCompedText(item.reduction.compedQuantity, item.quantity)
+                    : compedText(item.reduction.kind, item.reduction.percent)}
                 {item.reduction.netMinor === null ? null : (
                   <>
                     {" "}

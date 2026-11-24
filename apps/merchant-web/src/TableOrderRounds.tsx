@@ -19,7 +19,7 @@ import {
   PayLaterRemoveRefusalNotice,
   type PayLaterRemoveRefusal,
 } from "./PayLaterItemRemoveAction.js";
-import { compRecordText, ItemCompAction } from "./ItemCompAction.js";
+import { compRecordLabel, ItemCompAction } from "./ItemCompAction.js";
 import { orderMoney } from "./order-money.js";
 import { useStoreBusinessDay } from "./StoreBusinessDay.js";
 import {
@@ -217,14 +217,16 @@ export function TableOrderRounds({
         // The table's bill (Payment's own figure): what is left to pay after the comps.
         const bill = detail.order.tableBill;
         const names = new Map(detail.lines.items.map((line) => [line.orderItemReference, line]));
+        const listed = comps.map((comp) => ({
+          comp,
+          dish: names.get(comp.orderItemReference)?.name ?? t("Dish"),
+        }));
         return (
           <ul className="table-order-rounds__comps" aria-label={t("Comps and discounts")}>
-            {comps.map((comp) => (
-              <li key={comp.orderItemReference}>
-                <span>
-                  {names.get(comp.orderItemReference)?.name ?? t("Dish")} ·{" "}
-                  {compRecordText(comp, timeZone, "Guest")}
-                </span>
+            {listed.map(({ comp, dish }, index) => (
+              // Batch 60: a line comped in two parts has two records, each listed.
+              <li key={comp.orderItemReference + ":" + String(index)}>
+                <span>{compRecordLabel(dish, comp, timeZone, "Guest")}</span>
                 <span className="bop-amount">
                   −{orderMoney({ amountMinor: comp.amountMinor, currencyCode: "CAD" })}
                 </span>

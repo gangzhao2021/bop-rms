@@ -34,6 +34,7 @@ type Failure =
   | "GuestPaying"
   | "NotStarted"
   | "AlreadyComped"
+  | "NotThatMany"
   | "Changed"
   | "Unknown";
 
@@ -53,6 +54,10 @@ export function itemCompFailureText(failure: Failure) {
       );
     case "AlreadyComped":
       return t("One of these dishes already has a comp or discount. Refresh the table.");
+    case "NotThatMany":
+      return t(
+        "Fewer of these dishes are left to comp than you chose. Refresh the table, then choose again.",
+      );
     case "Changed":
       return t("This table changed since it was shown. Refresh it, then try again.");
     case "Unknown":
@@ -74,7 +79,9 @@ const failureOf = (status: number, payload: unknown): Failure => {
           ? "NotStarted"
           : error === "already_comped"
             ? "AlreadyComped"
-            : "Changed";
+            : error === "not_that_many"
+              ? "NotThatMany"
+              : "Changed";
   return "Unknown";
 };
 
@@ -126,6 +133,26 @@ export function compDishBillDownMinor(
 }
 
 /**
+ * Batch 60 (v15 b59 live): how many of a line's dishes are still left to comp, from the comps the
+ * round has (each says how many dishes of how many it covers; an older server: the whole line).
+ */
+export function compDishesLeft(
+  line: Pick<CurrentOrderLine, "orderItemReference" | "quantity">,
+  comps: readonly {
+    readonly orderItemReference: string;
+    readonly compedQuantity?: number | null;
+  }[],
+): number {
+  const own = comps.filter((comp) => comp.orderItemReference === line.orderItemReference);
+  if (own.some((comp) => comp.compedQuantity === null || comp.compedQuantity === undefined))
+    return 0;
+  return Math.max(
+    0,
+    line.quantity - own.reduce((sum, comp) => sum + (comp.compedQuantity ?? 0), 0),
+  );
+}
+
+/**
  * WP-2423 item 8 ① segment 2 (Owner decision 2, Figma 45:315; DEC-KITCHEN-ONE-TAP): a manager comps
  * or discounts any dish that reached the kitchen, before the table pays; the kitchen still makes it. Money, so it is confirmed:
  * the dishes, how much (shown exactly), and a reason; recorded as a compensating record that stays
@@ -157,6 +184,8 @@ export function ItemCompAction({
   // back to the opener, so a keyboard or screen-reader user never lands on the page itself.
   const focusTo = useRef<"panel" | "opener" | null>(null);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  // Batch 60: how many of a line's dishes to comp (absent: every dish left on it).
+  const [quantities, setQuantities] = useState<ReadonlyMap<string, number>>(new Map());
   const [opened, setOpened] = useState<number | null>(null);
   if (preselect !== undefined && preselect.nonce !== opened) {
     setOpened(preselect.nonce);
@@ -182,8 +211,24 @@ export function ItemCompAction({
   // the Order's version and what was asked (nothing is recorded by asking).
   const [dishPreviews, setDishPreviews] = useState<ReadonlyMap<string, string | null>>(new Map());
   const compable = new Set(order.batches.flatMap((batch) => batch.compableItems));
-  const offered = lines.filter((line) => compable.has(line.orderItemReference));
+  const comps = order.batches.flatMap((batch) => batch.compedItems);
+  const offered = lines.filter(
+    (line) => compable.has(line.orderItemReference) && compDishesLeft(line, comps) > 0,
+  );
   const chosen = offered.filter((line) => selected.has(line.orderItemReference));
+  const leftOf = (line: CurrentOrderLine) => compDishesLeft(line, comps);
+  // Batch 60: a comp of fewer dishes than are left on a line names them; the rest goes as before.
+  const compQuantitiesFor = (items: readonly CurrentOrderLine[]) =>
+    choice !== "Comp"
+      ? []
+      : items
+          .flatMap((line) => {
+            const quantity = quantities.get(line.orderItemReference);
+            return quantity !== undefined && quantity < leftOf(line)
+              ? [{ orderItemReference: line.orderItemReference, quantity }]
+              : [];
+          })
+          .sort((a, b) => (a.orderItemReference < b.orderItemReference ? -1 : 1));
   const openerKey = "comp:" + order.orderReference;
   // b23 review: the last dish comped leaves no button to give the focus back to: it goes to the
   // button again when the table still offers it, else to the comps the table now has.
@@ -205,25 +250,27 @@ export function ItemCompAction({
     amounts.every((value) => value !== null) &&
     (choice !== "Amount" || chosen.length === 1);
   const currencyCode = offered[0]?.total.currencyCode ?? "CAD";
-  const asked = {
-    orderReference: order.orderReference,
-    orderItemReferences: chosen.map((line) => line.orderItemReference).sort(),
-    kind: choice,
-    percent: choice === "Percent" ? percentValue : null,
-    amountOffMinor: choice === "Amount" ? String(amountOffMinor) : null,
+  const askedFor = (items: readonly CurrentOrderLine[]) => {
+    const compQuantities = compQuantitiesFor(items);
+    return {
+      orderReference: order.orderReference,
+      orderItemReferences: items.map((line) => line.orderItemReference).sort(),
+      kind: choice,
+      percent: choice === "Percent" ? percentValue : null,
+      amountOffMinor: choice === "Amount" ? String(amountOffMinor) : null,
+      ...(compQuantities.length > 0 ? { compQuantities } : {}),
+    };
   };
+  const asked = askedFor(chosen);
   const previewKey = valid ? JSON.stringify(asked) : null;
   // b23: the same choice for one dish alone (an amount off is per dish, so any one dish can ask).
   const choiceKnown =
     choice === "Comp" ||
     (choice === "Percent" && percentValue !== null) ||
     (choice === "Amount" && amountOffMinor !== null);
-  const dishKeyFor = (orderItemReference: string) =>
-    (order.currentVersion ?? "") +
-    "|" +
-    JSON.stringify({ ...asked, orderItemReferences: [orderItemReference] });
-  const dishKeys =
-    open && choiceKnown ? offered.map((line) => dishKeyFor(line.orderItemReference)) : [];
+  const dishKeyFor = (line: CurrentOrderLine) =>
+    (order.currentVersion ?? "") + "|" + JSON.stringify(askedFor([line]));
+  const dishKeys = open && choiceKnown ? offered.map((line) => dishKeyFor(line)) : [];
   const dishKeysText = JSON.stringify(dishKeys);
   // v15 b16 (DEC-COMP-BILL-CENT): the server works out what really comes off the bill (the bill's
   // tax is worked out once over the whole bill, so it can differ by a cent from the dishes' own).
@@ -381,6 +428,7 @@ export function ItemCompAction({
         focusTo.current = "opener";
         setOpen(false);
         setSelected(new Set());
+        setQuantities(new Map());
         setReason("");
         onSettled();
         return;
@@ -430,37 +478,69 @@ export function ItemCompAction({
     >
       <p>{compIntroText()}</p>
       <ul className="pay-later-remove__lines">
-        {offered.map((line) => (
-          <li key={line.orderItemReference}>
-            <label>
-              <input
-                type="checkbox"
-                checked={selected.has(line.orderItemReference)}
-                disabled={busy}
-                onChange={(event) => {
-                  const next = new Set(selected);
-                  if (event.currentTarget.checked) next.add(line.orderItemReference);
-                  else next.delete(line.orderItemReference);
-                  setSelected(next);
-                }}
-              />{" "}
-              {/* b23: what the bill goes down by for this dish, as the button and take-off say. */}
-              {payLaterRemoveDishText({
-                quantity: line.quantity,
-                name: line.name,
-                billDownMinor: choiceKnown
-                  ? compDishBillDownMinor(
-                      line,
-                      selected.has(line.orderItemReference),
-                      previewLines,
-                      dishPreviews.get(dishKeyFor(line.orderItemReference)),
-                    )
-                  : null,
-                total: line.total,
-              })}
-            </label>
-          </li>
-        ))}
+        {offered.map((line) => {
+          const left = leftOf(line);
+          const ticked = selected.has(line.orderItemReference);
+          const billDown = choiceKnown
+            ? compDishBillDownMinor(line, ticked, previewLines, dishPreviews.get(dishKeyFor(line)))
+            : null;
+          return (
+            <li key={line.orderItemReference}>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={ticked}
+                  disabled={busy}
+                  onChange={(event) => {
+                    const next = new Set(selected);
+                    if (event.currentTarget.checked) next.add(line.orderItemReference);
+                    else next.delete(line.orderItemReference);
+                    setSelected(next);
+                  }}
+                />{" "}
+                {/* b23: what the bill goes down by for this dish, as the button and take-off say.
+                    Batch 60: a line comped in part says the dishes left on it, and its own price
+                    no longer (only the server's figure). */}
+                {payLaterRemoveDishText({
+                  quantity: left,
+                  name:
+                    left < line.quantity
+                      ? t("{dish} ({count} comped already)", {
+                          dish: line.name,
+                          count: String(line.quantity - left),
+                        })
+                      : line.name,
+                  billDownMinor: left < line.quantity && billDown === null ? undefined : billDown,
+                  total: line.total,
+                })}
+              </label>
+              {/* Batch 60 (v15 b59 live): one bowl of two was wrong or came late: comp it alone. */}
+              {ticked && choice === "Comp" && left > 1 ? (
+                <label className="item-comp__quantity">
+                  {t("Dishes to comp")}{" "}
+                  <select
+                    value={String(quantities.get(line.orderItemReference) ?? left)}
+                    disabled={busy}
+                    onChange={(event) => {
+                      const next = new Map(quantities);
+                      next.set(line.orderItemReference, Number(event.currentTarget.value));
+                      setQuantities(next);
+                    }}
+                  >
+                    {Array.from({ length: left }, (_, index) => left - index).map((count) => (
+                      <option key={count} value={String(count)}>
+                        {t("{comped} of {quantity}", {
+                          comped: String(count),
+                          quantity: String(left),
+                        })}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+            </li>
+          );
+        })}
       </ul>
       <fieldset className="table-checkout__method" disabled={busy}>
         <legend>{t("How much")}</legend>
@@ -629,7 +709,14 @@ export function compRecordText(
   timeZone: string | undefined,
   style: ClockStyle = "Staff",
 ): string {
-  if (comp.reasonCode === "POINTS_REDEMPTION") return t("Points used");
+  return compRecordParts(comp, timeZone, style).join(" · ");
+}
+function compRecordParts(
+  comp: Parameters<typeof compRecordText>[0],
+  timeZone: string | undefined,
+  style: ClockStyle,
+): string[] {
+  if (comp.reasonCode === "POINTS_REDEMPTION") return [t("Points used")];
   const parts = [compedText(comp.kind, comp.percent)];
   const reason = compReasonLabel[comp.reasonCode as CompReason] as string | undefined;
   if (reason !== undefined) parts.push(reason);
@@ -642,7 +729,47 @@ export function compRecordText(
             time: storeTime(comp.decidedAt, timeZone, false, style),
           }),
     );
-  return parts.join(" · ");
+  return parts;
+}
+
+/**
+ * Batch 60: a comp of some of a line's dishes as staff read it after the fact, its dish named in
+ * the same words: "1 of 2 × Beef noodles comped · Goodwill · by Li, 21:14" (zh "牛肉面 · 免单 2 份中的
+ * 1 份 · …"). A comp of the whole line (or any other reduction) reads as before: "Beef noodles ·
+ * Comped · …". The dish and its comp both stay on the record; nothing is hidden.
+ */
+export function compRecordLabel(
+  name: string,
+  comp: Parameters<typeof compRecordText>[0] & {
+    readonly compedQuantity?: number | null;
+    readonly lineQuantity?: number;
+  },
+  timeZone: string | undefined,
+  style: ClockStyle = "Staff",
+): string {
+  const partly =
+    comp.kind === "Comp" &&
+    comp.reasonCode !== "POINTS_REDEMPTION" &&
+    typeof comp.compedQuantity === "number" &&
+    typeof comp.lineQuantity === "number" &&
+    comp.compedQuantity < comp.lineQuantity;
+  if (!partly) return name + " · " + compRecordText(comp, timeZone, style);
+  return [
+    t("{comped} of {quantity} × {dish} comped", {
+      comped: String(comp.compedQuantity),
+      quantity: String(comp.lineQuantity),
+      dish: name,
+    }),
+    ...compRecordParts(comp, timeZone, style).slice(1),
+  ].join(" · ");
+}
+
+/** Batch 60: a bill line whose comps cover some of its dishes ("1 of 2 comped"). */
+export function partCompedText(comped: number, quantity: number) {
+  return t("{comped} of {quantity} comped", {
+    comped: String(comped),
+    quantity: String(quantity),
+  });
 }
 
 export function compedText(kind: "Comp" | "Percent" | "Amount", percent: number | null) {

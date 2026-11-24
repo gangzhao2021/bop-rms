@@ -104,7 +104,9 @@ it("every time a Tables-only screen writes is in the guests' style", () => {
   for (const name of tablesOnly) {
     const source = readFileSync(join(import.meta.dirname, name), "utf8");
     const calls = [
-      ...source.matchAll(/\b(storeTime|orderWhen|compRecordText)\(([^;]*?)\)[,;}\s]/gsu),
+      ...source.matchAll(
+        /\b(storeTime|orderWhen|compRecordText|compRecordLabel)\(([^;]*?)\)[,;}\s]/gsu,
+      ),
     ];
     for (const call of calls) expect(call[2], `${name}: ${call[0]}`).toContain('"Guest"');
   }

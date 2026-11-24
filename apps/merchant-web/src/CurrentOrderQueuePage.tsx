@@ -71,7 +71,7 @@ import { serviceOperationReference } from "./service-control-client.js";
 import { StatePanel } from "@bop-rms/ui";
 import { playKitchenChime } from "./alert-chime.js";
 import { ClockStyleContext, type ClockStyle, storeTime } from "./StoreTime.js";
-import { compRecordText } from "./ItemCompAction.js";
+import { compRecordLabel } from "./ItemCompAction.js";
 import {
   counterAwaitingCardMachine,
   counterPayByText,
@@ -1430,12 +1430,11 @@ function CompRecordsNote({
   const names = new Map(detail.lines.items.map((line) => [line.orderItemReference, line.name]));
   return (
     <ul className="order-comp-records" aria-label={t("Comps and discounts")}>
-      {comps.map((comp) => (
-        <li key={comp.orderItemReference}>
+      {comps.map((comp, index) => (
+        // Batch 60: a line comped in two parts has two records, each listed.
+        <li key={comp.orderItemReference + ":" + String(index)}>
           <span>
-            {(names.get(comp.orderItemReference) ?? t("Dish")) +
-              " · " +
-              compRecordText(comp, timeZone)}
+            {compRecordLabel(names.get(comp.orderItemReference) ?? t("Dish"), comp, timeZone)}
           </span>{" "}
           {/* b59 (live58): sign, amount and tax note never break apart ("−" / "$14.13"). */}
           <span className="bop-amount">

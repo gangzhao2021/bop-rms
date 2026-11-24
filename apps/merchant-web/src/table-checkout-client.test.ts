@@ -142,3 +142,52 @@ describe("b25 (live24): dishes taken off the bill, named at checkout", () => {
     expect(() => parseTableBill(bill([{ ...round, takenOffDishes: "Edamame" }]))).toThrow();
   });
 });
+
+describe("batch 60: a line comped in part, at checkout", () => {
+  const ref = (n: number) => "01909969-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const noodles = (reduction: unknown) => ({
+    orderItemReference: ref(9),
+    quantity: 2,
+    displayName: "Beef noodles (TEST)",
+    subtotalMinor: "2500",
+    totalMinor: "1412",
+    reduction,
+  });
+  const bill = (item: unknown) => ({
+    diningSessionReference: ref(2),
+    sessionPhase: "Closing",
+    sessionVersion: 7,
+    paymentTiming: "PayLater",
+    tableLabel: "L59S B",
+    orderReference: ref(3),
+    rounds: [
+      {
+        roundNumber: 1,
+        items: [item],
+        subtotalMinor: "1250",
+        taxMinor: "162",
+        totalMinor: "1412",
+        paid: false,
+      },
+    ],
+    owed: { subtotalMinor: "1250", taxMinor: "162", totalMinor: "1412" },
+    consistent: true,
+    settlement: null,
+  });
+  const comp = { kind: "Comp", percent: null, amountMinor: "1413", netMinor: "1250" };
+  it("reads how many of the line's dishes were comped, and only for a comp", () => {
+    expect(
+      parseTableBill(bill(noodles({ ...comp, compedQuantity: 1 }))).rounds[0]?.items[0]?.reduction,
+    ).toMatchObject({ kind: "Comp", compedQuantity: 1, netMinor: "1250" });
+    expect(parseTableBill(bill(noodles(comp))).rounds[0]?.items[0]?.reduction).not.toHaveProperty(
+      "compedQuantity",
+    );
+    for (const broken of [
+      { ...comp, compedQuantity: 0 },
+      { ...comp, compedQuantity: 1.5 },
+      { ...comp, compedQuantity: "1" },
+      { ...comp, kind: "Percent", percent: 50, compedQuantity: 1 },
+    ])
+      expect(() => parseTableBill(bill(noodles(broken)))).toThrow();
+  });
+});

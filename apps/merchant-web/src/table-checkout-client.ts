@@ -69,6 +69,8 @@ export interface TableBill {
         readonly netMinor: string | null;
         /** Taken off with a guest's points, not by staff. */
         readonly points?: boolean;
+        /** Batch 60: comps cover this many of the line's dishes, not all (absent: all). */
+        readonly compedQuantity?: number;
       };
     }[];
     /**
@@ -645,6 +647,14 @@ function reductionOf(value: unknown) {
     amountMinor: amount(entry.amountMinor),
     netMinor: entry.netMinor === undefined ? null : amount(entry.netMinor),
     ...(entry.points === true ? { points: true } : {}),
+    ...(entry.compedQuantity === undefined
+      ? {}
+      : entry.kind === "Comp" &&
+          Number.isSafeInteger(entry.compedQuantity) &&
+          (entry.compedQuantity as number) >= 1 &&
+          (entry.compedQuantity as number) <= 999
+        ? { compedQuantity: entry.compedQuantity as number }
+        : invalid()),
   });
 }
 

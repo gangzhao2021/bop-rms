@@ -1114,13 +1114,30 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
                 // v15 M87/M161: why, when and by whom (read strictly when the server sends them).
                 const recorded =
                   entry !== null && typeof entry === "object" && Object.hasOwn(entry, "reasonCode");
+                // Batch 60: how many of the line's dishes the comp covers (older server: absent).
+                const counted =
+                  entry !== null &&
+                  typeof entry === "object" &&
+                  Object.hasOwn(entry, "compedQuantity");
                 const comp = exact(entry, [
                   "orderItemReference",
                   "kind",
                   "percent",
                   "amountMinor",
                   ...(recorded ? ["reasonCode", "decidedAt", "byLabel"] : []),
+                  ...(counted ? ["compedQuantity", "lineQuantity"] : []),
                 ]);
+                const dishCount = (value: unknown) =>
+                  Number.isSafeInteger(value) && (value as number) >= 1 && (value as number) <= 999;
+                if (
+                  counted &&
+                  (!dishCount(comp.lineQuantity) ||
+                    (comp.compedQuantity !== null &&
+                      (comp.kind !== "Comp" ||
+                        !dishCount(comp.compedQuantity) ||
+                        (comp.compedQuantity as number) > (comp.lineQuantity as number))))
+                )
+                  return fail();
                 if (
                   recorded &&
                   (typeof comp.reasonCode !== "string" ||
@@ -1153,6 +1170,12 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
                         reasonCode: comp.reasonCode as string,
                         decidedAt: comp.decidedAt as string,
                         byLabel: comp.byLabel as string | null,
+                      }
+                    : {}),
+                  ...(counted
+                    ? {
+                        compedQuantity: comp.compedQuantity as number | null,
+                        lineQuantity: comp.lineQuantity as number,
                       }
                     : {}),
                 });

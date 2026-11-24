@@ -398,6 +398,18 @@
   color: var(--bop-color-text-muted, #666666);
   font-size: 14px;
 }
+/* Batch 60: how many of a ticked line's dishes to comp, on its own row under the dish and lined
+   up with its name (past the checkbox), so it reads as part of that dish. */
+.item-comp .pay-later-remove__lines label.item-comp__quantity,
+.workspace-page.tables-v3 .item-comp .pay-later-remove__lines label.item-comp__quantity {
+  display: flex;
+  margin: 0 0 8px 26px;
+  font-size: 14px;
+}
+.item-comp__quantity select {
+  min-height: 44px;
+  font: inherit;
+}
 /* b22: the panel takes the focus when staff arrive for its round; the page scrolls to it, and no
    ring is drawn around a panel that is not itself a control. */
 .pay-later-remove:focus,
