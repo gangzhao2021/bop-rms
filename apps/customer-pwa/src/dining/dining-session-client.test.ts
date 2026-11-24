@@ -53,6 +53,18 @@ function firstRound(p: ReturnType<typeof payload>) {
 }
 
 describe("WP-2423 Q8 dining session client", () => {
+  it("batch 58 (v15 b57 live): decodes what the table paid after refunds, never more than paid", () => {
+    const base = payload() as { session: { summary: Record<string, unknown> } };
+    const refunded = structuredClone(base);
+    refunded.session.summary.paidAfterRefunds = cad("0");
+    expect(parseDiningSessionView(refunded).summary?.paidAfterRefunds).toEqual(cad("0"));
+    expect(parseDiningSessionView(base).summary).not.toHaveProperty("paidAfterRefunds");
+    for (const paidAfterRefunds of [cad("3391"), "0", null, { amountMinor: "-1" }]) {
+      const value = structuredClone(base);
+      value.session.summary.paidAfterRefunds = paidAfterRefunds;
+      expect(() => parseDiningSessionView(value)).toThrow();
+    }
+  });
   it("WP-2423 item 8 ⑦ 4b-3: decodes the per-head tea on the bill, and rejects anything else", () => {
     const base = payload() as { session: { summary: Record<string, unknown> } };
     const withTea = structuredClone(base);

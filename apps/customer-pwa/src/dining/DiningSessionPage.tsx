@@ -823,10 +823,19 @@ function TableSummary({ view }: { readonly view: DiningSessionView }) {
         </dl>
       ) : null}
       <dl>
-        <div>
-          <dt>{allPaid || closedByStaff ? t("Paid") : t("Paid so far")}</dt>
-          <dd>{money(summary.paid)}</dd>
-        </div>
+        {/* Batch 58 (v15 b57 live): once staff gave any of it back, what the table paid after
+            refunds, said as that; never who was refunded or how much each one got back. */}
+        {summary.paidAfterRefunds === undefined ? (
+          <div>
+            <dt>{allPaid || closedByStaff ? t("Paid") : t("Paid so far")}</dt>
+            <dd>{money(summary.paid)}</dd>
+          </div>
+        ) : (
+          <div>
+            <dt>{t("Paid after refunds")}</dt>
+            <dd>{money(summary.paidAfterRefunds)}</dd>
+          </div>
+        )}
         {/* Batch 52 (v15 b51 live): one name per moment for what the table still owes. Before
             anyone pays it is what the table pays at the end; once a part is paid, what is still to
             pay; once it is all paid there is nothing left to name (the pay section thanks them). */}

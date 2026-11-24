@@ -479,12 +479,17 @@ for (const width of [390, 1024, 1440])
         const expectRefunds = async () => {
           const receipt = page.getByRole("region", { name: zh ? "您的收据" : "Your receipt" });
           await expect(receipt).toContainText(youPaid);
-          await expect(receipt).toContainText((zh ? "您实付合计" : "Total paid by you") + "$14.13");
+          // Batch 58 (v15 b57 live): what was charged and what was paid after refunds, never two
+          // amounts both called "paid by you" (zh 实付).
+          await expect(receipt).toContainText((zh ? "付款金额" : "Amount charged") + "$14.13");
           await expect(receipt).toContainText(
             (zh ? "退回您的卡" : "Refunded to your card") + "−$8.00",
           );
           await expect(receipt).toContainText(
-            (zh ? "退款后合计" : "Total after refunds") + "$6.13",
+            (zh ? "退款后实付" : "You paid after refunds") + "$6.13",
+          );
+          await expect(receipt).not.toContainText(
+            zh ? /实付合计|退款后合计/u : /Total paid by you|Total after refunds/u,
           );
           const list = receipt.getByRole("list", {
             name: zh ? "您这笔付款的退款" : "Refunds of your payment",
@@ -528,6 +533,56 @@ for (const width of [390, 1024, 1440])
         await page.screenshot({ path: `test-results/b57-closed-${tag}.png`, fullPage: true });
       });
 
+      // Batch 58 (v15 b57 live, L57R A and L57R B): after staff refunded part 1's phone payment,
+      // $8.00 of it or all of it, the shared Table total still said "Paid $14.13" on the payer's
+      // phone and on another guest's. It is a table fact and must be true: what the table paid
+      // after refunds, said as that, never who got what back. The table read is the real API.
+      for (const refund of [
+        { kind: "Partial", item: "half-split-written-off", net: "$6.13", back: "$8.00" },
+        { kind: "Full", item: "by-dish-written-off", net: "$0.00", back: "$14.13" },
+      ] as const)
+        test(`staff refunded ${refund.kind === "Full" ? "all" : "part"} of a payment: the Table total says what the table paid after refunds, on every phone`, async ({
+          page,
+        }) => {
+          test.setTimeout(90_000);
+          scenario = refund.item;
+          const label = zh ? "退款后已付" : "Paid after refunds";
+          const gross = zh ? /已付款\$14\.13|已付\$14\.13/u : /Paid(?: so far)?\$14\.13/u;
+          for (const payer of [true, false]) {
+            phone = { payer, tableClosed: false, refunds: refund.kind };
+            await stubTable(page, []);
+            const tag = `table-refund-${refund.kind}-${payer ? "payer" : "other"}-${zh ? "zh" : "en"}-${width}`;
+            await open(page, "/dine-in/session", zh);
+            const total = page.getByRole("region", { name: zh ? "本桌合计" : "Table total" });
+            await expect(total).toContainText(label + refund.net);
+            await expect(total).not.toContainText(gross);
+            // Never who was refunded or how much went back to anyone.
+            await expect(total).not.toContainText(
+              zh ? /退回|您的卡|退款\$/u : /back to|your card|Refunded\$/iu,
+            );
+            await expect(total).not.toContainText(refund.back);
+            await expectInside(total, width);
+            if (!payer) {
+              // The other phone: no receipt, no refund, no one's payment anywhere on the page.
+              await expect(page.getByRole("main")).not.toContainText(
+                zh ? /收据|您已在这部手机上|退回/u : /receipt|You paid|back to your card/iu,
+              );
+              // (A full refund's amount is also the paid round's own total on its card.)
+              if (refund.kind === "Partial")
+                await expect(page.getByRole("main")).not.toContainText(refund.back);
+            }
+            await page.screenshot({ path: `test-results/b58-open-${tag}.png`, fullPage: true });
+            // Closed and cleaned: the ended page never states the gross as what was paid.
+            phone = { payer, tableClosed: true, refunds: refund.kind };
+            await open(page, "/dine-in/session", zh);
+            await expect(
+              page.getByRole("main").getByText(words(zh, refund.item).endedTitle),
+            ).toBeVisible();
+            await expect(page.getByRole("main")).not.toContainText(gross);
+            await page.screenshot({ path: `test-results/b58-closed-${tag}.png`, fullPage: true });
+          }
+        });
+
       test("staff refunded all of the payer's dish: the receipt says all of it goes back; another phone sees none of it", async ({
         page,
       }) => {
@@ -542,7 +597,10 @@ for (const width of [390, 1024, 1440])
         await open(page, "/dine-in/session", zh);
         const receipt = page.getByRole("region", { name: zh ? "您的收据" : "Your receipt" });
         await expect(receipt).toContainText(youPaid);
-        await expect(receipt).toContainText((zh ? "退款后合计" : "Total after refunds") + "$0.00");
+        await expect(receipt).toContainText((zh ? "付款金额" : "Amount charged") + "$14.13");
+        await expect(receipt).toContainText(
+          (zh ? "退款后实付" : "You paid after refunds") + "$0.00",
+        );
         await expect(receipt.getByRole("listitem")).toHaveCount(1);
         await expectInside(receipt, width);
         await expectOnFirstScreen(receipt.getByText(youPaid));

@@ -1415,6 +1415,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Part {number} of {count} of your table’s bill":
     "本桌账单共\u00a0{count}\u00a0份，这是第\u00a0{number}\u00a0份",
   "Total paid by you": "您实付合计",
+  "Amount charged": "付款金额",
+  "You paid after refunds": "退款后实付",
+  "Paid after refunds": "退款后已付",
   "This receipt is for your payment only. Staff closed the rest of your table’s bill; it is not charged to you.":
     "这张收据只包括您的付款。本桌账单的其余部分已由店员关闭，不向您收取。",
   "This receipt is for your payment only, not your table’s whole bill.":

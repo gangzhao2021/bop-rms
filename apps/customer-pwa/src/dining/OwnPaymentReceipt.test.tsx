@@ -128,7 +128,10 @@ const noodles = (roundNumber: number, payment: DiningRound["payment"]): DiningRo
   itemsTotal: cad(roundNumber === 1 ? "1413" : "1412"),
 });
 /** The guest table read after staff closed the rest (v15 b55: paid 1413, owed 0). */
-const closedTable = (splitParts: { count: number | null; paid: number }): DiningSessionState => ({
+const closedTable = (
+  splitParts: { count: number | null; paid: number },
+  paidAfterRefunds?: string,
+): DiningSessionState => ({
   status: "ready",
   refreshing: false,
   view: {
@@ -139,6 +142,7 @@ const closedTable = (splitParts: { count: number | null; paid: number }): Dining
     rounds: [noodles(1, "Paid"), noodles(2, "OnTableBill")],
     summary: {
       paid: cad("1413"),
+      ...(paidAfterRefunds === undefined ? {} : { paidAfterRefunds: cad(paidAfterRefunds) }),
       refunded: cad("0"),
       refundPending: cad("0"),
       due: cad("0"),
@@ -476,9 +480,13 @@ describe("batch 57: refunds of the payer's own payment", () => {
     expect(text()).toContain(
       "You paid $14.13 online on this phone. After $8.00 back to your card, you paid $6.13.",
     );
-    expect(text()).toContain("Total paid by you$14.13");
+    // Batch 58 (v15 b57 live): once some went back, the rows name what was charged and what
+    // was paid after refunds, never two amounts both called "paid by you".
+    expect(text()).toContain("Amount charged$14.13");
     expect(text()).toContain("Refunded to your card−$8.00");
-    expect(text()).toContain("Total after refunds$6.13");
+    expect(text()).toContain("You paid after refunds$6.13");
+    expect(text()).not.toContain("Total paid by you");
+    expect(text()).not.toContain("Total after refunds");
     const refunds = [...container.querySelectorAll(".dining-session__own-refunds li")].map((line) =>
       (line.textContent ?? "").replace(/\s+/gu, " "),
     );
@@ -508,8 +516,10 @@ describe("batch 57: refunds of the payer's own payment", () => {
       "zh-Hans",
     );
     expect(text()).toContain("您已在这部手机上在线付款 $14.13。这笔款项全部退回您的卡。");
+    expect(text()).toContain("付款金额$14.13");
     expect(text()).toContain("退回您的卡−$14.13");
-    expect(text()).toContain("退款后合计$0.00");
+    expect(text()).toContain("退款后实付$0.00");
+    expect(text()).not.toContain("您实付合计");
     expect(container.querySelector(".dining-session__own-refunds li")?.textContent).toMatch(
       /^.+，\$14\.13 已退回您的卡。银行可能要过几天才显示。$/u,
     );
@@ -530,6 +540,52 @@ describe("batch 57: refunds of the payer's own payment", () => {
     expect(text()).toContain(
       "您已在这部手机上在线付款 $14.13。退回您的卡 $8.00 后，您实付 $6.13。",
     );
+  });
+
+  // Batch 58 (v15 b57 live, L57R A): the zh receipt's sentence said 您实付 $6.13 while the row
+  // below said 您实付合计 $14.13: two different amounts both called 实付.
+  it("zh-Hans after a part refund: 实付 names only what was paid after the refund", async () => {
+    setCustomerCsrfCredential("d".repeat(43));
+    await show(
+      <DiningSessionScreen
+        state={closedTable({ count: 2, paid: 1 }, "613")}
+        onRefresh={() => undefined}
+        ownPaymentReceipt={payer(refundedPart)}
+      />,
+      "zh-Hans",
+    );
+    const receipt = container.querySelector(".dining-session__own-payment");
+    const words = (receipt?.textContent ?? "").replace(/\s+/gu, " ");
+    expect(words).toContain("退回您的卡 $8.00 后，您实付 $6.13。");
+    expect(words).toContain("付款金额$14.13");
+    expect(words).toContain("退回您的卡−$8.00");
+    expect(words).toContain("退款后实付$6.13");
+    // Every 实付 on the receipt is the same amount, the net.
+    expect([...words.matchAll(/实付 ?(\$\d+\.\d\d)/gu)].map((match) => match[1])).toEqual([
+      "$6.13",
+      "$6.13",
+    ]);
+    // The table total says what the table paid after refunds, not the gross.
+    const total = container.querySelector(".dining-session__summary");
+    const totalWords = (total?.textContent ?? "").replace(/\s+/gu, " ");
+    expect(totalWords).toContain("退款后已付$6.13");
+    expect(totalWords).not.toContain("$14.13");
+  });
+
+  it("no refund: the receipt keeps its wording in zh-Hans and en", async () => {
+    setCustomerCsrfCredential("d".repeat(43));
+    await show(
+      <DiningSessionScreen
+        state={closedTable({ count: 2, paid: 1 })}
+        onRefresh={() => undefined}
+        ownPaymentReceipt={payer(evenPart)}
+      />,
+      "zh-Hans",
+    );
+    expect(text()).toContain("您实付合计$14.13");
+    expect(text()).not.toContain("付款金额");
+    expect(text()).not.toContain("退款后");
+    expect(text()).toContain("已付款$14.13");
   });
 
   it("the closed-bill notice says the net; a refund read on Your table shows there next", async () => {

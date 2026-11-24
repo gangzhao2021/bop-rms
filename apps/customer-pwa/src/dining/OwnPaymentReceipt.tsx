@@ -375,8 +375,12 @@ export function OwnPaymentReceiptView({ receipt }: { readonly receipt: OwnPaymen
                 <dd>{money(payment.tipMinor)}</dd>
               </div>
             )}
+            {/* Batch 58 (v15 b57 live): once some of it went back, this row is what was charged
+                and the net row is what was paid, so 实付 names one amount only. */}
             <div>
-              <dt>{t("Total paid by you")}</dt>
+              <dt>
+                {payment.refundedMinor === "0" ? t("Total paid by you") : t("Amount charged")}
+              </dt>
               <dd>{money(payment.totalMinor)}</dd>
             </div>
             <div>
@@ -391,7 +395,7 @@ export function OwnPaymentReceiptView({ receipt }: { readonly receipt: OwnPaymen
                   <dd>−{money(payment.refundedMinor)}</dd>
                 </div>
                 <div>
-                  <dt>{t("Total after refunds")}</dt>
+                  <dt>{t("You paid after refunds")}</dt>
                   <dd>
                     {money((BigInt(payment.totalMinor) - BigInt(payment.refundedMinor)).toString())}
                   </dd>

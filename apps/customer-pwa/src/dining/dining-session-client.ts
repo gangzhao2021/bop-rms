@@ -166,6 +166,11 @@ export interface DiningSessionView {
   readonly rounds: readonly DiningRound[];
   readonly summary: null | {
     readonly paid: DiningMoney;
+    /**
+     * Batch 58 (v15 b57 live): once staff gave back any of the table's payments, what the table
+     * paid after those refunds (a table fact, never whose refund); absent before.
+     */
+    readonly paidAfterRefunds?: DiningMoney;
     readonly refunded: DiningMoney;
     readonly refundPending: DiningMoney;
     /**
@@ -633,7 +638,9 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
     const closedByStaff = has("closedByStaff");
     const withTaxRounding = has("taxRounding");
     const withBill = has("bill");
+    const withPaidAfterRefunds = has("paidAfterRefunds");
     const raw = record(session.summary, [
+      ...(withPaidAfterRefunds ? ["paidAfterRefunds"] : []),
       ...(withBill ? ["bill"] : []),
       ...(withPoints ? ["pointsUsed"] : []),
       ...(withTakenOff ? ["takenOff"] : []),
@@ -661,8 +668,16 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
       if (BigInt(ordered.subtotal.amountMinor) < 0n || BigInt(ordered.tax.amountMinor) < 0n)
         return invalid();
     } else if (rounds.some((round) => round.subtotal !== undefined)) return invalid();
+    const paidAfterRefunds = withPaidAfterRefunds ? money(raw.paidAfterRefunds) : null;
+    // Never more than was paid (a refund gives back at most what was paid).
+    if (
+      paidAfterRefunds !== null &&
+      BigInt(paidAfterRefunds.amountMinor) > BigInt(money(raw.paid).amountMinor)
+    )
+      return invalid();
     summary = Object.freeze({
       paid: money(raw.paid),
+      ...(paidAfterRefunds === null ? {} : { paidAfterRefunds }),
       refunded: money(raw.refunded),
       refundPending: money(raw.refundPending),
       due: money(raw.due),
