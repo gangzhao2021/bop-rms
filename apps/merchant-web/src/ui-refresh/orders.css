@@ -485,8 +485,10 @@
 .orders-page .order-row__paid {
   font-size: 13px;
 }
-/* Unlike the note below it, shown at every width: the amount above it depends on it. */
-.orders-page .order-row__refunded {
+/* Unlike the note below it, shown at every width: the amount above it depends on it. b61: so is
+   a table's refund still on its way back to the guest's card. */
+.orders-page .order-row__refunded,
+.orders-page .order-row__on-its-way {
   color: var(--bop-color-text-muted);
   font-size: 13px;
   text-align: end;

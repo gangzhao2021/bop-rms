@@ -5219,7 +5219,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Total refunded": "已退款合计",
   "Total after refunds": "退款后合计",
   "Refund on its way": "正在退回客人的卡",
-  "{amount} going back to the guest's card": "{amount} 正在退回客人的卡",
   Totals: "合计",
   "Totals grow until the business day closes; the settlement run happens after that.":
     "营业日结束前合计会持续增加；结算运行在那之后进行。",
@@ -10544,5 +10543,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Check the table again": "再查看一次这桌",
   "Checking the table…": "正在查看这桌…",
   // Batch 61 (v15 b60 live): refunds said plainly on Orders and on a table's payment.
+  "{amount} on its way": "退回中 {amount}",
   "Fully refunded": "已全部退款",
+  "Refund not sent yet": "退款未发出",
+  "Refund to make on the card machine": "退款待在刷卡机上办理",
+  "Tables merged into this one": "并入本桌的其他桌",
+  "Whole bill paid": "整桌账单实付",
 });

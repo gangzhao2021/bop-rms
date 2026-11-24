@@ -482,7 +482,7 @@ export function CurrentOrderLines({
    * Total, as a pickup's tip is, so "Total after refunds" and the list's amount agree. From
    * orderTableTaken.
    */
-  readonly tableTaken?: TableBillTaken | null | undefined;
+  readonly tableTaken?: OrderTableTaken | null | undefined;
 }) {
   const clockStyle = useContext(ClockStyleContext);
   const totals = lines.totals;
@@ -529,16 +529,31 @@ export function CurrentOrderLines({
   // b60 review: a table's tip and cash rounding are on its payment, not its lines.
   const tableTip = BigInt(tableTaken?.tipMinor ?? "0");
   const tableRounding = BigInt(tableTaken?.roundingMinor ?? "0");
-  const tip = BigInt(totals.tip?.amountMinor ?? "0") + tableTip;
+  // b61 (v15 b60 build notes): a merged table's payment is for the whole bill. This Order's Total
+  // stays its own rounds; the bill paid (the rounds of the tables merged in, the tip and the cash
+  // rounding) is said under it, and its refunds come off that bill, as the list's amount does.
+  const mergedRounds =
+    tableTaken?.mergedBillRoundsMinor === undefined
+      ? null
+      : BigInt(tableTaken.mergedBillRoundsMinor);
+  const ownTip = mergedRounds === null ? tableTip : 0n;
+  const ownRounding = mergedRounds === null ? tableRounding : 0n;
+  const tip = BigInt(totals.tip?.amountMinor ?? "0") + ownTip;
   const total = Object.freeze({
-    amountMinor: (
-      BigInt(orderTotalWithTip(shown).amountMinor) +
-      tableTip +
-      tableRounding
-    ).toString(),
+    amountMinor: (BigInt(orderTotalWithTip(shown).amountMinor) + ownTip + ownRounding).toString(),
     currencyCode: shown.total.currencyCode,
   });
-  const afterRefunds = totalAfterRefunds(total, refunds);
+  const mergedBill =
+    mergedRounds === null
+      ? null
+      : {
+          others: mergedRounds - BigInt(shown.total.amountMinor),
+          paid: Object.freeze({
+            amountMinor: (mergedRounds + tableTip + tableRounding).toString(),
+            currencyCode: shown.total.currencyCode,
+          }),
+        };
+  const afterRefunds = totalAfterRefunds(mergedBill?.paid ?? total, refunds);
   const given = refunds.filter((row) => row.pending !== true);
   const onItsWay = refunds.filter((row) => row.pending === true);
   // One "Check refund" per pending cancellation, on its first line.
@@ -814,11 +829,11 @@ export function CurrentOrderLines({
             <dd>{orderMoney({ amountMinor: tip.toString(), currencyCode: total.currencyCode })}</dd>
           </div>
         ) : null}
-        {tableRounding !== 0n ? (
+        {ownRounding !== 0n ? (
           <div>
             <dt>{t("Cash rounding")}</dt>
             <dd>
-              <span className="bop-amount">{signedCad(tableRounding.toString())}</span>
+              <span className="bop-amount">{signedCad(ownRounding.toString())}</span>
             </dd>
           </div>
         ) : null}
@@ -827,6 +842,41 @@ export function CurrentOrderLines({
           <dd>{orderMoney(total)}</dd>
         </div>
       </dl>
+      {mergedBill !== null ? (
+        <dl className="order-lines-totals order-lines-merged-bill">
+          {mergedBill.others > 0n ? (
+            <div>
+              <dt>{t("Tables merged into this one")}</dt>
+              <dd>
+                {orderMoney({
+                  amountMinor: mergedBill.others.toString(),
+                  currencyCode: total.currencyCode,
+                })}
+              </dd>
+            </div>
+          ) : null}
+          {tableTip !== 0n ? (
+            <div>
+              <dt>{t("Tip")}</dt>
+              <dd>
+                {orderMoney({ amountMinor: tableTip.toString(), currencyCode: total.currencyCode })}
+              </dd>
+            </div>
+          ) : null}
+          {tableRounding !== 0n ? (
+            <div>
+              <dt>{t("Cash rounding")}</dt>
+              <dd>
+                <span className="bop-amount">{signedCad(tableRounding.toString())}</span>
+              </dd>
+            </div>
+          ) : null}
+          <div>
+            <dt>{t("Whole bill paid")}</dt>
+            <dd>{orderMoney(mergedBill.paid)}</dd>
+          </div>
+        </dl>
+      ) : null}
       {/* The whole bill to pay only when it is not this Total alone (a table merged into it). */}
       {billRounding?.toPay != null &&
       (billRounding.toPay.amountMinor !== orderTotalWithTip(shown).amountMinor ||
@@ -1058,6 +1108,10 @@ export function orderRefundRows(
   const items = cancelledItemsRefund(lines.items);
   if (items !== null && items.amountMinor !== "0")
     rows.push({ label: t("Cancelled items refund"), amount: items });
+  // b61: of the refunds listed by name, those Payment has not answered yet (in its pending).
+  let listedPending = lines.items
+    .filter((item) => item.cancellation?.refundStatus === "Pending")
+    .reduce((sum, item) => sum + BigInt(item.cancellation?.refund.amountMinor ?? "0"), 0n);
   let online = items === null ? 0n : BigInt(items.amountMinor),
     known = true,
     total = online;
@@ -1081,14 +1135,32 @@ export function orderRefundRows(
       continue;
     }
     const amount = BigInt(cancellation.refundAmountMinor);
-    if (cancellation.refundMethod === "Online") online += amount;
+    if (cancellation.refundMethod === "Online") {
+      online += amount;
+      if (cancellation.refundStatus === "Pending") listedPending += amount;
+    }
     total += amount;
     rows.push({ label, amount: money(amount) });
   }
   let other = 0n;
+  // b61 (decided with b60's table rule): only money Payment says went back counts as "Other
+  // refunds" and comes off "Total after refunds"; a pickup's or online order's refund not
+  // answered yet is listed apart, as a table's is, so the list amount and the detail agree.
+  const waiting: OrderRefundRow[] = [];
   if (position !== null && known) {
-    const left = BigInt(position.refundedMinor) + BigInt(position.refundPendingMinor) - online;
+    const left = BigInt(position.refundedMinor) - (online - listedPending);
     if (left > 0n) other += left;
+    let pending = BigInt(position.refundPendingMinor) - listedPending;
+    const take = (minor: bigint, label: string) => {
+      const part = minor < pending ? minor : pending;
+      if (part <= 0n) return;
+      pending -= part;
+      waiting.push({ label, amount: money(part), pending: true });
+    };
+    // Said as Payment holds it: not sent yet, to make on the card machine, or on its way.
+    take(BigInt(position.refundNotSentMinor), t("Refund not sent yet"));
+    take(BigInt(position.refundOnMachineMinor), t("Refund to make on the card machine"));
+    take(pending, t("Refund on its way"));
   }
   // b60 (v15 b59 live, TM2 order 27): a paid table's own refunds (cash, card machine, and to a
   // guest's card once the Provider answered Succeeded), as Payment records them per part, count
@@ -1103,13 +1175,18 @@ export function orderRefundRows(
   if (rows.length > 1 && known) rows.push({ label: t("Total refunded"), amount: money(total) });
   // Still on its way back to the guest's card: said as such, never as given back.
   const pending = BigInt(table?.refundPendingMinor ?? "0");
-  if (pending > 0n)
-    rows.push({
+  if (pending > 0n) {
+    const same = waiting.findIndex((row) => row.label === t("Refund on its way"));
+    const before = same < 0 ? 0n : BigInt(waiting[same]?.amount?.amountMinor ?? "0");
+    const row = {
       label: t("Refund on its way"),
-      amount: money(pending),
+      amount: money(before + pending),
       pending: true,
-    });
-  return rows;
+    } as const;
+    if (same < 0) waiting.push(row);
+    else waiting[same] = row;
+  }
+  return [...rows, ...waiting];
 }
 
 /**
@@ -1118,9 +1195,28 @@ export function orderRefundRows(
  */
 export function orderTableTaken(order: {
   readonly tableBill: CurrentOrderQueue["items"][number]["tableBill"];
-}): TableBillTaken | null {
-  return order.tableBill?.paid ?? order.tableBill?.partlyPaid ?? null;
+  readonly batches?: readonly { readonly orderBatchReference: string }[];
+}): OrderTableTaken | null {
+  const bill = order.tableBill;
+  const taken = bill?.paid ?? bill?.partlyPaid ?? null;
+  if (bill == null || taken === null) return null;
+  // b61 (v15 b60 build notes): a table with tables merged into it was paid as one bill; its
+  // payment, tip and refunds cover their rounds too, which are on other Orders.
+  const own = new Set((order.batches ?? []).map((batch) => batch.orderBatchReference));
+  const merged =
+    bill.paid !== null &&
+    bill.mergedInto === undefined &&
+    [...(bill.billRoundNumbers?.keys() ?? [])].some((round) => !own.has(round));
+  return merged ? Object.freeze({ ...taken, mergedBillRoundsMinor: bill.totalMinor }) : taken;
 }
+/** orderTableTaken: what the table's payment took, and on a merged table its whole bill. */
+export type OrderTableTaken = TableBillTaken & {
+  /**
+   * b61: the rounds of the whole bill paid at a table with tables merged into it (this Order's
+   * and theirs). Absent: the payment is for this Order's rounds alone.
+   */
+  readonly mergedBillRoundsMinor?: string;
+};
 /**
  * WP-2423 (3cd0f8dd M1): the order's total with the tip its payments carried, so staff read what
  * was paid (as the guest's page and receipt do). Minor units only.
@@ -1782,6 +1878,25 @@ export function orderAmountRefunded(
     refunded += BigInt(batch.staffRound?.paidOnCardMachine?.refundedMinor ?? "0");
   const taken = orderAmountTaken(order);
   return taken === null || refunded > BigInt(taken.amountMinor) ? 0n : refunded;
+}
+/**
+ * b61 (v15 b60 live, TM2 order 50): the refund lines under a row's amount, shown at every width
+ * (the note beside them is hidden on phones). What went back: of what was taken, or, while a table
+ * is only partly paid, of its paid parts (the amount then stays the bill: the rest is still owed).
+ * What is still on its way back to a guest's card at a table is its own line, never counted as
+ * given back.
+ */
+export function orderRowRefundLines(
+  order: QueuedOrder,
+  position?: CurrentOrderDetail["paymentPosition"],
+): { readonly refundedMinor: bigint; readonly onItsWayMinor: bigint } {
+  const parts = order.tableBill?.paid === null ? order.tableBill.partlyPaid : undefined;
+  const refundedMinor =
+    orderAmountTaken(order) !== null
+      ? orderAmountRefunded(order, position)
+      : BigInt(parts?.refundedMinor ?? "0");
+  const taken = order.tableBill?.paid ?? parts;
+  return { refundedMinor, onItsWayMinor: BigInt(taken?.refundPendingMinor ?? "0") };
 }
 /**
  * WP-2423 (v15 751dd768): an order cancelled with no payment recorded (for example a table whose
@@ -2685,47 +2800,16 @@ export function orderAmountNote(
         ? there
         : t("Paid {amount} here", { amount: orderMoney(taken) }) + " · " + there;
     }
-    if (paid === null) {
-      // b60 review: a refund on a part already paid shows on the list too; the amount stays
-      // the bill (the rest is still owed).
-      const parts = order.tableBill.partlyPaid;
-      return [
-        t("On the table's bill"),
-        parts?.refundedMinor === undefined
-          ? null
-          : t("{refunded} refunded", {
-              refunded: orderMoney({ amountMinor: parts.refundedMinor, currencyCode: "CAD" }),
-            }),
-        parts?.refundPendingMinor === undefined
-          ? null
-          : t("{amount} going back to the guest's card", {
-              amount: orderMoney({ amountMinor: parts.refundPendingMinor, currencyCode: "CAD" }),
-            }),
-      ]
-        .filter((part) => part !== null)
-        .join(" · ");
-    }
-    const how =
-      paid.method === "Cash"
-        ? t("Paid at the table · cash")
-        : paid.method === "Online"
-          ? t("Paid at the table · guest's phone")
-          : paid.method === "Split"
-            ? t("Paid at the table · split bill")
-            : t("Paid at the table · card machine");
-    // Owner 2026-11-03: a refund shows on the list, not only inside the order. b60: as a pickup's,
-    // money given back is its own "$8.75 refunded" line under the amount (orderAmountRefunded), so
-    // only money still on its way back is said here, as such.
-    return [
-      how,
-      paid.refundPendingMinor === undefined
-        ? null
-        : t("{amount} going back to the guest's card", {
-            amount: orderMoney({ amountMinor: paid.refundPendingMinor, currencyCode: "CAD" }),
-          }),
-    ]
-      .filter((part) => part !== null)
-      .join(" · ");
+    // b61 (v15 b60 live): what went back and what is on its way are their own lines under the
+    // amount (orderRowRefundLines), shown at every width; these words only say how it is paid.
+    if (paid === null) return t("On the table's bill");
+    return paid.method === "Cash"
+      ? t("Paid at the table · cash")
+      : paid.method === "Online"
+        ? t("Paid at the table · guest's phone")
+        : paid.method === "Split"
+          ? t("Paid at the table · split bill")
+          : t("Paid at the table · card machine");
   }
   // v15 b12 (DEC-PAPER-ORDER-NEVER-RELEASED): paid on paper and entered again: its money is on the
   // new order, never read as an unpaid sale or "No payment recorded".
@@ -3655,6 +3739,7 @@ export function CurrentOrderQueueRows({
               // DEC-DINE-IN-PAY-LATER: an unpaid pay-later table shows what is on its bill.
               const taken = orderAmountTaken(order);
               const refunded = orderAmountRefunded(order, positionOf(order));
+              const refundLines = orderRowRefundLines(order, positionOf(order));
               const amount =
                 taken !== null
                   ? { ...taken, amountMinor: (BigInt(taken.amountMinor) - refunded).toString() }
@@ -3779,12 +3864,22 @@ export function CurrentOrderQueueRows({
                         ) : (
                           <span className="order-row__money">{orderMoney(amount)}</span>
                         )}
-                        {taken !== null && refunded > 0n ? (
+                        {refundLines.refundedMinor > 0n ? (
                           <span className="order-row__refunded">
                             {t("{refunded} refunded", {
                               refunded: orderMoney({
-                                amountMinor: refunded.toString(),
-                                currencyCode: taken.currencyCode,
+                                amountMinor: refundLines.refundedMinor.toString(),
+                                currencyCode: amount?.currencyCode ?? "CAD",
+                              }),
+                            })}
+                          </span>
+                        ) : null}
+                        {refundLines.onItsWayMinor > 0n ? (
+                          <span className="order-row__on-its-way">
+                            {t("{amount} on its way", {
+                              amount: orderMoney({
+                                amountMinor: refundLines.onItsWayMinor.toString(),
+                                currencyCode: amount?.currencyCode ?? "CAD",
                               }),
                             })}
                           </span>

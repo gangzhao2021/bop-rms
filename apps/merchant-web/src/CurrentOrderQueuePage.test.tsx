@@ -38,6 +38,7 @@ import {
   orderAmountTaken,
   orderAmountRefunded,
   orderTableTaken,
+  orderRowRefundLines,
   orderStatusTone,
   ordersSummary,
   orderLabel,
@@ -1344,8 +1345,11 @@ it("46940b76 L2: lists every refund on the order so they add up to what was refu
   ).toEqual([
     ["Cancelled items refund", "608"],
     ["Round 1 cancellation refund", "1177"],
-    ["Other refunds", "315"],
-    ["Total refunded", "2100"],
+    // b61: only money Payment says went back is an "Other refund"; $1.00 not answered yet is
+    // listed apart (it was counted as refunded before).
+    ["Other refunds", "215"],
+    ["Total refunded", "2000"],
+    ["Refund on its way", "100"],
   ]);
   // Before Payment opens the cancellation's refund its amount is not guessed.
   expect(
@@ -2714,9 +2718,9 @@ describe("b60 (v15 b59 live, TM2 order 27): a paid table's refunds count on Orde
     expect(orderAmountTaken(both)).toEqual(money("2825"));
     expect(orderAmountRefunded(both)).toBe(875n);
     expect(orderAmountRefunded(table({ refundPendingMinor: "300" }))).toBe(0n);
-    expect(orderAmountNote(both)).toBe(
-      "Paid at the table · split bill · $3.00 going back to the guest's card",
-    );
+    // b61: what is on its way is its own line under the amount (shown on phones too).
+    expect(orderAmountNote(both)).toBe("Paid at the table · split bill");
+    expect(orderRowRefundLines(both)).toEqual({ refundedMinor: 875n, onItsWayMinor: 300n });
     expect(orderAmountNote(table({ refundedMinor: "675" }))).toBe("Paid at the table · split bill");
   });
 
@@ -2727,7 +2731,7 @@ describe("b60 (v15 b59 live, TM2 order 27): a paid table's refunds count on Orde
         "其他退款",
         "正在退回客人的卡",
       ]);
-      expect(orderAmountNote(both)).toBe("已在桌上付清 · 分单 · $3.00 正在退回客人的卡");
+      expect(orderAmountNote(both)).toBe("已在桌上付清 · 分单");
     } finally {
       setLanguageForTest("en");
     }
@@ -2830,15 +2834,9 @@ describe("b60 review: a table's tip and cash rounding are in its Orders Total, s
     expect(html).toMatch(/<dt>Tip<\/dt><dd>\$3\.00<\/dd>/u);
     expect(html).toMatch(/<dt>Total<\/dt><dd>\$43\.00<\/dd>/u);
     expect(afterRefunds(html)).toBe("38.00");
-    expect(orderAmountNote(order)).toBe(
-      "On the table's bill · $5.00 refunded · $2.00 going back to the guest's card",
-    );
-    setLanguageForTest("zh-Hans");
-    try {
-      expect(orderAmountNote(order)).toContain("正在退回客人的卡");
-    } finally {
-      setLanguageForTest("en");
-    }
+    // b61: the refunds are their own lines under the amount, so phones show them too.
+    expect(orderAmountNote(order)).toBe("On the table's bill");
+    expect(orderRowRefundLines(order)).toEqual({ refundedMinor: 500n, onItsWayMinor: 200n });
   });
 });
 
@@ -2901,4 +2899,166 @@ it("b60 review: reads a table's tip, signed cash rounding and a paid part's refu
     },
   ])
     expect(() => read(bad)).toThrow();
+});
+
+describe("b61 (v15 b60 live): refunds read the same on phones, for pickups and on merged tables", () => {
+  const money = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" as const });
+  const fixture = parseCurrentOrderDetailFixtureLines();
+  const lines = (total: string) =>
+    ({
+      ...fixture,
+      totals: {
+        ...fixture.totals,
+        subtotal: money(String(Number(total) - 325)),
+        tax: money("325"),
+        total: money(total),
+        tip: null,
+      },
+    }) as Parameters<typeof CurrentOrderLines>[0]["lines"];
+  const value = (html: string, label: string) =>
+    new RegExp(`<dt>${label}</dt><dd>(?:<span class="bop-amount">)?([^<]+)<`, "u").exec(
+      html,
+    )?.[1] ?? null;
+
+  it("a table only partly paid (TM2 order 50) has its refund on the row's own line", () => {
+    // Split in two: part 1 $14.13 paid on a phone, $3.00 of it back on the card; part 2 owed.
+    const order = {
+      orderType: "DineIn",
+      paidOnline: null,
+      counter: null,
+      batches: [{ sequence: 1, staffCancellation: null, staffRound: null }],
+      tableBill: {
+        totalMinor: "2825",
+        partlyPaid: { remainingMinor: "1412", paidParts: 1, partCount: 2, refundedMinor: "300" },
+        paid: null,
+      },
+    } as unknown as Parameters<typeof orderRowRefundLines>[0];
+    expect(orderAmountTaken(order)).toBeNull();
+    expect(orderRowRefundLines(order)).toEqual({ refundedMinor: 300n, onItsWayMinor: 0n });
+    expect(orderAmountNote(order)).toBe("On the table's bill");
+  });
+
+  it("a pickup's refund not answered yet is listed apart and never comes off the total", () => {
+    const pickup = {
+      orderType: "Pickup",
+      paidOnline: money("1413"),
+      counter: null,
+      tableBill: null,
+      batches: [{ sequence: 1, staffCancellation: null, staffRound: null }],
+    } as unknown as Parameters<typeof orderRefundRows>[0];
+    const position = (refunded: string, pending: string, notSent = "0", onMachine = "0") => ({
+      refundedMinor: refunded,
+      refundPendingMinor: pending,
+      refundNotSentMinor: notSent,
+      refundOnMachineMinor: onMachine,
+    });
+    const linesOf = lines("1413");
+    // Sent to the card company, no answer yet: nothing is taken off.
+    const sending = orderRefundRows(pickup, linesOf, position("0", "1413"));
+    expect(sending).toEqual([{ label: "Refund on its way", amount: money("1413"), pending: true }]);
+    expect(totalAfterRefunds(money("1413"), sending)).toBeNull();
+    // $5.00 went back, $3.00 recorded but not sent yet, $2.00 to make on the card machine.
+    const mixed = orderRefundRows(pickup, linesOf, position("500", "500", "300", "200"));
+    expect(mixed).toEqual([
+      { label: "Other refunds", amount: money("500") },
+      { label: "Refund not sent yet", amount: money("300"), pending: true },
+      { label: "Refund to make on the card machine", amount: money("200"), pending: true },
+    ]);
+    expect(totalAfterRefunds(money("1413"), mixed)).toEqual(money("913"));
+    // The list amount agrees: what was paid less what went back.
+    expect(
+      BigInt(orderAmountTaken(pickup)?.amountMinor ?? "0") -
+        orderAmountRefunded(pickup, position("500", "500", "300", "200")),
+    ).toBe(913n);
+    const html = renderToStaticMarkup(<CurrentOrderLines lines={linesOf} refundRows={mixed} />);
+    expect(value(html, "Total")).toBe("$14.13");
+    expect(value(html, "Other refunds")).toBe("−$5.00");
+    expect(value(html, "Total after refunds")).toBe("$9.13");
+    expect(value(html, "Refund not sent yet")).toBe("$3.00");
+    // A refund of a cancelled round not answered yet is listed once, by its name.
+    const cancelled = {
+      ...pickup,
+      batches: [
+        {
+          sequence: 1,
+          staffRound: null,
+          staffCancellation: {
+            refundMethod: "Online",
+            refundStatus: "Pending",
+            refundAmountMinor: "1413",
+          },
+        },
+      ],
+    } as unknown as Parameters<typeof orderRefundRows>[0];
+    expect(orderRefundRows(cancelled, linesOf, position("0", "1413"))).toEqual([
+      { label: "Order cancellation refund", amount: money("1413") },
+    ]);
+    setLanguageForTest("zh-Hans");
+    try {
+      expect(
+        orderRefundRows(pickup, linesOf, position("500", "500", "300", "200")).map(
+          (row) => row.label,
+        ),
+      ).toEqual(["其他退款", "退款未发出", "退款待在刷卡机上办理"]);
+    } finally {
+      setLanguageForTest("en");
+    }
+  });
+
+  it("a merged table's Orders detail ends at the whole bill paid, as the list does", () => {
+    // Host table: its own round $28.25; a table merged into it had a $28.25 round (on another
+    // Order). Paid together on a phone with a $3.75 tip: $60.25. Then $10.00 back to the card.
+    const id = (n: number) => "0190a410-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+    const host = {
+      orderType: "DineIn",
+      paidOnline: null,
+      counter: null,
+      batches: [{ orderBatchReference: id(51), sequence: 1, staffCancellation: null }],
+      tableBill: {
+        totalMinor: "5650",
+        paid: { amountMinor: "6025", method: "Online", tipMinor: "375", refundedMinor: "1000" },
+        billRoundNumbers: new Map([
+          [id(51), 1],
+          [id(52), 2],
+        ]),
+      },
+    } as unknown as Parameters<typeof orderRefundRows>[0];
+    const linesOf = lines("2825");
+    const html = renderToStaticMarkup(
+      <CurrentOrderLines
+        lines={linesOf}
+        refundRows={orderRefundRows(host, linesOf, null)}
+        tableTaken={orderTableTaken(host)}
+      />,
+    );
+    expect(value(html, "Total")).toBe("$28.25");
+    expect(value(html, "Tables merged into this one")).toBe("$28.25");
+    expect(value(html, "Tip")).toBe("$3.75");
+    expect(value(html, "Whole bill paid")).toBe("$60.25");
+    expect(value(html, "Other refunds")).toBe("−$10.00");
+    expect(value(html, "Total after refunds")).toBe("$50.25");
+    const list = BigInt(orderAmountTaken(host)?.amountMinor ?? "0") - orderAmountRefunded(host);
+    expect(list).toBe(5025n);
+    // Not merged: the table's payment is this Order's alone, as before.
+    const single = {
+      ...host,
+      tableBill: { ...host.tableBill, billRoundNumbers: undefined },
+    } as unknown as Parameters<typeof orderRefundRows>[0];
+    expect(orderTableTaken(single)).not.toHaveProperty("mergedBillRoundsMinor");
+    setLanguageForTest("zh-Hans");
+    try {
+      const zh = renderToStaticMarkup(
+        <CurrentOrderLines
+          lines={linesOf}
+          refundRows={orderRefundRows(host, linesOf, null)}
+          tableTaken={orderTableTaken(host)}
+        />,
+      );
+      expect(value(zh, "并入本桌的其他桌")).toBe("$28.25");
+      expect(value(zh, "整桌账单实付")).toBe("$60.25");
+      expect(value(zh, "退款后合计")).toBe("$50.25");
+    } finally {
+      setLanguageForTest("en");
+    }
+  });
 });

@@ -251,7 +251,7 @@ const words = (zh: boolean) =>
         pending: "正在退回客人的卡",
         after: "退款后合计",
         refunded: "已退 $8.75",
-        note: "$3.00 正在退回客人的卡",
+        onItsWay: "退回中 $3.00",
       }
     : {
         total: "Total",
@@ -259,7 +259,7 @@ const words = (zh: boolean) =>
         pending: "Refund on its way",
         after: "Total after refunds",
         refunded: "$8.75 refunded",
-        note: "$3.00 going back to the guest's card",
+        onItsWay: "$3.00 on its way",
       };
 
 /** The order's totals: the original Total, what went back, what is on its way, what is left. */
@@ -327,7 +327,9 @@ for (const zh of [false, true]) {
       const row = page.locator("li.order-row").first();
       await expect(row.locator(".order-row__money")).toHaveText("$19.50");
       await expect(row.locator(".order-row__refunded")).toHaveText(w.refunded);
-      await expect(row.locator(".order-row__paid")).toContainText(w.note);
+      // b61: on its own line under the amount, so phones show it too (it was in the note).
+      await expect(row.locator(".order-row__on-its-way")).toBeVisible();
+      await expect(row.locator(".order-row__on-its-way")).toHaveText(w.onItsWay);
       const opener = row.locator(".order-row__open");
       if ((await opener.getAttribute("aria-expanded")) !== "true") await opener.click();
       await expect(opener).toHaveAttribute("aria-expanded", "true");
