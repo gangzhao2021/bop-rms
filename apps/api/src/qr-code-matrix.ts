@@ -288,12 +288,20 @@ export function renderQrSvg(matrix: QrMatrix, label: string): string {
     (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] ?? c,
   );
   const extent = matrix.size + margin * 2;
+  // Batch 58: each run of dark modules in a row is one rectangle (the same squares as one per
+  // module, about half the bytes), so a sheet of 500 table codes stays one downloadable file.
   let path = "";
-  matrix.modules.forEach((row, y) =>
-    row.forEach((dark, x) => {
-      if (dark) path += `M${x + margin} ${y + margin}h1v1h-1z`;
-    }),
-  );
+  matrix.modules.forEach((row, y) => {
+    for (let x = 0; x < row.length;) {
+      if (!row[x]) {
+        x++;
+        continue;
+      }
+      const start = x;
+      while (x < row.length && row[x]) x++;
+      path += `M${start + margin} ${y + margin}h${x - start}v1h-${x - start}z`;
+    }
+  });
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${extent} ${extent}" shape-rendering="crispEdges" role="img" aria-label="${name}">` +
     `<rect width="${extent}" height="${extent}" fill="#fff"/><path d="${path}" fill="#000"/></svg>`

@@ -70,4 +70,28 @@ describe("WP-2423 Q11 QR matrix", () => {
     expect(svg).toContain('aria-label="Table &lt;&quot;A&quot;&gt;"');
     expect(svg).toContain('viewBox="0 0 29 29"');
   });
+
+  it("batch 58: draws exactly the dark modules, one rectangle per run, in about half the bytes", () => {
+    for (const text of ["HELLO", tableUrl]) {
+      const matrix = encodeQrMatrix(text);
+      const svg = renderQrSvg(matrix, "T1");
+      const d = /<path d="([^"]*)"/u.exec(svg)?.[1] ?? "";
+      const drawn = matrix.modules.map((row) => row.map(() => false));
+      let rectangles = 0;
+      for (const [, x, y, width, back] of d.matchAll(/M(\d+) (\d+)h(\d+)v1h-(\d+)z/gu)) {
+        expect(back).toBe(width);
+        rectangles++;
+        for (let i = 0; i < Number(width); i++) {
+          const row = drawn[Number(y) - 4];
+          const column = Number(x) - 4 + i;
+          expect(row?.[column]).toBe(false);
+          if (row) row[column] = true;
+        }
+      }
+      expect(d.replace(/M\d+ \d+h\d+v1h-\d+z/gu, "")).toBe("");
+      expect(drawn).toEqual(matrix.modules);
+      const dark = matrix.modules.flat().filter(Boolean).length;
+      expect(rectangles).toBeLessThan(dark * 0.6);
+    }
+  });
 });
