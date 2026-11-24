@@ -8177,6 +8177,17 @@ async function journey(journeyEnding) {
           assert.equal(sent.length, 1);
           assert.equal((await positionNow()).settlement.pendingRefundMinor, 1000n);
           assert.equal((await positionNow()).settlement.confirmedRefundMinor, 0n);
+          // b60 (v15 b59 live, TM2 order 27): the Orders row reads the table's refunds from
+          // Payment under the pilot role: on its way, never as given back.
+          const billRefunds = async () => {
+            const { refundedMinor, refundPendingMinor } = (await orderDetail()).items[0].tableBill
+              .paid;
+            return { refundedMinor, refundPendingMinor };
+          };
+          assert.deepEqual(await billRefunds(), {
+            refundedMinor: undefined,
+            refundPendingMinor: "1000",
+          });
           const duringOutage = await dayNow();
           assert.equal(duringOutage.unresolvedOnlineRefundCount, 1);
           assert.deepEqual(duringOutage.settlement.onlineRefunded, { count: 0, amountMinor: 0n });
@@ -8221,6 +8232,10 @@ async function journey(journeyEnding) {
           // The money follows: the Order's position, the day's ledger and reports.
           assert.equal((await positionNow()).settlement.pendingRefundMinor, 0n);
           assert.equal((await positionNow()).settlement.confirmedRefundMinor, 1000n);
+          assert.deepEqual(await billRefunds(), {
+            refundedMinor: "1000",
+            refundPendingMinor: undefined,
+          });
           const refundedDay = await dayNow();
           assert.equal(refundedDay.unresolvedOnlineRefundCount, 0);
           assert.deepEqual(refundedDay.settlement.onlineRefunded, { count: 1, amountMinor: 1000n });
@@ -8239,6 +8254,11 @@ async function journey(journeyEnding) {
           );
           assert.equal(refused.payment.refundableMinor, (due - 1000n).toString());
           assert.equal((await positionNow()).settlement.confirmedRefundMinor, 1000n);
+          // A refused refund moved nothing: neither given back nor on its way.
+          assert.deepEqual(await billRefunds(), {
+            refundedMinor: "1000",
+            refundPendingMinor: undefined,
+          });
           assert.deepEqual((await dayNow()).settlement.onlineRefunded, {
             count: 1,
             amountMinor: 1000n,
@@ -8248,6 +8268,10 @@ async function journey(journeyEnding) {
           answers = "succeeded";
           const emptied = await refund((due - 1000n).toString());
           assert.equal(emptied.payment.refundableMinor, "0");
+          assert.deepEqual(await billRefunds(), {
+            refundedMinor: due.toString(),
+            refundPendingMinor: undefined,
+          });
           await assert.rejects(refund("1"), { code: "TABLE_PAYMENT_TOO_MUCH" });
           assert.deepEqual((await dayNow()).settlement.onlineRefunded, {
             count: 2,

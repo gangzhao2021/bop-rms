@@ -264,7 +264,8 @@ const dineIn = {
     // b40 review: on a merged table, each round's number on the whole bill, as checkout numbers it.
     billRoundNumbers: [{ orderBatchReference: id(0x9031), roundNumber: 2 }],
     partlyPaid: { remainingMinor: "0", paidParts: 2, partCount: 2 },
-    paid: { amountMinor: "9200", method: "Cash", refundedMinor: "0" },
+    // b60: what went back and what is still on its way back to a guest's card.
+    paid: { amountMinor: "9200", method: "Cash", refundedMinor: "500", refundPendingMinor: "300" },
   },
   paidOnline: { amountMinor: "8000", currencyCode: "CAD" },
   paymentPosition: {
@@ -1122,6 +1123,13 @@ describe("merchant BFF responses carry every read-model field the browser parses
     expect(table?.batches[0]?.kitchenRelease).toEqual({ state: "Sending", acceptedAt: at(3) });
     expect(table?.readyToServeItemCount).toBe(2);
     expect(table?.tableBill?.taxRoundingMinor).toBe("-1");
+    // b60: a paid table's refunds given back and on their way reach the Orders row.
+    expect(table?.tableBill?.paid).toEqual({
+      amountMinor: "9200",
+      method: "Cash",
+      refundedMinor: "500",
+      refundPendingMinor: "300",
+    });
     expect(table?.tableBill?.rounds).toEqual([
       {
         orderBatchReference: id(0x9031),

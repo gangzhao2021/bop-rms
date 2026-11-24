@@ -1399,6 +1399,32 @@ export async function tableRefundedMinor(
   ].reduce((sum, refund) => sum + refund.amountMinor, 0n);
 }
 
+/**
+ * b60 (v15 b59 live, TM2 order 27): a table's refunds as Orders reads them against the Order's
+ * total. Given back: cash, card-machine refunds and refunds to a guest's card the Provider answered
+ * Succeeded. On its way: refunds to a guest's card the Provider has not answered yet (never read as
+ * given back). A refused one moved nothing and is in neither.
+ */
+export async function tableRefundPosition(
+  tx: ConsumerTransaction,
+  store: ReturnType<typeof createPostgresDiningTableSettlementStore>,
+  orderReference: string,
+): Promise<{ readonly refundedMinor: bigint; readonly pendingMinor: bigint }> {
+  const orders = [orderReference];
+  const cash = await store.listCashRefundsByOrders(tx as never, orders);
+  const card = await store.listCardRefundsByOrders(tx as never, orders);
+  const online = await store.listOnlineRefundsByOrders(tx as never, orders);
+  const sum = (refunds: readonly { readonly amountMinor: bigint }[]) =>
+    refunds.reduce((total, refund) => total + refund.amountMinor, 0n);
+  return Object.freeze({
+    refundedMinor:
+      sum(cash) +
+      sum(card) +
+      sum(online.filter((refund) => refund.outcome?.status === "Succeeded")),
+    pendingMinor: sum(online.filter((refund) => refund.outcome === null)),
+  });
+}
+
 /** v15 b15 (DEC-TAX-WHOLE-RECEIPT): one of an Order's rounds as its table's bill charges it. */
 export interface OrderBillRound {
   readonly orderBatchReference: string;

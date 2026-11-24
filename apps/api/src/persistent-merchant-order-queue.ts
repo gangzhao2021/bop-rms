@@ -95,7 +95,7 @@ import {
   diningTableBillRoundNumbers,
   readDiningTableBill,
   readOrderBillRounds,
-  tableRefundedMinor,
+  tableRefundPosition,
 } from "./merchant-dining-table-checkout.js";
 import { withOptionalRead } from "./merchant-round-business-date.js";
 import { readPaidOrderWatch } from "./merchant-paid-order-watch.js";
@@ -719,8 +719,14 @@ export function createPersistentMerchantOrderQueue(options: {
                 amountMinor: string;
                 /** WP-2423 item 8 ④: "Split" — paid part by part (any methods), every part paid. */
                 method: "CardMachine" | "Cash" | "Online" | "Split";
-                /** Owner 2026-11-03: what went back (absent while nothing has). */
+                /**
+                 * Owner 2026-11-03: what went back (absent while nothing has). b60: only what the
+                 * Provider answered Succeeded for a refund to a guest's card, and cash and
+                 * card-machine refunds.
+                 */
                 refundedMinor?: string;
+                /** b60: refunds to a guest's card still on their way (absent while none is). */
+                refundPendingMinor?: string;
               } | null;
             }
           >();
@@ -1448,7 +1454,7 @@ export function createPersistentMerchantOrderQueue(options: {
                   plan.parts.length > 0 &&
                   diningTableSplitPaidInFull(plan, parts)
                 ) {
-                  const refunded = await tableRefundedMinor(
+                  const refunds = await tableRefundPosition(
                     businessTransaction as never,
                     tableStore,
                     order,
@@ -1462,14 +1468,14 @@ export function createPersistentMerchantOrderQueue(options: {
                         .reduce((sum, entry) => sum + entry.totalMinor, 0n)
                         .toString(),
                       method: "Split",
-                      ...(refunded > 0n ? { refundedMinor: refunded.toString() } : {}),
+                      ...tableBillRefunds(refunds),
                     },
                     ...(await paidBillRoundNumbers()),
                   });
                   continue;
                 }
                 if (settlement !== undefined) {
-                  const refunded = await tableRefundedMinor(
+                  const refunds = await tableRefundPosition(
                     businessTransaction as never,
                     tableStore,
                     order,
@@ -1479,7 +1485,7 @@ export function createPersistentMerchantOrderQueue(options: {
                     paid: {
                       amountMinor: settlement.totalMinor.toString(),
                       method: settlement.method,
-                      ...(refunded > 0n ? { refundedMinor: refunded.toString() } : {}),
+                      ...tableBillRefunds(refunds),
                     },
                     ...(await paidBillRoundNumbers()),
                   });
@@ -2335,4 +2341,19 @@ function withRemovedFromBill<Bill extends object>(
 ): Bill | (Bill & { removedMinor: string }) | null {
   if (bill === null || removedMinor === undefined || removedMinor < 0n) return bill;
   return { ...bill, removedMinor: removedMinor.toString() };
+}
+
+/**
+ * b60 (v15 b59 live, TM2 order 27): a paid table bill's refunds on its Orders row, so the list
+ * amount and the detail's "Total after refunds" count only money given back, and money still on
+ * its way back is said as such. Each figure is absent while it is zero.
+ */
+export function tableBillRefunds(refunds: {
+  readonly refundedMinor: bigint;
+  readonly pendingMinor: bigint;
+}): { readonly refundedMinor?: string; readonly refundPendingMinor?: string } {
+  return {
+    ...(refunds.refundedMinor > 0n ? { refundedMinor: refunds.refundedMinor.toString() } : {}),
+    ...(refunds.pendingMinor > 0n ? { refundPendingMinor: refunds.pendingMinor.toString() } : {}),
+  };
 }

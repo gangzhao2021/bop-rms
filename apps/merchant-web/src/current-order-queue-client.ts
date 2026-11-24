@@ -149,8 +149,13 @@ function parseTableBillBody(
     readonly amountMinor: string;
     /** WP-2423 item 8 ④: "Split" — paid part by part, every part paid. */
     readonly method: "CardMachine" | "Cash" | "Online" | "Split";
-    /** Owner 2026-11-03: what went back (absent while nothing has). */
+    /**
+     * Owner 2026-11-03: what went back (absent while nothing has). b60: cash, card-machine refunds
+     * and refunds to a guest's card the Provider answered Succeeded.
+     */
     readonly refundedMinor?: string;
+    /** b60: refunds to a guest's card still on their way (absent while none is). */
+    readonly refundPendingMinor?: string;
   } | null;
 } | null {
   if (value === null) return null;
@@ -219,20 +224,24 @@ function parseTableBillBody(
       paid: null,
     });
   }
-  const withRefund =
-    bill.paid !== null &&
-    typeof bill.paid === "object" &&
-    Object.hasOwn(bill.paid, "refundedMinor");
+  const has = (key: string) =>
+    bill.paid !== null && typeof bill.paid === "object" && Object.hasOwn(bill.paid, key);
+  const withRefund = has("refundedMinor");
+  const withPending = has("refundPendingMinor");
   const paid = exact(bill.paid, [
     "amountMinor",
     "method",
     ...(withRefund ? ["refundedMinor"] : []),
+    ...(withPending ? ["refundPendingMinor"] : []),
   ]);
   if (
     typeof paid.amountMinor !== "string" ||
     !minorAmount.test(paid.amountMinor) ||
     (withRefund &&
       (typeof paid.refundedMinor !== "string" || !minorAmount.test(paid.refundedMinor))) ||
+    (withPending &&
+      (typeof paid.refundPendingMinor !== "string" ||
+        !minorAmount.test(paid.refundPendingMinor))) ||
     (paid.method !== "CardMachine" &&
       paid.method !== "Cash" &&
       paid.method !== "Online" &&
@@ -245,6 +254,7 @@ function parseTableBillBody(
       amountMinor: paid.amountMinor,
       method: paid.method,
       ...(withRefund ? { refundedMinor: paid.refundedMinor as string } : {}),
+      ...(withPending ? { refundPendingMinor: paid.refundPendingMinor as string } : {}),
     }),
   });
 }
