@@ -1,8 +1,10 @@
+import { OrderPriceReductionError } from "@rms/ordering";
 import { expect, it } from "vitest";
 import {
   createMerchantDiningItemComp,
   createMerchantDiningItemCompPreview,
   ItemCompError,
+  itemCompFailureOf,
   parseItemCompCommand,
   parseItemCompPreview,
 } from "./merchant-dining-item-comp.js";
@@ -160,4 +162,16 @@ it("batch 60 (v15 b59 live): a comp may name how many of a line's dishes it cove
       compQuantities: [{ orderItemReference: id(3), quantity: 1 }],
     }),
   ).toThrow(expect.objectContaining({ code: "ITEM_COMP_INPUT_INVALID" }));
+});
+
+it("batch 61 (v15 b60 live): comps the database finds cover more dishes than the line has say fewer are left", () => {
+  expect(
+    itemCompFailureOf(new OrderPriceReductionError("ORDER_PRICE_REDUCTION_NOT_THAT_MANY")),
+  ).toBe("ITEM_COMP_NOT_THAT_MANY");
+  expect(itemCompFailureOf(new OrderPriceReductionError("ORDER_PRICE_REDUCTION_CONFLICT"))).toBe(
+    "ITEM_COMP_CONFLICT",
+  );
+  expect(itemCompFailureOf(new OrderPriceReductionError("ORDER_PRICE_REDUCTION_UNAVAILABLE"))).toBe(
+    "ITEM_COMP_UNAVAILABLE",
+  );
 });

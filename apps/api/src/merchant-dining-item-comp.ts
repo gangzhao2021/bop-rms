@@ -209,6 +209,19 @@ const publicRecords = (records: readonly OrderPriceReductionRecord[]) =>
     ),
   );
 
+/**
+ * What staff are told when Ordering refuses the comp while recording it. Batch 61: comps of a line
+ * the database finds cover more dishes than it has (another comp took them meanwhile) are "fewer
+ * are left than you chose", as the check before recording says.
+ */
+export function itemCompFailureOf(error: OrderPriceReductionError) {
+  return error.code === "ORDER_PRICE_REDUCTION_CONFLICT"
+    ? ("ITEM_COMP_CONFLICT" as const)
+    : error.code === "ORDER_PRICE_REDUCTION_NOT_THAT_MANY"
+      ? ("ITEM_COMP_NOT_THAT_MANY" as const)
+      : ("ITEM_COMP_UNAVAILABLE" as const);
+}
+
 interface ItemCompOptions {
   persistence: PersistentMerchantBffOptions;
   authentication: Pick<MerchantBffService, "authorize">;
@@ -452,12 +465,7 @@ function itemCompRun(options: ItemCompOptions) {
       );
     } catch (error) {
       if (error instanceof ItemCompError) throw error;
-      if (error instanceof OrderPriceReductionError)
-        return fail(
-          error.code === "ORDER_PRICE_REDUCTION_CONFLICT"
-            ? "ITEM_COMP_CONFLICT"
-            : "ITEM_COMP_UNAVAILABLE",
-        );
+      if (error instanceof OrderPriceReductionError) return fail(itemCompFailureOf(error));
       const code = databaseCode(error);
       if (code === "40P01" || code === "40001" || code === "55P03")
         return fail("ITEM_COMP_CONFLICT");

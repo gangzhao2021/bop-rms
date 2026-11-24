@@ -257,6 +257,11 @@ it("a comp then a 50 % discount take off exactly what the bill goes down by; the
 // and the bill, Orders, reports and the day-end line all agree to the cent.
 it("a manager comps 1 of 2 identical dishes, then the other; every record agrees to the cent", () =>
   journey("CompCentsLine"));
+// Batch 61 (v15 b60 live, order 54): 3 × Beef noodles on one line, 1 comped; three managers comp
+// 1 dish each at the same moment. Two are recorded; the third, sent while dishes were still left,
+// is told fewer are left than it chose (never "already has a comp"); the comps add up to the line.
+it("three part comps of one line at once never cover more than it has; the last is told fewer are left", () =>
+  journey("CompCentsLineRace"));
 // v15 b16 review: two $3.80 rounds at 13 % are charged $0.49 tax each, the whole bill $0.99 (+$0.01):
 // comping both takes off $8.59, one cent more than the dishes. Ordering's priced total, closing the
 // table without a payment and the day's report still read it ($0.00 owed, $8.59 comped).
@@ -1185,49 +1190,51 @@ async function journey(journeyEnding) {
                           ? "wp2423_plccp"
                           : ending === "CompCentsLine"
                             ? "wp2423_plccl"
-                            : ending === "CompCentsUp"
-                              ? "wp2423_plccu"
-                              : ending === "MergedCompCent"
-                                ? "wp2423_plmergc"
-                                : ending === "MergedOwnRounding"
-                                  ? "wp2423_plmergor"
-                                  : ending === "MergedRemoved"
-                                    ? "wp2423_plmergrm"
-                                    : ending === "MemberPointsOnline"
-                                      ? "wp2423_plmembon"
-                                      : ending === "MemberPointsOtherPhone"
-                                        ? "wp2423_plmembop"
-                                        : ending === "MemberPointsStoreAccount"
-                                          ? "wp2423_plmembac"
-                                          : ending === "MemberPointsRefunded"
-                                            ? "wp2423_plmembrf"
-                                            : ending === "MemberPointsPickup"
-                                              ? "wp2423_plmembpk"
-                                              : ending === "MemberPoints"
-                                                ? "wp2423_plmember"
-                                                : ending === "MemberPointsSplit"
-                                                  ? "wp2423_plmembsp"
-                                                  : ending === "MemberPointsWrittenOff"
-                                                    ? "wp2423_plmembwo"
-                                                    : ending === "PaidSplit"
-                                                      ? "wp2423_plsplit"
-                                                      : ending === "SplitWrittenOff"
-                                                        ? "wp2423_plsplwo"
-                                                        : ending === "SplitPhoneWrittenOff"
-                                                          ? "wp2423_plsplpwo"
-                                                          : ending === "ByGuestsPhoneWrittenOff"
-                                                            ? "wp2423_plbgpwo"
-                                                            : ending === "Held"
-                                                              ? "wp2423_plheld"
-                                                              : ending === "HeldAtCheckout"
-                                                                ? "wp2423_plheldco"
-                                                                : ending === "TipsOff"
-                                                                  ? "wp2423_pltips"
-                                                                  : ending === "Moved"
-                                                                    ? "wp2423_plmove"
-                                                                    : ending === "Merged"
-                                                                      ? "wp2423_plmerge"
-                                                                      : "wp2423_plon",
+                            : ending === "CompCentsLineRace"
+                              ? "wp2423_plcclr"
+                              : ending === "CompCentsUp"
+                                ? "wp2423_plccu"
+                                : ending === "MergedCompCent"
+                                  ? "wp2423_plmergc"
+                                  : ending === "MergedOwnRounding"
+                                    ? "wp2423_plmergor"
+                                    : ending === "MergedRemoved"
+                                      ? "wp2423_plmergrm"
+                                      : ending === "MemberPointsOnline"
+                                        ? "wp2423_plmembon"
+                                        : ending === "MemberPointsOtherPhone"
+                                          ? "wp2423_plmembop"
+                                          : ending === "MemberPointsStoreAccount"
+                                            ? "wp2423_plmembac"
+                                            : ending === "MemberPointsRefunded"
+                                              ? "wp2423_plmembrf"
+                                              : ending === "MemberPointsPickup"
+                                                ? "wp2423_plmembpk"
+                                                : ending === "MemberPoints"
+                                                  ? "wp2423_plmember"
+                                                  : ending === "MemberPointsSplit"
+                                                    ? "wp2423_plmembsp"
+                                                    : ending === "MemberPointsWrittenOff"
+                                                      ? "wp2423_plmembwo"
+                                                      : ending === "PaidSplit"
+                                                        ? "wp2423_plsplit"
+                                                        : ending === "SplitWrittenOff"
+                                                          ? "wp2423_plsplwo"
+                                                          : ending === "SplitPhoneWrittenOff"
+                                                            ? "wp2423_plsplpwo"
+                                                            : ending === "ByGuestsPhoneWrittenOff"
+                                                              ? "wp2423_plbgpwo"
+                                                              : ending === "Held"
+                                                                ? "wp2423_plheld"
+                                                                : ending === "HeldAtCheckout"
+                                                                  ? "wp2423_plheldco"
+                                                                  : ending === "TipsOff"
+                                                                    ? "wp2423_pltips"
+                                                                    : ending === "Moved"
+                                                                      ? "wp2423_plmove"
+                                                                      : ending === "Merged"
+                                                                        ? "wp2423_plmerge"
+                                                                        : "wp2423_plon",
     },
     async (context) => {
       const admin = new Client(context.clientConfig);
@@ -1272,6 +1279,8 @@ async function journey(journeyEnding) {
           ...centsPrice,
           // Batch 60: two bowls on one line.
           ...(ending === "CompCentsLine" ? { quantity: 2 } : {}),
+          // Batch 61: three on one line (the v15 b60 race, order 54).
+          ...(ending === "CompCentsLineRace" ? { quantity: 3 } : {}),
         });
         const tableGuest = id(0x602);
         const R2 = journeyRound({
@@ -7145,6 +7154,73 @@ async function journey(journeyEnding) {
           assert.equal(managerCompsTakenOff(decided).count, 1);
         }
 
+        /**
+         * Batch 61 (v15 b60 live, order 54): 3 × Beef noodles ($42.38), 1 comped; three 1-dish
+         * comps at once, each with its own reference, under the restricted role.
+         */
+        async function compPartOfLineRaceEnding() {
+          await cookAndServeRound1([round1, round2]);
+          const line = String(items1[0].orderItemReference);
+          assert.equal(items1[0].quantity, 3);
+          const lineTotal = price(items1[0]).total;
+          assert.equal(lineTotal, 4238n);
+          const original = BigInt((await bill()).owed.totalMinor);
+          const one = [{ orderItemReference: line, quantity: 1 }];
+          const first = await comp(manager, {
+            orderItemReferences: [line],
+            compQuantities: one,
+            reasonCode: "WRONG_DISH",
+          });
+          assert.equal(first.status, "Recorded");
+          // Two left: each of the three asks for 1 (fewer than are left, as the dialog sends it).
+          const raced = await Promise.allSettled(
+            [0, 1, 2].map(() =>
+              comp(manager, {
+                orderItemReferences: [line],
+                compQuantities: one,
+                reasonCode: "WRONG_DISH",
+              }),
+            ),
+          );
+          const told = raced.map((outcome) =>
+            outcome.status === "fulfilled" ? outcome.value.status : outcome.reason?.code,
+          );
+          assert.deepEqual(
+            [...told].sort(),
+            ["ITEM_COMP_NOT_THAT_MANY", "Recorded", "Recorded"],
+            JSON.stringify(raced.map((o) => String(o.reason ?? o.status))),
+          );
+          const recorded = await rows(
+            "SELECT comped_quantity AS dishes,total_minor::text AS total,tax_rounding_minor::text AS share FROM rms_ordering.order_item_price_reduction WHERE order_id=$1 AND order_item_id=$2 ORDER BY decided_at,reduction_id",
+            [orderReference, line],
+          );
+          assert.deepEqual(
+            recorded.map((r) => r.dishes),
+            [1, 1, 1],
+          );
+          // The comps take off exactly the line, to the cent (and the whole bill's tax cents they
+          // carry), and the bill goes down by exactly what they record.
+          const takenOff = recorded.reduce((sum, r) => sum + BigInt(r.total), 0n);
+          assert.equal(
+            recorded.reduce((sum, r) => sum + BigInt(r.total) - BigInt(r.share), 0n),
+            lineTotal,
+            JSON.stringify(recorded),
+          );
+          const after = await bill();
+          assert.equal(after.consistent, true);
+          assert.equal(BigInt(after.owed.totalMinor), original - takenOff);
+          // Nothing left: the rest of the line or a percentage is "already comped"; a count (the
+          // dialog names one only while more dishes are left) is still "fewer are left".
+          for (const [command, code] of [
+            [{}, "ITEM_COMP_ALREADY_COMPED"],
+            [{ kind: "Percent", percent: 10 }, "ITEM_COMP_ALREADY_COMPED"],
+            [{ compQuantities: one }, "ITEM_COMP_NOT_THAT_MANY"],
+          ])
+            await assert.rejects(comp(manager, { orderItemReferences: [line], ...command }), {
+              code,
+            });
+        }
+
         async function compedWholeEnding() {
           const recordPartySize = await partySizeWhileOpen();
           await notPreparedRound1();
@@ -9363,6 +9439,7 @@ async function journey(journeyEnding) {
         }
         if (ending.startsWith("CompCents")) {
           if (ending === "CompCentsLine") await compPartOfLineEnding();
+          else if (ending === "CompCentsLineRace") await compPartOfLineRaceEnding();
           else
             await compCentsEnding(
               ending === "CompCentsWhole" ? "Whole" : ending === "CompCentsUp" ? "Up" : "Partial",

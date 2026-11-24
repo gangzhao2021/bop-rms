@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   orderItemCompAmounts,
+  orderItemCompLineRefusal,
   orderItemReductions,
   orderPriceReductionAmounts,
   withBillTaxRoundingShares,
@@ -196,5 +197,43 @@ describe("batch 60: a comp of some of a line's dishes (1 of 2 × Beef noodles)",
       { ...record(1, "2026-11-24T18:00:00.000Z", 2825n, 325n), compedQuantity: null },
     ]).get("i1");
     expect(whole).toMatchObject({ compedQuantity: null, remainingQuantity: 0 });
+  });
+});
+
+describe("batch 61 (v15 b60 live, order 54): why a line can't take a comp now", () => {
+  const line = {
+    lineQuantity: 3,
+    reducedCount: 0,
+    compedQuantity: 0,
+    reducedWhole: false,
+    byDishes: true,
+    asked: null,
+  };
+  it("lets a comp take dishes still left", () => {
+    expect(orderItemCompLineRefusal(line)).toBeNull();
+    expect(
+      orderItemCompLineRefusal({ ...line, reducedCount: 1, compedQuantity: 1, asked: 2 }),
+    ).toBeNull();
+  });
+  it("says fewer are left when a count named while dishes were left finds none now (three at once)", () => {
+    // 3 × Beef noodles, 1 comped, three 1-dish comps at once: the third finds all 3 covered.
+    expect(
+      orderItemCompLineRefusal({ ...line, reducedCount: 3, compedQuantity: 3, asked: 1 }),
+    ).toBe("NotThatMany");
+    expect(
+      orderItemCompLineRefusal({ ...line, reducedCount: 2, compedQuantity: 2, asked: 2 }),
+    ).toBe("NotThatMany");
+  });
+  it("says already comped only for a line with nothing left asked as a whole, or a whole-line reduction", () => {
+    expect(orderItemCompLineRefusal({ ...line, reducedCount: 3, compedQuantity: 3 })).toBe(
+      "AlreadyReduced",
+    );
+    expect(
+      orderItemCompLineRefusal({ ...line, reducedCount: 1, reducedWhole: true, asked: 1 }),
+    ).toBe("AlreadyReduced");
+    // A percentage or an amount off (not by dishes) on a line comped in part.
+    expect(
+      orderItemCompLineRefusal({ ...line, reducedCount: 1, compedQuantity: 1, byDishes: false }),
+    ).toBe("AlreadyReduced");
   });
 });

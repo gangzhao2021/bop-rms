@@ -96,9 +96,37 @@ export type OrderPriceReductionNotEligibleReason =
   | "NotThatMany"
   | "InvalidAmount";
 
+/**
+ * Batch 61 (v15 b60 live, order 54): why a line can't take a reduction now (null: it can).
+ * `asked` is the dishes a manager's comp names for the line (null: a whole-line reduction or the
+ * dishes left). A comp names a count only while more dishes are left than it names (the dialog
+ * sends none for "all left"), so a named count that finds nothing left lost a race with another
+ * part comp: "NotThatMany" (fewer are left than chosen), never "AlreadyReduced" (a comp already
+ * covers the dish), which stays for a line with nothing left that was asked as a whole.
+ */
+export function orderItemCompLineRefusal(line: {
+  readonly lineQuantity: number;
+  readonly reducedCount: number;
+  readonly compedQuantity: number;
+  readonly reducedWhole: boolean;
+  /** Only a manager's comp naming its dishes may join a comp of some of the line's dishes. */
+  readonly byDishes: boolean;
+  readonly asked: number | null;
+}): "AlreadyReduced" | "NotThatMany" | null {
+  if (line.reducedCount > 0 && (!line.byDishes || line.reducedWhole)) return "AlreadyReduced";
+  const left = line.lineQuantity - line.compedQuantity;
+  if (left < 1) return line.byDishes && line.asked !== null ? "NotThatMany" : "AlreadyReduced";
+  if (line.asked !== null && line.asked > left) return "NotThatMany";
+  return null;
+}
+
 export class OrderPriceReductionError extends Error {
   constructor(
-    readonly code: "ORDER_PRICE_REDUCTION_CONFLICT" | "ORDER_PRICE_REDUCTION_UNAVAILABLE",
+    readonly code:
+      | "ORDER_PRICE_REDUCTION_CONFLICT"
+      | "ORDER_PRICE_REDUCTION_UNAVAILABLE"
+      /** Batch 61: the database refused comps covering more dishes than the line has. */
+      | "ORDER_PRICE_REDUCTION_NOT_THAT_MANY",
   ) {
     super(code);
     this.name = "OrderPriceReductionError";
@@ -506,13 +534,20 @@ export function createPostgresOrderPriceReductionStore(options: {
       // reduction of the whole line (an older comp, a percentage, an amount off, points) stands
       // alone.
       const byDishes = choice.kind === "Comp" && quantities !== undefined;
-      if (reducedCount > 0 && (!byDishes || row.reduced_whole === true))
-        return notEligible("AlreadyReduced");
       const left = lineQuantity - comped;
-      if (left < 1) return notEligible("AlreadyReduced");
-      const asked = byDishes ? (quantities.get(String(row.item)) ?? left) : null;
-      if (asked !== null && (!Number.isSafeInteger(asked) || asked < 1)) return unavailable();
-      if (asked !== null && asked > left) return notEligible("NotThatMany");
+      const named = byDishes ? quantities.get(String(row.item)) : undefined;
+      if (named !== undefined && (!Number.isSafeInteger(named) || named < 1)) return unavailable();
+      // Batch 61: a count named while dishes were left that finds none now is "fewer are left".
+      const refusal = orderItemCompLineRefusal({
+        lineQuantity,
+        reducedCount,
+        compedQuantity: comped,
+        reducedWhole: row.reduced_whole === true,
+        byDishes,
+        asked: named ?? null,
+      });
+      if (refusal !== null) return notEligible(refusal);
+      const asked = byDishes ? (named ?? left) : null;
       if (row.quote_version !== "1" && row.quote_version !== "2") return unavailable();
       const snapshot = (
         row.quote_version === "2" ? decodeConfiguredOrderItemSnapshot : decodeOrderItemSnapshot
@@ -972,6 +1007,12 @@ export function createPostgresOrderPriceReductionStore(options: {
         await tx.query("ROLLBACK TO SAVEPOINT ordering_price_reduction", []);
         await tx.query("RELEASE SAVEPOINT ordering_price_reduction", []);
         if (error instanceof OrderPriceReductionError) throw error;
+        // Batch 61: the line's own check (after the insert) refused more dishes than it has.
+        if (
+          error instanceof Error &&
+          error.message.includes("price reduction covers more dishes than the line has")
+        )
+          throw new OrderPriceReductionError("ORDER_PRICE_REDUCTION_NOT_THAT_MANY");
         return conflict();
       }
       return this.loadByOperation(tx, operation);
