@@ -45,3 +45,18 @@ export function tableBillOutcome(view: DiningSessionView): TableBillOutcome {
   }
   return /^0+$/u.test(summary.due.amountMinor) ? { kind: "Paid" } : { kind: "Owing" };
 }
+
+/**
+ * Batch 56 (v15 b55 live, guest-closed-bill-menu-cart): staff's equal parts on a bill still open
+ * (how many are paid, of how many). A part is a share of the whole bill and pays no round, but the
+ * read ties part 1 to round 1 (order 80: round 1 "Paid", round 2 "On the table's bill" after
+ * part 1 of 2 was paid), so round cards say what the parts did instead. Null: no equal parts, none
+ * paid yet, or staff closed the bill (tableBillOutcome says that).
+ */
+export function openBillParts(
+  view: DiningSessionView,
+): { readonly paid: number; readonly count: number } | null {
+  const parts = view.summary?.splitParts;
+  if (view.summary?.closedByStaff === true || parts === undefined) return null;
+  return parts.count !== null && parts.paid > 0 ? { paid: parts.paid, count: parts.count } : null;
+}

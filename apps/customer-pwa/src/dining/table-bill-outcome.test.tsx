@@ -3,7 +3,7 @@ import { MemoryRouter } from "react-router";
 import { EndedTableCard } from "./EndedTable.js";
 import { afterEach, describe, expect, it } from "vitest";
 import type { DiningRound, DiningSessionView } from "./dining-session-client.js";
-import { tableBillOutcome } from "./table-bill-outcome.js";
+import { openBillParts, tableBillOutcome } from "./table-bill-outcome.js";
 import {
   getTableCheckout,
   noteTableCheckingOut,
@@ -127,6 +127,26 @@ describe("batch 55: one reading of how a table's bill ended", () => {
       }),
     ).toEqual({ kind: "Owing" });
     expect(tableBillOutcome({ ...reads.onePayment, rounds: [] })).toEqual({ kind: "Owing" });
+  });
+});
+
+describe("batch 56: staff's equal parts on a bill still open", () => {
+  it("order 80: 1 of 2 parts paid while open; none once staff closed it, by dish or none paid", () => {
+    const open = read("1413", [round(1, "Paid"), round(2, "OnTableBill")], {
+      due: cad("1412"),
+      splitParts: { count: 2, paid: 1 },
+    });
+    expect(openBillParts(open)).toEqual({ paid: 1, count: 2 });
+    expect(openBillParts(reads.split)).toBeNull();
+    expect(openBillParts(reads.byDish)).toBeNull();
+    expect(
+      openBillParts(
+        read("0", [round(1, "OnTableBill")], {
+          due: cad("2825"),
+          splitParts: { count: 2, paid: 0 },
+        }),
+      ),
+    ).toBeNull();
   });
 });
 

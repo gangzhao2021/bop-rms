@@ -1380,12 +1380,12 @@ describe("batch 53 (v15 b52 live): the Table total note says how a split bill wa
   it("paid in full by dish in 2 payments: never paid once at the end (en, zh)", () => {
     const en = note("en", "2825", "0", { count: null, paid: 2 });
     expect(en).toContain(
-      "The table paid by dish, in 2 payments. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
+      "The table paid by dish, in 2 payments. Cash is rounded to the nearest 5 cents; card and phone payments are not rounded.",
     );
     expect(en).not.toContain("paid once at the end");
     expect(en).not.toContain("paying by dish");
     const zh = note("zh-Hans", "2825", "0", { count: null, paid: 2 });
-    expect(zh).toContain("这桌已按菜分 2 笔付清。现金按 5 分取整，刷卡不取整。");
+    expect(zh).toContain("这桌已按菜分 2 笔付清。现金按 5 分取整，刷卡和手机付款不取整。");
     expect(zh).not.toContain("最后一起付清");
     expect(zh).not.toContain("按菜付款");
   });
@@ -1422,32 +1422,38 @@ describe("batch 53 (v15 b52 live): the Table total note says how a split bill wa
     // charged; never "paid in one payment" or 结 (which reads as settled).
     const byDish = note("en", "1413", "0", { count: null, paid: 1 }, true);
     expect(byDish).toContain(
-      "Staff closed your table’s bill: the table paid by dish (1 paid), and the rest is not charged to you. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
+      "Staff closed your table’s bill: the table paid by dish (1 paid), and the rest is not charged to you.",
     );
     expect(byDish).not.toContain("The table paid in one payment.");
     const zhByDish = note("zh-Hans", "1413", "0", { count: null, paid: 1 }, true);
-    expect(zhByDish).toContain(
-      "店员已关闭本桌账单：这桌按菜付了 1 笔，其余不向您收取。现金按 5 分取整，刷卡不取整。",
-    );
+    expect(zhByDish).toContain("店员已关闭本桌账单：这桌按菜付了 1 笔，其余不向您收取。");
     expect(zhByDish).not.toMatch(/付清|结这张单/u);
     const fixed = note("en", "942", "0", { count: 3, paid: 1 }, true);
     expect(fixed).toContain(
-      "Staff closed your table’s bill: the table paid 1 of the 3 parts, and the rest is not charged to you. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
+      "Staff closed your table’s bill: the table paid 1 of the 3 parts, and the rest is not charged to you.",
     );
     expect(fixed).not.toContain("The table paid the bill in 3 parts.");
     expect(note("zh-Hans", "942", "0", { count: 3, paid: 1 }, true)).toContain(
-      "店员已关闭本桌账单：这桌 3 份付了 1 份，其余不向您收取。现金按 5 分取整，刷卡不取整。",
+      "店员已关闭本桌账单：这桌 3 份付了 1 份，其余不向您收取。",
     );
+    // Batch 56 (v15 b55 live, order 87): nothing more will be collected, so no cash rounding.
+    for (const closed of [
+      byDish,
+      zhByDish,
+      fixed,
+      note("zh-Hans", "942", "0", { count: 3, paid: 1 }, true),
+    ])
+      expect(closed).not.toMatch(/5 cents|rounded|取整/u);
   });
   it("the rest taken off after 1 of 3 parts was paid: says 1 of 3, never paid in 3 parts", () => {
     const en = note("en", "1413", "0", { count: 3, paid: 1 });
     expect(en).toContain(
-      "The table paid 1 of the 3 parts; nothing is left to pay. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
+      "The table paid 1 of the 3 parts; nothing is left to pay. Cash is rounded to the nearest 5 cents; card and phone payments are not rounded.",
     );
     expect(en).not.toContain("The table paid the bill in 3 parts.");
     expect(en).not.toContain("paid so far");
     expect(note("zh-Hans", "1413", "0", { count: 3, paid: 1 })).toContain(
-      "这桌 3 份付了 1 份，已无需再付。现金按 5 分取整，刷卡不取整。",
+      "这桌 3 份付了 1 份，已无需再付。现金按 5 分取整，刷卡和手机付款不取整。",
     );
   });
 });
@@ -1785,11 +1791,42 @@ describe("batch 55 (v15 b54 live): round cards once staff closed the bill", () =
     expect(
       payments("en", [noodles(1, "Paid"), noodles(2, "OnTableBill")], "1413", {
         due: cad("1412"),
-        splitParts: { count: 2, paid: 1 },
+        splitParts: { count: null, paid: 1 },
       }),
     ).toEqual(["Paid", "On the table's bill"]);
     expect(payments("zh-Hans", [noodles(1, "OnTableBill")], "0", { due: cad("1413") })).toEqual([
       "记入本桌账单",
+    ]);
+  });
+  it("batch 56, order 80: staff's equal parts while the bill is open say the parts, never one round paid", () => {
+    // v15 b55 live: part 1 of 2 was paid; the read tied it to round 1 (round 1 Paid, round 2 on
+    // the bill). A part is a share of the whole bill: every round says how many parts are paid.
+    const open = { due: cad("1412"), splitParts: { count: 2, paid: 1 } };
+    const rounds = [noodles(1, "Paid"), noodles(2, "OnTableBill")];
+    expect(payments("en", rounds, "1413", open)).toEqual([
+      "1 of 2 parts paid",
+      "1 of 2 parts paid",
+    ]);
+    expect(payments("zh-Hans", rounds, "1413", open)).toEqual([
+      "2\u00a0份付了 1\u00a0份",
+      "2\u00a0份付了 1\u00a0份",
+    ]);
+    // Staff split before anyone paid: the rounds are still on the table's bill.
+    expect(
+      payments("en", [noodles(1, "OnTableBill"), noodles(2, "OnTableBill")], "0", {
+        due: cad("2825"),
+        splitParts: { count: 2, paid: 0 },
+      }),
+    ).toEqual(["On the table's bill", "On the table's bill"]);
+    // Every part paid: Paid.
+    const paid = { splitParts: { count: 2, paid: 2 } };
+    expect(payments("en", [noodles(1, "Paid"), noodles(2, "Paid")], "2825", paid)).toEqual([
+      "Paid",
+      "Paid",
+    ]);
+    expect(payments("zh-Hans", [noodles(1, "Paid"), noodles(2, "Paid")], "2825", paid)).toEqual([
+      "已付款",
+      "已付款",
     ]);
   });
 });

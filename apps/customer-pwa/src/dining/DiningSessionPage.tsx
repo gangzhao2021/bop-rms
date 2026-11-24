@@ -1,5 +1,5 @@
 import { createTablePaymentClient } from "./table-payment-client.js";
-import { tableBillOutcome, type ClosedBillPaid } from "./table-bill-outcome.js";
+import { openBillParts, tableBillOutcome, type ClosedBillPaid } from "./table-bill-outcome.js";
 import {
   dateLocale,
   keepWords,
@@ -405,7 +405,24 @@ function ComboLine({
  * did (never one round "Paid" as if that round was what was paid). By dish, a guest's own dish
  * they paid for stays Paid. Null: the round's own payment says it.
  */
-function closedRoundPaymentText(round: DiningRound, closed: ClosedBillPaid | null): string | null {
+function closedRoundPaymentText(
+  round: DiningRound,
+  closed: ClosedBillPaid | null,
+  parts: { readonly paid: number; readonly count: number } | null,
+): string | null {
+  // Batch 56 (v15 b55 live, order 80): while the bill is open, staff's equal parts pay no round
+  // either: every round on the bill says how many parts are paid, and Paid once all of them are.
+  if (
+    closed === null &&
+    parts !== null &&
+    (round.payment === "OnTableBill" || round.payment === "Paid")
+  )
+    return parts.paid >= parts.count
+      ? t("Paid")
+      : t("{paid} of {count} parts paid", {
+          paid: String(parts.paid),
+          count: String(parts.count),
+        });
   if (closed === null) return null;
   if (closed.kind === "Parts" && (round.payment === "OnTableBill" || round.payment === "Paid"))
     return t("{paid} of {count} parts paid; the rest not charged to you", {
@@ -424,8 +441,11 @@ function RoundCard({
   collectOrderNumber = null,
   note = null,
   closedBill = null,
+  billParts = null,
 }: {
   readonly round: DiningRound;
+  /** Batch 56: staff's equal parts on a bill still open, once one is paid; null otherwise. */
+  readonly billParts?: { readonly paid: number; readonly count: number } | null;
   /** Batch 55: staff closed the table's bill (what was paid); null while it is open or paid. */
   readonly closedBill?: ClosedBillPaid | null;
   /** A guest started this table, so nobody brings a finished dish over: it is called by number. */
@@ -441,7 +461,7 @@ function RoundCard({
 }) {
   const headingId = `dining-round-${round.roundNumber}`;
   const charge = staffCharge(round);
-  const closedPayment = closedRoundPaymentText(round, closedBill);
+  const closedPayment = closedRoundPaymentText(round, closedBill, billParts);
   // v15 batch-5: cancelled before anyone paid, so nothing is owed for it: no tax, no total.
   // v15 b20: so is a round staff took off a table's bill before it paid (never charged): its
   // dishes' own subtotal, tax and total must not read as owed.
@@ -862,42 +882,42 @@ function TableSummary({ view }: { readonly view: DiningSessionView }) {
             ? t("Staff closed your table’s bill; nothing was charged.")
             : summary.splitParts !== undefined && summary.splitParts.count === null
               ? t(
-                  "Staff closed your table’s bill: the table paid by dish ({paid} paid), and the rest is not charged to you. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
+                  "Staff closed your table’s bill: the table paid by dish ({paid} paid), and the rest is not charged to you.",
                   { paid: String(summary.splitParts.paid) },
                 )
               : summary.splitParts !== undefined
                 ? t(
-                    "Staff closed your table’s bill: the table paid {paid} of the {count} parts, and the rest is not charged to you. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
+                    "Staff closed your table’s bill: the table paid {paid} of the {count} parts, and the rest is not charged to you.",
                     {
                       count: String(summary.splitParts.count),
                       paid: String(summary.splitParts.paid),
                     },
                   )
                 : t(
-                    "Staff closed your table’s bill: what the table paid stays paid, and the rest is not charged to you. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
+                    "Staff closed your table’s bill: what the table paid stays paid, and the rest is not charged to you.",
                   )
           : payLater && splitPaid !== null
             ? splitPaid.count === null && splitPaid.paid === 1
               ? t(
-                  "The table paid in one payment. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
+                  "The table paid in one payment. Cash is rounded to the nearest 5 cents; card and phone payments are not rounded.",
                 )
               : splitPaid.count === null
                 ? t(
-                    "The table paid by dish, in {paid} payments. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
+                    "The table paid by dish, in {paid} payments. Cash is rounded to the nearest 5 cents; card and phone payments are not rounded.",
                     { paid: String(splitPaid.paid) },
                   )
                 : t(
-                    "The table paid the bill in {count} parts. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
+                    "The table paid the bill in {count} parts. Cash is rounded to the nearest 5 cents; card and phone payments are not rounded.",
                     { count: String(splitPaid.count) },
                   )
             : payLater && splitEnded !== null
               ? splitEnded.count === null
                 ? t(
-                    "The table paid by dish, {paid} paid; nothing is left to pay. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
+                    "The table paid by dish, {paid} paid; nothing is left to pay. Cash is rounded to the nearest 5 cents; card and phone payments are not rounded.",
                     { paid: String(splitEnded.paid) },
                   )
                 : t(
-                    "The table paid {paid} of the {count} parts; nothing is left to pay. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
+                    "The table paid {paid} of the {count} parts; nothing is left to pay. Cash is rounded to the nearest 5 cents; card and phone payments are not rounded.",
                     { count: String(splitEnded.count), paid: String(splitEnded.paid) },
                   )
               : payLater && summary.splitParts !== undefined && summary.splitParts.count === null
@@ -916,7 +936,7 @@ function TableSummary({ view }: { readonly view: DiningSessionView }) {
                   : payLater
                     ? summary.cashRounding !== undefined
                       ? t(
-                          "The table paid once at the end. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
+                          "The table paid once at the end. Cash is rounded to the nearest 5 cents; card and phone payments are not rounded.",
                         )
                       : summary.bill !== undefined &&
                           summary.bill.total.amountMinor === "0" &&
@@ -1327,6 +1347,7 @@ export function DiningSessionScreen({
   // Batch 55: how the bill ended, read as Menu, dish pages and Cart read it.
   const outcome = view === null ? null : tableBillOutcome(view);
   const closedBill = outcome?.kind === "ClosedByStaff" ? outcome.paid : null;
+  const billParts = view === null ? null : openBillParts(view);
   const paidOff =
     tablePay?.paid === true ||
     closedBill !== null ||
@@ -1544,6 +1565,7 @@ export function DiningSessionScreen({
                 key={round.roundNumber}
                 round={round}
                 closedBill={closedBill}
+                billParts={billParts}
                 menu={menu}
                 collectOrderNumber={view.startedByGuest === true ? view.orderNumber : null}
                 note={
