@@ -294,7 +294,7 @@ const words = {
     heldMeta: "Synthetic Store · Dine-in · no round can be added to this table now",
     checkAgain: "Check the table again",
     refused:
-      "Table T7 can't take an order now (marked unavailable, or its session is closing). Check the table on the Tables page.",
+      "Table T7 can't take an order now (marked unavailable, or it is checking out or being closed). Check the table on the Tables page.",
   },
   "zh-Hans": {
     paid: "T7 号桌的账单已付清，不能再加单。客人如还要点，请先关台，再按“已清洁”，然后为他们点单：这会开一张新账单。",
@@ -313,7 +313,7 @@ const words = {
     billMeta: "Synthetic Store · 堂食 · 记入本桌账单 · 最后一起结账",
     heldMeta: "Synthetic Store · 堂食 · 这桌现在不能加单",
     checkAgain: "再查看一次这桌",
-    refused: "桌台 T7 目前不能点单（被标记为不可用，或其会话正在关闭）。请在桌台页查看这张桌台。",
+    refused: "桌台 T7 目前不能点单（被标记为不可用，或正在结账、关台）。请在桌台页查看这张桌台。",
   },
 } as const;
 
@@ -433,6 +433,12 @@ for (const language of ["en", "zh-Hans"] as const) {
     ).toHaveCount(0);
     await sendButton.click({ force: true });
     expect(sends).toBe(1);
+    // Batch 57 (v15 b56 live): a paid bill takes no round however often the table is read, so
+    // only the reason's own next step is offered, never "Check the table again".
+    await expect(page.getByRole("button", { name: said.checkAgain })).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: /Checking the table|正在查看这桌/u }),
+    ).toHaveCount(0);
     await fitsAtEachWidth(page, alert, `entry-refused-${language}`);
     await expectNoInternalText(page);
   });
@@ -465,6 +471,8 @@ for (const language of ["en", "zh-Hans"] as const) {
     // The refusal's own message stays; Send stays held.
     const held = page.locator("#counter-order-table-hold");
     await expect(held).toHaveText(said.refused);
+    // Batch 57 (b56 build): staff words, never the internal "session" / "会话".
+    await expect(held).not.toHaveText(/session|会话/iu);
     await expect(sendButton).toBeDisabled();
     await expect(page.locator(".workspace-page__meta")).toHaveText(said.heldMeta);
     expect(sends).toBe(1);

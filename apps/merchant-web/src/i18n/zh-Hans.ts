@@ -2162,8 +2162,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "它已从看板移除。为它记录的损耗已退回库存。",
   "It is off the board. The first dish stays recorded as waste.":
     "它已从看板移除。第一份仍记为损耗。",
-  "It may be marked unavailable or its session may be closing. Check it on the Tables page.":
-    "它可能被标记为不可用，或其会话正在关闭。请在桌台页查看。",
+  "It may be marked unavailable, or it may be checking out or being closed. Check it on the Tables page.":
+    "它可能被标记为不可用，或正在结账、关台。请在桌台页查看。",
   "It must be approved and published by": "它必须由以下人员批准并发布：",
   "It must be done by someone other than the person who last changed the draft, who holds price approval.":
     "需由最后修改草稿者以外、持有价格审批权限的人进行。",
@@ -6069,8 +6069,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{value} Current configuration refreshed.": "{value} 已刷新当前配置。",
   "{value} Tablets already set up keep working.": "{value}已设置的平板仍可继续使用。",
   "{value} being made and {ready} ready to serve": "{value}在制作，{ready} 项可上桌",
-  "{value} can't take an order now (marked unavailable, or its session is closing). Check the table on the Tables page.":
-    "{value}目前不能点单（被标记为不可用，或其会话正在关闭）。请在桌台页查看这张桌台。",
+  "{value} can't take an order now (marked unavailable, or it is checking out or being closed). Check the table on the Tables page.":
+    "{value}目前不能点单（被标记为不可用，或正在结账、关台）。请在桌台页查看这张桌台。",
   "{value} h {value2} min": "{value} 小时 {value2} 分钟",
   "{value} has no table QR code, so orders can't be taken for it yet. Nothing was sent or charged. {value2}":
     "{value}没有桌台二维码，因此暂时不能为它点单。未发送任何内容，也未收费。{value2}",

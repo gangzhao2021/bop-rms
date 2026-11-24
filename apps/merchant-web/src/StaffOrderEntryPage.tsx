@@ -349,7 +349,9 @@ const menuError: Record<string, [string, string]> = {
   PermissionDenied: [noAccessHeading, pageAccessDeniedText],
   TableUnavailable: [
     t("This table can't take an order now"),
-    t("It may be marked unavailable or its session may be closing. Check it on the Tables page."),
+    t(
+      "It may be marked unavailable, or it may be checking out or being closed. Check it on the Tables page.",
+    ),
   ],
   TableHasNoQr: [
     t("This table has no table QR code yet"),
@@ -581,7 +583,7 @@ export function placeErrorText(
       );
     case "TableUnavailable":
       return t(
-        "{value} can't take an order now (marked unavailable, or its session is closing). Check the table on the Tables page.",
+        "{value} can't take an order now (marked unavailable, or it is checking out or being closed). Check the table on the Tables page.",
         { value: table ?? "This table" },
       );
     // DEC-STAFF-ROUND-ONE-AT-A-TIME: two tablets sending for one table take turns.
@@ -2873,15 +2875,21 @@ export function StaffOrderEntryPage({
                       )
                     : tableHold.refused}
                 </p>
-                <button
-                  type="button"
-                  disabled={tableHold.state === "Reading"}
-                  onClick={() => void explainTableRefusal(tableHold.refused)}
-                >
-                  {tableHold.state === "Reading"
-                    ? t("Checking the table…")
-                    : t("Check the table again")}
-                </button>
+                {/* Batch 57 (v15 b56 live): a paid bill never takes a round again, so reading the
+                    table again can't free Send there; the reason's own next step (close the table
+                    and press Cleaned) is the only one offered. A checkout can still be cancelled, a
+                    table marked available or given a code, and a failed read read again. */}
+                {tableHold.state === "Paid" ? null : (
+                  <button
+                    type="button"
+                    disabled={tableHold.state === "Reading"}
+                    onClick={() => void explainTableRefusal(tableHold.refused)}
+                  >
+                    {tableHold.state === "Reading"
+                      ? t("Checking the table…")
+                      : t("Check the table again")}
+                  </button>
+                )}
               </div>
             ) : null}
             {slipHeld !== null && ordering && phase === "Building" && paper ? (
