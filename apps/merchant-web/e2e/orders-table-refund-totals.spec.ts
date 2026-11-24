@@ -256,7 +256,7 @@ const words = (zh: boolean) =>
     : {
         total: "Total",
         other: "Other refunds",
-        pending: "Going back to the guest's card",
+        pending: "Refund on its way",
         after: "Total after refunds",
         refunded: "$8.75 refunded",
         note: "$3.00 going back to the guest's card",

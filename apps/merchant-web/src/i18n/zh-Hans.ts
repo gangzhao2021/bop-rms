@@ -5218,7 +5218,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Total collected": "收款合计",
   "Total refunded": "已退款合计",
   "Total after refunds": "退款后合计",
-  "Going back to the guest's card": "正在退回客人的卡",
+  "Refund on its way": "正在退回客人的卡",
   "{amount} going back to the guest's card": "{amount} 正在退回客人的卡",
   Totals: "合计",
   "Totals grow until the business day closes; the settlement run happens after that.":

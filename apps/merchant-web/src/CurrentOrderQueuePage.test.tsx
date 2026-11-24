@@ -2665,10 +2665,10 @@ describe("b60 (v15 b59 live, TM2 order 27): a paid table's refunds count on Orde
     ]);
     expect(orderRefundRows(both, lines, null)).toEqual([
       { label: "Other refunds", amount: money("875") },
-      { label: "Going back to the guest's card", amount: money("300"), pending: true },
+      { label: "Refund on its way", amount: money("300"), pending: true },
     ]);
     expect(orderRefundRows(table({ refundPendingMinor: "300" }), lines, null)).toEqual([
-      { label: "Going back to the guest's card", amount: money("300"), pending: true },
+      { label: "Refund on its way", amount: money("300"), pending: true },
     ]);
     // Nothing refunded: no refund rows, the total stands alone.
     expect(orderRefundRows(table({}), lines, null)).toEqual([]);
@@ -2704,7 +2704,7 @@ describe("b60 (v15 b59 live, TM2 order 27): a paid table's refunds count on Orde
     expect(html).toMatch(/<dt>Total<\/dt><dd>\$28\.25<\/dd>/u);
     expect(html).toMatch(/Other refunds<\/dt><dd><span class="bop-amount">−\$8\.75<\/span><\/dd>/u);
     expect(html).toMatch(
-      /Going back to the guest&#x27;s card<\/dt><dd><span class="bop-amount">\$3\.00<\/span><\/dd>/u,
+      /Refund on its way<\/dt><dd><span class="bop-amount">\$3\.00<\/span><\/dd>/u,
     );
     expect(html).toMatch(/<dt>Total after refunds<\/dt><dd>\$19\.50<\/dd>/u);
     expect(html).not.toContain("Total refunded");
@@ -2824,7 +2824,7 @@ describe("b60 review: a table's tip and cash rounding are in its Orders Total, s
     });
     expect(orderRefundRows(order, lines, null)).toEqual([
       { label: "Other refunds", amount: money("500") },
-      { label: "Going back to the guest's card", amount: money("200"), pending: true },
+      { label: "Refund on its way", amount: money("200"), pending: true },
     ]);
     const html = detail(order);
     expect(html).toMatch(/<dt>Tip<\/dt><dd>\$3\.00<\/dd>/u);

@@ -1105,7 +1105,7 @@ export function orderRefundRows(
   const pending = BigInt(table?.refundPendingMinor ?? "0");
   if (pending > 0n)
     rows.push({
-      label: t("Going back to the guest's card"),
+      label: t("Refund on its way"),
       amount: money(pending),
       pending: true,
     });
