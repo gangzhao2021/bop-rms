@@ -5218,6 +5218,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Total collected": "收款合计",
   "Total refunded": "已退款合计",
   "Total after refunds": "退款后合计",
+  "Going back to the guest's card": "正在退回客人的卡",
+  "{amount} going back to the guest's card": "{amount} 正在退回客人的卡",
   Totals: "合计",
   "Totals grow until the business day closes; the settlement run happens after that.":
     "营业日结束前合计会持续增加；结算运行在那之后进行。",
@@ -6455,7 +6457,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "断网时的纸单。已经做过就不要再做，直接点做好。",
   "It also shows in the kitchen, marked as from a paper slip. If it was already made, the kitchen marks it done and you mark it served.":
     "后厨屏也会显示这一轮，并标明来自纸单。已经做过的，请后厨直接点做好，你再点已上。",
-  "Refunded {amount}": "已退 {amount}",
   "As of": "更新于",
   "Rounds taken since then aren't here: add the paper slips.":
     "断网后新点的菜不在这里，要加上纸单。",

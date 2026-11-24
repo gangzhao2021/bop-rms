@@ -36,6 +36,7 @@ import {
   totalAfterRefunds,
   orderAgeText,
   orderAmountTaken,
+  orderAmountRefunded,
   orderStatusTone,
   ordersSummary,
   orderLabel,
@@ -2634,4 +2635,100 @@ it("M108: staff remove a guest's contact at the guest's request, after a confirm
     expect(html).not.toContain("Remove again");
     expect(html).not.toContain(">Remove<");
   }
+});
+
+describe("b60 (v15 b59 live, TM2 order 27): a paid table's refunds count on Orders like a pickup's", () => {
+  const money = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" as const });
+  // Order 27: part 1 ($14.13) paid on a phone, part 2 ($14.12) on the card machine. Four refunds to
+  // the card on part 1 ($5.00, $1.00, $0.50, $0.25) went back; here also $2.00 on the card machine
+  // for part 2, and $3.00 to the card still on its way. A refused one is never sent (the server
+  // leaves it out).
+  const table = (paid: Record<string, string>) =>
+    ({
+      orderType: "DineIn",
+      paidOnline: null,
+      counter: null,
+      paymentPosition: null,
+      batches: [{ sequence: 1, staffCancellation: null, staffRound: null }],
+      tableBill: { totalMinor: "2825", paid: { amountMinor: "2825", method: "Split", ...paid } },
+    }) as unknown as Parameters<typeof orderRefundRows>[0];
+  const lines = {
+    items: [],
+    totals: { total: money("2825") },
+  } as unknown as Parameters<typeof orderRefundRows>[1];
+  const both = table({ refundedMinor: "875", refundPendingMinor: "300" });
+
+  it("lists money given back as Other refunds and money on its way apart, never as given back", () => {
+    expect(orderRefundRows(table({ refundedMinor: "675" }), lines, null)).toEqual([
+      { label: "Other refunds", amount: money("675") },
+    ]);
+    expect(orderRefundRows(both, lines, null)).toEqual([
+      { label: "Other refunds", amount: money("875") },
+      { label: "Going back to the guest's card", amount: money("300"), pending: true },
+    ]);
+    expect(orderRefundRows(table({ refundPendingMinor: "300" }), lines, null)).toEqual([
+      { label: "Going back to the guest's card", amount: money("300"), pending: true },
+    ]);
+    // Nothing refunded: no refund rows, the total stands alone.
+    expect(orderRefundRows(table({}), lines, null)).toEqual([]);
+  });
+
+  it("works the total after refunds from what went back only; the original total stays", () => {
+    const rows = orderRefundRows(both, lines, null);
+    expect(totalAfterRefunds(money("2825"), rows)).toEqual(money("1950"));
+    expect(totalAfterRefunds(money("2825"), orderRefundRows(table({}), lines, null))).toBeNull();
+    expect(
+      totalAfterRefunds(
+        money("2825"),
+        orderRefundRows(table({ refundPendingMinor: "300" }), lines, null),
+      ),
+    ).toBeNull();
+    const html = renderToStaticMarkup(
+      <CurrentOrderLines
+        lines={
+          {
+            ...parseCurrentOrderDetailFixtureLines(),
+            totals: {
+              ...parseCurrentOrderDetailFixtureLines().totals,
+              subtotal: money("2500"),
+              tax: money("325"),
+              total: money("2825"),
+              tip: null,
+            },
+          } as Parameters<typeof CurrentOrderLines>[0]["lines"]
+        }
+        refundRows={rows}
+      />,
+    );
+    expect(html).toMatch(/<dt>Total<\/dt><dd>\$28\.25<\/dd>/u);
+    expect(html).toMatch(/Other refunds<\/dt><dd><span class="bop-amount">−\$8\.75<\/span><\/dd>/u);
+    expect(html).toMatch(
+      /Going back to the guest&#x27;s card<\/dt><dd><span class="bop-amount">\$3\.00<\/span><\/dd>/u,
+    );
+    expect(html).toMatch(/<dt>Total after refunds<\/dt><dd>\$19\.50<\/dd>/u);
+    expect(html).not.toContain("Total refunded");
+  });
+
+  it("lowers the list amount by what went back and says what is on its way", () => {
+    expect(orderAmountTaken(both)).toEqual(money("2825"));
+    expect(orderAmountRefunded(both)).toBe(875n);
+    expect(orderAmountRefunded(table({ refundPendingMinor: "300" }))).toBe(0n);
+    expect(orderAmountNote(both)).toBe(
+      "Paid at the table · split bill · $3.00 going back to the guest's card",
+    );
+    expect(orderAmountNote(table({ refundedMinor: "675" }))).toBe("Paid at the table · split bill");
+  });
+
+  it("says it in Simplified Chinese", () => {
+    setLanguageForTest("zh-Hans");
+    try {
+      expect(orderRefundRows(both, lines, null).map((row) => row.label)).toEqual([
+        "其他退款",
+        "正在退回客人的卡",
+      ]);
+      expect(orderAmountNote(both)).toBe("已在桌上付清 · 分单 · $3.00 正在退回客人的卡");
+    } finally {
+      setLanguageForTest("en");
+    }
+  });
 });

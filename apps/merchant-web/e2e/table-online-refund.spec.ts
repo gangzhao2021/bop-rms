@@ -334,8 +334,9 @@ test("@production a refund on a PIN sign-in asks to confirm it's you, not for a 
   await expect(page.getByText("A manager refunds this payment", { exact: false })).toHaveCount(0);
 });
 
-// v15 batch 7: a table order with a refund says so on its row ("Paid at the table · guest's
-// phone · Refunded $10.00") without pushing the page sideways, with the order open beside it.
+// v15 batch 7: a table order with a refund says so on its row without pushing the page sideways,
+// with the order open beside it. b60: as a pickup's, under its amount ("$36.00", "$10.00
+// refunded"), at every width.
 for (const width of [1440, 1024, 390])
   test(`@production a refunded table order's row fits at ${width} with the order open`, async ({
     page,
@@ -354,8 +355,9 @@ for (const width of [1440, 1024, 390])
     await expect(
       page.getByRole("button", { name: "Refund to the card", exact: true }),
     ).toBeVisible();
-    if (width !== 390)
-      await expect(page.locator(".order-row__paid").first()).toContainText("Refunded $10.00");
+    await expect(page.locator(".order-row__money").first()).toHaveText("$36.00");
+    await expect(page.locator(".order-row__refunded").first()).toBeVisible();
+    await expect(page.locator(".order-row__refunded").first()).toHaveText("$10.00 refunded");
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
     );

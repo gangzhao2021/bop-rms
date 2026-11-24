@@ -519,6 +519,8 @@ export function CurrentOrderLines({
   // the money charged; what the order comes to after its refunds is said under them, so staff
   // never read a refunded total as money owed. Only when every refund's amount is known.
   const afterRefunds = totalAfterRefunds(orderTotalWithTip(shown), refunds);
+  const given = refunds.filter((row) => row.pending !== true);
+  const onItsWay = refunds.filter((row) => row.pending === true);
   // One "Check refund" per pending cancellation, on its first line.
   const checkReferences = new Set<string>();
   const checkLines = new Map<string, string>();
@@ -842,9 +844,9 @@ export function CurrentOrderLines({
           </div>
         </dl>
       ) : null}
-      {refunds.length > 0 ? (
+      {given.length > 0 ? (
         <dl className="order-lines-totals order-lines-cancelled-refund">
-          {refunds.map((row) => (
+          {given.map((row) => (
             <div key={row.label}>
               <dt>{row.label}</dt>
               <dd>
@@ -866,6 +868,23 @@ export function CurrentOrderLines({
           </div>
         </dl>
       ) : null}
+      {/* b60: money still on its way back, under what the order comes to, never taken off it. */}
+      {onItsWay.length > 0 ? (
+        <dl className="order-lines-totals order-lines-cancelled-refund">
+          {onItsWay.map((row) => (
+            <div key={row.label}>
+              <dt>{row.label}</dt>
+              <dd>
+                {row.amount === null ? (
+                  t("Amount not known yet")
+                ) : (
+                  <span className="bop-amount">{orderMoney(row.amount)}</span>
+                )}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
     </section>
   );
 }
@@ -877,8 +896,10 @@ export function CurrentOrderLines({
  */
 export function totalAfterRefunds(
   total: { readonly amountMinor: string; readonly currencyCode: string },
-  refunds: readonly OrderRefundRow[],
+  rows: readonly OrderRefundRow[],
 ): { readonly amountMinor: string; readonly currencyCode: string } | null {
+  // b60: money still on its way back is not taken off.
+  const refunds = rows.filter((row) => row.pending !== true);
   if (refunds.length === 0 || refunds.some((row) => row.amount === null)) return null;
   const refunded = refunds[refunds.length - 1]?.amount;
   if (refunded == null || refunded.currencyCode !== total.currencyCode) return null;
@@ -986,6 +1007,11 @@ export interface OrderRefundRow {
   readonly label: string;
   /** Null: the refund has started but Payment has not opened it yet (amount not known). */
   readonly amount: { readonly amountMinor: string; readonly currencyCode: string } | null;
+  /**
+   * b60: money still on its way back (a refund to a guest's card the Provider has not answered),
+   * listed apart and never taken off the total after refunds.
+   */
+  readonly pending?: true;
 }
 /**
  * WP-2423 (46940b76 L2): every refund on the order, so the lines add up to what the payment line
@@ -1031,14 +1057,29 @@ export function orderRefundRows(
     total += amount;
     rows.push({ label, amount: money(amount) });
   }
+  let other = 0n;
   if (position !== null && known) {
-    const other = BigInt(position.refundedMinor) + BigInt(position.refundPendingMinor) - online;
-    if (other > 0n) {
-      rows.push({ label: t("Other refunds"), amount: money(other) });
-      total += other;
-    }
+    const left = BigInt(position.refundedMinor) + BigInt(position.refundPendingMinor) - online;
+    if (left > 0n) other += left;
+  }
+  // b60 (v15 b59 live, TM2 order 27): a paid table's own refunds (cash, card machine, and to a
+  // guest's card once the Provider answered Succeeded), as Payment records them per part, count
+  // against the order's total like a pickup's; the "Paid at the table" section keeps each line.
+  const table = order.tableBill?.paid ?? null;
+  other += BigInt(table?.refundedMinor ?? "0");
+  if (other > 0n) {
+    rows.push({ label: t("Other refunds"), amount: money(other) });
+    total += other;
   }
   if (rows.length > 1 && known) rows.push({ label: t("Total refunded"), amount: money(total) });
+  // Still on its way back to the guest's card: said as such, never as given back.
+  const pending = BigInt(table?.refundPendingMinor ?? "0");
+  if (pending > 0n)
+    rows.push({
+      label: t("Going back to the guest's card"),
+      amount: money(pending),
+      pending: true,
+    });
   return rows;
 }
 
@@ -1698,6 +1739,8 @@ export function orderAmountRefunded(
 ): bigint {
   let refunded = position == null ? 0n : BigInt(position.refundedMinor);
   refunded += BigInt(order.counter?.paidOnCardMachine?.refundedMinor ?? "0");
+  // b60 (v15 b59 live, TM2 order 27): a paid table's own refunds, given back (never on its way).
+  refunded += BigInt(order.tableBill?.paid?.refundedMinor ?? "0");
   for (const batch of order.batches)
     refunded += BigInt(batch.staffRound?.paidOnCardMachine?.refundedMinor ?? "0");
   const taken = orderAmountTaken(order);
@@ -2613,14 +2656,19 @@ export function orderAmountNote(
           : paid.method === "Split"
             ? t("Paid at the table · split bill")
             : t("Paid at the table · card machine");
-    // Owner 2026-11-03: a refund shows on the list, not only inside the order.
-    return paid.refundedMinor === undefined
-      ? how
-      : how +
-          " · " +
-          t("Refunded {amount}", {
-            amount: orderMoney({ amountMinor: paid.refundedMinor, currencyCode: "CAD" }),
-          });
+    // Owner 2026-11-03: a refund shows on the list, not only inside the order. b60: as a pickup's,
+    // money given back is its own "$8.75 refunded" line under the amount (orderAmountRefunded), so
+    // only money still on its way back is said here, as such.
+    return [
+      how,
+      paid.refundPendingMinor === undefined
+        ? null
+        : t("{amount} going back to the guest's card", {
+            amount: orderMoney({ amountMinor: paid.refundPendingMinor, currencyCode: "CAD" }),
+          }),
+    ]
+      .filter((part) => part !== null)
+      .join(" · ");
   }
   // v15 b12 (DEC-PAPER-ORDER-NEVER-RELEASED): paid on paper and entered again: its money is on the
   // new order, never read as an unpaid sale or "No payment recorded".
