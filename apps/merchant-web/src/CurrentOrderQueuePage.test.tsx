@@ -2443,7 +2443,8 @@ it("Orders v2: the header line counts today's orders apart from earlier-day orde
   };
   expect(ordersSummary(view, "2026-10-26", 0)).toBe("1 order today · 1 from earlier days");
   expect(ordersSummary(view, "2026-10-26", 2)).toBe(
-    "1 order today · 2 to accept · 1 from earlier days",
+    // Batch 57: the earlier day's order to accept is counted with the earlier days.
+    "1 order today · 1 to accept · 1 from earlier days (1 to accept)",
   );
   expect(ordersSummary(view, null, 1)).toBe("2 orders on this page · 1 to accept");
 });

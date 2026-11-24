@@ -3762,15 +3762,21 @@ export function ordersSummary(
   awaiting: number,
   day: OrdersBusinessDay | null = null,
 ): string {
-  const waiting = awaiting > 0 ? t(" · {count} to accept", { count: awaiting }) : "";
+  const toAccept = (count: number) => (count > 0 ? t(" · {count} to accept", { count }) : "");
   if (today === null)
     return (
       (view.items.length === 1
         ? t("1 order on this page")
-        : t("{count} orders on this page", { count: view.items.length })) + waiting
+        : t("{count} orders on this page", { count: view.items.length })) + toAccept(awaiting)
     );
   const listedDay = day !== null && day.businessDate === today ? day : null;
-  const earlier = view.items.filter((order) => earlierDayUnfinished(order, listedDay)).length;
+  const earlierOrders = view.items.filter((order) => earlierDayUnfinished(order, listedDay));
+  const earlier = earlierOrders.length;
+  // Batch 57 (v15 batch 56 live): "89 orders today · 1 to accept · 46 from earlier days" while the
+  // one to accept was the earlier days' 11/4 table order. Each part says how many of its own
+  // orders wait; together they are the To accept tab's orders.
+  const earlierWaiting = Math.min(awaiting, earlierOrders.filter(isAwaitingAcceptance).length);
+  const waiting = toAccept(awaiting - earlierWaiting);
   const counted = view.todayOrderCount;
   // An earlier-day order listed with today's (holding stock, a round waiting) is not one of them.
   const onPage = view.items.filter(
@@ -3790,7 +3796,16 @@ export function ordersSummary(
           : t("{count} orders today", { count: onPage })
         : t("{count} of today's orders on this page", { count: onPage });
   return (
-    todays + waiting + (earlier > 0 ? t(" · {count} from earlier days", { count: earlier }) : "")
+    todays +
+    waiting +
+    (earlier === 0
+      ? ""
+      : earlierWaiting > 0
+        ? t(" · {count} from earlier days ({waiting} to accept)", {
+            count: earlier,
+            waiting: earlierWaiting,
+          })
+        : t(" · {count} from earlier days", { count: earlier }))
   );
 }
 

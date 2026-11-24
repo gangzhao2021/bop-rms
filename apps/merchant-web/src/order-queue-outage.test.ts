@@ -158,14 +158,14 @@ describe("batch 56: an earlier day's order still waiting to be accepted is liste
       todayOrderCount: 75,
     } as CurrentOrderQueue;
     expect(ordersSummary(view, "2026-11-23", 2, day)).toBe(
-      "75 orders today · 2 to accept · 2 from earlier days",
+      "75 orders today · 1 to accept · 2 from earlier days (1 to accept)",
     );
     // An older server (no count) and a next page: the page's count says it is the page's.
     const older = Object.fromEntries(
       Object.entries(view).filter(([key]) => key !== "todayOrderCount"),
     ) as CurrentOrderQueue;
     expect(ordersSummary(older, "2026-11-23", 2, day)).toBe(
-      "2 of today's orders on this page · 2 to accept · 2 from earlier days",
+      "2 of today's orders on this page · 1 to accept · 2 from earlier days (1 to accept)",
     );
     // The whole day on one page: the page's count is the day's.
     expect(
@@ -175,6 +175,37 @@ describe("batch 56: an earlier day's order still waiting to be accepted is liste
         2,
         day,
       ),
-    ).toBe("2 orders today · 2 to accept · 2 from earlier days");
+    ).toBe("2 orders today · 1 to accept · 2 from earlier days (1 to accept)");
+  });
+});
+
+// Batch 57 (v15 batch 56 live, Test Merchant 2, business date 2026-11-23).
+describe("batch 57: the Orders header and tabs count what they say", () => {
+  const day = { businessDate: "2026-11-23", startsAt: "2026-11-23T09:00:00.000Z" };
+  // The 11/4 table order still waiting, 45 earlier-day open pickups, and today's newest 50 of 89
+  // with none to accept.
+  const leftover = order("2", "2026-11-05T01:47:04.758Z", {
+    awaiting: true,
+    day: "2026-11-23",
+    opened: "2026-11-04",
+  });
+  const pickups = Array.from({ length: 45 }, (_, i) =>
+    order(String(20 + i), "2026-11-04T21:33:01.000Z", { day: "2026-11-04", earlierOpen: true }),
+  );
+  const todays = Array.from({ length: 50 }, (_, i) =>
+    order(String(89 - i), "2026-11-23T20:00:00.000Z", { day: "2026-11-23" }),
+  );
+  const view = {
+    unreadable: [],
+    items: [leftover, ...pickups, ...todays],
+    nextAfterOrderReference: "40",
+    todayOrderCount: 89,
+  } as unknown as CurrentOrderQueue;
+
+  it("says the one to accept is the earlier days', not one of today's", () => {
+    // Before: "89 orders today · 1 to accept · 46 from earlier days".
+    expect(ordersSummary(view, "2026-11-23", 1, day)).toBe(
+      "89 orders today · 46 from earlier days (1 to accept)",
+    );
   });
 });

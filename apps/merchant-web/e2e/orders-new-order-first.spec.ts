@@ -176,7 +176,7 @@ for (const language of ["en", "zh-Hans"] as const)
       expect(order_.slice(firstEarlier).every((label) => label.includes("/"))).toBe(true);
       await expect(
         page.getByRole("heading", {
-          name: language === "en" ? "Earlier days · not finished" : "之前营业日 · 还没做完",
+          name: language === "en" ? "Earlier days · not finished" : "较早营业日 · 未完成",
         }),
       ).toHaveCount(1);
       // "Needs attention" still names the earlier days' orders, in one line that opens.
@@ -351,8 +351,12 @@ for (const language of ["en", "zh-Hans"] as const)
       const meta = page.locator(".workspace-page__meta");
       // The day's count is the server's, not the page's (and not the 19-day-old table order).
       await expect(meta).toContainText(en ? "75 orders today" : "今天 75 单");
-      await expect(meta).toContainText(en ? "2 to accept" : "2 单待接");
-      await expect(meta).toContainText(en ? "46 from earlier days" : "另有 46 单是之前的");
+      // Batch 57: today's New order and the earlier days' table order, each in its own part.
+      await expect(meta).toHaveText(
+        en
+          ? "75 orders today · 1 to accept · 46 from earlier days (1 to accept)"
+          : "今天 75 单 · 1 单待接 · 另有 46 单来自较早营业日（1 单待接）",
+      );
       await expect(
         page.getByRole("button", { name: en ? "Pause ordering" : "暂停点单" }),
       ).toBeVisible();
@@ -383,7 +387,7 @@ for (const language of ["en", "zh-Hans"] as const)
       const tableIndex = labels.findIndex((label) => /11\/4 · 2(?!\d)/u.test(label));
       expect(tableIndex).toBeGreaterThanOrEqual(50);
       await expect(table).toContainText(
-        en ? "From an earlier day · waiting to be accepted" : "之前营业日的单 · 还没接",
+        en ? "From an earlier day · waiting to be accepted" : "较早营业日 · 待接单",
       );
       await expect(table.getByRole("button", { name: en ? /^Accept/u : /^接单/u })).toHaveCount(1);
       const attention = page.locator(".order-attention");

@@ -6216,7 +6216,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Finished · ingredients still set aside": "已做完 · 食材仍被占着",
   "Not paid": "未付款",
   "Card machine": "刷卡机",
-  "Earlier days · not finished": "之前营业日 · 还没做完",
+  // Batch 57 (v15 batch 56 live): one name, 较早营业日, for the earlier days' group on Orders.
+  "Earlier days · not finished": "较早营业日 · 未完成",
   "No orders yet": "还没有订单",
   "New orders appear here on their own.": "新订单会自动出现在这里。",
   "1 order on this page": "本页 1 单",
@@ -6225,11 +6226,14 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{count} orders today": "今天 {count} 单",
   // Batch 56 (v15 batch 55 live): without the server's day count, the page's count says so.
   "{count} of today's orders on this page": "本页有今天的 {count} 单",
-  "From an earlier day · waiting to be accepted": "之前营业日的单 · 还没接",
+  "From an earlier day · waiting to be accepted": "较早营业日 · 待接单",
   "Sent on an earlier day and never accepted. Open it and decide what to do with it.":
-    "这是之前营业日下的单，一直没接。打开它决定怎么处理。",
+    "这单在较早营业日下单，一直没接。打开它决定怎么处理。",
   " · {count} to accept": " · {count} 单待接",
-  " · {count} from earlier days": " · 另有 {count} 单是之前的",
+  " · {count} from earlier days": " · 另有 {count} 单来自较早营业日",
+  // Batch 57 (v15 batch 56 live): the order to accept is one of the earlier days', not today's.
+  " · {count} from earlier days ({waiting} to accept)":
+    " · 另有 {count} 单来自较早营业日（{waiting} 单待接）",
   "Needs attention": "需要处理",
   "Part {number} paid by": "第 {number} 份付款方式",
   "{amount} to go · {paid} of {count} parts paid": "还差 {amount} · 已付 {paid}/{count} 份",
