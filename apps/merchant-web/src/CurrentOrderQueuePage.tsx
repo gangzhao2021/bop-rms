@@ -3832,12 +3832,44 @@ export function ordersSummary(
   awaiting: number,
   day: OrdersBusinessDay | null = null,
 ): string {
+  return ordersSummaryParts(view, today, awaiting, day).join("");
+}
+/** The header's separator between its count phrases (" · " in both languages). */
+const summarySeparator = /^ · /u;
+/**
+ * Batch 58 (v15 batch 57 live, 390 wide): the header wrapped inside a phrase, "… (1 to" / "accept)"
+ * and "（1 单待" / "接）". Each count phrase is kept on one line; the line wraps between phrases.
+ */
+export function OrdersSummaryLine({ parts }: { readonly parts: readonly string[] }) {
+  return (
+    <>
+      {parts.map((part, index) => {
+        const phrase = part.replace(summarySeparator, "");
+        return (
+          <Fragment key={index}>
+            {index > 0 && phrase !== part ? " · " : null}
+            <span className="orders-summary__part">{phrase}</span>
+          </Fragment>
+        );
+      })}
+    </>
+  );
+}
+/** The header's count phrases, each with its leading separator after the first. */
+export function ordersSummaryParts(
+  view: CurrentOrderQueue,
+  today: string | null,
+  awaiting: number,
+  day: OrdersBusinessDay | null = null,
+): string[] {
   const toAccept = (count: number) => (count > 0 ? t(" · {count} to accept", { count }) : "");
+  const parts = (...all: string[]) => all.filter((part) => part !== "");
   if (today === null)
-    return (
-      (view.items.length === 1
+    return parts(
+      view.items.length === 1
         ? t("1 order on this page")
-        : t("{count} orders on this page", { count: view.items.length })) + toAccept(awaiting)
+        : t("{count} orders on this page", { count: view.items.length }),
+      toAccept(awaiting),
     );
   const listedDay = day !== null && day.businessDate === today ? day : null;
   const earlierOrders = view.items.filter((order) => earlierDayUnfinished(order, listedDay));
@@ -3865,17 +3897,17 @@ export function ordersSummary(
           ? t("1 order today")
           : t("{count} orders today", { count: onPage })
         : t("{count} of today's orders on this page", { count: onPage });
-  return (
-    todays +
-    waiting +
-    (earlier === 0
+  return parts(
+    todays,
+    waiting,
+    earlier === 0
       ? ""
       : earlierWaiting > 0
         ? t(" · {count} from earlier days ({waiting} to accept)", {
             count: earlier,
             waiting: earlierWaiting,
           })
-        : t(" · {count} from earlier days", { count: earlier }))
+        : t(" · {count} from earlier days", { count: earlier }),
   );
 }
 
@@ -4925,13 +4957,17 @@ export function CurrentOrderQueuePage({
           : t("Orders")
       }
       meta={
-        single
-          ? detail === undefined
-            ? storeLabel
-            : `${orderTypeLabel[detail.order.orderType]} · ${orderChannelLabel(orderChannel(detail.order))}`
-          : state.kind === "Ready"
-            ? ordersSummary(state.view, today, awaitingCount, ordersDay)
-            : null
+        single ? (
+          detail === undefined ? (
+            storeLabel
+          ) : (
+            `${orderTypeLabel[detail.order.orderType]} · ${orderChannelLabel(orderChannel(detail.order))}`
+          )
+        ) : state.kind === "Ready" ? (
+          <OrdersSummaryLine
+            parts={ordersSummaryParts(state.view, today, awaitingCount, ordersDay)}
+          />
+        ) : null
       }
       status={
         updatedAt === null ? null : (

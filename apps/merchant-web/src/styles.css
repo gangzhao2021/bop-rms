@@ -6954,6 +6954,11 @@ body:has(.product-complete-draft) .bop-shell__header,
   color: var(--bop-color-text-muted);
   font-size: 13px;
 }
+/* Batch 58: each count phrase of the Orders header stays whole; the line wraps between them. */
+.orders-summary__part {
+  display: inline-block;
+  max-width: 100%;
+}
 .workspace-page__toolbar {
   display: flex;
   flex-wrap: wrap;

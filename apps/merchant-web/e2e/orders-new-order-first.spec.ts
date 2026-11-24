@@ -553,3 +553,174 @@ for (const language of ["en", "zh-Hans"] as const)
       await expect(rows.first()).toContainText("11/4 · 2");
       await expectNoInternalText(page);
     });
+
+/**
+ * Batch 58 (v15 batch 57 live, Test Merchant 2 at 04:06 Toronto, business date 2026-11-24, 104
+ * orders the day before): the first page held today's 3 orders and 47 of yesterday's finished
+ * ones, with 46 earlier-day orders listed after them and a next page. Today listed 49 rows and All
+ * said 49, but with To accept chosen the footer read "2 of 96 orders on this page match" (zh 本页
+ * 96 笔订单中有 1 笔符合): it counted yesterday's rows that Today hides. At 390 the header wrapped
+ * inside the parenthesis, "46 from earlier days (1 to" / "accept)" and "（1 单待" / "接）". The
+ * footer now counts the rows Today shows, the same as All, and each count phrase of the header
+ * stays on one line. The answer is the live shape, with synthetic references.
+ */
+const liveToday = "2026-11-24";
+const liveYesterday = "2026-11-23";
+for (const language of ["en", "zh-Hans"] as const)
+  for (const [width, height] of [
+    [390, 844],
+    [1024, 768],
+    [1440, 900],
+  ] as const)
+    test(`@production the Orders footer counts what Today shows and the header keeps each count whole, ${language} at ${width}`, async ({
+      page,
+    }) => {
+      const en = language === "en";
+      if (!en)
+        await page.addInitScript(() =>
+          window.localStorage.setItem("bop.merchant.language", "zh-Hans"),
+        );
+      await page.setViewportSize({ width, height });
+      await page.clock.install();
+      const now = Date.now();
+      const listed = (row: ReturnType<typeof order>) => ({
+        ...row,
+        earlierOpenPickup: false,
+      });
+      // Today's 3: two accepted table orders of other testers and the New order to accept.
+      const todays = [
+        listed(order(703, "3", liveToday, new Date(now - 60_000).toISOString(), true)),
+        listed(order(702, "2", liveToday, new Date(now - 5 * 60_000).toISOString(), false)),
+        listed(order(701, "1", liveToday, new Date(now - 9 * 60_000).toISOString(), false)),
+      ];
+      // The newest 47 of yesterday's 104, all handed over (references newest first, as served).
+      const yesterdays = Array.from({ length: 47 }, (_, i) => ({
+        ...listed(
+          order(
+            646 - i,
+            String(104 - i),
+            liveYesterday,
+            new Date(now - (20 + i * 6) * 60_000).toISOString(),
+            false,
+          ),
+        ),
+        currentPhase: "Fulfilled",
+        currentVersion: 3,
+      }));
+      const earlier = tm2Earlier.map((row) => ({
+        ...row,
+        listedBusinessDate: row.listedBusinessDate === today ? liveToday : row.listedBusinessDate,
+      }));
+      const answer = {
+        earlierDayItems: earlier,
+        items: [...todays, ...yesterdays],
+        nextAfterOrderReference: id(600),
+        todayOrderCount: 3,
+      };
+      await page.route("**/merchant/session", (route) =>
+        route.fulfill({
+          headers,
+          json: { ...session, workspace: { ...session.workspace, businessDate: liveToday } },
+        }),
+      );
+      await page.route("**/merchant/business-day", (route) =>
+        route.fulfill({
+          headers,
+          json: {
+            businessDate: liveToday,
+            startsAt: new Date(now - 6 * 60_000).toISOString(),
+            endsAt: new Date(now + 24 * 3_600_000 - 6 * 60_000).toISOString(),
+            timeZone: "America/Toronto",
+            observedAt: new Date(now).toISOString(),
+          },
+        }),
+      );
+      for (const pattern of ["**/merchant/orders?*", "**/merchant/orders"])
+        await page.route(pattern, (route) => route.fulfill({ headers, json: answer }));
+      await page.goto("/operations/orders");
+      const rows = page.locator("li.order-row:not([hidden])");
+      // Today: today's 3 and the 46 earlier-day orders; yesterday's finished ones are not shown.
+      await expect(rows).toHaveCount(49);
+      const meta = page.locator(".workspace-page__meta");
+      await expect(meta).toHaveText(
+        en
+          ? "3 orders today · 1 to accept · 46 from earlier days (1 to accept)"
+          : "今天 3 单 · 1 单待接 · 另有 46 单来自较早营业日（1 单待接）",
+      );
+      // Each count phrase stays on one line, with room left for wider Linux fonts (DejaVu Sans).
+      const phrases = en
+        ? ["3 orders today", "1 to accept", "46 from earlier days (1 to accept)"]
+        : ["今天 3 单", "1 单待接", "另有 46 单来自较早营业日（1 单待接）"];
+      const lines = await meta.evaluate((element, wanted) => {
+        const text = element.textContent ?? "";
+        const nodes: Text[] = [];
+        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+        for (let node = walker.nextNode(); node !== null; node = walker.nextNode())
+          nodes.push(node as Text);
+        const at = (offset: number): [Text, number] => {
+          let left = offset;
+          for (const node of nodes) {
+            if (left <= node.length) return [node, left];
+            left -= node.length;
+          }
+          const last = nodes[nodes.length - 1] as Text;
+          return [last, last.length];
+        };
+        const width = element.getBoundingClientRect().width;
+        return wanted.map((phrase) => {
+          const start = text.indexOf(phrase);
+          if (start < 0) return { phrase, lines: -1, spare: -1 };
+          const range = document.createRange();
+          range.setStart(...at(start));
+          range.setEnd(...at(start + phrase.length));
+          const tops = new Set(
+            Array.from(range.getClientRects())
+              .filter((rect) => rect.width > 0)
+              .map((rect) => Math.round(rect.top)),
+          );
+          return { phrase, lines: tops.size, spare: width - range.getBoundingClientRect().width };
+        });
+      }, phrases);
+      for (const line of lines) {
+        expect(line.lines, JSON.stringify(line)).toBe(1);
+        expect(line.spare, JSON.stringify(line)).toBeGreaterThanOrEqual(40);
+      }
+      // The New order is still the first row on the first screen under the header.
+      const fresh = rows.first();
+      await expect(fresh.locator(".order-row__open")).toContainText("3");
+      await page.evaluate(() => window.scrollTo(0, 0));
+      const bottom = await fresh.evaluate(
+        (row) => row.getBoundingClientRect().bottom + window.scrollY,
+      );
+      expect(bottom, `${language} ${width}`).toBeLessThanOrEqual(height - 40);
+      const tabs = page.locator(".order-status-filters button");
+      const tab = (name: string) => tabs.filter({ hasText: name });
+      await expect(tab(en ? "All" : "全部").locator(".order-status-filters__count")).toHaveText(
+        "49",
+      );
+      await page.screenshot({
+        path: test.info().outputPath(`orders-footer-${language}-${width}.png`),
+      });
+      // To accept: today's New order and the 11/4 table order. The footer counts the 49 rows
+      // Today shows (as All does), and still says the next page is not searched.
+      await tab(en ? "To accept" : "待接单").click();
+      await expect(rows).toHaveCount(2);
+      const footer = page.locator(".order-queue-filter-count");
+      await expect(footer).toHaveText(
+        en
+          ? "2 of 49 orders on this page match. Other pages are not searched."
+          : "本页 49 笔订单中有 2 笔符合。不搜索其他页。",
+      );
+      // Back on All, Today that fits says nothing more under the list.
+      await tab(en ? "All" : "全部").click();
+      await expect(footer).toHaveCount(0);
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        ),
+      ).toBe(0);
+      await page.screenshot({
+        path: test.info().outputPath(`orders-footer-toaccept-${language}-${width}.png`),
+      });
+      await expectNoInternalText(page);
+    });

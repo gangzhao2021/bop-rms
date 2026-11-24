@@ -5,6 +5,7 @@ import {
   earlierDayWaiting,
   orderCountText,
   ordersSummary,
+  ordersSummaryParts,
   statusTabCount,
   viewOrderCount,
 } from "./CurrentOrderQueuePage.js";
@@ -268,7 +269,7 @@ describe("batch 57: the Orders header and tabs count what they say", () => {
 });
 
 // Batch 58 (v15 batch 57 live, Test Merchant 2 at 04:06 Toronto, business date 2026-11-24).
-describe("batch 58: the Orders footer counts what Today shows", () => {
+describe("batch 58: the Orders footer counts what Today shows; the header keeps each count whole", () => {
   const day = { businessDate: "2026-11-24", startsAt: "2026-11-24T09:00:00.000Z" };
   // The 11/4 table order still waiting, 45 earlier-day open pickups, today's 3 (one to accept) and
   // the newest 47 of yesterday's 104, all handed over.
@@ -316,5 +317,21 @@ describe("batch 58: the Orders footer counts what Today shows", () => {
     expect(viewOrderCount(view.items, " 104 ", "Today", "2026-11-24")).toBe(96);
     // The business day not known yet: nothing is hidden.
     expect(viewOrderCount(view.items, "", "Today", null)).toBe(96);
+  });
+
+  it("gives the header as whole phrases, the separator leading each after the first", () => {
+    // At 390 the line broke inside "(1 to accept)"; each part is now kept whole.
+    expect(ordersSummaryParts(view, "2026-11-24", 2, day)).toEqual([
+      "3 orders today",
+      " · 1 to accept",
+      " · 46 from earlier days (1 to accept)",
+    ]);
+    expect(ordersSummary(view, "2026-11-24", 2, day)).toBe(
+      "3 orders today · 1 to accept · 46 from earlier days (1 to accept)",
+    );
+    expect(ordersSummaryParts(view, "2026-11-24", 0, day)).toEqual([
+      "3 orders today",
+      " · 46 from earlier days",
+    ]);
   });
 });
