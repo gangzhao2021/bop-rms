@@ -222,15 +222,25 @@ export function filterCurrentOrderItems(
  * other tab whose rows are partly on a later page shows no number (null). Nothing is hidden: the
  * rows and the next page stay as they are.
  */
+/** The Orders read answers 50 Orders a page, and at most 50 earlier-day Orders with the first. */
+const ordersPageSize = 50;
 export function statusTabCount(
-  view: Pick<CurrentOrderQueue, "items" | "nextAfterOrderReference" | "todayOrderCount">,
+  view: Pick<
+    CurrentOrderQueue,
+    "items" | "nextAfterOrderReference" | "todayOrderCount" | "unreadable"
+  >,
   after: string | null,
   filters: CurrentOrderFilters,
 ): number | null {
   if (after === null && view.nextAfterOrderReference === null)
     return filterCurrentOrderItems(view.items, filters).length;
   const today = filters.today ?? null;
+  // With a next page the page part holds exactly 50 Orders, so the rest of the answer (readable or
+  // not) is the earlier-day Orders listed with today's. The server lists at most 50 of them; at 50
+  // more may stay on the page of the day they were opened and still show under Today there.
+  const earlierListed = view.items.length + view.unreadable.length - ordersPageSize;
   if (
+    earlierListed >= ordersPageSize ||
     after !== null ||
     today === null ||
     view.todayOrderCount === undefined ||
@@ -241,7 +251,7 @@ export function statusTabCount(
     filters.channel !== "All"
   )
     return null;
-  // Today's orders are the server's count; the earlier days' listed with them are all on page 1.
+  // Today's orders are the server's count; fewer than 50 earlier days' listed means all are here.
   return (
     view.todayOrderCount +
     filterCurrentOrderItems(view.items, filters).filter(
@@ -4489,6 +4499,9 @@ export function CurrentOrderQueuePage({
     if (soundOn && (arrived.length > 0 || urgent.length > 0) && audio.current)
       playKitchenChime(audio.current);
   }, [state, now, soundOn]);
+  // The header, the tab title and the chime name the waiting orders on this screen that staff can
+  // accept now (each has its Accept button here); it never reads as the day's total. A tab number
+  // does read as the total for what the tab filters, so it shows only when it is that total.
   const awaitingCount = state.kind === "Ready" ? ordersAwaitingAcceptance(state.view) : 0;
   // M43: what arrived since the page loaded; opening an order clears its mark.
   const [fresh, setFresh] = useState<ReadonlySet<string>>(new Set());

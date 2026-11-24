@@ -233,6 +233,26 @@ describe("batch 57: the Orders header and tabs count what they say", () => {
     expect(statusTabCount(older, null, filters)).toBeNull();
   });
 
+  it("shows no All number once the earlier days fill their 50 places", () => {
+    // Review of batch 57: 50 earlier-day rows listed means more may wait on later pages, where they
+    // still show under Today. Before: All 89 + 50 = 139 while the Today list holds more.
+    const full = Array.from({ length: 50 }, (_, i) =>
+      order(String(100 + i), "2026-11-04T21:33:01.000Z", { day: "2026-11-04", earlierOpen: true }),
+    );
+    const capped = { ...view, items: [...full, ...todays] } as CurrentOrderQueue;
+    expect(statusTabCount(capped, null, filters)).toBeNull();
+    // An earlier-day row the page could not read still takes one of the 50 places.
+    const unread = {
+      ...view,
+      items: [...full.slice(1), ...todays],
+      unreadable: [{ orderNumber: "100", orderType: "Pickup", phase: "Submitted" }],
+    } as unknown as CurrentOrderQueue;
+    expect(statusTabCount(unread, null, filters)).toBeNull();
+    // 49 earlier-day rows: all of them are here, so All is still the day's whole list.
+    const under = { ...view, items: [...full.slice(1), ...todays] } as CurrentOrderQueue;
+    expect(statusTabCount(under, null, filters)).toBe(89 + 49);
+  });
+
   it("counts every tab when the whole list is loaded", () => {
     const whole = {
       ...view,
