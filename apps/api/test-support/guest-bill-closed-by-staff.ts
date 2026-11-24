@@ -30,6 +30,10 @@ type TableBill = Awaited<ReturnType<typeof readDiningTableBill>>;
  * Batch 57 (v15 b56 live, TM2 L56P D, order 101):
  * whole-table-paid-online: one phone paid "The whole table" ($28.25) online, no split, no tip;
  *   the bill is paid in full by that one payment (the table's settlement, method Online).
+ * Batch 60 (b58/b59 known limit; v15's by-dish settlements, e.g. TM2 L53 orders: one settlement
+ * per guest, one line per round, part 1 1413 for round 1 and part 2 1412 for round 2):
+ * by-dish-both-paid: phone A paid its own dish (round 1, $14.13), phone B paid its own (round 2,
+ *   $14.12): the bill is paid in full by dish, nothing written off.
  */
 export type GuestBillScenario =
   | "open-after-one-dish"
@@ -40,7 +44,8 @@ export type GuestBillScenario =
   | "half-split-written-off"
   | "half-split-open"
   | "half-split-paid"
-  | "whole-table-paid-online";
+  | "whole-table-paid-online"
+  | "by-dish-both-paid";
 
 const id = (n: number) => "0198b054-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const cad = (amountMinor: bigint) => ({ amountMinor, currencyCode: "CAD" });
@@ -60,13 +65,16 @@ const notWrittenOff = (scenario: GuestBillScenario) =>
   scenario === "open-after-one-dish" ||
   scenario === "half-split-open" ||
   scenario === "half-split-paid" ||
-  scenario === "whole-table-paid-online";
+  scenario === "whole-table-paid-online" ||
+  scenario === "by-dish-both-paid";
 /** Every round paid: by both parts of the split, or by one payment for the whole table. */
 const paidInFull = (scenario: GuestBillScenario) =>
-  scenario === "half-split-paid" || scenario === "whole-table-paid-online";
+  scenario === "half-split-paid" ||
+  scenario === "whole-table-paid-online" ||
+  scenario === "by-dish-both-paid";
 /** What the table paid, payment by payment. */
 const paidOf = (scenario: GuestBillScenario): bigint[] =>
-  scenario === "half-split-paid"
+  scenario === "half-split-paid" || scenario === "by-dish-both-paid"
     ? [1413n, 1412n]
     : scenario === "whole-table-paid-online"
       ? [2825n]
@@ -121,12 +129,98 @@ function tableBill(scenario: GuestBillScenario): TableBill {
         : {
             mode: scenario === "parts-written-off" || evenHalves(scenario) ? "Even" : "ByGuests",
             stale: false,
-            paidInFull: scenario === "half-split-paid",
+            paidInFull: scenario === "half-split-paid" || scenario === "by-dish-both-paid",
           },
     writeOff: notWrittenOff(scenario)
       ? null
       : { amountMinor: String(owedMinor), decidedAt: "2026-11-22T16:08:33.000Z" },
   } as unknown as TableBill;
+}
+
+/** Batch 60: the guest Sessions of the two phones (A paid part 1; B is the other phone). */
+export const guestPhoneSession = (payer: boolean) => id(payer ? 0x60 : 0x61);
+
+/**
+ * Batch 60: Payment's records of this table's payments, in the settlement store's read shapes
+ * (listSplitPlans / listByOrders), so the real `customerRoundPaymentRefunds` ties staff's refunds
+ * to the rounds those payments paid. By dish: one settlement per guest, one line per round (as on
+ * v15); staff's even split: part 1's slice is round 1 (as v15 recorded order 67); the whole table:
+ * one settlement with a line per round.
+ */
+export function guestBillPayments(scenario: GuestBillScenario): {
+  readonly plan:
+    | {
+        readonly splitPlanReference: string;
+        readonly mode: "Even" | "ByGuests";
+        readonly guestParts: readonly {
+          readonly partNumber: number;
+          readonly guestSessionReference: string | null;
+          readonly withdrawn: null;
+        }[];
+      }
+    | undefined;
+  readonly settlements: readonly {
+    readonly settlementReference: string;
+    readonly part: { readonly splitPlanReference: string; readonly partNumber: number } | null;
+    readonly totalMinor: bigint;
+    readonly tipMinor: bigint;
+    readonly lines: readonly {
+      readonly orderBatchReference: string;
+      readonly roundMinor: bigint;
+      readonly tipMinor: bigint;
+      readonly roundingMinor: bigint;
+    }[];
+  }[];
+} {
+  const plan = id(0x70);
+  const paid = paidOf(scenario);
+  if (paid.length === 0) return { plan: undefined, settlements: [] };
+  if (scenario === "whole-table-paid-online")
+    return {
+      plan: undefined,
+      settlements: [
+        {
+          settlementReference: id(0x80),
+          part: null,
+          totalMinor: 2825n,
+          tipMinor: 0n,
+          lines: allRounds.map((round) => ({
+            orderBatchReference: round.batch,
+            roundMinor: round.totalMinor,
+            tipMinor: 0n,
+            roundingMinor: 0n,
+          })),
+        },
+      ],
+    };
+  const even = scenario === "parts-written-off" || evenHalves(scenario);
+  return {
+    plan: {
+      splitPlanReference: plan,
+      mode: even ? "Even" : "ByGuests",
+      guestParts: even
+        ? []
+        : paid.map((_, index) => ({
+            partNumber: index + 1,
+            guestSessionReference: guestPhoneSession(index === 0),
+            withdrawn: null,
+          })),
+    },
+    settlements: paid.map((amountMinor, index) => ({
+      settlementReference: id(0x80 + index),
+      part: { splitPlanReference: plan, partNumber: index + 1 },
+      totalMinor: amountMinor,
+      tipMinor: 0n,
+      lines: [
+        {
+          orderBatchReference: allRounds[index]?.batch ?? allRounds[0].batch,
+          roundMinor: amountMinor,
+          tipMinor: 0n,
+          roundingMinor: 0n,
+        },
+      ],
+    })),
+  };
 }
 
 /** Batch 59: what staff gave back of the table's payments, refused refunds left out. */
@@ -190,9 +284,11 @@ export function guestBillClosedByStaffFacts(
             ? "L54 GB5 (TEST)"
             : scenario === "whole-table-paid-online"
               ? "L56P D (TEST)"
-              : evenHalves(scenario)
-                ? "L55 CB3 (TEST)"
-                : "L53 WO4 (TEST)",
+              : scenario === "by-dish-both-paid"
+                ? "L60 BD (TEST)"
+                : evenHalves(scenario)
+                  ? "L55 CB3 (TEST)"
+                  : "L53 WO4 (TEST)",
       checkedAt: "2026-11-22T16:09:00.000Z",
       paymentTiming: "PayLater",
       order: {
@@ -203,9 +299,11 @@ export function guestBillClosedByStaffFacts(
               ? "67"
               : scenario === "whole-table-paid-online"
                 ? "101"
-                : evenHalves(scenario)
-                  ? "80"
-                  : "52",
+                : scenario === "by-dish-both-paid"
+                  ? "66"
+                  : evenHalves(scenario)
+                    ? "80"
+                    : "52",
         batches: rounds.map((round) => ({
           orderBatchReference: round.batch,
           submittedAt: sentAt,
@@ -348,12 +446,15 @@ export function guestOwnRefunds(kind: GuestOwnRefunds): readonly OwnRefund[] {
  * staff closed anything: part 1 paid on a phone, part 2 ($14.12) still to pay, nothing written off.
  */
 export function guestOwnPaymentView(
-  scenario: "by-dish-written-off" | "half-split-written-off" | "half-split-open",
+  scenario:
+    "by-dish-written-off" | "half-split-written-off" | "half-split-open" | "by-dish-both-paid",
   payer: boolean,
   sessionPhase: "Closing" | "Closed" = "Closing",
   refunds: GuestOwnRefunds = "None",
 ): PaymentView {
-  const byDish = scenario === "by-dish-written-off";
+  // Batch 60: both guests paid their own dish (B, the other phone, paid part 2 for round 2).
+  const bothPaid = scenario === "by-dish-both-paid";
+  const byDish = scenario === "by-dish-written-off" || bothPaid;
   const dish = { displayName: "Beef noodles (TEST)", quantity: 1, shared: false };
   const paidPart = {
     partNumber: 1,
@@ -381,9 +482,12 @@ export function guestOwnPaymentView(
     subtotalMinor: "1250",
     taxMinor: "162",
     roundNumbers: [2],
-    dishes: [],
-    payment: null,
+    dishes: bothPaid ? [dish] : [],
+    payment: bothPaid
+      ? { ...paidPart.payment, totalMinor: "1412", recordedAt: "2026-11-24T00:35:02.000Z" }
+      : null,
     guestPaying: false,
+    ...(bothPaid ? { choice: "Mine" as const } : {}),
   };
   return {
     bill: {
@@ -413,37 +517,52 @@ export function guestOwnPaymentView(
         taxMinor: String(round.taxMinor),
         totalMinor: String(round.totalMinor),
         taxRoundingMinor: "0",
-        paid: round.mine,
+        paid: round.mine || bothPaid,
         orderedBy: null,
         fromTableLabel: null,
         liveOrderedAt: null,
       })),
       taxRoundingMinor: "0",
-      owed: { subtotalMinor: "1250", taxMinor: "162", totalMinor: "1412" },
+      owed: bothPaid
+        ? { subtotalMinor: "0", taxMinor: "0", totalMinor: "0" }
+        : { subtotalMinor: "1250", taxMinor: "162", totalMinor: "1412" },
       consistent: true,
       tips: { enabled: true, tierPercents: [10, 15, 18] },
       settlement: null,
       split: {
         mode: byDish ? "ByGuests" : "Even",
         stale: false,
-        paidInFull: false,
+        paidInFull: bothPaid,
         dishChoices: [],
-        parts: byDish ? [paidPart] : [paidPart, restPart],
-        paidParts: 1,
-        remainingMinor: "1412",
+        parts: byDish && !bothPaid ? [paidPart] : [paidPart, restPart],
+        paidParts: bothPaid ? 2 : 1,
+        remainingMinor: bothPaid ? "0" : "1412",
       },
       writeOff:
-        scenario === "half-split-open"
+        scenario === "half-split-open" || bothPaid
           ? null
           : { amountMinor: "1412", decidedAt: "2026-11-24T00:35:10.000Z" },
       onlinePayment: null,
     } as unknown as PaymentView["bill"],
     attempt: null,
     lastOwnDeclined: null,
-    paidByMe: payer && byDish ? [1] : [],
+    paidByMe: byDish ? (payer ? [1] : bothPaid ? [2] : []) : [],
     choices: null,
-    ownPayments: payer
-      ? [
+    ownPayments: !payer
+      ? bothPaid
+        ? [
+            {
+              partNumber: 2,
+              samePlan: true,
+              roundsMinor: "1412",
+              tipMinor: "0",
+              totalMinor: "1412",
+              paidAt: "2026-11-24T00:35:02.000Z",
+              refunds: [],
+            },
+          ]
+        : []
+      : [
           {
             partNumber: 1,
             samePlan: true,
@@ -453,8 +572,7 @@ export function guestOwnPaymentView(
             paidAt: "2026-11-24T00:34:40.000Z",
             refunds: guestOwnRefunds(refunds),
           },
-        ]
-      : [],
+        ],
   };
 }
 

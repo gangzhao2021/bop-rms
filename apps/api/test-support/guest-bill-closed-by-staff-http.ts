@@ -20,10 +20,13 @@ import {
 } from "../src/customer-session-bootstrap.js";
 import {
   composeCustomerDiningSession,
+  customerRoundPaymentRefunds,
   customerTableBillFacts,
 } from "../src/customer-dining-session-read.js";
 import {
   guestBillClosedByStaffFacts,
+  guestBillPayments,
+  guestPhoneSession,
   guestBillWriteOff,
   guestOwnPaymentView,
   guestWholeTablePaidView,
@@ -49,7 +52,16 @@ const ownRefunded = (kind: GuestOwnRefunds) => {
   const minor = guestOwnRefunds(kind)
     .filter((refund) => refund.status !== "Failed")
     .reduce((sum, refund) => sum + BigInt(refund.amountMinor), 0n);
-  return minor === 0n ? {} : { refundedMinor: minor.toString() };
+  // Batch 60: of it, what is still on its way (the Provider has not answered yet).
+  const pending = guestOwnRefunds(kind)
+    .filter((refund) => refund.status === "Pending")
+    .reduce((sum, refund) => sum + BigInt(refund.amountMinor), 0n);
+  return minor === 0n
+    ? {}
+    : {
+        refundedMinor: minor.toString(),
+        ...(pending === 0n ? {} : { refundPendingMinor: pending.toString() }),
+      };
 };
 const endedCsrf = "C".repeat(43);
 
@@ -67,7 +79,8 @@ export async function startGuestBillHttp(
     const current = scenario();
     return current === "by-dish-written-off" ||
       current === "half-split-written-off" ||
-      current === "half-split-open"
+      current === "half-split-open" ||
+      current === "by-dish-both-paid"
       ? current
       : null;
   };
@@ -177,13 +190,28 @@ export async function startGuestBillHttp(
         port: {
           read: async () => {
             // Batch 58: the table's refunds are a table fact: every phone's read carries them.
-            const { facts, bill } = guestBillClosedByStaffFacts(
-              scenario(),
-              paidPart() === null ? "None" : (phone().refunds ?? "None"),
+            const refunds = paidPart() === null ? "None" : (phone().refunds ?? "None");
+            const { facts, bill } = guestBillClosedByStaffFacts(scenario(), refunds);
+            // Batch 60: staff's refunds (all of them of phone A's payment, part 1) tied to the
+            // rounds Payment's settlements paid, as the real read does for the asking phone.
+            const { plan, settlements } = guestBillPayments(scenario());
+            const roundPaymentRefunds = customerRoundPaymentRefunds(
+              plan,
+              settlements,
+              new Map(
+                settlements[0] === undefined
+                  ? []
+                  : [[settlements[0].settlementReference, guestTableRefundedMinor(refunds)]],
+              ),
+              guestPhoneSession(phone().payer),
             );
             return composeCustomerDiningSession({
               ...facts,
-              order: { ...facts.order, tableBill: customerTableBillFacts(bill) },
+              order: {
+                ...facts.order,
+                tableBill: customerTableBillFacts(bill),
+                ...(roundPaymentRefunds.size === 0 ? {} : { roundPaymentRefunds }),
+              },
             });
           },
         },

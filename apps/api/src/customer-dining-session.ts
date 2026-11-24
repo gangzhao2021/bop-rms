@@ -211,6 +211,19 @@ export class CustomerDiningSessionHandler {
             ...(round.refundPending === undefined
               ? {}
               : { refundPending: money(round.refundPending) }),
+            // Batch 60: a Paid round whose own payment staff gave back (the amount: payer only).
+            ...(round.paymentRefund === undefined
+              ? {}
+              : {
+                  paymentRefund: {
+                    state: round.paymentRefund.state,
+                    ...(round.paymentRefund.yourPaidAfterRefunds === undefined
+                      ? {}
+                      : {
+                          yourPaidAfterRefunds: money(round.paymentRefund.yourPaidAfterRefunds),
+                        }),
+                  },
+                }),
           })),
           summary:
             view.summary === null

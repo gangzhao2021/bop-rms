@@ -5,12 +5,16 @@ import { createApp } from "./app.js";
 import { CustomerDiningSessionHandler } from "./customer-dining-session.js";
 import {
   composeCustomerDiningSession,
+  customerRoundPaymentRefunds,
   customerTableBillFacts,
   type CustomerDiningSessionView,
   type CustomerMoney,
 } from "./customer-dining-session-read.js";
 import {
   guestBillClosedByStaffFacts,
+  guestBillPayments,
+  guestPhoneSession,
+  guestTableRefundedMinor,
   liveWrittenOffSummaryWithoutClosedByStaff,
   type GuestBillScenario,
 } from "../test-support/guest-bill-closed-by-staff.js";
@@ -159,6 +163,7 @@ const everyRound: Every<Round> = {
   bill,
   refunded: cad(1n),
   refundPending: cad(1n),
+  paymentRefund: { state: "Partly", yourPaidAfterRefunds: cad(613n) },
 };
 const everySummary: Every<Summary> = {
   paid: cad(1413n),
@@ -280,5 +285,76 @@ describe("batch 58: the table's paid figure after staff refunded a phone payment
     const partial = (await serve(() => guestRead("half-split-written-off", "Partial")))
       .summary as Record<string, unknown>;
     expect(partial.splitParts).toEqual({ count: 2, paid: 1 });
+  });
+});
+
+// Batch 60 (v15 b58/b59 known limit): guests paid by dish (phone A round 1, $14.13; phone B round
+// 2, $14.12, one settlement each with one line per round, as v15 records them) and staff then gave
+// back all or some of A's payment. Each round sent "Paid" while the table said "Paid after refunds".
+// Through Payment's settlement shapes, the real per-round mapping, composition and HTTP reply.
+describe("batch 60: a round paid by dish says what staff gave back of its payment", () => {
+  const read = (
+    scenario: GuestBillScenario,
+    refunds: NonNullable<Parameters<typeof guestBillClosedByStaffFacts>[1]>,
+    payer: boolean,
+  ) => {
+    const { facts, bill } = guestBillClosedByStaffFacts(scenario, refunds);
+    const { plan, settlements } = guestBillPayments(scenario);
+    const roundPaymentRefunds = customerRoundPaymentRefunds(
+      plan,
+      settlements,
+      new Map([[settlements[0]?.settlementReference ?? "", guestTableRefundedMinor(refunds)]]),
+      guestPhoneSession(payer),
+    );
+    return composeCustomerDiningSession({
+      ...facts,
+      order: {
+        ...facts.order,
+        tableBill: customerTableBillFacts(bill),
+        ...(roundPaymentRefunds.size === 0 ? {} : { roundPaymentRefunds }),
+      },
+    });
+  };
+  const rounds = (session: Record<string, unknown>) =>
+    (session.rounds as { payment: string; paymentRefund?: unknown }[]).map((round) => [
+      round.payment,
+      round.paymentRefund,
+    ]);
+  it("all of A's payment back: round 1 refunded in full on both phones, round 2 still paid", async () => {
+    for (const payer of [true, false])
+      expect(rounds(await serve(() => read("by-dish-both-paid", "Full", payer)))).toEqual([
+        ["Paid", { state: "Full" }],
+        ["Paid", undefined],
+      ]);
+  });
+  it("part of A's payment back ($5.00 back, $3.00 on its way): A reads $6.13; B no amount", async () => {
+    expect(rounds(await serve(() => read("by-dish-both-paid", "Partial", true)))).toEqual([
+      [
+        "Paid",
+        { state: "Partly", yourPaidAfterRefunds: { amountMinor: "613", currencyCode: "CAD" } },
+      ],
+      ["Paid", undefined],
+    ]);
+    const other = await serve(() => read("by-dish-both-paid", "Partial", false));
+    expect(rounds(other)).toEqual([
+      ["Paid", { state: "Partly" }],
+      ["Paid", undefined],
+    ]);
+    expect(JSON.stringify(other.rounds)).not.toMatch(/613|800|yourPaid/u);
+  });
+  it("staff closed the rest after A paid by dish: only A's round carries the refund", async () => {
+    expect(rounds(await serve(() => read("by-dish-written-off", "Partial", true)))).toEqual([
+      [
+        "Paid",
+        { state: "Partly", yourPaidAfterRefunds: { amountMinor: "613", currencyCode: "CAD" } },
+      ],
+      ["OnTableBill", undefined],
+    ]);
+  });
+  it("staff's even split pays no round: no round carries a refund", async () => {
+    expect(rounds(await serve(() => read("half-split-written-off", "Full", true)))).toEqual([
+      ["Paid", undefined],
+      ["OnTableBill", undefined],
+    ]);
   });
 });

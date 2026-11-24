@@ -6,6 +6,7 @@ import {
   composeCustomerDiningSession,
   createCustomerDiningSessionRead,
   createProjectionLagWindow,
+  customerRoundPaymentRefunds,
   customerSplitParts,
   customerTableBillFacts,
   customerTableBillLines,
@@ -2448,5 +2449,117 @@ describe("b23 DEC-TAX-WHOLE-RECEIPT: with a comp, what was paid and owed plus wh
     // Round 1 still shows what the bill says of it: its cucumber $6.25 less the comp, $0.00.
     expect(after.rounds[0]?.bill?.total).toEqual(cad(0n));
     reconciles(after);
+  });
+});
+
+// Batch 60 (v15 b58/b59 known limit): guests paying by dish each pay their rounds with their own
+// settlement (v15: one line per round, the tip on the last line); staff's refunds are recorded
+// against that settlement. The read ties them back to the rounds it paid, for every phone, and
+// tells the phone whose payment it was what it came to for the round after refunds.
+describe("batch 60: refunds of a round's own payment", () => {
+  const plan = {
+    splitPlanReference: "plan-1",
+    mode: "ByGuests",
+    guestParts: [
+      { partNumber: 1, guestSessionReference: "guest-a", withdrawn: null },
+      { partNumber: 2, guestSessionReference: "guest-b", withdrawn: null },
+    ],
+  };
+  const line = (round: string, roundMinor: bigint, tipMinor = 0n) => ({
+    orderBatchReference: round,
+    roundMinor,
+    tipMinor,
+    roundingMinor: 0n,
+  });
+  const settlement = (
+    reference: string,
+    partNumber: number | null,
+    lines: ReturnType<typeof line>[],
+  ) => ({
+    settlementReference: reference,
+    part: partNumber === null ? null : { splitPlanReference: "plan-1", partNumber },
+    totalMinor: lines.reduce((sum, entry) => sum + entry.roundMinor + entry.tipMinor, 0n),
+    lines,
+  });
+  const byDish = [
+    settlement("s-a", 1, [line("round-1", 1413n, 188n)]),
+    settlement("s-b", 2, [line("round-2", 1412n)]),
+  ];
+  it("by dish: a full refund (tip included) is Full; the order money alone is Partly", () => {
+    expect(
+      Object.fromEntries(customerRoundPaymentRefunds(plan, byDish, new Map([["s-a", 1601n]]))),
+    ).toEqual({ "round-1": { state: "Full" } });
+    // Only the order money back, the tip stays paid: A reads $1.88; B (or nobody) no amount.
+    expect(
+      Object.fromEntries(
+        customerRoundPaymentRefunds(plan, byDish, new Map([["s-a", 1413n]]), "guest-a"),
+      ),
+    ).toEqual({ "round-1": { state: "Partly", yourPaidAfterRefundsMinor: 188n } });
+    expect(
+      Object.fromEntries(
+        customerRoundPaymentRefunds(plan, byDish, new Map([["s-a", 1413n]]), "guest-b"),
+      ),
+    ).toEqual({ "round-1": { state: "Partly" } });
+  });
+  it("a round two guests paid is Full only when both payments went back", () => {
+    const shared = [
+      settlement("s-a", 1, [line("round-1", 700n)]),
+      settlement("s-b", 2, [line("round-1", 713n)]),
+    ];
+    expect(
+      Object.fromEntries(
+        customerRoundPaymentRefunds(plan, shared, new Map([["s-a", 700n]]), "guest-a"),
+      ),
+    ).toEqual({ "round-1": { state: "Partly", yourPaidAfterRefundsMinor: 0n } });
+    expect(
+      Object.fromEntries(
+        customerRoundPaymentRefunds(
+          plan,
+          shared,
+          new Map([
+            ["s-a", 700n],
+            ["s-b", 713n],
+          ]),
+        ),
+      ),
+    ).toEqual({ "round-1": { state: "Full" } });
+  });
+  it("one payment for several rounds, partly back: both Partly, no amount it can't tie", () => {
+    const whole = [settlement("s-w", null, [line("round-1", 1413n), line("round-2", 1412n)])];
+    expect(
+      Object.fromEntries(
+        customerRoundPaymentRefunds(undefined, whole, new Map([["s-w", 800n]]), "guest-a"),
+      ),
+    ).toEqual({ "round-1": { state: "Partly" }, "round-2": { state: "Partly" } });
+    expect(
+      Object.fromEntries(customerRoundPaymentRefunds(undefined, whole, new Map([["s-w", 2825n]]))),
+    ).toEqual({ "round-1": { state: "Full" }, "round-2": { state: "Full" } });
+  });
+  it("staff's even split pays no round: nothing is tied to a round", () => {
+    expect(
+      customerRoundPaymentRefunds(
+        { ...plan, mode: "Even" },
+        [settlement("s-a", 1, [line("round-1", 1413n)])],
+        new Map([["s-a", 1413n]]),
+        "guest-a",
+      ).size,
+    ).toBe(0);
+  });
+  it("the table read passes the asking phone's guest Session through", async () => {
+    const read = await readCustomerTablePayments(
+      {} as never,
+      {
+        listByOrders: async () => byDish,
+        listSplitPlans: async () => [{ ...plan, parts: [{ partNumber: 1 }, { partNumber: 2 }] }],
+        listCashRefundsByOrders: async () => [],
+        listCardRefundsByOrders: async () => [{ settlementReference: "s-a", amountMinor: 500n }],
+        listOnlineRefundsByOrders: async () => [],
+      } as unknown as Parameters<typeof readCustomerTablePayments>[1],
+      "order-1" as never,
+      "guest-a",
+    );
+    expect(Object.fromEntries(read.roundPaymentRefunds)).toEqual({
+      "round-1": { state: "Partly", yourPaidAfterRefundsMinor: 1101n },
+    });
   });
 });

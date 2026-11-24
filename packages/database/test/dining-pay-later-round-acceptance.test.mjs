@@ -7783,6 +7783,35 @@ async function journey(journeyEnding) {
           assert.equal((await cashRefund("100")).status, "Recorded");
           const refunded = await bill();
           assert.equal(refunded.refundedMinor, "100");
+          // Batch 60 (v15 b58/b59 known limit): the round B's phone payment and staff's cash part
+          // paid reads partly refunded on every guest page (it said only "Paid"). B, whose own
+          // payment went untouched, is told what it paid for the round; A, who paid nothing that
+          // stands, is told no amount. Payment's own records, read under the pilot role.
+          const roundRefundsFor = (guest) =>
+            transactions({ guc: true }).run((tx) =>
+              readCustomerTablePayments(
+                tx,
+                createPostgresDiningTableSettlementStore({
+                  scope: ownerScope,
+                  authorize: async () => true,
+                }),
+                orderReference,
+                guest,
+              ),
+            );
+          assert.deepEqual(
+            Object.fromEntries((await roundRefundsFor(tableGuest)).roundPaymentRefunds),
+            {
+              [first.orderBatchReference]: {
+                state: "Partly",
+                yourPaidAfterRefundsMinor: unitMinor,
+              },
+            },
+          );
+          assert.deepEqual(
+            Object.fromEntries((await roundRefundsFor(guestSession)).roundPaymentRefunds),
+            { [first.orderBatchReference]: { state: "Partly" } },
+          );
           assert.equal(refunded.split.paidInFull, true);
           assert.equal(
             refunded.split.parts.find((part) => part.partNumber === 2).payment.totalMinor,

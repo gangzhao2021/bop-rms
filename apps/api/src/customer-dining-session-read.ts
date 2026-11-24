@@ -197,6 +197,11 @@ export interface CustomerDiningSessionFacts {
      * there are and are paid.
      */
     readonly splitParts?: CustomerSplitParts | null;
+    /**
+     * Batch 60 (v15 b58/b59 known limit): rounds whose own payment (guests paying by dish, or the
+     * one payment for the whole table) staff then gave back, in part or in full, by round.
+     */
+    readonly roundPaymentRefunds?: ReadonlyMap<string, CustomerRoundPaymentRefund>;
     readonly unpaidCancellations: ReadonlySet<string>;
     /**
      * v15 batch-5: of those, the rounds the guest paying for them stopped before paying ("Don't
@@ -364,6 +369,16 @@ export interface CustomerDiningSessionView {
      */
     readonly refunded?: CustomerMoney;
     readonly refundPending?: CustomerMoney;
+    /**
+     * Batch 60 (v15 b58/b59 known limit): a Paid round whose own payment staff then gave back:
+     * all of it ("Full") or some of it ("Partly"). A table fact for every phone, never whose
+     * payment or how much; `yourPaidAfterRefunds` only to the phone whose payment it was, when
+     * that payment's refunds can be told for this round.
+     */
+    readonly paymentRefund?: {
+      readonly state: "Partly" | "Full";
+      readonly yourPaidAfterRefunds?: CustomerMoney;
+    };
   }[];
   /** Null until the table has ordered. Due is the item total of rounds still waiting for payment. */
   readonly summary: null | {
@@ -579,6 +594,121 @@ export function customerSplitParts(
 }
 
 /**
+ * Batch 60 (v15 b58/b59 known limit): what staff gave back of the payment that paid a round. By
+ * dish (同桌结账) each guest's payment records the rounds it paid (one line per round, the tip and
+ * rounding on the last), and one payment for the whole table records every round; staff's equal
+ * parts (and parts by round or by item) pay the bill, no round in particular, and say nothing here.
+ */
+export interface CustomerRoundPaymentRefund {
+  /** Full: every payment that paid this round went back in full; Partly: some of one did. */
+  readonly state: "Partly" | "Full";
+  /**
+   * Partly only, and only for the phone whose own payment paid (some of) this round: what that
+   * payment came to for this round after refunds. Absent when the refund can't be tied to this
+   * round (one payment for several rounds, only partly given back).
+   */
+  readonly yourPaidAfterRefundsMinor?: bigint;
+}
+export function customerRoundPaymentRefunds(
+  plan:
+    | {
+        readonly mode: string;
+        readonly splitPlanReference?: string;
+        readonly guestParts?: readonly {
+          readonly partNumber: number;
+          readonly guestSessionReference: string | null;
+          readonly withdrawn: unknown;
+        }[];
+      }
+    | undefined,
+  settlements: readonly {
+    readonly part: { readonly splitPlanReference: string; readonly partNumber: number } | null;
+    readonly settlementReference?: string;
+    readonly totalMinor?: bigint;
+    readonly lines?: readonly {
+      readonly orderBatchReference: string;
+      readonly roundMinor: bigint;
+      readonly tipMinor: bigint;
+      readonly roundingMinor: bigint;
+    }[];
+  }[],
+  refundedBySettlement: ReadonlyMap<string, bigint>,
+  /** The asking phone's guest Session (null: none is told its own amount). */
+  guestSessionReference: string | null = null,
+): ReadonlyMap<string, CustomerRoundPaymentRefund> {
+  const answer = new Map<string, CustomerRoundPaymentRefund>();
+  if (plan !== undefined && plan.mode !== "Whole" && plan.mode !== "ByGuests") return answer;
+  const paying = settlements.filter(
+    (settlement) =>
+      settlement.settlementReference !== undefined &&
+      settlement.totalMinor !== undefined &&
+      settlement.totalMinor > 0n &&
+      (settlement.lines?.length ?? 0) > 0,
+  );
+  const back = (settlement: (typeof paying)[number]) =>
+    refundedBySettlement.get(settlement.settlementReference as string) ?? 0n;
+  const mine = (settlement: (typeof paying)[number]) =>
+    guestSessionReference !== null &&
+    settlement.part !== null &&
+    plan?.splitPlanReference === settlement.part.splitPlanReference &&
+    (plan.guestParts ?? []).some(
+      (part) =>
+        part.partNumber === settlement.part?.partNumber &&
+        part.withdrawn === null &&
+        part.guestSessionReference === guestSessionReference,
+    );
+  const share = (settlement: (typeof paying)[number], round: string) =>
+    (settlement.lines ?? [])
+      .filter((line) => line.orderBatchReference === round)
+      .reduce((sum, line) => sum + line.roundMinor + line.tipMinor + line.roundingMinor, 0n);
+  const rounds = new Set(
+    paying.flatMap((settlement) =>
+      (settlement.lines ?? []).map((line) => line.orderBatchReference),
+    ),
+  );
+  for (const round of rounds) {
+    const covering = paying.filter((settlement) =>
+      (settlement.lines ?? []).some((line) => line.orderBatchReference === round),
+    );
+    if (!covering.some((settlement) => back(settlement) > 0n)) continue;
+    const full = covering.every(
+      (settlement) => back(settlement) >= (settlement.totalMinor as bigint),
+    );
+    if (full) {
+      answer.set(round, Object.freeze({ state: "Full" as const }));
+      continue;
+    }
+    // This phone's own payments for this round, when each one's refund can be told for it.
+    const own = covering.filter(mine);
+    let paid = 0n;
+    let refunded = 0n;
+    let told = own.length > 0;
+    for (const settlement of own) {
+      const part = share(settlement, round);
+      const total = settlement.totalMinor as bigint;
+      const given = back(settlement);
+      const whole = (settlement.lines ?? []).reduce(
+        (sum, line) => sum + line.roundMinor + line.tipMinor + line.roundingMinor,
+        0n,
+      );
+      paid += part;
+      if (given >= total) refunded += part;
+      else if (given === 0n) continue;
+      else if (part === whole && whole === total) refunded += given;
+      else told = false;
+    }
+    answer.set(
+      round,
+      Object.freeze({
+        state: "Partly" as const,
+        ...(told && paid >= refunded ? { yourPaidAfterRefundsMinor: paid - refunded } : {}),
+      }),
+    );
+  }
+  return answer;
+}
+
+/**
  * A table paying at the end: its payments so far and, for a split bill, what the guest's page
  * says of it. WP-2423 item 8 ④: a split bill's rounds are paid once every part is (each part is
  * a payment with its own tip and cash rounding); 同桌结账: guests paying by dish have paid once
@@ -599,6 +729,8 @@ export async function readCustomerTablePayments(
   orderReference: Parameters<
     ReturnType<typeof createPostgresDiningTableSettlementStore>["listByOrders"]
   >[1][number],
+  /** Batch 60: the asking phone's guest Session, for its own payment's refunds by round. */
+  guestSessionReference: string | null = null,
 ) {
   const tableSettlements = await store.listByOrders(transaction, [orderReference]);
   const [splitPlan] = await store.listSplitPlans(transaction, [orderReference]);
@@ -631,6 +763,12 @@ export async function readCustomerTablePayments(
     splitPaid,
     splitParts: customerSplitParts(splitPlan, tableSettlements, refundedBySettlement),
     refundedMinor,
+    roundPaymentRefunds: customerRoundPaymentRefunds(
+      splitPlan,
+      tableSettlements,
+      refundedBySettlement,
+      guestSessionReference,
+    ),
   };
 }
 
@@ -973,6 +1111,18 @@ export function composeCustomerDiningSession(
         : {}),
       ...(roundRefunds.confirmed > 0n ? { refunded: money(roundRefunds.confirmed) } : {}),
       ...(roundRefunds.pending > 0n ? { refundPending: money(roundRefunds.pending) } : {}),
+      // Batch 60: a Paid round whose own payment staff then gave back (in part or in full).
+      ...((refund) =>
+        refund === undefined || payment !== "Paid"
+          ? {}
+          : {
+              paymentRefund: Object.freeze({
+                state: refund.state,
+                ...(refund.yourPaidAfterRefundsMinor === undefined
+                  ? {}
+                  : { yourPaidAfterRefunds: money(refund.yourPaidAfterRefundsMinor) }),
+              }),
+            })(order.roundPaymentRefunds?.get(reference)),
     });
   });
   // b22 (DEC-TAX-WHOLE-RECEIPT): a table paying at the end ordered what its one receipt says — the
@@ -1642,10 +1792,21 @@ function postgresDependencies(
                 authorize: async (_tx, value) =>
                   value.orderReference === orderReference && (await stillAuthorized()),
               });
-        const { tableSettlements, splitPaid, splitParts, refundedMinor } =
+        const { tableSettlements, splitPaid, splitParts, refundedMinor, roundPaymentRefunds } =
           tableStore === null
-            ? { tableSettlements: [], splitPaid: false, splitParts: null, refundedMinor: 0n }
-            : await readCustomerTablePayments(transaction, tableStore, orderReference);
+            ? {
+                tableSettlements: [],
+                splitPaid: false,
+                splitParts: null,
+                refundedMinor: 0n,
+                roundPaymentRefunds: new Map<string, CustomerRoundPaymentRefund>(),
+              }
+            : await readCustomerTablePayments(
+                transaction,
+                tableStore,
+                orderReference,
+                guestSessionReference,
+              );
         // WP-2423 item 8b: which lines are a charge. A convenience: it has its own savepoint, so a
         // failure here never takes the table page down at any table. Whatever was read before the
         // failure still counts (the cart still refuses the per-head item from a guest).
@@ -1724,6 +1885,7 @@ function postgresDependencies(
           ...(teaLines.size === 0 ? {} : { teaLines }),
           ...(chargeLines.size === 0 ? {} : { chargeLines }),
           splitParts,
+          ...(roundPaymentRefunds.size === 0 ? {} : { roundPaymentRefunds }),
           tableSettlement:
             tableSettlements.length === 0
               ? null
@@ -1943,7 +2105,8 @@ export function mergeBillOrderFacts(
     teaLines = sets((facts) => facts.teaLines),
     chargeLines = sets((facts) => facts.chargeLines),
     orderAgain = maps((facts) => facts.orderAgain),
-    itemPrices = maps((facts) => facts.itemPrices);
+    itemPrices = maps((facts) => facts.itemPrices),
+    roundPaymentRefunds = maps((facts) => facts.roundPaymentRefunds);
   return {
     ...own,
     batches: all
@@ -1967,6 +2130,7 @@ export function mergeBillOrderFacts(
     remakes: sets((facts) => facts.remakes),
     ...(orderAgain.size === 0 ? {} : { orderAgain }),
     ...(own.itemPrices === undefined ? {} : { itemPrices }),
+    ...(roundPaymentRefunds.size === 0 ? {} : { roundPaymentRefunds }),
     payments: all.flatMap((facts) => facts.payments),
     refunds: {
       confirmedMinor: all.reduce((sum, facts) => sum + facts.refunds.confirmedMinor, 0n),
