@@ -417,6 +417,19 @@
   font-size: 14px;
   font-weight: 600;
 }
+/* Batch 56: a send the table refused, held with its reason and a way to read the table again. */
+.counter-order .counter-order__table-hold {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  min-width: 0;
+}
+.counter-order .counter-order__table-hold > p {
+  overflow-wrap: anywhere;
+}
+.counter-order .counter-order__table-hold > button {
+  min-height: 44px;
+}
 .counter-order .counter-order__send {
   display: block;
 }

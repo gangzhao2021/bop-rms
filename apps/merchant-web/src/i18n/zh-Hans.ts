@@ -10503,4 +10503,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "No round can be added for this table now": "这桌现在不能加单",
   "Nothing was sent or charged, and this order is still here.":
     "没有下单，也没有收款；这张单还在这里。",
+  // Batch 56 (v15 b55 live): after a refused send, until the table takes a round again.
+  "{store} · Dine-in · no round can be added to this table now":
+    "{store} · 堂食 · 这桌现在不能加单",
+  "About {value} before tax.": "税前约 {value}。",
+  "Check the table again": "再查看一次这桌",
+  "Checking the table…": "正在查看这桌…",
 });

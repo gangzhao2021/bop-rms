@@ -22,6 +22,7 @@ const session = id(41);
 const order = id(42);
 const shots = process.env.B55_SHOTS ?? "test-results-b55/shots";
 const widths = [1440, 1024, 390] as const;
+const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 const price = (amount: string) => ({ status: "Available", amount, currency: "CAD", reason: null });
 
 const menu = {
@@ -288,6 +289,12 @@ const words = {
     add: /^Add Beef noodles$/u,
     send: "Send order",
     ticket: "Items in this order",
+    // Batch 56: once the table reads as taking no round, the header says so (no bill promise).
+    billMeta: "Synthetic Store · Dine-in · added to the table's bill · the table pays at the end",
+    heldMeta: "Synthetic Store · Dine-in · no round can be added to this table now",
+    checkAgain: "Check the table again",
+    refused:
+      "Table T7 can't take an order now (marked unavailable, or its session is closing). Check the table on the Tables page.",
   },
   "zh-Hans": {
     paid: "T7 号桌的账单已付清，不能再加单。客人如还要点，请先关台，再按“已清洁”，然后为他们点单：这会开一张新账单。",
@@ -303,6 +310,10 @@ const words = {
     add: /^添加\s?Beef noodles$/u,
     send: "发送订单",
     ticket: "此订单中的商品",
+    billMeta: "Synthetic Store · 堂食 · 记入本桌账单 · 最后一起结账",
+    heldMeta: "Synthetic Store · 堂食 · 这桌现在不能加单",
+    checkAgain: "再查看一次这桌",
+    refused: "桌台 T7 目前不能点单（被标记为不可用，或其会话正在关闭）。请在桌台页查看这张桌台。",
   },
 } as const;
 
@@ -401,12 +412,80 @@ for (const language of ["en", "zh-Hans"] as const) {
     state.paid = true;
     await page.getByRole("button", { name: said.send }).click();
     const alert = page.getByRole("alert").filter({ hasText: said.kept });
-    await expect(alert).toHaveText(`${said.paid} ${said.kept}`);
+    // Batch 56 (v15 b55 live "…新账单。 没有下单…"): no space after a Chinese full stop.
+    await expect(alert).toHaveText(
+      language === "en" ? `${said.paid} ${said.kept}` : `${said.paid}${said.kept}`,
+    );
     expect(sends).toBe(1);
     // The round is still on screen, as built.
     const ticket = page.getByRole("list", { name: said.ticket });
     await expect(ticket).toContainText("Beef noodles");
+    // Batch 56 (v15 b55 live): Send is held with the reason beside it, and the header no longer
+    // says the round goes on the table's bill; pressing it posts nothing more.
+    const sendButton = page.getByRole("button", { name: said.send });
+    await expect(sendButton).toBeDisabled();
+    await expect(sendButton).toHaveAccessibleDescription(
+      language === "en" ? `${said.paid} ${said.kept}` : `${said.paid}${said.kept}`,
+    );
+    await expect(page.locator(".workspace-page__meta")).toHaveText(said.heldMeta);
+    await expect(
+      page.getByText(/goes on the table's bill|记入本桌账单|own join code|入桌码/u),
+    ).toHaveCount(0);
+    await sendButton.click({ force: true });
+    expect(sends).toBe(1);
     await fitsAtEachWidth(page, alert, `entry-refused-${language}`);
     await expectNoInternalText(page);
+  });
+
+  test(`@production a refused send whose table can't be read again keeps its message and reads again, never sends again (${language})`, async ({
+    page,
+  }) => {
+    const state: State = { phase: "Active", version: 6, paid: false };
+    await signIn(page, state, language);
+    let sends = 0;
+    await page.route("**/merchant/dining/staff-rounds", (route) => {
+      sends += 1;
+      return route.fulfill({ status: 409, headers, json: { error: "table_unavailable" } });
+    });
+    const panel = await openTable(page, language);
+    await panel.getByRole("link", { name: said.take }).click();
+    await page.getByRole("button", { name: said.add }).click();
+    await expect(page.locator(".workspace-page__meta")).toHaveText(said.billMeta);
+    // Staff started checkout elsewhere; the Tables list can't be read right after the refusal.
+    state.phase = "Closing";
+    state.version = 7;
+    let tablesDown = true;
+    await page.route("**/merchant/dining/tables", (route) =>
+      tablesDown ? route.fulfill({ status: 503, headers, json: {} }) : route.fallback(),
+    );
+    await page.getByRole("button", { name: said.send }).click();
+    const sendButton = page.getByRole("button", { name: said.send });
+    const again = page.getByRole("button", { name: said.checkAgain });
+    await expect(again).toBeEnabled();
+    // The refusal's own message stays; Send stays held.
+    const held = page.locator("#counter-order-table-hold");
+    await expect(held).toHaveText(said.refused);
+    await expect(sendButton).toBeDisabled();
+    await expect(page.locator(".workspace-page__meta")).toHaveText(said.heldMeta);
+    expect(sends).toBe(1);
+    await fitsAtEachWidth(page, held, `entry-reread-failed-${language}`);
+    // The connection is back: reading again says the table is checking out, and still holds Send.
+    tablesDown = false;
+    await again.click();
+    await expect(held).toHaveText(
+      language === "en"
+        ? new RegExp(`^${escape(said.checkingOut)}.* ${escape(said.kept)}$`, "u")
+        : new RegExp(`^${escape(said.checkingOut)}.*。${escape(said.kept)}$`, "u"),
+    );
+    await expect(sendButton).toBeDisabled();
+    // The guests want more: checkout is cancelled on the table, and reading again frees Send.
+    state.phase = "Active";
+    state.version = 8;
+    await again.click();
+    await expect(held).toHaveCount(0);
+    await expect(sendButton).toBeEnabled();
+    await expect(page.locator(".workspace-page__meta")).toHaveText(said.billMeta);
+    await expect(page.getByRole("list", { name: said.ticket })).toContainText("Beef noodles");
+    expect(sends).toBe(1);
   });
 }

@@ -1,4 +1,4 @@
-import { wordGap } from "./word-gap.js";
+import { sentences, wordGap } from "./word-gap.js";
 import {
   t,
   saidTable,
@@ -1319,20 +1319,41 @@ export function StaffOrderEntryPage({
    * next by the same rule the Tables panel offers the round by; the order stays as it is.
    */
   const refusalRead = useRef(0);
-  const explainTableRefusal = useCallback(async () => {
-    refusalRead.current += 1;
-    const read = refusalRead.current;
-    const found = await findTable();
-    const offer = found === undefined ? undefined : await roundOfferOf(found);
-    if (read !== refusalRead.current || phaseNow.current !== "Building") return;
-    if (found === undefined || (offer !== "CheckingOut" && offer !== "Paid")) return;
-    setTableLabel(found.stableLabel);
-    setProblem(
-      staffRoundRefusedText(offer, found.stableLabel) +
-        " " +
-        t("Nothing was sent or charged, and this order is still here."),
-    );
-  }, [findTable, roundOfferOf]);
+  /**
+   * Batch 56 (v15 b55 live: after the refusal and the re-read the header still said "added to the
+   * table's bill" and a second Send posted again, 409): while the table is read again, and once it
+   * reads as taking no round, Send is held with the reason beside it and the header stops promising
+   * the table's bill; the draft stays. A re-read that fails keeps the refusal's own message and
+   * offers to read the table again, never to send again. A table that takes a round again (checkout
+   * cancelled) frees Send.
+   */
+  const [tableHold, setTableHold] = useState<{
+    readonly state: "Reading" | "ReadFailed" | Exclude<StaffRoundOffer, "Offered">;
+    /** The refusal's own message, said until the table is read as checking out or paid. */
+    readonly refused: string;
+  } | null>(null);
+  const explainTableRefusal = useCallback(
+    async (refused: string) => {
+      refusalRead.current += 1;
+      const read = refusalRead.current;
+      setProblem(null);
+      setTableHold({ state: "Reading", refused });
+      const found = await findTable();
+      const offer = found === undefined ? undefined : await roundOfferOf(found);
+      if (read !== refusalRead.current || phaseNow.current !== "Building") return;
+      if (found === undefined || offer === undefined) {
+        setTableHold({ state: "ReadFailed", refused });
+        return;
+      }
+      setTableLabel(found.stableLabel);
+      if (offer === "Offered") {
+        setTableHold(null);
+        return;
+      }
+      setTableHold({ state: offer, refused });
+    },
+    [findTable, roundOfferOf],
+  );
   const readGuestCart = useCallback(() => {
     if (tableSession === null) return;
     guestRead.current?.abort();
@@ -1481,6 +1502,7 @@ export function StaffOrderEntryPage({
       : itemCount;
   const canSend =
     phase === "Building" &&
+    tableHold === null &&
     (lines.length > 0 || (tableMode && guestSent.length > 0)) &&
     withdrawn.length === 0 &&
     !(guestCart?.guestPaying === true && guestLines.length > 0) &&
@@ -1758,7 +1780,17 @@ export function StaffOrderEntryPage({
       if (!unanswered) unansweredLines.current = [];
       setProblemNeedsTableCode(failure.code === "TableHasNoQr");
       setPartyChanged(failure.code === "TablePartyChanged");
-      if (failure.code === "TableUnavailable" && tableMode) void explainTableRefusal();
+      if (failure.code === "TableUnavailable" && tableMode)
+        void explainTableRefusal(
+          placeErrorText(
+            failure,
+            lines,
+            tableLabel === null
+              ? null
+              : t("Table {tableLabel}", { tableLabel: saidTable(tableLabel) }),
+            tableQrHref !== undefined,
+          ),
+        );
       // v15 batch-5 review: the paper paid-at was refused before anything was placed; staff
       // correct it where they typed it.
       if (failure.code === "TakenBeforeRecords" || failure.code === "PaidAtOutOfRange") {
@@ -1945,6 +1977,8 @@ export function StaffOrderEntryPage({
     setChangeDue(null);
     setProblem(null);
     setProblemNeedsTableCode(false);
+    refusalRead.current += 1;
+    setTableHold(null);
     setPaidNote(null);
     setRemovedNote(null);
     setSentGuest([]);
@@ -2078,16 +2112,20 @@ export function StaffOrderEntryPage({
       title={pageTitle}
       meta={
         tableMode
-          ? tablePaysLater
-            ? t("{store} · Dine-in · added to the table's bill · the table pays at the end", {
+          ? tableHold !== null
+            ? t("{store} · Dine-in · no round can be added to this table now", {
                 store: storeLabel,
               })
-            : t(
-                "{store} · Dine-in · added to the table's order · paid on the store's card machine",
-                {
+            : tablePaysLater
+              ? t("{store} · Dine-in · added to the table's bill · the table pays at the end", {
                   store: storeLabel,
-                },
-              )
+                })
+              : t(
+                  "{store} · Dine-in · added to the table's order · paid on the store's card machine",
+                  {
+                    store: storeLabel,
+                  },
+                )
           : t("{store} · Pickup · paid at the counter, card machine or cash", { store: storeLabel })
       }
       className="counter-order"
@@ -2547,15 +2585,17 @@ export function StaffOrderEntryPage({
                   <span>{cad(roundEstimate.toString())}</span>
                 </p>
                 <p className="counter-order__estimate">
-                  {tablePaysLater
-                    ? t(
-                        "About {value} before tax. It goes on the table's bill; the table pays once at the end.",
-                        { value: cad(roundEstimate.toString()) },
-                      )
-                    : t(
-                        "About {value} before tax and tip. The final total comes when you send the order.",
-                        { value: cad(roundEstimate.toString()) },
-                      )}
+                  {tableHold !== null
+                    ? t("About {value} before tax.", { value: cad(roundEstimate.toString()) })
+                    : tablePaysLater
+                      ? t(
+                          "About {value} before tax. It goes on the table's bill; the table pays once at the end.",
+                          { value: cad(roundEstimate.toString()) },
+                        )
+                      : t(
+                          "About {value} before tax and tip. The final total comes when you send the order.",
+                          { value: cad(roundEstimate.toString()) },
+                        )}
                 </p>
               </div>
             ) : (estimate !== null && lines.length > 0) || (placed !== null && !ordering) ? (
@@ -2635,15 +2675,17 @@ export function StaffOrderEntryPage({
                             : t("Sent. Charge {totalMinor} with tax and tip on the card machine.", {
                                 totalMinor: cad(placed.totalMinor),
                               })
-                    : tablePaysLater
-                      ? t(
-                          "About {value} before tax. It goes on the table's bill; the table pays once at the end.",
-                          { value: cad((estimate ?? 0n).toString()) },
-                        )
-                      : t(
-                          "About {value} before tax and tip. The final total comes when you send the order.",
-                          { value: cad((estimate ?? 0n).toString()) },
-                        )}
+                    : tableHold !== null
+                      ? t("About {value} before tax.", { value: cad((estimate ?? 0n).toString()) })
+                      : tablePaysLater
+                        ? t(
+                            "About {value} before tax. It goes on the table's bill; the table pays once at the end.",
+                            { value: cad((estimate ?? 0n).toString()) },
+                          )
+                        : t(
+                            "About {value} before tax and tip. The final total comes when you send the order.",
+                            { value: cad((estimate ?? 0n).toString()) },
+                          )}
                 </p>
               </div>
             ) : null}
@@ -2811,7 +2853,7 @@ export function StaffOrderEntryPage({
                 </div>
               ) : null}
             </fieldset>
-            {tableMode && ordering ? (
+            {tableMode && ordering && tableHold === null ? (
               <p className="field-hint">
                 {t(
                   "Sending gives this order its own join code, so a join code you handed out that hasn't been used yet stops working. Guests already at the table stay joined.",
@@ -2819,6 +2861,28 @@ export function StaffOrderEntryPage({
               </p>
             ) : null}
             {problem !== null && ordering ? <p role="alert">{problem}</p> : null}
+            {tableHold !== null && phase === "Building" ? (
+              <div className="counter-order__table-hold">
+                <p id="counter-order-table-hold" role="alert">
+                  {(tableHold.state === "CheckingOut" || tableHold.state === "Paid") &&
+                  tableLabel !== null
+                    ? sentences(
+                        staffRoundRefusedText(tableHold.state, tableLabel),
+                        t("Nothing was sent or charged, and this order is still here."),
+                      )
+                    : tableHold.refused}
+                </p>
+                <button
+                  type="button"
+                  disabled={tableHold.state === "Reading"}
+                  onClick={() => void explainTableRefusal(tableHold.refused)}
+                >
+                  {tableHold.state === "Reading"
+                    ? t("Checking the table…")
+                    : t("Check the table again")}
+                </button>
+              </div>
+            ) : null}
             {slipHeld !== null && ordering && phase === "Building" && paper ? (
               <PaperSlipConfirm
                 orderNumber={slipHeld.orderNumber}
@@ -2893,6 +2957,7 @@ export function StaffOrderEntryPage({
                   type="button"
                   className="counter-order__primary"
                   disabled={!canSend}
+                  aria-describedby={tableHold === null ? undefined : "counter-order-table-hold"}
                   onClick={() => void send()}
                 >
                   {phase === "Sending"
