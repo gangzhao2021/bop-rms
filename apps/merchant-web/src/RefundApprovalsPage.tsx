@@ -1,5 +1,5 @@
 import { systemText, t, listSeparator } from "./i18n/i18n.js";
-import { wordGap } from "./word-gap.js";
+import { sentences, wordGap } from "./word-gap.js";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { StatePanel } from "@bop-rms/ui";
@@ -1140,7 +1140,7 @@ export function RefundApprovalsPage({
           {state === "Denied" ? null : (
             <details className="approvals-why">
               <summary>
-                {t("Large or late refunds need a second person.")} {t("Why approval?")}
+                {sentences(t("Large or late refunds need a second person."), t("Why approval?"))}
               </summary>
               <p>
                 {t(

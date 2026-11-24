@@ -1,4 +1,4 @@
-import { t } from "../i18n/i18n.js";
+import { t, wordGap } from "../i18n/i18n.js";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import {
   createConnectivityController,
@@ -36,7 +36,8 @@ export function ConnectivityBanner({
     >
       {state.status === "offline" ? (
         <>
-          <strong>{t("You’re offline.")}</strong>{" "}
+          <strong>{t("You’re offline.")}</strong>
+          {wordGap()}
           <span>
             {t(
               "Ordering and payment are paused until you reconnect. Nothing is sent in the background.",
@@ -46,7 +47,8 @@ export function ConnectivityBanner({
       ) : (
         <>
           <div>
-            <strong>{t("Connection restored.")}</strong>{" "}
+            <strong>{t("Connection restored.")}</strong>
+            {wordGap()}
             <span>
               {/* WP-2423 M17: a payment confirmed just before the drop may have gone through; M94: the page reads again by itself. */}
               {t(

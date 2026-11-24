@@ -1,4 +1,4 @@
-import { wordGap } from "./word-gap.js";
+import { sentences, wordGap } from "./word-gap.js";
 import {
   allergenName,
   holdUnsavedWork,
@@ -1320,7 +1320,10 @@ export function DishEditor({
             {allergensOutstanding ? (
               <p className="dish-editor__note" role="note">
                 {unanswered > 0
-                  ? `${t("Answer every allergen to save: {count} left.", { count: unanswered })} ${t("A row left blank is never taken as No.")}`
+                  ? sentences(
+                      t("Answer every allergen to save: {count} left.", { count: unanswered }),
+                      t("A row left blank is never taken as No."),
+                    )
                   : t("Tick the allergen check to save.")}
               </p>
             ) : null}

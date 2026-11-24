@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { LanguageRoot } from "../i18n/i18n.js";
 import { ConnectivityBanner } from "./ConnectivityBanner.js";
 import type { ConnectivityController, ConnectivityState } from "./connectivity-controller.js";
 
@@ -43,4 +44,25 @@ describe("Customer PWA connectivity banner", () => {
     expect(html).not.toContain("Nothing was sent");
     expect(html).toContain("Dismiss");
   });
+
+  // Batch 57 (sweep after v15 b56 live): Chinese sentences follow each other with no space
+  // ("您已离线。 恢复网络前…" read as a gap); English keeps one.
+  it.each([
+    ["offline", "en", "You’re offline. Ordering"],
+    ["offline", "zh-Hans", "您已离线。恢复网络前"],
+    ["restored", "en", "Connection restored. Updating"],
+    ["restored", "zh-Hans", "网络已恢复。"],
+  ] as const)(
+    "joins the %s sentences in %s without a space after a Chinese full stop",
+    (status, language, said) => {
+      const text = renderToStaticMarkup(
+        <LanguageRoot initial={language}>
+          {() => <ConnectivityBanner controller={controller({ status })} />}
+        </LanguageRoot>,
+      ).replace(/<[^>]+>/gu, "");
+      expect(text).toContain(said);
+      expect(text).not.toMatch(/[。！？；] /u);
+      renderToStaticMarkup(<LanguageRoot initial="en">{() => null}</LanguageRoot>);
+    },
+  );
 });

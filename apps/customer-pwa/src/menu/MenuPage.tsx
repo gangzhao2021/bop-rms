@@ -1134,7 +1134,7 @@ function QuickAddButton({ family }: { readonly family: MenuFamily }) {
       quick.onAdded(
         state.earlierCartCleared === true
           ? t("Added to your cart.") +
-              " " +
+              wordGap() +
               t(
                 "Your table's earlier cart timed out, so items that hadn't been ordered were cleared. Orders already placed are not affected.",
               )

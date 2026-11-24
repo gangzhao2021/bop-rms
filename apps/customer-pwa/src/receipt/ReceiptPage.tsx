@@ -575,7 +575,8 @@ export function ReceiptPage({
             <p>
               {view
                 ? t("Showing the receipt already loaded on this page.")
-                : t("No receipt is available on this page yet.")}{" "}
+                : t("No receipt is available on this page yet.")}
+              {wordGap()}
               {t("Reconnect to refresh.")}
             </p>
           </section>

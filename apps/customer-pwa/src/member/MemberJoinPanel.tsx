@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
-import { t, useLanguage } from "../i18n/i18n.js";
+import { t, useLanguage, wordGap } from "../i18n/i18n.js";
 import { memberCodeProblem, MemberSignIn } from "./MemberSignIn.js";
 import { memberClient, type MemberClient, type MemberState } from "./member-client.js";
 
@@ -67,7 +67,8 @@ export function MemberJoinPanel({
   const addedNote =
     auto > 0 ? (
       <p className="member-panel__added" role="status">
-        {t("{points} points added for this order.", { points: String(auto) })}{" "}
+        {t("{points} points added for this order.", { points: String(auto) })}
+        {wordGap()}
         <Link to="/member">{t("See your points")}</Link>
       </p>
     ) : null;
@@ -104,7 +105,8 @@ export function MemberJoinPanel({
       <p className="member-panel__link" role="status">
         {t("No problem. You can still add this order’s points on this phone until {time}.", {
           time: until,
-        })}{" "}
+        })}
+        {wordGap()}
         <button type="button" onClick={() => setSkipped(false)}>
           {t("Join now")}
         </button>

@@ -178,3 +178,50 @@ test("@production a cashier's home and badge never count refunds they can neithe
   await expect(page.getByText("Refunds waiting for approval")).toHaveCount(0);
   await expect(page.getByText("To approve", { exact: true })).toHaveCount(0);
 });
+
+// Batch 57 (v15 b56 live, /app/approvals in zh: "大额或逾期的退款需要另一人批准。 为什么需要批准？"):
+// the plain JSX space between the two sentences put a space after the Chinese full stop.
+for (const language of ["en", "zh-Hans"] as const)
+  test(`@production the refund approvals line joins its two sentences in the language's own way (${language})`, async ({
+    page,
+  }) => {
+    if (language === "zh-Hans")
+      await page.addInitScript(() =>
+        window.localStorage.setItem("bop.merchant.language", "zh-Hans"),
+      );
+    await session(page, true);
+    await page.route("**/merchant/payments/refunds/approvals", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          observedAt: new Date().toISOString(),
+          canApprove: true,
+          canSend: true,
+          soleOperator: null,
+          entries: [entry(1, "AwaitingApproval")],
+        },
+      }),
+    );
+    await page.goto("/app/approvals");
+    const summary = page.locator(".approvals-why summary");
+    await expect(summary).toHaveText(
+      language === "en"
+        ? "Large or late refunds need a second person. Why approval?"
+        : "大额或逾期的退款需要另一人批准。为什么需要批准？",
+    );
+    for (const width of [1440, 1024, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await expect(summary).toBeVisible();
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+        ),
+      ).toBe(true);
+      // Wrapped, never clipped, with room left for the wider DejaVu fonts of Linux CI.
+      const box = await summary.boundingBox();
+      expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(width);
+      expect(
+        await summary.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+      ).toBe(true);
+    }
+  });
