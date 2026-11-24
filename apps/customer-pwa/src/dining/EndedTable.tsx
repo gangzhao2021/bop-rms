@@ -86,6 +86,7 @@ export function ClosedBillTableCard({
   paid,
   yourPaidMinor = null,
   yourRefundedMinor = "0",
+  yourRefundPendingMinor = "0",
   receiptLink = false,
 }: {
   readonly tableLabel: string;
@@ -97,6 +98,8 @@ export function ClosedBillTableCard({
   readonly yourPaidMinor?: string | null;
   /** Batch 57 (Q36): of it, refunded or on its way back to the card. */
   readonly yourRefundedMinor?: string;
+  /** Batch 60: of that, still on its way to the card. */
+  readonly yourRefundPendingMinor?: string;
   /** Batch 56: a tab other than Your table links to this phone's own receipt there. */
   readonly receiptLink?: boolean;
 }) {
@@ -117,7 +120,7 @@ export function ClosedBillTableCard({
               )}
       </p>
       {yourPaidMinor === null || paid === "Nothing" ? null : (
-        <p>{youPaidText(yourPaidMinor, yourRefundedMinor)}</p>
+        <p>{youPaidText(yourPaidMinor, yourRefundedMinor, yourRefundPendingMinor)}</p>
       )}
       <p>{t("New party? Ask staff to seat you, then scan again.")}</p>
       {yourPaidMinor !== null && paid !== "Nothing" && receiptLink ? (
@@ -193,6 +196,7 @@ export function EndedTableCard({ ended }: { readonly ended: EndedTable }) {
       paid={ended.paid}
       yourPaidMinor={ended.yourPaidMinor ?? null}
       yourRefundedMinor={ended.yourRefundedMinor ?? "0"}
+      yourRefundPendingMinor={ended.yourRefundPendingMinor ?? "0"}
       receiptLink
     />
   ) : (

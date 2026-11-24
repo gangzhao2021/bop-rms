@@ -110,6 +110,15 @@ export interface DiningRound {
    */
   readonly refunded?: DiningMoney;
   readonly refundPending?: DiningMoney;
+  /**
+   * Batch 60 (v15 b58/b59 known limit): a Paid round whose own payment (by dish, or the whole
+   * table's one payment) staff then gave back, all of it or some. `yourPaidAfterRefunds`: only on
+   * the phone whose payment it was, what it came to for this round after refunds.
+   */
+  readonly paymentRefund?: {
+    readonly state: "Partly" | "Full";
+    readonly yourPaidAfterRefunds?: DiningMoney;
+  };
 }
 
 export interface DiningOrderAgain {
@@ -444,7 +453,10 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
       value !== null && typeof value === "object" && Object.hasOwn(value, "refunded");
     const refundPending =
       value !== null && typeof value === "object" && Object.hasOwn(value, "refundPending");
+    const paymentRefund =
+      value !== null && typeof value === "object" && Object.hasOwn(value, "paymentRefund");
     const round = record(value, [
+      ...(paymentRefund ? ["paymentRefund"] : []),
       ...(billed ? ["bill"] : []),
       ...(refunded ? ["refunded"] : []),
       ...(refundPending ? ["refundPending"] : []),
@@ -612,6 +624,34 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
         return {
           ...(confirmed === null ? {} : { refunded: confirmed }),
           ...(pending === null ? {} : { refundPending: pending }),
+        };
+      })(),
+      ...(() => {
+        // Batch 60: only a Paid round's payment went back; the amount only with "Partly".
+        if (!paymentRefund) return {};
+        if (round.payment !== "Paid") return invalid();
+        const yours =
+          round.paymentRefund !== null &&
+          typeof round.paymentRefund === "object" &&
+          Object.hasOwn(round.paymentRefund, "yourPaidAfterRefunds");
+        const entry = record(round.paymentRefund, [
+          "state",
+          ...(yours ? ["yourPaidAfterRefunds"] : []),
+        ]);
+        const state = oneOf(entry.state, ["Partly", "Full"] as const);
+        const amount = yours ? money(entry.yourPaidAfterRefunds) : null;
+        if (
+          amount !== null &&
+          (state !== "Partly" ||
+            amount.currencyCode !== itemsTotal.currencyCode ||
+            BigInt(amount.amountMinor) < 0n)
+        )
+          return invalid();
+        return {
+          paymentRefund: Object.freeze({
+            state,
+            ...(amount === null ? {} : { yourPaidAfterRefunds: amount }),
+          }),
         };
       })(),
     });

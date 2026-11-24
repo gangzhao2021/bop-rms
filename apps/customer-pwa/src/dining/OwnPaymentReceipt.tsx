@@ -212,7 +212,21 @@ export interface OwnPaid {
   readonly paidMinor: string;
   /** Batch 57: of it, refunded or on its way back to the card ("0": none). */
   readonly refundedMinor: string;
+  /** Batch 60: of that, still on its way (the card issuer has not confirmed it; "0": none). */
+  readonly refundPendingMinor: string;
 }
+
+/** Batch 60: what of these refunds is still on its way to the card (minor units). */
+export const pendingOf = (refunds: readonly OwnPaymentRefund[]): string =>
+  refunds
+    .filter((refund) => refund.status === "Pending")
+    .reduce((sum, refund) => sum + BigInt(refund.amountMinor), 0n)
+    .toString();
+const ownPaidOf = (receipt: OwnPaymentReceipt): OwnPaid => ({
+  paidMinor: receipt.totalMinor,
+  refundedMinor: receipt.refundedMinor,
+  refundPendingMinor: pendingOf(receipt.payments.flatMap((payment) => payment.refunds)),
+});
 let ownPaidAtTable: {
   readonly credential: string;
   readonly status: "loading" | "ready" | "none" | "unavailable";
@@ -242,11 +256,7 @@ export function resetOwnPaidAtTable(): void {
  */
 function keepOwnPaid(credential: string | null, receipt: OwnPaymentReceipt) {
   if (credential === null) return;
-  setOwnPaidAtTable({
-    credential,
-    status: "ready",
-    paid: { paidMinor: receipt.totalMinor, refundedMinor: receipt.refundedMinor },
-  });
+  setOwnPaidAtTable({ credential, status: "ready", paid: ownPaidOf(receipt) });
 }
 
 /**
@@ -272,8 +282,7 @@ export function useOwnPaidAtTable(enabled: boolean): OwnPaid | null {
     createOwnPaymentReceiptClient(() => credential)
       .read()
       .then(
-        (receipt) =>
-          settle("ready", { paidMinor: receipt.totalMinor, refundedMinor: receipt.refundedMinor }),
+        (receipt) => settle("ready", ownPaidOf(receipt)),
         (error: unknown) =>
           settle(
             error instanceof OwnPaymentReceiptError && error.code === "none"
@@ -290,24 +299,39 @@ export function useOwnPaidAtTable(enabled: boolean): OwnPaid | null {
 
 /**
  * "You paid $14.13 online on this phone." — the one line every tab says to the payer. Batch 57
- * (Q36): with what went back to the card (refunded or on its way), and what they paid net.
+ * (Q36): with what went back to the card (refunded or on its way), and what they paid net. Batch
+ * 60 (v15 b59 live, L59W A): what Payment confirmed is said as done (went back, 已退回), and only
+ * what is still on its way as on its way; never "goes back" beside a refund dated as done.
  */
-export const youPaidText = (amountMinor: string, refundedMinor = "0") => {
+export const youPaidText = (amountMinor: string, refundedMinor = "0", refundPendingMinor = "0") => {
   const refunded = BigInt(refundedMinor);
-  if (refunded <= 0n)
-    return t("You paid {amount} online on this phone.", { amount: money(amountMinor) });
-  if (refunded >= BigInt(amountMinor))
-    return t("You paid {amount} online on this phone. All of it goes back to your card.", {
-      amount: money(amountMinor),
-    });
-  return t(
-    "You paid {amount} online on this phone. After {refund} back to your card, you paid {net}.",
-    {
-      amount: money(amountMinor),
-      refund: money(refundedMinor),
-      net: money((BigInt(amountMinor) - refunded).toString()),
-    },
+  const pending = BigInt(refundPendingMinor) > refunded ? refunded : BigInt(refundPendingMinor);
+  const done = refunded - pending;
+  const amount = money(amountMinor);
+  if (refunded <= 0n) return t("You paid {amount} online on this phone.", { amount });
+  const net = money(
+    (BigInt(amountMinor) - refunded > 0n ? BigInt(amountMinor) - refunded : 0n).toString(),
   );
+  if (done > 0n && pending > 0n)
+    return t(
+      "You paid {amount} online on this phone. {done} went back to your card and {pending} is on its way, so in the end you pay {net}.",
+      { amount, done: money(done.toString()), pending: money(pending.toString()), net },
+    );
+  if (refunded >= BigInt(amountMinor))
+    return pending > 0n
+      ? t("You paid {amount} online on this phone. All of it is on its way back to your card.", {
+          amount,
+        })
+      : t("You paid {amount} online on this phone. All of it went back to your card.", { amount });
+  return pending > 0n
+    ? t(
+        "You paid {amount} online on this phone. {refund} is on its way back to your card, so in the end you pay {net}.",
+        { amount, refund: money(refundedMinor), net },
+      )
+    : t(
+        "You paid {amount} online on this phone. {refund} went back to your card, so you paid {net}.",
+        { amount, refund: money(refundedMinor), net },
+      );
 };
 
 /** One refund of this phone's payment, in plain words: where the money is and what to do. */
@@ -333,6 +357,25 @@ export function refundText(refund: OwnPaymentRefund): string {
   );
 }
 
+/**
+ * Batch 60 (v15 b59 live): a payment's refunds as receipt rows — confirmed ("Refunded to your
+ * card", 已退回您的卡) and still on its way ("On its way back to your card", 正在退回您的卡) —
+ * each only when there is some.
+ */
+function refundRows(
+  payment: OwnPaymentReceipt["payments"][number],
+): readonly (readonly [string, string])[] {
+  const refunded = BigInt(payment.refundedMinor);
+  const pending = BigInt(pendingOf(payment.refunds));
+  const onItsWay = pending > refunded ? refunded : pending;
+  return (
+    [
+      [t("Refunded to your card"), (refunded - onItsWay).toString()],
+      [t("On its way back to your card"), onItsWay.toString()],
+    ] as const
+  ).filter(([, amountMinor]) => amountMinor !== "0");
+}
+
 function coversText(payment: OwnPaymentReceipt["payments"][number]): string {
   if (payment.covers === "WholeTable") return t("Your table’s whole bill");
   if (payment.covers === "Dishes") return t("The dishes you paid for");
@@ -351,7 +394,13 @@ export function OwnPaymentReceiptView({ receipt }: { readonly receipt: OwnPaymen
       aria-labelledby="own-payment-receipt"
     >
       <h2 id="own-payment-receipt">{t("Your receipt")}</h2>
-      <p>{youPaidText(receipt.totalMinor, receipt.refundedMinor)}</p>
+      <p>
+        {youPaidText(
+          receipt.totalMinor,
+          receipt.refundedMinor,
+          pendingOf(receipt.payments.flatMap((payment) => payment.refunds)),
+        )}
+      </p>
       {receipt.payments.map((payment, index) => (
         <div key={index}>
           <h3>{coversText(payment)}</h3>
@@ -390,10 +439,13 @@ export function OwnPaymentReceiptView({ receipt }: { readonly receipt: OwnPaymen
             {/* Batch 57 (Q36): what went back to the card, and what this payment came to net. */}
             {payment.refundedMinor === "0" ? null : (
               <>
-                <div>
-                  <dt>{t("Refunded to your card")}</dt>
-                  <dd>−{money(payment.refundedMinor)}</dd>
-                </div>
+                {/* Batch 60: what Payment confirmed went back, and what is still on its way. */}
+                {refundRows(payment).map(([label, amountMinor]) => (
+                  <div key={label}>
+                    <dt>{label}</dt>
+                    <dd>−{money(amountMinor)}</dd>
+                  </div>
+                ))}
                 <div>
                   <dt>{t("You paid after refunds")}</dt>
                   <dd>

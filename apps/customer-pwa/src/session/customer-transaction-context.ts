@@ -146,6 +146,8 @@ interface EmptyTable {
     readonly amountMinor: string;
     /** Batch 57 (Q36): of it, refunded or on its way back to the card (absent: none). */
     readonly refundedMinor?: string;
+    /** Batch 60: of that, still on its way to the card (absent: none). */
+    readonly refundPendingMinor?: string;
     readonly csrfToken: string;
   };
 }
@@ -207,6 +209,8 @@ export type EndedTable = Readonly<
       yourPaidMinor?: string | null;
       /** Batch 57: of it, refunded or on its way back to the card (absent: none). */
       yourRefundedMinor?: string;
+      /** Batch 60: of that, still on its way to the card (absent: none). */
+      yourRefundPendingMinor?: string;
     }
   | {
       kind: "Moved";
@@ -246,6 +250,9 @@ export function getEndedTable(): EndedTable | null {
             ...(emptyTable.yourPayment.refundedMinor === undefined
               ? {}
               : { yourRefundedMinor: emptyTable.yourPayment.refundedMinor }),
+            ...(emptyTable.yourPayment.refundPendingMinor === undefined
+              ? {}
+              : { yourRefundPendingMinor: emptyTable.yourPayment.refundPendingMinor }),
           }),
     });
   if (emptyTable !== null)

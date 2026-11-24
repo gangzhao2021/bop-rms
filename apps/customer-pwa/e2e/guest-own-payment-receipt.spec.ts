@@ -11,7 +11,11 @@ import { routeStorefrontReads } from "./storefront-reads";
 // closed, the visit restore are the real API handlers on a local server, answering v15's records;
 // the cart's refusal, the menu and the storefront reads are synthetic, in the shapes v15 answered.
 type Scenario =
-  "by-dish-written-off" | "half-split-written-off" | "half-split-open" | "whole-table-paid-online";
+  | "by-dish-written-off"
+  | "half-split-written-off"
+  | "half-split-open"
+  | "whole-table-paid-online"
+  | "by-dish-both-paid";
 interface GuestBillHttp {
   readonly url: string;
   close(): Promise<void>;
@@ -462,9 +466,11 @@ for (const width of [390, 1024, 1440])
         phone = { payer: true, tableClosed: false, refunds: "Partial" };
         await stubTable(page, []);
         const tag = `refund-partial-${zh ? "zh" : "en"}-${width}`;
+        // Batch 60 (v15 b59 live): what Payment confirmed went back ($5.00) is said as done, what
+        // is still on its way ($3.00) as on its way.
         const youPaid = zh
-          ? "您已在这部手机上在线付款 $14.13。退回您的卡 $8.00 后，您实付 $6.13。"
-          : "You paid $14.13 online on this phone. After $8.00 back to your card, you paid $6.13.";
+          ? "您已在这部手机上在线付款 $14.13。$5.00 已退回您的卡，$3.00 正在退回，退回后您实付 $6.13。"
+          : "You paid $14.13 online on this phone. $5.00 went back to your card and $3.00 is on its way, so in the end you pay $6.13.";
         const lines = zh
           ? [
               /，\$5\.00 已退回您的卡。银行可能要过几天才显示。$/u,
@@ -483,7 +489,10 @@ for (const width of [390, 1024, 1440])
           // amounts both called "paid by you" (zh 实付).
           await expect(receipt).toContainText((zh ? "付款金额" : "Amount charged") + "$14.13");
           await expect(receipt).toContainText(
-            (zh ? "退回您的卡" : "Refunded to your card") + "−$8.00",
+            (zh ? "已退回您的卡" : "Refunded to your card") + "−$5.00",
+          );
+          await expect(receipt).toContainText(
+            (zh ? "正在退回您的卡" : "On its way back to your card") + "−$3.00",
           );
           await expect(receipt).toContainText(
             (zh ? "退款后实付" : "You paid after refunds") + "$6.13",
@@ -584,7 +593,7 @@ for (const width of [390, 1024, 1440])
           }
         });
 
-      test("staff refunded all of the payer's dish: the receipt says all of it goes back; another phone sees none of it", async ({
+      test("staff refunded all of the payer's dish: the receipt says all of it went back; another phone sees none of it", async ({
         page,
       }) => {
         test.setTimeout(90_000);
@@ -592,9 +601,11 @@ for (const width of [390, 1024, 1440])
         phone = { payer: true, tableClosed: true, refunds: "Full" };
         await stubTable(page, []);
         const tag = `refund-full-${zh ? "zh" : "en"}-${width}`;
+        // Batch 60 (v15 b59 live, L59W A): Payment answered Succeeded, so it went back (已全部
+        // 退回), never "goes back" (全部退回) beside the dated 已退回 line.
         const youPaid = zh
-          ? "您已在这部手机上在线付款 $14.13。这笔款项全部退回您的卡。"
-          : "You paid $14.13 online on this phone. All of it goes back to your card.";
+          ? "您已在这部手机上在线付款 $14.13。这笔款项已全部退回您的卡。"
+          : "You paid $14.13 online on this phone. All of it went back to your card.";
         await open(page, "/dine-in/session", zh);
         const receipt = page.getByRole("region", { name: zh ? "您的收据" : "Your receipt" });
         await expect(receipt).toContainText(youPaid);
@@ -603,9 +614,19 @@ for (const width of [390, 1024, 1440])
           (zh ? "退款后实付" : "You paid after refunds") + "$0.00",
         );
         await expect(receipt.getByRole("listitem")).toHaveCount(1);
+        await expect(receipt).not.toContainText(
+          zh ? /这笔款项全部退回|正在退回/u : /goes back|on its way/u,
+        );
         await expectInside(receipt, width);
         await expectOnFirstScreen(receipt.getByText(youPaid));
         await page.screenshot({ path: `test-results/b57-closed-${tag}.png`, fullPage: true });
+        for (const path of ["/cart", "/menu"]) {
+          await open(page, path, zh);
+          const card = page.getByRole("main").getByRole("status").filter({ hasText: youPaid });
+          await expect(card).toBeVisible();
+          await expectInside(card, width);
+          await expectOnFirstScreen(card.getByText(youPaid));
+        }
         await open(page, "/cart", zh);
         await expect(page.getByRole("main").getByRole("status")).toContainText(youPaid);
         // Another phone at the table: no one's payment and no refund. Batch 59: all that was
@@ -655,10 +676,12 @@ for (const width of [390, 1024, 1440])
             : zh
               ? "店员已关闭本桌账单：这桌 2 份付了 1 份，其余不向您收取。"
               : "Staff closed your table’s bill: the table paid 1 of the 2 parts, and the rest is not charged to you.";
+          // Batch 60 (v15 b59 live, L59W A): equal parts pay no round, so neither round (phone B's
+          // round 2 was never paid) claims a refund; the note says what went back.
           const roundPayment = full
             ? zh
-              ? "已全部退回，不向您收取"
-              : "Refunded in full; not charged to you"
+              ? "不向您收取"
+              : "Not charged to you"
             : zh
               ? "2\u00a0份付了 1\u00a0份，其余不向您收取"
               : "1 of 2 parts paid; the rest not charged to you";
@@ -709,6 +732,10 @@ for (const width of [390, 1024, 1440])
                 .allTextContents()
             ).map((text) => text.trim());
             expect(payments).toEqual([roundPayment, roundPayment]);
+            if (full)
+              await expect(page.locator(".order-status__batches")).not.toContainText(
+                zh ? /退回/u : /Refunded|went back/u,
+              );
             await expectInside(page.locator(".order-status__batches"), width);
             if (!payer)
               await expect(page.getByRole("main")).not.toContainText(
@@ -733,6 +760,141 @@ for (const width of [390, 1024, 1440])
             const endedCard = page.getByRole("main").getByRole("status").filter({ hasText: ended });
             await expect(endedCard).toBeVisible();
             if (full) await expect(endedCard).not.toContainText(paidPart);
+            await expectInside(endedCard, width);
+            await expectOnFirstScreen(endedCard.getByText(ended));
+            await page.screenshot({ path: `test-results/${tag}-cleaned.png`, fullPage: true });
+          }
+        });
+    });
+
+/** Batch 60: each round card's Payment cell, newest round first (as the page lists them). */
+async function roundPayments(page: Page, zh: boolean) {
+  const cells = page
+    .locator(".dining-session__round-facts div")
+    .filter({
+      has: page.locator("dt", { hasText: new RegExp(`^${zh ? "付款" : "Payment"}$`, "u") }),
+    })
+    .locator("dd");
+  // Both rounds drawn first (a slower machine reads the table a moment later).
+  await expect(cells).toHaveCount(2);
+  return (await cells.allTextContents()).map((text) => text.replace(/\s+/gu, " ").trim());
+}
+
+// Batch 60 (v15 b58/b59 known limit): guests paying by dish each pay their own rounds (v15: one
+// settlement per guest, one line per round). After staff gave back all or some of phone A's
+// payment (round 1), round 1 still said its round-level "Paid" / 已付款 beside "Paid after
+// refunds". Each round now says its truth; the phone that paid reads what it paid for the round
+// after refunds, another phone only that some or all of it went back. The table read (with
+// Payment's settlement shapes through the real per-round mapping), the table-payment reads and
+// the visit restore are the real API handlers on a local server.
+for (const width of [390, 1024, 1440])
+  for (const zh of [false, true])
+    test.describe(`@production CUST-DINE-IN b60 a round paid by dish after staff's refund (${zh ? "zh-Hans" : "en"} ${width})`, () => {
+      test.use({ viewport: { width, height: 844 }, hasTouch: width < 768, isMobile: width < 768 });
+      const words = {
+        full: zh ? "已全额退款" : "Refunded in full",
+        fullClosed: zh ? "已全部退回，不向您收取" : "Refunded in full; not charged to you",
+        partly: zh ? "部分退款" : "Partly refunded",
+        partlyYours: zh
+          ? "部分退款，退款后您实付 $6.13"
+          : "Partly refunded; you paid $6.13 after refunds",
+        paid: zh ? "已付款" : "Paid",
+        notCharged: zh ? "不向您收取" : "Not charged to you",
+        unpaidPart: zh ? "未付部分不向您收取" : "Unpaid part not charged to you",
+        // What another phone must never read of A's payment.
+        private: zh
+          ? /\$6\.13|\$8\.00|\$5\.00|\$3\.00|退回您|您的卡/u
+          : /\$6\.13|\$8\.00|\$5\.00|\$3\.00|your card/iu,
+      };
+      for (const refund of ["Full", "Partial"] as const)
+        test(`both guests paid by dish, A's payment ${refund === "Full" ? "all" : "partly"} back: round 1 says it on each phone, round 2 stays paid`, async ({
+          page,
+        }) => {
+          test.setTimeout(90_000);
+          scenario = "by-dish-both-paid";
+          for (const payer of [true, false]) {
+            const tag = `b60-bydish-paid-${refund}-${payer ? "payer" : "other"}-${zh ? "zh" : "en"}-${width}`;
+            phone = { payer, tableClosed: false, refunds: refund };
+            await stubTable(page, []);
+            await open(page, "/dine-in/session", zh);
+            const total = page.getByRole("region", { name: zh ? "本桌合计" : "Table total" });
+            await expect(total).toContainText(
+              (zh ? "退款后已付" : "Paid after refunds") +
+                (refund === "Full" ? "$14.12" : "$20.25"),
+            );
+            // Newest first: round 2 (B's, still paid), then round 1 (A's).
+            expect(await roundPayments(page, zh)).toEqual([
+              words.paid,
+              refund === "Full" ? words.full : payer ? words.partlyYours : words.partly,
+            ]);
+            const rounds = page.locator(".order-status__batches");
+            if (!payer) await expect(rounds).not.toContainText(words.private);
+            await expectInside(rounds, width);
+            await expectNoInternalText(page);
+            await page.screenshot({ path: `test-results/${tag}.png`, fullPage: true });
+          }
+        });
+      for (const refund of ["Full", "Partial"] as const)
+        test(`A paid its dish, staff closed the rest, then ${refund === "Full" ? "all" : "part"} of it went back: rounds, Menu and the ended page`, async ({
+          page,
+        }) => {
+          test.setTimeout(120_000);
+          scenario = "by-dish-written-off";
+          const full = refund === "Full";
+          const youPaid = full
+            ? zh
+              ? "您已在这部手机上在线付款 $14.13。这笔款项已全部退回您的卡。"
+              : "You paid $14.13 online on this phone. All of it went back to your card."
+            : zh
+              ? "您已在这部手机上在线付款 $14.13。$5.00 已退回您的卡，$3.00 正在退回，退回后您实付 $6.13。"
+              : "You paid $14.13 online on this phone. $5.00 went back to your card and $3.00 is on its way, so in the end you pay $6.13.";
+          for (const payer of [true, false]) {
+            const tag = `b60-bydish-closed-${refund}-${payer ? "payer" : "other"}-${zh ? "zh" : "en"}-${width}`;
+            phone = { payer, tableClosed: false, refunds: refund };
+            await stubTable(page, []);
+            await open(page, "/dine-in/session", zh);
+            // Round 2 was never paid: not charged, never "refunded". Round 1: what went back.
+            expect(await roundPayments(page, zh)).toEqual([
+              full ? words.notCharged : words.unpaidPart,
+              full ? words.fullClosed : payer ? words.partlyYours : words.partly,
+            ]);
+            const rounds = page.locator(".order-status__batches");
+            if (!payer) {
+              await expect(rounds).not.toContainText(words.private);
+              await expect(page.getByRole("main")).not.toContainText(
+                zh ? /收据|您已在这部手机上|退回您/u : /receipt|You paid|back to your card/iu,
+              );
+            } else await expect(page.getByRole("main")).toContainText(youPaid);
+            await expectInside(rounds, width);
+            await expectNoInternalText(page);
+            await page.screenshot({ path: `test-results/${tag}-open.png`, fullPage: true });
+            // Menu: the payer's own line says the refund in the right tense.
+            await open(page, "/menu", zh);
+            if (payer) {
+              const line = page.getByRole("main").getByRole("status").filter({ hasText: youPaid });
+              await expect(line).toBeVisible();
+              await expectInside(line, width);
+              await expectOnFirstScreen(line.getByText(youPaid));
+            } else
+              await expect(page.getByRole("main")).not.toContainText(
+                zh ? /您已在这部手机上|退回您/u : /You paid|your card/iu,
+              );
+            await page.screenshot({ path: `test-results/${tag}-menu.png`, fullPage: true });
+            // Closed and cleaned: the ended page says the same.
+            phone = { payer, tableClosed: true, refunds: refund };
+            const ended = full
+              ? zh
+                ? "店员已关闭本桌账单：已付的款项已全部退回，不向您收取。"
+                : "Staff closed your table’s bill: what was paid went back in full; nothing is charged to you."
+              : zh
+                ? "店员已关闭本桌账单：已付的款项不变，其余不向您收取。"
+                : "Staff closed your table’s bill: what was paid stays paid, and the rest is not charged to you.";
+            await open(page, "/menu", zh);
+            const endedCard = page.getByRole("main").getByRole("status").filter({ hasText: ended });
+            await expect(endedCard).toBeVisible();
+            if (payer) await expect(endedCard).toContainText(youPaid);
+            else await expect(endedCard).not.toContainText(words.private);
+            await expect(endedCard).not.toContainText(zh ? /这笔款项全部退回/u : /goes back/u);
             await expectInside(endedCard, width);
             await expectOnFirstScreen(endedCard.getByText(ended));
             await page.screenshot({ path: `test-results/${tag}-cleaned.png`, fullPage: true });

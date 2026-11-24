@@ -477,13 +477,16 @@ describe("batch 57: refunds of the payer's own payment", () => {
         ownPaymentReceipt={payer(refundedPart)}
       />,
     );
+    // Batch 60 (v15 b59 live): what Payment confirmed went back is said as done, what is still
+    // on its way as on its way (before: "After $8.00 back to your card" for both).
     expect(text()).toContain(
-      "You paid $14.13 online on this phone. After $8.00 back to your card, you paid $6.13.",
+      "You paid $14.13 online on this phone. $5.00 went back to your card and $3.00 is on its way, so in the end you pay $6.13.",
     );
     // Batch 58 (v15 b57 live): once some went back, the rows name what was charged and what
     // was paid after refunds, never two amounts both called "paid by you".
     expect(text()).toContain("Amount charged$14.13");
-    expect(text()).toContain("Refunded to your card−$8.00");
+    expect(text()).toContain("Refunded to your card−$5.00");
+    expect(text()).toContain("On its way back to your card−$3.00");
     expect(text()).toContain("You paid after refunds$6.13");
     expect(text()).not.toContain("Total paid by you");
     expect(text()).not.toContain("Total after refunds");
@@ -515,9 +518,13 @@ describe("batch 57: refunds of the payer's own payment", () => {
       />,
       "zh-Hans",
     );
-    expect(text()).toContain("您已在这部手机上在线付款 $14.13。这笔款项全部退回您的卡。");
+    // Batch 60 (v15 b59 live, L59W A): Payment confirmed it, so it went back (已全部退回), never
+    // "goes back" (全部退回) beside the dated 已退回 line.
+    expect(text()).toContain("您已在这部手机上在线付款 $14.13。这笔款项已全部退回您的卡。");
+    expect(text()).not.toContain("这笔款项全部退回");
     expect(text()).toContain("付款金额$14.13");
-    expect(text()).toContain("退回您的卡−$14.13");
+    expect(text()).toContain("已退回您的卡−$14.13");
+    expect(text()).not.toContain("正在退回");
     expect(text()).toContain("退款后实付$0.00");
     expect(text()).not.toContain("您实付合计");
     expect(container.querySelector(".dining-session__own-refunds li")?.textContent).toMatch(
@@ -537,8 +544,55 @@ describe("batch 57: refunds of the payer's own payment", () => {
       />,
       "zh-Hans",
     );
+    expect(text()).toContain("您已在这部手机上在线付款 $14.13。$8.00 已退回您的卡，您实付 $6.13。");
+    // Batch 60: while some of it is still on its way, that part is said as on its way.
+    await show(
+      <EndedTableCard
+        ended={{
+          kind: "ClosedByStaff",
+          tableLabel: "L55 CB3 (TEST)",
+          paid: "Some",
+          store: null,
+          yourPaidMinor: "1413",
+          yourRefundedMinor: "800",
+          yourRefundPendingMinor: "300",
+        }}
+      />,
+      "zh-Hans",
+    );
     expect(text()).toContain(
-      "您已在这部手机上在线付款 $14.13。退回您的卡 $8.00 后，您实付 $6.13。",
+      "您已在这部手机上在线付款 $14.13。$5.00 已退回您的卡，$3.00 正在退回，退回后您实付 $6.13。",
+    );
+    await show(
+      <EndedTableCard
+        ended={{
+          kind: "ClosedByStaff",
+          tableLabel: "L55 CB3 (TEST)",
+          paid: "Refunded",
+          store: null,
+          yourPaidMinor: "1413",
+          yourRefundedMinor: "1413",
+        }}
+      />,
+    );
+    expect(text()).toContain(
+      "You paid $14.13 online on this phone. All of it went back to your card.",
+    );
+    await show(
+      <EndedTableCard
+        ended={{
+          kind: "ClosedByStaff",
+          tableLabel: "L55 CB3 (TEST)",
+          paid: "Refunded",
+          store: null,
+          yourPaidMinor: "1413",
+          yourRefundedMinor: "1413",
+          yourRefundPendingMinor: "1413",
+        }}
+      />,
+    );
+    expect(text()).toContain(
+      "You paid $14.13 online on this phone. All of it is on its way back to your card.",
     );
   });
 
@@ -556,9 +610,10 @@ describe("batch 57: refunds of the payer's own payment", () => {
     );
     const receipt = container.querySelector(".dining-session__own-payment");
     const words = (receipt?.textContent ?? "").replace(/\s+/gu, " ");
-    expect(words).toContain("退回您的卡 $8.00 后，您实付 $6.13。");
+    expect(words).toContain("$5.00 已退回您的卡，$3.00 正在退回，退回后您实付 $6.13。");
     expect(words).toContain("付款金额$14.13");
-    expect(words).toContain("退回您的卡−$8.00");
+    expect(words).toContain("已退回您的卡−$5.00");
+    expect(words).toContain("正在退回您的卡−$3.00");
     expect(words).toContain("退款后实付$6.13");
     // Every 实付 on the receipt is the same amount, the net.
     expect([...words.matchAll(/实付 ?(\$\d+\.\d\d)/gu)].map((match) => match[1])).toEqual([
@@ -609,7 +664,7 @@ describe("batch 57: refunds of the payer's own payment", () => {
     );
     await show(<TableCheckoutNotice checkout={checkout} />);
     expect(text()).toContain(
-      "You paid $14.13 online on this phone. After $8.00 back to your card, you paid $6.13.",
+      "You paid $14.13 online on this phone. $5.00 went back to your card and $3.00 is on its way, so in the end you pay $6.13.",
     );
   });
 

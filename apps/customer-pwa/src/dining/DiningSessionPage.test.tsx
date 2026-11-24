@@ -1833,14 +1833,13 @@ describe("batch 55 (v15 b54 live): round cards once staff closed the bill", () =
   };
   it("batch 59: part 1 given back in full is not paid: rounds and the Table total note (en, zh)", () => {
     const rounds = [noodles(1, "Paid"), noodles(2, "OnTableBill")];
+    // Batch 60 (v15 b59 live, L59W A): staff's equal parts pay no round, so no round claims a
+    // refund (phone B's round 2 was never paid): each is not charged; the note says the refund.
     expect(payments("en", rounds, "1413", refundedFull)).toEqual([
-      "Refunded in full; not charged to you",
-      "Refunded in full; not charged to you",
+      "Not charged to you",
+      "Not charged to you",
     ]);
-    expect(payments("zh-Hans", rounds, "1413", refundedFull)).toEqual([
-      "已全部退回，不向您收取",
-      "已全部退回，不向您收取",
-    ]);
+    expect(payments("zh-Hans", rounds, "1413", refundedFull)).toEqual(["不向您收取", "不向您收取"]);
     const en = tableTotal("en", refundedFull);
     expect(en).toContain("Paid after refunds$0.00");
     expect(en).toContain("The billNot charged to you");
@@ -1852,6 +1851,69 @@ describe("batch 55 (v15 b54 live): round cards once staff closed the bill", () =
     expect(zh).toContain("退款后已付$0.00");
     expect(zh).toContain("店员已关闭本桌账单：这桌 2 份中有 1 份付款已全部退回，不向您收取。");
     expect(zh).not.toMatch(/2\s?份付了\s?1\s?份|其余账款|不变/u);
+  });
+  // Batch 60 (v15 b58/b59 known limit): guests paid by dish (A round 1, B round 2); staff then
+  // gave back all or some of A's payment. Each round said its round-level "Paid" beside "Paid
+  // after refunds". The read ties the refund to the round its payment paid.
+  it("batch 60: by dish, a round whose payment went back says so; the payer reads its net", () => {
+    const refunded = (state: "Full" | "Partly", yours?: string): DiningRound => ({
+      ...noodles(1, "Paid"),
+      paymentRefund: {
+        state,
+        ...(yours === undefined ? {} : { yourPaidAfterRefunds: cad(yours) }),
+      },
+    });
+    const paidAll = {
+      splitParts: { count: null, paid: 2 },
+      paidAfterRefunds: cad("1412"),
+      tableTip: cad("0"),
+      cashRounding: cad("0"),
+    };
+    expect(payments("en", [refunded("Full"), noodles(2, "Paid")], "2825", paidAll)).toEqual([
+      "Refunded in full",
+      "Paid",
+    ]);
+    expect(payments("zh-Hans", [refunded("Full"), noodles(2, "Paid")], "2825", paidAll)).toEqual([
+      "已全额退款",
+      "已付款",
+    ]);
+    const partly = { ...paidAll, paidAfterRefunds: cad("2025") };
+    expect(payments("en", [refunded("Partly", "613"), noodles(2, "Paid")], "2825", partly)).toEqual(
+      ["Partly refunded; you paid $6.13 after refunds", "Paid"],
+    );
+    expect(
+      payments("zh-Hans", [refunded("Partly", "613"), noodles(2, "Paid")], "2825", partly),
+    ).toEqual(["部分退款，退款后您实付 $6.13", "已付款"]);
+    // Another phone: only that some went back, never an amount.
+    expect(payments("en", [refunded("Partly"), noodles(2, "Paid")], "2825", partly)).toEqual([
+      "Partly refunded",
+      "Paid",
+    ]);
+    expect(payments("zh-Hans", [refunded("Partly"), noodles(2, "Paid")], "2825", partly)).toEqual([
+      "部分退款",
+      "已付款",
+    ]);
+    // Staff closed the rest after A paid by dish: A's round, and B's round never paid.
+    const closedByDish = {
+      closedByStaff: true as const,
+      splitParts: { count: null, paid: 1 },
+      paidAfterRefunds: cad("613"),
+    };
+    expect(
+      payments("en", [refunded("Partly", "613"), noodles(2, "OnTableBill")], "1413", closedByDish),
+    ).toEqual(["Partly refunded; you paid $6.13 after refunds", "Unpaid part not charged to you"]);
+    const allBack = {
+      closedByStaff: true as const,
+      splitParts: { count: null, paid: 1, refunded: 1 },
+      paidAfterRefunds: cad("0"),
+    };
+    expect(payments("en", [refunded("Full"), noodles(2, "OnTableBill")], "1413", allBack)).toEqual([
+      "Refunded in full; not charged to you",
+      "Not charged to you",
+    ]);
+    expect(
+      payments("zh-Hans", [refunded("Full"), noodles(2, "OnTableBill")], "1413", allBack),
+    ).toEqual(["已全部退回，不向您收取", "不向您收取"]);
   });
   it("batch 59: part 1 only partly given back is still paid, with the figure after refunds", () => {
     const rounds = [noodles(1, "Paid"), noodles(2, "OnTableBill")];

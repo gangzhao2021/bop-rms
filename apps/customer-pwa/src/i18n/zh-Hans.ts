@@ -1425,11 +1425,20 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "We couldn’t load your receipt. Check your connection and try again.":
     "暂时没能加载您的收据，请检查网络后再试。",
   // Batch 57 (Q36): refunds of the payer's own payment, on their own receipt and every tab.
-  "You paid {amount} online on this phone. All of it goes back to your card.":
-    "您已在这部手机上在线付款 {amount}。这笔款项全部退回您的卡。",
-  "You paid {amount} online on this phone. After {refund} back to your card, you paid {net}.":
-    "您已在这部手机上在线付款 {amount}。退回您的卡 {refund} 后，您实付 {net}。",
-  "Refunded to your card": "退回您的卡",
+  // Batch 60 (v15 b59 live): what Payment confirmed is said as done (已退回), and only what is
+  // still on its way as on its way (正在退回).
+  "You paid {amount} online on this phone. All of it went back to your card.":
+    "您已在这部手机上在线付款 {amount}。这笔款项已全部退回您的卡。",
+  "You paid {amount} online on this phone. All of it is on its way back to your card.":
+    "您已在这部手机上在线付款 {amount}。这笔款项正在全部退回您的卡。",
+  "You paid {amount} online on this phone. {refund} went back to your card, so you paid {net}.":
+    "您已在这部手机上在线付款 {amount}。{refund} 已退回您的卡，您实付 {net}。",
+  "You paid {amount} online on this phone. {refund} is on its way back to your card, so in the end you pay {net}.":
+    "您已在这部手机上在线付款 {amount}。{refund} 正在退回您的卡，退回后您实付 {net}。",
+  "You paid {amount} online on this phone. {done} went back to your card and {pending} is on its way, so in the end you pay {net}.":
+    "您已在这部手机上在线付款 {amount}。{done} 已退回您的卡，{pending} 正在退回，退回后您实付 {net}。",
+  "Refunded to your card": "已退回您的卡",
+  "On its way back to your card": "正在退回您的卡",
   "Refunds of your payment": "您这笔付款的退款",
   "On {date}, {amount} went back to your card. Your bank may take a few days to show it.":
     "{date}，{amount} 已退回您的卡。银行可能要过几天才显示。",
@@ -1592,6 +1601,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Staff closed your table’s bill: what was paid went back in full; nothing is charged to you. To order anything else, ask staff.":
     "店员已关闭本桌账单：已付的款项已全部退回，不向您收取。如需再点，请找店员。",
   "Refunded in full; not charged to you": "已全部退回，不向您收取",
+  // Batch 60 (b58/b59 known limit): a round paid by dish whose payment staff gave back (with
+  // "Refunded in full" 已全额退款 and "Partly refunded" 部分退款, as the pickup receipt says them).
+  "Partly refunded; you paid {amount} after refunds": "部分退款，退款后您实付 {amount}",
   "{refunded} of {count} parts refunded in full":
     "{count}\u00a0份中有 {refunded}\u00a0份已全部退回",
   "{paid} of {count} parts paid, {refunded} refunded in full":

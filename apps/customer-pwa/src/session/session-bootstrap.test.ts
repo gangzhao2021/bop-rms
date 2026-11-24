@@ -822,6 +822,41 @@ it("batch 57: keeps what went back to this phone's card from a bill staff closed
   expect(getEndedTable()).toBeNull();
 });
 
+// Batch 60 (v15 b59 live): of what went back, what is still on its way, so the ended page says
+// "went back" only for what Payment confirmed (never more than went back, never without it).
+it("batch 60: keeps what of the refund is still on its way to this phone's card", async () => {
+  const restore = (value: unknown) =>
+    restoreCustomerSession(vi.fn().mockResolvedValue(response(value)));
+  const closed = {
+    tableLabel: "L55 CB3 (TEST)",
+    paid: "Some",
+    yourPayment: {
+      amountMinor: "1413",
+      method: "Online",
+      refundedMinor: "800",
+      refundPendingMinor: "300",
+    },
+    csrfToken: "C".repeat(43),
+  };
+  expect(await restore({ schemaVersion: 1, closedTable: closed })).toBe(false);
+  expect(getEndedTable()).toMatchObject({
+    kind: "ClosedByStaff",
+    yourPaidMinor: "1413",
+    yourRefundedMinor: "800",
+    yourRefundPendingMinor: "300",
+  });
+  setEmptyTable(null);
+  for (const yourPayment of [
+    { ...closed.yourPayment, refundPendingMinor: "801" },
+    { ...closed.yourPayment, refundPendingMinor: "0" },
+    { amountMinor: "1413", method: "Online", refundPendingMinor: "300" },
+  ])
+    expect(await restore({ schemaVersion: 1, closedTable: { ...closed, yourPayment } })).toBe(
+      false,
+    );
+  expect(getEndedTable()).toBeNull();
+});
+
 // Batch 47 (v15 b46 live): a tab left open while staff closed, moved or merged the table was
 // refused (401 cart_session_expired, or the cart read's "your place ended") and said "Your Store
 // session expired. Scan the location QR code again." The restore read is asked instead; only a

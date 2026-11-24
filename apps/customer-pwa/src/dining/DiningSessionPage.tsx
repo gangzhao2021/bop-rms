@@ -440,17 +440,41 @@ function closedRoundPaymentText(
             paid: String(parts.paid),
             count: String(parts.count),
           });
-  if (closed === null) return null;
+  if (closed === null) return roundRefundText(round, false);
   if (closed.kind === "Parts" && (round.payment === "OnTableBill" || round.payment === "Paid"))
     return t("{paid} of {count} parts paid; the rest not charged to you", {
       paid: String(closed.paid),
       count: String(closed.count),
     });
-  // Batch 59 (v15 b58 live, L58R B): all that was paid went back: no round was paid.
+  // Batch 59 (v15 b58 live, L58R B): all that was paid went back: no round was paid. Batch 60
+  // (v15 b59 live, L59W A, phone B's round 2): staff's equal parts pay the bill, no round, so no
+  // round says a refund was made for it: each is not charged. By dish (or one payment for the
+  // whole table) only a round whose own payment went back says so; one never paid is not charged.
   if (closed.kind === "Refunded" && (round.payment === "OnTableBill" || round.payment === "Paid"))
-    return t("Refunded in full; not charged to you");
+    return round.payment === "Paid" && closed.parts === null
+      ? roundRefundText(round, true)
+      : t("Not charged to you");
+  if (round.payment === "Paid") return roundRefundText(round, true);
   if (round.payment !== "OnTableBill") return null;
   return closed.kind === "Nothing" ? t("Not charged to you") : t("Unpaid part not charged to you");
+}
+
+/**
+ * Batch 60 (v15 b58/b59 known limit): a Paid round whose own payment staff then gave back, said as
+ * that (never "Paid" beside "Paid after refunds"). The phone whose payment it was reads what it
+ * paid for the round after refunds; another phone reads only that some or all of it went back.
+ * Null: no refund of this round's payment (it says Paid).
+ */
+function roundRefundText(round: DiningRound, closed: boolean): string | null {
+  const refund = round.payment === "Paid" ? round.paymentRefund : undefined;
+  if (refund === undefined) return null;
+  if (refund.state === "Full")
+    return closed ? t("Refunded in full; not charged to you") : t("Refunded in full");
+  return refund.yourPaidAfterRefunds === undefined
+    ? t("Partly refunded")
+    : t("Partly refunded; you paid {amount} after refunds", {
+        amount: money(refund.yourPaidAfterRefunds),
+      });
 }
 
 function RoundCard({

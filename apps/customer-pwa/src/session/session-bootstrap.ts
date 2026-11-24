@@ -116,13 +116,26 @@ function settledStore(
 function ownPaymentOf(
   value: unknown,
   csrfToken: unknown,
-): Readonly<{ amountMinor: string; refundedMinor?: string; csrfToken: string }> | null {
+): Readonly<{
+  amountMinor: string;
+  refundedMinor?: string;
+  refundPendingMinor?: string;
+  csrfToken: string;
+}> | null {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
   const raw = value as Record<string, unknown>;
   // Batch 57 (Q36): with what went back to the card, when anything did (never more than paid).
   const refunded = raw.refundedMinor;
+  // Batch 60: of it, what is still on its way (only with a refund, never more than it).
+  const pending = raw.refundPendingMinor;
   if (
-    Object.keys(raw).length !== (refunded === undefined ? 2 : 3) ||
+    Object.keys(raw).length !==
+      (refunded === undefined ? 2 : 3) + (pending === undefined ? 0 : 1) ||
+    (pending !== undefined &&
+      (refunded === undefined ||
+        typeof pending !== "string" ||
+        !/^[1-9][0-9]{0,15}$/u.test(pending) ||
+        BigInt(pending) > BigInt(refunded as string))) ||
     raw.method !== "Online" ||
     typeof raw.amountMinor !== "string" ||
     !/^[1-9][0-9]{0,15}$/u.test(raw.amountMinor) ||
@@ -137,6 +150,7 @@ function ownPaymentOf(
   return Object.freeze({
     amountMinor: raw.amountMinor,
     ...(refunded === undefined ? {} : { refundedMinor: refunded as string }),
+    ...(pending === undefined ? {} : { refundPendingMinor: pending as string }),
     csrfToken,
   });
 }

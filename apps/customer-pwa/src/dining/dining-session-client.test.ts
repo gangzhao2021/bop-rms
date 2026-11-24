@@ -84,6 +84,41 @@ describe("WP-2423 Q8 dining session client", () => {
       expect(() => parseDiningSessionView(value)).toThrow();
     }
   });
+  it("batch 60: decodes a Paid round's payment refund; the amount only with Partly", () => {
+    const base = payload() as { session: { rounds: Record<string, unknown>[] } };
+    const full = structuredClone(base);
+    (full.session.rounds[0] as Record<string, unknown>).paymentRefund = { state: "Full" };
+    expect(parseDiningSessionView(full).rounds[0]?.paymentRefund).toEqual({ state: "Full" });
+    const partly = structuredClone(base);
+    (partly.session.rounds[0] as Record<string, unknown>).paymentRefund = {
+      state: "Partly",
+      yourPaidAfterRefunds: cad("613"),
+    };
+    expect(parseDiningSessionView(partly).rounds[0]?.paymentRefund).toEqual({
+      state: "Partly",
+      yourPaidAfterRefunds: cad("613"),
+    });
+    expect(parseDiningSessionView(base).rounds[0]).not.toHaveProperty("paymentRefund");
+    for (const [payment, paymentRefund] of [
+      ["Paid", { state: "Full", yourPaidAfterRefunds: cad("0") }],
+      ["Paid", { state: "Some" }],
+      [
+        "Paid",
+        { state: "Partly", yourPaidAfterRefunds: { amountMinor: "-1", currencyCode: "CAD" } },
+      ],
+      [
+        "Paid",
+        { state: "Partly", yourPaidAfterRefunds: { amountMinor: "1", currencyCode: "USD" } },
+      ],
+      ["Paid", { state: "Partly", reason: "FOOD_ISSUE" }],
+      ["Paid", null],
+      ["OnTableBill", { state: "Full" }],
+    ] as const) {
+      const value = structuredClone(base);
+      Object.assign(value.session.rounds[0] as Record<string, unknown>, { payment, paymentRefund });
+      expect(() => parseDiningSessionView(value)).toThrow();
+    }
+  });
   it("WP-2423 item 8 ⑦ 4b-3: decodes the per-head tea on the bill, and rejects anything else", () => {
     const base = payload() as { session: { summary: Record<string, unknown> } };
     const withTea = structuredClone(base);
