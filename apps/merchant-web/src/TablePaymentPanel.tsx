@@ -181,6 +181,30 @@ export function sentRefundOf(
   return newest ?? null;
 }
 
+/**
+ * b61 (v15 b60 live, TM2 order 48): how the end of a payment's refund lines reads. Everything went
+ * back and nothing is still on its way: "Fully refunded", never "Can still be refunded $0.00", and
+ * no "It can take a few days…" line. While a refund is on its way, or something is left, the
+ * amount left and the timing line stay as before.
+ */
+export function tablePaymentRefundEnd(payment: TablePayment): {
+  /** Everything went back: what went back in all (cash, card machine, card); else null. */
+  readonly fullyRefundedMinor: string | null;
+  readonly timingLine: boolean;
+} {
+  const sending = payment.onlineRefunds.some((refund) => refund.state === "Sending");
+  const gone = payment.onlineRefunds.filter((refund) => refund.state === "Refunded");
+  const went = [...payment.cashRefunds, ...payment.cardRefunds, ...gone].reduce(
+    (sum, refund) => sum + BigInt(refund.amountMinor),
+    0n,
+  );
+  const fully = went > 0n && !sending && BigInt(payment.refundableMinor) === 0n;
+  return {
+    fullyRefundedMinor: fully ? went.toString() : null,
+    timingLine: !fully && gone.length > 0,
+  };
+}
+
 async function post(fetcher: typeof fetch, path: string, csrf: string, body: unknown) {
   const response = await fetcher(path, {
     method: "POST",
@@ -416,6 +440,7 @@ function TablePaymentBlock({
     }
   };
   const canRefund = refundable > 0n;
+  const refundEnd = tablePaymentRefundEnd(payment);
   const sentRefund = sentRefundOf(payment, sent);
   const sentText =
     sentRefund === null
@@ -503,7 +528,13 @@ function TablePaymentBlock({
             </dd>
           </div>
         ))}
-        {refundable !== BigInt(payment.totalMinor) ? (
+        {refundEnd.fullyRefundedMinor !== null ? (
+          // b61 (v15 b60 live): everything went back; never "Can still be refunded $0.00".
+          <div>
+            <dt>{t("Fully refunded")}</dt>
+            <dd>{cad(refundEnd.fullyRefundedMinor)}</dd>
+          </div>
+        ) : refundable !== BigInt(payment.totalMinor) ? (
           <div>
             {/* v15 M177: what may still go back, said plainly (not something owed). */}
             <dt>{t("Can still be refunded")}</dt>
@@ -519,7 +550,7 @@ function TablePaymentBlock({
           )}
         </p>
       ) : null}
-      {payment.onlineRefunds.some((refund) => refund.state === "Refunded") ? (
+      {refundEnd.timingLine ? (
         <p role="note">{t("It can take a few days to show on the guest's card.")}</p>
       ) : null}
       {payment.onlineRefunds.some((refund) => refund.state === "Refused") ? (

@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { cashRefundNickel, parseTablePayments, sentRefundOf } from "./TablePaymentPanel.js";
+import {
+  cashRefundNickel,
+  parseTablePayments,
+  sentRefundOf,
+  tablePaymentRefundEnd,
+  type TablePayment,
+} from "./TablePaymentPanel.js";
 
 describe("v15 M131: cash goes back in whole nickels", () => {
   it("rounds the Canadian way and never above what is left of the cash", () => {
@@ -96,5 +102,67 @@ describe("b59 (live58): the card refund just made is the one its sentence follow
   it("says nothing before the refund is listed or when none was made here", () => {
     expect(sentRefundOf(read(["Refunded"]), { amountMinor: "500", before: 1 })).toBeNull();
     expect(sentRefundOf(read(["Refunded"]), null)).toBeNull();
+  });
+});
+
+describe("b61 (v15 b60 live, TM2 order 48): a payment refunded in full says so", () => {
+  // Paid $32.00 on the guest's phone ($28.25 + $3.75 tip); $10.00 then $22.00 back to the card.
+  const refund = (amountMinor: string, state: "Sending" | "Refunded" | "Refused") => ({
+    amountMinor,
+    reasonCode: "CUSTOMER_REQUEST" as const,
+    requestedAt: "2026-11-24T22:56:00.000Z",
+    byLabel: "You",
+    state,
+  });
+  const paid = (refundableMinor: string, onlineRefunds: TablePayment["onlineRefunds"]) =>
+    ({
+      partNumber: null,
+      method: "Online",
+      roundsMinor: "2825",
+      tipMinor: "375",
+      roundingMinor: "0",
+      totalMinor: "3200",
+      takenAt: "2026-11-24T22:55:00.000Z",
+      recordedAfterOutage: false,
+      cashRefunds: [],
+      cardRefunds: [],
+      onlineRefunds,
+      refundableMinor,
+      canRefund: true,
+    }) as TablePayment;
+  it("everything went back: Fully refunded, no amount left and no timing line", () => {
+    expect(
+      tablePaymentRefundEnd(paid("0", [refund("1000", "Refunded"), refund("2200", "Refunded")])),
+    ).toEqual({ fullyRefundedMinor: "3200", timingLine: false });
+  });
+  it("part went back: the amount left and the timing line stay", () => {
+    expect(tablePaymentRefundEnd(paid("2200", [refund("1000", "Refunded")]))).toEqual({
+      fullyRefundedMinor: null,
+      timingLine: true,
+    });
+  });
+  it("the last of it still on its way: not yet Fully refunded", () => {
+    expect(
+      tablePaymentRefundEnd(paid("0", [refund("1000", "Refunded"), refund("2200", "Sending")])),
+    ).toEqual({ fullyRefundedMinor: null, timingLine: true });
+  });
+  it("cash given back in full counts, a refused refund never does", () => {
+    const cash = {
+      ...paid("0", [refund("500", "Refused")]),
+      method: "Cash",
+      cashRefunds: [
+        {
+          amountMinor: "3200",
+          reasonCode: "FOOD_ISSUE",
+          refundedAt: "2026-11-24T22:57:00.000Z",
+          byLabel: "You",
+        },
+      ],
+    } as TablePayment;
+    expect(tablePaymentRefundEnd(cash)).toEqual({ fullyRefundedMinor: "3200", timingLine: false });
+    expect(tablePaymentRefundEnd(paid("3200", []))).toEqual({
+      fullyRefundedMinor: null,
+      timingLine: false,
+    });
   });
 });

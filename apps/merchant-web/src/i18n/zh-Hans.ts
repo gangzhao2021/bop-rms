@@ -10543,4 +10543,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "About {value} before tax.": "税前约 {value}。",
   "Check the table again": "再查看一次这桌",
   "Checking the table…": "正在查看这桌…",
+  // Batch 61 (v15 b60 live): refunds said plainly on Orders and on a table's payment.
+  "Fully refunded": "已全部退款",
 });
