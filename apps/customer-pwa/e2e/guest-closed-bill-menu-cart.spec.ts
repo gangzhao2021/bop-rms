@@ -15,8 +15,18 @@ import { routeStorefrontReads } from "./storefront-reads";
 // said "Thank you for dining with us … See the receipt" for a bill that has no receipt. After the
 // close, the visit restore is the real HTTP handler on the same local server (session over, the
 // bill's write-off in the v15 shape).
+//
+// Batch 56 (v15 b55 live, TM2 L55 CB3, orders 80 and 87): while the bill was still open with staff's
+// even split of 2 and part 1 paid, round 1 read "Paid" and round 2 "On the table's bill"; once
+// staff closed it, the Table total note still ended with the cash rounding line, which said only
+// card (the guest paid by phone); and at 1440 the dish page's allergy block began 150 px left of
+// the dish.
 type Scenario =
-  "one-round-nothing-paid-written-off" | "by-dish-written-off" | "half-split-written-off";
+  | "one-round-nothing-paid-written-off"
+  | "by-dish-written-off"
+  | "half-split-written-off"
+  | "half-split-open"
+  | "half-split-paid";
 interface GuestBillHttp {
   readonly url: string;
   close(): Promise<void>;
@@ -303,6 +313,25 @@ async function expectFits(box: Locator, width: number) {
   ).toBe(false);
 }
 
+/**
+ * Batch 56: the dish page has one left edge. The allergy block below a dish without a photo starts
+ * where the dish does (at 1440 it started at x 240, the dish at x 390).
+ */
+async function expectOneLeftEdge(page: Page) {
+  const dishEdge = (await page.locator(".sellable-detail").boundingBox())?.x;
+  const helpEdge = (await page.locator("aside.menu-help").boundingBox())?.x;
+  expect(dishEdge).toBeDefined();
+  expect(Math.abs((helpEdge ?? -1000) - (dishEdge ?? 0))).toBeLessThanOrEqual(1);
+}
+
+/** The Table total's closing note. */
+const tableTotalNote = (page: Page, zh: boolean) =>
+  page
+    .getByRole("region", { name: zh ? "本桌合计" : "Table total" })
+    .locator("p")
+    .last()
+    .textContent();
+
 /** Each round's Payment, round 1 first (the page lists the newest round first). */
 async function roundPayments(page: Page, zh: boolean) {
   const label = words(zh, false).payment;
@@ -387,6 +416,7 @@ for (const width of [390, 1024, 1440])
           await expect(dishNotice.getByRole("link", { name: text.link })).toBeVisible();
           await expect(page.getByRole("main")).not.toContainText(text.wrong);
           await expectFits(dishNotice, width);
+          await expectOneLeftEdge(page);
           await expectNothingToAdd(page);
           await page.screenshot({ path: `test-results/b55-dish-${tag}.png`, fullPage: true });
 
@@ -410,6 +440,9 @@ for (const width of [390, 1024, 1440])
           await expect(page.getByRole("main")).not.toContainText(
             zh ? /记入本桌账单|已结清|收据/u : /On the table's bill|bill is paid|receipt/u,
           );
+          // Batch 56: nothing more will be collected, so no cash rounding line.
+          expect(await tableTotalNote(page, zh)).toContain(text.heading);
+          expect(await tableTotalNote(page, zh)).not.toMatch(/5 cents|rounded|取整/u);
           // Each round's Payment fits its column: no word cut off, no sideways scroll.
           expect(
             await page
@@ -445,5 +478,69 @@ for (const width of [390, 1024, 1440])
           // Nothing was offered, so nothing was tapped: no cart was started or changed (the pay
           // section's own read is a POST).
           expect(asked.filter((line) => /^POST .*cart/u.test(line))).toEqual([]);
+        });
+    });
+
+// Batch 56 (v15 b55 live, order 80): staff's even split while the bill is open. A part is a share
+// of the whole bill and pays no round, so every round says how many parts are paid, and Paid once
+// all are; the Table total note names card and phone, as the guest may pay either way.
+const openSplitCases = [
+  {
+    scenario: "half-split-open",
+    title: "order 80, 1 of 2 equal parts paid, bill open",
+    rounds: (zh: boolean) =>
+      zh
+        ? ["2\u00a0份付了 1\u00a0份", "2\u00a0份付了 1\u00a0份"]
+        : ["1 of 2 parts paid", "1 of 2 parts paid"],
+    note: (zh: boolean) =>
+      zh
+        ? "这桌分成 2 份付款，已付 1 份。在柜台付现金按 5 分取整，刷卡和手机付款不取整。"
+        : "The table is paying the bill in 2 parts; 1 paid so far. Cash at the counter is rounded to the nearest 5 cents; card and phone payments are not.",
+  },
+  {
+    scenario: "half-split-paid",
+    title: "both equal parts paid",
+    rounds: (zh: boolean) => (zh ? ["已付款", "已付款"] : ["Paid", "Paid"]),
+    note: (zh: boolean) =>
+      zh
+        ? "这桌已分 2 份付清。现金按 5 分取整，刷卡和手机付款不取整。"
+        : "The table paid the bill in 2 parts. Cash is rounded to the nearest 5 cents; card and phone payments are not rounded.",
+  },
+] as const;
+
+for (const width of [390, 1024, 1440])
+  for (const zh of [false, true])
+    test.describe(`@production CUST-DINE-IN Your table while staff's equal parts are paid (${zh ? "zh-Hans" : "en"} ${width})`, () => {
+      test.use({ viewport: { width, height: 844 }, hasTouch: width < 768, isMobile: width < 768 });
+      for (const item of openSplitCases)
+        test(`${item.title}: rounds say the parts, never one round paid`, async ({ page }) => {
+          test.setTimeout(60_000);
+          scenario = item.scenario;
+          await stubTable(page, []);
+          await open(page, "/dine-in/session", zh);
+          await expect(
+            page.getByRole("region", { name: zh ? "本桌合计" : "Table total" }),
+          ).toBeVisible();
+          await expect.poll(() => roundPayments(page, zh)).toEqual(item.rounds(zh));
+          await expect(page.getByRole("main")).not.toContainText(
+            zh ? /记入本桌账单|不向您收取/u : /On the table's bill|not charged to you/u,
+          );
+          expect(await tableTotalNote(page, zh)).toContain(item.note(zh));
+          // Each round's Payment fits its column: no word cut off, no sideways scroll.
+          expect(
+            await page
+              .locator(".dining-session__round-facts dd")
+              .evaluateAll((all) => all.some((dd) => dd.scrollWidth > dd.clientWidth)),
+          ).toBe(false);
+          expect(
+            await page.evaluate(
+              () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+            ),
+          ).toBeLessThanOrEqual(0);
+          await expectNoInternalText(page);
+          await page.screenshot({
+            path: `test-results/b56-table-${item.scenario}-${zh ? "zh" : "en"}-${width}.png`,
+            fullPage: true,
+          });
         });
     });

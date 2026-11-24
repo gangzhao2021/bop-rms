@@ -23,6 +23,10 @@ type TableBill = Awaited<ReturnType<typeof readDiningTableBill>>;
  * one-round-nothing-paid-written-off: order 59, one round ($14.13), nobody paid, all written off.
  * half-split-written-off: order 67, staff split evenly in 2; part 1 ($14.13) was paid, and the
  *   bill read tied that part to round 1 (round 1 paid); then the rest ($14.12) written off.
+ * Batch 56 (v15 b55 live, TM2 L55 CB3, orders 80 and 87):
+ * half-split-open: the same even split of 2 with part 1 ($14.13) paid, before staff closed
+ *   anything: the bill read still ties part 1 to round 1 (round 1 paid, round 2 on the bill).
+ * half-split-paid: then part 2 ($14.12) was paid too; the bill is paid in full.
  */
 export type GuestBillScenario =
   | "open-after-one-dish"
@@ -30,7 +34,9 @@ export type GuestBillScenario =
   | "parts-written-off"
   | "nothing-paid-written-off"
   | "one-round-nothing-paid-written-off"
-  | "half-split-written-off";
+  | "half-split-written-off"
+  | "half-split-open"
+  | "half-split-paid";
 
 const id = (n: number) => "0198b054-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const cad = (amountMinor: bigint) => ({ amountMinor, currencyCode: "CAD" });
@@ -41,15 +47,26 @@ const allRounds = [
 ] as const;
 const roundsOf = (scenario: GuestBillScenario): readonly (typeof allRounds)[number][] =>
   scenario === "one-round-nothing-paid-written-off" ? allRounds.slice(0, 1) : allRounds;
+const evenHalves = (scenario: GuestBillScenario) =>
+  scenario === "half-split-written-off" ||
+  scenario === "half-split-open" ||
+  scenario === "half-split-paid";
+/** No write-off: the bill is still open, or paid in full. */
+const notWrittenOff = (scenario: GuestBillScenario) =>
+  scenario === "open-after-one-dish" ||
+  scenario === "half-split-open" ||
+  scenario === "half-split-paid";
 /** What the table paid, payment by payment. */
 const paidOf = (scenario: GuestBillScenario): bigint[] =>
-  scenario === "open-after-one-dish" ||
-  scenario === "by-dish-written-off" ||
-  scenario === "half-split-written-off"
-    ? [1413n]
-    : scenario === "parts-written-off"
-      ? [942n]
-      : [];
+  scenario === "half-split-paid"
+    ? [1413n, 1412n]
+    : scenario === "open-after-one-dish" ||
+        scenario === "by-dish-written-off" ||
+        evenHalves(scenario)
+      ? [1413n]
+      : scenario === "parts-written-off"
+        ? [942n]
+        : [];
 
 /** The table bill as staff checkout reads it (readDiningTableBill), the fields the guest uses. */
 function tableBill(scenario: GuestBillScenario): TableBill {
@@ -79,7 +96,7 @@ function tableBill(scenario: GuestBillScenario): TableBill {
       taxRoundingMinor: "0",
       // By dish, guest A's own round was paid in full; a fixed part of 3 pays no round on its
       // own, but v15 tied order 67's part 1 of 2 to round 1 (its slice was all of round 1).
-      paid: (byDishPaid || scenario === "half-split-written-off") && round.mine,
+      paid: scenario === "half-split-paid" || ((byDishPaid || evenHalves(scenario)) && round.mine),
       orderedBy: null,
       fromTableLabel: null,
       liveOrderedAt: null,
@@ -90,17 +107,13 @@ function tableBill(scenario: GuestBillScenario): TableBill {
       scenario === "nothing-paid-written-off" || scenario === "one-round-nothing-paid-written-off"
         ? null
         : {
-            mode:
-              scenario === "parts-written-off" || scenario === "half-split-written-off"
-                ? "Even"
-                : "ByGuests",
+            mode: scenario === "parts-written-off" || evenHalves(scenario) ? "Even" : "ByGuests",
             stale: false,
-            paidInFull: false,
+            paidInFull: scenario === "half-split-paid",
           },
-    writeOff:
-      scenario === "open-after-one-dish"
-        ? null
-        : { amountMinor: String(owedMinor), decidedAt: "2026-11-22T16:08:33.000Z" },
+    writeOff: notWrittenOff(scenario)
+      ? null
+      : { amountMinor: String(owedMinor), decidedAt: "2026-11-22T16:08:33.000Z" },
   } as unknown as TableBill;
 }
 
@@ -115,7 +128,7 @@ export function guestBillWriteOff(scenario: GuestBillScenario): {
   readonly capturedOrderAllocationMinor: bigint;
   readonly writtenOffMinor: bigint;
 } | null {
-  if (scenario === "open-after-one-dish") return null;
+  if (notWrittenOff(scenario)) return null;
   const priced = roundsOf(scenario).reduce<bigint>((sum, round) => sum + round.totalMinor, 0n);
   const captured = paidOf(scenario).reduce<bigint>((sum, amount) => sum + amount, 0n);
   return {
@@ -149,7 +162,9 @@ export function guestBillClosedByStaffFacts(scenario: GuestBillScenario): {
           ? "L54 GB2 (TEST)"
           : scenario === "half-split-written-off"
             ? "L54 GB5 (TEST)"
-            : "L53 WO4 (TEST)",
+            : evenHalves(scenario)
+              ? "L55 CB3 (TEST)"
+              : "L53 WO4 (TEST)",
       checkedAt: "2026-11-22T16:09:00.000Z",
       paymentTiming: "PayLater",
       order: {
@@ -158,7 +173,9 @@ export function guestBillClosedByStaffFacts(scenario: GuestBillScenario): {
             ? "59"
             : scenario === "half-split-written-off"
               ? "67"
-              : "52",
+              : evenHalves(scenario)
+                ? "80"
+                : "52",
         batches: rounds.map((round) => ({
           orderBatchReference: round.batch,
           submittedAt: sentAt,
@@ -181,19 +198,17 @@ export function guestBillClosedByStaffFacts(scenario: GuestBillScenario): {
         paymentOutcomes: new Map(),
         paymentDeadlines: new Map(),
         payLaterRounds: new Set(rounds.map((round) => round.batch)),
-        // A part of a split settles no round on its own (the bill was not paid in full).
-        settledRounds: new Set(),
+        // A part of a split settles no round on its own (the bill was not paid in full); once
+        // every part is paid, the settlements settle every round.
+        settledRounds: new Set(
+          scenario === "half-split-paid" ? rounds.map((round) => round.batch) : [],
+        ),
         tableSettlement: paid.length === 0 ? null : { tipMinor: 0n, roundingMinor: 0n },
         splitParts: nothingPaid
           ? null
           : {
-              count:
-                scenario === "parts-written-off"
-                  ? 3
-                  : scenario === "half-split-written-off"
-                    ? 2
-                    : null,
-              paid: 1,
+              count: scenario === "parts-written-off" ? 3 : evenHalves(scenario) ? 2 : null,
+              paid: paid.length,
             },
         unpaidCancellations: new Set(),
         staffCancellations: new Map(),
