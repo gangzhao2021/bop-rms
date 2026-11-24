@@ -2162,8 +2162,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "它已从看板移除。为它记录的损耗已退回库存。",
   "It is off the board. The first dish stays recorded as waste.":
     "它已从看板移除。第一份仍记为损耗。",
-  "It may be marked unavailable, or it may be checking out or being closed. Check it on the Tables page.":
-    "它可能被标记为不可用，或正在结账、关台。请在桌台页查看。",
+  "It may be marked unavailable, or it may not be set up for orders yet. Check it on the Tables page.":
+    "它可能被标记为不可用，或尚未设置好接受点单。请在桌台页查看。",
   "It must be approved and published by": "它必须由以下人员批准并发布：",
   "It must be done by someone other than the person who last changed the draft, who holds price approval.":
     "需由最后修改草稿者以外、持有价格审批权限的人进行。",

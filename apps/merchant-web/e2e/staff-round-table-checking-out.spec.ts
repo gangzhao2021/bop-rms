@@ -68,6 +68,8 @@ interface State {
   phase: "Active" | "Closing";
   version: number;
   paid: boolean;
+  /** Marked unavailable on the Tables page (being cleaned). */
+  blocked?: boolean;
 }
 
 const round = (n: number, paid: boolean) => ({
@@ -183,8 +185,8 @@ async function signIn(page: Page, state: State, language: "en" | "zh-Hans") {
             areaCode: "MAIN",
             capacity: 4,
             lifecycle: "Published",
-            operationalState: "Available",
-            blockReasonCode: null,
+            operationalState: state.blocked === true ? "TemporarilyBlocked" : "Available",
+            blockReasonCode: state.blocked === true ? "CLEANING" : null,
             aggregateVersion: 2,
             currentDiningSessionReference: session,
             elapsedMinutes: 3,
@@ -295,6 +297,9 @@ const words = {
     checkAgain: "Check the table again",
     refused:
       "Table T7 can't take an order now (marked unavailable, or it is checking out or being closed). Check the table on the Tables page.",
+    unavailableHeading: "This table can't take an order now",
+    unavailable:
+      "It may be marked unavailable, or it may not be set up for orders yet. Check it on the Tables page.",
   },
   "zh-Hans": {
     paid: "T7 号桌的账单已付清，不能再加单。客人如还要点，请先关台，再按“已清洁”，然后为他们点单：这会开一张新账单。",
@@ -314,6 +319,8 @@ const words = {
     heldMeta: "Synthetic Store · 堂食 · 这桌现在不能加单",
     checkAgain: "再查看一次这桌",
     refused: "桌台 T7 目前不能点单（被标记为不可用，或正在结账、关台）。请在桌台页查看这张桌台。",
+    unavailableHeading: "这张桌台目前不能点单",
+    unavailable: "它可能被标记为不可用，或尚未设置好接受点单。请在桌台页查看。",
   },
 } as const;
 
@@ -374,6 +381,24 @@ for (const language of ["en", "zh-Hans"] as const) {
     await fitsAtEachWidth(page, refused, `entry-paid-${language}`);
     await expectNoInternalText(page);
     expect(rounds).toEqual([]);
+  });
+
+  test(`@production a table marked unavailable, opened directly, says why without naming checkout (${language})`, async ({
+    page,
+  }) => {
+    // Batch 57 (review): a table checking out or paid gets its own message on direct open, so this
+    // one never says "checking out" / "结账".
+    const state: State = { phase: "Active", version: 6, paid: false, blocked: true };
+    await signIn(page, state, language);
+    await page.goto(`/operations/order-entry?table=${tableReference}`);
+    await expect(page.getByRole("heading", { name: said.unavailableHeading })).toBeVisible();
+    const reason = page.getByText(said.unavailable, { exact: true });
+    await expect(reason).toBeVisible();
+    await expect(page.getByText(/checking out|结账/u)).toHaveCount(0);
+    await expect(page.getByRole("button", { name: said.send })).toHaveCount(0);
+    await fitsAtEachWidth(page, reason, `entry-unavailable-${language}`);
+    // "marked unavailable" names the state staff set on the Tables page, not a placeholder.
+    await expectNoInternalText(page, ["marked unavailable"]);
   });
 
   test(`@production a table checking out before anyone paid offers no staff round until checkout is cancelled (${language})`, async ({

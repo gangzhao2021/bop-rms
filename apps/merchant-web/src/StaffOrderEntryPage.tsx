@@ -350,7 +350,7 @@ const menuError: Record<string, [string, string]> = {
   TableUnavailable: [
     t("This table can't take an order now"),
     t(
-      "It may be marked unavailable, or it may be checking out or being closed. Check it on the Tables page.",
+      "It may be marked unavailable, or it may not be set up for orders yet. Check it on the Tables page.",
     ),
   ],
   TableHasNoQr: [
