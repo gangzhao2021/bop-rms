@@ -172,7 +172,7 @@ export function createSettledTableReceiptClient(
 const money = (amountMinor: string) => formatMoney(amountMinor, "CAD");
 const methodText = (method: Method) =>
   method === "Online"
-    ? t("Card on a guest’s phone")
+    ? t("Online by phone")
     : method === "Cash"
       ? t("Cash")
       : t("Card at the table");

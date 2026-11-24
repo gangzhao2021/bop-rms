@@ -163,12 +163,12 @@ describe("batch 56: the guest who paid part of a bill staff closed keeps their o
     );
     expect(own.read).toHaveBeenCalledTimes(1);
     expect(text()).toContain("Your receipt");
-    expect(text()).toContain("You paid $14.13 by card on this phone.");
+    expect(text()).toContain("You paid $14.13 online on this phone.");
     expect(text()).toContain("Part 1 of 2 of your table’s bill");
     expect(text()).toContain("Subtotal before tax$12.50");
     expect(text()).toContain("Tax$1.63");
     expect(text()).toContain("Total paid by you$14.13");
-    expect(text()).toContain("Paid byCard on this phone");
+    expect(text()).toContain("Paid byOnline by phone");
     expect(text()).toContain(
       "This receipt is for your payment only. Staff closed the rest of your table’s bill; it is not charged to you.",
     );
@@ -189,11 +189,11 @@ describe("batch 56: the guest who paid part of a bill staff closed keeps their o
       "zh-Hans",
     );
     expect(text()).toContain("您的收据");
-    expect(text()).toContain("您已在这部手机上在线支付 $14.13。");
+    expect(text()).toContain("您已在这部手机上在线付款 $14.13。");
     expect(text()).toContain("您付款的菜品");
     expect(text()).toContain("Beef noodles (TEST)");
     expect(text()).toContain("您实付合计$14.13");
-    expect(text()).toContain("付款方式本机在线付款");
+    expect(text()).toContain("付款方式手机在线付款");
     expect(text()).toContain(
       "这张收据只包括您的付款。本桌账单的其余部分已由店员关闭，不向您收取。",
     );
@@ -211,7 +211,7 @@ describe("batch 56: the guest who paid part of a bill staff closed keeps their o
       />,
     );
     expect(other.read).toHaveBeenCalledTimes(1);
-    expect(text()).not.toMatch(/Your receipt|You paid|Card on this phone/u);
+    expect(text()).not.toMatch(/Your receipt|You paid|Online by phone/u);
     const nothing = payer(evenPart);
     const state = closedTable({ count: 2, paid: 0 });
     if (state.status === "ready" && state.view.summary !== null)
@@ -240,7 +240,7 @@ describe("batch 56: the guest who paid part of a bill staff closed keeps their o
     expect(text()).toContain(
       "Staff closed your table’s bill: what was paid stays paid, and the rest is not charged to you.",
     );
-    expect(text()).toContain("You paid $14.13 by card on this phone.");
+    expect(text()).toContain("You paid $14.13 online on this phone.");
     expect(text()).toContain("Your receipt");
     expect(text()).toContain("Part 1 of 2 of your table’s bill");
     // Menu, a dish page or Cart: the line, and a link to that receipt on Your table.
@@ -256,7 +256,7 @@ describe("batch 56: the guest who paid part of a bill staff closed keeps their o
       />,
       "zh-Hans",
     );
-    expect(text()).toContain("您已在这部手机上在线支付 $14.13。");
+    expect(text()).toContain("您已在这部手机上在线付款 $14.13。");
     expect(container.querySelector("a")?.textContent).toBe("查看您的收据");
     expect(container.querySelector("a")?.getAttribute("href")).toBe("/dine-in/session");
   });
@@ -348,7 +348,7 @@ describe("batch 56 review: the closed-bill notice while the table is still open"
     expect(text()).toContain(
       "Staff closed your table’s bill: what was paid stays paid, and the rest is not charged to you.",
     );
-    expect(text()).toContain("You paid $14.13 by card on this phone.");
+    expect(text()).toContain("You paid $14.13 online on this phone.");
     expect(container.querySelector("a")?.textContent).toBe("See your receipt");
     expect(container.querySelector("a")?.getAttribute("href")).toBe("/dine-in/session");
     const [[, init]] = asked(fetch) as [[string, RequestInit]];
@@ -356,7 +356,7 @@ describe("batch 56 review: the closed-bill notice while the table is still open"
     expect(new Headers(init.headers).get("x-csrf-token")).toBe("d".repeat(43));
     // Moving to a dish page or Cart asks nothing again: a payment on a closed bill is final.
     await show(<TableCheckoutNotice checkout={closedSome} />, "zh-Hans");
-    expect(text()).toContain("您已在这部手机上在线支付 $14.13。");
+    expect(text()).toContain("您已在这部手机上在线付款 $14.13。");
     expect(container.querySelector("a")?.textContent).toBe("查看您的收据");
     expect(asked(fetch)).toHaveLength(1);
   });
@@ -397,6 +397,6 @@ describe("batch 56 review: the closed-bill notice while the table is still open"
     await show(<TableCheckoutNotice checkout={closedSome} />);
     expect(asked(down)).toHaveLength(1);
     expect(asked(back)).toHaveLength(1);
-    expect(text()).toContain("You paid $14.13 by card on this phone.");
+    expect(text()).toContain("You paid $14.13 online on this phone.");
   });
 });

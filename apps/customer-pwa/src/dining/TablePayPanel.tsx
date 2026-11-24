@@ -543,7 +543,7 @@ export function TablePayPanel({
             <dt>{t("Paid by")}</dt>
             <dd>
               {receipt.method === "Online"
-                ? t("Card on a guest’s phone")
+                ? t("Online by phone")
                 : receipt.method === "Cash"
                   ? t("Cash")
                   : t("Card at the table")}

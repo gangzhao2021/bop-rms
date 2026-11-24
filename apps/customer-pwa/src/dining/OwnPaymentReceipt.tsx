@@ -222,9 +222,9 @@ export function useOwnPaidAtTable(enabled: boolean): string | null {
     : null;
 }
 
-/** "You paid $14.13 by card on this phone." — the one line every tab says to the payer. */
+/** "You paid $14.13 online on this phone." — the one line every tab says to the payer. */
 export const youPaidText = (amountMinor: string) =>
-  t("You paid {amount} by card on this phone.", { amount: money(amountMinor) });
+  t("You paid {amount} online on this phone.", { amount: money(amountMinor) });
 
 function coversText(payment: OwnPaymentReceipt["payments"][number]): string {
   if (payment.covers === "WholeTable") return t("Your table’s whole bill");
@@ -274,13 +274,13 @@ export function OwnPaymentReceiptView({ receipt }: { readonly receipt: OwnPaymen
             </div>
             <div>
               <dt>{t("Paid by")}</dt>
-              <dd>{t("Card on this phone")}</dd>
+              <dd>{t("Online by phone")}</dd>
             </div>
           </dl>
         </div>
       ))}
       {receipt.tablePaidInFull ? null : (
-        <p>
+        <p className="dining-session__own-payment-note">
           {receipt.restClosedByStaff
             ? t(
                 "This receipt is for your payment only. Staff closed the rest of your table’s bill; it is not charged to you.",

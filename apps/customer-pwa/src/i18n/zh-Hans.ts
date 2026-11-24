@@ -194,7 +194,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Cancelled · {refund}{amount}": "已取消 · {refund}{amount}",
   "Cancelled — not paid": "已取消 — 未付款",
   "Card payment isn’t set up at this location yet. Ask staff how to pay.":
-    "本店暂未开通刷卡付款，请询问店员如何付款。",
+    "本店暂未开通在线付款，请询问店员如何付款。",
   "Card · ": "银行卡 · ",
   "Cart actions": "购物车操作",
   "Cart changed": "购物车有变动",
@@ -440,7 +440,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Loading order status": "正在加载订单状态",
   "Loading payment": "正在加载付款",
   "Loading receipt": "正在加载收据",
-  "Loading secure card form…": "正在加载安全刷卡表单…",
+  "Loading secure card form…": "正在加载安全付款表单…",
   "Loading the current menu": "正在加载当前菜单",
   "Loading your cart…": "正在加载您的购物车…",
   "Loading your table": "正在加载您的桌位",
@@ -508,7 +508,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "One of the chosen options is no longer available.": "所选的某个选项已不再供应。",
   "One of your choices has no current price. Ask staff for help.":
     "您的某个选项目前没有价格，请向店员求助。",
-  "Online card": "在线刷卡",
+  "Online card": "银行卡在线付款",
   "Online ordering is paused for a short while. Try again in a few minutes, or order with a staff member.":
     "在线点单暂停一会儿。请几分钟后再试，或请店员帮您点单。",
   "Online ordering paused": "在线点单已暂停",
@@ -535,7 +535,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{label} registration no. {number}": "{label}登记号 {number}",
   "How many {name}": "{name}的数量",
   "Open the menu": "打开菜单",
-  "Opening a new card payment…": "正在打开新的刷卡付款…",
+  "Opening a new card payment…": "正在打开新的银行卡付款…",
   "Opening your order": "正在打开您的订单",
   "Opening your order on this phone…": "正在这部手机上打开您的订单…",
   "Opening your payment…": "正在打开您的付款…",
@@ -793,7 +793,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Search the menu": "搜索菜单",
   "Search this menu": "搜索本菜单",
   Section: "分区",
-  "Secure card payment": "安全刷卡付款",
+  "Secure card payment": "安全的银行卡付款",
   "Secure payment": "安全付款",
   "See everything your table ordered": "查看这桌点的所有东西",
   "See your table": "查看本桌",
@@ -979,7 +979,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "This menu can’t be opened": "无法打开这个菜单",
   "This order can’t be paid yet. Ask staff for help.": "这笔订单暂时无法付款，请向店员求助。",
   "This order has reached the limit of card tries. Ask staff to pay at the counter.":
-    "这笔订单的刷卡次数已达上限，请到柜台请店员收款。",
+    "这笔订单的银行卡付款尝试次数已达上限，请到柜台请店员收款。",
   "This order is complete.": "这笔订单已完成。",
   "This order isn’t available on this phone": "这部手机上无法查看这笔订单",
   "This order was cancelled because its payment didn’t go through. You weren’t charged for it.":
@@ -1118,11 +1118,11 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "We couldn’t make a code. Try again, or ask a staff member for one.":
     "无法生成代码。请重试，或向店员要一个。",
   "We couldn’t open another card payment. Check your connection and try again.":
-    "无法打开新的刷卡付款，请检查网络后重试。",
+    "无法打开新的银行卡付款，请检查网络后重试。",
   "We couldn’t open your payment. Check your connection and try again.":
     "无法打开您的付款，请检查网络后重试。",
   "We couldn’t prepare your card payment. Check the form and try again.":
-    "无法准备刷卡付款，请检查表单后重试。",
+    "无法准备银行卡付款，请检查表单后重试。",
   "We couldn’t price your order just now. Try again in a moment; if it still doesn’t work, ask staff to take your order.":
     "暂时无法为您的订单计价。请稍后再试；如果仍然不行，请店员帮您点单。",
   "We couldn’t reach the store": "无法连接门店",
@@ -1403,7 +1403,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Staff closed your table’s bill: what was paid stays paid, and the rest is not charged to you.":
     "店员已关闭本桌账单：已付的款项不变，其余不向您收取。",
   // Batch 56 (v15 b55 live): the guest who paid part of a bill staff closed keeps their receipt.
-  "You paid {amount} by card on this phone.": "您已在这部手机上在线支付 {amount}。",
+  // Batch 57 (v15 b56 live): a guest's phone payment has one name on every receipt — paid online
+  // on a phone (在线付款), never a card swipe (刷卡 is the store's card machine only).
+  "You paid {amount} online on this phone.": "您已在这部手机上在线付款 {amount}。",
+  "Online by phone": "手机在线付款",
   "See your receipt": "查看您的收据",
   "Your receipt": "您的收据",
   "Your table’s whole bill": "本桌全部账单",
@@ -1412,7 +1415,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Part {number} of {count} of your table’s bill":
     "本桌账单共\u00a0{count}\u00a0份，这是第\u00a0{number}\u00a0份",
   "Total paid by you": "您实付合计",
-  "Card on this phone": "本机在线付款",
   "This receipt is for your payment only. Staff closed the rest of your table’s bill; it is not charged to you.":
     "这张收据只包括您的付款。本桌账单的其余部分已由店员关闭，不向您收取。",
   "This receipt is for your payment only, not your table’s whole bill.":
@@ -1445,7 +1447,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Your table’s order": "本桌消费",
   "Total paid": "实付合计",
   "Paid by": "付款方式",
-  "Card on a guest’s phone": "客人手机刷卡",
   "Card at the table": "桌边刷卡",
   "Thank you! Your table is paid in full.": "谢谢！本桌已全部付清。",
   "Pay the bill": "结账付款",
@@ -1463,7 +1464,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Pay {amount}": "支付 {amount}",
   Cash: "现金",
   "Card payment isn’t available on this phone. Ask a staff member to take the payment.":
-    "这部手机暂时不能刷卡付款，请找店员收款。",
+    "这部手机暂时不能在线付款，请找店员收款。",
   "Choose a tip to pay": "请选择小费后付款",
   "Other amount": "其他金额",
   "Enter the tip to pay": "请输入小费后付款",
@@ -1541,12 +1542,14 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Part {number} · {amount}": "第 {number} 份 · {amount}",
   paid: "已付",
   "being paid": "正在付",
-  "{paid} of {count} parts paid · {amount} to go": "已付 {paid}/{count} 份 · 还差 {amount}",
+  // Batch 57 (v15 b56 live): parts paid said one way across Your table (as on the round cards).
+  "{paid} of {count} parts paid · {amount} to go":
+    "{count}\u00a0份付了 {paid}\u00a0份 · 还差 {amount}",
   "Tip (for your part)": "小费（按您这一份）",
   "Every part of the bill is paid ({count} parts). Thank you!": "账单 {count} 份都已付清，谢谢！",
   "Still to pay": "还剩",
-  "The table is paying the bill in {count} parts; {paid} paid so far. Cash at the counter is rounded to the nearest 5 cents; card and phone payments are not.":
-    "这桌分成 {count} 份付款，已付 {paid} 份。在柜台付现金按 5 分取整，刷卡和手机付款不取整。",
+  "The table is paying the bill in parts: {paid} of {count} parts paid. Cash at the counter is rounded to the nearest 5 cents; card and phone payments are not.":
+    "这桌分份付款：{count}\u00a0份付了 {paid}\u00a0份。在柜台付现金按 5 分取整，刷卡和手机付款不取整。",
   "The table is paying by dish; {paid} paid so far. Cash at the counter is rounded to the nearest 5 cents; card and phone payments are not.":
     "这桌按菜付款，已付 {paid} 笔。在柜台付现金按 5 分取整，刷卡和手机付款不取整。",
   "The table paid in one payment. Cash is rounded to the nearest 5 cents; card and phone payments are not rounded.":

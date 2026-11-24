@@ -353,6 +353,13 @@
   color: var(--bop-color-text-muted);
   font-size: 0.875rem;
 }
+/* Batch 57 (v15 b56 live): the own receipt's closing note is a note under the amounts, a section
+   gap below the "Paid by" row, like the Table total's note — not one more row of that table. */
+.customer-page .dining-session__own-payment-note {
+  margin: var(--bop-space-4) 0 0;
+  color: var(--bop-color-text-muted);
+  font-size: 0.875rem;
+}
 
 /* WP-2423 取舍 18 DEC-MEMBER-POINTS: joining, using points and the member page. */
 .customer-page .member-panel,

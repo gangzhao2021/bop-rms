@@ -1524,7 +1524,7 @@ test.describe("@production CUST-DINE-IN-SESSION table view", () => {
     };
     await page.reload();
     await expect(card).toContainText("Part 1 paid byCard at the table · $3.22");
-    await expect(card).toContainText("Part 2 paid byCard on a guest’s phone · $2.55");
+    await expect(card).toContainText("Part 2 paid byOnline by phone · $2.55");
     await expect(card).toContainText("Tip$0.68");
     // WP-2423 DEC-TAX-WHOLE-RECEIPT (v15 batch 9): one tax figure, the bill's tax worked out once
     // (the rounds' tax less the cent), with no separate rounding line.
@@ -1962,7 +1962,7 @@ test.describe("@production DEC-DINE-IN-PAY-LATER S4 the guest pays the whole tab
     await pay.getByRole("button", { name: "Pay securely" }).click();
     const receipt = page.getByRole("region", { name: "Receipt" });
     await expect(receipt).toContainText("$23.04", { timeout: 10000 });
-    await expect(receipt).toContainText("Card on a guest’s phone");
+    await expect(receipt).toContainText("Online by phone");
     await expect(receipt).toContainText("$2.70");
     // Points already came off the table's order; the receipt says so while the table is open.
     await expect(receipt).toContainText("Points used (already taken off)");
@@ -2760,7 +2760,7 @@ test.describe("@production 同桌结账 guests pay by dish at a table that pays 
       evenSplit.on = true;
       await page.getByRole("button", { name: "Refresh now" }).click();
       await expect(
-        page.getByText("The table is paying the bill in 2 parts; 0 paid so far."),
+        page.getByText("The table is paying the bill in parts: 0 of 2 parts paid."),
       ).toBeVisible();
       await expect(pay).toContainText("Your table split the bill evenly in 2 parts.", {
         timeout: 3_000,

@@ -144,6 +144,42 @@ it("batch 42 (v15 b41 live): every Chinese guest text says 您, never 你", () =
   ).toBe("手机号只用来发登录验证码，以及在积分过期前通知您。您可以随时退出并删除。");
 });
 
+it("batch 57 (v15 b56 live): a guest's phone payment has one name; 刷卡 is the card machine only", () => {
+  const { keys } = translatedTexts();
+  // One name for the method on every receipt (own, whole table, settled), in each language.
+  expect(keys.has("Online by phone")).toBe(true);
+  expect(zhHans["Online by phone"]).toBe("手机在线付款");
+  for (const old of ["Card on this phone", "Card on a guest’s phone"]) {
+    expect(keys.has(old), old).toBe(false);
+    expect(Object.hasOwn(zhHans, old), old).toBe(false);
+  }
+  expect(zhHans["You paid {amount} online on this phone."]).toBe(
+    "您已在这部手机上在线付款 {amount}。",
+  );
+  // 刷卡 (a swipe) only where staff take a card on the store's card machine (刷卡机, 桌边刷卡), or
+  // where the rounding note sets card payments beside phone payments.
+  const swipe = Object.entries(zhHans).filter(
+    ([, chinese]) => chinese.includes("刷卡") && !/刷卡机|桌边刷卡|刷卡和手机付款/u.test(chinese),
+  );
+  expect(swipe).toEqual([]);
+});
+
+it("batch 57 (v15 b56 live): Your table says parts paid one way in Chinese, as the round cards do", () => {
+  const round = zhHans["{paid} of {count} parts paid"];
+  expect(round).toBe("{count}\u00a0份付了 {paid}\u00a0份");
+  expect(zhHans["{paid} of {count} parts paid · {amount} to go"]).toBe(`${round} · 还差 {amount}`);
+  expect(
+    zhHans[
+      "The table is paying the bill in parts: {paid} of {count} parts paid. Cash at the counter is rounded to the nearest 5 cents; card and phone payments are not."
+    ],
+  ).toContain(round);
+  // Never the fraction, nor "已付 N 份", for an even split's progress.
+  const others = Object.entries(zhHans).filter(([, chinese]) =>
+    /\{paid\}\/\{count\}|已付 \{paid\} 份/u.test(chinese),
+  );
+  expect(others).toEqual([]);
+});
+
 it("batch 42 (v15 b41 live): a table named in Latin letters keeps a space where it meets Chinese", () => {
   renderToStaticMarkup(createElement(LanguageRoot, { initial: "zh-Hans", children: () => null }));
   try {

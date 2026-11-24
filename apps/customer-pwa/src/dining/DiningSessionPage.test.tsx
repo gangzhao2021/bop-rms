@@ -778,13 +778,15 @@ describe("CUST-DINE-IN-SESSION (WP-2423 Q8)", () => {
       { split: true, tipMinor: "235", paidMinor: "2100" },
     );
     expect(split).toContain("Part 1 paid by");
-    expect(split).toContain("Card on a guest’s phone · $11.00");
+    expect(split).toContain("Online by phone · $11.00");
     expect(split).toContain("Part 2 paid by");
     expect(split).toContain("Card at the table · $10.00");
     expect(split).toContain("Tip");
     expect(split).toContain("$2.35");
     // Public fields only.
-    expect(cash + split).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-7|CardMachine|Online\b|@/u);
+    expect(cash + split).not.toMatch(
+      /[0-9a-f]{8}-[0-9a-f]{4}-7|CardMachine|Online\b(?! by phone)|@/u,
+    );
     expect(() => parseSettledTableReceipt({ receipt: { tableLabel: "<b>" } })).toThrow();
   });
 
@@ -1410,10 +1412,10 @@ describe("batch 53 (v15 b52 live): the Table total note says how a split bill wa
       "这桌按菜付款，已付 1 笔。在柜台付现金按 5 分取整，刷卡和手机付款不取整。",
     );
     expect(note("en", "1413", "1412", { count: 2, paid: 1 })).toContain(
-      "The table is paying the bill in 2 parts; 1 paid so far. Cash at the counter is rounded to the nearest 5 cents; card and phone payments are not.",
+      "The table is paying the bill in parts: 1 of 2 parts paid. Cash at the counter is rounded to the nearest 5 cents; card and phone payments are not.",
     );
     expect(note("zh-Hans", "1413", "1412", { count: 2, paid: 1 })).toContain(
-      "这桌分成 2 份付款，已付 1 份。在柜台付现金按 5 分取整，刷卡和手机付款不取整。",
+      "这桌分份付款：2 份付了 1 份。在柜台付现金按 5 分取整，刷卡和手机付款不取整。",
     );
   });
   it("staff wrote off the rest after part was paid: never says the table paid in full", () => {
@@ -1585,7 +1587,7 @@ describe("WP-2423 item 8 ④ v15 a: a table paying its split bill in parts", () 
     });
     expect(html).toContain("Still to pay");
     expect(html).toContain("$3.39");
-    expect(html).toContain("The table is paying the bill in 3 parts; 2 paid so far.");
+    expect(html).toContain("The table is paying the bill in parts: 2 of 3 parts paid.");
     expect(html).not.toContain("To pay at the end");
     expect(html).not.toContain("The table paid once at the end");
   });

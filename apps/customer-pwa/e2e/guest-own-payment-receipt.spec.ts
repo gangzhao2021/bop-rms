@@ -10,7 +10,8 @@ import { routeStorefrontReads } from "./storefront-reads";
 // table read, the table-payment reads (the bill and this phone's own payment) and, once the table
 // closed, the visit restore are the real API handlers on a local server, answering v15's records;
 // the cart's refusal, the menu and the storefront reads are synthetic, in the shapes v15 answered.
-type Scenario = "by-dish-written-off" | "half-split-written-off";
+type Scenario =
+  "by-dish-written-off" | "half-split-written-off" | "half-split-open" | "whole-table-paid-online";
 interface GuestBillHttp {
   readonly url: string;
   close(): Promise<void>;
@@ -255,7 +256,8 @@ async function expectOnFirstScreen(line: Locator) {
 function words(zh: boolean, item: Scenario) {
   return {
     receipt: zh ? "您的收据" : "Your receipt",
-    youPaid: zh ? "您已在这部手机上在线支付 $14.13。" : "You paid $14.13 by card on this phone.",
+    // Batch 57 (v15 b56 live): one name for a guest's phone payment, on every receipt.
+    youPaid: zh ? "您已在这部手机上在线付款 $14.13。" : "You paid $14.13 online on this phone.",
     covers:
       item === "by-dish-written-off"
         ? zh
@@ -265,7 +267,7 @@ function words(zh: boolean, item: Scenario) {
           ? "本桌账单共\u00a02\u00a0份，这是第\u00a01\u00a0份"
           : "Part 1 of 2 of your table’s bill",
     total: zh ? "您实付合计" : "Total paid by you",
-    method: zh ? "本机在线付款" : "Card on this phone",
+    method: zh ? "付款方式手机在线付款" : "Paid byOnline by phone",
     only: zh
       ? "这张收据只包括您的付款。本桌账单的其余部分已由店员关闭，不向您收取。"
       : "This receipt is for your payment only. Staff closed the rest of your table’s bill; it is not charged to you.",
@@ -297,6 +299,14 @@ async function expectOwnReceipt(page: Page, zh: boolean, item: Scenario, width: 
   await expect(receipt).toContainText(text.method);
   await expect(receipt).toContainText(text.only);
   await expect(receipt).not.toContainText(text.wrong);
+  // Batch 57 (v15 b56 live): the closing note is its own paragraph under the amounts, a section
+  // gap (the page's 16 px token) below the last row, "Paid by", not a row of that table. Before,
+  // it sat about 4 px under it.
+  const paidBy = receipt.locator("dl > div").last();
+  await expect(paidBy).toContainText(text.method);
+  const below = await receipt.getByText(text.only).boundingBox();
+  const row = await paidBy.boundingBox();
+  expect((below?.y ?? 0) - ((row?.y ?? 0) + (row?.height ?? 0))).toBeGreaterThanOrEqual(12);
   await expectInside(receipt, width);
   await expectOnFirstScreen(receipt.getByText(text.youPaid));
 }
@@ -436,4 +446,74 @@ for (const width of [390, 1024, 1440])
           });
         });
       }
+    });
+
+// Batch 57 (v15 b56 live, payer-own-payment-record): the same phone payment was named two ways —
+// the payer's own receipt said "Card on this phone" / 本机在线付款, while an ordinary table one phone
+// paid in full (TM2 L56P D, order 101) still said 付款方式 客人手机刷卡 ("a card swipe on a guest's
+// phone") on Your table, open and ended. It is an online payment from the guest's phone, never a
+// card machine swipe: one name per language on every receipt. The table-payment reads (the pay
+// panel's receipt; once closed, the settled receipt) are the real API handlers on a local server.
+for (const width of [390, 1024, 1440])
+  for (const zh of [false, true])
+    test.describe(`@production CUST-DINE-IN one name for a guest's phone payment (${zh ? "zh-Hans" : "en"} ${width})`, () => {
+      test.use({ viewport: { width, height: 844 }, hasTouch: width < 768, isMobile: width < 768 });
+      test("whole table paid on one phone (order 101): open and ended receipts say how", async ({
+        page,
+      }) => {
+        test.setTimeout(90_000);
+        scenario = "whole-table-paid-online";
+        phone = { payer: false, tableClosed: false };
+        await stubTable(page, []);
+        const method = zh ? "付款方式手机在线付款" : "Paid byOnline by phone";
+        const old = zh ? /刷卡/u : /Card on|guest’s phone/u;
+        const tag = `whole-table-${zh ? "zh" : "en"}-${width}`;
+
+        await open(page, "/dine-in/session", zh);
+        const receipt = page.getByRole("region", { name: zh ? "收据" : "Receipt", exact: true });
+        await expect(receipt).toContainText((zh ? "实付合计" : "Total paid") + "$28.25");
+        await expect(receipt).toContainText(method);
+        await expect(receipt).not.toContainText(old);
+        await expectInside(receipt, width);
+        await page.screenshot({ path: `test-results/b57-open-${tag}.png`, fullPage: true });
+
+        phone = { payer: false, tableClosed: true };
+        await open(page, "/dine-in/session", zh);
+        const ended = page.getByRole("region", { name: zh ? "收据" : "Receipt", exact: true });
+        await expect(ended).toContainText(zh ? "第 1 轮" : "Round 1");
+        await expect(ended).toContainText(method);
+        await expect(ended).not.toContainText(old);
+        await expectInside(ended, width);
+        await expectNoInternalText(page);
+        await page.screenshot({ path: `test-results/b57-ended-${tag}.png`, fullPage: true });
+      });
+
+      // Batch 57 (v15 b56 live, split-round-labels-and-rounding-note): during an open even split
+      // with part 1 paid, zh-Hans Your table said the same progress three ways — the round cards
+      // "2 份付了 1 份", the pay panel "已付 1/2 份 · 还差 $14.12", the Table total note "这桌分成 2 份付款，
+      // 已付 1 份". One phrasing across the page (English already says "1 of 2 parts paid").
+      test("open even split, part 1 paid (order 88): parts paid said one way", async ({ page }) => {
+        test.setTimeout(90_000);
+        scenario = "half-split-open";
+        phone = { payer: false, tableClosed: false };
+        await stubTable(page, []);
+        const parts = zh ? "2\u00a0份付了 1\u00a0份" : "1 of 2 parts paid";
+        await open(page, "/dine-in/session", zh);
+        const main = page.getByRole("main");
+        const pay = main.getByRole("region", { name: zh ? "结账付款" : "Pay the bill" });
+        await expect(pay).toContainText(parts + (zh ? " · 还差 $14.12" : " · $14.12 to go"));
+        const rounds = main.getByRole("region", { name: zh ? "各轮点单" : "Rounds" });
+        await expect(rounds.getByText(parts, { exact: true })).toHaveCount(2);
+        const total = main.getByRole("region", { name: zh ? "本桌合计" : "Table total" });
+        await expect(total).toContainText(parts);
+        await expect(total).toContainText((zh ? "还剩" : "Still to pay") + "$14.12");
+        // Never the fraction or another phrasing of the same progress.
+        await expect(main).not.toContainText(zh ? /1\/2|已付 1 份|分成 2 份付款/u : /1\/2/u);
+        await expectInside(pay, width);
+        await expectInside(total, width);
+        await page.screenshot({
+          path: `test-results/b57-split-open-${zh ? "zh" : "en"}-${width}.png`,
+          fullPage: true,
+        });
+      });
     });

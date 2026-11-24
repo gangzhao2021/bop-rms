@@ -927,7 +927,7 @@ function TableSummary({ view }: { readonly view: DiningSessionView }) {
                   )
                 : payLater && summary.splitParts !== undefined
                   ? t(
-                      "The table is paying the bill in {count} parts; {paid} paid so far. Cash at the counter is rounded to the nearest 5 cents; card and phone payments are not.",
+                      "The table is paying the bill in parts: {paid} of {count} parts paid. Cash at the counter is rounded to the nearest 5 cents; card and phone payments are not.",
                       {
                         count: String(summary.splitParts.count),
                         paid: String(summary.splitParts.paid),
