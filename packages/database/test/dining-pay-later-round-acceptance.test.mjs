@@ -7784,9 +7784,9 @@ async function journey(journeyEnding) {
           const refunded = await bill();
           assert.equal(refunded.refundedMinor, "100");
           // Batch 60 (v15 b58/b59 known limit): the round B's phone payment and staff's cash part
-          // paid reads partly refunded on every guest page (it said only "Paid"). B, whose own
-          // payment went untouched, is told what it paid for the round; A, who paid nothing that
-          // stands, is told no amount. Payment's own records, read under the pilot role.
+          // paid reads partly refunded on every guest page (it said only "Paid"). Batch 60 review:
+          // no phone is told "you paid ... after refunds": B's own payment went untouched, and A
+          // paid nothing that stands. Payment's own records, read under the pilot role.
           const roundRefundsFor = (guest) =>
             transactions({ guc: true }).run((tx) =>
               readCustomerTablePayments(
@@ -7801,12 +7801,7 @@ async function journey(journeyEnding) {
             );
           assert.deepEqual(
             Object.fromEntries((await roundRefundsFor(tableGuest)).roundPaymentRefunds),
-            {
-              [first.orderBatchReference]: {
-                state: "Partly",
-                yourPaidAfterRefundsMinor: unitMinor,
-              },
-            },
+            { [first.orderBatchReference]: { state: "Partly" } },
           );
           assert.deepEqual(
             Object.fromEntries((await roundRefundsFor(guestSession)).roundPaymentRefunds),

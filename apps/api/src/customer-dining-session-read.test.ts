@@ -2524,16 +2524,59 @@ describe("batch 60: refunds of a round's own payment", () => {
       ),
     ).toEqual({ "round-1": { state: "Full" } });
   });
-  it("one payment for several rounds, partly back: both Partly, no amount it can't tie", () => {
-    const whole = [settlement("s-w", null, [line("round-1", 1413n), line("round-2", 1412n)])];
+  // Batch 60 review: B's own payment for the round went untouched; only A's went back. B reads
+  // plain "Partly refunded", never "you paid $7.13 after refunds" as if B had been refunded.
+  it("a round two guests paid, only the other's payment back: no amount for the untouched phone", () => {
+    const shared = [
+      settlement("s-a", 1, [line("round-1", 700n)]),
+      settlement("s-b", 2, [line("round-1", 713n)]),
+    ];
+    for (const given of [700n, 300n])
+      expect(
+        Object.fromEntries(
+          customerRoundPaymentRefunds(plan, shared, new Map([["s-a", given]]), "guest-b"),
+        ),
+      ).toEqual({ "round-1": { state: "Partly" } });
     expect(
       Object.fromEntries(
-        customerRoundPaymentRefunds(undefined, whole, new Map([["s-w", 800n]]), "guest-a"),
+        customerRoundPaymentRefunds(plan, shared, new Map([["s-a", 300n]]), "guest-a"),
       ),
-    ).toEqual({ "round-1": { state: "Partly" }, "round-2": { state: "Partly" } });
+    ).toEqual({ "round-1": { state: "Partly", yourPaidAfterRefundsMinor: 400n } });
+  });
+  // Batch 60 review: a payment for several rounds, only partly back, can't be tied to any one
+  // round: no round says "Partly refunded" (the Table total note and the payer's receipt carry
+  // it); everything back says Full on each round it paid.
+  it("one payment for several rounds, partly back: no round is marked; all back: both Full", () => {
+    const whole = [settlement("s-w", null, [line("round-1", 1413n), line("round-2", 1412n)])];
+    expect(
+      customerRoundPaymentRefunds(undefined, whole, new Map([["s-w", 800n]]), "guest-a").size,
+    ).toBe(0);
     expect(
       Object.fromEntries(customerRoundPaymentRefunds(undefined, whole, new Map([["s-w", 2825n]]))),
     ).toEqual({ "round-1": { state: "Full" }, "round-2": { state: "Full" } });
+    const byDishSeveral = [
+      settlement("s-a", 1, [line("round-1", 1413n), line("round-2", 1412n)]),
+      settlement("s-b", 2, [line("round-3", 900n)]),
+    ];
+    expect(
+      customerRoundPaymentRefunds(plan, byDishSeveral, new Map([["s-a", 800n]]), "guest-a").size,
+    ).toBe(0);
+  });
+  it("a round paid by a partly refunded multi-round payment and one fully back: Partly, no amount", () => {
+    const mixed = [
+      settlement("s-a", 1, [line("round-1", 700n), line("round-2", 500n)]),
+      settlement("s-b", 2, [line("round-1", 713n)]),
+    ];
+    const refunds = new Map([
+      ["s-a", 300n],
+      ["s-b", 713n],
+    ]);
+    expect(
+      Object.fromEntries(customerRoundPaymentRefunds(plan, mixed, refunds, "guest-a")),
+    ).toEqual({ "round-1": { state: "Partly" } });
+    expect(
+      Object.fromEntries(customerRoundPaymentRefunds(plan, mixed, refunds, "guest-b")),
+    ).toEqual({ "round-1": { state: "Partly", yourPaidAfterRefundsMinor: 0n } });
   });
   it("staff's even split pays no round: nothing is tied to a round", () => {
     expect(

@@ -112,8 +112,9 @@ export interface DiningRound {
   readonly refundPending?: DiningMoney;
   /**
    * Batch 60 (v15 b58/b59 known limit): a Paid round whose own payment (by dish, or the whole
-   * table's one payment) staff then gave back, all of it or some. `yourPaidAfterRefunds`: only on
-   * the phone whose payment it was, what it came to for this round after refunds.
+   * table's one payment) staff then gave back, all of it or some of this round's money (a payment
+   * for several rounds only partly given back marks no round). `yourPaidAfterRefunds`: only on the
+   * phone whose own payment for this round was given back, what it came to after refunds.
    */
   readonly paymentRefund?: {
     readonly state: "Partly" | "Full";

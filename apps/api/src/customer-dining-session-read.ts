@@ -600,12 +600,16 @@ export function customerSplitParts(
  * parts (and parts by round or by item) pay the bill, no round in particular, and say nothing here.
  */
 export interface CustomerRoundPaymentRefund {
-  /** Full: every payment that paid this round went back in full; Partly: some of one did. */
+  /**
+   * Full: every payment that paid this round went back in full; Partly: some of this round's money
+   * provably went back (a payment for it went back in full, or one that paid only this round went
+   * back in part). A payment for several rounds, only partly given back, marks no round.
+   */
   readonly state: "Partly" | "Full";
   /**
-   * Partly only, and only for the phone whose own payment paid (some of) this round: what that
-   * payment came to for this round after refunds. Absent when the refund can't be tied to this
-   * round (one payment for several rounds, only partly given back).
+   * Partly only, and only for the phone whose own payment for this round was (in part) given back:
+   * what that payment came to for this round after refunds. Absent when its own payment went
+   * untouched or its refund can't be tied to this round.
    */
   readonly yourPaidAfterRefundsMinor?: bigint;
 }
@@ -666,6 +670,20 @@ export function customerRoundPaymentRefunds(
       (settlement.lines ?? []).map((line) => line.orderBatchReference),
     ),
   );
+  // What went back of one payment for this round, when it can be told for this round: none, all
+  // of the round's share (the payment went back in full), or the refund itself when the payment
+  // paid only this round. A payment for several rounds, only partly given back, can't be tied to
+  // any one of them (null): its refund stays on the Table total note and the payer's receipt.
+  const tied = (settlement: (typeof paying)[number], round: string): bigint | null => {
+    const given = back(settlement);
+    if (given === 0n) return 0n;
+    const total = settlement.totalMinor as bigint;
+    if (given >= total) return share(settlement, round);
+    const onlyThisRound = (settlement.lines ?? []).every(
+      (line) => line.orderBatchReference === round,
+    );
+    return onlyThisRound && share(settlement, round) === total ? given : null;
+  };
   for (const round of rounds) {
     const covering = paying.filter((settlement) =>
       (settlement.lines ?? []).some((line) => line.orderBatchReference === round),
@@ -678,30 +696,27 @@ export function customerRoundPaymentRefunds(
       answer.set(round, Object.freeze({ state: "Full" as const }));
       continue;
     }
-    // This phone's own payments for this round, when each one's refund can be told for it.
-    const own = covering.filter(mine);
+    // Partly only when some of this round's money provably went back.
+    if (!covering.some((settlement) => (tied(settlement, round) ?? 0n) > 0n)) continue;
+    // This phone's own payments for this round: its amount after refunds only when some of them
+    // went back for this round and every one's refund can be told for it. A phone whose own
+    // payment went untouched reads plain "Partly refunded", never "you paid ... after refunds".
     let paid = 0n;
     let refunded = 0n;
-    let told = own.length > 0;
-    for (const settlement of own) {
-      const part = share(settlement, round);
-      const total = settlement.totalMinor as bigint;
-      const given = back(settlement);
-      const whole = (settlement.lines ?? []).reduce(
-        (sum, line) => sum + line.roundMinor + line.tipMinor + line.roundingMinor,
-        0n,
-      );
-      paid += part;
-      if (given >= total) refunded += part;
-      else if (given === 0n) continue;
-      else if (part === whole && whole === total) refunded += given;
-      else told = false;
+    let told = true;
+    for (const settlement of covering.filter(mine)) {
+      paid += share(settlement, round);
+      const given = tied(settlement, round);
+      if (given === null) told = false;
+      else refunded += given;
     }
     answer.set(
       round,
       Object.freeze({
         state: "Partly" as const,
-        ...(told && paid >= refunded ? { yourPaidAfterRefundsMinor: paid - refunded } : {}),
+        ...(told && refunded > 0n && paid >= refunded
+          ? { yourPaidAfterRefundsMinor: paid - refunded }
+          : {}),
       }),
     );
   }
