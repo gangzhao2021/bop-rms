@@ -2189,6 +2189,47 @@ export function awaitingSince(order: CurrentOrderQueue["items"][number]): string
     .map((batch) => batch.awaitingAcceptanceSince ?? batch.submittedAt ?? order.submittedAt);
   return starts.length === 0 ? order.submittedAt : starts.reduce((a, b) => (b < a ? b : a));
 }
+/** The Store's current business day as Orders needs it: its date and when it began. */
+export type OrdersBusinessDay = Readonly<{ businessDate: string; startsAt: string }>;
+/**
+ * Batch 56 (v15 batch 55 live, Test Merchant 2): a table order of Wed Nov 4 ("11/4 · 2") whose only
+ * round was still waiting to be accepted 19 days later was listed first under "Today", above the
+ * real New order, as if it were today's work. An order of an earlier business day that has sent
+ * nothing since today began, but still has a round to accept, is a leftover: it is listed with the
+ * earlier days' unfinished orders, Needs attention names it, its row says so, and the To accept tab
+ * still lists it. It is never hidden or dropped. A table of an earlier day that sent a round today
+ * stays with today's orders.
+ */
+export function earlierDayWaiting(
+  order: CurrentOrderQueue["items"][number],
+  day: OrdersBusinessDay | null,
+): boolean {
+  if (day === null || order.businessDate === null || order.businessDate >= day.businessDate)
+    return false;
+  if (order.heldStock !== null || order.earlierOpenPickup || !isAwaitingAcceptance(order))
+    return false;
+  const dayStart = Date.parse(day.startsAt);
+  return !order.batches.some(
+    (batch) => Date.parse(batch.submittedAt ?? order.submittedAt) >= dayStart,
+  );
+}
+/** The Store's current business day for Orders (null outside a Store workspace or until read). */
+function useOrdersBusinessDay(): OrdersBusinessDay | null {
+  const day = useStoreBusinessDay();
+  const businessDate = day?.businessDate ?? null;
+  const startsAt = day?.startsAt ?? null;
+  return useMemo(
+    () => (businessDate === null || startsAt === null ? null : { businessDate, startsAt }),
+    [businessDate, startsAt],
+  );
+}
+/** An earlier day's order still to finish: holding stock, an open pickup, or a round waiting. */
+export function earlierDayUnfinished(
+  order: CurrentOrderQueue["items"][number],
+  day: OrdersBusinessDay | null,
+): boolean {
+  return order.heldStock !== null || order.earlierOpenPickup || earlierDayWaiting(order, day);
+}
 /**
  * merchant-outage-recovery M43: within each day group of the list (the server's order), the orders
  * still waiting for acceptance come first, the one waiting longest on top, so a new order lands at
@@ -2201,8 +2242,9 @@ export function awaitingSince(order: CurrentOrderQueue["items"][number]): string
  */
 export function awaitingFirst<T extends CurrentOrderQueue["items"][number]>(
   items: readonly T[],
+  day: OrdersBusinessDay | null = null,
 ): readonly T[] {
-  const unfinished = (order: T) => order.heldStock !== null || order.earlierOpenPickup;
+  const unfinished = (order: T) => earlierDayUnfinished(order, day);
   const group = (order: T) => (unfinished(order) ? "held" : (order.listedBusinessDate ?? ""));
   const result: T[] = [];
   let run: T[] = [];
@@ -2372,6 +2414,7 @@ function OrderStatusNotes({
   readonly timeZone?: string | undefined;
   readonly position?: CurrentOrderDetail["paymentPosition"] | undefined;
 }) {
+  const day = useOrdersBusinessDay();
   return (
     <>
       {now === undefined ? null : <AcceptanceDeadline order={order} now={now} />}
@@ -2395,6 +2438,10 @@ function OrderStatusNotes({
         </span>
       ) : order.earlierOpenPickup ? (
         <span className="order-held-stock-tag">{t("From an earlier day · not finished")}</span>
+      ) : earlierDayWaiting(order, day) ? (
+        <span className="order-held-stock-tag">
+          {t("From an earlier day · waiting to be accepted")}
+        </span>
       ) : null}
       {order.counter?.recordedAfterOutage ? (
         <span className="order-counter-outage" data-tier="warning">
@@ -3348,6 +3395,7 @@ export function CurrentOrderQueueRows({
   // WP-2423 Q21: orders are grouped by the Store business day they belong to (order numbers restart
   // each business day; an order after midnight before the day's start belongs to the day before).
   const today = useStoreBusinessDay()?.businessDate ?? null;
+  const ordersDay = useOrdersBusinessDay();
   const selectedReference = selected?.orderReference ?? null;
   useEffect(() => {
     if (selectedReference === null || !focusPanel.current) return;
@@ -3395,8 +3443,8 @@ export function CurrentOrderQueueRows({
     const day = order.listedBusinessDate;
     if (day === null) continue;
     // WP-2423 (2026-10-16): earlier-day orders still holding stock are listed as one group; since
-    // batch 55 after the day groups (awaitingFirst).
-    const unfinished = order.heldStock !== null || order.earlierOpenPickup;
+    // batch 55 after the day groups (awaitingFirst); since batch 56 with a round still waiting too.
+    const unfinished = earlierDayUnfinished(order, ordersDay);
     const group = unfinished ? "held" : day;
     if (group !== previous)
       dayHeadings.set(
@@ -3701,11 +3749,18 @@ export function CurrentOrderDetails({
 /**
  * Orders v2 (Owner 2026-10-26): the header's one line — today's orders, how many wait to be
  * accepted, and earlier-day orders the list still shows — so the counts match the rows.
+ *
+ * Batch 56 (v15 batch 55 live, Test Merchant 2): "51 orders today" counted the page (the newest 50
+ * plus a 19-day-old table order) while the Store had 74 that day. Today's count is the server's
+ * count of the Store's orders of the business day; "from earlier days" counts the earlier days'
+ * unfinished orders the list shows under their own heading. Without the server's count (an older
+ * server, or it could not count), the line says the page's count is the page's.
  */
 export function ordersSummary(
   view: CurrentOrderQueue,
   today: string | null,
   awaiting: number,
+  day: OrdersBusinessDay | null = null,
 ): string {
   const waiting = awaiting > 0 ? t(" · {count} to accept", { count: awaiting }) : "";
   if (today === null)
@@ -3714,24 +3769,28 @@ export function ordersSummary(
         ? t("1 order on this page")
         : t("{count} orders on this page", { count: view.items.length })) + waiting
     );
-  // An earlier-day order still holding stock is listed with today's but is not one of them.
-  const todays = view.items.filter(
+  const listedDay = day !== null && day.businessDate === today ? day : null;
+  const earlier = view.items.filter((order) => earlierDayUnfinished(order, listedDay)).length;
+  const counted = view.todayOrderCount;
+  // An earlier-day order listed with today's (holding stock, a round waiting) is not one of them.
+  const onPage = view.items.filter(
     (order) =>
-      order.listedBusinessDate === today && order.heldStock === null && !order.earlierOpenPickup,
+      order.listedBusinessDate === today &&
+      (order.businessDate ?? order.listedBusinessDate) === today &&
+      !earlierDayUnfinished(order, listedDay),
   ).length;
-  const earlier =
-    filterCurrentOrderItems(view.items, {
-      orderNumber: "",
-      type: "All",
-      channel: "All",
-      phase: "All",
-      day: "Today",
-      today,
-    }).length - todays;
+  const todays =
+    counted !== undefined
+      ? counted === 1
+        ? t("1 order today")
+        : t("{count} orders today", { count: counted })
+      : view.nextAfterOrderReference === null
+        ? onPage === 1
+          ? t("1 order today")
+          : t("{count} orders today", { count: onPage })
+        : t("{count} of today's orders on this page", { count: onPage });
   return (
-    (todays === 1 ? t("1 order today") : t("{count} orders today", { count: todays })) +
-    waiting +
-    (earlier > 0 ? t(" · {count} from earlier days", { count: earlier }) : "")
+    todays + waiting + (earlier > 0 ? t(" · {count} from earlier days", { count: earlier }) : "")
   );
 }
 
@@ -3750,9 +3809,12 @@ function OrderAttention({
   readonly onOpen: (order: QueuedOrder) => void;
   readonly onShowHeld: () => void;
 }) {
+  const day = useOrdersBusinessDay();
   const holding = view.items.filter((order) => order.heldStock !== null);
+  // Batch 56: with an earlier day's order whose round still waits to be accepted.
   const unfinished = view.items.filter(
-    (order) => order.heldStock === null && order.earlierOpenPickup,
+    (order) =>
+      order.heldStock === null && (order.earlierOpenPickup || earlierDayWaiting(order, day)),
   );
   const outage = view.items.some((order) => order.acceptanceHold !== null);
   if (holding.length === 0 && unfinished.length === 0 && !outage) return null;
@@ -3766,7 +3828,13 @@ function OrderAttention({
                 orderNumber: orderLabel(order, today),
               })}
             </p>
-            <p className="order-attention__hint">{earlierOpenPickupText(order)}</p>
+            <p className="order-attention__hint">
+              {order.earlierOpenPickup
+                ? earlierOpenPickupText(order)
+                : t(
+                    "Sent on an earlier day and never accepted. Open it and decide what to do with it.",
+                  )}
+            </p>
           </div>
           <button type="button" onClick={() => onOpen(order)}>
             {t("Show order {orderNumber}", { orderNumber: orderLabel(order, today) })}
@@ -4014,6 +4082,7 @@ export function CurrentOrderQueuePage({
   /** WP-2423 (2026-10-16 v15): the last held-stock release, confirmed until the page changes. */
   const [released, setReleased] = useState<string | null>(null);
   const businessDay = useStoreBusinessDay()?.businessDate ?? null;
+  const ordersDay = useOrdersBusinessDay();
   // Owner 2026-10-25: "Today" applies once the page has an order of the Store's business day;
   // before the first order of the day every loaded day stays in view.
   const today =
@@ -4381,8 +4450,10 @@ export function CurrentOrderQueuePage({
   }, [opened]);
   const sortedView = useMemo(
     () =>
-      state.kind === "Ready" ? { ...state.view, items: awaitingFirst(state.view.items) } : null,
-    [state],
+      state.kind === "Ready"
+        ? { ...state.view, items: awaitingFirst(state.view.items, ordersDay) }
+        : null,
+    [state, ordersDay],
   );
   // WP-2423 Q1: a background tab still shows how many orders wait for acceptance.
   useEffect(() => {
@@ -4551,7 +4622,7 @@ export function CurrentOrderQueuePage({
   const [acceptedByAll, setAcceptedByAll] = useState<ReadonlySet<string>>(() => new Set());
   const acceptAllTargets =
     state.kind === "Ready" && phaseFilter === "AwaitingAcceptance" && !single
-      ? awaitingFirst(filteredOrders).flatMap((order) =>
+      ? awaitingFirst(filteredOrders, ordersDay).flatMap((order) =>
           order.batches
             .filter(
               (batch) =>
@@ -4771,7 +4842,7 @@ export function CurrentOrderQueuePage({
             ? storeLabel
             : `${orderTypeLabel[detail.order.orderType]} · ${orderChannelLabel(orderChannel(detail.order))}`
           : state.kind === "Ready"
-            ? ordersSummary(state.view, today, awaitingCount)
+            ? ordersSummary(state.view, today, awaitingCount, ordersDay)
             : null
       }
       status={

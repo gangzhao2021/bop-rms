@@ -721,13 +721,25 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
   // DEC-CHECKOUT-SESSION-OUTAGE: only while online pickup is full or has turned guests away.
   const withPickupHour =
     value !== null && typeof value === "object" && Object.hasOwn(value, "pickupHour");
+  // Batch 56: the Store's Orders on its current business day (absent from an older server, or
+  // while the server can't count them).
+  const withTodayCount =
+    value !== null && typeof value === "object" && Object.hasOwn(value, "todayOrderCount");
   const raw = exact(value, [
     ...(withEarlier ? ["earlierDayItems"] : []),
     ...(withWatch ? ["paidOrderWatch"] : []),
     ...(withPickupHour ? ["pickupHour"] : []),
+    ...(withTodayCount ? ["todayOrderCount"] : []),
     "items",
     "nextAfterOrderReference",
   ]);
+  if (
+    withTodayCount &&
+    (typeof raw.todayOrderCount !== "number" ||
+      !Number.isSafeInteger(raw.todayOrderCount) ||
+      raw.todayOrderCount < 0)
+  )
+    return fail();
   const paidOrderWatch = parsePaidOrderWatch(raw.paidOrderWatch);
   const pickupHour = withPickupHour ? parsePickupHour(raw.pickupHour) : null;
   // The page holds up to 50 Orders; earlier-day Orders (first page only) up to 50 more. An older
@@ -1476,6 +1488,9 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
     /** DEC-PAID-ORDER-AUTO-ACCEPT: absent at a Store that does not use it. */
     ...(paidOrderWatch === null ? {} : { paidOrderWatch }),
     ...((pickupHour === null ? {} : { pickupHour }) as { readonly pickupHour?: PickupHourNotice }),
+    ...((withTodayCount ? { todayOrderCount: raw.todayOrderCount } : {}) as {
+      readonly todayOrderCount?: number;
+    }),
     unreadable: Object.freeze(unreadable),
   });
 }
@@ -2042,7 +2057,11 @@ export function createCurrentOrderQueueClient(fetcher: typeof fetch = fetch) {
         share,
         "GET " + path,
         signal,
-        (shared) => get(fetcher, path, shared, (value) => parseCurrentOrderQueue(value, after)),
+        (shared) =>
+          get(fetcher, path, shared, (value) => parseCurrentOrderQueue(value, after), {
+            // Batch 56: the Store's orders on its business day, for the Orders header.
+            "X-Bop-Orders-Count": "today",
+          }),
         // A cancelled read is refused as before, never shown.
         () => new CurrentOrderQueueError("Unavailable"),
       );
@@ -2083,6 +2102,7 @@ async function get<T>(
   path: string,
   signal: AbortSignal,
   parse: (value: unknown) => T,
+  headers: Readonly<Record<string, string>> = {},
 ): Promise<T> {
   const controller = new AbortController();
   const abort = () => controller.abort();
@@ -2097,7 +2117,7 @@ async function get<T>(
       redirect: "error",
       cache: "no-store",
       signal: controller.signal,
-      headers: { Accept: "application/json" },
+      headers: { Accept: "application/json", ...headers },
     });
     if (response.status === 401 || response.status === 403)
       throw new CurrentOrderQueueError("PermissionDenied");

@@ -77,6 +77,23 @@ it("DEC-CHECKOUT-SESSION-OUTAGE: reads when online pickup is full and how many g
       }),
     ).toThrow();
 });
+it("batch 56: reads how many orders the Store has today, as the server counted them", () => {
+  expect(
+    parseCurrentOrderQueue({ items: [row(1)], nextAfterOrderReference: null, todayOrderCount: 74 })
+      .todayOrderCount,
+  ).toBe(74);
+  expect(
+    parseCurrentOrderQueue({ items: [row(1)], nextAfterOrderReference: null }),
+  ).not.toHaveProperty("todayOrderCount");
+  for (const broken of [-1, 1.5, "74", null, Number.MAX_SAFE_INTEGER + 1])
+    expect(() =>
+      parseCurrentOrderQueue({
+        items: [row(1)],
+        nextAfterOrderReference: null,
+        todayOrderCount: broken,
+      }),
+    ).toThrow();
+});
 it("WP-2423 (2026-10-16 v15): a full page with earlier-day Orders holding stock still reads", () => {
   // The v15 answer that blanked the Orders page: 50 Orders of the page with a next page, plus 18
   // Orders of earlier days whose stock is still set aside (listed first, under today).
@@ -173,6 +190,8 @@ it("uses same-origin no-store GET and only cursor in URL", async () => {
       credentials: "same-origin",
       redirect: "error",
       cache: "no-store",
+      // Batch 56: asks for the Store's orders of the day (the server sends it only then).
+      headers: { Accept: "application/json", "X-Bop-Orders-Count": "today" },
     }),
   );
 });

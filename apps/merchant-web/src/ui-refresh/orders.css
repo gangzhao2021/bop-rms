@@ -1655,3 +1655,26 @@
 .orders-page .order-sound-notice p {
   margin: 0;
 }
+/* Batch 56 (v15 batch 55 live, Test Merchant 2 at 390 en): a New order had 9 px to spare on a
+   phone's first screen under the sound notice, Pause ordering and Needs attention. On phones the
+   notice and its button share one line and the gaps above the list are tighter; nothing is hidden. */
+@media (max-width: 48rem) {
+  .orders-page .workspace-page__header {
+    margin-bottom: var(--bop-space-3);
+  }
+  .orders-page .order-sound-notice {
+    flex-wrap: nowrap;
+    gap: var(--bop-space-3);
+    margin-bottom: var(--bop-space-3);
+  }
+  .orders-page .order-sound-notice p {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .orders-page .order-sound-notice button {
+    flex: none;
+  }
+  .orders-page .order-attention {
+    margin-bottom: var(--bop-space-3);
+  }
+}

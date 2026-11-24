@@ -204,3 +204,217 @@ for (const language of ["en", "zh-Hans"] as const)
       });
       await expectNoInternalText(page);
     });
+
+/**
+ * Batch 56 (v15 batch 55 live, Test Merchant 2 at 390 en): the header said "51 orders today" (the
+ * page's 50 plus a 19-day-old table order) while the Store had 74 orders that business day; the
+ * table order "11/4 · 2", whose only round from Wed Nov 4 was still waiting to be accepted, was
+ * listed first under "Today", above the real New order, and the New order had 9 px to spare on a
+ * phone's first screen. The header counts the day's orders as the server counts them; an
+ * earlier-day order still waiting sits with the earlier days' unfinished orders (Needs attention
+ * names it, the To accept tab still lists it, its row says so), never dropped; and the New order
+ * keeps room on the first screen with sound off, Pause ordering and Needs attention above it.
+ */
+const tm2Table = {
+  orderReference: id(90),
+  orderNumber: "2",
+  orderType: "DineIn",
+  sourceChannel: "Qr",
+  businessDate: "2026-11-04",
+  listedBusinessDate: today,
+  heldStock: null,
+  earlierOpenPickup: false,
+  submittedAt: "2026-11-05T01:47:04.758Z",
+  observedAt: "2026-11-23T05:00:00.000Z",
+  initialBatchReference: id(1090),
+  batches: [
+    {
+      orderBatchReference: id(1090),
+      sequence: 1,
+      acceptanceStatus: "NotAccepted",
+      canRequestAcceptance: true,
+      canCancel: false,
+      staffCancellation: null,
+      canCancelItems: false,
+      submittedAt: "2026-11-05T01:47:04.758Z",
+    },
+  ],
+  canRequestAcceptance: true,
+  tableBill: { totalMinor: "2825", paid: null },
+  currentPhase: "Submitted",
+  currentVersion: 1,
+  unfulfillable: null,
+  pickupNotCollected: false,
+  acceptBy: null,
+  awaitingPayment: false,
+};
+// v15 TM2 at the batch 55 check: 45 earlier-day open pickups (11/4 to 11/13) after the table.
+const tm2Earlier = [
+  tm2Table,
+  ...Array.from({ length: 45 }, (_, i) => {
+    const day = earlierDays[i % earlierDays.length] as string;
+    return order(100 + i, String(20 + i * 3), day, day + "T21:33:01.000Z", false);
+  }),
+];
+for (const language of ["en", "zh-Hans"] as const)
+  for (const [width, height] of [
+    [390, 844],
+    [1024, 768],
+    [1440, 900],
+  ] as const)
+    test(`@production Orders counts the day's orders and keeps an earlier-day order to accept with the earlier days, ${language} at ${width}`, async ({
+      page,
+    }) => {
+      const en = language === "en";
+      if (!en)
+        await page.addInitScript(() =>
+          window.localStorage.setItem("bop.merchant.language", "zh-Hans"),
+        );
+      await page.setViewportSize({ width, height });
+      await page.clock.install();
+      const now = Date.now();
+      // A full page of today's 50 newest, with 24 more of today's behind Next page.
+      const todays = Array.from({ length: 51 }, (_, i) =>
+        order(
+          300 + i,
+          String(i + 1),
+          today,
+          new Date(now - (60 - i) * 60_000).toISOString(),
+          false,
+        ),
+      ).reverse();
+      let answer = {
+        earlierDayItems: tm2Earlier,
+        items: todays.slice(0, 50),
+        nextAfterOrderReference: id(301),
+        todayOrderCount: 74,
+      };
+      await page.route("**/merchant/session", (route) =>
+        route.fulfill({
+          headers,
+          json: { ...session, workspace: { ...session.workspace, pauseOrderingShown: true } },
+        }),
+      );
+      await page.route("**/merchant/business-day", (route) =>
+        route.fulfill({
+          headers,
+          json: {
+            businessDate: today,
+            startsAt: new Date(now - 6 * 3_600_000).toISOString(),
+            endsAt: new Date(now + 18 * 3_600_000).toISOString(),
+            timeZone: "America/Toronto",
+            observedAt: new Date(now).toISOString(),
+          },
+        }),
+      );
+      await page.route("**/merchant/service-control", (route) =>
+        route.fulfill({
+          headers,
+          json: {
+            hours: {
+              configurationSource: "StoreOverride",
+              effectiveFrom: "2026-07-29T11:00:00.000Z",
+              effectiveUntil: null,
+              businessDayStartLocalTime: "04:00:00",
+              weeklySchedule: Array.from({ length: 7 }, (_, index) => ({
+                isoWeekday: index + 1,
+                intervals: [],
+              })),
+              exceptions: [],
+            },
+            screenId: "STORE-HOURS-SERVICE",
+            storeReference: scope.storeReference,
+            configurationReference: id(70),
+            timeZone: scope.timeZone,
+            enabledServiceModes: ["DineIn", "Pickup"],
+            observedAt: new Date(now).toISOString(),
+            expectedVersion: 4,
+            activePauses: [],
+          },
+        }),
+      );
+      for (const pattern of ["**/merchant/orders?*", "**/merchant/orders"])
+        await page.route(pattern, (route) => route.fulfill({ headers, json: answer }));
+      await page.goto("/operations/orders");
+      const rows = page.locator("li.order-row:not([hidden])");
+      await expect(rows).toHaveCount(96);
+      // The New order arrives while staff have Orders open; the oldest of today's moves to page 2.
+      answer = {
+        ...answer,
+        items: [order(900, "75", today, new Date(now).toISOString(), true), ...todays.slice(0, 49)],
+        nextAfterOrderReference: id(302),
+        todayOrderCount: 75,
+      };
+      await page.clock.fastForward(11_000);
+      const fresh = page.locator("li.order-row[data-new]");
+      await expect(fresh).toHaveCount(1);
+      const meta = page.locator(".workspace-page__meta");
+      // The day's count is the server's, not the page's (and not the 19-day-old table order).
+      await expect(meta).toContainText(en ? "75 orders today" : "今天 75 单");
+      await expect(meta).toContainText(en ? "2 to accept" : "2 单待接");
+      await expect(meta).toContainText(en ? "46 from earlier days" : "另有 46 单是之前的");
+      await expect(
+        page.getByRole("button", { name: en ? "Pause ordering" : "暂停点单" }),
+      ).toBeVisible();
+      const notice = page.locator(".order-sound-notice");
+      await expect(notice).toBeVisible();
+      // On a phone the sound notice and its button share one line (it took three before).
+      if (width < 768) {
+        const line = await notice.boundingBox();
+        const button = await notice.getByRole("button").boundingBox();
+        expect(line?.height ?? 0, "sound notice on one line").toBeLessThanOrEqual(
+          (button?.height ?? 0) + 8,
+        );
+      }
+      // The New order is the first row, with room on the first screen for Linux fonts.
+      const labels = await rows.evaluateAll((list) =>
+        list.map((row) => row.querySelector(".order-row__open")?.textContent ?? ""),
+      );
+      expect(labels[0]).toContain("75");
+      await page.evaluate(() => window.scrollTo(0, 0));
+      const bottom = await fresh.evaluate(
+        (row) => row.getBoundingClientRect().bottom + window.scrollY,
+      );
+      test.info().annotations.push({ type: "bottom", description: `${bottom} of ${height}` });
+      expect(bottom, `${language} ${width}`).toBeLessThanOrEqual(height - 40);
+      // The table order still waiting from 11/4 is with the earlier days, says so, and is kept.
+      const table = rows.filter({ hasText: /11\/4 · 2(?!\d)/u });
+      await expect(table).toHaveCount(1);
+      const tableIndex = labels.findIndex((label) => /11\/4 · 2(?!\d)/u.test(label));
+      expect(tableIndex).toBeGreaterThanOrEqual(50);
+      await expect(table).toContainText(
+        en ? "From an earlier day · waiting to be accepted" : "之前营业日的单 · 还没接",
+      );
+      await expect(table.getByRole("button", { name: en ? /^Accept/u : /^接单/u })).toHaveCount(1);
+      const attention = page.locator(".order-attention");
+      await expect(attention).toContainText(
+        en ? "46 orders from earlier days aren't finished" : "46 张较早营业日的订单还没有完成",
+      );
+      await page.screenshot({
+        path: test.info().outputPath(`orders-tm2-${language}-${width}.png`),
+      });
+      await attention.locator("summary").click();
+      await expect(
+        attention.getByRole("button", {
+          name: en ? "Show order 11/4 · 2" : "查看 11/4 · 2 号单",
+          exact: true,
+        }),
+      ).toBeVisible();
+      // One tap away on To accept, with today's New order first.
+      await page
+        .locator(".order-status-filters button")
+        .filter({ hasText: en ? "To accept" : "待接单" })
+        .click();
+      const accepting = await rows.evaluateAll((list) =>
+        list.map((row) => row.querySelector(".order-row__open")?.textContent ?? ""),
+      );
+      expect(accepting).toHaveLength(2);
+      expect(accepting[0]).toContain("75");
+      expect(accepting[1]).toContain("11/4 · 2");
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        ),
+      ).toBe(0);
+      await expectNoInternalText(page);
+    });

@@ -6223,6 +6223,11 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{count} orders on this page": "本页 {count} 单",
   "1 order today": "今天 1 单",
   "{count} orders today": "今天 {count} 单",
+  // Batch 56 (v15 batch 55 live): without the server's day count, the page's count says so.
+  "{count} of today's orders on this page": "本页有今天的 {count} 单",
+  "From an earlier day · waiting to be accepted": "之前营业日的单 · 还没接",
+  "Sent on an earlier day and never accepted. Open it and decide what to do with it.":
+    "这是之前营业日下的单，一直没接。打开它决定怎么处理。",
   " · {count} to accept": " · {count} 单待接",
   " · {count} from earlier days": " · 另有 {count} 单是之前的",
   "Needs attention": "需要处理",
