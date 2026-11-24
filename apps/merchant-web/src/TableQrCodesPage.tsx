@@ -6,6 +6,7 @@ import { createTableQrClient, TableQrClientError, type TableQrRow } from "./tabl
 import { WorkspacePage } from "./WorkspacePage.js";
 import { noAccessHeading } from "./access-denied.js";
 import { NoAccessNotice } from "./NoAccessNotice.js";
+import { sentences } from "./word-gap.js";
 
 /**
  * WP-2423 Q11 (Section 88 DIN-TABLE-LIST): the Store Manager prints each table's QR code once,
@@ -136,7 +137,7 @@ export function TableQrCodesPage({
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
       setMessage({
         tone: "neutral",
-        text: `${
+        text: sentences(
           tables.length === 1
             ? t("Downloaded {fileName} with the code for table {stableLabel}.", {
                 fileName: sheet.fileName,
@@ -145,8 +146,9 @@ export function TableQrCodesPage({
             : t("Downloaded {fileName} with {count} table QR codes.", {
                 fileName: sheet.fileName,
                 count: tables.length,
-              })
-        } ${t("Open it and print at 100% scale.")}`,
+              }),
+          t("Open it and print at 100% scale."),
+        ),
       });
     } catch (error) {
       setMessage({

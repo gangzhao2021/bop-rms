@@ -41,11 +41,12 @@ function callEnd(text: string, open: number): number {
  * What follows the t() call when it is followed by a literal space: {" "} or + " "; batch 57 (v15
  * b56 live, "大额或逾期的退款需要另一人批准。 为什么需要批准？"): also the plain JSX space JSX keeps
  * between an expression (or a closing tag) and what follows on the same line, and a space in a
- * template string ("…} ${…").
+ * template string ("…} ${…"), also where the call ends a multi-line ternary inside "${ … }" and the
+ * closing "}" starts its own line.
  */
 const literalSpace = [
   /^\s*\}?\s*(?:<\/[a-z]+>\s*)?(?:\{" "\}|\+\s*" ")/u,
-  /^\}[ \t]+(?:\{|\$\{|[\p{L}\p{N}])/u,
+  /^\s*\}[ \t]+(?:\{|\$\{|[\p{L}\p{N}])/u,
   /^\s*\}?[ \t]*<\/[a-z]+>[ \t]+(?:\{|[\p{L}\p{N}])/u,
 ];
 
