@@ -458,11 +458,24 @@ export function customerSettledTableReceiptBody(view: DiningTableOnlinePaymentVi
  * before tax, tax, tip and the amount captured, and how (on this phone). Whether staff closed the
  * rest of the bill, and whether the table paid in full, so the receipt never claims more than this
  * phone paid. Never another guest's amounts, names, references, card details or codes.
+ *
+ * Batch 57 (WP-2423 Q36): every refund of this phone's own payment as Payment recorded it — the
+ * amount, when staff asked for it and when the Provider answered, and whether it went back to the
+ * card, is still on its way, or was refused — and what this phone paid net of them. A refused
+ * refund moved nothing, so it is listed and not taken off (as on the table's receipt and for
+ * staff). Never another guest's refunds, the reason, who approved it or any reference.
  */
 export function customerOwnPaymentBody(view: DiningTableOnlinePaymentView) {
   const bill = view.bill;
   const split = bill.split;
   const own = view.ownPayments ?? [];
+  const refundsOf = (entry: (typeof own)[number]) => entry.refunds;
+  const refundedOf = (entry: (typeof own)[number]) =>
+    refundsOf(entry)
+      .filter((refund) => refund.status !== "Failed")
+      .reduce((sum, refund) => sum + BigInt(refund.amountMinor), 0n);
+  const totalMinor = own.reduce((sum, entry) => sum + BigInt(entry.totalMinor), 0n);
+  const refundedMinor = own.reduce((sum, entry) => sum + refundedOf(entry), 0n);
   return {
     schemaVersion: 1,
     ownPayment: {
@@ -500,9 +513,19 @@ export function customerOwnPaymentBody(view: DiningTableOnlinePaymentView) {
           totalMinor: entry.totalMinor,
           method: "Online" as const,
           paidAt: entry.paidAt,
+          refunds: refundsOf(entry).map((refund) => ({
+            amountMinor: refund.amountMinor,
+            status: refund.status,
+            requestedAt: refund.requestedAt,
+            answeredAt: refund.answeredAt,
+          })),
+          refundedMinor: refundedOf(entry).toString(),
         };
       }),
-      totalMinor: own.reduce((sum, entry) => sum + BigInt(entry.totalMinor), 0n).toString(),
+      totalMinor: totalMinor.toString(),
+      // Refunded or on its way back to the card (a refused one is not taken off).
+      refundedMinor: refundedMinor.toString(),
+      netMinor: (totalMinor - refundedMinor).toString(),
     },
   };
 }

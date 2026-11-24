@@ -7578,9 +7578,14 @@ async function journey(journeyEnding) {
                 tipMinor: "0",
                 totalMinor: unitMinor.toString(),
                 method: "Online",
+                // Batch 57: no refund of it.
+                refunds: [],
+                refundedMinor: "0",
               },
             ],
             totalMinor: unitMinor.toString(),
+            refundedMinor: "0",
+            netMinor: unitMinor.toString(),
           });
           assert.equal(BigInt(partB.subtotal) + BigInt(partB.tax), unitMinor);
           assert.deepEqual(reads.shape(customerOwnPaymentBody(await payments.read(b)).ownPayment), {
@@ -9316,9 +9321,13 @@ async function journey(journeyEnding) {
                   tipMinor: "0",
                   totalMinor: parts[0].amountMinor,
                   method: "Online",
+                  refunds: [],
+                  refundedMinor: "0",
                 },
               ],
               totalMinor: parts[0].amountMinor,
+              refundedMinor: "0",
+              netMinor: parts[0].amountMinor,
             };
             // While the table is open: the payer reads its own payment, and only it.
             const openBody = await ownBody(tablePhone, tablePhone.csrfCredential, "Current");
@@ -9331,6 +9340,99 @@ async function journey(journeyEnding) {
             await assert.rejects(ownBody(hostPhone, hostPhone.csrfCredential, "Current"), {
               code: "GUEST_SESSION_UNAVAILABLE",
             });
+            // ── Batch 57 (Q36): a manager refunds part of the payer's own payment to its card
+            // (DEC-TABLE-ONLINE-REFUND, the real command under the pilot role). The Provider first
+            // answers "pending" (on its way), later "succeeded"; a second refund it refuses. The
+            // payer's own receipt lists each refund as Payment recorded it and what it paid net;
+            // the other phone still reads nothing.
+            let refundAnswers = "pending";
+            const refundProvider = {
+              async refundPayment(request) {
+                return refundAnswer(
+                  request,
+                  refundAnswers,
+                  "re_TESTOWN" + sha256(request.idempotencyKey).slice(7, 31),
+                );
+              },
+            };
+            const refundOwnPart = (amountMinor) =>
+              createMerchantDiningTableOnlineRefund({
+                persistence: persistenceOf(manager),
+                authentication: manager.authentication,
+                provider: refundProvider,
+                nextReference: fresh,
+              })({
+                ...as(manager),
+                command: {
+                  orderReference,
+                  operationReference: fresh(),
+                  amountMinor,
+                  reasonCode: "FOOD_ISSUE",
+                  partNumber: 1,
+                },
+              });
+            const paidMinor = BigInt(parts[0].amountMinor);
+            const withRefunds = (refunds, refundedMinor) => ({
+              ...expected,
+              tableLabel: undefined,
+              payments: [{ ...expected.payments[0], refunds, refundedMinor }],
+              refundedMinor,
+              netMinor: (paidMinor - BigInt(refundedMinor)).toString(),
+            });
+            /** The refunds without their times (checked to be instants in order). */
+            const refundShape = (body) => {
+              const shaped = shape(body);
+              return {
+                ...shaped,
+                payments: shaped.payments.map((payment) => ({
+                  ...payment,
+                  refunds: payment.refunds.map(({ requestedAt, answeredAt, ...rest }) => {
+                    assert.ok(Number.isFinite(Date.parse(requestedAt)));
+                    if (answeredAt !== null)
+                      assert.ok(Date.parse(answeredAt) >= Date.parse(requestedAt));
+                    return { ...rest, answered: answeredAt !== null };
+                  }),
+                })),
+              };
+            };
+            assert.equal((await refundOwnPart("300")).status, "Recorded");
+            const pendingBody = await ownBody(tablePhone, tablePhone.csrfCredential, "Current");
+            assert.deepEqual(
+              refundShape(pendingBody),
+              withRefunds([{ amountMinor: "300", status: "Pending", answered: false }], "300"),
+            );
+            // The Provider answers: it went back to the card.
+            refundAnswers = "succeeded";
+            assert.equal(
+              await createDiningTableOnlineRefundSender({
+                scope: ownerScope,
+                provider: refundProvider,
+                transactions: transactions(),
+                authorize: async () => true,
+                now: () => new Date(Date.now() + 120_000).toISOString(),
+                nextReference: fresh,
+              }).sendOpen({ limit: 5 }),
+              1,
+            );
+            // A second refund the Provider refuses: on record, nothing moved, not taken off.
+            refundAnswers = "failed";
+            assert.equal((await refundOwnPart("200")).status, "Recorded");
+            const refundedBody = await ownBody(tablePhone, tablePhone.csrfCredential, "Current");
+            const refundedExpected = withRefunds(
+              [
+                { amountMinor: "300", status: "Refunded", answered: true },
+                { amountMinor: "200", status: "Failed", answered: true },
+              ],
+              "300",
+            );
+            assert.deepEqual(refundShape(refundedBody), refundedExpected);
+            assert.doesNotMatch(
+              JSON.stringify(refundedBody),
+              /[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}|pi_|ch_|re_|provider|actor|FOOD_ISSUE/iu,
+            );
+            await assert.rejects(ownBody(hostPhone, hostPhone.csrfCredential, "Current"), {
+              code: "GUEST_SESSION_UNAVAILABLE",
+            });
             // ── The table closes. The restore tells the payer what it paid, with the ended
             // visit's value for its own receipt; the other phone is told how the bill ended only.
             assert.equal((await closing(manager, "Finalize")).phase, "Closed");
@@ -9339,6 +9441,7 @@ async function journey(journeyEnding) {
             assert.deepEqual(payer?.yourPayment, {
               amountMinor: parts[0].amountMinor,
               method: "Online",
+              refundedMinor: "300",
             });
             assert.equal(typeof payer?.csrfToken, "string");
             const other = await restoreFor(hostPhone);
@@ -9346,7 +9449,10 @@ async function journey(journeyEnding) {
             assert.equal("yourPayment" in (other ?? {}), false);
             assert.equal("csrfToken" in (other ?? {}), false);
             const endedBody = await ownBody(tablePhone, payer.csrfToken, "Unavailable");
-            assert.deepEqual(shape(endedBody), { ...expected, tableLabel: undefined });
+            assert.deepEqual(refundShape(endedBody), refundedExpected);
+            await assert.rejects(ownBody(hostPhone, hostPhone.csrfCredential, "Unavailable"), {
+              code: "GUEST_SESSION_UNAVAILABLE",
+            });
             // The table's own settled receipt stays refused: there is none for a closed bill.
             await assert.rejects(
               guestPort("Unavailable").settledReceipt({

@@ -110,6 +110,8 @@ export function createCustomerSessionBootstrapRead(
   ): Promise<{
     readonly paid: "Nothing" | "Some";
     readonly ownPaidMinor: bigint;
+    /** Batch 57 (Q36): of it, refunded or on its way back to the card (a refused one: not). */
+    readonly ownRefundedMinor: bigint;
   } | null> => {
     const tenantReference = options.publicProfile?.binding?.tenantReference;
     if (tenantReference === undefined) return null;
@@ -127,20 +129,31 @@ export function createCustomerSessionBootstrapRead(
     const paid = closedBillPaid(writeOff);
     // Batch 56 (v15 b55 live): what this phone itself paid on that bill before staff closed the
     // rest (Payment's captured phone payments of this guest's Session; never another guest's).
-    const ownPaidMinor =
+    const own =
       paid === "Nothing"
+        ? []
+        : (await payment.listOnlinePaymentsByOrders(transaction as never, [order])).filter(
+            (attempt) =>
+              attempt.guestSessionReference === guestSessionReference &&
+              attempt.outcome?.status === "Captured",
+          );
+    const ownPaidMinor = own.reduce(
+      (sum, attempt) => sum + (attempt.outcome?.capturedMinor ?? attempt.totalMinor),
+      0n,
+    );
+    // Batch 57 (Q36): Payment's refunds of those payments to their card, as the own receipt reads.
+    const ownPayments = new Set(own.map((attempt) => attempt.onlinePaymentReference));
+    const ownRefundedMinor =
+      own.length === 0
         ? 0n
-        : (await payment.listOnlinePaymentsByOrders(transaction as never, [order]))
+        : (await payment.listOnlineRefundsByOrders(transaction as never, [order]))
             .filter(
-              (attempt) =>
-                attempt.guestSessionReference === guestSessionReference &&
-                attempt.outcome?.status === "Captured",
+              (refund) =>
+                ownPayments.has(refund.onlinePaymentReference) &&
+                refund.outcome?.status !== "Failed",
             )
-            .reduce(
-              (sum, attempt) => sum + (attempt.outcome?.capturedMinor ?? attempt.totalMinor),
-              0n,
-            );
-    return { paid, ownPaidMinor };
+            .reduce((sum, refund) => sum + refund.amountMinor, 0n);
+    return { paid, ownPaidMinor, ownRefundedMinor };
   };
   return {
     async read(sessionCredential: string) {
@@ -352,6 +365,9 @@ export function createCustomerSessionBootstrapRead(
                   yourPayment: {
                     amountMinor: closed.ownPaidMinor.toString(),
                     method: "Online" as const,
+                    ...(closed.ownRefundedMinor > 0n
+                      ? { refundedMinor: closed.ownRefundedMinor.toString() }
+                      : {}),
                   },
                   ...receipt,
                 }
@@ -500,7 +516,12 @@ export function createCustomerSessionBootstrapHandler(options?: {
            * Batch 56: what this phone itself paid on that bill, with read-only access to its own
            * payment's receipt (absent: this phone paid nothing on it).
            */
-          yourPayment?: { amountMinor: string; method: "Online" };
+          yourPayment?: {
+            amountMinor: string;
+            method: "Online";
+            /** Batch 57: of it, refunded or on its way back (absent: none). */
+            refundedMinor?: string;
+          };
           csrfToken?: string;
         }
       | null
@@ -646,9 +667,16 @@ export function createCustomerSessionBootstrapHandler(options?: {
           own !== undefined &&
           ownCsrf !== null &&
           own.method === "Online" &&
-          /^[1-9][0-9]{0,15}$/u.test(own.amountMinor)
+          /^[1-9][0-9]{0,15}$/u.test(own.amountMinor) &&
+          (own.refundedMinor === undefined ||
+            (/^[1-9][0-9]{0,15}$/u.test(own.refundedMinor) &&
+              BigInt(own.refundedMinor) <= BigInt(own.amountMinor)))
             ? {
-                yourPayment: { amountMinor: own.amountMinor, method: own.method },
+                yourPayment: {
+                  amountMinor: own.amountMinor,
+                  method: own.method,
+                  ...(own.refundedMinor === undefined ? {} : { refundedMinor: own.refundedMinor }),
+                },
                 csrfToken: ownCsrf,
               }
             : {};

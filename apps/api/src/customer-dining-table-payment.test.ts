@@ -569,9 +569,13 @@ it("batch 56: the payer's own receipt says what it paid for, never that the tabl
           totalMinor: "1413",
           method: "Online",
           paidAt: "2026-11-24T00:34:40.000Z",
+          refunds: [],
+          refundedMinor: "0",
         },
       ],
       totalMinor: "1413",
+      refundedMinor: "0",
+      netMinor: "1413",
     },
   });
   const byDish = customerOwnPaymentBody(guestOwnPaymentView("by-dish-written-off", true));
@@ -589,6 +593,51 @@ it("batch 56: the payer's own receipt says what it paid for, never that the tabl
   for (const body of [even, byDish])
     expect(JSON.stringify(body)).not.toMatch(
       /1412|0198b054|orderReference|guestSession|pi_|provider|tendered|actor/iu,
+    );
+});
+
+// Batch 57 (WP-2423 Q36, b56 remaining): staff refunded part of the payer's own phone payment and
+// its own receipt still read only "Total paid by you $14.13" — no refund, no net. Payment's refund
+// records in v15's shapes: $5.00 Succeeded, $3.00 with no Provider answer yet, $2.00 refused.
+it("batch 57: the payer's own receipt lists each refund of its payment and what it paid net", () => {
+  const partial = customerOwnPaymentBody(
+    guestOwnPaymentView("half-split-written-off", true, "Closed", "Partial"),
+  ).ownPayment;
+  expect(partial.payments[0]?.refunds).toEqual([
+    {
+      amountMinor: "500",
+      status: "Refunded",
+      requestedAt: "2026-11-24T00:40:17.521Z",
+      answeredAt: "2026-11-24T00:40:17.565Z",
+    },
+    {
+      amountMinor: "300",
+      status: "Pending",
+      requestedAt: "2026-11-24T00:41:02.104Z",
+      answeredAt: null,
+    },
+    {
+      amountMinor: "200",
+      status: "Failed",
+      requestedAt: "2026-11-24T00:41:40.250Z",
+      answeredAt: "2026-11-24T00:41:40.311Z",
+    },
+  ]);
+  // A refused refund moved nothing: it is listed, not taken off.
+  expect(partial.payments[0]?.refundedMinor).toBe("800");
+  expect([partial.totalMinor, partial.refundedMinor, partial.netMinor]).toEqual([
+    "1413",
+    "800",
+    "613",
+  ]);
+  const full = customerOwnPaymentBody(
+    guestOwnPaymentView("by-dish-written-off", true, "Closing", "Full"),
+  ).ownPayment;
+  expect([full.refundedMinor, full.netMinor]).toEqual(["1413", "0"]);
+  // Never the reason, who approved it, or any reference.
+  for (const body of [partial, full])
+    expect(JSON.stringify(body)).not.toMatch(
+      /reason|FOOD_ISSUE|approved|0198b054|onlineRefund|re_|provider|actor/iu,
     );
 });
 

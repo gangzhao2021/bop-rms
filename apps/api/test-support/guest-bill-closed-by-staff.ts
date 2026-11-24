@@ -266,6 +266,49 @@ export const liveWrittenOffSummaryWithoutClosedByStaff = {
 } as const;
 
 type PaymentView = import("../src/dining-table-online-payment.js").DiningTableOnlinePaymentView;
+type OwnRefund = NonNullable<PaymentView["ownPayments"]>[number]["refunds"][number];
+/**
+ * Batch 57 (WP-2423 Q36): refunds staff made of the payer's own phone payment (1413), in the
+ * shapes Payment records them (rms_payment.dining_table_online_refund and _outcome, as on v15):
+ * "Partial" — $5.00 back to the card (v15's 2026-11-11 FOOD_ISSUE refund: the Provider answered
+ * Succeeded 44 ms after the request), $3.00 still on its way (no Provider answer yet, as the
+ * sender leaves one the Provider calls "pending") and $2.00 the Provider refused (Failed, no
+ * Provider refund: nothing moved); "Full" — the whole payment back (v15's 2026-11-03 refund of all
+ * of a part, 890 of 890).
+ */
+export type GuestOwnRefunds = "None" | "Partial" | "Full";
+export function guestOwnRefunds(kind: GuestOwnRefunds): readonly OwnRefund[] {
+  if (kind === "None") return [];
+  if (kind === "Full")
+    return [
+      {
+        amountMinor: "1413",
+        status: "Refunded",
+        requestedAt: "2026-11-24T00:40:03.609Z",
+        answeredAt: "2026-11-24T00:40:03.643Z",
+      },
+    ];
+  return [
+    {
+      amountMinor: "500",
+      status: "Refunded",
+      requestedAt: "2026-11-24T00:40:17.521Z",
+      answeredAt: "2026-11-24T00:40:17.565Z",
+    },
+    {
+      amountMinor: "300",
+      status: "Pending",
+      requestedAt: "2026-11-24T00:41:02.104Z",
+      answeredAt: null,
+    },
+    {
+      amountMinor: "200",
+      status: "Failed",
+      requestedAt: "2026-11-24T00:41:40.250Z",
+      answeredAt: "2026-11-24T00:41:40.311Z",
+    },
+  ];
+}
 /**
  * Batch 56 (v15 b55 live, L55 CB2 order 76 and L55 CB3 order 80): the guest table-payment view
  * (createDiningTableOnlinePayments' read) once staff closed the rest of a bill one guest paid
@@ -279,6 +322,7 @@ export function guestOwnPaymentView(
   scenario: "by-dish-written-off" | "half-split-written-off" | "half-split-open",
   payer: boolean,
   sessionPhase: "Closing" | "Closed" = "Closing",
+  refunds: GuestOwnRefunds = "None",
 ): PaymentView {
   const byDish = scenario === "by-dish-written-off";
   const dish = { displayName: "Beef noodles (TEST)", quantity: 1, shared: false };
@@ -378,6 +422,7 @@ export function guestOwnPaymentView(
             tipMinor: "0",
             totalMinor: "1413",
             paidAt: "2026-11-24T00:34:40.000Z",
+            refunds: guestOwnRefunds(refunds),
           },
         ]
       : [],

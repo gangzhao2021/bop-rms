@@ -13,6 +13,7 @@ const f = vi.hoisted(() => ({
   mergedIn: vi.fn(),
   writeOffs: vi.fn(),
   onlinePayments: vi.fn(),
+  onlineRefunds: vi.fn(),
   settlementScope: vi.fn(),
 }));
 vi.mock("@bop/identity", async (original) => ({
@@ -38,7 +39,11 @@ vi.mock("@rms/payment", async (original) => ({
   ...(await original<typeof import("@rms/payment")>()),
   createPostgresDiningTableSettlementStore: (options: unknown) => {
     f.settlementScope(options);
-    return { listWriteOffsByOrders: f.writeOffs, listOnlinePaymentsByOrders: f.onlinePayments };
+    return {
+      listWriteOffsByOrders: f.writeOffs,
+      listOnlinePaymentsByOrders: f.onlinePayments,
+      listOnlineRefundsByOrders: f.onlineRefunds,
+    };
   },
 }));
 vi.mock("@rms/store", async (original) => ({
@@ -86,6 +91,7 @@ beforeEach(() => {
   f.mergedIn.mockResolvedValue([]);
   f.writeOffs.mockResolvedValue([]);
   f.onlinePayments.mockResolvedValue([]);
+  f.onlineRefunds.mockResolvedValue([]);
 });
 
 it("a table closed with nothing ordered says so with the Store's names, and gives nothing to act with", async () => {
@@ -303,6 +309,60 @@ describe("a bill staff closed when the guests left", () => {
       csrfToken: "C".repeat(43),
     });
     expect(f.onlinePayments).toHaveBeenCalledWith(tx, [ref(8)]);
+  });
+
+  // Batch 57 (WP-2423 Q36): staff refunded part of that phone payment to its card. Payment's
+  // refund records, in v15's shape: $5.00 Succeeded, $3.00 still on its way (no answer), $2.00
+  // the Provider refused; and $4.00 of another guest's payment. Before: amountMinor 1413 only.
+  const refund = (payment: string, amountMinor: bigint, status: "Succeeded" | "Failed" | null) => ({
+    onlineRefundReference: ref(40 + Number(amountMinor % 97n)),
+    onlinePaymentReference: payment,
+    orderReference: ref(8),
+    amountMinor,
+    requestedAt: "2026-11-24T00:40:17.521Z",
+    outcome:
+      status === null
+        ? null
+        : {
+            status,
+            providerRefundReference: null,
+            providerCreatedAt: null,
+            recordedAt: "2026-11-24T00:40:17.565Z",
+          },
+  });
+  it("batch 57: the payer is told what went back to its card; refused and other guests' refunds are not", async () => {
+    f.writeOffs.mockResolvedValue([writeOff(1413n, 2825n)]);
+    f.onlinePayments.mockResolvedValue([
+      phonePayment(guest.sessionReference, "Captured"),
+      { ...phonePayment(ref(30), "Captured"), onlinePaymentReference: ref(31) },
+    ]);
+    f.onlineRefunds.mockResolvedValue([
+      refund(ref(20), 500n, "Succeeded"),
+      refund(ref(20), 300n, null),
+      refund(ref(20), 200n, "Failed"),
+      refund(ref(31), 400n, "Succeeded"),
+    ]);
+    const answer = await createCustomerSessionBootstrapRead(withTenant).readSettledTable(
+      "A".repeat(43),
+    );
+    expect(answer).toEqual({
+      tableLabel: "V44 A (TEST)",
+      closedByStaff: "Some",
+      store: tm2,
+      yourPayment: { amountMinor: "1413", method: "Online", refundedMinor: "800" },
+      csrfToken: "C".repeat(43),
+    });
+    expect(f.onlineRefunds).toHaveBeenCalledWith(tx, [ref(8)]);
+    // Only refused refunds: nothing went back, nothing is said.
+    f.onlineRefunds.mockResolvedValue([refund(ref(20), 200n, "Failed")]);
+    expect(
+      await createCustomerSessionBootstrapRead(withTenant).readSettledTable("A".repeat(43)),
+    ).toMatchObject({ yourPayment: { amountMinor: "1413", method: "Online" } });
+    expect(
+      JSON.stringify(
+        await createCustomerSessionBootstrapRead(withTenant).readSettledTable("A".repeat(43)),
+      ),
+    ).not.toContain("refundedMinor");
   });
 
   it("batch 56: another guest's payment, or a declined one, is never this phone's", async () => {

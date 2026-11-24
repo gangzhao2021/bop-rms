@@ -7,6 +7,7 @@ import {
   createPostgresDiningTableSettlementStore,
   createRetrieveIntentRequest,
   type DiningTableOnlinePaymentRecord,
+  type DiningTableOnlineRefundRecord,
   type PaymentProviderAdapter,
   type PaymentProviderOutcome,
 } from "@rms/payment";
@@ -149,6 +150,19 @@ export interface DiningTableOnlinePaymentView {
     readonly tipMinor: string;
     readonly totalMinor: string;
     readonly paidAt: string;
+    /**
+     * Batch 57 (WP-2423 Q36): every refund of this payment back to its card, as Payment recorded
+     * it, oldest first (append-only: a refused one stays, and a later one is its own entry).
+     * Pending: approved, the Provider has not given its final answer; Refunded: the Provider
+     * confirmed it; Failed: the Provider refused it, so nothing went back.
+     */
+    readonly refunds: readonly {
+      readonly amountMinor: string;
+      readonly status: "Pending" | "Refunded" | "Failed";
+      readonly requestedAt: string;
+      /** When Payment recorded the Provider's final answer (null while pending). */
+      readonly answeredAt: string | null;
+    }[];
   }[];
   readonly choices: null | {
     /** The Store's setting: the whole table, or only what this phone added, chosen to start. */
@@ -325,6 +339,7 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
     current: Awaited<ReturnType<typeof readDiningTableBill>>,
     attempts: readonly DiningTableOnlinePaymentRecord[],
     authority: TableOnlinePaymentAuthority,
+    refunds: readonly DiningTableOnlineRefundRecord[] = [],
   ): DiningTableOnlinePaymentView => {
     // This guest's own open payment first; otherwise a whole-table one another guest started.
     const open =
@@ -377,6 +392,26 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
                   tipMinor: attempt.tipMinor.toString(),
                   totalMinor: (attempt.outcome.capturedMinor ?? attempt.totalMinor).toString(),
                   paidAt: attempt.outcome.occurredAt,
+                  refunds: Object.freeze(
+                    refunds
+                      .filter(
+                        (refund) =>
+                          refund.onlinePaymentReference === attempt.onlinePaymentReference,
+                      )
+                      .map((refund) =>
+                        Object.freeze({
+                          amountMinor: refund.amountMinor.toString(),
+                          status:
+                            refund.outcome === null
+                              ? ("Pending" as const)
+                              : refund.outcome.status === "Succeeded"
+                                ? ("Refunded" as const)
+                                : ("Failed" as const),
+                          requestedAt: refund.requestedAt,
+                          answeredAt: refund.outcome?.recordedAt ?? null,
+                        }),
+                      ),
+                  ),
                 }),
               ]
             : [],
@@ -715,7 +750,21 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
         current.orderReference === null
           ? []
           : await attemptsOf(tx, authority, current.orderReference);
-      return viewOf(current, attempts, authority);
+      // Batch 57 (Q36): refunds of this phone's own captured payments (Payment's table refund
+      // records, the same the table's receipt and staff read), only when it paid something here.
+      const paidHere =
+        current.orderReference !== null &&
+        authority.guestSessionReference !== null &&
+        attempts.some(
+          (attempt) =>
+            attempt.guestSessionReference === authority.guestSessionReference &&
+            attempt.outcome?.status === "Captured",
+        );
+      const refunds =
+        paidHere && current.orderReference !== null
+          ? await store(authority).listOnlineRefundsByOrders(tx, [current.orderReference])
+          : [];
+      return viewOf(current, attempts, authority, refunds);
     });
 
   return Object.freeze({

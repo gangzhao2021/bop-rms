@@ -27,7 +27,9 @@ import {
   guestBillWriteOff,
   guestOwnPaymentView,
   guestWholeTablePaidView,
+  guestOwnRefunds,
   type GuestBillScenario,
+  type GuestOwnRefunds,
 } from "./guest-bill-closed-by-staff.js";
 
 /**
@@ -38,8 +40,16 @@ import {
 export interface GuestBillPhone {
   readonly payer: boolean;
   readonly tableClosed: boolean;
+  /** Batch 57 (Q36): what staff refunded of the payer's own payment (absent: nothing). */
+  readonly refunds?: GuestOwnRefunds;
 }
 const visitCsrf = "d".repeat(43);
+const ownRefunded = (kind: GuestOwnRefunds) => {
+  const minor = guestOwnRefunds(kind)
+    .filter((refund) => refund.status !== "Failed")
+    .reduce((sum, refund) => sum + BigInt(refund.amountMinor), 0n);
+  return minor === 0n ? {} : { refundedMinor: minor.toString() };
+};
 const endedCsrf = "C".repeat(43);
 
 /**
@@ -94,7 +104,12 @@ export async function startGuestBillHttp(
           String(credentials.csrfCredential) !== (tableClosed ? endedCsrf : visitCsrf)
         )
           throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
-        return guestOwnPaymentView(part, true, tableClosed ? "Closed" : "Closing");
+        return guestOwnPaymentView(
+          part,
+          true,
+          tableClosed ? "Closed" : "Closing",
+          phone().refunds ?? "None",
+        );
       },
     } as never,
   });
@@ -130,10 +145,15 @@ export async function startGuestBillHttp(
                 brandDisplayName: "Test Merchant 2 - not production",
                 storeDisplayName: "Test Merchant 2 Main - not production",
               },
-              // Batch 56: the phone that paid part of it (Payment's captured payment, 1413).
+              // Batch 56: the phone that paid part of it (Payment's captured payment, 1413). Batch
+              // 57: with what went back to its card, refused refunds left out (as the read sums).
               ...(phone().payer && paidPart() !== null
                 ? {
-                    yourPayment: { amountMinor: "1413", method: "Online" as const },
+                    yourPayment: {
+                      amountMinor: "1413",
+                      method: "Online" as const,
+                      ...ownRefunded(phone().refunds ?? "None"),
+                    },
                     csrfToken: endedCsrf,
                   }
                 : {}),

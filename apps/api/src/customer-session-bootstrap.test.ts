@@ -286,10 +286,28 @@ it("tells a guest whose table closed with nothing ordered that its visit ended, 
       csrfToken: "C".repeat(43),
     },
   });
+  // Batch 57 (Q36): with what went back to its card; never more than it paid.
+  f.readSettledTable.mockResolvedValue({
+    tableLabel: "L55 CB3 (TEST)",
+    closedByStaff: "Some",
+    yourPayment: { amountMinor: "1413", method: "Online", refundedMinor: "800" },
+    csrfToken: "C".repeat(43),
+  });
+  expect(await (await f.request()).json()).toEqual({
+    schemaVersion: 1,
+    closedTable: {
+      tableLabel: "L55 CB3 (TEST)",
+      paid: "Some",
+      yourPayment: { amountMinor: "1413", method: "Online", refundedMinor: "800" },
+      csrfToken: "C".repeat(43),
+    },
+  });
   for (const yourPayment of [
     { amountMinor: "0", method: "Online" },
     { amountMinor: "14.13", method: "Online" },
     { amountMinor: "1413", method: "Cash" },
+    { amountMinor: "1413", method: "Online", refundedMinor: "1414" },
+    { amountMinor: "1413", method: "Online", refundedMinor: "0" },
   ]) {
     f.readSettledTable.mockResolvedValue({
       tableLabel: "L55 CB3 (TEST)",
