@@ -69,7 +69,26 @@ const tablePayment = {
   ],
 };
 
-async function mock(page: Page, zh: boolean) {
+/**
+ * b60 review: a table paid $46.00 on a guest's phone for $40.00 of dishes ($6.00 tip), $10.00 of it
+ * refunded. The Total is what was paid (tip included, as a pickup's), so "Total after refunds"
+ * equals the list's amount ($36.00), never $30.00.
+ */
+const tippedPayment = {
+  orderReference: id(1),
+  payment: {
+    ...part,
+    partNumber: null,
+    roundsMinor: "4000",
+    tipMinor: "600",
+    totalMinor: "4600",
+    onlineRefunds: [onlineRefund("1000", "Refunded", 1)],
+    refundableMinor: "3600",
+  },
+  parts: [],
+};
+
+async function mock(page: Page, zh: boolean, tipped = false) {
   if (zh)
     await page.addInitScript(() => {
       try {
@@ -139,15 +158,20 @@ async function mock(page: Page, zh: boolean) {
     canRequestAcceptance: false,
     canViewPayments: true,
     canRecordCardMachinePayment: false,
-    tableBill: {
-      totalMinor: "2825",
-      paid: {
-        amountMinor: "2825",
-        method: "Split",
-        refundedMinor: "875",
-        refundPendingMinor: "300",
-      },
-    },
+    tableBill: tipped
+      ? {
+          totalMinor: "4000",
+          paid: { amountMinor: "4600", method: "Online", refundedMinor: "1000", tipMinor: "600" },
+        }
+      : {
+          totalMinor: "2825",
+          paid: {
+            amountMinor: "2825",
+            method: "Split",
+            refundedMinor: "875",
+            refundPendingMinor: "300",
+          },
+        },
     currentPhase: "Fulfilled",
     currentVersion: 6,
     unfulfillable: null,
@@ -155,19 +179,19 @@ async function mock(page: Page, zh: boolean) {
     acceptBy: null,
     awaitingPayment: false,
   };
-  const item = (n: number, name: string, taxMinor: string) => ({
+  const item = (n: number, name: string, taxMinor: string, priceMinor = "1250") => ({
     orderItemReference: id(200 + n),
     orderBatchReference: id(51),
     name,
     options: [],
     quantity: 1,
     customerNote: null,
-    unitPrice: money("1250"),
-    subtotal: money("1250"),
+    unitPrice: money(priceMinor),
+    subtotal: money(priceMinor),
     discount: money("0"),
     tax: money(taxMinor),
     fee: money("0"),
-    total: money((1250 + Number(taxMinor)).toString()),
+    total: money((Number(priceMinor) + Number(taxMinor)).toString()),
     canCancel: false,
     cancellation: null,
   });
@@ -181,22 +205,41 @@ async function mock(page: Page, zh: boolean) {
         screenId: "OPS-ORDER-DETAIL",
         pickupContact: null,
         order,
-        lines: {
-          items: [item(1, "Beef noodles (TEST)", "163"), item(2, "Pork dumplings (TEST)", "162")],
-          totals: {
-            subtotal: money("2500"),
-            discount: money("0"),
-            tax: money("325"),
-            fee: money("0"),
-            taxRounding: money("0"),
-            total: money("2825"),
-          },
-        },
+        lines: tipped
+          ? {
+              items: [
+                item(1, "Beef noodles (TEST)", "230", "1770"),
+                item(2, "Pork dumplings (TEST)", "230", "1770"),
+              ],
+              totals: {
+                subtotal: money("3540"),
+                discount: money("0"),
+                tax: money("460"),
+                fee: money("0"),
+                taxRounding: money("0"),
+                total: money("4000"),
+                tip: money("0"),
+              },
+            }
+          : {
+              items: [
+                item(1, "Beef noodles (TEST)", "163"),
+                item(2, "Pork dumplings (TEST)", "162"),
+              ],
+              totals: {
+                subtotal: money("2500"),
+                discount: money("0"),
+                tax: money("325"),
+                fee: money("0"),
+                taxRounding: money("0"),
+                total: money("2825"),
+              },
+            },
       },
     }),
   );
   await page.route("**/merchant/orders/table-payment", (route) =>
-    route.fulfill({ headers, json: tablePayment }),
+    route.fulfill({ headers, json: tipped ? tippedPayment : tablePayment }),
   );
 }
 
@@ -304,6 +347,51 @@ for (const zh of [false, true]) {
       await mock(page, zh);
       await page.goto("/operations/orders/" + id(1));
       await totalsHold(page, zh);
+    });
+  }
+}
+
+for (const zh of [false, true]) {
+  const language = zh ? "zh-Hans" : "en";
+  for (const [width, height] of [
+    [390, 844],
+    [1024, 768],
+    [1440, 900],
+  ] as const) {
+    test(`@production b60 review: a tipped table's detail and list agree after a refund (${language}, ${width})`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height });
+      await mock(page, zh, true);
+      await page.goto("/operations/orders");
+      const row = page.locator("li.order-row").first();
+      await expect(row.locator(".order-row__money")).toHaveText("$36.00");
+      await expect(row.locator(".order-row__refunded")).toHaveText(
+        zh ? "已退 $10.00" : "$10.00 refunded",
+      );
+      const opener = row.locator(".order-row__open");
+      if ((await opener.getAttribute("aria-expanded")) !== "true") await opener.click();
+      await expect(opener).toHaveAttribute("aria-expanded", "true");
+      const value = (label: string) =>
+        page
+          .locator(".order-lines-totals > div")
+          .filter({ has: page.locator("dt", { hasText: new RegExp(`^${label}$`, "u") }) })
+          .locator("dd")
+          .first();
+      await expect(value(zh ? "小费" : "Tip")).toHaveText("$6.00");
+      await expect(value(zh ? "合计" : "Total")).toHaveText("$46.00");
+      await expect(value(zh ? "其他退款" : "Other refunds")).toHaveText("−$10.00");
+      // The same figure as the list's amount.
+      await expect(value(zh ? "退款后合计" : "Total after refunds")).toHaveText("$36.00");
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+        ),
+      ).toBe(true);
+      await page.screenshot({
+        path: `test-results/b60r-tipped-table-${language}-${width}.png`,
+        fullPage: true,
+      });
     });
   }
 }

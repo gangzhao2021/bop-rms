@@ -110,6 +110,7 @@ import {
   ordersAwaitingAcceptance,
   type OrderPickupContact,
   type PickupHourNotice,
+  type TableBillTaken,
 } from "./current-order-queue-client.js";
 import {
   floorServerProblemHeading,
@@ -436,6 +437,7 @@ export function CurrentOrderLines({
   refundRows,
   rounds,
   billRounding,
+  tableTaken,
 }: {
   /**
    * v15 b15 (DEC-TAX-WHOLE-RECEIPT): an Order on a pay-at-end table — its rounds as the bill
@@ -475,6 +477,12 @@ export function CurrentOrderLines({
    * from orderRefundRows. Absent: only the cancelled items' refund is listed.
    */
   readonly refundRows?: readonly OrderRefundRow[] | undefined;
+  /**
+   * b60 review: a table's payment (or its paid parts): the tip and cash rounding it took are in the
+   * Total, as a pickup's tip is, so "Total after refunds" and the list's amount agree. From
+   * orderTableTaken.
+   */
+  readonly tableTaken?: TableBillTaken | null | undefined;
 }) {
   const clockStyle = useContext(ClockStyleContext);
   const totals = lines.totals;
@@ -518,7 +526,19 @@ export function CurrentOrderLines({
   // v15 2026-11-11 b10: with every round cancelled and refunded, the Total above still reads as
   // the money charged; what the order comes to after its refunds is said under them, so staff
   // never read a refunded total as money owed. Only when every refund's amount is known.
-  const afterRefunds = totalAfterRefunds(orderTotalWithTip(shown), refunds);
+  // b60 review: a table's tip and cash rounding are on its payment, not its lines.
+  const tableTip = BigInt(tableTaken?.tipMinor ?? "0");
+  const tableRounding = BigInt(tableTaken?.roundingMinor ?? "0");
+  const tip = BigInt(totals.tip?.amountMinor ?? "0") + tableTip;
+  const total = Object.freeze({
+    amountMinor: (
+      BigInt(orderTotalWithTip(shown).amountMinor) +
+      tableTip +
+      tableRounding
+    ).toString(),
+    currencyCode: shown.total.currencyCode,
+  });
+  const afterRefunds = totalAfterRefunds(total, refunds);
   const given = refunds.filter((row) => row.pending !== true);
   const onItsWay = refunds.filter((row) => row.pending === true);
   // One "Check refund" per pending cancellation, on its first line.
@@ -788,15 +808,23 @@ export function CurrentOrderLines({
             })}
           </dd>
         </div>
-        {totals.tip !== null && totals.tip.amountMinor !== "0" ? (
+        {tip !== 0n ? (
           <div>
             <dt>{t("Tip")}</dt>
-            <dd>{orderMoney(totals.tip)}</dd>
+            <dd>{orderMoney({ amountMinor: tip.toString(), currencyCode: total.currencyCode })}</dd>
+          </div>
+        ) : null}
+        {tableRounding !== 0n ? (
+          <div>
+            <dt>{t("Cash rounding")}</dt>
+            <dd>
+              <span className="bop-amount">{signedCad(tableRounding.toString())}</span>
+            </dd>
           </div>
         ) : null}
         <div>
           <dt>{t("Total")}</dt>
-          <dd>{orderMoney(orderTotalWithTip(shown))}</dd>
+          <dd>{orderMoney(total)}</dd>
         </div>
       </dl>
       {/* The whole bill to pay only when it is not this Total alone (a table merged into it). */}
@@ -1065,7 +1093,8 @@ export function orderRefundRows(
   // b60 (v15 b59 live, TM2 order 27): a paid table's own refunds (cash, card machine, and to a
   // guest's card once the Provider answered Succeeded), as Payment records them per part, count
   // against the order's total like a pickup's; the "Paid at the table" section keeps each line.
-  const table = order.tableBill?.paid ?? null;
+  // b60 review: and a refund on a part already paid while the rest is still owed.
+  const table = orderTableTaken(order);
   other += BigInt(table?.refundedMinor ?? "0");
   if (other > 0n) {
     rows.push({ label: t("Other refunds"), amount: money(other) });
@@ -1083,6 +1112,15 @@ export function orderRefundRows(
   return rows;
 }
 
+/**
+ * b60 review: what a table's payment took besides its rounds and what went back — the whole bill
+ * once paid, or its paid parts while the rest is owed. Null: nothing paid at the table.
+ */
+export function orderTableTaken(order: {
+  readonly tableBill: CurrentOrderQueue["items"][number]["tableBill"];
+}): TableBillTaken | null {
+  return order.tableBill?.paid ?? order.tableBill?.partlyPaid ?? null;
+}
 /**
  * WP-2423 (3cd0f8dd M1): the order's total with the tip its payments carried, so staff read what
  * was paid (as the guest's page and receipt do). Minor units only.
@@ -2223,6 +2261,7 @@ function QueuedOrderLines({
           state.detail.paymentPosition,
         )}
         billRounding={orderBill(state.detail.order)}
+        tableTaken={orderTableTaken(state.detail.order)}
         rounds={
           state.detail.order.orderType === "DineIn"
             ? {
@@ -2647,7 +2686,26 @@ export function orderAmountNote(
         ? there
         : t("Paid {amount} here", { amount: orderMoney(taken) }) + " · " + there;
     }
-    if (paid === null) return t("On the table's bill");
+    if (paid === null) {
+      // b60 review: a refund on a part already paid shows on the list too; the amount stays
+      // the bill (the rest is still owed).
+      const parts = order.tableBill.partlyPaid;
+      return [
+        t("On the table's bill"),
+        parts?.refundedMinor === undefined
+          ? null
+          : t("{refunded} refunded", {
+              refunded: orderMoney({ amountMinor: parts.refundedMinor, currencyCode: "CAD" }),
+            }),
+        parts?.refundPendingMinor === undefined
+          ? null
+          : t("{amount} going back to the guest's card", {
+              amount: orderMoney({ amountMinor: parts.refundPendingMinor, currencyCode: "CAD" }),
+            }),
+      ]
+        .filter((part) => part !== null)
+        .join(" · ");
+    }
     const how =
       paid.method === "Cash"
         ? t("Paid at the table · cash")
@@ -5422,6 +5480,7 @@ export function CurrentOrderQueuePage({
                               detail.paymentPosition,
                             )}
                             billRounding={orderBill(detail.order)}
+                            tableTaken={orderTableTaken(detail.order)}
                             rounds={
                               detail.order.orderType === "DineIn"
                                 ? {

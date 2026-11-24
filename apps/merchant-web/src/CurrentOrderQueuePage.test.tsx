@@ -37,6 +37,7 @@ import {
   orderAgeText,
   orderAmountTaken,
   orderAmountRefunded,
+  orderTableTaken,
   orderStatusTone,
   ordersSummary,
   orderLabel,
@@ -2731,4 +2732,173 @@ describe("b60 (v15 b59 live, TM2 order 27): a paid table's refunds count on Orde
       setLanguageForTest("en");
     }
   });
+});
+
+describe("b60 review: a table's tip and cash rounding are in its Orders Total, so the list and the detail agree", () => {
+  const money = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" as const });
+  // The table-online-refund.spec shape: dishes $40.00, paid $46.00 on the guest's phone ($6.00 tip).
+  const table = (bill: Record<string, unknown>) =>
+    ({
+      orderType: "DineIn",
+      paidOnline: null,
+      counter: null,
+      paymentPosition: null,
+      batches: [{ sequence: 1, staffCancellation: null, staffRound: null }],
+      tableBill: { totalMinor: "4000", ...bill },
+    }) as unknown as Parameters<typeof orderRefundRows>[0];
+  const paid = (extra: Record<string, string>) =>
+    table({ paid: { amountMinor: "4600", method: "Online", tipMinor: "600", ...extra } });
+  const lines = {
+    ...parseCurrentOrderDetailFixtureLines(),
+    totals: {
+      ...parseCurrentOrderDetailFixtureLines().totals,
+      subtotal: money("3540"),
+      tax: money("460"),
+      total: money("4000"),
+      tip: money("0"),
+    },
+  } as Parameters<typeof CurrentOrderLines>[0]["lines"];
+  const detail = (order: Parameters<typeof orderRefundRows>[0]) =>
+    renderToStaticMarkup(
+      <CurrentOrderLines
+        lines={lines}
+        refundRows={orderRefundRows(order, lines, null)}
+        tableTaken={orderTableTaken(order)}
+      />,
+    );
+  const list = (order: Parameters<typeof orderRefundRows>[0]) => {
+    const taken = orderAmountTaken(order);
+    return taken === null ? null : BigInt(taken.amountMinor) - orderAmountRefunded(order);
+  };
+  const afterRefunds = (html: string) =>
+    /<dt>Total after refunds<\/dt><dd>\$([0-9.]+)<\/dd>/u.exec(html)?.[1] ?? null;
+
+  it("shows the tip and a Total equal to what was paid", () => {
+    const html = detail(paid({}));
+    expect(html).toMatch(/<dt>Tip<\/dt><dd>\$6\.00<\/dd>/u);
+    expect(html).toMatch(/<dt>Total<\/dt><dd>\$46\.00<\/dd>/u);
+    expect(list(paid({}))).toBe(4600n);
+  });
+
+  it("a full refund leaves $0.00, as a refunded pickup", () => {
+    const order = paid({ refundedMinor: "4600" });
+    expect(afterRefunds(detail(order))).toBe("0.00");
+    expect(list(order)).toBe(0n);
+  });
+
+  it("refunding only the tip leaves the dishes' $40.00", () => {
+    const order = paid({ refundedMinor: "600" });
+    expect(afterRefunds(detail(order))).toBe("40.00");
+    expect(list(order)).toBe(4000n);
+  });
+
+  it("a part refund reads the same on the list and in the detail", () => {
+    const order = paid({ refundedMinor: "1000" });
+    expect(afterRefunds(detail(order))).toBe("36.00");
+    expect(list(order)).toBe(3600n);
+  });
+
+  it("counts a cash payment's rounding, with its sign", () => {
+    const order = table({
+      paid: { amountMinor: "3998", method: "Cash", roundingMinor: "-2", refundedMinor: "500" },
+    });
+    const html = detail(order);
+    expect(html).toMatch(/<dt>Cash rounding<\/dt><dd><span class="bop-amount">−\$0\.02<\/span>/u);
+    expect(html).toMatch(/<dt>Total<\/dt><dd>\$39\.98<\/dd>/u);
+    expect(afterRefunds(html)).toBe("34.98");
+    expect(list(order)).toBe(3498n);
+  });
+
+  it("a refund on a part already paid shows while the rest is owed", () => {
+    // Two parts: part 1 paid $23.00 ($20.00 + $3.00 tip); $5.00 of it went back, $2.00 on its way.
+    const order = table({
+      partlyPaid: {
+        remainingMinor: "2000",
+        paidParts: 1,
+        partCount: 2,
+        tipMinor: "300",
+        refundedMinor: "500",
+        refundPendingMinor: "200",
+      },
+      paid: null,
+    });
+    expect(orderRefundRows(order, lines, null)).toEqual([
+      { label: "Other refunds", amount: money("500") },
+      { label: "Going back to the guest's card", amount: money("200"), pending: true },
+    ]);
+    const html = detail(order);
+    expect(html).toMatch(/<dt>Tip<\/dt><dd>\$3\.00<\/dd>/u);
+    expect(html).toMatch(/<dt>Total<\/dt><dd>\$43\.00<\/dd>/u);
+    expect(afterRefunds(html)).toBe("38.00");
+    expect(orderAmountNote(order)).toBe(
+      "On the table's bill · $5.00 refunded · $2.00 going back to the guest's card",
+    );
+    setLanguageForTest("zh-Hans");
+    try {
+      expect(orderAmountNote(order)).toContain("正在退回客人的卡");
+    } finally {
+      setLanguageForTest("en");
+    }
+  });
+});
+
+it("b60 review: reads a table's tip, signed cash rounding and a paid part's refunds, and refuses bad ones", () => {
+  const order = (tableBill: unknown) => ({
+    orderReference: "01909968-0000-7000-8000-000000000001",
+    orderNumber: "ORD-1001",
+    orderType: "DineIn",
+    sourceChannel: "Web",
+    submittedAt: "2026-09-14T00:00:00.000Z",
+    observedAt: "2026-09-14T00:01:00.000Z",
+    initialBatchReference: "01909968-0000-7000-8000-000000000090",
+    batches: [],
+    canRequestAcceptance: false,
+    unfulfillable: null,
+    pickupNotCollected: false,
+    acceptBy: null,
+    awaitingPayment: false,
+    currentPhase: "Cancelled",
+    currentVersion: 2,
+    tableBill,
+  });
+  const read = (tableBill: unknown) =>
+    parseCurrentOrderQueue({ items: [order(tableBill)], nextAfterOrderReference: null }).items[0]
+      ?.tableBill;
+  expect(
+    read({
+      totalMinor: "4000",
+      paid: { amountMinor: "3998", method: "Cash", tipMinor: "0", roundingMinor: "-2" },
+    })?.paid,
+  ).toEqual({ amountMinor: "3998", method: "Cash", tipMinor: "0", roundingMinor: "-2" });
+  expect(
+    read({
+      totalMinor: "4000",
+      partlyPaid: {
+        remainingMinor: "2000",
+        paidParts: 1,
+        partCount: 2,
+        tipMinor: "300",
+        refundedMinor: "500",
+        refundPendingMinor: "200",
+      },
+      paid: null,
+    })?.partlyPaid,
+  ).toEqual({
+    remainingMinor: "2000",
+    paidParts: 1,
+    partCount: 2,
+    tipMinor: "300",
+    refundedMinor: "500",
+    refundPendingMinor: "200",
+  });
+  for (const bad of [
+    { totalMinor: "4000", paid: { amountMinor: "4600", method: "Online", tipMinor: "-600" } },
+    { totalMinor: "4000", paid: { amountMinor: "4600", method: "Online", roundingMinor: "-0" } },
+    {
+      totalMinor: "4000",
+      partlyPaid: { remainingMinor: "2000", paidParts: 1, partCount: 2, refundedMinor: 500 },
+      paid: null,
+    },
+  ])
+    expect(() => read(bad)).toThrow();
 });

@@ -5,6 +5,7 @@ import {
   failedPaymentBatches,
   orderBill,
   orderRefundRows,
+  orderTableTaken,
   removedUnpaidItems,
   soldOutRemovedItems,
   waitingForStaffBatches,
@@ -186,6 +187,7 @@ export function TableOrderRounds({
           waitingBatches={waitingForStaffBatches(detail.view)}
           failedPaymentBatches={failedPaymentBatches(detail.view)}
           refundRows={orderRefundRows(detail.order, detail.lines, detail.paymentPosition)}
+          tableTaken={orderTableTaken(detail.order)}
           billRounding={orderBill(
             detail.order,
             mergedTableLabels.length === 0

@@ -263,9 +263,26 @@ const dineIn = {
     mergedInto: { tableLabel: "T3", paid: true },
     // b40 review: on a merged table, each round's number on the whole bill, as checkout numbers it.
     billRoundNumbers: [{ orderBatchReference: id(0x9031), roundNumber: 2 }],
-    partlyPaid: { remainingMinor: "0", paidParts: 2, partCount: 2 },
+    // b60 review: a paid part's tip, rounding and refunds, as on a paid bill.
+    partlyPaid: {
+      remainingMinor: "0",
+      paidParts: 2,
+      partCount: 2,
+      tipMinor: "600",
+      roundingMinor: "-1",
+      refundedMinor: "200",
+      refundPendingMinor: "100",
+    },
     // b60: what went back and what is still on its way back to a guest's card.
-    paid: { amountMinor: "9200", method: "Cash", refundedMinor: "500", refundPendingMinor: "300" },
+    // b60 review: and the tip and signed cash rounding the bill took.
+    paid: {
+      amountMinor: "9200",
+      method: "Cash",
+      refundedMinor: "500",
+      refundPendingMinor: "300",
+      tipMinor: "1202",
+      roundingMinor: "-2",
+    },
   },
   paidOnline: { amountMinor: "8000", currencyCode: "CAD" },
   paymentPosition: {
@@ -1129,6 +1146,8 @@ describe("merchant BFF responses carry every read-model field the browser parses
       method: "Cash",
       refundedMinor: "500",
       refundPendingMinor: "300",
+      tipMinor: "1202",
+      roundingMinor: "-2",
     });
     expect(table?.tableBill?.rounds).toEqual([
       {

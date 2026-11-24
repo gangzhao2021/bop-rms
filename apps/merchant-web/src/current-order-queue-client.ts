@@ -130,6 +130,44 @@ function parseTableBill(value: unknown, orderType: unknown): TableBill | null {
           : { billRoundNumbers: parseBillRoundNumbers(billRoundNumbers) }),
       });
 }
+/**
+ * b60 review: what a table's payment (or its paid parts) took besides the rounds, and what went
+ * back. Each figure is absent while it is zero (or from an older server).
+ */
+export interface TableBillTaken {
+  /**
+   * Owner 2026-11-03: what went back. b60: cash, card-machine refunds and refunds to a guest's
+   * card the Provider answered Succeeded.
+   */
+  readonly refundedMinor?: string;
+  /** b60: refunds to a guest's card still on their way. */
+  readonly refundPendingMinor?: string;
+  /** b60 review: the tip taken with the bill. */
+  readonly tipMinor?: string;
+  /** b60 review: the cash rounding taken with the bill (can be below zero). */
+  readonly roundingMinor?: string;
+}
+const takenFields = ["refundedMinor", "refundPendingMinor", "tipMinor", "roundingMinor"] as const;
+const signedMinorAmount = /^(0|-?[1-9][0-9]{0,17})$/u;
+function takenKeys(value: unknown): readonly string[] {
+  return value !== null && typeof value === "object"
+    ? takenFields.filter((key) => Object.hasOwn(value, key))
+    : [];
+}
+function parseTaken(value: Record<string, unknown>): TableBillTaken | null {
+  const taken: Record<string, string> = {};
+  for (const key of takenFields) {
+    if (!Object.hasOwn(value, key)) continue;
+    const figure = value[key];
+    if (
+      typeof figure !== "string" ||
+      !(key === "roundingMinor" ? signedMinorAmount : minorAmount).test(figure)
+    )
+      return null;
+    taken[key] = figure;
+  }
+  return taken;
+}
 function parseTableBillBody(
   value: unknown,
   orderType: unknown,
@@ -144,19 +182,14 @@ function parseTableBillBody(
     readonly paidParts: number;
     /** Null: guests are paying by dish (a part per payment, no fixed count). */
     readonly partCount: number | null;
-  };
-  readonly paid: {
-    readonly amountMinor: string;
-    /** WP-2423 item 8 ④: "Split" — paid part by part, every part paid. */
-    readonly method: "CardMachine" | "Cash" | "Online" | "Split";
-    /**
-     * Owner 2026-11-03: what went back (absent while nothing has). b60: cash, card-machine refunds
-     * and refunds to a guest's card the Provider answered Succeeded.
-     */
-    readonly refundedMinor?: string;
-    /** b60: refunds to a guest's card still on their way (absent while none is). */
-    readonly refundPendingMinor?: string;
-  } | null;
+  } & TableBillTaken;
+  readonly paid:
+    | ({
+        readonly amountMinor: string;
+        /** WP-2423 item 8 ④: "Split" — paid part by part, every part paid. */
+        readonly method: "CardMachine" | "Cash" | "Online" | "Split";
+      } & TableBillTaken)
+    | null;
 } | null {
   if (value === null) return null;
   const withParts =
@@ -206,8 +239,15 @@ function parseTableBillBody(
       });
     }
     if (!withParts) return Object.freeze({ totalMinor: bill.totalMinor, paid: null });
-    const parts = exact(bill.partlyPaid, ["remainingMinor", "paidParts", "partCount"]);
+    const parts = exact(bill.partlyPaid, [
+      "remainingMinor",
+      "paidParts",
+      "partCount",
+      ...takenKeys(bill.partlyPaid),
+    ]);
+    const partsTaken = parseTaken(parts);
     if (
+      partsTaken === null ||
       typeof parts.remainingMinor !== "string" ||
       !minorAmount.test(parts.remainingMinor) ||
       !Number.isSafeInteger(parts.paidParts) ||
@@ -220,28 +260,17 @@ function parseTableBillBody(
         remainingMinor: parts.remainingMinor,
         paidParts: parts.paidParts as number,
         partCount: parts.partCount as number | null,
+        ...partsTaken,
       }),
       paid: null,
     });
   }
-  const has = (key: string) =>
-    bill.paid !== null && typeof bill.paid === "object" && Object.hasOwn(bill.paid, key);
-  const withRefund = has("refundedMinor");
-  const withPending = has("refundPendingMinor");
-  const paid = exact(bill.paid, [
-    "amountMinor",
-    "method",
-    ...(withRefund ? ["refundedMinor"] : []),
-    ...(withPending ? ["refundPendingMinor"] : []),
-  ]);
+  const paid = exact(bill.paid, ["amountMinor", "method", ...takenKeys(bill.paid)]);
+  const taken = parseTaken(paid);
   if (
+    taken === null ||
     typeof paid.amountMinor !== "string" ||
     !minorAmount.test(paid.amountMinor) ||
-    (withRefund &&
-      (typeof paid.refundedMinor !== "string" || !minorAmount.test(paid.refundedMinor))) ||
-    (withPending &&
-      (typeof paid.refundPendingMinor !== "string" ||
-        !minorAmount.test(paid.refundPendingMinor))) ||
     (paid.method !== "CardMachine" &&
       paid.method !== "Cash" &&
       paid.method !== "Online" &&
@@ -253,8 +282,7 @@ function parseTableBillBody(
     paid: Object.freeze({
       amountMinor: paid.amountMinor,
       method: paid.method,
-      ...(withRefund ? { refundedMinor: paid.refundedMinor as string } : {}),
-      ...(withPending ? { refundPendingMinor: paid.refundPendingMinor as string } : {}),
+      ...taken,
     }),
   });
 }
