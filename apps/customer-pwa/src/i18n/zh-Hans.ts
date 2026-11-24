@@ -421,6 +421,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   Discounted: "已打折",
   "Rounding (tax worked out on the whole bill)": "取整（税额按整单计算）",
   "On the house": "店家赠送",
+  "{comped} of {quantity} on the house": "{quantity} 份中的 {comped} 份店家赠送",
   "Part {number} paid by": "第 {number} 份付款方式",
   "We couldn’t load the receipt. Check your connection and try again.":
     "收据没能加载。请检查网络后重试。",

@@ -21,6 +21,12 @@ export interface SettledTableReceipt {
       readonly displayName: string;
       readonly subtotalMinor: string;
       readonly reduced: "Comp" | "Discount" | "Points" | null;
+      /**
+       * Batch 60: some of the line's dishes on the house, not all ("1 of 2"): how many of how
+       * many. Absent: the whole line (or an older server).
+       */
+      readonly compedQuantity?: number;
+      readonly quantity?: number;
     }[];
   }[];
   readonly subtotalMinor: string;
@@ -84,16 +90,29 @@ export function parseSettledTableReceipt(payload: unknown): SettledTableReceipt 
         fromTableLabel: label(round.fromTableLabel),
         items: list(round.items, 200).map((entry) => {
           const item = record(entry);
+          const reduced =
+            item.reduced === null ||
+            item.reduced === "Comp" ||
+            item.reduced === "Discount" ||
+            item.reduced === "Points"
+              ? item.reduced
+              : fail();
+          const count = (value: unknown) =>
+            Number.isSafeInteger(value) && (value as number) >= 1 && (value as number) <= 999
+              ? (value as number)
+              : fail();
+          const part =
+            item.compedQuantity === undefined
+              ? null
+              : reduced === "Comp"
+                ? { compedQuantity: count(item.compedQuantity), quantity: count(item.quantity) }
+                : fail();
+          if (part !== null && part.compedQuantity >= part.quantity) fail();
           return Object.freeze({
             displayName: text(item.displayName),
             subtotalMinor: minor(item.subtotalMinor),
-            reduced:
-              item.reduced === null ||
-              item.reduced === "Comp" ||
-              item.reduced === "Discount" ||
-              item.reduced === "Points"
-                ? item.reduced
-                : fail(),
+            reduced,
+            ...(part ?? {}),
           });
         }),
       });
@@ -195,7 +214,12 @@ export function SettledTableReceiptView({ receipt }: { readonly receipt: Settled
                 <dt>
                   {item.displayName}
                   {item.reduced === "Comp"
-                    ? ` · ${t("On the house")}`
+                    ? item.compedQuantity !== undefined && item.quantity !== undefined
+                      ? ` · ${t("{comped} of {quantity} on the house", {
+                          comped: String(item.compedQuantity),
+                          quantity: String(item.quantity),
+                        })}`
+                      : ` · ${t("On the house")}`
                     : item.reduced === "Discount"
                       ? ` · ${t("Discounted")}`
                       : item.reduced === "Points"

@@ -655,4 +655,110 @@ test.describe("@production a pay-at-the-end table after another phone paid, merg
     await page.getByRole("button", { name: "切换到中文" }).click();
     await expect(page.getByText("已售罄 · 已从账单删除，不收费")).toBeVisible();
   });
+
+  // Batch 60 (v15 b59 live, L59S B): staff comped 1 of 2 Beef noodles. The receipt keeps the line
+  // at its price and says one bowl of the two was on the house, never that both were.
+  test("batch 60: the receipt says 1 of 2 on the house beside the line (en, zh-Hans; 390, 1024, 1440)", async ({
+    page,
+  }) => {
+    let closed = false;
+    await endTableWhen(page, () => closed);
+    await openTable(page, {
+      session: (route) =>
+        closed
+          ? route.fulfill({ status: 404, headers: json, json: {} })
+          : route.fulfill({ status: 200, headers: json, json: sessionBody() }),
+      tablePayment: async (route) => {
+        if ((route.request().postData() ?? "").includes("SettledReceipt"))
+          return route.fulfill({
+            status: 200,
+            headers: json,
+            json: {
+              schemaVersion: 1,
+              receipt: {
+                tableLabel: "H4",
+                rounds: [
+                  {
+                    roundNumber: 1,
+                    fromTableLabel: null,
+                    items: [
+                      {
+                        displayName: "Beef noodles (TEST)",
+                        subtotalMinor: "2500",
+                        reduced: "Comp",
+                        compedQuantity: 1,
+                        quantity: 2,
+                      },
+                      { displayName: "Tomato pot (TEST)", subtotalMinor: "1600", reduced: null },
+                    ],
+                  },
+                ],
+                subtotalMinor: "2850",
+                taxMinor: "371",
+                ordersTotalMinor: "3221",
+                tipMinor: "0",
+                roundingMinor: "0",
+                paidMinor: "3221",
+                split: false,
+                payments: [{ partNumber: null, method: "CardMachine", totalMinor: "3221" }],
+              },
+            },
+          });
+        // Staff close the table while its bill is read (answered after the page settled).
+        await new Promise((resolve) => setTimeout(resolve, 1_500));
+        closed = true;
+        return route.fulfill({
+          status: 404,
+          headers: json,
+          json: { schemaVersion: 1, error: { code: "table_not_found" } },
+        });
+      },
+    });
+    const receipt = page.getByRole("main").getByRole("region", { name: "Receipt" });
+    await expect(receipt).toContainText("Beef noodles (TEST) · 1 of 2 on the house$25.00", {
+      timeout: 6_000,
+    });
+    await expect(receipt).not.toContainText("Beef noodles (TEST) · On the house");
+    const rowHolds = async () => {
+      const row = await receipt.locator("dt", { hasText: "Beef noodles (TEST)" }).evaluate((dt) => {
+        const dd = dt.nextElementSibling as HTMLElement;
+        const range = document.createRange();
+        range.selectNodeContents(dd);
+        return {
+          amountLines: new Set([...range.getClientRects()].map((rect) => Math.round(rect.top)))
+            .size,
+          spare:
+            (dt.parentElement?.getBoundingClientRect().width ?? 0) -
+            dd.getBoundingClientRect().width,
+        };
+      });
+      expect(row.amountLines).toBe(1);
+      expect(row.spare).toBeGreaterThanOrEqual(40);
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+    };
+    for (const width of [390, 1024, 1440]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      await rowHolds();
+      await page.screenshot({
+        path: `test-results/b60-receipt-comp-part-en-${width}.png`,
+        fullPage: true,
+      });
+    }
+    await page.getByRole("button", { name: "切换到中文" }).click();
+    const zhReceipt = page.getByRole("main").getByRole("region", { name: "收据" });
+    await expect(zhReceipt).toContainText("Beef noodles (TEST) · 2 份中的 1 份店家赠送$25.00");
+    for (const width of [390, 1024, 1440]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      await page.screenshot({
+        path: `test-results/b60-receipt-comp-part-zh-${width}.png`,
+        fullPage: true,
+      });
+    }
+    await expectNoInternalText(page);
+  });
 });
