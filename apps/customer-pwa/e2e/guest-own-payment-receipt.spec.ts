@@ -463,8 +463,8 @@ for (const width of [390, 1024, 1440])
         await stubTable(page, []);
         const tag = `refund-partial-${zh ? "zh" : "en"}-${width}`;
         const youPaid = zh
-          ? "您已在这部手机上在线支付 $14.13。退回您的卡 $8.00 后，您实付 $6.13。"
-          : "You paid $14.13 by card on this phone. After $8.00 back to your card, you paid $6.13.";
+          ? "您已在这部手机上在线付款 $14.13。退回您的卡 $8.00 后，您实付 $6.13。"
+          : "You paid $14.13 online on this phone. After $8.00 back to your card, you paid $6.13.";
         const lines = zh
           ? [
               /，\$5\.00 已退回您的卡。银行可能要过几天才显示。$/u,
@@ -537,8 +537,8 @@ for (const width of [390, 1024, 1440])
         await stubTable(page, []);
         const tag = `refund-full-${zh ? "zh" : "en"}-${width}`;
         const youPaid = zh
-          ? "您已在这部手机上在线支付 $14.13。这笔款项全部退回您的卡。"
-          : "You paid $14.13 by card on this phone. All of it goes back to your card.";
+          ? "您已在这部手机上在线付款 $14.13。这笔款项全部退回您的卡。"
+          : "You paid $14.13 online on this phone. All of it goes back to your card.";
         await open(page, "/dine-in/session", zh);
         const receipt = page.getByRole("region", { name: zh ? "您的收据" : "Your receipt" });
         await expect(receipt).toContainText(youPaid);

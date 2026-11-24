@@ -1422,10 +1422,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "We couldn’t load your receipt. Check your connection and try again.":
     "暂时没能加载您的收据，请检查网络后再试。",
   // Batch 57 (Q36): refunds of the payer's own payment, on their own receipt and every tab.
-  "You paid {amount} by card on this phone. All of it goes back to your card.":
-    "您已在这部手机上在线支付 {amount}。这笔款项全部退回您的卡。",
-  "You paid {amount} by card on this phone. After {refund} back to your card, you paid {net}.":
-    "您已在这部手机上在线支付 {amount}。退回您的卡 {refund} 后，您实付 {net}。",
+  "You paid {amount} online on this phone. All of it goes back to your card.":
+    "您已在这部手机上在线付款 {amount}。这笔款项全部退回您的卡。",
+  "You paid {amount} online on this phone. After {refund} back to your card, you paid {net}.":
+    "您已在这部手机上在线付款 {amount}。退回您的卡 {refund} 后，您实付 {net}。",
   "Refunded to your card": "退回您的卡",
   "Refunds of your payment": "您这笔付款的退款",
   "On {date}, {amount} went back to your card. Your bank may take a few days to show it.":

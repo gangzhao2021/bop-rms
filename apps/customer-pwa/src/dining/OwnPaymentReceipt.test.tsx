@@ -474,7 +474,7 @@ describe("batch 57: refunds of the payer's own payment", () => {
       />,
     );
     expect(text()).toContain(
-      "You paid $14.13 by card on this phone. After $8.00 back to your card, you paid $6.13.",
+      "You paid $14.13 online on this phone. After $8.00 back to your card, you paid $6.13.",
     );
     expect(text()).toContain("Total paid by you$14.13");
     expect(text()).toContain("Refunded to your card−$8.00");
@@ -507,7 +507,7 @@ describe("batch 57: refunds of the payer's own payment", () => {
       />,
       "zh-Hans",
     );
-    expect(text()).toContain("您已在这部手机上在线支付 $14.13。这笔款项全部退回您的卡。");
+    expect(text()).toContain("您已在这部手机上在线付款 $14.13。这笔款项全部退回您的卡。");
     expect(text()).toContain("退回您的卡−$14.13");
     expect(text()).toContain("退款后合计$0.00");
     expect(container.querySelector(".dining-session__own-refunds li")?.textContent).toMatch(
@@ -528,7 +528,7 @@ describe("batch 57: refunds of the payer's own payment", () => {
       "zh-Hans",
     );
     expect(text()).toContain(
-      "您已在这部手机上在线支付 $14.13。退回您的卡 $8.00 后，您实付 $6.13。",
+      "您已在这部手机上在线付款 $14.13。退回您的卡 $8.00 后，您实付 $6.13。",
     );
   });
 
@@ -542,7 +542,7 @@ describe("batch 57: refunds of the payer's own payment", () => {
       closedByStaff: { kind: "Parts", paid: 1, count: 2 },
     };
     await show(<TableCheckoutNotice checkout={checkout} />);
-    expect(text()).toContain("You paid $14.13 by card on this phone.");
+    expect(text()).toContain("You paid $14.13 online on this phone.");
     // Staff refund meanwhile; the guest opens Your table, whose receipt reads it afresh.
     await show(
       <DiningSessionScreen
@@ -553,7 +553,7 @@ describe("batch 57: refunds of the payer's own payment", () => {
     );
     await show(<TableCheckoutNotice checkout={checkout} />);
     expect(text()).toContain(
-      "You paid $14.13 by card on this phone. After $8.00 back to your card, you paid $6.13.",
+      "You paid $14.13 online on this phone. After $8.00 back to your card, you paid $6.13.",
     );
   });
 
