@@ -815,6 +815,14 @@
 .customer-page .sellable-detail:not(.sellable-detail--with-photo) {
   margin-inline: auto;
 }
+/* Batch 56 (v15 b55 live): the allergy block under that sheet keeps its column, so the page has
+   one left edge (at 1024 and 1440 it began 150 px left of the dish). */
+.customer-page
+  .menu-layout__main:has(.sellable-detail:not(.sellable-detail--with-photo))
+  > .menu-help {
+  max-width: 44rem;
+  margin-inline: auto;
+}
 .customer-page .menu-cart-panel h2 {
   margin: 0 0 var(--bop-space-3);
   font-size: 1.0625rem;
