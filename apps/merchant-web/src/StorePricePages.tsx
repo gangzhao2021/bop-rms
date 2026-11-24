@@ -1,3 +1,4 @@
+import { wordGap } from "./word-gap.js";
 import { PageIntro } from "./PageIntro.js";
 import { t } from "./i18n/i18n.js";
 import { noAccessHeading } from "./access-denied.js";
@@ -633,7 +634,8 @@ function PriceBookEditor({
           <p>
             {t(
               "These are dish prices changed on the Menu page. They go live when someone presses List it there.",
-            )}{" "}
+            )}
+            {wordGap()}
             <Link to="/app/commerce/menus">{t("Go to Menu")}</Link>
           </p>
         </StatePanel>

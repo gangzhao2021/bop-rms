@@ -1,3 +1,4 @@
+import { wordGap } from "./word-gap.js";
 import { t } from "./i18n/i18n.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { orderWhen } from "./CurrentOrderQueuePage.js";
@@ -154,7 +155,8 @@ export function TablePanelPhones({
           row below and "Pause joining by scan" is once, in the heading (no repeated controls). */}
       {fresh.map((phone) => (
         <p key={phone.participantReference} className="table-phones__new" role="note">
-          <strong>{t("Phone {number} just joined.", { number: String(phone.phoneNumber) })}</strong>{" "}
+          <strong>{t("Phone {number} just joined.", { number: String(phone.phoneNumber) })}</strong>
+          {wordGap()}
           {checkingOut
             ? t("Check it belongs to this table. If not, remove it below.")
             : t(

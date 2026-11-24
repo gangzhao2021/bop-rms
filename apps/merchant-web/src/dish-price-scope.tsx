@@ -1,3 +1,4 @@
+import { wordGap } from "./word-gap.js";
 import { t } from "./i18n/i18n.js";
 import type { MenuDish } from "./one-store-menu.js";
 import { minorToDollars } from "./store-price-pages.js";
@@ -99,7 +100,8 @@ export function DishPriceScope({
           ? t("This Store charges its own price, {own}.", { own })
           : brand !== null
             ? t("This Store charges the Brand price.")
-            : t("No price yet. The first price is for every Store.")}{" "}
+            : t("No price yet. The first price is for every Store.")}
+        {wordGap()}
         {brand !== null ? t("Brand price: {brand}.", { brand }) : null}{" "}
         {waiting !== null ? t("{price} for every Store once listed.", { price: waiting }) : null}
       </p>

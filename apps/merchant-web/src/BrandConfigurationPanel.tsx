@@ -1032,7 +1032,8 @@ export function BrandConfigurationPanel({
               <time dateTime={current.recordedReview.reviewValidUntil}>
                 {current.recordedReview.reviewValidUntil}
               </time>
-              {t(".")}{" "}
+              {t(".")}
+              {wordGap()}
               {Date.now() >= Date.parse(current?.recordedReview?.reviewValidUntil ?? "")
                 ? t(
                     "Review expired. New approval or publication is unavailable; original recovery remains available.",

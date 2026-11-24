@@ -1,3 +1,4 @@
+import { wordGap } from "./word-gap.js";
 import { t } from "./i18n/i18n.js";
 /**
  * WP-2423 pilot rule "Warn before timeouts" (2026-10-17): a paid pickup order nobody accepts is
@@ -182,7 +183,7 @@ export function refundAlertsDue(
   return {
     keys: due.map((warning) => `${warning.orderNumber}|${warning.acceptBy}|${warning.tier}`),
     chime: due.some((warning) => warning.tier === "urgent" || warning.tier === "final"),
-    announce: due.length === 0 ? null : due.map((warning) => warning.text).join(" "),
+    announce: due.length === 0 ? null : due.map((warning) => warning.text).join(wordGap()),
   };
 }
 

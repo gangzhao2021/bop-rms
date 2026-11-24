@@ -1,3 +1,4 @@
+import { wordGap } from "./word-gap.js";
 import { useEffect, useRef, useState } from "react";
 import { t } from "./i18n/i18n.js";
 import { newOperationReference } from "./operation-reference.js";
@@ -102,7 +103,7 @@ export function StoreGuestTableStart({
               ? t(
                   "A guest who scans a free table orders right away and pays each round on their phone. A finished table frees itself with no cleaning step: 20 minutes after the last activity if nobody ordered, 90 minutes if they did. The next party, or someone with a photo of the code, can also end a table quiet for 5 minutes with nothing owed, even if its guests are still sitting there. Nobody gets food without paying.",
                 ) +
-                " " +
+                wordGap() +
                 t(
                   "Finished dishes count as handed over: guests collect them at the counter by order number, and Home and Tables stop asking staff to serve them. A table staff mark “Being cleaned” stays closed to guests until staff clear it.",
                 )

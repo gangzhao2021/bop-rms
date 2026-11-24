@@ -240,14 +240,16 @@ export function NotSentCard({
             : t(
                 "Paid in cash: a manager or the owner gives back {cash} from the drawer (the refund of {amount}, in whole nickels) and records it on the payment page.",
                 { cash, amount: formatCad(entry.amountMinor) },
-              )}{" "}
+              )}
+          {wordGap()}
           <Link to={paymentPage}>{t("Open the payment")}</Link>
         </p>
       ) : onMachine ? (
         <p>
           {t(
             "Paid on the store's card machine: refund it on the machine, then record it on the payment page.",
-          )}{" "}
+          )}
+          {wordGap()}
           <Link to={paymentPage}>{t("Open the payment")}</Link>
         </p>
       ) : !canSend || entry.requestOperationReference === null ? (

@@ -1,3 +1,4 @@
+import { wordGap } from "./word-gap.js";
 import { t, listSeparator } from "./i18n/i18n.js";
 import { noAccessHeading } from "./access-denied.js";
 import { NoAccessNotice } from "./NoAccessNotice.js";
@@ -283,7 +284,8 @@ export function StoreTaxReviewPage({
             <StatePanel heading={t("Tax configuration ending soon")} tone="error" status>
               <p>
                 {t("Orders can be priced until")} <StoreDate value={c.endsAt} />
-                {t(", when {value}.", { value: endText[c.endsBecause] })}{" "}
+                {t(", when {value}.", { value: endText[c.endsBecause] })}
+                {wordGap()}
                 {/* WP-2423 store-service-controls (v15 M85, Owner item 19): who renews it. */}
                 {t(
                   "BOP support renews tax setup: call BOP support before then, or the store cannot take orders after that.",

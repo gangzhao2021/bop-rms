@@ -1,3 +1,4 @@
+import { wordGap } from "./word-gap.js";
 import { t, saidTable } from "./i18n/i18n.js";
 import { KitchenMayHaveStartedNote, kitchenMayHaveStartedText } from "./kitchen-cancel-warning.js";
 import { useEffect, useRef, useState } from "react";
@@ -455,7 +456,8 @@ export function TableGuestsLeft({
   if (load.kind === "Failed")
     return load.denied ? null : (
       <p role="status">
-        {t("Couldn't check the table's open rounds. Try again.")}{" "}
+        {t("Couldn't check the table's open rounds. Try again.")}
+        {wordGap()}
         <button type="button" onClick={() => setReload((value) => value + 1)}>
           {t("Check again")}
         </button>

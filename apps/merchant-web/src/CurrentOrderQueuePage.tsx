@@ -1,3 +1,4 @@
+import { wordGap } from "./word-gap.js";
 import {
   systemText,
   displayLocale,
@@ -1385,14 +1386,14 @@ export function OnlineRefundNote({
         : ""}
       {/* WP-2423 M16: never sent, sent and waiting, and to be made on the card machine, apart. */}
       {awaiting > 0n
-        ? " " +
+        ? wordGap() +
           t(
             "A refund of {amount} is recorded and waiting for approval. It is sent once it is approved under Approvals.",
             { amount: amount(awaiting) },
           )
         : ""}
       {approved > 0n
-        ? " " +
+        ? wordGap() +
           // WP-2423 M16: the system sends an approved refund; Approvals sends it if it did not.
           t(
             "A refund of {amount} is approved and is being sent. If it is still not sent in a minute, send it from Approvals.",
@@ -1402,14 +1403,14 @@ export function OnlineRefundNote({
           )
         : ""}
       {asked > 0n
-        ? " " +
+        ? wordGap() +
           t(
             "A refund of {amount} was asked for and is not sent yet. A manager or the owner sends it from Approvals.",
             { amount: amount(asked) },
           )
         : ""}
       {toSend > 0n
-        ? " " +
+        ? wordGap() +
           // A reader who can't send (a cashier) is told who sends it, not where; unread, where it
           // stands, never that this reader can send it.
           (order.canViewPayments !== true || canSend === false
@@ -1430,14 +1431,14 @@ export function OnlineRefundNote({
                 ))
         : ""}
       {onMachine > 0n
-        ? " " +
+        ? wordGap() +
           t(
             "A refund of {amount} is still to be made on the card machine. Refund it on the machine, then record the slip under Payments and refunds.",
             { amount: amount(onMachine) },
           )
         : ""}
       {sending > 0n
-        ? " " +
+        ? wordGap() +
           t("A refund of {amount} was sent and is waiting on the card company.", {
             amount: amount(sending),
           })
@@ -4663,7 +4664,7 @@ export function CurrentOrderQueuePage({
     ];
     acceptAllRunning.current = false;
     setAcceptedByAll((previous) => new Set([...previous, ...accepted]));
-    setAcceptAll({ running: false, summary: parts.join(" ") });
+    setAcceptAll({ running: false, summary: parts.join(wordGap()) });
     refreshInPlace();
   };
   // M108: after a contact removal, the order is read again quietly (as the background read does).
@@ -4910,7 +4911,7 @@ export function CurrentOrderQueuePage({
                 {stale === "No" ? null : (
                   <p className="order-queue-stale" role="status">
                     {stale === "ServerProblem"
-                      ? floorServerProblemText + " " + t("Showing the last update.")
+                      ? floorServerProblemText + wordGap() + t("Showing the last update.")
                       : t(
                           "Orders could not be refreshed. Showing the last update; retrying automatically.",
                         )}

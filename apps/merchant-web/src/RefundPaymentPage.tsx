@@ -1,3 +1,4 @@
+import { wordGap } from "./word-gap.js";
 import { dollarsToMinor } from "./store-price-pages.js";
 import { countOf, t, listSeparator } from "./i18n/i18n.js";
 import { orderMoney } from "./order-money.js";
@@ -94,7 +95,8 @@ export function requestBlockedMessage(context: Context): ReactNode {
       <p>
         {t(
           "New refund requests are made by a store manager, and then you approve them. If you run the store alone, turn on Sole operator in Store setup (it applies to every store of this brand), or give someone the Store Manager role in Staff.",
-        )}{" "}
+        )}
+        {wordGap()}
         <Link to="/app/approvals">{t("Open Approvals")}</Link>
       </p>
     ) : (
@@ -495,7 +497,8 @@ function RecordedRequestStatus({
                           })
                         : t("{amount} to refund on the card machine once an owner approves it.", {
                             amount: amount(payment.amountMinor),
-                          })}{" "}
+                          })}
+                      {wordGap()}
                       <Link to="/app/approvals">{t("Open Approvals")}</Link>
                     </p>
                   ) : recordedHere ? null : !canSend ? (
@@ -1445,7 +1448,8 @@ function RefundWizard({
                     <p className="refund-request__note">
                       {t("{reason}. Nothing was refunded; you can request again.", {
                         reason: declineReasonLabel[entry.decline.reasonCode] ?? t("Other reason"),
-                      })}{" "}
+                      })}
+                      {wordGap()}
                       <SourceTime instant={entry.decline.declinedAt} />
                     </p>
                   </RequestRow>
@@ -1751,7 +1755,7 @@ function RefundWizard({
                 "Refunded to the customer's original payment method as soon as you confirm. The card provider's answer is shown here.",
               )}
               {preview.paymentAttemptReferences.length > 1
-                ? " " +
+                ? wordGap() +
                   t("This refund covers {payments} of this order.", {
                     payments: countOf(preview.paymentAttemptReferences.length, "payment"),
                   })

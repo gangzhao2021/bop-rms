@@ -1,3 +1,4 @@
+import { wordGap } from "./word-gap.js";
 import { waitedAgoText } from "./paid-round-wait.js";
 import { LanguageSwitch } from "./i18n/LanguageSwitch.js";
 import {
@@ -3463,7 +3464,8 @@ export function KitchenBoardScreen({
         {activeSection !== "All" ? (
           // WP-2423 item 8 ⑧: this screen shows one section; the others' orders are counted here.
           <p className="kitchen-section-others" role="status">
-            {t("Showing {section}.", { section: sectionText(activeSection) })}{" "}
+            {t("Showing {section}.", { section: sectionText(activeSection) })}
+            {wordGap()}
             {otherSections.length === 0
               ? t("No orders wait in other sections.")
               : t("Other sections: {list}.", {

@@ -1,3 +1,4 @@
+import { wordGap } from "./word-gap.js";
 import { t } from "./i18n/i18n.js";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
@@ -336,7 +337,8 @@ export function ReceiptTemplateStoreSelection(props: ReceiptTemplateStoreSelecti
       </p>
       {failed ? (
         <p className="store-setup-block__problem store-setup-block__after">
-          {t("Saved receipt templates could not be loaded.")}{" "}
+          {t("Saved receipt templates could not be loaded.")}
+          {wordGap()}
           <button
             type="button"
             className="store-setup-inline-action"

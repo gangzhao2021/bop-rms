@@ -1,3 +1,4 @@
+import { wordGap } from "./word-gap.js";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { SlowWaitNotice } from "./slow-wait.js";
 import { t, saidTable } from "./i18n/i18n.js";
@@ -132,7 +133,7 @@ function errorText(error: unknown): string {
         "We couldn't confirm the result. Press the button again: it is never recorded twice.",
       );
     case "ServerProblem":
-      return notConfirmedPressAgainText + " " + paymentNotConfirmedText;
+      return notConfirmedPressAgainText + wordGap() + paymentNotConfirmedText;
     default:
       return t("This couldn't be done right now. Try again.");
   }
@@ -1027,7 +1028,8 @@ export function TableCheckout({
                     <p role="alert">
                       {t(
                         "A round is still being sent or was just changed. Wait a moment and read the bill again.",
-                      )}{" "}
+                      )}
+                      {wordGap()}
                       <button type="button" onClick={() => setReload((value) => value + 1)}>
                         {t("Read the bill again")}
                       </button>

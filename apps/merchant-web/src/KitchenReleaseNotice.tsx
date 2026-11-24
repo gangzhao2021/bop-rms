@@ -1,3 +1,4 @@
+import { wordGap } from "./word-gap.js";
 import { t } from "./i18n/i18n.js";
 import { notInKitchen } from "./current-order-queue-client.js";
 
@@ -48,7 +49,8 @@ export function AutomaticRefundLateNotice({ late }: { readonly late: boolean }) 
     <p className="order-kitchen-late" role="status">
       <span className="order-accept-by" data-tier="urgent">
         {t("The automatic refund didn't go through.")}
-      </span>{" "}
+      </span>
+      {wordGap()}
       {t("Press Refuse and refund to give the guest their money back in full.")}
     </p>
   );

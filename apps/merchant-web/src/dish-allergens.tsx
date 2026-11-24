@@ -1,3 +1,4 @@
+import { wordGap } from "./word-gap.js";
 import { allergenName, currentLanguage, listSeparator, t } from "./i18n/i18n.js";
 import type { MenuDish } from "./one-store-menu.js";
 import type {
@@ -133,11 +134,11 @@ export function allergenFormSummary(
   );
   if (contains === "" && may === "") return t("No allergens marked.");
   return [
-    contains ? `${t("Contains {list}", { list: contains })}.` : "",
-    may ? `${t("May contain {list}", { list: may })}.` : "",
+    contains ? t("Contains {list}.", { list: contains }) : "",
+    may ? t("May contain {list}.", { list: may }) : "",
   ]
     .filter(Boolean)
-    .join(" ");
+    .join(wordGap());
 }
 
 /**

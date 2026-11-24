@@ -1,3 +1,4 @@
+import { wordGap } from "./word-gap.js";
 import { t } from "./i18n/i18n.js";
 import { LanguageSwitch } from "./i18n/LanguageSwitch.js";
 import { StatePanel } from "@bop-rms/ui";
@@ -50,7 +51,8 @@ export function StaffSignInLink({
   if (entry === "Unavailable")
     return (
       <p className="staff-session__hint" role="alert">
-        {t("The sign-in page could not be reached.")}{" "}
+        {t("The sign-in page could not be reached.")}
+        {wordGap()}
         <button type="button" onClick={load}>
           {t("Try again")}
         </button>
@@ -575,7 +577,8 @@ export function StaffSessionGuard({
     return unconfirmed ? (
       <section className="staff-session__notice" role="alert" aria-label={t("Sign-in check")}>
         <p>
-          <strong>{t("Your sign-in may have ended.")}</strong>{" "}
+          <strong>{t("Your sign-in may have ended.")}</strong>
+          {wordGap()}
           {t("It could not be checked right now. If an action is refused, sign in again.")}
         </p>
       </section>
@@ -590,7 +593,8 @@ export function StaffSessionGuard({
       {notice.kind === "IdleWarning" ? (
         <>
           <p>
-            <strong>{t("Still there?")}</strong>{" "}
+            <strong>{t("Still there?")}</strong>
+            {wordGap()}
             {t("This screen signs out at {at} (in {at2}) because it hasn’t been used.", {
               at: at,
               at2: remaining(notice.at, current, now),
@@ -612,7 +616,8 @@ export function StaffSessionGuard({
       ) : (
         <>
           <p>
-            <strong>{t("Sign in again at {at}.", { at: at })}</strong>{" "}
+            <strong>{t("Sign in again at {at}.", { at: at })}</strong>
+            {wordGap()}
             {t(
               "A sign-in lasts at most 12 hours, so this one ends at {at} (in {at2}). Finish what you’re doing; staying active does not extend it.",
               { at: at, at2: remaining(notice.at, current, now) },

@@ -1,3 +1,4 @@
+import { wordGap } from "./word-gap.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import { AllergenFields, type AllergenAnswer } from "./dish-allergens.js";
@@ -284,7 +285,7 @@ export function ChoiceGroupApply({
           : "",
       ]
         .filter(Boolean)
-        .join(" "),
+        .join(wordGap()),
     );
   };
   const toggle = (references: readonly string[], on: boolean) =>
@@ -299,13 +300,16 @@ export function ChoiceGroupApply({
   return (
     <div className="dish-editor__apply" role="group" aria-label={label}>
       <p className="dish-editor__note">
-        {t("Adds what each dish is missing, at this dish's extra. Nothing else on it changes.")}{" "}
-        {t("Dishes with sizes are changed on the Products page.")}{" "}
+        {t("Adds what each dish is missing, at this dish's extra. Nothing else on it changes.")}
+        {wordGap()}
+        {t("Dishes with sizes are changed on the Products page.")}
+        {wordGap()}
         <Link to="/app/commerce/products">{t("Open products")}</Link>
       </p>
       {readFailed ? (
         <p role="alert">
-          {t("The dishes could not be read. Check the connection and try again.")}{" "}
+          {t("The dishes could not be read. Check the connection and try again.")}
+          {wordGap()}
           <button type="button" onClick={() => setReadAgain((value) => value + 1)}>
             {t("Read again")}
           </button>

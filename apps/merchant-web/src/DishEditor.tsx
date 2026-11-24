@@ -1,3 +1,4 @@
+import { wordGap } from "./word-gap.js";
 import {
   allergenName,
   holdUnsavedWork,
@@ -630,7 +631,7 @@ export function DishEditor({
         : "",
     ]
       .filter(Boolean)
-      .join(" ");
+      .join(wordGap());
   const marksOf = async (product: string | null) =>
     dish === null && product !== null ? applyDishMarks(client, product, marks) : [];
   const save = async () => {
@@ -680,7 +681,7 @@ export function DishEditor({
               : t("{count} need allergens.", { count: count.needAllergens }),
         ]
           .filter(Boolean)
-          .join(" "),
+          .join(wordGap()),
       );
       // Everything stays but the names, descriptions, price and tick. A fee is never carried on: it
       // cannot be undone, and the next item must be asked for its allergens.
@@ -1158,7 +1159,8 @@ export function DishEditor({
             <p className="dish-editor__note">
               {t(
                 "This store keeps stock, so a choice reaches other dishes through its recipe change.",
-              )}{" "}
+              )}
+              {wordGap()}
               <Link to="/app/commerce/option-recipes">{t("Open option recipes")}</Link>
             </p>
           ) : null}
@@ -1187,7 +1189,8 @@ export function DishEditor({
           <legend>{t("Allergens declared by staff")}</legend>
           {recipeAllergens ? (
             <p className="dish-editor__note">
-              {t("This dish has a recipe, so its allergens come from the recipe's ingredients.")}{" "}
+              {t("This dish has a recipe, so its allergens come from the recipe's ingredients.")}
+              {wordGap()}
               <Link to="/app/commerce/recipes">{t("Open recipes")}</Link>
             </p>
           ) : allergenChoices.length === 0 ? (
@@ -1239,7 +1242,8 @@ export function DishEditor({
                 <p className="dish-editor__note" role="note">
                   {t(
                     "This store keeps stock and recipes. Replace these declared allergens with a real recipe for this dish.",
-                  )}{" "}
+                  )}
+                  {wordGap()}
                   <Link to="/app/commerce/recipes">{t("Open recipes")}</Link>
                 </p>
               ) : null}

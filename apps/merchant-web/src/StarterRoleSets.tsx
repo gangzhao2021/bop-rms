@@ -1,3 +1,4 @@
+import { wordGap } from "./word-gap.js";
 import { listSeparator, systemText, t } from "./i18n/i18n.js";
 import { useReadAgainWhenOnline } from "./reconnect-read.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -421,7 +422,8 @@ export function StarterRoleSetOffer({
         {waiting.mine.length > 0 ? (
           <>
             <p>
-              {t("Waiting for approval: {list}.", { list: names(waiting.mine) })}{" "}
+              {t("Waiting for approval: {list}.", { list: names(waiting.mine) })}
+              {wordGap()}
               {several
                 ? t("Staff can be given them once they are approved and turned on.")
                 : t("Staff can be given it once it is approved and turned on.")}
@@ -467,7 +469,8 @@ export function StarterRoleSetOffer({
         ) : null}
         {waiting.turnOn.length > 0 ? (
           <p>
-            {t("Approved, not on yet: {list}.", { list: names(waiting.turnOn) })}{" "}
+            {t("Approved, not on yet: {list}.", { list: names(waiting.turnOn) })}
+            {wordGap()}
             <button
               disabled={busy}
               onClick={() =>
@@ -545,7 +548,8 @@ export function StarterRoleSetOffer({
       ) : place === "StoreSetup" ? (
         progress === null || progress.done ? (
           <p>
-            {t("Your roles are set up for your kind of shop.")}{" "}
+            {t("Your roles are set up for your kind of shop.")}
+            {wordGap()}
             <Link to="/app/organization/roles">{t("Change them on Roles")}</Link>
           </p>
         ) : (

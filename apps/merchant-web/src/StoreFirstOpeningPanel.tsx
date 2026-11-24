@@ -1,3 +1,4 @@
+import { wordGap } from "./word-gap.js";
 import { allergenName, listSeparator, serviceModeText, t } from "./i18n/i18n.js";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router";
@@ -617,7 +618,7 @@ function stopWords(outcome: Extract<StoreOpeningOutcome, { kind: "Stopped" }>): 
       return [
         t("{step} can't be published yet.", { step: stepWords(outcome.step) }),
         ...new Set((outcome.failedChecks ?? []).map(checkWords)),
-      ].join(" ");
+      ].join(wordGap());
     case "OutcomeUnknown":
       return t("We couldn't confirm {step}. {carryOn}", {
         step: stepWords(outcome.step),
@@ -1040,7 +1041,8 @@ export function StoreFirstOpeningPanel({
       <section id="store-opening" className="store-opening" aria-labelledby="store-opening-heading">
         <h3 id="store-opening-heading">{t("Open your store")}</h3>
         <p className="store-opening__lead">
-          {t("Waiting for you: {what}.", { what: listOf(waits.forYou.map(gateWords)) })}{" "}
+          {t("Waiting for you: {what}.", { what: listOf(waits.forYou.map(gateWords)) })}
+          {wordGap()}
           {t(
             "These were sent for your approval. Check them; pressing Approve records it as approved by you.",
           )}
@@ -1436,7 +1438,8 @@ export function StoreFirstOpeningPanel({
             {missing.map((entry) =>
               entry === "TaxRates" ? (
                 <p key={entry} role="status">
-                  {t("Waiting for BOP support to set your tax rates.")}{" "}
+                  {t("Waiting for BOP support to set your tax rates.")}
+                  {wordGap()}
                   {saved || facts.profile.current !== null
                     ? t("Come back here once they have: nothing else is needed from you now.")
                     : t("Save your details first: they need your province.")}
@@ -1445,7 +1448,8 @@ export function StoreFirstOpeningPanel({
                 <p key={entry} role="status">
                   {t(
                     "Someone else's change to this store's hours is still waiting. It has to be approved or declined before this can go further.",
-                  )}{" "}
+                  )}
+                  {wordGap()}
                   <Link to={`/app/organization/stores/${scope.storeReference}/service`}>
                     {t("Decide it on Hours & ordering")}
                   </Link>
@@ -1473,13 +1477,15 @@ export function StoreFirstOpeningPanel({
           <p className="store-opening__hint">
             {t(
               "Only you hold allergen list approval, so it does not go to anyone with this. You approve it after your store setup is published.",
-            )}{" "}
+            )}
+            {wordGap()}
             <Link to={allergensHref}>{t("Open Allergens")}</Link>
           </p>
         ) : null}
         {waits.listForYou ? (
           <p className="store-opening__hint">
-            {t("The allergen list is waiting for your approval.")}{" "}
+            {t("The allergen list is waiting for your approval.")}
+            {wordGap()}
             <Link to={allergensHref}>{t("Approve it on Allergens")}</Link>
           </p>
         ) : null}

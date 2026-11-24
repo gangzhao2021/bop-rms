@@ -1,3 +1,4 @@
+import { wordGap } from "./word-gap.js";
 import { countOf, t } from "./i18n/i18n.js";
 import { StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -243,7 +244,7 @@ function ReportSection({
 function cancelledInFullNote(summary: StoreReportSummary): string {
   if (summary.cancelledInFullCount === 0) return "";
   return (
-    " " +
+    wordGap() +
     t(
       "The settlement's figures also include {orders} ({amount}) taken and given back the same day, which this report lists apart instead of as sales and refunds.",
       {

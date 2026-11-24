@@ -1,3 +1,4 @@
+import { wordGap } from "./word-gap.js";
 import { t } from "./i18n/i18n.js";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -80,7 +81,8 @@ export function PickupIdentityDetails({
     );
   return (
     <p role="status">
-      {t("The name and phone on the order can't be shown right now.")}{" "}
+      {t("The name and phone on the order can't be shown right now.")}
+      {wordGap()}
       <button type="button" onClick={onRetry}>
         {t("Try again")}
       </button>
@@ -294,7 +296,8 @@ export function PickupHandoffForm({
             <p role="status">
               {t(
                 "The handover could not be confirmed. Do not hand anything over again; try confirming the same handover again.",
-              )}{" "}
+              )}
+              {wordGap()}
               <button type="button" disabled={paused} onClick={() => void submit(true)}>
                 {t("Try confirming again")}
               </button>

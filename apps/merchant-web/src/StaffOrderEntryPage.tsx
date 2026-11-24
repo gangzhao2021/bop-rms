@@ -181,7 +181,7 @@ export function alreadyOrderedCartText(
             );
   return paperCleared
     ? main +
-        " " +
+        wordGap() +
         t(
           "The paper slip goes with that order and was cleared here, so it is never recorded twice. If the same slip also paid for what is left, tick the paper order again and answer when asked.",
         )
@@ -498,7 +498,7 @@ export function guestRemovedNote(removed: readonly GuestCartLine[]): string | nu
           names: asked.map((line) => line.name).join(listSeparator()),
         }),
   ].filter((note): note is string => note !== null);
-  return notes.length === 0 ? null : notes.join(" ");
+  return notes.length === 0 ? null : notes.join(wordGap());
 }
 
 /** Who added a guest line, as staff say it ("Phone 2", "Phone 2 has left", "Staff"). */
@@ -2157,7 +2157,8 @@ export function StaffOrderEntryPage({
             : t(
                 "The last order sent from this tablet ({time}) got no answer, so it may already be placed. Enter it again and send: the order already placed comes back, never a second one. Or look for it in Orders first.",
                 { time: storeTime(restoredSend.sentAt, timeZone) },
-              )}{" "}
+              )}
+          {wordGap()}
           <Link to="/operations/orders">{t("Open Orders")}</Link>
         </p>
       ) : null}

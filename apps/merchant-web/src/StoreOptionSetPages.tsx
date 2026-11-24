@@ -1,3 +1,4 @@
+import { wordGap } from "./word-gap.js";
 import { t, listSeparator } from "./i18n/i18n.js";
 import { noAccessHeading } from "./access-denied.js";
 import { NoAccessNotice } from "./NoAccessNotice.js";
@@ -324,7 +325,7 @@ function OptionSetEditor({
       }
       setMessage({
         tone: "neutral",
-        text: [t("Saved."), ...optionSetSaveEffectText(result)].join(" "),
+        text: [t("Saved."), ...optionSetSaveEffectText(result)].join(wordGap()),
       });
       if (result.optionSet) setLatest(result.optionSet);
       // The choices this save made: the ones it did not send a reference for (whatever language
@@ -663,7 +664,8 @@ function OptionSetEditor({
         {/* Beside the button just pressed, where the owner is looking (the page may be long). */}
         {newChoices !== null && message?.tone === "neutral" ? (
           <p role="status" ref={newChoicesPrompt}>
-            {t("{choice} is not on any dish yet.", { choice: newChoices.names.join(t(", ")) })}{" "}
+            {t("{choice} is not on any dish yet.", { choice: newChoices.names.join(t(", ")) })}
+            {wordGap()}
             <Link to="/app/commerce/menus" state={{ applyChoice: newChoices }}>
               {t("Add it to dishes")}
             </Link>

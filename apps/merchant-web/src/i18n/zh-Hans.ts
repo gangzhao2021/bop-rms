@@ -6986,6 +6986,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "No allergens": "不含过敏原",
   "Contains {list}": "含{list}",
   "May contain {list}": "可能含{list}",
+  // Batch 56: a sentence of its own, ended in the language's full stop ("含花生。", never "含花生.").
+  "Contains {list}.": "含{list}。",
+  "May contain {list}.": "可能含{list}。",
   "Allergens of {item}": "{item}的过敏原",
   "This dish has a recipe, so its allergens come from the recipe's ingredients.":
     "这道菜有配方，过敏原来自配方里的配料。",

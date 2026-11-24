@@ -1,3 +1,4 @@
+import { wordGap } from "./word-gap.js";
 import { currentLanguage, t } from "./i18n/i18n.js";
 import { Link } from "react-router";
 import type { MenuBuilderView } from "./store-menu-pages.js";
@@ -254,7 +255,8 @@ export function MenuListingReview({
               : t(
                   "{count} price changes started on the Prices page stay there; they do not go live with the menu.",
                   { count: elsewhere },
-                )}{" "}
+                )}
+            {wordGap()}
             <Link to="/app/commerce/pricing">{t("See them")}</Link>
           </p>
         </>
@@ -263,7 +265,8 @@ export function MenuListingReview({
         <p className="one-menu__note" role="alert">
           {t(
             "Another price change went live after these menu prices were changed. Listing them as they are would undo it.",
-          )}{" "}
+          )}
+          {wordGap()}
           <button type="button" disabled={busy} onClick={onRebase}>
             {t("Apply my price changes to the prices in use")}
           </button>
@@ -277,7 +280,8 @@ export function MenuListingReview({
                 ? t("1 dish")
                 : t("{count} dishes", { count: undeclared.length }),
             dishes: undeclared.slice(0, 8).join(t(", ")) + (undeclared.length > 8 ? "…" : ""),
-          })}{" "}
+          })}
+          {wordGap()}
           <button type="button" onClick={onShowUndeclared}>
             {t("Answer allergens")}
           </button>

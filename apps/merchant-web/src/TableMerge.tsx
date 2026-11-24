@@ -1,3 +1,4 @@
+import { wordGap } from "./word-gap.js";
 import { useRef, useState } from "react";
 import { t, saidTable } from "./i18n/i18n.js";
 import { newOperationReference } from "./operation-reference.js";
@@ -229,7 +230,7 @@ export function TableMerge({
         },
       );
       onMerged(
-        failure === null ? announced : announced + " " + teaNotConfirmed(followed, failure),
+        failure === null ? announced : announced + wordGap() + teaNotConfirmed(followed, failure),
         chosen.tableReference,
       );
     } catch (error) {

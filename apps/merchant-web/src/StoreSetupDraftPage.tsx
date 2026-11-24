@@ -3830,7 +3830,8 @@ export function StorePaymentConfigurationEditor({
                   ? t("Check the three payment channel settings.")
                   : error === "Stale"
                     ? t("The saved payment methods were read too long ago. Try again.")
-                    : t("Payment methods could not be loaded. Your earlier save is safe.")}{" "}
+                    : t("Payment methods could not be loaded. Your earlier save is safe.")}
+          {wordGap()}
           {!ready && error !== "Denied" ? (
             <button
               type="button"
@@ -3847,7 +3848,8 @@ export function StorePaymentConfigurationEditor({
       {busy && !ready && <p role="status">{t("Loading payment methods…")}</p>}
       {pending && (
         <p role="status">
-          {t("An earlier payment save must be recovered before another save.")}{" "}
+          {t("An earlier payment save must be recovered before another save.")}
+          {wordGap()}
           <button
             type="button"
             className="store-setup-inline-action"
@@ -3914,7 +3916,8 @@ export function StorePaymentConfigurationEditor({
         <p className="store-setup-block__after">
           {selectedReference === null
             ? t("The store's payment methods are saved, but this setup does not use them yet.")
-            : t("This setup still uses the store's earlier payment methods.")}{" "}
+            : t("This setup still uses the store's earlier payment methods.")}
+          {wordGap()}
           <button
             type="button"
             className="store-setup-inline-action"
@@ -4195,7 +4198,8 @@ export function StoreSetupFeeContextEditor({
         <p role="status" className="store-setup-block__problem">
           {t(
             "Tax classifications could not be loaded. Tips, and fees that are off, can still be saved.",
-          )}{" "}
+          )}
+          {wordGap()}
           <button
             type="button"
             className="store-setup-inline-action"

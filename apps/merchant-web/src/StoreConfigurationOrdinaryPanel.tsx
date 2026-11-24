@@ -188,7 +188,8 @@ export function StoreConfigurationPublicationChecklist({
             ? t("1 thing needs fixing before this can be sent for approval or published.")
             : t("{count} things need fixing before this can be sent for approval or published.", {
                 count: failing.length,
-              })}{" "}
+              })}
+        {wordGap()}
         <span className="store-setup-publish__when">
           {t("Checked")} <StaffTime instant={checks.checkedAt} />
         </span>

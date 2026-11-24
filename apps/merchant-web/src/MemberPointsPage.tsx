@@ -1,3 +1,4 @@
+import { wordGap } from "./word-gap.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import { t } from "./i18n/i18n.js";
@@ -145,7 +146,9 @@ export function pointsRateText(earn: number, redeem: number): string | null {
           "About {percent}% back: a guest earns {earn} points per $1 and {redeem} points take $1 off.",
           { percent, earn: String(earn), redeem: String(redeem) },
         );
-  return tenths > 100 ? text + " " + t("That gives back more than most stores (2–5%).") : text;
+  return tenths > 100
+    ? text + wordGap() + t("That gives back more than most stores (2–5%).")
+    : text;
 }
 
 export function MemberPointsPage({
@@ -281,7 +284,8 @@ export function MemberPointsPage({
                 )
               : t(
                   "Points are off at this Store: guests aren't asked to join, and can't earn or use points here. Members keep their points.",
-                )}{" "}
+                )}
+            {wordGap()}
             {storeFeaturesHref === null ? null : (
               <Link to={storeFeaturesHref}>{t("Store features")}</Link>
             )}

@@ -1,3 +1,4 @@
+import { wordGap } from "./word-gap.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link } from "react-router";
@@ -294,7 +295,7 @@ export function RefundDeadlineWatch({
   const checked =
     checkedAt === null
       ? ""
-      : " " +
+      : wordGap() +
         (checkedSignedOut
           ? t("Last checked at {time}.", {
               time: storeTime(new Date(checkedAt).toISOString(), timeZone),
@@ -337,14 +338,14 @@ export function RefundDeadlineWatch({
       {signedOut ? (
         lines.accept === null && lines.kitchen === null && checked === "" ? null : (
           <p>
-            {[lines.accept, lines.kitchen].filter((line) => line !== null).join(" ")}
+            {[lines.accept, lines.kitchen].filter((line) => line !== null).join(wordGap())}
             {checked}
           </p>
         )
       ) : (
         <>
           {lines.accept === null && lines.kitchen === null ? null : (
-            <p>{[lines.accept, lines.kitchen].filter((line) => line !== null).join(" ")}</p>
+            <p>{[lines.accept, lines.kitchen].filter((line) => line !== null).join(wordGap())}</p>
           )}
           {ordersHref === null ||
           onOrdersPage ||

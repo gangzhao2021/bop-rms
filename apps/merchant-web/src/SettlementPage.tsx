@@ -519,7 +519,8 @@ export function SettlementReport({
           {view.currentDaySelfApprovedRefunds.count} {t("refund")}
           {view.currentDaySelfApprovedRefunds.count === 1 ? "" : "s"} ·{" "}
           {formatSettlementMoney(view.currentDaySelfApprovedRefunds.amountMinor)}{" "}
-          {t("approved by the owner alone.")}{" "}
+          {t("approved by the owner alone.")}
+          {wordGap()}
           {onShowDay ? (
             <button
               type="button"

@@ -1,3 +1,4 @@
+import { wordGap } from "./word-gap.js";
 import { listSeparator, t } from "./i18n/i18n.js";
 import { noAccessHeading } from "./access-denied.js";
 import { NoAccessNotice } from "./NoAccessNotice.js";
@@ -167,7 +168,8 @@ export function StoreWasteListPage({
               <p>
                 {needsReviewOnly
                   ? t("Nothing is waiting for review.")
-                  : t("No waste recorded yet.")}{" "}
+                  : t("No waste recorded yet.")}
+                {wordGap()}
                 <Link to="/operations/inventory/waste/new">{t("Record waste")}</Link>
               </p>
             </StatePanel>
@@ -519,7 +521,8 @@ export function WasteDishesNote({ dishes }: { readonly dishes: readonly string[]
       {t(
         "Dishes that use what was thrown away: {dishes}. If none is left, guests already see them sold out. If some is left but you won't use it, mark them sold out.",
         { dishes: dishes.join(listSeparator()) },
-      )}{" "}
+      )}
+      {wordGap()}
       <Link to="/app/commerce/availability">{t("Item availability")}</Link>
     </p>
   );

@@ -105,3 +105,23 @@ it("WP-2423 (M77, M167): a dish a recipe changed since the listing tells the own
     "Allergens from its recipe · Allergens changed since this menu was listed. Guests see them now; list the menu again to make it the reviewed list.",
   );
 });
+
+it("Batch 56: the allergen summary ends each sentence in the language's own full stop, with no space between them in Chinese", async () => {
+  const { setLanguageForTest } = await import("./i18n/i18n.js");
+  const answers = new Map([
+    ["egg", "Contains" as const],
+    ["milk", "CrossContactPossible" as const],
+    ["soy", "None" as const],
+  ]);
+  const named = choices.map((choice) => ({
+    ...choice,
+    nameZh: choice.code === "EGG" ? "鸡蛋" : choice.code === "MILK" ? "牛奶" : "大豆",
+  }));
+  try {
+    expect(allergenFormSummary(answers, named)).toBe("Contains Eggs. May contain Milk.");
+    setLanguageForTest("zh-Hans");
+    expect(allergenFormSummary(answers, named)).toBe("含鸡蛋。可能含牛奶。");
+  } finally {
+    setLanguageForTest("en");
+  }
+});

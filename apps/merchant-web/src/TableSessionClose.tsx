@@ -1,3 +1,4 @@
+import { wordGap } from "./word-gap.js";
 import { t, saidTable } from "./i18n/i18n.js";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
@@ -526,7 +527,8 @@ export function TableSessionClose({
               ? t(
                   "This table's order wasn't found at this store. Refresh the tables and try again.",
                 )
-              : t("Couldn't check this table's orders. Try again.")}{" "}
+              : t("Couldn't check this table's orders. Try again.")}
+          {wordGap()}
           {check.denied ? null : (
             <button type="button" onClick={() => setAttempt((value) => value + 1)}>
               {t("Check again")}
@@ -608,7 +610,8 @@ export function TableSessionClose({
         <p role="alert">
           {t(
             "The table wasn't closed: its order changed while it was being closed. It has been checked again; review it and try again.",
-          )}{" "}
+          )}
+          {wordGap()}
           {ordersLink}
         </p>
       ) : typeof outcome === "object" && outcome !== null ? (

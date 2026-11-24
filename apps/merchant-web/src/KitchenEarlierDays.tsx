@@ -1,3 +1,4 @@
+import { wordGap } from "./word-gap.js";
 import { t } from "./i18n/i18n.js";
 import { useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router";
@@ -340,7 +341,8 @@ export function KitchenCloseTicketDialog({
             </p>
           ) : null}
           <p className="kitchen-close-dialog__money" role="note">
-            {t("Closing the ticket does not refund or cancel the order.")}{" "}
+            {t("Closing the ticket does not refund or cancel the order.")}
+            {wordGap()}
             {t("If the guest paid and did not get their food, go to")}{" "}
             <Link to="/operations/orders">{t("Orders")}</Link>{" "}
             {t("to cancel or refund {order} from {day}.", {
@@ -400,7 +402,8 @@ export function KitchenEarlierDayConfirm({
         <div>
           <h2 id={titleId}>{t("This ticket is from {day} — continue?", { day: day })}</h2>
           <p>
-            {t("Order numbers restart every business day.")}{" "}
+            {t("Order numbers restart every business day.")}
+            {wordGap()}
             {t(
               "{order} from {day} is not today's order with the same number. Check it is the right ticket first.",
               { order: request.orderLabel, day },

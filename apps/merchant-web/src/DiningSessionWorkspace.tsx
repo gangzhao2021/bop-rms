@@ -557,7 +557,7 @@ function tableActionFailureText(error: unknown): string {
     case "Unknown":
       return t("The result is unknown. Press it again: the same request is sent, never twice.");
     case "ServerProblem":
-      return notConfirmedPressAgainText + " " + serverSideProblemText;
+      return notConfirmedPressAgainText + wordGap() + serverSideProblemText;
     case "Changed":
       return tableChangedText;
     case "TableCheckingOut":
@@ -1799,7 +1799,8 @@ function DiningSessionWorkspaceBody({
               ) : message === noTablesMessage ? (
                 // M159: an empty floor says what to do next, not only that nothing is here.
                 <>
-                  {t("No tables yet.")}{" "}
+                  {t("No tables yet.")}
+                  {wordGap()}
                   {tableQrHref !== undefined ? (
                     <Link to={tableQrHref}>{t("Add your first table")}</Link>
                   ) : (
@@ -2386,7 +2387,8 @@ function TablePanel({
               {t(
                 "Table {table} has no table QR code yet, so guests can't join it and orders can't be taken for it.",
                 { table: saidTable(table.stableLabel) },
-              )}{" "}
+              )}
+              {wordGap()}
               {tableQrHref !== undefined ? (
                 <>
                   {t("Create one on")} <Link to={tableQrHref}>{t("Table QR codes")}</Link>{" "}

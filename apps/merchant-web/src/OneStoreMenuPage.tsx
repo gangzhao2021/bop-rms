@@ -1,3 +1,4 @@
+import { wordGap } from "./word-gap.js";
 import { countOf, currentLanguage, t } from "./i18n/i18n.js";
 import { browserOffline } from "./stale-read.js";
 import { StatePanel } from "@bop-rms/ui";
@@ -115,9 +116,9 @@ export function listingProgressText(seconds: number | null): string {
   if (seconds === null) return base;
   const elapsed = t("{seconds} s", { seconds });
   return seconds < 120
-    ? base + " " + elapsed
+    ? base + wordGap() + elapsed
     : base +
-        " " +
+        wordGap() +
         elapsed +
         " · " +
         t("Taking longer than usual. Nothing needs doing; this page says when it is listed.");
@@ -1199,7 +1200,8 @@ export function OneStoreMenuPage({
       ) : null}
       {combosFailed ? (
         <p className="one-menu__note" role="status">
-          {t("The combos could not be read. Read the menu again to edit or add combos.")}{" "}
+          {t("The combos could not be read. Read the menu again to edit or add combos.")}
+          {wordGap()}
           <button type="button" onClick={reload}>
             {t("Read again")}
           </button>
@@ -1296,7 +1298,8 @@ export function OneStoreMenuPage({
             </div>
           ) : (
             <p className="one-menu__note">
-              {t("A manager or the owner lists the menu.")}{" "}
+              {t("A manager or the owner lists the menu.")}
+              {wordGap()}
               <Link to={`/app/commerce/menus/${menuReference}`}>{t("Open the menu")}</Link>
             </p>
           )}

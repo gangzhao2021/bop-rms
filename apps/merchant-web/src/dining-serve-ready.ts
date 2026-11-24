@@ -1,3 +1,4 @@
+import { wordGap } from "./word-gap.js";
 import { t } from "./i18n/i18n.js";
 import { servableQuantity, type DiningProgress } from "./dining-progress-client.js";
 import type { DiningServeReadyResult } from "./dining-serve-ready-client.js";
@@ -58,5 +59,5 @@ export function serveReadySummary(result: DiningServeReadyResult): string {
         value: result.failed === 1 ? "It is" : "They are",
       }),
     );
-  return parts.join(" ");
+  return parts.join(wordGap());
 }
