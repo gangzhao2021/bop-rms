@@ -436,6 +436,44 @@ export async function listStoreOrdersWithRoundsSince(
   );
 }
 
+/**
+ * Batch 56 (v15 batch 55 live, Test Merchant 2): how many Orders the Store has on a business day,
+ * as the Orders list pages them (every Order with its initial submission), so the Orders header
+ * can say "74 orders today" while the page holds only the newest 50. Read only, through the
+ * Store's own (brand_id, store_id, business_date, order_number) key. Caller authorizes and owns
+ * the transaction.
+ */
+export async function countStoreOrdersOfBusinessDate(
+  transaction: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  input: { readonly businessDate: string },
+): Promise<number> {
+  const brandReference = parseOrderingReference(scope.brandReference);
+  const storeReference = parseOrderingReference(scope.storeReference);
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(input.businessDate))
+    throw new Error("MERCHANT_ORDER_INDEX_UNAVAILABLE");
+  await transaction.query(
+    "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+    [brandReference, storeReference],
+  );
+  const [row] = (
+    await transaction.query(
+      "SELECT count(*)::text AS orders FROM rms_ordering.order_header h " +
+        "WHERE h.brand_id=$1 AND h.store_id=$2 AND h.business_date=$3::date AND EXISTS (" +
+        "SELECT 1 FROM rms_ordering.order_submission_record s " +
+        "JOIN rms_ordering.order_batch b ON b.order_id=s.order_id AND b.brand_id=s.brand_id " +
+        "AND b.store_id=s.store_id AND b.submission_id=s.submission_id " +
+        "WHERE s.order_id=h.order_id AND s.brand_id=h.brand_id AND s.store_id=h.store_id " +
+        "AND s.submission_kind='Initial')",
+      [brandReference, storeReference, input.businessDate],
+    )
+  ).rows as readonly Record<string, unknown>[];
+  const orders = Number(row?.orders);
+  if (typeof row?.orders !== "string" || !Number.isSafeInteger(orders) || orders < 0)
+    throw new Error("MERCHANT_ORDER_INDEX_UNAVAILABLE");
+  return orders;
+}
+
 export interface MerchantOrderLineMoney {
   readonly amountMinor: string;
   readonly currencyCode: string;

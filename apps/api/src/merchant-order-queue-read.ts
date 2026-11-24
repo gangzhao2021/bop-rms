@@ -29,6 +29,7 @@ import {
   createPostgresDiningOrderPreparationSource,
   parseOrderingInstant,
   listStoreOrdersWithRoundsSince,
+  countStoreOrdersOfBusinessDate,
   createOrderListPointReads,
 } from "@rms/ordering";
 
@@ -554,10 +555,27 @@ export function createMerchantOrderQueueRead(options: {
           }),
         );
       }
+      // Batch 56 (v15 batch 55 live): the Orders header's "N orders today" counted the page (the
+      // newest 50, plus an older table listed with them) while the Store had 74 that day. The day's
+      // Orders are counted where they are kept; an unreadable count never blanks the Orders page,
+      // and the header then says what the page shows.
+      const todayOrderCount =
+        today === null || !listing
+          ? null
+          : await withOptionalRead(
+              transaction,
+              () =>
+                countStoreOrdersOfBusinessDate(transaction, ownerScope, {
+                  businessDate: today.businessDate,
+                }),
+              null as number | null,
+            );
       if (!(await recheck())) return unavailable();
       return Object.freeze({
         items: Object.freeze(items),
         nextAfterOrderReference: index.nextAfterOrderReference,
+        /** Batch 56: how many Orders the Store has on its current business day (absent: unknown). */
+        ...(todayOrderCount === null ? {} : { todayOrderCount }),
       });
     });
 }

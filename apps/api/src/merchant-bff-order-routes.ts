@@ -336,6 +336,10 @@ export function installMerchantOrderRoutes(
           nextAfterOrderReference: view.nextAfterOrderReference,
           ...(view.paidOrderWatch === undefined ? {} : { paidOrderWatch: view.paidOrderWatch }),
           ...(view.pickupHour === undefined ? {} : { pickupHour: view.pickupHour }),
+          // Batch 56: the Store's Orders on its current business day, when the server knows it.
+          ...(typeof view.todayOrderCount === "number"
+            ? { todayOrderCount: view.todayOrderCount }
+            : {}),
         });
       })
       .catch((error: unknown) => refundReadFailure(response, error));

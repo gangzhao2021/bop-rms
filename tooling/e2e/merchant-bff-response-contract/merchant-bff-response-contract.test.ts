@@ -640,6 +640,8 @@ const paidOrderWatch = {
 const queueView = {
   items: [earlierCounterPickup, dineIn, heldPickup],
   nextAfterOrderReference: null,
+  // Batch 56: the Store's orders on its business day, for the Orders header.
+  todayOrderCount: 74,
   lines: null,
   pickupContact: null,
   paymentPosition: null,

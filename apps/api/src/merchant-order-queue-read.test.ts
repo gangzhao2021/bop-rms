@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   progress: vi.fn(),
   list: vi.fn(),
   carried: vi.fn(),
+  count: vi.fn(),
   holding: vi.fn(),
   earlierOpen: vi.fn(),
   earlierPaidWaiting: vi.fn(),
@@ -32,6 +33,7 @@ vi.mock("@rms/ordering", () => ({
   acquireOrderDispositionFence: mocks.fence,
   createPostgresMerchantOrderIndex: () => ({ list: mocks.list }),
   listStoreOrdersWithRoundsSince: mocks.carried,
+  countStoreOrdersOfBusinessDate: mocks.count,
   readOrderCreationQuoteVersion: async () => 2,
   createPostgresOrderAcceptanceReader: () => ({ loadByBatch: async () => null }),
   createPostgresOrderExecutionReader: vi.fn(),
@@ -67,6 +69,7 @@ beforeEach(() => {
   mocks.cancelled.mockReset();
   mocks.progress.mockReset();
   mocks.carried.mockReset();
+  mocks.count.mockReset();
   mocks.holding.mockReset();
   mocks.holding.mockResolvedValue([]);
   mocks.earlierOpen.mockReset();
@@ -494,4 +497,60 @@ it("WP-2423 (v15 2026-10-18, 40P01): fences every listed Order in ascending refe
     storeReference: scope.storeReference,
     orderReference: id(10),
   });
+});
+
+it("batch 56 (v15 batch 55 live): says how many Orders the Store has today, not how many the page holds", async () => {
+  mocks.cancelled.mockResolvedValue({ phase: "Cancelled", orderVersion: 2 });
+  mocks.list.mockResolvedValue({
+    items: [indexItem(12, "2026-11-23")],
+    nextAfterOrderReference: id(12),
+  });
+  mocks.carried.mockResolvedValue([]);
+  mocks.count.mockResolvedValue(74);
+  const run = (afterOrderReference: string | null, onlyOrderReference?: string) =>
+    createMerchantOrderQueueRead({
+      transactions: {
+        run: async (work) => work({ query: async () => ({ rows: [], rowCount: 0 }) }),
+      },
+      authorize: async () => scope,
+      quoteVersion: 1,
+      now: () => "2026-11-23T19:00:00.000Z",
+      today: async () => ({ businessDate: "2026-11-23", startsAt: "2026-11-23T09:00:00.000Z" }),
+    })({
+      sessionCookie: "synthetic",
+      afterOrderReference,
+      limit: 50,
+      ...(onlyOrderReference === undefined ? {} : { onlyOrderReference }),
+    });
+  const first = await run(null);
+  expect(first.todayOrderCount).toBe(74);
+  expect(mocks.count.mock.calls[0]?.[1]).toEqual({
+    brandReference: scope.brandReference,
+    storeReference: scope.storeReference,
+  });
+  expect(mocks.count.mock.calls[0]?.[2]).toEqual({ businessDate: "2026-11-23" });
+  // Next page: the same day's count.
+  expect((await run(id(20))).todayOrderCount).toBe(74);
+  // One order's page asks nothing about the day.
+  mocks.count.mockClear();
+  expect((await run(null, id(12))).todayOrderCount).toBeUndefined();
+  expect(mocks.count).not.toHaveBeenCalled();
+});
+
+it("batch 56: an unreadable day count never blanks the Orders page", async () => {
+  mocks.cancelled.mockResolvedValue({ phase: "Cancelled", orderVersion: 2 });
+  mocks.carried.mockResolvedValue([]);
+  mocks.count.mockRejectedValue(new Error("MERCHANT_ORDER_INDEX_UNAVAILABLE"));
+  const result = await createMerchantOrderQueueRead({
+    transactions: {
+      run: async (work) => work({ query: async () => ({ rows: [], rowCount: 0 }) }),
+    },
+    authorize: async () => scope,
+    quoteVersion: 1,
+    now: () => "2026-11-23T19:00:00.000Z",
+    today: async () => ({ businessDate: "2026-11-23", startsAt: "2026-11-23T09:00:00.000Z" }),
+  })({ sessionCookie: "synthetic", afterOrderReference: null, limit: 50 });
+  expect(result.items).toHaveLength(1);
+  expect(result.todayOrderCount).toBeUndefined();
+  expect(Object.hasOwn(result, "todayOrderCount")).toBe(false);
 });

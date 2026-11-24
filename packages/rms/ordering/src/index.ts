@@ -356,6 +356,7 @@ export {
   listStoreCounterOrders,
   listStoreOrderRoundSubmissions,
   listStoreOrdersWithRoundsSince,
+  countStoreOrdersOfBusinessDate,
   listStoreOrdersOfSubmissions,
   listStoreEarlierOpenPickupOrders,
   listStoreEarlierOrdersWithPaidRoundsAwaitingAcceptance,
