@@ -815,7 +815,7 @@ export function TableCheckout({
                 <ul>
                   {round.items.map((item, index) => (
                     <li key={index}>
-                      <span>
+                      <span className={item.reduction ? "table-checkout__dish" : undefined}>
                         {item.displayName}
                         {item.reduction ? (
                           // WP-2423 item 8 ① segment 2: what a manager took off this dish.

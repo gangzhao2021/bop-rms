@@ -559,6 +559,28 @@ for (const zh of [false, true]) {
           return new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size;
         });
       expect(amountLines).toBe(1);
+      // Batch 61 (v15 b60 live, 1024 en): the amount never starts a line away from its words: it
+      // sits on the row of their last line, at the row's right end (the words may wrap above).
+      const placed = await comp.evaluate((element) => {
+        const amount = element.querySelector(".table-checkout__comp-amount");
+        const words = document.createRange();
+        words.setStart(element, 0);
+        words.setEndBefore(amount as Node);
+        const lines = [...words.getClientRects()].filter((rect) => rect.width > 1);
+        const last = lines.reduce((low, rect) => (rect.bottom > low.bottom ? rect : low));
+        const box = (amount as HTMLElement).getBoundingClientRect();
+        const dish = (element.parentElement as HTMLElement).getBoundingClientRect();
+        return {
+          sameRow: box.top < last.bottom && box.bottom > last.top,
+          after: box.left >= last.right,
+          rightEnd: Math.abs(box.right - dish.right),
+          // Room the words' last line leaves before the amount (fonts differ: Linux DejaVu).
+          spare: box.left - last.right,
+        };
+      });
+      expect(placed.sameRow, JSON.stringify(placed)).toBe(true);
+      expect(placed.after, JSON.stringify(placed)).toBe(true);
+      expect(placed.rightEnd, JSON.stringify(placed)).toBeLessThan(1);
       await page.screenshot({
         path: `${shots}/checkout-comp-part-${language}-${width}.png`,
         fullPage: true,

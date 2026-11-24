@@ -1156,6 +1156,29 @@
 .workspace-page.tables-v3 .table-checkout__comp {
   color: var(--bop-color-text-muted);
 }
+/* Batch 61 (v15 b60 live, 1024 en): "Beef noodles (TEST) · 1 of 2 comped −$12.50" wrapped so the
+   amount began a line of its own, away from its words. The comp keeps its words and amount on one
+   row, the amount at the row's right end; when the row is too narrow the comp moves under the dish
+   as a whole, and only its words wrap (the amount stays beside their last line). */
+.workspace-page.tables-v3 .table-checkout__dish {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 0.3em;
+  min-width: 0;
+}
+.workspace-page.tables-v3 .table-checkout__dish > .table-checkout__comp {
+  display: flex;
+  flex: 1 1 auto;
+  justify-content: space-between;
+  align-items: last baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.workspace-page.tables-v3 .table-checkout__dish .table-checkout__comp-amount {
+  flex: none;
+}
 
 /* WP-2423 item 8 ① segment 3: what to do while offline, under the read-only notice. */
 .workspace-page.tables-v3 .tables-offline {
