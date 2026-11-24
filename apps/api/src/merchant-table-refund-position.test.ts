@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { tableRefundPosition } from "./merchant-dining-table-checkout.js";
-import { tableBillRefunds } from "./persistent-merchant-order-queue.js";
+import { tableBillRefunds, tableBillTipAndRounding } from "./persistent-merchant-order-queue.js";
 
 /**
  * b60 (v15 b59 live, TM2 order 27): a paid table's refunds as the Orders row reads them. Part 1
@@ -68,5 +68,21 @@ describe("b60: a table's refunds on Orders", () => {
       order,
     );
     expect(tableBillRefunds(sending)).toEqual({ refundPendingMinor: "300" });
+  });
+});
+
+describe("b60 review: a table's tip and cash rounding on its Orders row", () => {
+  it("adds up a whole payment or its paid parts, signed, and leaves out zeros", () => {
+    expect(tableBillTipAndRounding([{ tipMinor: 600n, roundingMinor: 0n }])).toEqual({
+      tipMinor: "600",
+    });
+    expect(
+      tableBillTipAndRounding([
+        { tipMinor: 300n, roundingMinor: -2n },
+        { tipMinor: 0n, roundingMinor: 1n },
+      ]),
+    ).toEqual({ tipMinor: "300", roundingMinor: "-1" });
+    expect(tableBillTipAndRounding([{ tipMinor: 0n, roundingMinor: 0n }])).toEqual({});
+    expect(tableBillTipAndRounding([])).toEqual({});
   });
 });

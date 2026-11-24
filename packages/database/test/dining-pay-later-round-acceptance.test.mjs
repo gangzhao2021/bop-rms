@@ -8188,6 +8188,13 @@ async function journey(journeyEnding) {
             refundedMinor: undefined,
             refundPendingMinor: "1000",
           });
+          // b60 review: the tip the bill took is on the Orders row, so the detail's Total (and
+          // "Total after refunds") is what was paid, as the list's amount is.
+          const paidNow = (await orderDetail()).items[0].tableBill.paid;
+          assert.ok(tipMinor > 0n);
+          assert.equal(paidNow.amountMinor, due.toString());
+          assert.equal(paidNow.tipMinor, tipMinor.toString());
+          assert.equal(paidNow.roundingMinor, undefined);
           const duringOutage = await dayNow();
           assert.equal(duringOutage.unresolvedOnlineRefundCount, 1);
           assert.deepEqual(duringOutage.settlement.onlineRefunded, { count: 0, amountMinor: 0n });

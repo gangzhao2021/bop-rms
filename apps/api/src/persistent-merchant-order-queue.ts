@@ -714,6 +714,12 @@ export function createPersistentMerchantOrderQueue(options: {
                 paidParts: number;
                 /** Null: guests are paying by dish (a part per payment, no fixed count). */
                 partCount: number | null;
+                /** b60 review: the paid parts' tip and cash rounding (each absent while zero). */
+                tipMinor?: string;
+                roundingMinor?: string;
+                /** b60 review: the paid parts' refunds, as on a paid bill (each absent while zero). */
+                refundedMinor?: string;
+                refundPendingMinor?: string;
               };
               paid: {
                 amountMinor: string;
@@ -727,6 +733,12 @@ export function createPersistentMerchantOrderQueue(options: {
                 refundedMinor?: string;
                 /** b60: refunds to a guest's card still on their way (absent while none is). */
                 refundPendingMinor?: string;
+                /**
+                 * b60 review: the tip and cash rounding taken with the bill (each absent while
+                 * zero), so the Order's Total is what was paid, as a pickup's with its tip.
+                 */
+                tipMinor?: string;
+                roundingMinor?: string;
               } | null;
             }
           >();
@@ -1469,6 +1481,7 @@ export function createPersistentMerchantOrderQueue(options: {
                         .toString(),
                       method: "Split",
                       ...tableBillRefunds(refunds),
+                      ...tableBillTipAndRounding(parts),
                     },
                     ...(await paidBillRoundNumbers()),
                   });
@@ -1486,6 +1499,7 @@ export function createPersistentMerchantOrderQueue(options: {
                       amountMinor: settlement.totalMinor.toString(),
                       method: settlement.method,
                       ...tableBillRefunds(refunds),
+                      ...tableBillTipAndRounding([settlement]),
                     },
                     ...(await paidBillRoundNumbers()),
                   });
@@ -1590,6 +1604,16 @@ export function createPersistentMerchantOrderQueue(options: {
                           paidParts: parts.length,
                           // Guests paying by dish add a part with each payment: no count yet.
                           partCount: plan.mode === "ByGuests" ? null : plan.parts.length,
+                          // b60 review: a paid part's tip, rounding and refunds count as on a
+                          // paid bill, so a refund on it shows on Orders while the rest is owed.
+                          ...tableBillTipAndRounding(parts),
+                          ...tableBillRefunds(
+                            await tableRefundPosition(
+                              businessTransaction as never,
+                              tableStore,
+                              order,
+                            ),
+                          ),
                         },
                       }
                     : {}),
@@ -2355,5 +2379,21 @@ export function tableBillRefunds(refunds: {
   return {
     ...(refunds.refundedMinor > 0n ? { refundedMinor: refunds.refundedMinor.toString() } : {}),
     ...(refunds.pendingMinor > 0n ? { refundPendingMinor: refunds.pendingMinor.toString() } : {}),
+  };
+}
+
+/**
+ * b60 review: the tip and cash rounding a table's payments took (one whole-table payment or its
+ * paid parts), so the Orders detail's Total and "Total after refunds" count them as the list's
+ * amount does. Each figure is absent while it is zero.
+ */
+export function tableBillTipAndRounding(
+  entries: readonly { readonly tipMinor: bigint; readonly roundingMinor: bigint }[],
+): { readonly tipMinor?: string; readonly roundingMinor?: string } {
+  const tip = entries.reduce((sum, entry) => sum + entry.tipMinor, 0n);
+  const rounding = entries.reduce((sum, entry) => sum + entry.roundingMinor, 0n);
+  return {
+    ...(tip !== 0n ? { tipMinor: tip.toString() } : {}),
+    ...(rounding !== 0n ? { roundingMinor: rounding.toString() } : {}),
   };
 }
