@@ -47,6 +47,7 @@ export type ItemCompErrorCode =
   | "ITEM_COMP_NOT_STARTED"
   | "ITEM_COMP_NOT_ELIGIBLE"
   | "ITEM_COMP_ALREADY_COMPED"
+  | "ITEM_COMP_NOT_THAT_MANY"
   | "ITEM_COMP_INVALID_AMOUNT"
   | "ITEM_COMP_CONFLICT"
   | "ITEM_COMP_UNAVAILABLE";
@@ -78,11 +79,48 @@ export function parseItemCompPreview(value: unknown) {
   return parseItemComp(value, "Preview");
 }
 
+/**
+ * Batch 60 (v15 b59 live): a comp may cover some of a line's dishes ("1 of 2 × Beef noodles"):
+ * optional `compQuantities`, [{ orderItemReference, quantity }], for a comp only, each one of the
+ * chosen dishes once; a dish not named is comped for every dish left on its line.
+ */
+function parseCompQuantities(value: unknown, items: readonly string[]) {
+  if (value === undefined) return new Map<string, number>();
+  if (!Array.isArray(value) || value.length > items.length) throw new Error();
+  const quantities = new Map<string, number>();
+  for (const entry of value as unknown[]) {
+    const raw = readClosedRecord(entry, ["orderItemReference", "quantity"]);
+    const item = String(parseOrderingReference(raw.orderItemReference));
+    if (
+      !items.includes(item) ||
+      quantities.has(item) ||
+      typeof raw.quantity !== "number" ||
+      !Number.isInteger(raw.quantity) ||
+      raw.quantity < 1 ||
+      raw.quantity > 999
+    )
+      throw new Error();
+    quantities.set(item, raw.quantity);
+  }
+  return quantities;
+}
+
 function parseItemComp(value: unknown, mode: "Command" | "Preview") {
   try {
+    const withQuantities =
+      value !== null && typeof value === "object" && Object.hasOwn(value, "compQuantities")
+        ? ["compQuantities"]
+        : [];
     const keys =
       mode === "Preview"
-        ? ["orderReference", "orderItemReferences", "kind", "percent", "amountOffMinor"]
+        ? [
+            "orderReference",
+            "orderItemReferences",
+            "kind",
+            "percent",
+            "amountOffMinor",
+            ...withQuantities,
+          ]
         : [
             "orderReference",
             "orderItemReferences",
@@ -91,6 +129,7 @@ function parseItemComp(value: unknown, mode: "Command" | "Preview") {
             "amountOffMinor",
             "reasonCode",
             "operationReference",
+            ...withQuantities,
             ...(value !== null &&
             typeof value === "object" &&
             Object.hasOwn(value, "expectedTotalMinor")
@@ -133,10 +172,13 @@ function parseItemComp(value: unknown, mode: "Command" | "Preview") {
     else throw new Error();
     const items = raw.orderItemReferences.map((item) => String(parseOrderingReference(item)));
     if (new Set(items).size !== items.length) throw new Error();
+    const compQuantities = parseCompQuantities(raw.compQuantities, items);
+    if (compQuantities.size > 0 && choice.kind !== "Comp") throw new Error();
     return Object.freeze({
       orderReference: String(parseOrderingReference(raw.orderReference)),
       orderItemReferences: Object.freeze(items.sort()),
       choice,
+      compQuantities: compQuantities as ReadonlyMap<string, number>,
       reasonCode: (mode === "Command"
         ? raw.reasonCode
         : "GOODWILL") as OrderPriceReductionReasonCode,
@@ -160,6 +202,9 @@ const publicRecords = (records: readonly OrderPriceReductionRecord[]) =>
         amountMinor: record.totalMinor.toString(),
         reasonCode: record.reasonCode,
         decidedAt: record.decidedAt,
+        // Batch 60: the dishes of the line this comp covers, of how many (null: the whole line).
+        compedQuantity: record.compedQuantity,
+        lineQuantity: record.lineQuantity,
       }),
     ),
   );
@@ -199,6 +244,8 @@ export function createMerchantDiningItemCompPreview(options: ItemCompOptions) {
       readonly lines: readonly {
         readonly orderItemReference: string;
         readonly amountMinor: string;
+        readonly compedQuantity: number | null;
+        readonly lineQuantity: number;
       }[];
     }>;
 }
@@ -257,7 +304,13 @@ function itemCompRun(options: ItemCompOptions) {
                   intent.orderItemReferences.join(",") ||
                 prior[0]?.reasonCode !== intent.reasonCode ||
                 prior[0]?.kind !== intent.choice.kind ||
-                prior[0]?.actorReference !== actorReference
+                prior[0]?.actorReference !== actorReference ||
+                // Batch 60: the same dishes of each line as asked.
+                prior.some(
+                  (record) =>
+                    intent.compQuantities.has(record.orderItemReference) &&
+                    intent.compQuantities.get(record.orderItemReference) !== record.compedQuantity,
+                )
               )
                 return fail("ITEM_COMP_CONFLICT");
               return Object.freeze({
@@ -301,9 +354,11 @@ function itemCompRun(options: ItemCompOptions) {
                     ? "ITEM_COMP_NOT_PAY_LATER"
                     : prepared.reason === "AlreadyReduced"
                       ? "ITEM_COMP_ALREADY_COMPED"
-                      : prepared.reason === "InvalidAmount"
-                        ? "ITEM_COMP_INVALID_AMOUNT"
-                        : "ITEM_COMP_NOT_ELIGIBLE",
+                      : prepared.reason === "NotThatMany"
+                        ? "ITEM_COMP_NOT_THAT_MANY"
+                        : prepared.reason === "InvalidAmount"
+                          ? "ITEM_COMP_INVALID_AMOUNT"
+                          : "ITEM_COMP_NOT_ELIGIBLE",
               );
             if (
               (await payments.listOnlinePaymentsByOrders(tx, [intent.orderReference])).some(
@@ -349,6 +404,8 @@ function itemCompRun(options: ItemCompOptions) {
                     Object.freeze({
                       orderItemReference: line.orderItemReference,
                       amountMinor: line.totalMinor.toString(),
+                      compedQuantity: line.compedQuantity,
+                      lineQuantity: line.lineQuantity,
                     }),
                   ),
                 ),

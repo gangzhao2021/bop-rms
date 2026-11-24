@@ -21,6 +21,7 @@ import {
   createPostgresOrderPricedAmountSource,
   listOrderItemPrices,
   listOrderPriceReductions,
+  orderItemReductions,
   listOrderBillOrders,
   listOrderDiningSessions,
   listOrderMergedInto,
@@ -187,6 +188,11 @@ export interface DiningTableBill {
         readonly netMinor: string;
         /** WP-2423 取舍 18: a guest's points, not a manager's decision. */
         readonly points?: true;
+        /**
+         * Batch 60: present only when comps cover some of the line's dishes, not all of them
+         * ("1 of 2 × Beef noodles comped"): how many they cover. Absent: the whole line.
+         */
+        readonly compedQuantity?: number;
       };
     }[];
     /**
@@ -430,6 +436,16 @@ function billRoundFigures(
   };
 }
 
+/** Batch 60: a line whose comps cover some of its dishes says how many (absent: all of them). */
+const partlyComped = (
+  reduction: { readonly compedQuantity: number | null; readonly lineQuantity: number } | null,
+): { readonly compedQuantity?: number } =>
+  reduction !== null &&
+  reduction.compedQuantity !== null &&
+  reduction.compedQuantity < reduction.lineQuantity
+    ? { compedQuantity: reduction.compedQuantity }
+    : {};
+
 /** The bill's rounds as DEC-TAX-WHOLE-RECEIPT computes its tax rounding (one reading for all). */
 function billTaxRoundingRoundsOf(
   confirmations: readonly { orderReference: unknown; orderBatchReference: unknown }[],
@@ -512,11 +528,9 @@ export async function billReductionTaxShares(
   const prices = [];
   for (const billOrder of billOrders)
     prices.push(...(await listOrderItemPrices(tx, owner, billOrder, "")));
-  const reductions = new Map(
-    (await listOrderPriceReductions(tx, owner, billOrders, input.observedAt)).map((record) => [
-      record.orderItemReference,
-      record,
-    ]),
+  // Batch 60: a line comped in part has a comp for each decision; the bill takes them as one.
+  const reductions = orderItemReductions(
+    await listOrderPriceReductions(tx, owner, billOrders, input.observedAt),
   );
   if (!(await allowed())) return fail("TABLE_CHECKOUT_PERMISSION_DENIED");
   return billReductionTaxRoundingShares(
@@ -682,11 +696,9 @@ export async function readDiningTableBill(
   const prices = billPrices.filter((item) => !removed.has(String(item.orderItemReference)));
   // Comps and discounts a manager decided (append-only): the dish stays on the bill at its price,
   // with what came off it.
-  const reductions = new Map(
-    (await listOrderPriceReductions(tx, owner, billOrders, input.observedAt)).map((record) => [
-      record.orderItemReference,
-      record,
-    ]),
+  // Batch 60: a line comped in part has a comp for each decision; the bill takes them as one.
+  const reductions = orderItemReductions(
+    await listOrderPriceReductions(tx, owner, billOrders, input.observedAt),
   );
   const payments = createPostgresDiningTableSettlementStore({
     scope,
@@ -888,6 +900,7 @@ export async function readDiningTableBill(
                     netMinor: (
                       off(item) as NonNullable<ReturnType<typeof off>>
                     ).netMinor.toString(),
+                    ...partlyComped(off(item)),
                   }),
           }),
         ),
@@ -1515,11 +1528,8 @@ export async function readOrderBillRounds(
       const prices = (await listOrderItemPrices(tx, owner, order, "")).filter(
         (item) => !removed.has(String(item.orderItemReference)),
       );
-      const reductions = new Map(
-        (await listOrderPriceReductions(tx, owner, [order], input.observedAt)).map((record) => [
-          record.orderItemReference,
-          record,
-        ]),
+      const reductions = orderItemReductions(
+        await listOrderPriceReductions(tx, owner, [order], input.observedAt),
       );
       // In the order they were confirmed, as checkout lists them.
       return [...rounds]

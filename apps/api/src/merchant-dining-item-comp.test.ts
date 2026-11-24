@@ -115,3 +115,49 @@ it("v15 b16: a body the comp can't read is refused as a promise (the route's 400
   }
   expect(ran).toBe(0);
 });
+
+it("batch 60 (v15 b59 live): a comp may name how many of a line's dishes it covers", () => {
+  const command = parseItemCompCommand({
+    ...base,
+    compQuantities: [{ orderItemReference: id(3), quantity: 1 }],
+  });
+  expect([...command.compQuantities]).toEqual([[id(3), 1]]);
+  // Not named: the dishes left on the line (the whole line for a line not comped yet).
+  expect(parseItemCompCommand(base).compQuantities.size).toBe(0);
+  expect(
+    parseItemCompPreview({
+      orderReference: base.orderReference,
+      orderItemReferences: [id(2)],
+      kind: "Comp",
+      percent: null,
+      amountOffMinor: null,
+      compQuantities: [{ orderItemReference: id(2), quantity: 2 }],
+    }).compQuantities.get(id(2)),
+  ).toBe(2);
+  for (const compQuantities of [
+    [{ orderItemReference: id(3), quantity: 0 }],
+    [{ orderItemReference: id(3), quantity: 1.5 }],
+    [{ orderItemReference: id(3), quantity: "1" }],
+    [{ orderItemReference: id(3), quantity: 1000 }],
+    // Only a dish the comp covers, once.
+    [{ orderItemReference: id(4), quantity: 1 }],
+    [
+      { orderItemReference: id(3), quantity: 1 },
+      { orderItemReference: id(3), quantity: 1 },
+    ],
+    [{ orderItemReference: id(3), quantity: 1, amountMinor: "1413" }],
+    { [id(3)]: 1 },
+  ])
+    expect(() => parseItemCompCommand({ ...base, compQuantities })).toThrow(
+      expect.objectContaining({ code: "ITEM_COMP_INPUT_INVALID" }),
+    );
+  // A percentage or an amount off covers the whole line.
+  expect(() =>
+    parseItemCompCommand({
+      ...base,
+      kind: "Percent",
+      percent: 15,
+      compQuantities: [{ orderItemReference: id(3), quantity: 1 }],
+    }),
+  ).toThrow(expect.objectContaining({ code: "ITEM_COMP_INPUT_INVALID" }));
+});

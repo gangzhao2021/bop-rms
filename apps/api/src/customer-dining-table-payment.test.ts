@@ -355,6 +355,64 @@ it("a settled receipt says what points took off, apart from a manager's comp", (
   ]);
 });
 
+it("batch 60: a settled receipt says how many of a line's dishes were on the house", () => {
+  const body = customerSettledTableReceiptBody({
+    bill: {
+      tableLabel: "L59S B",
+      taxRoundingMinor: "0",
+      settlement: {
+        method: "CardMachine",
+        tipMinor: "0",
+        roundingMinor: "0",
+        totalMinor: "1412",
+        recordedAt: "2026-11-24T18:00:00.000Z",
+      },
+      split: null,
+      rounds: [
+        {
+          roundNumber: 1,
+          fromTableLabel: null,
+          subtotalMinor: "1250",
+          taxMinor: "162",
+          totalMinor: "1412",
+          items: [
+            {
+              displayName: "Beef noodles (TEST)",
+              quantity: 2,
+              subtotalMinor: "2500",
+              totalMinor: "1412",
+              reduction: {
+                kind: "Comp",
+                percent: null,
+                amountMinor: "1413",
+                netMinor: "1250",
+                compedQuantity: 1,
+              },
+            },
+            {
+              displayName: "Tea",
+              quantity: 2,
+              subtotalMinor: "0",
+              totalMinor: "0",
+              reduction: { kind: "Comp", percent: null, amountMinor: "452", netMinor: "400" },
+            },
+          ],
+        },
+      ],
+    },
+  } as never);
+  expect(body.receipt.rounds[0]?.items).toEqual([
+    {
+      displayName: "Beef noodles (TEST)",
+      subtotalMinor: "2500",
+      reduced: "Comp",
+      compedQuantity: 1,
+      quantity: 2,
+    },
+    { displayName: "Tea", subtotalMinor: "0", reduced: "Comp" },
+  ]);
+});
+
 it("Owner 2026-11-03: a settled receipt says what went back, and says nothing while nothing has", () => {
   const view = (refundedMinor?: string) =>
     ({

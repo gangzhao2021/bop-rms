@@ -10,6 +10,7 @@ import { withCause } from "./merchant-failure.js";
 import { MerchantMenuError } from "./merchant-menus.js";
 import { DiningTableCheckoutError } from "./merchant-dining-table-checkout.js";
 import { UnpaidItemRemovalError } from "./merchant-dining-unpaid-item-removal.js";
+import { ItemCompError } from "./merchant-dining-item-comp.js";
 
 /**
  * WP-2423 item 10: a failure is a permission refusal only when the error says so. These run through
@@ -631,6 +632,20 @@ it.each(["/payments/refunds/preview", "/payments/refunds/request"])(
     expect(refused.reported).toEqual([]);
   },
 );
+
+// Batch 60: a comp of more of a line's dishes than are left is a refusal staff read, never a fault.
+it.each([
+  ["/orders/comp-items", "itemComp"],
+  ["/orders/comp-items/preview", "itemCompPreview"],
+])("POST %s comping more dishes than are left answers 409 not_that_many", async (path, key) => {
+  const refused = await serve({
+    [key]: rejecting(new ItemCompError("ITEM_COMP_NOT_THAT_MANY")),
+  } as never);
+  const response = await refused.post(path);
+  expect(response.status).toBe(409);
+  expect(await response.json()).toEqual({ error: "not_that_many" });
+  expect(refused.reported).toEqual([]);
+});
 
 // WP-2423 b17: a merchant request whose JSON can't be read is the BFF's own answer, on every route,
 // never left to the installation's outer handler (which named the payment simulator).

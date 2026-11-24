@@ -11,6 +11,7 @@ import {
   createPostgresPayLaterItemCancellationStore,
   listOrderItemPrices,
   listOrderPriceReductions,
+  orderItemReductions,
   listOrderBillOrders,
   listOrderMergedInto,
   parseOrderingInstant,
@@ -171,11 +172,7 @@ async function billRemovalMinor(
           !takenOff.has(String(price.orderItemReference)),
       ),
     );
-  const reduced = new Map(
-    (await listOrderPriceReductions(tx, owner, billOrders)).map(
-      (record) => [record.orderItemReference, record] as const,
-    ),
-  );
+  const reduced = orderItemReductions(await listOrderPriceReductions(tx, owner, billOrders));
   if (!(await authorize())) return fail("UNPAID_ITEM_REMOVAL_PERMISSION_DENIED");
   const billRounds = rounds.map((round) => ({
     orderReference: String(round.orderReference),

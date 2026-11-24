@@ -591,7 +591,8 @@ export function createPersistentMerchantSettlement(options: {
           ).filter((record) => record.reasonCode !== "POINTS_REDEMPTION");
           if (!(await guard(scope)(tx))) return null;
           return {
-            count: decided.length,
+            // Batch 60: dish lines, as Reports count them (a line comped in two parts is one).
+            count: new Set(decided.map((record) => record.orderItemReference)).size,
             amountMinor: decided.reduce((sum, record) => sum + record.totalMinor, 0n).toString(),
             currencyCode: "CAD" as const,
           };

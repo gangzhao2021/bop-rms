@@ -250,6 +250,12 @@ it("comping both dishes of a $28.25 table takes off $28.25, and every record agr
   journey("CompCentsWhole"));
 it("a comp then a 50 % discount take off exactly what the bill goes down by; the table pays the rest", () =>
   journey("CompCentsPartial"));
+// Batch 60 (v15 b59 live, L59S B): round 1 is 2 × Beef noodles ($25.00, its own tax $3.25), round
+// 2 one more ($14.13). A manager comps 1 of the 2 ($14.13), later the other ($14.12, the line's tax
+// left); more than is left, a percentage on a line comped in part and a third comp are refused,
+// and the bill, Orders, reports and the day-end line all agree to the cent.
+it("a manager comps 1 of 2 identical dishes, then the other; every record agrees to the cent", () =>
+  journey("CompCentsLine"));
 // v15 b16 review: two $3.80 rounds at 13 % are charged $0.49 tax each, the whole bill $0.99 (+$0.01):
 // comping both takes off $8.59, one cent more than the dishes. Ordering's priced total, closing the
 // table without a payment and the day's report still read it ($0.00 owed, $8.59 comped).
@@ -1176,49 +1182,51 @@ async function journey(journeyEnding) {
                         ? "wp2423_plccw"
                         : ending === "CompCentsPartial"
                           ? "wp2423_plccp"
-                          : ending === "CompCentsUp"
-                            ? "wp2423_plccu"
-                            : ending === "MergedCompCent"
-                              ? "wp2423_plmergc"
-                              : ending === "MergedOwnRounding"
-                                ? "wp2423_plmergor"
-                                : ending === "MergedRemoved"
-                                  ? "wp2423_plmergrm"
-                                  : ending === "MemberPointsOnline"
-                                    ? "wp2423_plmembon"
-                                    : ending === "MemberPointsOtherPhone"
-                                      ? "wp2423_plmembop"
-                                      : ending === "MemberPointsStoreAccount"
-                                        ? "wp2423_plmembac"
-                                        : ending === "MemberPointsRefunded"
-                                          ? "wp2423_plmembrf"
-                                          : ending === "MemberPointsPickup"
-                                            ? "wp2423_plmembpk"
-                                            : ending === "MemberPoints"
-                                              ? "wp2423_plmember"
-                                              : ending === "MemberPointsSplit"
-                                                ? "wp2423_plmembsp"
-                                                : ending === "MemberPointsWrittenOff"
-                                                  ? "wp2423_plmembwo"
-                                                  : ending === "PaidSplit"
-                                                    ? "wp2423_plsplit"
-                                                    : ending === "SplitWrittenOff"
-                                                      ? "wp2423_plsplwo"
-                                                      : ending === "SplitPhoneWrittenOff"
-                                                        ? "wp2423_plsplpwo"
-                                                        : ending === "ByGuestsPhoneWrittenOff"
-                                                          ? "wp2423_plbgpwo"
-                                                          : ending === "Held"
-                                                            ? "wp2423_plheld"
-                                                            : ending === "HeldAtCheckout"
-                                                              ? "wp2423_plheldco"
-                                                              : ending === "TipsOff"
-                                                                ? "wp2423_pltips"
-                                                                : ending === "Moved"
-                                                                  ? "wp2423_plmove"
-                                                                  : ending === "Merged"
-                                                                    ? "wp2423_plmerge"
-                                                                    : "wp2423_plon",
+                          : ending === "CompCentsLine"
+                            ? "wp2423_plccl"
+                            : ending === "CompCentsUp"
+                              ? "wp2423_plccu"
+                              : ending === "MergedCompCent"
+                                ? "wp2423_plmergc"
+                                : ending === "MergedOwnRounding"
+                                  ? "wp2423_plmergor"
+                                  : ending === "MergedRemoved"
+                                    ? "wp2423_plmergrm"
+                                    : ending === "MemberPointsOnline"
+                                      ? "wp2423_plmembon"
+                                      : ending === "MemberPointsOtherPhone"
+                                        ? "wp2423_plmembop"
+                                        : ending === "MemberPointsStoreAccount"
+                                          ? "wp2423_plmembac"
+                                          : ending === "MemberPointsRefunded"
+                                            ? "wp2423_plmembrf"
+                                            : ending === "MemberPointsPickup"
+                                              ? "wp2423_plmembpk"
+                                              : ending === "MemberPoints"
+                                                ? "wp2423_plmember"
+                                                : ending === "MemberPointsSplit"
+                                                  ? "wp2423_plmembsp"
+                                                  : ending === "MemberPointsWrittenOff"
+                                                    ? "wp2423_plmembwo"
+                                                    : ending === "PaidSplit"
+                                                      ? "wp2423_plsplit"
+                                                      : ending === "SplitWrittenOff"
+                                                        ? "wp2423_plsplwo"
+                                                        : ending === "SplitPhoneWrittenOff"
+                                                          ? "wp2423_plsplpwo"
+                                                          : ending === "ByGuestsPhoneWrittenOff"
+                                                            ? "wp2423_plbgpwo"
+                                                            : ending === "Held"
+                                                              ? "wp2423_plheld"
+                                                              : ending === "HeldAtCheckout"
+                                                                ? "wp2423_plheldco"
+                                                                : ending === "TipsOff"
+                                                                  ? "wp2423_pltips"
+                                                                  : ending === "Moved"
+                                                                    ? "wp2423_plmove"
+                                                                    : ending === "Merged"
+                                                                      ? "wp2423_plmerge"
+                                                                      : "wp2423_plon",
     },
     async (context) => {
       const admin = new Client(context.clientConfig);
@@ -1257,7 +1265,13 @@ async function journey(journeyEnding) {
             : ending.startsWith("CompCents") || ending.startsWith("Merged")
               ? { quantity: 1, unitPriceMinor: 1250n }
               : {};
-        const R1 = journeyRound({ at: time(-minutes(40)), prefix: "01a00011", ...centsPrice });
+        const R1 = journeyRound({
+          at: time(-minutes(40)),
+          prefix: "01a00011",
+          ...centsPrice,
+          // Batch 60: two bowls on one line.
+          ...(ending === "CompCentsLine" ? { quantity: 2 } : {}),
+        });
         const tableGuest = id(0x602);
         const R2 = journeyRound({
           at: time(-minutes(5)),
@@ -4407,7 +4421,7 @@ async function journey(journeyEnding) {
         const [rounding1, rounding2] =
           centsPrice.unitPriceMinor === 380n
             ? [0n, 1n]
-            : ending.startsWith("CompCents")
+            : ending.startsWith("CompCents") && ending !== "CompCentsLine"
               ? [0n, -1n]
               : [0n, 0n];
         assert.deepEqual(
@@ -6837,6 +6851,292 @@ async function journey(journeyEnding) {
           );
         }
 
+        /**
+         * Batch 60: comp 1 of 2 × Beef noodles, then the other one, under the restricted role.
+         */
+        async function compPartOfLineEnding() {
+          await cookAndServeRound1([round1, round2]);
+          const line = String(items1[0].orderItemReference),
+            other = String(items2[0].orderItemReference);
+          assert.equal(items1[0].quantity, 2);
+          assert.deepEqual(
+            [price(items1[0]), price(items2[0])].map((p) => [p.net, p.tax, p.total]),
+            [
+              [2500n, 325n, 2825n],
+              [1250n, 163n, 1413n],
+            ],
+          );
+          const original = BigInt((await bill()).owed.totalMinor);
+          assert.equal(original, 4238n);
+          const previewOf = (command) =>
+            createMerchantDiningItemCompPreview({
+              persistence: persistenceOf(manager),
+              authentication: manager.authentication,
+              nextReference: fresh,
+              installContext: async (tx, selected) => {
+                await tx.query(
+                  "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
+                  [selected.tenantReference, selected.brandReference, selected.storeReference],
+                );
+              },
+            })({
+              ...as(manager),
+              command: {
+                orderReference,
+                orderItemReferences: [line],
+                kind: "Comp",
+                percent: null,
+                amountOffMinor: null,
+                ...command,
+              },
+            });
+          const records = () =>
+            rows(
+              "SELECT order_item_id::text AS item,kind,net_minor::text AS net,tax_minor::text AS tax,total_minor::text AS total,tax_rounding_minor::text AS share,comped_quantity AS dishes FROM rms_ordering.order_item_price_reduction WHERE order_id=$1 ORDER BY decided_at,reduction_id",
+              [orderReference],
+            );
+          const one = [{ orderItemReference: line, quantity: 1 }];
+          const sum = (values) => values.reduce((total, value) => total + BigInt(value), 0n);
+          const queue = async () =>
+            (
+              await createPersistentMerchantOrderQueue({
+                persistence: persistenceOf(manager),
+                quoteVersion: 1,
+                acceptanceConfigured: true,
+              })({
+                sessionCookie: manager.sessionCookie,
+                afterOrderReference: null,
+                orderReference,
+              })
+            ).items[0];
+          // Before: the whole line is offered, as before.
+          assert.ok((await queue()).batches.some((b) => b.compableItems.includes(line)));
+          // 1 of 2: one bowl's $12.50 and its half-up share of the line's tax ($1.63).
+          const shown = await previewOf({ compQuantities: one });
+          assert.deepEqual(
+            [shown.totalMinor, shown.lines],
+            [
+              "1413",
+              [
+                {
+                  orderItemReference: line,
+                  amountMinor: "1413",
+                  compedQuantity: 1,
+                  lineQuantity: 2,
+                },
+              ],
+            ],
+          );
+          // Not chosen: the whole line, as before ($28.25).
+          assert.equal((await previewOf({})).totalMinor, "2825");
+          const operation = fresh();
+          const first = await comp(manager, {
+            orderItemReferences: [line],
+            compQuantities: one,
+            reasonCode: "WRONG_DISH",
+            operationReference: operation,
+            expectedTotalMinor: "1413",
+          });
+          assert.equal(first.status, "Recorded");
+          assert.deepEqual(
+            first.reductions.map((r) => [r.amountMinor, r.compedQuantity, r.lineQuantity]),
+            [["1413", 1, 2]],
+          );
+          // The same request again (a lost answer) is the same comp, never a second one.
+          const again = await comp(manager, {
+            orderItemReferences: [line],
+            compQuantities: one,
+            reasonCode: "WRONG_DISH",
+            operationReference: operation,
+          });
+          assert.equal(again.status, "AlreadyRecorded");
+          // ...and the same reference for another count is refused.
+          await assert.rejects(
+            comp(manager, {
+              orderItemReferences: [line],
+              compQuantities: [{ orderItemReference: line, quantity: 2 }],
+              reasonCode: "WRONG_DISH",
+              operationReference: operation,
+            }),
+            { code: "ITEM_COMP_CONFLICT" },
+          );
+          let now1 = await bill();
+          assert.equal(now1.consistent, true);
+          assert.equal(now1.owed.totalMinor, "2825");
+          const billLine = now1.rounds
+            .flatMap((round) => round.items)
+            .find((item) => item.orderItemReference === line);
+          // The line stays at its price; its comp says 1 of the 2.
+          assert.deepEqual(
+            [billLine.quantity, billLine.subtotalMinor, billLine.totalMinor, billLine.reduction],
+            [
+              2,
+              "2500",
+              "1412",
+              {
+                kind: "Comp",
+                percent: null,
+                amountMinor: "1413",
+                netMinor: "1250",
+                compedQuantity: 1,
+              },
+            ],
+          );
+          // Orders: the comp is on the record with its count; the line still offers the other bowl.
+          const afterFirst = await queue();
+          assert.deepEqual(
+            afterFirst.batches
+              .flatMap((b) => b.compedItems)
+              .map((c) => [c.orderItemReference, c.compedQuantity, c.lineQuantity, c.amountMinor]),
+            [[line, 1, 2, "1413"]],
+          );
+          assert.ok(afterFirst.batches.some((b) => b.compableItems.includes(line)));
+          // More than is left, or a percentage on a line comped in part, is refused.
+          await assert.rejects(
+            previewOf({ compQuantities: [{ orderItemReference: line, quantity: 2 }] }),
+            {
+              code: "ITEM_COMP_NOT_THAT_MANY",
+            },
+          );
+          await assert.rejects(
+            comp(manager, {
+              orderItemReferences: [line],
+              compQuantities: [{ orderItemReference: line, quantity: 2 }],
+            }),
+            { code: "ITEM_COMP_NOT_THAT_MANY" },
+          );
+          await assert.rejects(
+            comp(manager, { orderItemReferences: [line], kind: "Percent", percent: 50 }),
+            { code: "ITEM_COMP_ALREADY_COMPED" },
+          );
+          // The other bowl (the dishes left, not named): $12.50 and the $1.62 left of the tax.
+          assert.equal((await previewOf({})).totalMinor, "1412");
+          const second = await comp(manager, {
+            orderItemReferences: [line],
+            reasonCode: "LONG_WAIT",
+            expectedTotalMinor: "1412",
+          });
+          assert.equal(second.status, "Recorded");
+          assert.deepEqual(
+            (await records()).map((r) => [
+              r.item,
+              r.kind,
+              r.net,
+              r.tax,
+              r.total,
+              r.share,
+              r.dishes,
+            ]),
+            [
+              [line, "Comp", "1250", "163", "1413", "0", 1],
+              [line, "Comp", "1250", "162", "1412", "0", 1],
+            ],
+          );
+          now1 = await bill();
+          assert.equal(now1.owed.totalMinor, "1413");
+          const wholeLine = now1.rounds
+            .flatMap((round) => round.items)
+            .find((item) => item.orderItemReference === line);
+          // Both bowls comped: the line reads comped (no count), at its price, and owes nothing.
+          assert.deepEqual(
+            [wholeLine.subtotalMinor, wholeLine.totalMinor, wholeLine.reduction?.amountMinor],
+            ["2500", "0", "2825"],
+          );
+          assert.equal(wholeLine.reduction?.compedQuantity, undefined);
+          // A line comped in full can't be comped again; it is no longer offered.
+          await assert.rejects(comp(manager, { orderItemReferences: [line] }), {
+            code: "ITEM_COMP_ALREADY_COMPED",
+          });
+          const afterBoth = await queue();
+          assert.ok(!afterBoth.batches.some((b) => b.compableItems.includes(line)));
+          assert.ok(afterBoth.batches.some((b) => b.compableItems.includes(other)));
+          assert.equal(afterBoth.batches.flatMap((b) => b.compedItems).length, 2);
+          // The database holds the same rules: no comp beyond the line, no whole-line reduction
+          // beside comps, the count only on a comp, and the amounts by the dishes covered so far.
+          const insert = async (values) => {
+            await admin.query("BEGIN");
+            try {
+              await admin.query(
+                "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+                [scope.brandReference, scope.storeReference],
+              );
+              await admin.query(
+                "INSERT INTO rms_ordering.order_item_price_reduction (reduction_id,operation_id,brand_id,store_id,order_id,order_batch_id,order_item_id,kind,percent,net_minor,tax_minor,fee_minor,total_minor,currency_code,reason_code,actor_id,permission_code,audit_id,decided_at,comped_quantity) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NULL,$9,$10,0,$11,'CAD','GOODWILL',$12,'ordering.order.comp',$13,date_trunc('milliseconds',now()),$14)",
+                [
+                  fresh(),
+                  fresh(),
+                  scope.brandReference,
+                  scope.storeReference,
+                  orderReference,
+                  values.batch ?? R1.batch.orderBatchReference,
+                  values.item ?? line,
+                  values.kind ?? "Comp",
+                  values.net,
+                  values.tax,
+                  values.net + values.tax,
+                  id(0x701),
+                  fresh(),
+                  values.dishes,
+                ],
+              );
+            } finally {
+              await admin.query("ROLLBACK");
+            }
+          };
+          await assert.rejects(insert({ net: 1250, tax: 163, dishes: 1 }), /covers more dishes/u);
+          await assert.rejects(insert({ net: 2500, tax: 325, dishes: null }), /already reduced/u);
+          await assert.rejects(
+            insert({ kind: "Amount", net: 100, tax: 13, dishes: 1 }),
+            /names dishes only for a comp/u,
+          );
+          // Three more dishes of a line of two: the amounts can't follow them either.
+          await assert.rejects(insert({ net: 1250, tax: 163, dishes: 3 }), /amount mismatch/u);
+          // On the other line (one bowl): a comp of it must take its whole price.
+          await assert.rejects(
+            insert({
+              batch: R2.batch.orderBatchReference,
+              item: other,
+              net: 1250,
+              tax: 162,
+              dishes: 1,
+            }),
+            /price reduction amount mismatch/u,
+          );
+          await assert.rejects(
+            admin.query("UPDATE rms_ordering.order_item_price_reduction SET comped_quantity=2"),
+            /append-only/u,
+          );
+          // The table pays the rest; the comps and the payment are the bill before, to the cent.
+          const paid = await settleWith(server, { tip: { kind: "None" }, tenderedMinor: "100000" });
+          assert.equal(paid.status, "Recorded");
+          assert.equal(paid.bill.settlement.roundsMinor, "1413");
+          const comped = sum((await records()).map((r) => r.total));
+          assert.equal(comped, 2825n);
+          assert.equal(comped + 1413n, original);
+          const report = await salesReport();
+          assert.equal(report.summary.grossSalesMinor, "3750");
+          // One line comped (in two parts), with its tax: $28.25.
+          assert.equal(report.summary.compCount, 1);
+          assert.equal(report.summary.compsWithTaxMinor, "2825");
+          assert.equal(
+            BigInt(report.summary.netSalesMinor) + BigInt(report.summary.taxMinor),
+            1413n,
+          );
+          const decided = await transactions().run((tx) =>
+            listStorePriceReductionsDecided(tx, scope, {
+              startsAt: time(-minutes(120)),
+              endsAt: new Date(Date.now() + 1000).toISOString(),
+            }),
+          );
+          assert.deepEqual(
+            decided.map((r) => [r.totalMinor, r.compedQuantity, r.lineQuantity]),
+            [
+              [1413n, 1, 2],
+              [1412n, 1, 2],
+            ],
+          );
+        }
+
         async function compedWholeEnding() {
           const recordPartySize = await partySizeWhileOpen();
           await notPreparedRound1();
@@ -9033,9 +9333,11 @@ async function journey(journeyEnding) {
           return;
         }
         if (ending.startsWith("CompCents")) {
-          await compCentsEnding(
-            ending === "CompCentsWhole" ? "Whole" : ending === "CompCentsUp" ? "Up" : "Partial",
-          );
+          if (ending === "CompCentsLine") await compPartOfLineEnding();
+          else
+            await compCentsEnding(
+              ending === "CompCentsWhole" ? "Whole" : ending === "CompCentsUp" ? "Up" : "Partial",
+            );
           return;
         }
         if (ending === "CompedWhole") {

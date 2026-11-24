@@ -31,6 +31,7 @@ import {
   type OrderAutoAcceptanceBatchFact,
   type StaffOrderCancellationRecord,
   listOrderPriceReductions,
+  orderItemReductions,
   orderPriceReductionPermission,
   listCounterUnpaidCancellations,
   listOrderRoundAcceptances,
@@ -756,6 +757,9 @@ export function createPersistentMerchantOrderQueue(options: {
               orderItemReference: string;
               kind: "Comp" | "Percent" | "Amount";
               percent: number | null;
+              /** Batch 60: the line's dishes this comp covers, of how many (null: the line). */
+              compedQuantity: number | null;
+              lineQuantity: number;
               amountMinor: string;
               /** v15 M87/M161: why, when and by whom, as recorded (points: the guest's own). */
               reasonCode: string;
@@ -1265,9 +1269,8 @@ export function createPersistentMerchantOrderQueue(options: {
                 scoped,
                 payLaterOrders,
               );
-              const reduced = new Map(
-                reductions.map((record) => [record.orderItemReference, record]),
-              );
+              // Batch 60: a line comped in part has a comp for each decision, read as one.
+              const reduced = orderItemReductions(reductions);
               // v15 M87/M161: who decided each comp, by name ("You" for the viewer), or their role.
               const decidedBy =
                 reductions.length === 0 || ownerScope === null
@@ -1308,6 +1311,9 @@ export function createPersistentMerchantOrderQueue(options: {
                     orderItemReference: record.orderItemReference,
                     kind: record.kind,
                     percent: record.percent,
+                    // Batch 60: how many of the line's dishes this comp covers (null: all).
+                    compedQuantity: record.compedQuantity,
+                    lineQuantity: record.lineQuantity,
                     amountMinor: record.totalMinor.toString(),
                     reasonCode: record.reasonCode,
                     decidedAt: record.decidedAt,
@@ -1373,10 +1379,8 @@ export function createPersistentMerchantOrderQueue(options: {
                     removedByOrder
                       .find(([billOrder]) => billOrder === String(record.orderReference))?.[1]
                       .add(String(line));
-                const billReduced = new Map(
-                  (await listOrderPriceReductions(businessTransaction, scoped, billOrders)).map(
-                    (record) => [record.orderItemReference, record] as const,
-                  ),
+                const billReduced = orderItemReductions(
+                  await listOrderPriceReductions(businessTransaction, scoped, billOrders),
                 );
                 return billRemovedMinor(
                   host,
@@ -1638,11 +1642,12 @@ export function createPersistentMerchantOrderQueue(options: {
                   )
                     unpaidRemovable.set(batch, [...(unpaidRemovable.get(batch) ?? []), line]);
                   // DEC-KITCHEN-ONE-TAP: any dish that reached the kitchen (see the comp command).
+                  // Batch 60: a line comped in part still offers the dishes left on it.
                   if (
                     compAllowed &&
                     state !== "Cancelled" &&
                     !removed.has(line) &&
-                    !reduced.has(line)
+                    (reduced.get(line)?.remainingQuantity ?? 1) > 0
                   )
                     compable.set(batch, [...(compable.get(batch) ?? []), line]);
                 }

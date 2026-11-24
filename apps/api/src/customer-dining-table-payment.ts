@@ -421,6 +421,10 @@ export function customerSettledTableReceiptBody(view: DiningTableOnlinePaymentVi
                 : item.reduction.kind === "Comp"
                   ? "Comp"
                   : "Discount",
+          // Batch 60: comps on some of the line's dishes ("1 of 2 on the house").
+          ...(item.reduction?.compedQuantity === undefined
+            ? {}
+            : { compedQuantity: item.reduction.compedQuantity, quantity: item.quantity }),
         })),
         subtotalMinor: round.subtotalMinor,
         taxMinor: round.taxMinor,
