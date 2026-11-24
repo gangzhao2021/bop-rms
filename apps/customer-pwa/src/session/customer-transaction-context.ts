@@ -137,6 +137,12 @@ interface EmptyTable {
    * of it was paid. Such a bill has no receipt either. Absent: nothing was ordered.
    */
   readonly closedByStaff?: ClosedBillPaid;
+  /**
+   * Batch 56 (v15 b55 live): this phone paid part of that bill: how much (minor units, on this
+   * phone) and the ended visit's read-only value for its own payment's receipt. Absent: it paid
+   * nothing there.
+   */
+  readonly yourPayment?: { readonly amountMinor: string; readonly csrfToken: string };
 }
 /** What was paid on a bill staff closed when the guests left. */
 export type ClosedBillPaid = "Nothing" | "Some";
@@ -150,7 +156,15 @@ export function setEmptyTable(value: EmptyTable | null): void {
           tableLabel: value.tableLabel,
           ...(value.store === undefined ? {} : { store: Object.freeze({ ...value.store }) }),
           ...(value.closedByStaff === undefined ? {} : { closedByStaff: value.closedByStaff }),
+          ...(value.yourPayment === undefined
+            ? {}
+            : { yourPayment: Object.freeze({ ...value.yourPayment }) }),
         });
+}
+
+/** Batch 56: the ended visit's value for this phone's own payment's receipt (null: none). */
+export function getClosedTableOwnReceiptCsrf(): string | null {
+  return emptyTable?.yourPayment?.csrfToken ?? null;
 }
 
 export function getEmptyTableLabel(): string | null {
@@ -176,7 +190,14 @@ export type EndedTable = Readonly<
   | { kind: "Settled"; tableLabel: string; store: RestoredStore | null }
   | { kind: "Empty"; tableLabel: string; store: RestoredStore | null }
   /** Batch 55 review: staff closed the bill when the guests left; there is no receipt. */
-  | { kind: "ClosedByStaff"; tableLabel: string; paid: ClosedBillPaid; store: RestoredStore | null }
+  | {
+      kind: "ClosedByStaff";
+      tableLabel: string;
+      paid: ClosedBillPaid;
+      store: RestoredStore | null;
+      /** Batch 56: what this phone paid on that bill (minor units); null or absent: nothing. */
+      yourPaidMinor?: string | null;
+    }
   | {
       kind: "Moved";
       tableLabel: string;
@@ -208,6 +229,9 @@ export function getEndedTable(): EndedTable | null {
       tableLabel: emptyTable.tableLabel,
       paid: emptyTable.closedByStaff,
       store: emptyTable.store ?? null,
+      ...(emptyTable.yourPayment === undefined
+        ? {}
+        : { yourPaidMinor: emptyTable.yourPayment.amountMinor }),
     });
   if (emptyTable !== null)
     return Object.freeze({

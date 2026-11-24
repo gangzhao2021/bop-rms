@@ -109,6 +109,27 @@ function settledStore(
     storeDisplayName: raw.storeDisplayName as string,
   });
 }
+/**
+ * Batch 56: what this phone paid on a bill staff closed (on this phone, in minor units) and the
+ * ended visit's read-only value for that payment's receipt; null when malformed.
+ */
+function ownPaymentOf(
+  value: unknown,
+  csrfToken: unknown,
+): Readonly<{ amountMinor: string; csrfToken: string }> | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  const raw = value as Record<string, unknown>;
+  if (
+    Object.keys(raw).length !== 2 ||
+    raw.method !== "Online" ||
+    typeof raw.amountMinor !== "string" ||
+    !/^[1-9][0-9]{0,15}$/u.test(raw.amountMinor) ||
+    typeof csrfToken !== "string" ||
+    !/^[A-Za-z0-9_-]{43}$/u.test(csrfToken)
+  )
+    return null;
+  return Object.freeze({ amountMinor: raw.amountMinor, csrfToken });
+}
 /** M02: a restored dine-in Session's table, and whether this phone joined the party there. */
 export interface CustomerRestoredVisit {
   readonly publicTableReference: string;
@@ -334,22 +355,31 @@ export async function restoreCustomerSession(
         closed !== null && typeof closed === "object" && "store" in closed
           ? settledStore(closed.store)
           : undefined;
+      // Batch 56 (v15 b55 live): the phone that paid part of it is told what it paid, with the
+      // ended visit's read-only value for its own payment's receipt (an older server: neither).
+      const yours =
+        closed !== null && typeof closed === "object" && "yourPayment" in closed
+          ? ownPaymentOf(closed.yourPayment, "csrfToken" in closed ? closed.csrfToken : undefined)
+          : undefined;
       if (
         closed !== null &&
         typeof closed === "object" &&
         !Array.isArray(closed) &&
         store !== null &&
-        Object.keys(closed).length === (store === undefined ? 2 : 3) &&
+        yours !== null &&
+        Object.keys(closed).length ===
+          (store === undefined ? 2 : 3) + (yours === undefined ? 0 : 2) &&
         "tableLabel" in closed &&
         typeof closed.tableLabel === "string" &&
         /^[^\p{Cc}\p{Cf}<>{}$]{1,40}$/u.test(closed.tableLabel) &&
         "paid" in closed &&
-        (closed.paid === "Nothing" || closed.paid === "Some")
+        (closed.paid === "Some" || (closed.paid === "Nothing" && yours === undefined))
       ) {
         setEmptyTable({
           tableLabel: closed.tableLabel,
           closedByStaff: closed.paid,
           ...(store === undefined ? {} : { store }),
+          ...(yours === undefined ? {} : { yourPayment: yours }),
         });
         return tableEnded();
       }

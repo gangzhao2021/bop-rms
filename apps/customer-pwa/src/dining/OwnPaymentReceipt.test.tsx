@@ -1,0 +1,317 @@
+// @vitest-environment jsdom
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { MemoryRouter } from "react-router";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { LanguageRoot } from "../i18n/i18n.js";
+import {
+  setCustomerCsrfCredential,
+  setEmptyTable,
+} from "../session/customer-transaction-context.js";
+import { DiningSessionScreen, type DiningSessionState } from "./DiningSessionPage.js";
+import { EndedTableCard } from "./EndedTable.js";
+import {
+  OwnPaymentReceiptError,
+  createOwnPaymentReceiptClient,
+  parseOwnPaymentReceipt,
+  type OwnPaymentReceiptClient,
+} from "./OwnPaymentReceipt.js";
+import type { DiningRound, DiningSessionView } from "./dining-session-client.js";
+
+// Batch 56 (v15 b55 live, guest-closed-bill-menu-cart): a guest who paid part of a bill (their
+// dish by phone, L55 CB2 order 76; part 1 of staff's even split in 2, L55 CB3 order 80) and whose
+// staff then closed the rest saw only the table's "Paid $14.13" — no "you paid", no method, no
+// receipt — and once the table closed, nothing at all. The bodies are what the API's own-payment
+// read answers for v15's records (customer-dining-table-payment.test.ts builds them).
+const evenPart = {
+  schemaVersion: 1,
+  ownPayment: {
+    tableLabel: "L54 GB5 (TEST)",
+    restClosedByStaff: true,
+    tablePaidInFull: false,
+    payments: [
+      {
+        covers: "Part",
+        partNumber: 1,
+        partCount: 2,
+        dishes: [],
+        subtotalMinor: "1250",
+        taxMinor: "163",
+        paidForMinor: "1413",
+        tipMinor: "0",
+        totalMinor: "1413",
+        method: "Online",
+        paidAt: "2026-11-24T00:34:40.000Z",
+      },
+    ],
+    totalMinor: "1413",
+  },
+};
+const byDish = {
+  ...evenPart,
+  ownPayment: {
+    ...evenPart.ownPayment,
+    tableLabel: "L53 WO4 (TEST)",
+    payments: [
+      {
+        ...evenPart.ownPayment.payments[0],
+        covers: "Dishes",
+        partCount: null,
+        dishes: [{ displayName: "Beef noodles (TEST)", quantity: 1, shared: false }],
+      },
+    ],
+  },
+};
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+let container: HTMLDivElement, root: Root;
+beforeEach(() => {
+  container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  // The pay section's own read: nothing to pay on a closed bill (its answer is not under test).
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status: 404 })));
+});
+afterEach(() => {
+  act(() => root.unmount());
+  container.remove();
+  setCustomerCsrfCredential(null);
+  setEmptyTable(null);
+  vi.unstubAllGlobals();
+});
+const text = () => (container.textContent ?? "").replace(/\s+/gu, " ");
+async function show(node: React.ReactNode, language: "en" | "zh-Hans" = "en") {
+  // A fresh page each time (the language is chosen as the page starts).
+  act(() => root.unmount());
+  root = createRoot(container);
+  await act(async () => {
+    root.render(
+      <LanguageRoot initial={language}>
+        {() => <MemoryRouter initialEntries={["/dine-in/session"]}>{node}</MemoryRouter>}
+      </LanguageRoot>,
+    );
+  });
+  // The receipt's read settles.
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
+const payer = (body: unknown): OwnPaymentReceiptClient => ({
+  read: vi.fn().mockResolvedValue(parseOwnPaymentReceipt(body)),
+});
+const otherGuest = (): OwnPaymentReceiptClient => ({
+  read: vi.fn().mockRejectedValue(new OwnPaymentReceiptError("none")),
+});
+
+const cad = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
+const noodles = (roundNumber: number, payment: DiningRound["payment"]): DiningRound => ({
+  roundNumber,
+  orderedBy: roundNumber === 1 ? "You" : "AnotherGuest",
+  submittedAt: "2026-11-24T00:30:00.000Z",
+  status: "Served",
+  payment,
+  cancelsAt: null,
+  storeCancellationReason: null,
+  items: [
+    {
+      displayName: "Beef noodles (TEST)",
+      quantity: 1,
+      servedQuantity: 1,
+      cancelled: false,
+      lineTotal: cad(roundNumber === 1 ? "1413" : "1412"),
+    },
+  ],
+  itemsTotal: cad(roundNumber === 1 ? "1413" : "1412"),
+});
+/** The guest table read after staff closed the rest (v15 b55: paid 1413, owed 0). */
+const closedTable = (splitParts: { count: number | null; paid: number }): DiningSessionState => ({
+  status: "ready",
+  refreshing: false,
+  view: {
+    tableLabel: "L55 CB3 (TEST)",
+    orderNumber: "80",
+    checkedAt: "2026-11-24T00:36:00.000Z",
+    paymentTiming: "PayLater",
+    rounds: [noodles(1, "Paid"), noodles(2, "OnTableBill")],
+    summary: {
+      paid: cad("1413"),
+      refunded: cad("0"),
+      refundPending: cad("0"),
+      due: cad("0"),
+      tableTip: cad("0"),
+      cashRounding: cad("0"),
+      splitParts,
+      closedByStaff: true,
+    },
+  } as DiningSessionView,
+});
+
+describe("batch 56: the guest who paid part of a bill staff closed keeps their own receipt", () => {
+  it("while the table is open: the payer sees what they paid, how, and what it covers (en)", async () => {
+    setCustomerCsrfCredential("d".repeat(43));
+    const own = payer(evenPart);
+    await show(
+      <DiningSessionScreen
+        state={closedTable({ count: 2, paid: 1 })}
+        onRefresh={() => undefined}
+        ownPaymentReceipt={own}
+      />,
+    );
+    expect(own.read).toHaveBeenCalledTimes(1);
+    expect(text()).toContain("Your receipt");
+    expect(text()).toContain("You paid $14.13 by card on this phone.");
+    expect(text()).toContain("Part 1 of 2 of your table’s bill");
+    expect(text()).toContain("Subtotal before tax$12.50");
+    expect(text()).toContain("Tax$1.63");
+    expect(text()).toContain("Total paid by you$14.13");
+    expect(text()).toContain("Paid byCard on this phone");
+    expect(text()).toContain(
+      "This receipt is for your payment only. Staff closed the rest of your table’s bill; it is not charged to you.",
+    );
+    // Never that the table paid, and no one else's part.
+    const receipt = container.querySelector(".dining-session__own-payment")?.textContent ?? "";
+    expect(receipt).not.toMatch(/paid in full|bill is paid|\$14\.12|Part 2/u);
+    expect(text()).not.toMatch(/paid in full|bill is paid/u);
+  });
+
+  it("by dish (zh-Hans): the dishes this phone paid for", async () => {
+    setCustomerCsrfCredential("d".repeat(43));
+    await show(
+      <DiningSessionScreen
+        state={closedTable({ count: null, paid: 1 })}
+        onRefresh={() => undefined}
+        ownPaymentReceipt={payer(byDish)}
+      />,
+      "zh-Hans",
+    );
+    expect(text()).toContain("您的收据");
+    expect(text()).toContain("您已在这部手机上刷卡支付 $14.13。");
+    expect(text()).toContain("您付款的菜品");
+    expect(text()).toContain("Beef noodles (TEST)");
+    expect(text()).toContain("您实付合计$14.13");
+    expect(text()).toContain("付款方式本机刷卡");
+    expect(text()).toContain(
+      "这张收据只包括您的付款。本桌账单的其余部分已由店员关闭，不向您收取。",
+    );
+    expect(text()).not.toMatch(/已全部付清|已结清/u);
+  });
+
+  it("another guest at the table sees no one's payment; a bill with nothing paid asks nothing", async () => {
+    setCustomerCsrfCredential("d".repeat(43));
+    const other = otherGuest();
+    await show(
+      <DiningSessionScreen
+        state={closedTable({ count: 2, paid: 1 })}
+        onRefresh={() => undefined}
+        ownPaymentReceipt={other}
+      />,
+    );
+    expect(other.read).toHaveBeenCalledTimes(1);
+    expect(text()).not.toMatch(/Your receipt|You paid|Card on this phone/u);
+    const nothing = payer(evenPart);
+    const state = closedTable({ count: 2, paid: 0 });
+    if (state.status === "ready" && state.view.summary !== null)
+      (state.view.summary as { paid: unknown }).paid = cad("0");
+    await show(
+      <DiningSessionScreen state={state} onRefresh={() => undefined} ownPaymentReceipt={nothing} />,
+    );
+    expect(nothing.read).not.toHaveBeenCalled();
+  });
+
+  it("once the table closed: Your table keeps the payer's receipt; other tabs link to it", async () => {
+    setEmptyTable({
+      tableLabel: "L55 CB3 (TEST)",
+      closedByStaff: "Some",
+      yourPayment: { amountMinor: "1413", csrfToken: "C".repeat(43) },
+    });
+    const own = payer(evenPart);
+    await show(
+      <DiningSessionScreen
+        state={{ status: "ended-closed", tableLabel: "L55 CB3 (TEST)", paid: "Some" }}
+        onRefresh={() => undefined}
+        ownPaymentReceipt={own}
+      />,
+    );
+    expect(text()).toContain("This table’s visit has ended");
+    expect(text()).toContain(
+      "Staff closed your table’s bill: what was paid stays paid, and the rest is not charged to you.",
+    );
+    expect(text()).toContain("You paid $14.13 by card on this phone.");
+    expect(text()).toContain("Your receipt");
+    expect(text()).toContain("Part 1 of 2 of your table’s bill");
+    // Menu, a dish page or Cart: the line, and a link to that receipt on Your table.
+    await show(
+      <EndedTableCard
+        ended={{
+          kind: "ClosedByStaff",
+          tableLabel: "L55 CB3 (TEST)",
+          paid: "Some",
+          store: null,
+          yourPaidMinor: "1413",
+        }}
+      />,
+      "zh-Hans",
+    );
+    expect(text()).toContain("您已在这部手机上刷卡支付 $14.13。");
+    expect(container.querySelector("a")?.textContent).toBe("查看您的收据");
+    expect(container.querySelector("a")?.getAttribute("href")).toBe("/dine-in/session");
+  });
+
+  it("once the table closed: another guest's phone is told how the bill ended, nothing more", async () => {
+    setEmptyTable({ tableLabel: "L55 CB3 (TEST)", closedByStaff: "Some" });
+    const other = otherGuest();
+    await show(
+      <DiningSessionScreen
+        state={{ status: "ended-closed", tableLabel: "L55 CB3 (TEST)", paid: "Some" }}
+        onRefresh={() => undefined}
+        ownPaymentReceipt={other}
+      />,
+    );
+    expect(other.read).not.toHaveBeenCalled();
+    expect(text()).not.toMatch(/You paid|receipt/iu);
+    await show(
+      <EndedTableCard
+        ended={{ kind: "ClosedByStaff", tableLabel: "L55 CB3 (TEST)", paid: "Some", store: null }}
+      />,
+    );
+    expect(text()).not.toMatch(/You paid|receipt/iu);
+    expect(container.querySelector("a")).toBeNull();
+  });
+});
+
+describe("batch 56: the own-payment read", () => {
+  it("asks for this phone's own payment with the value given, in the guest's language", async () => {
+    const request = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify(evenPart), { status: 200 }));
+    const receipt = await createOwnPaymentReceiptClient(() => "C".repeat(43), request).read();
+    expect(receipt.totalMinor).toBe("1413");
+    const [url, init] = request.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/v1/dine-in/table-payment");
+    expect(JSON.parse(String(init.body))).toEqual({ action: "OwnPayment" });
+    expect((init.headers as Record<string, string>)["x-csrf-token"]).toBe("C".repeat(43));
+  });
+  it("not found or no value: nothing to show; anything else: try again", async () => {
+    const none = (status: number) =>
+      createOwnPaymentReceiptClient(
+        () => "C".repeat(43),
+        vi.fn().mockResolvedValue(new Response("{}", { status })),
+      ).read();
+    await expect(none(404)).rejects.toMatchObject({ code: "none" });
+    await expect(none(503)).rejects.toMatchObject({ code: "unavailable" });
+    await expect(createOwnPaymentReceiptClient(() => null).read()).rejects.toMatchObject({
+      code: "none",
+    });
+    // A body with another method or a malformed amount is never shown.
+    for (const bad of [
+      { ownPayment: { ...evenPart.ownPayment, totalMinor: "14.13" } },
+      {
+        ownPayment: {
+          ...evenPart.ownPayment,
+          payments: [{ ...evenPart.ownPayment.payments[0], method: "Cash" }],
+        },
+      },
+    ])
+      expect(() => parseOwnPaymentReceipt(bad)).toThrow(OwnPaymentReceiptError);
+  });
+});

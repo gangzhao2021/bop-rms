@@ -1402,6 +1402,23 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   // Batch 55 review: the ended table's card after staff closed a bill some of which was paid.
   "Staff closed your table’s bill: what was paid stays paid, and the rest is not charged to you.":
     "店员已关闭本桌账单：已付的款项不变，其余不向您收取。",
+  // Batch 56 (v15 b55 live): the guest who paid part of a bill staff closed keeps their receipt.
+  "You paid {amount} by card on this phone.": "您已在这部手机上刷卡支付 {amount}。",
+  "See your receipt": "查看您的收据",
+  "Your receipt": "您的收据",
+  "Your table’s whole bill": "本桌全部账单",
+  "The dishes you paid for": "您付款的菜品",
+  "Part {number} of your table’s bill": "本桌账单的第\u00a0{number}\u00a0份",
+  "Part {number} of {count} of your table’s bill":
+    "本桌账单共\u00a0{count}\u00a0份，这是第\u00a0{number}\u00a0份",
+  "Total paid by you": "您实付合计",
+  "Card on this phone": "本机刷卡",
+  "This receipt is for your payment only. Staff closed the rest of your table’s bill; it is not charged to you.":
+    "这张收据只包括您的付款。本桌账单的其余部分已由店员关闭，不向您收取。",
+  "This receipt is for your payment only, not your table’s whole bill.":
+    "这张收据只包括您的付款，不是本桌的全部账单。",
+  "We couldn’t load your receipt. Check your connection and try again.":
+    "暂时没能加载您的收据，请检查网络后再试。",
   // A no-break space keeps 份 with its number on a narrow round card.
   "{paid} of {count} parts paid; the rest not charged to you":
     "{count}\u00a0份付了 {paid}\u00a0份，其余不向您收取",

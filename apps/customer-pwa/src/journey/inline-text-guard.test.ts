@@ -237,6 +237,8 @@ const pageMachineCodes: Readonly<Record<string, ReadonlySet<string>>> = {
   "dining/DiningStaffCallPanel.tsx": new Set(["Question", "Withdrawn"]),
   // What the error says in a log; a guest never sees it.
   "dining/SettledTableReceipt.tsx": new Set(["settled table receipt "]),
+  // Batch 56: the error class's own name (never shown; the page says its own words).
+  "dining/OwnPaymentReceipt.tsx": new Set(["own payment receipt "]),
   // The name of the kind of tip sent to the server.
   // The name of the kind of tip sent to the server, and which dishes this phone pays (WP-2423
   // 同桌结账: Whole / Mine / Chosen, never rendered).

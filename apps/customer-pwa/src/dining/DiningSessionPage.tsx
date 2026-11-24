@@ -41,7 +41,15 @@ import {
   getUnseatedTableWait,
   isUnseatedTableScan,
   subscribeCustomerCsrfContext,
+  getCustomerCsrfCredential,
+  getClosedTableOwnReceiptCsrf,
+  getEndedTable,
 } from "../session/customer-transaction-context.js";
+import {
+  OwnPaymentReceiptPanel,
+  createOwnPaymentReceiptClient,
+  type OwnPaymentReceiptClient,
+} from "./OwnPaymentReceipt.js";
 import {
   backToWaitingText,
   tableNotOpenHeading,
@@ -1257,8 +1265,11 @@ export function DiningSessionScreen({
   settledReceipt,
   billReadKey,
   tablePaymentClient,
+  ownPaymentReceipt,
   placed = null,
 }: {
+  /** Batch 56: this phone's own payment's receipt reader (tests supply one). */
+  readonly ownPaymentReceipt?: OwnPaymentReceiptClient | undefined;
   /** WP-2423 item 6: a round was just placed from the cart (never "sent to the kitchen": a held
    * round waits for staff, and an item not prepared never reaches it). */
   readonly placed?: RoundPlaced | null;
@@ -1299,6 +1310,17 @@ export function DiningSessionScreen({
   );
   const [again, setAgain] = useState<{ key: string; item: DiningItem } | null>(null);
   const [tablePayment] = useState(() => tablePaymentClient ?? createTablePaymentClient());
+  // Batch 56 (v15 b55 live): this phone's own payment on a bill staff closed — with the table
+  // visit's value while the table is open, the ended visit's read-only value once it closed.
+  const [ownAtTable] = useState(
+    () => ownPaymentReceipt ?? createOwnPaymentReceiptClient(getCustomerCsrfCredential),
+  );
+  const [ownAfterClose] = useState(
+    () => ownPaymentReceipt ?? createOwnPaymentReceiptClient(getClosedTableOwnReceiptCsrf),
+  );
+  const endedTable = state.status === "ended-closed" ? getEndedTable() : null;
+  const endedYourPaidMinor =
+    endedTable?.kind === "ClosedByStaff" ? (endedTable.yourPaidMinor ?? null) : null;
   // Dishes can be added while the table orders: not while it checks out, after it paid, or once
   // everything is closed. A table paying at the end can still order after everything is served.
   // Batch 54: a bill staff closed (the guests left) takes nothing more either, paid or not.
@@ -1392,7 +1414,13 @@ export function DiningSessionScreen({
         <EmptyClosedTableCard tableLabel={state.tableLabel} />
       ) : null}
       {state.status === "ended-closed" ? (
-        <ClosedBillTableCard tableLabel={state.tableLabel} paid={state.paid} />
+        <>
+          {/* What this phone paid is said once, by its receipt below. */}
+          <ClosedBillTableCard tableLabel={state.tableLabel} paid={state.paid} />
+          {endedYourPaidMinor === null || state.paid === "Nothing" ? null : (
+            <OwnPaymentReceiptPanel client={ownAfterClose} />
+          )}
+        </>
       ) : null}
       {state.status === "not-joined" ? (
         <section className="order-status__card" role="alert">
@@ -1478,6 +1506,11 @@ export function DiningSessionScreen({
           onBillChanged={onRefresh}
           onGone={onRefresh}
         />
+      ) : null}
+      {/* Batch 56: staff closed a bill some of which was paid: the phone that paid it reads its
+          own receipt here (another guest's phone is answered "nothing here" and shows nothing). */}
+      {closedBill !== null && closedBill.kind !== "Nothing" ? (
+        <OwnPaymentReceiptPanel client={ownAtTable} />
       ) : null}
       {staffCall}
       {view && view.rounds.length === 0 ? (

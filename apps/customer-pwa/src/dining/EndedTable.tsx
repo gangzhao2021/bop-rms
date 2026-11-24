@@ -11,6 +11,7 @@ import {
   type ClosedBillPaid,
   type EndedTable,
 } from "../session/customer-transaction-context.js";
+import { youPaidText } from "./OwnPaymentReceipt.js";
 
 /**
  * Batch 46 (v15 b45 live): how this phone's table visit ended, when it has no visit now. Every
@@ -83,9 +84,18 @@ export function EmptyClosedTableCard({ tableLabel }: { readonly tableLabel: stri
 export function ClosedBillTableCard({
   tableLabel,
   paid,
+  yourPaidMinor = null,
+  receiptLink = false,
 }: {
   readonly tableLabel: string;
   readonly paid: ClosedBillPaid;
+  /**
+   * Batch 56 (v15 b55 live): what this phone paid on that bill before staff closed the rest (its
+   * own payment, never another guest's); null: it paid nothing there.
+   */
+  readonly yourPaidMinor?: string | null;
+  /** Batch 56: a tab other than Your table links to this phone's own receipt there. */
+  readonly receiptLink?: boolean;
 }) {
   return (
     <section className="order-status__card" role="status">
@@ -98,7 +108,13 @@ export function ClosedBillTableCard({
               "Staff closed your table’s bill: what was paid stays paid, and the rest is not charged to you.",
             )}
       </p>
+      {yourPaidMinor === null || paid === "Nothing" ? null : <p>{youPaidText(yourPaidMinor)}</p>}
       <p>{t("New party? Ask staff to seat you, then scan again.")}</p>
+      {yourPaidMinor !== null && paid !== "Nothing" && receiptLink ? (
+        <Link className="order-status__back" to="/dine-in/session">
+          {t("See your receipt")}
+        </Link>
+      ) : null}
     </section>
   );
 }
@@ -162,7 +178,12 @@ export function EndedTableCard({ ended }: { readonly ended: EndedTable }) {
   ) : ended.kind === "Empty" ? (
     <EmptyClosedTableCard tableLabel={ended.tableLabel} />
   ) : ended.kind === "ClosedByStaff" ? (
-    <ClosedBillTableCard tableLabel={ended.tableLabel} paid={ended.paid} />
+    <ClosedBillTableCard
+      tableLabel={ended.tableLabel}
+      paid={ended.paid}
+      yourPaidMinor={ended.yourPaidMinor ?? null}
+      receiptLink
+    />
   ) : (
     <MovedTableCard
       tableLabel={ended.tableLabel}

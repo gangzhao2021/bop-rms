@@ -16,6 +16,7 @@ import {
   getSettledTableLabel,
   setSettledTable,
   getSettledTableReceiptCsrf,
+  getClosedTableOwnReceiptCsrf,
   getSettledTableStore,
   getEmptyTableLabel,
   getEndedTableStore,
@@ -706,6 +707,43 @@ it("batch 55 review: keeps a table whose bill staff closed, with what was paid a
     { tableLabel: "L54 GB2 (TEST)", paid: "All" },
     { tableLabel: "<b>", paid: "Nothing" },
     { tableLabel: "L54 GB2 (TEST)", paid: "Nothing", csrfToken: "C".repeat(43) },
+  ]) {
+    expect(await restore({ schemaVersion: 1, closedTable: bad })).toBe(false);
+    expect(getEndedTable()).toBeNull();
+  }
+});
+
+// Batch 56 (v15 b55 live, L55 CB3 order 80): the phone that paid part 1 ($14.13) of a bill staff
+// then closed is told what it paid, and keeps the ended visit's read-only value for its receipt.
+it("batch 56: keeps what this phone paid on a bill staff closed, and its own receipt's access", async () => {
+  const restore = (value: unknown) =>
+    restoreCustomerSession(vi.fn().mockResolvedValue(response(value)));
+  const closed = {
+    tableLabel: "L55 CB3 (TEST)",
+    paid: "Some",
+    yourPayment: { amountMinor: "1413", method: "Online" },
+    csrfToken: "C".repeat(43),
+  };
+  expect(await restore({ schemaVersion: 1, closedTable: closed })).toBe(false);
+  expect(getCustomerCsrfCredential()).toBeNull();
+  expect(getEndedTable()).toEqual({
+    kind: "ClosedByStaff",
+    tableLabel: "L55 CB3 (TEST)",
+    paid: "Some",
+    store: null,
+    yourPaidMinor: "1413",
+  });
+  expect(getClosedTableOwnReceiptCsrf()).toBe("C".repeat(43));
+  // Never the whole table's receipt: that read stays closed to it.
+  expect(getSettledTableReceiptCsrf()).toBeNull();
+  setEmptyTable(null);
+  expect(getClosedTableOwnReceiptCsrf()).toBeNull();
+  for (const bad of [
+    { ...closed, paid: "Nothing" },
+    { ...closed, csrfToken: "short" },
+    { ...closed, yourPayment: { amountMinor: "0", method: "Online" } },
+    { ...closed, yourPayment: { amountMinor: "1413", method: "Cash" } },
+    { tableLabel: "L55 CB3 (TEST)", paid: "Some", yourPayment: closed.yourPayment },
   ]) {
     expect(await restore({ schemaVersion: 1, closedTable: bad })).toBe(false);
     expect(getEndedTable()).toBeNull();
