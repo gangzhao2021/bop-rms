@@ -9287,9 +9287,13 @@ async function journey(journeyEnding) {
               guestSessionReference,
               allowed: async () => true,
             });
+            // Batch 59 review: with a $2.00 tip on the part (the write-off's captured order money
+            // leaves it out; Payment's settlement total and the refund cap include it).
+            const partTipMinor = 200n;
+            const partPaidMinor = BigInt(parts[0].amountMinor) + partTipMinor;
             await phonePayments.start(guestAt(tableGuest), {
               operationReference: fresh(),
-              tip: { kind: "None" },
+              tip: { kind: "Amount", amountMinor: partTipMinor.toString() },
               partNumber: 1,
             });
             for (const intent of intents.values()) intent.status = "Captured";
@@ -9297,7 +9301,7 @@ async function journey(journeyEnding) {
             const part1 = captured.bill.split.parts[0];
             assert.deepEqual(
               [part1.payment.method, part1.payment.totalMinor],
-              ["Online", parts[0].amountMinor],
+              ["Online", partPaidMinor.toString()],
             );
             // The guests leave: staff close the rest (written off: parts 2 and 3).
             const served = await cookAndServeRound1();
@@ -9318,16 +9322,16 @@ async function journey(journeyEnding) {
                   subtotalMinor: parts[0].subtotalMinor,
                   taxMinor: parts[0].taxMinor,
                   paidForMinor: parts[0].amountMinor,
-                  tipMinor: "0",
-                  totalMinor: parts[0].amountMinor,
+                  tipMinor: partTipMinor.toString(),
+                  totalMinor: partPaidMinor.toString(),
                   method: "Online",
                   refunds: [],
                   refundedMinor: "0",
                 },
               ],
-              totalMinor: parts[0].amountMinor,
+              totalMinor: partPaidMinor.toString(),
               refundedMinor: "0",
-              netMinor: parts[0].amountMinor,
+              netMinor: partPaidMinor.toString(),
             };
             // While the table is open: the payer reads its own payment, and only it.
             const openBody = await ownBody(tablePhone, tablePhone.csrfCredential, "Current");
@@ -9371,7 +9375,7 @@ async function journey(journeyEnding) {
                   partNumber: 1,
                 },
               });
-            const paidMinor = BigInt(parts[0].amountMinor);
+            const paidMinor = partPaidMinor;
             const withRefunds = (refunds, refundedMinor) => ({
               ...expected,
               tableLabel: undefined,
@@ -9475,7 +9479,7 @@ async function journey(journeyEnding) {
             const payer = await restoreFor(tablePhone);
             assert.equal(payer?.closedByStaff, "Some");
             assert.deepEqual(payer?.yourPayment, {
-              amountMinor: parts[0].amountMinor,
+              amountMinor: paidMinor.toString(),
               method: "Online",
               refundedMinor: "300",
             });
@@ -9503,8 +9507,21 @@ async function journey(journeyEnding) {
             // was paid went back ("Refunded"), never that it stays paid: Payment's own refund
             // records, through its public settlement store, under the pilot API role.
             refundAnswers = "succeeded";
+            // Batch 59 review: first the rest of the order money (the part's $ before the tip):
+            // the $2.00 tip stays paid, so part 1 is still paid and either phone's restore says
+            // what was paid stays paid ("Some"), never that all of it went back. Before: "Refunded".
+            const orderMoneyMinor = BigInt(parts[0].amountMinor);
             // The Provider answers at once: it went back to the card.
-            assert.equal((await refundOwnPart((paidMinor - 300n).toString())).status, "Recorded");
+            assert.equal(
+              (await refundOwnPart((orderMoneyMinor - 300n).toString())).status,
+              "Recorded",
+            );
+            assert.equal(await tableRefundedForGuests(), orderMoneyMinor);
+            assert.deepEqual(await splitForGuests(), { count: parts.length, paid: 1 });
+            assert.equal((await restoreFor(tablePhone))?.closedByStaff, "Some");
+            assert.equal((await restoreFor(hostPhone))?.closedByStaff, "Some");
+            // Then the tip too: all of it went back.
+            assert.equal((await refundOwnPart(partTipMinor.toString())).status, "Recorded");
             assert.equal(await tableRefundedForGuests(), paidMinor);
             assert.deepEqual(await splitForGuests(), {
               count: parts.length,
@@ -9514,9 +9531,9 @@ async function journey(journeyEnding) {
             const payerAfter = await restoreFor(tablePhone);
             assert.equal(payerAfter?.closedByStaff, "Refunded");
             assert.deepEqual(payerAfter?.yourPayment, {
-              amountMinor: parts[0].amountMinor,
+              amountMinor: paidMinor.toString(),
               method: "Online",
-              refundedMinor: parts[0].amountMinor,
+              refundedMinor: paidMinor.toString(),
             });
             const otherAfter = await restoreFor(hostPhone);
             assert.equal(otherAfter?.closedByStaff, "Refunded");

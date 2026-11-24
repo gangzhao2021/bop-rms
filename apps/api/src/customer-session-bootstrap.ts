@@ -38,17 +38,21 @@ export const customerSessionBootstrapRoute = "/api/v1/customer/session/csrf";
 export const closedBillPaid = (
   writeOff: { readonly capturedOrderAllocationMinor: bigint },
   /**
-   * Batch 59 (v15 b58 live, L58R B): what staff then gave back of the table's payments (cash,
-   * card machine, and to a card on its way or confirmed). All of it back: "Refunded", so the
-   * ended page never says what was paid "stays paid" when none of it did.
+   * Batch 59 (v15 b58 live, L58R B): what the table's payments took in all (Payment's settlement
+   * totals: the bill's share and the tips), and what staff then gave back of them (cash, card
+   * machine, and to a card on its way or confirmed; staff refunds are capped at those totals).
+   * All of it back: "Refunded", so the ended page never says what was paid "stays paid" when none
+   * of it did. Order money alone back while a tip stays paid: "Some" (batch 59 review).
    */
-  tableRefundedMinor = 0n,
-): ClosedBillPaidAnswer =>
-  writeOff.capturedOrderAllocationMinor <= 0n
-    ? "Nothing"
-    : tableRefundedMinor >= writeOff.capturedOrderAllocationMinor
-      ? "Refunded"
-      : "Some";
+  table: { readonly paidMinor: bigint; readonly refundedMinor: bigint },
+): ClosedBillPaidAnswer => {
+  if (writeOff.capturedOrderAllocationMinor <= 0n) return "Nothing";
+  const paidMinor =
+    table.paidMinor > writeOff.capturedOrderAllocationMinor
+      ? table.paidMinor
+      : writeOff.capturedOrderAllocationMinor;
+  return table.refundedMinor >= paidMinor ? "Refunded" : "Some";
+};
 /** How much of a bill staff closed stays paid: nothing, some, or all of it given back. */
 export type ClosedBillPaidAnswer = "Nothing" | "Some" | "Refunded";
 export function createCustomerSessionBootstrapRead(
@@ -139,18 +143,28 @@ export function createCustomerSessionBootstrapRead(
     });
     const [writeOff] = await payment.listWriteOffsByOrders(transaction as never, [order]);
     if (writeOff === undefined) return null;
-    // Batch 59: Payment's refunds of the table's payments, as the guest table read sums them.
-    const tableRefundedMinor =
-      writeOff.capturedOrderAllocationMinor <= 0n
-        ? 0n
-        : [
-            ...(await payment.listCashRefundsByOrders(transaction as never, [order])),
-            ...(await payment.listCardRefundsByOrders(transaction as never, [order])),
-            ...(await payment.listOnlineRefundsByOrders(transaction as never, [order])).filter(
-              (refund) => refund.outcome?.status !== "Failed",
-            ),
-          ].reduce((sum, refund) => sum + refund.amountMinor, 0n);
-    const paid = closedBillPaid(writeOff, tableRefundedMinor);
+    // Batch 59: what the table's payments took (tips included) and Payment's refunds of them, as
+    // the guest table read sums them.
+    const captured = writeOff.capturedOrderAllocationMinor > 0n;
+    const tablePaidMinor = captured
+      ? (await payment.listByOrders(transaction as never, [order])).reduce(
+          (sum, settlement) => sum + settlement.totalMinor,
+          0n,
+        )
+      : 0n;
+    const tableRefundedMinor = captured
+      ? [
+          ...(await payment.listCashRefundsByOrders(transaction as never, [order])),
+          ...(await payment.listCardRefundsByOrders(transaction as never, [order])),
+          ...(await payment.listOnlineRefundsByOrders(transaction as never, [order])).filter(
+            (refund) => refund.outcome?.status !== "Failed",
+          ),
+        ].reduce((sum, refund) => sum + refund.amountMinor, 0n)
+      : 0n;
+    const paid = closedBillPaid(writeOff, {
+      paidMinor: tablePaidMinor,
+      refundedMinor: tableRefundedMinor,
+    });
     // Batch 56 (v15 b55 live): what this phone itself paid on that bill before staff closed the
     // rest (Payment's captured phone payments of this guest's Session; never another guest's).
     const own =

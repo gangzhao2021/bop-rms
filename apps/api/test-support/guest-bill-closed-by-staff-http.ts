@@ -142,10 +142,13 @@ export async function startGuestBillHttp(
             return {
               tableLabel: facts.tableLabel,
               // Batch 59: with what staff gave back of the table's payments (every phone).
-              closedByStaff: closedBillPaid(
-                writeOff,
-                paidPart() === null ? 0n : guestTableRefundedMinor(phone().refunds ?? "None"),
-              ),
+              // Batch 59 review: what the table's payments took (these scenarios pay no tip, so
+              // their settlement totals are the captured order money).
+              closedByStaff: closedBillPaid(writeOff, {
+                paidMinor: writeOff.capturedOrderAllocationMinor,
+                refundedMinor:
+                  paidPart() === null ? 0n : guestTableRefundedMinor(phone().refunds ?? "None"),
+              }),
               store: {
                 brandDisplayName: "Test Merchant 2 - not production",
                 storeDisplayName: "Test Merchant 2 Main - not production",

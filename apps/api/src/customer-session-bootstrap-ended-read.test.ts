@@ -16,6 +16,7 @@ const f = vi.hoisted(() => ({
   onlineRefunds: vi.fn(),
   cashRefunds: vi.fn(),
   cardRefunds: vi.fn(),
+  settlements: vi.fn(),
   settlementScope: vi.fn(),
 }));
 vi.mock("@bop/identity", async (original) => ({
@@ -47,6 +48,7 @@ vi.mock("@rms/payment", async (original) => ({
       listOnlineRefundsByOrders: f.onlineRefunds,
       listCashRefundsByOrders: f.cashRefunds,
       listCardRefundsByOrders: f.cardRefunds,
+      listByOrders: f.settlements,
     };
   },
 }));
@@ -98,6 +100,7 @@ beforeEach(() => {
   f.onlineRefunds.mockResolvedValue([]);
   f.cashRefunds.mockResolvedValue([]);
   f.cardRefunds.mockResolvedValue([]);
+  f.settlements.mockResolvedValue([]);
 });
 
 it("a table closed with nothing ordered says so with the Store's names, and gives nothing to act with", async () => {
@@ -411,6 +414,32 @@ describe("a bill staff closed when the guests left", () => {
     expect(await read()).toMatchObject({ closedByStaff: "Some" });
     expect(f.cashRefunds).toHaveBeenCalledWith(tx, [ref(8)]);
     expect(f.cardRefunds).toHaveBeenCalledWith(tx, [ref(8)]);
+  });
+
+  // Batch 59 review: phone A paid part 1 as $14.13 plus a $2.00 tip (Payment's settlement total
+  // 1613; the write-off's captured order money 1413 leaves the tip out), staff closed the rest,
+  // then a manager refunded $14.13 (or $15.00). $2.00 (or $1.13) stays paid: "Some", as the live
+  // closed page counts it by settlement total. Before: "Refunded" on both phones.
+  it("batch 59 review: a tip still paid after the order money went back is 'Some'; all of it back: 'Refunded'", async () => {
+    f.writeOffs.mockResolvedValue([writeOff(1413n, 2825n)]);
+    f.settlements.mockResolvedValue([
+      { orderReference: ref(8), tipMinor: 200n, totalMinor: 1613n },
+    ]);
+    f.onlinePayments.mockResolvedValue([
+      { ...phonePayment(guest.sessionReference, "Captured"), tipMinor: 200n, totalMinor: 1613n },
+    ]);
+    const read = () =>
+      createCustomerSessionBootstrapRead(withTenant).readSettledTable("A".repeat(43));
+    f.onlineRefunds.mockResolvedValue([refund(ref(20), 1413n, "Succeeded")]);
+    expect(await read()).toMatchObject({ closedByStaff: "Some" });
+    f.onlineRefunds.mockResolvedValue([refund(ref(20), 1500n, "Succeeded")]);
+    expect(await read()).toMatchObject({ closedByStaff: "Some" });
+    f.onlineRefunds.mockResolvedValue([
+      refund(ref(20), 1413n, "Succeeded"),
+      refund(ref(20), 200n, null),
+    ]);
+    expect(await read()).toMatchObject({ closedByStaff: "Refunded" });
+    expect(f.settlements).toHaveBeenCalledWith(tx, [ref(8)]);
   });
 
   it("batch 56: another guest's payment, or a declined one, is never this phone's", async () => {
