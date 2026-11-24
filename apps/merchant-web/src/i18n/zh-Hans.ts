@@ -10520,6 +10520,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Table {table} is checking out, so no round can be added to its bill. If the guests want to order more, press Cancel checkout on the table before anyone pays. Once someone has paid, finish the checkout, close the table and press Cleaned, then take their order as a new bill.":
     "{table} 号桌正在结账，不能再往这张账单加单。客人如还要点，在有人付款前请在这桌按“取消结账”。如果已经有人付款，请先结完账、关台并按“已清洁”，再为他们点单，算作一张新账单。",
   "No round can be added for this table now": "这桌现在不能加单",
+  // Batch 58 (v15 b57 live): the refusal's next step is on the table's panel on Tables.
+  "Open table {table} on Tables": "在桌台页打开 {table} 号桌",
   "Nothing was sent or charged, and this order is still here.":
     "没有下单，也没有收款；这张单还在这里。",
   // Batch 56 (v15 b55 live): after a refused send, until the table takes a round again.

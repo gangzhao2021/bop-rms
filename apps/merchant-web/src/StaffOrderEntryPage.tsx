@@ -1,4 +1,5 @@
 import { sentences, wordGap } from "./word-gap.js";
+import { tablesOpenTableState } from "./tables-open-table.js";
 import {
   t,
   saidTable,
@@ -2890,6 +2891,17 @@ export function StaffOrderEntryPage({
                       : t("Check the table again")}
                   </button>
                 )}
+                {/* Batch 58 (v15 b57 live): the reason's next step (close the table and press
+                    Cleaned, or Cancel checkout) is on the table's panel on Tables; one link opens
+                    it there, as "Back to Tables" does for a table opened directly. */}
+                {(tableHold.state === "Paid" || tableHold.state === "CheckingOut") &&
+                tableReference !== null ? (
+                  <Link to="/operations/dining" state={tablesOpenTableState(tableReference)}>
+                    {tableLabel === null
+                      ? t("Back to Tables")
+                      : t("Open table {table} on Tables", { table: saidTable(tableLabel) })}
+                  </Link>
+                ) : null}
               </div>
             ) : null}
             {slipHeld !== null && ordering && phase === "Building" && paper ? (

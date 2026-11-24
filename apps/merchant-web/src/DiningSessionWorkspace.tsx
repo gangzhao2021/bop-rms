@@ -49,7 +49,8 @@ import {
   kitchenOnlyAccessDeniedText,
   kitchenOnlyNavigation,
 } from "./access-denied.js";
-import { Link } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
+import { readTablesOpenTable } from "./tables-open-table.js";
 import {
   createDiningSessionClient,
   DiningSessionClientError,
@@ -693,6 +694,10 @@ function DiningSessionWorkspaceBody({
   orderFactsNow.current = orderFacts;
   const [tab, setTab] = useState<TableTab>("Needs");
   const detailRef = useRef<HTMLElement | null>(null);
+  // Batch 58: a link from order entry ("Open table T7 on Tables") opens that table's panel once.
+  const location = useLocation();
+  const navigate = useNavigate();
+  const linkedTable = useRef(readTablesOpenTable(location.state));
   const panelResultRef = useRef<HTMLParagraphElement | null>(null);
   const underList = usePanelUnderList();
   // Said in the panel: brought into view if the panel has moved (it shrinks when a table closes).
@@ -955,6 +960,20 @@ function DiningSessionWorkspaceBody({
         if (loaded.items.length === 0) setMessage(noTablesMessage);
         // Batch 51: the table open before the sign-in ended, chosen again after the first read.
         const reopen = takeTableForSignIn();
+        const linked = linkedTable.current;
+        if (linked !== null) {
+          linkedTable.current = null;
+          // Opened once: a reload or Back later finds the page as staff leave it.
+          void navigate(".", { replace: true, state: null });
+          if (reopen === null && items.some((table) => table.tableReference === linked)) {
+            setSelectedReference(linked);
+            if (
+              typeof window.matchMedia === "function" &&
+              window.matchMedia(panelUnderList).matches
+            )
+              requestAnimationFrame(() => detailRef.current?.scrollIntoView?.({ block: "start" }));
+          }
+        }
         if (reopen !== null) {
           reopenTaken = null;
           // Batch 51 (v15 b50 live): signed in again, the table staff had open is open again

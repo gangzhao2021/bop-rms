@@ -295,6 +295,7 @@ const words = {
     billMeta: "Synthetic Store · Dine-in · added to the table's bill · the table pays at the end",
     heldMeta: "Synthetic Store · Dine-in · no round can be added to this table now",
     checkAgain: "Check the table again",
+    openOnTables: "Open table T7 on Tables",
     refused:
       "Table T7 can't take an order now (marked unavailable, or it is checking out or being closed). Check the table on the Tables page.",
     unavailableHeading: "This table can't take an order now",
@@ -318,6 +319,7 @@ const words = {
     billMeta: "Synthetic Store · 堂食 · 记入本桌账单 · 最后一起结账",
     heldMeta: "Synthetic Store · 堂食 · 这桌现在不能加单",
     checkAgain: "再查看一次这桌",
+    openOnTables: "在桌台页打开 T7 号桌",
     refused: "桌台 T7 目前不能点单（被标记为不可用，或正在结账、关台）。请在桌台页查看这张桌台。",
     unavailableHeading: "这张桌台目前不能点单",
     unavailable: "它可能被标记为不可用，或尚未设置好接受点单。请在桌台页查看。",
@@ -466,6 +468,22 @@ for (const language of ["en", "zh-Hans"] as const) {
     ).toHaveCount(0);
     await fitsAtEachWidth(page, alert, `entry-refused-${language}`);
     await expectNoInternalText(page);
+    // Batch 58 (v15 b57 live): the next step is on the table's panel on Tables, one link away,
+    // and reachable from the keyboard.
+    const toTable = page.getByRole("link", { name: said.openOnTables, exact: true });
+    await fitsAtEachWidth(page, toTable, `entry-refused-link-${language}`);
+    await toTable.focus();
+    await expect(toTable).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/\/operations\/dining$/u);
+    const tablePanel = page.getByRole("complementary", { name: said.panel });
+    await expect(tablePanel).toContainText(said.paidInFull);
+    await expect(tablePanel.getByRole("note").filter({ hasText: said.paid })).toBeVisible();
+    // Opened once: a reload finds Tables with no table chosen, as staff would open it.
+    await page.reload();
+    await expect(page.getByRole("button", { name: said.select, exact: true })).toBeVisible();
+    await expect(tablePanel).not.toContainText(said.paidInFull);
+    expect(sends).toBe(1);
   });
 
   test(`@production a refused send whose table can't be read again keeps its message and reads again, never sends again (${language})`, async ({
@@ -511,6 +529,11 @@ for (const language of ["en", "zh-Hans"] as const) {
         : new RegExp(`^${escape(said.checkingOut)}.*。${escape(said.kept)}$`, "u"),
     );
     await expect(sendButton).toBeDisabled();
+    // Batch 58: Cancel checkout is on the table's panel on Tables, one link away.
+    await expect(page.getByRole("link", { name: said.openOnTables, exact: true })).toHaveAttribute(
+      "href",
+      /\/operations\/dining$/u,
+    );
     // The guests want more: checkout is cancelled on the table, and reading again frees Send.
     state.phase = "Active";
     state.version = 8;
