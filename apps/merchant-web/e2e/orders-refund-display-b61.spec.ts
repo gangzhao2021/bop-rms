@@ -361,11 +361,9 @@ for (const zh of [false, true]) {
       await mock(page, zh, "fullyRefunded");
       await page.goto("/operations/orders/" + id(1));
       const paid = page.locator("section.table-payment").first();
-      const row = paid
-        .locator(".table-checkout__totals > div")
-        .filter({
-          has: page.locator("dt", { hasText: zh ? /^已全部退款$/u : /^Fully refunded$/u }),
-        });
+      const row = paid.locator(".table-checkout__totals > div").filter({
+        has: page.locator("dt", { hasText: zh ? /^已全部退款$/u : /^Fully refunded$/u }),
+      });
       await expect(row.locator("dd")).toHaveText("$32.00");
       // Each refund keeps its own line.
       await expect(paid).toContainText("−$10.00");
