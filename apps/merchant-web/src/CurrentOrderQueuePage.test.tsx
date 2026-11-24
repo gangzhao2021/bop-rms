@@ -1278,7 +1278,9 @@ it("WP-2423 Q6 step 2: marks cancelled items, their refund and the refund total"
   expect(html.match(/Check refund/gu)).toHaveLength(1);
   // The original total stays; the cancelled items' refund is shown beside it.
   expect(html).toContain("$45.20");
-  expect(html).toMatch(/Cancelled items refund<\/dt><dd>−\$28\.25<\/dd>/u);
+  expect(html).toMatch(
+    /Cancelled items refund<\/dt><dd><span class="bop-amount">−\$28\.25<\/span><\/dd>/u,
+  );
   // Without a refund check context (or a cancellation reference) no button is offered.
   expect(renderToStaticMarkup(<CurrentOrderLines lines={lines} />)).not.toContain("Check refund");
   // A batch the store cancelled whole marks its remaining lines too.
@@ -1358,9 +1360,13 @@ it("46940b76 L2: lists every refund on the order so they add up to what was refu
       refundRows={orderRefundRows(order(cancellation), lines, position)}
     />,
   );
-  expect(html).toMatch(/Cancelled items refund<\/dt><dd>−\$6\.08<\/dd>/u);
-  expect(html).toMatch(/Order cancellation refund<\/dt><dd>−\$11\.77<\/dd>/u);
-  expect(html).toMatch(/Total refunded<\/dt><dd>−\$17\.85<\/dd>/u);
+  expect(html).toMatch(
+    /Cancelled items refund<\/dt><dd><span class="bop-amount">−\$6\.08<\/span><\/dd>/u,
+  );
+  expect(html).toMatch(
+    /Order cancellation refund<\/dt><dd><span class="bop-amount">−\$11\.77<\/span><\/dd>/u,
+  );
+  expect(html).toMatch(/Total refunded<\/dt><dd><span class="bop-amount">−\$17\.85<\/span><\/dd>/u);
   // Everything paid ($15.76 and the $2.09 tip) was refunded: nothing is left.
   expect(html).toMatch(/<dt>Total after refunds<\/dt><dd>\$0\.00<\/dd>/u);
 });
@@ -1384,7 +1390,7 @@ it("v15 2026-11-11 b10: with every paid round cancelled and refunded, the panel 
   const rows = [...refunds, { label: "Total refunded", amount: money("4704") }];
   const html = renderToStaticMarkup(<CurrentOrderLines lines={lines} refundRows={rows} />);
   expect(html).toMatch(/<dt>Total<\/dt><dd>\$47\.04<\/dd>/u);
-  expect(html).toMatch(/Total refunded<\/dt><dd>−\$47\.04<\/dd>/u);
+  expect(html).toMatch(/Total refunded<\/dt><dd><span class="bop-amount">−\$47\.04<\/span><\/dd>/u);
   expect(html).toMatch(/<dt>Total after refunds<\/dt><dd>\$0\.00<\/dd>/u);
   // Part refunded: what the order still comes to.
   expect(totalAfterRefunds(money("4704"), [refunds[0] as (typeof rows)[number]])).toEqual(

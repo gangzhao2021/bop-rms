@@ -848,7 +848,11 @@ export function CurrentOrderLines({
             <div key={row.label}>
               <dt>{row.label}</dt>
               <dd>
-                {row.amount === null ? t("Amount not known yet") : `−${orderMoney(row.amount)}`}
+                {row.amount === null ? (
+                  t("Amount not known yet")
+                ) : (
+                  <span className="bop-amount">{`−${orderMoney(row.amount)}`}</span>
+                )}
               </dd>
             </div>
           ))}
