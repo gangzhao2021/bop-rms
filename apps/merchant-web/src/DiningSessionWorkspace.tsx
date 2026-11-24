@@ -1821,6 +1821,7 @@ function DiningSessionWorkspaceBody({
               type="button"
               aria-pressed={tab === value}
               onClick={() => setTab(value)}
+              onFocus={(event) => keepTabInRow(event.currentTarget)}
             >
               {tabText[value]} <span className="table-tabs__count">{counts.get(value) ?? 0}</span>
             </button>
@@ -2626,4 +2627,21 @@ function TablePanel({
       </details>
     </>
   );
+}
+
+/**
+ * Batch 60: on a phone the tab row scrolls sideways, and the browser leaves a tab that is half in
+ * view where it is when Tab reaches it, so the tab and its focus ring are cut off at the row's
+ * edge. Scroll the row (only the row, at once) so the focused tab and its ring are whole.
+ */
+function keepTabInRow(tab: HTMLElement) {
+  const row = tab.parentElement;
+  if (row === null || row.scrollWidth <= row.clientWidth) return;
+  // The ring reaches 6px past the tab (3px + 3px offset); 8px keeps it clear of the edge.
+  const room = 8;
+  const edge = row.getBoundingClientRect().left + row.clientLeft;
+  const box = tab.getBoundingClientRect();
+  if (box.left - room < edge) row.scrollLeft -= edge - (box.left - room);
+  else if (box.right + room > edge + row.clientWidth)
+    row.scrollLeft += box.right + room - (edge + row.clientWidth);
 }

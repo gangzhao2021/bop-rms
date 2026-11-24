@@ -598,10 +598,7 @@
   .workspace-page.tables-v3 .dining-floor-layout {
     grid-template-columns: minmax(0, 1fr) minmax(22rem, 44%);
   }
-  .workspace-page.tables-v3 .table-panel {
-    border-left: 1px solid var(--bop-color-row-divider);
-    padding: 0 0 24px 28px;
-  }
+  /* The panel's hairline, padding and margin: see the later 1024 rule (room for focus rings). */
   .workspace-page.tables-v3 .table-list {
     padding-right: 20px;
   }
@@ -926,10 +923,15 @@
   }
 }
 @media (max-width: 767px) {
+  /* The tab row scrolls sideways on a phone, so it cuts off what is drawn past its padding edge:
+     8px of padding all round holds each tab's focus ring (3px + 3px offset), and the same negative
+     margin keeps the tabs where they were. */
   .workspace-page.tables-v3 .table-tabs {
     flex-wrap: nowrap;
     overflow-x: auto;
     gap: 0 20px;
+    margin: -8px -8px 0;
+    padding: 8px;
   }
   .workspace-page.tables-v3 .table-tabs button {
     flex: none;
@@ -1022,10 +1024,26 @@
   color: var(--bop-color-danger);
 }
 @media (min-width: 1024px) {
+  /* Batch 60 (v15 b59 live): from 1024 the panel is its own scroll box, which cuts off whatever is
+     drawn past its padding edge. Its heading sat flush with the top and right edges, so a focus
+     ring (3px + 3px offset) showed only its left bar and bottom line. 8px of padding above and to
+     the right holds the whole ring, and the same negative margin keeps every line where v3 draws
+     it. The hairline is drawn from 8px down (as a 1px background, 28px + 1px before the text) so it
+     still starts level with the list. */
   .workspace-page.tables-v3 .table-panel {
-    padding: 0 0 24px 28px;
-    border-left: 1px solid var(--bop-color-row-divider);
+    --table-panel-ring-room: 8px;
+    margin: calc(-1 * var(--table-panel-ring-room)) calc(-1 * var(--table-panel-ring-room)) 0 0;
+    padding: var(--table-panel-ring-room) var(--table-panel-ring-room) 24px 29px;
+    border-left: 0;
+    background: linear-gradient(var(--bop-color-row-divider), var(--bop-color-row-divider)) 0
+      var(--table-panel-ring-room) / 1px calc(100% - var(--table-panel-ring-room)) no-repeat;
   }
+}
+/* Tab brings the next stop just into view, flush with the window's, the panel's or the tab row's
+   edge, where part of its ring is cut off. The same room around each stop keeps the whole ring on
+   screen. */
+.workspace-page.tables-v3 :is(a[href], button, input, select, textarea, summary, [tabindex]) {
+  scroll-margin: 8px;
 }
 
 /* WP-2423 item 8 ① segment 2: the manager's comp or discount, one column like the checkout. */

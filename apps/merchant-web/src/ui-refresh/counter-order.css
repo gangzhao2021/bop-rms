@@ -212,6 +212,16 @@
      below the window: the order panel scrolls on its own, and its lines keep one row in view. */
   overflow-y: auto;
   overscroll-behavior: contain;
+  /* Batch 60: a scroll box cuts off what is drawn past its padding edge. 8px of padding all round
+     holds the focus rings of the heading, the fields and Send (up to 3px + 3px offset), and the
+     same negative margin keeps the panel where it was. */
+  margin: -8px;
+  padding: 8px;
+}
+.counter-order__layout:not(:has(.counter-order__charge))
+  .counter-order__ticket
+  :is(a[href], button, input, select, textarea, summary, [tabindex]) {
+  scroll-margin: 8px;
 }
 .counter-order__layout:not(:has(.counter-order__charge))
   .counter-order__ticket
@@ -250,6 +260,15 @@
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
+}
+/* Batch 60: the lines scroll on their own, so their last row's buttons and those at the right
+   edge lost part of their focus rings; 8px of room below and to the right, given back by the
+   margin, holds them. */
+.counter-order__layout:not(:has(.counter-order__charge))
+  .counter-order__ticket
+  .counter-order__lines {
+  margin: 0 -8px -8px 0;
+  padding: 0 8px 8px 0;
 }
 /* Name and price, with the quantity buttons under them; lines between, none outside. */
 .counter-order .counter-order__lines li {

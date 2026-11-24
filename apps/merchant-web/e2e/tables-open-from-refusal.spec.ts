@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { focusedRingOverhang, ringOverhangsWithin, ringsFrom, whole } from "./focus-ring-clip";
 import { expectNoInternalText } from "./internal-text-guard";
 
 /**
@@ -379,6 +380,7 @@ const words = {
     checkingOut: "is checking out",
     back: "Back to Tables",
     select: "Select T1",
+    tabs: "Show tables",
   },
   "zh-Hans": {
     add: /^添加\s?Beef noodles$/u,
@@ -390,6 +392,7 @@ const words = {
     checkingOut: "正在结账",
     back: "返回桌台",
     select: "选择 T1",
+    tabs: "显示桌台",
   },
 } as const;
 
@@ -473,6 +476,66 @@ for (const language of ["en", "zh-Hans"] as const) {
         ),
       ).toBe(true);
       expect(api.sends()).toBe(1);
+    });
+  }
+
+  for (const width of widths) {
+    const height = width === 390 ? 844 : 900;
+    /**
+     * Batch 60 (v15 batch 59 live): at 1024 and 1440 the panel is its own scroll box with no room
+     * above or right of its heading, so the heading's focus ring showed only its left bar and
+     * bottom line. The whole ring, and that of every stop in the panel, now stays inside it.
+     */
+    test(`@production the panel heading's whole focus ring shows after the keyboard follows the link at ${width} (${language})`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height });
+      const state: State = { phase: "Active", version: 6, paid: false };
+      await signIn(page, state, language);
+      const link = await refusedSend(page, state, language, true);
+      await link.focus();
+      await page.keyboard.press("Enter");
+      const { panel } = await landedOnPanel(page, language, `ring-${language}-${width}`);
+      const heading = await focusedRingOverhang(page);
+      expect(heading.ring).toBe(true);
+      expect(heading).toEqual(whole(heading));
+      // Every other stop in the panel, as Tab reaches it.
+      const stops = await ringOverhangsWithin(page, panel);
+      expect(stops.length).toBeGreaterThan(0);
+      for (const stop of stops) expect(stop, stop.name).toEqual(whole(stop));
+    });
+
+    /**
+     * Batch 60 sweep: the other scroll boxes on the way, each cutting off rings at its edge: order
+     * entry's order panel and its lines (from 901px), the Tables tab row and the phone top bar
+     * (390). Every stop in them now shows its whole ring.
+     */
+    test(`@production every focus ring in order entry's order panel, the Tables tabs and the top bar is whole at ${width} (${language})`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height });
+      const state: State = { phase: "Active", version: 6, paid: false };
+      await signIn(page, state, language);
+      await page.goto(`/operations/order-entry?table=${tableReference}`);
+      await page.getByRole("button", { name: said.add }).click();
+      const ticket = page.locator(".counter-order__ticket");
+      const rings = await ringsFrom(page, ticket, ticket.getByRole("heading", { level: 2 }));
+      expect(rings.length).toBeGreaterThan(3);
+      for (const ring of rings) expect(ring, `order entry: ${ring.name}`).toEqual(whole(ring));
+
+      await page.goto("/operations/dining");
+      const tabs = page.getByRole("navigation", { name: said.tabs });
+      const tabRings = await ringsFrom(page, tabs, tabs.getByRole("button").first());
+      expect(tabRings).toHaveLength(5);
+      for (const ring of tabRings) expect(ring, `tabs: ${ring.name}`).toEqual(whole(ring));
+
+      if (width === 390) {
+        const bar = page.locator(".workspace-sidebar");
+        const barRings = await ringsFrom(page, bar, bar.locator("button, summary").first());
+        expect(barRings.length).toBeGreaterThan(1);
+        for (const ring of barRings) expect(ring, `top bar: ${ring.name}`).toEqual(whole(ring));
+      }
+      await page.screenshot({ path: `${shots}/rings-tabs-${language}-${width}.png` });
     });
   }
 

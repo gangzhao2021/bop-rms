@@ -367,4 +367,10 @@
     flex: none;
     margin-inline-start: 0;
   }
+  /* Batch 60: the top bar keeps the sidebar's scroll box and has 4px above and below its 44px
+     controls, so the usual ring (3px + 3px offset) lost 2px at its top and bottom. Drawn 1px out
+     it fits whole, and the bar keeps its height. */
+  .workspace-sidebar :focus-visible {
+    outline-offset: 1px;
+  }
 }
