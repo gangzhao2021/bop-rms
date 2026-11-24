@@ -9447,6 +9447,21 @@ async function journey(journeyEnding) {
             assert.deepEqual(refundShape(refundedBody), refundedExpected);
             // Confirmed, and a refused one that moved nothing: the table paid 300 less.
             assert.equal(await tableRefundedForGuests(), 300n);
+            // Batch 59 (v15 b58 live, L58R A): part 1 only partly given back is still paid.
+            const splitForGuests = async () =>
+              (
+                await transactions({ guc: true }).run((tx) =>
+                  readCustomerTablePayments(
+                    tx,
+                    createPostgresDiningTableSettlementStore({
+                      scope: ownerScope,
+                      authorize: async () => true,
+                    }),
+                    orderReference,
+                  ),
+                )
+              ).splitParts;
+            assert.deepEqual(await splitForGuests(), { count: parts.length, paid: 1 });
             assert.doesNotMatch(
               JSON.stringify(refundedBody),
               /[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}|pi_|ch_|re_|provider|actor|FOOD_ISSUE/iu,
@@ -9482,6 +9497,31 @@ async function journey(journeyEnding) {
               }),
               { code: "GUEST_SESSION_UNAVAILABLE" },
             );
+            // ── Batch 59 (v15 b58 live, L58R B order 23): a manager then gives the rest of part
+            // 1 back to the card, so all of it went back. Every guest phone's read counts part 1
+            // as given back in full (never paid), and the restore of either phone says all that
+            // was paid went back ("Refunded"), never that it stays paid: Payment's own refund
+            // records, through its public settlement store, under the pilot API role.
+            refundAnswers = "succeeded";
+            // The Provider answers at once: it went back to the card.
+            assert.equal((await refundOwnPart((paidMinor - 300n).toString())).status, "Recorded");
+            assert.equal(await tableRefundedForGuests(), paidMinor);
+            assert.deepEqual(await splitForGuests(), {
+              count: parts.length,
+              paid: 1,
+              refunded: 1,
+            });
+            const payerAfter = await restoreFor(tablePhone);
+            assert.equal(payerAfter?.closedByStaff, "Refunded");
+            assert.deepEqual(payerAfter?.yourPayment, {
+              amountMinor: parts[0].amountMinor,
+              method: "Online",
+              refundedMinor: parts[0].amountMinor,
+            });
+            const otherAfter = await restoreFor(hostPhone);
+            assert.equal(otherAfter?.closedByStaff, "Refunded");
+            assert.equal("yourPayment" in (otherAfter ?? {}), false);
+            assert.doesNotMatch(JSON.stringify(otherAfter), /refundedMinor|amountMinor|csrfToken/u);
             return;
           }
           if (ending === "SplitWrittenOff") {

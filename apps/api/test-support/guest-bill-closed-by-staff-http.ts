@@ -28,6 +28,7 @@ import {
   guestOwnPaymentView,
   guestWholeTablePaidView,
   guestOwnRefunds,
+  guestTableRefundedMinor,
   type GuestBillScenario,
   type GuestOwnRefunds,
 } from "./guest-bill-closed-by-staff.js";
@@ -140,7 +141,11 @@ export async function startGuestBillHttp(
             if (writeOff === null || facts.tableLabel === null) return null;
             return {
               tableLabel: facts.tableLabel,
-              closedByStaff: closedBillPaid(writeOff),
+              // Batch 59: with what staff gave back of the table's payments (every phone).
+              closedByStaff: closedBillPaid(
+                writeOff,
+                paidPart() === null ? 0n : guestTableRefundedMinor(phone().refunds ?? "None"),
+              ),
               store: {
                 brandDisplayName: "Test Merchant 2 - not production",
                 storeDisplayName: "Test Merchant 2 Main - not production",

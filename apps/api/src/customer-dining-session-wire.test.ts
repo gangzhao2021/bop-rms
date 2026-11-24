@@ -267,4 +267,18 @@ describe("batch 58: the table's paid figure after staff refunded a phone payment
     >;
     expect(Object.hasOwn(summary, "paidAfterRefunds")).toBe(false);
   });
+  // Batch 59 (v15 b58 live, L58R B): all of part 1 went back; every phone's reply says one of
+  // the 2 parts was given back in full (never whose), so no page says the table paid it.
+  it("batch 59: a part given back in full is sent with the split; a part only partly, not", async () => {
+    const full = (await serve(() => guestRead("half-split-written-off", "Full"))).summary as Record<
+      string,
+      unknown
+    >;
+    expect(full.paidAfterRefunds).toEqual({ amountMinor: "0", currencyCode: "CAD" });
+    expect(full.splitParts).toEqual({ count: 2, paid: 1, refunded: 1 });
+    expect(JSON.stringify(full)).not.toMatch(/re_|reason|CUSTOMER_REQUEST|onlinePayment/iu);
+    const partial = (await serve(() => guestRead("half-split-written-off", "Partial")))
+      .summary as Record<string, unknown>;
+    expect(partial.splitParts).toEqual({ count: 2, paid: 1 });
+  });
 });

@@ -545,15 +545,36 @@ export interface CustomerTableBillLines {
 export interface CustomerSplitParts {
   readonly count: number | null;
   readonly paid: number;
+  /**
+   * Batch 59 (v15 b58 live, L58R B): of the parts paid, how many staff then gave back in full
+   * (their payment's refunds reach what it took). A table fact for every phone, never whose part
+   * or how much anyone got back; absent when none was.
+   */
+  readonly refunded?: number;
 }
 export function customerSplitParts(
   plan: { readonly mode: string; readonly parts: readonly unknown[] } | undefined,
-  settlements: readonly { readonly part: unknown }[],
+  settlements: readonly {
+    readonly part: unknown;
+    readonly settlementReference?: string;
+    readonly totalMinor?: bigint;
+  }[],
+  /** Batch 59: what went back of each settlement (by settlementReference); absent: nothing. */
+  refundedBySettlement: ReadonlyMap<string, bigint> = new Map(),
 ): CustomerSplitParts | null {
   if (plan === undefined || plan.mode === "Whole") return null;
+  const parts = settlements.filter((settlement) => settlement.part !== null);
+  const refunded = parts.filter(
+    (settlement) =>
+      settlement.settlementReference !== undefined &&
+      settlement.totalMinor !== undefined &&
+      settlement.totalMinor > 0n &&
+      (refundedBySettlement.get(settlement.settlementReference) ?? 0n) >= settlement.totalMinor,
+  ).length;
   return {
     count: plan.mode === "ByGuests" ? null : plan.parts.length,
-    paid: settlements.filter((settlement) => settlement.part !== null).length,
+    paid: parts.length,
+    ...(refunded === 0 ? {} : { refunded }),
   };
 }
 
@@ -586,7 +607,9 @@ export async function readCustomerTablePayments(
   // Batch 58 (v15 b57 live): what staff gave back of these payments, as staff's table reads count
   // it (tableRefundedMinor): cash given back, card-machine refunds, and refunds to a guest's card
   // once approved (on its way or confirmed; one the Provider refused gave nothing back).
+  // Batch 59 (v15 b58 live): and of which payment, so a part given back in full is not said paid.
   let refundedMinor = 0n;
+  const refundedBySettlement = new Map<string, bigint>();
   if (tableSettlements.length > 0) {
     const orders = [orderReference];
     for (const refund of [
@@ -595,13 +618,18 @@ export async function readCustomerTablePayments(
       ...(await store.listOnlineRefundsByOrders(transaction, orders)).filter(
         (refund) => refund.outcome?.status !== "Failed",
       ),
-    ])
+    ]) {
       refundedMinor += refund.amountMinor;
+      refundedBySettlement.set(
+        refund.settlementReference,
+        (refundedBySettlement.get(refund.settlementReference) ?? 0n) + refund.amountMinor,
+      );
+    }
   }
   return {
     tableSettlements,
     splitPaid,
-    splitParts: customerSplitParts(splitPlan, tableSettlements),
+    splitParts: customerSplitParts(splitPlan, tableSettlements, refundedBySettlement),
     refundedMinor,
   };
 }
@@ -1010,7 +1038,17 @@ export function composeCustomerDiningSession(
       (order.splitParts.paid === 0 && due + (order.tableBill?.owedMinor ?? 0n) === 0n) ||
       (order.splitParts.paid === 0 && order.tableBill?.splitStale === true)
         ? {}
-        : { splitParts: { count: order.splitParts.count, paid: order.splitParts.paid } }),
+        : {
+            splitParts: {
+              count: order.splitParts.count,
+              paid: order.splitParts.paid,
+              // Batch 59: parts given back in full, only while some part is counted paid.
+              ...((order.splitParts.refunded ?? 0) > 0 &&
+              (order.splitParts.refunded ?? 0) <= order.splitParts.paid
+                ? { refunded: order.splitParts.refunded }
+                : {}),
+            },
+          }),
       ...(() => {
         // v15 2026-10-29: the tea still on the bill (never the lines taken off), priced before tax
         // as the menu and the bill's item prices are; no price before tax, no note.

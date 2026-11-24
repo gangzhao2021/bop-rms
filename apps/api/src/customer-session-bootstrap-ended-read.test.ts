@@ -14,6 +14,8 @@ const f = vi.hoisted(() => ({
   writeOffs: vi.fn(),
   onlinePayments: vi.fn(),
   onlineRefunds: vi.fn(),
+  cashRefunds: vi.fn(),
+  cardRefunds: vi.fn(),
   settlementScope: vi.fn(),
 }));
 vi.mock("@bop/identity", async (original) => ({
@@ -43,6 +45,8 @@ vi.mock("@rms/payment", async (original) => ({
       listWriteOffsByOrders: f.writeOffs,
       listOnlinePaymentsByOrders: f.onlinePayments,
       listOnlineRefundsByOrders: f.onlineRefunds,
+      listCashRefundsByOrders: f.cashRefunds,
+      listCardRefundsByOrders: f.cardRefunds,
     };
   },
 }));
@@ -92,6 +96,8 @@ beforeEach(() => {
   f.writeOffs.mockResolvedValue([]);
   f.onlinePayments.mockResolvedValue([]);
   f.onlineRefunds.mockResolvedValue([]);
+  f.cashRefunds.mockResolvedValue([]);
+  f.cardRefunds.mockResolvedValue([]);
 });
 
 it("a table closed with nothing ordered says so with the Store's names, and gives nothing to act with", async () => {
@@ -363,6 +369,48 @@ describe("a bill staff closed when the guests left", () => {
         await createCustomerSessionBootstrapRead(withTenant).readSettledTable("A".repeat(43)),
       ),
     ).not.toContain("refundedMinor");
+  });
+
+  // Batch 59 (v15 b58 live, TM2 L58R B order 23): even split in 2, phone A paid part 1 (1413),
+  // staff wrote off the rest (1412), then a manager refunded all 1413 to the card (Succeeded).
+  // Once cleaned, both phones' ended page said "what was paid stays paid". Payment's refunds of
+  // the table's payments, as the guest table read sums them, tell the restore all of it went back.
+  it("batch 59: all that was paid went back: 'Refunded' on every phone; part of it: still 'Some'", async () => {
+    f.writeOffs.mockResolvedValue([writeOff(1413n, 2825n)]);
+    f.onlinePayments.mockResolvedValue([phonePayment(guest.sessionReference, "Captured")]);
+    f.onlineRefunds.mockResolvedValue([refund(ref(20), 1413n, "Succeeded")]);
+    const read = () =>
+      createCustomerSessionBootstrapRead(withTenant).readSettledTable("A".repeat(43));
+    expect(await read()).toEqual({
+      tableLabel: "V44 A (TEST)",
+      closedByStaff: "Refunded",
+      store: tm2,
+      yourPayment: { amountMinor: "1413", method: "Online", refundedMinor: "1413" },
+      csrfToken: "C".repeat(43),
+    });
+    // Another guest's phone: the same table fact, never whose payment or how much went back.
+    f.onlinePayments.mockResolvedValue([
+      { ...phonePayment(ref(30), "Captured"), onlinePaymentReference: ref(20) },
+    ]);
+    const other = await read();
+    expect(other).toEqual({ tableLabel: "V44 A (TEST)", closedByStaff: "Refunded", store: tm2 });
+    expect(JSON.stringify(other)).not.toMatch(/1413|refunded/u);
+    // On its way counts; refused does not; cash given back and card-machine refunds count too.
+    f.onlineRefunds.mockResolvedValue([refund(ref(20), 1413n, null)]);
+    expect(await read()).toMatchObject({ closedByStaff: "Refunded" });
+    f.onlineRefunds.mockResolvedValue([refund(ref(20), 1413n, "Failed")]);
+    expect(await read()).toMatchObject({ closedByStaff: "Some" });
+    f.onlineRefunds.mockResolvedValue([]);
+    f.cashRefunds.mockResolvedValue([{ amountMinor: 1000n }]);
+    f.cardRefunds.mockResolvedValue([{ amountMinor: 413n }]);
+    expect(await read()).toMatchObject({ closedByStaff: "Refunded" });
+    // L58R A (order 16): $8.00 of $14.13 back: what stays paid stays paid.
+    f.cashRefunds.mockResolvedValue([]);
+    f.cardRefunds.mockResolvedValue([]);
+    f.onlineRefunds.mockResolvedValue([refund(ref(20), 800n, "Succeeded")]);
+    expect(await read()).toMatchObject({ closedByStaff: "Some" });
+    expect(f.cashRefunds).toHaveBeenCalledWith(tx, [ref(8)]);
+    expect(f.cardRefunds).toHaveBeenCalledWith(tx, [ref(8)]);
   });
 
   it("batch 56: another guest's payment, or a declined one, is never this phone's", async () => {

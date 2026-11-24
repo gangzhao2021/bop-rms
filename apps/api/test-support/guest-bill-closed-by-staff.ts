@@ -129,6 +129,13 @@ function tableBill(scenario: GuestBillScenario): TableBill {
   } as unknown as TableBill;
 }
 
+/** Batch 59: what staff gave back of the table's payments, refused refunds left out. */
+export function guestTableRefundedMinor(kind: GuestOwnRefunds): bigint {
+  return guestOwnRefunds(kind)
+    .filter((refund) => refund.status !== "Failed")
+    .reduce((sum, refund) => sum + BigInt(refund.amountMinor), 0n);
+}
+
 /**
  * Batch 55 review: Payment's write-off record of this bill (priced, captured before it, written
  * off), as v15 holds it; null while the bill is open. The visit restore reads it once the table
@@ -243,6 +250,9 @@ export function guestBillClosedByStaffFacts(
             : {
                 count: scenario === "parts-written-off" ? 3 : evenHalves(scenario) ? 2 : null,
                 paid: paid.length,
+                // Batch 59 (v15 b58 live, L58R B): all of part 1 went back, so the read counts
+                // that part as given back in full (readCustomerTablePayments, by settlement).
+                ...(tableRefunds === "Full" ? { refunded: 1 } : {}),
               },
         unpaidCancellations: new Set(),
         staffCancellations: new Map(),

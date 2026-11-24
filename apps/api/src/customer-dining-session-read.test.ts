@@ -1176,8 +1176,8 @@ describe("batch 58 (v15 b57 live): the table total after staff refunded a paymen
           },
   });
   const read = (refunds: {
-    cash?: readonly { amountMinor: bigint }[];
-    card?: readonly { amountMinor: bigint }[];
+    cash?: readonly { amountMinor: bigint; settlementReference?: string }[];
+    card?: readonly { amountMinor: bigint; settlementReference?: string }[];
     online?: readonly ReturnType<typeof online>[];
     settled?: boolean;
   }) =>
@@ -1187,7 +1187,14 @@ describe("batch 58 (v15 b57 live): the table total after staff refunded a paymen
         listByOrders: async () =>
           refunds.settled === false
             ? []
-            : [{ part: { splitPlanReference: "plan-1", partNumber: 1 }, tipMinor: 0n }],
+            : [
+                {
+                  settlementReference: "settlement-1",
+                  part: { splitPlanReference: "plan-1", partNumber: 1 },
+                  totalMinor: 1413n,
+                  tipMinor: 0n,
+                },
+              ],
         listSplitPlans: async () => [
           {
             splitPlanReference: "plan-1",
@@ -1244,6 +1251,67 @@ describe("batch 58 (v15 b57 live): the table total after staff refunded a paymen
     expect((await read({ settled: false, online: [online(1n, "Succeeded")] })).refundedMinor).toBe(
       0n,
     );
+  });
+
+  // Batch 59 (v15 b58 live, L58R B order 23 / L58R A order 16): after all of part 1 went back,
+  // both phones still read "the table paid 1 of the 2 parts". The read now says, from Payment's
+  // refunds by payment, how many parts were given back in full; a part only partly given back
+  // is still paid. Never whose part or how much.
+  it("batch 59: a part given back in full is counted, a part only partly given back is not", async () => {
+    expect((await read({ online: [online(1413n, "Succeeded")] })).splitParts).toEqual({
+      count: 2,
+      paid: 1,
+      refunded: 1,
+    });
+    // On its way counts; refused does not.
+    expect((await read({ online: [online(1413n, null)] })).splitParts).toMatchObject({
+      refunded: 1,
+    });
+    expect((await read({ online: [online(1413n, "Failed")] })).splitParts).toEqual({
+      count: 2,
+      paid: 1,
+    });
+    // $8.00 back (L58R A): still paid.
+    expect((await read({ online: [online(800n, "Succeeded")] })).splitParts).toEqual({
+      count: 2,
+      paid: 1,
+    });
+    // Cash given back and a card-machine refund of that payment add up to the whole part.
+    const back = (amountMinor: bigint) => ({ settlementReference: "settlement-1", amountMinor });
+    expect((await read({ cash: [back(1000n)], card: [back(413n)] })).splitParts).toMatchObject({
+      refunded: 1,
+    });
+    expect((await read({})).splitParts).toEqual({ count: 2, paid: 1 });
+  });
+
+  it("batch 59: the table read carries the parts given back in full to every phone", () => {
+    const summary = (refunded: number | undefined, paid = 1) =>
+      composeCustomerDiningSession({
+        ...facts({
+          paymentOutcomes: new Map(),
+          payments: [{ status: "Succeeded", amount: cad(1413n) }],
+          payLaterRounds: new Set([id(30), id(40)]),
+          tableBill: {
+            owedMinor: 0n,
+            pointsUsedMinor: 0n,
+            takenOffMinor: 0n,
+            taxRoundingMinor: 0n,
+            closedByStaff: true,
+          },
+          tableSettlement: { tipMinor: 0n, roundingMinor: 0n, refundedMinor: 1413n },
+          splitParts: {
+            count: 2,
+            paid,
+            ...(refunded === undefined ? {} : { refunded }),
+          },
+        }),
+        paymentTiming: "PayLater",
+      }).summary;
+    expect(summary(1)).toMatchObject({
+      paidAfterRefunds: { amountMinor: 0n },
+      splitParts: { count: 2, paid: 1, refunded: 1 },
+    });
+    expect(summary(undefined)?.splitParts).toEqual({ count: 2, paid: 1 });
   });
 
   it("the table says what it paid after refunds once any went back, and only then", () => {

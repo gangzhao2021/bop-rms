@@ -35,9 +35,22 @@ export const customerSessionBootstrapRoute = "/api/v1/customer/session/csrf";
  * Batch 55 review (v15 b54): what a guest whose table closed is told was paid on a bill staff
  * closed when the guests left, from Payment's write-off record of it.
  */
-export const closedBillPaid = (writeOff: {
-  readonly capturedOrderAllocationMinor: bigint;
-}): "Nothing" | "Some" => (writeOff.capturedOrderAllocationMinor > 0n ? "Some" : "Nothing");
+export const closedBillPaid = (
+  writeOff: { readonly capturedOrderAllocationMinor: bigint },
+  /**
+   * Batch 59 (v15 b58 live, L58R B): what staff then gave back of the table's payments (cash,
+   * card machine, and to a card on its way or confirmed). All of it back: "Refunded", so the
+   * ended page never says what was paid "stays paid" when none of it did.
+   */
+  tableRefundedMinor = 0n,
+): ClosedBillPaidAnswer =>
+  writeOff.capturedOrderAllocationMinor <= 0n
+    ? "Nothing"
+    : tableRefundedMinor >= writeOff.capturedOrderAllocationMinor
+      ? "Refunded"
+      : "Some";
+/** How much of a bill staff closed stays paid: nothing, some, or all of it given back. */
+export type ClosedBillPaidAnswer = "Nothing" | "Some" | "Refunded";
 export function createCustomerSessionBootstrapRead(
   options: CustomerCheckoutSessionAuthorizationOptions & {
     publicProfile?: PersistentPublicStoreProfileOptions;
@@ -108,7 +121,7 @@ export function createCustomerSessionBootstrapRead(
     session: string,
     guestSessionReference: string,
   ): Promise<{
-    readonly paid: "Nothing" | "Some";
+    readonly paid: ClosedBillPaidAnswer;
     readonly ownPaidMinor: bigint;
     /** Batch 57 (Q36): of it, refunded or on its way back to the card (a refused one: not). */
     readonly ownRefundedMinor: bigint;
@@ -126,7 +139,18 @@ export function createCustomerSessionBootstrapRead(
     });
     const [writeOff] = await payment.listWriteOffsByOrders(transaction as never, [order]);
     if (writeOff === undefined) return null;
-    const paid = closedBillPaid(writeOff);
+    // Batch 59: Payment's refunds of the table's payments, as the guest table read sums them.
+    const tableRefundedMinor =
+      writeOff.capturedOrderAllocationMinor <= 0n
+        ? 0n
+        : [
+            ...(await payment.listCashRefundsByOrders(transaction as never, [order])),
+            ...(await payment.listCardRefundsByOrders(transaction as never, [order])),
+            ...(await payment.listOnlineRefundsByOrders(transaction as never, [order])).filter(
+              (refund) => refund.outcome?.status !== "Failed",
+            ),
+          ].reduce((sum, refund) => sum + refund.amountMinor, 0n);
+    const paid = closedBillPaid(writeOff, tableRefundedMinor);
     // Batch 56 (v15 b55 live): what this phone itself paid on that bill before staff closed the
     // rest (Payment's captured phone payments of this guest's Session; never another guest's).
     const own =
@@ -510,7 +534,7 @@ export function createCustomerSessionBootstrapHandler(options?: {
       | {
           tableLabel: string;
           /** Batch 55 review: staff closed the bill when the guests left (no receipt). */
-          closedByStaff: "Nothing" | "Some";
+          closedByStaff: ClosedBillPaidAnswer;
           store?: { brandDisplayName: string; storeDisplayName: string };
           /**
            * Batch 56: what this phone itself paid on that bill, with read-only access to its own
@@ -655,7 +679,12 @@ export function createCustomerSessionBootstrapHandler(options?: {
       // Batch 55 review (v15 b54): staff closed the bill when the guests left. There is no
       // receipt, so no receipt access: which table, whether anything was paid, and the Store.
       if ("closedByStaff" in settled) {
-        if (settled.closedByStaff !== "Nothing" && settled.closedByStaff !== "Some") return null;
+        if (
+          settled.closedByStaff !== "Nothing" &&
+          settled.closedByStaff !== "Some" &&
+          settled.closedByStaff !== "Refunded"
+        )
+          return null;
         // Batch 56 (v15 b55 live): the phone that paid part of it: what it paid and read-only
         // access to that payment's receipt. Anything malformed is left out (the bill's end stays).
         const own = settled.yourPayment;
