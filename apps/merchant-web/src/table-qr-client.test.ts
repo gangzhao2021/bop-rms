@@ -56,3 +56,40 @@ describe("2026-11-01: staff add, rename and retire their Store's tables", () => 
     await expect(refused(400, "dining_table_invalid")).rejects.toBeInstanceOf(TableQrClientError);
   });
 });
+
+describe("Batch 58: Print all codes is one sheet for every table the page lists", () => {
+  const sheetReply = () =>
+    json(200, { fileName: "table-qr-codes-2026-11-24.html", html: "<!doctype html><p></p>" });
+  it("sends up to 500 tables in one request", async () => {
+    const fetcher = vi.fn(async () => sheetReply());
+    const all = Array.from({ length: 500 }, (_, i) => id(i + 1));
+    await expect(createTableQrClient("csrf", fetcher).sheet(all)).resolves.toMatchObject({
+      fileName: "table-qr-codes-2026-11-24.html",
+    });
+    expect(fetcher).toHaveBeenCalledOnce();
+    const [, init] = fetcher.mock.calls[0] as unknown as [string, RequestInit];
+    expect(
+      (JSON.parse(String(init.body)) as { tableReferences: string[] }).tableReferences,
+    ).toHaveLength(500);
+  });
+  it("reads a sheet larger than 20 MB (500 codes are about 17 MB)", async () => {
+    const html = "<!doctype html>" + "x".repeat(24_000_000);
+    const fetcher = vi.fn(async () =>
+      json(200, { fileName: "table-qr-codes-2026-11-24.html", html }),
+    );
+    await expect(createTableQrClient("csrf", fetcher).sheet([id(1)])).resolves.toMatchObject({
+      fileName: "table-qr-codes-2026-11-24.html",
+    });
+  });
+  it("names too many tables as its own refusal, not an outage", async () => {
+    const fetcher = vi.fn(async () => json(413, { error: "dining_table_qr_too_many" }));
+    await expect(createTableQrClient("csrf", fetcher).sheet([id(1)])).rejects.toMatchObject({
+      code: "TooMany",
+    });
+    const unsent = vi.fn(async () => sheetReply());
+    await expect(
+      createTableQrClient("csrf", unsent).sheet(Array.from({ length: 501 }, (_, i) => id(i + 1))),
+    ).rejects.toMatchObject({ code: "TooMany" });
+    expect(unsent).not.toHaveBeenCalled();
+  });
+});

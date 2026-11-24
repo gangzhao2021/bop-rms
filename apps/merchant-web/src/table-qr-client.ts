@@ -13,12 +13,19 @@ export class TableQrClientError extends Error {
       | "NameTaken"
       /** 2026-11-01: guests are seated at the table, so it cannot be retired now. */
       | "Seated"
-      | "Invalid",
+      | "Invalid"
+      /** Batch 58: more tables than one printed sheet holds. */
+      | "TooMany",
   ) {
     super(code);
     this.name = "TableQrClientError";
   }
 }
+/**
+ * Batch 58: the most tables the Store's QR page lists, which is also the most one printed sheet
+ * holds (the API's own bound), so "Print all codes" is always one request and one file.
+ */
+export const tableQrSheetMaximum = 500;
 export type TableQrCodeState = "SetupIncomplete" | "None" | "Active" | "NotPrintable" | "TurnedOff";
 export interface TableQrRow {
   readonly tableReference: string;
@@ -111,6 +118,7 @@ export function createTableQrClient(csrf: string, fetcher: typeof fetch = fetch)
     }
     if (response.status === 401 || response.status === 403)
       throw new TableQrClientError("PermissionDenied");
+    if (response.status === 413) throw new TableQrClientError("TooMany");
     if (response.status === 409 || response.status === 400) {
       const reason = await response
         .json()
@@ -142,7 +150,7 @@ export function createTableQrClient(csrf: string, fetcher: typeof fetch = fetch)
       signal?: AbortSignal,
     ): Promise<{ readonly rows: readonly TableQrRow[]; readonly pickupLink: string | null }> {
       const data = await send("/merchant/dining/table-qr", {}, signal, false);
-      if (!Array.isArray(data.items) || data.items.length > 500) return fail();
+      if (!Array.isArray(data.items) || data.items.length > tableQrSheetMaximum) return fail();
       const link = data.pickupLink ?? null;
       if (
         link !== null &&
@@ -234,12 +242,14 @@ export function createTableQrClient(csrf: string, fetcher: typeof fetch = fetch)
       return row;
     },
     async sheet(tableReferences: readonly string[]): Promise<{ fileName: string; html: string }> {
+      if (tableReferences.length > tableQrSheetMaximum) throw new TableQrClientError("TooMany");
+      // About 17 MB at the bound; read up to 40 MB.
       const data = await send(
         "/merchant/dining/table-qr/sheet",
         { tableReferences },
         undefined,
         false,
-        20_000_000,
+        40_000_000,
       );
       if (
         typeof data.fileName !== "string" ||

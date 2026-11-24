@@ -27,6 +27,7 @@ export function installMerchantBffBodyParsers(
   // DEC-KITCHEN-ONE-TAP: a tap of 50 dishes, each naming up to 20 chosen dishes of a combo.
   const kitchenStepJson = express.json({ limit: 65_536, strict: true });
   const storeSetupJson = express.json({ limit: 2_097_152, strict: true });
+  const tableQrSheetJson = express.json({ limit: 32_768, strict: true });
   const storeSetupReferenceJson = express.json({ limit: 32_768, strict: true });
   const draftBytes = new WeakMap<object, number>();
   const completeDraftJson = express.json({
@@ -80,6 +81,25 @@ export function installMerchantBffBodyParsers(
           .status(large ? 413 : 400)
           .set("Cache-Control", NO_STORE)
           .json({ error: "store_configuration_ordinary_invalid" });
+      });
+      return;
+    }
+    // Batch 58: the printed sheet of every table a Store lists (500 references, about 20 KB).
+    if (request.method === "POST" && request.path === "/dining/table-qr/sheet") {
+      tableQrSheetJson(request, response, (error?: unknown) => {
+        if (!error) {
+          next();
+          return;
+        }
+        const large =
+          typeof error === "object" &&
+          error !== null &&
+          "type" in error &&
+          error.type === "entity.too.large";
+        response
+          .status(large ? 413 : 400)
+          .set("Cache-Control", NO_STORE)
+          .json({ error: large ? "dining_table_qr_too_many" : "input_invalid" });
       });
       return;
     }

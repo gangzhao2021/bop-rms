@@ -23,7 +23,11 @@ import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
-import { renderPickupPoster, renderTableQrSheet } from "./table-qr-sheet.js";
+import {
+  renderPickupPoster,
+  renderTableQrSheetGivingWay,
+  tableQrSheetMaximum,
+} from "./table-qr-sheet.js";
 import { derivedReference } from "./merchant-products.js";
 
 /**
@@ -66,6 +70,15 @@ interface Options {
   /** Exact HTTPS origin of the customer app that printed codes open. */
   readonly customerOrigin: string;
 }
+
+/**
+ * The most tables a Store's QR page lists, and so (batch 58) the most one printed sheet holds:
+ * "Print all codes" prints every table the page shows in one request and one file. At this bound
+ * the sheet is about 17 MB and is made in about 3 s (table-qr-sheet-bound acceptance).
+ */
+export const storeTableMaximum = tableQrSheetMaximum;
+/** The audit of one print names its tables in parts of this size (an audit summary is 16 KB). */
+const printedAuditPart = 100;
 
 const hashIntent = (value: string) => "sha256:" + createHash("sha256").update(value).digest("hex");
 const fail = (code = "TABLE_QR_UNAVAILABLE"): never => {
@@ -186,7 +199,7 @@ export function createMerchantDiningTableQr(options: Options) {
   ) {
     const all: DiningTable[] = [];
     let after: string | null = null;
-    for (let page = 0; page < 5; page++) {
+    for (let page = 0; page < storeTableMaximum / 100; page++) {
       const result = await tables.listTables({
         afterTableReference: after,
         limit: 100,
@@ -702,26 +715,34 @@ export function createMerchantDiningTableQr(options: Options) {
       );
     },
 
-    /** The printable sheet for the listed tables; every table must have a current code. */
+    /**
+     * The printable sheet for the listed tables; every table must have a current code. Batch 58:
+     * up to every table the Store's page lists (500), in one file and one audited print; more is
+     * refused as too many (a refusal, never an outage that asks staff to try again).
+     */
     async sheet(input: { sessionCookie: unknown; csrf: unknown; query: unknown }) {
       const authenticated = await options.authentication.authorize(input);
       const raw = readClosedRecord(input.query, ["tableReferences"]);
-      if (
-        !Array.isArray(raw.tableReferences) ||
-        raw.tableReferences.length < 1 ||
-        raw.tableReferences.length > 100
-      )
-        return fail();
+      if (!Array.isArray(raw.tableReferences) || raw.tableReferences.length < 1)
+        return fail("TABLE_QR_INVALID");
+      if (raw.tableReferences.length > storeTableMaximum) return fail("TABLE_QR_TOO_MANY");
       const requested = raw.tableReferences.map((value) => String(parseDiningReference(value)));
-      if (new Set(requested).size !== requested.length) return fail();
+      if (new Set(requested).size !== requested.length) return fail("TABLE_QR_INVALID");
       return authorizedRun(
         input.sessionCookie,
         authenticated.sessionReference,
         async (tx, { current, guard, scope, tables, codes }) => {
-          const latest = await codes.loadLatestForTables(requested);
+          // The Store's tables in a few pages, not one read per printed table.
+          const inUse = new Map(
+            (await listAll(tables, guard)).map((table) => [String(table.tableReference), table]),
+          );
+          const latest = new Map<string, DiningTableQrIssue>();
+          for (let i = 0; i < requested.length; i += 200)
+            for (const [key, value] of await codes.loadLatestForTables(requested.slice(i, i + 200)))
+              latest.set(key, value);
           const cards = [];
           for (const reference of requested) {
-            const table = await tables.loadTable(parseDiningReference(reference));
+            const table = inUse.get(reference);
             const issue = latest.get(reference);
             if (!table || item(table, issue).codeState !== "Active" || issue === undefined)
               return fail("TABLE_QR_CONFLICT");
@@ -732,24 +753,6 @@ export function createMerchantDiningTableQr(options: Options) {
             });
           }
           const occurredAt = parseDiningInstant(current.context.resolvedAt);
-          const sheetReference = options.newReference();
-          await appendAuditRecordInTransaction(tx, {
-            auditId: options.newReference(),
-            brandId: scope.brandReference,
-            storeId: scope.storeReference,
-            actor: { type: "User", reference: current.actorReference },
-            actionCode: "DINING_TABLE_QR_PRINTED",
-            targetType: "DiningTableQrSheet",
-            targetId: sheetReference,
-            afterSummary: { tableReferences: requested, tableCount: requested.length },
-            reasonCode: "TABLE_QR_PRINTED",
-            correlationId: sheetReference,
-            occurredAt,
-            sourceChannel: "MERCHANT_WEB",
-            dataClassification: "Restricted",
-            retentionPolicyCode: options.retentionPolicyCode,
-            retentionPolicyVersion: options.retentionPolicyVersion,
-          });
           // WP-2423 DEC-STORE-CUSTOMER-NAME: the printed card names the Store as guests see it
           // (current published profile, the Store's own language); the Store record name only when
           // none is published.
@@ -779,22 +782,50 @@ export function createMerchantDiningTableQr(options: Options) {
             });
           const publicName = published?.localizedFields[published.defaultLocale]?.storeDisplayName;
           const store = current.store as { displayName?: unknown; timeZone?: unknown };
+          const timeZone = typeof store.timeZone === "string" ? store.timeZone : "UTC";
+          // Batch 58: the sheet is drawn before the print is audited, so the Store's audit chain
+          // is held only for the audit itself, not while up to 500 codes are drawn (about 3 s),
+          // and drawing gives way to other requests between cards.
+          const html = await renderTableQrSheetGivingWay({
+            storeName:
+              publicName ?? (typeof store.displayName === "string" ? store.displayName : ""),
+            timeZone,
+            cards,
+          });
+          const sheetReference = options.newReference();
+          // One print, one sheet: its audit names every printed table, in parts that each fit an
+          // audit summary, all under the sheet's own reference.
+          const parts = Math.ceil(requested.length / printedAuditPart);
+          for (let part = 0; part < parts; part++)
+            await appendAuditRecordInTransaction(tx, {
+              auditId: options.newReference(),
+              brandId: scope.brandReference,
+              storeId: scope.storeReference,
+              actor: { type: "User", reference: current.actorReference },
+              actionCode: "DINING_TABLE_QR_PRINTED",
+              targetType: "DiningTableQrSheet",
+              targetId: sheetReference,
+              afterSummary: {
+                tableReferences: requested.slice(
+                  part * printedAuditPart,
+                  (part + 1) * printedAuditPart,
+                ),
+                tableCount: requested.length,
+                ...(parts > 1 ? { part: part + 1, parts } : {}),
+              },
+              reasonCode: "TABLE_QR_PRINTED",
+              correlationId: sheetReference,
+              occurredAt,
+              sourceChannel: "MERCHANT_WEB",
+              dataClassification: "Restricted",
+              retentionPolicyCode: options.retentionPolicyCode,
+              retentionPolicyVersion: options.retentionPolicyVersion,
+            });
           return Object.freeze({
             // WP-2423 M150: named by the Store's own date, never UTC's (23:22 in Toronto is
             // still that day).
-            fileName:
-              "table-qr-codes-" +
-              storeLocalDay(
-                occurredAt,
-                typeof store.timeZone === "string" ? store.timeZone : "UTC",
-              ) +
-              ".html",
-            html: renderTableQrSheet({
-              storeName:
-                publicName ?? (typeof store.displayName === "string" ? store.displayName : ""),
-              timeZone: typeof store.timeZone === "string" ? store.timeZone : "UTC",
-              cards,
-            }),
+            fileName: "table-qr-codes-" + storeLocalDay(occurredAt, timeZone) + ".html",
+            html,
           });
         },
       );

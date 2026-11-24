@@ -1107,6 +1107,9 @@ export function installMerchantDiningRoutes(
             response.status(409).json({ error: "dining_table_seated" });
           else if (error instanceof Error && error.message === "TABLE_QR_INVALID")
             response.status(400).json({ error: "dining_table_invalid" });
+          // Batch 58: more tables than one printed sheet holds, refused (not an outage).
+          else if (error instanceof Error && error.message === "TABLE_QR_TOO_MANY")
+            response.status(413).json({ error: "dining_table_qr_too_many" });
           else failed(response, error);
         });
     });

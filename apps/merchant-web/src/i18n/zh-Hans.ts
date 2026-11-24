@@ -4562,6 +4562,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "取餐码匹配，但本设备未设置为取餐柜台，因此不能在这里记录交付。请在取餐柜台设备上记录。",
   "The code matches. Hand over the order below, then confirm.":
     "取餐码匹配。请交付下方订单，然后确认。",
+  "One file can hold up to {count} table codes. Nothing changed. Print the tables one at a time from their rows.":
+    "一个文件最多可放 {count} 张桌台二维码。没有任何更改。请在各桌台行中逐个打印。",
   "The codes could not be downloaded. Nothing changed; try again.":
     "无法下载桌台二维码。没有任何更改；请重试。",
   "The confirmed refund could not be read. Refresh once the refund is confirmed and your access is current.":

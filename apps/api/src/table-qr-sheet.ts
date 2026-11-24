@@ -24,34 +24,46 @@ const day = (instant: string, timeZone: string) =>
     day: "numeric",
   }).format(new Date(instant));
 
-export function renderTableQrSheet(input: {
+/**
+ * Batch 58: the most cards one sheet holds, the same as the most tables a Store's QR page lists,
+ * so "Print all codes" always fits one file (about 17 MB at the bound).
+ */
+export const tableQrSheetMaximum = 500;
+
+interface TableQrSheetInput {
   readonly storeName: string;
   readonly timeZone: string;
   readonly cards: readonly TableQrSheetCard[];
-}): string {
-  if (input.cards.length < 1 || input.cards.length > 100) throw new Error("TABLE_QR_SHEET_INVALID");
-  const cards = input.cards
-    .map((card) => {
-      const url = new URL(card.url);
-      if (url.protocol !== "https:" || !url.hash.startsWith("#qr="))
-        throw new Error("TABLE_QR_SHEET_INVALID");
-      const label = escape(card.tableLabel);
-      const svg = renderQrSvg(encodeQrMatrix(card.url), "QR code for table " + card.tableLabel);
-      return (
-        `<article class="card"><p class="store">${escape(input.storeName)}</p>` +
-        `<h2>Table ${label}</h2><a class="code" href="${escape(card.url)}">${svg}</a>` +
-        `<p class="lead">Scan to order and pay from your phone</p>` +
-        `<ol><li>Open your phone camera and point it at the code.</li>` +
-        `<li>Ask your server for this table's joining code.</li>` +
-        `<li>Order and pay at your table. No app or account needed.</li></ol>` +
-        `<p class="valid">Code works until ${escape(day(card.validUntil, input.timeZone))}</p></article>`
-      );
-    })
-    .join("");
+}
+
+function sheetCard(card: TableQrSheetCard, input: TableQrSheetInput): string {
+  const url = new URL(card.url);
+  if (url.protocol !== "https:" || !url.hash.startsWith("#qr="))
+    throw new Error("TABLE_QR_SHEET_INVALID");
+  const label = escape(card.tableLabel);
+  const svg = renderQrSvg(encodeQrMatrix(card.url), "QR code for table " + card.tableLabel);
+  return (
+    `<article class="card"><p class="store">${escape(input.storeName)}</p>` +
+    `<h2>Table ${label}</h2><a class="code" href="${escape(card.url)}">${svg}</a>` +
+    `<p class="lead">Scan to order and pay from your phone</p>` +
+    `<ol><li>Open your phone camera and point it at the code.</li>` +
+    `<li>Ask your server for this table's joining code.</li>` +
+    `<li>Order and pay at your table. No app or account needed.</li></ol>` +
+    `<p class="valid">Code works until ${escape(day(card.validUntil, input.timeZone))}</p></article>`
+  );
+}
+
+function checkedCards(input: TableQrSheetInput) {
+  if (input.cards.length < 1 || input.cards.length > tableQrSheetMaximum)
+    throw new Error("TABLE_QR_SHEET_INVALID");
+  return input.cards;
+}
+
+function sheetDocument(storeName: string, cards: string): string {
   return (
     `<!doctype html><html lang="en"><head><meta charset="utf-8">` +
     `<meta name="viewport" content="width=device-width,initial-scale=1">` +
-    `<title>Table QR codes · ${escape(input.storeName)}</title><style>` +
+    `<title>Table QR codes · ${escape(storeName)}</title><style>` +
     `@page{size:A4;margin:12mm}*{box-sizing:border-box}` +
     `body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;color:#111;background:#fff}` +
     `.help{max-width:180mm;margin:12mm auto;padding:4mm 6mm;border:1px solid #111}` +
@@ -70,6 +82,28 @@ export function renderTableQrSheet(input: {
     `<p>Print a new code before the date under each code.</p></section>` +
     `<main class="sheet">${cards}</main></body></html>`
   );
+}
+
+export function renderTableQrSheet(input: TableQrSheetInput): string {
+  const cards = checkedCards(input).map((card) => sheetCard(card, input));
+  return sheetDocument(input.storeName, cards.join(""));
+}
+
+/**
+ * Batch 58: the same sheet, drawn a few cards at a time so the server keeps answering other
+ * requests (kitchen, orders, payments) while a large Store prints all of its codes.
+ */
+export async function renderTableQrSheetGivingWay(
+  input: TableQrSheetInput,
+  cardsPerTurn = 20,
+): Promise<string> {
+  const cards: string[] = [];
+  for (const card of checkedCards(input)) {
+    if (cards.length > 0 && cards.length % cardsPerTurn === 0)
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    cards.push(sheetCard(card, input));
+  }
+  return sheetDocument(input.storeName, cards.join(""));
 }
 
 /**

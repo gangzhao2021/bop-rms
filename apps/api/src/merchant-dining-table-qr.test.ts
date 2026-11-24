@@ -1,4 +1,4 @@
-import { beforeEach, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createMerchantDiningTableQr, storeLocalDay } from "./merchant-dining-table-qr.js";
 
 const m = vi.hoisted(() => ({
@@ -12,6 +12,15 @@ const m = vi.hoisted(() => ({
   loadByOperation: vi.fn(),
   service: vi.fn(),
   executeTable: vi.fn(),
+  appendAudit: vi.fn(),
+}));
+vi.mock("@bop/audit", async (original) => ({
+  ...(await original<typeof import("@bop/audit")>()),
+  appendAuditRecordInTransaction: m.appendAudit,
+}));
+vi.mock("@rms/store", async (original) => ({
+  ...(await original<typeof import("@rms/store")>()),
+  createPostgresPublicStoreProfilePublisher: () => ({ readCurrent: async () => null }),
 }));
 vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => m.resolve }));
 vi.mock("@rms/dining", async (original) => ({
@@ -195,4 +204,96 @@ it("WP-2423 M150: the printed QR file is named by the Store's own date, not UTC'
   // 23:22 in Toronto on Nov 4 is already Nov 5 in UTC.
   expect(storeLocalDay("2026-11-05T04:22:00.000Z", "America/Toronto")).toBe("2026-11-04");
   expect(storeLocalDay("2026-11-05T04:22:00.000Z", "UTC")).toBe("2026-11-05");
+});
+
+describe("batch 58: Print all codes prints every table the page lists in one sheet", () => {
+  const many = (count: number) =>
+    Array.from({ length: count }, (_, i) => ({
+      ...table,
+      tableReference: id(1000 + i),
+      stableLabel: "Hall " + (i + 1),
+    }));
+  const issue = (reference: string) => ({
+    tableReference: reference,
+    qrVersion: 1,
+    qrToken: "h.p" + reference.slice(-6) + "." + "s".repeat(86),
+    issuedAt: at,
+    expiresAt: "2027-04-12T03:30:00.000Z",
+  });
+  function store(count: number) {
+    const all = many(count);
+    // The Store's tables come in pages of 100, as the table store pages them.
+    m.listTables.mockImplementation(async (request: { afterTableReference: string | null }) => {
+      const start =
+        request.afterTableReference === null
+          ? 0
+          : all.findIndex((row) => row.tableReference === request.afterTableReference) + 1;
+      const items = all.slice(start, start + 100);
+      return {
+        items,
+        nextAfterTableReference:
+          start + 100 < all.length ? (items[items.length - 1]?.tableReference ?? null) : null,
+      };
+    });
+    m.loadLatestForTables.mockImplementation(async (references: string[]) => {
+      // The real code store refuses more than 200 tables in one read.
+      if (references.length > 200) throw new Error("DINING_TABLE_QR_UNAVAILABLE");
+      return new Map(references.map((reference) => [reference, issue(reference)]));
+    });
+    return all.map((row) => row.tableReference);
+  }
+  const print = (f: ReturnType<typeof setup>, tableReferences: unknown) =>
+    f.qr.sheet({ sessionCookie: "synthetic", csrf: "synthetic", query: { tableReferences } });
+
+  for (const count of [100, 101, 500])
+    it(`prints ${count} tables in one file and one audited print`, async () => {
+      const f = setup();
+      const references = store(count);
+      const sheet = await print(f, references);
+      expect(sheet.html.split('<article class="card">').length - 1).toBe(count);
+      // A few table pages, never one read per printed table.
+      expect(m.loadTable).not.toHaveBeenCalled();
+      expect(m.listTables.mock.calls.length).toBe(Math.ceil(count / 100));
+      // The audit names every printed table, in parts that fit an audit summary, under one sheet.
+      const audits = m.appendAudit.mock.calls.map(
+        (call) => call[1] as { targetId: string; afterSummary: Record<string, unknown> },
+      );
+      expect(audits).toHaveLength(Math.ceil(count / 100));
+      expect(new Set(audits.map((audit) => audit.targetId)).size).toBe(1);
+      expect(audits.flatMap((audit) => audit.afterSummary.tableReferences as string[])).toEqual(
+        references,
+      );
+      // The Store's audit chain is taken last: after every read and after the codes are drawn.
+      expect(Math.min(...m.appendAudit.mock.invocationCallOrder)).toBeGreaterThan(
+        Math.max(...f.tx.query.mock.invocationCallOrder),
+      );
+      for (const audit of audits) {
+        expect(audit.afterSummary.tableCount).toBe(count);
+        expect(JSON.stringify(audit.afterSummary).length).toBeLessThan(16_384);
+        expect(JSON.stringify(audit.afterSummary)).not.toContain("#qr=");
+      }
+    });
+
+  it("refuses more than 500 tables as too many, before any read or audit", async () => {
+    const f = setup();
+    const references = [...store(500), id(5000)];
+    await expect(print(f, references)).rejects.toThrow("TABLE_QR_TOO_MANY");
+    expect(m.resolve).not.toHaveBeenCalled();
+    expect(m.appendAudit).not.toHaveBeenCalled();
+  });
+
+  it("refuses an empty or repeated list as invalid input, not as an outage", async () => {
+    const f = setup();
+    store(2);
+    await expect(print(f, [])).rejects.toThrow("TABLE_QR_INVALID");
+    await expect(print(f, [id(1000), id(1000)])).rejects.toThrow("TABLE_QR_INVALID");
+    await expect(print(f, "all")).rejects.toThrow("TABLE_QR_INVALID");
+  });
+
+  it("refuses a table that is not one of the Store's tables in use as changed", async () => {
+    const f = setup();
+    store(3);
+    await expect(print(f, [id(1000), id(4040)])).rejects.toThrow("TABLE_QR_CONFLICT");
+    expect(m.appendAudit).not.toHaveBeenCalled();
+  });
 });

@@ -2,7 +2,12 @@ import { displayLocale, t, saidTable, listSeparator } from "./i18n/i18n.js";
 import { StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { serviceOperationReference } from "./service-control-client.js";
-import { createTableQrClient, TableQrClientError, type TableQrRow } from "./table-qr-client.js";
+import {
+  createTableQrClient,
+  TableQrClientError,
+  tableQrSheetMaximum,
+  type TableQrRow,
+} from "./table-qr-client.js";
 import { WorkspacePage } from "./WorkspacePage.js";
 import { noAccessHeading } from "./access-denied.js";
 import { NoAccessNotice } from "./NoAccessNotice.js";
@@ -158,7 +163,12 @@ export function TableQrCodesPage({
             ? t("A code changed since this page loaded. The list is refreshed; print again.")
             : error instanceof TableQrClientError && error.code === "PermissionDenied"
               ? t("Your role can't print table QR codes. Ask the owner or a manager.")
-              : t("The codes could not be downloaded. Nothing changed; try again."),
+              : error instanceof TableQrClientError && error.code === "TooMany"
+                ? t(
+                    "One file can hold up to {count} table codes. Nothing changed. Print the tables one at a time from their rows.",
+                    { count: tableQrSheetMaximum },
+                  )
+                : t("The codes could not be downloaded. Nothing changed; try again."),
       });
       if (error instanceof TableQrClientError && error.code === "Changed") refresh();
     } finally {

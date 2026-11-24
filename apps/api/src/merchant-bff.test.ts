@@ -4803,6 +4803,63 @@ it("WP-2423 Q11: protects table QR routes, answers a changed table with 409 and 
   }
 });
 
+it("batch 58: the sheet route reads 500 table references and answers too many as a 413 refusal", async () => {
+  const sheet = vi.fn(async (input: { query: unknown }) => {
+    const count = (input.query as { tableReferences: unknown[] }).tableReferences.length;
+    if (count > 500) throw new Error("TABLE_QR_TOO_MANY");
+    return { fileName: "table-qr-codes-2026-11-24.html", html: "<!doctype html>" };
+  });
+  const app = express();
+  app.use(
+    "/merchant",
+    createMerchantBffRouter({
+      service: fakeService(),
+      exactOrigin: "https://merchant.invalid",
+      acceptedHost: "merchant.invalid",
+      diningTableQr: { sheet } as unknown as NonNullable<MerchantBffRouterOptions["diningTableQr"]>,
+    }),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("server unavailable");
+  const references = (count: number) =>
+    Array.from(
+      { length: count },
+      (_, i) => "0190fa43-0000-7000-8000-" + (i + 1).toString(16).padStart(12, "0"),
+    );
+  const post = (body: string) =>
+    request(`http://127.0.0.1:${address.port}`, "/merchant/dining/table-qr/sheet", {
+      method: "POST",
+      body,
+      headers: {
+        ...safeHeaders,
+        Cookie: "__Host-bop-merchant=" + sessionCookie,
+        "X-BOP-CSRF": csrf,
+        "Content-Type": "application/json",
+      },
+    });
+  try {
+    for (const count of [100, 101, 500]) {
+      const answered = await post(JSON.stringify({ tableReferences: references(count) }));
+      expect(answered.status).toBe(200);
+    }
+    expect(sheet).toHaveBeenCalledTimes(3);
+    const refused = await post(JSON.stringify({ tableReferences: references(501) }));
+    expect(refused.status).toBe(413);
+    expect(await refused.json()).toEqual({ error: "dining_table_qr_too_many" });
+    // A body far beyond any Store's tables is refused by size, with the same answer.
+    const huge = await post(JSON.stringify({ tableReferences: references(1000) }));
+    expect(huge.status).toBe(413);
+    expect(await huge.json()).toEqual({ error: "dining_table_qr_too_many" });
+    expect(sheet).toHaveBeenCalledTimes(4);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
+});
+
 it("protects session start and returns one-time credentials only for Issued", async () => {
   const result = {
     status: "Issued" as const,
