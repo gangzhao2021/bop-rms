@@ -1113,6 +1113,8 @@ describe("merchant BFF responses carry every read-model field the browser parses
     expect(
       dropped(queueView, (path) => path.replace(/^\.earlierDayItems\[\]/u, ".items[]")),
     ).toEqual([]);
+    // Batch 56: Orders asks for the day's count and gets it.
+    expect(view.todayOrderCount).toBe(74);
     const table = view.items.find((item) => item.orderReference === dineIn.orderReference);
     expect(table?.batches[1]?.awaitingAcceptanceSince).toBe(at(14));
     expect(table?.batches[0]?.kitchenRelease).toEqual({ state: "Sending", acceptedAt: at(3) });

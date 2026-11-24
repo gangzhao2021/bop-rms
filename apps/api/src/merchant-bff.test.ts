@@ -1306,6 +1306,27 @@ it("WP-2423: reads one order's detail with its lines and hides other Stores' ord
   } as never);
   const room = (await (await request(root, "/merchant/orders", { headers })).json()) as object;
   expect(room).not.toHaveProperty("pickupHour");
+  // Batch 56 (v15 batch 55 live): the day's count goes only to a screen that asks for it; a
+  // tablet still running the earlier screen gets the list it knows (its parser refuses new fields).
+  const counted = {
+    items: [item],
+    nextAfterOrderReference: null,
+    lines: null,
+    pickupContact: null,
+    todayOrderCount: 74,
+  };
+  queue.mockResolvedValueOnce(counted as never);
+  const asked = (await (
+    await request(root, "/merchant/orders", {
+      headers: { ...headers, "x-bop-orders-count": "today" },
+    })
+  ).json()) as { todayOrderCount?: unknown };
+  expect(asked.todayOrderCount).toBe(74);
+  queue.mockResolvedValueOnce(counted as never);
+  const earlierScreen = (await (
+    await request(root, "/merchant/orders", { headers })
+  ).json()) as object;
+  expect(earlierScreen).not.toHaveProperty("todayOrderCount");
 });
 
 it("protects price management transport and sanitizes command failures", async () => {

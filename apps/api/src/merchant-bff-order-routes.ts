@@ -99,6 +99,9 @@ function fieldOf(command: unknown, name: string): unknown {
 }
 const operationOf = (command: unknown) => fieldOf(command, "operationReference");
 
+/** Batch 56: a screen that reads the day's count asks for it (`X-Bop-Orders-Count: today`). */
+export const ordersDayCountHeader = "x-bop-orders-count";
+
 function orderQueueRow(item: MerchantOrderQueueItem) {
   return {
     orderReference: item.orderReference,
@@ -320,6 +323,7 @@ export function installMerchantOrderRoutes(
       return;
     }
     const orderQueue = options.orderQueue;
+    const dayCountAsked = rawHeaderValues(request, ordersDayCountHeader).join() === "today";
     // WP-2423: the Orders list and the pickup queue each fence several Orders in their own order;
     // on a first load they run together and may deadlock. The read is rerun (nothing committed);
     // a conflict that persists is "retry later", never a permission refusal.
@@ -336,8 +340,10 @@ export function installMerchantOrderRoutes(
           nextAfterOrderReference: view.nextAfterOrderReference,
           ...(view.paidOrderWatch === undefined ? {} : { paidOrderWatch: view.paidOrderWatch }),
           ...(view.pickupHour === undefined ? {} : { pickupHour: view.pickupHour }),
-          // Batch 56: the Store's Orders on its current business day, when the server knows it.
-          ...(typeof view.todayOrderCount === "number"
+          // Batch 56: the Store's Orders on its current business day, when the server knows it,
+          // only to a screen that asks for it (a tablet still running the earlier screen reads
+          // the list it knows; its parser refuses fields it does not know).
+          ...(typeof view.todayOrderCount === "number" && dayCountAsked
             ? { todayOrderCount: view.todayOrderCount }
             : {}),
         });
