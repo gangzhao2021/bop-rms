@@ -107,9 +107,14 @@ export function ClosedBillTableCard({
       <p>
         {paid === "Nothing"
           ? t("Staff closed your table’s bill; nothing was charged.")
-          : t(
-              "Staff closed your table’s bill: what was paid stays paid, and the rest is not charged to you.",
-            )}
+          : paid === "Refunded"
+            ? // Batch 59 (v15 b58 live, L58R B): all that was paid went back; it never "stays paid".
+              t(
+                "Staff closed your table’s bill: what was paid went back in full; nothing is charged to you.",
+              )
+            : t(
+                "Staff closed your table’s bill: what was paid stays paid, and the rest is not charged to you.",
+              )}
       </p>
       {yourPaidMinor === null || paid === "Nothing" ? null : (
         <p>{youPaidText(yourPaidMinor, yourRefundedMinor)}</p>

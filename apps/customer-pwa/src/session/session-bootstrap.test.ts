@@ -713,6 +713,46 @@ it("batch 55 review: keeps a table whose bill staff closed, with what was paid a
   }
 });
 
+// Batch 59 (v15 b58 live, L58R B order 23): all of part 1 went back to the card, then staff
+// cleaned the table. The restore says so ("Refunded"), to the payer with what went back to its
+// card and to another phone with nothing of anyone's; an older page never sees the value.
+it("batch 59: keeps a closed bill all of whose payments went back, on every phone", async () => {
+  const restore = (value: unknown) =>
+    restoreCustomerSession(vi.fn().mockResolvedValue(response(value)));
+  expect(
+    await restore({
+      schemaVersion: 1,
+      closedTable: { tableLabel: "L58R B (TEST)", paid: "Refunded" },
+    }),
+  ).toBe(false);
+  expect(getEndedTable()).toEqual({
+    kind: "ClosedByStaff",
+    tableLabel: "L58R B (TEST)",
+    paid: "Refunded",
+    store: null,
+  });
+  setEmptyTable(null);
+  await restore({
+    schemaVersion: 1,
+    closedTable: {
+      tableLabel: "L58R B (TEST)",
+      paid: "Refunded",
+      yourPayment: { amountMinor: "1413", method: "Online", refundedMinor: "1413" },
+      csrfToken: "C".repeat(43),
+    },
+  });
+  expect(getEndedTable()).toEqual({
+    kind: "ClosedByStaff",
+    tableLabel: "L58R B (TEST)",
+    paid: "Refunded",
+    store: null,
+    yourPaidMinor: "1413",
+    yourRefundedMinor: "1413",
+  });
+  expect(getClosedTableOwnReceiptCsrf()).toBe("C".repeat(43));
+  setEmptyTable(null);
+});
+
 // Batch 56 (v15 b55 live, L55 CB3 order 80): the phone that paid part 1 ($14.13) of a bill staff
 // then closed is told what it paid, and keeps the ended visit's read-only value for its receipt.
 it("batch 56: keeps what this phone paid on a bill staff closed, and its own receipt's access", async () => {

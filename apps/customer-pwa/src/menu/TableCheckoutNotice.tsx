@@ -34,16 +34,28 @@ export function tableCheckoutText(checkout: TableCheckout): {
           ),
           link: t("See the bill"),
         }
-      : {
-          heading: t("Staff closed your table’s bill"),
-          line: t(
-            "What was paid stays paid, and the rest is not charged to you. To order anything else, ask staff.",
-          ),
-          whole: t(
-            "Staff closed your table’s bill: what was paid stays paid, and the rest is not charged to you. To order anything else, ask staff.",
-          ),
-          link: t("See the bill"),
-        };
+      : checkout.closedByStaff.kind === "Refunded"
+        ? // Batch 59 (v15 b58 live, L58R B): all that was paid went back; it never "stays paid".
+          {
+            heading: t("Staff closed your table’s bill"),
+            line: t(
+              "What was paid went back in full; nothing is charged to you. To order anything else, ask staff.",
+            ),
+            whole: t(
+              "Staff closed your table’s bill: what was paid went back in full; nothing is charged to you. To order anything else, ask staff.",
+            ),
+            link: t("See the bill"),
+          }
+        : {
+            heading: t("Staff closed your table’s bill"),
+            line: t(
+              "What was paid stays paid, and the rest is not charged to you. To order anything else, ask staff.",
+            ),
+            whole: t(
+              "Staff closed your table’s bill: what was paid stays paid, and the rest is not charged to you. To order anything else, ask staff.",
+            ),
+            link: t("See the bill"),
+          };
   return checkout.paid === true
     ? {
         heading: t("Your table’s bill is paid"),

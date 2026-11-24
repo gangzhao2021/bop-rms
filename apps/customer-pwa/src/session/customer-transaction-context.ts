@@ -149,8 +149,11 @@ interface EmptyTable {
     readonly csrfToken: string;
   };
 }
-/** What was paid on a bill staff closed when the guests left. */
-export type ClosedBillPaid = "Nothing" | "Some";
+/**
+ * What was paid on a bill staff closed when the guests left. Batch 59 (v15 b58 live): "Refunded",
+ * something was paid and staff then gave all of it back.
+ */
+export type ClosedBillPaid = "Nothing" | "Some" | "Refunded";
 let emptyTable: EmptyTable | null = null;
 
 export function setEmptyTable(value: EmptyTable | null): void {

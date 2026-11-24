@@ -150,6 +150,104 @@ describe("batch 56: staff's equal parts on a bill still open", () => {
   });
 });
 
+// Batch 59 (v15 b58 live, TM2 L58R B order 23 and L58R A order 16): staff split evenly in 2,
+// phone A paid part 1 ($14.13), staff closed the rest, then a manager gave all of part 1 back
+// to the card (the read: paidAfterRefunds 0, splitParts refunded 1) or $8.00 of it
+// (paidAfterRefunds 613, no part given back in full). Every page still said 1 of 2 parts paid and
+// "what was paid stays paid".
+describe("batch 59: a part given back in full is not paid", () => {
+  const refundedSplit = read("1413", [round(1, "Paid"), round(2, "OnTableBill")], {
+    splitParts: { count: 2, paid: 1, refunded: 1 },
+    paidAfterRefunds: cad("0"),
+    closedByStaff: true,
+    tableTip: cad("0"),
+    cashRounding: cad("0"),
+  });
+  const partlySplit = read("1413", [round(1, "Paid"), round(2, "OnTableBill")], {
+    splitParts: { count: 2, paid: 1 },
+    paidAfterRefunds: cad("613"),
+    closedByStaff: true,
+    tableTip: cad("0"),
+    cashRounding: cad("0"),
+  });
+  it("all of it back: Refunded, with the parts; part of it back: still 1 of 2 paid", () => {
+    expect(tableBillOutcome(refundedSplit)).toEqual({
+      kind: "ClosedByStaff",
+      paid: { kind: "Refunded", parts: { refunded: 1, count: 2 } },
+    });
+    expect(tableBillOutcome(partlySplit)).toEqual({
+      kind: "ClosedByStaff",
+      paid: { kind: "Parts", paid: 1, count: 2 },
+    });
+    // By dish (order 52's shape), all of the one payment back.
+    expect(
+      tableBillOutcome(
+        read("1413", reads.byDish.rounds, {
+          splitParts: { count: null, paid: 1, refunded: 1 },
+          paidAfterRefunds: cad("0"),
+          closedByStaff: true,
+        }),
+      ),
+    ).toEqual({ kind: "ClosedByStaff", paid: { kind: "Refunded", parts: null } });
+    // 3 parts, 2 paid, one of them given back in full: 1 of 3 paid, 1 given back.
+    expect(
+      tableBillOutcome(
+        read("1884", [round(1, "OnTableBill"), round(2, "OnTableBill")], {
+          splitParts: { count: 3, paid: 2, refunded: 1 },
+          paidAfterRefunds: cad("942"),
+          closedByStaff: true,
+        }),
+      ),
+    ).toEqual({ kind: "ClosedByStaff", paid: { kind: "Parts", paid: 1, count: 3, refunded: 1 } });
+  });
+  it("while the bill is open, a part given back is not counted paid", () => {
+    expect(
+      openBillParts(
+        read("1413", [round(1, "Paid"), round(2, "OnTableBill")], {
+          due: cad("1412"),
+          splitParts: { count: 2, paid: 1, refunded: 1 },
+          paidAfterRefunds: cad("0"),
+        }),
+      ),
+    ).toEqual({ paid: 0, count: 2, refunded: 1 });
+  });
+  it("Menu, dish pages and Cart never say what all went back stays paid (en, zh-Hans)", () => {
+    const saidIn = (language: "en" | "zh-Hans", view: DiningSessionView) => {
+      setCustomerCsrfCredential("c".repeat(43));
+      noteTableView(view);
+      noteTableCheckingOut(true);
+      const checkout = getTableCheckout();
+      if (checkout === null) throw new Error("the table read was not kept");
+      const out: { text?: ReturnType<typeof tableCheckoutText> } = {};
+      renderToStaticMarkup(
+        <LanguageRoot initial={language}>
+          {() => {
+            out.text = tableCheckoutText(checkout);
+            return null;
+          }}
+        </LanguageRoot>,
+      );
+      renderToStaticMarkup(<LanguageRoot initial="en">{() => null}</LanguageRoot>);
+      resetTableCheckout();
+      if (out.text === undefined) throw new Error("nothing was said");
+      return out.text;
+    };
+    const en = saidIn("en", refundedSplit);
+    expect(en.whole).toBe(
+      "Staff closed your table’s bill: what was paid went back in full; nothing is charged to you. To order anything else, ask staff.",
+    );
+    expect(en.line).toBe(
+      "What was paid went back in full; nothing is charged to you. To order anything else, ask staff.",
+    );
+    const zh = saidIn("zh-Hans", refundedSplit);
+    expect(zh.whole).toBe(
+      "店员已关闭本桌账单：已付的款项已全部退回，不向您收取。如需再点，请找店员。",
+    );
+    for (const said of [en, zh]) expect(Object.values(said).join()).not.toMatch(/stays paid|不变/u);
+    expect(saidIn("en", partlySplit).whole).toContain("what was paid stays paid");
+  });
+});
+
 describe("batch 55: Menu, dish pages and Cart say what Your table says", () => {
   const said = (language: "en" | "zh-Hans", view: DiningSessionView) => {
     setCustomerCsrfCredential("c".repeat(43));
@@ -236,7 +334,7 @@ describe("batch 55: Menu, dish pages and Cart say what Your table says", () => {
 // showed the settled card, "Thank you for dining with us … See the receipt", for a bill that has
 // no receipt. They say how the bill ended, in the words they used while the table was open.
 describe("the ended table's card after staff closed the bill", () => {
-  const card = (paid: "Nothing" | "Some", initial: "en" | "zh-Hans" = "en") => {
+  const card = (paid: "Nothing" | "Some" | "Refunded", initial: "en" | "zh-Hans" = "en") => {
     const html = renderToStaticMarkup(
       <LanguageRoot initial={initial}>
         {() => (
@@ -263,5 +361,16 @@ describe("the ended table's card after staff closed the bill", () => {
     for (const html of [card("Nothing"), card("Some"), card("Some", "zh-Hans")]) {
       expect(html).not.toMatch(/receipt|Thank you for dining|<a |收据|谢谢光临|已结清/iu);
     }
+  });
+  // Batch 59 (v15 b58 live, L58R B): all that was paid went back; before, "stays paid".
+  it("batch 59: all that was paid went back: says so, never that it stays paid", () => {
+    expect(card("Refunded")).toContain(
+      "Staff closed your table’s bill: what was paid went back in full; nothing is charged to you.",
+    );
+    expect(card("Refunded", "zh-Hans")).toContain(
+      "店员已关闭本桌账单：已付的款项已全部退回，不向您收取。",
+    );
+    for (const html of [card("Refunded"), card("Refunded", "zh-Hans")])
+      expect(html).not.toMatch(/stays paid|不变|receipt|收据|<a /iu);
   });
 });

@@ -1,5 +1,10 @@
 import { createTablePaymentClient } from "./table-payment-client.js";
-import { openBillParts, tableBillOutcome, type ClosedBillPaid } from "./table-bill-outcome.js";
+import {
+  openBillParts,
+  tableBillOutcome,
+  type ClosedBillPaid,
+  type OpenBillParts,
+} from "./table-bill-outcome.js";
 import {
   dateLocale,
   keepWords,
@@ -408,27 +413,42 @@ function ComboLine({
 function closedRoundPaymentText(
   round: DiningRound,
   closed: ClosedBillPaid | null,
-  parts: { readonly paid: number; readonly count: number } | null,
+  parts: OpenBillParts | null,
 ): string | null {
   // Batch 56 (v15 b55 live, order 80): while the bill is open, staff's equal parts pay no round
   // either: every round on the bill says how many parts are paid, and Paid once all of them are.
+  // Batch 59 (v15 b58 live): a part staff gave back in full is not paid, and is said as that.
   if (
     closed === null &&
     parts !== null &&
     (round.payment === "OnTableBill" || round.payment === "Paid")
   )
-    return parts.paid >= parts.count
-      ? t("Paid")
-      : t("{paid} of {count} parts paid", {
-          paid: String(parts.paid),
-          count: String(parts.count),
-        });
+    return parts.refunded !== undefined && parts.refunded > 0
+      ? parts.paid === 0
+        ? t("{refunded} of {count} parts refunded in full", {
+            refunded: String(parts.refunded),
+            count: String(parts.count),
+          })
+        : t("{paid} of {count} parts paid, {refunded} refunded in full", {
+            paid: String(parts.paid),
+            count: String(parts.count),
+            refunded: String(parts.refunded),
+          })
+      : parts.paid >= parts.count
+        ? t("Paid")
+        : t("{paid} of {count} parts paid", {
+            paid: String(parts.paid),
+            count: String(parts.count),
+          });
   if (closed === null) return null;
   if (closed.kind === "Parts" && (round.payment === "OnTableBill" || round.payment === "Paid"))
     return t("{paid} of {count} parts paid; the rest not charged to you", {
       paid: String(closed.paid),
       count: String(closed.count),
     });
+  // Batch 59 (v15 b58 live, L58R B): all that was paid went back: no round was paid.
+  if (closed.kind === "Refunded" && (round.payment === "OnTableBill" || round.payment === "Paid"))
+    return t("Refunded in full; not charged to you");
   if (round.payment !== "OnTableBill") return null;
   return closed.kind === "Nothing" ? t("Not charged to you") : t("Unpaid part not charged to you");
 }
@@ -445,7 +465,7 @@ function RoundCard({
 }: {
   readonly round: DiningRound;
   /** Batch 56: staff's equal parts on a bill still open, once one is paid; null otherwise. */
-  readonly billParts?: { readonly paid: number; readonly count: number } | null;
+  readonly billParts?: OpenBillParts | null;
   /** Batch 55: staff closed the table's bill (what was paid); null while it is open or paid. */
   readonly closedBill?: ClosedBillPaid | null;
   /** A guest started this table, so nobody brings a finished dish over: it is called by number. */
@@ -710,6 +730,50 @@ function BillLines({
   );
 }
 
+/**
+ * Batch 54/55: the Table total's note on a bill staff closed when the guests left: what was paid,
+ * that staff closed it, and that the rest is not charged. Batch 59 (v15 b58 live, L58R B): a part
+ * staff gave back in full is not called paid, and a bill whose payments all went back says so.
+ */
+function closedBillNote(closed: ClosedBillPaid): string {
+  switch (closed.kind) {
+    case "Nothing":
+      return t("Staff closed your table’s bill; nothing was charged.");
+    case "ByDish":
+      return t(
+        "Staff closed your table’s bill: the table paid by dish ({paid} paid), and the rest is not charged to you.",
+        { paid: String(closed.payments) },
+      );
+    case "Parts":
+      return (closed.refunded ?? 0) > 0
+        ? t(
+            "Staff closed your table’s bill: the table paid {paid} of the {count} parts (payments for {refunded} more went back in full), and the rest is not charged to you.",
+            {
+              count: String(closed.count),
+              paid: String(closed.paid),
+              refunded: String(closed.refunded ?? 0),
+            },
+          )
+        : t(
+            "Staff closed your table’s bill: the table paid {paid} of the {count} parts, and the rest is not charged to you.",
+            { count: String(closed.count), paid: String(closed.paid) },
+          );
+    case "Refunded":
+      return closed.parts === null
+        ? t(
+            "Staff closed your table’s bill: what was paid went back in full; nothing is charged to you.",
+          )
+        : t(
+            "Staff closed your table’s bill: payments for {refunded} of the {count} parts went back in full; nothing is charged to you.",
+            { count: String(closed.parts.count), refunded: String(closed.parts.refunded) },
+          );
+    case "Some":
+      return t(
+        "Staff closed your table’s bill: what the table paid stays paid, and the rest is not charged to you.",
+      );
+  }
+}
+
 function TableSummary({ view }: { readonly view: DiningSessionView }) {
   const payLater = view.paymentTiming === "PayLater";
   const summary = view.summary;
@@ -718,7 +782,11 @@ function TableSummary({ view }: { readonly view: DiningSessionView }) {
   // Batch 54 (v15 b53 live): staff closed the bill when the guests left; what was paid stays
   // paid and the rest is not charged. Said as that, never as paid in full. Batch 55: read as Menu,
   // dish pages and Cart read it.
-  const closedByStaff = tableBillOutcome(view).kind === "ClosedByStaff";
+  const outcome = tableBillOutcome(view);
+  const closedByStaff = outcome.kind === "ClosedByStaff";
+  const closedBill = outcome.kind === "ClosedByStaff" ? outcome.paid : null;
+  // Batch 59: a part staff gave back in full is not paid (open bill; closed: closedBillNote).
+  const refundedParts = summary.splitParts?.refunded ?? 0;
   // A table paying at the end that has paid everything it owes (staff closing a bill say so).
   const allPaid = payLater && !closedByStaff && !nonZero(summary.due) && nonZero(summary.paid);
   // Batch 53: the split's parts once the bill is paid in full (the server keeps them). Paid in
@@ -843,7 +911,7 @@ function TableSummary({ view }: { readonly view: DiningSessionView }) {
           <div>
             <dt>
               {closedByStaff
-                ? nonZero(summary.paid)
+                ? nonZero(summary.paidAfterRefunds ?? summary.paid)
                   ? t("Rest of the bill")
                   : t("The bill")
                 : summary.splitParts !== undefined || (payLater && nonZero(summary.paid))
@@ -886,25 +954,8 @@ function TableSummary({ view }: { readonly view: DiningSessionView }) {
             (the rest paid on a phone or by card is never rounded). Batch 54 (v15 b53 live): a bill
             staff closed says what was paid, that staff closed it, and that the rest is not
             charged; never that the table paid in full. */}
-        {closedByStaff
-          ? !nonZero(summary.paid)
-            ? t("Staff closed your table’s bill; nothing was charged.")
-            : summary.splitParts !== undefined && summary.splitParts.count === null
-              ? t(
-                  "Staff closed your table’s bill: the table paid by dish ({paid} paid), and the rest is not charged to you.",
-                  { paid: String(summary.splitParts.paid) },
-                )
-              : summary.splitParts !== undefined
-                ? t(
-                    "Staff closed your table’s bill: the table paid {paid} of the {count} parts, and the rest is not charged to you.",
-                    {
-                      count: String(summary.splitParts.count),
-                      paid: String(summary.splitParts.paid),
-                    },
-                  )
-                : t(
-                    "Staff closed your table’s bill: what the table paid stays paid, and the rest is not charged to you.",
-                  )
+        {closedByStaff && closedBill !== null
+          ? closedBillNote(closedBill)
           : payLater && splitPaid !== null
             ? splitPaid.count === null && splitPaid.paid === 1
               ? t(
@@ -927,7 +978,10 @@ function TableSummary({ view }: { readonly view: DiningSessionView }) {
                   )
                 : t(
                     "The table paid {paid} of the {count} parts; nothing is left to pay. Cash is rounded to the nearest 5 cents; card and phone payments are not rounded.",
-                    { count: String(splitEnded.count), paid: String(splitEnded.paid) },
+                    {
+                      count: String(splitEnded.count),
+                      paid: String(splitEnded.paid - refundedParts),
+                    },
                   )
               : payLater && summary.splitParts !== undefined && summary.splitParts.count === null
                 ? t(
@@ -939,7 +993,7 @@ function TableSummary({ view }: { readonly view: DiningSessionView }) {
                       "The table is paying the bill in parts: {paid} of {count} parts paid. Cash at the counter is rounded to the nearest 5 cents; card and phone payments are not.",
                       {
                         count: String(summary.splitParts.count),
-                        paid: String(summary.splitParts.paid),
+                        paid: String(summary.splitParts.paid - refundedParts),
                       },
                     )
                   : payLater
@@ -958,6 +1012,13 @@ function TableSummary({ view }: { readonly view: DiningSessionView }) {
                     : t(
                         "Paid amounts include tax and any tip. Amounts waiting for payment include tax, before any tip. Each guest pays for the rounds they order.",
                       )}
+        {/* Batch 59 (v15 b58 live): parts staff gave back in full, said once, never whose. */}
+        {!closedByStaff && refundedParts > 0
+          ? " " +
+            t("Payments for {refunded} of the parts went back in full.", {
+              refunded: String(refundedParts),
+            })
+          : null}
       </p>
     </section>
   );
@@ -982,7 +1043,7 @@ export type DiningSessionState =
   | {
       readonly status: "ended-closed";
       readonly tableLabel: string;
-      readonly paid: "Nothing" | "Some";
+      readonly paid: "Nothing" | "Some" | "Refunded";
     }
   | {
       readonly status: "unavailable";

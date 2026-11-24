@@ -1580,6 +1580,23 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "店员已关闭本桌账单：这桌 {count} 份付了 {paid} 份，其余不向您收取。",
   "Staff closed your table’s bill: what the table paid stays paid, and the rest is not charged to you.":
     "店员已关闭本桌账单：已付的款项不变，其余不向您收取。",
+  // Batch 59 (v15 b58 live, L58R B): a part staff gave back in full is not called paid.
+  "Staff closed your table’s bill: the table paid {paid} of the {count} parts (payments for {refunded} more went back in full), and the rest is not charged to you.":
+    "店员已关闭本桌账单：这桌 {count} 份付了 {paid} 份（另有 {refunded} 份付款已全部退回），其余不向您收取。",
+  "Staff closed your table’s bill: payments for {refunded} of the {count} parts went back in full; nothing is charged to you.":
+    "店员已关闭本桌账单：这桌 {count} 份中有 {refunded} 份付款已全部退回，不向您收取。",
+  "Staff closed your table’s bill: what was paid went back in full; nothing is charged to you.":
+    "店员已关闭本桌账单：已付的款项已全部退回，不向您收取。",
+  "What was paid went back in full; nothing is charged to you. To order anything else, ask staff.":
+    "已付的款项已全部退回，不向您收取。如需再点，请找店员。",
+  "Staff closed your table’s bill: what was paid went back in full; nothing is charged to you. To order anything else, ask staff.":
+    "店员已关闭本桌账单：已付的款项已全部退回，不向您收取。如需再点，请找店员。",
+  "Refunded in full; not charged to you": "已全部退回，不向您收取",
+  "{refunded} of {count} parts refunded in full":
+    "{count}\u00a0份中有 {refunded}\u00a0份已全部退回",
+  "{paid} of {count} parts paid, {refunded} refunded in full":
+    "{count}\u00a0份付了 {paid}\u00a0份，{refunded}\u00a0份已全部退回",
+  "Payments for {refunded} of the parts went back in full.": "其中有 {refunded} 份付款已全部退回。",
   "Staff closed your table’s bill; nothing was charged.": "店员已关闭本桌账单，未收取任何费用。",
   "Rest of the bill": "其余账款",
   "The bill": "账单",

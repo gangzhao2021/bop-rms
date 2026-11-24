@@ -65,6 +65,25 @@ describe("WP-2423 Q8 dining session client", () => {
       expect(() => parseDiningSessionView(value)).toThrow();
     }
   });
+  it("batch 59 (v15 b58 live): decodes the parts given back in full, never more than were paid", () => {
+    const base = payload() as { session: { summary: Record<string, unknown> } };
+    const parts = structuredClone(base);
+    parts.session.summary.splitParts = { count: 2, paid: 1, refunded: 1 };
+    parts.session.summary.paidAfterRefunds = cad("0");
+    expect(parseDiningSessionView(parts).summary?.splitParts).toEqual({
+      count: 2,
+      paid: 1,
+      refunded: 1,
+    });
+    const plain = structuredClone(base);
+    plain.session.summary.splitParts = { count: 2, paid: 1 };
+    expect(parseDiningSessionView(plain).summary?.splitParts).toEqual({ count: 2, paid: 1 });
+    for (const refunded of [2, 0, -1, "1", null, 1.5]) {
+      const value = structuredClone(base);
+      value.session.summary.splitParts = { count: 2, paid: 1, refunded };
+      expect(() => parseDiningSessionView(value)).toThrow();
+    }
+  });
   it("WP-2423 item 8 ⑦ 4b-3: decodes the per-head tea on the bill, and rejects anything else", () => {
     const base = payload() as { session: { summary: Record<string, unknown> } };
     const withTea = structuredClone(base);

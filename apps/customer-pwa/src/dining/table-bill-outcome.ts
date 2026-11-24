@@ -9,8 +9,9 @@ import type { DiningSessionView } from "./dining-session-client.js";
  *
  * - Owing: the table still owes something (or has not ordered).
  * - Paid: the table paid all it owes.
- * - ClosedByStaff: staff closed the bill when the guests left; what was paid stays paid and the
- *   rest is not charged. `paid` says how much of it was paid, never as paid in full.
+ * - ClosedByStaff: staff closed the bill when the guests left; what was paid stays paid (less
+ *   what staff gave back) and the rest is not charged. `paid` says how much of it was paid,
+ *   never as paid in full.
  */
 export type TableBillOutcome =
   | { readonly kind: "Owing" }
@@ -19,28 +20,59 @@ export type TableBillOutcome =
 
 /**
  * What was paid on a bill staff closed: nothing; some dishes (guests paying by dish); some of
- * staff's equal parts (not tied to any round); or a payment on the whole bill.
+ * staff's equal parts (not tied to any round); or a payment on the whole bill. Batch 59 (v15 b58
+ * live, L58R B): a part (or payment) staff gave back in full is not paid: `payments` and `paid`
+ * count only what stays paid, `refunded` the parts given back in full, and "Refunded" is a bill
+ * where all that was paid went back (never "what was paid stays paid" or "paid 1 of 2").
  */
 export type ClosedBillPaid =
   | { readonly kind: "Nothing" }
   | { readonly kind: "ByDish"; readonly payments: number }
-  | { readonly kind: "Parts"; readonly paid: number; readonly count: number }
-  | { readonly kind: "Some" };
+  | {
+      readonly kind: "Parts";
+      readonly paid: number;
+      readonly count: number;
+      /** Batch 59: parts paid and then given back in full (absent: none). */
+      readonly refunded?: number;
+    }
+  | { readonly kind: "Some" }
+  | {
+      readonly kind: "Refunded";
+      /** Staff's equal parts: how many were paid and then given back, of how many. */
+      readonly parts: { readonly refunded: number; readonly count: number } | null;
+    };
 
 export function tableBillOutcome(view: DiningSessionView): TableBillOutcome {
   const summary = view.summary;
   if (summary === null || view.rounds.length === 0) return { kind: "Owing" };
   if (summary.closedByStaff === true) {
     const parts = summary.splitParts;
+    const refunded = parts?.refunded ?? 0;
+    const kept = parts === undefined ? 0 : parts.paid - refunded;
+    const allBack =
+      summary.paidAfterRefunds !== undefined && /^0+$/u.test(summary.paidAfterRefunds.amountMinor);
     return {
       kind: "ClosedByStaff",
       paid: /^0+$/u.test(summary.paid.amountMinor)
         ? { kind: "Nothing" }
-        : parts !== undefined && parts.paid > 0 && parts.count === null
-          ? { kind: "ByDish", payments: parts.paid }
-          : parts !== undefined && parts.paid > 0 && parts.count !== null
-            ? { kind: "Parts", paid: parts.paid, count: parts.count }
-            : { kind: "Some" },
+        : allBack || (parts !== undefined && parts.paid > 0 && kept <= 0)
+          ? {
+              kind: "Refunded",
+              parts:
+                parts !== undefined && parts.count !== null && refunded > 0
+                  ? { refunded, count: parts.count }
+                  : null,
+            }
+          : parts !== undefined && parts.paid > 0 && parts.count === null
+            ? { kind: "ByDish", payments: kept }
+            : parts !== undefined && parts.paid > 0 && parts.count !== null
+              ? {
+                  kind: "Parts",
+                  paid: kept,
+                  count: parts.count,
+                  ...(refunded > 0 ? { refunded } : {}),
+                }
+              : { kind: "Some" },
     };
   }
   return /^0+$/u.test(summary.due.amountMinor) ? { kind: "Paid" } : { kind: "Owing" };
@@ -53,10 +85,18 @@ export function tableBillOutcome(view: DiningSessionView): TableBillOutcome {
  * part 1 of 2 was paid), so round cards say what the parts did instead. Null: no equal parts, none
  * paid yet, or staff closed the bill (tableBillOutcome says that).
  */
-export function openBillParts(
-  view: DiningSessionView,
-): { readonly paid: number; readonly count: number } | null {
+export function openBillParts(view: DiningSessionView): OpenBillParts | null {
   const parts = view.summary?.splitParts;
   if (view.summary?.closedByStaff === true || parts === undefined) return null;
-  return parts.count !== null && parts.paid > 0 ? { paid: parts.paid, count: parts.count } : null;
+  // Batch 59: a part staff gave back in full is not paid (`paid` counts what stays paid).
+  const refunded = parts.refunded ?? 0;
+  return parts.count !== null && parts.paid > 0
+    ? { paid: parts.paid - refunded, count: parts.count, ...(refunded > 0 ? { refunded } : {}) }
+    : null;
+}
+export interface OpenBillParts {
+  readonly paid: number;
+  readonly count: number;
+  /** Batch 59: parts paid and then given back in full (not in `paid`; absent: none). */
+  readonly refunded?: number;
 }

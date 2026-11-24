@@ -190,7 +190,15 @@ export interface DiningSessionView {
      * WP-2423 item 8 ④: the table pays in parts — how many, and how many are paid. Count null:
      * guests are paying by dish (no fixed number of parts).
      */
-    readonly splitParts?: { readonly count: number | null; readonly paid: number };
+    readonly splitParts?: {
+      readonly count: number | null;
+      readonly paid: number;
+      /**
+       * Batch 59 (v15 b58 live): of the parts paid, how many staff gave back in full (absent:
+       * none). Such a part is not called paid.
+       */
+      readonly refunded?: number;
+    };
     /** WP-2423 取舍 18: what points took off the bill, tax included. */
     readonly pointsUsed?: DiningMoney;
     /** v15 2026-11-02: what staff took off (comps, discounts), tax included. */
@@ -236,7 +244,7 @@ export class DiningSessionClientError extends Error {
     /** Batch 46: "moved": the party had ordered nothing at its own table. */
     readonly nothingOrdered = false,
     /** Batch 55 review: "ended-closed": whether anything was paid before staff closed it. */
-    readonly closedPaid: "Nothing" | "Some" = "Nothing",
+    readonly closedPaid: "Nothing" | "Some" | "Refunded" = "Nothing",
   ) {
     super("dining session is " + code);
     this.name = "DiningSessionClientError";
@@ -713,13 +721,29 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
         : {}),
       ...(withSplit
         ? (() => {
-            const parts = record(raw.splitParts, ["count", "paid"]);
+            const withRefunded =
+              raw.splitParts !== null &&
+              typeof raw.splitParts === "object" &&
+              Object.hasOwn(raw.splitParts, "refunded");
+            const parts = record(raw.splitParts, [
+              "count",
+              "paid",
+              ...(withRefunded ? ["refunded"] : []),
+            ]);
             // 同桌结账: guests paying by dish add a part with each payment, so there is no count
             // (null); staff's split always has 2 parts or more.
             const total = parts.count === null ? null : count(parts.count, 2),
-              paid = count(parts.paid, 0);
+              paid = count(parts.paid, 0),
+              refunded = withRefunded ? count(parts.refunded, 1) : 0;
             if (total !== null && paid > total) return invalid();
-            return { splitParts: Object.freeze({ count: total, paid }) };
+            if (refunded > paid) return invalid();
+            return {
+              splitParts: Object.freeze({
+                count: total,
+                paid,
+                ...(withRefunded ? { refunded } : {}),
+              }),
+            };
           })()
         : {}),
     });

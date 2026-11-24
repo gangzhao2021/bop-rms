@@ -383,7 +383,9 @@ export async function restoreCustomerSession(
         typeof closed.tableLabel === "string" &&
         /^[^\p{Cc}\p{Cf}<>{}$]{1,40}$/u.test(closed.tableLabel) &&
         "paid" in closed &&
-        (closed.paid === "Some" || (closed.paid === "Nothing" && yours === undefined))
+        (closed.paid === "Some" ||
+          closed.paid === "Refunded" ||
+          (closed.paid === "Nothing" && yours === undefined))
       ) {
         setEmptyTable({
           tableLabel: closed.tableLabel,

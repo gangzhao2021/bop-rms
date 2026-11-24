@@ -1779,6 +1779,125 @@ describe("batch 55 (v15 b54 live): round cards once staff closed the bill", () =
       "2\u00a0份付了 1\u00a0份，其余不向您收取",
     ]);
   });
+  // Batch 59 (v15 b58 live, TM2 L58R B order 23): part 1 of the even split (1413) was paid on
+  // a phone, staff closed the rest, then a manager gave all of it back to the card. The read
+  // (paidAfterRefunds 0, splitParts refunded 1) was right, yet every round said 2 份付了 1 份，
+  // 其余不向您收取 and the note "the table paid 1 of the 2 parts". L58R A (order 16): $8.00 of it
+  // back, 613 kept: part 1 is still paid.
+  const refundedFull = {
+    closedByStaff: true as const,
+    splitParts: { count: 2, paid: 1, refunded: 1 },
+    paidAfterRefunds: cad("0"),
+  };
+  const refundedPart = {
+    closedByStaff: true as const,
+    splitParts: { count: 2, paid: 1 },
+    paidAfterRefunds: cad("613"),
+  };
+  const tableTotal = (
+    language: "en" | "zh-Hans",
+    extra: Partial<NonNullable<DiningSessionView["summary"]>>,
+    open?: { readonly due: string },
+  ) => {
+    const html = renderToStaticMarkup(
+      <LanguageRoot initial={language}>
+        {() => (
+          <MemoryRouter initialEntries={["/dine-in/session"]}>
+            <DiningSessionScreen
+              state={{
+                status: "ready",
+                refreshing: false,
+                view: view({
+                  paymentTiming: "PayLater",
+                  rounds: [noodles(1, "Paid"), noodles(2, "OnTableBill")],
+                  summary: {
+                    paid: cad("1413"),
+                    refunded: cad("0"),
+                    refundPending: cad("0"),
+                    due: cad(open?.due ?? "0"),
+                    ...extra,
+                  },
+                }),
+              }}
+              store={store}
+              onRefresh={() => undefined}
+            />
+          </MemoryRouter>
+        )}
+      </LanguageRoot>,
+    );
+    renderToStaticMarkup(<LanguageRoot initial="en">{() => null}</LanguageRoot>);
+    const section =
+      /<section[^>]*aria-labelledby="dining-summary-heading"[^>]*>(.*?)<\/section>/su.exec(html);
+    return (section?.[1] ?? "").replace(/<[^>]+>/gu, "").replace(/&#x27;/gu, "'");
+  };
+  it("batch 59: part 1 given back in full is not paid: rounds and the Table total note (en, zh)", () => {
+    const rounds = [noodles(1, "Paid"), noodles(2, "OnTableBill")];
+    expect(payments("en", rounds, "1413", refundedFull)).toEqual([
+      "Refunded in full; not charged to you",
+      "Refunded in full; not charged to you",
+    ]);
+    expect(payments("zh-Hans", rounds, "1413", refundedFull)).toEqual([
+      "已全部退回，不向您收取",
+      "已全部退回，不向您收取",
+    ]);
+    const en = tableTotal("en", refundedFull);
+    expect(en).toContain("Paid after refunds$0.00");
+    expect(en).toContain("The billNot charged to you");
+    expect(en).toContain(
+      "Staff closed your table’s bill: payments for 1 of the 2 parts went back in full; nothing is charged to you.",
+    );
+    expect(en).not.toMatch(/paid 1 of the 2 parts|1 of 2 parts paid|Rest of the bill|stays paid/u);
+    const zh = tableTotal("zh-Hans", refundedFull);
+    expect(zh).toContain("退款后已付$0.00");
+    expect(zh).toContain("店员已关闭本桌账单：这桌 2 份中有 1 份付款已全部退回，不向您收取。");
+    expect(zh).not.toMatch(/2\s?份付了\s?1\s?份|其余账款|不变/u);
+  });
+  it("batch 59: part 1 only partly given back is still paid, with the figure after refunds", () => {
+    const rounds = [noodles(1, "Paid"), noodles(2, "OnTableBill")];
+    expect(payments("en", rounds, "1413", refundedPart)).toEqual([
+      "1 of 2 parts paid; the rest not charged to you",
+      "1 of 2 parts paid; the rest not charged to you",
+    ]);
+    const en = tableTotal("en", refundedPart);
+    expect(en).toContain("Paid after refunds$6.13");
+    expect(en).toContain("Rest of the billNot charged to you");
+    expect(en).toContain(
+      "Staff closed your table’s bill: the table paid 1 of the 2 parts, and the rest is not charged to you.",
+    );
+    // 3 parts, 2 paid, one given back in full: 1 paid, the other said given back.
+    const mixed = {
+      closedByStaff: true as const,
+      splitParts: { count: 3, paid: 2, refunded: 1 },
+      paidAfterRefunds: cad("942"),
+    };
+    expect(tableTotal("en", mixed)).toContain(
+      "Staff closed your table’s bill: the table paid 1 of the 3 parts (payments for 1 more went back in full), and the rest is not charged to you.",
+    );
+    expect(tableTotal("zh-Hans", mixed)).toContain(
+      "店员已关闭本桌账单：这桌 3 份付了 1 份（另有 1 份付款已全部退回），其余不向您收取。",
+    );
+  });
+  it("batch 59: while the bill is open, a part given back is said as that, never paid", () => {
+    const open = {
+      due: cad("1412"),
+      splitParts: { count: 2, paid: 1, refunded: 1 },
+      paidAfterRefunds: cad("0"),
+    };
+    const rounds = [noodles(1, "Paid"), noodles(2, "OnTableBill")];
+    expect(payments("en", rounds, "1413", open)).toEqual([
+      "1 of 2 parts refunded in full",
+      "1 of 2 parts refunded in full",
+    ]);
+    expect(payments("zh-Hans", rounds, "1413", open)).toEqual([
+      "2\u00a0份中有 1\u00a0份已全部退回",
+      "2\u00a0份中有 1\u00a0份已全部退回",
+    ]);
+    const en = tableTotal("en", open, { due: "1412" });
+    expect(en).toContain("The table is paying the bill in parts: 0 of 2 parts paid.");
+    expect(en).toContain("Payments for 1 of the parts went back in full.");
+    expect(tableTotal("zh-Hans", open, { due: "1412" })).toContain("其中有 1 份付款已全部退回。");
+  });
   it("ordinary bills keep their round payments (batch 53/54)", () => {
     // Order 66: paid by dish in full; order 63: one payment; an open split with 1 of 2 paid.
     const byDish = { splitParts: { count: null, paid: 2 } };
