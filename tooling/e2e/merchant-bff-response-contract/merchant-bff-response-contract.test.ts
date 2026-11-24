@@ -701,6 +701,7 @@ const detailView = {
   paidOrderWatch,
   // DEC-CHECKOUT-SESSION-OUTAGE: online pickup is full this hour and turned guests away.
   pickupHour: { full: true, endsAt: at(45), turnedAway: 2 },
+  todayOrderCount: 74,
 } satisfies Queue;
 const pickupDetailView = {
   items: [heldPickup],
@@ -760,6 +761,7 @@ const pickupDetailView = {
   paidOrderWatch,
   // DEC-CHECKOUT-SESSION-OUTAGE: online pickup is full this hour and turned guests away.
   pickupHour: { full: true, endsAt: at(45), turnedAway: 2 },
+  todayOrderCount: 74,
 } satisfies Queue;
 
 type KitchenList = Extract<Output<"kitchenQuery">, { items: unknown }>;
