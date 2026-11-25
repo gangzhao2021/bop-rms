@@ -472,14 +472,28 @@ for (const zh of [false, true]) {
           .locator(".table-checkout__totals > div")
           .filter({ has: page.locator("dt", { hasText: new RegExp(`^${label}$`, "u") }) })
           .locator("dd");
-      await expect(row(zh ? "实付合计" : "Total paid")).toHaveText("$32.00");
-      await expect(row(zh ? "已全部退款" : "Fully refunded")).toHaveText("$32.00");
+      // b64 (v15 b62 live, S62 E): paid, then refunded in full, net $0.00 — never "Total paid",
+      // a "Paid" heading or "Print paid bill" over it.
+      await expect(row(zh ? "合计" : "Total")).toHaveText("$32.00");
+      await expect(row(zh ? "已全部退款" : "Fully refunded")).toHaveText("−$32.00");
+      await expect(row(zh ? "退款后合计" : "Total after refunds")).toHaveText("$0.00");
       await expect(receipt).toContainText(
         zh
           ? "已全部退款。客人离开后关台。"
           : "Fully refunded. Close the table when the guests have left.",
       );
       await expect(receipt).not.toContainText(zh ? "已全部付清" : "Paid in full");
+      await expect(receipt).not.toContainText(zh ? "实付合计" : "Total paid");
+      await expect(checkout.locator("#table-checkout-title")).toHaveText(
+        zh ? "已退款" : "Refunded",
+      );
+      await expect(
+        receipt.getByRole("button", { name: zh ? "打印账单" : "Print bill" }),
+      ).toBeVisible();
+      await expect(page.getByText(zh ? "打印已付账单" : "Print paid bill")).toHaveCount(0);
+      await expect(
+        page.getByText(zh ? /账单已付清|已付的账/u : /bill is paid|on a paid bill/u),
+      ).toHaveCount(0);
       await fits(page, ".table-receipt .table-checkout__totals > div");
       await page.screenshot({
         path: `test-results/b62-tables-fully-refunded-${language}-${width}.png`,
@@ -511,6 +525,13 @@ for (const zh of [false, true]) {
     await expect(receipt).toContainText(zh ? "退款后合计$27.00" : "Total after refunds$27.00");
     await expect(receipt).toContainText(zh ? "正在退回客人的卡$3.00" : "Refund on its way$3.00");
     await expect(receipt).not.toContainText(zh ? "已全部退款" : "Fully refunded");
+    // b64: still paid, part of it refunded; never "Total paid" over a refunded bill.
+    await expect(receipt).toContainText(
+      zh
+        ? "已付款，部分已退款。客人离开后关台。"
+        : "Paid, part of it refunded. Close the table when the guests have left.",
+    );
+    await expect(receipt).not.toContainText(zh ? "实付合计" : "Total paid");
     await fits(page, ".table-receipt .table-checkout__totals > div");
   });
 }

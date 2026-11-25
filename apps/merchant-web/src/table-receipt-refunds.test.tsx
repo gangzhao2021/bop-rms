@@ -46,8 +46,11 @@ const text = (refunds: Record<string, string>) =>
 describe("b62: a paid table bill's checkout says what went back", () => {
   it("says Fully refunded, never Paid in full, once everything went back", () => {
     const read = text({ refundedMinor: "3200" });
-    expect(read).toContain("Total paid $32.00");
-    expect(read).toContain("Fully refunded $32.00");
+    // b64 (v15 b62 live, S62 E): paid, then refunded in full, net $0.00; never "Total paid".
+    expect(read).toContain("Total $32.00");
+    expect(read).toContain("Fully refunded −$32.00");
+    expect(read).toContain("Total after refunds $0.00");
+    expect(read).not.toContain("Total paid");
     expect(read).toContain("Fully refunded. Close the table when the guests have left.");
     expect(read).not.toContain("Paid in full");
   });
@@ -64,7 +67,9 @@ describe("b62: a paid table bill's checkout says what went back", () => {
     expect(read).toContain("Refund on its way $32.00");
     expect(read).not.toContain("Fully refunded");
     expect(read).not.toContain("Total after refunds");
-    expect(read).toContain("Paid in full. Close the table when the guests have left.");
+    // b64: all of it is on its way back: never "Paid in full" over it.
+    expect(read).toContain("Being refunded in full. Close the table when the guests have left.");
+    expect(read).not.toContain("Paid in full");
   });
 
   it("reads as before with no refund (and from an older server)", () => {

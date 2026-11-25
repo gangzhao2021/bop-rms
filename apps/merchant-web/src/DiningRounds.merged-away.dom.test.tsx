@@ -48,6 +48,7 @@ afterEach(() => {
 async function detail(
   mergedInto?: { tableLabel: string | null; paid: boolean },
   billPaid?: boolean,
+  billFullyRefunded?: boolean,
 ) {
   const fetcher = vi.fn<typeof fetch>(
     async () =>
@@ -64,6 +65,7 @@ async function detail(
       fetcher={fetcher}
       mergedInto={mergedInto}
       {...(billPaid === undefined ? {} : { billPaid })}
+      {...(billFullyRefunded === undefined ? {} : { billFullyRefunded })}
     >
       <p>Rounds</p>
     </DiningRoundsProvider>,
@@ -117,5 +119,16 @@ describe("b63: a paid table's checkout state", () => {
     expect(document.querySelector(".dining-rounds__table")?.getAttribute("data-tone")).toBe(
       "progress",
     );
+  });
+});
+
+// b64 (v15 b62 live, S62 E): a paid bill refunded in full still read "Paid · close when the guests
+// leave" on the Tables rounds and the Orders detail.
+describe("b64: a paid table's bill refunded in full", () => {
+  it("says it was fully refunded, never paid", async () => {
+    const text = await detail(undefined, true, true);
+    expect(text).toContain("Fully refunded · close when the guests leave");
+    expect(text).not.toContain("Paid · close");
+    expect(text).not.toContain("Checking out");
   });
 });

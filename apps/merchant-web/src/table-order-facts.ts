@@ -1,4 +1,7 @@
-import { createCurrentOrderQueueClient } from "./current-order-queue-client.js";
+import {
+  createCurrentOrderQueueClient,
+  tablePaidFullyRefunded,
+} from "./current-order-queue-client.js";
 import {
   createDiningProgressClient,
   servableQuantity,
@@ -134,11 +137,7 @@ function factsOfOrder(order: QueuedOrder): TableOrderFacts {
                 ? null
                 : {
                     amountMinor: order.tableBill.paid.amountMinor,
-                    ...(allBack(
-                      order.tableBill.paid.amountMinor,
-                      order.tableBill.paid.refundedMinor,
-                      order.tableBill.paid.refundPendingMinor,
-                    )
+                    ...(tablePaidFullyRefunded(order.tableBill.paid)
                       ? { fullyRefunded: true as const }
                       : {}),
                   },

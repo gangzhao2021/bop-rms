@@ -55,8 +55,12 @@ export function staffRoundRefusedText(offer: "CheckingOut" | "Paid", tableLabel:
 export function staffRoundRefusedShortText(
   offer: "CheckingOut" | "Paid",
   paymentStarted: boolean,
+  /** b64 (v15 b62 live, S62 E): the paid bill went back in full; never said as "paid". */
+  fullyRefunded = false,
 ): string {
   return offer === "CheckingOut" && !paymentStarted
     ? t("No new rounds while checking out. To add dishes, cancel checkout first.")
-    : t("No new rounds on a paid bill. New dishes start a new bill once the table is closed.");
+    : offer === "Paid" && fullyRefunded
+      ? t("No new rounds on a refunded bill. New dishes start a new bill once the table is closed.")
+      : t("No new rounds on a paid bill. New dishes start a new bill once the table is closed.");
 }

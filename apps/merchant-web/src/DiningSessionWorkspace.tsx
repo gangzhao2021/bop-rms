@@ -2012,6 +2012,10 @@ function DiningSessionWorkspaceBody({
                 rows.find((row) => row.table.tableReference === selected.tableReference)?.facts ??
                   null,
               )}
+              fullyRefunded={
+                rows.find((row) => row.table.tableReference === selected.tableReference)?.facts
+                  ?.bill?.paid?.fullyRefunded === true
+              }
               checkoutSaid={resultInPanel && said.checkingOut === true}
               checkoutRevision={checkoutRevision}
               refreshKey={String(loadedAt.current)}
@@ -2200,6 +2204,7 @@ function TablePanel({
   guestStartsOn,
   tableQrHref,
   settled,
+  fullyRefunded = false,
   checkoutSaid,
   checkoutRevision,
   refreshKey,
@@ -2262,6 +2267,8 @@ function TablePanel({
   readonly tableQrHref: string | undefined;
   /** Batch 49: the bill of the table checking out is paid, or nothing is owed. */
   readonly settled: boolean;
+  /** b64: that paid bill went back in full (said as refunded, never as paid). */
+  readonly fullyRefunded?: boolean;
   /** Batch 49: the outcome line at the top of the panel already says it is checking out. */
   readonly checkoutSaid: boolean;
   readonly checkoutRevision: number;
@@ -2583,7 +2590,11 @@ function TablePanel({
         // Batch 55 (v15 b54 live): a table checking out takes no round (the send refuses it);
         // staff read why and what to do instead of a link that fails on Send.
         <p role="note" className="dining-close-who">
-          {staffRoundRefusedShortText(roundOffer, table.session?.paymentStarted === true)}
+          {staffRoundRefusedShortText(
+            roundOffer,
+            table.session?.paymentStarted === true,
+            fullyRefunded,
+          )}
         </p>
       ) : null}
       {/* Owner 2026-11-03 walkthrough: dishes, payment and closing come first; the rest is here. */}

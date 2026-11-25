@@ -33,6 +33,11 @@ type TableBill = NonNullable<ReturnType<typeof parseTableBillBody>> & {
    */
   readonly billRoundNumbers?: ReadonlyMap<string, number>;
   /**
+   * b64 (v15 b62 live, S62 E): the bill is paid and its table is still checking out (the guests
+   * may still be seated). Absent once the table is closed, or from an older server.
+   */
+  readonly checkingOut?: true;
+  /**
    * v15 b19 (DEC-TAX-WHOLE-RECEIPT): on an Order's detail, what the dishes taken off its bill
    * before it was paid took off it — the bill with them less the bill without them, to the cent,
    * open, paid, split, merged or written off (absent: none, an older server, or not a detail).
@@ -102,15 +107,15 @@ function parseTableBill(value: unknown, orderType: unknown): TableBill | null {
       Object.hasOwn(value, "taxRoundingMinor") ||
       Object.hasOwn(value, "rounds") ||
       Object.hasOwn(value, "removedMinor") ||
-      Object.hasOwn(value, "billRoundNumbers")
+      Object.hasOwn(value, "billRoundNumbers") ||
+      Object.hasOwn(value, "checkingOut")
     )
   )
     return parseTableBillBody(value, orderType);
-  const { taxRoundingMinor, rounds, removedMinor, billRoundNumbers, ...rest } = value as Record<
-    string,
-    unknown
-  >;
+  const { taxRoundingMinor, rounds, removedMinor, billRoundNumbers, checkingOut, ...rest } =
+    value as Record<string, unknown>;
   if (
+    (checkingOut !== undefined && checkingOut !== true) ||
     (taxRoundingMinor !== undefined &&
       (typeof taxRoundingMinor !== "string" || !/^-?[1-9][0-9]{0,5}$/u.test(taxRoundingMinor))) ||
     (removedMinor !== undefined &&
@@ -128,6 +133,8 @@ function parseTableBill(value: unknown, orderType: unknown): TableBill | null {
         ...(billRoundNumbers === undefined
           ? {}
           : { billRoundNumbers: parseBillRoundNumbers(billRoundNumbers) }),
+        // b64: only a paid bill's table is said to be checking out.
+        ...(checkingOut === true && body.paid !== null ? { checkingOut: true as const } : {}),
       });
 }
 /**
@@ -285,6 +292,18 @@ function parseTableBillBody(
       ...taken,
     }),
   });
+}
+/**
+ * b62/b64 (v15 b61 and b62 live): a paid table bill all of whose money went back (given back, and
+ * nothing still on its way to a guest's card), so no screen says only "Paid" for it.
+ */
+export function tablePaidFullyRefunded(
+  paid: { readonly amountMinor: string } & TableBillTaken,
+): boolean {
+  const given = BigInt(paid.refundedMinor ?? "0");
+  return (
+    given > 0n && given >= BigInt(paid.amountMinor) && BigInt(paid.refundPendingMinor ?? "0") === 0n
+  );
 }
 function reference(value: unknown): string {
   if (typeof value !== "string" || !ref.test(value)) return fail();

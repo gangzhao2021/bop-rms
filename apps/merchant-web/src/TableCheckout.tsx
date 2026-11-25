@@ -805,7 +805,10 @@ export function TableCheckout({
         {bill?.writeOff
           ? t("Written off")
           : bill?.settlement || (bill?.split && bill.split.paidInFull)
-            ? t("Paid")
+            ? // b64 (v15 b62 live): a bill that went back in full is said as refunded.
+              tableBillRefundState(bill) === "Full" || tableBillRefundState(bill) === "AllOnItsWay"
+              ? t("Refunded")
+              : t("Paid")
             : t("Checkout")}
       </h3>
       {!live ? (
@@ -1544,12 +1547,20 @@ export function TableReceipt({
   const totalPaid = add((paid) => paid.totalMinor);
   const given = BigInt(bill.refunds?.givenMinor ?? "0");
   const onItsWay = BigInt(bill.refunds?.onItsWayMinor ?? "0");
-  const fullyRefunded = given > 0n && onItsWay === 0n && given >= totalPaid;
+  // b64 (v15 b62 live, S62 E): a bill refunded afterwards reads as paid, then refunded, and what it
+  // comes to after: never "Total paid" and "Print paid bill" over a bill that went back in full.
+  const refundState = tableBillRefundState(bill);
+  const fullyRefunded = refundState === "Full";
+  const refunded = refundState !== "None";
   return (
     <div
       ref={region}
       className="table-receipt"
-      aria-label={t("Paid bill for table {table}", { table: saidTable(tableLabel) })}
+      aria-label={
+        refunded
+          ? t("Bill for table {table}", { table: saidTable(tableLabel) })
+          : t("Paid bill for table {table}", { table: saidTable(tableLabel) })
+      }
     >
       <header className="table-receipt__head" data-print-only="">
         {storeLabel ? <p className="table-receipt__store">{storeLabel}</p> : null}
@@ -1607,7 +1618,7 @@ export function TableReceipt({
           </div>
         ) : null}
         <div className="table-checkout__total">
-          <dt>{t("Total paid")}</dt>
+          <dt>{refunded ? t("Total") : t("Total paid")}</dt>
           <dd>{cad(totalPaid)}</dd>
         </div>
         {payments.map(({ part, paid }) => (
@@ -1641,15 +1652,10 @@ export function TableReceipt({
             ) : null}
           </Fragment>
         ))}
-        {fullyRefunded ? (
-          <div className="table-checkout__refunded">
-            <dt>{t("Fully refunded")}</dt>
-            <dd>{cad(given)}</dd>
-          </div>
-        ) : given > 0n ? (
+        {given > 0n ? (
           <>
             <div className="table-checkout__refunded">
-              <dt>{t("Refunded")}</dt>
+              <dt>{fullyRefunded ? t("Fully refunded") : t("Refunded")}</dt>
               <dd>
                 <span className="bop-amount">−{cad(given)}</span>
               </dd>
@@ -1670,7 +1676,11 @@ export function TableReceipt({
       <p role="status" data-print-hide="">
         {fullyRefunded
           ? t("Fully refunded. Close the table when the guests have left.")
-          : t("Paid in full. Close the table when the guests have left.")}
+          : refundState === "AllOnItsWay"
+            ? t("Being refunded in full. Close the table when the guests have left.")
+            : refundState === "Part"
+              ? t("Paid, part of it refunded. Close the table when the guests have left.")
+              : t("Paid in full. Close the table when the guests have left.")}
       </p>
       {/* M50: only this paid bill prints, never the staff panel around it. It is not yet a tax
           receipt (no business number), so it is not called one (M48 is still open). */}
@@ -1680,10 +1690,32 @@ export function TableReceipt({
           if (region.current !== null) printRegion(region.current, "table-bill");
         }}
       >
-        {t("Print paid bill")}
+        {refunded ? t("Print bill") : t("Print paid bill")}
       </button>
     </div>
   );
+}
+
+/**
+ * b64 (v15 b62 live, S62 E): what went back of a paid table bill — nothing, part of it, all of it
+ * (nothing still on its way), or all of it with some still on its way to the guest's card. "None"
+ * while the bill is not paid. Payment's figures only (the bill's refunds against what was paid).
+ */
+export type TableBillRefundState = "None" | "Part" | "Full" | "AllOnItsWay";
+export function tableBillRefundState(bill: TableBill): TableBillRefundState {
+  const parts = bill.split?.parts ?? [];
+  const paid =
+    bill.settlement !== null
+      ? BigInt(bill.settlement.totalMinor)
+      : bill.split?.paidInFull === true && parts.every((entry) => entry.payment !== null)
+        ? parts.reduce((sum, entry) => sum + BigInt(entry.payment?.totalMinor ?? "0"), 0n)
+        : null;
+  if (paid === null) return "None";
+  const given = BigInt(bill.refunds?.givenMinor ?? "0");
+  const onItsWay = BigInt(bill.refunds?.onItsWayMinor ?? "0");
+  if (given + onItsWay <= 0n) return "None";
+  if (given + onItsWay < paid) return "Part";
+  return onItsWay === 0n ? "Full" : "AllOnItsWay";
 }
 
 /**

@@ -279,7 +279,8 @@ for (const language of ["en", "zh-Hans"] as const)
       expect(rows).toHaveLength(6);
       for (const [index, row] of rows.entries()) {
         const table = index === rows.length - 1;
-        expect(row.money).toBe(table ? "—" : "$14.13");
+        // b64 (v15 b62 live, order 7): the merged table's row has no "—" (its note says why).
+        expect(row.money).toBe(table ? "" : "$14.13");
         expect(row.next).toBe(0);
         if (width === 390) continue;
         // How a table was paid ends its grey line instead of wrapping in the money column.

@@ -117,6 +117,7 @@ import {
   ordersAwaitingAcceptance,
   type OrderPickupContact,
   type PickupHourNotice,
+  tablePaidFullyRefunded,
   type TableBillTaken,
 } from "./current-order-queue-client.js";
 import {
@@ -1334,10 +1335,11 @@ export function orderRefundRows(
       amount: money(listedPending),
       pending: true,
     });
-  // What the refunds listed by name gave back online, as Payment answered them.
-  let online = itemsBack,
-    known = true,
-    total = itemsBack;
+  // What the refunds listed by name gave back (b64: every way, and on the card machine or in cash
+  // apart), as Payment answered or staff recorded them.
+  let known = true,
+    total = itemsBack,
+    machineGiven = 0n;
   for (const batch of [...order.batches].sort((a, b) => a.sequence - b.sequence)) {
     const cancellation = batch.staffCancellation;
     if (cancellation === null || cancellation.refundAmountMinor === "0") continue;
@@ -1379,7 +1381,7 @@ export function orderRefundRows(
       });
       continue;
     }
-    if (cancellation.refundMethod === "Online") online += amount;
+    if (cancellation.refundMethod !== "Online") machineGiven += amount;
     total += amount;
     rows.push({ label, amount: money(amount) });
     // A counter order paid in cash is cancelled "on the card machine" and recorded as cash. An
@@ -1400,8 +1402,12 @@ export function orderRefundRows(
   // refunds" and comes off "Total after refunds"; a pickup's or online order's refund not
   // answered yet is listed apart, as a table's is, so the list amount and the detail agree.
   const waiting: OrderRefundRow[] = [...named];
+  // b64 (b63 F27 final check): Payment's position for the order is its settlement across every way
+  // it was paid — online, the card machine and the table's payment — so what it says went back
+  // already holds the table's and the card machine's refunds: they are never added again.
+  const table = orderTableTaken(order);
   if (position !== null && known) {
-    const left = BigInt(position.refundedMinor) - online;
+    const left = BigInt(position.refundedMinor) - total;
     if (left > 0n) other += left;
     let pending = BigInt(position.refundPendingMinor) - listedPending;
     const take = (minor: bigint, label: string) => {
@@ -1419,8 +1425,14 @@ export function orderRefundRows(
   // guest's card once the Provider answered Succeeded), as Payment records them per part, count
   // against the order's total like a pickup's; the "Paid at the table" section keeps each line.
   // b60 review: and a refund on a part already paid while the rest is still owed.
-  const table = orderTableTaken(order);
-  other += BigInt(table?.refundedMinor ?? "0");
+  if (position === null) {
+    other += BigInt(table?.refundedMinor ?? "0");
+    // b64 (b63 F27 final check): a counter order's own refunds, and a staff round's, on the card
+    // machine or in cash (ordinary refunds: the cancellations listed above are taken out), as the
+    // list's "refunded" counts them, so the lines add up to it.
+    const machine = orderMachineRefundedMinor(order) - machineGiven;
+    if (machine > 0n) other += machine;
+  }
   if (other > 0n) {
     // Round 2 F27: the record holds a refund to the guest's card once sent, before the Provider
     // answers (an ordinary refund, a table's refund to the card), so while any such money is on
@@ -1438,8 +1450,9 @@ export function orderRefundRows(
     total += other;
   }
   if (rows.length > 1 && known) rows.push({ label: t("Total refunded"), amount: money(total) });
-  // Still on its way back to the guest's card: said as such, never as given back.
-  const pending = BigInt(table?.refundPendingMinor ?? "0");
+  // Still on its way back to the guest's card: said as such, never as given back (b64: Payment's
+  // position already holds the table's, taken above).
+  const pending = position === null ? BigInt(table?.refundPendingMinor ?? "0") : 0n;
   if (pending > 0n) {
     const same = waiting.findIndex((row) => row.label === t("Refund on its way"));
     const before = same < 0 ? 0n : BigInt(waiting[same]?.amount?.amountMinor ?? "0");
@@ -2161,14 +2174,30 @@ export function orderAmountRefunded(
   order: QueuedOrder,
   position?: CurrentOrderDetail["paymentPosition"],
 ): bigint {
-  let refunded = position == null ? 0n : BigInt(position.refundedMinor);
-  refunded += BigInt(order.counter?.paidOnCardMachine?.refundedMinor ?? "0");
-  // b60 (v15 b59 live, TM2 order 27): a paid table's own refunds, given back (never on its way).
-  refunded += BigInt(order.tableBill?.paid?.refundedMinor ?? "0");
-  for (const batch of order.batches)
-    refunded += BigInt(batch.staffRound?.paidOnCardMachine?.refundedMinor ?? "0");
+  // b64: Payment's position is the order's settlement across every way it was paid (online, the
+  // card machine and the table's payment); without it, each way's own refunds.
+  const refunded =
+    position != null
+      ? BigInt(position.refundedMinor)
+      : orderMachineRefundedMinor(order) +
+        // b60 (v15 b59 live, TM2 order 27): a paid table's own refunds, given back (never on its way).
+        BigInt(order.tableBill?.paid?.refundedMinor ?? "0");
   const taken = orderAmountTaken(order);
   return taken === null || refunded > BigInt(taken.amountMinor) ? 0n : refunded;
+}
+/**
+ * b64: what went back on the Store's card machine or in cash of a counter order's payment and of
+ * the rounds staff entered (every such refund: ordinary ones and cancellations), as Payment records
+ * them per payment.
+ */
+export function orderMachineRefundedMinor(order: {
+  readonly counter: QueuedOrder["counter"];
+  readonly batches: QueuedOrder["batches"];
+}): bigint {
+  let refunded = BigInt(order.counter?.paidOnCardMachine?.refundedMinor ?? "0");
+  for (const batch of order.batches)
+    refunded += BigInt(batch.staffRound?.paidOnCardMachine?.refundedMinor ?? "0");
+  return refunded;
 }
 /**
  * b61 (v15 b60 live, TM2 order 50): the refund lines under a row's amount, shown at every width
@@ -3051,6 +3080,15 @@ export function mergedIntoText(into: {
 }
 
 /**
+ * b64 (v15 b62 live, S62 E): a paid table bill that went back in full says so at every width, as a
+ * merged table's note does: the $0.00 beside it depends on it.
+ */
+export function orderRowNoteShownEverywhere(order: QueuedOrder): boolean {
+  const paid = order.tableBill?.paid ?? null;
+  return paid !== null && tablePaidFullyRefunded(paid);
+}
+
+/**
  * Orders v2: the words under a row's amount, only when they say something the amount does not —
  * not paid, taken on the card machine, refunded. A plain online payment says nothing.
  */
@@ -3088,6 +3126,12 @@ export function orderAmountNote(
     // b61 (v15 b60 live): what went back and what is on its way are their own lines under the
     // amount (orderRowRefundLines), shown at every width; these words only say how it is paid.
     if (paid === null) return t("On the table's bill");
+    // b64 (v15 b62 live, S62 E): all of it went back. Never "Paid at the table" beside $0.00; while
+    // the table is still open, its next step, as the Tables row says it.
+    if (tablePaidFullyRefunded(paid))
+      return order.tableBill.checkingOut === true
+        ? t("Fully refunded · close when the guests leave")
+        : t("Fully refunded at the table");
     return paid.method === "Cash"
       ? t("Paid at the table · cash")
       : paid.method === "Online"
@@ -4119,9 +4163,11 @@ export function CurrentOrderQueueRows({
                               <span className="order-row__paid-gap">{" · "}</span>
                               <span
                                 className={
-                                  order.tableBill?.mergedInto === undefined
-                                    ? "order-row__paid"
-                                    : "order-row__merged"
+                                  order.tableBill?.mergedInto !== undefined
+                                    ? "order-row__merged"
+                                    : orderRowNoteShownEverywhere(order)
+                                      ? "order-row__said"
+                                      : "order-row__paid"
                                 }
                               >
                                 {note}
@@ -4156,7 +4202,11 @@ export function CurrentOrderQueueRows({
                       </span>
                       <span className="order-workbench-amount">
                         {amount === null ? (
-                          <span aria-hidden="true">—</span>
+                          // b64 (v15 b62 live, order 7): a table merged into another has its note
+                          // ("Merged into … · paid there") instead; no dash that reads as missing.
+                          order.tableBill?.mergedInto !== undefined ? null : (
+                            <span aria-hidden="true">—</span>
+                          )
                         ) : (
                           <span className="order-row__money">{orderMoney(amount)}</span>
                         )}
@@ -4275,6 +4325,9 @@ export function CurrentOrderDetails({
           fetcher={fetcher}
           mergedInto={order.tableBill?.mergedInto}
           billPaid={order.tableBill?.paid != null}
+          billFullyRefunded={
+            order.tableBill?.paid != null && tablePaidFullyRefunded(order.tableBill.paid)
+          }
         >
           {lines}
           {order.tableBill?.mergedInto === undefined ? null : (

@@ -10672,4 +10672,14 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   // Batch 62: a paid table bill refunded afterwards, on Tables.
   "Fully refunded. Close the table when the guests have left.": "已全部退款。客人离开后关台。",
   "Fully refunded · close when the guests leave": "已全部退款 · 客人走后关台",
+  // Batch 64 (v15 b62 live, S62 E): a paid table bill refunded afterwards reads as refunded.
+  "Bill for table {table}": "{table} 号桌账单",
+  "Print bill": "打印账单",
+  "Being refunded in full. Close the table when the guests have left.":
+    "正在全部退款。客人离开后关台。",
+  "Paid, part of it refunded. Close the table when the guests have left.":
+    "已付款，部分已退款。客人离开后关台。",
+  "No new rounds on a refunded bill. New dishes start a new bill once the table is closed.":
+    "已退款的账不能再加菜。关台后再点，会开一张新账单。",
+  "Fully refunded at the table": "已在桌上全部退款",
 });

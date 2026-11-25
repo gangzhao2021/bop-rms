@@ -489,7 +489,8 @@
    a table's refund still on its way back to the guest's card. */
 .orders-page .order-row__refunded,
 .orders-page .order-row__on-its-way,
-.orders-page .order-row__merged {
+.orders-page .order-row__merged,
+.orders-page .order-row__said {
   color: var(--bop-color-text-muted);
   font-size: 14px;
   text-align: end;
@@ -497,11 +498,13 @@
 }
 /* b62 (v15 b61 live, order 73): a table merged into another says where it was paid at every
    width; on a phone it wraps within about half the row, so the dishes keep the rest. */
-.orders-page .order-row__merged {
+.orders-page .order-row__merged,
+.orders-page .order-row__said {
   overflow-wrap: break-word;
 }
 @container order-list (max-width: 512px) {
-  .orders-page .order-row__merged {
+  .orders-page .order-row__merged,
+  .orders-page .order-row__said {
     max-width: 8.5rem;
   }
 }
@@ -720,6 +723,12 @@
 .orders-page .order-workbench-detail .order-lines-totals {
   max-width: none;
   margin: var(--bop-space-2) 0 0;
+}
+/* b64 (b63 F27 final check): a refund line's words ("Refunded on the card machine · 12:28") wrap
+   in their own column before they come within 40px of the amount, so the line reads the same with
+   any font (DejaVu on Linux is wider) instead of sitting on one line with a few px to spare. */
+.orders-page .order-workbench-detail .order-lines-totals > div > dt {
+  margin-inline-end: 40px;
 }
 .orders-page .order-workbench-detail .order-lines-totals > div:last-child {
   border-top: 0;

@@ -237,7 +237,13 @@ export function DiningRoundsProvider({
   closeActions = true,
   mergedInto,
   billPaid = false,
+  billFullyRefunded = false,
 }: {
+  /**
+   * b64 (v15 b62 live, S62 E): the paid bill went back in full; its checkout phase is said as the
+   * Tables row says it ("Fully refunded · close when the guests leave"), never "Paid".
+   */
+  readonly billFullyRefunded?: boolean;
   /**
    * b63 (F32, v15 D62DV A): the table's bill is paid in full. Its checkout phase is then said as
    * the list row says it ("Paid · close when the guests leave"), never "Checking out", which
@@ -551,7 +557,9 @@ export function DiningRoundsProvider({
           {/* v15 b12: the Closing phase is checkout (结账中); 关台 is only the close itself. */}
           {view.sessionPhase === "Closing"
             ? billPaid
-              ? t("Paid · close when the guests leave")
+              ? billFullyRefunded
+                ? t("Fully refunded · close when the guests leave")
+                : t("Paid · close when the guests leave")
               : t("Checking out")
             : t("Table closed")}
         </p>
