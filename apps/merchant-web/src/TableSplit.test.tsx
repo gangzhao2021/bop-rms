@@ -527,3 +527,32 @@ describe("batch 42: a by-dish part lists its dishes in the screen's language", (
     expect(byDish()).toContain("牛肉面, 豆浆");
   });
 });
+
+// b63 (F31, v15 D62DV A): with 2 of 2 parts paid the table stayed open as "Paid · close when the
+// guests leave", yet the note under the parts said it closes when every part is paid.
+describe("b63: the split note says the table is closed after the guests leave", () => {
+  afterEach(() => setLanguageForTest("en"));
+  const render = () =>
+    renderToStaticMarkup(
+      <TableSplitControls
+        bill={parseTableBill(splitBillFixture())}
+        csrf={"a".repeat(43)}
+        client={createTableCheckoutClient()}
+        disabled={false}
+        selectedPart={null}
+        onSelectPart={() => undefined}
+        onBill={() => undefined}
+        onProblem={() => undefined}
+      />,
+    );
+  it("never says paying the parts closes the table, in English and in Chinese", () => {
+    const en = render();
+    expect(en).toContain("When every part is paid, close the table after the guests leave.");
+    expect(en).toContain("after the guests leave. If the network is down, take each part as usual");
+    expect(en).not.toContain("The table closes when every part is paid");
+    setLanguageForTest("zh-Hans");
+    const zh = render();
+    expect(zh).toContain("每份都付清后，客人离开再关台。断网时照常收");
+    expect(zh).not.toContain("才能关台");
+  });
+});

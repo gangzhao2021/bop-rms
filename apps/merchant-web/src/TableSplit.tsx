@@ -2,6 +2,7 @@ import { useState } from "react";
 import { t, saidTable, listSeparator } from "./i18n/i18n.js";
 import { orderMoney } from "./order-money.js";
 import { serviceOperationReference } from "./service-control-client.js";
+import { wordGap } from "./word-gap.js";
 import {
   TableCheckoutError,
   type TableBill,
@@ -651,9 +652,13 @@ export function TableSplitControls({
               amount: cad(split.remainingMinor),
             })}
           </p>
+          {/* b63 (F31): paying every part never closes the table; staff close it once the
+              guests leave (the panel's own close step), so the note says that, never more. */}
           <p className="table-split__hint">
+            {t("When every part is paid, close the table after the guests leave.")}
+            {wordGap()}
             {t(
-              "The table closes when every part is paid. If the network is down, take each part as usual, note the part number on paper and record it later.",
+              "If the network is down, take each part as usual, note the part number on paper and record it later.",
             )}
           </p>
         </>

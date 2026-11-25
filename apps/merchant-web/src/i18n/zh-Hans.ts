@@ -6893,8 +6893,11 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   // Batch 58 (v15 b57 live): as the guest's phone says it.
   "{paid} of {count} parts paid · {amount} to go":
     "{count}\u00a0份付了 {paid}\u00a0份 · 还差 {amount}",
-  "The table closes when every part is paid. If the network is down, take each part as usual, note the part number on paper and record it later.":
-    "每一份都付清才能关台。断网时照常收，在纸上记下份号，恢复后逐份补录。",
+  // b63 (F31): paying every part does not close the table; staff close it when the guests leave.
+  "When every part is paid, close the table after the guests leave.":
+    "每份都付清后，客人离开再关台。",
+  "If the network is down, take each part as usual, note the part number on paper and record it later.":
+    "断网时照常收，在纸上记下份号，恢复后逐份补录。",
   "A part is already paid or a guest is paying, so the split can't change now.":
     "已经有一份付了或客人正在付，现在不能改分法。",
   "The bill couldn't be split. Read the bill again and try once more.":
