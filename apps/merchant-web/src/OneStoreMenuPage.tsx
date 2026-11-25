@@ -141,12 +141,18 @@ export function OneStoreMenuPage({
   client,
   availability,
   onMultiStore,
+  storeLabel,
 }: {
   readonly menuReference: string;
   readonly client: MenuClient;
   readonly availability: AvailabilityClient;
   /** The menu serves more than one Store: the review flow applies (the menu list is shown). */
   readonly onMultiStore: () => void;
+  /**
+   * Batch 63 F57 (RA-08): the line under "Menu" names the Store, as on Reports and Settlement;
+   * the menu's own record name ("Menu", in English) said nothing new and was English in Chinese.
+   */
+  readonly storeLabel?: string | undefined;
 }) {
   const [view, setView] = useState<MenuBuilderView | null>(null);
   // WP-2423 item 8 ⑥ part 4: the combos (each compiled into a dish on the menu).
@@ -1023,7 +1029,7 @@ export function OneStoreMenuPage({
     </li>
   );
   return (
-    <WorkspacePage className="one-menu" title={t("Menu")} meta={view.menu.name}>
+    <WorkspacePage className="one-menu" title={t("Menu")} meta={storeLabel}>
       {view.stores?.severalStores === true && !view.stores.servesHere ? (
         <StatePanel heading={t("Guests at this Store do not see this menu yet")} status>
           {mayList ? (

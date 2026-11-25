@@ -1367,7 +1367,11 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                         csrf={state.csrf}
                       >
                         {(client, availability) => (
-                          <StoreMenuListPage client={client} availability={availability} />
+                          <StoreMenuListPage
+                            client={client}
+                            availability={availability}
+                            storeLabel={state.workspace.selectedScope.storeLabel}
+                          />
                         )}
                       </WithMenuClients>
                     )}

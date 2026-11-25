@@ -202,6 +202,7 @@ async function page(
   menu: () => Promise<unknown>,
   answer?: (body: Record<string, unknown>) => Promise<unknown> | undefined,
   arrival: unknown = null,
+  storeLabel: string | undefined = undefined,
 ) {
   const { fetcher, sent } = server(menu, answer);
   const csrf = "a".repeat(43);
@@ -212,6 +213,7 @@ async function page(
         client={createMenuClient(csrf, fetcher)}
         availability={createAvailabilityClient(csrf, fetcher)}
         onMultiStore={() => undefined}
+        storeLabel={storeLabel}
       />
     </MemoryRouter>,
   );
@@ -219,6 +221,15 @@ async function page(
   return { container, sent };
 }
 const pendingText = "There are saved changes not listed yet.";
+
+it("batch 63 F57 (RA-08): the line under Menu names the Store, never the menu's English record name", async () => {
+  const menu = builder(id(3), "Listed", id(3));
+  // v15: the pilot's one menu is named "Menu", so the header said "Menu / Menu" (zh: 菜单 / Menu).
+  menu.menu.name = "Menu";
+  const { container } = await page(() => Promise.resolve(menu), undefined, null, "Training Store");
+  expect(container.querySelector("h1")?.textContent).toBe("Menu");
+  expect(container.querySelector(".workspace-page__meta")?.textContent).toBe("Training Store");
+});
 afterEach(() => document.body.replaceChildren());
 
 it("WP-2423 live minors 1/39: right after List it the page never says changes are still waiting", async () => {

@@ -215,10 +215,13 @@ function Failure({
 export function StoreMenuListPage({
   client = unavailableMenuClient,
   availability,
+  storeLabel,
 }: {
   readonly client?: MenuClient;
   /** WP-2423 item 8 ⑥: with it, a single store's one menu opens as the one-page menu. */
   readonly availability?: AvailabilityClient;
+  /** Batch 63 F57: the selected Store's name, under the one-page menu's title. */
+  readonly storeLabel?: string | undefined;
 }) {
   const { state, reload } = useMenuView(client, null, parseMenuListView);
   const [multiStore, setMultiStore] = useState(false);
@@ -250,6 +253,7 @@ export function StoreMenuListPage({
         client={client}
         availability={availability}
         onMultiStore={showList}
+        storeLabel={storeLabel}
       />
     );
   return (
