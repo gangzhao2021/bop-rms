@@ -690,9 +690,11 @@ for (const lang of ["en", "zh-Hans"] as const)
           "page",
         );
         await expect(page.getByText(/Loading|正在加载/u)).toHaveCount(0);
-        // v3: the title row ends with the language switch (in the top bar on a phone).
-        if (width > 768)
+        // v3: the title row ends with the language switch; below 1200 (batch 63, F38: the v3 top
+        // bar on tablets and phones) it is in the top bar.
+        if (width >= 1200)
           await expect(page.locator(".screen-heading .language-switch")).toBeVisible();
+        else await expect(page.locator("button.workspace-sidebar__language")).toBeVisible();
         await noOverflow(page);
         if (lang === "zh-Hans") {
           const text = await page.locator("main").innerText();

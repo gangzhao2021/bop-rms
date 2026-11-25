@@ -136,10 +136,11 @@ test("@production order closure retries the same intent then renders read-only h
   await expect(confirmation).toBeDisabled();
   await expect(page.getByRole("button", { name: "Refresh orders", exact: true })).toBeDisabled();
   await retry.click();
+  // Batch 63 (F30): no "Order closed. Serving history is read-only." footer; the close steps go.
+  await expect(page.getByRole("button", { name: "Close order", exact: true })).toHaveCount(0);
   await expect(
     page.getByText("Order closed. Serving history is read-only.", { exact: true }),
-  ).toBeVisible();
-  await expect(page.getByRole("button", { name: "Close order", exact: true })).toHaveCount(0);
+  ).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: "Confirm served quantity", exact: true }),
   ).toHaveCount(0);
@@ -154,7 +155,6 @@ test("@production order closure retries the same intent then renders read-only h
   });
   // The page's own refresh rereads the order and its rounds.
   await page.getByRole("button", { name: "Refresh orders", exact: true }).click();
-  await expect(
-    page.getByText("Order closed. Serving history is read-only.", { exact: true }),
-  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Refresh orders", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Close order", exact: true })).toHaveCount(0);
 });
