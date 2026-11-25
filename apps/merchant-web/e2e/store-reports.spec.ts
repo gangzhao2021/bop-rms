@@ -109,9 +109,8 @@ test("@production Reports show sales, items, hours and tips for a period, downlo
     page.getByText("Today is checked against it when the day closes.", { exact: false }),
   ).toBeVisible();
   await expect(page.getByRole("heading", { name: "Sales summary" })).toBeVisible();
-  await expect(page.getByRole("table", { name: "Sales by payment" })).toContainText(
-    "Store card machine",
-  );
+  // Batch 63 F58: the same words as Today's summary ("Card machine", not "Store card machine").
+  await expect(page.getByRole("table", { name: "Sales by payment" })).toContainText("Card machine");
   await expect(page.getByRole("table", { name: "Sales by order type" })).toContainText("Counter");
   await expect(page.getByRole("table", { name: "Item sales" })).toContainText("Latte — Large");
   await expect(page.getByRole("table", { name: "Sales by hour" })).toContainText("11:00");

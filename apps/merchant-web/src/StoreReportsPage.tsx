@@ -22,9 +22,10 @@ import { TonightReport } from "./TonightSummary.js";
 import { BrandStoresReport } from "./BrandStoresReport.js";
 
 const money = formatCad;
+// Batch 63 F58 (RA-10): the same words as Today's summary and Settlement.
 export const channelLabel: Record<StoreReportChannel, string> = {
-  Online: t("Online (card)"),
-  CardMachine: t("Store card machine"),
+  Online: t("Online (guest's phone)"),
+  CardMachine: t("Card machine"),
   Cash: t("Cash"),
 };
 export const orderTypeLabel: Record<StoreReportOrderType, string> = {
@@ -146,7 +147,7 @@ function SummaryLines({ summary }: { readonly summary: StoreReportSummary }) {
     lines.push([t("Cash rounding"), money(summary.cashRoundingMinor)]);
   if (summary.unmatchedMinor !== "0")
     lines.push([t("Paid but not matched to items"), money(summary.unmatchedMinor)]);
-  lines.push([t("Total collected"), money(summary.collectedMinor), true]);
+  lines.push([t("Total taken"), money(summary.collectedMinor), true]);
   // DEC-DINE-IN-PAY-LATER (decision 4): never collected, kept on its own line.
   if (summary.unpaidWriteOffCount > 0)
     lines.push([
@@ -170,7 +171,7 @@ function SummaryLines({ summary }: { readonly summary: StoreReportSummary }) {
     if (summary.refunds.notItemizedMinor !== "0")
       lines.push([t("  not split by item"), money(summary.refunds.notItemizedMinor)]);
   }
-  lines.push([t("Net collected"), money(summary.netCollectedMinor), true]);
+  lines.push([t("Net taken"), money(summary.netCollectedMinor), true]);
   // v15 M45 (Owner rule 6): the headline is net sales after every refund, partial ones included;
   // a refund by amount gives back its share of each dish's sales and tax.
   if (BigInt(summary.refunds.notItemizedMinor) > 0n)
@@ -371,10 +372,10 @@ export function StoreReports({
           <span className="overview-count__detail">{t("Before refunds")}</span>
         </li>
         <li>
-          <span className="overview-count__label">{t("Net collected")}</span>
+          <span className="overview-count__label">{t("Net taken")}</span>
           <strong className="overview-count__value">{money(s.netCollectedMinor)}</strong>
           <span className="overview-count__detail">
-            {t("{collectedMinor} collected − {refundsMinor} refunded", {
+            {t("{collectedMinor} taken − {refundsMinor} refunded", {
               collectedMinor: money(s.collectedMinor),
               refundsMinor: money(s.refundsMinor),
             })}
@@ -392,15 +393,23 @@ export function StoreReports({
         <h4>{t("By payment")}</h4>
         <Table
           label={t("Sales by payment")}
-          columns={[t("Payment"), t("Payments"), t("Collected"), t("Tips"), t("Refunds"), t("Net")]}
+          // F58: Payments, Tips, Taken, as on Today's summary.
+          columns={[
+            t("Payment"),
+            t("Payments"),
+            t("Tips"),
+            t("Taken"),
+            t("Refunds"),
+            t("Net taken"),
+          ]}
           empty={t("No payments in this period.")}
           rows={view.byChannel
             .filter((entry) => entry.paymentCount > 0 || entry.refundCount > 0)
             .map((entry) => [
               channelLabel[entry.channel],
               entry.paymentCount,
-              money(entry.collectedMinor),
               money(entry.tipsMinor),
+              money(entry.collectedMinor),
               money(entry.refundsMinor),
               money(entry.netCollectedMinor),
             ])}
@@ -415,7 +424,7 @@ export function StoreReports({
             t("Tax"),
             t("Tips"),
             t("Refunds"),
-            t("Net collected"),
+            t("Net taken"),
           ]}
           empty={t("No orders in this period.")}
           rows={view.byOrderType
@@ -442,7 +451,7 @@ export function StoreReports({
                 t("Tax"),
                 t("Tips"),
                 t("Refunds"),
-                t("Net collected"),
+                t("Net taken"),
               ]}
               empty={t("No days.")}
               rows={view.days.map((day) => [
@@ -511,7 +520,7 @@ export function StoreReports({
       >
         <Table
           label={t("Sales by hour")}
-          columns={[t("Hour"), t("Payments"), t("Net sales"), t("Tax"), t("Tips"), t("Collected")]}
+          columns={[t("Hour"), t("Payments"), t("Net sales"), t("Tax"), t("Tips"), t("Taken")]}
           empty={t("No payments in this period.")}
           rows={view.hours.map((row) => [
             row.hour,

@@ -1210,7 +1210,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "卡被拒了？请换一张卡。不付了？不用处理：订单会在 {payBy} 释放。",
   "Card declined? Try another card. Nothing goes to the kitchen until this is recorded; after {payBy} it can no longer be paid here and must be sent again.":
     "卡被拒了？请换一张卡。记录付款前不会发送到后厨；{payBy} 之后不能在此付款，需要重新发送。",
-  "Card machine net": "刷卡机净额",
+  "Card machine net": "刷卡机净实收",
   "Card machine totals": "刷卡机合计",
   "Card payment not confirmed by the card provider (due {at}) · ask the guest if they were charged; if not, cancel the round (a later charge is refunded automatically)":
     "发卡方未确认刷卡付款（截止 {at}）· 请问顾客是否已被扣款；如未扣款，请取消这一轮（之后的扣款会自动退回）",
@@ -3507,7 +3507,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Refunded in full on the store's card machine, including any tip.":
     "已在门店刷卡机上全额退款，包括小费。",
   "Refunded in full ·": "已全额退款 ·",
-  "Refunded on card machine": "已在刷卡机上退款",
+  "Refunded on card machine": "刷卡机退款",
   "Refunded to the customer's original payment method.": "已退回顾客原付款方式。",
   "Refunded {amount} on card machine": "已在刷卡机上退款 {amount}",
   "Refunded {refunded} of the online payment.": "已退回在线付款中的 {refunded}。",
@@ -4420,7 +4420,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "上一个营业日暂时查不到，请刷新再试。",
   "Taken at the counter. {value}{value2}": "柜台下单。{value}{value2}",
   "Taken by staff": "员工录入",
-  "Taken on card machine": "刷卡机收款",
+  "Taken on card machine": "刷卡机实收",
   "Takes effect: {value}": "生效时间：{value}",
   "Takes this version out of review and opens a copy to edit; it must be submitted for review again.":
     "将此版本撤出审核并打开一个副本进行编辑；它必须重新提交审核。",
@@ -5854,8 +5854,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{chargeType} order types": "{chargeType}的订单类型",
   "{chargeType} tax classification": "{chargeType}的税类",
   "{choices} · {value} · since": "{choices} · {value} · 自",
-  "{collectedMinor} collected − {refundsMinor} refunded":
-    "已收 {collectedMinor} − 已退 {refundsMinor}",
+  "{collectedMinor} taken − {refundsMinor} refunded": "实收 {collectedMinor} − 已退 {refundsMinor}",
   "{completedQuantity} of {requiredQuantity} done":
     "已完成 {completedQuantity} / {requiredQuantity}",
   "{completenessStatus} · data as of {value} · generated {generatedAt}":
@@ -6466,7 +6465,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Cash payments could not be read.": "现金收款读取失败。",
   "Cash totals": "现金合计",
   "Cash refunds": "现金退款",
-  "Net cash": "现金净额",
+  "Net cash": "现金净实收",
   "Cash rounding {roundingMinor}": "现金取整 {roundingMinor}",
   "{recordedAfterOutageCount} cash payment(s) were recorded after an outage; they count on the day they were paid.":
     "{recordedAfterOutageCount} 笔现金收款是断网后补录的，按实际收款那天计入。",
@@ -6864,7 +6863,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   Method: "方式",
   Taken: "实收",
   "Cash given back": "现金退款",
-  "Cash this system recorded (not the whole cash drawer)": "本系统记下的现金（不是钱箱总数）",
   "Total taken": "合计实收",
   "Net taken": "净实收",
   "Card machine: when you close, run its batch (settlement). The batch total should be {amount} (tips included, refunds taken off). If it differs, check each table's card payment.":
@@ -6873,6 +6871,11 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "钱箱里还有你们自己收银机收的现金。这里只算本系统记下的现金（桌台和柜台订单），两者分开数。",
   "Tables not paid yet": "还没结账的桌",
   "Every table is paid": "桌都结完了",
+  "Tonight: every table is paid": "今晚的桌都结完了",
+  "Check against the machine and drawer": "和刷卡机、钱箱核对",
+  "of which cash rounding {amount}": "其中现金取整 {amount}",
+  "Tables and counter, tips included. The machine's batch also holds card sales rung up on your own register, so it can be higher.":
+    "含桌台和柜台，含小费。刷卡机批次还包括你自己收银机刷的卡，可能更高。",
   "{tables} · {amount} to take before closing": "{tables} · 打烊前要收 {amount}",
   "Checking out": "结账中",
   "Take each table's payment before closing. If guests left without paying, a manager or the owner records it on the table.":
@@ -8908,8 +8911,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Paid {amount} here": "此处已付 {amount}",
   "Orders cancelled or rejected and refunded in full": "已取消或拒单并全额退款的订单",
   "The day-end settlement counts these payments and their refunds": "日结仍计入这些付款及其退款",
-  "Card machine: this system recorded {amount} on the card machine today (tables and counter, tips included, refunds taken off). Your batch also holds card sales rung up on your own register, so it can be higher.":
-    "刷卡机：本系统今天记录刷卡 {amount}（桌台和柜台，含小费，已扣退款）。刷卡机批次还包括你自己收银机刷的卡，可能更高。",
   "The settlement's figures also include {orders} ({amount}) taken and given back the same day, which this report lists apart instead of as sales and refunds.":
     "日结的数字里还包括当天收款又全额退回的 {orders}（{amount}），本报表把它们单独列出，不算作销售和退款。",
   "Waiting for your OK · not on the bill": "等你确认 · 未计入账单",

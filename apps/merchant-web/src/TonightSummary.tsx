@@ -24,6 +24,11 @@ import { orderLabel } from "./CurrentOrderQueuePage.js";
 const money = (minor: string | bigint) =>
   orderMoney({ amountMinor: String(minor), currencyCode: "CAD" });
 const minus = (minor: string | bigint) => "−" + money(minor);
+/** A line taken off a till check: "$0.00" when nothing was, never "−$0.00". */
+const less = (minor: string) => (minor === "0" ? money(minor) : minus(minor));
+/** "+$0.05" or "−$0.06": a part of a figure, signed, never a line taken off it. */
+const signedMoney = (minor: string) =>
+  minor.startsWith("-") ? "−" + money(minor.slice(1)) : "+" + money(minor);
 const channelText: Record<StoreReportChannel, string> = {
   Online: t("Online (guest's phone)"),
   CardMachine: t("Card machine"),
@@ -368,29 +373,9 @@ export function TonightSummaryView({
             )}
           </tbody>
         </table>
-        {cash !== null &&
-        (cash.paymentCount > 0 || cash.refundCount > 0 || cash.moneyTakenBackCount > 0) ? (
-          <dl className="tonight__cash">
-            <Row label={t("Cash rounding")} value={money(cash.cashRoundingMinor)} muted />
-            <Row
-              label={t("Cash given back")}
-              detail={countOf(cash.refundCount, "refund")}
-              value={minus(cash.refundsMinor)}
-              muted
-            />
-            {cash.moneyTakenBackCount > 0 ? (
-              <Row
-                label={t("Cash taken back after a refund made by mistake")}
-                value={money(cash.moneyTakenBackMinor)}
-                muted
-              />
-            ) : null}
-            <Row
-              label={t("Cash this system recorded (not the whole cash drawer)")}
-              value={money(drawer)}
-            />
-          </dl>
-        ) : null}
+        {/* Batch 63 F52 (RA-01, RA-09): the money column is one sum, line by line: the payment
+            methods, what they took in all, the refunds, and what stays. The till checks follow in
+            a part of their own, so no refund is taken off twice. */}
         <dl>
           <Row label={t("Total taken")} value={money(s.collectedMinor)} strong />
           <Row
@@ -411,32 +396,92 @@ export function TonightSummaryView({
             />
           ) : null}
         </dl>
-        <ul className="tonight__checks">
-          {machine !== null ? (
-            // Owner addition (b): reconcile with the card machine's own batch.
-            <li>
-              {/* v15 M57: the machine also takes sales rung up on the Store's own register. */}
-              {t(
-                "Card machine: this system recorded {amount} on the card machine today (tables and counter, tips included, refunds taken off). Your batch also holds card sales rung up on your own register, so it can be higher.",
-                { amount: money(machineNet) },
-              )}
-            </li>
-          ) : null}
-          {/* Owner addition (c): the drawer also holds the merchant's own register cash. */}
-          <li>
-            {t(
-              "The cash drawer also holds cash taken on your own register. This figure is only the cash this system recorded (tables and counter orders): count the two apart.",
-            )}
-          </li>
-        </ul>
       </section>
 
-      <section aria-labelledby="tonight-open" className="tonight__section">
+      {/* Batch 63 F52: the card machine and the drawer, each in Settlement's three lines, so the
+          figure staff compare with the batch slip or count in the drawer is a printed line. */}
+      <section aria-labelledby="tonight-check" className="tonight__section">
+        <h3 id="tonight-check">{t("Check against the machine and drawer")}</h3>
+        {machine !== null ? (
+          <>
+            <dl aria-label={t("Card machine")}>
+              <Row label={t("Taken on card machine")} value={money(machine.collectedMinor)} />
+              <Row
+                label={t("Refunded on card machine")}
+                detail={countOf(machine.refundCount, "refund")}
+                value={less(machine.refundsMinor)}
+              />
+              {machine.moneyTakenBackCount > 0 ? (
+                <Row
+                  label={t("Charged back on card machine")}
+                  detail={t("Money taken back after a refund made by mistake")}
+                  value={money(machine.moneyTakenBackMinor)}
+                />
+              ) : null}
+              <Row
+                label={t("Card machine net")}
+                detail={t("Compare with the machine's batch total")}
+                value={money(machineNet)}
+                strong
+              />
+            </dl>
+            {/* Owner addition (b), v15 M57: the batch also holds the Store's own register. */}
+            <p className="tonight__note">
+              {t(
+                "Tables and counter, tips included. The machine's batch also holds card sales rung up on your own register, so it can be higher.",
+              )}
+            </p>
+          </>
+        ) : null}
+        {cash !== null &&
+        (cash.paymentCount > 0 || cash.refundCount > 0 || cash.moneyTakenBackCount > 0) ? (
+          <dl aria-label={t("Cash")}>
+            <Row
+              label={t("Cash received")}
+              // RA-09: the rounding is inside the cash received, never a line taken off it.
+              detail={
+                cash.cashRoundingMinor === "0"
+                  ? null
+                  : t("of which cash rounding {amount}", {
+                      amount: signedMoney(cash.cashRoundingMinor),
+                    })
+              }
+              value={money(cash.collectedMinor)}
+            />
+            <Row
+              label={t("Cash refunds")}
+              detail={countOf(cash.refundCount, "refund")}
+              value={less(cash.refundsMinor)}
+            />
+            {cash.moneyTakenBackCount > 0 ? (
+              <Row
+                label={t("Cash taken back")}
+                detail={t("Money taken back after a refund made by mistake")}
+                value={money(cash.moneyTakenBackMinor)}
+              />
+            ) : null}
+            <Row label={t("Net cash")} value={money(drawer)} strong />
+          </dl>
+        ) : null}
+        {/* Owner addition (c): the drawer also holds the merchant's own register cash. */}
+        <p className="tonight__note">
+          {t(
+            "The cash drawer also holds cash taken on your own register. This figure is only the cash this system recorded (tables and counter orders): count the two apart.",
+          )}
+        </p>
+      </section>
+
+      {/* RA-11: every row keeps the dot's column, so table names line up with or without one. */}
+      <section aria-labelledby="tonight-open" className="tonight__section tonight__tables">
         <h3 id="tonight-open">
           {t("Tables not paid yet")}{" "}
           <span className="tonight__detail">
             {open.length === 0
-              ? t("Every table is paid")
+              ? // RA-11: tables still open from earlier days are listed right below, so "every
+                // table" says it is tonight's.
+                earlierTables.length > 0
+                ? t("Tonight: every table is paid")
+                : t("Every table is paid")
               : t("{tables} · {amount} to take before closing", {
                   tables: countOf(open.length, "table"),
                   amount: money(openOwedMinor.toString()),
@@ -464,7 +509,7 @@ export function TonightSummaryView({
             <p className="tonight__links">
               <Link to="/operations/dining">{t("Go to Tables")}</Link>
             </p>
-            <p className="tonight__detail">
+            <p className="tonight__note">
               {t(
                 "Take each table's payment before closing. If guests left without paying, a manager or the owner records it on the table.",
               )}
@@ -540,10 +585,13 @@ export function TonightSummaryView({
                 />
               ))}
             </dl>
-            <p className="tonight__detail">
+            <p className="tonight__note">
               {t(
                 "Opened on an earlier day and never closed. On Tables, take the payment or record that the guests left without paying, then close each one. Nothing is closed or written off by itself.",
               )}
+            </p>
+            <p className="tonight__links">
+              <Link to="/operations/dining">{t("Go to Tables")}</Link>
             </p>
           </>
         ) : null}
@@ -638,7 +686,7 @@ export function TonightSummaryView({
             )}
           </p>
         )}
-        <p className="tonight__detail">
+        <p className="tonight__note">
           {t(
             "These are the reports' figures for today so far, from the same records as the settlement made when this business day ends. Payments taken after the business day ends count on the next day.",
           )}

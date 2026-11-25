@@ -163,12 +163,13 @@ describe("WP-2423 item 8 ② tonight's closing summary", () => {
       "$191.60",
       "$219.50",
       "$91.95",
-      "Cash this system recorded (not the whole cash drawer)",
+      // Batch 63 F52: the drawer check in Settlement's lines; the rounding is inside the cash.
+      "Net cash",
       "$86.95",
       "$503.05",
       "$491.05",
-      // (b) the card machine's batch should match what it took, refunds off.
-      "this system recorded $219.50 on the card machine today",
+      // (b) the card machine's batch should match what it took, refunds off (a printed line).
+      "Card machine net",
       "so it can be higher",
       // (c) the drawer also holds the merchant's own register cash.
       "The cash drawer also holds cash taken on your own register.",
@@ -187,6 +188,132 @@ describe("WP-2423 item 8 ② tonight's closing summary", () => {
       "Rounds and orders cancelled unpaid",
     ])
       expect(html, text).toContain(text);
+  });
+  it("batch 63 F52 (RA-01, RA-09, RA-17): the money column is one sum and every till check is a printed line", () => {
+    const value = tonightSummaryFixture();
+    // A $2.00 card-machine refund (v15 TM2: the batch figure no line of the tab showed).
+    const report = value.report as {
+      summary: Record<string, unknown>;
+      byChannel: Record<string, unknown>[];
+      byOrderType: Record<string, unknown>[];
+      reconciliation: Record<string, unknown>;
+    };
+    const plus = (row: Record<string, unknown>, key: string, minor: number) => {
+      row[key] = String(BigInt(String(row[key])) + BigInt(minor));
+    };
+    const refund = (row: Record<string, unknown>) => {
+      plus(row, "refundCount", 1);
+      plus(row, "refundsMinor", 200);
+      plus(row, "netCollectedMinor", -200);
+      plus(row, "netSalesAfterRefundsMinor", -177);
+      plus(row, "taxAfterRefundsMinor", -23);
+      const parts = row.refunds as Record<string, unknown>;
+      plus(parts, "salesMinor", 177);
+      plus(parts, "taxMinor", 23);
+      row.refundCount = Number(row.refundCount);
+    };
+    // The day's summary and channels are shared with its one day (one object each).
+    refund(report.summary);
+    refund(report.byChannel.find((row) => row.channel === "CardMachine") ?? {});
+    refund(report.byOrderType.find((row) => row.orderType === "DineIn") ?? {});
+    plus(report.reconciliation, "settlementRefundedMinor", 200);
+    plus(report.reconciliation, "reportRefundedMinor", 200);
+    const summary = parseTonightSummary(value);
+    expect(tonightProblems(summary)).toEqual([]);
+    const html = render(value);
+    const between = (from: string, to: string) =>
+      html.slice(html.indexOf(`id="${from}"`), html.indexOf(`id="${to}"`));
+    const rows = (part: string) =>
+      [
+        ...part.matchAll(
+          /<dt>(.*?)(?:<span class="tonight__detail">(.*?)<\/span>)?<\/dt><dd>(.*?)<\/dd>/gu,
+        ),
+      ].map((match) => ({ label: match[1], detail: match[2] ?? "", value: match[3] ?? "" }));
+    const cents = (text: string) =>
+      (text.startsWith("−") ? -1 : 1) * Math.round(Number(text.replace(/[^0-9.]/gu, "")) * 100);
+    // The money column: the methods, then Total taken − Refunds = Net taken, nothing between.
+    const takings = between("tonight-takings", "tonight-check");
+    expect(takings).not.toContain("Cash rounding");
+    expect(takings).not.toContain("Cash given back");
+    const column = rows(takings);
+    expect(column.slice(0, 3).map((row) => row.label)).toEqual([
+      "Total taken",
+      "Refunds",
+      "Net taken",
+    ]);
+    const taken = [
+      ...takings.matchAll(
+        /<tr><th scope="row">.*?<\/th><td>\d+<\/td><td>.*?<\/td><td>(.*?)<\/td><\/tr>/gu,
+      ),
+    ];
+    expect(taken).toHaveLength(3);
+    expect(taken.reduce((sum, match) => sum + cents(match[1] ?? ""), 0)).toBe(
+      cents(column[0]?.value ?? ""),
+    );
+    expect(cents(column[0]?.value ?? "") + cents(column[1]?.value ?? "")).toBe(
+      cents(column[2]?.value ?? ""),
+    );
+    // The till checks, each adding up line by line, in Settlement's words.
+    const check = between("tonight-check", "tonight-open");
+    const lines = rows(check);
+    expect(lines.map((row) => row.label)).toEqual([
+      "Taken on card machine",
+      "Refunded on card machine",
+      "Card machine net",
+      "Cash received",
+      "Cash refunds",
+      "Net cash",
+    ]);
+    const [machineTaken = 0, machineRefunded = 0, machineNet, cashIn = 0, cashOut = 0, cashNet] =
+      lines.map((row) => cents(row.value));
+    expect([machineTaken, machineRefunded, machineNet]).toEqual([21950, -200, 21750]);
+    expect(lines[1]?.detail).toBe("1 refund");
+    expect(lines[2]?.detail).toBe("Compare with the machine&#x27;s batch total");
+    expect(machineTaken + machineRefunded).toBe(machineNet);
+    expect(cashIn + cashOut).toBe(cashNet);
+    // RA-09: the rounding is a part of the cash received, signed, never a line taken off it.
+    expect(lines[3]?.detail).toBe("of which cash rounding +$0.05");
+    // RA-17: the notes are notes at the rows' edge, not an indented list.
+    expect(check).toContain('<p class="tonight__note">Tables and counter, tips included.');
+    expect(check).not.toContain("<li>");
+  });
+  it("batch 63 RA-11: tonight's tables all paid beside earlier days' open ones says tonight, with a way to Tables", () => {
+    const value = tonightSummaryFixture();
+    // v15 TM2: tonight is paid, while Table 2 has been checking out for 19 days.
+    value.openTables = [
+      {
+        tableLabel: "2",
+        phase: "Closing",
+        paymentTiming: "PayLater",
+        owedMinor: "1780",
+        openedMinutes: 19 * 24 * 60,
+        standing: "Owes",
+      },
+      {
+        tableLabel: "4",
+        phase: "Active",
+        paymentTiming: "PayLater",
+        owedMinor: "0",
+        openedMinutes: 10 * 24 * 60,
+        standing: "NothingOrdered",
+      },
+    ];
+    value.openTablesOwedMinor = "1780";
+    const html = render(value);
+    const open = html.slice(
+      html.indexOf('id="tonight-open"'),
+      html.indexOf('id="tonight-cancelled"'),
+    );
+    expect(open).toContain("Tonight: every table is paid");
+    expect(open).not.toContain(">Every table is paid");
+    const earlier = open.slice(open.indexOf("From earlier days"));
+    expect(earlier).toContain('<a href="/operations/dining" data-discover="true">Go to Tables</a>');
+    // Every row of the tables part keeps the dot's column (CSS), dot or not.
+    expect(html).toContain('class="tonight__section tonight__tables"');
+    // With no earlier days, "every table" needs no "tonight".
+    expect(
+      render({ ...tonightSummaryFixture(), openTables: [], openTablesOwedMinor: "0" }),
+    ).toContain(">Every table is paid");
   });
   it("WP-2423 M163: money taken back is on its own line and in the drawer and the machine's batch", () => {
     const value = tonightSummaryFixture();
@@ -216,11 +343,12 @@ describe("WP-2423 item 8 ② tonight's closing summary", () => {
     for (const text of [
       "Money taken back after refunds made by mistake",
       "$6.25",
-      "Cash taken back after a refund made by mistake",
+      "Cash taken back",
       // Table cash $86.95 + $5.00 taken back; the batch $219.50 + $1.25 charged on the machine.
       "$91.95",
       // v15 M57: the machine figure is what this system recorded on it.
-      "this system recorded $220.75 on the card machine today",
+      "Charged back on card machine",
+      "$220.75",
     ])
       expect(html, text).toContain(text);
     // Refunds and net taken stay as they were.

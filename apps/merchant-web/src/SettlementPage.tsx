@@ -258,7 +258,7 @@ export function SettlementReport({
           aria-labelledby="settlement-card-machine"
         >
           <header>
-            <h3 id="settlement-card-machine">{t("Store card machine")}</h3>
+            <h3 id="settlement-card-machine">{t("Card machine")}</h3>
           </header>
           <ul className="overview-counts settlement__totals" aria-label={t("Card machine totals")}>
             <li>

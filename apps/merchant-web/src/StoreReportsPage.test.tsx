@@ -87,10 +87,11 @@ describe("WP-2423 Q14 store reports page", () => {
       "Gross sales",
       "Net sales",
       "Tax · SYNTHETIC TAX",
-      "Total collected",
-      "Net collected",
-      "Online (card)",
-      "Store card machine",
+      // Batch 63 F58: the same words as Today's summary and Settlement.
+      "Total taken",
+      "Net taken",
+      "Online (guest&#x27;s phone)",
+      "Card machine",
       "Dine-in",
       "Pickup",
       "Counter",
@@ -107,6 +108,24 @@ describe("WP-2423 Q14 store reports page", () => {
     expect(html).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}/u);
     expect(html).not.toContain("CardMachine");
     expect(html).not.toContain("DineIn");
+  });
+  it("batch 63 F58 (RA-10): uses Today's summary's words and its Payments, Tips, Taken order", () => {
+    const html = render(storeReportsViewFixture());
+    for (const old of [
+      "Total collected",
+      "Net collected",
+      "Online (card)",
+      "Store card machine",
+      ">Collected<",
+    ])
+      expect(html, old).not.toContain(old);
+    const byPayment = html.slice(html.indexOf('aria-label="Sales by payment"'));
+    const headers = [
+      ...byPayment
+        .slice(0, byPayment.indexOf("</thead>"))
+        .matchAll(/<th scope="col"[^>]*>(.*?)<\/th>/gu),
+    ].map((match) => match[1]);
+    expect(headers).toEqual(["Payment", "Payments", "Tips", "Taken", "Refunds", "Net taken"]);
   });
   it("says an open day is checked at day end and a closed range matches the settlement", () => {
     const fixture = storeReportsViewFixture();

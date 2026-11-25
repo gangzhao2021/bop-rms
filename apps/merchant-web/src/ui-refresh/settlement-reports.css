@@ -562,17 +562,17 @@
 .tonight__row[data-muted="true"] {
   color: var(--bop-color-text-muted);
 }
-.tonight__row[data-tone="action"] dt::before {
+.tonight__row[data-tone="action"] dt::before,
+.tonight__tables .tonight__row dt::before {
   content: "";
   display: inline-block;
   width: 8px;
   height: 8px;
   margin-right: 8px;
   border-radius: 50%;
-  background: var(--bop-color-danger-mark);
 }
-.tonight__cash {
-  padding-left: 16px;
+.tonight__row[data-tone="action"] dt::before {
+  background: var(--bop-color-danger-mark);
 }
 .tonight__methods {
   width: 100%;
@@ -594,12 +594,13 @@
 .tonight__methods :is(th, td) + :is(th, td) {
   padding-left: 16px;
 }
-.tonight__checks {
-  display: grid;
-  gap: 4px;
+/* Batch 63 RA-17: a note starts at the rows' own left edge, muted 14/400, never indented. */
+.tonight__note {
   margin: 8px 0 0;
-  padding-left: 20px;
+  padding: 0;
   color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
 }
 .tonight__links {
   display: flex;
@@ -699,12 +700,8 @@
   font-size: 14px;
 }
 .store-reports-page .tonight__head p,
-.store-reports-page .tonight__section p,
-.store-reports-page .tonight__checks {
+.store-reports-page .tonight__section p {
   padding-left: 0;
-}
-.store-reports-page .tonight__checks {
-  padding-left: 20px;
 }
 
 /*

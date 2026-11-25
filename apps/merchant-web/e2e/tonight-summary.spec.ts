@@ -85,16 +85,17 @@ test("@production tonight's summary adds up, checks the card machine and drawer,
   await expect(sales).toContainText("Net sales$394.25");
   const takings = page.getByRole("region", { name: /^Taken, by payment method/u });
   await expect(takings.getByRole("table")).toContainText("Card machine8$27.40$219.50");
-  await expect(takings).toContainText(
-    "Cash this system recorded (not the whole cash drawer)$86.95",
-  );
   await expect(takings).toContainText("Total taken$503.05");
   await expect(takings).toContainText("Net taken$491.05");
-  await expect(takings).toContainText("this system recorded $219.50 on the card machine today");
-  await expect(takings).not.toContainText("should be");
-  await expect(takings).toContainText(
-    "The cash drawer also holds cash taken on your own register.",
+  // Batch 63 F52: the card machine and the drawer are checked in a part of their own, in
+  // Settlement's lines (was "Cash this system recorded …" and a note with the batch figure).
+  const check = page.getByRole("region", { name: "Check against the machine and drawer" });
+  await expect(check).toContainText(
+    "Card machine netCompare with the machine's batch total$219.50",
   );
+  await expect(check).toContainText("Net cash$86.95");
+  await expect(check).not.toContainText("should be");
+  await expect(check).toContainText("The cash drawer also holds cash taken on your own register.");
   const open = page.getByRole("region", { name: /^Tables not paid yet/u });
   await expect(open).toContainText("2 tables · $86.40 to take before closing");
   await expect(open.getByRole("link", { name: "Go to Tables" })).toHaveAttribute(
@@ -418,6 +419,102 @@ for (const language of ["en", "zh-Hans"] as const) {
       ).toBe(true);
       await page.screenshot({
         path: `test-results/tonight-names-${language}-${width}.png`,
+        fullPage: true,
+      });
+    }
+  });
+}
+
+// Batch 63 F52/RA-17/RA-11 (v15 TM2 design review): the notes started 8–20 px right of the rows
+// they explain (x=265/277 against 257 at 1440; 24/36 against 16 at 390), the money column took
+// the cash refund off twice, and a table with a dot started 16 px right of one without.
+for (const language of ["en", "zh-Hans"] as const) {
+  test(`@production the money column adds up, the till checks are lines, and notes and table names line up (${language})`, async ({
+    page,
+  }) => {
+    const zh = language === "zh-Hans";
+    if (zh)
+      await page.addInitScript(() => {
+        try {
+          window.localStorage.setItem("bop.merchant.language", "zh-Hans");
+        } catch {
+          // The page still renders in English.
+        }
+      });
+    await workspace(page);
+    const fixture = tonightSummaryFixture();
+    // Tonight is paid; two tables were left open on earlier days, one owing, one not.
+    fixture.openTables = [
+      {
+        tableLabel: "2",
+        phase: "Closing",
+        paymentTiming: "PayLater",
+        owedMinor: "1780",
+        openedMinutes: 19 * 24 * 60,
+        standing: "Owes",
+      },
+      {
+        tableLabel: "4",
+        phase: "Active",
+        paymentTiming: "PayLater",
+        owedMinor: "0",
+        openedMinutes: 10 * 24 * 60,
+        standing: "NothingOrdered",
+      },
+    ];
+    fixture.openTablesOwedMinor = "1780";
+    await page.route("**/merchant/reports/tonight", (route) =>
+      route.fulfill({ headers, json: fixture }),
+    );
+    await page.goto("/app/reports/operations");
+    const takings = page.getByRole("region", {
+      name: zh ? /^实收（按付款方式）/u : /^Taken, by payment method/u,
+    });
+    await expect(takings).toContainText(zh ? "合计实收" : "Total taken");
+    // The money column is one sum: no cash line between the methods and the total.
+    await expect(takings).not.toContainText(zh ? "现金取整" : "Cash rounding");
+    const check = page.getByRole("region", {
+      name: zh ? "和刷卡机、钱箱核对" : "Check against the machine and drawer",
+    });
+    await expect(check).toContainText(zh ? "其中现金取整 +$0.05" : "of which cash rounding +$0.05");
+    const open = page.getByRole("region", {
+      name: zh ? /^还没结账的桌/u : /^Tables not paid yet/u,
+    });
+    await expect(open).toContainText(zh ? "今晚的桌都结完了" : "Tonight: every table is paid");
+    await expect(open.getByRole("link", { name: zh ? "前往桌台" : "Go to Tables" })).toBeVisible();
+    for (const width of [1440, 1024, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      const shape = await page.evaluate(() => {
+        const left = (element: Element) => element.getBoundingClientRect().left;
+        const textLeft = (element: Element) => {
+          const text = [...element.childNodes].find((node) => node.nodeType === Node.TEXT_NODE);
+          const range = document.createRange();
+          range.selectNodeContents(text ?? element);
+          return range.getBoundingClientRect().left;
+        };
+        const rowLeft = left(document.querySelector(".tonight__row") as Element);
+        // Every explanatory paragraph or list item in the summary (not headings, rows or links).
+        const notes = [...document.querySelectorAll(".tonight__section :is(p, li)")]
+          .filter((element) => !element.matches(".tonight__links, .tonight__links *"))
+          .map((element) => ({
+            text: (element.textContent ?? "").slice(0, 24),
+            offset: Math.round(left(element) - rowLeft),
+          }));
+        const open = document.querySelector("#tonight-open")?.closest("section") as Element;
+        const names = [...open.querySelectorAll(".tonight__row dt")].map((dt) =>
+          Math.round(textLeft(dt) - rowLeft),
+        );
+        return { notes, names };
+      });
+      for (const note of shape.notes) expect(note.offset, JSON.stringify(note)).toBe(0);
+      expect(shape.notes.length).toBeGreaterThanOrEqual(4);
+      // Table 2 (dot) and Table 4 (no dot) start their names at one x.
+      expect(new Set(shape.names).size, JSON.stringify(shape.names)).toBe(1);
+      await page.screenshot({
+        path: `test-results/tonight-lines-${language}-${width}.png`,
         fullPage: true,
       });
     }
