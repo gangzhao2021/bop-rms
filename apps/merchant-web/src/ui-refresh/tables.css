@@ -1797,6 +1797,10 @@
   width: 100%;
   border-collapse: collapse;
   font-size: 14px;
+  /* Batch 61: the shared page-list rule clips a list to round its corners, which cut the rings of
+     Retire at the right edge and of Create code and Print at the left on a phone. This list has
+     no box to round, so nothing is clipped. */
+  overflow: visible;
 }
 .workspace-page.table-qr-page .table-qr__list thead th {
   padding: 0 var(--bop-space-4) var(--bop-space-2) 0;

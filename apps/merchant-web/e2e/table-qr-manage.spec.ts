@@ -1,5 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
+import { ringsFrom, whole } from "./focus-ring-clip";
 import { expectNoInternalText } from "./internal-text-guard";
 
 /**
@@ -15,7 +16,7 @@ const store = {
 };
 const pickupLink = "https://order.example/#pickup=" + id(97);
 
-async function workspace(page: Page) {
+async function workspace(page: Page, listed: readonly unknown[] = []) {
   await page.route("**/merchant/session", (route) =>
     route.fulfill({
       headers,
@@ -42,7 +43,7 @@ async function workspace(page: Page) {
       },
     }),
   );
-  const tables: unknown[] = [];
+  const tables: unknown[] = [...listed];
   await page.route("**/merchant/dining/table-qr", (route) =>
     route.fulfill({ headers, json: { items: tables, pickupLink } }),
   );
@@ -145,3 +146,44 @@ test("@production a table just added gets its code and its row shows it without 
   await expect(row).not.toContainText("No code yet");
   expect(reads).toBe(before);
 });
+
+/**
+ * Batch 61 (b60 sweep): the shared page-list rule clipped this list to round its corners, which cut
+ * the focus rings of Retire at the right edge (1024, 1440) and of Create code and Print at the left
+ * (390). Rows as the Store lists them: one table with a code, one without.
+ */
+for (const language of ["en", "zh-Hans"] as const)
+  for (const [width, height] of [
+    [390, 844],
+    [1024, 768],
+    [1440, 900],
+  ] as const)
+    test(`@production every focus ring in the table list is whole at ${width} (${language})`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height });
+      if (language === "zh-Hans")
+        await page.addInitScript(() =>
+          window.localStorage.setItem("bop.merchant.language", "zh-Hans"),
+        );
+      const row = (n: number, label: string, codeState: "Active" | "None") => ({
+        tableReference: id(20 + n),
+        stableLabel: label,
+        areaCode: "MAIN",
+        aggregateVersion: 3,
+        seated: false,
+        codeState,
+        issuedAt: codeState === "Active" ? "2026-11-01T15:00:00.000Z" : null,
+        validUntil: codeState === "Active" ? "2027-05-01T15:00:00.000Z" : null,
+      });
+      await workspace(page, [row(1, "L61Q A (TEST)", "Active"), row(2, "L61Q B (TEST)", "None")]);
+      await page.goto("/app/operations/tables");
+      const list = page.locator("table.table-qr__list");
+      await expect(list.getByRole("row")).toHaveCount(3);
+      const rings = await ringsFrom(page, list, list.getByRole("button").first());
+      expect(rings.length).toBeGreaterThan(2);
+      for (const ring of rings) {
+        expect(ring.ring, ring.name).toBe(true);
+        expect(ring, `table list: ${ring.name}`).toEqual(whole(ring));
+      }
+    });
