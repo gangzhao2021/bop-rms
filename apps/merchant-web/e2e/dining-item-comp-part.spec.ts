@@ -353,6 +353,8 @@ for (const zh of [false, true]) {
     }
     await page.setViewportSize({ width: 1440, height: 900 });
     await confirm.click();
+    // b63 (F36): recorded on Confirm, as the cash payment.
+    await group.getByRole("button", { name: zh ? "确认" : "Confirm", exact: true }).click();
     // Only the choice goes: the dish, how many of it, why, and what the button showed.
     expect(sent.at(-1)).toEqual({
       orderReference: id(1),
@@ -383,6 +385,8 @@ for (const zh of [false, true]) {
     await expect(group.locator(".item-comp__quantity")).toHaveCount(0);
     await group.getByRole("radio", { name: zh ? "等待太久" : "Waited too long" }).check();
     await group.getByRole("button", { name: zh ? "免单 $14.12" : "Comp $14.12" }).click();
+    await group.getByRole("button", { name: zh ? "确认" : "Confirm", exact: true }).click();
+    await expect.poll(() => sent.at(-1)?.reasonCode).toBe("LONG_WAIT");
     expect(sent.at(-1)).toMatchObject({ orderItemReferences: [noodles], reasonCode: "LONG_WAIT" });
     expect(sent.at(-1)).not.toHaveProperty("compQuantities");
     // Both comps stay listed, each with its count; the line is never hidden.
@@ -538,10 +542,11 @@ for (const zh of [false, true]) {
     await page.goto("/operations/dining");
     await page.getByRole("button", { name: zh ? "选择 T3" : "Select T3", exact: true }).click();
     const checkout = page.getByRole("region", { name: zh ? "结账" : "Checkout" });
+    // b63 (F36): one amount per dish in the checkout list — what it is charged after its comp —
+    // and its comp in words beside the dish (the paid bill on paper still lists the comp).
     const comp = checkout.locator(".table-checkout__comp").first();
-    await expect(comp).toHaveText(
-      zh ? " · 免单 2 份中的 1 份 −$12.50" : " · 1 of 2 comped −$12.50",
-    );
+    await expect(comp).toHaveText(zh ? " · 免单 2 份中的 1 份" : " · 1 of 2 comped");
+    const line = checkout.locator(".table-checkout__rounds ul > li").first();
     for (const [width, height] of widths) {
       await page.setViewportSize({ width, height });
       expect(
@@ -549,38 +554,12 @@ for (const zh of [false, true]) {
           () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
         ),
       ).toBe(true);
-      // The sign and the amount stay together.
-      const amountLines = await checkout
-        .locator(".table-checkout__comp-amount")
-        .first()
-        .evaluate((element) => {
-          const range = document.createRange();
-          range.selectNodeContents(element);
-          return new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size;
-        });
-      expect(amountLines).toBe(1);
-      // Batch 61 (v15 b60 live, 1024 en): the amount never starts a line away from its words: it
-      // sits on the row of their last line, at the row's right end (the words may wrap above).
-      const placed = await comp.evaluate((element) => {
-        const amount = element.querySelector(".table-checkout__comp-amount");
-        const words = document.createRange();
-        words.setStart(element, 0);
-        words.setEndBefore(amount as Node);
-        const lines = [...words.getClientRects()].filter((rect) => rect.width > 1);
-        const last = lines.reduce((low, rect) => (rect.bottom > low.bottom ? rect : low));
-        const box = (amount as HTMLElement).getBoundingClientRect();
-        const dish = (element.parentElement as HTMLElement).getBoundingClientRect();
-        return {
-          sameRow: box.top < last.bottom && box.bottom > last.top,
-          after: box.left >= last.right,
-          rightEnd: Math.abs(box.right - dish.right),
-          // Room the words' last line leaves before the amount (fonts differ: Linux DejaVu).
-          spare: box.left - last.right,
-        };
-      });
-      expect(placed.sameRow, JSON.stringify(placed)).toBe(true);
-      expect(placed.after, JSON.stringify(placed)).toBe(true);
-      expect(placed.rightEnd, JSON.stringify(placed)).toBeLessThan(1);
+      await expect(line.locator(":scope > span")).toHaveText([
+        zh
+          ? "2 × Beef noodles (TEST) · 免单 2 份中的 1 份"
+          : "2 × Beef noodles (TEST) · 1 of 2 comped",
+        "$12.50",
+      ]);
       await page.screenshot({
         path: `${shots}/checkout-comp-part-${language}-${width}.png`,
         fullPage: true,

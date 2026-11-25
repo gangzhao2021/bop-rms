@@ -3222,9 +3222,12 @@ for (const language of ["en", "zh-Hans"] as const)
     const checkout = page.getByRole("region", { name: zh ? "结账" : "Checkout" });
     const rounds = checkout.locator(".table-checkout__rounds > li");
     const tax = zh ? "税" : "Tax";
-    // Round 1: cucumber $6.25, comped −$6.25 before tax, Tax $0.00: the round's $0.00.
-    await expect(rounds.nth(0)).toContainText("$6.25");
-    await expect(rounds.nth(0)).toContainText("−$6.25");
+    // Round 1: cucumber comped — b63 (F36): one amount, $0.00 after its comp — Tax $0.00: the
+    // round's $0.00.
+    await expect(rounds.nth(0).locator("ul > li").first()).toContainText(
+      zh ? "已免单$0.00" : "Comped$0.00",
+    );
+    await expect(rounds.nth(0)).not.toContainText("−$6.25");
     await expect(rounds.nth(0)).not.toContainText("$7.06");
     await expect(rounds.nth(0).locator(".table-checkout__round-tax")).toHaveText(`${tax}$0.00`);
     // Round 3: $3.25 + $6.25 + Tax $1.24 = $10.74.

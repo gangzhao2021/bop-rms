@@ -199,6 +199,8 @@ export function ItemCompAction({
   const [reason, setReason] = useState<CompReason | "">("");
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<Failure | null>(null);
+  // b63 (F36): what the confirm step shows, by what would be recorded (null: not confirming).
+  const [reviewing, setReviewing] = useState<string | null>(null);
   const attempt = useRef<{ key: string; reference: string } | null>(null);
   const [preview, setPreview] = useState<{
     readonly key: string;
@@ -398,6 +400,23 @@ export function ItemCompAction({
   }, [open]);
   if (offered.length === 0) return null;
   const ready = total !== null && reason !== "" && !busy;
+  // b63 (F36, v15 D62DW B): a comp was recorded on one tap although it can't be deleted. Like the
+  // cash payment, the first press shows what is recorded (dish, what the bill goes down by, why)
+  // and Confirm records it. Anything changed after that asks again.
+  const reviewKey = ready ? JSON.stringify([asked, reason, String(total)]) : null;
+  const chosenNames = chosen
+    .map((line) => {
+      const count = choice === "Comp" ? quantities.get(line.orderItemReference) : undefined;
+      return count !== undefined && count < leftOf(line)
+        ? t("{comped} of {quantity} × {dish}", {
+            comped: String(count),
+            quantity: String(leftOf(line)),
+            dish: line.name,
+          })
+        : line.name;
+    })
+    .join(listSeparator());
+  const confirming = reviewing !== null && reviewing === reviewKey;
   const send = async () => {
     if (!ready) return;
     const body = {
@@ -428,6 +447,7 @@ export function ItemCompAction({
       const payload = (await response.json().catch(() => null)) as unknown;
       if (response.ok) {
         attempt.current = null;
+        setReviewing(null);
         setDishPreviews(new Map());
         settledFocus.settled(panel.current);
         focusTo.current = "opener";
@@ -439,12 +459,16 @@ export function ItemCompAction({
         return;
       }
       const next = failureOf(response.status, payload);
+      // b63 (F36): a refusal ends the confirm step (Cancel is there again); a lost answer keeps it,
+      // so Confirm goes again with the same request.
+      if (next !== "Unknown" && next !== "FullSignInRequired") setReviewing(null);
       settledFocus.failed(panel.current);
       if (next !== "FullSignInRequired" && next !== "Unknown") attempt.current = null;
       setFailure(next);
       // v15 b16: the amount may have changed with the table: work it out again before the
       // manager can confirm, never the old button amount.
       if (next === "Changed") {
+        setReviewing(null);
         setDishPreviews(new Map());
         setPreview(null);
         setPreviewRun((value) => value + 1);
@@ -629,46 +653,100 @@ export function ItemCompAction({
       <p className="item-comp__note">
         {t("Recorded with your name and reason. It can't be deleted.")}
       </p>
-      <button
-        type="button"
-        className="table-checkout__primary"
-        data-confirm=""
-        disabled={previewFailure !== null ? busy : !ready}
-        onClick={() => {
-          if (previewFailure !== null) {
-            setPreview(null);
-            setPreviewRun((value) => value + 1);
-            return;
-          }
-          void send();
-        }}
-      >
-        {busy
-          ? t("Recording…")
-          : previewFailure !== null
-            ? t("Work out the amount again")
-            : !valid
-              ? t("Choose dishes, an amount and a reason")
-              : total === null
-                ? t("Working out the amount…")
-                : choice === "Comp"
-                  ? t("Comp {amount}", {
-                      amount: orderMoney({ amountMinor: String(total), currencyCode }),
-                    })
-                  : t("Take {amount} off", {
-                      amount: orderMoney({ amountMinor: String(total), currencyCode }),
-                    })}
-      </button>{" "}
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() => {
-          focusTo.current = "opener";
-          setOpen(false);
-        }}
-      >
-        {t("Cancel")}
-      </button>
+      {confirming && total !== null ? (
+        <div
+          role="alertdialog"
+          aria-labelledby="item-comp-confirm"
+          className="table-checkout__confirm item-comp__confirm"
+        >
+          <p id="item-comp-confirm">
+            {t("{what} · bill goes down {amount} · {reason}", {
+              what:
+                choice === "Comp"
+                  ? t("Comp {dishes}", { dishes: chosenNames })
+                  : choice === "Percent" && percentValue !== null
+                    ? t("{percent}% off {dishes}", {
+                        percent: String(percentValue),
+                        dishes: chosenNames,
+                      })
+                    : t("Discount {dishes}", { dishes: chosenNames }),
+              amount: orderMoney({ amountMinor: String(total), currencyCode }),
+              reason: reason === "" ? "" : compReasonLabel[reason],
+            })}
+          </p>
+          <div className="table-checkout__confirm-actions">
+            <button type="button" disabled={busy} onClick={() => setReviewing(null)}>
+              {t("Back")}
+            </button>
+            <button
+              type="button"
+              className="table-checkout__primary"
+              data-confirm=""
+              disabled={!ready}
+              onClick={() => void send()}
+            >
+              {busy ? t("Recording…") : t("Confirm")}
+            </button>
+            {failure !== null ? (
+              // After an outage staff may leave without recording; Confirm still goes again.
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => {
+                  setReviewing(null);
+                  focusTo.current = "opener";
+                  setOpen(false);
+                }}
+              >
+                {t("Cancel")}
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : (
+        <>
+          <button
+            type="button"
+            className="table-checkout__primary"
+            data-confirm=""
+            disabled={previewFailure !== null ? busy : !ready}
+            onClick={() => {
+              if (previewFailure !== null) {
+                setPreview(null);
+                setPreviewRun((value) => value + 1);
+                return;
+              }
+              if (reviewKey !== null) setReviewing(reviewKey);
+            }}
+          >
+            {busy
+              ? t("Recording…")
+              : previewFailure !== null
+                ? t("Work out the amount again")
+                : !valid
+                  ? t("Choose dishes, an amount and a reason")
+                  : total === null
+                    ? t("Working out the amount…")
+                    : choice === "Comp"
+                      ? t("Comp {amount}", {
+                          amount: orderMoney({ amountMinor: String(total), currencyCode }),
+                        })
+                      : t("Take {amount} off", {
+                          amount: orderMoney({ amountMinor: String(total), currencyCode }),
+                        })}
+          </button>{" "}
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              focusTo.current = "opener";
+              setOpen(false);
+            }}
+          >
+            {t("Cancel")}
+          </button>
+        </>
+      )}
       {previewFailure !== null && failure === null ? (
         <p role="alert">
           {previewFailure === "Unknown"

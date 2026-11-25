@@ -31,7 +31,11 @@ const table = (n: number, label: string, overrides: Record<string, unknown> = {}
 });
 
 /** The whole of a merge's screen, with what the per-head charge answers after it. */
-async function stubMerge(page: Page, teaAnswer: (route: Route) => Promise<void>) {
+async function stubMerge(
+  page: Page,
+  teaAnswer: (route: Route) => Promise<void>,
+  partySize: number | null = 5,
+) {
   const scope = {
     brandLabel: "Synthetic Brand",
     storeLabel: "Synthetic Store",
@@ -194,7 +198,7 @@ async function stubMerge(page: Page, teaAnswer: (route: Route) => Promise<void>)
         tableLabel: "T7",
         fromTableReference: id(1),
         fromTableLabel: "T6",
-        partySize: 5,
+        partySize,
       },
     });
   });
@@ -371,3 +375,53 @@ test("@production a Store without a per-head charge hears nothing about one afte
   await expect(page.getByText("isn't confirmed")).toHaveCount(0);
   await expect(page.getByText("Per-head charge")).toHaveCount(0);
 });
+
+// b63 (T14, v15 D62DW): a Store that doesn't ask party size merged two tables and was told
+// "共 2 位" — the default 1 per party said as a head count.
+for (const language of ["en", "zh-Hans"] as const)
+  test(`@production a merge with no party size known says no head count (${language})`, async ({
+    page,
+  }) => {
+    const zh = language === "zh-Hans";
+    if (zh)
+      await page.addInitScript(() => {
+        window.localStorage.setItem("bop.merchant.language", "zh-Hans");
+      });
+    await stubMerge(
+      page,
+      (route: Route) =>
+        route.fulfill({
+          headers,
+          json: {
+            status: "NoTeaCharge",
+            charged: 0,
+            expected: null,
+            guests: null,
+            override: null,
+            overrideVersion: 0,
+            problem: null,
+          },
+        }),
+      null,
+    );
+    await page.goto("/operations/dining");
+    await page.getByRole("button", { name: zh ? "选择 T6" : "Select T6", exact: true }).click();
+    await page.locator("details.table-panel__manage").evaluate((node) => {
+      (node as HTMLDetailsElement).open = true;
+    });
+    const panel = page.getByRole("region", {
+      name: zh ? "把这桌客人并到另一桌" : "Merge this party into another table",
+    });
+    await panel.getByRole("combobox").selectOption({ label: "T7" });
+    await panel.getByRole("button", { name: /T7/u }).click();
+    await expect(
+      page
+        .getByText(
+          zh
+            ? "已并到 T7 桌。T6 桌的手机请扫 T7 桌的桌台二维码继续点餐；T6 桌已标为待清洁。"
+            : "Merged into table T7. Phones from table T6 scan the code on table T7 to keep ordering; table T6 is marked for cleaning.",
+        )
+        .first(),
+    ).toBeVisible();
+    await expect(page.getByText(zh ? /共 \d+ 位/u : /\d+ guests/u)).toHaveCount(0);
+  });

@@ -274,6 +274,11 @@ test("@production a manager discounts a started dish from the Tables page; only 
       .map((v) => v.id),
   ).toEqual([]);
   await first.click();
+  // b63 (F36): what is recorded, said once more; Confirm records it.
+  await expect(group.getByRole("alertdialog")).toHaveText(
+    /^15% off Synthetic boiled fish · bill goes down \$1\.70 · Waited too long/u,
+  );
+  await group.getByRole("button", { name: "Confirm", exact: true }).click();
   // The bill changed meanwhile (the whole bill's tax cent now falls on this dish): refused,
   // nothing recorded, and the button is worked out again before the manager can confirm.
   await expect(group.getByRole("alert")).toHaveText(
@@ -281,6 +286,7 @@ test("@production a manager discounts a started dish from the Tables page; only 
   );
   await expect(confirm).toBeEnabled();
   await confirm.click();
+  await group.getByRole("button", { name: "Confirm", exact: true }).click();
   // The browser sends the choice, the reason and what the button showed — never an amount owed:
   // the server refuses a different amount as a changed table.
   const asked = {

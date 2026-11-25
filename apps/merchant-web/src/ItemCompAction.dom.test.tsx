@@ -267,6 +267,8 @@ const compAll = async (container: HTMLElement) => {
     ),
   );
   await click(buttonNamed(container, "Comp $10.74"));
+  // b63 (F36): the comp is recorded on Confirm, as the cash payment.
+  await click(buttonNamed(container, "Confirm"));
   await settle(10);
 };
 const later = async () => {
@@ -348,6 +350,8 @@ const compOne = async (container: HTMLElement) => {
     ),
   );
   await click(buttonNamed(container, "Comp $7.06"));
+  // b63 (F36): the comp is recorded on Confirm, as the cash payment.
+  await click(buttonNamed(container, "Confirm"));
   await settle(10);
 };
 /** The floor read again and the panel unlocked (React applies the unlock as each act ends). */
@@ -437,7 +441,9 @@ const confirmComp = async (container: HTMLElement) => {
       input.parentElement?.textContent?.includes("Goodwill"),
     ),
   );
-  const confirm = buttonNamed(container, "Comp $7.06") as HTMLButtonElement;
+  await click(buttonNamed(container, "Comp $7.06"));
+  // b63 (F36): the comp is recorded on Confirm, as the cash payment.
+  const confirm = buttonNamed(container, "Confirm") as HTMLButtonElement;
   confirm.focus();
   await click(confirm);
   await act(async () => {
@@ -460,7 +466,7 @@ it("b26: a comp whose answer was lost gives the focus back to the confirm", asyn
   expect(container.querySelector('[role="alert"]')?.textContent).toContain(
     "Press the button again",
   );
-  expect(document.activeElement).toBe(buttonNamed(container, "Comp $7.06"));
+  expect(document.activeElement).toBe(buttonNamed(container, "Confirm"));
 });
 it("b26: a comp refused because the table changed puts the focus on what the panel says", async () => {
   const { container } = await mount(
@@ -482,4 +488,45 @@ it("b26: a comp refused because the table changed puts the focus on what the pan
   const alert = container.querySelector<HTMLElement>('[role="alert"]');
   expect(alert?.textContent).toContain("This table changed");
   expect(document.activeElement).toBe(alert);
+});
+
+// b63 (F36, v15 D62DW B): "Comp $7.06" was recorded on one tap, although the form says it can't
+// be deleted. The first press shows what is recorded; Confirm records it; Back records nothing.
+it("b63: a comp is recorded only on Confirm, after saying the dish, the amount and why", async () => {
+  const sent: string[] = [];
+  const { container } = await mount(
+    <ItemCompAction
+      order={order}
+      lines={lines.items}
+      csrf={"a".repeat(43)}
+      fetcher={
+        (async (url: string, init?: RequestInit) => {
+          if (!url.endsWith("/preview")) sent.push(url);
+          return fetcher(url, init);
+        }) as typeof fetch
+      }
+      onSettled={() => undefined}
+    />,
+  );
+  await click(buttonNamed(container, "Comp or discount"));
+  await pause();
+  await tick(container, "Smashed cucumber");
+  await click(
+    [...container.querySelectorAll('input[name="item-comp-reason"]')].find((input) =>
+      input.parentElement?.textContent?.includes("Goodwill"),
+    ),
+  );
+  await click(buttonNamed(container, "Comp $7.06"));
+  expect(sent).toEqual([]);
+  const step = container.querySelector('[role="alertdialog"]');
+  expect(step?.textContent).toContain("Comp Smashed cucumber · bill goes down $7.06 · Goodwill");
+  await click(buttonNamed(container, "Back"));
+  expect(sent).toEqual([]);
+  expect(container.querySelector('[role="alertdialog"]')).toBeNull();
+  await click(buttonNamed(container, "Comp $7.06"));
+  await click(buttonNamed(container, "Confirm"));
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+  expect(sent).toHaveLength(1);
 });

@@ -63,7 +63,11 @@ export interface MerchantDiningTableMergeResult {
   readonly tableLabel: string;
   readonly fromTableReference: string;
   readonly fromTableLabel: string;
-  readonly partySize: number;
+  /**
+   * Both parties together. b63 (T14, v15 D62DW): null when neither party's size was ever recorded
+   * (the Store does not ask it): the default 1 per party is never said as a head count.
+   */
+  readonly partySize: number | null;
 }
 
 /**
@@ -193,6 +197,7 @@ export function createMerchantDiningTableMerge(options: {
                 readonly mergedPartySize: number;
               },
               status: "Applied" | "AlreadyApplied",
+              sizeKnown: boolean,
             ): MerchantDiningTableMergeResult =>
               Object.freeze({
                 status,
@@ -201,7 +206,7 @@ export function createMerchantDiningTableMerge(options: {
                 tableLabel: record.targetTableLabel,
                 fromTableReference: record.sourceTableReference,
                 fromTableLabel: record.sourceTableLabel,
-                partySize: record.mergedPartySize,
+                partySize: sizeKnown ? record.mergedPartySize : null,
               });
             const prior = await resolveDiningMergeOperation(
               tx as never,
@@ -217,7 +222,11 @@ export function createMerchantDiningTableMerge(options: {
               )
                 return fail("DINING_TABLE_MERGE_INPUT_INVALID");
               await clean(prior.occurredAt);
-              return result(prior, "AlreadyApplied");
+              // b63 (T14): the merged size was recorded only when a party's size was known.
+              const recorded = await loadDiningPartySizes(tx as never, scope, [
+                prior.targetSessionReference,
+              ]);
+              return result(prior, "AlreadyApplied", recorded.has(prior.targetSessionReference));
             }
             const source = await tables.loadTable(parseDiningReference(command.tableReference));
             const target = await tables.loadTable(
@@ -336,16 +345,20 @@ export function createMerchantDiningTableMerge(options: {
               });
             }
             // Both parties at the other table now (the tea follows, as for any party size).
-            await recordDiningPartySize(tx as never, scope, {
-              diningSessionReference: String(targetSession),
-              operationReference: derivedReference(command.operationReference, "party-size"),
-              expectedVersion: targetSize?.version ?? 0,
-              partySize: sourceGuests + targetGuests,
-              actorReference: actor,
-              observedAt,
-            });
+            // b63 (T14, v15 D62DW): when neither party's size was ever recorded (the Store does
+            // not ask it), none is made up from the default 1 each: the table stays without one.
+            const sizeKnown = parties.has(String(sourceSession)) || targetSize !== undefined;
+            if (sizeKnown)
+              await recordDiningPartySize(tx as never, scope, {
+                diningSessionReference: String(targetSession),
+                operationReference: derivedReference(command.operationReference, "party-size"),
+                expectedVersion: targetSize?.version ?? 0,
+                partySize: sourceGuests + targetGuests,
+                actorReference: actor,
+                observedAt,
+              });
             await clean(observedAt);
-            return result(merged.record, merged.status);
+            return result(merged.record, merged.status, sizeKnown);
           },
         ),
       );

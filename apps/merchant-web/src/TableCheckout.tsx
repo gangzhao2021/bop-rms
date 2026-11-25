@@ -833,16 +833,22 @@ export function TableCheckout({
                               : item.reduction.compedQuantity !== undefined
                                 ? // Batch 60: "1 of 2 comped"; the line stays at its price.
                                   partCompedText(item.reduction.compedQuantity, item.quantity)
-                                : compedText(item.reduction.kind, item.reduction.percent)}{" "}
-                            <span className="table-checkout__comp-amount">
-                              {/* b26 (live25): before tax, like the dish's price beside it, so
-                                  the round's dishes, comps and Tax line add up to its total. */}
-                              −{cad(checkoutCompMinor(item.reduction))}
-                            </span>
+                                : compedText(item.reduction.kind, item.reduction.percent)}
                           </span>
                         ) : null}
                       </span>
-                      <span>{cad(item.subtotalMinor)}</span>
+                      {/* b63 (F36): one amount per dish — what it is charged after its comp,
+                          before tax (b26: so the dishes and the Tax line add up to the round). */}
+                      <span>
+                        {cad(
+                          item.reduction
+                            ? (
+                                BigInt(item.subtotalMinor) -
+                                BigInt(checkoutCompMinor(item.reduction))
+                              ).toString()
+                            : item.subtotalMinor,
+                        )}
+                      </span>
                     </li>
                   ))}
                   {/* b25 (live24): a dish taken off the bill reads as on Orders, with no amount:

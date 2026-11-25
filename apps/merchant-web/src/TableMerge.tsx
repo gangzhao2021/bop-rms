@@ -58,7 +58,8 @@ export interface TableMergeClient {
     readonly diningSessionReference: string;
     readonly tableLabel: string;
     readonly fromTableLabel: string;
-    readonly partySize: number;
+    /** b63 (T14): null when no party's size is known (the Store does not ask it). */
+    readonly partySize: number | null;
   }>;
 }
 
@@ -88,7 +89,7 @@ export function createTableMergeClient(fetcher: typeof fetch = fetch): TableMerg
         typeof payload.diningSessionReference !== "string" ||
         typeof payload.tableLabel !== "string" ||
         typeof payload.fromTableLabel !== "string" ||
-        typeof payload.partySize !== "number"
+        (typeof payload.partySize !== "number" && payload.partySize !== null)
       )
         throw new TableMergeError("Unavailable");
       return {
@@ -227,14 +228,22 @@ export function TableMerge({
       }
       if (failure === null && followed?.status === "Mismatch") failure = "Unavailable";
       if (!chargesPerHead(followed)) failure = null;
-      const announced = t(
-        "Merged into table {table}: {count} guests. Phones from table {from} scan the code on table {table} to keep ordering; table {from} is marked for cleaning.",
-        {
-          table: saidTable(merged.tableLabel),
-          from: merged.fromTableLabel,
-          count: String(merged.partySize),
-        },
-      );
+      // b63 (T14, v15 D62DW): a Store that doesn't ask party size is never told a head count
+      // made of the default 1 per party.
+      const announced =
+        merged.partySize === null
+          ? t(
+              "Merged into table {table}. Phones from table {from} scan the code on table {table} to keep ordering; table {from} is marked for cleaning.",
+              { table: saidTable(merged.tableLabel), from: merged.fromTableLabel },
+            )
+          : t(
+              "Merged into table {table}: {count} guests. Phones from table {from} scan the code on table {table} to keep ordering; table {from} is marked for cleaning.",
+              {
+                table: saidTable(merged.tableLabel),
+                from: merged.fromTableLabel,
+                count: String(merged.partySize),
+              },
+            );
       onMerged(
         failure === null ? announced : announced + wordGap() + teaNotConfirmed(followed, failure),
         chosen.tableReference,

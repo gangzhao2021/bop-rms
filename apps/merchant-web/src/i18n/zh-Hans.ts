@@ -6675,6 +6675,11 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Change to give": "找零",
   // b63 (T15): on the paid record.
   "Change given": "已找零",
+  // b63 (F39): the staff round, before and after sending.
+  "Sending replaces the join code you just handed out; guests already at the table stay joined.":
+    "发送后，刚给出的加入码会失效；已加入的客人不受影响。",
+  "{amount} with tax goes on the table's bill; the table pays at the end.":
+    "含税 {amount} 已记到这桌账上，最后一起付。",
   "How this part is paid": "这份怎么付",
   "Charged on the card machine": "刷卡机实收",
   "Count the cash first. Once recorded, only a manager can refund it.":
@@ -6748,6 +6753,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "We couldn't work out the amount. Check the connection, then try again.":
     "没能算出减多少。请检查网络，然后重试。",
   "Comp {amount}": "免单 {amount}",
+  // b63 (F36): the comp's confirm step, as the cash payment's.
+  "{what} · bill goes down {amount} · {reason}": "{what} · 账单减 {amount} · {reason}",
+  "Comp {dishes}": "免单：{dishes}",
+  "Discount {dishes}": "打折：{dishes}",
+  "{percent}% off {dishes}": "{dishes} 减 {percent}%",
+  Confirm: "确认",
   "price {amount}": "价格 {amount}",
   "Take {amount} off": "减 {amount}",
   Comped: "已免单",
@@ -7480,6 +7491,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "hasn't ordered yet (merge it into this table instead)": "还没点单（请把那桌并到这桌）",
   "Merged into table {table}: {count} guests. Phones from table {from} scan the code on table {table} to keep ordering; table {from} is marked for cleaning.":
     "已并到 {table} 桌：共 {count} 位。{from} 桌的手机请扫 {table} 桌的桌台二维码继续点餐；{from} 桌已标为待清洁。",
+  // b63 (T14): with no party size known, no head count is said.
+  "Merged into table {table}. Phones from table {from} scan the code on table {table} to keep ordering; table {from} is marked for cleaning.":
+    "已并到 {table} 桌。{from} 桌的手机请扫 {table} 桌的桌台二维码继续点餐；{from} 桌已标为待清洁。",
   "Something on one of the bills was paid or split. Those tables can't be merged.":
     "其中一桌的账单已有付款或已分单，不能并桌。",
   "That table hasn't ordered yet. Merge that table into this one instead.":

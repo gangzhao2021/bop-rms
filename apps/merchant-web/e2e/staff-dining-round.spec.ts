@@ -960,15 +960,11 @@ async function pendingPayLaterRound(page: Page, tipsOn: boolean) {
   await expect(
     page.getByRole("heading", { name: "Table T4 round sent to the kitchen" }),
   ).toBeVisible();
-  await expect(page.getByText("Nothing to charge now.", { exact: false })).toBeVisible();
+  // b63 (F39): what went on the bill, with no tip promised (none is chosen until checkout).
   await expect(
-    page.getByText(
-      tipsOn
-        ? "Nothing to charge now. The round is on the table's bill; the table pays once at the end, tip included."
-        : "Nothing to charge now. The round is on the table's bill; the table pays once at the end.",
-      { exact: true },
-    ),
+    page.getByText(/^\$\d+\.\d\d with tax goes on the table's bill; the table pays at the end\.$/u),
   ).toBeVisible();
+  await expect(page.getByText(/tip included/u)).toHaveCount(0);
   if (!tipsOn) await expect(page.getByText(/\btips?\b/iu)).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Paid on card machine/u })).toHaveCount(0);
   expect(rounds.at(-1)).toMatchObject({ tip: { kind: "None" } });
@@ -1977,7 +1973,7 @@ for (const zh of [false, true])
       name: zh ? "客人手机上还没送出的菜" : "From the guests' phones (not sent yet)",
     });
     await expect(guests.getByRole("listitem")).toHaveCount(1);
-    await page.getByRole("button", { name: zh ? "添加 Gyoza" : "Add Gyoza" }).click();
+    await page.getByRole("button", { name: zh ? /^添加\s?Gyoza$/u : "Add Gyoza" }).click();
     await page.getByRole("button", { name: zh ? "发送订单" : "Send order" }).click();
     await expect(
       page.getByRole("heading", {
@@ -2019,6 +2015,89 @@ for (const zh of [false, true])
       ).toBe(false);
       await page.screenshot({
         path: `test-results/b28-pay-first-round-guest-dishes-${zh ? "zh-Hans" : "en"}-${width}.png`,
+        fullPage: true,
+      });
+    }
+  });
+
+// b63 (F39, v15 D62DV): a permanent note about join codes sat above Send; after sending, the
+// table was promised a tip no one had chosen, "Another order" was a white bordered button and
+// Back to Tables and Open Orders were black underlined links; before sending there was no way
+// back to the table.
+for (const language of ["en", "zh-Hans"] as const)
+  test(`@production b63: a table's staff round has a way back, no tip promised and one primary after sending (${language})`, async ({
+    page,
+  }) => {
+    const zh = language === "zh-Hans";
+    if (zh)
+      await page.addInitScript(() => {
+        window.localStorage.setItem("bop.merchant.language", "zh-Hans");
+      });
+    await signIn(page, { ...table, paymentTiming: "PayLater" });
+    await page.route("**/merchant/counter/menu**", (route) =>
+      route.fulfill({ headers, json: menu }),
+    );
+    await page.route("**/merchant/dining/staff-rounds", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          status: "Placed",
+          orderReference: id(20),
+          orderBatchReference: id(21),
+          orderNumber: "7",
+          orderVersion: 5,
+          tableLabel: "T4",
+          orderMinor: "2119",
+          tipMinor: "0",
+          totalMinor: "2119",
+          payBy: null,
+          payLater: true,
+          recordedAfterOutage: false,
+        },
+      }),
+    );
+    await page.goto("/operations/order-entry?table=" + tableReference);
+    const main = page.locator("main");
+    const back = main.locator(".workspace-page__back a");
+    await expect(back).toHaveText(/^‹ /u);
+    await expect(back).toContainText("T4");
+    await expect(main).not.toContainText(zh ? "加入码" : "join code");
+    await page.getByRole("button", { name: zh ? /^添加\s?Gyoza$/u : "Add Gyoza" }).click();
+    await page.getByRole("button", { name: zh ? "发送订单" : "Send order" }).click();
+    await expect(main.getByRole("status").filter({ hasText: "$21.19" })).toHaveText(
+      zh
+        ? "含税 $21.19 已记到这桌账上，最后一起付。"
+        : "$21.19 with tax goes on the table's bill; the table pays at the end.",
+    );
+    await expect(main).not.toContainText(zh ? "含小费" : "tip included");
+    const backToTables = main.getByRole("link", { name: zh ? "返回桌台" : "Back to Tables" });
+    const another = main.getByRole("button", {
+      name: zh ? "这张桌台的另一笔订单" : "Another order for this table",
+    });
+    const orders = main.getByRole("link", { name: zh ? "打开订单页" : "Open Orders" });
+    for (const width of [1440, 1024, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      const looks = await Promise.all(
+        [backToTables, another, orders].map((step) =>
+          step.evaluate((element) => {
+            const style = getComputedStyle(element);
+            return [
+              style.backgroundColor,
+              style.color,
+              style.borderTopWidth,
+              style.textDecorationLine,
+              element.getBoundingClientRect().height >= 44,
+            ];
+          }),
+        ),
+      );
+      expect(looks).toEqual([
+        ["rgb(31, 99, 224)", "rgb(255, 255, 255)", "0px", "none", true],
+        ["rgba(0, 0, 0, 0)", "rgb(31, 99, 224)", "0px", "none", true],
+        ["rgba(0, 0, 0, 0)", "rgb(31, 99, 224)", "0px", "none", true],
+      ]);
+      await page.screenshot({
+        path: `${process.env.B63_SHOTS ?? "test-results/b63-shots"}/staff-round-sent-${language}-${width}.png`,
         fullPage: true,
       });
     }

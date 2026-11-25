@@ -678,21 +678,6 @@ export function TableSessionClose({
         </div>
       ) : openRounds === undefined ? (
         guestsLeft
-      ) : orderReference === null ? (
-        // b63 (F34, T4): a table seated with nothing ordered — taking the order is the step due,
-        // so closing it is accent words, said as when it is done: the guests left.
-        <button
-          type="button"
-          className="table-panel__text-step"
-          disabled={submitting || (outcome !== "Unknown" && locked)}
-          onClick={() => void close()}
-        >
-          {submitting
-            ? t("Closing the table…")
-            : outcome === "Unknown"
-              ? t("Try closing again")
-              : t("Guests left — close table")}
-        </button>
       ) : (
         <>
           <p>
@@ -706,7 +691,9 @@ export function TableSessionClose({
           </p>
           <button
             type="button"
-            className="table-panel__primary"
+            // b63 (F34, T4): a table seated with nothing ordered — taking the order is the step
+            // due, so its close is accent words, said as when it is done: the guests left.
+            className={orderReference === null ? "table-panel__text-step" : "table-panel__primary"}
             disabled={submitting || (outcome !== "Unknown" && locked)}
             onClick={() => void close()}
           >
@@ -714,7 +701,9 @@ export function TableSessionClose({
               ? t("Closing the table…")
               : outcome === "Unknown"
                 ? t("Try closing again")
-                : t("Close table {stableLabel}", { stableLabel: saidTable(table.stableLabel) })}
+                : orderReference === null
+                  ? t("Guests left — close table")
+                  : t("Close table {stableLabel}", { stableLabel: saidTable(table.stableLabel) })}
           </button>
         </>
       )}

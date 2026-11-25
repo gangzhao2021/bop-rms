@@ -218,6 +218,8 @@ it("comps 1 of 2 Beef noodles: the panel asks how many, and the button says one 
   );
   await reason(container, "Wrong dish served");
   await click(buttonNamed(container, "Comp $14.13"));
+  // b63 (F36): the comp is recorded on Confirm, as the cash payment.
+  await click(buttonNamed(container, "Confirm"));
   await settle(10);
   expect(commands).toHaveLength(1);
   expect(commands[0]).toMatchObject({
@@ -323,6 +325,8 @@ it("says plainly when fewer bowls are left than were chosen", async () => {
   await pause();
   await reason(container, "Wrong dish served");
   await click(buttonNamed(container, "Comp $14.13"));
+  // b63 (F36): the comp is recorded on Confirm, as the cash payment.
+  await click(buttonNamed(container, "Confirm"));
   await settle(10);
   expect(container.querySelector('[role="alert"]')?.textContent).toBe(
     "Fewer of these dishes are left to comp than you chose. Refresh the table, then choose again.",

@@ -15,7 +15,7 @@ import { NoAccessNotice } from "./NoAccessNotice.js";
 import { StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStaffSessionLive } from "./staff-session-reads.js";
-import { Link, useSearchParams } from "react-router";
+import { Link, useLocation, useSearchParams } from "react-router";
 import { createDiningSessionClient } from "./dining-session-client.js";
 import {
   createTableCartClient,
@@ -922,6 +922,10 @@ export function StaffOrderEntryPage({
       : null;
   const tableMode = requestedTable !== null;
   const [tableLabel, setTableLabel] = useState<string | null>(null);
+  // b63 (F39): Tables opened this page while a join code it had handed out was on screen.
+  const location = useLocation();
+  const joinCodeShown =
+    (location.state as { readonly joinCodeShown?: unknown } | null)?.joinCodeShown === true;
   // DEC-DINE-IN-PAY-LATER: the table pays once at the end — no tip and no charge per round.
   const [tablePaysLater, setTablePaysLater] = useState(false);
   const [menu, setMenu] = useState<
@@ -2113,6 +2117,14 @@ export function StaffOrderEntryPage({
   return (
     <WorkspacePage
       title={pageTitle}
+      back={
+        // b63 (F39): the way back to the table, before and after sending.
+        tableMode && tableReference !== null && tableLabel !== null ? (
+          <Link to="/operations/dining" state={tablesOpenTableState(tableReference)}>
+            ‹ {saidTable(tableLabel)}
+          </Link>
+        ) : undefined
+      }
       meta={
         tableMode
           ? tableHold !== null
@@ -2867,10 +2879,11 @@ export function StaffOrderEntryPage({
                 </div>
               ) : null}
             </fieldset>
-            {tableMode && ordering && tableHold === null ? (
+            {/* b63 (F39): only when a join code was just handed out at the table, in one line. */}
+            {tableMode && ordering && tableHold === null && joinCodeShown ? (
               <p className="field-hint">
                 {t(
-                  "Sending gives this order its own join code, so a join code you handed out that hasn't been used yet stops working. Guests already at the table stay joined.",
+                  "Sending replaces the join code you just handed out; guests already at the table stay joined.",
                 )}
               </p>
             ) : null}
@@ -3071,14 +3084,10 @@ export function StaffOrderEntryPage({
               </div>
             </dl>
             <p role="status">
-              {/* b39 review: a tip is promised only where the Store takes tips. */}
-              {tips?.enabled === true
-                ? t(
-                    "Nothing to charge now. The round is on the table's bill; the table pays once at the end, tip included.",
-                  )
-                : t(
-                    "Nothing to charge now. The round is on the table's bill; the table pays once at the end.",
-                  )}
+              {/* b63 (F39): no tip is chosen yet, so none is promised; the amount says what went on. */}
+              {t("{amount} with tax goes on the table's bill; the table pays at the end.", {
+                amount: cad(placed.orderMinor),
+              })}
             </p>
             {paper ? (
               <p role="note">
@@ -3087,12 +3096,21 @@ export function StaffOrderEntryPage({
                 )}
               </p>
             ) : null}
-            <div className="card-actions">
-              <button type="button" onClick={startOver}>
+            {/* b63 (F39): back to the floor is the step due; the rest are accent words. */}
+            <div className="card-actions counter-order__sent-actions">
+              <Link
+                className="counter-order__sent-primary"
+                to="/operations/dining"
+                state={tableReference === null ? undefined : tablesOpenTableState(tableReference)}
+              >
+                {t("Back to Tables")}
+              </Link>
+              <button type="button" className="counter-order__sent-step" onClick={startOver}>
                 {t("Another order for this table")}
               </button>
-              <Link to="/operations/dining">{t("Back to Tables")}</Link>
-              <Link to="/operations/orders">{t("Open Orders")}</Link>
+              <Link className="counter-order__sent-step" to="/operations/orders">
+                {t("Open Orders")}
+              </Link>
             </div>
           </section>
         ) : placed !== null && !ordering ? (

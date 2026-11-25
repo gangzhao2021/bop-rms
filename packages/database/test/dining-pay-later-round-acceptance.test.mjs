@@ -2529,9 +2529,12 @@ async function journey(journeyEnding) {
             await rows(
               "SELECT operation_id::text op,source_session_id::text src,target_session_id::text dst,merged_party_size::int party FROM rms_dining.dining_session_merge_operation",
             ),
-            [{ op: winner, src: mSession, dst: sessionReference, party: merged.partySize }],
+            [{ op: winner, src: mSession, dst: sessionReference, party: (partyBefore ?? 1) + 1 }],
           );
-          assert.equal(merged.partySize, (partyBefore ?? 1) + 1);
+          // b63 (T14, v15 D62DW): neither party's size recorded (the Store does not ask it): no
+          // head count is said or recorded; with one known, both together as before.
+          assert.equal(merged.partySize, partyBefore === undefined ? null : partyBefore + 1);
+          assert.equal(again.partySize, merged.partySize);
           assert.deepEqual(
             await rows(
               "SELECT count(*)::int n FROM platform_audit.audit_record WHERE action_code='DINING_SESSION_MERGE_TABLE' AND target_id=$1",
@@ -2560,7 +2563,7 @@ async function journey(journeyEnding) {
                 [sessionReference],
               )
             )[0],
-            { party_size: merged.partySize },
+            merged.partySize === null ? undefined : { party_size: merged.partySize },
           );
           // Its Order is on this table's bill (Ordering and Payment each record their side).
           assert.deepEqual(

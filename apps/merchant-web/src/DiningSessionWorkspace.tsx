@@ -2348,6 +2348,8 @@ function TablePanel({
         <Link
           className="table-panel__primary"
           to={`/operations/order-entry?table=${encodeURIComponent(table.tableReference)}`}
+          // b63 (F39): the join code just handed out here stops working once a round is sent.
+          state={code ? { joinCodeShown: true } : undefined}
         >
           {t("Take order for table {stableLabel}", {
             stableLabel: saidTable(table.stableLabel),
@@ -2491,6 +2493,8 @@ function TablePanel({
         <Link
           className="table-panel__text-step"
           to={`/operations/order-entry?table=${encodeURIComponent(table.tableReference)}`}
+          // b63 (F39): the join code just handed out here stops working once a round is sent.
+          state={code ? { joinCodeShown: true } : undefined}
         >
           {t("Take order for table {stableLabel}", {
             stableLabel: saidTable(table.stableLabel),

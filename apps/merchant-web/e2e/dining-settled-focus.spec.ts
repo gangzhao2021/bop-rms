@@ -251,9 +251,15 @@ async function tableWith(
     await group.getByRole("checkbox", { name: /Synthetic boiled fish/u }).check();
     await group.getByRole("combobox").selectOption({ index: 1 });
   }
-  const confirm = group.getByRole("button", {
+  const first = group.getByRole("button", {
     name: comp ? (zh ? "免单 $11.30" : "Comp $11.30") : zh ? "删掉 $11.30" : "Take off $11.30",
   });
+  await expect(first).toBeEnabled();
+  // b63 (F36): a comp is recorded on its Confirm step, as the cash payment.
+  if (comp) await first.click();
+  const confirm = comp
+    ? group.getByRole("button", { name: zh ? "确认" : "Confirm", exact: true })
+    : first;
   await expect(confirm).toBeEnabled();
   return {
     opener,

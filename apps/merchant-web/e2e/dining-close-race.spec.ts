@@ -302,7 +302,8 @@ for (const race of ["PaidTable", "EmptyTable"] as const)
         await page.goto("/operations/dining");
         await page.getByRole("button", { name: zh ? `选择 ${label}` : `Select ${label}` }).click();
         const close = page.getByRole("button", {
-          name: zh ? /^关闭 TL45/u : /^Close TL45/u,
+          // b63 (F34): an empty table's close reads "Guests left — close table".
+          name: zh ? /^关闭 TL45|^客人走了，关台$/u : /^Close TL45|^Guests left — close table$/u,
         });
         if (race === "PaidTable" && !zh)
           await expect(row(page)).toContainText("Paid · close when the guests leave");
@@ -348,7 +349,8 @@ for (const language of ["en", "zh-Hans"] as const)
     await page.getByRole("button", { name: zh ? `选择 ${label}` : `Select ${label}` }).click();
     await page
       .getByRole("button", {
-        name: zh ? /^关闭 TL45/u : /^Close TL45/u,
+        // b63 (F34): an empty table's close reads "Guests left — close table".
+        name: zh ? /^关闭 TL45|^客人走了，关台$/u : /^Close TL45|^Guests left — close table$/u,
       })
       .click();
     const alert = page
@@ -369,7 +371,9 @@ for (const language of ["en", "zh-Hans"] as const)
     await expect(page.getByText(zh ? /付款或退款/u : /payment or refund/u)).toHaveCount(0);
     // The table is still open, so Close can be pressed again once staff have looked.
     await expect(
-      page.getByRole("button", { name: zh ? /^关闭 TL45/u : /^Close TL45/u }),
+      page.getByRole("button", {
+        name: zh ? /^关闭 TL45|^客人走了，关台$/u : /^Close TL45|^Guests left — close table$/u,
+      }),
     ).toBeEnabled();
     const box = await alert.evaluate((node) => node.getBoundingClientRect().toJSON() as DOMRect);
     expect(box.left).toBeGreaterThanOrEqual(16);
@@ -408,7 +412,9 @@ for (const outcome of ["lost", "won"] as const)
         await page.setViewportSize({ width, height });
         await page.goto("/operations/dining");
         await page.getByRole("button", { name: zh ? `选择 ${label}` : `Select ${label}` }).click();
-        const close = page.getByRole("button", { name: zh ? /^关闭 TL45/u : /^Close TL45/u });
+        const close = page.getByRole("button", {
+          name: zh ? /^关闭 TL45|^客人走了，关台$/u : /^Close TL45|^Guests left — close table$/u,
+        });
         // Staff are at the table's panel, with its Close step in view.
         await close.scrollIntoViewIfNeeded();
         await expect(close).toBeInViewport();
@@ -486,7 +492,9 @@ for (const outcome of ["lost", "won"] as const)
         const select = page.getByRole("button", { name: zh ? `选择 ${label}` : `Select ${label}` });
         await select.scrollIntoViewIfNeeded();
         await select.click();
-        const close = page.getByRole("button", { name: zh ? /^关闭 TL45/u : /^Close TL45/u });
+        const close = page.getByRole("button", {
+          name: zh ? /^关闭 TL45|^客人走了，关台$/u : /^Close TL45|^Guests left — close table$/u,
+        });
         await close.scrollIntoViewIfNeeded();
         await expect(close).toBeInViewport();
         // Staff have scrolled well down the floor: the top of the list is out of view.
