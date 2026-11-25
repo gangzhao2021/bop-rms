@@ -379,13 +379,25 @@ for (const width of [390, 1024, 1440])
           expect((boxes.at(-1)?.right ?? 0) - (boxes[0]?.left ?? 0)).toBeLessThanOrEqual(
             width - 32 - 40,
           );
-        await expect(pay.locator(".dining-session__tip-basis")).toHaveText(
-          zh ? "按税前 $12.50 计算" : "Based on $12.50 before tax",
-        );
+        // Batch 63 review: what a percentage is of is said once a part is chosen (that part's own
+        // amount before tax), never the rest of the bill before then.
+        await expect(pay.locator(".dining-session__tip-basis")).toHaveCount(0);
+        // Batch 63 review (Figma 51:223): the parts are a tight list — 44 px rows, 4 px apart.
+        const partBoxes = await parts
+          .locator("label")
+          .evaluateAll((labels) => labels.map((label) => label.getBoundingClientRect().toJSON()));
+        for (const [index, box] of partBoxes.entries()) {
+          expect(box.height).toBeGreaterThanOrEqual(44);
+          if (index > 0)
+            expect(box.top - (partBoxes[index - 1]?.bottom ?? 0)).toBeLessThanOrEqual(4.5);
+        }
         await page.screenshot({ path: tag("pay-after-part1"), fullPage: true });
 
         // The guest chooses part 2, then 15 %: the frame's 已选 and outline, and You pay.
         await part2.click();
+        await expect(pay.locator(".dining-session__tip-basis")).toHaveText(
+          zh ? "按税前 $12.50 计算" : "Based on $12.50 before tax",
+        );
         await expect(part2).toHaveAttribute("data-state", "Chosen");
         expect(await part2.evaluate((element) => getComputedStyle(element).color)).toBe(accent);
         await expect(part2).toContainText(zh ? "已选" : "chosen");

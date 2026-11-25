@@ -582,6 +582,9 @@
    pay has an open ring (choose it). */
 .customer-page .dining-session__parts label {
   position: relative;
+  /* Batch 63 review (Figma 51:223): a tight list, 44 px rows 4 px apart — never the shell's
+     space under a form label. */
+  margin-bottom: 0;
   cursor: pointer;
   color: var(--bop-color-text-default);
 }

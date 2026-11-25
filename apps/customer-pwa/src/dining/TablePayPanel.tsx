@@ -1010,9 +1010,13 @@ export function TablePayPanel({
                   </label>
                 ))}
               </div>
-              <p className="dining-session__tip-basis">
-                {t("Based on {amount} before tax", { amount: money(subtotal) })}
-              </p>
+              {/* Batch 63 review: what a percentage is of, once it is known — the chosen part's
+                  (or dishes') own amount before tax, never the rest of the bill before then. */}
+              {(byDish ? selection === null : view.split !== null && chosen === null) ? null : (
+                <p className="dining-session__tip-basis">
+                  {t("Based on {amount} before tax", { amount: money(subtotal) })}
+                </p>
+              )}
               {chosenTip === OTHER ? (
                 <div className="dining-session__tip-amount">
                   <label htmlFor="table-tip-amount">{t("Tip ({symbol})", { symbol: "$" })}</label>
