@@ -225,7 +225,7 @@ for (const lang of ["en", "zh-Hans"] as const)
     await open.click();
     // The order is named in the page's language (it read "取消 order 2 未付款…" in Chinese).
     const dialog = page.getByRole("dialog", {
-      name: zh ? "订单 2：取消未付款的第 1 轮？" : "Cancel unpaid round 1 of order 2?",
+      name: zh ? "2 号单：取消未付款的第 1 轮？" : "Cancel unpaid round 1 of order 2?",
     });
     await expect(dialog).toBeVisible();
     await expect(dialog).toContainText(

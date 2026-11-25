@@ -214,13 +214,13 @@ for (const language of ["en", "zh-Hans"] as const)
     // Batch 63 (F19): how it was paid ends the grey line; the money column holds the amount.
     await expect(row.locator(".order-workbench-amount")).toHaveText("—");
     await expect(row.locator(".order-row__paid")).toHaveText(
-      zh ? "纸单已付款 · 这笔销售记在订单 85 上" : "Paid on paper · its sale is on order 85",
+      zh ? "纸单已付款 · 这笔销售记在 85 号单上" : "Paid on paper · its sale is on order 85",
     );
     await expect(row).not.toContainText(zh ? "未记录付款" : "No payment recorded");
     await openOrder(page, "73");
     const record = orderPanel(page).getByRole("region", { name: zh ? "记录" : "Record" });
     await expect(record).toContainText(
-      zh ? "已关闭 · 已重新录入为订单 85" : "Closed · entered again as order 85",
+      zh ? "已关闭 · 已重新录入为 85 号单" : "Closed · entered again as order 85",
     );
     await expect(record).not.toContainText(zh ? "已取消" : "Cancelled");
     await noSideScroll(page, `b12-paper-reentered-${language}`);

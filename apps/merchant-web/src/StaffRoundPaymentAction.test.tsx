@@ -120,8 +120,8 @@ it("says what the kitchen starts in the staff member's language, for an order or
       "The kitchen starts this round once it is recorded.",
     );
     setLanguageForTest("zh-Hans");
-    expect(chargeFirstText("1130", "order")).toContain("记录后后厨才开始制作这一单。");
-    expect(chargeFirstText("1130", "round")).toContain("记录后后厨才开始制作这一轮。");
+    expect(chargeFirstText("1130", "order")).toContain("记录后厨房才开始制作这一单。");
+    expect(chargeFirstText("1130", "round")).toContain("记录后厨房才开始制作这一轮。");
     expect(chargeFirstText("1130", "order")).not.toMatch(/order|round|\{subject\}/u);
   } finally {
     setLanguageForTest("en");

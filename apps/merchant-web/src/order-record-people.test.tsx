@@ -206,7 +206,7 @@ describe("M61: the order record says who did what", () => {
     expect(orderRecordRows(parsed, "Pickup", tz, "2026-11-05")[0]?.label).toBe("Cancelled");
     setLanguageForTest("zh-Hans");
     expect(orderRecordRows(parsed, "Pickup", tz, "2026-11-05", false, "85")[0]?.label).toBe(
-      "已关闭 · 已重新录入为订单 85",
+      "已关闭 · 已重新录入为 85 号单",
     );
   });
 });

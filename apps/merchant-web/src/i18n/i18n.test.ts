@@ -168,7 +168,8 @@ it("chooses Chinese for a device that prefers Chinese, and writes Chinese while 
   expect(displayLocale()).toBe("en-US");
   setLanguageForTest("zh-Hans");
   expect(t("Orders")).toBe("订单");
-  expect(t("Order {orderNumber}", { orderNumber: "12" })).toBe("订单 12");
+  // Batch 64 (v15 b63 live): one form for an order number, as the kitchen says it.
+  expect(t("Order {orderNumber}", { orderNumber: "12" })).toBe("12 号单");
   expect(countOf(3, "order")).toBe("3 笔订单");
   expect(listSeparator()).toBe("、");
   expect(displayLocale()).toBe("zh-CN");

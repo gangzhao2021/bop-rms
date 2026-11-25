@@ -6,7 +6,7 @@ import { at, headers, navigation, store } from "./kitchen-tm2-fixture";
 /**
  * WP-2423 batch 54 (v15 batch 53 live check, kitchen-first-tap-earlier-day-slots): Test Merchant
  * 2's kitchen display at 1024 wide in zh-Hans. The browser could not hold the screen on, so the
- * header said so. The top bar did not fit: 后厨 / 标记商品售罄 moved to a second row and the
+ * header said so. The top bar did not fit: 厨房 / 标记商品售罄 moved to a second row and the
  * "English" switch sat alone on a third row. Owner rule: the language switch is top-right.
  *
  * At 1024 and 1440 the Store's name, the display's own links, Hand over and the language switch
@@ -105,7 +105,7 @@ for (const awake of ["Unsupported", "Held"] as const)
       const nav = page.getByRole("navigation", { name: zh ? "主导航" : "Primary" });
       const title = header.getByRole("heading", { level: 1 });
       const links = [
-        nav.getByRole("link", { name: zh ? "后厨" : "Kitchen", exact: true }),
+        nav.getByRole("link", { name: zh ? "厨房" : "Kitchen", exact: true }),
         nav.getByRole("link", { name: zh ? "标记商品售罄" : "Mark an item sold out" }),
       ];
       const handover = header.getByRole("button", {
@@ -235,7 +235,7 @@ for (const state of ["Loading", "Unavailable", "Kitchen only"] as const)
         ).toBeVisible();
       const title = header.getByRole("heading", { level: 1 });
       const label = header.locator(":scope > p");
-      await expect(label).toHaveText(zh ? "后厨屏" : "Kitchen display");
+      await expect(label).toHaveText(zh ? "厨房屏" : "Kitchen display");
       const switcher = header.getByRole("button", {
         name: zh ? "Switch to English" : "切换到中文",
       });

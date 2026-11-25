@@ -57,7 +57,7 @@ async function chooseLanguage(page: Page, language: "en" | "zh-Hans") {
 async function chooseOnPhone(page: Page, zh: boolean, value: string) {
   await atTop(page, 390, 844);
   await page.locator(".kitchen-filter-toggle").click();
-  const sheet = page.getByRole("dialog", { name: zh ? "筛选后厨工作" : "Filter Kitchen work" });
+  const sheet = page.getByRole("dialog", { name: zh ? "筛选厨房工作" : "Filter Kitchen work" });
   await sheet.getByLabel(zh ? "工作状态" : "Work state").selectOption(value);
   await sheet.getByRole("button", { name: zh ? "完成" : "Done" }).click();
 }
@@ -86,7 +86,7 @@ test("@production WP-2423 batch 45: a work state chosen on the phone stays marke
   for (const language of ["en", "zh-Hans"] as const) {
     if (language === "zh-Hans") await chooseLanguage(page, language);
     const zh = language === "zh-Hans";
-    const tabs = page.getByRole("group", { name: zh ? "显示后厨工作" : "Show kitchen work" });
+    const tabs = page.getByRole("group", { name: zh ? "显示厨房工作" : "Show kitchen work" });
     const marked = tabs.locator('button[aria-pressed="true"]');
     for (const [value, en, cn] of states) {
       await chooseOnPhone(page, zh, value);

@@ -880,10 +880,10 @@ describe("v15 finding: the store system card follows the server's answer, not th
       );
       // Under a minute the round "just paid": 刚付款, never 刚刚已付款.
       expect(tableRoundWaitText(1, paidAt, Date.parse(paidAt) + 20_000)).toBe(
-        "第 1 轮刚付款 · 请在订单页接单以发送到后厨",
+        "第 1 轮刚付款 · 请在订单页接单以发送到厨房",
       );
       expect(tableRoundWaitText(1, paidAt, Date.parse(paidAt) + 4 * 60_000)).toBe(
-        "第 1 轮 4 分钟前已付款 · 请在订单页接单以发送到后厨",
+        "第 1 轮 4 分钟前已付款 · 请在订单页接单以发送到厨房",
       );
     } finally {
       setLanguageForTest("en");

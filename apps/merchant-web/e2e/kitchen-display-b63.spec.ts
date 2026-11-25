@@ -73,7 +73,7 @@ for (const language of ["en", "zh-Hans"] as const)
       // The title at 28/600 and no divider under the header.
       expect(
         await heading
-          .getByRole("heading", { name: zh ? "后厨" : "Kitchen", exact: true })
+          .getByRole("heading", { name: zh ? "厨房" : "Kitchen", exact: true })
           .evaluate((node) => [getComputedStyle(node).fontSize, getComputedStyle(node).fontWeight]),
         `${where}: title 28/600`,
       ).toEqual(["28px", "600"]);

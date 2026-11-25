@@ -74,7 +74,7 @@ function filtersButton(page: Page) {
 
 async function chooseWorkState(page: Page, zh: boolean, value: string) {
   await filtersButton(page).click();
-  const sheet = page.getByRole("dialog", { name: zh ? "筛选后厨工作" : "Filter Kitchen work" });
+  const sheet = page.getByRole("dialog", { name: zh ? "筛选厨房工作" : "Filter Kitchen work" });
   await sheet.getByLabel(zh ? "工作状态" : "Work state").selectOption(value);
   await sheet.getByRole("button", { name: zh ? "完成" : "Done" }).click();
 }
@@ -197,7 +197,7 @@ for (const surface of ["display", "back office"] as const)
       }
       // With an order searched for as well, the button says filters are applied.
       await button.click();
-      const sheet = page.getByRole("dialog", { name: zh ? "筛选后厨工作" : "Filter Kitchen work" });
+      const sheet = page.getByRole("dialog", { name: zh ? "筛选厨房工作" : "Filter Kitchen work" });
       await sheet.getByLabel(zh ? "单号或桌台" : "Order number or table").fill("3");
       await sheet.getByLabel(zh ? "单号或桌台" : "Order number or table").press("Enter");
       await expect(button).toHaveText(zh ? "筛选 · 已应用" : "Filters · Applied");
@@ -266,7 +266,7 @@ test("@production WP-2423 batch 44: To make with dishes on the stove says they a
     if (language === "zh-Hans") await chooseLanguage(page, language);
     const zh = language === "zh-Hans";
     await page.setViewportSize({ width: 1440, height: 900 });
-    const tabs = page.getByRole("group", { name: zh ? "显示后厨工作" : "Show kitchen work" });
+    const tabs = page.getByRole("group", { name: zh ? "显示厨房工作" : "Show kitchen work" });
     await tabs.getByRole("button", { name: zh ? /^待做/u : /^To make/u }).click();
     for (const [width, height] of widths) {
       await atTop(page, width, height);

@@ -162,14 +162,14 @@ for (const language of ["en", "zh-Hans"] as const)
       const zh = language === "zh-Hans";
       const chase = page.getByRole("button", {
         name: zh
-          ? "向后厨催 Dan dan noodles (TEST)"
+          ? "向厨房催 Dan dan noodles (TEST)"
           : "Chase Dan dan noodles (TEST) with the kitchen",
       });
       await chase.click();
       await expect(
         page.getByText(
           zh
-            ? "已通知后厨加快做 Dan dan noodles (TEST)。"
+            ? "已通知厨房加快做 Dan dan noodles (TEST)。"
             : "The kitchen was told to hurry Dan dan noodles (TEST).",
         ),
       ).toBeVisible();

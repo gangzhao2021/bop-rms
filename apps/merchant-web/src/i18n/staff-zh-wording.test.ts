@@ -62,3 +62,33 @@ it("Tables, Home and the kitchen board use it, as Orders does", () => {
   expect(t("· {count} more from earlier days", { count: 2 })).toBe("· 另有 2 张来自较早营业日");
   expect(t(" · {count} from earlier days", { count: 46 })).toBe(" · 另有 46 单来自较早营业日");
 });
+
+/**
+ * Batch 64 (v15 batch 63 live, TM2): an order number was said three ways ("自取 · 35 号单" on the
+ * kitchen ticket, "订单 36" on a table ticket, "订单 35 已付款" at the counter), and the kitchen two
+ * ("记录后后厨才开始制作这一单" beside "记录后厨房才开始做这单"). One form each: "35 号单", 厨房.
+ */
+it("an order number reads one way on every staff screen: N 号单", () => {
+  const numbered = /订单\s*\{(?!order\})\w+\}/u;
+  expect(entries.filter(([, zh]) => numbered.test(zh)).map(([en]) => en)).toEqual([]);
+  setLanguageForTest("zh-Hans");
+  expect(t("Order {orderNumber}", { orderNumber: "36" })).toBe("36 号单");
+  expect(t("Order {orderNumber} paid", { orderNumber: "35" })).toBe("35 号单已付款");
+  expect(t("Order {orderNumber} · {amount}", { orderNumber: "35", amount: "$17.80" })).toBe(
+    "35 号单 · $17.80",
+  );
+  expect(t("Pickup · Order {orderNumber}", { orderNumber: "35" })).toBe("自取 · 35 号单");
+});
+
+it("the kitchen has one name on every staff screen: 厨房", () => {
+  // 后厨房 only where a sentence's 后 ("after") meets 厨房.
+  expect(entries.filter(([, zh]) => /后厨(?!房)/u.test(zh)).map(([en]) => en)).toEqual([]);
+  setLanguageForTest("zh-Hans");
+  expect(t("Kitchen")).toBe("厨房");
+  expect(
+    t(
+      "Charge {amount} on the card machine first, then record it here. The kitchen starts this order once it is recorded.",
+      { amount: "$17.80" },
+    ),
+  ).toBe("请先在刷卡机上收款 $17.80，再在此记录。记录后厨房才开始制作这一单。");
+});

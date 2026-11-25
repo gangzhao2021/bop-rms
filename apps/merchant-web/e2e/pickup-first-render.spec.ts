@@ -36,11 +36,11 @@ const words = {
     heading: "自取",
     refresh: "刷新",
     loading: "正在加载取餐…",
-    order: "订单 42",
+    order: "42 号单",
     mark: "标记未取餐",
     checked: "我已检查取餐架，没有人取走这笔订单",
     close: "作为未取餐关闭",
-    closed: "订单 42 已作为未取餐关闭。",
+    closed: "42 号单已作为未取餐关闭。",
   },
 } as const;
 /** One paid pickup order the kitchen just finished (Beef noodles), as at Test Merchant 2. */

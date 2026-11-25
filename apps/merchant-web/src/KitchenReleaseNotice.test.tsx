@@ -29,12 +29,12 @@ it("says a paid round is being sent, then that it has not reached the kitchen, i
     renderToStaticMarkup(
       <KitchenReleaseNotice release={{ state: "NotInKitchen", acceptedAt }} now={at(61)} />,
     ),
-  ).toContain("还没进后厨");
+  ).toContain("还没进厨房");
   expect(
     renderToStaticMarkup(
       <KitchenReleaseNotice release={{ state: "Sending", acceptedAt }} now={at(1)} />,
     ),
-  ).toContain("正在发送到后厨…");
+  ).toContain("正在发送到厨房…");
   expect(renderToStaticMarkup(<AutomaticRefundLateNotice late />)).toContain("自动退款没有完成");
 });
 it("tells staff to refuse and refund a pickup whose automatic refund did not go through", () => {

@@ -56,14 +56,14 @@ async function chooseLanguage(page: Page, language: "en" | "zh-Hans") {
 
 async function chooseWorkState(page: Page, zh: boolean, value: string) {
   await page.getByRole("button", { name: zh ? /^筛选/u : /^Filters/u }).click();
-  const sheet = page.getByRole("dialog", { name: zh ? "筛选后厨工作" : "Filter Kitchen work" });
+  const sheet = page.getByRole("dialog", { name: zh ? "筛选厨房工作" : "Filter Kitchen work" });
   await sheet.getByLabel(zh ? "工作状态" : "Work state").selectOption(value);
   await sheet.getByRole("button", { name: zh ? "完成" : "Done" }).click();
 }
 
 async function workStateChosen(page: Page, zh: boolean): Promise<string> {
   await page.getByRole("button", { name: zh ? /^筛选/u : /^Filters/u }).click();
-  const sheet = page.getByRole("dialog", { name: zh ? "筛选后厨工作" : "Filter Kitchen work" });
+  const sheet = page.getByRole("dialog", { name: zh ? "筛选厨房工作" : "Filter Kitchen work" });
   const value = await sheet.getByLabel(zh ? "工作状态" : "Work state").inputValue();
   await sheet.getByRole("button", { name: zh ? "完成" : "Done" }).click();
   return value;
@@ -216,7 +216,7 @@ test("@production WP-2423 batch 43: To make with only work being made says Nothi
     if (language === "zh-Hans") await chooseLanguage(page, language);
     const zh = language === "zh-Hans";
     await page.setViewportSize({ width: 1440, height: 900 });
-    const tabs = page.getByRole("group", { name: zh ? "显示后厨工作" : "Show kitchen work" });
+    const tabs = page.getByRole("group", { name: zh ? "显示厨房工作" : "Show kitchen work" });
     await tabs.getByRole("button", { name: zh ? /^待做/u : /^To make/u }).click();
     await expect(empty.getByRole("heading")).toHaveText(zh ? "没有待做的工作" : "Nothing to make");
     await expect(empty).toContainText(zh ? "目前没有需要制作的。" : "Nothing to make right now.");
@@ -246,7 +246,7 @@ test("@production WP-2423 batch 43: switching language keeps the back office's t
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.getByRole("combobox", { name: "Kitchen section" }).selectOption("饮品");
   const tabs = page.getByRole("group", { name: "Show kitchen work" });
-  const zhTabs = page.getByRole("group", { name: "显示后厨工作" });
+  const zhTabs = page.getByRole("group", { name: "显示厨房工作" });
   for (const [width, height] of [
     [1440, 900],
     [1024, 768],

@@ -142,7 +142,7 @@ for (const [who, navigation] of [
       await expect(main, path).not.toContainText(internalWords);
       await expectNoInternalText(page);
       await toChinese(page);
-      await expect(main.getByRole("link", { name: "去后厨屏" }), path).toBeVisible();
+      await expect(main.getByRole("link", { name: "去厨房屏" }), path).toBeVisible();
       await expect(main, path).not.toContainText(asciiStopAfterChinese);
       await toEnglish(page);
     }
@@ -221,7 +221,7 @@ test("@production refused pages reached by address show plain words and no actio
   for (const [path] of pages) {
     await page.goto(path);
     const main = page.getByRole("main");
-    await expect(main.getByRole("link", { name: "去后厨屏" }), path).toBeVisible();
+    await expect(main.getByRole("link", { name: "去厨房屏" }), path).toBeVisible();
     await expect(page.locator("body"), path).not.toContainText(asciiStopAfterChinese);
     await expect(page.locator("body"), path).not.toContainText(internalWords);
     await expect(page.locator("body"), path).not.toContainText(

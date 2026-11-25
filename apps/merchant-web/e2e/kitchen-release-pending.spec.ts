@@ -166,7 +166,7 @@ test("@production Home and Orders say it in Chinese, with no codes", async ({ pa
   await expect(page.getByText("需要你处理的已付订单")).toBeVisible();
   await expect(
     page.getByText(
-      "2 笔订单已付款，但没进后厨或没有按规定退款。请在“订单”里逐一打开查看怎么处理。",
+      "2 笔订单已付款，但没进厨房或没有按规定退款。请在“订单”里逐一打开查看怎么处理。",
     ),
   ).toBeVisible();
   for (const width of [1440, 1024, 390]) {
@@ -181,9 +181,9 @@ test("@production Home and Orders say it in Chinese, with no codes", async ({ pa
   await page.goto("/operations/orders");
   await openOrder(page, "31");
   await expect(
-    orderPanel(page).getByRole("status").filter({ hasText: "还没进后厨" }),
-  ).toContainText("已付款，3 分钟前已接单，但后厨还没收到。请按这里列出的菜品制作，并告诉经理。");
+    orderPanel(page).getByRole("status").filter({ hasText: "还没进厨房" }),
+  ).toContainText("已付款，3 分钟前已接单，但厨房还没收到。请按这里列出的菜品制作，并告诉经理。");
   await openOrder(page, "33");
-  await expect(orderPanel(page).getByText("正在发送到后厨…")).toBeVisible();
+  await expect(orderPanel(page).getByText("正在发送到厨房…")).toBeVisible();
   await expectNoInternalText(page);
 });

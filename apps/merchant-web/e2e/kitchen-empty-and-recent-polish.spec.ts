@@ -51,7 +51,7 @@ test("@production WP-2423 batch 42: a work-state tab with nothing in it is quiet
   for (const language of ["en", "zh-Hans"] as const) {
     if (language === "zh-Hans") await chooseLanguage(page, language);
     const zh = language === "zh-Hans";
-    const tabs = page.getByRole("group", { name: zh ? "显示后厨工作" : "Show kitchen work" });
+    const tabs = page.getByRole("group", { name: zh ? "显示厨房工作" : "Show kitchen work" });
     await tabs.getByRole("button", { name: zh ? /^待做/u : /^To make/u }).click();
     const empty = page.locator(".kitchen-board-empty");
     // Batch 43: the tab's own heading.
@@ -99,7 +99,7 @@ test("@production WP-2423 batch 42: the kitchen display's work state is not a fi
       ],
     ] as const) {
       await page.getByRole("button", { name: zh ? /^筛选/u : /^Filters/u }).click();
-      const sheet = page.getByRole("dialog", { name: zh ? "筛选后厨工作" : "Filter Kitchen work" });
+      const sheet = page.getByRole("dialog", { name: zh ? "筛选厨房工作" : "Filter Kitchen work" });
       await sheet.getByLabel(zh ? "工作状态" : "Work state").selectOption(value);
       await sheet.getByRole("button", { name: zh ? "完成" : "Done" }).click();
       const empty = page.locator(".kitchen-board-empty");
@@ -118,7 +118,7 @@ test("@production WP-2423 batch 42: the kitchen display's work state is not a fi
     }
     // Back to Active work for the next language.
     await page.getByRole("button", { name: zh ? /^筛选/u : /^Filters/u }).click();
-    const sheet = page.getByRole("dialog", { name: zh ? "筛选后厨工作" : "Filter Kitchen work" });
+    const sheet = page.getByRole("dialog", { name: zh ? "筛选厨房工作" : "Filter Kitchen work" });
     await sheet.getByLabel(zh ? "工作状态" : "Work state").selectOption("Active");
     await sheet.getByRole("button", { name: zh ? "完成" : "Done" }).click();
     await expectNoInternalText(page);
@@ -197,7 +197,7 @@ test("@production WP-2423 batch 42 review: a drinks station keeping 饮品 chose
   await expect(empty).not.toContainText(filtersText);
   await chooseLanguage(page, "zh-Hans");
   await page.getByRole("button", { name: /^筛选/u }).click();
-  const zhSheet = page.getByRole("dialog", { name: "筛选后厨工作" });
+  const zhSheet = page.getByRole("dialog", { name: "筛选厨房工作" });
   await zhSheet.getByLabel("工作状态").selectOption("Queued");
   await zhSheet.getByRole("button", { name: "完成" }).click();
   await expect(empty).toContainText("目前没有需要制作的。");

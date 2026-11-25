@@ -109,7 +109,7 @@ it("WP-2423 item 5: warns before a staff round's payment time ends, urgently in 
       expect(text).not.toMatch(/[A-Za-z]{2,}/u);
     }
     expect(staffRoundPaymentNotice(waiting, now, "America/Toronto")?.text).toBe(
-      "员工录入的一轮正在等待刷卡机付款。请在 8:30 前记录；记录后后厨才开始制作。",
+      "员工录入的一轮正在等待刷卡机付款。请在 8:30 前记录；记录后厨房才开始制作。",
     );
   } finally {
     setLanguageForTest("en");

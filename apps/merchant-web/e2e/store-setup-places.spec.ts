@@ -438,7 +438,7 @@ async function noOverflow(page: Page) {
 const places = [
   ["profile", "Store details", "门店资料", ""],
   ["receipts", "Receipts and tax numbers", "收据与税号", "?section=receipts"],
-  ["kitchen", "Kitchen setup", "后厨", "?section=kitchen"],
+  ["kitchen", "Kitchen setup", "厨房", "?section=kitchen"],
   ["access", "Permissions and safety", "权限与安全", "?section=access"],
   ["changes", "Settings that need approval", "需审批的设置", "?section=changes"],
 ] as const;

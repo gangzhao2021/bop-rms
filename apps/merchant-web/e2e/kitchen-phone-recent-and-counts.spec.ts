@@ -151,7 +151,7 @@ test("@production WP-2423 batch 41: a waiting remake is counted as work, and the
         await expect(page.locator(".workspace-page__meta")).toContainText(
           zh ? "今天 1 项工作" : "Today 1 work item",
         );
-        const tabs = page.getByRole("group", { name: zh ? "显示后厨工作" : "Show kitchen work" });
+        const tabs = page.getByRole("group", { name: zh ? "显示厨房工作" : "Show kitchen work" });
         await expect(
           tabs.getByRole("button", { name: zh ? /^未完成/u : /^Open work/u }),
         ).toHaveText(zh ? /1$/u : "Open work1");

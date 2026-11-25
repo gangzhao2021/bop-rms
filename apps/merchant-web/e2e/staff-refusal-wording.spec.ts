@@ -117,10 +117,10 @@ test("@production a kitchen sign-in on Orders is told it is kitchen work only, w
   await page.getByRole("button", { name: "切换到中文" }).click();
   await expect(
     main.getByText(
-      "你当前是后厨登录，不包括这个页面。要用这个页面，请找店主或店长开通，或换有权限的员工登录。",
+      "你当前是厨房登录，不包括这个页面。要用这个页面，请找店主或店长开通，或换有权限的员工登录。",
     ),
   ).toBeVisible();
-  await expect(main.getByRole("link", { name: "去后厨屏" })).toBeVisible();
+  await expect(main.getByRole("link", { name: "去厨房屏" })).toBeVisible();
   await expect(main).not.toContainText(internalWords);
   await shoot(page, "orders-kitchen-zh");
   await page.getByRole("button", { name: "Switch to English" }).click();
