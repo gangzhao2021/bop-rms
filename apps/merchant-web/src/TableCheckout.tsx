@@ -801,16 +801,7 @@ export function TableCheckout({
   if (session.phase !== "Closing") return null;
   return (
     <section aria-label={t("Checkout")} className="table-checkout">
-      <h3 id="table-checkout-title">
-        {bill?.writeOff
-          ? t("Written off")
-          : bill?.settlement || (bill?.split && bill.split.paidInFull)
-            ? // b64 (v15 b62 live): a bill that went back in full is said as refunded.
-              tableBillRefundState(bill) === "Full" || tableBillRefundState(bill) === "AllOnItsWay"
-              ? t("Refunded")
-              : t("Paid")
-            : t("Checkout")}
-      </h3>
+      <h3 id="table-checkout-title">{tableCheckoutHeading(bill)}</h3>
       {!live ? (
         <p className="table-checkout__stale" role="status">
           {t(
@@ -1696,6 +1687,22 @@ export function TableReceipt({
   );
 }
 
+/**
+ * The Tables checkout heading. b64 (v15 b62 live): a bill that went back in full is said as
+ * refunded; while some of it is still on its way to the guest's card it is being refunded, never
+ * "Refunded" (as its receipt says "Being refunded in full" and lists the refund on its way).
+ */
+export function tableCheckoutHeading(bill: TableBill | null): string {
+  if (bill === null) return t("Checkout");
+  if (bill.writeOff) return t("Written off");
+  if (!bill.settlement && !(bill.split && bill.split.paidInFull)) return t("Checkout");
+  const state = tableBillRefundState(bill);
+  return state === "Full"
+    ? t("Refunded")
+    : state === "AllOnItsWay"
+      ? t("Being refunded")
+      : t("Paid");
+}
 /**
  * b64 (v15 b62 live, S62 E): what went back of a paid table bill — nothing, part of it, all of it
  * (nothing still on its way), or all of it with some still on its way to the guest's card. "None"

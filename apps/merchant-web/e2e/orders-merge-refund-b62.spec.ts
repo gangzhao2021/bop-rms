@@ -534,4 +534,28 @@ for (const zh of [false, true]) {
     await expect(receipt).not.toContainText(zh ? "实付合计" : "Total paid");
     await fits(page, ".table-receipt .table-checkout__totals > div");
   });
+
+  test(`@production b64: Tables checkout heads a bill all going back, some still on its way, as being refunded (${language})`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    // $32.00 claimed back: $20.00 given back, $12.00 still on its way.
+    await tables(page, zh, { refundedMinor: "3200", refundPendingMinor: "1200" });
+    await page.goto("/operations/dining");
+    await page
+      .getByRole("button", { name: zh ? "选择 S61 B (TEST)" : "Select S61 B (TEST)", exact: true })
+      .click();
+    const checkout = page.getByRole("region", { name: zh ? "结账" : "Checkout" });
+    const receipt = checkout.locator(".table-receipt");
+    await expect(receipt).toContainText(
+      zh
+        ? "正在全部退款。客人离开后关台。"
+        : "Being refunded in full. Close the table when the guests have left.",
+    );
+    await expect(receipt).toContainText(zh ? "正在退回客人的卡$12.00" : "Refund on its way$12.00");
+    // $12.00 is not back on the guest's card yet: never headed as given back.
+    await expect(checkout.locator("#table-checkout-title")).toHaveText(
+      zh ? "退款中" : "Being refunded",
+    );
+  });
 }

@@ -9,7 +9,7 @@ import {
 import { parseCurrentOrderQueue } from "./current-order-queue-client.js";
 import { setLanguageForTest } from "./i18n/i18n.js";
 import { staffRoundRefusedShortText } from "./staff-round-offer.js";
-import { TableReceipt, tableBillRefundState } from "./TableCheckout.js";
+import { TableReceipt, tableBillRefundState, tableCheckoutHeading } from "./TableCheckout.js";
 import type { TableBill } from "./table-checkout-client.js";
 
 /**
@@ -105,6 +105,18 @@ describe("b64: Tables checkout of a paid bill refunded afterwards", () => {
     expect(text).toContain("Being refunded in full. Close the table when the guests have left.");
     expect(text).toContain("|Refund on its way|$12.00|");
     expect(text).not.toContain("Paid in full");
+  });
+
+  it("heads a bill all of which is going back, some still on its way, as being refunded", () => {
+    const onItsWay = bill({ givenMinor: "2000", onItsWayMinor: "1200" });
+    // Money not yet back on the guest's card is never said as given back.
+    expect(tableCheckoutHeading(onItsWay)).toBe("Being refunded");
+    expect(tableCheckoutHeading(bill({ givenMinor: "3200", onItsWayMinor: "0" }))).toBe("Refunded");
+    expect(tableCheckoutHeading(bill({ givenMinor: "500", onItsWayMinor: "0" }))).toBe("Paid");
+    expect(tableCheckoutHeading(bill({ givenMinor: "0", onItsWayMinor: "0" }))).toBe("Paid");
+    setLanguageForTest("zh-Hans");
+    expect(tableCheckoutHeading(onItsWay)).toBe("退款中");
+    expect(tableCheckoutHeading(bill({ givenMinor: "3200", onItsWayMinor: "0" }))).toBe("已退款");
   });
 
   it("keeps a bill nothing went back from as paid in full", () => {
