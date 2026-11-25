@@ -162,6 +162,45 @@ export async function readStaffCancellationRefundPosition(
 }
 
 /**
+ * b62 (v15 b61 live, TM2 orders 67, 69 and 79): what a staff cancellation's online refund gives
+ * back before Payment's compensation workload opens its case (10 to 55 s live): what is left of the
+ * payment (tip included), the same figure the cancel dialog and the command said, read from
+ * Payment's remaining refundable amount. Null when nothing is left to give back.
+ */
+export async function readStaffCancellationRefundToCome(
+  transaction: ConsumerTransaction,
+  scope: {
+    tenantReference: string;
+    brandReference: string;
+    storeReference: string;
+    providerAccountReference: string;
+    environment: "Test" | "Live";
+  },
+  record: Pick<
+    StaffOrderCancellationRecord,
+    | "orderReference"
+    | "paymentTransactionReference"
+    | "paymentIntentReference"
+    | "paymentAttemptReference"
+  >,
+  observedAt: string,
+  authorize: () => Promise<boolean>,
+): Promise<bigint | null> {
+  const orderReference = String(record.orderReference);
+  const position = await readPaymentRemainingRefundable(transaction, {
+    scope,
+    orderReference,
+    paymentTransactionReference: String(record.paymentTransactionReference),
+    paymentIntentReference: String(record.paymentIntentReference),
+    paymentAttemptReference: String(record.paymentAttemptReference),
+    observedAt,
+    authorize: async (tx, query) =>
+      tx === transaction && query.orderReference === orderReference && (await authorize()),
+  });
+  return position.remainingMinor > 0n ? position.remainingMinor : null;
+}
+
+/**
  * WP-2423 Q6: refund status of a staff cancellation from Payment's compensation-owned amounts for
  * its payment attempt. Refunded only once a Provider-confirmed refund fact exists and nothing is
  * still claimed; until the compensation workload opens its case, the refund is pending.

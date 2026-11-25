@@ -87,6 +87,7 @@ import { createMerchantBusinessDayWindows } from "./merchant-business-day-window
 import {
   readCardMachineCancellationRefund,
   readStaffCancellationRefundPosition,
+  readStaffCancellationRefundToCome,
   staffOrderCancellationPermission,
   type StaffOrderRefundStatus,
 } from "./merchant-order-staff-cancellation.js";
@@ -794,12 +795,40 @@ export function createPersistentMerchantOrderQueue(options: {
                     stillAllowed,
                   );
                   const total = position.confirmedMinor + position.pendingMinor;
+                  // b62 (v15 b61 live, orders 67, 69 and 79): until Payment's compensation opens
+                  // its case the refund still gives back what is left of the payment, the amount
+                  // the cancel dialog just said; never "not known" for up to a minute. Optional:
+                  // when Payment can't be read, the amount stays unknown.
+                  const configure = options.resolveRefundConfiguration;
+                  const toCome =
+                    total > 0n || configure === undefined || tenantReference === null
+                      ? null
+                      : await withOptionalRead(
+                          businessTransaction,
+                          async () =>
+                            readStaffCancellationRefundToCome(
+                              businessTransaction,
+                              {
+                                tenantReference,
+                                ...scoped,
+                                ...(await configure(businessTransaction, {
+                                  tenantReference,
+                                  ...scoped,
+                                })),
+                              },
+                              record,
+                              String(source.now()),
+                              stillAllowed,
+                            ),
+                          null,
+                        );
                   online = {
                     status:
                       position.confirmedMinor > 0n && position.pendingMinor === 0n
                         ? "Refunded"
                         : "Pending",
-                    amountMinor: total > 0n ? total.toString() : null,
+                    amountMinor:
+                      total > 0n ? total.toString() : toCome === null ? null : toCome.toString(),
                   };
                 }
               recordFacts?.cancellations.push({

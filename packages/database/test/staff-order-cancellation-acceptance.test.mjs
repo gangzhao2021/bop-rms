@@ -2601,6 +2601,10 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
             },
             quoteVersion: 1,
             acceptanceConfigured: true,
+            resolveRefundConfiguration: async () => ({
+              providerAccountReference: provider,
+              environment: "Test",
+            }),
           })({
             sessionCookie: reader.sessionCookie,
             afterOrderReference: null,
@@ -2638,6 +2642,24 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
       assert.equal(refusedRow.batches[0].canRequestAcceptance, false);
       assert.equal(refusedRow.batches[0].canCancel, false);
       assert.equal(refusedRow.batches[0].staffCancellation.reasonCode, "SOLD_OUT");
+      // b62 (v15 b61 live, TM2 orders 67, 69 and 79): before Payment's compensation opens its case
+      // the refund still says what goes back (the whole payment, as the cancel dialog said), read
+      // under the pilot role; never "Amount not known yet" for up to a minute.
+      assert.equal(
+        (
+          await admin.query(
+            "SELECT count(*)::int n FROM rms_payment.payment_compensation_action_history WHERE order_id=$1",
+            [waitingPickup.order],
+          )
+        ).rows[0].n,
+        0,
+      );
+      assert.equal(refusedRow.batches[0].staffCancellation.refundStatus, "Pending");
+      assert.equal(refusedRow.batches[0].staffCancellation.refundMethod, "Online");
+      assert.equal(
+        refusedRow.batches[0].staffCancellation.refundAmountMinor,
+        String(waitingPickup.batches[0].totalMinor),
+      );
 
       // ── WP-2423 item 8a: a pickup of only a bottle or a bag fee. The kitchen had nothing to
       // prepare and said it was ready at once (its decision; no ticket). The Orders page offers no
