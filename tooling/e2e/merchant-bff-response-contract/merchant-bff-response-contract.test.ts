@@ -263,6 +263,10 @@ const dineIn = {
     mergedInto: { tableLabel: "T3", paid: true },
     // b40 review: on a merged table, each round's number on the whole bill, as checkout numbers it.
     billRoundNumbers: [{ orderBatchReference: id(0x9031), roundNumber: 2 }],
+    // v15 b19: what the dishes taken off this Order's bill before it was paid took off it.
+    removedMinor: "150",
+    // b64: the bill is paid and its table is still checking out.
+    checkingOut: true as const,
     // b60 review: a paid part's tip, rounding and refunds, as on a paid bill.
     partlyPaid: {
       remainingMinor: "0",
