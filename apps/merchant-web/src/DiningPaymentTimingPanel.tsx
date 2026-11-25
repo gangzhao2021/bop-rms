@@ -188,7 +188,7 @@ export function DiningPaymentTimingPanel({
   );
   return (
     <section className="dining-payment-timing" aria-labelledby="dining-payment-timing-title">
-      <h2 id="dining-payment-timing-title">{t("Dine-in payment")}</h2>
+      <h2 id="dining-payment-timing-title">{t("How dine-in guests pay")}</h2>
       {state === "Loading" ? (
         <p role="status">{t("Loading…")}</p>
       ) : state === "Unavailable" || view === null ? (
@@ -210,17 +210,20 @@ export function DiningPaymentTimingPanel({
               t("Each round is paid before it goes to the kitchen."),
             )}
           </fieldset>
-          <button
-            type="button"
-            className="dining-payment-timing__save"
-            disabled={state !== "Ready" || chosen === view.paymentTiming}
-            onClick={() => void save()}
-          >
-            {state === "Saving" ? t("Saving…") : t("Save")}
-          </button>
-          <p className="dining-payment-timing__note">
-            {t("A change applies to tables opened after it; tables already open keep theirs.")}
-          </p>
+          {/* Batch 63 F54 (Figma 57:121): Save, then what a change does, on one line. */}
+          <div className="dining-payment-timing__actions">
+            <button
+              type="button"
+              className="dining-payment-timing__save"
+              disabled={state !== "Ready" || chosen === view.paymentTiming}
+              onClick={() => void save()}
+            >
+              {state === "Saving" ? t("Saving…") : t("Save")}
+            </button>
+            <p className="dining-payment-timing__note">
+              {t("A change applies to tables opened after it; tables already open keep theirs.")}
+            </p>
+          </div>
         </>
       )}
       <p role="status" className="dining-payment-timing__message">

@@ -5,17 +5,17 @@ import {
   systemText,
   t,
   wallClockTime,
-  withOneSentenceEnd,
 } from "./i18n/i18n.js";
 import { businessDateLabel } from "./StoreBusinessDay.js";
 import { ClockStyleContext, storeTime } from "./StoreTime.js";
 import { StatePanel } from "@bop-rms/ui";
 import { StoreConfigurationEditor } from "./StoreConfigurationEditor.js";
+import type { StoreConfigurationView } from "./store-configuration-client.js";
 import { WorkspacePage } from "./WorkspacePage.js";
 import { noAccessHeading } from "./access-denied.js";
 import { NoAccessNotice } from "./NoAccessNotice.js";
 import { createStoreConfigurationClient } from "./store-configuration-client.js";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useParams } from "react-router";
 import { timeZoneLabel } from "./time-zone-names.js";
 import { isOpenAllDay, lastOrdersTime } from "./open-all-day.js";
@@ -93,11 +93,17 @@ export function ServiceHoursSummary({
   hours,
   timeZone,
   observedAt,
+  action = null,
+  changes = null,
 }: {
   hours: ServiceHours;
   timeZone: string;
   /** When the hours were read: special dates before that operating day are no longer listed. */
   observedAt: string;
+  /** Batch 63 F54: "Edit hours", accent text at the end of the section's title row. */
+  action?: ReactNode;
+  /** Batch 63 F54: the "Changes waiting for approval" line under the hours. */
+  changes?: ReactNode;
 }) {
   const days = [
     t("Monday"),
@@ -138,78 +144,98 @@ export function ServiceHoursSummary({
         : []),
     ]);
   };
-  /** Periods back to back that cover the day: said once above them. */
-  const allDayAbove = (intervals: readonly ServiceInterval[]) =>
-    intervals.length > 1 && isOpenAllDay(intervals) ? <p>{t("Open 24 hours")}</p> : null;
+  /**
+   * Batch 63 F54 (Figma 57:121): one row a day, the day and its periods on one line (each period
+   * a line of its own), row hairlines; periods back to back that cover the day are said once.
+   */
+  const periods = (intervals: readonly ServiceInterval[]) =>
+    intervals.length === 0 ? (
+      <span className="hours-page__period">{t("Closed")}</span>
+    ) : (
+      <>
+        {intervals.length > 1 && isOpenAllDay(intervals) ? (
+          <span className="hours-page__period">{t("Open 24 hours")}</span>
+        ) : null}
+        {intervals.map((interval, index) => (
+          <span key={index} className="hours-page__period">
+            {describe(interval)}
+          </span>
+        ))}
+      </>
+    );
   // Batch 46 (v15: "2026-11-05 · Special hours" 17 days after the date): only today's and later
   // special dates are listed; earlier ones stay in the published configuration's own record.
   const today = operatingDate(observedAt, timeZone, hours.businessDayStartLocalTime);
   const exceptions = hours.exceptions.filter((exception) => exception.localDate >= today);
   return (
-    <section aria-labelledby="published-hours-title">
-      <h2 id="published-hours-title">{t("Published hours")}</h2>
-      <p>
-        {hours.configurationSource === "StoreOverride"
-          ? t("Store configuration")
-          : t("Inherited Brand configuration")}{" "}
-        · {timeZoneLabel(timeZone)}
-      </p>
-      <p>
-        {withOneSentenceEnd(
-          t("Business day starts at {businessDayStartLocalTime}.", {
-            businessDayStartLocalTime: serviceTime(hours.businessDayStartLocalTime),
-          }),
-        )}
-      </p>
-      <div className="detail-section-grid">
-        {hours.weeklySchedule.map((day) => (
-          <section key={day.isoWeekday}>
-            <h3>{days[day.isoWeekday - 1]}</h3>
-            {allDayAbove(day.intervals)}
-            {day.intervals.length ? (
-              <ul>
-                {day.intervals.map((interval, index) => (
-                  <li key={index}>{describe(interval)}</li>
-                ))}
-              </ul>
-            ) : (
-              <p>{t("Closed")}</p>
-            )}
-          </section>
-        ))}
+    <section aria-labelledby="published-hours-title" className="hours-page__section">
+      <div className="hours-page__section-head">
+        <h2 id="published-hours-title">{t("Opening hours")}</h2>
+        {action}
       </div>
-      <h3>{t("Exceptions and holidays")}</h3>
+      {/* RA-05: what guests see, in their words (was "Published hours", "Store configuration"). */}
+      <p className="hours-page__muted">{t("Hours guests see now")}</p>
+      <dl className="hours-page__rows">
+        {hours.weeklySchedule.map((day) => (
+          <div key={day.isoWeekday} className="hours-page__row">
+            <dt>{days[day.isoWeekday - 1]}</dt>
+            <dd>{periods(day.intervals)}</dd>
+          </div>
+        ))}
+      </dl>
       {exceptions.length ? (
-        <ul>
-          {exceptions.map((exception) => (
-            <li key={exception.localDate}>
-              <strong>
-                <time dateTime={exception.localDate}>
-                  {businessDateLabel(exception.localDate, today)}
-                </time>
-                {" · " + exceptionKindLabel(exception.kind)}
-              </strong>
-              {allDayAbove(exception.intervals)}
-              {exception.intervals.length ? (
-                <ul>
-                  {exception.intervals.map((interval, index) => (
-                    <li key={index}>{describe(interval)}</li>
-                  ))}
-                </ul>
-              ) : (
-                <p>{t("Closed")}</p>
-              )}
-            </li>
-          ))}
-        </ul>
+        <>
+          <p className="hours-page__muted">{t("Special dates and holidays:")}</p>
+          <dl className="hours-page__rows">
+            {exceptions.map((exception) => (
+              <div key={exception.localDate} className="hours-page__row hours-page__row--date">
+                <dt>
+                  <time dateTime={exception.localDate}>
+                    {businessDateLabel(exception.localDate, today)}
+                  </time>
+                  {" · " + exceptionKindLabel(exception.kind)}
+                </dt>
+                <dd>{periods(exception.intervals)}</dd>
+              </div>
+            ))}
+          </dl>
+        </>
       ) : (
-        <p>{t("No special dates or holidays coming up.")}</p>
+        <p className="hours-page__muted">{t("Special dates and holidays: none coming up.")}</p>
       )}
+      {changes}
     </section>
   );
 }
 
-export function StoreServiceControlPanel({ store, csrf }: { store: string; csrf: string }) {
+/** Batch 63 F54: whether an hours change is on its way, in plain words (none, saved, waiting). */
+export function hoursChangesText(view: StoreConfigurationView | null): string | null {
+  if (view === null) return null;
+  const latest = view.latestWithdrawal === undefined ? view.latest : null;
+  switch (latest?.lifecycle) {
+    case "Draft":
+      return t(
+        "Changes waiting for approval: none. A saved change has not been sent for approval yet.",
+      );
+    case "PendingApproval":
+      return t("Changes waiting for approval: 1.");
+    case "Approved":
+      return t("Changes waiting for approval: none. An approved change is not live yet.");
+    default:
+      return t("Changes waiting for approval: none.");
+  }
+}
+
+export function StoreServiceControlPanel({
+  store,
+  csrf,
+  storeLabel = "",
+}: {
+  store: string;
+  csrf: string;
+  /** Batch 63 F54: the Store's name, first in the line under the title (as on Orders). */
+  storeLabel?: string;
+}) {
   const route = useParams().id;
   const client = useMemo(() => createServiceControlClient(), []);
   const [view, setView] = useState<ServiceControlState | null>(null);
@@ -224,15 +250,20 @@ export function StoreServiceControlPanel({ store, csrf }: { store: string; csrf:
   const controller = useRef<AbortController | null>(null);
   const running = useRef(false);
   const pending = useRef<ServiceControlCommand | null>(null);
-  // WP-2423 Q4: hours editing appears only where this runtime can actually save it.
-  const [configurable, setConfigurable] = useState(false);
+  // WP-2423 Q4: hours editing appears only where this runtime can actually save it. Batch 63 F54:
+  // the same read says whether a change is waiting for approval.
+  const [configuration, setConfiguration] = useState<StoreConfigurationView | null>(null);
+  const configurable = configuration !== null;
+  const [editing, setEditing] = useState(false);
   useEffect(() => {
     const probe = new AbortController();
     createStoreConfigurationClient()
       .load(store, probe.signal)
       .then(
-        () => setConfigurable(!probe.signal.aborted),
-        () => setConfigurable(false),
+        (next) => {
+          if (!probe.signal.aborted) setConfiguration(next);
+        },
+        () => setConfiguration(null),
       );
     return () => probe.abort();
   }, [store]);
@@ -367,23 +398,73 @@ export function StoreServiceControlPanel({ store, csrf }: { store: string; csrf:
       </WorkspacePage>
     );
   const disabled = busy || !online || uncertain;
+  const head =
+    view === null
+      ? storeLabel
+      : joinPieces(
+          [
+            storeLabel,
+            timeZoneLabel(view.timeZone),
+            t("business day starts {time}", {
+              time: serviceTime(view.hours.businessDayStartLocalTime),
+            }),
+          ].filter((part) => part !== ""),
+        );
+  const changes = hoursChangesText(configuration);
   return (
     // Batch 47: every time on Hours & ordering, the editor's included, in the guests' style.
+    // Batch 63 F54 (Figma 57:121): the Orders header — title, the Store, its zone and business
+    // day, the shared stamp and Refresh at the right — then three sections at 20/600.
     <ClockStyleContext.Provider value="Guest">
-      <WorkspacePage title={t("Hours & ordering")}>
+      <WorkspacePage
+        title={t("Hours & ordering")}
+        className="hours-page"
+        meta={head === "" ? null : head}
+        status={
+          view === null ? null : (
+            <span className="hours-page__updated">
+              {/* Batch 46: in the app's language and the Store's zone, never the browser's. */}
+              {t("Updated {time}", {
+                time: storeTime(view.observedAt, view.timeZone, false, "Guest"),
+              })}
+            </span>
+          )
+        }
+        actions={
+          <button
+            type="button"
+            className="hours-page__link"
+            onClick={() => void load()}
+            disabled={busy || !online || uncertain}
+          >
+            {t("Refresh")}
+          </button>
+        }
+      >
         {view && (
           <ServiceHoursSummary
             hours={view.hours}
             timeZone={view.timeZone}
             observedAt={view.observedAt}
+            action={
+              configurable && !editing ? (
+                <button type="button" className="hours-page__link" onClick={() => setEditing(true)}>
+                  {t("Edit hours")}
+                </button>
+              ) : null
+            }
+            changes={
+              changes === null || editing ? null : <p className="hours-page__muted">{changes}</p>
+            }
           />
         )}
-        {configurable ? (
+        {configurable && (editing || view === null) ? (
           <StoreConfigurationEditor
             key={store + csrf}
             store={store}
             csrf={csrf}
-            // Batch 51: the editor says the zone itself while Published hours is not drawn.
+            autoLoad={editing}
+            // Batch 51: the editor says the zone itself while Opening hours is not drawn.
             publishedHours={
               view
                 ? {
@@ -394,73 +475,73 @@ export function StoreServiceControlPanel({ store, csrf }: { store: string; csrf:
             }
           />
         ) : null}
-        <section aria-labelledby="service-controls-title" aria-busy={busy}>
-          <h2 id="service-controls-title">{t("Service controls")}</h2>
-          <p>
-            {t(
-              "Pause new service for a limited time. Existing paid orders and occupied dining tables remain active.",
-            )}
+        <section
+          aria-labelledby="service-controls-title"
+          aria-busy={busy}
+          className="hours-page__section"
+        >
+          <h2 id="service-controls-title">{t("Pause ordering")}</h2>
+          <p className="hours-page__muted">
+            {t("While paused, no new orders come in. Paid orders and seated tables carry on.")}
           </p>
           {!online && (
             <p role="status">{t("Offline read-only. Reconnect before changing service.")}</p>
           )}
-          <p role="status" aria-live="polite">
+          <p role="status" aria-live="polite" className="hours-page__status">
             {systemText(message)}
           </p>
-          <button type="button" onClick={() => void load()} disabled={busy || !online || uncertain}>
-            {t("Refresh service status")}
-          </button>
           {uncertain && (
-            <button type="button" onClick={() => void submit()} disabled={busy || !online}>
+            <button
+              type="button"
+              className="hours-page__link"
+              onClick={() => void submit()}
+              disabled={busy || !online}
+            >
               {t("Retry same request")}
             </button>
           )}
           {view && (
             <>
-              <p>
-                {/* Batch 46: in the app's language and the Store's zone, never the browser's.
-                    Batch 50: the zone itself is said once, under Published hours, which shows
-                    whenever this read does. */}
-                {t("Updated {value}", {
-                  value: storeTime(view.observedAt, view.timeZone, true, "Guest"),
-                })}
-              </p>
-              <fieldset disabled={disabled}>
-                <legend>{t("Pause service")}</legend>
-                <label htmlFor="pause-duration">{t("Pause duration (minutes)")}</label>
-                <input
-                  id="pause-duration"
-                  type="number"
-                  min="1"
-                  max="240"
-                  step="1"
-                  value={minutes}
-                  onChange={(event) => setMinutes(event.target.value)}
-                />
-                <label htmlFor="pause-mode">{t("Service")}</label>
-                <select
-                  id="pause-mode"
-                  value={mode}
-                  onChange={(event) => setMode(event.target.value)}
-                >
-                  <option value="All">{t("All services")}</option>
-                  {view.enabledServiceModes.map((value) => (
-                    <option key={value} value={value}>
-                      {serviceModeText(value)}
-                    </option>
-                  ))}
-                </select>
-                <button type="button" onClick={pause}>
-                  {t("Pause service")}
+              <fieldset disabled={disabled} className="hours-page__pause">
+                <legend className="visually-hidden">{t("Pause ordering")}</legend>
+                <label>
+                  <span>{t("How long (minutes)")}</span>
+                  <input
+                    id="pause-duration"
+                    type="number"
+                    min="1"
+                    max="240"
+                    step="1"
+                    inputMode="numeric"
+                    value={minutes}
+                    onChange={(event) => setMinutes(event.target.value)}
+                  />
+                </label>
+                <label>
+                  <span>{t("Which services")}</span>
+                  <select
+                    id="pause-mode"
+                    value={mode}
+                    onChange={(event) => setMode(event.target.value)}
+                  >
+                    <option value="All">{t("All services")}</option>
+                    {view.enabledServiceModes.map((value) => (
+                      <option key={value} value={value}>
+                        {serviceModeText(value)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button type="button" className="hours-page__primary" onClick={pause}>
+                  {t("Pause ordering")}
                 </button>
               </fieldset>
-              <h3>{t("Active pauses")}</h3>
               {view.activePauses.length === 0 ? (
-                <p>{t("No active pauses.")}</p>
+                <p className="hours-page__muted">{t("No pause now.")}</p>
               ) : (
-                <ul>
+                <ul className="hours-page__pauses" aria-label={t("Paused now")}>
                   {view.activePauses.map((item) => (
-                    <li key={item.closureReference}>
+                    <li key={item.closureReference} className="hours-page__row">
                       <span>
                         {t("{value} — until {value2}", {
                           value:
@@ -471,6 +552,7 @@ export function StoreServiceControlPanel({ store, csrf }: { store: string; csrf:
                       </span>{" "}
                       <button
                         type="button"
+                        className="hours-page__link"
                         disabled={disabled}
                         onClick={() => resume(item.closureReference)}
                       >

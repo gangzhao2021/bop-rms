@@ -168,10 +168,13 @@ export function StoreConfigurationEditor({
   store,
   csrf,
   publishedHours,
+  autoLoad = false,
 }: {
   store: string;
   csrf: string;
   publishedHours?: PublishedHoursShown;
+  /** Batch 63 F54: opened from "Edit hours" on Opening hours, it reads the saved hours at once. */
+  autoLoad?: boolean;
 }) {
   const client = useMemo(() => createStoreConfigurationClient(), []);
   const [view, setView] = useState<StoreConfigurationView | null>(null);
@@ -194,6 +197,13 @@ export function StoreConfigurationEditor({
       window.removeEventListener("online", update);
       window.removeEventListener("offline", update);
     };
+  }, []);
+  const loadOnOpen = useRef(autoLoad);
+  useEffect(() => {
+    if (!loadOnOpen.current) return;
+    loadOnOpen.current = false;
+    void load();
+    // Once, when opened from "Edit hours".
   }, []);
   async function load() {
     if (running.current || pending.current) return;
@@ -405,7 +415,7 @@ export function StoreConfigurationEditor({
   const actions = (
     <div className="hours-editor-head__actions">
       <button type="button" disabled={disabled} onClick={() => void load()}>
-        {view ? t("Reload configuration") : t("Edit operating hours")}
+        {view ? t("Reload saved hours") : t("Edit hours")}
       </button>
       {uncertain && (
         <button type="button" disabled={busy || !online} onClick={() => void save()}>
@@ -416,10 +426,11 @@ export function StoreConfigurationEditor({
   );
   return (
     <section aria-labelledby="configuration-editor-title" aria-busy={busy}>
-      <h2 id="configuration-editor-title">{t("Operating hours draft")}</h2>
+      {/* Batch 63 F54 (RA-05): staff words, not "draft" and "configuration". */}
+      <h3 id="configuration-editor-title">{t("Change opening hours")}</h3>
       <p>
         {t(
-          "Save changes for review. Published hours remain active until a new configuration is published.",
+          "Save your change for approval. Guests keep seeing the hours above until it is approved and goes live.",
         )}
       </p>
       {!online && <p role="status">{t("Offline read-only.")}</p>}

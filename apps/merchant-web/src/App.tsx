@@ -1128,6 +1128,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                   <StoreServiceControlPanel
                     key={state.workspace.selectedScope.storeReference + state.csrf}
                     store={state.workspace.selectedScope.storeReference}
+                    storeLabel={state.workspace.selectedScope.storeLabel}
                     csrf={state.csrf}
                   />
                 ) : (

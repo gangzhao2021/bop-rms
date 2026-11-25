@@ -142,9 +142,13 @@ test("@production Hours & ordering reads in the guests' time style, today on, in
   expect(hours).toContain(
     "11:30\u00a0a.m.–2:30\u00a0p.m. · Dine-in · last orders 25 minutes before closing",
   );
-  expect(hours).toContain("Business day starts at 4:00\u00a0a.m.");
+  // Batch 63 F54: the Store, its zone and business day are said once, under the page title.
+  const head = await page.locator(".workspace-page__meta").innerText();
+  expect(head).toBe(
+    "Main · Eastern Time (Toronto, Ottawa and Montréal) · business day starts 4:00\u00a0a.m.",
+  );
   expect(hours).not.toContain("a.m..");
-  expect(hours).toMatch(/Store configuration · Eastern Time \(Toronto, Ottawa and Montréal\)/u);
+  expect(hours).not.toContain("Store configuration");
   // Past special dates are not listed; today's (the business day before 4:00) and later ones are.
   expect(hours).not.toContain("2026-11-05");
   expect(hours).not.toContain("Nov 5");
@@ -153,8 +157,8 @@ test("@production Hours & ordering reads in the guests' time style, today on, in
   expect(hours).not.toMatch(/\d{4}-\d{2}-\d{2}/u);
   expect(hours).not.toMatch(/\d (AM|PM)\b/u);
   const controls = await controlsText(page);
-  // Batch 50: the time zone is said once, under Published hours, not again here.
-  expect(controls).toContain("Updated Nov 22, 2026, 12:12\u00a0a.m.");
+  // Batch 63 F54: the shared stamp at the top right; the zone is not said again here.
+  await expect(page.locator(".workspace-page__status")).toHaveText("Updated 12:12\u00a0a.m.");
   expect(controls).not.toContain("Eastern Time");
   expect(controls).toContain("All services — until Nov 22, 2026, 12:40\u00a0a.m.");
   expect(controls).not.toMatch(/\d (AM|PM)\b/u);
@@ -166,8 +170,9 @@ test("@production Hours & ordering reads as natural Chinese, today on", async ({
   const hours = await hoursText(page);
   expect(hours).toContain("17:00–0:00（次日）· 堂食 · 打烊前 30 分钟停止点单 · 预计 15 分钟做好");
   expect(hours).toContain("11:30–14:30 · 堂食 · 打烊前 25 分钟停止点单");
-  expect(hours).toContain("营业日从 4:00 开始。");
-  expect(hours).toContain("门店配置 · 北美东部时间（多伦多、渥太华和蒙特利尔）");
+  const head = await page.locator(".workspace-page__meta").innerText();
+  expect(head).toBe("Main · 北美东部时间（多伦多、渥太华和蒙特利尔）· 营业日从 4:00 开始");
+  expect(hours).not.toContain("门店配置");
   expect(hours).not.toContain("最后点单");
   expect(hours).not.toContain("00:00");
   expect(hours).not.toMatch(/[一-鿿] \(|\) [一-鿿]|（[^）]*\(/u);
@@ -179,8 +184,7 @@ test("@production Hours & ordering reads as natural Chinese, today on", async ({
   expect(hours).not.toMatch(/\d{4}-\d{2}-\d{2}/u);
   expect(hours).not.toMatch(/[A-Za-z]/u);
   const controls = await controlsText(page);
-  // Batch 50: the time zone is said once, under Published hours, not again here.
-  expect(controls).toContain("更新于 2026年11月22日 0:12");
+  await expect(page.locator(".workspace-page__status")).toHaveText("0:12 已更新");
   expect(controls).not.toContain("北美东部时间");
   expect(controls).toContain("所有服务 — 至 2026年11月22日 0:40");
   expect(controls).not.toMatch(/\b(?:Nov|a\.m\.|p\.m\.|AM|PM)\b/u);

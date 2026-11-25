@@ -143,8 +143,9 @@ test("@production configuration editor preserves uncertain request and reloads s
     }
   });
   await page.goto("/app/organization/stores/" + store + "/service");
-  const editor = page.getByRole("region", { name: "Operating hours draft" });
-  await editor.getByRole("button", { name: "Edit operating hours" }).click();
+  // Batch 63 F54: "Edit hours" on Opening hours opens the editor (was a button inside it).
+  await page.getByRole("button", { name: "Edit hours" }).first().click();
+  const editor = page.getByRole("region", { name: "Change opening hours" });
   await editor.getByRole("button", { name: "Add dated exception" }).click();
   const exception = editor.getByRole("group", { name: "Exception 1", exact: true });
   await exception.getByLabel("Exception date").fill("2026-12-25");
@@ -166,7 +167,7 @@ test("@production configuration editor preserves uncertain request and reloads s
   ).toBeVisible();
   await expect(editor.getByText("Latest change: Draft, not yet sent for approval")).toBeVisible();
   await page.reload();
-  await editor.getByRole("button", { name: "Edit operating hours" }).click();
+  await page.getByRole("button", { name: "Edit hours" }).first().click();
   await expect(
     editor.getByRole("group", { name: "Exception 1", exact: true }).getByLabel("Exception date"),
   ).toHaveValue("2026-12-25");
@@ -300,8 +301,9 @@ test("@production WP-2423 Q4: hours of a configuration from Store setup are save
     await route.fulfill({ headers, json: { status: "Applied", resultingVersion: 2 } });
   });
   await page.goto("/app/organization/stores/" + store + "/service");
-  const editor = page.getByRole("region", { name: "Operating hours draft" });
-  await editor.getByRole("button", { name: "Edit operating hours" }).click();
+  // Batch 63 F54: "Edit hours" on Opening hours opens the editor (was a button inside it).
+  await page.getByRole("button", { name: "Edit hours" }).first().click();
+  const editor = page.getByRole("region", { name: "Change opening hours" });
   await expect(editor.getByText("Opening hours are changed here.", { exact: false })).toBeVisible();
   await expect(editor.getByText("Fees in the published settings")).toBeVisible();
   await editor.getByRole("button", { name: "Add dated exception" }).click();
@@ -405,8 +407,9 @@ test("@production WP-2423 v15: your own hours change is approved alone; a refusa
     await route.fulfill({ status: 403, headers, json: { error: "sole_operator_off" } });
   });
   await page.goto("/app/organization/stores/" + store + "/service");
-  const editor = page.getByRole("region", { name: "Operating hours draft" });
-  await editor.getByRole("button", { name: "Edit operating hours" }).click();
+  // Batch 63 F54: "Edit hours" on Opening hours opens the editor (was a button inside it).
+  await page.getByRole("button", { name: "Edit hours" }).first().click();
+  const editor = page.getByRole("region", { name: "Change opening hours" });
   const own = page.getByRole("region", { name: "Approve your own change" });
   await expect(own.getByText("you are the only person who holds Owner access")).toBeVisible();
   await expect(editor.getByRole("button", { name: "Approve reviewed configuration" })).toHaveCount(
@@ -498,8 +501,9 @@ test("@production WP-2423 v15: after a refused publication your change can still
     });
   });
   await page.goto("/app/organization/stores/" + store + "/service");
-  const editor = page.getByRole("region", { name: "Operating hours draft" });
-  await editor.getByRole("button", { name: "Edit operating hours" }).click();
+  // Batch 63 F54: "Edit hours" on Opening hours opens the editor (was a button inside it).
+  await page.getByRole("button", { name: "Edit hours" }).first().click();
+  const editor = page.getByRole("region", { name: "Change opening hours" });
   await editor.getByRole("button", { name: "Publish approved configuration" }).click();
   await expect(
     editor.getByText(/^This change was approved by you alone while Sole operator was off/u),
@@ -508,7 +512,7 @@ test("@production WP-2423 v15: after a refused publication your change can still
   expect(commands[0]?.command).toBe("Publish");
   // Nothing was published and nothing is in doubt: no retry, and both next steps stay usable.
   await expect(editor.getByRole("button", { name: "Retry configuration request" })).toHaveCount(0);
-  await expect(editor.getByRole("button", { name: "Reload configuration" })).toBeEnabled();
+  await expect(editor.getByRole("button", { name: "Reload saved hours" })).toBeEnabled();
   const withdraw = editor.getByRole("button", { name: "Withdraw my change" });
   await expect(withdraw).toBeEnabled();
   await expectHoursLayout(page, "store-hours-publish-refused");
@@ -521,7 +525,7 @@ test("@production WP-2423 v15: after a refused publication your change can still
   expect(withdrawals).toHaveLength(1);
   expect(withdrawals[0]?.configurationReference).toBe(id(22));
   expect(reads).toBe(readsBefore + 1);
-  await expect(editor.getByRole("button", { name: "Reload configuration" })).toBeEnabled();
+  await expect(editor.getByRole("button", { name: "Reload saved hours" })).toBeEnabled();
   await expectNoInternalText(page);
 });
 
@@ -582,8 +586,9 @@ test("@production WP-2423 v15: someone else's open change names them; declining 
     await route.fulfill({ headers, json: { status: "Applied", kind: "Declined" } });
   });
   await page.goto("/app/organization/stores/" + store + "/service");
-  const editor = page.getByRole("region", { name: "Operating hours draft" });
-  await editor.getByRole("button", { name: "Edit operating hours" }).click();
+  // Batch 63 F54: "Edit hours" on Opening hours opens the editor (was a button inside it).
+  await page.getByRole("button", { name: "Edit hours" }).first().click();
+  const editor = page.getByRole("region", { name: "Change opening hours" });
   await expect(editor.getByText("Mia Chen’s change (version 2", { exact: false })).toBeVisible();
   await expect(editor.getByRole("button", { name: "Validate saved draft" })).toBeDisabled();
   await expect(editor.getByRole("button", { name: "Submit saved draft" })).toBeDisabled();

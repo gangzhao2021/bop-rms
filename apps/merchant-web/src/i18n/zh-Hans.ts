@@ -5294,6 +5294,28 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "每项最多 {perOptionMaximum}，共 {total}{need}",
   Updated: "已更新",
   "Updated {value}": "更新于 {value}",
+  "Edit hours": "修改营业时间",
+  "Change opening hours": "修改营业时间",
+  "Reload saved hours": "重新读取已保存的营业时间",
+  "Save your change for approval. Guests keep seeing the hours above until it is approved and goes live.":
+    "保存后等待审批。在批准并生效之前，客人看到的仍是上面的营业时间。",
+  "Hours guests see now": "客人现在看到的时间",
+  "Special dates and holidays:": "特殊日期和节假日：",
+  "Special dates and holidays: none coming up.": "特殊日期和节假日：接下来没有。",
+  "Changes waiting for approval: none.": "等待审批的修改：没有。",
+  "Changes waiting for approval: 1.": "等待审批的修改：1 个。",
+  "Changes waiting for approval: none. A saved change has not been sent for approval yet.":
+    "等待审批的修改：没有。有一个已保存的修改还没提交审批。",
+  "Changes waiting for approval: none. An approved change is not live yet.":
+    "等待审批的修改：没有。有一个已批准的修改还没生效。",
+  "business day starts {time}": "营业日从 {time} 开始",
+  "While paused, no new orders come in. Paid orders and seated tables carry on.":
+    "暂停期间不接新单；已付款的单和有客的桌不受影响。",
+  "How long (minutes)": "暂停多久（分钟）",
+  "Which services": "哪些服务",
+  "No pause now.": "现在没有暂停。",
+  "Paused now": "正在暂停",
+  "How dine-in guests pay": "堂食怎么付款",
   "Updating availability…": "正在更新可用性…",
   "Updating the table…": "正在更新这桌…",
   "Updating remake": "正在更新重做",

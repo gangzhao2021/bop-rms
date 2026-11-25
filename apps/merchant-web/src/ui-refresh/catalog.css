@@ -947,3 +947,198 @@ fieldset.store-features__modules {
 .one-menu .one-menu__actions button {
   min-width: 44px;
 }
+
+/*
+ * Batch 63 F54 (RA-05, Figma 57:121): Hours & ordering in the v3 rules. The Orders header (28/600
+ * title; the Store, zone and business day in 14 grey; "Updated" and Refresh at the right), then
+ * three 20/600 sections: Opening hours (a 16/400 row a day, row hairlines, "Edit hours" as accent
+ * text), Pause ordering (fields on one line, one accent primary), How dine-in guests pay.
+ */
+.workspace-page.hours-page .workspace-page__title h1 {
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: normal;
+}
+.workspace-page.hours-page .workspace-page__meta,
+.workspace-page.hours-page .workspace-page__status {
+  font-size: 14px;
+}
+.workspace-page.hours-page .hours-page__link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 400;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.workspace-page.hours-page .hours-page__link:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+/* 720 px as Store features: the longest day ("Open 24 hours · Dine-in, Pickup · no orders after
+   11:34 p.m.") keeps about 40 px spare on its line for Linux fonts. */
+.hours-page__section {
+  max-width: 720px;
+  margin: 32px 0 0;
+}
+.workspace-page.hours-page > .hours-page__section:first-of-type {
+  margin-top: 8px;
+}
+.hours-page__section h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+.hours-page__section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0 16px;
+}
+.hours-page__section-head h2 {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+}
+.workspace-page.hours-page .hours-page__muted {
+  margin: 4px 0 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
+}
+.hours-page__rows {
+  display: grid;
+  margin: 12px 0 16px;
+}
+.hours-page__row {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 4px 16px;
+  padding: 12px 0;
+  font-size: 16px;
+  font-weight: 400;
+}
+/* A special date ("Fri, Jan 1, 2027 · Holiday") keeps its words on one line beside its hours. */
+.hours-page__row--date {
+  grid-template-columns: minmax(120px, max-content) minmax(0, 1fr);
+}
+.hours-page__row + .hours-page__row {
+  border-top: 1px solid var(--bop-color-row-divider, #e5e5e5);
+}
+.workspace-page.hours-page .hours-page__row :is(dt, dd) {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--bop-color-text-default);
+}
+.hours-page__row dd {
+  display: grid;
+  gap: 2px;
+}
+.workspace-page.hours-page .hours-page__status {
+  margin: 8px 0 0;
+  font-size: 14px;
+}
+.workspace-page.hours-page .hours-page__status:empty {
+  display: none;
+}
+.workspace-page.hours-page .hours-page__pause {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 16px 24px;
+  min-width: 0;
+  margin: 16px 0 0;
+  padding: 0;
+  border: 0;
+}
+.workspace-page.hours-page .hours-page__pause label {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
+}
+.workspace-page.hours-page .hours-page__pause :is(input, select) {
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid var(--bop-color-border-default);
+  border-radius: 0;
+  background: none;
+  color: var(--bop-color-text-default);
+  font: inherit;
+  font-size: 16px;
+}
+.workspace-page.hours-page .hours-page__pause input {
+  width: 148px;
+}
+.workspace-page.hours-page .hours-page__pause select {
+  width: 220px;
+  max-width: 100%;
+}
+.workspace-page.hours-page .hours-page__primary {
+  min-height: 44px;
+  padding: 0 28px;
+  border: 0;
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-accent-fill);
+  font: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.workspace-page.hours-page .hours-page__primary:disabled {
+  opacity: 0.4;
+}
+.hours-page__pauses {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.hours-page__pauses .hours-page__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+}
+.workspace-page.hours-page section[aria-labelledby="configuration-editor-title"] {
+  max-width: 720px;
+  margin: 8px 0 0;
+}
+.workspace-page.hours-page section[aria-labelledby="configuration-editor-title"] h3 {
+  margin: 16px 0 4px;
+  font-size: 16px;
+  font-weight: 600;
+}
+.workspace-page.hours-page .dining-payment-timing {
+  max-width: 720px;
+  margin-top: 40px;
+}
+@media (max-width: 599px) {
+  .hours-page__row {
+    grid-template-columns: 88px minmax(0, 1fr);
+  }
+  .hours-page__row--date {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .workspace-page.hours-page .hours-page__pause input,
+  .workspace-page.hours-page .hours-page__pause select {
+    width: 100%;
+  }
+  .workspace-page.hours-page .hours-page__pause label {
+    flex: 1 1 140px;
+  }
+}

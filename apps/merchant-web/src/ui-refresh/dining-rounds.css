@@ -222,9 +222,16 @@
   font-size: 14px;
   font-weight: 600;
 }
+/* Batch 63 F54 (Figma 57:121): Save is the accent at reduced strength until something changes
+   (it looked like plain grey text), with what a change does beside it. */
 .dining-payment-timing__save:disabled {
-  background: var(--bop-color-surface-raised, #f2f2f2);
-  color: var(--bop-color-text-muted);
+  opacity: 0.4;
+}
+.dining-payment-timing__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 20px;
 }
 
 /* DEC-DINE-IN-PAY-LATER: a pay-later table's checkout on Tables (v3: white, row hairlines only). */

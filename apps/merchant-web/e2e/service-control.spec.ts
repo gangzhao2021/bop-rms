@@ -93,22 +93,23 @@ test("@production service controls retry uncertain writes and recover from versi
     }
   });
   await page.goto("/app/organization/stores/" + store + "/service");
-  const panel = page.getByRole("region", { name: "Service controls" });
-  await expect(panel.getByText("No active pauses.")).toBeVisible();
-  await panel.getByLabel("Pause duration (minutes)").fill("15");
-  await panel.getByRole("button", { name: "Pause service", exact: true }).click();
+  // Batch 63 F54 (Figma 57:121): the section is "Pause ordering"; Refresh is in the page header.
+  const panel = page.getByRole("region", { name: "Pause ordering" });
+  await expect(panel.getByText("No pause now.")).toBeVisible();
+  await panel.getByLabel("How long (minutes)").fill("15");
+  await panel.getByRole("button", { name: "Pause ordering", exact: true }).click();
   await expect(panel.getByRole("button", { name: "Retry same request" })).toBeVisible();
-  await expect(panel.getByRole("button", { name: "Pause service", exact: true })).toBeDisabled();
+  await expect(panel.getByRole("button", { name: "Pause ordering", exact: true })).toBeDisabled();
   await panel.getByRole("button", { name: "Retry same request" }).focus();
   await page.keyboard.press("Enter");
   await expect(panel.getByRole("button", { name: "Resume all services" })).toBeVisible();
   await panel.getByRole("button", { name: "Resume all services" }).click();
-  await expect(panel.getByText("No active pauses.")).toBeVisible();
-  await panel.getByRole("button", { name: "Pause service", exact: true }).click();
+  await expect(panel.getByText("No pause now.")).toBeVisible();
+  await panel.getByRole("button", { name: "Pause ordering", exact: true }).click();
   await expect(panel.getByText("Source changed. Refresh before trying again.")).toBeVisible();
-  await expect(panel.getByRole("button", { name: "Pause service", exact: true })).toHaveCount(0);
-  await panel.getByRole("button", { name: "Refresh service status" }).click();
-  await expect(panel.getByText("No active pauses.")).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Pause ordering", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect(panel.getByText("No pause now.")).toBeVisible();
   expect(requests).toHaveLength(4);
 });
 
@@ -150,7 +151,7 @@ test("@production Hours & ordering shows one clear state to a role without acces
   await page.goto("/app/organization/stores/" + store + "/service");
   await expect(page.getByRole("heading", { name: "No access" })).toBeVisible();
   await expect(page.getByText(/Ask the owner or a manager/u)).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Service controls" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Refresh service status" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Pause ordering" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Refresh", exact: true })).toHaveCount(0);
   await expect(page.getByText(/Check access and refresh/u)).toHaveCount(0);
 });

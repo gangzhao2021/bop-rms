@@ -80,9 +80,10 @@ for (const [language, locale] of [
         const zh = language === "zh-Hans";
         const hours = page.locator("section[aria-labelledby='published-hours-title']");
         await expect(
-          hours.getByRole("heading", { name: zh ? "已发布的营业时间" : "Published hours" }),
+          hours.getByRole("heading", { name: zh ? "营业时间" : "Opening hours" }),
         ).toBeVisible();
-        const items = hours.locator(".detail-section-grid li");
+        // Batch 63 F54: a row a day, its periods each a line.
+        const items = hours.locator(".hours-page__rows").first().locator(".hours-page__period");
         await expect(items).toHaveCount(7);
         await expect(items.first()).toHaveText(
           zh ? "24 小时营业 · 堂食、自取" : "Open 24 hours · Dine-in, Pickup",
