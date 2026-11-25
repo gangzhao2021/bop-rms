@@ -141,9 +141,7 @@ test("@production Hours & ordering reads on the staff 24-hour clock, today on, i
   expect(hours).toContain(
     "17:00–00:00 (next day) · Dine-in · last orders 30 minutes before closing · ready in 15 minutes",
   );
-  expect(hours).toContain(
-    "11:30–14:30 · Dine-in · last orders 25 minutes before closing",
-  );
+  expect(hours).toContain("11:30–14:30 · Dine-in · last orders 25 minutes before closing");
   // Batch 63 F54: the Store, its zone and business day are said once, under the page title.
   const head = await page.locator(".workspace-page__meta").innerText();
   expect(head).toBe(

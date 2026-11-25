@@ -492,7 +492,9 @@ for (const language of ["en", "zh-Hans"] as const) {
         await openEditor(page, zh);
         const head = editor(page);
         const sentence = head.getByText(
-          zh ? "你已于 11月16日周一 05:17 撤回你的更改。" : "You withdrew your change on Mon, Nov 16",
+          zh
+            ? "你已于 11月16日周一 05:17 撤回你的更改。"
+            : "You withdrew your change on Mon, Nov 16",
         );
         const reload = head.getByRole("button", {
           name: zh ? "重新读取已保存的营业时间" : "Reload saved hours",
