@@ -330,3 +330,96 @@ for (const language of ["en", "zh-Hans"] as const) {
     }
   });
 }
+
+// Batch 62 (v15 b61 live, TM2 at 390): the six tables "Paid, guests still seated" wrapped as
+// "…, C61 C" / "(TEST), C61 D (TEST), …": one table's name split across two lines, in English and
+// in Chinese. Each name is measured where it is drawn: all of it on one line.
+for (const language of ["en", "zh-Hans"] as const) {
+  test(`@production a row listing tables never splits a table's name across lines (${language})`, async ({
+    page,
+  }) => {
+    const zh = language === "zh-Hans";
+    if (zh)
+      await page.addInitScript(() => {
+        try {
+          window.localStorage.setItem("bop.merchant.language", "zh-Hans");
+        } catch {
+          // The page still renders in English.
+        }
+      });
+    await workspace(page);
+    const fixture = tonightSummaryFixture();
+    const names = [
+      "S61 A (TEST)",
+      "S61 B (TEST)",
+      "C61 B (TEST)",
+      "C61 C (TEST)",
+      "C61 D (TEST)",
+      "C61 E (TEST)",
+    ];
+    (fixture.openTables as Record<string, unknown>[]).push(
+      ...names.map((tableLabel) => ({
+        tableLabel,
+        phase: "Active",
+        paymentTiming: "PayLater",
+        owedMinor: "0",
+        openedMinutes: 40,
+        standing: "Paid",
+      })),
+    );
+    await page.route("**/merchant/reports/tonight", (route) =>
+      route.fulfill({ headers, json: fixture }),
+    );
+    await page.goto("/app/reports/operations");
+    const row = page.locator(".tonight__row", {
+      hasText: zh ? "已付清，客人还在座" : "Paid, guests still seated",
+    });
+    await expect(row).toContainText(names[5] as string);
+    for (const width of [390, 1024, 1440]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      const drawn = await row.locator("dd").evaluate((dd, listed) => {
+        // Every text node of the names, and where each name starts and ends in them.
+        const nodes: Text[] = [];
+        const walker = document.createTreeWalker(dd, NodeFilter.SHOW_TEXT);
+        for (let node = walker.nextNode(); node !== null; node = walker.nextNode())
+          nodes.push(node as Text);
+        const text = nodes.map((node) => node.data).join("");
+        const at = (offset: number): [Text, number] => {
+          let left = offset;
+          for (const node of nodes) {
+            if (left <= node.data.length) return [node, left];
+            left -= node.data.length;
+          }
+          throw new Error("offset");
+        };
+        const lineHeight = Number.parseFloat(getComputedStyle(dd).lineHeight) || 20;
+        const tops = new Set<number>();
+        const names = listed.map((name) => {
+          const start = text.indexOf(name);
+          if (start < 0) return { name, lines: 0 };
+          const range = document.createRange();
+          range.setStart(...at(start));
+          range.setEnd(...at(start + name.length));
+          const lines = new Set(
+            [...range.getClientRects()]
+              .filter((rect) => rect.width > 0.5)
+              .map((rect) => Math.round(rect.top / (lineHeight / 2))),
+          );
+          for (const line of lines) tops.add(line);
+          return { name, lines: lines.size };
+        });
+        return { names, rows: tops.size };
+      }, names);
+      // Every name on one line; at a phone width they take more than one line between them.
+      for (const name of drawn.names) expect(name.lines, `${name.name} at ${width}`).toBe(1);
+      if (width === 390) expect(drawn.rows, JSON.stringify(drawn)).toBeGreaterThan(1);
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      await page.screenshot({
+        path: `test-results/tonight-names-${language}-${width}.png`,
+        fullPage: true,
+      });
+    }
+  });
+}

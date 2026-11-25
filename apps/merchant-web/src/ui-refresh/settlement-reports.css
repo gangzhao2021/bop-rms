@@ -547,6 +547,13 @@
   white-space: normal;
   overflow-wrap: anywhere;
 }
+/* Batch 62 (v15 b61 live, 390): each table's name stays whole ("C61 C (TEST)", never "C61 C" /
+   "(TEST)"); the names wrap between each other. A name longer than the line still wraps inside
+   its own box rather than running past the screen. */
+.tonight__name {
+  display: inline-block;
+  max-width: 100%;
+}
 .tonight__row[data-strong="true"] {
   border-top: 1px solid var(--bop-color-row-divider);
   font-size: 16px;

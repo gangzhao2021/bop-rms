@@ -391,6 +391,38 @@ describe("WP-2423 item 8 ② tonight's closing summary", () => {
       }
     }
   });
+  it("batch 62 (v15 b61 live, 390): each table's name in a list row is kept whole", () => {
+    const fixture = tonightSummaryFixture();
+    const names = ["S61 A (TEST)", "S61 B (TEST)", "C61 B (TEST)", "C61 C (TEST)"];
+    (fixture.openTables as Record<string, unknown>[]).push(
+      ...names.map((tableLabel) => ({
+        tableLabel,
+        phase: "Active",
+        paymentTiming: "PayLater",
+        owedMinor: "0",
+        openedMinutes: 30,
+        standing: "Paid",
+      })),
+    );
+    for (const [language, joined] of [
+      ["en", "S61 A (TEST), S61 B (TEST), C61 B (TEST), C61 C (TEST)"],
+      ["zh-Hans", "S61 A (TEST)、S61 B (TEST)、C61 B (TEST)、C61 C (TEST)"],
+    ] as const) {
+      setLanguageForTest(language);
+      try {
+        const html = render(fixture);
+        // One box per name, the separator inside it, so a line can only break between names.
+        for (const [index, name] of names.entries())
+          expect(html).toContain(
+            `<span class="tonight__name">${name}${index < names.length - 1 ? (language === "en" ? "," : "、") : ""}</span>`,
+          );
+        const text = html.replace(/<wbr\/?>/gu, "").replace(/<[^>]+>/gu, "");
+        expect(text).toContain(joined);
+      } finally {
+        setLanguageForTest("en");
+      }
+    }
+  });
   it("times the closing reminder by the Store's published closing", () => {
     const endsAt = "2026-10-28T08:00:00.000Z"; // 04:00 the next morning, Toronto.
     const at = (instant: string) => Date.parse(instant);

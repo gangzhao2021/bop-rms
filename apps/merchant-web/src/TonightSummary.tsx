@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { NoAccessNotice } from "./NoAccessNotice.js";
 import { Link } from "react-router";
 import { useBrowserOffline } from "./stale-read.js";
@@ -150,7 +150,8 @@ function Row({
 }: {
   readonly label: string;
   readonly detail?: string | null;
-  readonly value: string;
+  /** A list row's value is its names, each kept whole on a line (batch 62). */
+  readonly value: string | readonly string[];
   readonly strong?: boolean;
   readonly muted?: boolean;
   readonly tone?: "action" | undefined;
@@ -172,7 +173,26 @@ function Row({
         {label}
         {detail ? <span className="tonight__detail">{detail}</span> : null}
       </dt>
-      <dd>{value}</dd>
+      <dd>
+        {typeof value === "string"
+          ? value
+          : // Batch 62 (v15 b61 live, 390): a name never breaks inside ("C61 C" / "(TEST)"); the
+            // line breaks only between names, after the separator.
+            value.map((name, index) => {
+              const separator = listSeparator();
+              const mark = separator.trimEnd();
+              const last = index === value.length - 1;
+              return (
+                <Fragment key={index}>
+                  <span className="tonight__name">
+                    {name}
+                    {last ? null : mark}
+                  </span>
+                  {last ? null : separator === mark ? <wbr /> : separator.slice(mark.length)}
+                </Fragment>
+              );
+            })}
+      </dd>
     </div>
   );
 }
@@ -241,9 +261,7 @@ export function TonightSummaryView({
               ? t("Checking out")
               : t("Seated");
   const tableNames = (tables: typeof open) =>
-    tables
-      .map((table) => t("Table {table}", { table: saidTable(table.tableLabel) }))
-      .join(listSeparator());
+    tables.map((table) => t("Table {table}", { table: saidTable(table.tableLabel) }));
   const c = summary.cancelled;
   // Every payment taken is counted in sales and tax, and the money agrees with the settlement.
   const matches = report.reconciliation.matchesSettlement && s.unmatchedMinor === "0";
