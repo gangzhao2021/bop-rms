@@ -310,7 +310,11 @@ export function tableNeed(
       return {
         tone: "done",
         rank: 4,
-        words: t("Paid · close when the guests leave"),
+        // b62 (v15 b61 live, S61 B): paid, then all of it given back.
+        words:
+          order.bill.paid.fullyRefunded === true
+            ? t("Fully refunded · close when the guests leave")
+            : t("Paid · close when the guests leave"),
         detail: cad(order.bill.paid.amountMinor),
         step: null,
       };

@@ -634,3 +634,38 @@ it("b13: a table checking out says what this device read last while its bill is 
     }).detail,
   ).toBe("$28.25");
 });
+
+describe("b62 (v15 b61 live, S61 B): a table paid, then all of it refunded", () => {
+  const closing = table(7, { session: { phase: "Closing", version: 3, orderReference: id(207) } });
+  const paidBill = (refunds?: { givenMinor: string; onItsWayMinor: string }) =>
+    ({
+      owed: { subtotalMinor: "0", taxMinor: "0", totalMinor: "0" },
+      settlement: { roundsMinor: "2825", totalMinor: "3200" },
+      split: null,
+      ...(refunds === undefined ? {} : { refunds }),
+    }) as unknown as TableBill;
+  it("says Fully refunded on the Tables list, never only Paid", () => {
+    expect(
+      tableNeed(
+        closing,
+        tableFactsFromBill(paidBill({ givenMinor: "3200", onItsWayMinor: "0" })),
+        now,
+      ),
+    ).toMatchObject({
+      tone: "done",
+      words: "Fully refunded · close when the guests leave",
+      detail: "$32.00",
+    });
+  });
+  it("says Paid while some of it is kept or still on its way back", () => {
+    for (const refunds of [
+      undefined,
+      { givenMinor: "500", onItsWayMinor: "0" },
+      { givenMinor: "0", onItsWayMinor: "3200" },
+    ])
+      expect(tableNeed(closing, tableFactsFromBill(paidBill(refunds)), now)).toMatchObject({
+        words: "Paid · close when the guests leave",
+        detail: "$32.00",
+      });
+  });
+});

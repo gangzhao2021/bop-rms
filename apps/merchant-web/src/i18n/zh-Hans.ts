@@ -10563,4 +10563,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "已并入另一桌。本单各轮记在该桌账单上，已在那里付清。",
   "Merged into another table. Its rounds are on that table's bill and are paid there.":
     "已并入另一桌。本单各轮记在该桌账单上，在那里结账。",
+  // Batch 62: a paid table bill refunded afterwards, on Tables.
+  "Fully refunded. Close the table when the guests have left.": "已全部退款。客人离开后关台。",
+  "Fully refunded · close when the guests leave": "已全部退款 · 客人走后关台",
 });

@@ -8624,6 +8624,20 @@ async function journey(journeyEnding) {
             refundedMinor: undefined,
             refundPendingMinor: "1000",
           });
+          // b62 (v15 b61 live, S61 B): the Tables page's checkout reads the bill, which counts a
+          // refund on its way in refundedMinor; it now says which part is still on its way, so
+          // checkout never says it went back (under the pilot role).
+          const checkoutRefunds = async () => {
+            const { refundedMinor, refundPendingMinor } = await createMerchantDiningTableBillRead({
+              persistence: persistenceOf(manager),
+              authentication: manager.authentication,
+            })({ ...as(manager), query: { diningSessionReference: sessionReference } });
+            return { refundedMinor, refundPendingMinor };
+          };
+          assert.deepEqual(await checkoutRefunds(), {
+            refundedMinor: "1000",
+            refundPendingMinor: "1000",
+          });
           // b60 review: the tip the bill took is on the Orders row, so the detail's Total (and
           // "Total after refunds") is what was paid, as the list's amount is.
           const paidNow = (await orderDetail()).items[0].tableBill.paid;
@@ -8679,6 +8693,10 @@ async function journey(journeyEnding) {
             refundedMinor: "1000",
             refundPendingMinor: undefined,
           });
+          assert.deepEqual(await checkoutRefunds(), {
+            refundedMinor: "1000",
+            refundPendingMinor: undefined,
+          });
           const refundedDay = await dayNow();
           assert.equal(refundedDay.unresolvedOnlineRefundCount, 0);
           assert.deepEqual(refundedDay.settlement.onlineRefunded, { count: 1, amountMinor: 1000n });
@@ -8712,6 +8730,10 @@ async function journey(journeyEnding) {
           const emptied = await refund((due - 1000n).toString());
           assert.equal(emptied.payment.refundableMinor, "0");
           assert.deepEqual(await billRefunds(), {
+            refundedMinor: due.toString(),
+            refundPendingMinor: undefined,
+          });
+          assert.deepEqual(await checkoutRefunds(), {
             refundedMinor: due.toString(),
             refundPendingMinor: undefined,
           });

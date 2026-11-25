@@ -41,6 +41,12 @@ export class TableCheckoutError extends Error {
 }
 
 export interface TableBill {
+  /**
+   * b62 (v15 b61 live): what went back from the table's payments: given back (cash, card machine,
+   * a guest's card once the Provider answered) and still on its way to a guest's card. Both "0"
+   * while nothing was refunded (or from an older server).
+   */
+  readonly refunds?: { readonly givenMinor: string; readonly onItsWayMinor: string };
   readonly diningSessionReference: string;
   readonly sessionPhase: "Active" | "Closing" | "Closed" | "Cancelled";
   readonly sessionVersion: number;
@@ -269,7 +275,16 @@ export function parseTableBill(value: unknown): TableBill {
     return invalid();
   const owed = raw.owed as Record<string, unknown>;
   const settlement = raw.settlement as Record<string, unknown> | null;
+  // The server's refundedMinor counts a refund on its way too; refundPendingMinor is that part.
+  const refunded = raw.refundedMinor === undefined ? 0n : BigInt(amount(raw.refundedMinor));
+  const onItsWay =
+    raw.refundPendingMinor === undefined ? 0n : BigInt(amount(raw.refundPendingMinor));
+  if (onItsWay > refunded) return invalid();
   return Object.freeze({
+    refunds: Object.freeze({
+      givenMinor: (refunded - onItsWay).toString(),
+      onItsWayMinor: onItsWay.toString(),
+    }),
     diningSessionReference: raw.diningSessionReference,
     sessionPhase: raw.sessionPhase as TableBill["sessionPhase"],
     sessionVersion: raw.sessionVersion as number,

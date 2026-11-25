@@ -1423,7 +1423,7 @@ export function TableCheckout({
  * DEC-DINE-IN-PAY-LATER rule 5: one receipt for the whole table — every round's dishes, tax, tip,
  * cash rounding, total and how it was paid — never split by round.
  */
-function TableReceipt({
+export function TableReceipt({
   bill,
   tableLabel,
   storeLabel,
@@ -1467,6 +1467,12 @@ function TableReceipt({
     .map((entry) => entry.paid.recordedAt)
     .reduce((latest, at) => (at > latest ? at : latest), "");
   const dishes = bill.rounds.flatMap((round) => round.items);
+  // b62 (v15 b61 live, S61 B): what went back after it was paid, as the Orders detail says it:
+  // given back comes off what was paid; still on its way to the guest's card is said apart.
+  const totalPaid = add((paid) => paid.totalMinor);
+  const given = BigInt(bill.refunds?.givenMinor ?? "0");
+  const onItsWay = BigInt(bill.refunds?.onItsWayMinor ?? "0");
+  const fullyRefunded = given > 0n && onItsWay === 0n && given >= totalPaid;
   return (
     <div
       ref={region}
@@ -1530,7 +1536,7 @@ function TableReceipt({
         ) : null}
         <div className="table-checkout__total">
           <dt>{t("Total paid")}</dt>
-          <dd>{cad(add((paid) => paid.totalMinor))}</dd>
+          <dd>{cad(totalPaid)}</dd>
         </div>
         {payments.map(({ part, paid }) => (
           <Fragment key={part ?? "whole"}>
@@ -1562,9 +1568,36 @@ function TableReceipt({
             ) : null}
           </Fragment>
         ))}
+        {fullyRefunded ? (
+          <div className="table-checkout__refunded">
+            <dt>{t("Fully refunded")}</dt>
+            <dd>{cad(given)}</dd>
+          </div>
+        ) : given > 0n ? (
+          <>
+            <div className="table-checkout__refunded">
+              <dt>{t("Refunded")}</dt>
+              <dd>
+                <span className="bop-amount">−{cad(given)}</span>
+              </dd>
+            </div>
+            <div>
+              <dt>{t("Total after refunds")}</dt>
+              <dd>{cad(totalPaid - given)}</dd>
+            </div>
+          </>
+        ) : null}
+        {onItsWay > 0n ? (
+          <div className="table-checkout__refunded">
+            <dt>{t("Refund on its way")}</dt>
+            <dd>{cad(onItsWay)}</dd>
+          </div>
+        ) : null}
       </dl>
       <p role="status" data-print-hide="">
-        {t("Paid in full. Close the table when the guests have left.")}
+        {fullyRefunded
+          ? t("Fully refunded. Close the table when the guests have left.")
+          : t("Paid in full. Close the table when the guests have left.")}
       </p>
       {/* M50: only this paid bill prints, never the staff panel around it. It is not yet a tax
           receipt (no business number), so it is not called one (M48 is still open). */}

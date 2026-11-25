@@ -35,9 +35,20 @@ export interface TableOrderFacts {
       /** Null: guests are paying by dish (no fixed number of parts). */
       readonly partCount: number | null;
     };
-    readonly paid: { readonly amountMinor: string } | null;
+    /**
+     * b62 (v15 b61 live, S61 B): fullyRefunded once everything it paid went back (nothing still
+     * on its way), so the list never says only "Paid" for it.
+     */
+    readonly paid: { readonly amountMinor: string; readonly fullyRefunded?: true } | null;
   } | null;
 }
+
+/** b62: everything paid went back, and nothing is still on its way to a guest's card. */
+const allBack = (paidMinor: string, givenMinor: string | undefined, onItsWay: string | undefined) =>
+  givenMinor !== undefined &&
+  BigInt(givenMinor) > 0n &&
+  BigInt(givenMinor) >= BigInt(paidMinor) &&
+  BigInt(onItsWay ?? "0") === 0n;
 
 /**
  * v15 batch 8: a table checking out whose Order the queue read did not bring (a slow or failed
@@ -58,6 +69,9 @@ export function tableFactsFromBill(bill: TableBill): TableOrderFacts {
               .toString(),
           }
         : null;
+  const fully =
+    paid !== null &&
+    allBack(paid.amountMinor, bill.refunds?.givenMinor, bill.refunds?.onItsWayMinor);
   return {
     readyToServe: 0,
     inKitchen: false,
@@ -73,7 +87,7 @@ export function tableFactsFromBill(bill: TableBill): TableOrderFacts {
             },
           }
         : {}),
-      paid,
+      paid: paid === null ? null : fully ? { ...paid, fullyRefunded: true } : paid,
     },
   };
 }
@@ -106,7 +120,16 @@ function factsOfOrder(order: QueuedOrder): TableOrderFacts {
             paid:
               order.tableBill.paid === null
                 ? null
-                : { amountMinor: order.tableBill.paid.amountMinor },
+                : {
+                    amountMinor: order.tableBill.paid.amountMinor,
+                    ...(allBack(
+                      order.tableBill.paid.amountMinor,
+                      order.tableBill.paid.refundedMinor,
+                      order.tableBill.paid.refundPendingMinor,
+                    )
+                      ? { fullyRefunded: true as const }
+                      : {}),
+                  },
           },
   };
 }

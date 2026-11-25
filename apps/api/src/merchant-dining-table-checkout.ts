@@ -151,6 +151,11 @@ export function tableTipMinor(tip: DiningTableTip, subtotalMinor: bigint): bigin
 export interface DiningTableBill {
   /** Owner 2026-11-03: what went back from this table's payments (absent while nothing has). */
   readonly refundedMinor?: string;
+  /**
+   * b62 (v15 b61 live): of refundedMinor, refunds to a guest's card the Provider has not answered
+   * yet (absent while none), so staff checkout says them as on their way, never as given back.
+   */
+  readonly refundPendingMinor?: string;
   readonly diningSessionReference: string;
   readonly sessionPhase: "Active" | "Closing" | "Closed" | "Cancelled";
   readonly sessionVersion: number;
@@ -708,6 +713,10 @@ export async function readDiningTableBill(
   const [writeOff] = await payments.listWriteOffsByOrders(tx, [orderReference]);
   const refundedMinor =
     settlements.length === 0 ? 0n : await tableRefundedMinor(tx, payments, orderReference);
+  const refundPendingMinor =
+    refundedMinor === 0n
+      ? 0n
+      : (await tableRefundPosition(tx, payments, orderReference)).pendingMinor;
   const onlinePayments = await payments.listOnlinePaymentsByOrders(tx, [orderReference]);
   const onlinePayment = onlinePayments.filter((entry) => entry.part === null).at(-1);
   // The whole-table payment, if the table paid at once.
@@ -1258,6 +1267,7 @@ export async function readDiningTableBill(
   const result = {
     ...base,
     ...(refundedMinor > 0n ? { refundedMinor: refundedMinor.toString() } : {}),
+    ...(refundPendingMinor > 0n ? { refundPendingMinor: refundPendingMinor.toString() } : {}),
     rounds: Object.freeze(rounds),
     waitingRounds,
     taxRoundingMinor: taxRoundingMinor.toString(),
