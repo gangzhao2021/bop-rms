@@ -893,7 +893,8 @@ function RoleRow({
           : t("{count} staff", { count: role.memberCount })}
         {role.change ? <span> · {roleChangeStatusLabels[role.change.status]}</span> : null}
       </div>
-      <Link to={`/app/organization/roles/${role.roleReference}`}>{t("Open")}</Link>
+      {/* Batch 63 review (RA-16): "View" / "查看" (the Chinese for "Open" here read 未解决). */}
+      <Link to={`/app/organization/roles/${role.roleReference}`}>{t("View")}</Link>
       {role.change === null && role.presetUpdate !== null ? (
         <PresetUpdateOffer
           role={role}

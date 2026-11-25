@@ -1,7 +1,7 @@
 import { t, listSeparator } from "./i18n/i18n.js";
 import { noAccessHeading } from "./access-denied.js";
 import { NoAccessNotice } from "./NoAccessNotice.js";
-import { AppFrame, StatePanel } from "@bop-rms/ui";
+import { StatePanel } from "@bop-rms/ui";
 import { Freshness, SourceTime, StoreDate } from "./StoreTime.js";
 import { WorkspacePage } from "./WorkspacePage.js";
 import { useCallback, useEffect, useState } from "react";
@@ -443,20 +443,20 @@ function AllergenItem({
     validUntil > view.sourceAsOf.slice(0, 10) &&
     confirmed;
   return (
-    <AppFrame title={item.name} description={t("Allergens")}>
-      <header className="screen-heading">
-        <div>
-          <p className="bop-eyebrow">{t("Allergens · Ingredient")}</p>
-          <h2>{item.name}</h2>
-          <p>
-            {statusText[item.status]}
-            {item.declaration
-              ? " · " + declarationSummary(registry, item.declaration, view.locale)
-              : ""}
-          </p>
-        </div>
-        <Link to="/app/compliance/allergens">{t("Back to allergens")}</Link>
-      </header>
+    // Batch 63 review (RA-03): the ingredient page has the shared page header too — its name as
+    // the 28/600 title, the language switch at the top right and the one "Updated" stamp.
+    <WorkspacePage
+      className="allergens-page"
+      back={<Link to="/app/compliance/allergens">{t("Back to allergens")}</Link>}
+      title={item.name}
+      meta={
+        statusText[item.status] +
+        (item.declaration
+          ? " · " + declarationSummary(registry, item.declaration, view.locale)
+          : "")
+      }
+      status={<Freshness status="Fresh" at={view.sourceAsOf} />}
+    >
       {message ? (
         <StatePanel
           heading={message.tone === "error" ? t("Not recorded") : t("Recorded")}
@@ -613,6 +613,6 @@ function AllergenItem({
           </ul>
         )}
       </section>
-    </AppFrame>
+    </WorkspacePage>
   );
 }

@@ -287,6 +287,7 @@
   gap: 4px 16px;
 }
 .one-menu .one-menu__filters button,
+.one-menu .one-menu__add button,
 .one-menu .one-menu__actions button,
 .one-menu .one-menu__sizes button,
 .one-menu .one-menu__pending-actions button,
@@ -319,6 +320,7 @@
   color: var(--bop-color-text-muted);
   cursor: default;
 }
+.one-menu .one-menu__add .one-menu__primary,
 .one-menu .one-menu__pending-actions .one-menu__primary,
 .one-menu .dish-editor__actions .one-menu__primary {
   padding: 0 16px;

@@ -242,7 +242,11 @@ export function StoreDevicesView({
                   <p id="store-devices-label-hint" className="store-devices__hint">
                     {t("A name staff recognise, up to 40 characters.")}
                   </p>
-                  <button type="submit" disabled={locked || !validDeviceLabel(label)}>
+                  <button
+                    type="submit"
+                    data-variant="primary"
+                    disabled={locked || !validDeviceLabel(label)}
+                  >
                     {busy ? t("Setting up…") : t("Set up this tablet for staff PINs")}
                   </button>
                 </form>
@@ -288,6 +292,7 @@ export function StoreDevicesView({
                         <td>
                           <button
                             type="button"
+                            data-variant="destructive"
                             disabled={locked}
                             aria-label={t("Remove {label}", { label: device.label })}
                             onClick={() => onAsk({ kind: "Remove", device })}
@@ -327,6 +332,7 @@ export function StoreDevicesView({
                           {row.state === "Set" ? (
                             <button
                               type="button"
+                              data-variant="destructive"
                               disabled={locked}
                               aria-label={t("Reset {name}'s PIN", { name: systemText(row.name) })}
                               onClick={() => onAsk({ kind: "Reset", person: row })}

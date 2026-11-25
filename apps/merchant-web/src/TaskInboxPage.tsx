@@ -3,6 +3,7 @@ import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { NoAccessNotice } from "./NoAccessNotice.js";
 import { StatePanel } from "@bop-rms/ui";
 import { WorkspacePage } from "./WorkspacePage.js";
+import { Freshness } from "./StoreTime.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import {
@@ -166,6 +167,13 @@ export function TaskInboxScreen({
       className="task-inbox-page"
       title={<span id="task-inbox-heading">{t("Tasks")}</span>}
       meta={view?.storeLabel ?? null}
+      // Batch 63 review (RA-03, F24): the one "Updated 01:36" stamp, from this read; while offline
+      // it says the list may be out of date.
+      status={
+        view === null ? null : (
+          <Freshness status={state.kind === "Ready" ? "Fresh" : "Stale"} at={view.observedAt} />
+        )
+      }
       actions={
         <>
           <button type="button" onClick={onRefresh} disabled={!online || state.kind === "Loading"}>
@@ -205,10 +213,8 @@ export function TaskInboxScreen({
                 <div>
                   <h3 id="task-inbox-records-heading">{t("Task records")}</h3>
                   <p>
-                    {t("{length} records on this page · observed {observedAt}", {
-                      length: view.items.length,
-                      observedAt: view.observedAt,
-                    })}
+                    {/* The header's "Updated" stamp says when; never the raw instant here. */}
+                    {t("{length} records on this page", { length: view.items.length })}
                   </p>
                 </div>
               </div>

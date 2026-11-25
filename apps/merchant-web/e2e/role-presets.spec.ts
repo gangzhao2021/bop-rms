@@ -318,7 +318,7 @@ test("@production a sole owner edits Front of House, approves it alone, turns it
   await page
     .locator("li.role-row")
     .filter({ hasText: "Front of House" })
-    .getByRole("link", { name: "Open" })
+    .getByRole("link", { name: "View" })
     .click();
   await page.getByRole("button", { name: "Edit this preset" }).click();
   const comp = page.getByLabel("Comp or discount dishes before the table pays");
@@ -372,7 +372,7 @@ test("@production a role nobody holds is removed and brought back; a new role is
   await page
     .locator("li.role-row")
     .filter({ hasText: "Inventory Manager" })
-    .getByRole("link", { name: "Open" })
+    .getByRole("link", { name: "View" })
     .click();
   await page.getByRole("button", { name: "Bring back" }).click();
   await expect(page.getByText("0 staff hold this role")).toBeVisible();

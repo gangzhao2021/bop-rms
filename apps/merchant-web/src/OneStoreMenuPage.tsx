@@ -1088,8 +1088,10 @@ export function OneStoreMenuPage({
       </div>
       {mayEditDishes ? (
         <div className="one-menu__add">
+          {/* Batch 63 review (F22): the menu's one next step is the accent fill; the rest are words. */}
           <button
             type="button"
+            className="one-menu__primary"
             aria-expanded={editing === "new"}
             onClick={() => setEditing((current) => (current === "new" ? null : "new"))}
           >

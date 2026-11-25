@@ -455,6 +455,7 @@ export function MemberPointsPage({
               {view.canManage ? (
                 <button
                   type="submit"
+                  data-variant="primary"
                   disabled={busy || (Object.keys(draft).length === 0 && draftRewards === null)}
                 >
                   {t("Save rules")}

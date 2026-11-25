@@ -203,3 +203,110 @@ a.shell-action {
 .workspace-content button[data-variant="primary"]:disabled {
   opacity: 0.4;
 }
+
+/*
+ * F22 extended (batch 63 review; brief §2 v3 "按钮只有两种…取消、退款类用红色文字，点了先确认。不再用
+ * 白底细边按钮和黑色块"): on Shared tablets & PINs, Points and Store features every other button is
+ * accent words — never the shared base's white bordered box or its black submit block. The one next
+ * step is marked data-variant="primary" (the accent fill above); removing a tablet or resetting a PIN
+ * is data-variant="destructive" (red words, quiet.css) and asks first in its dialog. The page header
+ * keeps its own rules (Refresh, the language switch).
+ */
+.workspace-content
+  :is(
+    .workspace-page.store-devices,
+    .member-points,
+    .store-kitchen-sections,
+    .store-kitchen-sections__add
+  )
+  button:not(
+    [data-variant="primary"],
+    [data-variant="destructive"],
+    .workspace-page__header *,
+    .store-features__save
+  ) {
+  min-height: 44px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font: inherit;
+  font-size: var(--bop-type-small);
+  font-weight: var(--bop-type-strong);
+  cursor: pointer;
+}
+.workspace-content
+  :is(
+    .workspace-page.store-devices,
+    .member-points,
+    .store-kitchen-sections,
+    .store-kitchen-sections__add
+  )
+  button:not(
+    [data-variant="primary"],
+    [data-variant="destructive"],
+    .workspace-page__header *,
+    .store-features__save
+  ):disabled {
+  color: var(--bop-color-text-muted);
+  cursor: default;
+}
+.workspace-content
+  :is(
+    .workspace-page.store-devices,
+    .member-points,
+    .store-kitchen-sections,
+    .store-kitchen-sections__add
+  )
+  button:not(
+    [data-variant="primary"],
+    [data-variant="destructive"],
+    .workspace-page__header *,
+    .store-features__save
+  ):hover:not(:disabled) {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+/* The red words keep the same frame as the accent words beside them. */
+.workspace-content .workspace-page.store-devices button[data-variant="destructive"] {
+  min-height: 44px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  font-size: var(--bop-type-small);
+}
+.workspace-content .workspace-page.store-devices button[data-variant="destructive"]:disabled {
+  color: var(--bop-color-text-muted);
+}
+.workspace-content button[data-variant="primary"] {
+  min-height: 44px;
+  padding: 0 var(--bop-space-4);
+}
+
+/*
+ * RA-16 (batch 63 review): a link inside a page is accent 14/400 words, underlined only on hover
+ * (as Approvals' "Turn on approving alone" and Home's links) — the Roles rows' "View" and Staff's
+ * "View and manage" were black underlined body text. Each role row ends with its 1px #E5E5E5
+ * hairline; the shared card frame no longer hides it.
+ */
+.workspace-content :is(.role-row, .staff-page .bop-state-card) > a,
+.workspace-content .staff-page .bop-state-card a {
+  color: var(--bop-color-accent);
+  font-size: var(--bop-type-small);
+  font-weight: var(--bop-type-regular);
+  text-decoration: none;
+}
+.workspace-content :is(.role-row, .staff-page .bop-state-card) a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+/* The role rows are a list: a hairline between rows, never above the first or below the last
+   (quiet.css, Owner 2026-10-26). The rows' own border used the card token, which is see-through. */
+.workspace-content .role-row {
+  border-bottom: 0;
+}
+.workspace-content .role-row + .role-row {
+  border-top: 1px solid var(--bop-color-row-divider);
+}

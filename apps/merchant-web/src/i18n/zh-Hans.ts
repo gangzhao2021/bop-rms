@@ -5973,8 +5973,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{length} payment{value} to look at": "{length} 笔付款需要查看",
   "{length} product{value} cannot be priced for every order type. Menus offering them are not submitted for review until fixed on the product page.":
     "{length} 件商品无法为每种订单类型定价。在商品页修正之前，提供它们的菜单不会提交审核。",
-  "{length} records on this page · observed {observedAt}":
-    "本页 {length} 条记录 · 观察于 {observedAt}",
+  "{length} records on this page": "本页 {length} 条记录",
   "{length} settings": "{length} 项设置",
   "{length} table{value}": "{length} 张桌台",
   "{length} tickets": "{length} 张票据",
