@@ -43,6 +43,7 @@ import {
   type TablePayment,
 } from "./TablePaymentPanel.js";
 import { UnpaidRoundCancelAction, isPaymentUnconfirmed } from "./UnpaidRoundCancelAction.js";
+import { refundsBehindRefunded, type ListedRefundPart } from "./refund-assignment.js";
 import {
   earlierOpenPickupText,
   HeldStockReleaseAction,
@@ -1228,21 +1229,17 @@ export interface OrderRefundRow {
  * the customer's request, or an automatic one), then the total when there is more than one.
  */
 /** F27 final check: a refund listed by name above, as the order's record says it went back. */
-export interface ListedRefund {
-  readonly method: "CardMachine" | "Cash" | "Online";
-  readonly amountMinor: bigint;
-}
+export type ListedRefund = ListedRefundPart;
 /**
  * Batch 63 review (F27, D62C-12/T12): the refunds behind "Refunded", each said with its own way and
  * time ("Refunded to card · 22:59", "Cash given back · 02:28"), from the order's record (money
- * Payment sent back, as the record lists it). Only when the record's refunds make up exactly that
- * money — all of them, or all but the refunds already listed by name above — else null, and the
- * row stays "Refunded" (never a way or time that might belong to another refund).
+ * Payment sent back, as the record lists it), else null, and the row stays "Refunded" (never a way
+ * or time that might belong to another refund).
  *
- * Final check (F27): a refund listed by name is taken out of the record only by its way and amount
- * (a card-machine $12 cancellation is never an online $12), and only when exactly one record refund
- * could be it; when more than one could, null. A table's refund also says its reason when its
- * payment lists exactly one refund of that way, amount and time.
+ * F27 fix-up: which record refunds those are is decided only by refundsBehindRefunded — every
+ * refund listed by name above taken out one-to-one by way and amount (each cancelled item on its
+ * own), even when the record's total already equals the money shown. A table's refund also says its
+ * reason when its payment lists exactly one refund of that way, amount and time.
  */
 export function refundedByWay(
   record: CurrentOrderDetail["record"] | undefined,
@@ -1251,24 +1248,9 @@ export function refundedByWay(
   when: (at: string) => string,
   reasons: readonly RefundReason[] = [],
 ): readonly { readonly label: string; readonly amountMinor: bigint }[] | null {
-  if (record == null || record.refunds.length === 0) return null;
-  const sum = (list: typeof record.refunds) =>
-    list.reduce((total, refund) => total + BigInt(refund.amountMinor), 0n);
-  let refunds = record.refunds;
-  if (sum(refunds) !== refundedMinor) {
-    const rest = [...refunds];
-    for (const named of listed) {
-      const same = rest.filter(
-        (refund) =>
-          refund.method === named.method && BigInt(refund.amountMinor) === named.amountMinor,
-      );
-      if (same.length > 1) return null;
-      const one = same[0];
-      if (one !== undefined) rest.splice(rest.indexOf(one), 1);
-    }
-    if (rest.length === 0 || sum(rest) !== refundedMinor) return null;
-    refunds = rest;
-  }
+  if (record == null) return null;
+  const refunds = refundsBehindRefunded(record.refunds, listed, refundedMinor);
+  if (refunds === null) return null;
   const reasonOf = (refund: (typeof refunds)[number]) => {
     const same = reasons.filter(
       (reason) =>
@@ -1332,7 +1314,13 @@ export function orderRefundRows(
   const itemsBack = items === null ? 0n : BigInt(items.amountMinor) - listedPending;
   if (itemsBack > 0n) {
     rows.push({ label: t("Cancelled items refund"), amount: money(itemsBack) });
-    listed.push({ method: "Online", amountMinor: itemsBack });
+    // F27 fix-up: matched item by item, never as one refund of their sum.
+    for (const item of lines.items) {
+      const cancellation = item.cancellation;
+      if (cancellation?.refundStatus !== "Refunded") continue;
+      const amountMinor = BigInt(cancellation.refund.amountMinor);
+      if (amountMinor > 0n) listed.push({ method: "Online", amountMinor });
+    }
   }
   if (listedPending > 0n)
     named.push({

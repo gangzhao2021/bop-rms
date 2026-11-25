@@ -2811,33 +2811,120 @@ describe("b60 (v15 b59 live, TM2 order 27): a paid table's refunds count on Orde
         ]);
     });
 
+    // $2.00 + $3.00 of cancelled items went back online ($5.00 in all) at 21:00 and 21:10.
+    const withItems = {
+      items: [
+        { cancellation: { refund: money("200"), refundStatus: "Refunded" } },
+        { cancellation: { refund: money("300"), refundStatus: "Refunded" } },
+      ],
+      totals: { total: money("4000") },
+    } as unknown as Parameters<typeof orderRefundRows>[1];
+    const itemTwo = refund("Online", "200", "2026-11-24T21:00:00.000Z");
+    const itemThree = refund("Online", "300", "2026-11-24T21:10:00.000Z");
+
     it("the cancelled items' refund is never taken for an unrelated refund of the same amount", () => {
-      // $2.00 + $3.00 of cancelled items went back online ($5.00 in all); round 2's $7.00 went
-      // back on the machine; $5.00 cash of the table's payment was given back at 02:28.
-      const withItems = {
-        items: [
-          { cancellation: { refund: money("200"), refundStatus: "Refunded" } },
-          { cancellation: { refund: money("300"), refundStatus: "Refunded" } },
-        ],
-        totals: { total: money("4000") },
-      } as unknown as Parameters<typeof orderRefundRows>[1];
-      expect(
-        orderRefundRows(
-          dineIn("500", "700"),
-          withItems,
-          null,
-          record([
-            refund("Cash", "500", "2026-11-25T02:28:00.000Z"),
-            refund("CardMachine", "700", "2026-11-24T21:05:00.000Z"),
-          ]),
-          clock,
-        ),
-      ).toEqual([
+      // Round 2's $7.00 went back on the machine; $5.00 cash of the table's payment at 02:28.
+      const rows = (refunds: ReturnType<typeof refund>[]) =>
+        orderRefundRows(dineIn("500", "700"), withItems, null, record(refunds), clock);
+      const cash = refund("Cash", "500", "2026-11-25T02:28:00.000Z");
+      const round = refund("CardMachine", "700", "2026-11-24T21:05:00.000Z");
+      expect(rows([itemTwo, cash, round, itemThree])).toEqual([
         { label: "Cancelled items refund", amount: money("500") },
         { label: "Round 2 cancellation refund (card machine)", amount: money("700") },
         { label: "Cash given back · 02:28", amount: money("500") },
         { label: "Total refunded", amount: money("1700") },
       ]);
+      // The items' own refunds are not in the record: which $5.00 is which is not known.
+      expect(rows([cash, round])).toEqual([
+        { label: "Cancelled items refund", amount: money("500") },
+        { label: "Round 2 cancellation refund (card machine)", amount: money("700") },
+        { label: "Refunded", amount: money("500") },
+        { label: "Total refunded", amount: money("1700") },
+      ]);
+    });
+
+    it("F27 fix-up: items made of several refunds are matched one by one, not by an equal single refund", () => {
+      // A pickup: $2.00 and $3.00 of items back online, then an unrelated $5.00 online at 22:59.
+      const pickup = {
+        orderType: "Pickup",
+        paidOnline: null,
+        counter: null,
+        batches: [],
+        tableBill: null,
+      } as unknown as Parameters<typeof orderRefundRows>[0];
+      const position = {
+        refundedMinor: "1000",
+        refundPendingMinor: "0",
+        refundNotSentMinor: "0",
+        refundOnMachineMinor: "0",
+      } as unknown as Parameters<typeof orderRefundRows>[2];
+      const unrelated = refund("Online", "500", "2026-11-24T22:59:00.000Z");
+      for (const refunds of [
+        [itemTwo, itemThree, unrelated],
+        [unrelated, itemThree, itemTwo],
+      ])
+        expect(orderRefundRows(pickup, withItems, position, record(refunds), clock)).toEqual([
+          { label: "Cancelled items refund", amount: money("500") },
+          { label: "Refunded to card · 22:59", amount: money("500") },
+          { label: "Total refunded", amount: money("1000") },
+        ]);
+      // Only the unrelated $5.00 is in the record: the money stays plain "Refunded", all of it.
+      expect(orderRefundRows(pickup, withItems, position, record([unrelated]), clock)).toEqual([
+        { label: "Cancelled items refund", amount: money("500") },
+        { label: "Refunded", amount: money("500") },
+        { label: "Total refunded", amount: money("1000") },
+      ]);
+    });
+
+    it("F27 fix-up: a record holding only the listed refund never names the other one's way", () => {
+      // The record's $12.00 equals the other money, but it is round 2's card-machine cancellation;
+      // the table's other $12.00 is not in the record yet.
+      expect(orderRefundRows(dineIn("1200"), lines, null, record([machine]), clock)).toEqual([
+        { label: "Round 2 cancellation refund (card machine)", amount: money("1200") },
+        { label: "Refunded", amount: money("1200") },
+        { label: "Total refunded", amount: money("2400") },
+      ]);
+      setLanguageForTest("zh-Hans");
+      try {
+        expect(
+          orderRefundRows(dineIn("1200"), lines, null, record([machine]), clock)[1]?.label,
+        ).toBe("已退款");
+      } finally {
+        setLanguageForTest("en");
+      }
+    });
+
+    it("F27 fix-up: two listed refunds of one way and amount take both of theirs", () => {
+      const twoRounds = {
+        ...dineIn("500"),
+        batches: [2, 3].map((sequence) => ({
+          sequence,
+          staffRound: null,
+          staffCancellation: {
+            reasonCode: "SOLD_OUT",
+            cancelledAt: "2026-11-24T21:05:00.000Z",
+            refundStatus: "Refunded",
+            refundAmountMinor: "1200",
+            refundMethod: "CardMachine",
+          },
+        })),
+      } as unknown as Parameters<typeof orderRefundRows>[0];
+      const later = refund("CardMachine", "1200", "2026-11-24T21:15:00.000Z");
+      const cash = refund("Cash", "500", "2026-11-25T02:28:00.000Z");
+      expect(
+        orderRefundRows(twoRounds, lines, null, record([machine, later, cash]), clock).map(
+          (row) => row.label,
+        ),
+      ).toEqual([
+        "Round 2 cancellation refund (card machine)",
+        "Round 3 cancellation refund (card machine)",
+        "Cash given back · 02:28",
+        "Total refunded",
+      ]);
+      // Only one of the two is in the record: the cash is not certain to be the rest.
+      expect(
+        orderRefundRows(twoRounds, lines, null, record([machine, cash]), clock)[2]?.label,
+      ).toBe("Refunded");
     });
 
     it("F27 reason: a table's refund says why it went back, in staff words (en and zh-Hans)", () => {
