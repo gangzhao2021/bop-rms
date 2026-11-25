@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { pinFixtureYear } from "./store-year.fixture.js";
 import {
   DiscardDraftAction,
   DiscardDraftQuestion,
@@ -14,6 +15,10 @@ import {
   dollarsToMinor,
   minorToDollars,
 } from "./store-price-pages.js";
+
+// Batch 64: dates of this year are written without the year; these fixtures are in 2026.
+beforeEach(() => pinFixtureYear());
+afterEach(() => vi.useRealTimers());
 
 describe("WP-2423 price page helpers", () => {
   it("converts dollars and cents exactly", () => {
@@ -235,9 +240,9 @@ describe("WP-2423 price book list", () => {
   it("shows times in the Store's time zone, not UTC", async () => {
     const { html, text } = await renderList(listView(), "America/Toronto");
     expect(text).not.toContain("UTC");
-    expect(text).toContain("since Oct 1, 2026, 9:00 AM");
-    expect(text).toContain("Oct 15, 2026, 12:30 PM");
-    expect(text).toContain("PRICES-20261001: Oct 1, 2026, 9:00 AM – now");
+    expect(text).toContain("since Thu, Oct 1 09:00");
+    expect(text).toContain("Thu, Oct 15 12:30");
+    expect(text).toContain("PRICES-20261001: Thu, Oct 1 09:00 – now");
     expect(html).toContain('dateTime="2026-10-15T16:30:00.000Z"');
   });
 });

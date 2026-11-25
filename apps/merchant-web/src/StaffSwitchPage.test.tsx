@@ -67,7 +67,7 @@ describe("messages", () => {
         "America/Toronto",
       ),
     ).toBe(
-      "Too many wrong PINs. Ana's PIN is locked until 3:45 PM. Ask a manager to reset it, or sign in with your account.",
+      "Too many wrong PINs. Ana's PIN is locked until 15:45. Ask a manager to reset it, or sign in with your account.",
     );
     expect(
       switchMessageText(
@@ -115,7 +115,7 @@ describe("screen", () => {
       ],
     };
     const html = view(locked);
-    expect(html).toContain('Ana<span class="staff-switch__locked">Locked until 3:42 PM</span>');
+    expect(html).toContain('Ana<span class="staff-switch__locked">Locked until 15:42</span>');
     // Ben's lock already passed at the time shown.
     expect(html).toContain(">Ben</button>");
     plain(html.replace("TEST-ONLY", ""));
@@ -152,7 +152,7 @@ describe("screen", () => {
       message: { kind: "Locked", until: "2026-10-14T19:45:00.000Z" },
       heldUntil: Date.parse("2026-10-14T19:45:00.000Z"),
     });
-    expect(html).toContain("Ana&#x27;s PIN is locked until 3:45 PM");
+    expect(html).toContain("Ana&#x27;s PIN is locked until 15:45");
     expect(html).toMatch(/data-key="5" disabled=""/u);
   });
   it("explains a tablet that is not set up, an empty list and a lost connection", () => {

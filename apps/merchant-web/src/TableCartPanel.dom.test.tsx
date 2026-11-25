@@ -175,7 +175,7 @@ describe("v15 batch 7: a phone chose what it pays and hasn't paid yet", () => {
     const { container } = await mount(panel(fetcher));
     await settle();
     expect(container.textContent).toMatch(
-      /Phone 2 is choosing which of these dishes to pay, until 3:05\sPM\. Taking a dish out ends their choice: their phone asks them to choose again\./u,
+      /Phone 2 is choosing which of these dishes to pay, until 15:05\. Taking a dish out ends their choice: their phone asks them to choose again\./u,
     );
     // Staff can still take a dish out (the guest asked, or the kitchen can't make it).
     await click(buttonNamed(container, "Remove from cart"));
@@ -194,7 +194,7 @@ describe("v15 batch 7: a phone chose what it pays and hasn't paid yet", () => {
     const { container } = await mount(panel(fetcher, "America/Regina"));
     await settle();
     expect(container.textContent).toMatch(
-      /A guest is choosing which of these dishes to pay, until 2:05\sPM\./u,
+      /A guest is choosing which of these dishes to pay, until 14:05\./u,
     );
   });
 
@@ -207,7 +207,7 @@ describe("v15 batch 7: a phone chose what it pays and hasn't paid yet", () => {
     const { container } = await mount(panel(fetcher));
     await settle();
     expect(container.textContent).toMatch(
-      /Phone 2 chose which of these dishes to pay and hasn't paid\. Their hold ran out at 3:05\sPM\. Taking a dish out ends their choice: their phone asks them to choose again\./u,
+      /Phone 2 chose which of these dishes to pay and hasn't paid\. Their hold ran out at 15:05\. Taking a dish out ends their choice: their phone asks them to choose again\./u,
     );
     expect(container.textContent).not.toContain("is choosing");
   });

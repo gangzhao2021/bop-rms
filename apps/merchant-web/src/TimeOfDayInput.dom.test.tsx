@@ -80,7 +80,7 @@ it("lets staff end a period at the end of the day, saved as the hours model writ
     [...(select(container, "Start 1", "Hour")?.options ?? [])].map((o) => o.value),
   ).not.toContain("end");
   // Picking an hour again gives that hour on the hour.
-  await selectValue(select(container, "End 1", "Hour"), "10");
+  await selectValue(select(container, "End 1", "Hour"), "22");
   expect(changed).toHaveBeenLastCalledWith({ endLocalTime: "22:00:00" });
   expect(nextDay(container).disabled).toBe(false);
 });

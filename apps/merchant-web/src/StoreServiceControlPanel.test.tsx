@@ -13,10 +13,10 @@ afterEach(() => setLanguageForTest("en"));
 const text = (html: string) => html.replace(/<[^>]+>/gu, "\n");
 
 it("WP-2423 Q4, batch 46: writes published hours in staff language, as guests read times", () => {
-  expect(serviceTime("09:00:00")).toBe("9:00\u00a0a.m.");
-  expect(serviceTime("00:00:00")).toBe("12:00\u00a0a.m.");
-  expect(serviceTime("12:30:00")).toBe("12:30\u00a0p.m.");
-  expect(serviceTime("23:59:59")).toBe("11:59\u00a0p.m.");
+  expect(serviceTime("09:00:00")).toBe("09:00");
+  expect(serviceTime("00:00:00")).toBe("00:00");
+  expect(serviceTime("12:30:00")).toBe("12:30");
+  expect(serviceTime("23:59:59")).toBe("23:59");
   const interval = {
     startLocalTime: "11:00:00",
     endLocalTime: "21:30:00",
@@ -42,9 +42,7 @@ it("WP-2423 Q4, batch 46: writes published hours in staff language, as guests re
       }
     />,
   );
-  expect(html).toContain(
-    "11:00\u00a0a.m.–9:30\u00a0p.m. · Dine-in, Pickup · last orders 15 minutes before closing",
-  );
+  expect(html).toContain("11:00–21:30 · Dine-in, Pickup · last orders 15 minutes before closing");
   // Batch 63 F54: the business day and zone are said once, under the page title.
   expect(html).not.toContain("Business day starts");
   expect(html).not.toContain("DineIn");
@@ -84,12 +82,13 @@ it("batch 46: Chinese hours read as whole Chinese phrases with full-width bracke
       hours={hotpot}
     />,
   );
-  expect(html).toContain("17:00–0:00（次日）· 堂食 · 打烊前 30 分钟停止点单 · 预计 15 分钟做好");
+  expect(html).toContain("17:00–00:00（次日）· 堂食 · 打烊前 30 分钟停止点单 · 预计 15 分钟做好");
   // Batch 63 F54: no "Store configuration"; the zone and business day are in the page header.
   expect(html).not.toContain("门店配置");
   expect(html).toContain("客人现在看到的时间");
   expect(html).not.toContain("最后点单");
-  expect(html).not.toContain("00:00");
+  // Batch 64: the staff clock, "00:00", never the guests' "0:00".
+  expect(html).not.toMatch(/[^0-9]0:00/u);
   expect(text(html)).toContain("今天 · 11月21日周六\n · 特殊营业时间");
   expect(text(html)).toContain("12月25日周五\n · 节假日");
   expect(html).not.toContain("Holiday");

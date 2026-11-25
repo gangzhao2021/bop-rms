@@ -296,8 +296,9 @@ function formatCommunicationTime(value: string): string {
     year: "numeric",
     month: "short",
     day: "numeric",
-    hour: "numeric",
+    hour: "2-digit",
     minute: "2-digit",
+    hourCycle: "h23",
     timeZone: "UTC",
     timeZoneName: "short",
   }).format(new Date(value));

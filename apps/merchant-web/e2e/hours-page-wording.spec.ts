@@ -34,6 +34,8 @@ const lateNight = {
 };
 
 async function open(page: Page, language: "en" | "zh-Hans") {
+  // Batch 64: a date of this year is written without its year; the page reads as at the read.
+  await page.clock.setFixedTime(new Date("2026-11-22T05:14:00.000Z"));
   if (language === "zh-Hans")
     await page.addInitScript(() => {
       window.localStorage.setItem("bop.merchant.language", "zh-Hans");
@@ -131,23 +133,24 @@ async function fitsEveryWidth(page: Page, name: string) {
   await page.setViewportSize({ width: 1440, height: 900 });
 }
 
-test("@production Hours & ordering reads in the guests' time style, today on, in English", async ({
+test("@production Hours & ordering reads on the staff 24-hour clock, today on, in English", async ({
   page,
 }) => {
   await open(page, "en");
   const hours = await hoursText(page);
   expect(hours).toContain(
-    "5:00\u00a0p.m.–12:00\u00a0a.m. (next day) · Dine-in · last orders 30 minutes before closing · ready in 15 minutes",
+    "17:00–00:00 (next day) · Dine-in · last orders 30 minutes before closing · ready in 15 minutes",
   );
   expect(hours).toContain(
-    "11:30\u00a0a.m.–2:30\u00a0p.m. · Dine-in · last orders 25 minutes before closing",
+    "11:30–14:30 · Dine-in · last orders 25 minutes before closing",
   );
   // Batch 63 F54: the Store, its zone and business day are said once, under the page title.
   const head = await page.locator(".workspace-page__meta").innerText();
   expect(head).toBe(
-    "Main · Eastern Time (Toronto, Ottawa and Montréal) · business day starts 4:00\u00a0a.m.",
+    "Main · Eastern Time (Toronto, Ottawa and Montréal) · business day starts 04:00",
   );
-  expect(hours).not.toContain("a.m..");
+  // Batch 64: the staff clock, never "a.m."/"p.m." (v15 b63: "Updated 12:32 p.m." here only).
+  expect(hours).not.toMatch(/[ap]\.m\./u);
   expect(hours).not.toContain("Store configuration");
   // Past special dates are not listed; today's (the business day before 4:00) and later ones are.
   expect(hours).not.toContain("2026-11-05");
@@ -158,9 +161,9 @@ test("@production Hours & ordering reads in the guests' time style, today on, in
   expect(hours).not.toMatch(/\d (AM|PM)\b/u);
   const controls = await controlsText(page);
   // Batch 63 F54: the shared stamp at the top right; the zone is not said again here.
-  await expect(page.locator(".workspace-page__status")).toHaveText("Updated 12:12\u00a0a.m.");
+  await expect(page.locator(".workspace-page__status")).toHaveText("Updated 00:12");
   expect(controls).not.toContain("Eastern Time");
-  expect(controls).toContain("All services — until Nov 22, 2026, 12:40\u00a0a.m.");
+  expect(controls).toContain("All services — until Sun, Nov 22 00:40");
   expect(controls).not.toMatch(/\d (AM|PM)\b/u);
   await fitsEveryWidth(page, "hours-en");
 });
@@ -168,13 +171,13 @@ test("@production Hours & ordering reads in the guests' time style, today on, in
 test("@production Hours & ordering reads as natural Chinese, today on", async ({ page }) => {
   await open(page, "zh-Hans");
   const hours = await hoursText(page);
-  expect(hours).toContain("17:00–0:00（次日）· 堂食 · 打烊前 30 分钟停止点单 · 预计 15 分钟做好");
+  expect(hours).toContain("17:00–00:00（次日）· 堂食 · 打烊前 30 分钟停止点单 · 预计 15 分钟做好");
   expect(hours).toContain("11:30–14:30 · 堂食 · 打烊前 25 分钟停止点单");
   const head = await page.locator(".workspace-page__meta").innerText();
-  expect(head).toBe("Main · 北美东部时间（多伦多、渥太华和蒙特利尔）· 营业日从 4:00 开始");
+  expect(head).toBe("Main · 北美东部时间（多伦多、渥太华和蒙特利尔）· 营业日从 04:00 开始");
   expect(hours).not.toContain("门店配置");
   expect(hours).not.toContain("最后点单");
-  expect(hours).not.toContain("00:00");
+  expect(hours).not.toMatch(/[^0-9]0:00/u);
   expect(hours).not.toMatch(/[一-鿿] \(|\) [一-鿿]|（[^）]*\(/u);
   expect(hours).not.toContain("） ·");
   expect(hours).not.toContain("2026-11-05");
@@ -184,9 +187,9 @@ test("@production Hours & ordering reads as natural Chinese, today on", async ({
   expect(hours).not.toMatch(/\d{4}-\d{2}-\d{2}/u);
   expect(hours).not.toMatch(/[A-Za-z]/u);
   const controls = await controlsText(page);
-  await expect(page.locator(".workspace-page__status")).toHaveText("已更新 0:12");
+  await expect(page.locator(".workspace-page__status")).toHaveText("已更新 00:12");
   expect(controls).not.toContain("北美东部时间");
-  expect(controls).toContain("所有服务 — 至 2026年11月22日 0:40");
+  expect(controls).toContain("所有服务 — 至 11月22日周日 00:40");
   expect(controls).not.toMatch(/\b(?:Nov|a\.m\.|p\.m\.|AM|PM)\b/u);
   await fitsEveryWidth(page, "hours-zh");
 });

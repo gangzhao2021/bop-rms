@@ -185,15 +185,14 @@ describe("b39 warn before the business day ends with tables open", () => {
     expect(tablesClosingAlert(null, Date.parse("2026-11-21T02:30:00.000Z"), 3, zone)).toBeNull();
   });
   it("warns from an hour before closing, and after closing until the day ends", () => {
-    // The time is the Store's, written as the guests' pages write it (b40: "10:00 p.m.", never
-    // "10:00 PM"), and a time that ends the sentence brings its own period.
+    // The time is the Store's, on the staff clock (batch 64: "22:00", as every staff screen).
     const soon = tablesClosingAlert(day, Date.parse("2026-11-21T02:30:00.000Z"), 3, zone);
     expect(soon?.tone).toBe("soon");
     expect(soon?.text).toMatch(
-      /^Closing at 10:00\sp\.m\.: 3 tables still open\. Take each table's payment and close it when the guests leave\.$/u,
+      /^Closing at 22:00: 3 tables still open\. Take each table's payment and close it when the guests leave\.$/u,
     );
     expect(tablesClosingAlert(day, Date.parse("2026-11-21T05:00:00.000Z"), 1, zone)?.text).toMatch(
-      /^Closed at 10:00\sp\.m\.: 1 table still open\. Take the payment, or record that the guests left without paying, and close each table before the day ends at 4:00\sa\.m\.$/u,
+      /^Closed at 22:00: 1 table still open\. Take the payment, or record that the guests left without paying, and close each table before the day ends at 04:00\.$/u,
     );
     expect(tablesClosingAlert(day, Date.parse("2026-11-21T09:00:00.000Z"), 1, zone)).toBeNull();
   });
@@ -203,7 +202,7 @@ describe("b39 warn before the business day ends with tables open", () => {
     expect(tablesClosingAlert(allDay, Date.parse("2026-11-21T07:00:00.000Z"), 2, zone)).toBeNull();
     const last = tablesClosingAlert(allDay, Date.parse("2026-11-21T08:30:00.000Z"), 2, zone);
     expect(last?.tone).toBe("past");
-    expect(last?.text).toMatch(/^The business day ends at 4:00\sa\.m\.: 2 tables still open\./u);
+    expect(last?.text).toMatch(/^The business day ends at 04:00: 2 tables still open\./u);
     expect(last?.text).not.toMatch(/Clos/u);
   });
   it("batch 47 fix-up: a Store that closes exactly as its day ends is told it is closing", () => {
@@ -212,7 +211,7 @@ describe("b39 warn before the business day ends with tables open", () => {
     expect(tablesClosingAlert(toFour, Date.parse("2026-11-21T07:59:00.000Z"), 2, zone)).toBeNull();
     const soon = tablesClosingAlert(toFour, Date.parse("2026-11-21T08:30:00.000Z"), 2, zone);
     expect(soon?.tone).toBe("soon");
-    expect(soon?.text).toMatch(/^Closing at 4:00\sa\.m\.: 2 tables still open\./u);
+    expect(soon?.text).toMatch(/^Closing at 04:00: 2 tables still open\./u);
   });
   it("without published hours, warns in the day's last hour", () => {
     const open = { endsAt: day.endsAt, closesAt: null };

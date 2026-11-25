@@ -104,6 +104,8 @@ async function open(
     draftTimeZone?: string;
   } = {},
 ) {
+  // Batch 64: a date of this year is written without its year; the page reads as at the read.
+  await page.clock.setFixedTime(new Date("2026-11-22T10:11:00.000Z"));
   if (language === "zh-Hans")
     await page.addInitScript(() => {
       window.localStorage.setItem("bop.merchant.language", "zh-Hans");
@@ -247,14 +249,14 @@ for (const language of ["en", "zh-Hans"] as const) {
         expect(text).not.toContain("日期使用");
         expect(text).toContain("没有时段的例外表示当天停业。");
         expect(text).toContain(
-          "你已于 11月16日 5:17 撤回你的更改。下一项更改将基于已发布的营业时间。",
+          "你已于 11月16日周一 05:17 撤回你的更改。下一项更改将基于已发布的营业时间。",
         );
         expect(text).not.toContain("它已被");
       } else {
         // Batch 49: the time zone and day start are said under Published hours, not again here.
         expect(text).not.toContain("Times are in");
         expect(text).toContain(
-          "You withdrew your change on Nov 16, 5:17\u00a0a.m. The next change starts from the published hours.",
+          "You withdrew your change on Mon, Nov 16 05:17. The next change starts from the published hours.",
         );
         expect(text).not.toContain("AM");
       }
@@ -271,15 +273,16 @@ for (const language of ["en", "zh-Hans"] as const) {
               .map((select) => (select as HTMLSelectElement).selectedOptions[0]?.text)
               .join(" "),
           );
-      expect(await shown(start)).toBe(zh ? "12 00" : "12 00 p.m.");
-      expect(await shown(end)).toBe(zh ? "1 00" : "1 00 a.m.");
+      // Batch 64: the staff clock, 00–23, in English as in Chinese.
+      expect(await shown(start)).toBe("12 00");
+      expect(await shown(end)).toBe("01 00");
       expect(await start.innerText()).not.toMatch(/:\d\d:\d\d|PM|AM/u);
       // Keyboard: the hour is picked by typing it.
       const hour = start.getByRole("combobox", { name: zh ? "小时" : "Hour" });
       await hour.focus();
       // Typing picks an hour the same way on every platform (arrow keys open the list on macOS).
-      await page.keyboard.type(zh ? "13" : "1");
-      expect(await shown(start)).toBe(zh ? "13 00" : "1 00 p.m.");
+      await page.keyboard.type("13");
+      expect(await shown(start)).toBe("13 00");
       await expectNoInternalText(page);
     });
 
@@ -288,11 +291,11 @@ for (const language of ["en", "zh-Hans"] as const) {
       [1024, 768],
       [1440, 900],
     ] as const) {
-      test(`the open editor fits at ${width}, and a time never breaks from its a.m./p.m.`, async ({
+      test(`the open editor fits at ${width}, and a time stays whole on its line`, async ({
         page,
       }) => {
         await page.setViewportSize({ width, height });
-        // Test Merchant 2: open 24 hours, Sunday orders stop at 11:34 p.m. (cut-off 1,500 s).
+        // Test Merchant 2: open 24 hours, Sunday orders stop at 23:34 (cut-off 1,500 s).
         await open(page, language, {
           weeklySchedule: week(wholeDay, { ...wholeDay, orderCutoffSeconds: 1500 }),
         });
@@ -304,20 +307,20 @@ for (const language of ["en", "zh-Hans"] as const) {
         await expect(sunday).toHaveText(
           zh
             ? "24 小时营业 · 堂食、自取 · 23:34 后停止点单"
-            : "Open 24 hours · Dine-in, Pickup · no orders after 11:34\u00a0p.m.",
+            : "Open 24 hours · Dine-in, Pickup · no orders after 23:34",
         );
-        if (!zh) {
-          // One line box holds "11:34 p.m." whatever the width.
+        {
+          // One line box holds "23:34" whatever the width.
           const lines = await sunday.evaluate((element) => {
             const node = [...element.childNodes].find((child) =>
-              (child.textContent ?? "").includes("11:34"),
+              (child.textContent ?? "").includes("23:34"),
             );
             if (node === undefined) return -1;
             const text = node.textContent ?? "";
-            const from = text.indexOf("11:34");
+            const from = text.indexOf("23:34");
             const range = document.createRange();
             range.setStart(node, from);
-            range.setEnd(node, from + "11:34\u00a0p.m.".length);
+            range.setEnd(node, from + "23:34".length);
             return new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size;
           });
           expect(lines).toBe(1);
@@ -415,8 +418,8 @@ for (const language of ["en", "zh-Hans"] as const) {
         // Said once, as one whole sentence naming who and when.
         const text = await editor(page).innerText();
         const sentence = zh
-          ? "你已于 11月16日 5:17 撤回你的更改。下一项更改将基于已发布的营业时间。"
-          : "You withdrew your change on Nov 16, 5:17\u00a0a.m. The next change starts from the published hours.";
+          ? "你已于 11月16日周一 05:17 撤回你的更改。下一项更改将基于已发布的营业时间。"
+          : "You withdrew your change on Mon, Nov 16 05:17. The next change starts from the published hours.";
         expect(text).toContain(sentence);
         expect(text).not.toContain(zh ? "最近更改：" : "Latest change:");
         expect(text.split(zh ? "撤回" : "withdr").length - 1).toBe(1);
@@ -489,7 +492,7 @@ for (const language of ["en", "zh-Hans"] as const) {
         await openEditor(page, zh);
         const head = editor(page);
         const sentence = head.getByText(
-          zh ? "你已于 11月16日 5:17 撤回你的更改。" : "You withdrew your change on Nov 16,",
+          zh ? "你已于 11月16日周一 05:17 撤回你的更改。" : "You withdrew your change on Mon, Nov 16",
         );
         const reload = head.getByRole("button", {
           name: zh ? "重新读取已保存的营业时间" : "Reload saved hours",
@@ -517,7 +520,7 @@ for (const language of ["en", "zh-Hans"] as const) {
         // The time zone and the start of the business day are said once on the page, under
         // the page title (batch 63 F54; was under Published hours).
         const page_ = await page.locator("main").innerText();
-        const dayStart = zh ? /营业日从 4:00 开始/gu : /business day starts (?:at )?4:00/giu;
+        const dayStart = zh ? /营业日从 04:00 开始/gu : /business day starts (?:at )?04:00/giu;
         expect(page_.match(dayStart)?.length ?? 0).toBe(1);
         expect(text).not.toContain(zh ? "时间使用" : "Times are in");
         await expect(page.locator(".workspace-page__meta")).toContainText(
@@ -688,7 +691,7 @@ for (const language of ["en", "zh-Hans"] as const) {
           );
           if (service !== "Published") {
             await expect(sentence).toContainText(
-              zh ? "营业日从 4:00 开始" : "business day starts at 4:00 a.m.",
+              zh ? "营业日从 04:00 开始" : "business day starts at 04:00",
             );
             // The sentence wraps inside the editor, about 40 px clear of the screen edge.
             const room = await sentence.evaluate((element) => ({
@@ -763,8 +766,8 @@ for (const language of ["en", "zh-Hans"] as const) {
         );
         await expect(page.locator(".workspace-page__meta")).toHaveText(
           zh
-            ? "Main · 北美东部时间（多伦多、渥太华和蒙特利尔）· 营业日从 4:00 开始"
-            : "Main · Eastern Time (Toronto, Ottawa and Montréal) · business day starts 4:00 a.m.",
+            ? "Main · 北美东部时间（多伦多、渥太华和蒙特利尔）· 营业日从 04:00 开始"
+            : "Main · Eastern Time (Toronto, Ottawa and Montréal) · business day starts 04:00",
         );
         const look = await page.evaluate(() => {
           const style = (element: Element | null) =>

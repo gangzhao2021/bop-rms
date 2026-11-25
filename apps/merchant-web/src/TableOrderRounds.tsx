@@ -122,7 +122,7 @@ export function TableOrderRounds({
       return {
         // Batch 60: a line comped in two parts has two records, each listed.
         key: comp.orderItemReference + ":" + String(index),
-        label: compRecordLabel(dish, comp, timeZone, "Guest"),
+        label: compRecordLabel(dish, comp, timeZone),
         amountMinor: comp.amountMinor,
       };
     });

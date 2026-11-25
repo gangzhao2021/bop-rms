@@ -29,7 +29,7 @@ import { SoleOperatorSelfApproval } from "./SoleOperatorSelfApproval.js";
 import { actionAccessDeniedText } from "./access-denied.js";
 import { useReadAgainWhenSignedInAgain } from "./PageDidNotLoad.js";
 import { isStaffSignInEndedRefusal } from "./staff-session-reads.js";
-import { ClockStyleContext, friendlyStoreTime, StoreTimeZoneContext } from "./StoreTime.js";
+import { friendlyStoreTime, StoreTimeZoneContext } from "./StoreTime.js";
 import {
   serviceOperationReference,
   type ServiceMode,
@@ -752,7 +752,7 @@ export function StoreHoursDraftForm({
           {withOneSentenceEnd(
             t("Times are in {timeZone}. The business day starts at {value}.", {
               timeZone: timeZoneLabel(draft.timeZone),
-              // Batch 46: written as the published hours above it are ("4:00 a.m.", "4:00").
+              // Written as the published hours above it are ("04:00").
               value: wallClockTime(draft.businessDayStartLocalTime),
             }),
           )}
@@ -1057,7 +1057,7 @@ export function StoreHoursOwnApproval({
 /**
  * Batch 47 (v15 b46: "它已被撤回 由你 11月16日 5:17", "It was withdrawn by you Nov 16, 5:17 AM"):
  * who withdrew or declined the latest change and when, as one whole sentence per language, its
- * time in the screen's clock style ("5:17 a.m." on Hours & ordering).
+ * time on the staff clock ("Mon, Nov 16 05:17").
  */
 export function withdrawalSentence(
   withdrawal: NonNullable<StoreConfigurationView["latestWithdrawal"]>,
@@ -1086,8 +1086,7 @@ function WithdrawalLine({
   readonly withdrawal: NonNullable<StoreConfigurationView["latestWithdrawal"]>;
 }) {
   const timeZone = useContext(StoreTimeZoneContext);
-  const style = useContext(ClockStyleContext);
-  const time = friendlyStoreTime(withdrawal.withdrawnAt, timeZone, new Date(), style);
+  const time = friendlyStoreTime(withdrawal.withdrawnAt, timeZone);
   const sentence = withdrawalSentence(withdrawal, time);
   // The time keeps its exact instant in a <time> element, inside the sentence it belongs to.
   const at = sentence.indexOf(time);

@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { pinFixtureYear } from "./store-year.fixture.js";
 import { findInternalText, staticText } from "../e2e/internal-text-patterns.js";
 import { ChangeHistory } from "./StoreOptionRecipesPage.js";
 import { StoreTimeZoneContext } from "./StoreTime.js";
@@ -8,6 +9,10 @@ import {
   optionRecipeStatus,
   type OptionRecipeRow,
 } from "./store-option-recipes-page.js";
+
+// Batch 64: dates of this year are written without the year; these fixtures are in 2026.
+beforeEach(() => pinFixtureYear());
+afterEach(() => vi.useRealTimers());
 
 const row = (change: Partial<NonNullable<OptionRecipeRow["change"]>> | null, covered = false) =>
   ({
@@ -66,8 +71,8 @@ describe("WP-2423 option recipe page helpers", () => {
       recordedAt: "2026-10-16T13:00:00.000Z",
     };
     const waiting = render(row({ ...base, reviews: [review("Cost")] }));
-    expect(waiting).toContain("Saved by Mia on Oct 16, 2026, 9:00 AM");
-    expect(waiting).toContain("Cost: approved by Noah on Oct 16, 2026, 10:05 AM");
+    expect(waiting).toContain("Saved by Mia on Fri, Oct 16 09:00");
+    expect(waiting).toContain("Cost: approved by Noah on Fri, Oct 16 10:05");
     expect(waiting).toContain(
       "Still needed: food safety review, by someone who holds recipe review other than the person who saved it and the first reviewer",
     );

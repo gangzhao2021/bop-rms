@@ -2000,7 +2000,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "已于 {value} 记录主持人转让。刷新参与者查看当前主持人。",
   Hour: "小时",
   // Batch 47: the hours editor's time control (shown in English only).
-  "a.m. or p.m.": "上午或下午",
   Hours: "营业时间",
   "Hours & ordering": "营业时间与点单",
   "Hours & service": "营业时间与服务",

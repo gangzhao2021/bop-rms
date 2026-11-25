@@ -376,7 +376,7 @@ test("@production Home shows store system alerts with what to do, and their reso
   await expect(
     needs.getByText(/What to do: Pause online ordering if staff screens still work/u),
   ).toBeVisible();
-  await expect(needs.getByText("Since Oct 15, 2026, 11:56 AM")).toBeVisible();
+  await expect(needs.getByText("Since Thu, Oct 15 11:56")).toBeVisible();
   await expect(
     needs.getByText("Guests cannot scan, order or pay online.", { exact: false }),
   ).toBeHidden();
@@ -386,7 +386,7 @@ test("@production Home shows store system alerts with what to do, and their reso
   ).toBeVisible();
   await expect(card.getByText("Store system: needs attention")).toBeVisible();
   await expect(card.getByText("all good")).toHaveCount(0);
-  await expect(card.getByText("Last backup Oct 15, 2026, 4:30 AM", { exact: false })).toBeVisible();
+  await expect(card.getByText("Last backup Thu, Oct 15 04:30", { exact: false })).toBeVisible();
   await card.getByText("System details").click();
   await expect(card.getByText("The Owner is also alerted by email.")).toBeVisible();
   await expectNoInternalText(page);
@@ -452,7 +452,7 @@ test("@production Home shows store system alerts with what to do, and their reso
   board = { ...problem, monitor: "Silent", active: [] };
   await card.getByRole("button", { name: "Check again" }).click();
   await expect(
-    needs.getByText(/The alert monitor stopped reporting at Oct 15, 2026/u),
+    needs.getByText(/The alert monitor stopped reporting at Thu, Oct 15 \d\d:\d\d/u),
   ).toBeVisible();
   await expect(card.getByText("Store system: problems are not being checked")).toBeVisible();
   expect(requested.every((method) => method === "GET")).toBe(true);
@@ -625,7 +625,7 @@ test("@production A merchant's Home says nothing about a monitor it cannot start
   // is when they stopped, not the board's, which moves every minute whether a read worked or not.
   board = { ...merchantBoard, checksIncompleteSince: "2026-10-15T13:05:00.000Z" };
   await card.getByRole("button", { name: "Check again" }).click();
-  await expect(card.getByText("Store system: last checked Oct 15, 2026, 9:05 AM")).toBeVisible();
+  await expect(card.getByText("Store system: last checked Thu, Oct 15 09:05")).toBeVisible();
   await expect(card.getByText("all good")).toHaveCount(0);
 
   // Its own problem: what to do, the page that settles it and who to call.
@@ -702,14 +702,14 @@ test("@production A merchant's Home says nothing about a monitor it cannot start
     }),
   ).toBeVisible();
   await expect(needs.getByText("Urgent", { exact: true })).toBeVisible();
-  await expect(needs.getByText(/as of Oct 15, 2026, 12:00\sPM/u)).toBeVisible();
+  await expect(needs.getByText(/as of Thu, Oct 15 12:00/u)).toBeVisible();
   await expect(page.getByText("The alert monitor")).toHaveCount(0);
   await expect(card.getByText("Store system: needs attention")).toBeVisible();
 
   // Nothing on the board and no monitor: quiet, and says when it last looked.
   board = { ...merchantBoard, monitor: "Silent" };
   await card.getByRole("button", { name: "Check again" }).click();
-  await expect(card.getByText("Store system: last checked Oct 15, 2026, 12:00 PM")).toBeVisible();
+  await expect(card.getByText("Store system: last checked Thu, Oct 15 12:00")).toBeVisible();
   await expect(needs.getByText("Urgent", { exact: true })).toHaveCount(0);
   await expectNoInternalText(page);
   expect(home.errors).toEqual([]);

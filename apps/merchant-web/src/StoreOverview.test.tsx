@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
+import { pinFixtureYear } from "./store-year.fixture.js";
 import {
   isAwaitingAcceptance,
   ordersAwaitingAcceptance,
@@ -1455,6 +1456,11 @@ describe("Figma v1 (2026-10-25): Home lists what needs attention now", () => {
     ).toBe("");
   });
   it("WP-2423 item 9: a cleared order-rules row keeps its place, never 'nothing needs attention'", () => {
+    // Batch 64: a date of this year is written without the year; the fixture is in 2026.
+    pinFixtureYear();
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
     const quiet: OverviewTodayState = {
       ...state,
       orders: ready({ ...orders, awaitingAcceptance: 0 }),
@@ -1496,7 +1502,7 @@ describe("Figma v1 (2026-10-25): Home lists what needs attention now", () => {
     );
     expect(html).toContain("do not resume ordering yet");
     expect(html).toContain("when today&#x27;s business day ends");
-    expect(html).toContain("Check passed Nov 6, 2026, 8:08\u00a0PM");
+    expect(html).toContain("Check passed Fri, Nov 6 20:08");
     expect(html).toContain("Wait for BOP support");
     // The next business day it is gone, and Home is quiet again.
     const nextDay = renderToStaticMarkup(

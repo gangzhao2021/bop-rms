@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { pinFixtureYear } from "./store-year.fixture.js";
 import { act } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
@@ -14,6 +15,10 @@ import {
 import { setLanguageForTest } from "./i18n/i18n.js";
 import { buttonNamed, click, mount, settle } from "./dom-test-kit.fixture.js";
 import { MemoryRouter } from "react-router";
+
+// Batch 64: dates of this year are written without the year; these fixtures are in 2026.
+beforeEach(() => pinFixtureYear());
+afterEach(() => vi.useRealTimers());
 
 /**
  * b20 (v15 live check of b19): Store setup's step 4 after creating, sending and withdrawing a
@@ -161,7 +166,7 @@ it("b20: Chinese status sentences put no space inside the brackets or before the
   document.body.replaceChildren();
   const open = await panel(workspaceOf({ latest: configuration("Draft") }));
   const text = open.container.textContent ?? "";
-  expect(text).toMatch(/请在\d+月\d+日 \d{2}:\d{2}( UTC)?前批准并发布/u);
+  expect(text).toMatch(/请在\d+月\d+日周. \d{2}:\d{2}( UTC)?前批准并发布/u);
   document.body.replaceChildren();
   const published = configuration("Published");
   const live = await panel(workspaceOf({ latest: published, current: published }));

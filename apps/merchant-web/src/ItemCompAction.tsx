@@ -8,7 +8,7 @@ import { orderMoney } from "./order-money.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import { payLaterRemoveDishText } from "./PayLaterItemRemoveAction.js";
 import { dollarsToMinor } from "./TableCheckout.js";
-import { type ClockStyle, storeTime } from "./StoreTime.js";
+import { storeTime } from "./StoreTime.js";
 
 type Order = CurrentOrderQueue["items"][number];
 export type CompReason = "QUALITY" | "WRONG_DISH" | "LONG_WAIT" | "GOODWILL";
@@ -802,14 +802,12 @@ export function compRecordText(
     readonly byLabel?: string | null;
   },
   timeZone: string | undefined,
-  style: ClockStyle = "Staff",
 ): string {
-  return compRecordParts(comp, timeZone, style).join(" · ");
+  return compRecordParts(comp, timeZone).join(" · ");
 }
 function compRecordParts(
   comp: Parameters<typeof compRecordText>[0],
   timeZone: string | undefined,
-  style: ClockStyle,
 ): string[] {
   if (comp.reasonCode === "POINTS_REDEMPTION") return [t("Points used")];
   const parts = [compedText(comp.kind, comp.percent)];
@@ -818,10 +816,10 @@ function compRecordParts(
   if (comp.decidedAt !== undefined)
     parts.push(
       comp.byLabel === null || comp.byLabel === undefined
-        ? storeTime(comp.decidedAt, timeZone, false, style)
+        ? storeTime(comp.decidedAt, timeZone)
         : t("by {person}, {time}", {
             person: comp.byLabel === "You" ? t("You") : comp.byLabel,
-            time: storeTime(comp.decidedAt, timeZone, false, style),
+            time: storeTime(comp.decidedAt, timeZone),
           }),
     );
   return parts;
@@ -840,7 +838,6 @@ export function compRecordLabel(
     readonly lineQuantity?: number;
   },
   timeZone: string | undefined,
-  style: ClockStyle = "Staff",
 ): string {
   const partly =
     comp.kind === "Comp" &&
@@ -848,14 +845,14 @@ export function compRecordLabel(
     typeof comp.compedQuantity === "number" &&
     typeof comp.lineQuantity === "number" &&
     comp.compedQuantity < comp.lineQuantity;
-  if (!partly) return name + " · " + compRecordText(comp, timeZone, style);
+  if (!partly) return name + " · " + compRecordText(comp, timeZone);
   return [
     t("{comped} of {quantity} × {dish} comped", {
       comped: String(comp.compedQuantity),
       quantity: String(comp.lineQuantity),
       dish: name,
     }),
-    ...compRecordParts(comp, timeZone, style).slice(1),
+    ...compRecordParts(comp, timeZone).slice(1),
   ].join(" · ");
 }
 

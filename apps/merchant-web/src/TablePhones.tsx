@@ -196,7 +196,7 @@ export function TablePanelPhones({
                 : phone.left
                   ? t("left")
                   : t("joined {time}", {
-                      time: orderWhen(phone.joinedAt, timeZone, today, "Guest"),
+                      time: orderWhen(phone.joinedAt, timeZone, today),
                     })}
             </span>
             {phone.left ? (
@@ -314,8 +314,7 @@ export function TableHeldRounds({
         <div key={round.orderBatchReference} className="table-held-rounds__round">
           <p>
             <strong>{t("{round} is waiting for your OK", { round: name(round) })}</strong> ·{" "}
-            {heldRoundReasonText(round.reason)} ·{" "}
-            {orderWhen(round.heldAt, timeZone, today, "Guest")}
+            {heldRoundReasonText(round.reason)} · {orderWhen(round.heldAt, timeZone, today)}
           </p>
           <p className="table-held-rounds__note">
             {t(

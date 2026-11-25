@@ -18,13 +18,7 @@ import {
 import { serviceOperationReference } from "./service-control-client.js";
 import { ComboPartClientError, markComboPartServed } from "./combo-part-client.js";
 import { chaseDish, DiningChaseClientError } from "./dining-chase-client.js";
-import {
-  ClockStyleContext,
-  SourceTime,
-  StoreTimeZoneContext,
-  storeTime,
-  wholeMinuteAtOrAfter,
-} from "./StoreTime.js";
+import { SourceTime, StoreTimeZoneContext, storeTime, wholeMinuteAtOrAfter } from "./StoreTime.js";
 import type { ComboPartView } from "./combo-parts.js";
 
 /**
@@ -269,9 +263,8 @@ export function DiningRoundsProvider({
   readonly fetcher?: typeof fetch | undefined;
   readonly children: ReactNode;
 }) {
-  // b40 review: times in notices are the Store's, in the screen's style (Tables: "2:05 p.m.").
+  // Times in notices are the Store's, on the staff clock (batch 64: "14:05").
   const timeZone = useContext(StoreTimeZoneContext);
-  const clockStyle = useContext(ClockStyleContext);
   const [view, setView] = useState<DiningProgress | null>(null);
   const [unavailable, setUnavailable] = useState<DiningRoundsProgress["unavailable"]>(null);
   const [busy, setBusy] = useState(false);
@@ -482,8 +475,6 @@ export function DiningRoundsProvider({
                   time: storeTime(
                     wholeMinuteAtOrAfter(error.retryAt ?? new Date().toISOString()),
                     timeZone,
-                    false,
-                    clockStyle,
                   ),
                 }),
               )

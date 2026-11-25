@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { pinFixtureYear } from "./store-year.fixture.js";
 import { findInternalText, staticText } from "../e2e/internal-text-patterns.js";
 import { StaffPinError, type StoreDevicesRead } from "./staff-pin-client.js";
 import {
@@ -11,6 +12,10 @@ import {
   StoreDevicesView,
   type DevicesLoad,
 } from "./StoreDevicesPage.js";
+
+// Batch 64: dates of this year are written without the year; these fixtures are in 2026.
+beforeEach(() => pinFixtureYear());
+afterEach(() => vi.useRealTimers());
 
 const at = "2026-10-14T18:00:00.000Z";
 const now = Date.parse("2026-10-14T19:30:00.000Z");
@@ -75,10 +80,10 @@ describe("Shared tablets & PINs", () => {
     );
     expect(html).toContain("Front counter");
     expect(html).toContain("Mia Manager");
-    expect(html).toContain("Oct 14, 2:00\u00a0PM");
+    expect(html).toContain("Wed, Oct 14 14:00");
     expect(html).toContain("Not used yet");
     expect(html).toContain('aria-label="Remove Front counter"');
-    expect(html).toContain("Locked until 3:45 PM");
+    expect(html).toContain("Locked until 15:45");
     expect(html).toContain("Reset — waiting for a new PIN");
     expect(html).toContain("No PIN");
     // Reset is offered only where a PIN is set.

@@ -1,11 +1,11 @@
 import { useId } from "react";
-import { guestLocale, t } from "./i18n/i18n.js";
+import { t } from "./i18n/i18n.js";
 
 /**
  * Batch 47 (v15 b46: the hours editor's browser time fields read "12:00:00 PM" and "01:00:00 AM",
  * with seconds and the browser's own AM/PM, even on a Chinese screen, beside "12:00 p.m." and
  * "1:00 a.m." on the same page): a Store wall-clock time picked to the minute, written the way the
- * page writes times — "12 : 00 p.m." in English, "12 : 00" (0–23) in Chinese.
+ * page writes times. Batch 64: the staff clock, "09 : 00" (00–23), in English and Chinese.
  *
  * A browser's time field follows the browser's language, not the page's, and a lang attribute
  * does not change that, so this is a group of ordinary selects: each is reached with Tab, changed
@@ -32,25 +32,7 @@ export function wallClockValue(parts: WallClockParts): string {
   return `${two(parts.hour)}:${two(parts.minute)}:00`;
 }
 
-/** Whether the page's language writes a 12-hour clock, and its words for the two halves. */
-export function wallClockStyle(): {
-  readonly twelveHour: boolean;
-  readonly am: string;
-  readonly pm: string;
-} {
-  const format = new Intl.DateTimeFormat(guestLocale(), {
-    hour: "numeric",
-    minute: "2-digit",
-    timeZone: "UTC",
-  });
-  const cycle = format.resolvedOptions().hourCycle;
-  const period = (hour: number) =>
-    format
-      .formatToParts(new Date(Date.UTC(2000, 0, 1, hour)))
-      .find((part) => part.type === "dayPeriod")?.value ?? (hour < 12 ? "AM" : "PM");
-  return { twelveHour: cycle === "h12" || cycle === "h11", am: period(1), pm: period(13) };
-}
-
+const hours = Array.from({ length: 24 }, (_, hour) => hour);
 const minutes = Array.from({ length: 60 }, (_, minute) => minute);
 
 /**
@@ -77,8 +59,6 @@ export function TimeOfDayInput({
 }) {
   const labelId = useId();
   const parts = wallClockParts(value);
-  const style = wallClockStyle();
-  const afternoon = parts.hour >= 12;
   const atEndOfDay = endOfDay && value === endOfDayLocalTime;
   const change = (next: Partial<WallClockParts>) => onChange(wallClockValue({ ...parts, ...next }));
   return (
@@ -95,7 +75,7 @@ export function TimeOfDayInput({
           className={
             atEndOfDay ? "time-of-day__hour time-of-day__hour--end-of-day" : "time-of-day__hour"
           }
-          value={atEndOfDay ? "end" : style.twelveHour ? parts.hour % 12 : parts.hour}
+          value={atEndOfDay ? "end" : parts.hour}
           onChange={(event) => {
             if (event.target.value === "end") {
               onChange(endOfDayLocalTime);
@@ -103,18 +83,12 @@ export function TimeOfDayInput({
             }
             const picked = Number(event.target.value);
             // From the end of the day, an hour picked is that evening's, on the hour.
-            change({
-              hour: style.twelveHour ? picked + (afternoon ? 12 : 0) : picked,
-              ...(atEndOfDay ? { minute: 0 } : {}),
-            });
+            change({ hour: picked, ...(atEndOfDay ? { minute: 0 } : {}) });
           }}
         >
-          {(style.twelveHour
-            ? Array.from({ length: 12 }, (_, n) => n)
-            : Array.from({ length: 24 }, (_, n) => n)
-          ).map((hour) => (
+          {hours.map((hour) => (
             <option key={hour} value={hour}>
-              {style.twelveHour ? (hour === 0 ? 12 : hour) : hour}
+              {String(hour).padStart(2, "0")}
             </option>
           ))}
           {endOfDay && <option value="end">{t("Midnight (end of day)")}</option>}
@@ -134,18 +108,6 @@ export function TimeOfDayInput({
                 </option>
               ))}
             </select>
-            {style.twelveHour && (
-              <select
-                aria-label={t("a.m. or p.m.")}
-                value={afternoon ? "pm" : "am"}
-                onChange={(event) =>
-                  change({ hour: (parts.hour % 12) + (event.target.value === "pm" ? 12 : 0) })
-                }
-              >
-                <option value="am">{style.am}</option>
-                <option value="pm">{style.pm}</option>
-              </select>
-            )}
           </>
         )}
       </span>

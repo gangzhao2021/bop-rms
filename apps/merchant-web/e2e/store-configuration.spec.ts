@@ -150,11 +150,11 @@ test("@production configuration editor preserves uncertain request and reloads s
   const exception = editor.getByRole("group", { name: "Exception 1", exact: true });
   await exception.getByLabel("Exception date").fill("2026-12-25");
   await exception.getByRole("button", { name: "Add exception interval" }).click();
-  // Batch 47: the time is picked as the page writes it (10:00 a.m.), never a browser time field.
+  // Batch 47: the time is picked as the page writes it, never a browser time field; batch 64: on
+  // the staff 24-hour clock (10:00).
   const start = exception.getByRole("group", { name: "Start 1", exact: true });
   await start.getByRole("combobox", { name: "Hour" }).selectOption({ label: "10" });
   await start.getByRole("combobox", { name: "Minute" }).selectOption({ label: "00" });
-  await start.getByRole("combobox", { name: "a.m. or p.m." }).selectOption({ label: "a.m." });
   await exception.getByLabel("Dine-in", { exact: true }).uncheck();
 
   await editor.getByRole("button", { name: "Save hours draft" }).click();

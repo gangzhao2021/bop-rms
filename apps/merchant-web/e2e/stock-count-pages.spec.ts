@@ -1,6 +1,11 @@
 import { expect, test } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
 
+// Batch 64: a date of this year is written without its year; these fixtures are in 2026.
+test.beforeEach(async ({ page }) => {
+  await page.clock.setFixedTime(new Date("2026-11-25T17:00:00.000Z"));
+});
+
 // v15 run (738b4c8b): the stock count list showed "Started" as 2026-10-07T22:59:17.279Z and the
 // count said "counted by Staff 0100". Staff read Store-local times and people's names.
 test("@production stock counts show Store-local times and people's names, never identifiers", async ({
@@ -132,12 +137,12 @@ test("@production stock counts show Store-local times and people's names, never 
   await expect(page.getByRole("heading", { name: "Stock counts", level: 2 })).toBeVisible();
   const row = page.getByRole("row").filter({ hasText: "Walk-in fridge" });
   // 22:59 UTC is 6:59 PM in Toronto.
-  await expect(row.getByRole("link", { name: "Oct 7, 6:59 PM" })).toBeVisible();
+  await expect(row.getByRole("link", { name: "Wed, Oct 7 18:59" })).toBeVisible();
   await expect(row).toContainText("Mina Chen");
   await expect(row).toContainText("Cycle count");
   await expectNoInternalText(page);
 
-  await row.getByRole("link", { name: "Oct 7, 6:59 PM" }).click();
+  await row.getByRole("link", { name: "Wed, Oct 7 18:59" }).click();
   await expect(
     page.getByRole("heading", { name: "Count · Walk-in fridge", level: 2 }),
   ).toBeVisible();

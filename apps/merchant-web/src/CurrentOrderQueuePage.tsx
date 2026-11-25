@@ -76,7 +76,7 @@ import { useRememberedAlertSound } from "./alert-sound.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import { StatePanel } from "@bop-rms/ui";
 import { playKitchenChime } from "./alert-chime.js";
-import { ClockStyleContext, orderWhen, storeTime } from "./StoreTime.js";
+import { orderWhen, storeTime } from "./StoreTime.js";
 export { orderWhen };
 import { compedText, compRecordLabel, partCompedText } from "./ItemCompAction.js";
 import {
@@ -567,7 +567,6 @@ export function CurrentOrderLines({
    */
   readonly tableTaken?: OrderTableTaken | null | undefined;
 }) {
-  const clockStyle = useContext(ClockStyleContext);
   const totals = lines.totals;
   const cancelledRefund = cancelledItemsRefund(lines.items);
   const refunds: readonly OrderRefundRow[] =
@@ -872,12 +871,7 @@ export function CurrentOrderLines({
                             : ""}
                         {batch.submittedAt === null ? null : (
                           <time className="order-round__time" dateTime={batch.submittedAt}>
-                            {orderWhen(
-                              batch.submittedAt,
-                              rounds.timeZone,
-                              rounds.today ?? null,
-                              clockStyle,
-                            )}
+                            {orderWhen(batch.submittedAt, rounds.timeZone, rounds.today ?? null)}
                           </time>
                         )}
                       </h3>

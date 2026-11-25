@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { pinFixtureYear } from "./store-year.fixture.js";
 import { findInternalText, staticText } from "../e2e/internal-text-patterns.js";
 import {
   createStaffPageClient,
@@ -19,6 +20,10 @@ import {
   StaffRoleSummary,
 } from "./StaffAdministrationPages.js";
 import { StoreTimeZoneContext } from "./StoreTime.js";
+
+// Batch 64: dates of this year are written without the year; these fixtures are in 2026.
+beforeEach(() => pinFixtureYear());
+afterEach(() => vi.useRealTimers());
 
 const id = (n: number) => "01909974-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const member = {
@@ -163,7 +168,7 @@ describe("WP-2423 DEC-COGNITO-STORE-STAFF staff invitations", () => {
         </StoreTimeZoneContext.Provider>,
       );
     expect(staticText(line({}))).toMatch(
-      /Invited · email sent\s+Oct 20.*· expires\s+Oct 27, 2026/su,
+      /Invited · email sent\s+Tue, Oct 20 \d\d:\d\d.*· expires\s+Oct 27, 2026/su,
     );
     expect(staticText(line({ delivery: "Unknown" }))).toContain("Invited · email not confirmed");
     expect(staticText(line({ status: "Expired" }))).toContain("Invitation expired");

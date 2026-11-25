@@ -23,14 +23,14 @@ it("WP-2423 item 8 ③ follow-up: warns servers 30 minutes before last orders an
   const at = Date.parse("2026-10-29T01:30:00.000Z"); // 21:30 in Toronto
   const iso = new Date(at).toISOString();
   expect(lastOrdersText(iso, at - lastOrdersWarningMs - 1, "America/Toronto")).toBeNull();
-  // b40: written as the guests' pages write it ("9:30 p.m."), its period ending the sentence.
+  // Batch 64: on the staff clock ("21:30"), as every staff screen writes times.
   const soon = lastOrdersText(iso, at - 60_000, "America/Toronto");
   expect(soon?.tone).toBe("soon");
   expect(soon?.text).toMatch(
-    /^Last orders at 9:30\sp\.m\. After that guests can't order from their phones; you can still add a round for a table\.$/u,
+    /^Last orders at 21:30\. After that guests can't order from their phones; you can still add a round for a table\.$/u,
   );
   expect(lastOrdersText(iso, at + 60_000, "America/Toronto")?.text).toMatch(
-    /^Guests stopped ordering from their phones at 9:30\sp\.m\. \(last orders\)\./u,
+    /^Guests stopped ordering from their phones at 21:30 \(last orders\)\./u,
   );
   expect(lastOrdersText(iso, at + 60_000, "America/Toronto")?.tone).toBe("past");
   expect(lastOrdersText(null, at, "America/Toronto")).toBeNull();

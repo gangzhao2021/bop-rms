@@ -1,7 +1,7 @@
 import { DiningPaymentTimingPanel } from "./DiningPaymentTimingPanel.js";
 import { serviceModeText, listSeparator, systemText, t, wallClockTime } from "./i18n/i18n.js";
 import { businessDateLabel } from "./StoreBusinessDay.js";
-import { ClockStyleContext, storeTime } from "./StoreTime.js";
+import { storeTime } from "./StoreTime.js";
 import { StatePanel } from "@bop-rms/ui";
 import { StoreConfigurationEditor } from "./StoreConfigurationEditor.js";
 import type { StoreConfigurationView } from "./store-configuration-client.js";
@@ -26,9 +26,7 @@ import {
 } from "./service-control-client.js";
 
 /**
- * "09:00:00" → "9:00 a.m."; "00:00:00" → "12:00 a.m." (Chinese "0:00"). Batch 46: the Store's
- * hours read as guests read them on their phones (the b40 convention for times guests also see,
- * as on Tables), never "9:00 AM" beside a guest's "9:00 a.m.".
+ * "09:00:00" → "09:00"; "00:00:00" → "00:00": the Store's hours on the staff clock (batch 64).
  */
 export function serviceTime(value: string): string {
   return wallClockTime(value);
@@ -418,180 +416,179 @@ export function StoreServiceControlPanel({
         );
   const changes = hoursChangesText(configuration);
   return (
-    // Batch 47: every time on Hours & ordering, the editor's included, in the guests' style.
     // Batch 63 F54 (Figma 57:121): the Orders header — title, the Store, its zone and business
-    // day, the shared stamp and Refresh at the right — then three sections at 20/600.
-    <ClockStyleContext.Provider value="Guest">
-      <WorkspacePage
-        title={t("Hours & ordering")}
-        className="hours-page"
-        meta={head === "" ? null : head}
-        status={
-          view === null ? null : (
-            <span className="hours-page__updated">
-              {/* Batch 46: in the app's language and the Store's zone, never the browser's. */}
-              {t("Updated {time}", {
-                time: storeTime(view.observedAt, view.timeZone, false, "Guest"),
-              })}
-            </span>
-          )
-        }
-        actions={
+    // day, the shared stamp and Refresh at the right — then three sections at 20/600. Batch 64
+    // (v15 b63: "Updated 12:32 p.m." here, "Updated 12:32" everywhere else): every time on it, the
+    // editor's included, is the staff clock.
+    <WorkspacePage
+      title={t("Hours & ordering")}
+      className="hours-page"
+      meta={head === "" ? null : head}
+      status={
+        view === null ? null : (
+          <span className="hours-page__updated">
+            {/* Batch 46: in the app's language and the Store's zone, never the browser's. */}
+            {t("Updated {time}", {
+              time: storeTime(view.observedAt, view.timeZone),
+            })}
+          </span>
+        )
+      }
+      actions={
+        <button
+          type="button"
+          className="hours-page__link"
+          onClick={() => void load()}
+          disabled={busy || !online || uncertain}
+        >
+          {t("Refresh")}
+        </button>
+      }
+    >
+      {view && (
+        <ServiceHoursSummary
+          hours={view.hours}
+          timeZone={view.timeZone}
+          observedAt={view.observedAt}
+          action={
+            configurable && !editing ? (
+              <button
+                type="button"
+                className="hours-page__link"
+                ref={editHours}
+                onClick={() => setEditing(true)}
+              >
+                {t("Edit hours")}
+              </button>
+            ) : null
+          }
+          changes={
+            changes === null || editing ? null : <p className="hours-page__muted">{changes}</p>
+          }
+        />
+      )}
+      {configurable && (editing || view === null) ? (
+        <StoreConfigurationEditor
+          key={store + csrf}
+          store={store}
+          csrf={csrf}
+          autoLoad={editing}
+          {...(editing
+            ? {
+                onClose: () => {
+                  focusEditHours.current = true;
+                  setEditing(false);
+                  setProbeRevision((value) => value + 1);
+                },
+              }
+            : {})}
+          // Batch 51: the editor says the zone itself while Opening hours is not drawn.
+          publishedHours={
+            view
+              ? {
+                  timeZone: view.timeZone,
+                  businessDayStartLocalTime: view.hours.businessDayStartLocalTime,
+                }
+              : null
+          }
+        />
+      ) : null}
+      <section
+        aria-labelledby="service-controls-title"
+        aria-busy={busy}
+        className="hours-page__section"
+      >
+        <h2 id="service-controls-title">{t("Pause ordering")}</h2>
+        <p className="hours-page__muted">
+          {t("While paused, no new orders come in. Paid orders and seated tables carry on.")}
+        </p>
+        {!online && (
+          <p role="status">{t("Offline read-only. Reconnect before changing service.")}</p>
+        )}
+        <p role="status" aria-live="polite" className="hours-page__status">
+          {systemText(message)}
+        </p>
+        {uncertain && (
           <button
             type="button"
             className="hours-page__link"
-            onClick={() => void load()}
-            disabled={busy || !online || uncertain}
+            onClick={() => void submit()}
+            disabled={busy || !online}
           >
-            {t("Refresh")}
+            {t("Retry same request")}
           </button>
-        }
-      >
-        {view && (
-          <ServiceHoursSummary
-            hours={view.hours}
-            timeZone={view.timeZone}
-            observedAt={view.observedAt}
-            action={
-              configurable && !editing ? (
-                <button
-                  type="button"
-                  className="hours-page__link"
-                  ref={editHours}
-                  onClick={() => setEditing(true)}
-                >
-                  {t("Edit hours")}
-                </button>
-              ) : null
-            }
-            changes={
-              changes === null || editing ? null : <p className="hours-page__muted">{changes}</p>
-            }
-          />
         )}
-        {configurable && (editing || view === null) ? (
-          <StoreConfigurationEditor
-            key={store + csrf}
-            store={store}
-            csrf={csrf}
-            autoLoad={editing}
-            {...(editing
-              ? {
-                  onClose: () => {
-                    focusEditHours.current = true;
-                    setEditing(false);
-                    setProbeRevision((value) => value + 1);
-                  },
-                }
-              : {})}
-            // Batch 51: the editor says the zone itself while Opening hours is not drawn.
-            publishedHours={
-              view
-                ? {
-                    timeZone: view.timeZone,
-                    businessDayStartLocalTime: view.hours.businessDayStartLocalTime,
-                  }
-                : null
-            }
-          />
-        ) : null}
-        <section
-          aria-labelledby="service-controls-title"
-          aria-busy={busy}
-          className="hours-page__section"
-        >
-          <h2 id="service-controls-title">{t("Pause ordering")}</h2>
-          <p className="hours-page__muted">
-            {t("While paused, no new orders come in. Paid orders and seated tables carry on.")}
-          </p>
-          {!online && (
-            <p role="status">{t("Offline read-only. Reconnect before changing service.")}</p>
-          )}
-          <p role="status" aria-live="polite" className="hours-page__status">
-            {systemText(message)}
-          </p>
-          {uncertain && (
-            <button
-              type="button"
-              className="hours-page__link"
-              onClick={() => void submit()}
-              disabled={busy || !online}
-            >
-              {t("Retry same request")}
-            </button>
-          )}
-          {view && (
-            <>
-              <fieldset disabled={disabled} className="hours-page__pause">
-                <legend className="visually-hidden">{t("Pause ordering")}</legend>
-                <label>
-                  <span>{t("How long (minutes)")}</span>
-                  <input
-                    id="pause-duration"
-                    type="number"
-                    min="1"
-                    max="240"
-                    step="1"
-                    inputMode="numeric"
-                    value={minutes}
-                    onChange={(event) => setMinutes(event.target.value)}
-                  />
-                </label>
-                <label>
-                  <span>{t("Which services")}</span>
-                  <select
-                    id="pause-mode"
-                    value={mode}
-                    onChange={(event) => setMode(event.target.value)}
-                  >
-                    <option value="All">{t("All services")}</option>
-                    {view.enabledServiceModes.map((value) => (
-                      <option key={value} value={value}>
-                        {serviceModeText(value)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <button type="button" className="hours-page__primary" onClick={pause}>
-                  {t("Pause ordering")}
-                </button>
-              </fieldset>
-              {view.activePauses.length === 0 ? (
-                <p className="hours-page__muted">{t("No pause now.")}</p>
-              ) : (
-                <ul className="hours-page__pauses" aria-label={t("Paused now")}>
-                  {view.activePauses.map((item) => (
-                    <li key={item.closureReference} className="hours-page__row">
-                      <span>
-                        {t("{value} — until {value2}", {
-                          value:
-                            item.serviceModes?.map(serviceModeText).join(listSeparator()) ??
-                            t("All services"),
-                          value2: storeTime(item.effectiveUntil, view.timeZone, true, "Guest"),
-                        })}
-                      </span>{" "}
-                      <button
-                        type="button"
-                        className="hours-page__link"
-                        disabled={disabled}
-                        onClick={() => resume(item.closureReference)}
-                      >
-                        {t("Resume {value}", {
-                          value:
-                            item.serviceModes?.map(serviceModeText).join(listSeparator()) ??
-                            t("all services"),
-                        })}
-                      </button>
-                    </li>
+        {view && (
+          <>
+            <fieldset disabled={disabled} className="hours-page__pause">
+              <legend className="visually-hidden">{t("Pause ordering")}</legend>
+              <label>
+                <span>{t("How long (minutes)")}</span>
+                <input
+                  id="pause-duration"
+                  type="number"
+                  min="1"
+                  max="240"
+                  step="1"
+                  inputMode="numeric"
+                  value={minutes}
+                  onChange={(event) => setMinutes(event.target.value)}
+                />
+              </label>
+              <label>
+                <span>{t("Which services")}</span>
+                <select
+                  id="pause-mode"
+                  value={mode}
+                  onChange={(event) => setMode(event.target.value)}
+                >
+                  <option value="All">{t("All services")}</option>
+                  {view.enabledServiceModes.map((value) => (
+                    <option key={value} value={value}>
+                      {serviceModeText(value)}
+                    </option>
                   ))}
-                </ul>
-              )}
-            </>
-          )}
-        </section>
-        {/* WP-2423 DEC-DINE-IN-PAY-LATER: when dine-in guests pay (Owner, Store Manager). */}
-        <DiningPaymentTimingPanel csrf={csrf} />
-      </WorkspacePage>
-    </ClockStyleContext.Provider>
+                </select>
+              </label>
+              <button type="button" className="hours-page__primary" onClick={pause}>
+                {t("Pause ordering")}
+              </button>
+            </fieldset>
+            {view.activePauses.length === 0 ? (
+              <p className="hours-page__muted">{t("No pause now.")}</p>
+            ) : (
+              <ul className="hours-page__pauses" aria-label={t("Paused now")}>
+                {view.activePauses.map((item) => (
+                  <li key={item.closureReference} className="hours-page__row">
+                    <span>
+                      {t("{value} — until {value2}", {
+                        value:
+                          item.serviceModes?.map(serviceModeText).join(listSeparator()) ??
+                          t("All services"),
+                        value2: storeTime(item.effectiveUntil, view.timeZone, true),
+                      })}
+                    </span>{" "}
+                    <button
+                      type="button"
+                      className="hours-page__link"
+                      disabled={disabled}
+                      onClick={() => resume(item.closureReference)}
+                    >
+                      {t("Resume {value}", {
+                        value:
+                          item.serviceModes?.map(serviceModeText).join(listSeparator()) ??
+                          t("all services"),
+                      })}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        )}
+      </section>
+      {/* WP-2423 DEC-DINE-IN-PAY-LATER: when dine-in guests pay (Owner, Store Manager). */}
+      <DiningPaymentTimingPanel csrf={csrf} />
+    </WorkspacePage>
   );
 }

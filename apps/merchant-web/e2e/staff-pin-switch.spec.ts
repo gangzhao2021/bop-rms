@@ -21,10 +21,14 @@ const scope = {
 const testEntry = { path: "/internal-test/staff", testOnly: true };
 const minutesFromNow = (minutes: number) =>
   new Date(Date.now() + minutes * 60_000).toISOString().replace(/\.\d+Z$/u, ".000Z");
+// Batch 64: the Store's 24-hour clock ("14:25").
 const clock = (instant: string) =>
-  new Intl.DateTimeFormat("en-US", { timeZone: zone, hour: "numeric", minute: "2-digit" }).format(
-    new Date(instant),
-  );
+  new Intl.DateTimeFormat("en-CA", {
+    timeZone: zone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(new Date(instant));
 const navigation = [
   { screenId: "HOME-OVERVIEW", label: "Overview", href: "/app", permission: "merchant.access" },
   {

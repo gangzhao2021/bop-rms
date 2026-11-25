@@ -10,7 +10,7 @@ import {
 } from "./dining-session-close-client.js";
 import { createDiningProgressClient } from "./dining-progress-client.js";
 import { paidAtDayNote, paidAtInstant } from "./counter-payment.js";
-import { storeTime } from "./StoreTime.js";
+import { storeWhen } from "./StoreTime.js";
 import {
   cashTotalMinor,
   createTableCheckoutClient,
@@ -478,7 +478,7 @@ export function TableCheckout({
     paidBeforeOrdered && lastLiveOrderedAt !== null
       ? t(
           "This is before this table's last round was ordered in the system ({at}). A card machine's clock can be a few minutes off: check the time on the slip before you confirm.",
-          { at: storeTime(lastLiveOrderedAt, timeZone, true, "Guest") },
+          { at: storeWhen(lastLiveOrderedAt, timeZone) },
         )
       : null,
     paidAtDayNote(paperInstant, Date.now(), timeZone),
@@ -1306,7 +1306,7 @@ export function TableCheckout({
                         {paper && paperInstant !== null ? (
                           <div>
                             <dt>{t("Paid at")}</dt>
-                            <dd>{storeTime(paperInstant, timeZone, true, "Guest")}</dd>
+                            <dd>{storeWhen(paperInstant, timeZone)}</dd>
                           </div>
                         ) : null}
                         {method === "Cash" && cashDue !== null && change !== null ? (
@@ -1556,9 +1556,7 @@ export function TableReceipt({
       <header className="table-receipt__head" data-print-only="">
         {storeLabel ? <p className="table-receipt__store">{storeLabel}</p> : null}
         <p>{t("Table {table}", { table: saidTable(tableLabel) })}</p>
-        {paidAt !== "" ? (
-          <p>{t("Paid {time}", { time: storeTime(paidAt, timeZone, true, "Guest") })}</p>
-        ) : null}
+        {paidAt !== "" ? <p>{t("Paid {time}", { time: storeWhen(paidAt, timeZone) })}</p> : null}
       </header>
       <ul className="table-receipt__dishes" data-print-only="">
         {dishes.map((item) => (

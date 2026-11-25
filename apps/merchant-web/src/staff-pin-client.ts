@@ -1,4 +1,4 @@
-import { displayLocale, t } from "./i18n/i18n.js";
+import { clockTime, displayLocale, t } from "./i18n/i18n.js";
 /**
  * WP-2423 (Owner-approved design "A"): device-bound six-digit staff PIN quick switch.
  *
@@ -531,15 +531,11 @@ export function createStaffPinClient(
 }
 
 /**
- * "3:45 PM" in the store's time zone (the device's own zone, which on a store tablet is the
- * store's, when the store's is not known).
+ * "15:45" on the store's 24-hour clock (batch 64: the one staff clock), in the store's time zone
+ * (the device's own zone, which on a store tablet is the store's, when the store's is not known).
  */
 export function storeClockTime(instantValue: string, zone: string | undefined): string {
-  return new Intl.DateTimeFormat(displayLocale(), {
-    ...(zone === undefined ? {} : { timeZone: zone }),
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(new Date(instantValue));
+  return clockTime(Date.parse(instantValue), zone);
 }
 /** "Oct 14, 2026" in the store's time zone. */
 export function storeDate(instantValue: string, zone: string | undefined): string {

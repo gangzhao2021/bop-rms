@@ -1,5 +1,6 @@
-import { displayLocale, t } from "./i18n/i18n.js";
-import { useEffect, useRef, useState } from "react";
+import { t } from "./i18n/i18n.js";
+import { useContext, useEffect, useRef, useState } from "react";
+import { StoreTimeZoneContext, storeWhen } from "./StoreTime.js";
 import {
   createDiningHostTransferClient,
   DiningHostClientError,
@@ -25,6 +26,8 @@ export function DiningHostTransferAction({
     [message, setMessage] = useState("");
   const pending = useRef<AbortController | null>(null),
     operation = useRef<Operation | null>(null);
+  // Batch 64: the Store's 24-hour clock, never the browser's own date and 12-hour time.
+  const timeZone = useContext(StoreTimeZoneContext);
   useEffect(() => () => pending.current?.abort(), []);
   const locked = disabled || state !== "Idle";
   const load = async () => {
@@ -99,7 +102,7 @@ export function DiningHostTransferAction({
         setConfirmed(false);
         setMessage(
           t("Recorded at {value}. Refresh phones to see which phone sends the cart.", {
-            value: new Date(result.transferredAt).toLocaleString(displayLocale()),
+            value: storeWhen(result.transferredAt, timeZone),
           }),
         );
       }
@@ -151,7 +154,7 @@ export function DiningHostTransferAction({
               <li key={p.participantReference}>
                 {t("Phone {value} · Joined {value2}{value3}", {
                   value: index + 1,
-                  value2: new Date(p.joinedAt).toLocaleString(displayLocale()),
+                  value2: storeWhen(p.joinedAt, timeZone),
                   value3: p.isHost ? t(" · Sends the cart") : "",
                 })}
               </li>
@@ -173,7 +176,7 @@ export function DiningHostTransferAction({
                   <option key={p.participantReference} value={p.participantReference}>
                     {t("Phone {value} · Joined {value2}", {
                       value: index + 1,
-                      value2: new Date(p.joinedAt).toLocaleString(displayLocale()),
+                      value2: storeWhen(p.joinedAt, timeZone),
                     })}
                   </option>
                 ),

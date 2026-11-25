@@ -52,14 +52,14 @@ it("Hours & ordering says a whole day is open 24 hours, and when its orders stop
   );
   expect(html).toContain('<span class="hours-page__period">Open 24 hours · Dine-in, Pickup</span>');
   expect(html).toContain(
-    '<span class="hours-page__period">Open 24 hours · Dine-in, Pickup · no orders after 11:34\u00a0p.m.</span>',
+    '<span class="hours-page__period">Open 24 hours · Dine-in, Pickup · no orders after 23:34</span>',
   );
   const weekly = html.slice(0, html.indexOf("Special dates and holidays"));
-  expect(weekly).not.toContain("11:59\u00a0p.m.");
+  expect(weekly).not.toContain("23:59");
   expect(html).not.toContain("before closing");
   // Back-to-back periods: said once above them, each period still listed for staff.
   expect(html).toContain(
-    '<span class="hours-page__period">Open 24 hours</span><span class="hours-page__period">12:00\u00a0a.m.–12:00\u00a0p.m. · Dine-in, Pickup</span>',
+    '<span class="hours-page__period">Open 24 hours</span><span class="hours-page__period">00:00–12:00 · Dine-in, Pickup</span>',
   );
   setLanguageForTest("zh-Hans");
   const zh = renderToStaticMarkup(
@@ -123,7 +123,7 @@ it("a period from midnight to 2:00 the next day keeps its end time on staff scre
     />,
   );
   expect(html).toContain(
-    '<span class="hours-page__period">12:00\u00a0a.m.–2:00\u00a0a.m. (next day) · Dine-in, Pickup</span>',
+    '<span class="hours-page__period">00:00–02:00 (next day) · Dine-in, Pickup</span>',
   );
   expect(html).not.toContain("Open 24 hours");
   expect(openingHoursLines(overnight as never)[0]).not.toContain("open 24 hours");

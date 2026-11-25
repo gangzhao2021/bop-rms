@@ -1,7 +1,8 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { setLanguageForTest } from "./i18n/i18n.js";
 import { DiningRoundsContext } from "./DiningRounds.js";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
+import { pinFixtureYear } from "./store-year.fixture.js";
 import {
   readCurrentOrders,
   refreshedOrderState,
@@ -358,10 +359,13 @@ it("WP-2423 batch 31: a later round's Accept button names its round in the staff
 });
 
 it("WP-2423: shows order times in the Store's time zone", () => {
+  // Batch 64: the staff clock; a date of this year is written without the year.
+  pinFixtureYear();
+  onTestFinished(() => {
+    vi.useRealTimers();
+  });
   expect(storeTime("2026-10-08T01:30:00.000Z", "America/Toronto")).toBe("21:30");
-  expect(storeTime("2026-10-08T01:30:00.000Z", "America/Toronto", true)).toBe(
-    "Oct 7, 2026, 9:30\u00a0PM",
-  );
+  expect(storeTime("2026-10-08T01:30:00.000Z", "America/Toronto", true)).toBe("Wed, Oct 7 21:30");
   expect(storeTime("2026-10-08T01:30:00.000Z", undefined)).toBe("01:30 UTC");
 });
 

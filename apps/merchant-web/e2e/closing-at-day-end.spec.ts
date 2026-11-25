@@ -8,7 +8,7 @@ import { expectNoInternalText } from "./internal-text-guard";
  * closing wording for such a Store was only unit tested. Here, on the production build with a
  * fixed clock and the /merchant/business-day shape v15 sends:
  * - a late-night Store open 18:00–04:00, business day from 04:00 (closesAt = endsAt, openAtDayEnd
- *   false), is reminded on Home from 03:00, and Tables says "Closing at 4:00 a.m." / "4:00 打烊";
+ *   false), is reminded on Home from 03:00, and Tables says "Closing at 04:00" / "04:00 打烊" (batch 64: the staff clock);
  * - a Store open 24 hours (TM2: closesAt = endsAt, openAtDayEnd true) never sees the reminder.
  * Synthetic HTTP interception, TEST-only data.
  */
@@ -159,8 +159,8 @@ for (const language of ["en", "zh-Hans"] as const) {
         await expect(
           page.getByText(
             zh
-              ? /^4:00 打烊：还有 2 张?桌/u
-              : /^Closing at 4:00\sa\.m\.: 2 tables still open\. Take each table's payment and close it when the guests leave\.$/u,
+              ? /^04:00 打烊：还有 2 张?桌/u
+              : /^Closing at 04:00: 2 tables still open\. Take each table's payment and close it when the guests leave\.$/u,
           ),
         ).toBeVisible();
         await expect(page.getByText(zh ? /营业日 .* 结束/u : /business day ends/u)).toHaveCount(0);
@@ -196,8 +196,8 @@ for (const language of ["en", "zh-Hans"] as const) {
       await expect(
         page.getByText(
           zh
-            ? /^营业日 4:00 结束：还有 2/u
-            : /^The business day ends at 4:00\sa\.m\.: 2 tables still open\./u,
+            ? /^营业日 04:00 结束：还有 2/u
+            : /^The business day ends at 04:00: 2 tables still open\./u,
         ),
       ).toBeVisible();
       await expect(page.getByText(zh ? /打烊：/u : /^Closing at/u)).toHaveCount(0);

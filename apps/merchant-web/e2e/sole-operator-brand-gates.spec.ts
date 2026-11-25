@@ -255,7 +255,7 @@ test("@production the price list shows drafts in Store time and discarding a dra
   const row = page.getByRole("row", { name: /PRICES-Q19-TEST/u });
   await expect(row).toContainText("Draft, not published yet");
   // Store time (America/Toronto), never UTC.
-  await expect(row).toContainText("Oct 15, 2026, 12:30 PM");
+  await expect(row).toContainText("Thu, Oct 15 12:30");
   await expect(page.getByText(/UTC/u)).toHaveCount(0);
   // Sole operator is on: the page does not tell the owner to have someone else publish.
   // Owner 2026-10-25: the explanation is under "More about this".
@@ -627,8 +627,8 @@ test("@production v15 catalog pages show staff words: recipe, option recipes, op
     page.getByText(/Step 2: Steam the milk .* \(at the same time as the step before\)/u),
   ).toBeVisible();
   await expect(page.getByText("0.018 kg")).toBeVisible();
-  await expect(page.getByText("Approved by Noah on Oct 16, 2026, 10:05 AM")).toBeVisible();
-  await expect(page.getByText(/since Oct 16, 2026, 10:05\sAM/u)).toBeVisible();
+  await expect(page.getByText("Approved by Noah on Fri, Oct 16 10:05")).toBeVisible();
+  await expect(page.getByText(/since Fri, Oct 16 10:05/u)).toBeVisible();
   await expect(page.getByText(/You wrote this version and you are the only person/u)).toBeVisible();
   await expect(page.getByText(/\[0\]|Staff \d{4}/u)).toHaveCount(0);
   await expectNoInternalText(page);
@@ -774,8 +774,8 @@ test("@production v15 catalog pages show staff words: recipe, option recipes, op
     }),
   );
   await page.goto("/app/commerce/option-recipes");
-  await expect(page.getByText("Saved by Mia on Oct 16, 2026, 10:05 AM")).toBeVisible();
-  await expect(page.getByText("Cost: approved by You on Oct 16, 2026, 10:05 AM")).toBeVisible();
+  await expect(page.getByText("Saved by Mia on Fri, Oct 16 10:05")).toBeVisible();
+  await expect(page.getByText("Cost: approved by You on Fri, Oct 16 10:05")).toBeVisible();
   await expect(page.getByText("Whole milk 0.2 L → Oat milk 0.2 L")).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "Reviews you cannot give as a second person" }),
@@ -866,7 +866,7 @@ test("@production v15 catalog pages show staff words: recipe, option recipes, op
     }),
   );
   await page.goto(`/app/commerce/products/${id(71)}/edit`);
-  await expect(page.getByText(/updated Oct 16, 2026, 10:05\sAM/u)).toBeVisible();
+  await expect(page.getByText(/updated Fri, Oct 16 10:05/u)).toBeVisible();
   await expect(page.getByRole("option", { name: /Dine-in 13%/u })).toHaveCount(1);
   await expectNoInternalText(page);
 

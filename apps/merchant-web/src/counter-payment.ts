@@ -1,12 +1,6 @@
 import { t, withOneSentenceEnd } from "./i18n/i18n.js";
 import { orderMoney } from "./order-money.js";
-import {
-  type ClockStyle,
-  storeDate,
-  storeLocalInputValue,
-  storeLocalInstant,
-  storeTime,
-} from "./StoreTime.js";
+import { storeDate, storeLocalInputValue, storeLocalInstant, storeTime } from "./StoreTime.js";
 import type { CounterOrderClientError } from "./staff-order-entry.js";
 import type { CurrentOrderQueue } from "./current-order-queue-client.js";
 
@@ -235,10 +229,8 @@ function paymentWindowNoticeText(input: {
    * system does at the time, never to charge or take payment.
    */
   readonly paper?: boolean;
-  /** b40 review: "Guest" on Tables, so the time reads as everywhere else on it. */
-  readonly clockStyle?: ClockStyle;
 }): { readonly tier: "warning" | "urgent"; readonly ended: boolean; readonly text: string } {
-  const at = storeTime(input.payBy, input.timeZone, false, input.clockStyle);
+  const at = storeTime(input.payBy, input.timeZone);
   const remainingMs = Date.parse(input.payBy) - input.now;
   if (input.paper === true) {
     if (remainingMs <= 0)

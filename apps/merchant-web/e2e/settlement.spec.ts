@@ -1,6 +1,11 @@
 import { expect, test } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
 
+// Batch 64: a date of this year is written without its year; these fixtures are in 2026.
+test.beforeEach(async ({ page }) => {
+  await page.clock.setFixedTime(new Date("2026-11-25T17:00:00.000Z"));
+});
+
 const id = (n: number) => "018f7700-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const scope = {
   brandLabel: "Synthetic Brand",
@@ -179,7 +184,7 @@ test("@production Settlement shows the day's totals, the run result and differen
   ).toBeVisible();
   await expect(
     page.getByText(
-      "14 payments checked in 240 runs · last Sep 22, 2026, 3:58 AM · 13 matched · 1 difference",
+      "14 payments checked in 240 runs · last Tue, Sep 22 03:58 · 13 matched · 1 difference",
     ),
   ).toBeVisible();
   await expect(page.getByText("Difference · Refund differs")).toBeVisible();

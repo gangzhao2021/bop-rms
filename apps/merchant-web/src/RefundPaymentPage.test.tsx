@@ -1,7 +1,8 @@
 import { OrdinaryRefundClientError, type RefundRecoveryView } from "./ordinary-refund-client.js";
 import { MemoryRouter } from "react-router";
 import { renderToStaticMarkup } from "react-dom/server";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { pinFixtureYear } from "./store-year.fixture.js";
 import { cardMachineRefundRecordedText } from "./CardMachineRequestRefund.js";
 import {
   cardMachineRefundBySenderText,
@@ -32,6 +33,10 @@ import {
 } from "./RefundPaymentPage.js";
 import { StoreTimeZoneContext } from "./StoreTime.js";
 import { setLanguageForTest } from "./i18n/i18n.js";
+
+// Batch 64: dates of this year are written without the year; these fixtures are in 2026.
+beforeEach(() => pinFixtureYear());
+afterEach(() => vi.useRealTimers());
 
 afterEach(() => setLanguageForTest("en"));
 
@@ -177,7 +182,7 @@ it("WP-2423 item 4: a recorded card-machine refund shows its slip reference in s
     );
   const html = render("RF4821");
   expect(html).toContain("Refunded $5.93 on the store&#x27;s card machine");
-  expect(html).toContain("Oct 15, 2026, 1:52\u00a0PM");
+  expect(html).toContain("Thu, Oct 15 13:52");
   expect(html).toContain("Slip reference: RF4821.");
   expect(html).not.toContain(id(1));
   expect(render(null)).toContain("No slip reference was entered.");
@@ -193,7 +198,7 @@ it("WP-2423 item 4: recording the machine refund confirms it plainly, with the c
       "America/Toronto",
     ),
   ).toBe(
-    "Card-machine refund recorded: $5.93 refunded on the card machine at Oct 15, 2026, 1:52\u00a0PM. The card machine's refund slip is the customer's receipt.",
+    "Card-machine refund recorded: $5.93 refunded on the card machine at Thu, Oct 15 13:52. The card machine's refund slip is the customer's receipt.",
   );
   expect(
     cardMachineRefundRecordedText({ ...result, receipt: "Issued" }, "$5.93", "593", "UTC"),

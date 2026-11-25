@@ -91,9 +91,9 @@ for (const [language, locale] of [
         await expect(items.last()).toHaveText(
           zh
             ? "24 小时营业 · 堂食、自取 · 23:34 后停止点单"
-            : "Open 24 hours · Dine-in, Pickup · no orders after 11:34 p.m.",
+            : "Open 24 hours · Dine-in, Pickup · no orders after 23:34",
         );
-        await expect(hours).not.toContainText(zh ? "23:59" : "11:59");
+        await expect(hours).not.toContainText("23:59");
         await expect(hours).not.toContainText(zh ? "打烊前" : "before closing");
         expect(
           await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),

@@ -369,8 +369,8 @@ for (const zh of [false, true]) {
     });
     const list = details.getByRole("list", { name: zh ? "免单/折让" : "Comps and discounts" });
     const first = zh
-      ? "Beef noodles (TEST) · 免单 2 份中的 1 份 · 上错菜 · 由你经办，8:13−$14.13"
-      : "1 of 2 × Beef noodles (TEST) comped · Wrong dish served · by You, 8:13 a.m.−$14.13";
+      ? "Beef noodles (TEST) · 免单 2 份中的 1 份 · 上错菜 · 由你经办，08:13−$14.13"
+      : "1 of 2 × Beef noodles (TEST) comped · Wrong dish served · by You, 08:13−$14.13";
     await expect(list.getByRole("listitem").first()).toHaveText(first);
 
     // The other bowl, later: the panel offers the one left, with nothing to count.
@@ -393,8 +393,8 @@ for (const zh of [false, true]) {
     await expect(list.getByRole("listitem")).toHaveText([
       first,
       zh
-        ? "Beef noodles (TEST) · 免单 2 份中的 1 份 · 等待太久 · 由你经办，8:21−$14.12"
-        : "1 of 2 × Beef noodles (TEST) comped · Waited too long · by You, 8:21 a.m.−$14.12",
+        ? "Beef noodles (TEST) · 免单 2 份中的 1 份 · 等待太久 · 由你经办，08:21−$14.12"
+        : "1 of 2 × Beef noodles (TEST) comped · Waited too long · by You, 08:21−$14.12",
       `${zh ? "整桌账单减免后应付" : "Whole bill to pay after comps"}$4.29`,
     ]);
     // Every bowl comped: the panel offers only the tea now.

@@ -1,4 +1,4 @@
-import { clockTime, clockTimeEndingSentence, countOf, t } from "./i18n/i18n.js";
+import { clockTime, countOf, t } from "./i18n/i18n.js";
 
 /**
  * b39 (v15 b38 dinner sweep; AGENTS.md "warn before timeouts"): nothing closes a table by itself at
@@ -22,9 +22,8 @@ export function tablesClosingAlert(
   timeZone?: string,
 ): { readonly tone: "soon" | "past"; readonly text: string } | null {
   if (day === null || openTables === 0) return null;
-  // b40: the guests' style of time ("10:00 p.m."); one that ends a sentence brings its period.
+  // Batch 64: the staff clock ("22:00").
   const time = (at: number) => clockTime(at, timeZone);
-  const timeAtEnd = (at: number) => clockTimeEndingSentence(at, timeZone);
   const lead = tablesClosingLeadMinutes * 60_000;
   const ends = day.endsAt === null ? Number.NaN : Date.parse(day.endsAt);
   const closesAt =
@@ -48,7 +47,7 @@ export function tablesClosingAlert(
       text: Number.isFinite(ends)
         ? t(
             "Closed at {time}: {tables} still open. Take the payment, or record that the guests left without paying, and close each table before the day ends at {end}.",
-            { time: time(closes), tables, end: timeAtEnd(ends) },
+            { time: time(closes), tables, end: time(ends) },
           )
         : t(
             "Closed at {time}: {tables} still open. Take the payment, or record that the guests left without paying, and close each table.",

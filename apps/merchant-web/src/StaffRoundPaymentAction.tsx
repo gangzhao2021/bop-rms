@@ -1,6 +1,5 @@
 import { t } from "./i18n/i18n.js";
-import { useContext, useEffect, useId, useRef, useState } from "react";
-import { ClockStyleContext } from "./StoreTime.js";
+import { useEffect, useId, useRef, useState } from "react";
 import { validSlipReference } from "./CardMachineRefundAction.js";
 import { orderMoney } from "./order-money.js";
 import { CashTenderFields, cashTender } from "./CashTenderFields.js";
@@ -152,7 +151,6 @@ export function StaffRoundPaymentAction({
     paidAtInput.current?.focus();
     paidAtInput.current?.select?.();
   }, [focusPaidAt]);
-  const clockStyle = useContext(ClockStyleContext);
   const paperInstant = recordedAfterOutage ? paidAtInstant(paidAt, Date.now(), timeZone) : null;
   const readAmount = () => {
     if (loadAmountDue === undefined) return;
@@ -394,7 +392,6 @@ export function StaffRoundPaymentAction({
               tableMode: subject === "round",
               timeZone,
               paper: recordedAfterOutage,
-              clockStyle,
             });
             return (
               <p

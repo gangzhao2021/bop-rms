@@ -239,46 +239,28 @@ export function displayLocale(): string {
   return current === "zh-Hans" ? "zh-CN" : "en-US";
 }
 
-/** The locale the guests' pages write times in ("12:30 a.m." / "0:30"); see clockTime. */
-export function guestLocale(): string {
-  return current === "zh-Hans" ? "zh-CN" : "en-CA";
-}
-
 /**
- * b40 (v15 b39 cross-midnight check: staff read "12:30 AM" where guests read "12:30 a.m."): a
- * time of day as the guest's pages write it, in the house style of the language ("12:30 a.m.",
- * "0:30"), in the Store's time zone when given.
+ * A time of day on the Store's 24-hour clock, "00:30" / "14:05", in the Store's time zone when
+ * given. Batch 64 (v15 b63: staff screens mixed "12:15 p.m." and "12:15"): every staff screen,
+ * Tables and Hours & ordering included, writes the one staff clock; guests' pages keep theirs.
  */
 export function clockTime(at: number, timeZone?: string): string {
-  return keepTimeTogether(
-    new Intl.DateTimeFormat(guestLocale(), {
-      hour: "numeric",
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", {
+      hour: "2-digit",
       minute: "2-digit",
+      hourCycle: "h23",
       ...(timeZone === undefined ? {} : { timeZone }),
-    }).format(new Date(at)),
+    })
+      .formatToParts(new Date(at))
+      .map((part) => [part.type, part.value]),
   );
+  return `${parts.hour}:${parts.minute}`;
 }
-/**
- * Batch 47 (v15 b46: "no orders after 11:34" with "p.m." alone on the next line, at 1024 and
- * 1440): a written time keeps its a.m./p.m. on its line. The guests' en-CA style puts an ordinary
- * space before "p.m." (en-US already writes U+202F); it becomes a no-break space.
- */
-export function keepTimeTogether(text: string): string {
-  return text.replace(/(\d) (?=[ap]\.m\.|[AP]M\b)/gu, "$1\u00a0");
-}
-/**
- * Batch 46 (v15 overnight check: Hours & ordering read "5:00 PM–12:00 AM" and "00:00" where guests
- * read "5:00 p.m.–12:00 a.m." and "0:00"): a Store wall-clock time ("17:00:00") in the same house
- * style as clockTime.
- */
+/** A Store wall-clock time ("17:00:00") as staff read it: "17:00" (batch 64: the staff clock). */
 export function wallClockTime(localTime: string): string {
   const [hour = 0, minute = 0] = localTime.split(":").map(Number);
   return clockTime(Date.UTC(2000, 0, 1, hour, minute), "UTC");
-}
-/** A clockTime that ends a sentence: its own "a.m." period ends it ("ends at 4:00 a.m."). */
-export function clockTimeEndingSentence(at: number, timeZone?: string): string {
-  const time = clockTime(at, timeZone);
-  return time.endsWith(".") ? time.slice(0, -1) : time;
 }
 
 /**

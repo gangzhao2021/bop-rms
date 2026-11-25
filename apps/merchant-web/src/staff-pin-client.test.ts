@@ -170,7 +170,7 @@ describe("parsing", () => {
     expect(read.staffPins?.[0]?.state).toBe("Reset");
   });
   it("formats lock times on the store's clock", () => {
-    expect(storeClockTime(at, "America/Toronto")).toBe("3:45 PM");
+    expect(storeClockTime(at, "America/Toronto")).toBe("15:45");
   });
 });
 

@@ -1,4 +1,5 @@
-import { expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { pinFixtureYear } from "./store-year.fixture.js";
 import { renderToStaticMarkup } from "react-dom/server";
 import { findInternalText, staticText } from "../e2e/internal-text-patterns.js";
 import { MemoryRouter } from "react-router";
@@ -20,6 +21,10 @@ import {
   parseStoreConfigurationSnapshot,
   parseStoreConfigurationView,
 } from "./store-configuration-client.js";
+
+// Batch 64: dates of this year are written without the year; these fixtures are in 2026.
+beforeEach(() => pinFixtureYear());
+afterEach(() => vi.useRealTimers());
 const id = (n: number) => `018f9f40-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const at = "2026-08-15T14:00:00.000Z";
 const configuration = (lifecycle: "Draft" | "PendingApproval" | "Approved" | "Published") => ({
@@ -247,7 +252,7 @@ const renderForm = (
 it("says the time zone and day start in the editor only when they are not the published ones", () => {
   // Batch 46/49: as the published hours read it, with one sentence end.
   const sentence =
-    "Times are in Eastern Time (Toronto, Ottawa and Montréal). The business day starts at 5:00\u00a0a.m.<";
+    "Times are in Eastern Time (Toronto, Ottawa and Montréal). The business day starts at 05:00.<";
   const html = renderForm(
     hoursView({ ...configuration("Draft"), businessDayStartLocalTime: "05:00:00" }),
   );
@@ -258,7 +263,7 @@ it("says the time zone and day start in the editor only when they are not the pu
   // service-status read loads or has failed, so the editor says the zone itself; once Published
   // hours says the same zone and day start, it does not repeat them.
   const toronto =
-    "Times are in Eastern Time (Toronto, Ottawa and Montréal). The business day starts at 4:00\u00a0a.m.<";
+    "Times are in Eastern Time (Toronto, Ottawa and Montréal). The business day starts at 04:00.<";
   const missing = renderForm(hoursView({ ...configuration("Draft") }), { publishedHours: null });
   expect(missing).toContain(toronto);
   expect(missing.split("Eastern Time").length - 1).toBe(1);
@@ -284,7 +289,7 @@ it("edits hours without effective dates, business-day start or a typed reason co
   expect(html).not.toContain("The business day starts");
   // Batch 47: hours and minutes as the page writes them, never a browser time field with seconds.
   expect(html).not.toContain('type="time"');
-  expect(html).toContain('<option value="9" selected="">9</option>');
+  expect(html).toContain('<option value="9" selected="">09</option>');
   expect(html).not.toMatch(/<label>Business day starts/u);
   expect(html).toContain("No pending change. Customers see the published hours.");
   expect(html).not.toContain("Published version");
@@ -463,7 +468,7 @@ it("WP-2423 v15: names who made the open change, and declining it is confirmed w
     </MemoryRouter>,
   );
   expect(closed).toContain(
-    'Someone with approval access declined the latest change on <time dateTime="2026-08-15T14:00:00.000Z" title="2026-08-15T14:00:00.000Z">Aug 15, 2:00\u00a0PM UTC</time>. Reason: Talk to me before changing this. The next change starts from the published hours.',
+    'Someone with approval access declined the latest change on <time dateTime="2026-08-15T14:00:00.000Z" title="2026-08-15T14:00:00.000Z">Sat, Aug 15 14:00 UTC</time>. Reason: Talk to me before changing this. The next change starts from the published hours.',
   );
   expect(() =>
     parseStoreConfigurationView(

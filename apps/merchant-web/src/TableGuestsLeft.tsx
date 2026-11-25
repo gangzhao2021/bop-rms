@@ -143,7 +143,7 @@ export function guestsLeftRoundText(
             )
           : t(
               "{name}: not paid, no money was taken. It will be cancelled now (otherwise automatically at {at}); nothing is refunded.",
-              { name, at: storeTime(round.cancelsAt, timeZone, false, "Guest") },
+              { name, at: storeTime(round.cancelsAt, timeZone) },
             );
     case "WaitingForStaff":
       // WP-2423 item 8 ⑤: never sent to the kitchen, never cancelled by time; closing cancels it.

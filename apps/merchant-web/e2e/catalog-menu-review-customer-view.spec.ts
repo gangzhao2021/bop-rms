@@ -194,7 +194,7 @@ test("@production an approver sees each item's customer description and photo, w
   const review = page.getByRole("region", { name: "What customers will see" });
   await expect(review).toBeVisible();
   await expect(review).toContainText(
-    "Compared with the menu customers see now (published Oct 16, 2:05 PM): 1 new item, 1 description changed, 1 photo changed, 1 item removed.",
+    "Compared with the menu customers see now (published Fri, Oct 16 14:05): 1 new item, 1 description changed, 1 photo changed, 1 item removed.",
   );
   const items = review.getByRole("listitem").filter({ has: page.getByRole("heading") });
   await expect(items).toHaveCount(3);

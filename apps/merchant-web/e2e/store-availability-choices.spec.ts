@@ -168,7 +168,7 @@ test("@production A manager marks pearls sold out in every drink at once and bri
 
   await pearlsRow.getByRole("button", { name: "Sold out today" }).click();
   await expect(page.getByText("Pearls is sold out for today in every dish.")).toBeVisible();
-  await expect(pearlsRow).toContainText("Sold out until 4:00 AM tomorrow");
+  await expect(pearlsRow).toContainText("Sold out until 04:00 tomorrow");
   expect(commands[0]).toMatchObject({
     action: "OptionSoldOut",
     optionReference: id(30),

@@ -171,9 +171,9 @@ test("@production Tables keeps the last tables read-only after a failed refresh 
   offline = true;
   await page.getByRole("button", { name: "Refresh tables", exact: true }).click();
   const notice = page.getByRole("status").filter({ hasText: "Read-only until reconnected" });
-  // b40: in the Tables clock style, as guests read it ("2:05 p.m.", never "14:05").
+  // Batch 64: the staff clock ("14:05"), as on every staff screen.
   await expect(notice).toContainText(
-    /showing the last update from \d{1,2}:\d\d\s[ap]\.m\.(?:\s[A-Z]{2,5}\.)? Actions are paused/u,
+    /showing the last update from \d\d:\d\d(?:\s[A-Z]{2,5})?\. Actions are paused/u,
   );
   await expect(select).toBeDisabled();
   await expect(page.getByText("Tables unavailable", { exact: false })).toHaveCount(0);
@@ -274,9 +274,9 @@ test("@production Tables warns servers before guests' last orders and says staff
   );
   await page.goto("/operations/dining");
   const notice = page.locator(".last-orders-notice");
-  // b40: the guests' style of time, "9:30 p.m." (never "9:30 PM").
+  // Batch 64: the staff clock, "21:30".
   await expect(notice).toHaveText(
-    /^Last orders at 9:30\sp\.m\. After that guests can't order from their phones; you can still add a round for a table\.$/u,
+    /^Last orders at 21:30\. After that guests can't order from their phones; you can still add a round for a table\.$/u,
   );
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
@@ -287,7 +287,7 @@ test("@production Tables warns servers before guests' last orders and says staff
   }
   await page.clock.fastForward("21:00");
   await expect(notice).toHaveText(
-    /^Guests stopped ordering from their phones at 9:30\sp\.m\. \(last orders\)\. You can still add a round for a table\.$/u,
+    /^Guests stopped ordering from their phones at 21:30 \(last orders\)\. You can still add a round for a table\.$/u,
   );
   await expect(notice).toHaveAttribute("data-tone", "past");
 });

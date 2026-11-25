@@ -2,7 +2,7 @@ import { t } from "./i18n/i18n.js";
 import { useContext, useEffect, useRef } from "react";
 import { useStaffSessionLive } from "./staff-session-reads.js";
 import { StatePanel } from "@bop-rms/ui";
-import { ClockStyleContext, StoreTimeZoneContext, storeTime } from "./StoreTime.js";
+import { StoreTimeZoneContext, storeTime } from "./StoreTime.js";
 import { floorServerProblemHeading, floorServerProblemText } from "./failure-words.js";
 
 /**
@@ -101,12 +101,9 @@ export function StaleReadNotice({
   readonly serverProblemText?: string;
 }) {
   const timeZone = useContext(StoreTimeZoneContext);
-  // b40 review: on Tables the time reads as everywhere else there ("2:05 p.m.", not "14:05").
-  const style = useContext(ClockStyleContext);
-  const lastLoaded = storeTime(stale.lastLoadedAt, timeZone, false, style);
+  const lastLoaded = storeTime(stale.lastLoadedAt, timeZone);
   // b41 (v15 b40 live): one whole sentence per language with the time inside it, so Chinese reads
-  // "离线 — 显示的是 6:07 的最近更新，…" (never "以下时间的最近更新： 6:07"). "… from 2:05 p.m. Actions
-  // …": a time ending in a period ends the sentence itself.
+  // "离线 — 显示的是 06:07 的最近更新，…" (never "以下时间的最近更新： 06:07").
   const aroundTime = (sentence: string) => {
     const [before = "", rest = ""] = sentence.split(TIME);
     return (

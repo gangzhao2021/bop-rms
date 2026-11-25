@@ -1,4 +1,4 @@
-import { displayLocale, guestLocale, keepTimeTogether, t } from "./i18n/i18n.js";
+import { displayLocale, t } from "./i18n/i18n.js";
 import { createContext, useContext } from "react";
 
 /** WP-2423: the selected Store's IANA time zone, provided once by the workspace. */
@@ -8,15 +8,6 @@ export const StoreTimeZoneContext = createContext<string | undefined>(undefined)
  * here instead of carrying a second "Last checked" of its own.
  */
 export const PageReadAtContext = createContext<((at: string) => void) | null>(null);
-
-/**
- * b40 review (Tables mixed "12:30 a.m.", "12:30 AM" and "01:23" on one screen): how a screen
- * writes times. "Staff" is the back office's "14:05"; "Guest" is the guests' house style
- * ("12:30 a.m.", "0:30"). Tables provides "Guest", so every time on it reads one way, as on the
- * guest's phone at that table.
- */
-export type ClockStyle = "Staff" | "Guest";
-export const ClockStyleContext = createContext<ClockStyle>("Staff");
 
 /**
  * Batch 42 (v15 chase at 10:04:10 refused, "chase it again at 10:04"): the first whole minute at
@@ -30,36 +21,19 @@ export function wholeMinuteAtOrAfter(instant: string): string {
 }
 
 /**
- * An instant as Store-local time: "14:05", or with the date "Oct 14, 2026, 2:05 PM" (never a
- * machine date such as 2026-10-14). UTC, labelled, when the Store's time zone is not known. In
- * the "Guest" style: "12:30 a.m.", or "Nov 21, 2026, 12:30 a.m.".
+ * Batch 64 (v15 b63: staff screens wrote one moment three ways — "Updated 12:32 p.m." on Hours,
+ * "12:15 p.m." on Tables beside "12:15" on Orders, "Nov 25, 2026, 12:28 PM by You" under Paid):
+ * every time on a staff screen is the Store's 24-hour clock, "14:05" in English and Chinese alike.
+ * With the date, the weekday and date come first, the year only when it is not this year — "Sat,
+ * Oct 24 20:00" / "10月24日周六 20:00", as Orders writes an earlier day.
+ * UTC, labelled, when the Store's time zone is not known. Guests' pages keep their own style.
  */
-export function storeTime(
-  instant: string,
-  timeZone: string | undefined,
-  withDate = false,
-  style: ClockStyle = "Staff",
-): string {
-  if (style === "Guest") {
-    const text = new Intl.DateTimeFormat(guestLocale(), {
-      timeZone: timeZone ?? "UTC",
-      ...(withDate ? { year: "numeric", month: "short", day: "numeric" } : {}),
-      hour: "numeric",
-      minute: "2-digit",
-    }).format(new Date(instant));
-    return keepTimeTogether(timeZone === undefined ? text + " UTC" : text);
-  }
-  if (withDate) {
-    const text = new Intl.DateTimeFormat(displayLocale(), {
-      timeZone: timeZone ?? "UTC",
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    }).format(new Date(instant));
-    return keepTimeTogether(timeZone === undefined ? text + " UTC" : text);
-  }
+export function storeTime(instant: string, timeZone: string | undefined, withDate = false): string {
+  return withDate ? friendlyStoreTime(instant, timeZone) : clockOf(instant, timeZone);
+}
+
+/** "14:05" on the Store's clock ("14:05 UTC" when its zone is not known). */
+function clockOf(instant: string, timeZone: string | undefined): string {
   if (timeZone === undefined) return instant.slice(11, 16) + " UTC";
   const parts = Object.fromEntries(
     new Intl.DateTimeFormat("en-CA", {
@@ -72,6 +46,16 @@ export function storeTime(
       .map((part) => [part.type, part.value]),
   );
   return `${parts.hour}:${parts.minute}`;
+}
+
+/** "2026-10-14": the Store's calendar day of an instant. */
+function dayOf(at: Date, zone: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: zone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(at);
 }
 
 /**
@@ -155,42 +139,52 @@ export function SourceTime({
   readonly withDate?: boolean;
 }) {
   const timeZone = useContext(StoreTimeZoneContext);
-  const style = useContext(ClockStyleContext);
   return (
     <time dateTime={instant} title={instant}>
-      {storeTime(instant, timeZone, withDate, style)}
+      {storeTime(instant, timeZone, withDate)}
     </time>
   );
 }
 
 /**
- * "Oct 14, 3:00 PM" in the Store's time zone; the year is added when it is not this year. In the
- * "Guest" style (batch 47: Hours & ordering): "Oct 14, 3:00 p.m." / "10月14日 15:00".
+ * An instant with its day, as staff read it (batch 64): "Wed, Oct 14 15:00" ("10月14日周三
+ * 15:00"), with the year only when it is not this year. Always the 24-hour clock.
  */
 export function friendlyStoreTime(
   instant: string,
   timeZone: string | undefined,
   now: Date = new Date(),
-  style: ClockStyle = "Staff",
 ): string {
   const zone = timeZone ?? "UTC";
-  const year = (at: Date) =>
-    new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric" }).format(at);
   const date = new Date(instant);
-  const text = new Intl.DateTimeFormat(style === "Guest" ? guestLocale() : displayLocale(), {
+  const label = new Intl.DateTimeFormat(displayLocale(), {
     timeZone: zone,
+    ...(dayOf(date, zone).slice(0, 4) === dayOf(now, zone).slice(0, 4) ? {} : { year: "numeric" }),
     month: "short",
     day: "numeric",
-    ...(year(date) === year(now) ? {} : { year: "numeric" }),
-    hour: "numeric",
-    minute: "2-digit",
+    weekday: "short",
   }).format(date);
-  return keepTimeTogether(timeZone === undefined ? text + " UTC" : text);
+  return `${label} ${clockOf(instant, timeZone)}`;
+}
+
+/**
+ * When something happened, as a line of a record says it (batch 64, v15 M177 "22:42 by Mei"):
+ * today's time alone, another day's with its day ("Wed, Oct 14 15:00").
+ */
+export function storeWhen(
+  instant: string,
+  timeZone: string | undefined,
+  now: Date = new Date(),
+): string {
+  const zone = timeZone ?? "UTC";
+  return dayOf(new Date(instant), zone) === dayOf(now, zone)
+    ? clockOf(instant, timeZone)
+    : friendlyStoreTime(instant, timeZone, now);
 }
 
 /**
  * WP-2423: when something ends, as staff say it in the Store's time zone, relative to now:
- * "3:00 PM today", "4:00 AM tomorrow", otherwise "Oct 16, 4:00 AM".
+ * "15:00 today", "04:00 tomorrow", otherwise "Fri, Oct 16 04:00".
  */
 export function storeDayTime(
   instant: string,
@@ -198,24 +192,12 @@ export function storeDayTime(
   now: Date = new Date(),
 ): string {
   const zone = timeZone ?? "UTC";
-  const day = (at: Date) =>
-    new Intl.DateTimeFormat("en-CA", {
-      timeZone: zone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).format(at);
+  const day = (at: Date) => dayOf(at, zone);
   const date = new Date(instant);
   const today = day(now);
   const [y, m, d] = today.split("-").map(Number) as [number, number, number];
   const tomorrow = new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10);
-  const time = keepTimeTogether(
-    new Intl.DateTimeFormat(displayLocale(), {
-      timeZone: zone,
-      hour: "numeric",
-      minute: "2-digit",
-    }).format(date),
-  );
+  const time = clockOf(instant, zone);
   const suffix = timeZone === undefined ? " UTC" : "";
   if (day(date) === today) return t("{time}{suffix} today", { time: time, suffix: suffix });
   if (day(date) === tomorrow) return t("{time}{suffix} tomorrow", { time: time, suffix: suffix });
@@ -223,8 +205,8 @@ export function storeDayTime(
 }
 
 /**
- * WP-2423: when a screen's information was last read, as staff say it: "Checked 10:11 PM today"
- * (or "Checked Oct 13, 10:11 PM" for an older read), in the Store's time zone. The exact
+ * WP-2423: when a screen's information was last read, as staff say it: "Checked 22:11 today"
+ * (or "Checked Tue, Oct 13 22:11" for an older read), in the Store's time zone. The exact
  * instant stays in the title.
  */
 export function CheckedTime({
@@ -243,16 +225,13 @@ export function CheckedTime({
 }
 
 /**
- * A staff-facing instant such as "Oct 14, 3:00 PM"; the exact instant stays in the title. Batch 47
- * (v15: Hours & ordering read "Nov 16, 5:17 AM" beside "4:00 a.m."): written in the screen's
- * clock style.
+ * A staff-facing instant such as "Wed, Oct 14 15:00"; the exact instant stays in the title.
  */
 export function StaffTime({ instant }: { readonly instant: string }) {
   const timeZone = useContext(StoreTimeZoneContext);
-  const style = useContext(ClockStyleContext);
   return (
     <time dateTime={instant} title={instant}>
-      {friendlyStoreTime(instant, timeZone, new Date(), style)}
+      {friendlyStoreTime(instant, timeZone)}
     </time>
   );
 }
@@ -331,13 +310,8 @@ export function StoreDate({ value }: { readonly value: string }) {
  * Orders v2: when an order was placed, in one style — the time today, else the date with the
  * weekday ("Sat, Oct 24 20:00"), with the year only when it is not this year.
  */
-export function orderWhen(
-  instant: string,
-  timeZone: string | undefined,
-  today: string | null,
-  style: ClockStyle = "Staff",
-) {
-  const time = storeTime(instant, timeZone, false, style);
+export function orderWhen(instant: string, timeZone: string | undefined, today: string | null) {
+  const time = storeTime(instant, timeZone);
   if (timeZone === undefined) return time;
   const date = new Intl.DateTimeFormat("en-CA", {
     timeZone,
@@ -346,7 +320,7 @@ export function orderWhen(
     day: "2-digit",
   }).format(new Date(instant));
   if (date === today) return time;
-  const label = new Intl.DateTimeFormat(style === "Guest" ? guestLocale() : displayLocale(), {
+  const label = new Intl.DateTimeFormat(displayLocale(), {
     timeZone,
     ...(today !== null && date.slice(0, 4) === today.slice(0, 4) ? {} : { year: "numeric" }),
     month: "short",
