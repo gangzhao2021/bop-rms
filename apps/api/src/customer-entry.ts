@@ -563,6 +563,19 @@ function parseCookie(value: unknown): GuestSessionCookieDescriptor {
   return expectedGuestSessionCookie;
 }
 
+/**
+ * Batch 64 fix-up: whether a table's printed name fits the public label shape. The Dining rule lets
+ * staff print names such as "#4" or "VIP*" that this shape refuses; such a name is said as an
+ * unnamed table, never turned into an entry outage.
+ */
+export function isPublicTableLabel(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    /^[^\p{Cc}\p{Cf}<>{}[\]`*_#]{1,120}$/u.test(value) &&
+    value === value.trim()
+  );
+}
+
 function parseEstablished(
   value: unknown,
   requestedAt: string,
@@ -667,15 +680,11 @@ function parseEstablished(
   if (Date.parse(contextExpiresAt) <= Date.parse(requestedAt)) {
     throw new TypeError("expired context result");
   }
-  // Batch 64 (F11): a table's printed name, only at a table, in the public label's shape.
-  if (
-    result.tableLabel !== undefined &&
-    (result.channel !== "DineIn" ||
-      typeof result.tableLabel !== "string" ||
-      !/^[^\p{Cc}\p{Cf}<>{}[\]`*_#]{1,120}$/u.test(result.tableLabel) ||
-      result.tableLabel !== result.tableLabel.trim())
-  )
-    throw new TypeError("invalid table label");
+  // Batch 64 (F11): a table's printed name, only at a table. A name outside the public label's
+  // shape is left out (the table unnamed), so the visit never depends on it.
+  if (result.tableLabel !== undefined && result.channel !== "DineIn")
+    throw new TypeError("table label away from a table");
+  const tableLabel = isPublicTableLabel(result.tableLabel) ? result.tableLabel : undefined;
   return Object.freeze({
     brandDisplayName,
     storeDisplayName,
@@ -687,7 +696,7 @@ function parseEstablished(
     locale: result.locale,
     contextExpiresAt,
     ...(result.tableOpen === undefined ? {} : { tableOpen: result.tableOpen as boolean }),
-    ...(result.tableLabel === undefined ? {} : { tableLabel: result.tableLabel as string }),
+    ...(tableLabel === undefined ? {} : { tableLabel }),
     sessionCredential: parseGuestRawCredential(result.sessionCredential),
     csrfCredential: parseGuestRawCredential(result.csrfCredential),
     cookie: parseCookie(result.cookie),

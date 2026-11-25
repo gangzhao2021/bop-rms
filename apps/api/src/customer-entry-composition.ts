@@ -29,6 +29,7 @@ import type {
   CustomerEntryPresentedTable,
   CustomerEntryWaitInput,
 } from "./customer-entry.js";
+import { isPublicTableLabel } from "./customer-entry.js";
 
 export interface CustomerEntryAdmissionInput extends Omit<CustomerEntryPortInput, "qrToken"> {
   readonly context: QrTableContext;
@@ -476,7 +477,7 @@ export function createCustomerEntryComposition(
             return Object.freeze({
               status: "TableNotOpen" as const,
               ...publicContext,
-              ...(typeof tableLabel === "string" ? { tableLabel } : {}),
+              ...(isPublicTableLabel(tableLabel) ? { tableLabel } : {}),
             });
           }
           if (input.intent !== "Start" && input.intent !== "NewParty")
@@ -494,8 +495,8 @@ export function createCustomerEntryComposition(
           return Object.freeze({ status: "TableAskNewParty" as const, ...publicContext });
 
         // Batch 64 (F11): the table's printed name comes with the visit too, so a guest who scans
-        // an open table straight away sees "Join D62A 1", not an unnamed table. Absent or failed:
-        // the table unnamed, as before (the visit never depends on it).
+        // an open table straight away sees "Join D62A 1", not an unnamed table. Absent, failed or
+        // outside the public label's shape (the Dining rule allows "#4"): the table unnamed.
         const tableLabel =
           qr.context.channel === "DineIn" && tableReference !== null && tableReference !== undefined
             ? await (
@@ -579,7 +580,7 @@ export function createCustomerEntryComposition(
           locale: String(qr.context.locale),
           contextExpiresAt,
           ...(tableOpen === undefined ? {} : { tableOpen }),
-          ...(typeof tableLabel === "string" ? { tableLabel } : {}),
+          ...(isPublicTableLabel(tableLabel) ? { tableLabel } : {}),
           sessionCredential: session.sessionCredential,
           csrfCredential: session.csrfCredential,
           cookie: session.cookie,

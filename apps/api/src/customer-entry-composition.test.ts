@@ -577,6 +577,25 @@ describe("DEC-DINING-GUEST-TABLE-START: a scan at a Store where guests start tab
     expect(unread).toMatchObject({ status: "Established", tableOpen: true });
     expect(Object.hasOwn(unread, "tableLabel")).toBe(false);
   });
+  it("batch 64 fix-up: a printed name such as #4 (Dining allows it, the public shape does not) leaves the table unnamed, never an outage", async () => {
+    const f = fixture();
+    const joined = await createCustomerEntryComposition({
+      ...f.options,
+      table: table({ isOpen: vi.fn(async () => true), label: vi.fn(async () => "#4") }),
+    }).establish(f.input());
+    expect(joined).toMatchObject({ status: "Established", tableOpen: true });
+    expect(Object.hasOwn(joined, "tableLabel")).toBe(false);
+    const g = fixture();
+    const notOpen = await createCustomerEntryComposition({
+      ...g.options,
+      table: table({
+        guestStart: vi.fn(async () => "No" as const),
+        label: vi.fn(async () => "VIP*"),
+      }),
+    }).establish(g.input());
+    expect(notOpen.status).toBe("TableNotOpen");
+    expect(Object.hasOwn(notOpen, "tableLabel")).toBe(false);
+  });
   it("an open table a new phone may be a new party at asks once, with no visit yet; the answer goes on", async () => {
     const asked = table({
       isOpen: vi.fn(async () => true),

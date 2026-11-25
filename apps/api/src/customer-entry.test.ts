@@ -243,17 +243,32 @@ describe("WP-1004 Customer-entry contract", () => {
     });
     port.result = established({ tableOpen: true });
     expect(Object.hasOwn((await (await post(serverPort)).json()) as object, "table")).toBe(false);
-    for (const result of [
-      established({ tableLabel: "<b>4</b>" }),
-      established({
-        tableLabel: "V63 A",
-        channel: "Pickup",
-        publicTableReference: null,
-        availableServiceModes: ["Pickup"],
-      }),
-    ]) {
-      port.result = result;
-      expect((await post(serverPort)).status).toBe(503);
+    // A name away from a table is a broken answer (a fresh server: each takes two scans).
+    const pickup = new MutablePort();
+    pickup.result = established({
+      tableLabel: "V63 A",
+      channel: "Pickup",
+      publicTableReference: null,
+      availableServiceModes: ["Pickup"],
+    });
+    expect((await post(await listen(customerEntry(pickup)))).status).toBe(503);
+    pickup.result = established({
+      channel: "Pickup",
+      publicTableReference: null,
+      availableServiceModes: ["Pickup"],
+    });
+    expect((await post(await listen(customerEntry(pickup)))).status).toBe(201);
+  });
+
+  it("batch 64 fix-up: a printed name the Dining rule allows but the public shape refuses still joins, unnamed", async () => {
+    for (const tableLabel of ["#4", "A_1", "VIP*", "<b>4</b>", " T1"]) {
+      const port = new MutablePort();
+      port.result = established({ tableOpen: true, tableLabel });
+      const joined = await post(await listen(customerEntry(port)));
+      expect(joined.status).toBe(201);
+      const body = (await joined.json()) as Record<string, unknown>;
+      expect(body).toMatchObject({ status: "Established", tableOpen: true });
+      expect(Object.hasOwn(body, "table")).toBe(false);
     }
   });
 
