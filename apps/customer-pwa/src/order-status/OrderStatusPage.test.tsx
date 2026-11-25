@@ -2030,3 +2030,49 @@ describe("WP-2423 M18 / M118: an order that isn't paid says so, with its deadlin
     expect(table).toContain("Payment attempt failed");
   });
 });
+
+// Batch 63 review: a collected pickup hides Refresh now (F16), but a refund staff issue after
+// collection (a complaint refund) must still be re-readable from the page without a full reload.
+describe("batch 63 review: Refresh now on a collected pickup with a refund", () => {
+  const cad = (amountMinor: bigint) => ({ amountMinor, currencyCode: "CAD" });
+  function collected(sources: Partial<NonNullable<OrderStatusView["sources"]>>) {
+    const state = readyState();
+    if (state.status !== "ready") throw new Error("missing fixture");
+    return render({
+      ...state,
+      view: {
+        ...state.view,
+        order: { ...state.view.order, canonicalPhase: "Fulfilled", fulfillmentStatus: "Completed" },
+        sources: { checkedAt: "2026-08-11T14:00:00.000Z", kitchen: null, payments: [], ...sources },
+      },
+    });
+  }
+
+  it("keeps Refresh now once a refund is recorded or on its way, and hides it otherwise", () => {
+    expect(collected({})).not.toContain("Refresh now");
+    expect(
+      collected({
+        refunds: {
+          refunded: cad(480n),
+          entries: [
+            { kind: "Refund", orderItemReferences: [id(4)], total: cad(480n), tip: cad(0n) },
+          ],
+        },
+      }),
+    ).toContain("Refresh now");
+    expect(
+      collected({
+        itemCancellations: [
+          {
+            orderBatchReference: id(3),
+            orderItemReferences: [id(4)],
+            cancelledAt: "2026-08-11T13:59:00.000Z",
+            reason: "SoldOut",
+            refundStatus: "Pending",
+            refundAmount: cad(480n),
+          },
+        ],
+      }),
+    ).toContain("Refresh now");
+  });
+});

@@ -167,6 +167,19 @@ export function hasPendingRefund(view: OrderStatusView): boolean {
       sources.storeAcceptance.refundStatus === "Pending")
   );
 }
+/**
+ * Batch 63 review: a refund recorded on this order or on its way. A collected pickup keeps
+ * Refresh now while one exists, so a refund staff issue after collection can be re-read.
+ */
+export function hasRefundToFollow(view: OrderStatusView): boolean {
+  const sources = view.sources;
+  return (
+    hasPendingRefund(view) ||
+    (sources?.refunds?.entries.length ?? 0) > 0 ||
+    (sources?.staffCancellations ?? []).length > 0 ||
+    (sources?.itemCancellations ?? []).length > 0
+  );
+}
 export const stoppedOrderStatusPoll: OrderStatusPoll = Object.freeze({
   mode: "stopped",
   errors: 0,
@@ -1518,9 +1531,11 @@ export function OrderStatusPage({
                 : orderStatusText.checksEveryFewSeconds}
           </p>
           {/* Batch 63 (F16): nothing changes on a collected pickup, so there is nothing to refresh
-              (a cancelled one may still have a refund on its way, so it keeps the button). */}
+              (a cancelled one may still have a refund on its way, so it keeps the button; so does
+              a collected one with a refund recorded or on its way, batch 63 review). */}
           {state.view.order.orderType === "Pickup" &&
-          state.view.order.fulfillmentStatus === "Completed" ? null : (
+          state.view.order.fulfillmentStatus === "Completed" &&
+          !hasRefundToFollow(state.view) ? null : (
             <button
               type="button"
               disabled={state.refreshing}
