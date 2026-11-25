@@ -1361,20 +1361,58 @@ for (const width of [390, 1024, 1440])
           }
         });
 
-      test("See your receipt on the ended Menu brings the payer to it once the table closed", async ({
-        page,
-      }) => {
-        test.setTimeout(90_000);
-        scenario = "by-dish-written-off";
-        phone = { payer: true, tableClosed: true, refunds: "Eight" };
-        await offerPoints(page, false);
-        await stubTable(page, []);
-        await open(page, "/menu", zh);
-        await page.getByRole("main").getByRole("link", { name: ownLink }).click();
-        await expect(page).toHaveURL(/\/dine-in\/session$/u);
-        await expectReceiptBroughtIntoView(
+      // Batch 62 review: the ended Menu (after Cleaned) for each way the bill ended, with and
+      // without the points card (v15 offered it there too). A bill staff closed with only this
+      // phone's part paid links "See your receipt" and focuses it; a bill paid in full links every
+      // phone to the table's settled receipt ("See the receipt"), which then opens on the first
+      // screen with this phone's refund in it, above the points card.
+      for (const item of [
+        { name: "staff closed the rest, then $8.00 back", scenario: "by-dish-written-off" },
+        { name: "paid by dish, then $8.00 of A back (G61 B)", scenario: "by-dish-both-paid" },
+        { name: "whole table, then $8.00 back (G61 E)", scenario: "whole-table-paid-online" },
+      ] as const)
+        test(`The ended Menu's receipt link brings the payer to it once the table closed: ${item.name}`, async ({
           page,
-          page.getByRole("main").getByRole("heading", { name: ownReceipt, exact: true }),
-        );
-      });
+        }) => {
+          test.setTimeout(120_000);
+          scenario = item.scenario;
+          phone = { payer: true, tableClosed: true, refunds: "Eight" };
+          const own = item.scenario === "by-dish-written-off";
+          const heading = page.getByRole("main").getByRole("heading", {
+            name: own ? ownReceipt : tableReceipt,
+            exact: true,
+          });
+          for (const points of [true, false]) {
+            await page.unrouteAll({ behavior: "ignoreErrors" });
+            await offerPoints(page, points);
+            await stubTable(page, []);
+            await open(page, "/menu", zh);
+            await page
+              .getByRole("main")
+              .getByRole("link", { name: own ? ownLink : zh ? "查看收据" : "See the receipt" })
+              .click();
+            await expect(page).toHaveURL(/\/dine-in\/session$/u);
+            if (own) await expectReceiptBroughtIntoView(page, heading);
+            else {
+              await expect(heading).toBeVisible();
+              const receipt = page.getByRole("region", { name: tableReceipt, exact: true });
+              await expect(receipt).toContainText(
+                zh ? /已退回您的卡|退款后/u : /Refunded to your card|paid after refunds/u,
+              );
+              await page.waitForTimeout(1500);
+              const nav = await page.locator(".bop-shell__nav").boundingBox();
+              const box = await heading.boundingBox();
+              expect(box?.y ?? -1).toBeGreaterThanOrEqual((nav?.y ?? 0) + (nav?.height ?? 0));
+              expect((box?.y ?? 0) + (box?.height ?? 0)).toBeLessThanOrEqual(844 - 40);
+              if (points) {
+                const card = page.getByRole("region", { name: /180/u });
+                if ((await card.count()) > 0)
+                  expect(box?.y ?? Infinity).toBeLessThan((await card.boundingBox())?.y ?? 0);
+              }
+            }
+            await page.screenshot({
+              path: `test-results/b62-ended-${item.scenario}-${points ? "points" : "nopoints"}-${zh ? "zh" : "en"}-${width}.png`,
+            });
+          }
+        });
     });
