@@ -488,6 +488,104 @@ for (const language of ["en", "zh-Hans"] as const)
       await noSideScroll(page);
     });
 
+/** The table's payment as its panel reads it: the $3.75 cash was given back for the food. */
+const refundedTablePayment = {
+  payment: {
+    partNumber: null,
+    method: "Online",
+    roundsMinor: "2825",
+    tipMinor: "0",
+    roundingMinor: "0",
+    totalMinor: "2825",
+    takenAt: "2026-11-25T01:40:00.000Z",
+    recordedAfterOutage: false,
+    cashRefunds: [
+      {
+        amountMinor: "375",
+        reasonCode: "FOOD_ISSUE",
+        refundedAt: "2026-11-25T03:28:00.000Z",
+        byLabel: "You",
+      },
+    ],
+    cardRefunds: [],
+    onlineRefunds: [
+      {
+        amountMinor: "500",
+        reasonCode: "CUSTOMER_REQUEST",
+        requestedAt: "2026-11-25T03:59:00.000Z",
+        byLabel: "You",
+        state: "Refunded",
+      },
+    ],
+    refundableMinor: "1650",
+  },
+  canRefund: true,
+};
+
+for (const language of ["en", "zh-Hans"] as const)
+  for (const [width, height] of sizes)
+    test(`@production F27 a table's refund line says why the money went back, ${language} at ${width}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height });
+      await ordersPage(page, language, [refundedTable], async (page) => {
+        await page.route("**/merchant/orders/detail*", (route) =>
+          route.fulfill({ headers, json: refundedDetail }),
+        );
+        await page.route("**/merchant/orders/table-payment", (route) =>
+          route.fulfill({ headers, json: refundedTablePayment }),
+        );
+      });
+      const panel = page.locator("aside.order-panel");
+      if (!(await panel.isVisible()))
+        await page.locator("li.order-row .order-row__open").first().click();
+      const zh = language === "zh-Hans";
+      const cash = panel
+        .locator(".order-lines-totals > div")
+        .filter({ hasText: zh ? /已退现金 · / : /Cash given back · / });
+      await expect(cash.locator("dt")).toHaveText(
+        zh ? "已退现金 · 菜品有问题 · 22:28" : "Cash given back · Problem with the food · 22:28",
+      );
+      await expect(
+        panel
+          .locator(".order-lines-totals dt")
+          .filter({ hasText: zh ? /^已退到卡上/ : /^Refunded to card/ }),
+      ).toHaveText(zh ? "已退到卡上 · 客人要求 · 22:59" : "Refunded to card · Guest asked · 22:59");
+      // The line and its amount stay inside the row with room for Linux fonts (about 40 px), and
+      // the amount is never pushed under or over the words.
+      const fit = await cash.evaluate((row) => {
+        const term = row.querySelector("dt");
+        const amount = row.querySelector("dd");
+        const rowBox = row.getBoundingClientRect();
+        const termBox = term?.getBoundingClientRect();
+        const amountBox = amount?.getBoundingClientRect();
+        const probe = document.createElement("span");
+        probe.style.cssText = "position:absolute;visibility:hidden;white-space:nowrap;font:inherit";
+        probe.textContent = term?.textContent ?? "";
+        term?.appendChild(probe);
+        const natural = probe.getBoundingClientRect().width;
+        probe.remove();
+        return {
+          overflow: row.scrollWidth - row.clientWidth,
+          rowRight: rowBox.right,
+          termRight: termBox?.right ?? 0,
+          termTop: termBox?.top ?? 0,
+          amountLeft: amountBox?.left ?? 0,
+          amountRight: amountBox?.right ?? 0,
+          amountTop: amountBox?.top ?? 0,
+          room: rowBox.width - (amountBox?.width ?? 0) - natural,
+          wraps: term === null ? false : getComputedStyle(term).whiteSpace !== "nowrap",
+        };
+      });
+      expect(fit.overflow).toBeLessThanOrEqual(0);
+      expect(fit.amountRight).toBeLessThanOrEqual(fit.rowRight + 0.5);
+      expect(fit.termRight).toBeLessThanOrEqual(fit.amountLeft + 0.5);
+      expect(Math.abs(fit.amountTop - fit.termTop)).toBeLessThanOrEqual(4);
+      // On one line with about 40 px to spare for DejaVu Sans, or wrapped inside its own column.
+      if (fit.room < 40) expect(fit.wraps).toBe(true);
+      await noSideScroll(page);
+    });
+
 const approvals = async (page: Page, language: Language) => {
   await inLanguage(page, language);
   await quietFrame(page);

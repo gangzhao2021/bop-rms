@@ -34,7 +34,14 @@ import {
   staffCancellationReasonLabel,
   staffCancellationSummary,
 } from "./StaffOrderCancelAction.js";
-import { TablePaymentPanel } from "./TablePaymentPanel.js";
+import {
+  TablePaymentPanel,
+  TableRefundReasonsContext,
+  reasonText as refundReasonText,
+  tableRefundReasons,
+  type RefundReason,
+  type TablePayment,
+} from "./TablePaymentPanel.js";
 import { UnpaidRoundCancelAction, isPaymentUnconfirmed } from "./UnpaidRoundCancelAction.js";
 import {
   earlierOpenPickupText,
@@ -1220,18 +1227,29 @@ export interface OrderRefundRow {
  * cancellation's refund, and — when every amount is known — any other online refund (a refund at
  * the customer's request, or an automatic one), then the total when there is more than one.
  */
+/** F27 final check: a refund listed by name above, as the order's record says it went back. */
+export interface ListedRefund {
+  readonly method: "CardMachine" | "Cash" | "Online";
+  readonly amountMinor: bigint;
+}
 /**
  * Batch 63 review (F27, D62C-12/T12): the refunds behind "Refunded", each said with its own way and
  * time ("Refunded to card · 22:59", "Cash given back · 02:28"), from the order's record (money
  * Payment sent back, as the record lists it). Only when the record's refunds make up exactly that
  * money — all of them, or all but the refunds already listed by name above — else null, and the
  * row stays "Refunded" (never a way or time that might belong to another refund).
+ *
+ * Final check (F27): a refund listed by name is taken out of the record only by its way and amount
+ * (a card-machine $12 cancellation is never an online $12), and only when exactly one record refund
+ * could be it; when more than one could, null. A table's refund also says its reason when its
+ * payment lists exactly one refund of that way, amount and time.
  */
 export function refundedByWay(
   record: CurrentOrderDetail["record"] | undefined,
   refundedMinor: bigint,
-  listedMinor: readonly bigint[],
+  listed: readonly ListedRefund[],
   when: (at: string) => string,
+  reasons: readonly RefundReason[] = [],
 ): readonly { readonly label: string; readonly amountMinor: bigint }[] | null {
   if (record == null || record.refunds.length === 0) return null;
   const sum = (list: typeof record.refunds) =>
@@ -1239,24 +1257,49 @@ export function refundedByWay(
   let refunds = record.refunds;
   if (sum(refunds) !== refundedMinor) {
     const rest = [...refunds];
-    for (const amount of listedMinor) {
-      const at = rest.findIndex((refund) => BigInt(refund.amountMinor) === amount);
-      if (at >= 0) rest.splice(at, 1);
+    for (const named of listed) {
+      const same = rest.filter(
+        (refund) =>
+          refund.method === named.method && BigInt(refund.amountMinor) === named.amountMinor,
+      );
+      if (same.length > 1) return null;
+      const one = same[0];
+      if (one !== undefined) rest.splice(rest.indexOf(one), 1);
     }
     if (rest.length === 0 || sum(rest) !== refundedMinor) return null;
     refunds = rest;
   }
+  const reasonOf = (refund: (typeof refunds)[number]) => {
+    const same = reasons.filter(
+      (reason) =>
+        reason.method === refund.method &&
+        reason.amountMinor === refund.amountMinor &&
+        Date.parse(reason.at) === Date.parse(refund.at),
+    );
+    const code = same.length === 1 ? same[0]?.reasonCode : undefined;
+    return code === undefined ? undefined : refundReasonText(code);
+  };
   return [...refunds]
     .sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0))
-    .map((refund) => ({
-      label:
-        refund.method === "Online"
-          ? t("Refunded to card · {time}", { time: when(refund.at) })
-          : refund.method === "Cash"
-            ? t("Cash given back · {time}", { time: when(refund.at) })
-            : t("Refunded on the card machine · {time}", { time: when(refund.at) }),
-      amountMinor: BigInt(refund.amountMinor),
-    }));
+    .map((refund) => {
+      const time = when(refund.at);
+      const reason = reasonOf(refund);
+      return {
+        label:
+          reason === undefined
+            ? refund.method === "Online"
+              ? t("Refunded to card · {time}", { time })
+              : refund.method === "Cash"
+                ? t("Cash given back · {time}", { time })
+                : t("Refunded on the card machine · {time}", { time })
+            : refund.method === "Online"
+              ? t("Refunded to card · {reason} · {time}", { reason, time })
+              : refund.method === "Cash"
+                ? t("Cash given back · {reason} · {time}", { reason, time })
+                : t("Refunded on the card machine · {reason} · {time}", { reason, time }),
+        amountMinor: BigInt(refund.amountMinor),
+      };
+    });
 }
 export function orderRefundRows(
   order: CurrentOrderQueue["items"][number],
@@ -1265,10 +1308,14 @@ export function orderRefundRows(
   /** F27: the order's record, so "Refunded" can say each refund's way and time. */
   record: CurrentOrderDetail["record"] | undefined = null,
   when: (at: string) => string = (at) => orderWhen(at, undefined, null),
+  /** F27 reason: why each of a table's refunds went back (tableRefundReasons). */
+  reasons: readonly RefundReason[] = [],
 ): readonly OrderRefundRow[] {
   const currencyCode = lines.totals.total.currencyCode;
   const money = (minor: bigint) => ({ amountMinor: minor.toString(), currencyCode });
   const rows: OrderRefundRow[] = [];
+  // F27 final check: the refunds listed by name above, by the way the record says each went back.
+  const listed: ListedRefund[] = [];
   // b61 review: a refund listed by name that has not gone back yet (Payment has not answered an
   // online one; a card-machine or cash one is not recorded yet) is listed apart with what is on
   // its way, never in "Total refunded" or taken off "Total after refunds", as the list's amount.
@@ -1283,7 +1330,10 @@ export function orderRefundRows(
           .filter((item) => item.cancellation?.refundStatus === "Pending")
           .reduce((sum, item) => sum + BigInt(item.cancellation?.refund.amountMinor ?? "0"), 0n);
   const itemsBack = items === null ? 0n : BigInt(items.amountMinor) - listedPending;
-  if (itemsBack > 0n) rows.push({ label: t("Cancelled items refund"), amount: money(itemsBack) });
+  if (itemsBack > 0n) {
+    rows.push({ label: t("Cancelled items refund"), amount: money(itemsBack) });
+    listed.push({ method: "Online", amountMinor: itemsBack });
+  }
   if (listedPending > 0n)
     named.push({
       label: t("Items refund on its way"),
@@ -1338,6 +1388,16 @@ export function orderRefundRows(
     if (cancellation.refundMethod === "Online") online += amount;
     total += amount;
     rows.push({ label, amount: money(amount) });
+    // A counter order paid in cash is cancelled "on the card machine" and recorded as cash.
+    listed.push({
+      method:
+        cancellation.refundMethod === "Online"
+          ? "Online"
+          : order.counter?.paidOnCardMachine?.cash != null
+            ? "Cash"
+            : "CardMachine",
+      amountMinor: amount,
+    });
   }
   let other = 0n;
   // b61 (decided with b60's table rule): only money Payment says went back counts as "Other
@@ -1368,12 +1428,7 @@ export function orderRefundRows(
   if (other > 0n) {
     // Batch 63 (F27, v15 b62 review: "Other refunds" — other than what?): money Payment says went
     // back, said as that, with each refund's way and time when the record shows which they were.
-    const ways = refundedByWay(
-      record,
-      other,
-      rows.flatMap((row) => (row.amount === null ? [] : [BigInt(row.amount.amountMinor)])),
-      when,
-    );
+    const ways = refundedByWay(record, other, listed, when, reasons);
     if (ways === null) rows.push({ label: t("Refunded"), amount: money(other) });
     else for (const way of ways) rows.push({ label: way.label, amount: money(way.amountMinor) });
     total += other;
@@ -2560,6 +2615,7 @@ function QueuedOrderLines({
   >({ kind: "Loading" });
   const reported = useRef(onDetail);
   reported.current = onDetail;
+  const refundReasons = useContext(TableRefundReasonsContext);
   const phones = useRoundPhones(
     refundCheck?.csrf ?? null,
     state.kind === "Ready" ? state.detail.order.diningSessionReference : null,
@@ -2607,6 +2663,7 @@ function QueuedOrderLines({
           state.detail.paymentPosition,
           state.detail.record,
           (at) => orderWhen(at, timeZone, today),
+          refundReasons,
         )}
         billRounding={orderBill(state.detail.order)}
         tableTaken={orderTableTaken(state.detail.order)}
@@ -4195,8 +4252,12 @@ export function CurrentOrderDetails({
   // Orders v3 (Owner 2026-10-26): a table's serving progress is under each round, read with the
   // order (no "View serving progress" switch); the page's own refresh rereads it.
   const dining = order.orderType === "DineIn" && order.currentPhase !== "Cancelled";
+  // F27 reason: the table's payments, read by its panel below, say why each refund went back on
+  // the order's refund lines above.
+  const [tablePayments, setTablePayments] = useState<readonly TablePayment[]>([]);
+  const reasons = useMemo(() => tableRefundReasons(tablePayments), [tablePayments]);
   return (
-    <>
+    <TableRefundReasonsContext.Provider value={reasons}>
       {dining ? (
         <DiningRoundsProvider
           orderReference={order.orderReference}
@@ -4246,6 +4307,7 @@ export function CurrentOrderDetails({
           orderReference={order.orderReference}
           csrf={csrf}
           {...(fetcher ? { fetcher } : {})}
+          onPayments={setTablePayments}
         />
       ) : null}
       {/* WP-2423 (v15 751dd768): offered only to people the server lets read payments. */}
@@ -4262,7 +4324,7 @@ export function CurrentOrderDetails({
           {t("Ask the manager or owner for refunds.")}
         </p>
       ) : null}
-    </>
+    </TableRefundReasonsContext.Provider>
   );
 }
 
@@ -5845,54 +5907,59 @@ export function CurrentOrderQueuePage({
                         fetcher={fetcher}
                       >
                         {(phones) => (
-                          <CurrentOrderLines
-                            lines={detail.lines}
-                            cancelledBatches={storeCancelledBatches(detail.view)}
-                            refusedBatches={storeRefusedBatches(detail.view)}
-                            unpaidCancelledBatches={unpaidCancelledBatches(detail.view)}
-                            failedPaymentBatches={failedPaymentBatches(detail.view)}
-                            removedItems={removedUnpaidItems(detail.view)}
-                            soldOutItems={soldOutRemovedItems(detail.view)}
-                            removedFromBillMinor={detail.order.tableBill?.removedMinor}
-                            waitingBatches={waitingForStaffBatches(detail.view)}
-                            refundRows={orderRefundRows(
-                              detail.order,
-                              detail.lines,
-                              detail.paymentPosition,
-                              detail.record,
-                              (at) => orderWhen(at, timeZone, businessDay),
+                          <TableRefundReasonsContext.Consumer>
+                            {(refundReasons) => (
+                              <CurrentOrderLines
+                                lines={detail.lines}
+                                cancelledBatches={storeCancelledBatches(detail.view)}
+                                refusedBatches={storeRefusedBatches(detail.view)}
+                                unpaidCancelledBatches={unpaidCancelledBatches(detail.view)}
+                                failedPaymentBatches={failedPaymentBatches(detail.view)}
+                                removedItems={removedUnpaidItems(detail.view)}
+                                soldOutItems={soldOutRemovedItems(detail.view)}
+                                removedFromBillMinor={detail.order.tableBill?.removedMinor}
+                                waitingBatches={waitingForStaffBatches(detail.view)}
+                                refundRows={orderRefundRows(
+                                  detail.order,
+                                  detail.lines,
+                                  detail.paymentPosition,
+                                  detail.record,
+                                  (at) => orderWhen(at, timeZone, businessDay),
+                                  refundReasons,
+                                )}
+                                billRounding={orderBill(detail.order)}
+                                tableTaken={orderTableTaken(detail.order)}
+                                rounds={
+                                  detail.order.orderType === "DineIn"
+                                    ? {
+                                        batches: detail.order.batches,
+                                        head: roundHead,
+                                        timeZone,
+                                        today: businessDay,
+                                        phones,
+                                        number: (batch) => billRoundNumber(order, batch),
+                                        // b22: under the round's dishes, as on Tables.
+                                        action: (batch) =>
+                                          roundTakeOff(
+                                            order,
+                                            batch,
+                                            detail.lines.items,
+                                            orderBill(detail.order)?.rounds?.get(
+                                              batch.orderBatchReference,
+                                            )?.totalMinor,
+                                          ),
+                                      }
+                                    : undefined
+                                }
+                                refundCheck={{
+                                  orderReference: order.orderReference,
+                                  csrf,
+                                  fetcher,
+                                  onChecked: () => reload(after),
+                                }}
+                              />
                             )}
-                            billRounding={orderBill(detail.order)}
-                            tableTaken={orderTableTaken(detail.order)}
-                            rounds={
-                              detail.order.orderType === "DineIn"
-                                ? {
-                                    batches: detail.order.batches,
-                                    head: roundHead,
-                                    timeZone,
-                                    today: businessDay,
-                                    phones,
-                                    number: (batch) => billRoundNumber(order, batch),
-                                    // b22: under the round's dishes, as on Tables.
-                                    action: (batch) =>
-                                      roundTakeOff(
-                                        order,
-                                        batch,
-                                        detail.lines.items,
-                                        orderBill(detail.order)?.rounds?.get(
-                                          batch.orderBatchReference,
-                                        )?.totalMinor,
-                                      ),
-                                  }
-                                : undefined
-                            }
-                            refundCheck={{
-                              orderReference: order.orderReference,
-                              csrf,
-                              fetcher,
-                              onChecked: () => reload(after),
-                            }}
-                          />
+                          </TableRefundReasonsContext.Consumer>
                         )}
                       </WithRoundPhones>
                     </>

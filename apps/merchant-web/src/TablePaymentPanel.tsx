@@ -1,4 +1,4 @@
-import { useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { ClockStyleContext, StoreTimeZoneContext, storeTime } from "./StoreTime.js";
 import { t } from "./i18n/i18n.js";
 import { isFullSignInRequired } from "./full-sign-in.js";
@@ -65,13 +65,57 @@ const reasons: readonly CashRefundReason[] = [
   "OVERCHARGED",
   "STORE_ERROR",
 ];
-const reasonText = (reason: CashRefundReason) =>
+/** A table refund's reason in staff words. */
+export const reasonText = (reason: CashRefundReason) =>
   ({
     FOOD_ISSUE: t("Problem with the food"),
     CUSTOMER_REQUEST: t("Guest asked"),
     OVERCHARGED: t("Charged too much"),
     STORE_ERROR: t("Store mistake"),
   })[reason];
+/**
+ * F27 reason: why a table's refund went back (its payment lists each one with its reason, at the
+ * same way, amount and time as the order's record). A pickup's or record-only refund has none.
+ */
+export interface RefundReason {
+  readonly method: "CardMachine" | "Cash" | "Online";
+  readonly amountMinor: string;
+  readonly at: string;
+  readonly reasonCode: CashRefundReason;
+}
+/**
+ * F27 reason (commercial: staff need to see why money went back): each refund of a table's
+ * payments with its reason in staff words — cash given back, refunded on the card machine, and to
+ * the guest's card (a refused one moved no money, and the record leaves it out too).
+ */
+export function tableRefundReasons(payments: readonly TablePayment[]): readonly RefundReason[] {
+  return Object.freeze(
+    payments.flatMap((payment) => [
+      ...payment.cashRefunds.map((refund) => ({
+        method: "Cash" as const,
+        amountMinor: refund.amountMinor,
+        at: refund.refundedAt,
+        reasonCode: refund.reasonCode,
+      })),
+      ...payment.cardRefunds.map((refund) => ({
+        method: "CardMachine" as const,
+        amountMinor: refund.amountMinor,
+        at: refund.refundedAt,
+        reasonCode: refund.reasonCode,
+      })),
+      ...payment.onlineRefunds
+        .filter((refund) => refund.state !== "Refused")
+        .map((refund) => ({
+          method: "Online" as const,
+          amountMinor: refund.amountMinor,
+          at: refund.requestedAt,
+          reasonCode: refund.reasonCode,
+        })),
+    ]),
+  );
+}
+/** F27 reason: the open order's table payments, so its refund lines can say why. */
+export const TableRefundReasonsContext = createContext<readonly RefundReason[]>([]);
 const onlineRefundLabel = (refund: TablePayment["onlineRefunds"][number]) => {
   const reason = reasonText(refund.reasonCode);
   return refund.state === "Refunded"
@@ -228,13 +272,17 @@ export function TablePaymentPanel({
   orderReference,
   csrf,
   fetcher = fetch,
+  onPayments,
 }: {
   readonly orderReference: string;
   readonly csrf: string;
   readonly fetcher?: typeof fetch;
+  /** F27 reason: the payments as last read or changed, for the order's refund lines. */
+  readonly onPayments?: (payments: readonly TablePayment[]) => void;
 }) {
   const [payments, setPayments] = useState<readonly TablePayment[]>([]);
   const [reload, setReload] = useState(0);
+  useEffect(() => onPayments?.(payments), [payments, onPayments]);
 
   useEffect(() => {
     let live = true;
@@ -514,7 +562,7 @@ function TablePaymentBlock({
           <div key={index}>
             <dt>
               {t("Refunded on the card machine · {reason}", {
-                reason: reasonText(refund.reasonCode),
+                reasonCode: refund.reasonCode,
               }) + when(refund.refundedAt, refund.byLabel)}
             </dt>
             <dd>−{cad(refund.amountMinor)}</dd>

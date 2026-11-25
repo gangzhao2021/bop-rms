@@ -56,6 +56,7 @@ import {
   parseCurrentOrderQueue,
 } from "./current-order-queue-client.js";
 import { AcceptanceHoldNotice, acceptanceHoldText } from "./AcceptanceHoldActions.js";
+import { tableRefundReasons } from "./TablePaymentPanel.js";
 import { currentOrderQueueFixture } from "./current-order-queue.fixtures.js";
 it("renders actual Accepted version and visibly unresolved state without fabricated summaries", () => {
   const item = {
@@ -2736,6 +2737,184 @@ describe("b60 (v15 b59 live, TM2 order 27): a paid table's refunds count on Orde
       { label: "Refund on its way", amount: money("300"), pending: true },
     ]);
     expect(orderRefundRows(both, lines, null, record([]), clock)[0]?.label).toBe("Refunded");
+  });
+
+  describe("F27 final check: a refund listed by name is matched by its way, never by amount alone", () => {
+    const refund = (
+      method: "Online" | "Cash" | "CardMachine",
+      amountMinor: string,
+      at: string,
+    ) => ({ method, amountMinor, by: "You", approvedBy: null, at, cashGivenBackMinor: null });
+    const record = (refunds: ReturnType<typeof refund>[]) =>
+      ({
+        accepted: [],
+        handedOver: [],
+        payments: [],
+        cancellations: [],
+        refunds,
+        writeOff: null,
+        paidOnlineByGuest: false,
+      }) as unknown as Parameters<typeof orderRefundRows>[3];
+    const clock = (at: string) => at.slice(11, 16);
+    // Round 2 was paid on the card machine and cancelled: $12.00 back on the machine at 21:05,
+    // listed by name. Then $12.00 of the table's payment went back to the guest's card at 22:59.
+    const dineIn = (refundedMinor: string, cancelledMinor = "1200") =>
+      ({
+        orderType: "DineIn",
+        paidOnline: null,
+        counter: null,
+        paymentPosition: null,
+        batches: [
+          { sequence: 1, staffCancellation: null, staffRound: null },
+          {
+            sequence: 2,
+            staffRound: null,
+            staffCancellation: {
+              reasonCode: "SOLD_OUT",
+              cancelledAt: "2026-11-24T21:05:00.000Z",
+              refundStatus: "Refunded",
+              refundAmountMinor: cancelledMinor,
+              refundMethod: "CardMachine",
+            },
+          },
+        ],
+        tableBill: {
+          totalMinor: "4000",
+          paid: { amountMinor: "4000", method: "Online", refundedMinor },
+        },
+      }) as unknown as Parameters<typeof orderRefundRows>[0];
+    const machine = refund("CardMachine", "1200", "2026-11-24T21:05:00.000Z");
+    const card = refund("Online", "1200", "2026-11-24T22:59:00.000Z");
+
+    it("two refunds of the same amount paid back different ways, in either order", () => {
+      for (const refunds of [
+        [machine, card],
+        [card, machine],
+      ])
+        expect(orderRefundRows(dineIn("1200"), lines, null, record(refunds), clock)).toEqual([
+          { label: "Round 2 cancellation refund (card machine)", amount: money("1200") },
+          { label: "Refunded to card · 22:59", amount: money("1200") },
+          { label: "Total refunded", amount: money("2400") },
+        ]);
+    });
+
+    it("more than one record refund could be the one listed: Refunded, no way or time", () => {
+      const other = refund("CardMachine", "1200", "2026-11-24T21:30:00.000Z");
+      for (const refunds of [
+        [machine, other],
+        [other, machine],
+      ])
+        expect(orderRefundRows(dineIn("1200"), lines, null, record(refunds), clock)).toEqual([
+          { label: "Round 2 cancellation refund (card machine)", amount: money("1200") },
+          { label: "Refunded", amount: money("1200") },
+          { label: "Total refunded", amount: money("2400") },
+        ]);
+    });
+
+    it("the cancelled items' refund is never taken for an unrelated refund of the same amount", () => {
+      // $2.00 + $3.00 of cancelled items went back online ($5.00 in all); round 2's $7.00 went
+      // back on the machine; $5.00 cash of the table's payment was given back at 02:28.
+      const withItems = {
+        items: [
+          { cancellation: { refund: money("200"), refundStatus: "Refunded" } },
+          { cancellation: { refund: money("300"), refundStatus: "Refunded" } },
+        ],
+        totals: { total: money("4000") },
+      } as unknown as Parameters<typeof orderRefundRows>[1];
+      expect(
+        orderRefundRows(
+          dineIn("500", "700"),
+          withItems,
+          null,
+          record([
+            refund("Cash", "500", "2026-11-25T02:28:00.000Z"),
+            refund("CardMachine", "700", "2026-11-24T21:05:00.000Z"),
+          ]),
+          clock,
+        ),
+      ).toEqual([
+        { label: "Cancelled items refund", amount: money("500") },
+        { label: "Round 2 cancellation refund (card machine)", amount: money("700") },
+        { label: "Cash given back · 02:28", amount: money("500") },
+        { label: "Total refunded", amount: money("1700") },
+      ]);
+    });
+
+    it("F27 reason: a table's refund says why it went back, in staff words (en and zh-Hans)", () => {
+      const cash = refund("Cash", "375", "2026-11-25T02:28:00.000Z");
+      const reasons = tableRefundReasons([
+        {
+          cashRefunds: [
+            {
+              amountMinor: "375",
+              reasonCode: "FOOD_ISSUE",
+              refundedAt: "2026-11-25T02:28:00.000Z",
+              byLabel: "You",
+            },
+          ],
+          cardRefunds: [
+            {
+              amountMinor: "1200",
+              reasonCode: "OVERCHARGED",
+              refundedAt: "2026-11-24T21:05:00.000Z",
+              byLabel: null,
+            },
+          ],
+          onlineRefunds: [
+            {
+              amountMinor: "500",
+              reasonCode: "CUSTOMER_REQUEST",
+              requestedAt: "2026-11-24T22:59:00.000Z",
+              byLabel: null,
+              state: "Refunded",
+            },
+            {
+              amountMinor: "900",
+              reasonCode: "STORE_ERROR",
+              requestedAt: "2026-11-24T23:10:00.000Z",
+              byLabel: null,
+              state: "Refused",
+            },
+          ],
+        },
+      ] as unknown as Parameters<typeof tableRefundReasons>[0]);
+      // A refused card refund moved no money: never a reason for one that went back.
+      expect(reasons).toHaveLength(3);
+      const rows = (refunds: ReturnType<typeof refund>[], refundedMinor: string) =>
+        orderRefundRows(
+          dineIn(refundedMinor, "0"),
+          lines,
+          null,
+          record(refunds),
+          clock,
+          reasons,
+        ).map((row) => row.label);
+      const all = [
+        cash,
+        refund("Online", "500", "2026-11-24T22:59:00.000Z"),
+        refund("CardMachine", "1200", "2026-11-24T21:05:00.000Z"),
+      ];
+      expect(rows(all, "2075")).toEqual([
+        "Refunded on the card machine · Charged too much · 21:05",
+        "Refunded to card · Guest asked · 22:59",
+        "Cash given back · Problem with the food · 02:28",
+        "Total refunded",
+      ]);
+      // A refund the table's payment does not list (or lists at another time): way and time only.
+      expect(rows([refund("Cash", "375", "2026-11-25T02:40:00.000Z")], "375")).toEqual([
+        "Cash given back · 02:40",
+      ]);
+      setLanguageForTest("zh-Hans");
+      try {
+        expect(rows([cash], "375")).toEqual(["已退现金 · 菜品有问题 · 02:28"]);
+        expect(rows(all, "2075").slice(0, 2)).toEqual([
+          "已在刷卡机退款 · 多收了 · 21:05",
+          "已退到卡上 · 客人要求 · 22:59",
+        ]);
+      } finally {
+        setLanguageForTest("en");
+      }
+    });
   });
 
   it("works the total after refunds from what went back only; the original total stays", () => {
