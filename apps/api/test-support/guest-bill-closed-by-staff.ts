@@ -462,7 +462,18 @@ export function guestOwnPaymentView(
   payer: boolean,
   sessionPhase: "Closing" | "Closed" = "Closing",
   refunds: GuestOwnRefunds = "None",
+  /**
+   * Batch 63 (design review D62B-01/08): the payer's tip on part 1 (its total grows by it); the
+   * even split's paid part marked as this phone's (as the real read marks every split mode); and,
+   * paid in full, the payer's phone paid both parts.
+   */
+  options: {
+    readonly partOneTipMinor?: string;
+    readonly markEven?: boolean;
+    readonly bothMine?: boolean;
+  } = {},
 ): PaymentView {
+  const tip = BigInt(options.partOneTipMinor ?? "0");
   // Batch 60: both guests paid their own dish (B, the other phone, paid part 2 for round 2).
   const bothPaid = scenario === "by-dish-both-paid";
   const byDish = scenario === "by-dish-written-off" || bothPaid;
@@ -476,9 +487,9 @@ export function guestOwnPaymentView(
     dishes: byDish ? [dish] : [],
     payment: {
       method: "Online" as const,
-      tipMinor: "0",
+      tipMinor: tip.toString(),
       roundingMinor: "0",
-      totalMinor: "1413",
+      totalMinor: (1413n + tip).toString(),
       tenderedMinor: null,
       changeMinor: null,
       recordedAt: "2026-11-24T00:34:40.000Z",
@@ -495,7 +506,12 @@ export function guestOwnPaymentView(
     roundNumbers: [2],
     dishes: bothPaid ? [dish] : [],
     payment: bothPaid
-      ? { ...paidPart.payment, totalMinor: "1412", recordedAt: "2026-11-24T00:35:02.000Z" }
+      ? {
+          ...paidPart.payment,
+          tipMinor: "0",
+          totalMinor: "1412",
+          recordedAt: "2026-11-24T00:35:02.000Z",
+        }
       : null,
     guestPaying: false,
     ...(bothPaid ? { choice: "Mine" as const } : {}),
@@ -561,7 +577,16 @@ export function guestOwnPaymentView(
     } as unknown as PaymentView["bill"],
     attempt: null,
     lastOwnDeclined: null,
-    paidByMe: byDish ? (payer ? [1] : bothPaid ? [2] : []) : [],
+    paidByMe:
+      payer && options.bothMine === true && bothPaid
+        ? [1, 2]
+        : byDish || options.markEven === true
+          ? payer
+            ? [1]
+            : bothPaid
+              ? [2]
+              : []
+          : [],
     choices: null,
     ownPayments: !payer
       ? bothPaid
@@ -582,11 +607,24 @@ export function guestOwnPaymentView(
             partNumber: 1,
             samePlan: true,
             roundsMinor: "1413",
-            tipMinor: "0",
-            totalMinor: "1413",
+            tipMinor: tip.toString(),
+            totalMinor: (1413n + tip).toString(),
             paidAt: "2026-11-24T00:34:40.000Z",
             refunds: guestOwnRefunds(refunds),
           },
+          ...(options.bothMine === true && bothPaid
+            ? [
+                {
+                  partNumber: 2,
+                  samePlan: true,
+                  roundsMinor: "1412",
+                  tipMinor: "0",
+                  totalMinor: "1412",
+                  paidAt: "2026-11-24T00:35:02.000Z",
+                  refunds: [],
+                },
+              ]
+            : []),
         ],
   };
 }

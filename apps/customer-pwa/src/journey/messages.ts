@@ -419,6 +419,9 @@ export const cartText = Object.freeze({
     get askInPerson() {
       return t("Ask a staff member to add these dishes.");
     },
+    /** What the page's status says (screen readers): never "add more" beside an unsent dish. */
+    status: (heading: string) =>
+      t("{heading}. Some dishes weren’t sent to the kitchen.", { heading }),
   }),
   /** M116: the cart while only looking at a closed (or paused) Store's menu. */
   storeNotTakingOrders: (storeDisplayName: string) =>

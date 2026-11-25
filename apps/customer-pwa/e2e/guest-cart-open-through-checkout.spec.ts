@@ -298,7 +298,53 @@ async function freshText(browser: Browser, table: Table, path: string, zh: boole
   return text;
 }
 
-async function expectCardOnly(page: Page, zh: boolean, phase: Phase, width: number) {
+/**
+ * Batch 63 (design review CDI-1, F01; this spec's "no dish on the card" changed with it): a Cart
+ * that still held an unsent dish when staff started checkout names it under "Not sent to the
+ * kitchen" (20/600), with its count in grey 14/400, and one accent text action asking staff to
+ * come over (this table's staff call is offered here). Nothing of the old cart's controls.
+ */
+async function expectUnsent(page: Page, zh: boolean, width: number) {
+  const main = page.getByRole("main");
+  const heading = main.getByRole("heading", {
+    name: zh ? "没有送到厨房" : "Not sent to the kitchen",
+  });
+  await expect(heading).toBeVisible({ timeout: 1_000 });
+  const style = await heading.evaluate((element) => {
+    const css = getComputedStyle(element);
+    return { size: css.fontSize, weight: css.fontWeight };
+  });
+  expect(style).toEqual({ size: "20px", weight: "600" });
+  const line = main.locator(".cart-unsent li");
+  await expect(line).toHaveCount(1);
+  await expect(line).toHaveText(`${dish} × 1`);
+  const count = await line.locator(".cart-unsent__count").evaluate((element) => {
+    const css = getComputedStyle(element);
+    return { size: css.fontSize, color: css.color };
+  });
+  expect(count).toEqual({ size: "14px", color: "rgb(102, 102, 102)" });
+  const ask = main.getByRole("button", {
+    name: zh ? "请店员加上这些菜" : "Ask staff to add these",
+  });
+  await expect(ask).toBeVisible();
+  await expect(main.getByRole("button")).toHaveCount(1);
+  const box = await ask.boundingBox();
+  expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+  expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(width - 15);
+  expect(await ask.evaluate((element) => getComputedStyle(element).color)).toBe("rgb(31, 99, 224)");
+  // "Add more" read as if the dish had gone to the kitchen: not said beside an unsent dish.
+  await expect(
+    main.getByText(zh ? "如需加点，请找店员。" : "Ask staff if you want to add more."),
+  ).toHaveCount(0);
+}
+
+async function expectCardOnly(
+  page: Page,
+  zh: boolean,
+  phase: Phase,
+  width: number,
+  unsent = false,
+) {
   const text = words(zh, phase);
   const card = page.getByRole("region", { name: text.heading });
   await expect(card).toBeVisible({ timeout: 1_000 });
@@ -309,8 +355,11 @@ async function expectCardOnly(page: Page, zh: boolean, phase: Phase, width: numb
   const main = page.getByRole("main");
   const quick = { timeout: 1_000 };
   for (const stale of staleCart) await expect(main.getByText(stale)).toHaveCount(0, quick);
-  await expect(main.getByText(dish)).toHaveCount(0, quick);
-  await expect(main.getByRole("button")).toHaveCount(0, quick);
+  if (unsent) await expectUnsent(page, zh, width);
+  else {
+    await expect(main.getByText(dish)).toHaveCount(0, quick);
+    await expect(main.getByRole("button")).toHaveCount(0, quick);
+  }
   await expect(main.getByRole("alert")).toHaveCount(0, quick);
   // The card sits inside the gutter on the first screen, with room for wider (Linux) fonts.
   const box = await card.boundingBox();
@@ -346,16 +395,20 @@ for (const width of [390, 1024, 1440])
 
           // Staff press Start checkout while this Cart stays open.
           table.phase = "checkout-started";
-          await runUntil(page, () => expectCardOnly(page, zh, "checkout-started", width));
+          await runUntil(page, () => expectCardOnly(page, zh, "checkout-started", width, unsent));
           const tag = `${unsent ? "unsent" : "empty"}-${zh ? "zh" : "en"}-${width}`;
           await page.screenshot({ path: `test-results/b49-cart-checkout-${tag}.png` });
-          expect(await mainText(page)).toBe(await freshText(browser, table, "/cart", zh, width));
+          // Batch 63: the open Cart still knows its unsent dish; a Cart opened afresh is refused
+          // the cart read during checkout and can't name it (known limit, WP-2423 batch 63).
+          if (!unsent)
+            expect(await mainText(page)).toBe(await freshText(browser, table, "/cart", zh, width));
 
           // Another phone pays the whole table; staff have not closed it yet.
           table.phase = "paid";
-          await runUntil(page, () => expectCardOnly(page, zh, "paid", width));
+          await runUntil(page, () => expectCardOnly(page, zh, "paid", width, unsent));
           await page.screenshot({ path: `test-results/b49-cart-paid-${tag}.png` });
-          expect(await mainText(page)).toBe(await freshText(browser, table, "/cart", zh, width));
+          if (!unsent)
+            expect(await mainText(page)).toBe(await freshText(browser, table, "/cart", zh, width));
         });
 
       test("Cart with an unsent dish comes back as it was after Cancel checkout", async ({
@@ -373,7 +426,7 @@ for (const width of [390, 1024, 1440])
         const before = await mainText(page);
 
         table.phase = "checkout-started";
-        await runUntil(page, () => expectCardOnly(page, zh, "checkout-started", width));
+        await runUntil(page, () => expectCardOnly(page, zh, "checkout-started", width, true));
         // Nobody has paid: staff press Cancel checkout so the table can order one more drink.
         table.phase = "open";
         await runUntil(page, async () => {
@@ -410,13 +463,13 @@ for (const width of [390, 1024, 1440])
           const before = await mainText(page);
 
           table.phase = "checkout-started";
-          await runUntil(page, () => expectCardOnly(page, zh, "checkout-started", width));
+          await runUntil(page, () => expectCardOnly(page, zh, "checkout-started", width, true));
           // Staff take their time with the bill: 150 s, the Cart on screen the whole while.
           table.cartReads = 0;
           await advance(page, 150_000);
           // One read about every 4 s (over 30), never a minute's silence (backing off: about 6).
           expect(table.cartReads).toBeGreaterThanOrEqual(25);
-          await expectCardOnly(page, zh, "checkout-started", width);
+          await expectCardOnly(page, zh, "checkout-started", width, true);
 
           if (after === "Cancel checkout") {
             table.phase = "open";
@@ -433,7 +486,7 @@ for (const width of [390, 1024, 1440])
             table.phase = "paid";
             // The table read (every 15 s) says the bill is paid; the Cart says so with it.
             await advance(page, 15_500);
-            await expectCardOnly(page, zh, "paid", width);
+            await expectCardOnly(page, zh, "paid", width, true);
           }
           await page.screenshot({
             path: `test-results/b50-cart-after-long-checkout-${after === "paid in full" ? "paid" : "cancel"}-${zh ? "zh" : "en"}-${width}.png`,

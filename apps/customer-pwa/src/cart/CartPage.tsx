@@ -1932,7 +1932,12 @@ function OpenCartPage({
                 ? // WP-2423 M74: never "up to date" while a dish's price changed since it was added.
                   cartText.pricesChangedSinceAdded
                 : state.status === "table-checking-out"
-                  ? tableCheckoutText(tableCheckout ?? unreadTableCheckout).whole
+                  ? // Batch 63 (CDI-1): with unsent dishes, never "add more" (they weren't sent).
+                    (state.cart?.cart.items.length ?? 0) > 0
+                    ? cartText.unsent.status(
+                        tableCheckoutText(tableCheckout ?? unreadTableCheckout).heading,
+                      )
+                    : tableCheckoutText(tableCheckout ?? unreadTableCheckout).whole
                   : (specificRefusal(state) ?? cartText.stateAnnouncement[state.status])}
       </div>
     </CustomerPage>

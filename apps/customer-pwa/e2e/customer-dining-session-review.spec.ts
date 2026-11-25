@@ -1677,9 +1677,13 @@ test.describe("@production DEC-DINE-IN-PAY-LATER S4 the guest pays the whole tab
     await expect(
       pay.getByRole("radio", { name: /^Part 3 · \$31\.64 · being paid/u }),
     ).toBeDisabled();
-    await expect(pay.getByRole("radio", { name: /^Part 2 · \$31\.64$/u })).toBeChecked();
-    // The tip is on this part's own share before tax: 15% of $28.00.
-    await pay.getByRole("radio", { name: /15% · \$4\.20/u }).check();
+    // Batch 63 (Figma 51:223): no part is chosen for the guest; they choose part 2 (已选).
+    const part2 = pay.getByRole("radio", { name: /^Part 2 · \$31\.64$/u });
+    await expect(part2).not.toBeChecked();
+    await part2.check();
+    // The tip is on this part's own share before tax: 15% of $28.00 ("You pay" says $4.20).
+    await pay.getByRole("radio", { name: "15%", exact: true }).check();
+    await expect(pay.locator(".dining-session__you-pay")).toContainText("Tip 15%$4.20");
     for (const width of [1440, 1024, 390]) {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
       expect(
@@ -1927,8 +1931,8 @@ test.describe("@production DEC-DINE-IN-PAY-LATER S4 the guest pays the whole tab
     const pay = page.getByRole("region", { name: "Pay the bill" });
     await expect(pay).toBeVisible();
     // No tip is chosen for the guest: every option, "No tip" included, alike; choose to pay.
-    for (const name of ["No tip", /10% · /u, /15% · /u, /18% · /u])
-      await expect(pay.getByRole("radio", { name })).not.toBeChecked();
+    for (const name of ["No tip", "10%", "15%", "18%"])
+      await expect(pay.getByRole("radio", { name, exact: true })).not.toBeChecked();
     await expect(pay.getByRole("button", { name: "Choose a tip to pay" })).toBeDisabled();
     // Checking out: no more rounds from the phone; staff add dishes.
     await expect(page.getByRole("link", { name: "Order more from the menu" })).toHaveCount(0);
@@ -1936,7 +1940,9 @@ test.describe("@production DEC-DINE-IN-PAY-LATER S4 the guest pays the whole tab
       page.getByText("Your table is paying the bill. Ask staff if you want to add more."),
     ).toBeVisible();
     // The tip is chosen once for the whole table: 15% of the bill before tax.
-    await pay.getByRole("radio", { name: /15% · \$2\.70/u }).check();
+    await pay.getByRole("radio", { name: "15%", exact: true }).check();
+    // Batch 63: "You pay" says what the 15 % comes to.
+    await expect(pay.locator(".dining-session__you-pay")).toContainText("Tip 15%$2.70");
     // Leaving the table page and coming back keeps the choice for this checkout.
     await page
       .getByRole("navigation", { name: "Customer journey" })
@@ -1947,7 +1953,9 @@ test.describe("@production DEC-DINE-IN-PAY-LATER S4 the guest pays the whole tab
       .getByRole("link", { name: "Your table" })
       .click();
     await expect(
-      page.getByRole("region", { name: "Pay the bill" }).getByRole("radio", { name: /15% · /u }),
+      page
+        .getByRole("region", { name: "Pay the bill" })
+        .getByRole("radio", { name: "15%", exact: true }),
     ).toBeChecked();
     await pay.getByRole("button", { name: "Pay $23.04" }).click();
     await expect(pay).toContainText("Paying $23.04 for the whole table, tip included.");

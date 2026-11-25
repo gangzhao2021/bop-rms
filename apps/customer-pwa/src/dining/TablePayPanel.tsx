@@ -114,6 +114,34 @@ export interface TablePayStatus {
  * none of the bill's dishes came from this phone, theirs can't be priced right now (batch 50: still
  * unpaid, so staff can help), or nothing of theirs is left to pay.
  */
+/**
+ * The guest's tip choice for this bill, kept in this tab so leaving Your table and coming back (or
+ * a reload) keeps it: only the option chosen and what the bill was then (its way of paying and
+ * what was left), never an amount or a reference. Batch 63 (Figma 51:223 "小费（不预选）"): it is
+ * given back only for that same bill; after a payment or a change of the bill's way of paying it
+ * is forgotten, so no tip is ever chosen for the guest. A per-tab convenience the server never
+ * relies on.
+ */
+const TIP_KEY = "bop-table-tip-choice";
+const savedTip = (basis: string): string | null => {
+  try {
+    const value = JSON.parse(window.sessionStorage.getItem(TIP_KEY) ?? "null") as unknown;
+    if (value === null || typeof value !== "object") return null;
+    const { basis: was, tip } = value as { basis?: unknown; tip?: unknown };
+    return was === basis && typeof tip === "string" && /^(0|[1-9][0-9]?)$/u.test(tip) ? tip : null;
+  } catch {
+    return null;
+  }
+};
+const saveTip = (basis: string | null, tip: string | null) => {
+  try {
+    if (basis === null || tip === null) window.sessionStorage.removeItem(TIP_KEY);
+    else window.sessionStorage.setItem(TIP_KEY, JSON.stringify({ basis, tip }));
+  } catch {
+    /* A private window may refuse storage; the guest just chooses again after a reload. */
+  }
+};
+
 export function onlyMineText(
   choices: Pick<NonNullable<TablePaymentView["choices"]>, "mine" | "addedAny" | "mineUnavailable">,
 ): string {
@@ -292,11 +320,23 @@ export function TablePayPanel({
           view.split?.remainingMinor ?? null,
         ]);
   const seenBasis = useRef<string | null>(null);
+  const settled =
+    view !== null && (!view.checkingOut || view.state === "Paid" || view.state === "Closed");
+  useEffect(() => {
+    if (settled) saveTip(null, null);
+  }, [settled]);
   useEffect(() => {
     if (basis === null) return;
     const before = seenBasis.current;
     seenBasis.current = basis;
-    if (before === null || before === basis) return;
+    if (before === basis) return;
+    if (before === null) {
+      // The same bill as when the guest chose: their tip is theirs again (never another bill's).
+      const saved = savedTip(basis);
+      if (saved !== null) setTip(saved);
+      return;
+    }
+    saveTip(null, null);
     setTip(null);
     setTyped("");
     setConfirmedTip(null);
@@ -784,6 +824,7 @@ export function TablePayPanel({
               quantities={quantities}
               onScope={(next) => {
                 setScope(next);
+                saveTip(null, null);
                 setTip(null);
                 setTyped("");
                 setConfirmedTip(null);
@@ -836,6 +877,7 @@ export function TablePayPanel({
                         checked={chosen?.partNumber === entry.partNumber}
                         onChange={() => {
                           setPart(entry.partNumber);
+                          saveTip(null, null);
                           setTip(null);
                           setTyped("");
                           setConfirmedTip(null);
@@ -915,9 +957,15 @@ export function TablePayPanel({
                       type="radio"
                       name="table-tip"
                       className="dining-session__choice-input"
+                      // "Other" on screen; said in full to a screen reader (label in name).
+                      {...(choice === OTHER ? { "aria-label": t("Other amount") } : {})}
                       value={choice}
                       checked={chosenTip === choice}
-                      onChange={() => setTip(choice)}
+                      onChange={() => {
+                        setTip(choice);
+                        // The typed amount is not kept: after a reload the guest types it again.
+                        saveTip(basis, choice === OTHER ? null : choice);
+                      }}
                     />
                     {choice === "0" ? t("No tip") : choice === OTHER ? t("Other") : `${choice}%`}
                   </label>

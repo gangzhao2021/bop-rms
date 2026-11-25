@@ -48,7 +48,29 @@ export interface GuestBillPhone {
   readonly tableClosed: boolean;
   /** Batch 57 (Q36): what staff refunded of the payer's own payment (absent: nothing). */
   readonly refunds?: GuestOwnRefunds;
+  /** Batch 63: see `guestOwnPaymentView`'s options; `merchant`: the settled receipt's header. */
+  readonly partOneTipMinor?: string;
+  readonly markEven?: boolean;
+  readonly bothMine?: boolean;
+  readonly merchant?: boolean;
 }
+/** Batch 63 (F05): the Store's published names and address, TEST-ONLY values. */
+const testMerchant = {
+  brandDisplayName: "Test Merchant 2 - not production",
+  storeDisplayName: "Test Merchant 2 Main - not production",
+  address: {
+    addressLines: ["100 Example Street (TEST)"],
+    locality: "Exampleville",
+    regionCode: "ON",
+    postalCode: "A1A 1A1",
+    countryCode: "CA",
+  },
+};
+const viewOptions = (current: GuestBillPhone) => ({
+  ...(current.partOneTipMinor === undefined ? {} : { partOneTipMinor: current.partOneTipMinor }),
+  ...(current.markEven === undefined ? {} : { markEven: current.markEven }),
+  ...(current.bothMine === undefined ? {} : { bothMine: current.bothMine }),
+});
 const visitCsrf = "d".repeat(43);
 const ownRefunded = (kind: GuestOwnRefunds) => {
   const minor = guestOwnRefunds(kind)
@@ -106,7 +128,13 @@ export async function startGuestBillHttp(
           return guestWholeTablePaidView("Closing", phone().refunds ?? "None", phone().payer);
         if (part === null) throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
         // Batch 61: with what staff gave back of the table's payments (the bill's refundedMinor).
-        return guestOwnPaymentView(part, phone().payer, "Closing", phone().refunds ?? "None");
+        return guestOwnPaymentView(
+          part,
+          phone().payer,
+          "Closing",
+          phone().refunds ?? "None",
+          viewOptions(phone()),
+        );
       },
       // Batch 57: once staff closed a table paid in full, its settled receipt (ended visit only).
       settledReceipt: async (credentials: { csrfCredential: string }) => {
@@ -116,14 +144,16 @@ export async function startGuestBillHttp(
           String(credentials.csrfCredential) !== endedCsrf
         )
           throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
-        return byDishPaid()
+        const view = byDishPaid()
           ? guestOwnPaymentView(
               scenario() as "by-dish-both-paid",
               phone().payer,
               "Closed",
               phone().refunds ?? "None",
+              viewOptions(phone()),
             )
           : guestWholeTablePaidView("Closed", phone().refunds ?? "None", phone().payer);
+        return phone().merchant === true ? { ...view, merchant: testMerchant } : view;
       },
       ownPayment: async (credentials: { csrfCredential: string }) => {
         const part = paidPart();
@@ -147,6 +177,7 @@ export async function startGuestBillHttp(
           payer,
           tableClosed ? "Closed" : "Closing",
           phone().refunds ?? "None",
+          viewOptions(phone()),
         );
       },
     } as never,

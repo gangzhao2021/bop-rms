@@ -1356,7 +1356,10 @@ describe("Batch 48: Cart while the table checks out", () => {
     expect(html).toContain(
       '<li><span>Beef noodles (TEST)</span> <span class="cart-unsent__count">× 2</span></li>',
     );
-    expect(html).not.toContain("<p>Ask staff if you want to add more.</p>");
+    expect(html).not.toContain("Ask staff if you want to add more.");
+    expect(html).toContain(
+      "Your table is paying the bill. Some dishes weren’t sent to the kitchen.",
+    );
     renderToStaticMarkup(createElement(LanguageRoot, { initial: "zh-Hans", children: () => null }));
     expect(renderPage(held)).toContain("没有送到厨房");
     renderToStaticMarkup(createElement(LanguageRoot, { initial: "en", children: () => null }));
