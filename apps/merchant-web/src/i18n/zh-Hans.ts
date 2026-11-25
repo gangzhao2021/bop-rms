@@ -1480,7 +1480,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "配置已保存。请在下方选择它，然后存为草稿以保留所选。",
   "Configuration sent for approval.": "配置已提交审批。",
   "Configuration unavailable": "配置暂不可用",
-  "Configuration unavailable. Check your access and retry.": "配置暂不可用。请检查你的权限后重试。",
   "Configuration waiting from someone else": "其他人的配置在等待",
   "Configure weekly hours": "设置每周营业时间",
   "Confirm and record handoff": "确认并记录交付",
@@ -10686,4 +10685,16 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "No new rounds on a refunded bill. New dishes start a new bill once the table is closed.":
     "已退款的账不能再加菜。关台后再点，会开一张新账单。",
   "Fully refunded at the table": "已在桌上全部退款",
+  // Batch 64: the hours editor closes, and says plainly why the saved hours were not read.
+  "Close without saving?": "不保存就关闭？",
+  "Close without saving? The changes you made here are not saved.":
+    "不保存就关闭？你在这里做的修改还没有保存。",
+  "Close without saving": "不保存，关闭",
+  "Keep editing": "继续修改",
+  "The saved hours couldn't be read just now. Nothing was changed. Try again.":
+    "暂时读不到已保存的营业时间。没有任何改动。请重试。",
+  "The saved hours couldn't be opened with this sign-in. If you were signed out, sign in again; otherwise ask an Owner for access to opening hours. Nothing was changed.":
+    "用当前登录打不开已保存的营业时间。如果你已被登出，请重新登录；否则请让店主给你营业时间的权限。没有任何改动。",
+  "Your sign-in on this screen has ended, so the saved hours weren't opened. Sign in again, then open them here. Nothing was changed.":
+    "这台设备上的登录已结束，所以没有打开已保存的营业时间。请重新登录，再到这里打开。没有任何改动。",
 });

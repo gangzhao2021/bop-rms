@@ -249,6 +249,16 @@ export function StoreServiceControlPanel({
   const [configuration, setConfiguration] = useState<StoreConfigurationView | null>(null);
   const configurable = configuration !== null;
   const [editing, setEditing] = useState(false);
+  // Batch 64: closing the editor reads again whether a change waits (one may have been saved) and
+  // gives focus back to "Edit hours".
+  const [probeRevision, setProbeRevision] = useState(0);
+  const editHours = useRef<HTMLButtonElement | null>(null);
+  const focusEditHours = useRef(false);
+  useEffect(() => {
+    if (editing || !focusEditHours.current || editHours.current === null) return;
+    focusEditHours.current = false;
+    editHours.current.focus();
+  });
   useEffect(() => {
     const probe = new AbortController();
     createStoreConfigurationClient()
@@ -257,10 +267,12 @@ export function StoreServiceControlPanel({
         (next) => {
           if (!probe.signal.aborted) setConfiguration(next);
         },
-        () => setConfiguration(null),
+        () => {
+          if (!probe.signal.aborted) setConfiguration(null);
+        },
       );
     return () => probe.abort();
-  }, [store]);
+  }, [store, probeRevision]);
   const load = useCallback(async () => {
     if (running.current || route !== store) return;
     running.current = true;
@@ -442,7 +454,12 @@ export function StoreServiceControlPanel({
             observedAt={view.observedAt}
             action={
               configurable && !editing ? (
-                <button type="button" className="hours-page__link" onClick={() => setEditing(true)}>
+                <button
+                  type="button"
+                  className="hours-page__link"
+                  ref={editHours}
+                  onClick={() => setEditing(true)}
+                >
                   {t("Edit hours")}
                 </button>
               ) : null
@@ -458,6 +475,15 @@ export function StoreServiceControlPanel({
             store={store}
             csrf={csrf}
             autoLoad={editing}
+            {...(editing
+              ? {
+                  onClose: () => {
+                    focusEditHours.current = true;
+                    setEditing(false);
+                    setProbeRevision((value) => value + 1);
+                  },
+                }
+              : {})}
             // Batch 51: the editor says the zone itself while Opening hours is not drawn.
             publishedHours={
               view

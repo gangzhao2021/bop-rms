@@ -980,9 +980,12 @@ fieldset.store-features__modules {
     flex: none;
   }
 }
+/* Batch 64: a short word (刷新, 关闭) is still a whole 44 x 44 target, its word at the end. */
 .workspace-page.hours-page .hours-page__link {
   display: inline-flex;
   align-items: center;
+  justify-content: flex-end;
+  min-width: 44px;
   min-height: 44px;
   padding: 0;
   border: 0;
@@ -1139,6 +1142,33 @@ fieldset.store-features__modules {
   margin: 16px 0 4px;
   font-size: 16px;
   font-weight: 600;
+}
+/* Batch 64 (v15 b63 live: no way out of the editor): Close is accent text at the end of the
+   editor's title row, as "Edit hours" is on Opening hours; closing over unsaved changes asks in
+   one line with two accent words. */
+.workspace-page.hours-page .hours-editor-head__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0 16px;
+  margin-top: 16px;
+}
+.workspace-page.hours-page
+  section[aria-labelledby="configuration-editor-title"]
+  .hours-editor-head__title
+  h3 {
+  margin: 0;
+}
+.workspace-page.hours-page .hours-editor-close {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 24px;
+}
+.workspace-page.hours-page .hours-editor-close p {
+  flex: 1 1 100%;
+  margin: 0;
 }
 .workspace-page.hours-page .dining-payment-timing {
   max-width: 720px;

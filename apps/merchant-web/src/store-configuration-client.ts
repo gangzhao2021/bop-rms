@@ -625,7 +625,8 @@ export function createStoreConfigurationClient(fetcher: typeof fetch = fetch) {
         answer !== null && typeof answer === "object"
           ? Object.getOwnPropertyDescriptor(answer, "error")?.value
           : undefined;
-      if (response.status === 403) {
+      // Batch 64 (v15 b63 live): an ended sign-in (401) is a refusal too, never an outage.
+      if (response.status === 401 || response.status === 403) {
         // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: why your own approval alone was not accepted.
         if (error === "sole_operator_off") throw new Error(SOLE_OPERATOR_OFF_MESSAGE);
         if (error === "sole_operator_not_in_effect") throw new Error(SOLE_OPERATOR_OTHERS_MESSAGE);

@@ -26,6 +26,9 @@ import {
   type StoreConfigurationDeclineReason,
 } from "./store-configuration-client.js";
 import { SoleOperatorSelfApproval } from "./SoleOperatorSelfApproval.js";
+import { actionAccessDeniedText } from "./access-denied.js";
+import { useReadAgainWhenSignedInAgain } from "./PageDidNotLoad.js";
+import { isStaffSignInEndedRefusal } from "./staff-session-reads.js";
 import { ClockStyleContext, friendlyStoreTime, StoreTimeZoneContext } from "./StoreTime.js";
 import {
   serviceOperationReference,
@@ -164,17 +167,42 @@ export type PublishedHoursShown = {
   readonly businessDayStartLocalTime: string;
 } | null;
 
+/**
+ * Batch 64 (v15 b63 live): why the saved hours were not read. "Refused": the read was refused
+ * (on v15 the shared sign-in had just been pushed out by another screen); "Unavailable": no
+ * usable answer, after one quiet second try.
+ */
+type StoreHoursReadFailure = "Refused" | "Unavailable";
+/** Batch 64: a read that got no usable answer is tried once more after this long. */
+const READ_AGAIN_AFTER_MS = 800;
+
+/** Batch 64: what the editor says when the saved hours were not read, in staff words. */
+export function storeHoursReadFailureText(failure: StoreHoursReadFailure, live: boolean): string {
+  if (failure === "Unavailable")
+    return t("The saved hours couldn't be read just now. Nothing was changed. Try again.");
+  return live
+    ? t(
+        "The saved hours couldn't be opened with this sign-in. If you were signed out, sign in again; otherwise ask an Owner for access to opening hours. Nothing was changed.",
+      )
+    : t(
+        "Your sign-in on this screen has ended, so the saved hours weren't opened. Sign in again, then open them here. Nothing was changed.",
+      );
+}
+
 export function StoreConfigurationEditor({
   store,
   csrf,
   publishedHours,
   autoLoad = false,
+  onClose,
 }: {
   store: string;
   csrf: string;
   publishedHours?: PublishedHoursShown;
   /** Batch 63 F54: opened from "Edit hours" on Opening hours, it reads the saved hours at once. */
   autoLoad?: boolean;
+  /** Batch 64 (v15 b63 live: leaving the page was the only way out): closes the editor. */
+  onClose?: () => void;
 }) {
   const client = useMemo(() => createStoreConfigurationClient(), []);
   const [view, setView] = useState<StoreConfigurationView | null>(null);
@@ -182,6 +210,9 @@ export function StoreConfigurationEditor({
   const [busy, setBusy] = useState(false),
     [message, setMessage] = useState(""),
     [uncertain, setUncertain] = useState(false);
+  const [readFailure, setReadFailure] = useState<StoreHoursReadFailure | null>(null);
+  // Batch 64: asked before closing over changes that are not saved.
+  const [closing, setClosing] = useState(false);
   const [online, setOnline] = useState(navigator.onLine);
   const controller = useRef<AbortController | null>(null);
   const pending = useRef<StoreConfigurationCommand | StoreHoursDraftCommand | null>(null);
@@ -198,6 +229,9 @@ export function StoreConfigurationEditor({
       window.removeEventListener("offline", update);
     };
   }, []);
+  // Batch 64: a read refused because the sign-in ended reads again once it works again.
+  const readAgain = useRef<() => void>(() => undefined);
+  const live = useReadAgainWhenSignedInAgain(() => readAgain.current());
   const loadOnOpen = useRef(autoLoad);
   useEffect(() => {
     if (!loadOnOpen.current) return;
@@ -216,14 +250,29 @@ export function StoreConfigurationEditor({
     const active = new AbortController();
     controller.current = active;
     try {
-      const next = await client.load(store, active.signal);
+      let next: StoreConfigurationView;
+      try {
+        next = await client.load(store, active.signal);
+      } catch (error) {
+        // Batch 64: a refusal is said at once; an answer that wasn't usable (a busy moment, a
+        // dropped request) is tried once more before anything is said.
+        if (active.signal.aborted || readRefused(error)) throw error;
+        await new Promise((done) => setTimeout(done, READ_AGAIN_AFTER_MS));
+        if (active.signal.aborted) return;
+        next = await client.load(store, active.signal);
+      }
       if (active.signal.aborted) return;
       setView(next);
       setDraft(storeConfigurationEditBase(next));
+      setReadFailure(null);
       setMessage(reloading ? t("Reloaded the latest saved hours.") : "");
-    } catch {
-      if (!active.signal.aborted)
-        setMessage(t("Configuration unavailable. Check your access and retry."));
+    } catch (error) {
+      if (!active.signal.aborted) {
+        // Batch 64 (v15 b63 live): a refused first read was said as "Configuration unavailable.
+        // Check your access and retry." It is said as what happened, never as an outage.
+        setReadFailure(readRefused(error) ? "Refused" : "Unavailable");
+        setMessage("");
+      }
     } finally {
       if (!active.signal.aborted) {
         running.current = false;
@@ -411,11 +460,23 @@ export function StoreConfigurationEditor({
       }
     }
   }
+  readAgain.current = () => {
+    if (readFailure === "Refused") void load();
+  };
   const disabled = busy || !online || uncertain;
+  const unsaved =
+    view !== null &&
+    draft !== null &&
+    JSON.stringify(draft) !== JSON.stringify(storeConfigurationEditBase(view));
+  const close = () => {
+    if (onClose === undefined || busy) return;
+    if (unsaved && !closing) setClosing(true);
+    else onClose();
+  };
   const actions = (
     <div className="hours-editor-head__actions">
       <button type="button" disabled={disabled} onClick={() => void load()}>
-        {view ? t("Reload saved hours") : t("Edit hours")}
+        {view ? t("Reload saved hours") : readFailure !== null ? t("Try again") : t("Edit hours")}
       </button>
       {uncertain && (
         <button type="button" disabled={busy || !online} onClick={() => void save()}>
@@ -426,8 +487,33 @@ export function StoreConfigurationEditor({
   );
   return (
     <section aria-labelledby="configuration-editor-title" aria-busy={busy}>
-      {/* Batch 63 F54 (RA-05): staff words, not "draft" and "configuration". */}
-      <h3 id="configuration-editor-title">{t("Change opening hours")}</h3>
+      {/* Batch 63 F54 (RA-05): staff words, not "draft" and "configuration". Batch 64: Close at
+          the end of the title row, as "Edit hours" sits on Opening hours. */}
+      <div className="hours-editor-head__title">
+        <h3 id="configuration-editor-title">{t("Change opening hours")}</h3>
+        {onClose === undefined ? null : (
+          <button
+            type="button"
+            className="hours-page__link"
+            disabled={busy}
+            aria-expanded={closing ? true : undefined}
+            onClick={close}
+          >
+            {t("Close")}
+          </button>
+        )}
+      </div>
+      {closing && onClose !== undefined ? (
+        <div role="group" className="hours-editor-close" aria-label={t("Close without saving?")}>
+          <p>{t("Close without saving? The changes you made here are not saved.")}</p>
+          <button type="button" className="hours-page__link" onClick={onClose}>
+            {t("Close without saving")}
+          </button>
+          <button type="button" className="hours-page__link" onClick={() => setClosing(false)}>
+            {t("Keep editing")}
+          </button>
+        </div>
+      ) : null}
       <p>
         {t(
           "Save your change for approval. Guests keep seeing the hours above until it is approved and goes live.",
@@ -438,7 +524,7 @@ export function StoreConfigurationEditor({
           step apart. The status stays mounted, empty and without space, so a reload's result is
           still read out politely. */}
       <p role="status" aria-live="polite" className="hours-editor-head__status">
-        {systemText(message)}
+        {readFailure !== null ? storeHoursReadFailureText(readFailure, live) : systemText(message)}
       </p>
       {view && draft ? (
         <StoreHoursDraftForm
@@ -463,6 +549,14 @@ export function StoreConfigurationEditor({
         />
       )}
     </section>
+  );
+}
+
+/** Batch 64: the read was refused (or not sent because this screen's sign-in has ended). */
+function readRefused(error: unknown): boolean {
+  return (
+    isStaffSignInEndedRefusal(error) ||
+    (error instanceof Error && error.message === actionAccessDeniedText)
   );
 }
 

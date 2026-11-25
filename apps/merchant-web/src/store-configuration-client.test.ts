@@ -398,3 +398,17 @@ describe("WP-2423 (2026-10-16 v15) withdrawal answers", () => {
     expect(storeConfigurationKeptRefusals.has(SOLE_OPERATOR_APPROVAL_INVALID_MESSAGE)).toBe(true);
   });
 });
+
+it("batch 64: a read refused because the sign-in ended (401) is a refusal, not an outage", async () => {
+  const { actionAccessDeniedText } = await import("./access-denied.js");
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+    new Response(JSON.stringify({ error: "session_ended" }), {
+      status: 401,
+      headers: { "content-type": "application/json", "cache-control": "no-store" },
+    }),
+  );
+  const client = createStoreConfigurationClient(fetcher);
+  await expect(client.load(id(3), new AbortController().signal)).rejects.toThrow(
+    actionAccessDeniedText,
+  );
+});
