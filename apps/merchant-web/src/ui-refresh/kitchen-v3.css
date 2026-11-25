@@ -78,6 +78,12 @@
   gap: 0 16px;
   padding: 4px 16px;
 }
+/* Batch 61 (b60 sweep): the bar keeps 4px above its 44px controls, so the usual ring (3px + 3px
+   offset) lost 2px at the top of the screen. Drawn 1px out it fits whole, and the bar keeps its
+   height (as the workspace top bar, batch 60). */
+.kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header :focus-visible {
+  outline-offset: 1px;
+}
 .kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header > h1 {
   grid-area: title;
   min-width: 0;

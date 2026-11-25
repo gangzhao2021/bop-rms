@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { ringsFrom, whole } from "./focus-ring-clip";
 import { expectNoInternalText } from "./internal-text-guard";
 import { at, headers, navigation, store } from "./kitchen-tm2-fixture";
 
@@ -279,3 +280,35 @@ for (const state of ["Loading", "Unavailable", "Kitchen only"] as const)
       await expectNoInternalText(page);
     }
   });
+
+/**
+ * Batch 61 (b60 sweep): the bar keeps 4 px above its 44 px controls, so their focus ring (3 px +
+ * 3 px offset) lost 2 px at the top of the screen: Kitchen, Mark an item sold out, Hand over and
+ * the language switch, at every width. Every ring in the bar is now whole.
+ */
+test("@production WP-2423 batch 61: every focus ring in the kitchen display's top bar is whole", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await page.clock.setFixedTime(new Date(at));
+  await store(page, "Named", { reworks: [], commands: [] });
+  await page.goto("/operations/kitchen");
+  const header = page.locator(".kitchen-shell .bop-shell__header");
+  for (const language of ["en", "zh-Hans"] as const) {
+    if (language === "zh-Hans") await chooseLanguage(page, language);
+    for (const [width, height] of [
+      [390, 844],
+      [1024, 768],
+      [1440, 900],
+    ] as const) {
+      await page.setViewportSize({ width, height });
+      await page.evaluate(() => window.scrollTo(0, 0));
+      const rings = await ringsFrom(page, header, header.getByRole("link").first());
+      expect(rings.length, `${language} ${width}`).toBeGreaterThanOrEqual(4);
+      for (const ring of rings) {
+        expect(ring.ring, ring.name).toBe(true);
+        expect(ring, `${language} ${width}: ${ring.name}`).toEqual(whole(ring));
+      }
+    }
+  }
+});
