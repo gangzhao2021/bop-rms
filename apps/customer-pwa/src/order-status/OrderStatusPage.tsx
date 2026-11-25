@@ -701,10 +701,11 @@ function PickupTimeline({
 }) {
   // How many steps are done; the next one is happening now, except right after the store accepts
   // (nothing is being made yet) and once the order is collected.
+  // Batch 63 (F16): once Ready, "Ready for pickup" is done and collection is the step waiting.
   const done = collected
     ? 5
     : stage === "Ready"
-      ? 3
+      ? 4
       : stage === "Preparing" || stage === "Accepted"
         ? 2
         : 1;
@@ -718,7 +719,7 @@ function PickupTimeline({
           <li key={label} className={`order-status__step order-status__step--${state}`}>
             <span className="order-status__step-label">{label}</span>
             <span className="order-status__step-state">
-              {state === "done" ? text.done : state === "current" ? text.now : ""}
+              {state === "done" ? text.done : state === "current" ? text.current(index) : ""}
             </span>
           </li>
         );
@@ -954,8 +955,11 @@ function StatusContent({
     unpaidPickupCancelled ||
     view.order.batches.every((batch) => notPaid.has(batch.orderBatchReference));
   const kitchenWords = orderStatusText.kitchen;
-  const kitchenText =
-    storeCancelled || notAccepted
+  // Batch 63 (F16): a collected pickup has nothing left in the kitchen; "Kitchen status Ready"
+  // under "This order is complete" read as if it was still waiting.
+  const kitchenText = complete
+    ? null
+    : storeCancelled || notAccepted
       ? kitchenWords.cancelled
       : remakes.length > 0 && !complete
         ? kitchenWords.remaking
@@ -983,6 +987,28 @@ function StatusContent({
     (view.sources?.itemPrices ?? []).map((price) => [price.orderItemReference, price] as const),
   );
   const currency = view.order.batches[0]?.items[0]?.lineTotal.currencyCode ?? "CAD";
+  const showPickupCode =
+    view.order.orderType === "Pickup" &&
+    !complete &&
+    !notCollected &&
+    !unpaidPickupCancelled &&
+    !storeCancelled &&
+    !notAccepted &&
+    !nothingToCollect;
+  const pickupReady = kitchenLabel === "Ready" || view.order.canonicalPhase === "Ready";
+  const pickupCode = showPickupCode ? (
+    <PickupCodePanel
+      orderReference={view.order.orderReference}
+      orderNumber={view.order.orderNumber}
+      controller={pickupController}
+      autoReveal={pickupReady}
+      remaking={remakes.length > 0}
+      refreshToken={view.sources?.checkedAt ?? view.projectedAt}
+    />
+  ) : null;
+  // Batch 63 (F15): once the order is ready, the code staff check comes straight under "Ready for
+  // pickup", above the steps and rows; at 390 it sat below the first screen.
+  const codeFirst = pickupReady && remakes.length === 0;
   return (
     <>
       <section
@@ -992,6 +1018,7 @@ function StatusContent({
         <p className="bop-eyebrow">{orderStatusText.orderEyebrow(view.order.orderNumber)}</p>
         <h2 id="order-progress-heading">{progressHeading}</h2>
         <p>{progressMessage}</p>
+        {codeFirst ? pickupCode : null}
         {pickupDue !== null && !pickupDue.ended ? (
           <FinishPickupPayment orderReference={view.order.orderReference} />
         ) : null}
@@ -1041,22 +1068,7 @@ function StatusContent({
         </dl>
       </section>
 
-      {view.order.orderType === "Pickup" &&
-      !complete &&
-      !notCollected &&
-      !unpaidPickupCancelled &&
-      !storeCancelled &&
-      !notAccepted &&
-      !nothingToCollect ? (
-        <PickupCodePanel
-          orderReference={view.order.orderReference}
-          orderNumber={view.order.orderNumber}
-          controller={pickupController}
-          autoReveal={kitchenLabel === "Ready" || view.order.canonicalPhase === "Ready"}
-          remaking={remakes.length > 0}
-          refreshToken={view.sources?.checkedAt ?? view.projectedAt}
-        />
-      ) : null}
+      {codeFirst ? null : pickupCode}
 
       {payments && payments.some((payment) => payment.freshnessStatus !== "Fresh") ? (
         <section className="order-status__warning" role="status">
@@ -1505,13 +1517,18 @@ export function OrderStatusPage({
                 ? orderStatusText.orderComplete
                 : orderStatusText.checksEveryFewSeconds}
           </p>
-          <button
-            type="button"
-            disabled={state.refreshing}
-            onClick={() => void controller.refresh()}
-          >
-            {state.refreshing ? orderStatusText.refreshing : orderStatusText.refreshNow}
-          </button>
+          {/* Batch 63 (F16): nothing changes on a collected pickup, so there is nothing to refresh
+              (a cancelled one may still have a refund on its way, so it keeps the button). */}
+          {state.view.order.orderType === "Pickup" &&
+          state.view.order.fulfillmentStatus === "Completed" ? null : (
+            <button
+              type="button"
+              disabled={state.refreshing}
+              onClick={() => void controller.refresh()}
+            >
+              {state.refreshing ? orderStatusText.refreshing : orderStatusText.refreshNow}
+            </button>
+          )}
         </section>
       ) : null}
       {/* WP-2423 取舍 18: a signed-in member's points for what this phone paid, without asking. */}

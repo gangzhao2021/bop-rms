@@ -156,7 +156,10 @@ describe("WP-2423 Q15 tax receipt", () => {
       },
     });
     expect(html).not.toMatch(/unavailable|Live receipt status|delivery and support/u);
-    expect(html).toContain("Last checked");
+    // Batch 63 (F17): no "Last checked" time, and no zero refund lines when nothing was refunded.
+    expect(html).not.toContain("Last checked");
+    expect(html).not.toContain("Pending refunds");
+    expect(html).not.toContain("Confirmed refunds");
     expect(html).not.toContain("..");
   });
   it("rejects tax lines that do not add up and unsafe privacy links", () => {

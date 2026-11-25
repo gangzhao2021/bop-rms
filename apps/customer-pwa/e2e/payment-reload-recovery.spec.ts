@@ -44,7 +44,18 @@ for (const status of ["Failed", "Succeeded", "Pending", "Unknown", "Unprepared"]
       } else await route.fulfill({ status: 503, json: { unavailable: true } });
     });
     const assertView = async () => {
-      await expect(page.getByRole("heading", { name: "Check your payment" })).toBeVisible();
+      // Batch 63 (F16): the page has one heading, the result itself (was "Check your payment"
+      // above a second heading); the declined and confirmed results are now that heading.
+      await expect(page.getByRole("heading", { name: "Check your payment" })).toHaveCount(0);
+      await expect(page.getByRole("heading", { level: 2 })).toHaveCount(1);
+      const heading = {
+        Failed: "Payment declined",
+        Succeeded: "Payment confirmed",
+        Pending: "Payment not confirmed yet",
+        Unknown: "Payment result unknown",
+        Unprepared: "Your payment hasn’t started",
+      }[status];
+      await expect(page.getByRole("heading", { level: 2, name: heading })).toBeVisible();
       const message = {
         Failed: "Payment declined",
         Succeeded: "Payment confirmed",

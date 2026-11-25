@@ -599,7 +599,8 @@ for (const viewport of [
       );
       await page.goto("/orders/" + orderReference + "/receipt");
       await expect(page.getByText("Confirmed refunds$6.40")).toBeVisible();
-      const version2 = page.getByRole("article", { name: "Version 2: Refund" });
+      // Batch 63 (F17): versions are named in plain words, the updated one first.
+      const version2 = page.getByRole("article", { name: "Updated receipt (after refund)" });
       await expect(
         version2.getByText("Reason: A refund was made to your original payment."),
       ).toBeVisible();
@@ -616,11 +617,12 @@ for (const viewport of [
         what.locator(".receipt-page__totals div", { hasText: "Total after refunds" }),
       ).toHaveText("Total after refunds$6.40");
       // Version 1 is printed as it was issued: nothing refunded on it.
-      const version1 = page.getByRole("article", { name: "Version 1: Receipt" });
+      const version1 = page.getByRole("article", { name: "Original receipt" });
       await expect(version1.getByRole("region", { name: "What was refunded" })).toHaveCount(0);
+      // Batch 63 (F17): no zero "Refunded $0.00" line on the original.
       await expect(
         version1.locator(".receipt-page__totals div", { hasText: /^Refunded/u }),
-      ).toHaveText("Refunded$0.00");
+      ).toHaveCount(0);
       await expectNoInternalText(page);
       await noOverflowOrBlockingAxe(page);
       await page.goto("/orders/" + orderReference);
@@ -703,7 +705,8 @@ for (const viewport of [
       await expectNoInternalText(page);
       await noOverflowOrBlockingAxe(page);
       await page.goto("/orders/" + orderReference + "/receipt");
-      const paid = page.getByRole("region", { name: "Payment and refunds" });
+      // Batch 63 (F17): nothing was refunded, so the section is just "Payment".
+      const paid = page.getByRole("region", { name: "Payment", exact: true });
       await expect(paid.locator(".receipt-page__totals div", { hasText: /^Paid\$/u })).toHaveText(
         "Paid$10.81",
       );

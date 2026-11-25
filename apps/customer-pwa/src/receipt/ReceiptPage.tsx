@@ -173,18 +173,22 @@ export function receiptVersionReason(record: ReceiptRecordView): string | null {
   return record.reasonCode ? (receiptReasonText[record.reasonCode] ?? null) : null;
 }
 
+/**
+ * Batch 63 (F17): what each receipt is called once the order has more than one. "Version 2:
+ * Refund" read as a system record; a guest reads "Updated receipt (after refund)".
+ */
 const kindText: Record<ReceiptRecordView["kind"], string> = {
   get Original() {
-    return t("Receipt");
+    return t("Original receipt");
   },
   get Correction() {
     return t("Corrected receipt");
   },
   get Void() {
-    return t("Voided");
+    return t("Voided receipt");
   },
   get Refund() {
-    return t("Refund");
+    return t("Updated receipt (after refund)");
   },
   get Reissue() {
     return t("Reissued receipt");
@@ -212,26 +216,37 @@ export function receiptLinesIncludeTax(snapshot: ReceiptRecordView["snapshot"]):
   );
 }
 
-function ReceiptVersion({ record }: { readonly record: ReceiptRecordView }) {
+function ReceiptVersion({
+  record,
+  only,
+}: {
+  readonly record: ReceiptRecordView;
+  /** The order's one receipt: it is the receipt itself, with no version heading or date. */
+  readonly only: boolean;
+}) {
   const snapshot = record.snapshot;
   return (
     <article
       className="receipt-page__version"
-      aria-labelledby={`receipt-version-${record.version}`}
+      {...(only
+        ? { "aria-labelledby": "page-heading" }
+        : { "aria-labelledby": `receipt-version-${record.version}` })}
     >
-      <h2 id={`receipt-version-${record.version}`}>
-        {t("Version")} {record.version}: {kindText[record.kind]}
-      </h2>
-      <p>
-        {t("Recorded")} {formatDateTime(record.recordedAt)}
-      </p>
-      {receiptVersionReason(record) ? (
-        <p>
-          {t("Reason:")}
-          {wordGap()}
-          {receiptVersionReason(record)}
-        </p>
-      ) : null}
+      {only ? null : (
+        <>
+          <h2 id={`receipt-version-${record.version}`}>{kindText[record.kind]}</h2>
+          <p>
+            {t("Recorded")} {formatDateTime(record.recordedAt)}
+          </p>
+          {receiptVersionReason(record) ? (
+            <p>
+              {t("Reason:")}
+              {wordGap()}
+              {receiptVersionReason(record)}
+            </p>
+          ) : null}
+        </>
+      )}
       <ul className="receipt-page__lines">
         {snapshot.lines.map((line) => (
           <li key={line.lineReference}>
@@ -254,17 +269,18 @@ function ReceiptVersion({ record }: { readonly record: ReceiptRecordView }) {
         </p>
       ) : null}
       <dl className="receipt-page__totals">
-        {snapshot.adjustments ? (
-          <>
-            <div>
-              <dt>{t("Discount")}</dt>
-              <dd>{money(snapshot.adjustments.discount)}</dd>
-            </div>
-            <div>
-              <dt>{t("Fees")}</dt>
-              <dd>{money(snapshot.adjustments.fee)}</dd>
-            </div>
-          </>
+        {/* Batch 63 (F17): a zero discount, fee or refund says nothing; only real ones print. */}
+        {snapshot.adjustments && snapshot.adjustments.discount.amountMinor !== 0n ? (
+          <div>
+            <dt>{t("Discount")}</dt>
+            <dd>{money(snapshot.adjustments.discount)}</dd>
+          </div>
+        ) : null}
+        {snapshot.adjustments && snapshot.adjustments.fee.amountMinor !== 0n ? (
+          <div>
+            <dt>{t("Fees")}</dt>
+            <dd>{money(snapshot.adjustments.fee)}</dd>
+          </div>
         ) : null}
         <div>
           <dt>{t("Subtotal")}</dt>
@@ -305,10 +321,12 @@ function ReceiptVersion({ record }: { readonly record: ReceiptRecordView }) {
             {paymentStatusText[snapshot.paymentStatus]}
           </dd>
         </div>
-        <div>
-          <dt>{t("Refunded")}</dt>
-          <dd>{money(snapshot.refundedTotal)}</dd>
-        </div>
+        {snapshot.refundedTotal.amountMinor !== 0n ? (
+          <div>
+            <dt>{t("Refunded")}</dt>
+            <dd>{money(snapshot.refundedTotal)}</dd>
+          </div>
+        ) : null}
       </dl>
       <ReceiptRefunds snapshot={snapshot} version={record.version} />
     </article>
@@ -325,6 +343,11 @@ function ReceiptContent({
   const current = view.records.at(-1)?.snapshot;
   if (!current) return null;
   const financial = online ? view.financial : null;
+  const refundsToShow =
+    financial != null &&
+    (financial.confirmedRefundMinor !== 0n || financial.pendingRefundMinor !== 0n);
+  // Batch 63 (F17): the latest receipt first; earlier ones follow only once there was a change.
+  const records = [...view.records].reverse();
   return (
     <>
       {/* WP-2423 (v15 3cd0f8dd M5): the visit ended; the receipt is still here, read only. */}
@@ -333,7 +356,7 @@ function ReceiptContent({
           <h2>{t("Your visit has ended")}</h2>
           <p>
             {t("You can still view and save this receipt on this phone until")}{" "}
-            {endSentence(formatDateTime(view.visitEnded.receiptAvailableUntil, current.locale))}
+            {endSentence(formatDateTime(view.visitEnded.receiptAvailableUntil))}
           </p>
         </section>
       ) : null}
@@ -362,16 +385,16 @@ function ReceiptContent({
           {t("Order")} {current.orderNumber}
         </p>
         <p>
-          {t("Issued")} {formatDateTime(current.issuedAt, current.locale)}
+          {/* Batch 63 (F17): dates in the page's language (zh read "Nov 25, 2026" beside 2026年). */}
+          {t("Issued")} {formatDateTime(current.issuedAt)}
         </p>
       </section>
       <section className="receipt-page__financial" aria-labelledby="receipt-financial-heading">
-        <h2 id="receipt-financial-heading">{t("Payment and refunds")}</h2>
+        <h2 id="receipt-financial-heading">
+          {refundsToShow || !financial ? t("Payment and refunds") : t("Payment")}
+        </h2>
         {financial ? (
           <>
-            <p>
-              {t("Last checked")} {formatDateTime(financial.observedAt, current.locale)}
-            </p>
             <dl className="receipt-page__totals">
               <div>
                 <dt>{t("Paid")}</dt>
@@ -406,26 +429,32 @@ function ReceiptContent({
                   </div>
                 </>
               ) : null}
-              <div>
-                <dt>{t("Confirmed refunds")}</dt>
-                <dd>
-                  {money({
-                    amountMinor: financial.confirmedRefundMinor,
-                    currencyCode: financial.currencyCode,
-                  })}
-                </dd>
-              </div>
-              <div>
-                <dt>{t("Pending refunds")}</dt>
-                <dd>
-                  {money({
-                    amountMinor: financial.pendingRefundMinor,
-                    currencyCode: financial.currencyCode,
-                  })}
-                </dd>
-              </div>
+              {financial.confirmedRefundMinor !== 0n ? (
+                <div>
+                  <dt>{t("Confirmed refunds")}</dt>
+                  <dd>
+                    {money({
+                      amountMinor: financial.confirmedRefundMinor,
+                      currencyCode: financial.currencyCode,
+                    })}
+                  </dd>
+                </div>
+              ) : null}
+              {financial.pendingRefundMinor !== 0n ? (
+                <div>
+                  <dt>{t("Pending refunds")}</dt>
+                  <dd>
+                    {money({
+                      amountMinor: financial.pendingRefundMinor,
+                      currencyCode: financial.currencyCode,
+                    })}
+                  </dd>
+                </div>
+              ) : null}
             </dl>
-            <p>{t("Pending refunds are not confirmed refunds.")}</p>
+            {financial.pendingRefundMinor !== 0n ? (
+              <p>{t("Pending refunds are not confirmed refunds.")}</p>
+            ) : null}
             {financial.unresolvedAttemptCount > 0 ? (
               <p role="status">{t("Some payment attempts still need a final result.")}</p>
             ) : null}
@@ -440,10 +469,13 @@ function ReceiptContent({
           </p>
         )}
       </section>
-      <section className="receipt-page__history" aria-labelledby="receipt-history-heading">
-        <h2 id="receipt-history-heading">{t("Receipt history")}</h2>
-        {view.records.map((record) => (
-          <ReceiptVersion key={record.recordReference} record={record} />
+      <section className="receipt-page__history" aria-labelledby="page-heading">
+        {records.map((record) => (
+          <ReceiptVersion
+            key={record.recordReference}
+            record={record}
+            only={records.length === 1}
+          />
         ))}
       </section>
       {/* WP-2423 Q10: how to reach the Store, instead of internal delivery/support codes. */}

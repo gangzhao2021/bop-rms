@@ -129,7 +129,7 @@ describe("CUST-ORDER-STATUS screen contract", () => {
     if (state.status !== "ready") throw new Error("fixture");
     const step = (html: string, label: string) =>
       new RegExp(
-        `order-status__step--(\\w+)"><span class="order-status__step-label">${label}</span><span class="order-status__step-state">(\\w*)<`,
+        `order-status__step--(\\w+)"><span class="order-status__step-label">${label}</span><span class="order-status__step-state">([\\w ]*)<`,
         "u",
       )
         .exec(html)
@@ -156,19 +156,57 @@ describe("CUST-ORDER-STATUS screen contract", () => {
     expect(making).toContain('aria-label="Order progress"');
     expect(step(making, "Payment received")).toEqual(["done", "Done"]);
     expect(step(making, "Accepted by the store")).toEqual(["done", "Done"]);
-    expect(step(making, "Being made")).toEqual(["current", "Now"]);
+    // Batch 63 (F16): the kitchen making it is "In progress"; "Now" read as "accepted now".
+    expect(step(making, "Being made")).toEqual(["current", "In progress"]);
     expect(step(making, "Ready for pickup")).toEqual(["upcoming", ""]);
     expect(step(making, "Picked up")).toEqual(["upcoming", ""]);
+    expect(making).not.toContain(">Now<");
+    // Before the store accepts, its step is waiting, never "Now".
+    const waiting = render({
+      ...state,
+      view: { ...state.view, sources: { ...paid, kitchen: null } },
+    });
+    expect(step(waiting, "Payment received")).toEqual(["done", "Done"]);
+    expect(step(waiting, "Accepted by the store")).toEqual(["current", "Waiting"]);
+    expect(step(waiting, "Being made")).toEqual(["upcoming", ""]);
+    // Ready: "Ready for pickup" is done and collecting it is what waits.
+    const ready = render({
+      ...state,
+      view: {
+        ...state.view,
+        order: { ...state.view.order, canonicalPhase: "Ready" },
+        sources: { ...paid, kitchen: null },
+      },
+    });
+    expect(step(ready, "Ready for pickup")).toEqual(["done", "Done"]);
+    expect(step(ready, "Picked up")).toEqual(["current", "Waiting"]);
     const collected = render({
       ...state,
       view: {
         ...state.view,
         order: { ...state.view.order, canonicalPhase: "Fulfilled", fulfillmentStatus: "Completed" },
-        sources: { ...paid, kitchen: null },
+        // As v15 sends it: the kitchen ticket still says Ready after the guest collected.
+        sources: {
+          ...paid,
+          kitchen: {
+            batches: [
+              {
+                orderBatchReference: id(3),
+                status: "Ready",
+                updatedAt: "2026-08-11T13:59:00.000Z",
+              },
+            ],
+          },
+        },
       },
     });
     expect(step(collected, "Picked up")).toEqual(["done", "Done"]);
     expect(collected).not.toContain(">Now<");
+    expect(collected).not.toContain(">Waiting<");
+    // Batch 63 (F16): once collected, no kitchen row and nothing to refresh.
+    expect(collected).not.toContain("Kitchen status");
+    expect(collected).toContain("This order is complete.");
+    expect(collected).not.toContain("Refresh now");
     // A cancelled order has no steps to follow.
     const cancelled = render({
       ...state,

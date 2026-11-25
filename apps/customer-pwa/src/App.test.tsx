@@ -103,8 +103,9 @@ describe("customer PWA shell", () => {
     expect(payment).toContain("Secure payment");
     expect(payment).not.toContain('id="payment-tip"');
     expect(payment).toContain("Loading checkout");
-    expect(result).toContain("Check your payment");
-    expect(result).toContain("Verifying payment");
+    // Batch 63 (F16): the result is the page's one heading (no "Check your payment" above it).
+    expect(result).not.toContain("Check your payment");
+    expect(result).toContain('<h2 id="page-heading">Verifying payment</h2>');
     expect(result).not.toContain("Payment confirmed");
     expect(result).not.toContain("provider-secret");
   });

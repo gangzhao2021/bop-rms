@@ -183,7 +183,9 @@ export function SessionPaymentResultPage({
       }
       className="payment-page payment-result-page"
     >
-      <PageHeading title={t("Check your payment")}>
+      {/* Batch 63 (F16): one heading, the result itself. "Check your payment" above a second
+          heading "Payment confirmed" asked the guest to check what was already done. */}
+      <PageHeading title={heading}>
         <p className="payment-result-page__intro" aria-live="polite">
           {unknown
             ? t("The payment result is still being confirmed.")
@@ -207,11 +209,10 @@ export function SessionPaymentResultPage({
         <li>{t("Pay")}</li>
         <li aria-current="step">{t("Done")}</li>
       </ol>
-      <section className="payment-result-page__card" aria-labelledby="payment-result-heading">
+      <section className="payment-result-page__card" aria-labelledby="page-heading">
         <span className="payment-result-page__badge" data-tone={badgeTone}>
           {badge}
         </span>
-        <h2 id="payment-result-heading">{heading}</h2>
         <div role={alert ? "alert" : "status"} className="payment-result-page__message">
           {state.status === "loading" ? <p>{t("Verifying payment…")}</p> : null}
           {state.status === "missing" ? (

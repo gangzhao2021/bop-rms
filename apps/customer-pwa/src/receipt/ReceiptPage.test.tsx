@@ -1,4 +1,6 @@
+import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { LanguageRoot } from "../i18n/i18n.js";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { describe, expect, it } from "vitest";
 import { ReceiptPage, receiptLineAmount } from "./ReceiptPage.js";
@@ -75,7 +77,10 @@ describe("CUST-RECEIPT-SUPPORT screen contract", () => {
     expect(html).toContain('class="receipt-page__content"');
     expect(html).toContain('class="receipt-page__history"');
     expect(html).toContain('class="receipt-page__action-card"');
-    expect(html).toContain("Receipt history");
+    // Batch 63 (F17): one receipt is the receipt itself — no "Receipt history", no "Version 1".
+    expect(html).not.toContain("Receipt history");
+    expect(html).not.toContain("Version 1");
+    expect(html).not.toContain("Recorded");
     expect(html).toContain("Synthetic Operating Entity");
     expect(html).toContain("$11.30");
     expect(html).toContain("Print or save receipt");
@@ -162,7 +167,9 @@ it("separates current pending refunds from immutable history and hides them offl
   expect(html).toContain("$6.00");
   expect(html).toContain("Pending refunds are not confirmed refunds");
   expect(html).toContain("Some payment attempts still need a final result");
-  expect(html).toContain("Receipt history");
+  // Batch 63 (F17): a refund on its way says so, with the note; "Last checked" is gone.
+  expect(html).toContain("<dt>Pending refunds</dt>");
+  expect(html).not.toContain("Last checked");
   const offline = render({ status: "offline", view });
   expect(offline).not.toContain("$6.00");
   expect(offline).toContain("be checked while you");
@@ -437,10 +444,16 @@ describe("WP-2423 (v15 3cd0f8dd) receipt payments, refunds and ended visits", ()
     expect(html).toContain("<strong>Cancelled items</strong> · new on this version");
     expect(html).toContain("<dt>Refunded in total</dt><dd>$5.65</dd>");
     expect(html).toContain("<dt>Total after refunds</dt><dd>$5.65</dd>");
-    // The original version still prints as issued: nothing refunded, no refund section.
-    const first = html.slice(0, html.indexOf("Version 2"));
-    expect(first).toContain("<dt>Refunded</dt><dd>$0.00</dd>");
-    expect(first).not.toContain("What was refunded");
+    // Batch 63 (F17): the updated receipt comes first, in plain words; the original follows,
+    // printed as issued (nothing refunded on it, so no zero refund line).
+    expect(html.indexOf("Updated receipt (after refund)")).toBeGreaterThan(-1);
+    expect(html.indexOf("Updated receipt (after refund)")).toBeLessThan(
+      html.indexOf("Original receipt"),
+    );
+    expect(html).not.toMatch(/Version \d/u);
+    const original = html.slice(html.indexOf("Original receipt"));
+    expect(original).not.toContain("<dt>Refunded</dt>");
+    expect(original).not.toContain("What was refunded");
   });
 
   it("M5: says until when an ended visit can still open the receipt here", () => {
@@ -452,5 +465,62 @@ describe("WP-2423 (v15 3cd0f8dd) receipt payments, refunds and ended visits", ()
     });
     expect(html).toContain("Your visit has ended");
     expect(html).toContain("You can still view and save this receipt on this phone until");
+  });
+});
+
+describe("batch 63 (F17): the receipt reads as a receipt", () => {
+  it("prints no zero discount, fee or refund lines and no system words", () => {
+    const state = ready();
+    if (state.status !== "ready") throw new Error("fixture");
+    const record = state.view.records[0];
+    if (!record) throw new Error("fixture");
+    const zero = { amountMinor: 0n, currencyCode: "CAD" };
+    const html = render({
+      ...state,
+      view: {
+        ...state.view,
+        financial: {
+          observedAt: "2026-08-12T14:02:00.000Z",
+          currencyCode: "CAD",
+          capturedMinor: 1130n,
+          confirmedRefundMinor: 0n,
+          pendingRefundMinor: 0n,
+          unresolvedAttemptCount: 0,
+        },
+        records: [
+          {
+            ...record,
+            snapshot: { ...record.snapshot, adjustments: { discount: zero, fee: zero } },
+          },
+        ],
+      },
+    });
+    for (const words of [
+      "<dt>Discount</dt>",
+      "<dt>Fees</dt>",
+      "<dt>Refunded</dt>",
+      "Confirmed refunds",
+      "Pending refunds",
+      "Last checked",
+      "Receipt history",
+      "Version",
+    ])
+      expect(html).not.toContain(words);
+    expect(html).toContain('<h2 id="receipt-financial-heading">Payment</h2>');
+    expect(html).toContain("<dt>Paid</dt><dd>$11.30</dd>");
+    expect(html).toContain("<dt>Total</dt><dd>$11.30</dd>");
+  });
+
+  it("writes every date in Chinese on the Chinese page, with no ASCII colon", () => {
+    renderToStaticMarkup(createElement(LanguageRoot, { initial: "zh-Hans", children: () => null }));
+    try {
+      const html = render(ready());
+      // The receipt was issued in en-CA; the page still reads in the guest's language.
+      expect(html).toContain("签发时间 2026年8月12日");
+      expect(html).not.toMatch(/Aug|a\.m\.|p\.m\./u);
+      expect(html).not.toMatch(/[一-鿿]: /u);
+    } finally {
+      renderToStaticMarkup(createElement(LanguageRoot, { initial: "en", children: () => null }));
+    }
   });
 });

@@ -111,7 +111,9 @@ test("@production receipt navigation removes inaccessible history and fits commo
     { width: 320, height: 800 },
   ]) {
     await page.setViewportSize(viewport);
-    await expect(page.getByRole("heading", { name: "Receipt history" })).toBeVisible();
+    // Batch 63 (F17): the one receipt is the receipt itself (no "Receipt history" heading).
+    await expect(page.getByRole("heading", { name: "Receipt", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Receipt history" })).toHaveCount(0);
     await expect(page.getByRole("heading", { name: "Keep a copy" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Back to order status" })).toBeVisible();
     expect(
