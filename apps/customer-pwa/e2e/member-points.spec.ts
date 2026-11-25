@@ -359,15 +359,27 @@ for (const width of widths)
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
       ).toBe(true);
-      // Linux fonts (DejaVu) run wider: the heading keeps room inside the panel.
-      const room = await page.locator("#member-panel-title").evaluate((heading) => {
-        const panel = heading.closest("section")?.getBoundingClientRect();
+      // Linux fonts (DejaVu) run wider than macOS fonts. The heading wraps, so its distance to the
+      // panel edge says little; instead it must still fit, on at most two lines, in a panel 40 px
+      // narrower than the real one.
+      const narrowed = await page.locator("#member-panel-title").evaluate((heading) => {
+        const panel = heading.closest("section");
+        if (panel === null) return { room: -1, lines: 0 };
+        const before = panel.style.maxWidth;
+        panel.style.maxWidth = String(panel.getBoundingClientRect().width - 40) + "px";
+        const edge = panel.getBoundingClientRect().right;
         const range = document.createRange();
         range.selectNodeContents(heading);
-        const text = range.getBoundingClientRect();
-        return panel === undefined ? -1 : panel.right - text.right;
+        const rects = [...range.getClientRects()];
+        const measured = {
+          room: Math.min(...rects.map((line) => edge - line.right)),
+          lines: new Set(rects.map((line) => Math.round(line.bottom))).size,
+        };
+        panel.style.maxWidth = before;
+        return measured;
       });
-      expect(room).toBeGreaterThanOrEqual(0);
+      expect(narrowed.room).toBeGreaterThanOrEqual(0);
+      expect(narrowed.lines).toBeLessThanOrEqual(2);
     };
     for (const zh of [false, true])
       test(`${zh ? "zh-Hans" : "en"}: B reads plain points, A reads what its refund left`, async ({
