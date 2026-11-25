@@ -402,3 +402,177 @@ it("pay later: a guest's dish sold out just before the quote is marked, the roun
     }
   });
 });
+
+/**
+ * WP-2423 (staff-round-soldout-code, CI f445b8bb3): a dish sells out inside the round's own
+ * checkout step, after the checkout found it sellable and before it read the dish's menu facts
+ * (one Catalog read after the other, each seeing what is committed then). Staff were told "the
+ * system couldn't send it" (STAFF_ROUND_UNAVAILABLE). Now they are told that dish can't be sold
+ * now (STAFF_ROUND_ITEM_UNAVAILABLE, naming the round's line); nothing is ordered and the round's
+ * line comes back out of the table's Cart. The sold-out mark commits at that exact moment: the
+ * round's menu-facts read waits until it has (a test hook on the round's own Catalog read).
+ */
+it("a dish sells out inside the round's checkout, between its sellable check and its menu read: staff are told which dish", async () => {
+  await withIsolatedDatabase({ caseId: "wp2423_srs_race" }, async (context) => {
+    const admin = new Client(context.clientConfig);
+    await admin.connect();
+    vi.stubEnv("NODE_ENV", "development");
+    const api = await createPilotApiRole(admin, context, "wp2423_src");
+    let store = null;
+    const clientQuery = pg.Client.prototype.query;
+    try {
+      store = await prepareRealStaffRoundStore({ admin, context, api, paymentTiming: "PayLater" });
+      const { soup, tableReference, reference } = store;
+      const manager = await store.staff("01a0fd00-0000-7000-8000-000000000a01", [
+        "ordering.order.create_staff",
+        "dining.operate",
+        "dining.session.close",
+        "catalog.sku.sold_out.mark",
+        "catalog.sku.availability.manage",
+        "catalog.sku.read",
+      ]);
+      const as = { sessionCookie: manager.sessionCookie, csrf: manager.csrf };
+      /** Set while the round runs the step being raced; the hold fires once inside it. */
+      const race = { step: null, held: false, marked: null };
+      const counter = await store.counterFor(manager, {
+        decorateStaffRoundPipeline: (real) => {
+          const wrapped = { ...real };
+          for (const step of ["startCheckout", "submitPayLater"])
+            wrapped[step] = async (...values) => {
+              const armed = race.step?.name === step;
+              if (armed) race.step.inside = true;
+              try {
+                return await real[step](...values);
+              } finally {
+                if (armed) race.step.inside = false;
+              }
+            };
+          return wrapped;
+        },
+      });
+      const availability = createMerchantAvailability({
+        persistence: store.persistenceOf(manager),
+        authentication: manager.authentication,
+        references: { next: reference },
+        locale: "en-CA",
+      });
+      const mark = (action) =>
+        availability.command({
+          ...as,
+          body: {
+            action,
+            operationReference: reference(),
+            skuReference: soup.skuReference,
+            ...(action === "SoldOut" ? { until: "UntilBack" } : {}),
+          },
+        });
+      // After the checkout's own sellable check (Catalog read at the checkout's instant), it reads
+      // the held price and then the dish's menu facts at a later instant (Catalog's order
+      // snapshot). Before the held price is read, the manager's sold-out mark commits.
+      pg.Client.prototype.query = function (config, ...rest) {
+        const text = typeof config === "string" ? config : config?.text;
+        const current = race.step;
+        if (
+          current?.inside === true &&
+          !race.held &&
+          typeof text === "string" &&
+          /\bcomplete_snapshot_text\b/u.test(text) &&
+          /configured-checkout-validation-service/u.test(new Error().stack ?? "")
+        ) {
+          race.held = true;
+          const client = this;
+          return (async () => {
+            race.marked = await Promise.race([
+              mark("SoldOut").then(
+                () => "Marked",
+                (error) => "Failed:" + String(error?.code ?? error),
+              ),
+              new Promise((resolve) => setTimeout(() => resolve("TimedOut"), 5000)),
+            ]);
+            return clientQuery.call(client, config, ...rest);
+          })();
+        }
+        return clientQuery.call(this, config, ...rest);
+      };
+      const send = () =>
+        counter.staffDiningRound({
+          ...as,
+          command: {
+            operationReference: reference(),
+            tableReference,
+            lines: [
+              {
+                sellableReference: soup.skuReference,
+                quantity: 1,
+                optionSelections: [],
+                note: null,
+              },
+            ],
+            tip: { kind: "None" },
+            recordedAfterOutage: false,
+          },
+        });
+      // The table's first round goes through as usual.
+      assert.equal((await send()).status, "Placed");
+      const answers = [];
+      for (const step of ["startCheckout", "submitPayLater"]) {
+        race.step = { name: step, inside: false };
+        race.held = false;
+        race.marked = null;
+        const before = await admin.query(
+          "SELECT (SELECT count(*)::int FROM rms_ordering.order_batch) AS batches,(SELECT count(*)::int FROM rms_ordering.order_item) AS items",
+        );
+        const answer = await send().then(
+          (value) => ({ status: value.status }),
+          (error) => ({ status: "Refused", code: error?.code, lineIndex: error?.lineIndex }),
+        );
+        race.step = null;
+        const after = await admin.query(
+          "SELECT (SELECT count(*)::int FROM rms_ordering.order_batch) AS batches,(SELECT count(*)::int FROM rms_ordering.order_item) AS items",
+        );
+        answers.push({ step, held: race.held, marked: race.marked, ...answer });
+        stdout.write(`staff-round-soldout checkout race: ${JSON.stringify(answers.at(-1))}\n`);
+        // The mark really committed inside the round's step, between its two Catalog reads.
+        assert.deepEqual([race.held, race.marked], [true, "Marked"], JSON.stringify(answers));
+        // Staff are told the round's dish can't be sold now, and which line: never "a problem
+        // on our side". Nothing was ordered (the round's line left the table's Cart: the last
+        // round below is not refused for it).
+        assert.deepEqual(
+          [answer.status, answer.code, answer.lineIndex],
+          ["Refused", "STAFF_ROUND_ITEM_UNAVAILABLE", 0],
+          JSON.stringify(answers),
+        );
+        assert.deepEqual(after.rows[0], before.rows[0], JSON.stringify(answers));
+        await mark("BackInStock");
+      }
+      // Back on the menu, the same round goes through, and no cart line went out twice.
+      assert.equal((await send()).status, "Placed");
+      const [{ twice }] = (
+        await admin.query(
+          "SELECT count(*)::int AS twice FROM (SELECT source_cart_line_id FROM rms_ordering.order_item GROUP BY source_cart_line_id HAVING count(*)>1) twice",
+        )
+      ).rows;
+      assert.equal(twice, 0);
+      await restrictedRoleRan(store, api);
+    } finally {
+      pg.Client.prototype.query = clientQuery;
+      vi.unstubAllEnvs();
+      if (store !== null) await store.close();
+      for (const name of [api, api + "_w"]) {
+        await admin.query("DROP OWNED BY " + name).catch(() => undefined);
+        await admin.query("DROP ROLE " + name).catch(() => undefined);
+      }
+      await admin.end();
+    }
+  });
+});
+
+/**
+ * WP-2423 (staff-round-soldout-code, CI f445b8bb3): a dish sells out inside the round's own
+ * checkout step, after the checkout found it sellable and before it read the dish's menu facts
+ * (one Catalog read after the other, each seeing what is committed then). Staff were told "the
+ * system couldn't send it" (STAFF_ROUND_UNAVAILABLE). Now they are told that dish can't be sold
+ * now (STAFF_ROUND_ITEM_UNAVAILABLE, naming the round's line); nothing is ordered and the round's
+ * line comes back out of the table's Cart. The sold-out mark commits at that exact moment: the
+ * round's menu-facts read waits until it has (a test hook on the round's own Catalog read).
+ */
