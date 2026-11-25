@@ -340,20 +340,85 @@ export function soldOutNowDetail(awaiting: number, unpaid: number): string {
     { orders: countOf(awaiting, "order"), unpaid: countOf(unpaid, "order") },
   );
 }
+/** Batch 63 review (F24): Home reads at most this many Orders pages (300 orders a day). */
+export const HOME_ORDER_PAGES = 6;
+/**
+ * Batch 63 review (F24, v15: Home "At least 46 · counted from the most recent orders only" while
+ * Orders listed more): Home reads the Orders list as Orders does, page after page, until every
+ * order listed under today is read — the Store's own count of today's orders (the Orders header's
+ * "N orders today") is reached, the list moves on to earlier days, or it ends — so its count of
+ * today's open orders is exact and the same orders Orders lists. A quiet day reads one page, as
+ * before; a busy one a page per 50 orders, at most HOME_ORDER_PAGES. `complete` is false only when
+ * that limit stopped it (the count then says "At least").
+ */
+export async function readTodaysOrders(
+  load: (after: string | null) => Promise<CurrentOrderQueue>,
+  /** The Store's business date, asked once the first page is read (it may arrive meanwhile). */
+  businessDate: string | null | (() => string | null | Promise<string | null>),
+  pages = HOME_ORDER_PAGES,
+): Promise<{ readonly queue: CurrentOrderQueue; readonly complete: boolean }> {
+  const first = await load(null);
+  const today = typeof businessDate === "function" ? await businessDate() : businessDate;
+  if (today === null) return { queue: first, complete: first.nextAfterOrderReference === null };
+  const items = [...first.items];
+  const seen = new Set(items.map((order) => order.orderReference));
+  let last = first;
+  const todays = () => items.filter((order) => order.businessDate === today).length;
+  const allRead = (page: CurrentOrderQueue) => {
+    if (page.nextAfterOrderReference === null) return true;
+    if (first.todayOrderCount !== undefined && todays() >= first.todayOrderCount) return true;
+    // Pages after the earlier days' leftovers list Orders newest first by their own day.
+    const oldest = page.items.at(-1);
+    return oldest !== undefined && oldest.businessDate !== null && oldest.businessDate < today;
+  };
+  for (let read = 1; !allRead(last); read += 1) {
+    if (read >= pages)
+      return {
+        queue: { ...first, items, nextAfterOrderReference: last.nextAfterOrderReference },
+        complete: false,
+      };
+    last = await load(last.nextAfterOrderReference);
+    for (const order of last.items)
+      if (!seen.has(order.orderReference)) {
+        seen.add(order.orderReference);
+        items.push(order);
+      }
+  }
+  return {
+    queue: { ...first, items, nextAfterOrderReference: last.nextAfterOrderReference },
+    complete: true,
+  };
+}
 export function summarizeOrders(
   queue: CurrentOrderQueue,
   now = Date.now(),
   day: OrdersBusinessDay | null = null,
+  /**
+   * F24: every order listed under today was read (readTodaysOrders); the count is then exact.
+   * Absent: only this page was read, and a next page makes it a lower bound.
+   */
+  complete?: boolean,
 ): OrdersSummary {
   const earlier = queue.items.filter((order) => earlierDayUnfinished(order, day));
   // Owner 2026-11-04 walkthrough: a pickup closed as not collected keeps its phase but is finished.
   const open = queue.items.filter(
     (order) => openPhases.has(order.currentPhase ?? "") && !order.pickupNotCollected,
   );
+  // F24: once today's whole list is read, the number is today's open orders — those Orders lists
+  // under today (a table of an earlier day that sent a round today included); the earlier days'
+  // orders not finished are said apart, as Orders and Tables do.
+  const counted =
+    complete === undefined || day === null
+      ? open
+      : open.filter(
+          (order) =>
+            (order.listedBusinessDate ?? order.businessDate) === day.businessDate &&
+            !earlierDayUnfinished(order, day),
+        );
   const dineIn = open.filter((order) => order.orderType === "DineIn");
   const rounds = roundsAwaitingAcceptance(queue, now, paidRoundUrgentMinutes);
   return {
-    open: open.length,
+    open: counted.length,
     awaitingAcceptance: ordersAwaitingAcceptance(queue),
     earlierUnfinished: queue.items.filter(
       (order) => order.earlierOpenPickup && order.kitchenPhase !== "Ready",
@@ -398,7 +463,7 @@ export function summarizeOrders(
       ).length,
     ),
     dineIn: dineIn.length > 0,
-    more: queue.nextAfterOrderReference !== null,
+    more: complete === undefined ? queue.nextAfterOrderReference !== null : !complete,
     servedDineIn: new Set(
       queue.items
         .filter((order) => order.orderType === "DineIn" && order.currentPhase === "Fulfilled")
@@ -623,6 +688,15 @@ export function OverviewToday({
           label={t("Open orders")}
           read={state.orders}
           value={(o) => countShown(o.open, o.more, t("the most recent orders"))}
+          // F24: the earlier days' orders not finished are not in today's number; said apart, with
+          // the number Orders shows for them.
+          detail={(o) =>
+            (o.earlier?.total ?? 0) > 0
+              ? t("Not counted: {orders} from earlier days", {
+                  orders: countOf(o.earlier?.total ?? 0, "order"),
+                })
+              : null
+          }
           href="/operations/orders"
         />
         <Count
@@ -1672,12 +1746,33 @@ export function StoreOverview({
       await Promise.all([
         permitted.orders
           ? read(
-              async () =>
-                summarizeOrders(
-                  await clients.orders.load(null, controller.signal, { csrf, storeReference }),
+              async () => {
+                // F24: every order listed under today, read as Orders reads them. On opening, the
+                // Store's day may still be on its way: it is waited for a moment (within the time
+                // Home waits to show its reads together), never instead of the count.
+                const read = await readTodaysOrders(
+                  (after) =>
+                    after === null
+                      ? clients.orders.load(null, controller.signal, { csrf, storeReference })
+                      : clients.orders.load(after, controller.signal),
+                  async () => {
+                    for (
+                      let waited = 0;
+                      ordersDayRef.current === null && waited < 1_500;
+                      waited += 100
+                    )
+                      await new Promise((done) => setTimeout(done, 100));
+                    return ordersDayRef.current?.businessDate ?? null;
+                  },
+                );
+                const day = ordersDayRef.current;
+                return summarizeOrders(
+                  read.queue,
                   Date.now(),
-                  ordersDayRef.current,
-                ),
+                  day,
+                  day === null ? undefined : read.complete,
+                );
+              },
               (orders) => setState((s) => ({ ...s, orders })),
             )
           : null,

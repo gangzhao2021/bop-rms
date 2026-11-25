@@ -10544,6 +10544,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Older configuration history": "更早的配置记录",
   // b40 (v15 b39 live): Home counts tonight's tables apart from earlier days'.
   "Not counted: {tables} from earlier days": "不计入：{tables}来自较早营业日",
+  "Not counted: {orders} from earlier days": "不计入：{orders}来自较早营业日",
   // b40: a dish taken off because it sold out says why, as the guest's page does.
   "Sold out · taken off the bill, not charged": "已售罄 · 已从账单删除，不收费",
   // b41 (v15 b40 live): the Brand pages' frame and its states, in staff words.

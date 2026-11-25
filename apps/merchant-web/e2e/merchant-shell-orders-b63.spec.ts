@@ -701,6 +701,86 @@ for (const language of ["en", "zh-Hans"] as const)
     });
   }
 
+/**
+ * F24 (batch 63 review): v15 Home said "At least 46 · counted from the most recent orders only".
+ * A Store with 60 orders today (38 still open) and 5 open from yesterday: Home reads both pages of
+ * today's orders as Orders lists them and says exactly 38, with yesterday's said apart.
+ */
+for (const language of ["en", "zh-Hans"] as const)
+  for (const [width, height] of sizes)
+    test(`@production F24 Home counts today's open orders exactly across Orders pages, ${language} at ${width}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height });
+      const startsAt = new Date(Date.now() - 6 * 3_600_000);
+      const businessDate = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "America/Toronto",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(startsAt);
+      const yesterday = new Date(Date.parse(businessDate + "T12:00:00Z") - 86_400_000)
+        .toISOString()
+        .slice(0, 10);
+      const dated = (n: number, date: string, open: boolean) =>
+        order(n, {
+          businessDate: date,
+          listedBusinessDate: date,
+          currentPhase: open ? "Accepted" : "Fulfilled",
+          submittedAt:
+            date === businessDate
+              ? minutesAgo(30)
+              : startsAt.toISOString().replace(/T.*/u, "T03:00:00.000Z"),
+        });
+      // Newest first: today's 60 (the first 38 open), then yesterday's 5 (all open).
+      const today = Array.from({ length: 60 }, (_, n) =>
+        dated(0x900 - n, businessDate, n < 30 || (n >= 50 && n < 58)),
+      );
+      const earlier = Array.from({ length: 5 }, (_, n) => dated(0x800 - n, yesterday, true));
+      const first = today.slice(0, 50);
+      const second = [...today.slice(50), ...earlier];
+      const reads: string[] = [];
+      await inLanguage(page, language);
+      await quietFrame(page);
+      await page.route("**/merchant/business-day", (route) =>
+        route.fulfill({
+          headers,
+          json: {
+            businessDate,
+            startsAt: startsAt.toISOString(),
+            endsAt: new Date(startsAt.getTime() + 24 * 3_600_000).toISOString(),
+            timeZone: "America/Toronto",
+            observedAt: new Date().toISOString(),
+          },
+        }),
+      );
+      for (const pattern of ["**/merchant/orders?*", "**/merchant/orders"])
+        await page.route(pattern, (route) => {
+          const after = new URL(route.request().url()).searchParams.get("after");
+          reads.push(after ?? "first");
+          return route.fulfill({
+            headers,
+            json:
+              after === null
+                ? {
+                    items: first,
+                    nextAfterOrderReference: first.at(-1)?.orderReference ?? null,
+                    todayOrderCount: 60,
+                  }
+                : { items: second, nextAfterOrderReference: null },
+          });
+        });
+      await page.goto("/app");
+      const count = page.locator(".overview-counts li").filter({
+        has: page.getByRole("link", { name: language === "en" ? "Open orders" : "未完成的订单" }),
+      });
+      await expect(count.locator(".overview-count__value")).toHaveText("38");
+      await expect(count.locator(".overview-count__qualifier")).toHaveCount(0);
+      await expect(count.locator(".overview-count__note")).toHaveCount(0);
+      expect(reads.filter((read) => read !== "first").length).toBeGreaterThan(0);
+      await noSideScroll(page);
+    });
+
 for (const language of ["en", "zh-Hans"] as const)
   test(`@production F21 the phone's scrolling tabs keep every focus ring whole, ${language}`, async ({
     page,

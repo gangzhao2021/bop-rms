@@ -18,6 +18,7 @@ import {
   initialOverviewState,
   summarizeExceptions,
   summarizeOrders,
+  readTodaysOrders,
   earlierOrdersText,
   summarizePickups,
   summarizeTables,
@@ -38,6 +39,96 @@ import {
 } from "./paid-round-wait.js";
 import { setLanguageForTest } from "./i18n/i18n.js";
 import { StoreBusinessDayContext } from "./StoreBusinessDay.js";
+
+describe("Batch 63 review (F24): Home's open orders, exact from the Orders list", () => {
+  const queue = parseCurrentOrderQueue(currentOrderQueueFixture(), null);
+  const [base] = queue.items;
+  if (base === undefined) throw new Error("fixture has an order");
+  const ref = (n: number) => "018f7600-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const today = "2026-11-24";
+  const day = { businessDate: today, startsAt: "2026-11-24T09:00:00.000Z" };
+  const order = (n: number, businessDate: string, currentPhase = "Accepted") => ({
+    ...base,
+    orderReference: ref(n),
+    businessDate,
+    listedBusinessDate: businessDate,
+    currentPhase,
+    pickupNotCollected: false,
+    heldStock: null,
+    earlierOpenPickup: false,
+  });
+  /** v15 TM2: 89 orders today, 46 open; 50 a page, newest first. */
+  const todays = Array.from({ length: 89 }, (_, n) =>
+    order(1000 - n, today, n < 46 ? "Accepted" : "Fulfilled"),
+  );
+  const older = Array.from({ length: 30 }, (_, n) => order(500 - n, "2026-11-23", "Accepted"));
+  const all = [...todays, ...older];
+  const pages = [all.slice(0, 50), all.slice(50, 100), all.slice(100)];
+  const load = (after: string | null) => {
+    const at =
+      after === null
+        ? 0
+        : pages.findIndex(
+            (page) =>
+              page[0] &&
+              all.indexOf(page[0]) === all.findIndex((o) => o.orderReference === after) + 1,
+          );
+    const items = pages[at] ?? [];
+    const next = at < pages.length - 1 ? (items.at(-1)?.orderReference ?? null) : null;
+    reads.push(after);
+    return Promise.resolve({
+      ...queue,
+      items,
+      nextAfterOrderReference: next,
+      ...(at === 0 ? { todayOrderCount: 89 } : {}),
+    } as typeof queue);
+  };
+  let reads: (string | null)[] = [];
+
+  it("reads on until every order of today is read, and counts today's open orders exactly", async () => {
+    reads = [];
+    const read = await readTodaysOrders(load, today);
+    // Two pages hold today's 89; the third (yesterday's) is never read.
+    expect(reads).toHaveLength(2);
+    expect(read.complete).toBe(true);
+    const summary = summarizeOrders(read.queue, Date.now(), day, read.complete);
+    expect(summary.open).toBe(46);
+    expect(summary.more).toBe(false);
+    expect(countShown(summary.open, summary.more, "the most recent orders")).toEqual({
+      qualifier: null,
+      number: "46",
+      note: null,
+    });
+  });
+
+  it("the first page alone said only a lower bound", () => {
+    const first = { ...queue, items: pages[0] ?? [], nextAfterOrderReference: ref(951) };
+    const summary = summarizeOrders(first as typeof queue, Date.now(), day);
+    expect(summary.more).toBe(true);
+    expect(countShown(summary.open, summary.more, "x").qualifier).toBe("At least");
+  });
+
+  it("stops at its page limit and then says At least; one page when today fits on it", async () => {
+    reads = [];
+    const capped = await readTodaysOrders(load, today, 1);
+    expect(capped.complete).toBe(false);
+    expect(summarizeOrders(capped.queue, Date.now(), day, capped.complete).more).toBe(true);
+    reads = [];
+    const quiet = await readTodaysOrders(
+      () =>
+        Promise.resolve({
+          ...queue,
+          items: [order(1, today), order(2, today, "Ready"), order(3, "2026-11-23")],
+          nextAfterOrderReference: null,
+          todayOrderCount: 2,
+        } as typeof queue),
+      today,
+    );
+    expect(quiet.complete).toBe(true);
+    // Yesterday's open order is not today's work: not in the number.
+    expect(summarizeOrders(quiet.queue, Date.now(), day, quiet.complete).open).toBe(2);
+  });
+});
 
 describe("WP-2423 P2 store overview", () => {
   it("Owner 2026-11-04: a pickup closed as not collected is not an open order", () => {
