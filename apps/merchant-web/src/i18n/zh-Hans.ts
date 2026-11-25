@@ -661,7 +661,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Combo: {comboName} · last dish of it": "套餐：{comboName} · 这道做好就齐了",
   "Combo: {comboName} · also {dishes}": "套餐：{comboName} · 还差{dishes}",
   "Combo: {comboName} · {count} more dishes": "套餐：{comboName} · 还差 {count} 道",
-  "Added · {ago}": "加菜 · {ago}",
   "{count} more": "还有 {count} 条",
   "Taken by the kitchen": "厨房已接手",
   "More orders are waiting. They show as you finish these.": "还有订单在等，做完这些就会显示。",
