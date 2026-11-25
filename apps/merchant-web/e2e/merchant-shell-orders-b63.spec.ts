@@ -347,10 +347,29 @@ const line = (n: number, name: string, taxMinor: string) => ({
   canCancel: false,
   cancellation: null,
 });
+/**
+ * Round 2 F27: the same table once the $3.00 to the card went back too ($11.75 given back, nothing
+ * on its way). The server's record holds a table's refund to the card as soon as it is sent,
+ * answered or not, so a detail whose record names each refund's way has nothing on its way.
+ */
+const givenBackTable = {
+  ...refundedTable,
+  tableBill: {
+    totalMinor: "2825",
+    paid: { amountMinor: "2825", method: "Online", refundedMinor: "1175" },
+  },
+};
+const toCardOnItsWay = {
+  method: "Online",
+  amountMinor: "300",
+  by: "You",
+  approvedBy: null,
+  at: "2026-11-25T04:10:00.000Z",
+};
 const refundedDetail = {
   screenId: "OPS-ORDER-DETAIL",
   pickupContact: null,
-  order: refundedTable,
+  order: givenBackTable,
   lines: {
     items: [line(1, "Beef noodles (TEST)", "163"), line(2, "Beef noodles (TEST)", "162")],
     totals: {
@@ -384,6 +403,7 @@ const refundedDetail = {
         approvedBy: null,
         at: "2026-11-25T03:59:00.000Z",
       },
+      toCardOnItsWay,
     ],
     writeOff: null,
     paidOnlineByGuest: true,
@@ -467,7 +487,7 @@ for (const language of ["en", "zh-Hans"] as const)
       page,
     }) => {
       await page.setViewportSize({ width, height });
-      await ordersPage(page, language, [refundedTable], (page) =>
+      await ordersPage(page, language, [givenBackTable], (page) =>
         page.route("**/merchant/orders/detail*", (route) =>
           route.fulfill({ headers, json: refundedDetail }),
         ),
@@ -479,12 +499,46 @@ for (const language of ["en", "zh-Hans"] as const)
       const zh = language === "zh-Hans";
       await expect(
         labels.filter({ hasText: zh ? /^已退到卡上 · / : /^Refunded to card · / }),
-      ).toHaveText(zh ? /^已退到卡上 · (.* )?22:59$/u : /^Refunded to card · (.* )?22:59$/u);
+      ).toHaveText(
+        zh
+          ? [/^已退到卡上 · (.* )?22:59$/u, /^已退到卡上 · (.* )?23:10$/u]
+          : [/^Refunded to card · (.* )?22:59$/u, /^Refunded to card · (.* )?23:10$/u],
+      );
       await expect(
         labels.filter({ hasText: zh ? /^已退现金 · / : /^Cash given back · / }),
       ).toHaveText(zh ? /^已退现金 · (.* )?22:28$/u : /^Cash given back · (.* )?22:28$/u);
       // Never the bare word with no way or time.
       await expect(labels.filter({ hasText: zh ? /^已退款$/u : /^Refunded$/u })).toHaveCount(0);
+      await noSideScroll(page);
+    });
+
+for (const language of ["en", "zh-Hans"] as const)
+  for (const [width, height] of sizes)
+    test(`@production F27 round 2 money still on its way to the card names no refund's way, ${language} at ${width}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height });
+      // $8.75 given back and $3.00 sent to the card with no answer yet: the record holds all three.
+      await ordersPage(page, language, [refundedTable], (page) =>
+        page.route("**/merchant/orders/detail*", (route) =>
+          route.fulfill({ headers, json: { ...refundedDetail, order: refundedTable } }),
+        ),
+      );
+      const panel = page.locator("aside.order-panel");
+      if (!(await panel.isVisible()))
+        await page.locator("li.order-row .order-row__open").first().click();
+      const zh = language === "zh-Hans";
+      const rows = panel.locator(".order-lines-totals > div");
+      // All the money still shown: $8.75 refunded, $3.00 on its way, never a way, time or reason.
+      await expect(
+        rows.filter({ has: page.locator("dt", { hasText: zh ? /^已退款$/u : /^Refunded$/u }) }),
+      ).toContainText("$8.75");
+      await expect(
+        panel.locator(".order-lines-totals dt").filter({
+          hasText: zh ? /已退到卡上|已退现金/u : /Refunded to card|Cash given back/u,
+        }),
+      ).toHaveCount(0);
+      await expect(rows.filter({ hasText: "$3.00" })).toHaveCount(1);
       await noSideScroll(page);
     });
 
@@ -516,6 +570,13 @@ const refundedTablePayment = {
         byLabel: "You",
         state: "Refunded",
       },
+      {
+        amountMinor: "300",
+        reasonCode: "CUSTOMER_REQUEST",
+        requestedAt: "2026-11-25T04:10:00.000Z",
+        byLabel: "You",
+        state: "Refunded",
+      },
     ],
     refundableMinor: "1650",
   },
@@ -528,7 +589,7 @@ for (const language of ["en", "zh-Hans"] as const)
       page,
     }) => {
       await page.setViewportSize({ width, height });
-      await ordersPage(page, language, [refundedTable], async (page) => {
+      await ordersPage(page, language, [givenBackTable], async (page) => {
         await page.route("**/merchant/orders/detail*", (route) =>
           route.fulfill({ headers, json: refundedDetail }),
         );
@@ -550,7 +611,11 @@ for (const language of ["en", "zh-Hans"] as const)
         panel
           .locator(".order-lines-totals dt")
           .filter({ hasText: zh ? /^已退到卡上/ : /^Refunded to card/ }),
-      ).toHaveText(zh ? "已退到卡上 · 客人要求 · 22:59" : "Refunded to card · Guest asked · 22:59");
+      ).toHaveText(
+        zh
+          ? ["已退到卡上 · 客人要求 · 22:59", "已退到卡上 · 客人要求 · 23:10"]
+          : ["Refunded to card · Guest asked · 22:59", "Refunded to card · Guest asked · 23:10"],
+      );
       // The line and its amount stay inside the row with room for Linux fonts (about 40 px), and
       // the amount is never pushed under or over the words.
       const fit = await cash.evaluate((row) => {
@@ -592,8 +657,8 @@ for (const language of ["en", "zh-Hans"] as const)
       expect(Math.abs(fit.amountTop - fit.termTop)).toBeLessThanOrEqual(4);
       // On one line with at least 40 px to spare for DejaVu Sans, or really wrapped inside its own
       // column (more than one line, nothing cut off).
+      // (The wrapped case is held by the termOverflow check above.)
       if (fit.lines <= 1) expect(fit.room).toBeGreaterThanOrEqual(40);
-      else expect(fit.lines).toBeGreaterThan(1);
       await noSideScroll(page);
     });
 
@@ -605,12 +670,7 @@ const machineRefundedTable = {
   ...refundedTable,
   tableBill: {
     totalMinor: "2825",
-    paid: {
-      amountMinor: "2825",
-      method: "Online",
-      refundedMinor: "1075",
-      refundPendingMinor: "300",
-    },
+    paid: { amountMinor: "2825", method: "Online", refundedMinor: "1375" },
   },
 };
 const machineRefundedDetail = {
