@@ -193,8 +193,9 @@ test("@production an approver sees each item's customer description and photo, w
   await page.goto("/app/commerce/menus/" + id(40));
   const review = page.getByRole("region", { name: "What customers will see" });
   await expect(review).toBeVisible();
+  // Batch 64: a 2026 date is written without its year only while it is 2026; either reads.
   await expect(review).toContainText(
-    "Compared with the menu customers see now (published Fri, Oct 16 14:05): 1 new item, 1 description changed, 1 photo changed, 1 item removed.",
+    /Compared with the menu customers see now \(published Fri, Oct 16(?:, 2026)? 14:05\): 1 new item, 1 description changed, 1 photo changed, 1 item removed\./u,
   );
   const items = review.getByRole("listitem").filter({ has: page.getByRole("heading") });
   await expect(items).toHaveCount(3);
