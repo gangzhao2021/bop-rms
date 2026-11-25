@@ -1,7 +1,12 @@
 import { expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { roundBillLines } from "./CurrentOrderQueuePage.js";
-import { checkoutCompMinor, roundTaxLine } from "./TableCheckout.js";
+import { roundBillLines, roundDishComps } from "./CurrentOrderQueuePage.js";
+import {
+  checkoutCompMinor,
+  checkoutDishMinor,
+  checkoutOptionsText,
+  roundTaxLine,
+} from "./TableCheckout.js";
 
 // b26 (v15 live25, TM2 'L25 TCP (TEST)'): round 1 kept Smashed cucumber $6.25 (comped $7.06,
 // $6.25 before tax), round 3 Soy milk $3.25 + Smashed cucumber $6.25 at $10.74 on the bill.
@@ -85,4 +90,99 @@ it("live25: checkout's round lines (dishes and comps before tax, Tax) add up to 
     ),
   ).toBe(false);
   expect(roundTaxLine(round([], "0", "0"))).toBe(false);
+});
+
+it("b63 review: a comped dish's one amount never takes a tax-included comp off a pre-tax price", () => {
+  const comp = { kind: "Comp", percent: null, amountMinor: "706", netMinor: "625" } as const;
+  expect(checkoutDishMinor({ subtotalMinor: "625", reduction: comp })).toBe("0");
+  expect(checkoutDishMinor({ subtotalMinor: "625", reduction: null })).toBe("625");
+  // An older server sends no comp before tax: no subtraction (the comp keeps its own amount).
+  expect(checkoutDishMinor({ subtotalMinor: "625", reduction: { ...comp, netMinor: null } })).toBe(
+    null,
+  );
+});
+
+it("b63 review (T15): a dish's options read as on the Tables rounds", () => {
+  expect(
+    checkoutOptionsText([
+      { name: "Hot", quantity: 1 },
+      { name: "Extra egg", quantity: 2 },
+    ]),
+  ).toBe("Hot · Extra egg × 2");
+});
+
+// b63 review (F36, T6): on the Tables rounds the comped dish read "$6.25", the round "Comps and
+// discounts, before tax −$6.25" and the order "−$7.06" under its Total — one comp in three forms.
+it("b63 review: a comped dish reads Comped $0.00 on its round, with no before-tax comp line", () => {
+  const line = (reference: string, net: string, quantity = 1) => ({
+    orderItemReference: reference,
+    quantity,
+    subtotal: { amountMinor: net, currencyCode: "CAD" },
+    name: reference,
+  });
+  const batch = (comps: unknown[]) => ({ compedItems: comps }) as unknown as Batch;
+  const round = (subtotal: string) => ({
+    orderBatchReference: "r1",
+    subtotalMinor: subtotal,
+    taxMinor: "0",
+    totalMinor: subtotal,
+  });
+  const comp = (reference: string, more: Record<string, unknown> = {}) => ({
+    orderItemReference: reference,
+    kind: "Comp",
+    percent: null,
+    amountMinor: "706",
+    reasonCode: "FOOD_QUALITY",
+    ...more,
+  });
+  const cucumber = line("cucumber", "625"),
+    milk = line("milk", "325"),
+    noodles = line("noodles", "2500", 2);
+  // Comped whole: $0.00, "Comped"; the soy milk is not comped.
+  expect(
+    roundDishComps(batch([comp("cucumber")]), [cucumber, milk] as unknown as Lines, round("325")),
+  ).toEqual(new Map([["cucumber", { afterMinor: 0n, word: "Comped" }]]));
+  // 1 of 2 comped: the line keeps what the bill still charges for it.
+  expect(
+    roundDishComps(
+      batch([comp("noodles", { compedQuantity: 1, lineQuantity: 2 })]),
+      [noodles, milk] as unknown as Lines,
+      round(String(1250 + 325)),
+    ),
+  ).toEqual(new Map([["noodles", { afterMinor: 1250n, word: "1 of 2 comped" }]]));
+  // A percent off: what the bill took off is that dish's.
+  expect(
+    roundDishComps(
+      batch([comp("cucumber", { kind: "Percent", percent: 20 })]),
+      [cucumber, milk] as unknown as Lines,
+      round(String(500 + 325)),
+    ),
+  ).toEqual(new Map([["cucumber", { afterMinor: 500n, word: "20% off" }]]));
+  // Two dishes discounted in part can't be told apart: the round keeps its before-tax line.
+  expect(
+    roundDishComps(
+      batch([
+        comp("cucumber", { kind: "Percent", percent: 20 }),
+        comp("milk", { kind: "Percent", percent: 20 }),
+      ]),
+      [cucumber, milk] as unknown as Lines,
+      round("760"),
+    ),
+  ).toBeNull();
+  // Figures that do not agree are never shown as a dish's amount.
+  expect(
+    roundDishComps(batch([comp("cucumber")]), [cucumber, milk] as unknown as Lines, round("300")),
+  ).toBeNull();
+  // With the dishes after their comps, the round's lines are the dishes and Tax only.
+  const html = text(
+    roundBillLines(
+      comped,
+      [dish("Smashed cucumber", "625")] as unknown as Lines,
+      { orderBatchReference: "r1", subtotalMinor: "0", taxMinor: "0", totalMinor: "0" },
+      "CAD",
+      true,
+    ),
+  );
+  expect(html).not.toContain("before tax");
+  expect(html).toContain("Tax|");
 });

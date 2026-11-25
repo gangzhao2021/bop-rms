@@ -176,6 +176,11 @@ export interface DiningTableBill {
       readonly orderItemReference: string;
       readonly quantity: number;
       readonly displayName: string;
+      /**
+       * b63 review (T15): the options chosen ("Hot", "Extra egg × 2"), as frozen on the Order in
+       * the staff's language, so checkout tells two lines of the same dish apart. Absent: none.
+       */
+      readonly options?: readonly { readonly name: string; readonly quantity: number }[];
       readonly subtotalMinor: string;
       readonly totalMinor: string;
       /**
@@ -891,6 +896,15 @@ export async function readDiningTableBill(
             orderItemReference: String(item.orderItemReference),
             quantity: item.quantity,
             displayName: item.displayName,
+            ...(item.options.length > 0
+              ? {
+                  options: Object.freeze(
+                    item.options.map((option) =>
+                      Object.freeze({ name: option.displayName, quantity: option.quantity }),
+                    ),
+                  ),
+                }
+              : {}),
             subtotalMinor: item.subtotal.amountMinor.toString(),
             totalMinor: (item.total.amountMinor - (off(item)?.totalMinor ?? 0n)).toString(),
             reduction:

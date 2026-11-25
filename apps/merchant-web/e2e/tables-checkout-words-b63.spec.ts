@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { atWidth, floor, headers, splitBill, widths, zh } from "./tables-b63-fixture";
+import { atWidth, box, floor, headers, splitBill, widths, zh } from "./tables-b63-fixture";
 
 /**
  * b63 design review of v15 (bundle E): F40 (a part's cash), T15 (words) and T16 (the payment's
@@ -29,8 +29,13 @@ for (const language of ["en", "zh-Hans"] as const) {
     );
     const bill = await splitBill();
     // T15: two of a dish, as the round lines say it.
-    const [first] = (bill.rounds as { items: { quantity: number }[] }[])[0]?.items ?? [];
-    if (first !== undefined) first.quantity = 2;
+    const [first] =
+      (bill.rounds as { items: { quantity: number; options?: unknown }[] }[])[0]?.items ?? [];
+    if (first !== undefined) {
+      first.quantity = 2;
+      // b63 review (T15): the dish's options, on a grey line under it.
+      first.options = [{ name: "Hot (TEST)", quantity: 1 }];
+    }
     await page.route("**/merchant/dining/table-bill", (route) =>
       route.fulfill({ headers, json: bill }),
     );
@@ -58,6 +63,21 @@ for (const language of ["en", "zh-Hans"] as const) {
     const panel = await openT2(page, chinese);
     const checkout = panel.getByRole("region", { name: chinese ? "结账" : "Checkout" });
     await expect(checkout.locator(".table-checkout__rounds")).toContainText("2 × Mapo tofu (TEST)");
+    const options = checkout.locator(".table-checkout__options");
+    await expect(options).toHaveText("Hot (TEST)");
+    for (const width of widths) {
+      await atWidth(page, width);
+      const [look, dish] = await Promise.all([
+        options.evaluate((element) => {
+          const style = getComputedStyle(element);
+          return [style.fontSize, style.fontWeight];
+        }),
+        box(checkout.locator(".table-checkout__rounds li li").first()),
+      ]);
+      expect(look, `${width}`).toEqual(["14px", "400"]);
+      // On a line of its own under the dish's name.
+      expect((await box(options)).y, `${width}`).toBeGreaterThan(dish.y + 8);
+    }
     await checkout
       .getByRole("button", { name: chinese ? "收这一份" : "Collect this part" })
       .first()

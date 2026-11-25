@@ -64,6 +64,8 @@ export interface TableBill {
       readonly orderItemReference: string;
       readonly quantity: number;
       readonly displayName: string;
+      /** b63 review (T15): the options chosen ("Hot"); empty when none (or an older server). */
+      readonly options: readonly { readonly name: string; readonly quantity: number }[];
       readonly subtotalMinor: string;
       readonly totalMinor: string;
       /** WP-2423 item 8 ① segment 2: a manager's comp or discount (tax included), or null. */
@@ -329,6 +331,23 @@ export function parseTableBill(value: unknown): TableBill {
                     ? (item.quantity as number)
                     : invalid(),
                 displayName: text(item.displayName),
+                options:
+                  item.options === undefined
+                    ? Object.freeze([])
+                    : Array.isArray(item.options) && item.options.length <= 50
+                      ? Object.freeze(
+                          item.options.map((option: Record<string, unknown>) =>
+                            Object.freeze({
+                              name: text(option.name),
+                              quantity:
+                                Number.isSafeInteger(option.quantity) &&
+                                (option.quantity as number) >= 1
+                                  ? (option.quantity as number)
+                                  : invalid(),
+                            }),
+                          ),
+                        )
+                      : invalid(),
                 subtotalMinor: amount(item.subtotalMinor),
                 totalMinor: amount(item.totalMinor),
                 reduction: reductionOf(item.reduction),

@@ -6419,6 +6419,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Reading the bill…": "正在读取账单…",
   "Round {number}": "第 {number} 轮",
   "Total with tax": "含税合计",
+  // b63 review (F36): a comp record's amount, already in the figures under it.
+  "{amount} with tax": "含税 {amount}",
   "A round is still being sent or was just changed. Wait a moment and read the bill again.":
     "有一轮还在送出或刚有改动。请稍等后重新读取账单。",
   "Read the bill again": "重新读取账单",

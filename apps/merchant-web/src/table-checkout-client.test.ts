@@ -191,3 +191,47 @@ describe("batch 60: a line comped in part, at checkout", () => {
       expect(() => parseTableBill(bill(noodles(broken)))).toThrow();
   });
 });
+
+describe("b63 review (T15): a dish's options at checkout", () => {
+  const ref = (n: number) => "01909969-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const dish = (options: unknown) => ({
+    orderItemReference: ref(9),
+    quantity: 1,
+    displayName: "Hot and sour soup (TEST)",
+    ...(options === undefined ? {} : { options }),
+    subtotalMinor: "800",
+    totalMinor: "904",
+    reduction: null,
+  });
+  const bill = (item: unknown) => ({
+    diningSessionReference: ref(2),
+    sessionPhase: "Closing",
+    sessionVersion: 7,
+    paymentTiming: "PayLater",
+    tableLabel: "T5",
+    orderReference: ref(3),
+    rounds: [
+      {
+        roundNumber: 1,
+        items: [item],
+        subtotalMinor: "800",
+        taxMinor: "104",
+        totalMinor: "904",
+        paid: false,
+      },
+    ],
+    owed: { subtotalMinor: "800", taxMinor: "104", totalMinor: "904" },
+    consistent: true,
+    settlement: null,
+  });
+  it("reads them strictly, and none from an older server", () => {
+    const options = [
+      { name: "Hot", quantity: 1 },
+      { name: "Extra egg", quantity: 2 },
+    ];
+    expect(parseTableBill(bill(dish(options))).rounds[0]?.items[0]?.options).toEqual(options);
+    expect(parseTableBill(bill(dish(undefined))).rounds[0]?.items[0]?.options).toEqual([]);
+    for (const broken of [[{ name: "Hot", quantity: 0 }], [{ name: 7, quantity: 1 }], "Hot"])
+      expect(() => parseTableBill(bill(dish(broken)))).toThrow();
+  });
+});

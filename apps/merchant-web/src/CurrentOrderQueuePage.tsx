@@ -71,7 +71,7 @@ import { serviceOperationReference } from "./service-control-client.js";
 import { StatePanel } from "@bop-rms/ui";
 import { playKitchenChime } from "./alert-chime.js";
 import { ClockStyleContext, type ClockStyle, storeTime } from "./StoreTime.js";
-import { compRecordLabel } from "./ItemCompAction.js";
+import { compedText, compRecordLabel, partCompedText } from "./ItemCompAction.js";
 import {
   counterAwaitingCardMachine,
   counterPayByText,
@@ -382,6 +382,69 @@ export function orderSoldOutNowText(
 }
 
 /**
+ * b63 review (F36, T6): on the Tables rounds a comped dish is marked on its own line ("Comped
+ * $0.00") with what it is charged after its comp, before tax, so the round's dishes and its Tax
+ * add up to it without a separate "before tax" comp line. Each dish's share of what the comps
+ * took off before tax (`off`, the bill's own figure) is exact: a dish comped whole loses its whole
+ * price, and the one dish comped otherwise (in part, by percent or amount, or with points) takes
+ * the rest. Null when that can't be said exactly (two such dishes in a round, or figures that do
+ * not agree): the round then keeps its "before tax" comp line.
+ */
+export function roundDishComps(
+  batch: QueuedOrder["batches"][number],
+  charged: CurrentOrderDetail["lines"]["items"],
+  bill: OrderBillRound | undefined,
+): ReadonlyMap<string, { readonly afterMinor: bigint; readonly word: string }> | null {
+  if (bill === undefined || batch.compedItems.length === 0) return null;
+  const dishes = charged.reduce((sum, item) => sum + BigInt(item.subtotal.amountMinor), 0n);
+  const off = dishes - BigInt(bill.subtotalMinor);
+  if (off <= 0n) return null;
+  const found = new Map<string, { afterMinor: bigint; word: string }>();
+  let rest = off,
+    open: { item: (typeof charged)[number]; word: string } | null = null;
+  for (const item of charged) {
+    const comps = batch.compedItems.filter(
+      (comp) => comp.orderItemReference === item.orderItemReference,
+    );
+    if (comps.length === 0) continue;
+    const comped = comps.reduce(
+      (sum, comp) =>
+        comp.kind === "Comp" && comp.reasonCode !== "POINTS_REDEMPTION"
+          ? sum + (comp.compedQuantity ?? item.quantity)
+          : sum,
+      0,
+    );
+    const whole =
+      comps.every((comp) => comp.kind === "Comp" && comp.reasonCode !== "POINTS_REDEMPTION") &&
+      comped >= item.quantity;
+    const word = comps.every((comp) => comp.reasonCode === "POINTS_REDEMPTION")
+      ? t("Points used")
+      : whole
+        ? t("Comped")
+        : comps.every((comp) => comp.kind === "Comp")
+          ? partCompedText(Math.min(comped, item.quantity), item.quantity)
+          : [...new Set(comps.map((comp) => compedText(comp.kind, comp.percent)))].join(" · ");
+    if (whole) {
+      rest -= BigInt(item.subtotal.amountMinor);
+      found.set(item.orderItemReference, { afterMinor: 0n, word });
+    } else if (open !== null) return null;
+    else open = { item, word };
+  }
+  // Comps on dishes not charged in this round can't be placed.
+  if (
+    batch.compedItems.some(
+      (comp) => !charged.some((item) => item.orderItemReference === comp.orderItemReference),
+    )
+  )
+    return null;
+  if (open === null) return rest === 0n ? found : null;
+  const price = BigInt(open.item.subtotal.amountMinor);
+  if (rest <= 0n || rest > price) return null;
+  found.set(open.item.orderItemReference, { afterMinor: price - rest, word: open.word });
+  return found;
+}
+
+/**
  * b26 (live25): a round on the table's bill as staff read it on Orders and Tables — its dishes
  * before tax, then what comps (or points) took off them before tax, then its Tax — so the lines add
  * up to the round's total (the bill's figure, tax and the bill's cent included). Nothing when the
@@ -392,6 +455,8 @@ export function roundBillLines(
   charged: CurrentOrderDetail["lines"]["items"],
   bill: OrderBillRound | undefined,
   currencyCode: string,
+  /** b63 review (F36): the comped dishes already read after their comps (roundDishComps). */
+  dishesAfterComps = false,
 ): React.ReactNode {
   if (bill === undefined || charged.length === 0) return null;
   const dishes = charged.reduce((sum, item) => sum + BigInt(item.subtotal.amountMinor), 0n);
@@ -403,7 +468,7 @@ export function roundBillLines(
     orderMoney({ amountMinor: amountMinor.toString(), currencyCode });
   return (
     <>
-      {comped ? (
+      {comped && !dishesAfterComps ? (
         <li className="order-line-bill">
           <span className="order-line-quantity" />
           <span className="order-line-name">
@@ -438,7 +503,16 @@ export function CurrentOrderLines({
   rounds,
   billRounding,
   tableTaken,
+  compRecords,
 }: {
+  /**
+   * b63 review (F36, T6): the Tables panel's comps and discounts, each as one record line with its
+   * amount tax included, above the Total; the comped dishes are then marked on their rounds. Used
+   * only with the bill's rounds (an older server keeps its own list under the order).
+   */
+  readonly compRecords?:
+    | readonly { readonly key: string; readonly label: string; readonly amountMinor: string }[]
+    | undefined;
   /**
    * v15 b15 (DEC-TAX-WHOLE-RECEIPT): an Order on a pay-at-end table — its rounds as the bill
    * charges them (after comps, each round's tax holding its share of the bill's tax rounding), for
@@ -572,6 +646,31 @@ export function CurrentOrderLines({
     checkReferences.add(reference);
     checkLines.set(item.orderItemReference, reference);
   }
+  // The dishes a round charges (none cancelled, taken off or waiting for staff).
+  const roundCharged = (batchReference: string) =>
+    lines.items.filter(
+      (item) =>
+        item.orderBatchReference === batchReference &&
+        item.cancellation === null &&
+        !cancelledBatches?.has(item.orderBatchReference) &&
+        !unpaidLine(item) &&
+        !removedLine(item) &&
+        !waitingLine(item),
+    );
+  // b63 review (F36): on the Tables rounds each comped dish reads after its comp, marked.
+  const dishComps = new Map<string, { readonly afterMinor: bigint; readonly word: string }>();
+  const compsPlaced = new Set<string>();
+  if (compRecords !== undefined && billRounds !== null && rounds !== undefined)
+    for (const batch of rounds.batches) {
+      const placed = roundDishComps(
+        batch,
+        roundCharged(batch.orderBatchReference),
+        billRounds.get(batch.orderBatchReference),
+      );
+      if (placed === null) continue;
+      compsPlaced.add(batch.orderBatchReference);
+      for (const [reference, comp] of placed) dishComps.set(reference, comp);
+    }
   const lineItem = (item: CurrentOrderDetail["lines"]["items"][number]) => (
     <li
       key={item.orderItemReference}
@@ -594,6 +693,11 @@ export function CurrentOrderLines({
                 option.quantity > 1 ? `${option.name} × ${option.quantity}` : option.name,
               )
               .join(" · ")}
+          </span>
+        ) : null}
+        {dishComps.has(item.orderItemReference) ? (
+          <span className="order-line-options order-line-comped">
+            {dishComps.get(item.orderItemReference)?.word}
           </span>
         ) : null}
         {item.ageCheck ? (
@@ -662,7 +766,16 @@ export function CurrentOrderLines({
           </span>
         ) : null}
       </span>
-      <span className="order-line-amount">{orderMoney(item.subtotal)}</span>
+      <span className="order-line-amount">
+        {orderMoney(
+          dishComps.has(item.orderItemReference)
+            ? {
+                amountMinor: String(dishComps.get(item.orderItemReference)?.afterMinor ?? 0n),
+                currencyCode: item.subtotal.currencyCode,
+              }
+            : item.subtotal,
+        )}
+      </span>
       {rounds === undefined ? null : (
         <DiningRoundItemState
           orderItemReference={item.orderItemReference}
@@ -773,16 +886,10 @@ export function CurrentOrderLines({
                         {members.map(lineItem)}
                         {roundBillLines(
                           batch,
-                          members.filter(
-                            (item) =>
-                              item.cancellation === null &&
-                              !cancelledBatches?.has(item.orderBatchReference) &&
-                              !unpaidLine(item) &&
-                              !removedLine(item) &&
-                              !waitingLine(item),
-                          ),
+                          roundCharged(batch.orderBatchReference),
                           billRounds?.get(batch.orderBatchReference),
                           lines.totals.total.currencyCode,
+                          compsPlaced.has(batch.orderBatchReference),
                         )}
                       </ul>
                     )}
@@ -794,6 +901,25 @@ export function CurrentOrderLines({
           </RoundPaymentWaitContext.Provider>
         </KitchenSendingContext.Provider>
       )}
+      {compRecords !== undefined && compRecords.length > 0 && billRounds !== null ? (
+        // b63 review (F36, T6): each comp or discount once, as recorded, with its amount tax
+        // included; the rounds, Tax and Total under it are already after it (never "−" again).
+        <ul className="order-lines-comps" aria-label={t("Comps and discounts")}>
+          {compRecords.map((record) => (
+            <li key={record.key}>
+              <span>{record.label}</span>
+              <span className="bop-amount">
+                {t("{amount} with tax", {
+                  amount: orderMoney({
+                    amountMinor: record.amountMinor,
+                    currencyCode: lines.totals.total.currencyCode,
+                  }),
+                })}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
       <dl className="order-lines-totals">
         <div>
           {/* b15: with comps the bill's subtotal is after them, as checkout prints it. */}

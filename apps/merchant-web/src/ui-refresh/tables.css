@@ -1151,6 +1151,25 @@
   flex: none;
   white-space: nowrap;
 }
+/* b63 review (F36, T6): the comp records above the Total, one line each, its amount with tax. */
+.workspace-page.tables-v3 .order-lines-comps {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 14px;
+}
+.workspace-page.tables-v3 .order-lines-comps li {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  color: var(--bop-color-text-muted);
+}
+.workspace-page.tables-v3 .order-lines-comps li > span:last-child {
+  flex: none;
+  white-space: nowrap;
+}
 .workspace-page.tables-v3 .table-checkout__comp-amount {
   white-space: nowrap;
 }
@@ -1184,6 +1203,13 @@
 }
 .workspace-page.tables-v3 .table-checkout__dish .table-checkout__comp-amount {
   flex: none;
+}
+/* b63 review (T15): the dish's options on a grey 14/400 line of their own under the dish. */
+.workspace-page.tables-v3 .table-checkout__options {
+  flex: 1 0 100%;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
 }
 
 /* WP-2423 item 8 ① segment 3: what to do while offline, under the read-only notice. */

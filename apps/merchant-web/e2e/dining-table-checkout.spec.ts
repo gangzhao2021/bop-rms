@@ -3235,13 +3235,32 @@ for (const language of ["en", "zh-Hans"] as const)
     await expect(rounds.nth(2)).toContainText("$10.74");
     // A round taken off whole has no Tax line: nothing on it is charged.
     await expect(rounds.nth(1).locator(".table-checkout__round-tax")).toHaveCount(0);
-    // The table's order: Total $10.74, comp −$7.06, taken off $14.41 — $32.21 as ordered.
+    // The table's order: Total $10.74, comp $7.06 with tax, taken off $14.41 — $32.21 as ordered.
     const tableOrder = page.getByRole("region", { name: zh ? "这桌的订单" : "This table's order" });
     await expect(tableOrder).toContainText("$14.41");
     await expect(tableOrder).not.toContainText("$14.40");
-    await expect(tableOrder).toContainText("$7.06");
-    await expect(tableOrder).toContainText(
+    // b63 review (F36, T6): one comp in one form — the cucumber marked comped at $0.00 on its
+    // round (no "before tax" comp line), and the comp recorded once, tax included, above Total.
+    await expect(tableOrder).not.toContainText(
       zh ? "免单/折让（税前）" : "Comps and discounts, before tax",
+    );
+    const round1 = tableOrder.getByRole("region", { name: zh ? "第 1 轮" : "Round 1" });
+    await expect(round1.locator(".order-line-comped")).toHaveText(zh ? "已免单" : "Comped");
+    await expect(
+      round1
+        .locator("li")
+        .filter({ has: page.locator(".order-line-comped") })
+        .locator(".order-line-amount"),
+    ).toHaveText("$0.00");
+    const comps = tableOrder.getByRole("list", { name: zh ? "免单/折让" : "Comps and discounts" });
+    await expect(comps.getByRole("listitem")).toHaveCount(1);
+    await expect(comps.getByRole("listitem").first()).toContainText(
+      zh ? "含税 $7.06" : "$7.06 with tax",
+    );
+    await expect(tableOrder).not.toContainText("−$7.06");
+    // Above the Total, never under it.
+    expect((await comps.boundingBox())?.y ?? 0).toBeLessThan(
+      (await tableOrder.locator(".order-lines-totals").first().boundingBox())?.y ?? 0,
     );
     for (const width of [1440, 1024, 390]) {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });

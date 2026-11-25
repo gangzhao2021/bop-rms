@@ -112,6 +112,23 @@ export function TableOrderRounds({
       </p>
     );
   const { detail } = state;
+  // WP-2423 item 8 ① segment 2: comps and discounts, kept on the record (never removed).
+  const compNames = new Map(detail.lines.items.map((line) => [line.orderItemReference, line]));
+  const compRecords = detail.order.batches
+    .flatMap((batch) => batch.compedItems)
+    .map((comp, index) => {
+      const dish = compNames.get(comp.orderItemReference)?.name ?? t("Dish");
+      return {
+        // Batch 60: a line comped in two parts has two records, each listed.
+        key: comp.orderItemReference + ":" + String(index),
+        label: compRecordLabel(dish, comp, timeZone, "Guest"),
+        amountMinor: comp.amountMinor,
+      };
+    });
+  // b63 review (F36, T6): with the bill's rounds, the comped dishes are marked on their rounds and
+  // each comp is one record line above the Total (CurrentOrderLines); an older server's bill has
+  // no rounds, and keeps the list under the order with what is left to pay.
+  const billHasRounds = detail.order.tableBill?.rounds !== undefined;
   const roundNumber = (batch: CurrentOrderDetail["order"]["batches"][number]) =>
     billRoundNumbers == null ? undefined : billRoundNumbers.get(batch.orderBatchReference);
   // DEC-DINE-IN-PAY-LATER (rule 2), item 8 ①: dishes come off the unpaid bill right here. v15
@@ -189,6 +206,7 @@ export function TableOrderRounds({
           failedPaymentBatches={failedPaymentBatches(detail.view)}
           refundRows={orderRefundRows(detail.order, detail.lines, detail.paymentPosition)}
           tableTaken={orderTableTaken(detail.order)}
+          compRecords={billHasRounds ? compRecords : undefined}
           billRounding={orderBill(
             detail.order,
             mergedTableLabels.length === 0
@@ -212,24 +230,16 @@ export function TableOrderRounds({
         />
       </DiningRoundsProvider>
       {(() => {
-        // WP-2423 item 8 ① segment 2: comps and discounts, kept on the record (never removed).
-        const comps = detail.order.batches.flatMap((batch) => batch.compedItems);
-        if (comps.length === 0) return null;
+        if (compRecords.length === 0 || billHasRounds) return null;
         // The table's bill (Payment's own figure): what is left to pay after the comps.
         const bill = detail.order.tableBill;
-        const names = new Map(detail.lines.items.map((line) => [line.orderItemReference, line]));
-        const listed = comps.map((comp) => ({
-          comp,
-          dish: names.get(comp.orderItemReference)?.name ?? t("Dish"),
-        }));
         return (
           <ul className="table-order-rounds__comps" aria-label={t("Comps and discounts")}>
-            {listed.map(({ comp, dish }, index) => (
-              // Batch 60: a line comped in two parts has two records, each listed.
-              <li key={comp.orderItemReference + ":" + String(index)}>
-                <span>{compRecordLabel(dish, comp, timeZone, "Guest")}</span>
+            {compRecords.map((record) => (
+              <li key={record.key}>
+                <span>{record.label}</span>
                 <span className="bop-amount">
-                  −{orderMoney({ amountMinor: comp.amountMinor, currencyCode: "CAD" })}
+                  −{orderMoney({ amountMinor: record.amountMinor, currencyCode: "CAD" })}
                 </span>
               </li>
             ))}

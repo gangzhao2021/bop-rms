@@ -239,6 +239,31 @@ export function checkoutCompMinor(
   return reduction.netMinor ?? reduction.amountMinor;
 }
 
+/** b63 review (T15): a dish's options as the Tables rounds say them ("Hot · Extra egg × 2"). */
+export function checkoutOptionsText(
+  options: readonly { readonly name: string; readonly quantity: number }[],
+): string {
+  return options
+    .map((option) =>
+      option.quantity > 1 ? `${option.name} × ${String(option.quantity)}` : option.name,
+    )
+    .join(" · ");
+}
+
+/**
+ * b63 (F36): a comped dish's one amount on the checkout list — what it is charged after its comp,
+ * before tax. Null when the server sent no comp before tax (an older server): the dish then keeps
+ * its price and the comp its own amount, never a tax-included comp taken off a pre-tax price.
+ */
+export function checkoutDishMinor(
+  item: Pick<TableBill["rounds"][number]["items"][number], "subtotalMinor" | "reduction">,
+): string | null {
+  if (item.reduction === null) return item.subtotalMinor;
+  const net = item.reduction.netMinor;
+  if (net === null) return null;
+  return (BigInt(item.subtotalMinor) - BigInt(net)).toString();
+}
+
 /**
  * b26 (live25): a round's lines as staff read them — dishes before tax, less each comp before tax,
  * plus its Tax line — add up to the round's total. Shown only when they do (an older server sends
@@ -820,7 +845,13 @@ export function TableCheckout({
                 <ul>
                   {round.items.map((item, index) => (
                     <li key={index}>
-                      <span className={item.reduction ? "table-checkout__dish" : undefined}>
+                      <span
+                        className={
+                          item.reduction || item.options.length > 0
+                            ? "table-checkout__dish"
+                            : undefined
+                        }
+                      >
                         {/* b63 (T15): as the round lines say it, "2 × Beef noodles". */}
                         {item.quantity > 1 ? `${String(item.quantity)} × ` : ""}
                         {item.displayName}
@@ -834,21 +865,29 @@ export function TableCheckout({
                                 ? // Batch 60: "1 of 2 comped"; the line stays at its price.
                                   partCompedText(item.reduction.compedQuantity, item.quantity)
                                 : compedText(item.reduction.kind, item.reduction.percent)}
+                            {checkoutDishMinor(item) === null ? (
+                              // An older server sent no comp before tax: the comp keeps its own
+                              // amount beside the dish's price (b63 review).
+                              <>
+                                {" "}
+                                <span className="table-checkout__comp-amount">
+                                  −{cad(checkoutCompMinor(item.reduction))}
+                                </span>
+                              </>
+                            ) : null}
+                          </span>
+                        ) : null}
+                        {item.options.length > 0 ? (
+                          // b63 review (T15): the options chosen, on a line under the dish, so two
+                          // lines of the same dish ("Hot", "Mild") are told apart at checkout.
+                          <span className="table-checkout__options">
+                            {checkoutOptionsText(item.options)}
                           </span>
                         ) : null}
                       </span>
                       {/* b63 (F36): one amount per dish — what it is charged after its comp,
                           before tax (b26: so the dishes and the Tax line add up to the round). */}
-                      <span>
-                        {cad(
-                          item.reduction
-                            ? (
-                                BigInt(item.subtotalMinor) -
-                                BigInt(checkoutCompMinor(item.reduction))
-                              ).toString()
-                            : item.subtotalMinor,
-                        )}
-                      </span>
+                      <span>{cad(checkoutDishMinor(item) ?? item.subtotalMinor)}</span>
                     </li>
                   ))}
                   {/* b25 (live24): a dish taken off the bill reads as on Orders, with no amount:
