@@ -374,3 +374,10 @@
     outline-offset: 1px;
   }
 }
+/* Batch 61 (v15 b60 live): the sidebar is its own scroll box, and Tab scrolls in only a stop's own
+   box, so the first group that had to scroll in (Customers at 1024x768, Compliance at 1440x900)
+   ended flush with the window and lost the bottom of its ring (3px + 3px offset). The same room
+   around every stop, as on Tables, keeps the whole ring in view; the phone drawer scrolls too. */
+.workspace-sidebar :is(a[href], button, input, select, textarea, summary, [tabindex]) {
+  scroll-margin: 8px;
+}

@@ -119,3 +119,35 @@ export async function ringsFrom(page: Page, root: Locator, first: Locator) {
 }
 
 export const whole = (ring: RingOverhang) => ({ ...ring, top: 0, right: 0, bottom: 0, left: 0 });
+
+/**
+ * Batch 61: Tab from the start of the page through every stop, as the v15 live sweeps did, and
+ * measure each ring where the browser has scrolled it to. Stops when focus comes round again or
+ * leaves the page.
+ */
+export async function pageRingOverhangs(page: Page, limit = 400): Promise<RingOverhang[]> {
+  // The page's first stop (the skip link), focused as the keyboard would: Tab goes on from there.
+  await page.keyboard.press("Shift");
+  await page.evaluate(() =>
+    document
+      .querySelector<HTMLElement>(
+        "a[href], button:not([disabled]), input:not([disabled]), select, textarea, summary",
+      )
+      ?.focus(),
+  );
+  const results: RingOverhang[] = [await focusedRingOverhang(page)];
+  const seen = new Set<unknown>();
+  for (let step = 0; step < limit; step += 1) {
+    const key = await page.evaluate(() => {
+      const element = document.activeElement as (HTMLElement & { __ringSeen?: number }) | null;
+      if (element === null || element === document.body) return null;
+      element.__ringSeen ??= Math.random();
+      return element.__ringSeen;
+    });
+    if (key === null || seen.has(key)) break;
+    seen.add(key);
+    if (step > 0) results.push(await focusedRingOverhang(page));
+    await page.keyboard.press("Tab");
+  }
+  return results;
+}

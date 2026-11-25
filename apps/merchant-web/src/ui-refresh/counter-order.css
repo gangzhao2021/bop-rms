@@ -58,8 +58,19 @@
   gap: 24px;
   overflow-x: auto;
   scrollbar-width: none;
+  /* Batch 61 (v15 b60 live): a scroll box cuts off what is drawn past its padding edge, so the
+     category rings lost their top and bottom (and the first its left side too). 4px of room all
+     round, given back by the same negative margin, holds a ring drawn 1px out (3px + 1px); the
+     4px above is the bar's gap, so the row and the buttons stay where v3 draws them. */
+  margin: -4px;
+  padding: 4px;
+}
+.counter-order__categories button:focus-visible {
+  outline-offset: 1px;
 }
 .counter-order__categories button {
+  /* Tab scrolls a half-hidden category in with room for its ring. */
+  scroll-margin: 4px;
   flex: 0 0 auto;
   min-height: 44px;
   padding: 0;
