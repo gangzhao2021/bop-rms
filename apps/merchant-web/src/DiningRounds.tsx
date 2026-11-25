@@ -236,7 +236,14 @@ export function DiningRoundsProvider({
   children,
   closeActions = true,
   mergedInto,
+  billPaid = false,
 }: {
+  /**
+   * b63 (F32, v15 D62DV A): the table's bill is paid in full. Its checkout phase is then said as
+   * the list row says it ("Paid · close when the guests leave"), never "Checking out", which
+   * reads as money still to collect.
+   */
+  readonly billPaid?: boolean;
   /** The order's and table's close steps after the rounds (the Tables page has its own). */
   readonly closeActions?: boolean;
   /**
@@ -539,9 +546,17 @@ export function DiningRoundsProvider({
       ) : null}
       {view === null || view.sessionPhase === "Active" || mergedInto !== undefined ? null : (
         // The table is checking out (dishes still served, no new rounds), or closed.
-        <p className="dining-rounds__table" role="status">
+        <p
+          className="dining-rounds__table"
+          role="status"
+          data-tone={view.sessionPhase !== "Closing" ? undefined : billPaid ? "done" : "progress"}
+        >
           {/* v15 b12: the Closing phase is checkout (结账中); 关台 is only the close itself. */}
-          {view.sessionPhase === "Closing" ? t("Checking out") : t("Table closed")}
+          {view.sessionPhase === "Closing"
+            ? billPaid
+              ? t("Paid · close when the guests leave")
+              : t("Checking out")
+            : t("Table closed")}
         </p>
       )}
       {view === null || !closeActions ? null : (

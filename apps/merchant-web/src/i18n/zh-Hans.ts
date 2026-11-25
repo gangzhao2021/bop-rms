@@ -7452,6 +7452,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "no party": "没有客人",
   "pays for each round": "每轮先付",
   "checking out": "正在结账",
+  // b63 (F32): a table whose bill is paid in full, as its list row says it.
+  paid: "已付清",
   "paid or split already": "已有付款或已分单",
   "hasn't ordered yet (merge it into this table instead)": "还没点单（请把那桌并到这桌）",
   "Merged into table {table}: {count} guests. Phones from table {from} scan the code on table {table} to keep ordering; table {from} is marked for cleaning.":

@@ -125,6 +125,27 @@
   color: var(--bop-color-text-muted);
   font-size: 14px;
 }
+/* b63 (F32): the table's checkout state is a status — a dot and dark words (v3), green once paid. */
+.dining-rounds__table[data-tone] {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  color: var(--bop-color-text-default);
+  font-size: 14px;
+}
+.dining-rounds__table[data-tone]::before {
+  content: "";
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--bop-color-accent);
+  transform: translateY(-1px);
+}
+.dining-rounds__table[data-tone="done"]::before {
+  background: var(--bop-color-success-mark);
+}
 .table-order-rounds {
   display: grid;
   gap: 16px;

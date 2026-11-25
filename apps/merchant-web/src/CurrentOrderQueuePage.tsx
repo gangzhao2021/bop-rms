@@ -4067,6 +4067,7 @@ export function CurrentOrderDetails({
           onChanged={onChanged}
           fetcher={fetcher}
           mergedInto={order.tableBill?.mergedInto}
+          billPaid={order.tableBill?.paid != null}
         >
           {lines}
           {order.tableBill?.mergedInto === undefined ? null : (

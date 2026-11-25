@@ -176,6 +176,7 @@ export function TableOrderRounds({
         }}
         fetcher={fetcher}
         closeActions={false}
+        billPaid={detail.order.tableBill?.paid != null}
       >
         <CurrentOrderLines
           lines={detail.lines}

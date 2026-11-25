@@ -1904,6 +1904,13 @@ function DiningSessionWorkspaceBody({
             <TablePanel
               key={selected.tableReference}
               table={selected}
+              paidTables={
+                new Set(
+                  rows
+                    .filter((row) => Boolean(row.facts?.bill?.paid))
+                    .map((row) => row.table.tableReference),
+                )
+              }
               csrf={csrf}
               storeLabel={storeLabel}
               timeZone={timeZone}
@@ -2133,7 +2140,10 @@ function TablePanel({
   onMoved,
   onMoveCheckingOut,
   onMergeCheckingOut,
+  paidTables,
 }: {
+  /** b63 (F32): the tables whose bill is paid in full, as their list rows read them. */
+  readonly paidTables: ReadonlySet<string>;
   /** DEC-DINING-GUEST-TABLE-START: guests can start free tables at this Store now. */
   readonly guestStartsOn: boolean;
   /** WP-2423 item 8 ⑧: every table on the floor (where the party may move to). */
@@ -2525,6 +2535,7 @@ function TablePanel({
             locked={locked}
             onMerged={onMoved}
             onCheckingOut={onMergeCheckingOut}
+            paidTables={paidTables}
           />
         ) : null}
         {seated && canOperateTables && table.currentDiningSessionReference !== null ? (

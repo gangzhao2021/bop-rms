@@ -45,7 +45,10 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
-async function detail(mergedInto?: { tableLabel: string | null; paid: boolean }) {
+async function detail(
+  mergedInto?: { tableLabel: string | null; paid: boolean },
+  billPaid?: boolean,
+) {
   const fetcher = vi.fn<typeof fetch>(
     async () =>
       new Response(JSON.stringify(progress), {
@@ -60,6 +63,7 @@ async function detail(mergedInto?: { tableLabel: string | null; paid: boolean })
       refreshKey="1"
       fetcher={fetcher}
       mergedInto={mergedInto}
+      {...(billPaid === undefined ? {} : { billPaid })}
     >
       <p>Rounds</p>
     </DiningRoundsProvider>,
@@ -92,6 +96,26 @@ describe("b62: the Orders detail of a table merged into another", () => {
     );
     expect(mergedIntoText({ tableLabel: null, paid: true })).toBe(
       "Merged into another table. Its rounds are on that table's bill and were paid there.",
+    );
+  });
+});
+
+// b63 (F32, v15 D62DV A): a table paid in full still read "Checking out" under its Total, right
+// above "Paid", and staff took it for money still to collect.
+describe("b63: a paid table's checkout state", () => {
+  it("says it is paid, with a green dot, once nothing is owed", async () => {
+    const text = await detail(undefined, true);
+    expect(text).toContain("Paid · close when the guests leave");
+    expect(text).not.toContain("Checking out");
+    const line = document.querySelector(".dining-rounds__table");
+    expect(line?.getAttribute("data-tone")).toBe("done");
+  });
+
+  it("says Checking out only while money is still owed", async () => {
+    const text = await detail(undefined, false);
+    expect(text).toContain("Checking out");
+    expect(document.querySelector(".dining-rounds__table")?.getAttribute("data-tone")).toBe(
+      "progress",
     );
   });
 });

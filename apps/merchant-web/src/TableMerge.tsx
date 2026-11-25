@@ -115,12 +115,15 @@ export function mergeSourceProblem(table: StaffDiningTable): string | null {
 export function mergeTargetProblem(
   table: StaffDiningTable,
   other: StaffDiningTable,
+  /** b63 (F32): the other table's bill is paid in full (as its list row reads it). */
+  otherPaid = false,
 ): string | null {
   const session = other.session;
   if (other.currentDiningSessionReference === null || session === null || session === undefined)
     return t("no party");
   if (other.paymentTiming !== "PayLater") return t("pays for each round");
-  if (session.phase === "Closing") return t("checking out");
+  // b63 (F32): a paid table is said as its row says it, never "checking out" (money to collect).
+  if (session.phase === "Closing") return otherPaid ? t("paid") : t("checking out");
   if (session.paymentStarted === true) return t("paid or split already");
   if (table.session?.orderReference != null && session.orderReference === null)
     return t("hasn't ordered yet (merge it into this table instead)");
@@ -143,7 +146,10 @@ export function TableMerge({
   onCheckingOut,
   client: provided,
   tea: providedTea,
+  paidTables,
 }: {
+  /** b63 (F32): the tables whose bill is paid in full, as the list rows read them. */
+  readonly paidTables?: ReadonlySet<string>;
   readonly table: StaffDiningTable;
   readonly tables: readonly StaffDiningTable[];
   readonly csrf: string;
@@ -291,7 +297,11 @@ export function TableMerge({
             >
               <option value="">{t("Choose a table")}</option>
               {others.map((other) => {
-                const why = mergeTargetProblem(table, other);
+                const why = mergeTargetProblem(
+                  table,
+                  other,
+                  paidTables?.has(other.tableReference) === true,
+                );
                 return (
                   <option
                     key={other.tableReference}
