@@ -556,33 +556,131 @@ for (const language of ["en", "zh-Hans"] as const)
       const fit = await cash.evaluate((row) => {
         const term = row.querySelector("dt");
         const amount = row.querySelector("dd");
+        if (term === null || amount === null) throw new Error("refund line has no words or amount");
         const rowBox = row.getBoundingClientRect();
-        const termBox = term?.getBoundingClientRect();
-        const amountBox = amount?.getBoundingClientRect();
+        const termBox = term.getBoundingClientRect();
+        const amountBox = amount.getBoundingClientRect();
+        const style = getComputedStyle(row);
+        const gap = Number.parseFloat(style.columnGap) || 0;
+        // The words' width on one line, in the line's own font.
         const probe = document.createElement("span");
         probe.style.cssText = "position:absolute;visibility:hidden;white-space:nowrap;font:inherit";
-        probe.textContent = term?.textContent ?? "";
-        term?.appendChild(probe);
+        probe.textContent = term.textContent ?? "";
+        term.appendChild(probe);
         const natural = probe.getBoundingClientRect().width;
+        const oneLine = probe.getBoundingClientRect().height;
         probe.remove();
+        const lines = Math.round(termBox.height / oneLine);
         return {
           overflow: row.scrollWidth - row.clientWidth,
+          termOverflow: term.scrollWidth - term.clientWidth,
           rowRight: rowBox.right,
-          termRight: termBox?.right ?? 0,
-          termTop: termBox?.top ?? 0,
-          amountLeft: amountBox?.left ?? 0,
-          amountRight: amountBox?.right ?? 0,
-          amountTop: amountBox?.top ?? 0,
-          room: rowBox.width - (amountBox?.width ?? 0) - natural,
-          wraps: term === null ? false : getComputedStyle(term).whiteSpace !== "nowrap",
+          termRight: termBox.right,
+          termTop: termBox.top,
+          amountLeft: amountBox.left,
+          amountRight: amountBox.right,
+          amountTop: amountBox.top,
+          // What is left on the line beside the amount once the words are on one line.
+          room: rowBox.width - amountBox.width - gap - natural,
+          lines,
         };
       });
       expect(fit.overflow).toBeLessThanOrEqual(0);
+      expect(fit.termOverflow).toBeLessThanOrEqual(0);
       expect(fit.amountRight).toBeLessThanOrEqual(fit.rowRight + 0.5);
       expect(fit.termRight).toBeLessThanOrEqual(fit.amountLeft + 0.5);
       expect(Math.abs(fit.amountTop - fit.termTop)).toBeLessThanOrEqual(4);
-      // On one line with about 40 px to spare for DejaVu Sans, or wrapped inside its own column.
-      if (fit.room < 40) expect(fit.wraps).toBe(true);
+      // On one line with at least 40 px to spare for DejaVu Sans, or really wrapped inside its own
+      // column (more than one line, nothing cut off).
+      if (fit.lines <= 1) expect(fit.room).toBeGreaterThanOrEqual(40);
+      else expect(fit.lines).toBeGreaterThan(1);
+      await noSideScroll(page);
+    });
+
+/**
+ * The same table, $2.00 of it also given back on the card machine at 22:05 because it was charged
+ * too much: the payment, the order's record and the table's refunded money all say so.
+ */
+const machineRefundedTable = {
+  ...refundedTable,
+  tableBill: {
+    totalMinor: "2825",
+    paid: {
+      amountMinor: "2825",
+      method: "Online",
+      refundedMinor: "1075",
+      refundPendingMinor: "300",
+    },
+  },
+};
+const machineRefundedDetail = {
+  ...refundedDetail,
+  order: machineRefundedTable,
+  record: {
+    ...refundedDetail.record,
+    refunds: [
+      ...refundedDetail.record.refunds,
+      {
+        method: "CardMachine",
+        amountMinor: "200",
+        by: "You",
+        approvedBy: null,
+        at: "2026-11-25T03:05:00.000Z",
+      },
+    ],
+  },
+};
+const machineRefundedTablePayment = {
+  ...refundedTablePayment,
+  payment: {
+    ...refundedTablePayment.payment,
+    cardRefunds: [
+      {
+        amountMinor: "200",
+        reasonCode: "OVERCHARGED",
+        refundedAt: "2026-11-25T03:05:00.000Z",
+        byLabel: "You",
+      },
+    ],
+    refundableMinor: "1450",
+  },
+};
+
+for (const language of ["en", "zh-Hans"] as const)
+  for (const [width, height] of sizes)
+    test(`@production F27 a card-machine refund says its reason, under the totals and at the table, ${language} at ${width}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height });
+      await ordersPage(page, language, [machineRefundedTable], async (page) => {
+        await page.route("**/merchant/orders/detail*", (route) =>
+          route.fulfill({ headers, json: machineRefundedDetail }),
+        );
+        await page.route("**/merchant/orders/table-payment", (route) =>
+          route.fulfill({ headers, json: machineRefundedTablePayment }),
+        );
+      });
+      const panel = page.locator("aside.order-panel");
+      if (!(await panel.isVisible()))
+        await page.locator("li.order-row .order-row__open").first().click();
+      const zh = language === "zh-Hans";
+      await expect(
+        panel
+          .locator(".order-lines-totals dt")
+          .filter({ hasText: zh ? /^已在刷卡机退款/ : /^Refunded on the card machine/ }),
+      ).toHaveText(
+        zh
+          ? "已在刷卡机退款 · 多收了 · 22:05"
+          : "Refunded on the card machine · Charged too much · 22:05",
+      );
+      const atTable = panel
+        .locator(".table-checkout__totals dt")
+        .filter({ hasText: zh ? /^已在刷卡机退款/ : /^Refunded on the card machine/ });
+      await expect(atTable).toHaveCount(1);
+      await expect(atTable).toContainText(
+        zh ? /^已在刷卡机退款 · 多收了/u : /^Refunded on the card machine · Charged too much/u,
+      );
+      await expect(atTable).not.toContainText("{reason}");
       await noSideScroll(page);
     });
 
