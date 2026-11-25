@@ -33,7 +33,13 @@ export function tableCloseBlockers(
   {
     unservedExplained = false,
     paidItems,
+    onlyToDo = false,
   }: {
+    /**
+     * b63 (F35): leave out what only waits for the kitchen or for serving on a table paying at the
+     * end (its dishes are served from the panel); what is left needs a step elsewhere.
+     */
+    readonly onlyToDo?: boolean;
     /** The unserved dishes are already explained by the close plan (rounds paid with the table). */
     readonly unservedExplained?: boolean;
     /**
@@ -95,16 +101,17 @@ export function tableCloseBlockers(
             { count: paidWaiting },
           ),
     );
-  if (waiting > 0 && table.paymentTiming === "PayLater")
+  if (waiting > 0 && table.paymentTiming === "PayLater") {
     // DEC-DINE-IN-PAY-LATER: a round just sent is on its way to the kitchen (nothing to pay now).
-    blockers.push(
-      waiting === 1
-        ? t("1 item is still being sent to the kitchen. Check again in a moment.")
-        : t("{count} items are still being sent to the kitchen. Check again in a moment.", {
-            count: waiting,
-          }),
-    );
-  else if (waiting > 0)
+    if (!onlyToDo)
+      blockers.push(
+        waiting === 1
+          ? t("1 item is still being sent to the kitchen. Check again in a moment.")
+          : t("{count} items are still being sent to the kitchen. Check again in a moment.", {
+              count: waiting,
+            }),
+      );
+  } else if (waiting > 0)
     blockers.push(
       waiting === 1
         ? t(
@@ -115,7 +122,7 @@ export function tableCloseBlockers(
             { count: waiting },
           ),
     );
-  if (unserved > 0 && !unservedExplained && table.paymentTiming === "PayLater")
+  if (unserved > 0 && !unservedExplained && table.paymentTiming === "PayLater" && !onlyToDo)
     // b26 (live25): a round on the table's bill has no Cancel on the Orders page; before the
     // table pays, a dish the kitchen hasn't started comes off its round (Take dishes off round N).
     blockers.push(
@@ -128,7 +135,7 @@ export function tableCloseBlockers(
             { count: unserved },
           ),
     );
-  else if (unserved > 0 && !unservedExplained)
+  else if (unserved > 0 && !unservedExplained && table.paymentTiming !== "PayLater")
     blockers.push(
       unserved === 1
         ? t("1 item hasn't been served yet. Mark it served or cancel it on the Orders page.")
@@ -139,6 +146,16 @@ export function tableCloseBlockers(
     );
   return blockers;
 }
+
+/**
+ * b63 (F35): the close evaluation's reasons a table paying at the end resolves on its own panel —
+ * serving its dishes and paying in Checkout — said in the one line instead of listed.
+ */
+const servedOrPaidHere = new Set([
+  "ORDER_BALANCE_UNPAID",
+  "EXECUTION_NOT_FINAL",
+  "FULFILLMENT_NOT_FINAL",
+]);
 
 /** One operation per closing step; an unconfirmed result is retried with the same ones. */
 export interface TableClosePlan {
@@ -357,6 +374,7 @@ export function TableSessionClose({
         readonly open: number;
         readonly blockers: readonly string[];
         readonly paidWithTable?: boolean;
+        readonly onlyServing?: boolean;
       }
     | null
     | undefined
@@ -402,6 +420,50 @@ export function TableSessionClose({
             : []),
         ]
       : [];
+  // b63 (F35, v15 D62DV): a table paying at the end whose dishes are still to serve (or whose bill
+  // is still to pay) is said in one line; only what needs a step elsewhere is listed with it.
+  const payLater = table.paymentTiming === "PayLater";
+  const toDo =
+    check.kind === "Ready" && payLater
+      ? [
+          ...tableCloseBlockers(
+            table,
+            progress === null
+              ? null
+              : { items: [...progress.items, ...(check.merged ?? []).flatMap((m) => m.items)] },
+            {
+              onlyToDo: true,
+              paidItems: new Set(
+                (progress?.items ?? [])
+                  .filter((item) =>
+                    (table.roundsAwaitingAcceptance ?? []).some(
+                      (round) => round.roundNumber === item.batchSequence,
+                    ),
+                  )
+                  .map((item) => item.orderItemReference),
+              ),
+            },
+          ),
+          ...(plan && plan.open === 0
+            ? closeReasonTexts(
+                plan.blockers.filter((code) => !servedOrPaidHere.has(code)),
+                "PayLater",
+              )
+            : []),
+        ]
+      : [];
+  const waitsHere =
+    payLater &&
+    (plan === undefined ||
+      (plan !== null &&
+        (plan.open === 0 || plan.onlyServing === true) &&
+        plan.blockers.every((code) => servedOrPaidHere.has(code))));
+  // b63 (F31 verifier): once the bill is paid, what is left is serving the last dishes.
+  const billPaid =
+    session.phase === "Closing" &&
+    plan !== undefined &&
+    plan !== null &&
+    !plan.blockers.includes("ORDER_BALANCE_UNPAID");
   const guestsLeft =
     orderReference !== null && check.kind === "Ready" ? (
       <TableGuestsLeft
@@ -421,13 +483,17 @@ export function TableSessionClose({
         fetcher={fetcher}
         mergedOrderReferences={mergedOrders === "" ? [] : mergedOrders.split(",")}
         billRoundNumbers={billRoundNumbers}
+        listServing={!payLater}
       />
     ) : null;
   // The rounds the plan lists keep the table open even when no item is waiting (refunds).
   const planBlocks = typeof openRounds === "number" && openRounds > 0;
   const ordersLink =
     orderReference === null ? null : (
-      <Link to={`/operations/orders/${orderReference}`}>{t("Open this table's order")}</Link>
+      // b63 (F33, T9): clickable words are accent text (v3), never a black underlined link.
+      <Link className="table-panel__text-step" to={`/operations/orders/${orderReference}`}>
+        {t("Open this table's order")}
+      </Link>
     );
 
   const close = async () => {
@@ -514,7 +580,10 @@ export function TableSessionClose({
     );
   return (
     <section aria-label={t("Close this table")} className="dining-table-close">
-      <h3>{t("Close the table")}</h3>
+      {/* b63 (F35): the heading comes with the close itself, not with what still stops it. */}
+      {check.kind === "Ready" && (blockers.length > 0 || planBlocks) ? null : (
+        <h3>{t("Close the table")}</h3>
+      )}
       {check.kind === "Checking" ? (
         <p role="status">{t("Checking this table's orders…")}</p>
       ) : check.kind === "Failed" ? (
@@ -535,6 +604,55 @@ export function TableSessionClose({
             </button>
           )}
         </p>
+      ) : (blockers.length > 0 || planBlocks) && payLater && waitsHere && toDo.length === 0 ? (
+        // b63 (F35): one dark line, nothing to read twice; the steps are served and paid above.
+        <>
+          <p className="dining-table-close__wait">
+            {billPaid
+              ? t("Serve the remaining dishes, then close the table.")
+              : t("Close after every dish is served and the bill is paid.")}
+            {wordGap()}
+            <button
+              type="button"
+              className="table-panel__text-step"
+              onClick={() => setAttempt((value) => value + 1)}
+            >
+              {t("Check again")}
+            </button>
+          </p>
+          {guestsLeft}
+        </>
+      ) : (blockers.length > 0 || planBlocks) && payLater ? (
+        <div role="note">
+          {waitsHere ? (
+            <p className="dining-table-close__wait">
+              {billPaid
+                ? t("Serve the remaining dishes, then close the table.")
+                : t("Close after every dish is served and the bill is paid.")}
+            </p>
+          ) : null}
+          {toDo.length > 0 ? (
+            <>
+              <p>{t("This table can't be closed yet:")}</p>
+              <ul>
+                {toDo.map((text) => (
+                  <li key={text}>{text}</li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+          {guestsLeft}
+          <p>
+            {ordersLink}{" "}
+            <button
+              type="button"
+              className="table-panel__text-step"
+              onClick={() => setAttempt((value) => value + 1)}
+            >
+              {t("Check again")}
+            </button>
+          </p>
+        </div>
       ) : blockers.length > 0 || planBlocks ? (
         <div role="note">
           {blockers.length > 0 ? (

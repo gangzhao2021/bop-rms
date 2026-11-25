@@ -5137,6 +5137,13 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "This store": "本门店",
   "This table can't be closed yet. Close out its open rounds first.":
     "这张桌台还不能关闭。请先结束其未完成的轮次。",
+  // b63 (F35, F31): what still stops closing a table paying at the end, in one line.
+  "Close after every dish is served and the bill is paid.": "菜上齐、账结清后再关台。",
+  "No new rounds while checking out. To add dishes, cancel checkout first.":
+    "结账中不能加菜。要加菜，先取消结账。",
+  "No new rounds on a paid bill. New dishes start a new bill once the table is closed.":
+    "已付的账不能再加菜。关台后再点，会开一张新账单。",
+  "Serve the remaining dishes, then close the table.": "先把剩下的菜上齐，再关台。",
   "This table can't be closed yet:": "这张桌台还不能关闭：",
   "This table can't take an order now": "这张桌台目前不能点单",
   "Another staff member is sending a round for {value} right now. Nothing of this order was sent or charged, and it is still here: send it again in a moment.":
@@ -6219,6 +6226,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Mark sold out": "标为售罄",
   "More for {item}": "{item}的更多操作",
   More: "更多",
+  // b63 (F33): Table QR codes keeps Rename, Turn off and Retire under More.
+  "More for table {table}": "桌台 {table} 的更多操作",
+  "Retire after the guests leave and the table is closed.": "客人离开、关台后才能停用。",
   // Orders v2 (Owner 2026-10-26).
   "Still holds its ingredients": "还占着食材",
   "Finished · ingredients still set aside": "已做完 · 食材仍被占着",
@@ -6652,8 +6662,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Open table": "开台",
   "More for this table": "这桌的其他操作",
   "Take an order for the table": "替客人点一轮",
-  "Try the new join code again": "再试一次换入桌码",
-  "New join code": "换入桌码",
+  // b63 (T15): "换入桌码" read oddly; it gives the table another join code.
+  "Try the new join code again": "再试一次换一个加入码",
+  "New join code": "换一个加入码",
   "Mark unavailable": "设为暂不可用",
   "Mark available": "设为可用",
   "Confirm the payment": "确认收款",

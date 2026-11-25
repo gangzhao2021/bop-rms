@@ -28,7 +28,7 @@ import {
   prepareServeAllReady,
   type TableOrderFacts,
 } from "./table-order-facts.js";
-import { staffRoundOffer, staffRoundRefusedText } from "./staff-round-offer.js";
+import { staffRoundOffer, staffRoundRefusedShortText } from "./staff-round-offer.js";
 import {
   compareTables,
   staffCallReasonText,
@@ -2486,7 +2486,7 @@ function TablePanel({
         // Batch 55 (v15 b54 live): a table checking out takes no round (the send refuses it);
         // staff read why and what to do instead of a link that fails on Send.
         <p role="note" className="dining-close-who">
-          {staffRoundRefusedText(roundOffer, table.stableLabel)}
+          {staffRoundRefusedShortText(roundOffer, table.session?.paymentStarted === true)}
         </p>
       ) : null}
       {/* Owner 2026-11-03 walkthrough: dishes, payment and closing come first; the rest is here. */}

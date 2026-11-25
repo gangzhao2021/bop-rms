@@ -698,7 +698,8 @@
 /* Buttons: the accent fill for the one next step, accent words for the rest. */
 .workspace-page.tables-v3 :is(.table-row__step, .table-panel__primary) {
   display: inline-flex;
-  min-height: 36px;
+  /* b63 (F33, T9): the row's one step is a whole 44 px target too, as the panel's. */
+  min-height: 44px;
   align-items: center;
   justify-content: center;
   padding: 0 16px;
@@ -717,6 +718,9 @@
 .workspace-page.tables-v3 :is(.table-row__text-step, .table-panel__text-step) {
   display: inline-flex;
   min-height: 44px;
+  /* b63 (F33, T9): "开台" was 36 px wide; a short word still gets a 44 x 44 target. */
+  min-width: 44px;
+  justify-content: center;
   align-items: center;
   padding: 0 4px;
   border: 0;
@@ -1292,6 +1296,25 @@
   font-weight: 600;
   text-align: center;
 }
+/* b63 (F33, T3): − and + are the first tap of every split; each is a whole 44 x 44 target (by
+   padding, the glyph stays), the count between them 16/600 in even figures. */
+.tables-v3 .table-split__people button {
+  display: inline-flex;
+  min-width: 44px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+}
+.tables-v3 .table-split__people {
+  gap: 4px;
+}
+.tables-v3 .table-split__people > span {
+  margin-inline-end: 8px;
+}
+.tables-v3 .table-split__people output {
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
 .tables-v3 .table-split__rounds ul,
 .tables-v3 .table-split__parts {
   margin: 8px 0;
@@ -1858,7 +1881,37 @@
   white-space: normal;
 }
 .workspace-page.table-qr-page .table-qr__actions button:not(:first-child) {
-  margin-inline-start: var(--bop-space-4);
+  margin-inline-start: 24px;
+}
+/* b63 (F33, T9): each row step is a whole 44 x 44 target (padding, not a bigger word), 24 px
+   apart; Rename, Turn off and Retire wait under More. */
+.workspace-page.table-qr-page .table-qr__actions button {
+  min-width: 44px;
+  padding-inline: 8px;
+}
+.workspace-page.table-qr-page .table-qr__actions > :not(:first-child) {
+  margin-inline-start: 24px;
+}
+.workspace-page.table-qr-page .table-qr__list td.table-qr__actions:has(.table-qr__more-actions) {
+  padding-bottom: 8px;
+}
+.workspace-page.table-qr-page .table-qr__more-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0 24px;
+  margin: 0;
+}
+.workspace-page.table-qr-page .table-qr__actions > .table-qr__more-actions {
+  margin-inline-start: 0;
+}
+.workspace-page.table-qr-page .table-qr__more-actions button:not(:first-child) {
+  margin-inline-start: 0;
+}
+.workspace-page.table-qr-page .table-qr__more-note {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
 }
 
 /* Pickup ordering: its own group under the list. */
@@ -1912,15 +1965,28 @@
   .workspace-page.table-qr-page .table-qr__list td.table-qr__actions {
     display: flex;
     flex-wrap: wrap;
-    gap: 0 var(--bop-space-4);
+    gap: 0 24px;
     text-align: start;
   }
-  .workspace-page.table-qr-page .table-qr__actions button:not(:first-child) {
+  .workspace-page.table-qr-page .table-qr__actions button:not(:first-child),
+  .workspace-page.table-qr-page .table-qr__actions > :not(:first-child) {
     margin-inline-start: 0;
+  }
+  .workspace-page.table-qr-page .table-qr__more-actions {
+    flex-basis: 100%;
+    justify-content: flex-start;
   }
 }
 
 /* Batch 40: a person refused Tables sees the refusal alone, without an empty detail panel. */
 .workspace-page.dining-floor .dining-session-detail[hidden] {
   display: none;
+}
+
+/* b63 (F35): what still stops closing a table paying at the end, as one dark 14/400 line. */
+.workspace-page.tables-v3 .dining-table-close__wait {
+  margin: 0;
+  color: var(--bop-color-text-default);
+  font-size: 14px;
+  font-weight: 400;
 }

@@ -92,6 +92,8 @@ export function TableQrCodesPage({
   const [message, setMessage] = useState<{ tone: "neutral" | "error"; text: string } | null>(null);
   const active = useRef<AbortController | null>(null);
   const [change, setChange] = useState<TableChange | null>(null);
+  // b63 (F33): the row whose Rename, Turn off and Retire are shown (under More).
+  const [moreOf, setMoreOf] = useState<string | null>(null);
   const [tableName, setTableName] = useState("");
   const [seats, setSeats] = useState("4");
   const refresh = useCallback(() => {
@@ -677,7 +679,8 @@ export function TableQrCodesPage({
             <tr>
               <th scope="col">{t("Table")}</th>
               {showArea ? <th scope="col">{t("Area")}</th> : null}
-              <th scope="col">{t("Code")}</th>
+              {/* b63 (T15): the column shows the code's state, not a code. */}
+              <th scope="col">{t("Status")}</th>
               <th scope="col">{t("Works until")}</th>
               <th scope="col" aria-label={t("Actions")} />
             </tr>
@@ -687,7 +690,7 @@ export function TableQrCodesPage({
               <tr key={row.tableReference}>
                 <th scope="row">{row.stableLabel}</th>
                 {showArea ? <td data-label={t("Area")}>{areaText(row.areaCode)}</td> : null}
-                <td data-label={t("Code")}>
+                <td data-label={t("Status")}>
                   <span className="table-qr__state" data-tone={codeTone[row.codeState]}>
                     {codeText[row.codeState]}
                   </span>
@@ -726,39 +729,62 @@ export function TableQrCodesPage({
                       {t("Create code")}
                     </button>
                   )}
+                  {/* b63 (F33, T9/T15): the everyday steps stay in the row; Rename, Turn off and
+                      Retire are under More, so a finger aiming at Replace never lands on them. */}
                   {row.codeState === "SetupIncomplete" ? null : (
-                    <button
-                      type="button"
-                      disabled={busy || pending !== null || change !== null}
-                      onClick={() => beginChange("Rename", row)}
-                    >
-                      {t("Rename")}
-                    </button>
-                  )}
-                  {row.codeState === "Active" ? (
-                    <button
-                      type="button"
-                      data-variant="destructive"
-                      disabled={busy || pending !== null}
-                      onClick={() => start("TurnOff", row)}
-                    >
-                      {t("Turn off")}
-                    </button>
-                  ) : null}
-                  {row.codeState === "SetupIncomplete" ? null : (
-                    <button
-                      type="button"
-                      data-variant="destructive"
-                      disabled={busy || pending !== null || change !== null || row.seated}
-                      title={
-                        row.seated
-                          ? t("Guests are seated here; close their table first.")
-                          : undefined
-                      }
-                      onClick={() => beginChange("Retire", row)}
-                    >
-                      {t("Retire")}
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        aria-expanded={moreOf === row.tableReference}
+                        aria-controls={`table-qr-more-${row.tableReference}`}
+                        onClick={() =>
+                          setMoreOf(moreOf === row.tableReference ? null : row.tableReference)
+                        }
+                      >
+                        {t("More")}
+                      </button>
+                      {moreOf === row.tableReference ? (
+                        <span
+                          id={`table-qr-more-${row.tableReference}`}
+                          className="table-qr__more-actions"
+                          role="group"
+                          aria-label={t("More for table {table}", { table: row.stableLabel })}
+                        >
+                          <button
+                            type="button"
+                            disabled={busy || pending !== null || change !== null}
+                            onClick={() => beginChange("Rename", row)}
+                          >
+                            {t("Rename")}
+                          </button>
+                          {row.codeState === "Active" ? (
+                            <button
+                              type="button"
+                              data-variant="destructive"
+                              disabled={busy || pending !== null}
+                              onClick={() => start("TurnOff", row)}
+                            >
+                              {t("Turn off")}
+                            </button>
+                          ) : null}
+                          {row.seated ? (
+                            // Never a grey Retire: what to do first, in words.
+                            <span className="table-qr__more-note">
+                              {t("Retire after the guests leave and the table is closed.")}
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              data-variant="destructive"
+                              disabled={busy || pending !== null || change !== null}
+                              onClick={() => beginChange("Retire", row)}
+                            >
+                              {t("Retire")}
+                            </button>
+                          )}
+                        </span>
+                      ) : null}
+                    </>
                   )}
                 </td>
               </tr>

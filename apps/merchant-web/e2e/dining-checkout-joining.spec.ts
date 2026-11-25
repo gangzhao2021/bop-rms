@@ -417,9 +417,9 @@ async function expectNoJoiningSteps(page: Page, zh: boolean) {
     page.getByRole("button", { name: zh ? /扫码加入/u : /joining by scan/u }),
   ).toHaveCount(0);
   await expect(page.getByText(zh ? /暂停扫码加入/u : /pause joining by scan/iu)).toHaveCount(0);
-  await expect(page.getByRole("button", { name: zh ? "换入桌码" : "New join code" })).toHaveCount(
-    0,
-  );
+  await expect(
+    page.getByRole("button", { name: zh ? "换一个加入码" : "New join code" }),
+  ).toHaveCount(0);
   // The checkout fact is not said again as a reason not to merge.
   await expect(page.getByText(zh ? /现在不能并桌/u : /Merging isn't available/u)).toHaveCount(0);
 }
@@ -518,11 +518,11 @@ for (const language of ["en", "zh-Hans"] as const)
       await expect(
         phonesBlock.getByRole("button", { name: zh ? "暂停扫码加入" : "Pause joining by scan" }),
       ).toBeVisible();
-      await panel.getByRole("button", { name: zh ? "换入桌码" : "New join code" }).click();
+      await panel.getByRole("button", { name: zh ? "换一个加入码" : "New join code" }).click();
       // The refusal and the re-read (now Closing) together say it once, in the panel, in view.
       await expect(panel.getByText(paying(zh)).first()).toBeVisible();
       await expect(
-        page.getByRole("button", { name: zh ? "换入桌码" : "New join code" }),
+        page.getByRole("button", { name: zh ? "换一个加入码" : "New join code" }),
       ).toHaveCount(0);
       await expect(
         phonesBlock.getByRole("button", { name: zh ? "暂停扫码加入" : "Pause joining by scan" }),
@@ -548,7 +548,7 @@ for (const language of ["en", "zh-Hans"] as const)
       await page.setViewportSize({ width, height });
       await page.goto("/operations/dining");
       const { panel, phonesBlock } = await openManage(page, zh);
-      await panel.getByRole("button", { name: zh ? "换入桌码" : "New join code" }).click();
+      await panel.getByRole("button", { name: zh ? "换一个加入码" : "New join code" }).click();
       await expect(page.getByText(paying(zh))).toHaveCount(1);
       await expect(page.getByText(paying(zh))).toBeInViewport();
       // The guest pays; the tables are read again (as when this tab comes back into view).
@@ -605,7 +605,7 @@ for (const language of ["en", "zh-Hans"] as const)
         phonesBlock.getByRole("button", { name: zh ? "暂停扫码加入" : "Pause joining by scan" }),
       ).toBeVisible();
       await expect(
-        panel.getByRole("button", { name: zh ? "换入桌码" : "New join code" }),
+        panel.getByRole("button", { name: zh ? "换一个加入码" : "New join code" }),
       ).toBeVisible();
       await expect(page.getByText(paying(zh))).toHaveCount(0);
       await expect(page.getByText(settled(zh))).toHaveCount(0);
@@ -648,7 +648,7 @@ for (const language of ["en", "zh-Hans"] as const)
       await expect(page.getByText(paying(zh))).toHaveCount(0);
       await expect(page.getByText(settled(zh))).toHaveCount(0);
       await expect(
-        panel.getByRole("button", { name: zh ? "换入桌码" : "New join code" }),
+        panel.getByRole("button", { name: zh ? "换一个加入码" : "New join code" }),
       ).toBeVisible();
     });
 

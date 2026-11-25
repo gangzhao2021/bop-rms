@@ -282,6 +282,10 @@ const words = {
     checkingOut:
       "Table T7 is checking out, so no round can be added to its bill. If the guests want to order more, press Cancel checkout on the table before anyone pays.",
     kept: "Nothing was sent or charged, and this order is still here.",
+    // b63 (F35): the table's own panel says it in one short line.
+    panelPaid:
+      "No new rounds on a paid bill. New dishes start a new bill once the table is closed.",
+    panelCheckingOut: "No new rounds while checking out. To add dishes, cancel checkout first.",
     heading: "No round can be added for this table now",
     take: "Take order for table T7",
     select: "Select T7",
@@ -307,6 +311,8 @@ const words = {
     checkingOut:
       "T7 号桌正在结账，不能再往这张账单加单。客人如还要点，在有人付款前请在这桌按“取消结账”。",
     kept: "没有下单，也没有收款；这张单还在这里。",
+    panelPaid: "已付的账不能再加菜。关台后再点，会开一张新账单。",
+    panelCheckingOut: "结账中不能加菜。要加菜，先取消结账。",
     heading: "这桌现在不能加单",
     take: "为桌台 T7 点单",
     select: "选择 T7",
@@ -368,8 +374,8 @@ for (const language of ["en", "zh-Hans"] as const) {
     const panel = await openTable(page, language);
     await expect(panel).toContainText(said.paidInFull);
     await expect(panel.getByRole("link", { name: said.take })).toHaveCount(0);
-    const note = panel.getByRole("note").filter({ hasText: said.paid });
-    await expect(note).toHaveText(said.paid);
+    const note = panel.getByRole("note").filter({ hasText: said.panelPaid });
+    await expect(note).toHaveText(said.panelPaid);
     await fitsAtEachWidth(page, note, `tables-paid-${language}`);
     await expectNoInternalText(page, ["Temporarily unavailable", "暂时不可用"]);
 
@@ -411,13 +417,13 @@ for (const language of ["en", "zh-Hans"] as const) {
     const panel = await openTable(page, language);
     await expect(panel.getByRole("button", { name: said.cancel })).toBeVisible();
     await expect(panel.getByRole("link", { name: said.take })).toHaveCount(0);
-    const note = panel.getByRole("note").filter({ hasText: said.checkingOut });
+    const note = panel.getByRole("note").filter({ hasText: said.panelCheckingOut });
     await expect(note).toBeVisible();
     await fitsAtEachWidth(page, note, `tables-checking-out-${language}`);
     // The guests want more: Cancel checkout, and the round is offered again.
     await panel.getByRole("button", { name: said.cancel }).click();
     await expect(panel.getByRole("link", { name: said.take })).toBeVisible();
-    await expect(panel.getByRole("note").filter({ hasText: said.checkingOut })).toHaveCount(0);
+    await expect(panel.getByRole("note").filter({ hasText: said.panelCheckingOut })).toHaveCount(0);
   });
 
   test(`@production a send refused because the guest paid meanwhile says why and keeps the round (${language})`, async ({
@@ -478,7 +484,7 @@ for (const language of ["en", "zh-Hans"] as const) {
     await expect(page).toHaveURL(/\/operations\/dining$/u);
     const tablePanel = page.getByRole("complementary", { name: said.panel });
     await expect(tablePanel).toContainText(said.paidInFull);
-    await expect(tablePanel.getByRole("note").filter({ hasText: said.paid })).toBeVisible();
+    await expect(tablePanel.getByRole("note").filter({ hasText: said.panelPaid })).toBeVisible();
     // Opened once: a reload finds Tables with no table chosen, as staff would open it.
     await page.reload();
     await expect(page.getByRole("button", { name: said.select, exact: true })).toBeVisible();

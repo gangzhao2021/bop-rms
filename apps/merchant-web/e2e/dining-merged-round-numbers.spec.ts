@@ -346,14 +346,16 @@ for (const language of ["en", "zh-Hans"] as const)
     await expect(host).toContainText(
       zh ? "已售罄 · 已从账单删除，不收费" : "Sold out · taken off the bill, not charged",
     );
-    // b41: closing the table lists every unserved round of the merged bill, by its bill number.
-    const toServe = details.getByRole("region", {
-      name: zh ? "还没上的菜" : "Dishes still to serve",
-    });
-    await expect(toServe.locator("li")).toHaveCount(3);
-    expect(
-      (await toServe.locator("li").allTextContents()).map((text) => text.replace(/[:：].*$/su, "")),
-    ).toEqual([round(1), round(2), round(3)]);
+    // b41: closing the table reads every unserved round of the merged bill. b63 (F35): the
+    // rounds above already show what is unserved, so closing says it in one line, not again.
+    await expect(
+      details.getByRole("region", { name: zh ? "还没上的菜" : "Dishes still to serve" }),
+    ).toHaveCount(0);
+    await expect(details.locator(".dining-table-close__wait")).toHaveText(
+      zh
+        ? /^菜上齐、账结清后再关台。/u
+        : /^Close after every dish is served and the bill is paid\./u,
+    );
     expect([...new Set(planRequests)].sort()).toEqual([id(1), id(2)]);
     for (const width of [1440, 1024, 390]) {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });

@@ -576,7 +576,7 @@ for (const language of ["en", "zh-Hans"] as const)
       });
       await expect(more).toBeVisible();
       await expect(
-        more.getByRole("button", { name: zh ? "换入桌码" : "New join code" }),
+        more.getByRole("button", { name: zh ? "换一个加入码" : "New join code" }),
       ).toHaveCount(0);
       // Batch 49: this table has paid (cash), so the panel says its bill is settled, once, where
       // its phones are (dining-checkout-joining.spec.ts has the phones and the unpaid case).
@@ -633,7 +633,7 @@ for (const language of ["en", "zh-Hans"] as const)
         name: zh ? "所选桌台详情" : "Selected table details",
       });
       await panel.getByText(zh ? "管理这张桌" : "Manage this table").click();
-      await panel.getByRole("button", { name: zh ? "换入桌码" : "New join code" }).click();
+      await panel.getByRole("button", { name: zh ? "换一个加入码" : "New join code" }).click();
       const line = page.getByText(paying(zh));
       await expect(line).toBeVisible();
       await expect(line).toHaveCount(1);

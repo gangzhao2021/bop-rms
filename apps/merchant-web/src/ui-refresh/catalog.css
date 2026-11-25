@@ -919,3 +919,8 @@ fieldset.store-features__modules {
   grid-area: editor;
   margin: 4px 0 0;
 }
+
+/* b63 (F33 + RA-13): a dish's ↑ and ↓ were 20 x 44, 15 px apart; each is a whole 44 x 44 target. */
+.one-menu .one-menu__actions button {
+  min-width: 44px;
+}

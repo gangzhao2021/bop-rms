@@ -112,8 +112,9 @@ for (const language of ["en", "zh-Hans"] as const)
       const sweep = await windowEdgeSweep(page);
       // The list is far taller than the window: Tab had to scroll it, row by row.
       expect(sweep.scrolled).toBeGreaterThan(height);
-      expect(sweep.stops).toBeGreaterThan(100);
-      expect(sweep.back).toBeGreaterThan(100);
+      // b63 (F33): Rename, Turn off and Retire wait under More, so each row has three stops.
+      expect(sweep.stops).toBeGreaterThan(80);
+      expect(sweep.back).toBeGreaterThan(80);
       expect(sweep.cut, report(sweep)).toEqual([]);
       // Nothing moved without focus: the page is where it was before any Tab, at its top.
       await page.reload();

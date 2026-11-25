@@ -47,3 +47,16 @@ export function staffRoundRefusedText(offer: "CheckingOut" | "Paid", tableLabel:
         { table },
       );
 }
+
+/**
+ * b63 (F35, v15 D62DV): on the table's own panel the long reason above is one short line — the
+ * panel shows Cancel checkout itself while it can still be pressed (nothing paid yet).
+ */
+export function staffRoundRefusedShortText(
+  offer: "CheckingOut" | "Paid",
+  paymentStarted: boolean,
+): string {
+  return offer === "CheckingOut" && !paymentStarted
+    ? t("No new rounds while checking out. To add dishes, cancel checkout first.")
+    : t("No new rounds on a paid bill. New dishes start a new bill once the table is closed.");
+}

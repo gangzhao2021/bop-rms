@@ -152,6 +152,8 @@ test("@production Table QR codes: print one, replace a lost code at a seated tab
   });
 
   // Turning off a seated table's code: no new code, guests ask staff (not "scan the new code").
+  // b63 (F33): Turn off waits under More, away from Print and Replace.
+  await page.getByRole("row", { name: /T2/u }).getByRole("button", { name: "More" }).click();
   await page.getByRole("row", { name: /T2/u }).getByRole("button", { name: "Turn off" }).click();
   await expect(
     page.getByRole("heading", { name: "Turn off the code for table T2?" }),

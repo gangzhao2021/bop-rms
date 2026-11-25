@@ -342,7 +342,13 @@ export function TableGuestsLeft({
   canResolve = true,
   mergedOrderReferences = [],
   billRoundNumbers = null,
+  listServing = true,
 }: {
+  /**
+   * b63 (F35): when every open round only waits to be served, the close section says so in one
+   * line itself, so this list (the same thing again, round by round) is not shown.
+   */
+  readonly listServing?: boolean;
   /** b41: the Orders of the tables merged into this one (their rounds are on this bill). */
   readonly mergedOrderReferences?: readonly string[];
   /** b41: each round's number on the whole bill (null or "Reading": each Order's own). */
@@ -369,7 +375,13 @@ export function TableGuestsLeft({
    * paid with the table, whose own guidance replaces the generic "serve or cancel" line.
    */
   readonly onPlan: (
-    plan: { open: number; blockers: readonly string[]; paidWithTable: boolean } | null,
+    plan: {
+      open: number;
+      blockers: readonly string[];
+      paidWithTable: boolean;
+      /** b63 (F35): every open round only waits for its dishes to be served. */
+      onlyServing: boolean;
+    } | null,
   ) => void;
   /** After rounds were cancelled: re-check the table. */
   readonly onResolved: () => void;
@@ -427,6 +439,9 @@ export function TableGuestsLeft({
           blockers: plan.closeBlockers,
           paidWithTable:
             plan.rounds.length > 0 && plan.rounds.every((round) => round.state === "PaidWithTable"),
+          onlyServing: plan.rounds.every(
+            (round) => round.state === "OnTableBill" || round.state === "PaidWithTable",
+          ),
         });
       })
       .catch((error: unknown) => {
@@ -472,7 +487,7 @@ export function TableGuestsLeft({
   if (
     plan.rounds.every((round) => round.state === "OnTableBill" || round.state === "PaidWithTable")
   )
-    return (
+    return !listServing ? null : (
       <section aria-label={t("Dishes still to serve")} className="dining-table-guests-left">
         <ul>
           {listed.map((round) => (
