@@ -2,6 +2,11 @@ import { wordGap } from "./word-gap.js";
 import { useRef, useState } from "react";
 import { t, saidTable } from "./i18n/i18n.js";
 import { newOperationReference } from "./operation-reference.js";
+import {
+  isStaffSignInEndedRefusal,
+  signedOutText,
+  useStaffSessionLive,
+} from "./staff-session-reads.js";
 import type { StaffDiningTable } from "./dining-session-client.js";
 import {
   createTableTeaClient,
@@ -23,6 +28,8 @@ export type TableMergeProblem =
   | "TargetNotOrdered"
   | "UnsentCart"
   | "TooManyGuests"
+  /** Batch 64: this screen's sign-in had ended (401, or the tab's gate kept it back). */
+  | "SignedOut"
   /** The request never left this device. */
   | "Offline"
   /** The system answered it is busy. */
@@ -78,10 +85,11 @@ export function createTableMergeClient(fetcher: typeof fetch = fetch): TableMerg
           headers: { "content-type": "application/json", "x-bop-csrf": csrf },
           body: JSON.stringify({ action: "Merge", ...command }),
         });
-      } catch {
-        throw new TableMergeError("Offline");
+      } catch (error) {
+        throw new TableMergeError(isStaffSignInEndedRefusal(error) ? "SignedOut" : "Offline");
       }
-      if (response.status === 401 || response.status === 403) throw new TableMergeError("Denied");
+      if (response.status === 401) throw new TableMergeError("SignedOut");
+      if (response.status === 403) throw new TableMergeError("Denied");
       const payload = (await response.json().catch(() => null)) as Record<string, unknown> | null;
       if (response.status === 409)
         throw new TableMergeError(problems[String(payload?.error)] ?? "Changed");
@@ -176,6 +184,11 @@ export function TableMerge({
   const [target, setTarget] = useState("");
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  // Batch 64 (v15 b63 live): a 403 just after this screen was signed out (another sign-in took its
+  // place) is not the role's limit. While the signed-out cover is up, or for a 401, staff are told
+  // to sign in again, never that their role can't merge tables.
+  const [denied, setDenied] = useState(false);
+  const live = useStaffSessionLive();
   // One reference per intended merge until it is answered (a retry is recorded once).
   const operation = useRef<{ key: string; reference: string } | null>(null);
   const blocked = mergeSourceProblem(table);
@@ -197,6 +210,7 @@ export function TableMerge({
       operation.current = { key, reference: newOperationReference() };
     setBusy(true);
     setProblem(null);
+    setDenied(false);
     try {
       const merged = await client.merge(csrf, {
         operationReference: operation.current.reference,
@@ -268,28 +282,31 @@ export function TableMerge({
         onCheckingOut(chosen.tableReference);
         return;
       }
+      setDenied(code === "Denied");
       setProblem(
-        code === "PaymentStarted"
-          ? t("Something on one of the bills was paid or split. Those tables can't be merged.")
-          : code === "TargetNotOrdered"
-            ? t("That table hasn't ordered yet. Merge that table into this one instead.")
-            : code === "UnsentCart"
-              ? t(
-                  "This table's guests have dishes in their cart they haven't sent. Ask them to send or clear the cart first.",
-                )
-              : code === "TooManyGuests"
-                ? t("Together the parties would be more than 99 guests.")
-                : code === "PaysEachRound"
-                  ? t("Only tables that pay at the end can be merged.")
-                  : code === "CheckingOut"
-                    ? t("One of the tables is checking out. Merge before checking out.")
-                    : code === "Denied"
-                      ? t("Your role can't merge tables. Ask the owner or a manager.")
-                      : code === "Changed" || code === "NotSeated"
-                        ? t("The tables changed meanwhile. They are read again: check and retry.")
-                        : code === "Offline"
-                          ? t("The merge wasn't confirmed: this device is offline. Retry.")
-                          : t("The merge wasn't confirmed: the system is busy. Retry."),
+        code === "SignedOut"
+          ? signedOutText()
+          : code === "PaymentStarted"
+            ? t("Something on one of the bills was paid or split. Those tables can't be merged.")
+            : code === "TargetNotOrdered"
+              ? t("That table hasn't ordered yet. Merge that table into this one instead.")
+              : code === "UnsentCart"
+                ? t(
+                    "This table's guests have dishes in their cart they haven't sent. Ask them to send or clear the cart first.",
+                  )
+                : code === "TooManyGuests"
+                  ? t("Together the parties would be more than 99 guests.")
+                  : code === "PaysEachRound"
+                    ? t("Only tables that pay at the end can be merged.")
+                    : code === "CheckingOut"
+                      ? t("One of the tables is checking out. Merge before checking out.")
+                      : code === "Denied"
+                        ? t("Your role can't merge tables. Ask the owner or a manager.")
+                        : code === "Changed" || code === "NotSeated"
+                          ? t("The tables changed meanwhile. They are read again: check and retry.")
+                          : code === "Offline"
+                            ? t("The merge wasn't confirmed: this device is offline. Retry.")
+                            : t("The merge wasn't confirmed: the system is busy. Retry."),
       );
       if (code === "Changed" || code === "NotSeated") onMerged("", null);
     } finally {
@@ -315,6 +332,7 @@ export function TableMerge({
               onChange={(event) => {
                 setTarget(event.currentTarget.value);
                 setProblem(null);
+                setDenied(false);
               }}
             >
               <option value="">{t("Choose a table")}</option>
@@ -351,7 +369,7 @@ export function TableMerge({
           </button>
         </>
       )}
-      {problem ? <p role="alert">{problem}</p> : null}
+      {problem ? <p role="alert">{denied && !live ? signedOutText() : problem}</p> : null}
     </section>
   );
 }

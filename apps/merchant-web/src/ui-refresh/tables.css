@@ -2055,7 +2055,10 @@
     font-size: 16px;
     font-weight: 400;
   }
-  .workspace-page.tables-v3 .table-panel[data-docked] {
+  /* Batch 64 (v15 b63 live): the room for the docked step is kept at the page's end, not the
+     panel's: "Table settings" under the panel sat behind the button (y 755-799 under 780-828 on a
+     free table; hidden on a seated one scrolled to the end). */
+  .workspace-page.tables-v3:has(.table-panel[data-docked]) {
     padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px));
   }
   .workspace-page.tables-v3 .table-panel[data-docked] [data-dock="bottom"] {

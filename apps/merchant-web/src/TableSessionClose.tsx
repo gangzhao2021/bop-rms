@@ -18,6 +18,7 @@ import {
 import { serviceOperationReference } from "./service-control-client.js";
 import type { CommandOutcomeRecovery } from "./command-outcome-recovery.js";
 import { TableGuestsLeft } from "./TableGuestsLeft.js";
+import { signedOutText, useStaffSessionLive } from "./staff-session-reads.js";
 import { closeReasonTexts } from "./dining-close-reasons.js";
 import type { StaffDiningTable, StaffDiningTableSession } from "./dining-session-client.js";
 
@@ -321,6 +322,7 @@ export function TableSessionClose({
   readonly onChangedElsewhere?: (() => void) | undefined;
   readonly fetcher?: typeof fetch | undefined;
 }) {
+  const live = useStaffSessionLive();
   const [check, setCheck] = useState<Check>(
     session.orderReference === null ? { kind: "Ready", progress: null } : { kind: "Checking" },
   );
@@ -589,15 +591,21 @@ export function TableSessionClose({
         <p role="status">{t("Checking this table's orders…")}</p>
       ) : check.kind === "Failed" ? (
         <p role="status">
-          {check.denied
+          {/* Batch 64 (v15 b63 live): refused because this screen was signed out (the cover is
+              up), not for the Owner's role. */}
+          {check.denied && !live
             ? t(
-                "You can't check this table's orders with your current access. Ask an Owner or Store Manager to close it.",
+                "Your sign-in on this screen has ended, so this table's orders weren't checked. Sign in again to keep working.",
               )
-            : check.missing
+            : check.denied
               ? t(
-                  "This table's order wasn't found at this store. Refresh the tables and try again.",
+                  "You can't check this table's orders with your current access. Ask an Owner or Store Manager to close it.",
                 )
-              : t("Couldn't check this table's orders. Try again.")}
+              : check.missing
+                ? t(
+                    "This table's order wasn't found at this store. Refresh the tables and try again.",
+                  )
+                : t("Couldn't check this table's orders. Try again.")}
           {wordGap()}
           {check.denied ? null : (
             <button type="button" onClick={() => setAttempt((value) => value + 1)}>
@@ -715,7 +723,9 @@ export function TableSessionClose({
         </p>
       ) : outcome === "Denied" ? (
         <p role="alert">
-          {t("Your role can't close tables. Ask the owner or a manager to close it.")}
+          {live
+            ? t("Your role can't close tables. Ask the owner or a manager to close it.")
+            : signedOutText()}
         </p>
       ) : outcome === "Gone" ? (
         <p role="alert">

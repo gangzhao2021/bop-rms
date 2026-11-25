@@ -36,6 +36,17 @@ export function backgroundReadAllowed(
   return visible && !ended;
 }
 
+/**
+ * Batch 64 (v15 b63 live): what an action refused because this screen's sign-in ended says (a 401,
+ * a request the gate kept back, or a 403 while the signed-out cover is up): sign in again, never
+ * that the role can't do it.
+ */
+export function signedOutText(): string {
+  return t(
+    "Your sign-in on this screen has ended, so this wasn't sent. Sign in again, then try again.",
+  );
+}
+
 /** True while this screen's sign-in is usable; periodic reads stop when it turns false. */
 export function useStaffSessionLive(): boolean {
   return !useSyncExternalStore(subscribeStaffSessionEnded, staffSessionEnded, () => false);
