@@ -43,7 +43,11 @@ import {
   type TablePayment,
 } from "./TablePaymentPanel.js";
 import { UnpaidRoundCancelAction, isPaymentUnconfirmed } from "./UnpaidRoundCancelAction.js";
-import { refundsBehindRefunded, type ListedRefundPart } from "./refund-assignment.js";
+import {
+  refundsBehindRefunded,
+  type ListedRefundPart,
+  type RefundAssignmentContext,
+} from "./refund-assignment.js";
 import {
   earlierOpenPickupText,
   HeldStockReleaseAction,
@@ -1247,9 +1251,10 @@ export function refundedByWay(
   listed: readonly ListedRefund[],
   when: (at: string) => string,
   reasons: readonly RefundReason[] = [],
+  context: RefundAssignmentContext = { onlineMayBeOnItsWay: true },
 ): readonly { readonly label: string; readonly amountMinor: bigint }[] | null {
   if (record == null) return null;
-  const refunds = refundsBehindRefunded(record.refunds, listed, refundedMinor);
+  const refunds = refundsBehindRefunded(record.refunds, listed, refundedMinor, context);
   if (refunds === null) return null;
   const reasonOf = (refund: (typeof refunds)[number]) => {
     const same = reasons.filter(
@@ -1319,7 +1324,8 @@ export function orderRefundRows(
       const cancellation = item.cancellation;
       if (cancellation?.refundStatus !== "Refunded") continue;
       const amountMinor = BigInt(cancellation.refund.amountMinor);
-      if (amountMinor > 0n) listed.push({ method: "Online", amountMinor });
+      // Round 2 F27: the server never puts an item's refund in the order's record.
+      if (amountMinor > 0n) listed.push({ method: "Online", amountMinor, inRecord: false });
     }
   }
   if (listedPending > 0n)
@@ -1376,16 +1382,18 @@ export function orderRefundRows(
     if (cancellation.refundMethod === "Online") online += amount;
     total += amount;
     rows.push({ label, amount: money(amount) });
-    // A counter order paid in cash is cancelled "on the card machine" and recorded as cash.
-    listed.push({
-      method:
-        cancellation.refundMethod === "Online"
-          ? "Online"
-          : order.counter?.paidOnCardMachine?.cash != null
-            ? "Cash"
-            : "CardMachine",
-      amountMinor: amount,
-    });
+    // A counter order paid in cash is cancelled "on the card machine" and recorded as cash. An
+    // online cancellation refund is never in the order's record (round 2 F27); one given back on
+    // the card machine or in cash is, as the payment's own refund.
+    listed.push(
+      cancellation.refundMethod === "Online"
+        ? { method: "Online", amountMinor: amount, inRecord: false }
+        : {
+            method: order.counter?.paidOnCardMachine?.cash != null ? "Cash" : "CardMachine",
+            amountMinor: amount,
+            inRecord: true,
+          },
+    );
   }
   let other = 0n;
   // b61 (decided with b60's table rule): only money Payment says went back counts as "Other
@@ -1414,9 +1422,17 @@ export function orderRefundRows(
   const table = orderTableTaken(order);
   other += BigInt(table?.refundedMinor ?? "0");
   if (other > 0n) {
+    // Round 2 F27: the record holds a refund to the guest's card once sent, before the Provider
+    // answers (an ordinary refund, a table's refund to the card), so while any such money is on
+    // its way (beyond the listed refunds on theirs, never in the record) none is said as given back.
+    const onlineMayBeOnItsWay =
+      BigInt(table?.refundPendingMinor ?? "0") > 0n ||
+      (position === null
+        ? order.paidOnline != null
+        : BigInt(position.refundPendingMinor) > listedPending);
     // Batch 63 (F27, v15 b62 review: "Other refunds" — other than what?): money Payment says went
     // back, said as that, with each refund's way and time when the record shows which they were.
-    const ways = refundedByWay(record, other, listed, when, reasons);
+    const ways = refundedByWay(record, other, listed, when, reasons, { onlineMayBeOnItsWay });
     if (ways === null) rows.push({ label: t("Refunded"), amount: money(other) });
     else for (const way of ways) rows.push({ label: way.label, amount: money(way.amountMinor) });
     total += other;

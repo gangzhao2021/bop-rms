@@ -103,8 +103,10 @@ export function tableRefundReasons(payments: readonly TablePayment[]): readonly 
         at: refund.refundedAt,
         reasonCode: refund.reasonCode,
       })),
+      // Round 2 F27: only a refund the card company answered went back; one still going back
+      // ("Sending") or refused never gives its reason to a refund said as given back.
       ...payment.onlineRefunds
-        .filter((refund) => refund.state !== "Refused")
+        .filter((refund) => refund.state === "Refunded")
         .map((refund) => ({
           method: "Online" as const,
           amountMinor: refund.amountMinor,
