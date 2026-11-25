@@ -549,7 +549,9 @@ export function CurrentOrderLines({
       : {
           others: mergedRounds - BigInt(shown.total.amountMinor),
           paid: Object.freeze({
-            amountMinor: (mergedRounds + tableTip + tableRounding).toString(),
+            amountMinor:
+              tableTaken?.mergedBillPaidMinor ??
+              (mergedRounds + tableTip + tableRounding).toString(),
             currencyCode: shown.total.currencyCode,
           }),
         };
@@ -1255,7 +1257,13 @@ export function orderTableTaken(order: {
     bill.paid !== null &&
     bill.mergedInto === undefined &&
     [...(bill.billRoundNumbers?.keys() ?? [])].some((round) => !own.has(round));
-  return merged ? Object.freeze({ ...taken, mergedBillRoundsMinor: bill.totalMinor }) : taken;
+  return merged && bill.paid !== null
+    ? Object.freeze({
+        ...taken,
+        mergedBillRoundsMinor: bill.totalMinor,
+        mergedBillPaidMinor: bill.paid.amountMinor,
+      })
+    : taken;
 }
 /** orderTableTaken: what the table's payment took, and on a merged table its whole bill. */
 export type OrderTableTaken = TableBillTaken & {
@@ -1264,6 +1272,11 @@ export type OrderTableTaken = TableBillTaken & {
    * and theirs). Absent: the payment is for this Order's rounds alone.
    */
   readonly mergedBillRoundsMinor?: string;
+  /**
+   * b61 review: what that payment took (the figure the list's amount uses), so "Whole bill paid"
+   * and "Total after refunds" never read apart from it.
+   */
+  readonly mergedBillPaidMinor?: string;
 };
 /**
  * WP-2423 (3cd0f8dd M1): the order's total with the tip its payments carried, so staff read what

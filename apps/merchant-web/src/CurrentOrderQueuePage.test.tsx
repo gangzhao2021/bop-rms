@@ -3185,6 +3185,24 @@ describe("b61 (v15 b60 live): refunds read the same on phones, for pickups and o
       tableBill: { ...host.tableBill, billRoundNumbers: undefined },
     } as unknown as Parameters<typeof orderRefundRows>[0];
     expect(orderTableTaken(single)).not.toHaveProperty("mergedBillRoundsMinor");
+    // b61 review: "Whole bill paid" is what the payment took (the list's figure), even if the
+    // rounds, tip and rounding read a cent apart from it.
+    const apart = {
+      ...host,
+      tableBill: { ...host.tableBill, paid: { ...host.tableBill?.paid, amountMinor: "6024" } },
+    } as unknown as Parameters<typeof orderRefundRows>[0];
+    const apartHtml = renderToStaticMarkup(
+      <CurrentOrderLines
+        lines={linesOf}
+        refundRows={orderRefundRows(apart, linesOf, null)}
+        tableTaken={orderTableTaken(apart)}
+      />,
+    );
+    expect(value(apartHtml, "Whole bill paid")).toBe("$60.24");
+    expect(value(apartHtml, "Total after refunds")).toBe("$50.24");
+    expect(BigInt(orderAmountTaken(apart)?.amountMinor ?? "0") - orderAmountRefunded(apart)).toBe(
+      5024n,
+    );
     setLanguageForTest("zh-Hans");
     try {
       const zh = renderToStaticMarkup(
