@@ -19,6 +19,12 @@ const entryRoute = "/bff/customer/entry";
  * open now. Its own budget, no visit, no admission; "Changed" sends the phone to the entry once.
  */
 export const customerEntryTableWaitRoute = "/bff/customer/entry/table-wait";
+/**
+ * Batch 64 fix-up: what a customer page says it reads on a visit answer. A phone still running the
+ * PWA it cached before batch 64 fails on any unknown key, so the open table's printed name goes only
+ * to a page that sends `table-label` here; the old page keeps joining with an unnamed table.
+ */
+export const customerEntryAcceptsHeader = "bop-entry-accepts";
 const expectedGuestSessionCookie: GuestSessionCookieDescriptor = Object.freeze({
   name: "__Host-bop-guest",
   secure: true,
@@ -1359,8 +1365,14 @@ export class CustomerEntryHandler {
           locale: result.locale,
           contextExpiresAt: result.contextExpiresAt,
           ...(result.tableOpen === undefined ? {} : { tableOpen: result.tableOpen }),
-          // Batch 64 (F11): the table's printed name, in the shape "not open yet" sends it.
-          ...(result.tableLabel === undefined ? {} : { table: { label: result.tableLabel } }),
+          // Batch 64 (F11): the table's printed name, in the shape "not open yet" sends it, and
+          // only to a page that reads it (an older cached page would show an entry outage).
+          ...(result.tableLabel === undefined ||
+          !(request.get(customerEntryAcceptsHeader) ?? "")
+            .split(",")
+            .some((part) => part.trim() === "table-label")
+            ? {}
+            : { table: { label: result.tableLabel } }),
           csrfToken: result.csrfCredential,
         });
       } catch (error) {

@@ -120,6 +120,9 @@ async function listen(handler?: CustomerEntryHandler): Promise<number> {
   return (server.address() as AddressInfo).port;
 }
 
+const accepting = (): Record<string, string> =>
+  requestHeaders({ "bop-entry-accepts": "table-label" });
+
 function requestHeaders(overrides: Record<string, string> = {}): Record<string, string> {
   return {
     "content-type": "application/json",
@@ -230,11 +233,40 @@ describe("WP-1004 Customer-entry contract", () => {
     ]);
   });
 
+  it("batch 64 fix-up: a page cached before batch 64 (no bop-entry-accepts) still joins an open named table, unnamed", async () => {
+    for (const headers of [requestHeaders(), requestHeaders({ "bop-entry-accepts": "other" })]) {
+      const port = new MutablePort();
+      port.result = established({ tableOpen: true, tableLabel: "V63 A (TEST)" });
+      const joined = await post(await listen(customerEntry(port)), undefined, headers);
+      expect(joined.status).toBe(201);
+      const body = (await joined.json()) as Record<string, unknown>;
+      expect(body).toMatchObject({ status: "Established", tableOpen: true });
+      // The old page's exact reader fails on any unknown key, so none is sent.
+      expect(Object.keys(body).sort()).toEqual(
+        [
+          "schemaVersion",
+          "status",
+          "brandDisplayName",
+          "storeDisplayName",
+          "publicStoreReference",
+          "publicTableReference",
+          "channel",
+          "operatingState",
+          "availableServiceModes",
+          "locale",
+          "contextExpiresAt",
+          "tableOpen",
+          "csrfToken",
+        ].sort(),
+      );
+    }
+  });
+
   it("batch 64 (F11): names an open table on its visit, only at a table and only a safe name", async () => {
     const port = new MutablePort();
     const serverPort = await listen(customerEntry(port));
     port.result = established({ tableOpen: true, tableLabel: "V63 A (TEST)" });
-    const named = await post(serverPort);
+    const named = await post(serverPort, undefined, accepting());
     expect(named.status).toBe(201);
     expect(await named.json()).toMatchObject({
       status: "Established",
@@ -242,7 +274,12 @@ describe("WP-1004 Customer-entry contract", () => {
       table: { label: "V63 A (TEST)" },
     });
     port.result = established({ tableOpen: true });
-    expect(Object.hasOwn((await (await post(serverPort)).json()) as object, "table")).toBe(false);
+    expect(
+      Object.hasOwn(
+        (await (await post(serverPort, undefined, accepting())).json()) as object,
+        "table",
+      ),
+    ).toBe(false);
     // A name away from a table is a broken answer (a fresh server: each takes two scans).
     const pickup = new MutablePort();
     pickup.result = established({
@@ -264,7 +301,7 @@ describe("WP-1004 Customer-entry contract", () => {
     for (const tableLabel of ["#4", "A_1", "VIP*", "<b>4</b>", " T1"]) {
       const port = new MutablePort();
       port.result = established({ tableOpen: true, tableLabel });
-      const joined = await post(await listen(customerEntry(port)));
+      const joined = await post(await listen(customerEntry(port)), undefined, accepting());
       expect(joined.status).toBe(201);
       const body = (await joined.json()) as Record<string, unknown>;
       expect(body).toMatchObject({ status: "Established", tableOpen: true });

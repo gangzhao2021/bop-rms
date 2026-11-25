@@ -640,7 +640,8 @@ export function createCustomerEntryClient(
         redirect: "error",
         referrerPolicy: "no-referrer",
         signal: controller.signal,
-        headers: { "content-type": "application/json" },
+        // Batch 64: this page reads an open table's printed name on its visit answer.
+        headers: { "content-type": "application/json", "bop-entry-accepts": "table-label" },
         body: JSON.stringify({
           ...(replay
             ? intent === null

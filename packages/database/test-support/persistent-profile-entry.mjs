@@ -394,6 +394,8 @@ export async function exercisePersistentProfileEntry({
           "content-type": "application/json",
           "sec-fetch-site": "same-origin",
           "sec-fetch-mode": "cors",
+          // The current customer page reads the open table's printed name (batch 64).
+          "bop-entry-accepts": "table-label",
           ...(cookie === undefined ? {} : { cookie }),
         },
         body: JSON.stringify({ qrToken: f.token() }),

@@ -329,6 +329,10 @@ describe("customer entry browser boundary", () => {
       kind: "Established",
       context: { tableLabel: "V63 A (TEST)" },
     });
+    // It says it reads the name, so the api sends it (a page cached before batch 64 does not).
+    expect(fetch.mock.calls[0]?.[1]).toMatchObject({
+      headers: { "bop-entry-accepts": "table-label" },
+    });
     // A name it can't show safely is left out; the guest still joins.
     const unsafe = await start();
     expect(unsafe).toMatchObject({ kind: "Established" });
