@@ -7,6 +7,7 @@ import { LanguageRoot } from "../i18n/i18n.js";
 import type { StoreProfile, StoreProfileLoader } from "../store/store-profile-client.js";
 import { TablePayPanel } from "./TablePayPanel.js";
 import { parseTablePaymentView, type createTablePaymentClient } from "./table-payment-client.js";
+import { setCustomerCsrfCredential } from "../session/customer-transaction-context.js";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let container: HTMLDivElement, root: Root;
@@ -235,4 +236,63 @@ it("batch 63 review: after a by-dish card payment fails, the guest chooses again
   expect(start).toHaveBeenCalledTimes(2);
   const references = start.mock.calls.map((call: unknown[]) => call[0]);
   expect(references[1]).not.toBe(references[0]);
+});
+
+/**
+ * Batch 64 (v15 b62 review F09, b63 live): "Have points? Sign in to use them" came before what the
+ * guest pays and the tip, so the first thing asked at Pay the bill was to sign in. It comes after
+ * the payment choices, and paying never waits for it.
+ */
+it("batch 64 (F09): Have points? comes after the payment choices, before what you pay", async () => {
+  setCustomerCsrfCredential("c".repeat(43));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            schemaVersion: 1,
+            offered: true,
+            signedIn: false,
+            messagesAvailable: true,
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    ),
+  );
+  const open = {
+    read: async () => byGuests({}),
+  } as unknown as ReturnType<typeof createTablePaymentClient>;
+  await act(async () => {
+    root.render(
+      <LanguageRoot initial="en">
+        {() => (
+          <MemoryRouter>
+            <TablePayPanel client={open} storeProfile={null} />
+          </MemoryRouter>
+        )}
+      </LanguageRoot>,
+    );
+  });
+  await act(async () => {
+    for (let index = 0; index < 8; index += 1) await new Promise((resolve) => setTimeout(resolve));
+  });
+  const points = [...container.querySelectorAll("button")].find(
+    (button) => button.textContent === "Have points? Sign in to use them",
+  );
+  const tip = container.querySelector(".dining-session__tip");
+  const scope = container.querySelector('input[name="table-pay-scope"]');
+  const pay = container.querySelector(".dining-session__pay-button");
+  expect(points).toBeDefined();
+  expect(tip).not.toBeNull();
+  const after = (first: Element | null | undefined, second: Element | null | undefined) =>
+    first !== null &&
+    first !== undefined &&
+    second !== null &&
+    second !== undefined &&
+    (first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+  expect(after(scope, points)).toBe(true);
+  expect(after(tip, points)).toBe(true);
+  expect(after(points, pay)).toBe(true);
+  setCustomerCsrfCredential(null);
 });

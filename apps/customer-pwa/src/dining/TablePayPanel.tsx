@@ -844,12 +844,6 @@ export function TablePayPanel({
       ) : (
         <>
           {youPaid}
-          <MemberPointsAtTable
-            onBillChanged={() => {
-              void read();
-              onBillChanged?.();
-            }}
-          />
           {view.state === "Failed" ? (
             <p role="alert">
               {t(
@@ -1070,6 +1064,14 @@ export function TablePayPanel({
               ) : null}
             </fieldset>
           )}
+          {/* Batch 64 (v15 b62 review F09): points come after the payment choices (what is paid
+              and the tip), never before them; paying never depends on signing in. */}
+          <MemberPointsAtTable
+            onBillChanged={() => {
+              void read();
+              onBillChanged?.();
+            }}
+          />
           {total === null || chosenTipMinor === null ? null : (
             // Batch 63 (D62B-04, Figma 51:223 你付): what is paid, the tip with its percentage and
             // the total, before the button that takes it.
