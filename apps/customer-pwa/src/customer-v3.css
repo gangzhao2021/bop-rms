@@ -1201,6 +1201,13 @@
   color: var(--bop-color-text-muted);
   font-size: 14px;
 }
+/* Batch 64 (v15 b63 live, M63 C): a line's options or note, grey 14/400 under the dish. */
+.customer-page .cart-unsent .cart-unsent__detail {
+  display: block;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
 .customer-page .cart-unsent p {
   margin: var(--bop-space-2) 0 0;
   color: var(--bop-color-text-default);

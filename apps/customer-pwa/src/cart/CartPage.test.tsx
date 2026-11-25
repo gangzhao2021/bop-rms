@@ -1362,8 +1362,9 @@ describe("Batch 48: Cart while the table checks out", () => {
     const html = renderPage(held);
     expect(html).toContain("Your table is paying the bill");
     expect(html).toContain('<h3 id="cart-unsent-heading">Not sent to the kitchen</h3>');
+    // Batch 64: with the dish's options under it, so staff add the right one.
     expect(html).toContain(
-      '<li><span>Beef noodles (TEST)</span> <span class="cart-unsent__count">× 2</span></li>',
+      '<li><span>Beef noodles (TEST)</span> <span class="cart-unsent__count">× 2</span><span class="cart-unsent__detail">Synthetic size</span></li>',
     );
     expect(html).not.toContain("Ask staff if you want to add more.");
     expect(html).toContain(
@@ -1374,5 +1375,44 @@ describe("Batch 48: Cart while the table checks out", () => {
     renderToStaticMarkup(createElement(LanguageRoot, { initial: "en", children: () => null }));
     // Nothing left unsent: the card reads as before.
     expect(renderPage(checkingOut)).toContain("<p>Ask staff if you want to add more.</p>");
+  });
+
+  // Batch 64 (v15 b63 live, M63 C): two guests each had 1 × Beef noodles (TEST) in the table's
+  // cart. "Not sent to the kitchen" listed "Beef noodles (TEST) × 1" twice, which read as a
+  // duplicate. The same dish is one line with how many; a different option stays its own line.
+  it("lists the same unsent dish once with how many, and a different option on its own", () => {
+    setCustomerCsrfCredential("c".repeat(43));
+    noteTableCheckingOut(true);
+    const base = cart();
+    const item = base.cart.items[0];
+    if (item === undefined) throw new Error("synthetic item missing");
+    const noodles = { ...item, displayName: "Beef noodles (TEST)", quantity: 1, configuration: [] };
+    const held: CartState = {
+      ...checkingOut,
+      cart: {
+        ...base,
+        cart: {
+          ...base.cart,
+          orderType: "DineIn",
+          items: [
+            { ...noodles, cartItemReference: "line-a" },
+            { ...noodles, cartItemReference: "line-b" },
+            {
+              ...noodles,
+              cartItemReference: "line-c",
+              configuration: [{ optionReference: "opt-spicy", displayName: "Spicy", quantity: 1 }],
+            },
+          ],
+        },
+      },
+    };
+    const html = renderPage(held);
+    expect(html.match(/<li><span>Beef noodles \(TEST\)<\/span>/gu)).toHaveLength(2);
+    expect(html).toContain(
+      '<li><span>Beef noodles (TEST)</span> <span class="cart-unsent__count">× 2</span></li>',
+    );
+    expect(html).toContain(
+      '<li><span>Beef noodles (TEST)</span> <span class="cart-unsent__count">× 1</span><span class="cart-unsent__detail">Spicy</span></li>',
+    );
   });
 });

@@ -30,6 +30,8 @@ interface Table {
   phase: Phase;
   /** One dish this phone added and has not sent yet. */
   readonly unsent: boolean;
+  /** Batch 64 (v15 b63 live, M63 C): another guest's line of the same dish, not sent either. */
+  readonly sameDishTwice?: boolean;
   /** Batch 50: the cart reads this page made, counted while a test looks. */
   cartReads?: number;
 }
@@ -83,18 +85,16 @@ async function stubTable(page: Page, table: Table) {
                 absoluteExpiresAt: expiresAt,
               },
               items: table.unsent
-                ? [
-                    {
-                      cartItemReference: id(2),
-                      sellableReference: id(3),
-                      displayName: dish,
-                      quantity: 1,
-                      configuration: [],
-                      customerNote: null,
-                      lineEstimate: { status: "Unavailable", reasonCode: "QUOTE_REQUIRED" },
-                      warnings: [],
-                    },
-                  ]
+                ? [2, ...(table.sameDishTwice === true ? [6] : [])].map((line) => ({
+                    cartItemReference: id(line),
+                    sellableReference: id(3),
+                    displayName: dish,
+                    quantity: 1,
+                    configuration: [],
+                    customerNote: null,
+                    lineEstimate: { status: "Unavailable", reasonCode: "QUOTE_REQUIRED" },
+                    warnings: [],
+                  }))
                 : [],
               quote: null,
               warnings: [],
@@ -410,6 +410,47 @@ for (const width of [390, 1024, 1440])
           if (!unsent)
             expect(await mainText(page)).toBe(await freshText(browser, table, "/cart", zh, width));
         });
+
+      // Batch 64 (v15 b63 live, M63 C): two guests each had 1 × Beef noodles (TEST) in the
+      // table's cart when staff started checkout. "Not sent to the kitchen" listed the dish twice
+      // ("Beef noodles (TEST) × 1" on two lines), which read as a duplicate to the guest and to
+      // the staff member they show it to. The same dish is one line with how many in all.
+      test("the same dish unsent by two guests is one line with how many", async ({ page }) => {
+        test.setTimeout(120_000);
+        const table: Table = { phase: "open", unsent: true, sameDishTwice: true };
+        await page.clock.install();
+        await stubTable(page, table);
+        await open(page, "/cart", zh);
+        await expect(page.getByRole("main").getByText(dish).first()).toBeVisible();
+        table.phase = "checkout-started";
+        const main = page.getByRole("main");
+        await runUntil(page, () =>
+          expect(
+            main.getByRole("heading", { name: zh ? "没有送到厨房" : "Not sent to the kitchen" }),
+          ).toBeVisible({ timeout: 1_000 }),
+        );
+        const line = main.locator(".cart-unsent li");
+        await expect(line).toHaveCount(1);
+        await expect(line).toHaveText(`${dish} × 2`);
+        // Inside the gutter with room for wider (Linux) fonts, never scrolling sideways.
+        const box = await line.boundingBox();
+        expect(box?.x ?? 0).toBeGreaterThanOrEqual(15);
+        const words = await line.evaluate((element) => {
+          const range = document.createRange();
+          range.selectNodeContents(element);
+          return range.getBoundingClientRect().right;
+        });
+        expect(words).toBeLessThanOrEqual(width - 15 - 40);
+        expect(
+          await page.evaluate(
+            () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+          ),
+        ).toBeLessThanOrEqual(0);
+        await expectNoInternalText(page);
+        await page.screenshot({
+          path: `test-results/b64-cart-unsent-twice-${zh ? "zh" : "en"}-${width}.png`,
+        });
+      });
 
       test("Cart with an unsent dish comes back as it was after Cancel checkout", async ({
         page,

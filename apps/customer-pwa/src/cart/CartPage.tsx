@@ -566,6 +566,46 @@ function CartSummary({
 }
 
 /**
+ * Batch 64 (v15 b63 live, M63 C): the table's cart holds one line per guest, so two guests who each
+ * added the same dish read as a duplicate ("Beef noodles × 1" twice). The same dish with the same
+ * options and note is one line with how many in all; a different option or note stays its own
+ * line and says what differs, so no line looks like another.
+ */
+export function unsentLines(items: readonly CartItemView[]): readonly {
+  readonly key: string;
+  readonly displayName: string;
+  readonly detail: string | null;
+  readonly quantity: number;
+}[] {
+  const lines = new Map<
+    string,
+    { key: string; displayName: string; detail: string | null; quantity: number }
+  >();
+  for (const item of items) {
+    const options = item.configuration
+      .map((option) => `${option.optionReference}:${option.quantity}`)
+      .sort()
+      .join(",");
+    const key = JSON.stringify([item.sellableReference, options, item.customerNote ?? ""]);
+    const line = lines.get(key);
+    if (line !== undefined) {
+      line.quantity += item.quantity;
+      continue;
+    }
+    const detail = [describeConfiguration(item), item.customerNote]
+      .filter((part): part is string => part !== null && part.trim() !== "")
+      .join(listSeparator());
+    lines.set(key, {
+      key: item.cartItemReference,
+      displayName: item.displayName,
+      detail: detail === "" ? null : detail,
+      quantity: item.quantity,
+    });
+  }
+  return [...lines.values()];
+}
+
+/**
  * Batch 63 (design review CDI-1, F01): what was still in the cart, unsent, when the table started
  * paying — each dish and how many (no box, no strikethrough) — and one way to get them added:
  * staff are asked to come over (the table's staff call), or, where the Store doesn't take calls
@@ -609,10 +649,13 @@ export function UnsentAtCheckout({
     <div className="cart-unsent" aria-labelledby="cart-unsent-heading">
       <h3 id="cart-unsent-heading">{cartText.unsent.heading}</h3>
       <ul>
-        {items.map((item) => (
-          <li key={item.cartItemReference}>
-            <span>{item.displayName}</span>{" "}
-            <span className="cart-unsent__count">× {item.quantity}</span>
+        {unsentLines(items).map((line) => (
+          <li key={line.key}>
+            <span>{line.displayName}</span>{" "}
+            <span className="cart-unsent__count">× {line.quantity}</span>
+            {line.detail === null ? null : (
+              <span className="cart-unsent__detail">{line.detail}</span>
+            )}
           </li>
         ))}
       </ul>
