@@ -195,8 +195,12 @@ test("@production refused pages reached by address show plain words and no actio
 }) => {
   test.setTimeout(120_000);
   await refusedEverywhere(page, cookWorkspace);
+  // Batch 63 F56 (0f8eef1f9): /app/tasks is hidden in the pilot workspace and opens Home, so it
+  // is no longer a refused page; it must not show the old task placeholder either.
+  await page.goto("/app/tasks");
+  await expect(page).toHaveURL(/\/app$/u);
+  await expect(page.locator("body")).not.toContainText(/Task and source facts|Load next page/u);
   const pages: readonly (readonly [string, RegExp])[] = [
-    ["/app/tasks", /Task and source facts/u],
     ["/app/operations/tables", /Print all codes|Add a table/u],
     ["/app/approvals", /Sole operator/u],
     ["/app/operations/payment-reconciliation", /Yesterday|Business day/u],
@@ -212,7 +216,7 @@ test("@production refused pages reached by address show plain words and no actio
   }
   await page.goto("/app/operations/tables");
   await shoot(page, "table-codes-refused-en");
-  // The Tasks page has no language switch of its own: choose Chinese once, then walk the pages.
+  // Choose Chinese once, then walk the pages.
   await toChinese(page);
   for (const [path] of pages) {
     await page.goto(path);
