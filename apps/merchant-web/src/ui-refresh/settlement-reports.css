@@ -594,6 +594,10 @@
 .tonight__methods :is(th, td) + :is(th, td) {
   padding-left: 16px;
 }
+/* Batch 63 F52: the drawer's lines start a step below the card machine's note. */
+.tonight__note + dl {
+  margin-top: 16px;
+}
 /* Batch 63 RA-17: a note starts at the rows' own left edge, muted 14/400, never indented. */
 .tonight__note {
   margin: 8px 0 0;
