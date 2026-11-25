@@ -1,4 +1,5 @@
 import { wordGap } from "./word-gap.js";
+import { keepRowRingInView } from "./row-ring-in-view.js";
 import { systemText, displayLocale, listSeparator, t, saidTable } from "./i18n/i18n.js";
 import { formatContactPhone } from "./contact-phone.js";
 import { noAccessHeading } from "./access-denied.js";
@@ -4109,6 +4110,8 @@ export function CurrentOrderQueueRows({
                             else rowButtons.current.delete(order.orderReference);
                           }}
                           onClick={() => (isOpen ? close() : open(order))}
+                          // Batch 64: the ring is the row's; Tab brings the whole row in.
+                          onFocus={(event) => keepRowRingInView(event.currentTarget)}
                         >
                           {label}
                         </button>

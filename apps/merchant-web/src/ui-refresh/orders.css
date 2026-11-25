@@ -404,6 +404,11 @@
   outline: 3px solid var(--bop-color-focus);
   outline-offset: -3px;
 }
+/* Batch 64 (v15 b62 live): Tab brings the row that draws the ring into view (row-ring-in-view.ts),
+   with room around it for the ring, below a pinned top bar too. */
+.orders-page :is(.order-row, .order-row__summary) {
+  scroll-margin: calc(var(--bop-pinned-top, 0px) + 8px) 8px 8px;
+}
 .orders-page .order-row__number {
   grid-area: num;
   min-width: 0;
@@ -1602,9 +1607,12 @@
     align-self: end;
     justify-self: end;
   }
+  /* Batch 64 (v15 b62 live: the ring ran over "Order 3" and "Check the refund" at the row's
+     edges): on phones the row has no side padding, so the ring sits just outside it, in the
+     page's 16 px gutter. */
   .orders-page .order-row:has(.order-row__open:focus-visible) {
     outline: 3px solid var(--bop-color-focus);
-    outline-offset: -3px;
+    outline-offset: 4px;
   }
   /* Batch 54 (v15 b53 live: "11/4 · 43" put its status 113.5px right of today's rows): a label
      longer than four characters, or one with "New order" beside it, takes the whole first line;

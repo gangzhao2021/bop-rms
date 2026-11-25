@@ -217,3 +217,84 @@ export async function windowEdgeSweepAt(
   }
   return { cut, scrolled };
 }
+
+/**
+ * Batch 64 (v15 b62 live, Orders and Exceptions): the ring staff actually see. A row button with
+ * no outline of its own has its ring drawn by the row around it (`:has(:focus-visible)`), so this
+ * measures the nearest of the focused element and its ancestors (up to four up) that draws an
+ * outline, against every scroll container around it and the viewport.
+ */
+export function drawnRingOverhang(page: Page): Promise<RingOverhang> {
+  return page.evaluate(() => {
+    const focused = document.activeElement as HTMLElement | null;
+    const none = { top: 0, right: 0, bottom: 0, left: 0, clippedBy: null };
+    if (focused === null || focused === document.body)
+      return { name: "BODY", ring: false, ...none };
+    const name = `${focused.tagName} ${(focused.textContent ?? "").trim().slice(0, 40)}`;
+    let element: HTMLElement | null = focused;
+    let width = 0;
+    let offset = 0;
+    for (let depth = 0; element !== null && depth < 5; depth += 1) {
+      const style = getComputedStyle(element);
+      width = parseFloat(style.outlineWidth) || 0;
+      // A box drawn as its children only (display: contents) draws no ring of its own.
+      if (style.display !== "contents" && style.outlineStyle !== "none" && width > 0) {
+        offset = parseFloat(style.outlineOffset) || 0;
+        break;
+      }
+      element = element.parentElement;
+    }
+    if (element === null || width === 0) return { name, ring: false, ...none };
+    const box = element.getBoundingClientRect();
+    const reach = width + offset;
+    const ring = {
+      top: box.top - reach,
+      right: box.right + reach,
+      bottom: box.bottom + reach,
+      left: box.left - reach,
+    };
+    let worst = { ...none } as {
+      top: number;
+      right: number;
+      bottom: number;
+      left: number;
+      clippedBy: string | null;
+    };
+    const measure = (
+      clip: { top: number; right: number; bottom: number; left: number },
+      by: string,
+    ) => {
+      const over = {
+        top: Math.max(0, clip.top - ring.top),
+        right: Math.max(0, ring.right - clip.right),
+        bottom: Math.max(0, ring.bottom - clip.bottom),
+        left: Math.max(0, clip.left - ring.left),
+      };
+      const sum = over.top + over.right + over.bottom + over.left;
+      const before = worst.top + worst.right + worst.bottom + worst.left;
+      if (sum > before) worst = { ...over, clippedBy: by };
+    };
+    for (let node = element.parentElement; node !== null; node = node.parentElement) {
+      if (node === document.documentElement || node === document.body) break;
+      const own = getComputedStyle(node);
+      if (own.overflowX === "visible" && own.overflowY === "visible") continue;
+      const outer = node.getBoundingClientRect();
+      const left = outer.left + node.clientLeft;
+      const top = outer.top + node.clientTop;
+      measure(
+        { top, left, right: left + node.clientWidth, bottom: top + node.clientHeight },
+        `${node.tagName.toLowerCase()}.${[...node.classList].join(".")}`,
+      );
+    }
+    measure(
+      {
+        top: 0,
+        left: 0,
+        right: document.documentElement.clientWidth,
+        bottom: document.documentElement.clientHeight,
+      },
+      "viewport",
+    );
+    return { name, ring: true, ...worst };
+  });
+}

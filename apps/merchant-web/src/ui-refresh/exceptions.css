@@ -11,6 +11,31 @@
   white-space: normal;
   overflow-wrap: anywhere;
 }
+/* Batch 64 (found with the v15 b62 ring check, Linux fonts at 1024): the Orders row of batch 63
+   lays "what" out as two named cells (type, when) that a case's row has no place for, so both
+   lines fell into one spot and overlapped. A case keeps them stacked in its "what" cell. */
+@container order-list (min-width: 513px) {
+  .orders-page.order-exception-page .order-row__what {
+    display: grid;
+    grid-area: what;
+    align-content: center;
+    min-width: 0;
+  }
+  .orders-page.order-exception-page
+    .order-row__what
+    > :is(.order-workbench-type, .order-row__when) {
+    grid-area: auto;
+  }
+}
+/* Batch 64 (v15 b62 live: the ring stopped short of "Check the refund", and ran over the row's
+   words): a case's ring goes round its whole row, the step included, just outside it. */
+.orders-page.order-exception-page .order-row__summary:has(.order-row__open:focus-visible) {
+  outline: none;
+}
+.orders-page.order-exception-page .order-row:has(.order-row__open:focus-visible) {
+  outline: 3px solid var(--bop-color-focus);
+  outline-offset: 2px;
+}
 .orders-page.order-exception-page .order-row {
   grid-template-columns: minmax(0, 1fr) 7rem;
 }

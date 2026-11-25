@@ -1,4 +1,5 @@
 import { systemText, t } from "./i18n/i18n.js";
+import { keepRowRingInView } from "./row-ring-in-view.js";
 import { ReconciliationFollowUpAction } from "./ReconciliationFollowUpAction.js";
 import { CompensationReconciliationAction } from "./CompensationReconciliationAction.js";
 import { UnmatchedCaptureRefundAction } from "./UnmatchedCaptureRefundAction.js";
@@ -434,6 +435,8 @@ export function OrderExceptionScreen({
                           else rowButtons.current.delete(reference);
                         }}
                         onClick={() => (isOpen ? close() : open(reference))}
+                        // Batch 64: the ring is the row's; Tab brings the whole row in.
+                        onFocus={(event) => keepRowRingInView(event.currentTarget)}
                       >
                         {exceptionLabel(item)}
                       </button>
