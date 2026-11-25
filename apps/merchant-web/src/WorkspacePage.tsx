@@ -13,6 +13,7 @@ export function WorkspacePage({
   title,
   meta,
   status,
+  statusOnPage = false,
   actions,
   className,
   children,
@@ -22,6 +23,12 @@ export function WorkspacePage({
   readonly title: ReactNode;
   readonly meta?: ReactNode;
   readonly status?: ReactNode;
+  /**
+   * The status is the page's warnings or controls, not its "Updated 01:36" stamp: it stays on the
+   * page at every width. The tablet top bar holds one short stamp on one line (F38, Figma 58:65);
+   * a warning or a button sent there is cut off at the window's edge and lost to staff.
+   */
+  readonly statusOnPage?: boolean;
   readonly actions?: ReactNode;
   readonly className?: string | undefined;
   readonly children: ReactNode;
@@ -42,9 +49,13 @@ export function WorkspacePage({
           <div className="workspace-page__toolbar">
             {/* Batch 63 (F38): on a tablet the stamp is in the top bar (Figma 58:65). */}
             {status ? (
-              <TopBarStatus>
+              statusOnPage ? (
                 <div className="workspace-page__status">{status}</div>
-              </TopBarStatus>
+              ) : (
+                <TopBarStatus>
+                  <div className="workspace-page__status">{status}</div>
+                </TopBarStatus>
+              )
             ) : null}
             {actions ? <div className="workspace-page__actions">{actions}</div> : null}
           </div>

@@ -122,6 +122,9 @@ for (const [width, height] of [
     await expect(main).toContainText("no order yet · frees itself in 7 min");
     // Whichever list staff are on, the top of the page says it first.
     await expect(main).toContainText("Table T2 frees itself in 7 min");
+    // It is the page's line at every width: the 1024 top bar holds a stamp only, and a warning
+    // sent there ran past the window's edge (batch 63 CI).
+    await expect(page.locator(".workspace-sidebar__status")).toBeEmpty();
     // The warning waits for its last minutes: a countdown nobody can act on is just noise.
     await expect(main.getByText("frees itself in 18 min")).toHaveCount(0);
     await expect(main).toContainText("a new party ended the last visit");

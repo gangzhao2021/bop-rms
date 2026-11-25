@@ -1811,6 +1811,9 @@ function DiningSessionWorkspaceBody({
       className="dining-floor tables-v3"
       title={t("Tables")}
       meta={storeLabel}
+      // Batch 63 CI: the seated count, the warnings and the pause are the page's own lines, read
+      // first on every list; the tablet top bar is for a stamp, and Tables has none.
+      statusOnPage
       status={
         tables.length > 0 ? (
           <span className="dining-floor-summary">
