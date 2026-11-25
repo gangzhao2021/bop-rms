@@ -3058,7 +3058,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Paid online ": "已在线付款 ",
   "Paid online at a time the store was offline{value}. It was not refunded automatically. {value2} If you already made it from a paper ticket, accept it, then mark it ready and hand it over as usual.":
     "门店离线时{value}已在线付款，没有自动退款。{value2}如果已按纸质小票做好，请先接单，再照常标记做好并交付。",
-  "Paid online minus refunded": "在线付款减去已退款",
+  "Online minus refunds": "线上减去退款",
   "Paid without a fulfillable order": "已付款但订单无法完成",
   "Paid · the kitchen gets it once you accept it": "已付款 · 接单后厨房才会收到",
   "Paid, but not sent to the kitchen yet. Accept it in Orders now (or ask a manager to): an order that isn't accepted in time expires and must be refunded on the card machine.":

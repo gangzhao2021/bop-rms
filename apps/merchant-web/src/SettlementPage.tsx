@@ -212,7 +212,8 @@ export function SettlementReport({
       </section>
       <ul className="overview-counts settlement__totals" aria-label={t("Day totals")}>
         <li>
-          <span className="overview-count__label">{t("Paid online")}</span>
+          {/* Batch 64 (F58): the words Reports uses for the same money. */}
+          <span className="overview-count__label">{t("Online (guest's phone)")}</span>
           <strong className="overview-count__value">{money(view.captured)}</strong>
           <span className="overview-count__detail">
             {view.captured === null
@@ -224,7 +225,7 @@ export function SettlementReport({
           </span>
         </li>
         <li>
-          <span className="overview-count__label">{t("Refunded")}</span>
+          <span className="overview-count__label">{t("Refunds")}</span>
           <strong className="overview-count__value">{money(view.refunded)}</strong>
           <span className="overview-count__detail">
             {view.refunded === null
@@ -236,7 +237,7 @@ export function SettlementReport({
           </span>
         </li>
         <li>
-          <span className="overview-count__label">{t("Net")}</span>
+          <span className="overview-count__label">{t("Net taken")}</span>
           <strong className="overview-count__value">
             {view.captured && view.refunded
               ? formatSettlementMoney(
@@ -244,7 +245,7 @@ export function SettlementReport({
                 )
               : "—"}
           </strong>
-          <span className="overview-count__detail">{t("Paid online minus refunded")}</span>
+          <span className="overview-count__detail">{t("Online minus refunds")}</span>
         </li>
       </ul>
       {/* WP-2423 Q7: the Store's own card machine, kept apart to match its batch total. */}

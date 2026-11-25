@@ -5,6 +5,7 @@ import { StoreBusinessDayContext } from "./StoreBusinessDay.js";
 import { StoreReports, StoreReportsPage, coveredRangeFrom, shiftDate } from "./StoreReportsPage.js";
 import { createStoreReportsClient, parseStoreReportsView } from "./store-reports-client.js";
 import { storeReportsViewFixture } from "./store-reports.fixtures.js";
+import { setLanguageForTest } from "./i18n/i18n.js";
 
 const render = (value: unknown, onDownload: (() => void) | null = () => undefined) =>
   renderToStaticMarkup(
@@ -125,7 +126,25 @@ describe("WP-2423 Q14 store reports page", () => {
         .slice(0, byPayment.indexOf("</thead>"))
         .matchAll(/<th scope="col"[^>]*>(.*?)<\/th>/gu),
     ].map((match) => match[1]);
-    expect(headers).toEqual(["Payment", "Payments", "Tips", "Taken", "Refunds", "Net taken"]);
+    // Batch 64 (v15 b63 live): the first column is the method, as on Today's summary ("Method"),
+    // so in Chinese it no longer shares "付款" with the payment count.
+    expect(headers).toEqual(["Method", "Payments", "Tips", "Taken", "Refunds", "Net taken"]);
+  });
+  it("batch 64: the zh-Hans By payment table heads each column with its own word", () => {
+    setLanguageForTest("zh-Hans");
+    try {
+      const html = render(storeReportsViewFixture());
+      const byPayment = html.slice(html.indexOf('aria-label="按付款方式销售"'));
+      const headers = [
+        ...byPayment
+          .slice(0, byPayment.indexOf("</thead>"))
+          .matchAll(/<th scope="col"[^>]*>(.*?)<\/th>/gu),
+      ].map((match) => match[1]);
+      expect(headers).toEqual(["方式", "付款", "小费", "实收", "退款", "净实收"]);
+      expect(new Set(headers).size).toBe(headers.length);
+    } finally {
+      setLanguageForTest("en");
+    }
   });
   it("says an open day is checked at day end and a closed range matches the settlement", () => {
     const fixture = storeReportsViewFixture();

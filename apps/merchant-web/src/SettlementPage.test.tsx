@@ -41,6 +41,29 @@ describe("WP-2423 P1 settlement report", () => {
       summarizeOutcomes({ Matched: 0, Healed: 1, Unresolved: 0, Unavailable: 3, Difference: 1 }),
     ).toBe("0 matched · 1 healed · 1 difference · 3 provider unavailable");
   });
+  it("batch 64 (F58): the online totals use the Reports words, in en and zh-Hans", () => {
+    const labels = (html: string) =>
+      [
+        ...html
+          .slice(html.indexOf("settlement__totals"))
+          .matchAll(/<span class="overview-count__label">(.*?)<\/span>/gu),
+      ]
+        .slice(0, 3)
+        .map((match) => match[1]);
+    const en = render(settlementViewFixture());
+    expect(labels(en)).toEqual(["Online (guest&#x27;s phone)", "Refunds", "Net taken"]);
+    expect(en).not.toContain("Paid online");
+    expect(en).not.toContain(">Net<");
+    setLanguageForTest("zh-Hans");
+    try {
+      const zh = render(settlementViewFixture());
+      expect(labels(zh)).toEqual(["线上（客人手机）", "退款", "净实收"]);
+      expect(zh).not.toContain("在线付款");
+      expect(zh).not.toContain(">净额<");
+    } finally {
+      setLanguageForTest("en");
+    }
+  });
   it("shows the day, totals, the settlement statement and each payment needing attention in Store time", () => {
     const html = render(settlementViewFixture());
     expect(html).toContain("Business day: Mon, Sep 21");

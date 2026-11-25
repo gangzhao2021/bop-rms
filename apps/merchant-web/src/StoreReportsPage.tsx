@@ -393,9 +393,10 @@ export function StoreReports({
         <h4>{t("By payment")}</h4>
         <Table
           label={t("Sales by payment")}
-          // F58: Payments, Tips, Taken, as on Today's summary.
+          // F58: Payments, Tips, Taken, as on Today's summary. Batch 64: the first column is the
+          // method there too ("方式"), so it never shares "付款" with the payment count.
           columns={[
-            t("Payment"),
+            t("Method"),
             t("Payments"),
             t("Tips"),
             t("Taken"),
