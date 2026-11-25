@@ -60,6 +60,10 @@ import {
   type SendRoundState,
 } from "../checkout/send-round.js";
 import { DiningStaffCallPanel } from "../dining/DiningStaffCallPanel.js";
+import {
+  createHttpDiningStaffCallClient,
+  type DiningStaffCallClient,
+} from "../dining/dining-staff-call-client.js";
 import { tableWaitingToOpen, useGoOnWhenTableOpens } from "../entry/table-wait-away.js";
 import type { DiningSessionClient } from "../dining/dining-session-client.js";
 import { useTablePaymentTiming, type TableTimingAnswer } from "../dining/table-timing.js";
@@ -561,6 +565,75 @@ function CartSummary({
   );
 }
 
+/**
+ * Batch 63 (design review CDI-1, F01): what was still in the cart, unsent, when the table started
+ * paying — each dish and how many (no box, no strikethrough) — and one way to get them added:
+ * staff are asked to come over (the table's staff call), or, where the Store doesn't take calls
+ * from phones, the guest is told to ask a staff member.
+ */
+export function UnsentAtCheckout({
+  items,
+  staffCall: provided,
+}: {
+  readonly items: readonly CartItemView[];
+  readonly staffCall?: DiningStaffCallClient;
+}) {
+  const [client] = useState(() => provided ?? createHttpDiningStaffCallClient());
+  const [call, setCall] = useState<"reading" | "offered" | "asked" | "sending" | "off" | "failed">(
+    "reading",
+  );
+  const key = useRef<string | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    client.read(controller.signal).then(
+      (view) => {
+        if (!controller.signal.aborted) setCall(view.open === null ? "offered" : "asked");
+      },
+      () => {
+        if (!controller.signal.aborted) setCall("off");
+      },
+    );
+    return () => controller.abort();
+  }, [client]);
+  const ask = async () => {
+    setCall("sending");
+    key.current ??= client.newOperationReference();
+    try {
+      const outcome = await client.call(key.current, "OrderProblem");
+      setCall(outcome.status === "TooMany" ? "off" : "asked");
+    } catch {
+      setCall("failed");
+    }
+  };
+  return (
+    <div className="cart-unsent" aria-labelledby="cart-unsent-heading">
+      <h3 id="cart-unsent-heading">{cartText.unsent.heading}</h3>
+      <ul>
+        {items.map((item) => (
+          <li key={item.cartItemReference}>
+            <span>{item.displayName}</span>{" "}
+            <span className="cart-unsent__count">× {item.quantity}</span>
+          </li>
+        ))}
+      </ul>
+      {call === "offered" || call === "sending" ? (
+        <button
+          type="button"
+          className="cart-unsent__ask"
+          disabled={call === "sending"}
+          onClick={() => void ask()}
+        >
+          {cartText.unsent.ask}
+        </button>
+      ) : call === "asked" ? (
+        <p role="status">{cartText.unsent.asked}</p>
+      ) : call === "reading" ? null : (
+        <p role={call === "failed" ? "alert" : undefined}>{cartText.unsent.askInPerson}</p>
+      )}
+    </div>
+  );
+}
+
 /** WP-2423 (M154): the exact reason a change was refused ("This dish just sold out."), or null. */
 function specificRefusal(state: CartState): string | null {
   if (state.status !== "validation" || !("issueCodes" in state)) return null;
@@ -590,9 +663,13 @@ function ErrorState({
   // is told to ask staff and where the bill, or once paid the receipt, is.
   if (state.status === "table-checking-out") {
     const text = tableCheckoutText(checkout ?? unreadTableCheckout);
+    // Batch 63 (design review CDI-1, F01): dishes still in the cart when staff started checkout
+    // never reached the kitchen. They are named, never dropped without a word ("add more" read as
+    // if they had been sent); the Store keeps them for when staff cancel checkout.
+    const unsent = state.cart?.cart.items ?? [];
     return (
       <StateMessage heading={text.heading}>
-        <p>{text.line}</p>
+        {unsent.length === 0 ? <p>{text.line}</p> : <UnsentAtCheckout items={unsent} />}
         {own.yourPaid === null ? null : <p>{own.yourPaid}</p>}
         <div className="cart-state__actions">
           {/* Batch 62: the payer's link brings their receipt into view on Your table. */}

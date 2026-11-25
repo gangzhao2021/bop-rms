@@ -405,6 +405,21 @@ export const cartText = Object.freeze({
   get pageHeading() {
     return t("Your cart");
   },
+  /** Batch 63 (CDI-1): dishes still in the cart, unsent, when the table started paying. */
+  unsent: Object.freeze({
+    get heading() {
+      return t("Not sent to the kitchen");
+    },
+    get ask() {
+      return t("Ask staff to add these");
+    },
+    get asked() {
+      return t("Staff have been asked to come to your table");
+    },
+    get askInPerson() {
+      return t("Ask a staff member to add these dishes.");
+    },
+  }),
   /** M116: the cart while only looking at a closed (or paused) Store's menu. */
   storeNotTakingOrders: (storeDisplayName: string) =>
     t("{storeDisplayName} isn’t taking orders right now", { storeDisplayName }),

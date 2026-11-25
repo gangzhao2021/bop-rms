@@ -2156,4 +2156,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "给您付的款加 {points} 分（已扣除退款）",
   "Your payments": "您的付款",
   "Part {number} · {method}": "第 {number} 份 · {method}",
+  // Batch 63 (CDI-1): dishes still in the cart when the table started paying.
+  "Not sent to the kitchen": "没有送到厨房",
+  "Ask staff to add these": "请店员加上这些菜",
+  "Ask a staff member to add these dishes.": "请找店员帮您加上这些菜。",
 });

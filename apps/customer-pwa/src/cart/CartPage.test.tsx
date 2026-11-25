@@ -1329,4 +1329,38 @@ describe("Batch 48: Cart while the table checks out", () => {
     expect(status(html)).toBe(words);
     expect(html).not.toContain("checking out");
   });
+
+  // Batch 63 (design review CDI-1, F01): phone 1 had 1 × Beef noodles in the cart, not sent, when
+  // staff started checkout. The cart lost it without a word ("Ask staff if you want to add
+  // more"), so the guest waited for a dish the kitchen never got.
+  it("names the dishes still in the cart as not sent to the kitchen", () => {
+    setCustomerCsrfCredential("c".repeat(43));
+    noteTableCheckingOut(true);
+    const base = cart();
+    const item = base.cart.items[0];
+    if (item === undefined) throw new Error("synthetic item missing");
+    const held: CartState = {
+      ...checkingOut,
+      cart: {
+        ...base,
+        cart: {
+          ...base.cart,
+          orderType: "DineIn",
+          items: [{ ...item, displayName: "Beef noodles (TEST)", quantity: 2 }],
+        },
+      },
+    };
+    const html = renderPage(held);
+    expect(html).toContain("Your table is paying the bill");
+    expect(html).toContain('<h3 id="cart-unsent-heading">Not sent to the kitchen</h3>');
+    expect(html).toContain(
+      '<li><span>Beef noodles (TEST)</span> <span class="cart-unsent__count">× 2</span></li>',
+    );
+    expect(html).not.toContain("<p>Ask staff if you want to add more.</p>");
+    renderToStaticMarkup(createElement(LanguageRoot, { initial: "zh-Hans", children: () => null }));
+    expect(renderPage(held)).toContain("没有送到厨房");
+    renderToStaticMarkup(createElement(LanguageRoot, { initial: "en", children: () => null }));
+    // Nothing left unsent: the card reads as before.
+    expect(renderPage(checkingOut)).toContain("<p>Ask staff if you want to add more.</p>");
+  });
 });
