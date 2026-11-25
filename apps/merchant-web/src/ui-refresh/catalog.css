@@ -963,6 +963,21 @@ fieldset.store-features__modules {
 .workspace-page.hours-page .workspace-page__status {
   font-size: 14px;
 }
+/* "Updated" and Refresh stay at the top right beside the title where there is room: the Store,
+   zone and business-day line under the title wraps instead (with Linux fonts it left under 50 px
+   at 1024 and pushed the toolbar under the title). */
+@media (min-width: 900px) {
+  .workspace-page.hours-page .workspace-page__header {
+    flex-wrap: nowrap;
+  }
+  .workspace-page.hours-page .workspace-page__title {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .workspace-page.hours-page .workspace-page__toolbar {
+    flex: none;
+  }
+}
 .workspace-page.hours-page .hours-page__link {
   display: inline-flex;
   align-items: center;
