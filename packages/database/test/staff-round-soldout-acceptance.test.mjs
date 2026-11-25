@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { performance } from "node:perf_hooks";
 import { stdout } from "node:process";
+import { setTimeout as delay } from "node:timers/promises";
 import pg from "pg";
 import { it, vi } from "vitest";
 import { createMerchantAvailability } from "../../../apps/api/src/merchant-availability.ts";
@@ -480,16 +481,15 @@ it("a dish sells out inside the round's checkout, between its sellable check and
           /configured-checkout-validation-service/u.test(new Error().stack ?? "")
         ) {
           race.held = true;
-          const client = this;
           return (async () => {
             race.marked = await Promise.race([
               mark("SoldOut").then(
                 () => "Marked",
                 (error) => "Failed:" + String(error?.code ?? error),
               ),
-              new Promise((resolve) => setTimeout(() => resolve("TimedOut"), 5000)),
+              delay(5000, "TimedOut"),
             ]);
-            return clientQuery.call(client, config, ...rest);
+            return clientQuery.call(this, config, ...rest);
           })();
         }
         return clientQuery.call(this, config, ...rest);
@@ -566,13 +566,3 @@ it("a dish sells out inside the round's checkout, between its sellable check and
     }
   });
 });
-
-/**
- * WP-2423 (staff-round-soldout-code, CI f445b8bb3): a dish sells out inside the round's own
- * checkout step, after the checkout found it sellable and before it read the dish's menu facts
- * (one Catalog read after the other, each seeing what is committed then). Staff were told "the
- * system couldn't send it" (STAFF_ROUND_UNAVAILABLE). Now they are told that dish can't be sold
- * now (STAFF_ROUND_ITEM_UNAVAILABLE, naming the round's line); nothing is ordered and the round's
- * line comes back out of the table's Cart. The sold-out mark commits at that exact moment: the
- * round's menu-facts read waits until it has (a test hook on the round's own Catalog read).
- */
