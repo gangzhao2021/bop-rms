@@ -4,6 +4,7 @@ import { createHttpDiningInvitationClient } from "./dining-invitation-client.js"
 import { DiningInvitationView, type DiningInvitationState } from "./DiningInvitationPanel.js";
 import { formatClockTime } from "../journey/format.js";
 import { setCustomerCsrfCredential } from "../session/customer-transaction-context.js";
+import { LanguageRoot } from "../i18n/i18n.js";
 
 afterEach(() => setCustomerCsrfCredential(null));
 const key = "01902423-0000-7000-8000-000000000001";
@@ -139,6 +140,28 @@ describe("WP-2423 DEC-DINING-GUEST-INVITATION panel", () => {
     expect(html).toContain(formatClockTime(expiresAt));
     expect(html).toContain("A new code replaces this one.");
     expect(html).toContain('role="status"');
+  });
+
+  // Batch 64 (v15 b63): the zh line opened a full-width （ and closed with an English ")." —
+  // "…15 分钟内有效（至 12:42)."
+  it("closes the code's time in the guest's own punctuation, in English and Chinese", () => {
+    const time = formatClockTime(expiresAt);
+    expect(render({ status: "issued", code: "482913", expiresAt })).toContain(
+      `It works once and for 15 minutes (until ${time}).</p>`,
+    );
+    const zh = renderToStaticMarkup(
+      <LanguageRoot initial="zh-Hans">
+        {() => (
+          <DiningInvitationView
+            state={{ status: "issued", code: "482913", expiresAt }}
+            onMake={() => undefined}
+          />
+        )}
+      </LanguageRoot>,
+    );
+    renderToStaticMarkup(<LanguageRoot initial="en">{() => null}</LanguageRoot>);
+    expect(zh).toMatch(/只能用一次，15 分钟内有效（至 \d{1,2}:\d{2}）。<\/p>/u);
+    expect(zh).not.toMatch(/\)\.|（至[^）]*\)/u);
   });
 
   it.each([

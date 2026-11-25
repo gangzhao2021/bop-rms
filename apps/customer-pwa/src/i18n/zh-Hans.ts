@@ -825,8 +825,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Show pickup code": "显示取餐码",
   "Show this code to staff to collect your order. Valid until ":
     "向店员出示这个代码即可取餐。有效期至 ",
-  "Show this code to the person joining you. It works once and for 15 minutes (until":
-    "把这个代码给要加入的人看。只能用一次，15 分钟内有效（至",
+  "Show this code to the person joining you. It works once and for 15 minutes (until {time}).":
+    "把这个代码给要加入的人看。只能用一次，15 分钟内有效（至 {time}）。",
   "Showing the last status loaded on this page.": "显示的是本页上次加载的状态。",
   "Showing the receipt already loaded on this page.": "显示的是本页已加载的收据。",
   "Showing what was loaded before. It may be out of date.":

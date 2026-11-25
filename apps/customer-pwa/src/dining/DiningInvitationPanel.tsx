@@ -222,8 +222,12 @@ export function DiningInvitationView({
             <span className="sr-only">{state.code.split("").join(" ")}</span>
           </p>
           <p>
-            {t("Show this code to the person joining you. It works once and for 15 minutes (until")}{" "}
-            {formatClockTime(state.expiresAt)}).
+            {/* Batch 64 (v15 b63): the whole sentence in one string, so Chinese closes its own
+                brackets (（至 12:42）。), never an English ")." */}
+            {t(
+              "Show this code to the person joining you. It works once and for 15 minutes (until {time}).",
+              { time: formatClockTime(state.expiresAt) },
+            )}
           </p>
           <p className="dining-invitation__note">
             {t("For someone else after them, make a new code. A new code replaces this one.")}
