@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { MemberJoinPanel } from "../member/MemberJoinPanel.js";
 import { MemberPointsAtTable } from "../member/MemberPointsAtTable.js";
-import { yourReceiptAttribute } from "./your-receipt-link.js";
 import { v7 as uuidv7 } from "uuid";
 import { saidTable, t, wordGap, listSeparator } from "../i18n/i18n.js";
 import { parseTipAmount } from "../checkout/tip-amount.js";
@@ -519,8 +518,6 @@ export function TablePayPanel({
       <section
         className="order-status__card dining-session__receipt"
         aria-labelledby="table-receipt"
-        // Batch 62: the payer's "See your receipt" leads here (its own payment is said inside).
-        {...(ownReceipt === null ? {} : { [yourReceiptAttribute]: "" })}
       >
         <h2 id="table-receipt">{t("Receipt")}</h2>
         <dl className="order-status__money">

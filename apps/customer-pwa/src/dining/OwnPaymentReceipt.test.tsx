@@ -988,3 +988,98 @@ describe("batch 62: See your receipt brings the payer to their receipt", () => {
     expect(document.activeElement).toBe(document.body);
   });
 });
+
+// Batch 62 review: the pay section's read failed while the payer's own read worked (a by-dish or
+// split payer then lost the "Your receipt" batch 61 showed, and the link found nothing); and a phone
+// that paid its dishes before the whole-table settlement of the rest got a second "Your receipt"
+// nested inside the table's Receipt, the link focusing the table's heading.
+describe("batch 62 review: the payer's receipt whatever the pay section knows", () => {
+  const byDishRefunded = {
+    ...byDish,
+    ownPayment: {
+      ...byDish.ownPayment,
+      restClosedByStaff: false,
+      tablePaidInFull: true,
+      payments: [
+        {
+          ...byDish.ownPayment.payments[0],
+          refunds: [
+            {
+              amountMinor: "500",
+              status: "Refunded",
+              requestedAt: "2026-11-24T00:40:17.521Z",
+              answeredAt: "2026-11-24T00:40:17.565Z",
+            },
+          ],
+          refundedMinor: "500",
+        },
+      ],
+      refundedMinor: "500",
+      netMinor: "913",
+    },
+  };
+  const dishesThenRest = {
+    schemaVersion: 1,
+    ownPayment: {
+      ...wholeTableOwn.ownPayment,
+      payments: [
+        { ...byDish.ownPayment.payments[0], refunds: [], refundedMinor: "0" },
+        {
+          ...wholeTableOwn.ownPayment.payments[0],
+          paidForMinor: "1412",
+          totalMinor: "1412",
+          paidAt: "2026-11-24T05:20:00.000Z",
+        },
+      ],
+    },
+  };
+  const ownHeading = () => container.querySelector<HTMLElement>("#own-payment-receipt");
+
+  it("the pay section cannot be read: the payer still reads Your receipt, and the link finds it", async () => {
+    setCustomerCsrfCredential("d".repeat(43));
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+    await show(
+      <DiningSessionScreen
+        state={wholeTablePaidRefunded}
+        onRefresh={() => undefined}
+        ownPaymentReceipt={payer(byDishRefunded)}
+        showReceipt
+      />,
+    );
+    await settle();
+    expect(ownHeading()?.textContent).toBe("Your receipt");
+    expect(document.activeElement).toBe(ownHeading());
+  });
+
+  it("dishes paid before the whole-table settlement: Your receipt on its own, and the link opens it", async () => {
+    setCustomerCsrfCredential("d".repeat(43));
+    answerWholeTableRead();
+    await show(
+      <DiningSessionScreen
+        state={wholeTablePaidRefunded}
+        onRefresh={() => undefined}
+        ownPaymentReceipt={payer(dishesThenRest)}
+        showReceipt
+      />,
+    );
+    await settle();
+    expect(headings().filter((h) => /receipt/iu.test(h))).toEqual(["Receipt", "Your receipt"]);
+    expect(ownHeading()?.closest("[aria-labelledby=table-receipt]")).toBeNull();
+    expect(document.activeElement).toBe(ownHeading());
+  });
+
+  it("the whole table paid on this phone: the link opens the table's Receipt", async () => {
+    setCustomerCsrfCredential("d".repeat(43));
+    answerWholeTableRead();
+    await show(
+      <DiningSessionScreen
+        state={wholeTablePaidRefunded}
+        onRefresh={() => undefined}
+        ownPaymentReceipt={payer(wholeTableOwn)}
+        showReceipt
+      />,
+    );
+    await settle();
+    expect(document.activeElement).toBe(container.querySelector("#table-receipt"));
+  });
+});

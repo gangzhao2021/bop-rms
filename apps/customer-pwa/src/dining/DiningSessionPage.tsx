@@ -1423,6 +1423,8 @@ export function DiningSessionScreen({
 }) {
   // DEC-DINE-IN-PAY-LATER: whether the table is checking out or paid, from its pay panel.
   const [tablePay, setTablePay] = useState<TablePayStatus | null>(null);
+  // Batch 62 review: this phone also paid a part or its dishes: its receipt stays its own.
+  const [ownApart, setOwnApart] = useState(false);
   useBringYourReceiptIntoView(showReceipt);
   const view = state.status === "ready" || state.status === "unavailable" ? state.view : null;
   const active = isDiningSessionActive(view);
@@ -1638,7 +1640,9 @@ export function DiningSessionScreen({
           // of back: the payer's own payment and refund are said inside the table's receipt, the
           // one receipt of that payment (another phone's read finds nothing of its own there).
           ownReceipt={
-            paidThenRefunded ? <OwnPaymentReceiptPanel client={ownAtTable} inTableReceipt /> : null
+            paidThenRefunded ? (
+              <OwnPaymentReceiptPanel client={ownAtTable} inTableReceipt onApart={setOwnApart} />
+            ) : null
           }
           readKey={billReadKey}
           onStatus={(status) => {
@@ -1653,7 +1657,9 @@ export function DiningSessionScreen({
       {/* Batch 56: staff closed a bill some of which was paid: the phone that paid it reads its
           own receipt here (another guest's phone is answered "nothing here" and shows nothing). */}
       {(closedBill !== null && closedBill.kind !== "Nothing") ||
-      (paidThenRefunded && tablePay !== null && !tablePay.receipt) ? (
+      // Batch 62 review: hidden only once the table's Receipt is known to show it (a failed pay
+      // section read keeps the payer's receipt, as batch 61 did).
+      (paidThenRefunded && (tablePay?.receipt !== true || ownApart)) ? (
         // Batch 61 (v15 b60 live, CRT60 B/C): a bill paid in full that staff then gave some of
         // back: the payer reads its own payment and refund here too (others: nothing here).
         <OwnPaymentReceiptPanel client={ownAtTable} />

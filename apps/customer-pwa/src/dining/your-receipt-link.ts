@@ -15,6 +15,11 @@ export const wantsYourReceipt = (state: unknown): boolean =>
 
 /** The element a receipt's section carries so the link finds it, whichever receipt it is. */
 export const yourReceiptAttribute = "data-your-receipt";
+/**
+ * Batch 62 review: this phone's payment said as lines inside the table's Receipt (it paid the whole
+ * bill): the link opens that Receipt. A receipt of its own, when there is one, comes first.
+ */
+export const yourReceiptInTableAttribute = "data-your-receipt-in-table";
 
 /** How long after the receipt is first shown content arriving above it may still move it. */
 const settleMilliseconds = 4000;
@@ -30,13 +35,16 @@ const waitMilliseconds = 15_000;
 export function useBringYourReceiptIntoView(active: boolean): void {
   useEffect(() => {
     if (!active || typeof document === "undefined") return;
-    let focused = false;
+    // The element given focus; a receipt drawn again (its section read anew) is given it again.
+    let focused: HTMLElement | null = null;
     let shownAt: number | null = null;
     let stopped = false;
     // Its heading; a receipt that could not be read is its "try again" notice.
     const heading = () => {
       const receipt = document.querySelector<HTMLElement>(`[${yourReceiptAttribute}]`);
-      return receipt?.querySelector<HTMLElement>("h2") ?? receipt ?? null;
+      if (receipt !== null) return receipt.querySelector<HTMLElement>("h2") ?? receipt;
+      const inside = document.querySelector<HTMLElement>(`[${yourReceiptInTableAttribute}]`);
+      return inside?.parentElement?.closest("section")?.querySelector<HTMLElement>("h2") ?? inside;
     };
     const place = () => {
       if (stopped) return;
@@ -48,8 +56,11 @@ export function useBringYourReceiptIntoView(active: boolean): void {
         return;
       }
       target.scrollIntoView?.({ block: "start" });
-      if (!focused) {
-        focused = true;
+      if (
+        focused !== target &&
+        (focused === null || !focused.isConnected || document.activeElement === document.body)
+      ) {
+        focused = target;
         if (!target.hasAttribute("tabindex")) target.setAttribute("tabindex", "-1");
         target.focus({ preventScroll: true });
       }

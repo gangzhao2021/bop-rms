@@ -3264,7 +3264,8 @@
 }
 /* Batch 62: "See your receipt" brings the receipt's heading in under the sticky tab bar, with room. */
 .customer-page [data-your-receipt],
-.customer-page [data-your-receipt] h2 {
+.customer-page [data-your-receipt] h2,
+.customer-page .dining-session__receipt:has([data-your-receipt-in-table]) > h2 {
   scroll-margin-top: calc(var(--customer-nav-height) + var(--bop-space-6));
 }
 

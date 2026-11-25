@@ -7,7 +7,7 @@ import {
   subscribeCustomerCsrfContext,
 } from "../session/customer-transaction-context.js";
 import { splitPartDishesText } from "./TablePayPanel.js";
-import { yourReceiptAttribute } from "./your-receipt-link.js";
+import { yourReceiptAttribute, yourReceiptInTableAttribute } from "./your-receipt-link.js";
 
 /**
  * Batch 56 (v15 b55 live, guest-closed-bill-menu-cart): a guest who paid part of a table's bill on
@@ -488,7 +488,7 @@ export function OwnPaymentReceiptView({ receipt }: { readonly receipt: OwnPaymen
 export function OwnWholeTablePaymentLines({ receipt }: { readonly receipt: OwnPaymentReceipt }) {
   const refunds = receipt.payments.flatMap((payment) => payment.refunds);
   return (
-    <div className="dining-session__own-payment-lines">
+    <div className="dining-session__own-payment-lines" {...{ [yourReceiptInTableAttribute]: "" }}>
       <p>{youPaidText(receipt.totalMinor, receipt.refundedMinor, pendingOf(refunds))}</p>
       {refunds.length === 0 ? null : (
         <ul className="dining-session__own-refunds" aria-label={t("Refunds of your payment")}>
@@ -504,14 +504,18 @@ export function OwnWholeTablePaymentLines({ receipt }: { readonly receipt: OwnPa
 /**
  * Loads this phone's own payment's receipt; nothing is shown when it paid nothing here. Batch 62:
  * `inTableReceipt`: said inside the table's receipt (a payment for the whole table is said as
- * lines of it; anything else keeps its own receipt).
+ * lines of it). Batch 62 review: a phone that also paid a part or its dishes before the whole-table
+ * settlement keeps its own receipt, apart from the table's: inside it shows nothing and `onApart`
+ * asks the table page to show that receipt on its own.
  */
 export function OwnPaymentReceiptPanel({
   client,
   inTableReceipt = false,
+  onApart,
 }: {
   readonly client: OwnPaymentReceiptClient;
   readonly inTableReceipt?: boolean;
+  readonly onApart?: (apart: boolean) => void;
 }) {
   const [state, setState] = useState<
     | { readonly status: "loading" }
@@ -535,6 +539,13 @@ export function OwnPaymentReceiptPanel({
   useEffect(() => {
     void load();
   }, [load]);
+  const apart =
+    inTableReceipt &&
+    state.status === "ready" &&
+    !state.receipt.payments.every((payment) => payment.covers === "WholeTable");
+  useEffect(() => {
+    if (inTableReceipt && state.status !== "loading") onApart?.(apart);
+  }, [apart, inTableReceipt, onApart, state.status]);
   // Dish names follow the language the guest switches to (the server writes them).
   useReloadOnLanguageChange(() => void load());
   // A phone that paid nothing here sees nothing, not even a moment of "loading your receipt".
@@ -545,7 +556,7 @@ export function OwnPaymentReceiptPanel({
         className="order-status__unavailable"
         role="alert"
         // Batch 62: "See your receipt" leads here when the receipt could not be read.
-        {...(inTableReceipt ? {} : { [yourReceiptAttribute]: "" })}
+        {...{ [inTableReceipt ? yourReceiptInTableAttribute : yourReceiptAttribute]: "" }}
       >
         <p>{t("We couldn’t load your receipt. Check your connection and try again.")}</p>
         <button
@@ -560,7 +571,7 @@ export function OwnPaymentReceiptPanel({
         </button>
       </section>
     );
-  if (inTableReceipt && state.receipt.payments.every((payment) => payment.covers === "WholeTable"))
-    return <OwnWholeTablePaymentLines receipt={state.receipt} />;
+  if (apart) return null;
+  if (inTableReceipt) return <OwnWholeTablePaymentLines receipt={state.receipt} />;
   return <OwnPaymentReceiptView receipt={state.receipt} />;
 }
