@@ -371,7 +371,8 @@ export function tableNeed(
     return {
       tone: "progress",
       rank: 50,
-      words: t("Kitchen is making it"),
+      // b63 (T15): as the panel says it — sent until the kitchen marks something started.
+      words: order.kitchenStarted === false ? t("Sent to the kitchen") : t("Kitchen is making it"),
       detail: null,
       step: null,
     };

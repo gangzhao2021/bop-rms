@@ -556,3 +556,22 @@ describe("b63: the split note says the table is closed after the guests leave", 
     expect(zh).not.toContain("才能关台");
   });
 });
+
+// b63 (F40, v15 D62DV): "Part 1 · $6.78" while cash asked to confirm $6.80.
+describe("b63: a part paid in cash says the cash to ask for", () => {
+  afterEach(() => setLanguageForTest("en"));
+  it("names the cash, the part and the rounding, in English and in Chinese", async () => {
+    const { partCashText } = await import("./TableSplit.js");
+    const cash = { partNumber: 1, dueMinor: 678n, tipMinor: 0n, cashMinor: 680n };
+    expect(partCashText(1, "678", cash)).toBe("Part 1 · $6.80 cash ($6.78 + 2¢ rounding)");
+    expect(partCashText(1, "677", { ...cash, dueMinor: 677n, cashMinor: 675n })).toBe(
+      "Part 1 · $6.75 cash ($6.77 − 2¢ rounding)",
+    );
+    expect(
+      partCashText(2, "700", { partNumber: 2, dueMinor: 805n, tipMinor: 105n, cashMinor: 805n }),
+    ).toBe("Part 2 · $8.05 cash ($7.00 + $1.05 tip)");
+    expect(partCashText(1, "680", { ...cash, dueMinor: 680n })).toBe("Part 1 · $6.80 cash");
+    setLanguageForTest("zh-Hans");
+    expect(partCashText(1, "678", cash)).toBe("第 1 份 · 现金 $6.80（$6.78，取整 +2¢）");
+  });
+});

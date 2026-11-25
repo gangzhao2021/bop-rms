@@ -2243,7 +2243,10 @@ function TablePanel({
               ? table.paymentTiming === "PayLater"
                 ? t("pays at the end")
                 : t("pays each round")
-              : tableFloorStatus(table).label,
+              : // b63 (T15): a free table is "Free" (空桌) here, as on its tab and list row.
+                tableFloorStatus(table).state === "Available"
+                ? t("Free")
+                : tableFloorStatus(table).label,
             table.guestStart != null ? t("started by a guest") : null,
             table.guestStart?.endedLastParty === true
               ? t("a new party ended the last visit")

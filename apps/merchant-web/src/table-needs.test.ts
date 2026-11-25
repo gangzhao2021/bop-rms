@@ -669,3 +669,22 @@ describe("b62 (v15 b61 live, S61 B): a table paid, then all of it refunded", () 
       });
   });
 });
+
+// b63 (T15, v15 D62DW): before the kitchen started anything the row read "Kitchen is making it"
+// (zh 后厨在做) while the panel said "Sent to the kitchen" for every line.
+describe("b63: a table's row says sent until the kitchen starts", () => {
+  it("says Sent to the kitchen, then Kitchen is making it, as the panel does", () => {
+    const now = Date.parse("2026-11-25T19:00:00.000Z");
+    expect(tableNeed(table(1), facts({ inKitchen: true, kitchenStarted: false }), now).words).toBe(
+      "Sent to the kitchen",
+    );
+    expect(tableNeed(table(1), facts({ inKitchen: true, kitchenStarted: true }), now).words).toBe(
+      "Kitchen is making it",
+    );
+    setLanguageForTest("zh-Hans");
+    expect(tableNeed(table(1), facts({ inKitchen: true, kitchenStarted: false }), now).words).toBe(
+      "已发送到后厨",
+    );
+    setLanguageForTest("en");
+  });
+});

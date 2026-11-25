@@ -821,6 +821,8 @@ export function TableCheckout({
                   {round.items.map((item, index) => (
                     <li key={index}>
                       <span className={item.reduction ? "table-checkout__dish" : undefined}>
+                        {/* b63 (T15): as the round lines say it, "2 × Beef noodles". */}
+                        {item.quantity > 1 ? `${String(item.quantity)} × ` : ""}
                         {item.displayName}
                         {item.reduction ? (
                           // WP-2423 item 8 ① segment 2: what a manager took off this dish.
@@ -963,6 +965,21 @@ export function TableCheckout({
                 onBill={setBill}
                 onProblem={setProblem}
                 onSettingUp={setSplitSettingUp}
+                partCash={
+                  method === "Cash" &&
+                  selected !== null &&
+                  !byGuests &&
+                  due !== null &&
+                  cashDue !== null &&
+                  tipMinor !== null
+                    ? {
+                        partNumber: selected.partNumber,
+                        dueMinor: due,
+                        tipMinor,
+                        cashMinor: cashDue,
+                      }
+                    : null
+                }
               />
               <TableReceipt
                 bill={bill}
@@ -1086,7 +1103,10 @@ export function TableCheckout({
                     </fieldset>
                   )}
                   <fieldset className="table-checkout__method" disabled={busy || locked}>
-                    <legend>{t("How the table pays")}</legend>
+                    {/* b63 (T15): collecting one part, only that part is being paid. */}
+                    <legend>
+                      {selected ? t("How this part is paid") : t("How the table pays")}
+                    </legend>
                     <label data-choice={t("Card machine")}>
                       <input
                         type="radio"
@@ -1569,7 +1589,8 @@ export function TableReceipt({
             ) : null}
             {paid.changeMinor !== null ? (
               <div>
-                <dt>{t("Change to give")}</dt>
+                {/* b63 (T15): on the paid record the change was handed over already. */}
+                <dt>{t("Change given")}</dt>
                 <dd>{cad(paid.changeMinor)}</dd>
               </div>
             ) : null}

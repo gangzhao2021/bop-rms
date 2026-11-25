@@ -164,6 +164,42 @@ export function byDishUnitAmounts(
   return amounts;
 }
 
+/** b63 (F40): what the cash for a part comes to, once Cash and a tip are chosen for it. */
+export interface PartCash {
+  readonly partNumber: number;
+  /** The part with its tip, before rounding. */
+  readonly dueMinor: bigint;
+  readonly tipMinor: bigint;
+  /** Rounded to 5 cents: what staff ask the guest for. */
+  readonly cashMinor: bigint;
+}
+
+/**
+ * b63 (F40, v15 D62DV): a part read "Part 1 · $6.78" while cash asked to confirm $6.80, the
+ * rounding said only further down, so staff asked the guest for the wrong amount. With Cash chosen
+ * the part line says the cash to ask for, and how it is made up.
+ */
+export function partCashText(partNumber: number, amountMinor: string, cash: PartCash): string {
+  const rounding = cash.cashMinor - cash.dueMinor;
+  let details = cad(amountMinor);
+  if (cash.tipMinor > 0n)
+    details = t("{amount} + {tip} tip", { amount: details, tip: cad(cash.tipMinor.toString()) });
+  if (rounding > 0n)
+    details = t("{base} + {cents}¢ rounding", { base: details, cents: rounding.toString() });
+  else if (rounding < 0n)
+    details = t("{base} − {cents}¢ rounding", { base: details, cents: (-rounding).toString() });
+  return cash.tipMinor === 0n && rounding === 0n
+    ? t("Part {number} · {cash} cash", {
+        number: String(partNumber),
+        cash: cad(cash.cashMinor.toString()),
+      })
+    : t("Part {number} · {cash} cash ({details})", {
+        number: String(partNumber),
+        cash: cad(cash.cashMinor.toString()),
+        details,
+      });
+}
+
 export function TableSplitControls({
   bill,
   csrf,
@@ -174,7 +210,10 @@ export function TableSplitControls({
   onBill,
   onProblem,
   onSettingUp,
+  partCash = null,
 }: {
+  /** b63 (F40): the part being collected in cash, and what the cash comes to. */
+  readonly partCash?: PartCash | null;
   /**
    * b63 (F34, T13): a split by dish or by rounds is being set up and not confirmed yet; the
    * whole table's tip and payment wait until it is (or until All together is chosen again).
@@ -596,8 +635,16 @@ export function TableSplitControls({
               <li key={part.partNumber} data-selected={selectedPart === part.partNumber}>
                 <div>
                   <strong>
-                    {t("Part {number}", { number: String(part.partNumber) })} ·{" "}
-                    {cad(part.amountMinor)}
+                    {partCash !== null &&
+                    partCash.partNumber === part.partNumber &&
+                    part.payment === null ? (
+                      partCashText(part.partNumber, part.amountMinor, partCash)
+                    ) : (
+                      <>
+                        {t("Part {number}", { number: String(part.partNumber) })} ·{" "}
+                        {cad(part.amountMinor)}
+                      </>
+                    )}
                   </strong>
                   <span
                     className="table-split__status"

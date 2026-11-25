@@ -23,6 +23,11 @@ export interface TableOrderFacts {
   readonly readyToServe: number;
   /** The kitchen is still making (or about to make) something for this table. */
   readonly inKitchen: boolean;
+  /**
+   * b63 (T15): the kitchen has started something of it (a dish marked started, or remade); until
+   * then what it has is only sent. Absent: not known (said as before).
+   */
+  readonly kitchenStarted?: boolean;
   /** Every dish ordered so far has been served. */
   readonly allServed: boolean;
   /** A pay-later table's bill: what it comes to, and what it paid once paid. */
@@ -103,11 +108,18 @@ type QueuedOrder = Awaited<
 /** One Order of the queue (or its own detail read) as the Tables list says it. */
 function factsOfOrder(order: QueuedOrder): TableOrderFacts {
   const ready = order.readyToServeItemCount ?? 0;
+  const inKitchen =
+    (order.remakingItemCount ?? 0) > 0 ||
+    (order.currentPhase !== null && kitchenPhases.has(order.currentPhase));
   return {
     readyToServe: ready,
-    inKitchen:
-      (order.remakingItemCount ?? 0) > 0 ||
-      (order.currentPhase !== null && kitchenPhases.has(order.currentPhase)),
+    inKitchen,
+    // b63 (T15): said only while the kitchen has something (it names what it is doing).
+    ...(inKitchen
+      ? {
+          kitchenStarted: (order.remakingItemCount ?? 0) > 0 || order.currentPhase === "InProgress",
+        }
+      : {}),
     allServed: order.currentPhase === "Fulfilled" && ready === 0,
     bill:
       order.tableBill === null
@@ -144,14 +156,23 @@ const unfinished = new Set(["Submitted", "Accepted", "InProgress"]);
  */
 export function kitchenFactsFromProgress(
   view: DiningProgress,
-): Pick<TableOrderFacts, "readyToServe" | "inKitchen" | "allServed"> {
+): Pick<TableOrderFacts, "readyToServe" | "inKitchen" | "allServed" | "kitchenStarted"> {
   const ready = readyToServe(view).reduce((sum, item) => sum + servableQuantity(item), 0);
   const live = view.items.filter((item) => item.phase !== "Cancelled" && item.phase !== "Rejected");
+  const inKitchen =
+    live.some((item) => unfinished.has(item.phase)) ||
+    live.some((item) => (item.remakingQuantity ?? 0) > 0);
   return {
     readyToServe: ready,
-    inKitchen:
-      live.some((item) => unfinished.has(item.phase)) ||
-      live.some((item) => (item.remakingQuantity ?? 0) > 0),
+    inKitchen,
+    // b63 (T15): said only while the kitchen has something (it names what it is doing).
+    ...(inKitchen
+      ? {
+          kitchenStarted: live.some(
+            (item) => item.phase === "InProgress" || (item.remakingQuantity ?? 0) > 0,
+          ),
+        }
+      : {}),
     allServed: live.length > 0 && live.every((item) => item.phase === "Fulfilled"),
   };
 }

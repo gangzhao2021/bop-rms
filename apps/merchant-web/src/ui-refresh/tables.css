@@ -897,12 +897,14 @@
   outline: 2px solid var(--bop-color-accent);
   outline-offset: 2px;
 }
+/* b63 (T16): no section dividers (v3: hairlines are for list rows only); 24 px of space sets the
+   payment's confirm apart instead. */
 .workspace-page.tables-v3 .table-checkout__confirm {
   display: grid;
   gap: 12px;
-  padding: 16px 0;
-  border-top: 1px solid var(--bop-color-row-divider);
-  border-bottom: 1px solid var(--bop-color-row-divider);
+  margin: 24px 0;
+  padding: 0;
+  border: 0;
 }
 .workspace-page.tables-v3 .table-checkout__confirm h4 {
   margin: 0;

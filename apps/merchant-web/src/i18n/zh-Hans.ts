@@ -6673,6 +6673,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   Bill: "账单",
   "Cash due (rounded to 5 cents)": "应收现金（按 5 分取整）",
   "Change to give": "找零",
+  // b63 (T15): on the paid record.
+  "Change given": "已找零",
+  "How this part is paid": "这份怎么付",
   "Charged on the card machine": "刷卡机实收",
   "Count the cash first. Once recorded, only a manager can refund it.":
     "请先点清现金。记下以后不能修改，只能由店长退款。",
@@ -6894,6 +6897,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "phone {number}": "手机 {number}",
   "Part for round {number}": "第 {number} 轮归哪一份",
   "Part {number}": "第 {number} 份",
+  // b63 (F40): the cash to ask for a part, and how it is made up.
+  "Part {number} · {cash} cash": "第 {number} 份 · 现金 {cash}",
+  "Part {number} · {cash} cash ({details})": "第 {number} 份 · 现金 {cash}（{details}）",
+  "{amount} + {tip} tip": "{amount}，小费 {tip}",
+  "{base} + {cents}¢ rounding": "{base}，取整 +{cents}¢",
+  "{base} − {cents}¢ rounding": "{base}，取整 −{cents}¢",
   "Split by rounds": "这样分",
   "Use at least two parts, each with a round.": "至少分两份，每份至少一轮。",
   "The bill changed after it was split. Split it again before taking payments.":
