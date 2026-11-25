@@ -1602,6 +1602,9 @@
 }
 .checkout-details-form details {
   font-size: 16px;
+  /* A Store's policy text can hold a long web address or word; at 16 px it must still break
+     inside a 390 px phone instead of widening the whole form past the screen. */
+  overflow-wrap: anywhere;
 }
 .checkout-details-form summary {
   min-height: 44px;

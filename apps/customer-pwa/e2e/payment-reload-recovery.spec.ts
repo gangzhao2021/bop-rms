@@ -180,7 +180,10 @@ for (const status of ["Failed", "Succeeded", "Pending", "Unknown", "Unprepared"]
         };
       });
       expect(geometry).toMatchObject({ headerWidth: width, headerLeft: 0, navRowSpread: 0 });
-      expect(geometry.headerHeight).toBeLessThanOrEqual(80);
+      // Batch 63 (F07): the header's hint is 14 px (was 13). At 320 px with a wider fallback font
+      // (DejaVu Sans on Linux) "Scan the location QR code to begin" takes two lines beside the
+      // language switch (84 px); one more 18 px line is allowed there, never more.
+      expect(geometry.headerHeight).toBeLessThanOrEqual(width === 320 ? 98 : 80);
       expect(geometry.navHeight).toBeLessThanOrEqual(60);
       expect(geometry.headerToNavGap, JSON.stringify(geometry)).toBe(0);
       expect(geometry.navToTitleGap, JSON.stringify(geometry)).toBeGreaterThanOrEqual(12);
