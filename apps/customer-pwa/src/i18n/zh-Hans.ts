@@ -1252,7 +1252,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Your table connection is confirmed. You can continue to the menu. No order has been placed.":
     "已确认本桌，可以继续查看菜单。尚未下单。",
   "Your table was changed. Ask a staff member for a join code for your new table.":
-    "本桌已更换，请向店员索取新桌的入桌码。",
+    "您已换桌，请向店员索取新桌的入桌码。",
   "Your table · {tableLabel}": "本桌 · {tableLabel}",
   "Your table's earlier cart timed out, so items that hadn't been ordered were cleared. Orders already placed are not affected.":
     "您这桌之前的购物车已超时，尚未下单的商品已清除。已下的订单不受影响。",

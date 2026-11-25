@@ -142,6 +142,10 @@ it("batch 42 (v15 b41 live): every Chinese guest text says 您, never 你", () =
   expect(zhHans["Your table · {tableLabel}"]).toBe("本桌 · {tableLabel}");
   expect(zhHans["Your table ordered {count}"]).toBe("本桌已点 {count} 份");
   expect(Object.values(zhHans).filter((chinese) => chinese.includes("您的桌位"))).toEqual([]);
+  // Batch 63 review: a moved party reads as "you were moved", not "this table was replaced".
+  expect(
+    zhHans["Your table was changed. Ask a staff member for a join code for your new table."],
+  ).toBe("您已换桌，请向店员索取新桌的入桌码。");
   expect(
     zhHans[
       "We use your phone number only to text you a sign-in code and to tell you before your points expire. You can leave and delete it any time."
