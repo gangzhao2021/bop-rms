@@ -1209,3 +1209,172 @@ for (const width of [390, 1024, 1440])
         }
       });
     });
+
+/**
+ * Batch 62: the points sign-up card on the pay section, as v15 offered it to a payer after a
+ * refund ("Join and earn 180 points on this order (after the refund)", G61 E), or no card (the
+ * member read answers unavailable, which shows nothing). Synthetic member answers.
+ */
+async function offerPoints(page: Page, offered: boolean) {
+  await page.route("**/bff/customer/member", (route) =>
+    route.fulfill({
+      status: offered ? 200 : 503,
+      headers: { "cache-control": "no-store", "content-type": "application/json" },
+      body: JSON.stringify(
+        offered
+          ? {
+              schemaVersion: 1,
+              offered: true,
+              signedIn: false,
+              messagesAvailable: true,
+              rule: {
+                earnPointsPerDollar: 9,
+                redeemPointsPerDollar: 100,
+                minimumRedemptionPoints: 300,
+                redemptionIncrementPoints: 100,
+                rewards: [],
+              },
+              claim: {
+                until: "2026-11-25T22:51:00.000Z",
+                parts: [{ partNumber: null, points: 180, certain: true, afterRefund: true }],
+              },
+            }
+          : { schemaVersion: 1, error: { code: "member_unavailable" } },
+      ),
+    }),
+  );
+}
+
+/**
+ * Batch 62: the receipt heading the link led to is on screen, below the sticky tab bar and with
+ * 40 px to spare above the bottom of an 844 px screen (Linux fonts run wider), and it has focus,
+ * so a keyboard or screen reader starts there.
+ */
+async function expectReceiptBroughtIntoView(page: Page, heading: Locator) {
+  await expect(heading).toBeFocused();
+  const nav = await page.locator(".bop-shell__nav").boundingBox();
+  const navBottom = (nav?.y ?? 0) + (nav?.height ?? 0);
+  // Content still arriving above it (the pay section, the points card) never pushes it away.
+  await page.waitForTimeout(1500);
+  const box = await heading.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box?.y ?? -1).toBeGreaterThanOrEqual(navBottom);
+  expect((box?.y ?? 0) + (box?.height ?? 0)).toBeLessThanOrEqual(844 - 40);
+}
+
+// Batch 62 (v15 b61 live, guest-refund-receipts-and-notices, G61 B order 62 and G61 E order 78):
+// Menu and Cart's "See your receipt" / 查看您的收据 opened Your table at the top. With the points
+// card above it, the payer's receipt heading sat at y=911 on an 844 px phone (en; 840 zh), so the
+// guest landed on the pay notice and the points form. And a phone that paid the whole table
+// ($28.25), of which staff refunded $8.00 while the table was open, read the table's Receipt
+// (Paid / Refunded / Total paid after refunds), "Thank you! Your table is paid in full.", the points
+// card, then "Your receipt" with the same three figures. The table read, the table-payment reads
+// and the visit restore are the real API handlers on a local server answering v15's records
+// (settlement 2825, online refund 800 Succeeded; by dish 1413 + 1412, refund 800 of A).
+for (const width of [390, 1024, 1440])
+  for (const zh of [false, true])
+    test.describe(`@production CUST-DINE-IN b62 the payer's receipt after a refund (${zh ? "zh-Hans" : "en"} ${width})`, () => {
+      test.use({ viewport: { width, height: 844 }, hasTouch: width < 768, isMobile: width < 768 });
+      const ownLink = zh ? "查看您的收据" : "See your receipt";
+      const tableReceipt = zh ? "收据" : "Receipt";
+      const ownReceipt = zh ? "您的收据" : "Your receipt";
+      const settled = zh
+        ? "账单已结清，之后店员办理了退款。"
+        : "The bill is settled. Staff have since made a refund.";
+      const paidInFull = zh ? /已全部付清|已付清/u : /paid in full/u;
+      const wholeYouPaid = zh
+        ? "您已在这部手机上在线付款 $28.25。$8.00 已退回您的卡，您实付 $20.25。"
+        : "You paid $28.25 online on this phone. $8.00 went back to your card, so you paid $20.25.";
+      const receipts = (page: Page) =>
+        page
+          .getByRole("main")
+          .getByRole("region", { name: zh ? /^(收据|您的收据)$/u : /^(Receipt|Your receipt)$/u });
+
+      test("whole table paid on one phone, then $8.00 back (G61 E): one receipt, settled with a refund", async ({
+        page,
+      }) => {
+        test.setTimeout(120_000);
+        scenario = "whole-table-paid-online";
+        await offerPoints(page, true);
+        for (const payer of [true, false]) {
+          const tag = `b62-whole-${payer ? "A" : "B"}-${zh ? "zh" : "en"}-${width}`;
+          phone = { payer, tableClosed: false, refunds: "Eight" };
+          await stubTable(page, []);
+          await open(page, "/dine-in/session", zh);
+          const receipt = page.getByRole("region", { name: tableReceipt, exact: true });
+          await expect(receipt).toContainText(settled);
+          if (payer) await expect(receipt).toContainText(wholeYouPaid);
+          // The figures are the table's, said once on this phone.
+          expect(await receiptRows(receipt)).toEqual(
+            expect.arrayContaining([
+              (zh ? "已付款 " : "Paid ") + "$28.25",
+              (zh ? "已退款 −" : "Refunded −") + "$8.00",
+              (zh ? "退款后实付 " : "Total paid after refunds ") + "$20.25",
+            ]),
+          );
+          await expect(receipts(page)).toHaveCount(1);
+          await expect(page.getByRole("main")).not.toContainText(paidInFull);
+          // What this phone paid is said before the points card, never after it.
+          const points = page.getByRole("region", { name: /180/u });
+          await expect(points).toBeVisible();
+          const said = await receipt.getByText(settled).boundingBox();
+          expect(said?.y ?? Infinity).toBeLessThan((await points.boundingBox())?.y ?? 0);
+          // Another phone never reads the payer's own words.
+          if (!payer)
+            await expect(page.getByRole("main")).not.toContainText(
+              zh ? /您已在这部手机上|退回您的卡/u : /You paid|your card/u,
+            );
+          await expectInside(receipt, width);
+          await expectNoInternalText(page);
+          await page.screenshot({ path: `test-results/${tag}-open.png`, fullPage: true });
+        }
+      });
+
+      for (const item of [
+        { name: "paid by dish, then $8.00 of A back (G61 B)", scenario: "by-dish-both-paid" },
+        { name: "staff closed the rest, then $8.00 back", scenario: "by-dish-written-off" },
+        { name: "whole table, then $8.00 back (G61 E)", scenario: "whole-table-paid-online" },
+      ] as const)
+        test(`See your receipt from Menu and Cart brings the payer to it: ${item.name}`, async ({
+          page,
+        }) => {
+          test.setTimeout(150_000);
+          scenario = item.scenario;
+          phone = { payer: true, tableClosed: false, refunds: "Eight" };
+          const heading = page.getByRole("main").getByRole("heading", {
+            name: item.scenario === "whole-table-paid-online" ? tableReceipt : ownReceipt,
+            exact: true,
+          });
+          for (const points of [true, false]) {
+            await page.unrouteAll({ behavior: "ignoreErrors" });
+            await offerPoints(page, points);
+            await stubTable(page, []);
+            for (const path of ["/menu", "/cart"]) {
+              await open(page, path, zh);
+              await page.getByRole("main").getByRole("link", { name: ownLink }).click();
+              await expect(page).toHaveURL(/\/dine-in\/session$/u);
+              await expectReceiptBroughtIntoView(page, heading);
+              await page.screenshot({
+                path: `test-results/b62-link-${item.scenario}-${points ? "points" : "nopoints"}${path.replace("/", "-")}-${zh ? "zh" : "en"}-${width}.png`,
+              });
+            }
+          }
+        });
+
+      test("See your receipt on the ended Menu brings the payer to it once the table closed", async ({
+        page,
+      }) => {
+        test.setTimeout(90_000);
+        scenario = "by-dish-written-off";
+        phone = { payer: true, tableClosed: true, refunds: "Eight" };
+        await offerPoints(page, false);
+        await stubTable(page, []);
+        await open(page, "/menu", zh);
+        await page.getByRole("main").getByRole("link", { name: ownLink }).click();
+        await expect(page).toHaveURL(/\/dine-in\/session$/u);
+        await expectReceiptBroughtIntoView(
+          page,
+          page.getByRole("main").getByRole("heading", { name: ownReceipt, exact: true }),
+        );
+      });
+    });
