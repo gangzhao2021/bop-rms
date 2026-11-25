@@ -516,6 +516,31 @@ interface TableResult {
 
 /** Below the desktop width the selected table's panel sits under (or over) the list. */
 const panelUnderList = "(max-width: 1023px)";
+/** b63 review (F37, v3 46:324): on a phone the selected table's panel takes the list's place. */
+const phoneWidth = "(max-width: 767px)";
+const phoneNow = () =>
+  typeof window.matchMedia === "function" && window.matchMedia(phoneWidth).matches;
+
+/**
+ * b63 review (F37): on a phone, the panel's step due (its one filled primary) stays at the bottom of
+ * the screen while staff scroll the table. With a confirm or a comp or take-off open, that is the
+ * filled one; otherwise the panel's first primary. Presentation only: the button is the same.
+ */
+function dockPanelPrimary(panel: HTMLElement, on: boolean) {
+  const docked = panel.querySelectorAll<HTMLElement>("[data-dock]");
+  const scope =
+    panel.querySelector<HTMLElement>("[role='alertdialog']") ??
+    panel.querySelector<HTMLElement>(".pay-later-remove, .item-comp") ??
+    panel;
+  const primary = on
+    ? (scope.querySelector<HTMLElement>(".table-checkout__primary, .table-panel__primary") ?? null)
+    : null;
+  for (const element of docked) if (element !== primary) element.removeAttribute("data-dock");
+  if (primary !== null && !primary.hasAttribute("data-dock"))
+    primary.setAttribute("data-dock", "bottom");
+  if (primary === null) panel.removeAttribute("data-docked");
+  else if (!panel.hasAttribute("data-docked")) panel.setAttribute("data-docked", "");
+}
 function usePanelUnderList() {
   const query = () =>
     typeof window !== "undefined" &&
@@ -744,6 +769,44 @@ function DiningSessionWorkspaceBody({
   const [now, setNow] = useState(() => Date.now());
   const businessDay = useStoreBusinessDay();
   const selected = tables.find((table) => table.tableReference === selectedReference) ?? null;
+  // b63 review (F37, v3 46:324): on a phone a chosen table's panel replaces the list; "‹ Tables"
+  // brings the list back where staff had scrolled it. Wider, both stay side by side or stacked.
+  const [phoneList, setPhoneList] = useState(false);
+  const listScroll = useRef<number | null>(null);
+  const phoneView = selected === null ? undefined : phoneList ? "list" : "table";
+  const backToList = () => {
+    const at = listScroll.current;
+    const chosen = selectedReference;
+    setPhoneList(true);
+    requestAnimationFrame(() => {
+      if (at !== null) window.scrollTo({ top: at, behavior: "instant" as ScrollBehavior });
+      // The row staff came from, for a keyboard or switch user.
+      const row = [...document.querySelectorAll<HTMLElement>("[data-table-reference]")].find(
+        (element) => element.dataset.tableReference === chosen,
+      );
+      row?.focus({ preventScroll: true });
+    });
+  };
+  useEffect(() => {
+    const panel = detailRef.current;
+    if (panel === null || typeof window.matchMedia !== "function") return;
+    const phone = window.matchMedia(phoneWidth);
+    const dock = () => dockPanelPrimary(panel, phone.matches && phoneView === "table");
+    dock();
+    const watch = new MutationObserver(dock);
+    watch.observe(panel, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["disabled", "hidden", "open"],
+    });
+    phone.addEventListener?.("change", dock);
+    return () => {
+      watch.disconnect();
+      phone.removeEventListener?.("change", dock);
+      dockPanelPrimary(panel, false);
+    };
+  }, [phoneView, selectedReference]);
   useEffect(() => {
     if (arrival === null) return;
     if (selected?.tableReference !== arrival) {
@@ -1172,6 +1235,9 @@ function DiningSessionWorkspaceBody({
     };
   }, []);
   const select = (table: StaffDiningTable) => {
+    // b63 review (F37): on a phone, where the list was when staff left it for the table.
+    if (phoneNow() && (selected === null || phoneList)) listScroll.current = window.scrollY;
+    setPhoneList(false);
     if (table.tableReference !== selectedReference) {
       setBlockReasonCode("");
       if (code?.table !== table.tableReference) setCode(null);
@@ -1429,6 +1495,14 @@ function DiningSessionWorkspaceBody({
         .sort(compareTables),
     [tables, orderFacts, billFacts, billUnread, queueRead, kitchenFacts, now],
   );
+  // b63 (F32): the tables whose bill is paid, for the panel's merge choices (once per list read).
+  const paidTables = useMemo(
+    () =>
+      new Set(
+        rows.filter((row) => Boolean(row.facts?.bill?.paid)).map((row) => row.table.tableReference),
+      ),
+    [rows],
+  );
   // Batch 49 review: a refused step's "paying the bill" line holds only while that is true. Once
   // that table's bill reads settled, or a read newer than the refusal shows the table no longer
   // checking out, the line goes and the panel says what is true now in its usual place.
@@ -1603,6 +1677,7 @@ function DiningSessionWorkspaceBody({
       <button
         type="button"
         className="table-row__open"
+        data-table-reference={table.tableReference}
         aria-pressed={table.tableReference === selectedReference}
         aria-label={t("Select {stableLabel}", { stableLabel: table.stableLabel })}
         aria-describedby={"table-need-" + table.tableReference}
@@ -1663,6 +1738,7 @@ function DiningSessionWorkspaceBody({
               <button
                 type="button"
                 className="table-free__name"
+                data-table-reference={table.tableReference}
                 aria-pressed={table.tableReference === selectedReference}
                 aria-label={t("Select {stableLabel}", { stableLabel: table.stableLabel })}
                 disabled={paused || hostLocked}
@@ -1829,7 +1905,7 @@ function DiningSessionWorkspaceBody({
         </nav>
       )}
       {said && !resultInPanel ? resultLine() : null}
-      <div className="dining-floor-layout">
+      <div className="dining-floor-layout" data-phone-view={phoneView}>
         <section className="table-list" aria-label={t("Tables by what they need")}>
           {tables.length === 0 ? (
             <p role="status" className="dining-floor-empty" data-loading={state === "Loading"}>
@@ -1899,18 +1975,18 @@ function DiningSessionWorkspaceBody({
           aria-label={t("Selected table details")}
           hidden={refused}
         >
+          {selected ? (
+            // b63 review (F37): on a phone, back to the list (shown there only).
+            <button type="button" className="table-panel__back" onClick={backToList}>
+              ‹ {t("Tables")}
+            </button>
+          ) : null}
           {resultInPanel ? resultLine(panelResultRef) : null}
           {selected ? (
             <TablePanel
               key={selected.tableReference}
               table={selected}
-              paidTables={
-                new Set(
-                  rows
-                    .filter((row) => Boolean(row.facts?.bill?.paid))
-                    .map((row) => row.table.tableReference),
-                )
-              }
+              paidTables={paidTables}
               csrf={csrf}
               storeLabel={storeLabel}
               timeZone={timeZone}

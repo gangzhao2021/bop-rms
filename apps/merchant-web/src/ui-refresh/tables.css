@@ -2029,3 +2029,48 @@
 .workspace-page.tables-v3 .table-panel .table-split__apply.table-checkout__primary {
   margin-top: 8px;
 }
+
+/* b63 review (F37, v3 46:324): on a phone the chosen table's panel replaces the list (and its
+   tabs); "‹ Tables" brings the list back where it was. The step due stays at the screen's bottom,
+   so it is in reach however far staff scroll the table. */
+.workspace-page.tables-v3 .table-panel__back {
+  display: none;
+}
+@media (max-width: 767px) {
+  .workspace-page.tables-v3 .dining-floor-layout[data-phone-view="table"] > .table-list,
+  .workspace-page.tables-v3 .dining-floor-layout[data-phone-view="list"] > .table-panel,
+  .workspace-page.tables-v3:has(.dining-floor-layout[data-phone-view="table"]) .table-tabs {
+    display: none;
+  }
+  .workspace-page.tables-v3 .table-panel__back {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    margin: 0 0 8px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--bop-color-accent);
+    font: inherit;
+    font-size: 16px;
+    font-weight: 400;
+  }
+  .workspace-page.tables-v3 .table-panel[data-docked] {
+    padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px));
+  }
+  .workspace-page.tables-v3 .table-panel[data-docked] [data-dock="bottom"] {
+    position: fixed;
+    right: 16px;
+    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    left: 16px;
+    z-index: 20;
+    display: flex;
+    /* Across the screen between the 16 px gutters (the panel's start alignment is for in-flow). */
+    justify-self: stretch;
+    width: auto;
+    align-items: center;
+    justify-content: center;
+    min-height: 48px;
+    margin: 0;
+  }
+}

@@ -884,8 +884,12 @@ for (const language of ["en", "zh-Hans"] as const)
       const panel = page.getByRole("complementary", {
         name: zh ? "所选桌台详情" : "Selected table details",
       });
+      // b63 review (F37): on a phone the list is hidden while the chosen table's panel is open.
       await expect(
-        page.getByRole("button", { name: zh ? `选择 ${label}` : `Select ${label}` }),
+        page.getByRole("button", {
+          name: zh ? `选择 ${label}` : `Select ${label}`,
+          includeHidden: true,
+        }),
       ).toHaveAttribute("aria-pressed", "true");
       await expect(panel.getByText("Beef noodles (TEST)").first()).toBeVisible({ timeout: 3_000 });
       expect(state.billReads).toBeGreaterThan(bills);

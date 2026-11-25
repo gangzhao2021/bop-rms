@@ -497,8 +497,10 @@ for (const outcome of ["lost", "won"] as const)
         });
         await close.scrollIntoViewIfNeeded();
         await expect(close).toBeInViewport();
-        // Staff have scrolled well down the floor: the top of the list is out of view.
-        expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(300);
+        // Staff have scrolled well down the floor: the top of the list is out of view. b63 review
+        // (F37): on a phone the panel takes the list's place, so it starts near the top instead.
+        if (width >= 768) expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(300);
+        else await expect(page.locator(".table-list")).toBeHidden();
         await close.click();
         const text =
           outcome === "won"

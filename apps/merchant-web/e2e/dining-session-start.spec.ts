@@ -263,13 +263,11 @@ test("@production staff starts a table and recovers a lost join code without dup
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
-    const [mobileBoard, mobileDetails] = await Promise.all([
-      page.locator(".table-list").boundingBox(),
-      details.boundingBox(),
-    ]);
-    if (!mobileBoard || !mobileDetails)
-      throw new Error("Mobile list and selected detail must be visible");
-    expect(mobileDetails.y).toBeGreaterThanOrEqual(mobileBoard.y + mobileBoard.height);
+    // b63 review (F37, v3 46:324): on a phone the chosen table's panel takes the list's place
+    // (no longer under the whole list); "‹ Tables" brings the list back.
+    await expect(page.locator(".table-list")).toBeHidden();
+    await expect(details).toBeVisible();
+    await expect(details.getByRole("button", { name: "‹ Tables" })).toBeVisible();
     await page.screenshot({ path: `test-results/dining-board-${width}.png`, fullPage: true });
   }
   await page.setViewportSize({ width: 1440, height: 900 });

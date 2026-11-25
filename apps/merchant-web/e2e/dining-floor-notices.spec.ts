@@ -86,6 +86,9 @@ test("@production Tables board shows open time in hours or days and flags long-o
   await expect(page.getByText(/34992|min elapsed/u)).toHaveCount(0);
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    // b63 review (F37): on a phone the chosen table's panel takes the list's place; Tables
+    // brings the list back.
+    if (width === 390) await page.getByRole("button", { name: "‹ Tables" }).click();
     await expect(tile("T2")).toBeVisible();
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),

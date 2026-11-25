@@ -482,17 +482,18 @@ for (const zh of [false, true]) {
           : "Fully refunded. Close the table when the guests have left.",
       );
       await expect(receipt).not.toContainText(zh ? "已全部付清" : "Paid in full");
-      // The table's row on the list says it too.
-      await expect(
-        page.getByText(
-          zh ? "已全部退款 · 客人走后关台" : "Fully refunded · close when the guests leave",
-        ),
-      ).toBeVisible();
       await fits(page, ".table-receipt .table-checkout__totals > div");
       await page.screenshot({
         path: `test-results/b62-tables-fully-refunded-${language}-${width}.png`,
         fullPage: true,
       });
+      // The table's row on the list says it too (b63 review, F37: on a phone, back on the list).
+      if (width < 768) await page.getByRole("button", { name: zh ? "‹ 桌台" : "‹ Tables" }).click();
+      await expect(
+        page.getByText(
+          zh ? "已全部退款 · 客人走后关台" : "Fully refunded · close when the guests leave",
+        ),
+      ).toBeVisible();
     });
   }
 

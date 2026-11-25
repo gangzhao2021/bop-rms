@@ -121,7 +121,10 @@ test("@production staff confirms Host transfer and retains unknown operation acr
   const retry = page.getByRole("button", { name: "Retry same host transfer", exact: true });
   await expect(retry).toBeEnabled();
   await expect(page.getByRole("button", { name: "Refresh tables", exact: true })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Select T1", exact: true })).toBeDisabled();
+  // b63 review (F37): on a phone the list is hidden while the panel is open; its rows still wait.
+  await expect(
+    page.getByRole("button", { name: "Select T1", exact: true, includeHidden: true }),
+  ).toBeDisabled();
   await expect(page.getByRole("button", { name: "New join code", exact: true })).toBeDisabled();
   await retry.click();
   await expect(retry).toBeEnabled();
