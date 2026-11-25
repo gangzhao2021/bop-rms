@@ -16,10 +16,12 @@ import { CustomerDiningSessionHandler } from "../src/customer-dining-session.js"
 import { GuestSessionError } from "@bop/identity";
 import {
   closedBillPaid,
+  closedBillSomeRefunded,
   createCustomerSessionBootstrapHandler,
 } from "../src/customer-session-bootstrap.js";
 import {
   composeCustomerDiningSession,
+  customerDishPaidRounds,
   customerRoundPaymentRefunds,
   customerTableBillFacts,
 } from "../src/customer-dining-session-read.js";
@@ -85,6 +87,10 @@ export async function startGuestBillHttp(
       : null;
   };
   const wholeTablePaid = () => scenario() === "whole-table-paid-online";
+  // Batch 61 (v15 b60 live, CRT60 B/C): by dish, both phones paid their own dish; once staff
+  // closed the table its settled receipt is read, each phone with its own payment only.
+  const byDishPaid = () => scenario() === "by-dish-both-paid";
+  const paidInFull = () => wholeTablePaid() || byDishPaid();
   // Batch 56: the guest's table-payment reads (the bill, and this phone's own payment), as the
   // real port answers them: the payer's own captured payment only, and "not found" for any other
   // phone; once the table closed, only with the ended visit's value.
@@ -97,30 +103,39 @@ export async function startGuestBillHttp(
         // Batch 57: a table one phone paid in full, still open: the whole-table receipt.
         if (wholeTablePaid()) return guestWholeTablePaidView("Closing");
         if (part === null) throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
-        return guestOwnPaymentView(part, phone().payer);
+        // Batch 61: with what staff gave back of the table's payments (the bill's refundedMinor).
+        return guestOwnPaymentView(part, phone().payer, "Closing", phone().refunds ?? "None");
       },
       // Batch 57: once staff closed a table paid in full, its settled receipt (ended visit only).
       settledReceipt: async (credentials: { csrfCredential: string }) => {
         if (
-          !wholeTablePaid() ||
+          !paidInFull() ||
           !phone().tableClosed ||
           String(credentials.csrfCredential) !== endedCsrf
         )
           throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
-        return guestWholeTablePaidView("Closed");
+        return byDishPaid()
+          ? guestOwnPaymentView(
+              scenario() as "by-dish-both-paid",
+              phone().payer,
+              "Closed",
+              phone().refunds ?? "None",
+            )
+          : guestWholeTablePaidView("Closed");
       },
       ownPayment: async (credentials: { csrfCredential: string }) => {
         const part = paidPart();
         const { payer, tableClosed } = phone();
+        // Batch 61: by dish paid in full, phone B paid its own dish too (its own payment only).
         if (
           part === null ||
-          !payer ||
+          (!payer && !byDishPaid()) ||
           String(credentials.csrfCredential) !== (tableClosed ? endedCsrf : visitCsrf)
         )
           throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
         return guestOwnPaymentView(
           part,
-          true,
+          payer,
           tableClosed ? "Closed" : "Closing",
           phone().refunds ?? "None",
         );
@@ -141,7 +156,7 @@ export async function startGuestBillHttp(
           readSettledTable: async () => {
             const { facts } = guestBillClosedByStaffFacts(scenario());
             // Batch 57: a table paid in full: its label and read-only receipt access.
-            if (wholeTablePaid() && facts.tableLabel !== null)
+            if (paidInFull() && facts.tableLabel !== null)
               return {
                 tableLabel: facts.tableLabel,
                 csrfToken: endedCsrf,
@@ -157,11 +172,19 @@ export async function startGuestBillHttp(
               // Batch 59: with what staff gave back of the table's payments (every phone).
               // Batch 59 review: what the table's payments took (these scenarios pay no tip, so
               // their settlement totals are the captured order money).
-              closedByStaff: closedBillPaid(writeOff, {
-                paidMinor: writeOff.capturedOrderAllocationMinor,
-                refundedMinor:
-                  paidPart() === null ? 0n : guestTableRefundedMinor(phone().refunds ?? "None"),
-              }),
+              ...((refundedMinor) => {
+                const paid = closedBillPaid(writeOff, {
+                  paidMinor: writeOff.capturedOrderAllocationMinor,
+                  refundedMinor,
+                });
+                // Batch 61: with part of what stays paid given back, as the real restore says it.
+                return {
+                  closedByStaff: paid,
+                  ...(closedBillSomeRefunded(paid, refundedMinor)
+                    ? { someRefunded: true as const }
+                    : {}),
+                };
+              })(paidPart() === null ? 0n : guestTableRefundedMinor(phone().refunds ?? "None")),
               store: {
                 brandDisplayName: "Test Merchant 2 - not production",
                 storeDisplayName: "Test Merchant 2 Main - not production",
@@ -205,12 +228,18 @@ export async function startGuestBillHttp(
               ),
               guestPhoneSession(phone().payer),
             );
+            // Batch 61: by dish, the rounds a guest's payment paid some of (the real mapping).
+            const dishPaidRounds = customerDishPaidRounds(
+              facts.order.splitParts ?? null,
+              settlements,
+            );
             return composeCustomerDiningSession({
               ...facts,
               order: {
                 ...facts.order,
                 tableBill: customerTableBillFacts(bill),
                 ...(roundPaymentRefunds.size === 0 ? {} : { roundPaymentRefunds }),
+                ...(dishPaidRounds.size === 0 ? {} : { dishPaidRounds }),
               },
             });
           },

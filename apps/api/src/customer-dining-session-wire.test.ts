@@ -5,6 +5,7 @@ import { createApp } from "./app.js";
 import { CustomerDiningSessionHandler } from "./customer-dining-session.js";
 import {
   composeCustomerDiningSession,
+  customerDishPaidRounds,
   customerRoundPaymentRefunds,
   customerTableBillFacts,
   type CustomerDiningSessionView,
@@ -164,6 +165,7 @@ const everyRound: Every<Round> = {
   refunded: cad(1n),
   refundPending: cad(1n),
   paymentRefund: { state: "Partly", yourPaidAfterRefunds: cad(613n) },
+  partlyPaid: true,
 };
 const everySummary: Every<Summary> = {
   paid: cad(1413n),
@@ -356,5 +358,58 @@ describe("batch 60: a round paid by dish says what staff gave back of its paymen
       ["Paid", undefined],
       ["OnTableBill", undefined],
     ]);
+  });
+});
+
+// Batch 61 (v15 b60 live, CRT60 D order 51): by dish, staff closed the rest of the bill. A round
+// nobody paid any of read "Unpaid part not charged to you" / 未付部分不向您收取, as if part of it
+// were paid. The read now says which rounds still on the bill a guest's payment paid some of
+// (Payment's settlement lines, one per round), through the real mapping and the HTTP reply.
+describe("batch 61: a round on a closed by-dish bill says whether anyone paid some of it", () => {
+  const read = (scenario: GuestBillScenario, roundOnePaidInFull: boolean) => {
+    const { facts, bill } = guestBillClosedByStaffFacts(scenario);
+    const { settlements } = guestBillPayments(scenario);
+    const dishPaidRounds = customerDishPaidRounds(facts.order.splitParts ?? null, settlements);
+    // A round of two dishes, one of them paid, is on the bill's rounds as not paid in full.
+    const rounds = bill.rounds.map((round, index) =>
+      index === 0 && !roundOnePaidInFull ? { ...round, paid: false } : round,
+    );
+    return composeCustomerDiningSession({
+      ...facts,
+      order: {
+        ...facts.order,
+        tableBill: customerTableBillFacts({ ...bill, rounds } as typeof bill),
+        ...(dishPaidRounds.size === 0 ? {} : { dishPaidRounds }),
+      },
+    });
+  };
+  const partly = (session: Record<string, unknown>) =>
+    (session.rounds as { payment: string; partlyPaid?: unknown }[]).map((round) => [
+      round.payment,
+      round.partlyPaid,
+    ]);
+  it("a round paid in part is partlyPaid; one nobody paid, or one paid in full, is not", async () => {
+    expect(partly(await serve(() => read("by-dish-written-off", false)))).toEqual([
+      ["OnTableBill", true],
+      ["OnTableBill", undefined],
+    ]);
+    // Order 51: round 1 paid in full by both phones, round 2 never paid.
+    expect(partly(await serve(() => read("by-dish-written-off", true)))).toEqual([
+      ["Paid", undefined],
+      ["OnTableBill", undefined],
+    ]);
+  });
+  it("only on a bill staff closed, and never for staff's equal parts", async () => {
+    expect(partly(await serve(() => read("open-after-one-dish", false)))).toEqual([
+      ["OnTableBill", undefined],
+      ["OnTableBill", undefined],
+    ]);
+    const { facts } = guestBillClosedByStaffFacts("half-split-written-off");
+    expect(
+      customerDishPaidRounds(
+        facts.order.splitParts ?? null,
+        guestBillPayments("half-split-written-off").settlements,
+      ).size,
+    ).toBe(0);
   });
 });

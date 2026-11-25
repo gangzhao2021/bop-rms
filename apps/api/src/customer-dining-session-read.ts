@@ -202,6 +202,12 @@ export interface CustomerDiningSessionFacts {
      * one payment for the whole table) staff then gave back, in part or in full, by round.
      */
     readonly roundPaymentRefunds?: ReadonlyMap<string, CustomerRoundPaymentRefund>;
+    /**
+     * Batch 61 (v15 b60 live, CRT60 D): guests paying by dish, the rounds some guest's payment paid
+     * a dish of (each settlement's lines name the rounds it paid). A round in it that is not paid
+     * in full was paid in part.
+     */
+    readonly dishPaidRounds?: ReadonlySet<string>;
     readonly unpaidCancellations: ReadonlySet<string>;
     /**
      * v15 batch-5: of those, the rounds the guest paying for them stopped before paying ("Don't
@@ -379,6 +385,12 @@ export interface CustomerDiningSessionView {
       readonly state: "Partly" | "Full";
       readonly yourPaidAfterRefunds?: CustomerMoney;
     };
+    /**
+     * Batch 61 (v15 b60 live, CRT60 D): on a bill staff closed when the guests left, a round still
+     * on it that guests paying by dish paid some of: its unpaid part is what is not charged. Absent:
+     * nobody paid any of it (it is not charged at all).
+     */
+    readonly partlyPaid?: true;
   }[];
   /** Null until the table has ordered. Due is the item total of rounds still waiting for payment. */
   readonly summary: null | {
@@ -594,6 +606,27 @@ export function customerSplitParts(
 }
 
 /**
+ * Batch 61 (v15 b60 live, CRT60 D): guests paying by dish (no fixed number of parts), the rounds
+ * any guest's payment paid a dish of — each settlement's lines name the rounds it paid, one line
+ * per round. Staff's equal parts (and the whole table's one payment) pay no round here: empty.
+ */
+export function customerDishPaidRounds(
+  splitParts: CustomerSplitParts | null,
+  settlements: readonly {
+    readonly part: unknown;
+    readonly lines: readonly { readonly orderBatchReference: string }[];
+  }[],
+): ReadonlySet<string> {
+  return new Set(
+    splitParts === null || splitParts.count !== null
+      ? []
+      : settlements
+          .filter((settlement) => settlement.part !== null)
+          .flatMap((settlement) => settlement.lines.map((line) => line.orderBatchReference)),
+  );
+}
+
+/**
  * Batch 60 (v15 b58/b59 known limit): what staff gave back of the payment that paid a round. By
  * dish (同桌结账) each guest's payment records the rounds it paid (one line per round, the tip and
  * rounding on the last), and one payment for the whole table records every round; staff's equal
@@ -773,10 +806,13 @@ export async function readCustomerTablePayments(
       );
     }
   }
+  const splitParts = customerSplitParts(splitPlan, tableSettlements, refundedBySettlement);
   return {
     tableSettlements,
     splitPaid,
-    splitParts: customerSplitParts(splitPlan, tableSettlements, refundedBySettlement),
+    splitParts,
+    // Batch 61: by dish, the rounds a guest's payment paid some of.
+    dishPaidRounds: customerDishPaidRounds(splitParts, tableSettlements),
     refundedMinor,
     roundPaymentRefunds: customerRoundPaymentRefunds(
       splitPlan,
@@ -1138,6 +1174,12 @@ export function composeCustomerDiningSession(
                   : { yourPaidAfterRefunds: money(refund.yourPaidAfterRefundsMinor) }),
               }),
             })(order.roundPaymentRefunds?.get(reference)),
+      // Batch 61: a round staff closed the rest of after guests paid some of its dishes.
+      ...(payment === "OnTableBill" &&
+      order.tableBill?.closedByStaff === true &&
+      order.dishPaidRounds?.has(reference) === true
+        ? { partlyPaid: true as const }
+        : {}),
     });
   });
   // b22 (DEC-TAX-WHOLE-RECEIPT): a table paying at the end ordered what its one receipt says — the
@@ -1807,12 +1849,20 @@ function postgresDependencies(
                 authorize: async (_tx, value) =>
                   value.orderReference === orderReference && (await stillAuthorized()),
               });
-        const { tableSettlements, splitPaid, splitParts, refundedMinor, roundPaymentRefunds } =
+        const {
+          tableSettlements,
+          splitPaid,
+          splitParts,
+          dishPaidRounds,
+          refundedMinor,
+          roundPaymentRefunds,
+        } =
           tableStore === null
             ? {
                 tableSettlements: [],
                 splitPaid: false,
                 splitParts: null,
+                dishPaidRounds: new Set<string>(),
                 refundedMinor: 0n,
                 roundPaymentRefunds: new Map<string, CustomerRoundPaymentRefund>(),
               }
@@ -1901,6 +1951,8 @@ function postgresDependencies(
           ...(chargeLines.size === 0 ? {} : { chargeLines }),
           splitParts,
           ...(roundPaymentRefunds.size === 0 ? {} : { roundPaymentRefunds }),
+          // Batch 61: by dish, the rounds a guest's payment paid some of.
+          ...(dishPaidRounds.size === 0 ? {} : { dishPaidRounds }),
           tableSettlement:
             tableSettlements.length === 0
               ? null

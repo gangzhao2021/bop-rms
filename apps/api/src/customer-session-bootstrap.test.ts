@@ -267,6 +267,25 @@ it("tells a guest whose table closed with nothing ordered that its visit ended, 
   });
   f.readSettledTable.mockResolvedValue({ tableLabel: "L54 GB2 (TEST)", closedByStaff: "All" });
   expect((await f.request()).status).toBe(204);
+  // Batch 61 (v15 b60 live, CRT60 D): part of what stays paid went back; only with "Some".
+  f.readSettledTable.mockResolvedValue({
+    tableLabel: "CRT60 D (TEST)",
+    closedByStaff: "Some",
+    someRefunded: true,
+  });
+  expect(await (await f.request()).json()).toEqual({
+    schemaVersion: 1,
+    closedTable: { tableLabel: "CRT60 D (TEST)", paid: "Some", someRefunded: true },
+  });
+  f.readSettledTable.mockResolvedValue({
+    tableLabel: "CRT60 D (TEST)",
+    closedByStaff: "Refunded",
+    someRefunded: true,
+  });
+  expect(await (await f.request()).json()).toEqual({
+    schemaVersion: 1,
+    closedTable: { tableLabel: "CRT60 D (TEST)", paid: "Refunded" },
+  });
   // Batch 56 (v15 b55 live, L55 CB3 order 80): the phone that paid part 1 ($14.13) is told what
   // it paid, with read-only access to its own payment's receipt; malformed, it is left out.
   f.readSettledTable.mockResolvedValue({

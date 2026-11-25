@@ -355,10 +355,12 @@ describe("a bill staff closed when the guests left", () => {
       "A".repeat(43),
     );
     // Batch 60 (v15 b59 live): of it, the $3.00 the Provider has not answered is on its way, so
-    // the ended page says only what Payment confirmed went back.
+    // the ended page says only what Payment confirmed went back. Batch 61: part of what stays
+    // paid went back, so the ended page never says it stays paid.
     expect(answer).toEqual({
       tableLabel: "V44 A (TEST)",
       closedByStaff: "Some",
+      someRefunded: true,
       store: tm2,
       yourPayment: {
         amountMinor: "1413",
@@ -447,6 +449,57 @@ describe("a bill staff closed when the guests left", () => {
     ]);
     expect(await read()).toMatchObject({ closedByStaff: "Refunded" });
     expect(f.settlements).toHaveBeenCalledWith(tx, [ref(8)]);
+  });
+
+  // Batch 61 (v15 b60 live, CRT60 D order 51): by dish, A paid $14.13 and B $14.12 (part 1 and
+  // part 2 of the plan), staff closed the rest (round 2), then a manager refunded $8.00 of A
+  // (Succeeded/800). Once cleaned, both phones' ended page said "what was paid stays paid" next
+  // to A's "$8.00 went back to your card". Before: no someRefunded on either phone.
+  it("batch 61: part of what stays paid went back: someRefunded on every phone, the amount payer-only", async () => {
+    f.writeOffs.mockResolvedValue([writeOff(2825n, 4237n)]);
+    f.settlements.mockResolvedValue([
+      { orderReference: ref(8), tipMinor: 0n, totalMinor: 1413n },
+      { orderReference: ref(8), tipMinor: 0n, totalMinor: 1412n },
+    ]);
+    const partB = {
+      ...phonePayment(ref(30), "Captured"),
+      onlinePaymentReference: ref(31),
+      roundsMinor: 1412n,
+      totalMinor: 1412n,
+      part: { splitPlanReference: ref(21), partNumber: 2 },
+      outcome: { ...phonePayment(ref(30), "Captured").outcome, capturedMinor: 1412n },
+    };
+    f.onlinePayments.mockResolvedValue([phonePayment(guest.sessionReference, "Captured"), partB]);
+    f.onlineRefunds.mockResolvedValue([refund(ref(20), 800n, "Succeeded")]);
+    const read = () =>
+      createCustomerSessionBootstrapRead(withTenant).readSettledTable("A".repeat(43));
+    expect(await read()).toEqual({
+      tableLabel: "V44 A (TEST)",
+      closedByStaff: "Some",
+      someRefunded: true,
+      store: tm2,
+      yourPayment: { amountMinor: "1413", method: "Online", refundedMinor: "800" },
+      csrfToken: "C".repeat(43),
+    });
+    f.onlinePayments.mockResolvedValue([
+      { ...phonePayment(ref(32), "Captured"), onlinePaymentReference: ref(20) },
+      { ...partB, guestSessionReference: guest.sessionReference },
+    ]);
+    const other = await read();
+    expect(other).toEqual({
+      tableLabel: "V44 A (TEST)",
+      closedByStaff: "Some",
+      someRefunded: true,
+      store: tm2,
+      yourPayment: { amountMinor: "1412", method: "Online" },
+      csrfToken: "C".repeat(43),
+    });
+    expect(JSON.stringify(other)).not.toMatch(/800|1413|refundedMinor/u);
+    // Nothing given back (or only a refused refund): no flag, the old words stand.
+    f.onlineRefunds.mockResolvedValue([refund(ref(20), 800n, "Failed")]);
+    expect(await read()).not.toHaveProperty("someRefunded");
+    f.onlineRefunds.mockResolvedValue([]);
+    expect(await read()).not.toHaveProperty("someRefunded");
   });
 
   it("batch 56: another guest's payment, or a declined one, is never this phone's", async () => {

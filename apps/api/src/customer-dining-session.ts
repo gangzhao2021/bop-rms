@@ -224,6 +224,8 @@ export class CustomerDiningSessionHandler {
                         }),
                   },
                 }),
+            // Batch 61: a round on a closed bill that guests paying by dish paid some of.
+            ...(round.partlyPaid === true ? { partlyPaid: true } : {}),
           })),
           summary:
             view.summary === null

@@ -374,6 +374,12 @@ export function customerTablePaymentBody(view: DiningTableOnlinePaymentView) {
  * The settled table's receipt in public fields only: the rounds and dishes (comps shown as such),
  * before tax, tax, and each payment's method, tip, cash rounding and amount — never card details,
  * who took it, references or codes. A split bill lists every part and how it was paid.
+ *
+ * Batch 61 (v15 b60 live, CRT60 B order 46): a bill paid in parts lists only the asking phone's
+ * own parts (Payment's captured payments of this guest Session), each marked `yours` with what of
+ * it went back to the card (refunded or on its way; a refused refund moved nothing) — never
+ * another guest's part amount or refund. `paymentCount` says how many payments paid the bill; the
+ * table's totals (paid, tip, rounding, refunded) stay whole, as every guest shares them.
  */
 export function customerSettledTableReceiptBody(view: DiningTableOnlinePaymentView) {
   const bill = view.bill;
@@ -403,6 +409,33 @@ export function customerSettledTableReceiptBody(view: DiningTableOnlinePaymentVi
       : (bill.split?.parts ?? []).flatMap((part) =>
           part.payment === null ? [] : [payment(part.partNumber, part.payment)],
         );
+  const split = bill.settlement === null && bill.split !== null;
+  // Batch 61: this phone's own captured payments of the bill's current split, by part number.
+  const own = new Map(
+    (view.ownPayments ?? []).flatMap((entry) =>
+      entry.partNumber === null || !entry.samePlan ? [] : [[entry.partNumber, entry] as const],
+    ),
+  );
+  const yours = (partNumber: number | null) => {
+    const entry = partNumber === null ? undefined : own.get(partNumber);
+    if (entry === undefined) return null;
+    const back = entry.refunds.filter((refund) => refund.status !== "Failed");
+    const total = (refunds: typeof back) =>
+      refunds.reduce((sum, refund) => sum + BigInt(refund.amountMinor), 0n);
+    const refunded = total(back);
+    const pending = total(back.filter((refund) => refund.status === "Pending"));
+    return {
+      yours: true as const,
+      ...(refunded > 0n ? { refundedMinor: refunded.toString() } : {}),
+      ...(pending > 0n ? { refundPendingMinor: pending.toString() } : {}),
+    };
+  };
+  const listed = split
+    ? payments.flatMap((entry) => {
+        const mine = yours(entry.partNumber);
+        return mine === null ? [] : [{ ...entry, ...mine }];
+      })
+    : payments;
   return {
     schemaVersion: 1,
     receipt: {
@@ -450,8 +483,10 @@ export function customerSettledTableReceiptBody(view: DiningTableOnlinePaymentVi
       paidMinor: sum(payments.map((entry) => entry.totalMinor)),
       ...(bill.refundedMinor === undefined ? {} : { refundedMinor: bill.refundedMinor }),
       // A table comped to nothing has no payment at all, so no parts either.
-      split: bill.settlement === null && bill.split !== null,
-      payments,
+      split,
+      // Batch 61: parts paid by other guests are counted, never itemised to this phone.
+      ...(split ? { paymentCount: payments.length } : {}),
+      payments: listed,
     },
   };
 }

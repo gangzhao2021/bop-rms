@@ -401,11 +401,22 @@ type OwnRefund = NonNullable<PaymentView["ownPayments"]>[number]["refunds"][numb
  * Succeeded 44 ms after the request), $3.00 still on its way (no Provider answer yet, as the
  * sender leaves one the Provider calls "pending") and $2.00 the Provider refused (Failed, no
  * Provider refund: nothing moved); "Full" — the whole payment back (v15's 2026-11-03 refund of all
- * of a part, 890 of 890).
+ * of a part, 890 of 890). Batch 61 (v15 b60 live, TM2 orders 49, 51 and 56): "Eight" — $8.00 of
+ * the $14.13 back to the card, the Provider answering Succeeded (Payment amount 800, outcome
+ * Succeeded/800), so the payer paid $6.13 after it.
  */
-export type GuestOwnRefunds = "None" | "Partial" | "Full";
+export type GuestOwnRefunds = "None" | "Partial" | "Full" | "Eight";
 export function guestOwnRefunds(kind: GuestOwnRefunds): readonly OwnRefund[] {
   if (kind === "None") return [];
+  if (kind === "Eight")
+    return [
+      {
+        amountMinor: "800",
+        status: "Refunded",
+        requestedAt: "2026-11-24T22:51:12.408Z",
+        answeredAt: "2026-11-24T22:51:12.512Z",
+      },
+    ];
   if (kind === "Full")
     return [
       {
@@ -489,11 +500,15 @@ export function guestOwnPaymentView(
     guestPaying: false,
     ...(bothPaid ? { choice: "Mine" as const } : {}),
   };
+  // Batch 61: what staff gave back of the table's payments (all of it of A's part 1), as the bill
+  // read sums Payment's refunds of the table (readDiningTableBill's refundedMinor).
+  const tableRefunded = guestTableRefundedMinor(refunds);
   return {
     bill: {
       diningSessionReference: id(0x20),
       sessionPhase,
       sessionVersion: 7,
+      ...(tableRefunded === 0n ? {} : { refundedMinor: tableRefunded.toString() }),
       paymentTiming: "PayLater",
       // The same table as the guest table read of this scenario.
       tableLabel: guestBillClosedByStaffFacts(scenario).facts.tableLabel,

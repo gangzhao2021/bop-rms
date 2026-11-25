@@ -7925,6 +7925,27 @@ async function journey(journeyEnding) {
             // The guests leave: staff close the rest (A's dish written off).
             const served = await cookAndServeRound1();
             assert.ok(await departure(manager, served.currentOrderVersion));
+            // Batch 61 (v15 b60 live, CRT60 D): round 1 (2 bowls) was paid in part by B's dish,
+            // the rest written off: Payment's settlement lines, read under the pilot role, say
+            // which round a guest's payment paid some of, so it reads "Unpaid part not charged"
+            // while a round nobody paid reads "Not charged to you".
+            const closedRead = await transactions({ guc: true }).run((tx) =>
+              readCustomerTablePayments(
+                tx,
+                createPostgresDiningTableSettlementStore({
+                  scope: ownerScope,
+                  authorize: async () => true,
+                }),
+                orderReference,
+              ),
+            );
+            assert.deepEqual([...closedRead.dishPaidRounds], [first.orderBatchReference]);
+            assert.equal(
+              (await bill()).rounds.find(
+                (round) => round.orderBatchReference === first.orderBatchReference,
+              ).paid,
+              false,
+            );
             // While the table is open: B reads its own payment by its phone, through the real
             // port; the host's phone, which paid nothing, is told "not found".
             const openBody = await reads.ownBody(tablePhone, tablePhone.csrfCredential, "Current");
@@ -10265,18 +10286,15 @@ async function journey(journeyEnding) {
             provider,
           });
           assert.equal(receipt.split, true);
-          assert.deepEqual(
-            receipt.payments.map((payment) => [payment.partNumber, payment.method]),
-            [
-              [1, "CardMachine"],
-              [2, "Cash"],
-              [3, "Online"],
-            ],
-          );
+          // Batch 61 (v15 b60 live, CRT60 B): this phone paid none of the 3 parts (the card
+          // machine, cash, and another guest's phone did), so no part is itemised to it, only how
+          // many payments paid the bill; the table's totals below stay whole.
+          assert.deepEqual(receipt.payments, []);
+          assert.equal(receipt.paymentCount, 3);
           const paidParts = done.split.parts;
           assert.deepEqual(
-            receipt.payments.map((payment) => payment.totalMinor),
-            paidParts.map((part) => part.payment.totalMinor),
+            paidParts.map((part) => part.payment.method),
+            ["CardMachine", "Cash", "Online"],
           );
           assert.equal(
             receipt.paidMinor,

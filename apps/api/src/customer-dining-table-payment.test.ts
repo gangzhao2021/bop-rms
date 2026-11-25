@@ -437,6 +437,66 @@ it("Owner 2026-11-03: a settled receipt says what went back, and says nothing wh
   expect(customerSettledTableReceiptBody(view()).receipt).not.toHaveProperty("refundedMinor");
 });
 
+// Batch 61 (v15 b60 live, CRT60 B order 46 and C order 49): by dish, phone A paid $14.13 and
+// phone B $14.12, a manager refunded all (or $8.00) of A, staff closed and cleaned the table.
+// The ended receipt listed both parts' amounts to both phones (第 1 份 … $14.13 / 第 2 份 …
+// $14.12). Each phone now gets its own part with its own refunds, and only a count of the rest.
+it("batch 61: a settled receipt paid by dish lists the asking phone's own part only, with its refunds", () => {
+  for (const refunds of ["Full", "Eight"] as const) {
+    const back = refunds === "Full" ? "1413" : "800";
+    const payer = customerSettledTableReceiptBody(
+      guestOwnPaymentView("by-dish-both-paid", true, "Closed", refunds),
+    ).receipt;
+    expect(payer).toMatchObject({
+      paidMinor: "2825",
+      refundedMinor: back,
+      split: true,
+      paymentCount: 2,
+    });
+    expect(payer.payments).toEqual([
+      {
+        partNumber: 1,
+        method: "Online",
+        tipMinor: "0",
+        roundingMinor: "0",
+        totalMinor: "1413",
+        paidAt: "2026-11-24T00:34:40.000Z",
+        yours: true,
+        refundedMinor: back,
+      },
+    ]);
+    const other = customerSettledTableReceiptBody(
+      guestOwnPaymentView("by-dish-both-paid", false, "Closed", refunds),
+    ).receipt;
+    expect(other.payments).toEqual([
+      {
+        partNumber: 2,
+        method: "Online",
+        tipMinor: "0",
+        roundingMinor: "0",
+        totalMinor: "1412",
+        paidAt: "2026-11-24T00:35:02.000Z",
+        yours: true,
+      },
+    ]);
+    // The table's totals stay whole (every guest shares them); A's part is never itemised to B.
+    expect(other).toMatchObject({ paidMinor: "2825", refundedMinor: back, paymentCount: 2 });
+    expect(JSON.stringify(other.payments)).not.toMatch(/1413|"800"|refund/u);
+  }
+  // A refund still on its way is said apart; a refused one moved nothing.
+  const partial = customerSettledTableReceiptBody(
+    guestOwnPaymentView("by-dish-both-paid", true, "Closed", "Partial"),
+  ).receipt;
+  expect(partial.payments[0]).toMatchObject({ refundedMinor: "800", refundPendingMinor: "300" });
+  // A phone that paid no part sees the count and the table's totals, no part at all.
+  const none = customerSettledTableReceiptBody({
+    ...guestOwnPaymentView("by-dish-both-paid", true, "Closed", "Full"),
+    ownPayments: [],
+  }).receipt;
+  expect(none.payments).toEqual([]);
+  expect(none.paymentCount).toBe(2);
+});
+
 it("M92: a declined phone payment for a part says it failed, while that part is still unpaid", () => {
   const part = (partNumber: number, paid: boolean) => ({
     partNumber,

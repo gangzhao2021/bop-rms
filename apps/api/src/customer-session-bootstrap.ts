@@ -55,6 +55,13 @@ export const closedBillPaid = (
 };
 /** How much of a bill staff closed stays paid: nothing, some, or all of it given back. */
 export type ClosedBillPaidAnswer = "Nothing" | "Some" | "Refunded";
+/**
+ * Batch 61 (v15 b60 live, CRT60 D order 51): some of a bill staff closed stays paid, and part of
+ * what was paid went back (staff gave back $8.00 of a $14.13 payment): the ended page never says
+ * what was paid "stays paid" then. `tableRefundedMinor` as `closedBillPaid` counts it.
+ */
+export const closedBillSomeRefunded = (paid: ClosedBillPaidAnswer, tableRefundedMinor: bigint) =>
+  paid === "Some" && tableRefundedMinor > 0n;
 export function createCustomerSessionBootstrapRead(
   options: CustomerCheckoutSessionAuthorizationOptions & {
     publicProfile?: PersistentPublicStoreProfileOptions;
@@ -126,6 +133,11 @@ export function createCustomerSessionBootstrapRead(
     guestSessionReference: string,
   ): Promise<{
     readonly paid: ClosedBillPaidAnswer;
+    /**
+     * Batch 61 (v15 b60 live, CRT60 D): some of what stays paid on it went back (staff refunded
+     * part of a payment, or one of several): never said to stay paid. Only with paid "Some".
+     */
+    readonly someRefunded: boolean;
     readonly ownPaidMinor: bigint;
     /** Batch 57 (Q36): of it, refunded or on its way back to the card (a refused one: not). */
     readonly ownRefundedMinor: bigint;
@@ -195,7 +207,13 @@ export function createCustomerSessionBootstrapRead(
     const ownRefundPendingMinor = ownRefunds
       .filter((refund) => refund.outcome === null)
       .reduce((sum, refund) => sum + refund.amountMinor, 0n);
-    return { paid, ownPaidMinor, ownRefundedMinor, ownRefundPendingMinor };
+    return {
+      paid,
+      someRefunded: closedBillSomeRefunded(paid, tableRefundedMinor),
+      ownPaidMinor,
+      ownRefundedMinor,
+      ownRefundPendingMinor,
+    };
   };
   return {
     async read(sessionCredential: string) {
@@ -402,6 +420,7 @@ export function createCustomerSessionBootstrapRead(
           named({
             tableLabel,
             closedByStaff: closed.paid,
+            ...(closed.someRefunded ? { someRefunded: true as const } : {}),
             ...(closed.ownPaidMinor > 0n
               ? {
                   yourPayment: {
@@ -556,6 +575,8 @@ export function createCustomerSessionBootstrapHandler(options?: {
           tableLabel: string;
           /** Batch 55 review: staff closed the bill when the guests left (no receipt). */
           closedByStaff: ClosedBillPaidAnswer;
+          /** Batch 61: with "Some", part of what was paid went back (absent: none did). */
+          someRefunded?: true;
           store?: { brandDisplayName: string; storeDisplayName: string };
           /**
            * Batch 56: what this phone itself paid on that bill, with read-only access to its own
@@ -743,6 +764,9 @@ export function createCustomerSessionBootstrapHandler(options?: {
           closedTable: {
             tableLabel: settled.tableLabel,
             paid: settled.closedByStaff,
+            ...(settled.closedByStaff === "Some" && settled.someRefunded === true
+              ? { someRefunded: true }
+              : {}),
             ...storeNames(settled.store),
             ...yours,
           },
