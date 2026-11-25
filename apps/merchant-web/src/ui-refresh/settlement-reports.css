@@ -445,6 +445,12 @@
  * WP-2423 item 8 ② (Figma 47-2): tonight's closing summary and the Home closing reminder, in the
  * frozen v3 visuals — white, no boxes, hairlines between rows, one accent, amounts at the right.
  */
+/* Batch 64 (v15 b63 live: 刷新 was 36 x 44): Refresh is a whole 44 x 44 target, its word at the
+   right edge of the header. */
+.store-reports-page .workspace-page__actions button {
+  min-width: 44px;
+  text-align: end;
+}
 .store-reports-page .store-reports__tabs {
   display: flex;
   flex-wrap: wrap;
@@ -618,8 +624,11 @@
   gap: 20px;
   align-items: center;
 }
+/* Batch 64 (v15 b63 live: Print 32 x 44, 结算 28 x 44): each is a whole 44 x 44 target; a short
+   word keeps its place at the start and the target reaches past its end. */
 .tonight__links :is(a, button) {
   min-height: 44px;
+  min-width: 44px;
   display: inline-flex;
   align-items: center;
   padding: 0;
@@ -731,6 +740,9 @@
   font-size: 14px;
 }
 .workspace-page.settlement-page .workspace-page__header button:not(.language-switch) {
+  /* Batch 64: 刷新 was 36 px wide; a whole 44 x 44 target, its word at the right edge. */
+  min-width: 44px;
+  text-align: end;
   min-height: 44px;
   padding: 0 4px;
   border: 0;
@@ -793,6 +805,8 @@
 .workspace-page.settlement-page .settlement__closed-day button,
 .workspace-page.settlement-page .settlement button,
 .workspace-page.settlement-page .bop-state-card button {
+  /* Batch 64 (v15 b63 live: Show 37 x 44, 显示 28 x 44): whole 44 x 44 targets. */
+  min-width: 44px;
   min-height: 44px;
   padding: 0;
   border: 0;
