@@ -393,3 +393,21 @@ it("keeps short Chinese words around a name whole, and leaves English as it is",
     "Pickup from Lane Dessert is selected.",
   );
 });
+
+// Batch 64 (v15 b62 live, points-refund-share): the plain points offer read "这单可以积 125 分" and
+// the same offer after a refund "这单可积 55 分（已扣除退款部分）" — one sentence, two verb forms.
+// Every points offer says it one way, and every "(after the refund)" one way.
+it("says the points offer and its after-refund note one way in Chinese", () => {
+  const offers = Object.entries(zhHans).filter(([english]) =>
+    /^(Join and earn|Add) \{points\} points/u.test(english),
+  );
+  expect(offers.length).toBeGreaterThanOrEqual(6);
+  for (const [english, chinese] of offers) {
+    if (english.startsWith("Join and earn")) {
+      expect(chinese).toContain("可以积 {points} 分");
+      expect(chinese).not.toMatch(/可积/u);
+    }
+    if (english.endsWith("(after the refund)")) expect(chinese).toMatch(/（已扣除退款部分）$/u);
+    else expect(chinese).not.toContain("退款");
+  }
+});

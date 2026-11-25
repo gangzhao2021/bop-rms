@@ -409,7 +409,7 @@ for (const width of widths)
         await open();
         await expect(title).toHaveText(
           zh
-            ? "加入会员，这单可积 55 分（已扣除退款部分）"
+            ? "加入会员，这单可以积 55 分（已扣除退款部分）"
             : "Join and earn 55 points on this order (after the refund)",
         );
         await fits(page);
@@ -433,7 +433,7 @@ for (const width of widths)
           .check();
         await expect(title).toHaveText(
           zh
-            ? "加入会员，这单可积 55 分（已扣除退款部分）"
+            ? "加入会员，这单可以积 55 分（已扣除退款部分）"
             : "Join and earn 55 points on this order (after the refund)",
         );
         await page

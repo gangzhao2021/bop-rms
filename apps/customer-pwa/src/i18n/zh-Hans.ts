@@ -1804,7 +1804,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Join and earn {points} points on this order": "加入会员，这单可以积 {points} 分",
   "Add {points} points for this order (after the refund)": "给这单加 {points} 分（已扣除退款部分）",
   "Join and earn {points} points on this order (after the refund)":
-    "加入会员，这单可积 {points} 分（已扣除退款部分）",
+    "加入会员，这单可以积 {points} 分（已扣除退款部分）",
   "Which part did you pay?": "您付的是哪一份？",
   "Part {number} · {points} points": "第 {number} 份 · {points} 分",
   "Add my points": "加上我的积分",
@@ -2159,10 +2159,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   // Batch 63 (D62B-08): points on every part this phone paid, and its payments together.
   "Join and earn {points} points on what you paid": "加入会员，您付的款可以积 {points} 分",
   "Join and earn {points} points on what you paid (after the refund)":
-    "加入会员，您付的款可以积 {points} 分（已扣除退款）",
+    "加入会员，您付的款可以积 {points} 分（已扣除退款部分）",
   "Add {points} points for what you paid": "给您付的款加 {points} 分",
   "Add {points} points for what you paid (after the refund)":
-    "给您付的款加 {points} 分（已扣除退款）",
+    "给您付的款加 {points} 分（已扣除退款部分）",
   "Your payments": "您的付款",
   "Part {number} · {method}": "第 {number} 份 · {method}",
   // Batch 63 (CDI-1): dishes still in the cart when the table started paying.
