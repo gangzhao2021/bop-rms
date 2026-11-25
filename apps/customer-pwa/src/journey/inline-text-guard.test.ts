@@ -242,7 +242,18 @@ const pageMachineCodes: Readonly<Record<string, ReadonlySet<string>>> = {
   // The name of the kind of tip sent to the server.
   // The name of the kind of tip sent to the server, and which dishes this phone pays (WP-2423
   // 同桌结账: Whole / Mine / Chosen, never rendered).
-  "dining/TablePayPanel.tsx": new Set(["None", "Amount", "Percent", "Whole", "Mine", "Chosen"]),
+  // Batch 63: a part's state drawn as a dot (data-state) and "nothing chosen yet"; never shown.
+  "dining/TablePayPanel.tsx": new Set([
+    "None",
+    "Amount",
+    "Percent",
+    "Whole",
+    "Mine",
+    "Chosen",
+    "Unchosen",
+    "Paid",
+    "Paying",
+  ]),
   // Which dishes this round pays at a pay-first table (WP-2423 shared-table-checkout (a): Whole /
   // Mine / Chosen, sent to the server, never rendered).
   "cart/TablePayChoice.tsx": new Set(["Whole", "Mine", "Chosen"]),

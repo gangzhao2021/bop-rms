@@ -13,6 +13,22 @@ export const scanToOrderOnlyText = () =>
     "You earn points on every order you scan to place. Points can be used only when you pay a table’s bill at the end, not on pickup or pay-first tables.",
   );
 
+type ClaimPart = NonNullable<MemberState["claim"]>["parts"][number];
+/**
+ * Batch 63 (design review D62B-08, F06): which parts this phone may claim, and whether it must be
+ * asked. A phone that paid parts on its own card claims every one of them at once ("Join and earn
+ * 375 points on what you paid"), never "Which part did you pay?" with half the points; a phone
+ * that paid nothing here is asked which part, among those paid at the counter.
+ */
+export function memberClaimParts(parts: readonly ClaimPart[]): {
+  readonly parts: readonly ClaimPart[];
+  /** Every part offered is this phone's own payment: all of them are claimed together. */
+  readonly allOwn: boolean;
+} {
+  const own = parts.filter((entry) => entry.certain === true);
+  return own.length > 0 ? { parts: own, allOwn: true } : { parts, allOwn: false };
+}
+
 /**
  * On a receipt: join and earn on this order. Nothing here can get in the way of the receipt: a read
  * that fails shows nothing, and joining can wait until the time it states.
@@ -114,28 +130,39 @@ export function MemberJoinPanel({
     );
   // v15 batch 8: a phone that paid a part on its own card knows which part it paid: it is offered
   // that part only, never asked "which part did you pay?" beside parts others paid at the counter.
-  const parts = claim.parts.some((entry) => entry.certain === true)
-    ? claim.parts.filter((entry) => entry.certain === true)
-    : claim.parts;
-  const several = parts.length > 1;
+  // Batch 63 (F06): a phone that paid several parts is offered all of them, together.
+  const { parts, allOwn } = memberClaimParts(claim.parts);
+  const together = allOwn && parts.length > 1;
+  const several = parts.length > 1 && !together;
   const chosen = several ? parts.find((entry) => entry.partNumber === part) : parts[0];
-  const points = chosen?.points ?? Math.max(...parts.map((entry) => entry.points));
+  const points = together
+    ? parts.reduce((sum, entry) => sum + entry.points, 0)
+    : (chosen?.points ?? Math.max(...parts.map((entry) => entry.points)));
   // v15 M60: a refund on this order already takes its share off these points. v15 b61 live: said
   // only of the points shown: before a part is chosen, those are the largest part's, which another
   // part's refund never touched.
-  const afterRefund =
-    chosen !== undefined
+  const afterRefund = together
+    ? parts.some((entry) => entry.afterRefund === true)
+    : chosen !== undefined
       ? chosen.afterRefund === true
       : parts.length > 0 &&
         parts
           .filter((entry) => entry.points === points)
           .every((entry) => entry.afterRefund === true);
   const partNumber = several ? part : (parts[0]?.partNumber ?? null);
+  /** Batch 63: the rest of this phone's own parts, once the first is claimed (or joined with). */
+  const claimRest = async (earnedFirst: number) => {
+    let earnedAll = earnedFirst;
+    if (together)
+      for (const entry of parts.slice(1))
+        earnedAll += (await client.claim(entry.partNumber, orderReference)).earnedPoints;
+    return earnedAll;
+  };
   const add = async () => {
     setBusy(true);
     setProblem(null);
     try {
-      setEarned((await client.claim(partNumber, orderReference)).earnedPoints);
+      setEarned(await claimRest((await client.claim(partNumber, orderReference)).earnedPoints));
     } catch (error) {
       setProblem(memberCodeProblem(error, claim.until));
     } finally {
@@ -146,15 +173,29 @@ export function MemberJoinPanel({
     <section className="member-panel" aria-labelledby="member-panel-title">
       {addedNote}
       <h2 id="member-panel-title">
-        {afterRefund
-          ? state.signedIn
-            ? t("Add {points} points for this order (after the refund)", { points: String(points) })
-            : t("Join and earn {points} points on this order (after the refund)", {
-                points: String(points),
-              })
-          : state.signedIn
-            ? t("Add {points} points for this order", { points: String(points) })
-            : t("Join and earn {points} points on this order", { points: String(points) })}
+        {together
+          ? afterRefund
+            ? state.signedIn
+              ? t("Add {points} points for what you paid (after the refund)", {
+                  points: String(points),
+                })
+              : t("Join and earn {points} points on what you paid (after the refund)", {
+                  points: String(points),
+                })
+            : state.signedIn
+              ? t("Add {points} points for what you paid", { points: String(points) })
+              : t("Join and earn {points} points on what you paid", { points: String(points) })
+          : afterRefund
+            ? state.signedIn
+              ? t("Add {points} points for this order (after the refund)", {
+                  points: String(points),
+                })
+              : t("Join and earn {points} points on this order (after the refund)", {
+                  points: String(points),
+                })
+            : state.signedIn
+              ? t("Add {points} points for this order", { points: String(points) })
+              : t("Join and earn {points} points on this order", { points: String(points) })}
       </h2>
       <p>{scanToOrderOnlyText()}</p>
       {several ? (
@@ -198,7 +239,7 @@ export function MemberJoinPanel({
               partNumber,
               orderReference,
             });
-            setEarned(result.earnedPoints);
+            setEarned(await claimRest(result.earnedPoints));
           }}
         />
       )}

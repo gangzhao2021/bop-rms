@@ -2133,4 +2133,27 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Total paid after refunds": "退款后实付",
   "Number of payments": "付款笔数",
   "Your payment": "您的付款",
+  // Batch 63 (design review D62B-01/04, Figma 51:223): pay a part or dishes, and what you pay.
+  "You paid {amount} · Online by phone": "您已付 {amount} · 手机在线付款",
+  "You paid {amount} (tip {tip}) · Online by phone":
+    "您已付 {amount}（含小费 {tip}）· 手机在线付款",
+  "paid by you": "您已付",
+  chosen: "已选",
+  "Based on {amount} before tax": "按税前 {amount} 计算",
+  "You pay": "您付",
+  "Part {number}": "第 {number} 份",
+  "Tip {percent}%": "小费 {percent}%",
+  "The rest of the table": "本桌剩下的",
+  "What you added": "您点的菜",
+  "The dishes you chose": "您选的菜",
+  "Choose the part you pay": "请选择您付哪一份",
+  // Batch 63 (D62B-08): points on every part this phone paid, and its payments together.
+  "Join and earn {points} points on what you paid": "加入会员，您付的款可以积 {points} 分",
+  "Join and earn {points} points on what you paid (after the refund)":
+    "加入会员，您付的款可以积 {points} 分（已扣除退款）",
+  "Add {points} points for what you paid": "给您付的款加 {points} 分",
+  "Add {points} points for what you paid (after the refund)":
+    "给您付的款加 {points} 分（已扣除退款）",
+  "Your payments": "您的付款",
+  "Part {number} · {method}": "第 {number} 份 · {method}",
 });

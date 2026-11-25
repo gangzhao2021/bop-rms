@@ -211,3 +211,44 @@ it("batch 61: own refunds are read strictly (never more pending than refunded, n
   expect(older.paymentCount).toBeNull();
   expect(older.payments[0]?.yours).toBe(false);
 });
+
+/**
+ * Batch 63 (design review D62B-08, F06): one phone paid both parts of an even split (D62BV A,
+ * $23.07 and $21.19). The ended receipt listed "Your payment · Online by phone · $23.07" and
+ * "Your payment · Online by phone · $21.19" with no total. Now one heading, each part, and what
+ * this phone paid in all.
+ */
+it("batch 63: a phone that paid several parts reads them under one heading, with a total", () => {
+  const both = byDish({ partNumber: 1, totalMinor: "2307" }, "0");
+  both.receipt.payments.push({
+    method: "Online",
+    tipMinor: "0",
+    roundingMinor: "0",
+    paidAt: "2026-11-24T00:35:02.000Z",
+    yours: true,
+    partNumber: 2,
+    totalMinor: "2119",
+  } as never);
+  const page = html(both);
+  expect(page.match(/Your payment</gu)).toBeNull();
+  expect(page).toContain('<h3 id="table-your-payments">Your payments</h3>');
+  expect(rows(page)).toEqual(
+    expect.arrayContaining([
+      "Part 1 · Online by phone $23.07",
+      "Part 2 · Online by phone $21.19",
+      "Total paid by you $44.26",
+    ]),
+  );
+  const zh = html(both, "zh-Hans");
+  expect(rows(zh)).toEqual(
+    expect.arrayContaining([
+      "第 1 份 · 手机在线付款 $23.07",
+      "第 2 份 · 手机在线付款 $21.19",
+      "您实付合计 $44.26",
+    ]),
+  );
+  // One part of its own: said as before, once.
+  expect(rows(html(byDish({ partNumber: 1, totalMinor: "1413" }, "0")))).toContain(
+    "Your payment Online by phone · $14.13",
+  );
+});

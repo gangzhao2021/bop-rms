@@ -1644,6 +1644,9 @@ export function DiningSessionScreen({
               <OwnPaymentReceiptPanel client={ownAtTable} inTableReceipt onApart={setOwnApart} />
             ) : null
           }
+          // Batch 63 (design review D62B-01, F02): once this phone paid a part or some dishes,
+          // Pay the bill first says what it paid, with that payment's lines.
+          ownPaid={<OwnPaymentReceiptPanel client={ownAtTable} soFar />}
           readKey={billReadKey}
           onStatus={(status) => {
             setTablePay(status);

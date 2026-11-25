@@ -240,7 +240,14 @@ const netOf = (paidMinor: string, refundedMinor: string) => {
  * Batch 61: this phone's own part of a split bill — how and how much it paid, what of it went
  * back to its card (confirmed, and still on its way) and what it paid after refunds.
  */
-function OwnPartRows({ payment }: { readonly payment: SettledTableReceipt["payments"][number] }) {
+function OwnPartRows({
+  payment,
+  label,
+}: {
+  readonly payment: SettledTableReceipt["payments"][number];
+  /** Batch 63: under "Your payments", each row names its part. */
+  readonly label?: string;
+}) {
   const pending =
     BigInt(payment.refundPendingMinor) > BigInt(payment.refundedMinor)
       ? BigInt(payment.refundedMinor)
@@ -249,8 +256,12 @@ function OwnPartRows({ payment }: { readonly payment: SettledTableReceipt["payme
   return (
     <>
       <div>
-        <dt>{t("Your payment")}</dt>
-        <dd>{`${methodText(payment.method)} · ${money(payment.totalMinor)}`}</dd>
+        <dt>{label ?? t("Your payment")}</dt>
+        <dd>
+          {label === undefined
+            ? `${methodText(payment.method)} · ${money(payment.totalMinor)}`
+            : money(payment.totalMinor)}
+        </dd>
       </div>
       {done > 0n ? (
         <div>
@@ -275,6 +286,9 @@ function OwnPartRows({ payment }: { readonly payment: SettledTableReceipt["payme
 }
 
 export function SettledTableReceiptView({ receipt }: { readonly receipt: SettledTableReceipt }) {
+  const yours = receipt.split ? receipt.payments.filter((payment) => payment.yours) : [];
+  const yourCount = yours.length;
+  const yourTotal = yours.reduce((sum, payment) => sum + BigInt(payment.totalMinor), 0n).toString();
   return (
     <section className="order-status__card dining-session__receipt" aria-labelledby="table-receipt">
       <h2 id="table-receipt">{t("Receipt")}</h2>
@@ -382,7 +396,9 @@ export function SettledTableReceiptView({ receipt }: { readonly receipt: Settled
         ) : null}
         {receipt.payments.map((payment) =>
           receipt.split && payment.yours ? (
-            <OwnPartRows key={payment.partNumber ?? 0} payment={payment} />
+            yourCount > 1 ? null : (
+              <OwnPartRows key={payment.partNumber ?? 0} payment={payment} />
+            )
           ) : (
             <div key={payment.partNumber ?? 0}>
               <dt>
@@ -399,6 +415,31 @@ export function SettledTableReceiptView({ receipt }: { readonly receipt: Settled
           ),
         )}
       </dl>
+      {/* Batch 63 (design review D62B-08, F06): a phone that paid several parts reads them under
+          one heading, each with its part, and what it paid in all — never "Your payment" twice. */}
+      {yourCount > 1 ? (
+        <div className="dining-session__receipt-round" aria-labelledby="table-your-payments">
+          <h3 id="table-your-payments">{t("Your payments")}</h3>
+          <dl className="order-status__money">
+            {receipt.payments
+              .filter((payment) => payment.yours)
+              .map((payment) => (
+                <OwnPartRows
+                  key={payment.partNumber ?? 0}
+                  payment={payment}
+                  label={t("Part {number} · {method}", {
+                    number: String(payment.partNumber ?? 1),
+                    method: methodText(payment.method),
+                  })}
+                />
+              ))}
+            <div className="dining-session__you-pay-total">
+              <dt>{t("Total paid by you")}</dt>
+              <dd>{money(yourTotal)}</dd>
+            </div>
+          </dl>
+        </div>
+      ) : null}
     </section>
   );
 }

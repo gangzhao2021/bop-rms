@@ -388,21 +388,10 @@ function coversText(payment: OwnPaymentReceipt["payments"][number]): string {
       });
 }
 
-export function OwnPaymentReceiptView({ receipt }: { readonly receipt: OwnPaymentReceipt }) {
+/** Each of this phone's payments: what it covered, its amounts, how, and what went back. */
+function OwnPaymentLines({ receipt }: { readonly receipt: OwnPaymentReceipt }) {
   return (
-    <section
-      className="order-status__card dining-session__receipt dining-session__own-payment"
-      aria-labelledby="own-payment-receipt"
-      {...{ [yourReceiptAttribute]: "" }}
-    >
-      <h2 id="own-payment-receipt">{t("Your receipt")}</h2>
-      <p>
-        {youPaidText(
-          receipt.totalMinor,
-          receipt.refundedMinor,
-          pendingOf(receipt.payments.flatMap((payment) => payment.refunds)),
-        )}
-      </p>
+    <>
       {receipt.payments.map((payment, index) => (
         <div key={index}>
           <h3>{coversText(payment)}</h3>
@@ -427,7 +416,7 @@ export function OwnPaymentReceiptView({ receipt }: { readonly receipt: OwnPaymen
               </div>
             )}
             {/* Batch 58 (v15 b57 live): once some of it went back, this row is what was charged
-                and the net row is what was paid, so 实付 names one amount only. */}
+              and the net row is what was paid, so 实付 names one amount only. */}
             <div>
               <dt>
                 {payment.refundedMinor === "0" ? t("Total paid by you") : t("Amount charged")}
@@ -466,6 +455,58 @@ export function OwnPaymentReceiptView({ receipt }: { readonly receipt: OwnPaymen
           )}
         </div>
       ))}
+    </>
+  );
+}
+
+/**
+ * Batch 63 (design review D62B-01, F02; Figma 51:223): right after this phone paid a part of the
+ * bill or some dishes, with the table still open, Pay the bill says so first — "You paid $23.07
+ * (tip $1.88) · Online by phone" beside a green dot — and then the same lines of each payment the
+ * receipt gives, so the guest knows it went through before anything else is offered.
+ */
+export function youPaidSoFarText(receipt: OwnPaymentReceipt): string {
+  const tipMinor = receipt.payments
+    .reduce((sum, payment) => sum + BigInt(payment.tipMinor), 0n)
+    .toString();
+  return tipMinor === "0"
+    ? t("You paid {amount} · Online by phone", { amount: money(receipt.totalMinor) })
+    : t("You paid {amount} (tip {tip}) · Online by phone", {
+        amount: money(receipt.totalMinor),
+        tip: money(tipMinor),
+      });
+}
+
+export function OwnPaidSoFarView({ receipt }: { readonly receipt: OwnPaymentReceipt }) {
+  const refunds = receipt.payments.flatMap((payment) => payment.refunds);
+  return (
+    <div className="dining-session__you-paid" {...{ [yourReceiptAttribute]: "" }}>
+      <p className="dining-session__you-paid-line" role="status">
+        {receipt.refundedMinor === "0"
+          ? youPaidSoFarText(receipt)
+          : youPaidText(receipt.totalMinor, receipt.refundedMinor, pendingOf(refunds))}
+      </p>
+      <OwnPaymentLines receipt={receipt} />
+    </div>
+  );
+}
+
+export function OwnPaymentReceiptView({ receipt }: { readonly receipt: OwnPaymentReceipt }) {
+  return (
+    <section
+      className="order-status__card dining-session__receipt dining-session__own-payment"
+      aria-labelledby="own-payment-receipt"
+      {...{ [yourReceiptAttribute]: "" }}
+    >
+      <h2 id="own-payment-receipt">{t("Your receipt")}</h2>
+      <p>
+        {youPaidText(
+          receipt.totalMinor,
+          receipt.refundedMinor,
+          pendingOf(receipt.payments.flatMap((payment) => payment.refunds)),
+        )}
+      </p>
+      <OwnPaymentLines receipt={receipt} />
       {receipt.tablePaidInFull ? null : (
         <p className="dining-session__own-payment-note">
           {receipt.restClosedByStaff
@@ -511,10 +552,13 @@ export function OwnWholeTablePaymentLines({ receipt }: { readonly receipt: OwnPa
 export function OwnPaymentReceiptPanel({
   client,
   inTableReceipt = false,
+  soFar = false,
   onApart,
 }: {
   readonly client: OwnPaymentReceiptClient;
   readonly inTableReceipt?: boolean;
+  /** Batch 63: at the top of Pay the bill while the table is still open ("You paid …"). */
+  readonly soFar?: boolean;
   readonly onApart?: (apart: boolean) => void;
 }) {
   const [state, setState] = useState<
@@ -573,5 +617,6 @@ export function OwnPaymentReceiptPanel({
     );
   if (apart) return null;
   if (inTableReceipt) return <OwnWholeTablePaymentLines receipt={state.receipt} />;
+  if (soFar) return <OwnPaidSoFarView receipt={state.receipt} />;
   return <OwnPaymentReceiptView receipt={state.receipt} />;
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { MemberJoinPanel } from "../member/MemberJoinPanel.js";
 import { MemberPointsAtTable } from "../member/MemberPointsAtTable.js";
 import { v7 as uuidv7 } from "uuid";
@@ -105,27 +105,6 @@ export interface TablePayStatus {
   /** Batch 62: this section shows the table's receipt (one payment paid the whole bill). */
   readonly receipt?: boolean;
 }
-// The guest's tip choice during this checkout, kept in this tab so a reload keeps it. Only the
-// option chosen is kept (no table, bill or amount); it is cleared once the table is paid or no
-// longer checking out. A per-tab convenience: the server never relies on it.
-const TIP_KEY = "bop-table-tip-choice";
-const savedTip = (): TipChoice | null => {
-  try {
-    const value = window.sessionStorage.getItem(TIP_KEY);
-    return value !== null && /^(0|[1-9][0-9]?)$/u.test(value) ? value : null;
-  } catch {
-    return null;
-  }
-};
-const saveTip = (choice: TipChoice | null) => {
-  try {
-    if (choice === null) window.sessionStorage.removeItem(TIP_KEY);
-    else window.sessionStorage.setItem(TIP_KEY, choice);
-  } catch {
-    /* A private window may refuse storage; the guest just chooses again after a reload. */
-  }
-};
-
 /**
  * Batch 42: the dishes one split part pays for, as the guest's language lists names ("2 × Har gow,
  * Soy milk" / "2 × 虾饺、豆浆"), with "(shared)" where asked.
@@ -171,6 +150,7 @@ export function splitPartDishesText(
 export function TablePayPanel({
   client: provided,
   ownReceipt = null,
+  ownPaid = null,
   onStatus,
   readKey,
   onBillChanged,
@@ -182,6 +162,12 @@ export function TablePayPanel({
    * table's receipt when one payment paid the whole bill (null: nothing to add).
    */
   readonly ownReceipt?: ReactNode;
+  /**
+   * Batch 63 (design review D62B-01, F02): this phone's own payments while the table still owes
+   * the rest ("You paid $23.07 (tip $1.88) · Online by phone" and its lines), said first in Pay
+   * the bill once this phone paid a part or some dishes. Read again after each payment.
+   */
+  readonly ownPaid?: ReactNode;
   /** Called when checkout or payment changes, so the table page reads itself again. */
   readonly onStatus?: (status: TablePayStatus) => void;
   /** A new value reads the table's payment state again. */
@@ -222,7 +208,8 @@ export function TablePayPanel({
   const [part, setPart] = useState<number | null>(null);
   // WP-2423 同桌结账: which dishes this phone pays (null: what the Store starts with), and how many
   // of each dish when the guest chooses.
-  const [scope, setScope] = useState<TablePayScope | null>(null);
+  // Batch 63: "Unchosen" once a payment changed the bill: the guest chooses again.
+  const [scope, setScope] = useState<TablePayScope | "Unchosen" | null>(null);
   const [quantities, setQuantities] = useState<ReadonlyMap<string, number>>(new Map());
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   // WP-2423 item 2: the card form's one-time value couldn't be read; the guest asks again.
@@ -289,18 +276,34 @@ export function TablePayPanel({
     );
     return () => window.clearTimeout(timer);
   }, [readRetry, read]);
-  // A reload keeps the tip the guest chose for this bill.
+  // Batch 63 (design review D62B-01, Figma 51:223 "小费（不预选）"): nothing is chosen for the
+  // guest. Once the bill's way of paying or what is left of it changes (a payment here or by
+  // another guest, staff splitting it another way), the part, the dishes and the tip chosen before
+  // are cleared, so Pay waits for the guest's own new choice and never offers to pay again with a
+  // part and tip picked for the earlier payment.
+  const basis =
+    view === null
+      ? null
+      : JSON.stringify([
+          view.split?.mode ?? "Whole",
+          view.split?.parts.length ?? 0,
+          view.split?.paidParts ?? 0,
+          view.owed.totalMinor,
+          view.split?.remainingMinor ?? null,
+        ]);
+  const seenBasis = useRef<string | null>(null);
   useEffect(() => {
-    if (view === null) return;
-    if (!view.checkingOut || view.state === "Paid" || view.state === "Closed") {
-      saveTip(null);
-      return;
-    }
-    if (tip === null) {
-      const saved = savedTip();
-      if (saved !== null) setTip(saved);
-    }
-  }, [view, tip]);
+    if (basis === null) return;
+    const before = seenBasis.current;
+    seenBasis.current = basis;
+    if (before === null || before === basis) return;
+    setTip(null);
+    setTyped("");
+    setConfirmedTip(null);
+    setPart(null);
+    setScope("Unchosen");
+    setQuantities(new Map());
+  }, [basis]);
   // The table page (its total, its "order more") follows checkout and payment.
   const status =
     view === null
@@ -388,18 +391,21 @@ export function TablePayPanel({
   // WP-2423 同桌结账: guests paying by dish choose their dishes; a bill staff split, a part.
   const choices = view.choices;
   const byDish = choices !== null && (view.split === null || view.split.mode === "ByGuests");
-  const payScope: TablePayScope =
+  const payScope: TablePayScope | null =
     !byDish || choices === null
       ? "Whole"
-      : scope === "Mine" && choices.mine === null
-        ? "Whole"
-        : (scope ?? initialPayScope(choices));
-  const selection = byDish ? paySelection(view, payScope, quantities) : null;
+      : scope === "Unchosen"
+        ? null
+        : scope === "Mine" && choices.mine === null
+          ? null
+          : (scope ?? initialPayScope(choices));
+  const selection = byDish && payScope !== null ? paySelection(view, payScope, quantities) : null;
   const toPay = view.split?.parts.filter((entry) => entry.status === "ToPay") ?? [];
   const chosen =
     view.split === null || byDish
       ? null
-      : (toPay.find((entry) => entry.partNumber === part) ?? toPay[0] ?? null);
+      : // Batch 63: never a part the guest didn't choose (Figma 51:223: 已选 is the guest's).
+        (toPay.find((entry) => entry.partNumber === part) ?? null);
   // A split bill: the chosen part's own amount, and its tip on its own share before tax.
   const subtotal = selection
     ? selection.subtotalMinor
@@ -597,6 +603,13 @@ export function TablePayPanel({
     );
   }
   if (view.state === "Closed") return null;
+  // Batch 63 (F02): what this phone paid of a bill paid part by part (or by dish), read again
+  // after each of its payments; said first in Pay the bill.
+  const paidByYou = view.split?.parts.filter((entry) => entry.byYou).length ?? 0;
+  const youPaid =
+    paidByYou === 0 || ownPaid === null ? null : (
+      <Fragment key={`${paidByYou}:${view.split?.paidParts ?? 0}`}>{ownPaid}</Fragment>
+    );
   // WP-2423 item 8 ④: a split bill paid part by part — every part is paid.
   if (view.state === "Paid" && view.split !== null)
     return (
@@ -621,6 +634,9 @@ export function TablePayPanel({
                   count: String(view.split.parts.length),
                 })}
         </p>
+        {/* Batch 63 (F06): this phone's own payments, once, with their total. After a refund the
+            table page shows the payer's receipt on its own. */}
+        {view.refundedMinor === "0" ? youPaid : null}
         <MemberJoinPanel />
       </section>
     );
@@ -746,6 +762,7 @@ export function TablePayPanel({
         </>
       ) : (
         <>
+          {youPaid}
           <MemberPointsAtTable
             onBillChanged={() => {
               void read();
@@ -765,7 +782,12 @@ export function TablePayPanel({
               choices={choices}
               scope={payScope}
               quantities={quantities}
-              onScope={setScope}
+              onScope={(next) => {
+                setScope(next);
+                setTip(null);
+                setTyped("");
+                setConfirmedTip(null);
+              }}
               onQuantity={(reference, quantity) =>
                 setQuantities((current) => new Map(current).set(reference, quantity))
               }
@@ -788,42 +810,70 @@ export function TablePayPanel({
                 {wordGap()}
                 {t("Pay one part; you can pay another one after it.")}
               </p>
-              <fieldset>
+              {/* Batch 63 (Figma 51:223): each part as a dot and dark words — paid (green), being
+                  paid (grey), the one this guest chose (accent); a part still to pay is chosen by
+                  the guest, never for them. */}
+              <fieldset className="dining-session__parts">
                 <legend>{t("Which part you pay")}</legend>
-                {view.split.parts.map((entry) => (
-                  <label key={entry.partNumber} data-status={entry.status}>
-                    <input
-                      type="radio"
-                      name="table-part"
-                      disabled={entry.status !== "ToPay"}
-                      checked={chosen?.partNumber === entry.partNumber}
-                      onChange={() => setPart(entry.partNumber)}
-                    />{" "}
-                    {t("Part {number} · {amount}", {
-                      number: String(entry.partNumber),
-                      amount: money(entry.amountMinor),
-                    })}
-                    {entry.status === "Paid"
-                      ? ` · ${t("paid")}`
+                {view.split.parts.map((entry) => {
+                  const state =
+                    entry.status === "Paid"
+                      ? entry.byYou
+                        ? "PaidByYou"
+                        : "Paid"
                       : entry.status === "Paying" || entry.status === "Mine"
-                        ? ` · ${t("being paid")}`
-                        : ""}
-                    {entry.tables.length === 0 ? null : (
-                      // b39: after a merge, which table's rounds this part pays.
-                      <small className="dining-session__split-dishes">
-                        {t("Table {table} · rounds {rounds}", {
-                          table: entry.tables.map(saidTable).join(" + "),
-                          rounds: entry.roundNumbers.join(listSeparator()),
+                        ? "Paying"
+                        : chosen?.partNumber === entry.partNumber
+                          ? "Chosen"
+                          : "ToPay";
+                  return (
+                    <label key={entry.partNumber} data-status={entry.status} data-state={state}>
+                      <input
+                        type="radio"
+                        name="table-part"
+                        className="dining-session__choice-input"
+                        disabled={entry.status !== "ToPay"}
+                        checked={chosen?.partNumber === entry.partNumber}
+                        onChange={() => {
+                          setPart(entry.partNumber);
+                          setTip(null);
+                          setTyped("");
+                          setConfirmedTip(null);
+                        }}
+                      />
+                      <span className="dining-session__part-dot" aria-hidden="true" />
+                      <span className="dining-session__part-words">
+                        {t("Part {number} · {amount}", {
+                          number: String(entry.partNumber),
+                          amount: money(entry.amountMinor),
                         })}
-                      </small>
-                    )}
-                    {entry.dishes.length === 0 ? null : (
-                      <small className="dining-session__split-dishes">
-                        {splitPartDishesText(entry.dishes, true)}
-                      </small>
-                    )}
-                  </label>
-                ))}
+                        {state === "PaidByYou"
+                          ? ` · ${t("paid by you")}`
+                          : state === "Paid"
+                            ? ` · ${t("paid")}`
+                            : state === "Paying"
+                              ? ` · ${t("being paid")}`
+                              : state === "Chosen"
+                                ? ` · ${t("chosen")}`
+                                : ""}
+                      </span>
+                      {entry.tables.length === 0 ? null : (
+                        // b39: after a merge, which table's rounds this part pays.
+                        <small className="dining-session__split-dishes">
+                          {t("Table {table} · rounds {rounds}", {
+                            table: entry.tables.map(saidTable).join(" + "),
+                            rounds: entry.roundNumbers.join(listSeparator()),
+                          })}
+                        </small>
+                      )}
+                      {entry.dishes.length === 0 ? null : (
+                        <small className="dining-session__split-dishes">
+                          {splitPartDishesText(entry.dishes, true)}
+                        </small>
+                      )}
+                    </label>
+                  );
+                })}
               </fieldset>
               <p>
                 {t("{paid} of {count} parts paid · {amount} to go", {
@@ -856,29 +906,26 @@ export function TablePayPanel({
                     ? t("Tip (for your part)")
                     : t("Tip (once, for the whole table)")}
               </legend>
-              {tipOptions.map((choice) => (
-                <label key={choice}>
-                  <input
-                    type="radio"
-                    name="table-tip"
-                    value={choice}
-                    checked={chosenTip === choice}
-                    onChange={() => {
-                      setTip(choice);
-                      // The typed amount is not kept: after a reload the guest types it again.
-                      saveTip(choice === OTHER ? null : choice);
-                    }}
-                  />{" "}
-                  {choice === "0"
-                    ? t("No tip")
-                    : choice === OTHER
-                      ? t("Other amount")
-                      : t("{percent}% · {amount}", {
-                          percent: choice,
-                          amount: money(tipMinor(choice, subtotal)),
-                        })}
-                </label>
-              ))}
+              {/* Batch 63 (D62B-04, Figma 51:223): one row of 44 px options, none chosen at
+                  first; the amount each comes to is in "You pay" below, once chosen. */}
+              <div className="dining-session__tip-row">
+                {tipOptions.map((choice) => (
+                  <label key={choice} data-chosen={chosenTip === choice ? "" : undefined}>
+                    <input
+                      type="radio"
+                      name="table-tip"
+                      className="dining-session__choice-input"
+                      value={choice}
+                      checked={chosenTip === choice}
+                      onChange={() => setTip(choice)}
+                    />
+                    {choice === "0" ? t("No tip") : choice === OTHER ? t("Other") : `${choice}%`}
+                  </label>
+                ))}
+              </div>
+              <p className="dining-session__tip-basis">
+                {t("Based on {amount} before tax", { amount: money(subtotal) })}
+              </p>
               {chosenTip === OTHER ? (
                 <div className="dining-session__tip-amount">
                   <label htmlFor="table-tip-amount">{t("Tip ({symbol})", { symbol: "$" })}</label>
@@ -930,6 +977,45 @@ export function TablePayPanel({
               ) : null}
             </fieldset>
           )}
+          {total === null || chosenTipMinor === null ? null : (
+            // Batch 63 (D62B-04, Figma 51:223 你付): what is paid, the tip with its percentage and
+            // the total, before the button that takes it.
+            <section className="dining-session__you-pay" aria-labelledby="table-you-pay">
+              <h3 id="table-you-pay">{t("You pay")}</h3>
+              <dl className="order-status__money">
+                <div>
+                  <dt>
+                    {byDish
+                      ? payScope === "Whole" && (view.split?.parts.length ?? 0) === 0
+                        ? t("Your table’s whole bill")
+                        : payScope === "Whole"
+                          ? t("The rest of the table")
+                          : payScope === "Mine"
+                            ? t("What you added")
+                            : t("The dishes you chose")
+                      : chosen !== null
+                        ? t("Part {number}", { number: String(chosen.partNumber) })
+                        : t("Your table’s whole bill")}
+                  </dt>
+                  <dd>{money(amountDue)}</dd>
+                </div>
+                {chosenTipMinor === "0" ? null : (
+                  <div>
+                    <dt>
+                      {chosenTip === OTHER
+                        ? t("Tip")
+                        : t("Tip {percent}%", { percent: chosenTip ?? "0" })}
+                    </dt>
+                    <dd>{money(chosenTipMinor)}</dd>
+                  </div>
+                )}
+                <div className="dining-session__you-pay-total">
+                  <dt>{t("Total")}</dt>
+                  <dd>{money(total)}</dd>
+                </div>
+              </dl>
+            </section>
+          )}
           <button
             type="button"
             className="dining-session__pay-button"
@@ -947,11 +1033,13 @@ export function TablePayPanel({
               ? t("Starting your payment…")
               : byDish && selection === null
                 ? t("Choose the dishes you pay for")
-                : total === null
-                  ? chosenTip === OTHER
-                    ? t("Enter the tip to pay")
-                    : t("Choose a tip to pay")
-                  : t("Pay {amount}", { amount: money(total) })}
+                : !byDish && view.split !== null && chosen === null
+                  ? t("Choose the part you pay")
+                  : total === null
+                    ? chosenTip === OTHER
+                      ? t("Enter the tip to pay")
+                      : t("Choose a tip to pay")
+                    : t("Pay {amount}", { amount: money(total) })}
           </button>
           {view.consistent ? null : (
             // v15 b12: the button never waits without a reason.
@@ -982,7 +1070,7 @@ function TablePayDishes({
 }: {
   readonly view: TablePaymentView;
   readonly choices: NonNullable<TablePaymentView["choices"]>;
-  readonly scope: TablePayScope;
+  readonly scope: TablePayScope | null;
   readonly quantities: ReadonlyMap<string, number>;
   readonly onScope: (scope: TablePayScope) => void;
   readonly onQuantity: (orderItemReference: string, quantity: number) => void;
