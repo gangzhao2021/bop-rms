@@ -235,7 +235,12 @@ function PickupCard({
       // reference) takes its own line, so the waiting time still starts where every other row's does.
       data-long-number={orderLabel.length > 4 ? "true" : undefined}
     >
-      <h3 className="pickup-queue__number">
+      {/* Batch 64 (v15 b63 live): read out as staff say it, "Order 42" / "42 号单" (the word,
+          visually hidden, came before the number in Chinese too: "订单 42"). */}
+      <h3
+        className="pickup-queue__number"
+        aria-label={t("Order {orderNumber}", { orderNumber: orderLabel })}
+      >
         <span className="pickup-queue__number-word">{t("Order")} </span>
         <span className="pickup-queue__number-value">{orderLabel}</span>
       </h3>
