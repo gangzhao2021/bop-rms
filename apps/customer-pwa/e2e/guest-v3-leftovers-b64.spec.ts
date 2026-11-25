@@ -14,7 +14,8 @@ import { routeStorefrontReads } from "./storefront-reads";
 //  - F11: an open table scanned straight away said "Join this table" with no table name.
 //  - F08: zh 导航 (Directions) and the offline cart's 重试 were 32 × 44; the offers box row was
 //    600 × 24 at 1024/1440.
-//  - F09: the Privacy notice was a black underlined 18 px-high link beside accent links.
+//  - F09: the Privacy notice was a black underlined 18 px-high link beside accent links; it is
+//    now accent and 44 px, and keeps its underline inside the sentence (axe link-in-text-block).
 //  - The pickup status links ran together: "View receipt and supportBack to menu".
 //  - Not reachable live: the moved-table words (您已换桌…) and the paused-ordering amber dot.
 test.beforeEach(({ context }) => routeStorefrontReads(context));
@@ -239,7 +240,9 @@ for (const width of [390, 1024, 1440])
         const privacy = page.locator(".privacy-notice-link");
         await expect(privacy).toContainText(zh ? "隐私声明" : "Privacy notice");
         const privacyLook = await look(privacy);
-        expect(privacyLook).toMatchObject({ color: accent, underline: "none", weight: "400" });
+        // Inside a sentence the link keeps its underline, so it is told apart without colour (axe
+        // link-in-text-block, WCAG 1.4.1).
+        expect(privacyLook).toMatchObject({ color: accent, underline: "underline", weight: "400" });
         expect(privacyLook.width).toBeGreaterThanOrEqual(44);
         expect(privacyLook.height).toBeGreaterThanOrEqual(44);
         // F09: "Not now" is a secondary action too: accent words on a 44 px tap, from the edge.
@@ -277,7 +280,9 @@ for (const width of [390, 1024, 1440])
         expect(text).not.toContain(zh ? "帮助返回菜单" : "supportBack to menu");
         const privacy = main.locator(".privacy-notice-link");
         const privacyLook = await look(privacy);
-        expect(privacyLook).toMatchObject({ color: accent, underline: "none", weight: "400" });
+        // Inside a sentence the link keeps its underline, so it is told apart without colour (axe
+        // link-in-text-block, WCAG 1.4.1).
+        expect(privacyLook).toMatchObject({ color: accent, underline: "underline", weight: "400" });
         expect(privacyLook.width).toBeGreaterThanOrEqual(44);
         expect(privacyLook.height).toBeGreaterThanOrEqual(44);
         expect(

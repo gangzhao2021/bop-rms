@@ -1308,16 +1308,15 @@
 }
 
 /* Batch 64 (v15 b63 F09): the Store's privacy notice is a secondary action like the others —
-   accent words, no underline, a 44 px tap — inside its sentence on checkout and the receipt. The
-   tap grows by padding on the inline words, so the sentence keeps its own line spacing. */
+   accent words and a 44 px tap — inside its sentence on checkout and the receipt. A link inside a
+   sentence keeps its underline, so it is told apart without colour (WCAG 1.4.1, axe
+   link-in-text-block). The tap grows by padding on the inline words, so the sentence keeps its
+   own line spacing. */
 .customer-page.customer-page .privacy-notice-link {
   display: inline;
   padding-block: 14px;
   color: var(--bop-color-accent);
   font-weight: 400;
-  text-decoration: none;
-}
-.customer-page.customer-page .privacy-notice-link:hover {
   text-decoration: underline;
   text-underline-offset: 3px;
 }
