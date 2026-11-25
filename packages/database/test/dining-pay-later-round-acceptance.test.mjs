@@ -409,12 +409,13 @@ async function settledReceiptFor({ scope, ownerScope, transactions, phone, provi
   };
   // Batch 44: the pilot reads the Store's published names with it (same transaction, as the API
   // role). Where they can't be read the answer is the same, without them.
+  const publicProfile = {
+    binding: { ...ownerScope, validUntil: new Date(Date.now() + 3_600_000).toISOString() },
+    authorize: async () => true,
+  };
   const settled = await createCustomerSessionBootstrapRead({
     ...access,
-    publicProfile: {
-      binding: { ...ownerScope, validUntil: new Date(Date.now() + 3_600_000).toISOString() },
-      authorize: async () => true,
-    },
+    publicProfile,
   }).readSettledTable(phone.sessionCredential);
   if (settled === null) return null;
   assert.equal(typeof settled.csrfToken, "string");
@@ -435,6 +436,8 @@ async function settledReceiptFor({ scope, ownerScope, transactions, phone, provi
       },
     }),
     providerEnvironment: "Test",
+    // Batch 63 (F05): the receipt's header, read as the pilot API role with the ended visit.
+    publicProfile,
   });
   const body = customerSettledTableReceiptBody(
     await port.settledReceipt({
@@ -447,6 +450,14 @@ async function settledReceiptFor({ scope, ownerScope, transactions, phone, provi
     JSON.stringify(body),
     /[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}|slip|TEST 0001|actor|provider|tendered/iu,
   );
+  // Batch 63 (design review D62B-03, F05): the guest's copy says who it is from — the same
+  // published names the restore read, and the Store's published address.
+  if (settled.store !== undefined) {
+    assert.equal(body.receipt.merchant?.storeDisplayName, settled.store.storeDisplayName);
+    assert.equal(body.receipt.merchant?.brandDisplayName, settled.store.brandDisplayName);
+    assert.ok(body.receipt.merchant.address.addressLines.length >= 1);
+    assert.equal(typeof body.receipt.merchant.address.postalCode, "string");
+  }
   return { settledTableLabel: settled.tableLabel, ...body.receipt };
 }
 

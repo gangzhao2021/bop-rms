@@ -2160,4 +2160,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Not sent to the kitchen": "没有送到厨房",
   "Ask staff to add these": "请店员加上这些菜",
   "Ask a staff member to add these dishes.": "请找店员帮您加上这些菜。",
+  // Batch 63 (D62B-03): the dine-in receipt's header, as the pickup receipt's.
+  "Table {table}": "{table} 桌",
+  "Paid {date}": "付款时间 {date}",
 });

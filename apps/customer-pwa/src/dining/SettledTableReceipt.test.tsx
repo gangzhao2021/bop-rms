@@ -1,7 +1,11 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, expect, it } from "vitest";
 import { LanguageRoot } from "../i18n/i18n.js";
-import { parseSettledTableReceipt, SettledTableReceiptView } from "./SettledTableReceipt.js";
+import {
+  parseSettledTableReceipt,
+  PrintTableReceipt,
+  SettledTableReceiptView,
+} from "./SettledTableReceipt.js";
 
 /**
  * Batch 60 (v15 b59 live, L59S B): staff comp 1 of 2 Beef noodles. The guest's receipt keeps the
@@ -250,5 +254,58 @@ it("batch 63: a phone that paid several parts reads them under one heading, with
   // One part of its own: said as before, once.
   expect(rows(html(byDish({ partNumber: 1, totalMinor: "1413" }, "0")))).toContain(
     "Your payment Online by phone · $14.13",
+  );
+});
+
+/**
+ * Batch 63 (design review D62B-03, F05): a dine-in guest could not keep a receipt — no Store name
+ * or address and no date (the pickup receipt has them), and no print or save action.
+ */
+it("batch 63: the receipt says who it is from and when, and offers to print or save it", () => {
+  const merchant = {
+    brandDisplayName: "Test Merchant 2 - not production",
+    storeDisplayName: "Test Merchant 2 Main - not production",
+    address: {
+      addressLines: ["100 Test Street"],
+      locality: "Toronto",
+      regionCode: "ON",
+      postalCode: "M5V 1A1",
+      countryCode: "CA",
+    },
+  };
+  const withHeader = receipt(noodles);
+  Object.assign(withHeader.receipt, { merchant, paidAt: "2026-11-24T00:35:02.000Z" });
+  const page = html(withHeader);
+  expect(page).toContain(
+    '<p class="dining-session__receipt-store">Test Merchant 2 Main - not production</p>',
+  );
+  expect(page).toContain("<p>Test Merchant 2 - not production</p>");
+  expect(page).toContain(
+    "<address><span>100 Test Street</span><span>Toronto, ON M5V 1A1</span></address>",
+  );
+  // A named table is said as written ("Table" only before a number or code).
+  expect(page).toContain("<p>L59S B (TEST)</p>");
+  expect(page).toMatch(/<p>Paid Nov 2[34], 2026/u);
+  const zh = html(withHeader, "zh-Hans");
+  expect(zh).toContain("<p>L59S B (TEST)</p>");
+  expect(zh).toMatch(/<p>付款时间 2026/u);
+  // An older server sends neither: no header.
+  expect(html(receipt(noodles))).not.toContain("dining-session__receipt-merchant");
+  for (const broken of [
+    { ...merchant, storeDisplayName: "<b>x</b>" },
+    { ...merchant, address: { ...merchant.address, addressLines: [] as string[] } },
+  ]) {
+    const bad = receipt(noodles);
+    Object.assign(bad.receipt, { merchant: broken });
+    if (broken.address.addressLines.length === 0) {
+      // No address line at all is still a well-formed list; the header just has the locality.
+      expect(() => parseSettledTableReceipt(bad)).not.toThrow();
+    } else expect(() => parseSettledTableReceipt(bad)).toThrow();
+  }
+  const print = renderToStaticMarkup(
+    <LanguageRoot initial="zh-Hans">{() => <PrintTableReceipt />}</LanguageRoot>,
+  );
+  expect(print).toBe(
+    '<p class="dining-session__receipt-print"><button type="button">打印或保存收据</button></p>',
   );
 });

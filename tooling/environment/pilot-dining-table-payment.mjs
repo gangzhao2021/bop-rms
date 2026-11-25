@@ -46,6 +46,8 @@ export function registerInternalDiningTablePayment(
     payments,
     ...(isStripeProvider(simulator) ? { handoff: simulator.handoff } : {}),
     providerEnvironment: pilotProviderEnvironment(),
+    // Batch 63 (F05): the Store's published names and address on the guest's settled receipt.
+    publicProfile: resources.publicProfile,
   });
   const handler = new CustomerDiningTablePaymentHandler({ allowedOrigin: origin, port });
   app.post(ROUTE, ...handler.handler());

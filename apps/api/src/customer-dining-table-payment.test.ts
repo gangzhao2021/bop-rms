@@ -312,6 +312,52 @@ it("v15 2026-11-02: the receipt while the table is still open says what points t
   expect(body.payment.receipt?.pointsUsedMinor).toBe("339");
 });
 
+// Batch 63 (design review D62B-03, F05): a dine-in guest could not keep a receipt: no Store name or
+// address and no date, though the pickup receipt has them. The settled receipt says who it is
+// from (the Store's published names and address) and when the bill was paid (its last payment).
+it("batch 63: a settled receipt names the Store, its address and when the bill was paid", () => {
+  const merchant = {
+    brandDisplayName: "Test Merchant 2 - not production",
+    storeDisplayName: "Test Merchant 2 Main - not production",
+    address: {
+      addressLines: ["100 Test Street"],
+      locality: "Toronto",
+      regionCode: "ON",
+      postalCode: "M5V 1A1",
+      countryCode: "CA",
+    },
+  };
+  const paid = (partNumber: number, recordedAt: string) => ({
+    partNumber,
+    payment: {
+      method: "Online",
+      tipMinor: "0",
+      roundingMinor: "0",
+      totalMinor: "1413",
+      recordedAt,
+    },
+  });
+  const view = (withMerchant: boolean) =>
+    ({
+      ...(withMerchant ? { merchant } : {}),
+      ownPayments: [],
+      bill: {
+        tableLabel: "T1",
+        taxRoundingMinor: "0",
+        settlement: null,
+        split: {
+          paidInFull: true,
+          parts: [paid(1, "2026-11-24T00:35:02.000Z"), paid(2, "2026-11-24T00:34:40.000Z")],
+        },
+        rounds: [],
+      },
+    }) as never;
+  const body = customerSettledTableReceiptBody(view(true));
+  expect(body.receipt).toMatchObject({ merchant, paidAt: "2026-11-24T00:35:02.000Z" });
+  // The Store's profile could not be read: the receipt is the same, without its header.
+  expect(customerSettledTableReceiptBody(view(false)).receipt).not.toHaveProperty("merchant");
+});
+
 it("a settled receipt says what points took off, apart from a manager's comp", () => {
   const item = (displayName: string, reduction: unknown) => ({
     displayName,

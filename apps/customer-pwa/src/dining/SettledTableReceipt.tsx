@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { t, saidTable, nameLocale, useReloadOnLanguageChange } from "../i18n/i18n.js";
-import { formatMoney } from "../journey/format.js";
+import { formatDateTime, formatLocalityLine, formatMoney } from "../journey/format.js";
 import { MemberJoinPanel } from "../member/MemberJoinPanel.js";
 import { boundedJsonFetch } from "../network/bounded-fetch.js";
 import { getSettledTableReceiptCsrf } from "../session/customer-transaction-context.js";
@@ -14,6 +14,22 @@ import { getSettledTableReceiptCsrf } from "../session/customer-transaction-cont
 type Method = "CardMachine" | "Cash" | "Online";
 export interface SettledTableReceipt {
   readonly tableLabel: string | null;
+  /**
+   * Batch 63 (design review D62B-03, F05): who the receipt is from — the Store's published names
+   * and address — and when the bill was paid. Null: an older server, or not readable now.
+   */
+  readonly merchant: null | {
+    readonly brandDisplayName: string;
+    readonly storeDisplayName: string;
+    readonly address: {
+      readonly addressLines: readonly string[];
+      readonly locality: string;
+      readonly regionCode: string;
+      readonly postalCode: string;
+      readonly countryCode: string;
+    };
+  };
+  readonly paidAt: string | null;
   readonly rounds: readonly {
     readonly roundNumber: number;
     readonly fromTableLabel: string | null;
@@ -87,10 +103,44 @@ const record = (value: unknown): Record<string, unknown> =>
 const list = (value: unknown, maximum: number): readonly unknown[] =>
   Array.isArray(value) && value.length <= maximum ? value : fail();
 
+/** Batch 63: a published name or address part (plain text, never markup). */
+const plain = (value: unknown, maximum: number) =>
+  typeof value === "string" &&
+  value.trim() !== "" &&
+  value.length <= maximum &&
+  !/[\p{Cc}\p{Cf}<>]/u.test(value)
+    ? value
+    : fail();
+function merchantOf(value: unknown): SettledTableReceipt["merchant"] {
+  if (value === undefined) return null;
+  const merchant = record(value);
+  const address = record(merchant.address);
+  return Object.freeze({
+    brandDisplayName: plain(merchant.brandDisplayName, 200),
+    storeDisplayName: plain(merchant.storeDisplayName, 200),
+    address: Object.freeze({
+      addressLines: Object.freeze(list(address.addressLines, 3).map((line) => plain(line, 160))),
+      locality: plain(address.locality, 120),
+      regionCode: plain(address.regionCode, 12),
+      postalCode: plain(address.postalCode, 20),
+      countryCode: plain(address.countryCode, 2),
+    }),
+  });
+}
+
 export function parseSettledTableReceipt(payload: unknown): SettledTableReceipt {
   const receipt = record(record(payload).receipt);
   return Object.freeze({
     tableLabel: label(receipt.tableLabel),
+    merchant: merchantOf(receipt.merchant),
+    paidAt:
+      receipt.paidAt === undefined
+        ? null
+        : typeof receipt.paidAt === "string" &&
+            receipt.paidAt.length <= 40 &&
+            Number.isFinite(Date.parse(receipt.paidAt))
+          ? receipt.paidAt
+          : fail(),
     rounds: list(receipt.rounds, 200).map((value) => {
       const round = record(value);
       return Object.freeze({
@@ -290,8 +340,33 @@ export function SettledTableReceiptView({ receipt }: { readonly receipt: Settled
   const yourCount = yours.length;
   const yourTotal = yours.reduce((sum, payment) => sum + BigInt(payment.totalMinor), 0n).toString();
   return (
-    <section className="order-status__card dining-session__receipt" aria-labelledby="table-receipt">
+    <section
+      className="order-status__card dining-session__receipt dining-session__receipt--settled"
+      aria-labelledby="table-receipt"
+    >
       <h2 id="table-receipt">{t("Receipt")}</h2>
+      {/* Batch 63 (design review D62B-03, F05): who it is from and when, as the pickup receipt
+          says it, so the guest's printed or saved copy stands on its own. */}
+      {receipt.merchant === null ? null : (
+        <div className="dining-session__receipt-merchant">
+          <p className="dining-session__receipt-store">{receipt.merchant.storeDisplayName}</p>
+          {receipt.merchant.brandDisplayName === receipt.merchant.storeDisplayName ? null : (
+            <p>{receipt.merchant.brandDisplayName}</p>
+          )}
+          <address>
+            {receipt.merchant.address.addressLines.map((line) => (
+              <span key={line}>{line}</span>
+            ))}
+            <span>{formatLocalityLine(receipt.merchant.address)}</span>
+          </address>
+          {receipt.tableLabel === null ? null : (
+            <p>{t("Table {table}", { table: saidTable(receipt.tableLabel) })}</p>
+          )}
+          {receipt.paidAt === null ? null : (
+            <p>{t("Paid {date}", { date: formatDateTime(receipt.paidAt) })}</p>
+          )}
+        </div>
+      )}
       {receipt.rounds.map((round) => (
         <div key={round.roundNumber} className="dining-session__receipt-round">
           <h3>
@@ -490,7 +565,38 @@ export function SettledTableReceiptPanel({
   return (
     <>
       <SettledTableReceiptView receipt={state.receipt} />
+      <PrintTableReceipt />
       <MemberJoinPanel />
     </>
+  );
+}
+
+/**
+ * Batch 63 (design review D62B-03, F05): keep a copy of the table's receipt, as pickup offers —
+ * the browser's print, which also saves a PDF. Only the receipt is printed (the page's tabs,
+ * header, points offer and this action are left out).
+ */
+export function PrintTableReceipt() {
+  const print = () => {
+    const root = document.documentElement;
+    root.dataset.printing = "table-receipt";
+    const done = () => {
+      delete root.dataset.printing;
+      window.removeEventListener("afterprint", done);
+    };
+    window.addEventListener("afterprint", done);
+    try {
+      window.print();
+    } finally {
+      // Browsers that print synchronously have printed by now; afterprint may not come.
+      window.setTimeout(done, 0);
+    }
+  };
+  return (
+    <p className="dining-session__receipt-print">
+      <button type="button" onClick={print}>
+        {t("Print or save receipt")}
+      </button>
+    </p>
   );
 }

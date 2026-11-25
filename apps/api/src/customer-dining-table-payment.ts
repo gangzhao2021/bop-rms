@@ -22,6 +22,11 @@ import {
   type createDiningTableOnlinePayments,
 } from "./dining-table-online-payment.js";
 import { isTipPercent } from "./merchant-store-features.js";
+import { createPublicStoreProfileService, parseGetPublicStoreRequest } from "@rms/store";
+import {
+  createPersistentPublicStoreProfilePorts,
+  type PersistentPublicStoreProfileOptions,
+} from "./persistent-public-store-profile.js";
 import type { DiningTableTip } from "./merchant-dining-table-checkout.js";
 
 /**
@@ -48,6 +53,29 @@ export interface CustomerDiningTablePaymentOptions {
     ): Promise<{ clientSecret: string }>;
   };
   readonly providerEnvironment: "Test" | "Live";
+  /**
+   * Batch 63 (design review D62B-03, F05): the Store's published profile, read for the settled
+   * receipt's header (the names and address guests see), as the ended visit's restore reads it.
+   * Absent: the receipt carries no merchant block (older compositions).
+   */
+  readonly publicProfile?: PersistentPublicStoreProfileOptions;
+}
+
+/**
+ * Batch 63 (F05): who the guest's receipt is from — the Store's published names and address
+ * (Public classification), as on the pickup receipt and the Store's pages. Never staff, the
+ * operating account or any reference.
+ */
+export interface CustomerSettledReceiptMerchant {
+  readonly brandDisplayName: string;
+  readonly storeDisplayName: string;
+  readonly address: {
+    readonly addressLines: readonly string[];
+    readonly locality: string;
+    readonly regionCode: string;
+    readonly postalCode: string;
+    readonly countryCode: string;
+  };
 }
 
 export function createCustomerDiningTablePayment(options: CustomerDiningTablePaymentOptions) {
@@ -115,14 +143,61 @@ export function createCustomerDiningTablePayment(options: CustomerDiningTablePay
     return Object.freeze({
       diningSessionReference: billSession,
       guestSessionReference: participant.guestSessionReference,
+      publicStoreReference: guest.publicStoreReference,
+      locale: guest.locale,
     });
+  };
+  /**
+   * Batch 63 (F05): the Store's published names and address for the settled receipt's header,
+   * read with the ended visit's value as its restore reads them. A profile that can't be read
+   * leaves the header out; the receipt itself never waits on it.
+   */
+  const settledMerchant = async (
+    credentials: Credentials,
+  ): Promise<CustomerSettledReceiptMerchant | null> => {
+    const profileOptions = options.publicProfile;
+    if (profileOptions === undefined) return null;
+    try {
+      return await options.access.transactions.run(async (tx) => {
+        const ended = await settledIn(tx, credentials);
+        const request = parseGetPublicStoreRequest({
+          publicStoreReference: ended.publicStoreReference,
+          requestedLocale: ended.locale,
+          evaluatedAt: options.access.now(),
+          purpose: "CustomerCart",
+        });
+        const profile = await createPublicStoreProfileService(
+          createPersistentPublicStoreProfilePorts(tx, profileOptions, request),
+        ).getPublicStore(request);
+        if (profile.status !== "Available") return null;
+        const address = profile.profile.address;
+        return Object.freeze({
+          brandDisplayName: profile.profile.brandDisplayName,
+          storeDisplayName: profile.profile.storeDisplayName,
+          address: Object.freeze({
+            addressLines: Object.freeze([...address.addressLines]),
+            locality: address.locality,
+            regionCode: address.regionCode,
+            postalCode: address.postalCode,
+            countryCode: address.countryCode,
+          }),
+        });
+      });
+    } catch {
+      return null;
+    }
   };
   /** The ended visit's read-only authority over the bill its table closed with. */
   const endedAuthority = async (
     credentials: Credentials,
     displayLocale?: string | null,
   ): Promise<TableOnlinePaymentAuthority> => {
-    const first = await options.access.transactions.run((tx) => settledIn(tx, credentials));
+    const ended = await options.access.transactions.run((tx) => settledIn(tx, credentials));
+    // Only the bill's references: the Store and locale are for the receipt's header (batch 63).
+    const first = {
+      diningSessionReference: ended.diningSessionReference,
+      guestSessionReference: ended.guestSessionReference,
+    };
     return Object.freeze({
       ...first,
       displayLocale,
@@ -178,7 +253,9 @@ export function createCustomerDiningTablePayment(options: CustomerDiningTablePay
       // Written off, or closed with nothing ordered: there is no receipt to show.
       if (bill.sessionPhase !== "Closed" || !(paidInFull || compedToNothing))
         throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
-      return view;
+      // Batch 63 (F05): who the receipt is from, for the guest's printed or saved copy.
+      const merchant = await settledMerchant(credentials);
+      return merchant === null ? view : Object.freeze({ ...view, merchant });
     },
     async start(
       credentials: Credentials,
@@ -381,7 +458,9 @@ export function customerTablePaymentBody(view: DiningTableOnlinePaymentView) {
  * another guest's part amount or refund. `paymentCount` says how many payments paid the bill; the
  * table's totals (paid, tip, rounding, refunded) stay whole, as every guest shares them.
  */
-export function customerSettledTableReceiptBody(view: DiningTableOnlinePaymentView) {
+export function customerSettledTableReceiptBody(
+  view: DiningTableOnlinePaymentView & { readonly merchant?: CustomerSettledReceiptMerchant },
+) {
   const bill = view.bill;
   const rounds = bill.rounds.filter((round) => round.items.length > 0);
   const sum = (values: readonly string[]) =>
@@ -440,6 +519,17 @@ export function customerSettledTableReceiptBody(view: DiningTableOnlinePaymentVi
     schemaVersion: 1,
     receipt: {
       tableLabel: bill.tableLabel,
+      // Batch 63 (F05): the Store's published names and address (absent: not readable now), and
+      // when the bill was paid (its last payment), for the guest's printed or saved copy.
+      ...(view.merchant === undefined ? {} : { merchant: view.merchant }),
+      ...(payments.length === 0
+        ? {}
+        : {
+            paidAt: payments.reduce(
+              (last, entry) => (entry.paidAt > last ? entry.paidAt : last),
+              payments[0]?.paidAt ?? "",
+            ),
+          }),
       rounds: rounds.map((round) => ({
         roundNumber: round.roundNumber,
         fromTableLabel: round.fromTableLabel,

@@ -742,3 +742,47 @@
 .customer-page.customer-page .cart-state .cart-unsent__ask:disabled {
   color: var(--bop-color-text-muted);
 }
+
+/* Batch 63 (design review D62B-03, F05): the dine-in receipt says who it is from and when (as the
+   pickup receipt), and offers one accent text action to print or save it. */
+.customer-page .dining-session__receipt-merchant {
+  margin-top: var(--bop-space-2);
+  color: var(--bop-color-text-default);
+}
+.customer-page .dining-session__receipt-merchant p {
+  margin: 0;
+}
+.customer-page .dining-session__receipt-merchant .dining-session__receipt-store {
+  font-weight: 600;
+}
+.customer-page .dining-session__receipt-merchant address {
+  display: grid;
+  font-style: normal;
+}
+.customer-page .dining-session__receipt-print {
+  margin: var(--bop-space-2) 0 0;
+}
+.customer-page.customer-page .dining-session__receipt-print button {
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+@media print {
+  html[data-printing="table-receipt"] body * {
+    visibility: hidden;
+  }
+  html[data-printing="table-receipt"] .dining-session__receipt--settled,
+  html[data-printing="table-receipt"] .dining-session__receipt--settled * {
+    visibility: visible;
+  }
+  html[data-printing="table-receipt"] .dining-session__receipt--settled {
+    position: absolute;
+    inset: 0 0 auto;
+    border: 0;
+  }
+}
