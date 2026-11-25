@@ -6368,6 +6368,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "顾客来了就做好交给他；不来就取消订单，系统会退款并把食材放回库存。",
   "Show order {orderNumber}": "查看 {orderNumber} 号单",
   "Updated {time}": "{time} 已更新",
+  "Adding new staff opens when staff sign-in is switched on for your store. Until then, ask BOP support to add them.":
+    "门店开通员工登录后，就能在这里添加新员工。在那之前，请联系 BOP 技术支持帮你添加。",
   Filter: "筛选",
   "Close filters": "关闭筛选",
   Date: "日期",

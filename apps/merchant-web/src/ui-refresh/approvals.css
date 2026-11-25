@@ -149,3 +149,22 @@
   color: var(--bop-color-text-muted);
   cursor: not-allowed;
 }
+
+/* Batch 63 F55 (RA-02): Staff. "View and manage" is accent text with a 44 px target (the shared
+   link rule), and the line under the list says who adds staff while inviting is not on yet. */
+.staff-list__manage {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--bop-color-accent);
+  font-size: 14px;
+  font-weight: 400;
+  text-decoration: none;
+}
+.staff-list__how-to-add {
+  max-width: 40rem;
+  margin: 16px 0 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
+}

@@ -1,7 +1,7 @@
 import { listSeparator, systemText, t } from "./i18n/i18n.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
-import { SourceTime, StaffTime, StoreDate } from "./StoreTime.js";
-import { useCallback, useEffect, useState } from "react";
+import { StaffTime, StoreDate, StoreTimeZoneContext, storeTime } from "./StoreTime.js";
+import { useCallback, useContext, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { newOperationReference } from "./operation-reference.js";
 import { FullSignInPrompt } from "./FullSignInPrompt.js";
@@ -919,7 +919,7 @@ function Page({
           <p className="bop-eyebrow">{detail ? t("Staff member") : t("Staff")}</p>
           <h2>{t("Store staff and roles")}</h2>
           <p>
-            {t("Source as of")} <SourceTime instant={view.sourceAsOf} />
+            <UpdatedStamp instant={view.sourceAsOf} />
           </p>
         </div>
       </header>
@@ -958,7 +958,10 @@ function Page({
               {detail ? (
                 <Link to="/app/organization/users">{t("Back to staff")}</Link>
               ) : (
-                <Link to={`/app/organization/users/${member.actorReference}`}>
+                <Link
+                  className="staff-list__manage"
+                  to={`/app/organization/users/${member.actorReference}`}
+                >
                   {t("View and manage")}
                 </Link>
               )}
@@ -976,7 +979,26 @@ function Page({
           </section>
         ))
       )}
+      {/* Batch 63 F55 (RA-02): staff invitations wait on staff sign-in for the Store (an External
+          Evidence gate, WP-2423 step 9). Until then the list says who adds staff, instead of a
+          silent dead end; no link to a page that cannot do it. The Owner has not yet named who
+          adds them during the pilot, so it says BOP support for now (recorded in WP-2423).
+          Gone once the server offers inviting (mayInvite). */}
+      {!detail && !view.viewer.mayInvite ? (
+        <p className="staff-list__how-to-add">
+          {t(
+            "Adding new staff opens when staff sign-in is switched on for your store. Until then, ask BOP support to add them.",
+          )}
+        </p>
+      ) : null}
     </AppFrame>
+  );
+}
+/** Batch 63 F55 (F24): the one refresh stamp every page uses, "Updated 01:52". */
+function UpdatedStamp({ instant }: { readonly instant: string }) {
+  const timeZone = useContext(StoreTimeZoneContext);
+  return (
+    <time dateTime={instant}>{t("Updated {time}", { time: storeTime(instant, timeZone) })}</time>
   );
 }
 export function StaffListPage({
