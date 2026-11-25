@@ -213,12 +213,18 @@ export function StaffRoundPaymentAction({
         </p>
         <div className="card-actions">
           {reading === "Failed" ? (
-            <button type="button" onClick={readAmount}>
+            <button
+              type="button"
+              className={counterStyle ? "counter-order__accent-text" : undefined}
+              onClick={readAmount}
+            >
               {t("Try again")}
             </button>
           ) : null}
           <button
             type="button"
+            // Batch 64 (F42): at the counter, the panel's quiet ways out are accent text.
+            className={counterStyle ? "counter-order__accent-text" : undefined}
             onClick={() => {
               read.current?.abort();
               setReading("Idle");
