@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { ringsFrom, whole } from "./focus-ring-clip";
 import { expectNoInternalText } from "./internal-text-guard";
 
 const stores = [1, 2].map((n) => ({
@@ -992,6 +993,12 @@ test("@production WP-2423 a single payment's difference resolved by its re-check
   await expect(open.getByText("Open", { exact: true })).toBeVisible();
   await expectNoInternalText(page);
   await openCase(page, 0);
+  // Batch 61 (b60 sweep): from 1280 the case panel scrolls on its own and cut the top and right of
+  // the close button's ring and the right of Show follow-up history; every ring in it is whole.
+  const panel = page.locator("aside.order-panel:not([hidden])");
+  const rings = await ringsFrom(page, panel, panel.getByRole("button").first());
+  expect(rings.length).toBeGreaterThan(1);
+  for (const ring of rings) expect(ring, `case panel: ${ring.name}`).toEqual(whole(ring));
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
     expect(

@@ -766,6 +766,12 @@
     padding: 0 4px var(--bop-space-6) 0;
   }
 }
+/* Batch 61: Tab scrolls in only a stop's own box, flush with the panel's or the window's edge
+   (Accept at the bottom of a phone), where part of its ring is cut off; room around each stop
+   keeps the whole ring in view. */
+.orders-page .order-panel :is(a[href], button, input, select, textarea, summary, [tabindex]) {
+  scroll-margin: 8px;
+}
 /* Tablets: a sheet over the list from the right, below the page's title row. */
 @media (min-width: 48.0625rem) and (max-width: 79.99rem) {
   .orders-page .order-panel {
@@ -1278,6 +1284,25 @@
 @media (min-width: 80rem) {
   .orders-page .order-workbench[data-panel] .order-panel {
     max-height: calc(100vh - var(--bop-pinned-top, 0px) - 152px);
+  }
+  /* Batch 61 (b60 sweep): the panel scrolls on its own, so it cut off what is drawn past its
+     padding edge: the close button (pulled 6px up and 10px right) lost 12px of its ring at the top
+     and 16px at the right, Accept lost its right side and the last button its bottom. 12px of room
+     above and below and 16px to the right, given back by the same negative margins (with 12px
+     less sticky offset and 12px more height), keep every line, the stuck position and the bottom
+     edge where they were. The hairline is drawn as a 1px background over the old height only. */
+  .orders-page .order-workbench[data-panel] .order-panel {
+    --order-panel-ring-room: 12px;
+    top: calc(var(--bop-pinned-top, 0px) + 16px - var(--order-panel-ring-room));
+    max-height: calc(100vh - var(--bop-pinned-top, 0px) - 152px + var(--order-panel-ring-room));
+    margin: calc(-1 * var(--order-panel-ring-room)) -16px calc(-1 * var(--order-panel-ring-room)) 0;
+    padding: var(--order-panel-ring-room) 16px var(--order-panel-ring-room)
+      calc(var(--bop-space-6) + 1px);
+    border-left: 0;
+    background:
+      linear-gradient(var(--bop-color-row-divider), var(--bop-color-row-divider)) 0
+        var(--order-panel-ring-room) / 1px calc(100% - 2 * var(--order-panel-ring-room)) no-repeat,
+      var(--bop-color-surface-default);
   }
 }
 /* The list beside the panel keeps its columns, narrower; it stacks only on a phone. */

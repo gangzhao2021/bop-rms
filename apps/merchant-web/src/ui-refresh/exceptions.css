@@ -67,6 +67,14 @@
   color: var(--bop-color-text-muted);
   font-size: 14px;
 }
+/* Batch 61: from 1280 the panel has room above and to the right for focus rings (orders.css);
+   the × keeps its place inside that room, so its own ring shows whole. */
+@media (min-width: 80rem) {
+  .orders-page.order-exception-page .order-panel > .order-panel__close {
+    top: var(--order-panel-ring-room, 0px);
+    right: 16px;
+  }
+}
 /* Tablets: the sheet has its own padding, and the × keeps inside it. */
 @media (min-width: 48.0625rem) and (max-width: 79.99rem) {
   .orders-page.order-exception-page .order-panel > .order-panel__close {

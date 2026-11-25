@@ -327,3 +327,66 @@ for (const language of ["en", "zh-Hans"] as const) {
       });
   }
 }
+
+/** A dine-in round waiting for acceptance, as Orders lists it (the orders-outage shape). */
+const waitingRound = (n: number) => ({
+  orderReference: id(0x4000 + n),
+  orderNumber: "ORD-" + String(n),
+  orderType: "DineIn",
+  sourceChannel: "Web",
+  submittedAt: "2026-11-24T22:40:00.000Z",
+  observedAt: "2026-11-24T22:40:00.000Z",
+  initialBatchReference: id(0x4100 + n),
+  batches: [
+    {
+      orderBatchReference: id(0x4100 + n),
+      sequence: 1,
+      acceptanceStatus: "NotAccepted",
+      canRequestAcceptance: true,
+      canCancel: false,
+      staffCancellation: null,
+      canCancelItems: false,
+    },
+  ],
+  canRequestAcceptance: true,
+  currentPhase: "Submitted",
+  currentVersion: 1,
+  unfulfillable: null,
+  pickupNotCollected: false,
+  acceptBy: null,
+  awaitingPayment: false,
+});
+
+for (const language of ["en", "zh-Hans"] as const)
+  for (const width of [390, 1024, 1440] as const)
+    /**
+     * (c) b60 sweep: from 1280 the Orders panel scrolls on its own, and the close button (pulled up
+     * and right) lost 16 px of its ring at the top and right; Accept lost its right side.
+     */
+    test(`@production every focus ring in the opened order on Orders is whole at ${width} (${language})`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      await signIn(page, language);
+      await page.unroute("**/merchant/orders*");
+      for (const pattern of ["**/merchant/orders?*", "**/merchant/orders"])
+        await page.route(pattern, (route) =>
+          route.fulfill({
+            headers,
+            json: { items: [waitingRound(2)], nextAfterOrderReference: null },
+          }),
+        );
+      await page.goto("/operations/orders");
+      const panel = page.locator("aside.order-panel");
+      await expect(panel.getByRole("heading", { level: 2, name: /ORD-2/u })).toBeVisible();
+      const rings = await ringsFrom(page, panel, panel.getByRole("button").first());
+      expect(rings.length).toBeGreaterThan(1);
+      for (const ring of rings) {
+        expect(ring.ring, ring.name).toBe(true);
+        expect(ring, `order panel: ${ring.name}`).toEqual(whole(ring));
+      }
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      await page.screenshot({ path: `${shots}/orders-panel-${language}-${width}.png` });
+    });
