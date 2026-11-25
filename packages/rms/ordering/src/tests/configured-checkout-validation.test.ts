@@ -80,6 +80,17 @@ function setup(
     async () => f.catalogLines[0]?.snapshot,
   );
   const load = vi.fn<ConfiguredCheckoutValidationPorts["history"]["load"]>(async () => q);
+  const validateSelection = vi.fn<
+    ConfiguredCheckoutValidationPorts["catalog"]["validateSelection"]
+  >(
+    async (input) =>
+      ({
+        status: "Accepted",
+        ...input,
+        ...cart.items[0]?.catalogSelectionEvidence,
+        validatedAt: input.observedAt,
+      }) as never,
+  );
   const fulfillment = vi.fn<ConfiguredCheckoutValidationPorts["fulfillment"]["validate"]>(
     async (input) =>
       ({
@@ -112,15 +123,7 @@ function setup(
     pricingChannelCode: f.pricingChannelCode,
     now: () => at,
     references: { hashIntent: () => q.inputDigest },
-    catalog: {
-      validateSelection: async (input) =>
-        ({
-          status: "Accepted",
-          ...input,
-          ...cart.items[0]?.catalogSelectionEvidence,
-          validatedAt: input.observedAt,
-        }) as never,
-    },
+    catalog: { validateSelection },
     fulfillment: { validate: fulfillment },
   };
   const command = {
@@ -138,6 +141,7 @@ function setup(
     loadCart,
     capture,
     load,
+    validateSelection,
     fulfillment,
     command,
     service: createConfiguredCheckoutValidationService(ports),
@@ -200,6 +204,56 @@ it.each(["expired", "backwards"])("rejects %s clock after history wait", async (
   });
   await expect(s.service.validate(s.command)).rejects.toThrow();
   expect(s.fulfillment).not.toHaveBeenCalled();
+});
+
+describe("staff-round-soldout-code: a dish stops selling between the checkout's sellable check and its menu read", () => {
+  it("names the line the Catalog no longer sells, never an outage", async () => {
+    const s = setup(true);
+    s.capture.mockResolvedValue(null);
+    s.validateSelection.mockImplementation(async (input) =>
+      s.validateSelection.mock.calls.length === 1
+        ? ({
+            status: "Accepted",
+            ...input,
+            ...s.cart.items[0]?.catalogSelectionEvidence,
+            validatedAt: input.observedAt,
+          } as never)
+        : ({ status: "Rejected", reason: "SELLABLE_UNAVAILABLE" } as never),
+    );
+    await expect(s.service.validate(s.command)).rejects.toMatchObject({
+      code: "CHECKOUT_ITEM_UNAVAILABLE",
+      line: {
+        cartItemReference: s.cart.items[0]?.cartItemReference,
+        available: null,
+        sharedStock: false,
+      },
+    });
+    // Asked again at the instant the menu facts were read.
+    expect(s.validateSelection).toHaveBeenCalledTimes(2);
+    expect(s.validateSelection.mock.calls[1]?.[0].observedAt).toBe(
+      s.capture.mock.calls[0]?.[0].observedAt,
+    );
+    expect(s.fulfillment).not.toHaveBeenCalled();
+  });
+  it.each(["sells it", "cannot answer"])(
+    "still says try again when the Catalog %s but captured no menu facts",
+    async (mode) => {
+      const s = setup(true);
+      s.capture.mockResolvedValue(null);
+      const accepted = s.validateSelection.getMockImplementation();
+      s.validateSelection.mockImplementation(async (input) => {
+        if (mode !== "sells it" && s.validateSelection.mock.calls.length > 1)
+          throw new Error("catalog unavailable");
+        if (accepted === undefined) throw new Error("missing fixture");
+        return accepted(input);
+      });
+      await expect(s.service.validate(s.command)).rejects.toMatchObject({
+        code: "CHECKOUT_DEPENDENCY_UNAVAILABLE",
+      });
+      expect(s.validateSelection).toHaveBeenCalledTimes(2);
+      expect(s.fulfillment).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe("price-hold-dish-changes (DEC-PRICE-HOLD §3): a dish listed since its price was confirmed", () => {

@@ -1,7 +1,11 @@
 import { assertGuestSessionUsable, createGuestSession } from "@bop/identity";
 import type { CatalogDishChangeKey, ValidateCatalogSelectionInput } from "@rms/catalog";
 import type { ConfiguredPriceQuoteSnapshot, PriceQuoteHistoryReader } from "@rms/pricing";
-import { parseCartAggregate, parseOrderingInstant } from "../domain/cart.js";
+import {
+  parseCartAggregate,
+  parseOrderingInstant,
+  parseOrderingReference,
+} from "../domain/cart.js";
 import { parseOrderCatalogLineSnapshot } from "../domain/order-item-snapshot.js";
 import { CheckoutValidationError } from "../domain/checkout-validation.js";
 import { bindConfiguredCartQuote } from "./configured-cart-quote-binding.js";
@@ -73,6 +77,26 @@ async function sameDishesOn(
 export function createConfiguredCheckoutValidationService(
   ports: ConfiguredCheckoutValidationPorts,
 ) {
+  /** Refuses the line when the Catalog does not sell it at `selection.observedAt`. */
+  const refuseUnsellable = async (
+    cartItemReference: string,
+    selection: ValidateCatalogSelectionInput,
+  ): Promise<void> => {
+    let result: Awaited<
+      ReturnType<ConfiguredCheckoutValidationPorts["catalog"]["validateSelection"]>
+    >;
+    try {
+      result = await ports.catalog.validateSelection(selection);
+    } catch {
+      return unavailable();
+    }
+    if (result.status === "Rejected" && result.reason === "SELLABLE_UNAVAILABLE")
+      throw new CheckoutValidationError("CHECKOUT_ITEM_UNAVAILABLE", {
+        cartItemReference: parseOrderingReference(cartItemReference),
+        available: null,
+        sharedStock: false,
+      });
+  };
   const assertSameDishes = (
     cart: ReturnType<typeof parseCartAggregate>,
     catalogLines: readonly { readonly cartItemReference: string; readonly snapshot: unknown }[],
@@ -110,19 +134,22 @@ export function createConfiguredCheckoutValidationService(
           if (quote === null) return unavailable();
           const catalogLines = [];
           for (const item of cart.items) {
-            const observedAt = now();
-            catalogLines.push({
-              cartItemReference: item.cartItemReference,
-              snapshot: await ports.snapshots.capture({
-                brandReference: cart.brandReference as never,
-                storeReference: cart.storeReference as never,
-                sourceChannel: cart.sourceChannel,
-                orderType: cart.orderType,
-                sellableReference: item.sellableReference as never,
-                optionSelections: item.optionSelections as never,
-                observedAt: observedAt as never,
-              }),
-            });
+            const selection = {
+              brandReference: cart.brandReference as never,
+              storeReference: cart.storeReference as never,
+              sourceChannel: cart.sourceChannel,
+              orderType: cart.orderType,
+              sellableReference: item.sellableReference as never,
+              optionSelections: item.optionSelections as never,
+              observedAt: now() as never,
+            } satisfies ValidateCatalogSelectionInput;
+            const snapshot = await ports.snapshots.capture(selection);
+            // WP-2423 (staff-round-soldout-code): the dish sold out (or came off the menu) a moment
+            // ago, after this checkout found it sellable: the Catalog captures no snapshot for it
+            // now. Asked again at that same instant, a dish the Catalog no longer sells is named,
+            // as when the first check found it so; never "a problem on our side".
+            if (snapshot === null) await refuseUnsellable(item.cartItemReference, selection);
+            catalogLines.push({ cartItemReference: item.cartItemReference, snapshot });
           }
           // WP-2423 (DEC-PRICE-HOLD §3, price-hold-dish-changes): inside the hold a dish found
           // on a newer menu keeps its price only when the guest is told the same name and the
