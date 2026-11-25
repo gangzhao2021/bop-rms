@@ -922,9 +922,12 @@ export function StaffOrderEntryPage({
       : null;
   const tableMode = requestedTable !== null;
   const [tableLabel, setTableLabel] = useState<string | null>(null);
-  // b63 (F39): Tables opened this page while a join code it had handed out was on screen.
+  // b63 (F39): Tables opened this page while a join code it had handed out was on screen, or
+  // (review) the Tables list says the table has a join code nobody used yet, from any device.
   const location = useLocation();
+  const [unusedJoinCode, setUnusedJoinCode] = useState(false);
   const joinCodeShown =
+    unusedJoinCode ||
     (location.state as { readonly joinCodeShown?: unknown } | null)?.joinCodeShown === true;
   // DEC-DINE-IN-PAY-LATER: the table pays once at the end — no tip and no charge per round.
   const [tablePaysLater, setTablePaysLater] = useState(false);
@@ -1149,6 +1152,7 @@ export function StaffOrderEntryPage({
           if (offer !== "Offered") return offer;
           setTablePaysLater(found.paymentTiming === "PayLater");
           setTableSession(found.currentDiningSessionReference);
+          setUnusedJoinCode(found.unusedJoinCode === true);
           return;
         }
         if (result.next === null) break;
@@ -2879,11 +2883,11 @@ export function StaffOrderEntryPage({
                 </div>
               ) : null}
             </fieldset>
-            {/* b63 (F39): only when a join code was just handed out at the table, in one line. */}
+            {/* b63 (F39): only while the table has a join code nobody used yet, in one line. */}
             {tableMode && ordering && tableHold === null && joinCodeShown ? (
               <p className="field-hint">
                 {t(
-                  "Sending replaces the join code you just handed out; guests already at the table stay joined.",
+                  "Sending replaces this table's join code that nobody has used yet; guests already at the table stay joined.",
                 )}
               </p>
             ) : null}

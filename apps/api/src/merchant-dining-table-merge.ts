@@ -5,6 +5,7 @@ import {
   DiningMergeError,
   createPostgresDiningSessionReadStore,
   createPostgresDiningTableStore,
+  loadDiningPartySizeOperation,
   loadDiningPartySizes,
   mergeDiningSessions,
   parseDiningInstant,
@@ -64,10 +65,15 @@ export interface MerchantDiningTableMergeResult {
   readonly fromTableReference: string;
   readonly fromTableLabel: string;
   /**
-   * Both parties together. b63 (T14, v15 D62DW): null when neither party's size was ever recorded
-   * (the Store does not ask it): the default 1 per party is never said as a head count.
+   * Both parties together. b63 (T14, v15 D62DW): null unless both parties' sizes were recorded:
+   * a party never counted is never said, or recorded, as a made-up 1.
    */
   readonly partySize: number | null;
+  /**
+   * b63 review (T14): one party's size was recorded and the other's never was, so the table's
+   * head count is not known until staff set it (the tea follows it).
+   */
+  readonly partySizeToSet: boolean;
 }
 
 /**
@@ -197,7 +203,7 @@ export function createMerchantDiningTableMerge(options: {
                 readonly mergedPartySize: number;
               },
               status: "Applied" | "AlreadyApplied",
-              sizeKnown: boolean,
+              size: { readonly known: boolean; readonly toSet: boolean },
             ): MerchantDiningTableMergeResult =>
               Object.freeze({
                 status,
@@ -206,7 +212,8 @@ export function createMerchantDiningTableMerge(options: {
                 tableLabel: record.targetTableLabel,
                 fromTableReference: record.sourceTableReference,
                 fromTableLabel: record.sourceTableLabel,
-                partySize: sizeKnown ? record.mergedPartySize : null,
+                partySize: size.known ? record.mergedPartySize : null,
+                partySizeToSet: !size.known && size.toSet,
               });
             const prior = await resolveDiningMergeOperation(
               tx as never,
@@ -222,11 +229,24 @@ export function createMerchantDiningTableMerge(options: {
               )
                 return fail("DINING_TABLE_MERGE_INPUT_INVALID");
               await clean(prior.occurredAt);
-              // b63 (T14): the merged size was recorded only when a party's size was known.
-              const recorded = await loadDiningPartySizes(tx as never, scope, [
-                prior.targetSessionReference,
-              ]);
-              return result(prior, "AlreadyApplied", recorded.has(prior.targetSessionReference));
+              // b63 (T14): the merge recorded both parties' size only when both were known; when
+              // only one was, the table's head count is still to be set.
+              const recorded = await loadDiningPartySizeOperation(
+                tx as never,
+                scope,
+                derivedReference(command.operationReference, "party-size"),
+              );
+              const counted =
+                recorded === null
+                  ? await loadDiningPartySizes(tx as never, scope, [
+                      prior.sourceSessionReference,
+                      prior.targetSessionReference,
+                    ])
+                  : null;
+              return result(prior, "AlreadyApplied", {
+                known: recorded !== null,
+                toSet: counted !== null && counted.size > 0,
+              });
             }
             const source = await tables.loadTable(parseDiningReference(command.tableReference));
             const target = await tables.loadTable(
@@ -288,9 +308,12 @@ export function createMerchantDiningTableMerge(options: {
               String(sourceSession),
               String(targetSession),
             ]);
-            const sourceGuests = parties.get(String(sourceSession))?.partySize ?? 1,
+            const sourceSize = parties.get(String(sourceSession)),
               targetSize = parties.get(String(targetSession));
-            const targetGuests = targetSize?.partySize ?? 1;
+            // The merge record keeps 1 for a party never counted (its table requires a size); it
+            // is never said or recorded as the table's head count (b63 T14).
+            const sourceGuests = sourceSize?.partySize ?? 1,
+              targetGuests = targetSize?.partySize ?? 1;
             if (sourceGuests + targetGuests > 99) return fail("DINING_TABLE_MERGE_TOO_MANY_GUESTS");
             const mergeCommand = {
               operationReference: command.operationReference,
@@ -345,9 +368,10 @@ export function createMerchantDiningTableMerge(options: {
               });
             }
             // Both parties at the other table now (the tea follows, as for any party size).
-            // b63 (T14, v15 D62DW): when neither party's size was ever recorded (the Store does
-            // not ask it), none is made up from the default 1 each: the table stays without one.
-            const sizeKnown = parties.has(String(sourceSession)) || targetSize !== undefined;
+            // b63 (T14, v15 D62DW): only when both parties' sizes were recorded is their sum the
+            // table's head count. A party never counted is not made up as 1: with neither known
+            // the table stays without one; with one known, staff are asked to set it.
+            const sizeKnown = sourceSize !== undefined && targetSize !== undefined;
             if (sizeKnown)
               await recordDiningPartySize(tx as never, scope, {
                 diningSessionReference: String(targetSession),
@@ -358,7 +382,10 @@ export function createMerchantDiningTableMerge(options: {
                 observedAt,
               });
             await clean(observedAt);
-            return result(merged.record, merged.status, sizeKnown);
+            return result(merged.record, merged.status, {
+              known: sizeKnown,
+              toSet: sourceSize !== undefined || targetSize !== undefined,
+            });
           },
         ),
       );

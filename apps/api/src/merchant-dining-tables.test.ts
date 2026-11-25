@@ -93,6 +93,8 @@ vi.mock("@rms/dining", async (original) => ({
     storeBudgetSpent: guestStart.budgetSpent,
   }),
   loadDiningGuestTableActivity: async () => guestStart.activity,
+  // b63 review (F39): no open table has a join code nobody used (proven in dine-in-journey).
+  loadDiningSessionsWithUnusedJoinCode: async () => new Set(),
   loadDiningCleaningLeftByClose: async (_tx: unknown, _scope: unknown, tables: unknown) => {
     guestStart.cleaningAsked.push(tables);
     return guestStart.cleaningLeft;

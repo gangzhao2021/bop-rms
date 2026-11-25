@@ -138,6 +138,11 @@ export interface StaffDiningTable {
   staffCall?: StaffDiningCall | null;
   /** WP-2423 (M171): allergen codes staff marked for this open table (absent: none). */
   tableAllergies?: readonly string[] | undefined;
+  /**
+   * b63 review (F39): the open table has a join code nobody has used yet (absent: none, or an
+   * older server); a staff round sent for it replaces that code.
+   */
+  unusedJoinCode?: true | undefined;
 }
 /** WP-2423 (M171): an allergen staff may mark a table with (the Brand's list). */
 export interface StaffTableAllergenChoice {
@@ -553,6 +558,14 @@ export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
           ...(r.blockedSince === undefined || r.blockedSince === null
             ? {}
             : { blockedSince: instant(r.blockedSince) }),
+          ...(r.unusedJoinCode === undefined
+            ? {}
+            : {
+                unusedJoinCode:
+                  r.unusedJoinCode === true && currentDiningSessionReference !== null
+                    ? (true as const)
+                    : fail(),
+              }),
           ...(r.tableAllergies === undefined
             ? {}
             : {

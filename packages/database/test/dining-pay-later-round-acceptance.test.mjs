@@ -2482,12 +2482,39 @@ async function journey(journeyEnding) {
           assert.equal((await closing(server, "Begin")).phase, "Closing");
           await assert.rejects(merge(server, fresh()), { code: "DINING_TABLE_MERGE_CHECKING_OUT" });
           assert.equal((await closing(server, "Cancel")).phase, "Active");
-          const partyBefore = (
-            await rows(
-              "SELECT party_size FROM rms_dining.dining_session_party_size WHERE session_id=$1 ORDER BY version DESC LIMIT 1",
-              [sessionReference],
-            )
-          )[0]?.party_size;
+          // b63 review (T14): which parties staff counted before the merge (TEST-only sizes, as
+          // the party-size command records them): neither, this table only, T-M only, or both.
+          const counted =
+            {
+              MergedCompCent: { here: 3 },
+              MergedRemoved: { there: 2 },
+              MergedOwnRounding: { here: 3, there: 2 },
+            }[ending] ?? {};
+          const countParty = (session, size) =>
+            admin.query(
+              "INSERT INTO rms_dining.dining_session_party_size (tenant_id,brand_id,store_id,session_id,version,operation_id,party_size,actor_id,recorded_at) SELECT $1::uuid,$2::uuid,$3::uuid,$4::uuid,coalesce(max(version),0)+1,$5::uuid,$6::int,$7::uuid,date_trunc('milliseconds',now()) FROM rms_dining.dining_session_party_size WHERE session_id=$4::uuid",
+              [
+                tenant,
+                ownerScope.brandReference,
+                ownerScope.storeReference,
+                session,
+                fresh(),
+                size,
+                id(0x700),
+              ],
+            );
+          if (counted.here !== undefined) await countParty(sessionReference, counted.here);
+          if (counted.there !== undefined) await countParty(mSession, counted.there);
+          const latestParty = async (session) =>
+            (
+              await rows(
+                "SELECT party_size FROM rms_dining.dining_session_party_size WHERE session_id=$1 ORDER BY version DESC LIMIT 1",
+                [session],
+              )
+            )[0]?.party_size;
+          const partyBefore = await latestParty(sessionReference),
+            mPartyBefore = await latestParty(mSession);
+          assert.deepEqual([partyBefore, mPartyBefore], [counted.here, counted.there]);
 
           // ── Two staff merge T-M at the same moment: one merges, the other is told the tables
           // changed (never two merges).
@@ -2529,12 +2556,31 @@ async function journey(journeyEnding) {
             await rows(
               "SELECT operation_id::text op,source_session_id::text src,target_session_id::text dst,merged_party_size::int party FROM rms_dining.dining_session_merge_operation",
             ),
-            [{ op: winner, src: mSession, dst: sessionReference, party: (partyBefore ?? 1) + 1 }],
+            // The merge record keeps 1 for a party never counted (its table requires a size).
+            [
+              {
+                op: winner,
+                src: mSession,
+                dst: sessionReference,
+                party: (partyBefore ?? 1) + (mPartyBefore ?? 1),
+              },
+            ],
           );
-          // b63 (T14, v15 D62DW): neither party's size recorded (the Store does not ask it): no
-          // head count is said or recorded; with one known, both together as before.
-          assert.equal(merged.partySize, partyBefore === undefined ? null : partyBefore + 1);
-          assert.equal(again.partySize, merged.partySize);
+          // b63 (T14, v15 D62DW): a party never counted is never said or recorded as a made-up 1:
+          // both counted, their sum; one counted, no sum and staff are asked to set it; neither,
+          // nothing. The same request again answers the same.
+          const bothCounted = partyBefore !== undefined && mPartyBefore !== undefined;
+          assert.deepEqual(
+            [merged.partySize, merged.partySizeToSet],
+            [
+              bothCounted ? partyBefore + mPartyBefore : null,
+              !bothCounted && (partyBefore !== undefined || mPartyBefore !== undefined),
+            ],
+          );
+          assert.deepEqual(
+            [again.partySize, again.partySizeToSet],
+            [merged.partySize, merged.partySizeToSet],
+          );
           assert.deepEqual(
             await rows(
               "SELECT count(*)::int n FROM platform_audit.audit_record WHERE action_code='DINING_SESSION_MERGE_TABLE' AND target_id=$1",
@@ -2563,7 +2609,11 @@ async function journey(journeyEnding) {
                 [sessionReference],
               )
             )[0],
-            merged.partySize === null ? undefined : { party_size: merged.partySize },
+            bothCounted
+              ? { party_size: partyBefore + mPartyBefore }
+              : partyBefore === undefined
+                ? undefined
+                : { party_size: partyBefore },
           );
           // Its Order is on this table's bill (Ordering and Payment each record their side).
           assert.deepEqual(

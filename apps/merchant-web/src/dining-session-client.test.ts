@@ -400,3 +400,16 @@ it("reads a join-state refusal for a table paying its bill as checking out, not 
     code: "Changed",
   });
 });
+it("b63 review (F39): reads that an open table has a join code nobody used, only for an open table", async () => {
+  const read = (item: Record<string, unknown>) =>
+    createDiningSessionClient(
+      vi.fn(async () =>
+        response({ canOperateTables: true, items: [item], nextAfterTableReference: null }),
+      ),
+    ).tables("A".repeat(43));
+  const seated = { ...table, currentDiningSessionReference: id(3), elapsedMinutes: 4 };
+  expect((await read({ ...seated, unusedJoinCode: true })).items[0]?.unusedJoinCode).toBe(true);
+  expect((await read(seated)).items[0]).not.toHaveProperty("unusedJoinCode");
+  await expect(read({ ...seated, unusedJoinCode: false })).rejects.toThrow();
+  await expect(read({ ...table, unusedJoinCode: true })).rejects.toThrow();
+});

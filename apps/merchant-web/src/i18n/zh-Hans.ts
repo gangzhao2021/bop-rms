@@ -6676,8 +6676,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   // b63 (T15): on the paid record.
   "Change given": "已找零",
   // b63 (F39): the staff round, before and after sending.
-  "Sending replaces the join code you just handed out; guests already at the table stay joined.":
-    "发送后，刚给出的加入码会失效；已加入的客人不受影响。",
+  "Sending replaces this table's join code that nobody has used yet; guests already at the table stay joined.":
+    "发送后，这桌还没人用过的加入码会失效；已加入的客人不受影响。",
   "{amount} with tax goes on the table's bill; the table pays at the end.":
     "含税 {amount} 已记到这桌账上，最后一起付。",
   "How this part is paid": "这份怎么付",
@@ -7494,6 +7494,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   // b63 (T14): with no party size known, no head count is said.
   "Merged into table {table}. Phones from table {from} scan the code on table {table} to keep ordering; table {from} is marked for cleaning.":
     "已并到 {table} 桌。{from} 桌的手机请扫 {table} 桌的桌台二维码继续点餐；{from} 桌已标为待清洁。",
+  // b63 review (T14): one party counted, the other never: the sum isn't said.
+  "Only one of the two parties was counted: set how many guests are at table {table} under Manage this table.":
+    "两桌只有一桌记了人数：请在“管理这张桌”里填写 {table} 桌现在共几位。",
   "Something on one of the bills was paid or split. Those tables can't be merged.":
     "其中一桌的账单已有付款或已分单，不能并桌。",
   "That table hasn't ordered yet. Merge that table into this one instead.":

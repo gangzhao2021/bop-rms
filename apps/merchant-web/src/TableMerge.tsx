@@ -58,8 +58,10 @@ export interface TableMergeClient {
     readonly diningSessionReference: string;
     readonly tableLabel: string;
     readonly fromTableLabel: string;
-    /** b63 (T14): null when no party's size is known (the Store does not ask it). */
+    /** b63 (T14): null unless both parties' sizes are known (the Store may not ask it). */
     readonly partySize: number | null;
+    /** b63 review (T14): only one party was counted, so staff set the table's head count. */
+    readonly partySizeToSet: boolean;
   }>;
 }
 
@@ -89,7 +91,8 @@ export function createTableMergeClient(fetcher: typeof fetch = fetch): TableMerg
         typeof payload.diningSessionReference !== "string" ||
         typeof payload.tableLabel !== "string" ||
         typeof payload.fromTableLabel !== "string" ||
-        (typeof payload.partySize !== "number" && payload.partySize !== null)
+        (typeof payload.partySize !== "number" && payload.partySize !== null) ||
+        typeof payload.partySizeToSet !== "boolean"
       )
         throw new TableMergeError("Unavailable");
       return {
@@ -97,6 +100,7 @@ export function createTableMergeClient(fetcher: typeof fetch = fetch): TableMerg
         tableLabel: payload.tableLabel,
         fromTableLabel: payload.fromTableLabel,
         partySize: payload.partySize,
+        partySizeToSet: payload.partySizeToSet,
       };
     },
   };
@@ -244,8 +248,17 @@ export function TableMerge({
                 count: String(merged.partySize),
               },
             );
+      // b63 review (T14): one party was never counted, so the sum isn't known: staff set it.
+      const toSet = merged.partySizeToSet
+        ? announced +
+          wordGap() +
+          t(
+            "Only one of the two parties was counted: set how many guests are at table {table} under Manage this table.",
+            { table: saidTable(merged.tableLabel) },
+          )
+        : announced;
       onMerged(
-        failure === null ? announced : announced + wordGap() + teaNotConfirmed(followed, failure),
+        failure === null ? toSet : toSet + wordGap() + teaNotConfirmed(followed, failure),
         chosen.tableReference,
       );
     } catch (error) {

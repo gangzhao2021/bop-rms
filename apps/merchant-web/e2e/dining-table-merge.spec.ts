@@ -35,6 +35,7 @@ async function stubMerge(
   page: Page,
   teaAnswer: (route: Route) => Promise<void>,
   partySize: number | null = 5,
+  partySizeToSet = false,
 ) {
   const scope = {
     brandLabel: "Synthetic Brand",
@@ -199,6 +200,7 @@ async function stubMerge(
         fromTableReference: id(1),
         fromTableLabel: "T6",
         partySize,
+        partySizeToSet,
       },
     });
   });
@@ -378,8 +380,15 @@ test("@production a Store without a per-head charge hears nothing about one afte
 
 // b63 (T14, v15 D62DW): a Store that doesn't ask party size merged two tables and was told
 // "共 2 位" — the default 1 per party said as a head count.
-for (const language of ["en", "zh-Hans"] as const)
-  test(`@production a merge with no party size known says no head count (${language})`, async ({
+// b63 review (T14): with one party counted and the other never, no sum is said: staff are asked
+// to set the table's head count.
+for (const [language, oneKnown] of [
+  ["en", false],
+  ["zh-Hans", false],
+  ["en", true],
+  ["zh-Hans", true],
+] as const)
+  test(`@production a merge with ${oneKnown ? "one party" : "no party"} counted says no head count (${language})`, async ({
     page,
   }) => {
     const zh = language === "zh-Hans";
@@ -403,6 +412,7 @@ for (const language of ["en", "zh-Hans"] as const)
           },
         }),
       null,
+      oneKnown,
     );
     await page.goto("/operations/dining");
     await page.getByRole("button", { name: zh ? "选择 T6" : "Select T6", exact: true }).click();
@@ -424,4 +434,11 @@ for (const language of ["en", "zh-Hans"] as const)
         .first(),
     ).toBeVisible();
     await expect(page.getByText(zh ? /共 \d+ 位/u : /\d+ guests/u)).toHaveCount(0);
+    const toSet = page.getByText(
+      zh
+        ? "两桌只有一桌记了人数：请在“管理这张桌”里填写 T7 桌现在共几位。"
+        : "Only one of the two parties was counted: set how many guests are at table T7 under Manage this table.",
+    );
+    if (oneKnown) await expect(toSet.first()).toBeVisible();
+    else await expect(toSet).toHaveCount(0);
   });

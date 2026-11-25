@@ -1001,6 +1001,71 @@ export async function loadDiningPartySizes(
 }
 
 /**
+ * b63 review (F39): which of these open tables still has a join code nobody has used (the latest
+ * code issued for the table, not yet used, revoked or expired at `observedAt`). Sending a staff
+ * round issues the table a new code, so that one stops working; staff are told before Send.
+ */
+export async function loadDiningSessionsWithUnusedJoinCode(
+  tx: DiningTableTransaction,
+  scopeInput: DiningTableStoreScope,
+  diningSessionReferences: readonly string[],
+  observedAt: string,
+): Promise<ReadonlySet<string>> {
+  const tenant = parseDiningReference(scopeInput.tenantReference);
+  const brand = parseDiningReference(scopeInput.brandReference);
+  const store = parseDiningReference(scopeInput.storeReference);
+  const sessions = diningSessionReferences.map((reference) => parseDiningReference(reference));
+  const at = Date.parse(parseDiningInstant(observedAt));
+  const found = new Set<string>();
+  if (sessions.length === 0) return found;
+  if (sessions.length > 1000) return fail();
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    brand,
+    store,
+  ]);
+  const result = (await tx.query(
+    "SELECT DISTINCT ON (session_id) session_id::text AS session,status,capability_snapshot->>'kind' AS kind,capability_snapshot->>'expiresAt' AS expires_at FROM rms_dining.dining_join_capability WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND session_id=ANY($4::uuid[]) ORDER BY session_id,(capability_snapshot->>'generation')::numeric DESC",
+    [tenant, brand, store, sessions],
+  )) as { rows?: unknown };
+  if (!Array.isArray(result.rows)) return fail();
+  for (const row of result.rows as Record<string, unknown>[]) {
+    const expires = typeof row.expires_at === "string" ? Date.parse(row.expires_at) : Number.NaN;
+    if (typeof row.status !== "string" || !Number.isFinite(expires)) return fail();
+    if (row.status === "Active" && row.kind === "HumanCode" && expires > at)
+      found.add(String(row.session));
+  }
+  return found;
+}
+
+/**
+ * b63 review (T14): the party size this one operation recorded, if it recorded one (a merge
+ * records the parties' size together only when both were known).
+ */
+export async function loadDiningPartySizeOperation(
+  tx: DiningTableTransaction,
+  scopeInput: DiningTableStoreScope,
+  operationReference: string,
+): Promise<{ readonly diningSessionReference: string; readonly partySize: number } | null> {
+  const brand = parseDiningReference(scopeInput.brandReference);
+  const store = parseDiningReference(scopeInput.storeReference);
+  const operation = parseDiningReference(operationReference);
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    brand,
+    store,
+  ]);
+  const found = rows(
+    await tx.query(
+      "SELECT session_id::text AS session,party_size FROM rms_dining.dining_session_party_size WHERE brand_id=$1 AND store_id=$2 AND operation_id=$3",
+      [brand, store, operation],
+    ),
+  )[0];
+  if (found === undefined) return null;
+  const partySize = Number(found.party_size);
+  if (!Number.isSafeInteger(partySize) || partySize < 1 || partySize > 99) return fail();
+  return Object.freeze({ diningSessionReference: String(found.session), partySize });
+}
+
+/**
  * Staff record how many guests sit at an open table: the table's next party-size version, with
  * who and when. `expectedVersion` is the version they saw (0: none yet); another change in
  * between is a conflict. The same operation again returns what it recorded.

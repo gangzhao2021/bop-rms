@@ -49,6 +49,7 @@ import { createInternalBatchCancellationDispatcher } from "../../../tooling/envi
 import { applyWorkflowRelease } from "../../../tooling/environment/workflow-release-install.mjs";
 import { createPersistentMerchantOrderQueue } from "../../../apps/api/src/persistent-merchant-order-queue.ts";
 import { createMerchantDiningTables } from "../../../apps/api/src/merchant-dining-tables.ts";
+import { parseDiningJoinCapability } from "../../bop/public-capability/src/index.ts";
 import { createMerchantDiningOrderProgress } from "../../../apps/api/src/merchant-dining-order-progress.ts";
 import { orderProgressResponse } from "../../../apps/api/src/merchant-bff-dining-routes.ts";
 import { orderDetailResponse } from "../../../apps/api/src/merchant-bff-order-routes.ts";
@@ -1593,6 +1594,45 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
             startedAt,
           ],
         );
+        // b63 review (F39): the second table's join codes: the first was replaced, the one now
+        // handed out nobody has used yet (TEST-only rows; no code value is stored here).
+        for (const [suffix, generation, status, issuedAt] of [
+          ["a0f4", 1, "Revoked", time(-minutes(14))],
+          ["a0f5", 2, "Active", time(-minutes(2))],
+        ]) {
+          const version = status === "Active" ? 1 : 2;
+          const capability = parseDiningJoinCapability({
+            capabilityReference: scope.storeReference.slice(0, 24) + "00000000" + suffix,
+            purpose: "DiningJoin",
+            kind: "HumanCode",
+            storeReference: scope.storeReference,
+            tableReference,
+            diningSessionReference: sessionReference,
+            selectorHash: "a".repeat(63) + String(generation),
+            pepperVersion: 1,
+            assignmentVersion: 1,
+            generation,
+            status,
+            version,
+            issuedAt,
+            expiresAt: new Date(Date.parse(issuedAt) + minutes(12)).toISOString(),
+            consumedAt: null,
+            revokedAt: status === "Revoked" ? time(-minutes(10)) : null,
+          });
+          await client.query(
+            "INSERT INTO rms_dining.dining_join_capability (capability_id,tenant_id,brand_id,store_id,session_id,version,status,capability_snapshot) VALUES ($1,$2,$3,$4,$5,$8,$6,$7::jsonb)",
+            [
+              capability.capabilityReference,
+              tenant,
+              scope.brandReference,
+              scope.storeReference,
+              sessionReference,
+              status,
+              JSON.stringify(capability),
+              version,
+            ],
+          );
+        }
       };
       const tablesWith = async (before) => {
         queryCount.value = 0;
@@ -1611,6 +1651,16 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
       assert.equal(oneTable.view.items.filter((t) => t.session !== null).length, 1);
       assert.equal(twoTables.view.items.filter((t) => t.session !== null).length, 2);
       assert.equal(twoTables.view.canCloseSessions, true);
+      // b63 review (F39): the read says which open table still has a join code nobody used (read
+      // under the restricted role), so a staff round is warned before Send on any device.
+      const seated = twoTables.view.items.filter((t) => t.session !== null);
+      assert.deepEqual(
+        [false, true].map(
+          (second) =>
+            seated.find((t) => (t.stableLabel === "SYNTHETIC-SECOND") === second)?.unusedJoinCode,
+        ),
+        [undefined, true],
+      );
       assert.ok(
         twoTables.queries - oneTable.queries <= 2,
         "tables read queries by open tables " +

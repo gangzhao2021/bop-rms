@@ -13,6 +13,7 @@ import {
   loadDiningCleaningLeftByClose,
   loadDiningGuestTableActivity,
   loadDiningGuestTableStartPage,
+  loadDiningSessionsWithUnusedJoinCode,
   parseDiningInstant,
   parseDiningReference,
 } from "@rms/dining";
@@ -541,6 +542,18 @@ export function createMerchantDiningTables(options: {
             },
             activeReferences.map((reference) => String(reference)),
           );
+          // b63 review (F39): the open tables whose join code nobody has used yet; sending a staff
+          // round gives the table a new one, so staff are told before Send (on any device).
+          const unusedJoinCodes = await loadDiningSessionsWithUnusedJoinCode(
+            tx as never,
+            {
+              tenantReference: current.selected.tenantReference,
+              brandReference: current.context.brand.brandReference,
+              storeReference: current.store.storeReference,
+            },
+            activeReferences.map((reference) => String(reference)),
+            parseDiningInstant(options.persistence.now()),
+          );
           // Marking needs dining.operate, which this read already requires.
           const allergenChoices = await tableAllergenChoices(tx, {
             brandReference: String(current.context.brand.brandReference),
@@ -718,6 +731,11 @@ export function createMerchantDiningTables(options: {
                           String(table.activeDiningSessionReference),
                         ),
                       }
+                    : {}),
+                  // b63 review (F39): only when the open table has a join code nobody used yet.
+                  ...(table.activeDiningSessionReference !== null &&
+                  unusedJoinCodes.has(String(table.activeDiningSessionReference))
+                    ? { unusedJoinCode: true as const }
                     : {}),
                   // How long a table has waited for cleaning, where guests can then start it.
                   ...(cleaningLeftByClose.has(String(table.tableReference))

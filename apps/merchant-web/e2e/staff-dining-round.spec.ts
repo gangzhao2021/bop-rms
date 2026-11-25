@@ -2102,3 +2102,32 @@ for (const language of ["en", "zh-Hans"] as const)
       });
     }
   });
+
+// b63 review (F39): the note relied on a code handed out on this tablet's panel just before; a
+// code handed out from another tablet, or the page opened again, gave no warning before Send. The
+// Tables list says the table still has a join code nobody used, and the note says so from there.
+for (const language of ["en", "zh-Hans"] as const)
+  test(`@production b63: a table with an unused join code is told before Send, on any device (${language})`, async ({
+    page,
+  }) => {
+    const zh = language === "zh-Hans";
+    if (zh)
+      await page.addInitScript(() => {
+        window.localStorage.setItem("bop.merchant.language", "zh-Hans");
+      });
+    await signIn(page, { ...table, paymentTiming: "PayLater", unusedJoinCode: true });
+    await page.route("**/merchant/counter/menu**", (route) =>
+      route.fulfill({ headers, json: menu }),
+    );
+    // Opened straight from its address (no Tables panel on this device before it).
+    await page.goto("/operations/order-entry?table=" + tableReference);
+    const main = page.locator("main");
+    await page.getByRole("button", { name: zh ? /^添加\s?Gyoza$/u : "Add Gyoza" }).click();
+    await expect(
+      main.locator(".field-hint").filter({ hasText: zh ? "加入码" : "join code" }),
+    ).toHaveText(
+      zh
+        ? "发送后，这桌还没人用过的加入码会失效；已加入的客人不受影响。"
+        : "Sending replaces this table's join code that nobody has used yet; guests already at the table stay joined.",
+    );
+  });
