@@ -574,6 +574,13 @@
 .tonight__row[data-tone="action"] dt::before {
   background: var(--bop-color-danger-mark);
 }
+/* A label that wraps (390 with Linux fonts: "Guests left without paying (written off)") goes on
+   under its name, not under the dot's column. */
+.tonight__row[data-tone="action"] dt,
+.tonight__tables .tonight__row dt {
+  padding-left: 16px;
+  text-indent: -16px;
+}
 .tonight__methods {
   width: 100%;
   border-collapse: collapse;
