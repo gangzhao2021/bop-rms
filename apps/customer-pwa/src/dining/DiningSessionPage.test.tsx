@@ -2046,3 +2046,45 @@ describe("batch 63 (F13): what the table owes once checkout opens", () => {
     expect(open).not.toContain("To pay at the end");
   });
 });
+
+// Batch 63 review: a dish where its round is says nothing, also on a paid round (pay-first or a
+// table already paid). The null answer must not fall through to the older "Served 0 of 2" line.
+describe("batch 63 review: a paid round's dish where its round is", () => {
+  const ramen = (progress: "Waiting" | "Making" | "Ready" | "Served", servedQuantity: number) => ({
+    displayName: "Ramen",
+    quantity: 2,
+    servedQuantity,
+    cancelled: false,
+    lineTotal: cad("3000"),
+    progress,
+  });
+  const paid = (status: DiningRound["status"], item: DiningRound["items"][number]) =>
+    render({
+      status: "ready",
+      view: view({ rounds: [round({ status, payment: "Paid", items: [item] })] }),
+      refreshing: false,
+    });
+
+  it("does not tell the guest 'Served 0 of 2' for a dish that is ready, waiting or being made", () => {
+    for (const [status, progress] of [
+      ["Ready", "Ready"],
+      ["Received", "Waiting"],
+      ["Preparing", "Making"],
+    ] as const) {
+      const html = paid(status, ramen(progress, 0));
+      expect(html).toContain("2 × Ramen");
+      expect(html).not.toContain("Served 0 of 2");
+      expect(html).not.toContain("Served</span>");
+    }
+  });
+
+  it("shows no count for a fully served dish under a served round", () => {
+    const html = paid("Served", ramen("Served", 2));
+    expect(html).not.toContain("Served 2 of 2");
+  });
+
+  it("still names a dish that is ahead of its round, and the count while partly served", () => {
+    expect(paid("Preparing", ramen("Ready", 0))).toContain("order-status__item-progress");
+    expect(paid("Serving", ramen("Served", 1))).toContain("Served 1 of 2");
+  });
+});

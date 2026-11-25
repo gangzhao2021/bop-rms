@@ -617,14 +617,16 @@ function RoundCard({
                     })
                   : t("Being remade · we'll bring it to your table shortly")}
               </span>
-            ) : item.progress !== undefined &&
-              !charge &&
-              dishProgressText(item, round.status) !== null ? (
+            ) : item.progress !== undefined && !charge ? (
               // M91: every round says where each dish is, not only a paid one (batch 63: only
-              // where it differs from the round's own word).
-              <span className="order-status__item-progress">
-                {dishProgressText(item, round.status)}
-              </span>
+              // where it differs from the round's own word). A null answer means "say nothing"
+              // and never reaches the older paid-round count below.
+              (() => {
+                const progressText = dishProgressText(item, round.status);
+                return progressText === null ? null : (
+                  <span className="order-status__item-progress">{progressText}</span>
+                );
+              })()
             ) : round.payment === "Paid" && !charge ? (
               <span>
                 {t("Served")} {item.servedQuantity} {t("of")} {item.quantity}
