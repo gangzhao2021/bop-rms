@@ -97,6 +97,11 @@ export interface CustomerEntryEstablished {
    * can't be read.
    */
   readonly tableOpen?: boolean;
+  /**
+   * Batch 64 (F11): at a table, its printed name (never an id), so the join page says which table
+   * this is; absent when it can't be read.
+   */
+  readonly tableLabel?: string;
   readonly sessionCredential: GuestRawCredential;
   readonly csrfCredential: GuestRawCredential;
   readonly cookie: GuestSessionCookieDescriptor;
@@ -574,6 +579,7 @@ function parseEstablished(
     "locale",
     "contextExpiresAt",
     ...(Object.hasOwn(value as object, "tableOpen") ? ["tableOpen"] : []),
+    ...(Object.hasOwn(value as object, "tableLabel") ? ["tableLabel"] : []),
     "sessionCredential",
     "csrfCredential",
     "cookie",
@@ -661,6 +667,15 @@ function parseEstablished(
   if (Date.parse(contextExpiresAt) <= Date.parse(requestedAt)) {
     throw new TypeError("expired context result");
   }
+  // Batch 64 (F11): a table's printed name, only at a table, in the public label's shape.
+  if (
+    result.tableLabel !== undefined &&
+    (result.channel !== "DineIn" ||
+      typeof result.tableLabel !== "string" ||
+      !/^[^\p{Cc}\p{Cf}<>{}[\]`*_#]{1,120}$/u.test(result.tableLabel) ||
+      result.tableLabel !== result.tableLabel.trim())
+  )
+    throw new TypeError("invalid table label");
   return Object.freeze({
     brandDisplayName,
     storeDisplayName,
@@ -672,6 +687,7 @@ function parseEstablished(
     locale: result.locale,
     contextExpiresAt,
     ...(result.tableOpen === undefined ? {} : { tableOpen: result.tableOpen as boolean }),
+    ...(result.tableLabel === undefined ? {} : { tableLabel: result.tableLabel as string }),
     sessionCredential: parseGuestRawCredential(result.sessionCredential),
     csrfCredential: parseGuestRawCredential(result.csrfCredential),
     cookie: parseCookie(result.cookie),
@@ -1334,6 +1350,8 @@ export class CustomerEntryHandler {
           locale: result.locale,
           contextExpiresAt: result.contextExpiresAt,
           ...(result.tableOpen === undefined ? {} : { tableOpen: result.tableOpen }),
+          // Batch 64 (F11): the table's printed name, in the shape "not open yet" sends it.
+          ...(result.tableLabel === undefined ? {} : { table: { label: result.tableLabel } }),
           csrfToken: result.csrfCredential,
         });
       } catch (error) {

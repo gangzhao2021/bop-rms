@@ -121,7 +121,7 @@ function parseSuccess(value: unknown): CustomerEntryEstablishedContext {
     "locale",
     "contextExpiresAt",
     "csrfToken",
-    ...(["tableOpen", "resumed", "previousVisit"] as const).filter(
+    ...(["tableOpen", "table", "resumed", "previousVisit"] as const).filter(
       (key) => value !== null && typeof value === "object" && Object.hasOwn(value, key),
     ),
   ]);
@@ -150,6 +150,18 @@ function parseSuccess(value: unknown): CustomerEntryEstablishedContext {
     raw.publicTableReference === null ? null : reference(raw.publicTableReference);
   if ((raw.channel === "DineIn") !== (publicTableReference !== null))
     throw new TypeError("Table context mismatch");
+  // Batch 64 (F11): the table's printed name, only at a table. A name this page can't show safely
+  // is left out: the guest still joins, at an unnamed table.
+  if (raw.table !== undefined && raw.channel !== "DineIn")
+    throw new TypeError("Table context mismatch");
+  const tableLabel = (() => {
+    if (raw.table === undefined) return null;
+    try {
+      return publicLabel(exact(raw.table, ["label"]).label);
+    } catch {
+      return null;
+    }
+  })();
   const modes = Object.freeze(
     raw.availableServiceModes.map((mode) => {
       if (!(["DineIn", "Pickup", "Delivery"] as const).includes(mode as never))
@@ -176,6 +188,7 @@ function parseSuccess(value: unknown): CustomerEntryEstablishedContext {
     contextExpiresAt: instant(raw.contextExpiresAt),
     csrfToken: raw.csrfToken,
     ...(raw.tableOpen === undefined ? {} : { tableOpen: raw.tableOpen as boolean }),
+    ...(tableLabel === null ? {} : { tableLabel }),
     ...(raw.resumed === true ? { resumed: true as const } : {}),
     ...(raw.previousVisit === undefined
       ? {}

@@ -557,10 +557,13 @@ export function EntryContextPage({
       onAnswer={client.enter === undefined ? undefined : answer}
       onSeated={recheckNow ?? undefined}
       tableLabel={
-        (state.kind === "Established" || state.kind === "Resumed") &&
-        tableName?.store === state.context.publicStoreReference
-          ? tableName.label
-          : null
+        // Batch 64 (F11): the open table's own answer names it; else the waiting page's name.
+        state.kind === "Established" && state.context.tableLabel !== undefined
+          ? state.context.tableLabel
+          : (state.kind === "Established" || state.kind === "Resumed") &&
+              tableName?.store === state.context.publicStoreReference
+            ? tableName.label
+            : null
       }
       waitStopped={waitStopped}
       waitRefused={waitRefused}

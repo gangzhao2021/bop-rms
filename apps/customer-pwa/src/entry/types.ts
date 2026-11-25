@@ -16,6 +16,8 @@ export interface CustomerEntryEstablishedContext {
   readonly csrfToken: string;
   /** Coordinator 2026-10-30: at a table, whether staff seated a party there (absent: unknown). */
   readonly tableOpen?: boolean;
+  /** Batch 64 (F11): at a table, its printed name (absent when not sent or not safe to show). */
+  readonly tableLabel?: string;
   /** M104/M105: this phone's pickup visit at this Store goes on (its cart and orders are kept). */
   readonly resumed?: true;
   /** M104/M105: the visit this phone had here ended; whether its receipts are still on the phone. */

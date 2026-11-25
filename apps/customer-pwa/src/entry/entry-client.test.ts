@@ -311,6 +311,30 @@ describe("customer entry browser boundary", () => {
     setUnseatedTableScan(false);
   });
 
+  it("batch 64 (F11): reads an open table's printed name from its visit, and only a safe one", async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(response(201, { ...established, table: { label: "V63 A (TEST)" } }))
+      .mockResolvedValueOnce(response(201, { ...established, table: { label: "<b>1</b>" } }));
+    const start = () =>
+      createCustomerEntryClient({
+        fetch,
+        hash: "#qr=aaa.bbb.ccc",
+        pathname: "/",
+        search: "",
+        replaceState: vi.fn(),
+        online: () => true,
+      }).start();
+    await expect(start()).resolves.toMatchObject({
+      kind: "Established",
+      context: { tableLabel: "V63 A (TEST)" },
+    });
+    // A name it can't show safely is left out; the guest still joins.
+    const unsafe = await start();
+    expect(unsafe).toMatchObject({ kind: "Established" });
+    expect(Object.hasOwn((unsafe as { context: object }).context, "tableLabel")).toBe(false);
+  });
+
   it("WP-2423 Q4: reads a closed or paused Store with today's hours", async () => {
     const body = (operatingState: string) => ({
       schemaVersion: 1,

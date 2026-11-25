@@ -230,6 +230,33 @@ describe("WP-1004 Customer-entry contract", () => {
     ]);
   });
 
+  it("batch 64 (F11): names an open table on its visit, only at a table and only a safe name", async () => {
+    const port = new MutablePort();
+    const serverPort = await listen(customerEntry(port));
+    port.result = established({ tableOpen: true, tableLabel: "V63 A (TEST)" });
+    const named = await post(serverPort);
+    expect(named.status).toBe(201);
+    expect(await named.json()).toMatchObject({
+      status: "Established",
+      tableOpen: true,
+      table: { label: "V63 A (TEST)" },
+    });
+    port.result = established({ tableOpen: true });
+    expect(Object.hasOwn((await (await post(serverPort)).json()) as object, "table")).toBe(false);
+    for (const result of [
+      established({ tableLabel: "<b>4</b>" }),
+      established({
+        tableLabel: "V63 A",
+        channel: "Pickup",
+        publicTableReference: null,
+        availableServiceModes: ["Pickup"],
+      }),
+    ]) {
+      port.result = result;
+      expect((await post(serverPort)).status).toBe(503);
+    }
+  });
+
   it("says whether a party is seated at the scanned table, and only at a table", async () => {
     const port = new MutablePort();
     const serverPort = await listen(customerEntry(port));

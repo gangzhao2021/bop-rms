@@ -895,6 +895,8 @@ export async function exercisePersistentProfileEntry({
       const diningBody = await diningResponse.json();
       assert.equal(diningBody.channel, "DineIn");
       assert.equal(diningBody.tableOpen, true);
+      // Batch 64 (F11): the open table is named on its visit too (read under the pilot role).
+      assert.deepEqual(diningBody.table, { label: "T01" });
       assert.equal(diningBody.publicTableReference, diningTable.publicTableReference);
       assert.equal(diningResponse.headers.getSetCookie().length, 1);
       assert.equal(Object.hasOwn(diningBody, "sessionCredential"), false);
@@ -953,6 +955,7 @@ export async function exercisePersistentProfileEntry({
         const body = await response.json();
         // Staff seated the party: another phone's scan finds the table open.
         assert.equal(body.tableOpen, true);
+        assert.deepEqual(body.table, { label: "T01" });
         return {
           cookie: response.headers.getSetCookie()[0].split(";")[0],
           csrfToken: body.csrfToken,

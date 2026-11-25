@@ -493,6 +493,16 @@ export function createCustomerEntryComposition(
         )
           return Object.freeze({ status: "TableAskNewParty" as const, ...publicContext });
 
+        // Batch 64 (F11): the table's printed name comes with the visit too, so a guest who scans
+        // an open table straight away sees "Join D62A 1", not an unnamed table. Absent or failed:
+        // the table unnamed, as before (the visit never depends on it).
+        const tableLabel =
+          qr.context.channel === "DineIn" && tableReference !== null && tableReference !== undefined
+            ? await (
+                options.table?.label?.({ ...scope, tableReference: String(tableReference) }) ??
+                Promise.resolve(null)
+              ).catch(() => null)
+            : null;
         const admitted = parseGuestAdmissionEvidence(
           await options.admission.consume(
             Object.freeze({
@@ -569,6 +579,7 @@ export function createCustomerEntryComposition(
           locale: String(qr.context.locale),
           contextExpiresAt,
           ...(tableOpen === undefined ? {} : { tableOpen }),
+          ...(typeof tableLabel === "string" ? { tableLabel } : {}),
           sessionCredential: session.sessionCredential,
           csrfCredential: session.csrfCredential,
           cookie: session.cookie,
