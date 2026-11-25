@@ -184,7 +184,7 @@ test("@production Hours & ordering reads as natural Chinese, today on", async ({
   expect(hours).not.toMatch(/\d{4}-\d{2}-\d{2}/u);
   expect(hours).not.toMatch(/[A-Za-z]/u);
   const controls = await controlsText(page);
-  await expect(page.locator(".workspace-page__status")).toHaveText("0:12 已更新");
+  await expect(page.locator(".workspace-page__status")).toHaveText("已更新 0:12");
   expect(controls).not.toContain("北美东部时间");
   expect(controls).toContain("所有服务 — 至 2026年11月22日 0:40");
   expect(controls).not.toMatch(/\b(?:Nov|a\.m\.|p\.m\.|AM|PM)\b/u);

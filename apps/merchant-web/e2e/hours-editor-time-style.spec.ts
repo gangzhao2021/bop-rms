@@ -807,8 +807,17 @@ for (const language of ["en", "zh-Hans"] as const) {
           const p = primary.getBoundingClientRect();
           const sameLine = Math.abs(s.bottom - p.bottom) < 2;
           const title = (document.querySelector("main h1") as HTMLElement).getBoundingClientRect();
+          // Batch 63 (F38): at 1024 the stamp sits in the approved top bar (Figma 58:65), so
+          // what stays beside the title there is Refresh; on wider screens it is the stamp.
+          const inBar = document.querySelector(
+            ".workspace-sidebar__status .workspace-page__status",
+          );
           const stamp = (
-            document.querySelector(".workspace-page__status") as HTMLElement
+            document.querySelector(
+              inBar === null
+                ? ".workspace-page__header .workspace-page__status"
+                : ".workspace-page__header .workspace-page__actions",
+            ) as HTMLElement
           ).getBoundingClientRect();
           return {
             accent,
@@ -820,6 +829,7 @@ for (const language of ["en", "zh-Hans"] as const) {
             sameLine,
             primaryRight: window.innerWidth - p.right,
             stampRight: stamp.left > title.right,
+            stampInBar: inBar !== null,
           };
         });
         expect(look.h1).toEqual({ size: "28px", weight: "600" });
@@ -853,6 +863,7 @@ for (const language of ["en", "zh-Hans"] as const) {
         if (width >= 1024) expect(look.sameLine).toBe(true);
         expect(look.primaryRight).toBeGreaterThanOrEqual(width >= 1024 ? 40 : 16);
         if (width >= 1024) expect(look.stampRight).toBe(true);
+        expect(look.stampInBar).toBe(width === 1024);
         expect(
           await page.evaluate(
             () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
