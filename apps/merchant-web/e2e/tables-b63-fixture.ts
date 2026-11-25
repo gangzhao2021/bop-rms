@@ -58,10 +58,10 @@ export async function floor(
             ...(options.canTakeOrders
               ? [
                   {
-                    screenId: "ORD-STAFF-ENTRY",
-                    label: "Take an order",
+                    screenId: "OPS-ORDER-ENTRY",
+                    label: "Counter order",
                     href: "/operations/order-entry",
-                    permission: "order.staff_entry",
+                    permission: "ordering.order.create_staff",
                   },
                 ]
               : []),
@@ -77,7 +77,7 @@ export async function floor(
       json: {
         canOperateTables: options.canOperateTables ?? false,
         canCloseSessions: true,
-        ...(options.canTakeOrders ? { canTakeOrders: true } : {}),
+        ...(options.canTakeOrders ? { canTakeTableRounds: true } : {}),
         items: [
           {
             tableReference: id(1),

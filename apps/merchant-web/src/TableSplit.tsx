@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { t, saidTable, listSeparator } from "./i18n/i18n.js";
 import { orderMoney } from "./order-money.js";
 import { serviceOperationReference } from "./service-control-client.js";
@@ -173,7 +173,13 @@ export function TableSplitControls({
   onSelectPart,
   onBill,
   onProblem,
+  onSettingUp,
 }: {
+  /**
+   * b63 (F34, T13): a split by dish or by rounds is being set up and not confirmed yet; the
+   * whole table's tip and payment wait until it is (or until All together is chosen again).
+   */
+  readonly onSettingUp?: (settingUp: boolean) => void;
   readonly bill: TableBill;
   readonly csrf: string;
   readonly client: ReturnType<typeof createTableCheckoutClient>;
@@ -297,6 +303,14 @@ export function TableSplitControls({
             choice.orderItemReference === unit.orderItemReference && choice.unit === unit.unit,
         )?.partNumber === partOfUnit(`${unit.orderItemReference}:${unit.unit}`),
     );
+  const byRoundsApplied = split?.mode === "ByRounds" && !split.stale;
+  const settingUp =
+    !locked &&
+    ((mode === "ByItems" && !byItemsApplied) || (mode === "ByRounds" && !byRoundsApplied));
+  useEffect(() => {
+    onSettingUp?.(settingUp);
+  }, [settingUp, onSettingUp]);
+  useEffect(() => () => onSettingUp?.(false), [onSettingUp]);
   const partCount = Math.max(1, ...owing.map((round) => partOf.get(round.roundNumber) ?? 1));
   const byRoundsValid =
     partCount >= 2 &&
@@ -475,9 +489,10 @@ export function TableSplitControls({
             })}
           </ul>
           {byItemsApplied ? null : (
+            // b63 (F34): confirming the split is this step's one primary (v3 51:2).
             <button
               type="button"
-              className="table-split__apply"
+              className="table-split__apply table-checkout__primary"
               disabled={disabled || busy || !byItemsValid}
               onClick={() => void apply("ByItems")}
             >
@@ -548,7 +563,7 @@ export function TableSplitControls({
           </ul>
           <button
             type="button"
-            className="table-split__apply"
+            className="table-split__apply table-checkout__primary"
             disabled={disabled || busy || !byRoundsValid}
             onClick={() => void apply("ByRounds")}
           >

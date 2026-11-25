@@ -1990,3 +1990,14 @@
   font-size: 14px;
   font-weight: 400;
 }
+
+/* b63 (F34): with nothing ordered, Take order is the panel's one filled primary (a link). */
+.workspace-page.tables-v3 .table-panel a.table-panel__primary {
+  justify-self: start;
+  color: var(--bop-color-on-accent-fill);
+  text-decoration: none;
+}
+/* b63 (F34, T13): confirming a split by dish or by rounds is that step's one primary (v3 51:2). */
+.workspace-page.tables-v3 .table-panel .table-split__apply.table-checkout__primary {
+  margin-top: 8px;
+}

@@ -2340,6 +2340,17 @@ function TablePanel({
       ) : seated ? (
         <p className="table-panel__notice">{t("Nothing ordered yet.")}</p>
       ) : null}
+      {seated && !hasOrder && canTakeOrders && roundOffer === "Offered" ? (
+        // b63 (F34, T4): with nothing ordered, taking the order is the one step due: the primary.
+        <Link
+          className="table-panel__primary"
+          to={`/operations/order-entry?table=${encodeURIComponent(table.tableReference)}`}
+        >
+          {t("Take order for table {stableLabel}", {
+            stableLabel: saidTable(table.stableLabel),
+          })}
+        </Link>
+      ) : null}
       {seated
         ? // WP-2423 item 8 ⑨: the rounds of the tables merged into this one (on its bill), served
           // from here too.
@@ -2471,7 +2482,7 @@ function TablePanel({
           )}
         </section>
       ) : null}
-      {canTakeOrders && roundOffer === "Offered" ? (
+      {canTakeOrders && roundOffer === "Offered" && !(seated && !hasOrder) ? (
         // WP-2423 Q7 slice 2: a round for guests who can't or won't order on a phone (or a
         // paper order entered after an outage); it joins the table's order, or opens the table.
         <Link

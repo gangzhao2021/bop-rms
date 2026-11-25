@@ -329,6 +329,8 @@ export function TableCheckout({
   const [paper, setPaper] = useState(false);
   // WP-2423 item 8 ④: the part of a split bill being collected (null: the whole table).
   const [part, setPart] = useState<number | null>(null);
+  // b63 (F34, T13): a split by dish or by rounds being set up holds back the whole table's payment.
+  const [splitSettingUp, setSplitSettingUp] = useState(false);
   const [paidAt, setPaidAt] = useState("");
   const paperInstant = paper ? paidAtInstant(paidAt, Date.now(), timeZone) : null;
   // WP-2423 (v15 fabf0261): the server refused the paid-at itself; staff correct it in its field.
@@ -744,6 +746,9 @@ export function TableCheckout({
     }
   };
 
+  // b63 (F34, T4): a table just seated with nothing ordered has nothing to check out; taking its
+  // first order is the step that is due.
+  if (session.phase === "Active" && session.orderReference === null) return null;
   if (session.phase === "Active")
     return (
       <section aria-label={t("Checkout")} className="table-checkout">
@@ -957,6 +962,7 @@ export function TableCheckout({
                 }}
                 onBill={setBill}
                 onProblem={setProblem}
+                onSettingUp={setSplitSettingUp}
               />
               <TableReceipt
                 bill={bill}
@@ -964,7 +970,8 @@ export function TableCheckout({
                 storeLabel={storeLabel}
                 timeZone={timeZone}
               />
-              {bill.split !== null && selected === null && !(byGuests && owed > 0n) ? null : (
+              {splitSettingUp ||
+              (bill.split !== null && selected === null && !(byGuests && owed > 0n)) ? null : (
                 <>
                   {byGuests ? (
                     <h4 className="table-checkout__part-title">

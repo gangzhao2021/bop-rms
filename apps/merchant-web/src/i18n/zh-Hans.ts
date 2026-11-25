@@ -5138,6 +5138,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "This table can't be closed yet. Close out its open rounds first.":
     "这张桌台还不能关闭。请先结束其未完成的轮次。",
   // b63 (F35, F31): what still stops closing a table paying at the end, in one line.
+  // b63 (F34): a table seated with nothing ordered closes from accent words.
+  "Guests left — close table": "客人走了，关台",
   "Close after every dish is served and the bill is paid.": "菜上齐、账结清后再关台。",
   "No new rounds while checking out. To add dishes, cancel checkout first.":
     "结账中不能加菜。要加菜，先取消结账。",

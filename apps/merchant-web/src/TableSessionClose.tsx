@@ -581,7 +581,8 @@ export function TableSessionClose({
   return (
     <section aria-label={t("Close this table")} className="dining-table-close">
       {/* b63 (F35): the heading comes with the close itself, not with what still stops it. */}
-      {check.kind === "Ready" && (blockers.length > 0 || planBlocks) ? null : (
+      {(check.kind === "Ready" && (blockers.length > 0 || planBlocks)) ||
+      orderReference === null ? null : (
         <h3>{t("Close the table")}</h3>
       )}
       {check.kind === "Checking" ? (
@@ -677,6 +678,21 @@ export function TableSessionClose({
         </div>
       ) : openRounds === undefined ? (
         guestsLeft
+      ) : orderReference === null ? (
+        // b63 (F34, T4): a table seated with nothing ordered — taking the order is the step due,
+        // so closing it is accent words, said as when it is done: the guests left.
+        <button
+          type="button"
+          className="table-panel__text-step"
+          disabled={submitting || (outcome !== "Unknown" && locked)}
+          onClick={() => void close()}
+        >
+          {submitting
+            ? t("Closing the table…")
+            : outcome === "Unknown"
+              ? t("Try closing again")
+              : t("Guests left — close table")}
+        </button>
       ) : (
         <>
           <p>

@@ -377,7 +377,8 @@ const words = {
     heading: "L58F A (TEST)",
     panel: "Selected table details",
     paidInFull: "Paid in full.",
-    checkingOut: "is checking out",
+    // b63 (F35): the panel says it in one short line.
+    checkingOut: "No new rounds while checking out.",
     back: "Back to Tables",
     select: "Select T1",
     tabs: "Show tables",
@@ -389,7 +390,7 @@ const words = {
     heading: "L58F A (TEST)",
     panel: "所选桌台详情",
     paidInFull: "已全部付清。",
-    checkingOut: "正在结账",
+    checkingOut: "结账中不能加菜。",
     back: "返回桌台",
     select: "选择 T1",
     tabs: "显示桌台",
