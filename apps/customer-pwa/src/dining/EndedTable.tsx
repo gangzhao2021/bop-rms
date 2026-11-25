@@ -49,7 +49,9 @@ export function SettledTableCard({
       {/* Batch 44: the same words as the start page (a new party is seated first). */}
       <p>{t("New party? Ask staff to seat you, then scan again.")}</p>
       {receiptLink ? (
-        <Link className="order-status__back" to="/dine-in/session">
+        // Batch 64 (v15 b62 live, G62 A/B): brings the table's receipt into view on Your table and
+        // gives its heading focus, as "See your receipt" does.
+        <Link className="order-status__back" to="/dine-in/session" state={yourReceiptLinkState}>
           {t("See the receipt")}
         </Link>
       ) : null}

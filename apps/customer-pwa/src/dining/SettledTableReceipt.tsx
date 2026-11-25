@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { t, saidTable, nameLocale, useReloadOnLanguageChange } from "../i18n/i18n.js";
 import { formatDateTime, formatLocalityLine, formatMoney } from "../journey/format.js";
 import { MemberJoinPanel } from "../member/MemberJoinPanel.js";
 import { boundedJsonFetch } from "../network/bounded-fetch.js";
 import { getSettledTableReceiptCsrf } from "../session/customer-transaction-context.js";
+import { yourReceiptAttribute } from "./your-receipt-link.js";
 
 /**
  * Coordinator 2026-10-30 (Owner authorized): the receipt of a table that was closed after its bill
@@ -385,7 +386,26 @@ export function ReceiptMerchantHeader({
   );
 }
 
-export function SettledTableReceiptView({ receipt }: { readonly receipt: SettledTableReceipt }) {
+/**
+ * Batch 64 (v15 b62 live, G62 A): a bill paid whole on a phone. The table's receipt lists "Paid by
+ * Online by phone" for every phone; the phone that paid it is also told, inside it, that it paid
+ * on this phone, what went back to its card and when — as while the table was open — never a
+ * second receipt.
+ */
+export const paidWholeOnAPhone = (receipt: SettledTableReceipt): boolean =>
+  !receipt.split &&
+  receipt.payments.length === 1 &&
+  receipt.payments[0]?.partNumber === null &&
+  receipt.payments[0].method === "Online";
+
+export function SettledTableReceiptView({
+  receipt,
+  ownLines = null,
+}: {
+  readonly receipt: SettledTableReceipt;
+  /** Batch 64: this phone's own payment of a bill paid whole on a phone (nothing for others). */
+  readonly ownLines?: ReactNode;
+}) {
   const yours = receipt.split ? receipt.payments.filter((payment) => payment.yours) : [];
   const yourCount = yours.length;
   const yourTotal = yours.reduce((sum, payment) => sum + BigInt(payment.totalMinor), 0n).toString();
@@ -393,6 +413,8 @@ export function SettledTableReceiptView({ receipt }: { readonly receipt: Settled
     <section
       className="order-status__card dining-session__receipt dining-session__receipt--settled dining-session__receipt--printable"
       aria-labelledby="table-receipt"
+      // Batch 64 (v15 b62 live): "See the receipt" on an ended Menu, dish page or Cart lands here.
+      {...{ [yourReceiptAttribute]: "" }}
     >
       <h2 id="table-receipt">{t("Receipt")}</h2>
       {/* Batch 63 (design review D62B-03, F05): who it is from and when, as the pickup receipt
@@ -527,6 +549,7 @@ export function SettledTableReceiptView({ receipt }: { readonly receipt: Settled
           ),
         )}
       </dl>
+      {paidWholeOnAPhone(receipt) ? ownLines : null}
       {/* Batch 63 (design review D62B-08, F06): a phone that paid several parts reads them under
           one heading, each with its part, and what it paid in all — never "Your payment" twice. */}
       {yourCount > 1 ? (
@@ -559,8 +582,11 @@ export function SettledTableReceiptView({ receipt }: { readonly receipt: Settled
 /** Loads the settled table's receipt; nothing is shown when there is none (written off). */
 export function SettledTableReceiptPanel({
   client: provided,
+  ownLines = null,
 }: {
   readonly client?: SettledTableReceiptClient;
+  /** Batch 64: see `SettledTableReceiptView`. */
+  readonly ownLines?: ReactNode;
 }) {
   const [client] = useState(() => provided ?? createSettledTableReceiptClient());
   const [state, setState] = useState<
@@ -592,7 +618,12 @@ export function SettledTableReceiptPanel({
   if (state.status === "loading") return <p role="status">{t("Loading receipt")}</p>;
   if (state.status === "unavailable")
     return (
-      <section className="order-status__unavailable" role="alert">
+      <section
+        className="order-status__unavailable"
+        role="alert"
+        // Batch 64: "See the receipt" leads here when the receipt could not be read.
+        {...{ [yourReceiptAttribute]: "" }}
+      >
         <p>{t("We couldn’t load the receipt. Check your connection and try again.")}</p>
         <button className="order-status__retry" type="button" onClick={() => void load()}>
           {t("Try again")}
@@ -601,7 +632,7 @@ export function SettledTableReceiptPanel({
     );
   return (
     <>
-      <SettledTableReceiptView receipt={state.receipt} />
+      <SettledTableReceiptView receipt={state.receipt} ownLines={ownLines} />
       <PrintTableReceipt />
       <MemberJoinPanel />
     </>

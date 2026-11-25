@@ -52,6 +52,7 @@ import {
 } from "../session/customer-transaction-context.js";
 import {
   OwnPaymentReceiptPanel,
+  SettledOwnPaymentLines,
   createOwnPaymentReceiptClient,
   type OwnPaymentReceiptClient,
 } from "./OwnPaymentReceipt.js";
@@ -1402,14 +1403,20 @@ export function DiningSessionPage({
 function SettledTable({
   tableLabel,
   receipt,
+  own,
 }: {
   readonly tableLabel: string;
   readonly receipt?: SettledTableReceiptClient | undefined;
+  readonly own?: OwnPaymentReceiptClient | undefined;
 }) {
   return (
     <>
       <SettledTableCard tableLabel={tableLabel} />
-      <SettledTableReceiptPanel {...(receipt === undefined ? {} : { client: receipt })} />
+      <SettledTableReceiptPanel
+        {...(receipt === undefined ? {} : { client: receipt })}
+        // Batch 64 (v15 b62 live): the phone that paid the whole bill keeps its own lines.
+        ownLines={<SettledOwnPaymentLines client={own} />}
+      />
     </>
   );
 }
@@ -1605,7 +1612,11 @@ export function DiningSessionScreen({
         />
       ) : null}
       {state.status === "settled" ? (
-        <SettledTable tableLabel={state.tableLabel} receipt={settledReceipt} />
+        <SettledTable
+          tableLabel={state.tableLabel}
+          receipt={settledReceipt}
+          own={ownPaymentReceipt}
+        />
       ) : null}
       {state.status === "ended-empty" ? (
         <EmptyClosedTableCard tableLabel={state.tableLabel} />

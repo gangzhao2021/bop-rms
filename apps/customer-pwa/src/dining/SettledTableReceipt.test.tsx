@@ -321,3 +321,51 @@ it("batch 63: the receipt says who it is from and when, and offers to print or s
     '<p class="dining-session__receipt-print"><button type="button">打印或保存收据</button></p>',
   );
 });
+
+// Batch 64 (v15 b62 live, G62 A order 2): one phone paid the whole table ($28.25) and staff gave
+// $8.00 back. Once the table was closed and cleaned, that phone's receipt read the same as every
+// other phone's: its own "You paid … on this phone … went back to your card" lines and the refund's
+// date were gone. "See the receipt" on the ended Menu and Cart also left focus on the page.
+it("batch 64: a bill paid whole on a phone keeps that phone's own lines inside the receipt", () => {
+  const paidWhole = {
+    partNumber: null,
+    totalMinor: "2825",
+    tipMinor: "0",
+    roundingMinor: "0",
+    paidAt: "2026-11-24T00:34:40.000Z",
+  };
+  const whole = {
+    schemaVersion: 1,
+    receipt: {
+      ...byDish({}, "800").receipt,
+      split: false,
+      paymentCount: undefined,
+      payments: [{ ...paidWhole, method: "Online" }],
+    },
+  };
+  const own = <p className="own-lines">You paid $28.25 online on this phone.</p>;
+  const page = (payload: unknown) =>
+    renderToStaticMarkup(
+      <LanguageRoot initial="en">
+        {() => (
+          <SettledTableReceiptView receipt={parseSettledTableReceipt(payload)} ownLines={own} />
+        )}
+      </LanguageRoot>,
+    );
+  const wholePage = page(whole);
+  // Inside the table's receipt, after its totals and "Paid by".
+  expect(wholePage).toMatch(
+    /<section[^>]*data-your-receipt=""[^>]*>.*Paid by.*You paid \$28\.25 online on this phone\..*<\/section>/su,
+  );
+  // A bill paid in parts already lists this phone's own parts; paid at the table, no phone paid.
+  expect(page(byDish({ partNumber: 1, totalMinor: "1413" }, "800"))).not.toContain("own-lines");
+  expect(
+    page({
+      ...whole,
+      receipt: {
+        ...whole.receipt,
+        payments: [{ ...paidWhole, method: "CardMachine" }],
+      },
+    }),
+  ).not.toContain("own-lines");
+});

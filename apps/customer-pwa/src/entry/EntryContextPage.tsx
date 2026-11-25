@@ -10,6 +10,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import type { CustomerCurrentOrder } from "../session/session-bootstrap.js";
 import { SettledTableReceiptPanel } from "../dining/SettledTableReceipt.js";
+import { SettledOwnPaymentLines } from "../dining/OwnPaymentReceipt.js";
 import {
   getSettledTableLabel,
   getUnseatedTableWait,
@@ -1419,7 +1420,7 @@ function EntryState({
             <p className="entry-context">
               {tWords("Your meal at table {table} has ended.", { table: saidTable(settled) })}
             </p>
-            <SettledTableReceiptPanel />
+            <SettledTableReceiptPanel ownLines={<SettledOwnPaymentLines />} />
             <p>{t("New party? Ask staff to seat you, then scan again.")}</p>
           </>
         )}
@@ -1513,7 +1514,7 @@ function EntryState({
             <p className="entry-context">
               {tWords("Your meal at table {table} has ended.", { table: saidTable(settled) })}
             </p>
-            <SettledTableReceiptPanel />
+            <SettledTableReceiptPanel ownLines={<SettledOwnPaymentLines />} />
           </>
         )}
         {/* Batch 40: after last orders (or closing time) a new table can't order from the phone,
@@ -1588,7 +1589,7 @@ function EntryState({
             <p className="entry-context">
               {tWords("Your meal at table {table} has ended.", { table: saidTable(settled) })}
             </p>
-            <SettledTableReceiptPanel />
+            <SettledTableReceiptPanel ownLines={<SettledOwnPaymentLines />} />
             <p>{t("After you answer, this receipt won’t open on this phone.")}</p>
           </>
         )}

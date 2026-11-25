@@ -4,6 +4,7 @@ import { formatDateTime, formatMoney } from "../journey/format.js";
 import { boundedJsonFetch } from "../network/bounded-fetch.js";
 import {
   getCustomerCsrfCredential,
+  getSettledTableReceiptCsrf,
   subscribeCustomerCsrfContext,
 } from "../session/customer-transaction-context.js";
 import { splitPartDishesText } from "./TablePayPanel.js";
@@ -619,4 +620,22 @@ export function OwnPaymentReceiptPanel({
   if (inTableReceipt) return <OwnWholeTablePaymentLines receipt={state.receipt} />;
   if (soFar) return <OwnPaidSoFarView receipt={state.receipt} />;
   return <OwnPaymentReceiptView receipt={state.receipt} />;
+}
+
+/**
+ * Batch 64 (v15 b62 live, G62 A): once the table closed and was cleaned, the phone that paid the
+ * whole bill read only the table's receipt — the same as every other phone — and lost "You paid
+ * $28.25 online on this phone. $8.00 went back to your card …" and the refund's date it had read
+ * while the table was open. Inside the settled receipt it reads them again, with the ended visit's
+ * read-only value (the one its receipt is read with); a phone that paid nothing reads nothing.
+ */
+export function SettledOwnPaymentLines({
+  client: provided,
+}: {
+  readonly client?: OwnPaymentReceiptClient | undefined;
+}) {
+  const [client] = useState(
+    () => provided ?? createOwnPaymentReceiptClient(getSettledTableReceiptCsrf),
+  );
+  return <OwnPaymentReceiptPanel client={client} inTableReceipt />;
 }

@@ -1392,18 +1392,15 @@ for (const width of [390, 1024, 1440])
               .getByRole("link", { name: own ? ownLink : zh ? "查看收据" : "See the receipt" })
               .click();
             await expect(page).toHaveURL(/\/dine-in\/session$/u);
-            if (own) await expectReceiptBroughtIntoView(page, heading);
-            else {
-              await expect(heading).toBeVisible();
+            // Batch 64 (v15 b62 live, G62 A/B): "See the receipt" gives the Receipt heading focus
+            // too (focus had stayed on the page), as "See your receipt" does.
+            await expectReceiptBroughtIntoView(page, heading);
+            if (!own) {
               const receipt = page.getByRole("region", { name: tableReceipt, exact: true });
               await expect(receipt).toContainText(
                 zh ? /已退回您的卡|退款后/u : /Refunded to your card|paid after refunds/u,
               );
-              await page.waitForTimeout(1500);
-              const nav = await page.locator(".bop-shell__nav").boundingBox();
               const box = await heading.boundingBox();
-              expect(box?.y ?? -1).toBeGreaterThanOrEqual((nav?.y ?? 0) + (nav?.height ?? 0));
-              expect((box?.y ?? 0) + (box?.height ?? 0)).toBeLessThanOrEqual(844 - 40);
               if (points) {
                 const card = page.getByRole("region", { name: /180/u });
                 if ((await card.count()) > 0)
@@ -1415,4 +1412,112 @@ for (const width of [390, 1024, 1440])
             });
           }
         });
+    });
+
+// Batch 64 (v15 b62 live, guest-receipt-followups, G62 A order 2 and G62 V order 25): one phone paid
+// the whole table ($28.25) and staff gave $8.00 back while the table was open. After Close and
+// Cleaned that phone's receipt read the same as the other phone's (Paid / Refunded / Total paid
+// after refunds / Paid by Online by phone): its "You paid $28.25 online on this phone. $8.00 went
+// back to your card …" and the refund's date were gone, though a by-dish payer keeps its own. And
+// the ended Menu and Cart's "See the receipt" left focus on the page. The table read, the
+// table-payment reads and the visit restore are the real API handlers on a local server.
+for (const width of [390, 1024, 1440])
+  for (const zh of [false, true])
+    test.describe(`@production CUST-DINE-IN b64 the whole-table payer's receipt after the table closed (${zh ? "zh-Hans" : "en"} ${width})`, () => {
+      test.use({ viewport: { width, height: 844 }, hasTouch: width < 768, isMobile: width < 768 });
+      const tableReceipt = zh ? "收据" : "Receipt";
+      const wholeYouPaid = zh
+        ? "您已在这部手机上在线付款 $28.25。$8.00 已退回您的卡，您实付 $20.25。"
+        : "You paid $28.25 online on this phone. $8.00 went back to your card, so you paid $20.25.";
+      const dated = zh
+        ? /2026年11月2[45]日.*，\$8\.00 已退回您的卡。/u
+        : /^On Nov 2[45], 2026, .*, \$8\.00 went back to your card\./u;
+
+      test("closed and cleaned: the payer keeps its own lines and the refund's date in the receipt; printed too", async ({
+        page,
+      }) => {
+        test.setTimeout(120_000);
+        scenario = "whole-table-paid-online";
+        await page.addInitScript(() => {
+          window.print = () => undefined;
+        });
+        for (const payer of [true, false]) {
+          phone = { payer, tableClosed: true, refunds: "Eight" };
+          await stubTable(page, []);
+          await open(page, "/dine-in/session", zh);
+          const receipt = page.getByRole("region", { name: tableReceipt, exact: true });
+          await expect(receipt).toBeVisible();
+          // The table's figures, once, on every phone.
+          expect(await receiptRows(receipt)).toEqual(
+            expect.arrayContaining([
+              (zh ? "已付款 " : "Paid ") + "$28.25",
+              (zh ? "已退款 −" : "Refunded −") + "$8.00",
+              (zh ? "退款后实付 " : "Total paid after refunds ") + "$20.25",
+            ]),
+          );
+          await expect(page.getByRole("main").getByRole("heading", { level: 2 })).not.toHaveText([
+            zh ? "您的收据" : "Your receipt",
+          ]);
+          const lines = receipt.locator(".dining-session__own-payment-lines");
+          if (payer) {
+            // Inside the one receipt: this phone's own words and the refund's date, after the totals.
+            await expect(lines.locator("p")).toHaveText(wholeYouPaid);
+            await expect(lines.locator("li")).toHaveText(dated);
+            const paidBy = receipt.getByText(zh ? "手机在线付款" : "Online by phone").first();
+            expect((await lines.boundingBox())?.y ?? 0).toBeGreaterThan(
+              (await paidBy.boundingBox())?.y ?? Infinity,
+            );
+            await expectInside(receipt, width);
+            // Printed or saved, only the receipt shows, with this phone's own lines in it.
+            await page.emulateMedia({ media: "print" });
+            const visibility = (locator: Locator) =>
+              locator.evaluate((element) => getComputedStyle(element).visibility);
+            expect(await visibility(receipt)).toBe("visible");
+            expect(await visibility(lines.locator("p"))).toBe("visible");
+            expect(await visibility(lines.locator("li"))).toBe("visible");
+            expect(await visibility(page.locator("h1").first())).toBe("hidden");
+            expect(await visibility(page.locator(".dining-session__receipt-print button"))).toBe(
+              "hidden",
+            );
+            await page.emulateMedia({ media: "screen" });
+          } else {
+            // Another phone never reads the payer's own words or the refund's date.
+            await expect(lines).toHaveCount(0);
+            await expect(page.getByRole("main")).not.toContainText(
+              zh ? /您已在这部手机上|已退回您的卡。/u : /You paid|went back to your card/u,
+            );
+          }
+          await expectNoInternalText(page);
+          await page.screenshot({
+            path: `test-results/b64-whole-ended-${payer ? "A" : "B"}-${zh ? "zh" : "en"}-${width}.png`,
+            fullPage: true,
+          });
+        }
+      });
+
+      test("ended Cart: See the receipt focuses the Receipt heading on the first screen", async ({
+        page,
+      }) => {
+        test.setTimeout(120_000);
+        for (const item of ["whole-table-paid-online", "by-dish-both-paid"] as const) {
+          scenario = item;
+          phone = { payer: true, tableClosed: true, refunds: "Eight" };
+          await page.unrouteAll({ behavior: "ignoreErrors" });
+          await offerPoints(page, true);
+          await stubTable(page, []);
+          await open(page, "/cart", zh);
+          await page
+            .getByRole("main")
+            .getByRole("link", { name: zh ? "查看收据" : "See the receipt" })
+            .click();
+          await expect(page).toHaveURL(/\/dine-in\/session$/u);
+          await expectReceiptBroughtIntoView(
+            page,
+            page.getByRole("main").getByRole("heading", { name: tableReceipt, exact: true }),
+          );
+          await page.screenshot({
+            path: `test-results/b64-ended-cart-link-${item}-${zh ? "zh" : "en"}-${width}.png`,
+          });
+        }
+      });
     });
