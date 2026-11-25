@@ -1567,20 +1567,26 @@ export function OrderStatusPage({
           onChanged={() => void controller.refresh()}
         />
       ) : null}
-      {view?.order.orderType === "DineIn" ? (
-        // WP-2423 Q8: every round at the table, including other guests', and what is still due.
-        <Link className="order-status__receipt" to="/dine-in/session">
-          {orderStatusText.seeTableOrders}
+      {/* Batch 64 (v15 b63): the order's links in one row, apart from each other. */}
+      <p className="order-status__links">
+        {view?.order.orderType === "DineIn" ? (
+          // WP-2423 Q8: every round at the table, including other guests', and what is still due.
+          <Link className="order-status__receipt" to="/dine-in/session">
+            {orderStatusText.seeTableOrders}
+          </Link>
+        ) : null}
+        {view ? (
+          <Link
+            className="order-status__receipt"
+            to={`/orders/${view.order.orderReference}/receipt`}
+          >
+            {orderStatusText.viewReceipt}
+          </Link>
+        ) : null}
+        <Link className="order-status__back" to="/menu">
+          {orderStatusText.backToMenu}
         </Link>
-      ) : null}
-      {view ? (
-        <Link className="order-status__receipt" to={`/orders/${view.order.orderReference}/receipt`}>
-          {orderStatusText.viewReceipt}
-        </Link>
-      ) : null}
-      <Link className="order-status__back" to="/menu">
-        {orderStatusText.backToMenu}
-      </Link>
+      </p>
     </CustomerPage>
   );
 }

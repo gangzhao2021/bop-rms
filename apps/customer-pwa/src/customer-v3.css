@@ -406,6 +406,18 @@
 .customer-page .member-form .member-form__consent {
   display: block;
 }
+/* Batch 64 (v15 b63 F08): the offers box and its words are one 44 px row at every width (a
+   single line at 1024/1440 was 24 px). */
+.customer-page.customer-page .member-form .member-form__consent {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  gap: var(--bop-space-2);
+}
+.customer-page .member-form__consent input {
+  flex: none;
+  margin: 0;
+}
 .customer-page .member-form__actions {
   display: flex;
   flex-wrap: wrap;
@@ -706,10 +718,15 @@
     .entry-secondary-action,
     .dining-invitation__action--secondary,
     .pickup-code button,
-    .contact-details button
+    .contact-details button,
+    .cart-offline button,
+    .member-panel__skip
   ) {
   display: inline-flex;
   width: auto;
+  /* Batch 64 (v15 b63 F08): a two-character Chinese word (导航, 重试) is 32 px wide; the tap is
+     never narrower than it is tall. */
+  min-width: 44px;
   min-height: 44px;
   align-items: center;
   justify-content: flex-start;
@@ -1288,4 +1305,28 @@
 .customer-page.customer-page .entry-card,
 .customer-page.customer-page .entry-help {
   padding-inline: 0;
+}
+
+/* Batch 64 (v15 b63 F09): the Store's privacy notice is a secondary action like the others —
+   accent words, no underline, a 44 px tap — inside its sentence on checkout and the receipt. The
+   tap grows by padding on the inline words, so the sentence keeps its own line spacing. */
+.customer-page.customer-page .privacy-notice-link {
+  display: inline;
+  padding-block: 14px;
+  color: var(--bop-color-accent);
+  font-weight: 400;
+  text-decoration: none;
+}
+.customer-page.customer-page .privacy-notice-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* Batch 64 (v15 b63): the links at the foot of an order ("View receipt and support", "Back to
+   menu") stand apart; side by side they read as one phrase. */
+.customer-page.customer-page .order-status__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 24px;
+  margin-top: var(--bop-space-4);
 }
