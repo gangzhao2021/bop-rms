@@ -52,6 +52,30 @@ export function orderListOptionText(
   return text.length > 200 ? text.slice(0, 199) + "…" : text;
 }
 
+/**
+ * Batch 63 (F28, v15 design review: "1× Beef noodles (TEST), 1× Beef noodles (TEST)" read as a
+ * duplicate line): the same dish with the same chosen options is one line, its quantities added,
+ * across rounds; two soy milks with different sugar stay two lines. Lines keep the order of their
+ * first appearance; the rounds stay apart in the order's detail.
+ */
+export function mergeOrderListLines(lines: readonly MerchantOrderListSummary["items"][number][]): {
+  readonly items: MerchantOrderListSummary["items"];
+  readonly lineCount: number;
+} {
+  const merged = new Map<string, { name: string; option: string | null; quantity: number }>();
+  for (const line of lines) {
+    const key = JSON.stringify([line.name, line.option]);
+    const entry = merged.get(key);
+    if (entry === undefined) merged.set(key, { ...line });
+    else entry.quantity += line.quantity;
+  }
+  const all = [...merged.values()];
+  return {
+    items: Object.freeze(all.slice(0, 3).map((line) => Object.freeze({ ...line }))),
+    lineCount: all.length,
+  };
+}
+
 /** Read only; the caller authorizes the Store and owns the transaction. At most 200 Orders. */
 export async function loadMerchantOrderListSummaries(
   transaction: Transaction,
@@ -88,10 +112,7 @@ export async function loadMerchantOrderListSummaries(
     ),
   );
   if (lines.length > 20_000) return fail();
-  const found = new Map<
-    string,
-    { items: MerchantOrderListSummary["items"][number][]; lineCount: number }
-  >();
+  const found = new Map<string, MerchantOrderListSummary["items"][number][]>();
   for (const row of lines) {
     const order = parseOrderingReference(row.order_id);
     if (!orders.includes(order)) return fail();
@@ -100,21 +121,17 @@ export async function loadMerchantOrderListSummaries(
       row.quote_version === "2"
         ? decodeConfiguredOrderItemSnapshot(row.snapshot)
         : decodeOrderItemSnapshot(row.snapshot);
-    const entry = found.get(order) ?? { items: [], lineCount: 0 };
-    entry.lineCount += 1;
-    if (entry.items.length < 3) {
-      const chosen = orderListOptionText(
-        snapshot.catalog.options.map((option) => name(option.localizedNames)),
-        locale,
-      );
-      entry.items.push(
-        Object.freeze({
-          name: name(snapshot.catalog.localizedNames),
-          option: chosen,
-          quantity: snapshot.quantity,
-        }),
-      );
-    }
+    const entry = found.get(order) ?? [];
+    entry.push(
+      Object.freeze({
+        name: name(snapshot.catalog.localizedNames),
+        option: orderListOptionText(
+          snapshot.catalog.options.map((option) => name(option.localizedNames)),
+          locale,
+        ),
+        quantity: snapshot.quantity,
+      }),
+    );
     found.set(order, entry);
   }
   // The pickup name of each Order's initial submission, unless the contact was removed.
@@ -140,14 +157,16 @@ export async function loadMerchantOrderListSummaries(
     if (snapshot.pickupContact !== null) names.set(order, snapshot.pickupContact.name);
   }
   const summaries = new Map<string, MerchantOrderListSummary>();
-  for (const [order, entry] of found)
+  for (const [order, entryLines] of found) {
+    const entry = mergeOrderListLines(entryLines);
     summaries.set(
       order,
       Object.freeze({
-        items: Object.freeze(entry.items),
+        items: entry.items,
         lineCount: entry.lineCount,
         pickupName: names.get(order) ?? null,
       }),
     );
+  }
   return summaries;
 }
