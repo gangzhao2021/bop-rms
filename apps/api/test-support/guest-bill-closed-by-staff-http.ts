@@ -50,7 +50,6 @@ export interface GuestBillPhone {
   readonly refunds?: GuestOwnRefunds;
   /** Batch 63: see `guestOwnPaymentView`'s options; `merchant`: the settled receipt's header. */
   readonly partOneTipMinor?: string;
-  readonly markEven?: boolean;
   readonly bothMine?: boolean;
   readonly merchant?: boolean;
 }
@@ -68,7 +67,6 @@ const testMerchant = {
 };
 const viewOptions = (current: GuestBillPhone) => ({
   ...(current.partOneTipMinor === undefined ? {} : { partOneTipMinor: current.partOneTipMinor }),
-  ...(current.markEven === undefined ? {} : { markEven: current.markEven }),
   ...(current.bothMine === undefined ? {} : { bothMine: current.bothMine }),
 });
 const visitCsrf = "d".repeat(43);
@@ -104,7 +102,8 @@ export async function startGuestBillHttp(
     return current === "by-dish-written-off" ||
       current === "half-split-written-off" ||
       current === "half-split-open" ||
-      current === "by-dish-both-paid"
+      current === "by-dish-both-paid" ||
+      current === "half-split-paid"
       ? current
       : null;
   };

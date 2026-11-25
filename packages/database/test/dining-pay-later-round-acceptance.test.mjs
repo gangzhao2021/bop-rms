@@ -334,6 +334,12 @@ it("the points sweep settles a table's refund only under the Store's own account
 // about a refund, before or after A claims; A's points answer for A's refund alone.
 it("a phone that paid its own part keeps its points when another phone's part is refunded", () =>
   journey("MemberPointsSplitOnline"));
+// Batch 64 (v15 b63 live, M63 A): one phone paid both parts of staff's even split online. Its
+// table read names both parts as its own (staff's split records no guest claim of a part), and a
+// TEST member on it is offered both parts' points once, claims them in turn into one account, and
+// each part earns once; the other phone is told it paid nothing.
+it("a phone that paid both parts of staff's even split is told so and earns both parts once", () =>
+  journey("MemberPointsSplitOnePhone"));
 it("a paid pickup earns for the guest who ordered it, once, and for nobody else", () =>
   journey("MemberPointsPickup"));
 // WP-2423 item 8 ④: a split table pays one part in cash (some of it refunded), the guests leave;
@@ -1252,7 +1258,10 @@ async function journey(journeyEnding) {
                                                                         ? "wp2423_plmove"
                                                                         : ending === "Merged"
                                                                           ? "wp2423_plmerge"
-                                                                          : "wp2423_plon",
+                                                                          : ending ===
+                                                                              "MemberPointsSplitOnePhone"
+                                                                            ? "wp2423_plmembs1"
+                                                                            : "wp2423_plon",
     },
     async (context) => {
       const admin = new Client(context.clientConfig);
@@ -9193,6 +9202,111 @@ async function journey(journeyEnding) {
             return;
           }
 
+          if (ending === "MemberPointsSplitOnePhone") {
+            // This port's phone (tablePhone, guest Session tableGuest) pays both parts on its card.
+            const token = await join("+16135550141");
+            const split = await createMerchantDiningTableSplit({
+              persistence: persistenceOf(server),
+              authentication: server.authentication,
+              nextReference: fresh,
+            })({
+              ...as(server),
+              command: {
+                operationReference: fresh(),
+                diningSessionReference: sessionReference,
+                mode: "Even",
+                people: 2,
+                rounds: null,
+              },
+            });
+            assert.equal(split.status, "Recorded");
+            const parts = split.bill.split.parts;
+            // Staff's even split records no guest claim of a part (as on v15: 0 append rows).
+            assert.deepEqual(
+              await rows(
+                "SELECT count(*)::int AS n FROM rms_payment.dining_table_split_part_append WHERE order_id=$1",
+                [orderReference],
+              ),
+              [{ n: 0 }],
+            );
+            const { intents, stripe } = providerStandIn();
+            const payments = createDiningTableOnlinePayments({
+              scope: ownerScope,
+              providerAccountReference: provider,
+              environment: "Test",
+              provider: stripe,
+              transactions: transactions(),
+              now,
+              nextReference: fresh,
+            });
+            const phoneAt = (guestSessionReference) => ({
+              diningSessionReference: sessionReference,
+              guestSessionReference,
+              allowed: async () => true,
+            });
+            for (const partNumber of [1, 2]) {
+              await payments.start(phoneAt(tableGuest), {
+                operationReference: fresh(),
+                tip: { kind: "None" },
+                partNumber,
+              });
+              for (const intent of new Set(intents.values())) intent.status = "Captured";
+              const paid = await payments.refresh(phoneAt(tableGuest));
+              // Right after each payment, the phone's read names the parts it paid itself.
+              assert.deepEqual(paid.paidByMe, partNumber === 1 ? [1] : [1, 2]);
+            }
+            const paidBill = (await bill()).split;
+            assert.equal(paidBill.paidInFull, true);
+            // The phone that paid both: both its own, with its own payments. The other phone at
+            // the table: none, and none of this phone's payments.
+            const payer = await payments.read(phoneAt(tableGuest));
+            assert.deepEqual(payer.paidByMe, [1, 2]);
+            assert.deepEqual(
+              payer.ownPayments.map((entry) => [entry.partNumber, entry.samePlan]),
+              [
+                [1, true],
+                [2, true],
+              ],
+            );
+            const other = await payments.read(phoneAt(guestSession));
+            assert.deepEqual(other.paidByMe, []);
+            assert.deepEqual(other.ownPayments, []);
+            // Points: both parts offered once, as this phone's own, and claimed in turn into one
+            // account (as the guest page does); each part earns once, never twice.
+            const expected = (part) => Number((BigInt(part.subtotalMinor) * 3n) / 100n);
+            const [fullA, fullB] = [expected(parts[0]), expected(parts[1])];
+            assert.ok(fullA > 0 && fullB > 0);
+            assert.deepEqual((await port.state(guest(token))).claim.parts, [
+              { partNumber: 1, points: fullA, certain: true },
+              { partNumber: 2, points: fullB, certain: true },
+            ]);
+            assert.equal((await port.claim(guest(token), 1)).earnedPoints, fullA);
+            assert.deepEqual(
+              (await port.state(guest(token))).claim.parts.map((entry) => entry.partNumber),
+              [2],
+            );
+            assert.equal((await port.claim(guest(token), 2)).earnedPoints, fullB);
+            assert.equal(await pointsOf(token), fullA + fullB);
+            for (const partNumber of [1, 2])
+              await assert.rejects(port.claim(guest(token), partNumber), {
+                code: "MEMBER_NOTHING_TO_CLAIM",
+              });
+            const earned = await rows(
+              "SELECT account_id::text AS account,source_reference::text AS source,points::int AS points FROM rms_loyalty.loyalty_points_transaction WHERE order_id=$1 AND type='Earn' ORDER BY points",
+              [orderReference],
+            );
+            assert.equal(earned.length, 2);
+            assert.equal(new Set(earned.map((row) => row.account)).size, 1);
+            assert.equal(earned[0].account, String(await accountOf(token)));
+            assert.equal(new Set(earned.map((row) => row.source)).size, 2);
+            assert.deepEqual(
+              earned.map((row) => row.points),
+              [fullA, fullB].sort((a, b) => a - b),
+            );
+            await reportAddsUp();
+            return;
+          }
+
           if (ending === "MemberPointsSplitOnline") {
             // Phone B is this port's phone (tablePhone); phone A is the host's (hostPhone).
             const portA = createCustomerMember({
@@ -10020,6 +10134,10 @@ async function journey(journeyEnding) {
             });
             for (const intent of intents.values()) intent.status = "Captured";
             const captured = await phonePayments.refresh(guestAt(tableGuest));
+            // Batch 64 (v15 b63 live, M63 A): staff's even split records no guest claim of a
+            // part; the phone's own captured payment says part 1 is its own, and only its own.
+            assert.deepEqual(captured.paidByMe, [1]);
+            assert.deepEqual((await phonePayments.read(guestAt(guestSession))).paidByMe, []);
             const part1 = captured.bill.split.parts[0];
             assert.deepEqual(
               [part1.payment.method, part1.payment.totalMinor],

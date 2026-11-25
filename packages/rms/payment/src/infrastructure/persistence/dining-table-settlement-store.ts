@@ -535,6 +535,34 @@ export interface DiningTableOnlinePaymentRecord {
 export const onlinePaymentHoldsBill = (
   payment: Pick<DiningTableOnlinePaymentRecord, "outcome">,
 ): boolean => payment.outcome === null || payment.outcome.status === "Captured";
+/**
+ * Batch 64 (v15 b63 live, M63 A): the parts of the bill's current split that this guest's phone
+ * paid itself — its own online payments Payment captured for a part of that split, whatever the
+ * split's mode (staff's even split, by rounds or by dishes, or the guests' own by-dish parts).
+ * Staff's splits record no guest claim of a part, so the phone's own captured payment is what
+ * says the part is theirs. Only the asking phone's payments count, never another phone's; a part
+ * of an earlier split (staff split again) is not one of the current split's.
+ */
+export function diningTablePartsPaidBy(
+  payments: readonly Pick<
+    DiningTableOnlinePaymentRecord,
+    "guestSessionReference" | "part" | "outcome"
+  >[],
+  guestSessionReference: string | null,
+  splitPlanReference: string | null,
+): ReadonlySet<number> {
+  if (guestSessionReference === null || splitPlanReference === null) return new Set();
+  return new Set(
+    payments.flatMap((payment) =>
+      payment.guestSessionReference === guestSessionReference &&
+      payment.outcome?.status === "Captured" &&
+      payment.part !== null &&
+      payment.part.splitPlanReference === splitPlanReference
+        ? [payment.part.partNumber]
+        : [],
+    ),
+  );
+}
 const onlinePaymentSelect = `SELECT p.online_payment_id::text AS payment,p.tenant_id::text AS tenant,
  p.operation_id::text AS operation,p.intent_digest,p.dining_session_id::text AS session,p.order_id::text AS "order",
  p.guest_session_id::text AS guest,p.rounds_minor::text AS rounds,p.tip_minor::text AS tip,

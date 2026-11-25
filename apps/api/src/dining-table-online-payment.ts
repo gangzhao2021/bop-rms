@@ -6,6 +6,7 @@ import {
   createCreateIntentRequest,
   createPostgresDiningTableSettlementStore,
   createRetrieveIntentRequest,
+  diningTablePartsPaidBy,
   type DiningTableOnlinePaymentRecord,
   type DiningTableOnlineRefundRecord,
   type PaymentProviderAdapter,
@@ -223,6 +224,28 @@ export function lastOwnDeclinedOf(
   return Object.freeze({ partNumber: lastOwn.part?.partNumber ?? null });
 }
 
+/**
+ * WP-2423 同桌结账, batch 64 (v15 b63 live): the parts of the bill's current split that are paid and
+ * that this phone paid itself (Payment's rule: its own captured payments for a part of that split),
+ * by part number — for every split mode. Another phone's parts are never named.
+ */
+export function paidByMeOf(
+  parts: readonly { readonly partNumber: number; readonly payment: unknown }[],
+  attempts: readonly Pick<
+    DiningTableOnlinePaymentRecord,
+    "guestSessionReference" | "part" | "outcome"
+  >[],
+  guestSessionReference: string | null,
+  splitPlanReference: string | null,
+): readonly number[] {
+  const mine = diningTablePartsPaidBy(attempts, guestSessionReference, splitPlanReference);
+  return Object.freeze(
+    parts
+      .filter((part) => part.payment !== null && mine.has(part.partNumber))
+      .map((part) => part.partNumber),
+  );
+}
+
 const sha = (value: unknown) =>
   "sha256:" + createHash("sha256").update(canonicalizeRfc8785(value)).digest("hex");
 /** The attempt's reference, derived from the guest's operation (a retry finds the same one). */
@@ -353,16 +376,6 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
     // JSON answer can carry: the staff stop was recorded, then failed to answer.
     const { splitPlanRecord } = current;
     const publicBill = publicBillOf(current);
-    const mineParts = new Set(
-      (splitPlanRecord?.guestParts ?? [])
-        .filter(
-          (part) =>
-            part.withdrawn === null &&
-            authority.guestSessionReference !== null &&
-            part.guestSessionReference === authority.guestSessionReference,
-        )
-        .map((part) => part.partNumber),
-    );
     return Object.freeze({
       lastOwnDeclined: lastOwnDeclinedOf(
         attempts,
@@ -370,10 +383,13 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
         splitPlanRecord?.splitPlanReference ?? null,
       ),
       bill: publicBill,
-      paidByMe: Object.freeze(
-        (publicBill.split?.parts ?? [])
-          .filter((part) => part.payment !== null && mineParts.has(part.partNumber))
-          .map((part) => part.partNumber),
+      // Batch 64 (v15 b63 live, M63 A): the paid parts this phone paid itself, from its own
+      // captured payments (staff's even split records no guest claim of a part).
+      paidByMe: paidByMeOf(
+        publicBill.split?.parts ?? [],
+        attempts,
+        authority.guestSessionReference,
+        splitPlanRecord?.splitPlanReference ?? null,
       ),
       choices: choicesOf(current, authority),
       ownPayments: Object.freeze(

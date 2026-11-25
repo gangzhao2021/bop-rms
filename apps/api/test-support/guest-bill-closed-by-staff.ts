@@ -5,11 +5,13 @@
  * their own dish online; staff then recorded "Guests left without paying the rest" (a
  * GUEST_LEFT_UNPAID write-off: priced 2825, captured 1413, written off 1412).
  *
- * Plain data only (type imports): the api HTTP test composes it with the real read and handler
- * from source, and the customer browser spec serves it through the same handler on a local server.
+ * Plain data (and the real read's own rules): the api HTTP test composes it with the real read and
+ * handler from source, and the customer browser spec serves it through the same handler on a local
+ * server.
  */
 import type { CustomerDiningSessionFacts } from "../src/customer-dining-session-read.js";
 import type { readDiningTableBill } from "../src/merchant-dining-table-checkout.js";
+import { paidByMeOf } from "../src/dining-table-online-payment.js";
 
 type Order = NonNullable<CustomerDiningSessionFacts["order"]>;
 type TableBill = Awaited<ReturnType<typeof readDiningTableBill>>;
@@ -447,6 +449,20 @@ export function guestOwnRefunds(kind: GuestOwnRefunds): readonly OwnRefund[] {
     },
   ];
 }
+/** Batch 64: the split plan of `guestOwnPaymentView`'s bill (as `guestBillPayments`' plan). */
+const splitPlan = id(0x70);
+/** Batch 64: Payment's record of a phone's captured online payment for a part of that split. */
+const capturedPart = (guestSessionReference: string, partNumber: number) => ({
+  guestSessionReference,
+  part: { splitPlanReference: splitPlan, partNumber },
+  outcome: {
+    status: "Captured" as const,
+    capturedMinor: null,
+    providerTransactionReference: null,
+    occurredAt: "2026-11-24T00:34:40.000Z",
+    recordedAt: "2026-11-24T00:34:40.000Z",
+  },
+});
 /**
  * Batch 56 (v15 b55 live, L55 CB2 order 76 and L55 CB3 order 80): the guest table-payment view
  * (createDiningTableOnlinePayments' read) once staff closed the rest of a bill one guest paid
@@ -458,25 +474,29 @@ export function guestOwnRefunds(kind: GuestOwnRefunds): readonly OwnRefund[] {
  */
 export function guestOwnPaymentView(
   scenario:
-    "by-dish-written-off" | "half-split-written-off" | "half-split-open" | "by-dish-both-paid",
+    | "by-dish-written-off"
+    | "half-split-written-off"
+    | "half-split-open"
+    | "by-dish-both-paid"
+    | "half-split-paid",
   payer: boolean,
   sessionPhase: "Closing" | "Closed" = "Closing",
   refunds: GuestOwnRefunds = "None",
   /**
-   * Batch 63 (design review D62B-01/08): the payer's tip on part 1 (its total grows by it); the
-   * even split's paid part marked as this phone's (as the real read marks every split mode); and,
+   * Batch 63 (design review D62B-01/08): the payer's tip on part 1 (its total grows by it); and,
    * paid in full, the payer's phone paid both parts.
    */
   options: {
     readonly partOneTipMinor?: string;
-    readonly markEven?: boolean;
     readonly bothMine?: boolean;
   } = {},
 ): PaymentView {
   const tip = BigInt(options.partOneTipMinor ?? "0");
   // Batch 60: both guests paid their own dish (B, the other phone, paid part 2 for round 2).
-  const bothPaid = scenario === "by-dish-both-paid";
-  const byDish = scenario === "by-dish-written-off" || bothPaid;
+  // Batch 64 (v15 b63 live, M63 A): or both parts of staff's even split were paid (`bothMine`: on
+  // the payer's phone), the table still open.
+  const bothPaid = scenario === "by-dish-both-paid" || scenario === "half-split-paid";
+  const byDish = scenario === "by-dish-written-off" || scenario === "by-dish-both-paid";
   const dish = { displayName: "Beef noodles (TEST)", quantity: 1, shared: false };
   const paidPart = {
     partNumber: 1,
@@ -504,7 +524,7 @@ export function guestOwnPaymentView(
     subtotalMinor: "1250",
     taxMinor: "162",
     roundNumbers: [2],
-    dishes: bothPaid ? [dish] : [],
+    dishes: byDish && bothPaid ? [dish] : [],
     payment: bothPaid
       ? {
           ...paidPart.payment,
@@ -514,7 +534,7 @@ export function guestOwnPaymentView(
         }
       : null,
     guestPaying: false,
-    ...(bothPaid ? { choice: "Mine" as const } : {}),
+    ...(byDish && bothPaid ? { choice: "Mine" as const } : {}),
   };
   // Batch 61: what staff gave back of the table's payments (all of it of A's part 1), as the bill
   // read sums Payment's refunds of the table (readDiningTableBill's refundedMinor).
@@ -577,16 +597,19 @@ export function guestOwnPaymentView(
     } as unknown as PaymentView["bill"],
     attempt: null,
     lastOwnDeclined: null,
-    paidByMe:
-      payer && options.bothMine === true && bothPaid
-        ? [1, 2]
-        : byDish || options.markEven === true
-          ? payer
-            ? [1]
-            : bothPaid
-              ? [2]
-              : []
-          : [],
+    // Batch 64 (v15 b63 live, M63 A): which paid parts are this phone's, by the real read's rule
+    // from Payment's captured payments of this split (staff's even split records no guest claim
+    // of a part, as on v15): part 1 on the payer's phone; part 2, once paid, on the payer's phone
+    // (`bothMine`) or on the other phone.
+    paidByMe: paidByMeOf(
+      bothPaid || !byDish ? [paidPart, restPart] : [paidPart],
+      [
+        capturedPart(guestPhoneSession(true), 1),
+        ...(bothPaid ? [capturedPart(guestPhoneSession(options.bothMine === true), 2)] : []),
+      ],
+      guestPhoneSession(payer),
+      splitPlan,
+    ),
     choices: null,
     ownPayments: !payer
       ? bothPaid

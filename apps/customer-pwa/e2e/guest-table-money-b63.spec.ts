@@ -16,14 +16,15 @@ import { routeStorefrontReads } from "./storefront-reads";
 //  - F05 (D62B-03): no Store name, address or date on the dine-in receipt, and no print or save.
 //  - F06 (D62B-08): a phone that paid both parts was asked "Which part did you pay?" for half the
 //    points, "Your payment" was listed twice with no total, and the part options were 21 px tall.
-type Scenario = "half-split-open" | "by-dish-both-paid";
+type Scenario =
+  "half-split-open" | "by-dish-both-paid" | "half-split-paid" | "whole-table-paid-online";
 interface Phone {
   payer: boolean;
   tableClosed: boolean;
   partOneTipMinor?: string;
-  markEven?: boolean;
   bothMine?: boolean;
   merchant?: boolean;
+  refunds?: "None" | "Eight";
 }
 interface GuestBillHttp {
   readonly url: string;
@@ -321,7 +322,7 @@ for (const width of [390, 1024, 1440])
       }) => {
         test.setTimeout(90_000);
         scenario = "half-split-open";
-        phone = { payer: true, tableClosed: false, partOneTipMinor: "188", markEven: true };
+        phone = { payer: true, tableClosed: false, partOneTipMinor: "188" };
         await offerPoints(page, true);
         await stubTable(page, []);
         await open(page, "/dine-in/session", zh);
@@ -544,5 +545,149 @@ for (const width of [390, 1024, 1440])
         ))
           expect(box).toBeGreaterThanOrEqual(44);
         await page.screenshot({ path: tag("ended-which-part") });
+      });
+    });
+
+// Batch 64 (v15 b63 live, customer-table-money, M63 A/B): staff split M63 A evenly in 2; phone A
+// paid part 1 ($16.01, tip $1.88) and then part 2 ($15.37). Pay the bill never said "You paid …"
+// and part 1 read only "paid", as on every phone: the table-payment read named a part this
+// phone's only from a guest's own claim of it, and staff's even split records none (v15: 2 parts,
+// 0 claims). Once both parts were paid, the table still open, "Your payments" was missing too.
+// The batch 63 harness had marked the part this phone's by hand; it now goes through the read's
+// own rule from Payment's captured payments, as v15's records hold them. Also: a table paid whole
+// on a phone, still open, prints only its receipt (the b63 live check stubbed print).
+for (const width of [390, 1024, 1440])
+  for (const zh of [false, true])
+    test.describe(`@production CUST-DINE-IN b64 the parts this phone paid of staff's even split (${zh ? "zh-Hans" : "en"} ${width})`, () => {
+      test.use({ viewport: { width, height }, hasTouch: width < 768, isMobile: width < 768 });
+      const tag = (name: string) => `test-results/b64-${name}-${zh ? "zh" : "en"}-${width}.png`;
+
+      test("one part paid: the payer is told first and its part is its own; the other phone is not", async ({
+        page,
+      }) => {
+        test.setTimeout(90_000);
+        scenario = "half-split-open";
+        for (const payer of [true, false]) {
+          phone = { payer, tableClosed: false };
+          await page.unrouteAll({ behavior: "ignoreErrors" });
+          await offerPoints(page, payer);
+          await stubTable(page, []);
+          await open(page, "/dine-in/session", zh);
+          const pay = page.getByRole("region", { name: zh ? "结账付款" : "Pay the bill" });
+          const part1 = pay.locator(".dining-session__parts label").nth(0);
+          if (payer) {
+            await expect(pay.locator(".dining-session__you-paid-line")).toHaveText(
+              zh ? "您已付 $14.13 · 手机在线付款" : "You paid $14.13 · Online by phone",
+            );
+            await expect(part1).toHaveText(
+              zh ? "第 1 份 · $14.13 · 您已付" : "Part 1 · $14.13 · paid by you",
+            );
+            // Said first, above the parts, and on the first screen of a phone.
+            const line = await pay.locator(".dining-session__you-paid-line").boundingBox();
+            expect((line?.y ?? 0) + (line?.height ?? 0)).toBeLessThanOrEqual(
+              (await pay.locator(".dining-session__parts").boundingBox())?.y ?? 0,
+            );
+          } else {
+            await expect(part1).toHaveText(
+              zh ? "第 1 份 · $14.13 · 已付" : "Part 1 · $14.13 · paid",
+            );
+            await expect(pay.locator(".dining-session__you-paid")).toHaveCount(0);
+            await expect(pay).not.toContainText(zh ? /您已付/u : /You paid|paid by you/u);
+          }
+          await expect(pay.getByRole("radio", { checked: true })).toHaveCount(0);
+          await expectInside(pay, width);
+          await expectNoInternalText(page);
+          await page.screenshot({ path: tag(`even-part1-${payer ? "A" : "B"}`), fullPage: true });
+        }
+      });
+
+      test("both parts paid on this phone, table open: Your payments with the total under Pay the bill", async ({
+        page,
+      }) => {
+        test.setTimeout(90_000);
+        scenario = "half-split-paid";
+        phone = { payer: true, tableClosed: false, bothMine: true };
+        await offerPoints(page, true);
+        await stubTable(page, []);
+        await open(page, "/dine-in/session", zh);
+        const pay = page.getByRole("region", { name: zh ? "结账付款" : "Pay the bill" });
+        await expect(pay.locator("p[role=status]").first()).toHaveText(
+          zh ? "账单 2 份都已付清，谢谢！" : "Every part of the bill is paid (2 parts). Thank you!",
+        );
+        const youPaid = pay.locator(".dining-session__you-paid");
+        await expect(youPaid.locator(".dining-session__you-paid-line")).toHaveText(
+          zh ? "您已付 $28.25 · 手机在线付款" : "You paid $28.25 · Online by phone",
+        );
+        await expect(youPaid).toContainText(zh ? "您实付合计" : "Total paid by you");
+        await expect(youPaid).toContainText("$28.25");
+        // Under the paid line, above the points offer.
+        const points = page.getByRole("region", {
+          name: zh
+            ? "加入会员，您付的款可以积 375 分"
+            : "Join and earn 375 points on what you paid",
+        });
+        await expect(points).toBeVisible();
+        expect(await bottom(youPaid)).toBeLessThanOrEqual(await top(points));
+        await expectInside(pay, width);
+        await expectNoInternalText(page);
+        await page.screenshot({ path: tag("even-both-paid"), fullPage: true });
+      });
+
+      test("paid whole on this phone, table open: printed, only the receipt shows", async ({
+        page,
+      }) => {
+        test.setTimeout(90_000);
+        scenario = "whole-table-paid-online";
+        phone = { payer: true, tableClosed: false };
+        await page.addInitScript(() => {
+          (window as unknown as { printed: number }).printed = 0;
+          window.print = () => {
+            (window as unknown as { printed: number }).printed += 1;
+          };
+        });
+        await offerPoints(page, true);
+        await stubTable(page, []);
+        await open(page, "/dine-in/session", zh);
+        const receipt = page.getByRole("region", { name: zh ? "收据" : "Receipt", exact: true });
+        await expect(receipt).toBeVisible();
+        const print = page.getByRole("button", {
+          name: zh ? "打印或保存收据" : "Print or save receipt",
+        });
+        await print.click();
+        expect(await page.evaluate(() => (window as unknown as { printed: number }).printed)).toBe(
+          1,
+        );
+        await page.emulateMedia({ media: "print" });
+        const shown = (locator: Locator) =>
+          locator.evaluate(
+            (element) =>
+              getComputedStyle(element).visibility === "visible" &&
+              getComputedStyle(element).display !== "none" &&
+              element.getClientRects().length > 0,
+          );
+        expect(await shown(receipt.locator("h2").first())).toBe(true);
+        expect(await shown(receipt.locator("dl").first())).toBe(true);
+        expect(await shown(page.locator("h1").first())).toBe(false);
+        // By its markup: hidden in print, it is out of the accessibility tree.
+        expect(await shown(page.locator(".dining-session__receipt-print button"))).toBe(false);
+        expect(await page.locator(".member-panel").count()).toBeGreaterThan(0);
+        for (const panel of await page.locator(".member-panel").all())
+          expect(await shown(panel)).toBe(false);
+        // Nothing outside the receipt is shown on paper (the tabs, the header, the rounds).
+        const outside = await page.evaluate(() =>
+          [...document.querySelectorAll("body *")]
+            .filter(
+              (element) =>
+                !element.closest(".dining-session__receipt--printable") &&
+                element.children.length === 0 &&
+                (element.textContent ?? "").trim() !== "" &&
+                getComputedStyle(element).visibility === "visible" &&
+                element.getClientRects().length > 0,
+            )
+            .map((element) => (element.textContent ?? "").trim()),
+        );
+        expect(outside).toEqual([]);
+        await page.screenshot({ path: tag("whole-open-print"), fullPage: true });
+        await page.emulateMedia({ media: "screen" });
       });
     });
