@@ -499,6 +499,52 @@ export async function listDiningSessionTableLabels(
   return labels;
 }
 
+/**
+ * b64 (v15 b62 live, S62 E): the phase of each of these dining sessions (Active, Closing — paying
+ * or paid, guests may still be seated — Closed or Cancelled), so Orders can say a paid table's next
+ * step only while the table is still open. A session not found is omitted. Caller authorizes the
+ * Store and owns the transaction.
+ */
+export type DiningSessionPhaseName = "Active" | "Closing" | "Closed" | "Cancelled";
+export async function listDiningSessionPhases(
+  transaction: DiningTableTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  sessionReferences: readonly string[],
+): Promise<ReadonlyMap<string, DiningSessionPhaseName>> {
+  if (sessionReferences.length === 0) return new Map();
+  if (sessionReferences.length > 200) throw new Error("DINING_TABLE_INPUT_INVALID");
+  const brand = reference(scope.brandReference),
+    store = reference(scope.storeReference),
+    sessions = sessionReferences.map((value) => reference(value));
+  await transaction.query(
+    "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+    [brand, store],
+  );
+  const result = (await transaction.query(
+    "SELECT s.session_id::text session_id,s.phase FROM rms_dining.dining_session s " +
+      "WHERE s.brand_id=$1 AND s.store_id=$2 AND s.session_id=ANY($3::uuid[])",
+    [brand, store, sessions],
+  )) as { rows?: unknown } | null;
+  const found = result?.rows;
+  if (!Array.isArray(found) || found.length > sessions.length)
+    throw new Error("DINING_TABLE_UNAVAILABLE");
+  const phases = new Map<string, DiningSessionPhaseName>();
+  for (const row of found) {
+    const value = row as { session_id?: unknown; phase?: unknown };
+    const session = reference(value.session_id);
+    if (
+      !sessions.includes(session) ||
+      (value.phase !== "Active" &&
+        value.phase !== "Closing" &&
+        value.phase !== "Closed" &&
+        value.phase !== "Cancelled")
+    )
+      throw new Error("DINING_TABLE_UNAVAILABLE");
+    phases.set(session, value.phase);
+  }
+  return phases;
+}
+
 const tableLabel = (value: unknown): string | null =>
   typeof value === "string" && /^[^\p{Cc}\p{Cf}<>{}$]{1,40}$/u.test(value) && value.trim() === value
     ? value

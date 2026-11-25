@@ -44,7 +44,11 @@ import {
   listStoreKitchenOrderItemStates,
   listStoreStartedKitchenBatches,
 } from "@rms/kitchen";
-import { listDiningGuestStartedSessions, listDiningSessionTableLabels } from "@rms/dining";
+import {
+  listDiningGuestStartedSessions,
+  listDiningSessionPhases,
+  listDiningSessionTableLabels,
+} from "@rms/dining";
 import {
   listStorePickupAcceptanceDeadlines,
   listStoreUncollectedPickupOrders,
@@ -710,6 +714,11 @@ export function createPersistentMerchantOrderQueue(options: {
                * merged into), each round's number on the whole bill, as checkout numbers it.
                */
               billRoundNumbers?: { orderBatchReference: string; roundNumber: number }[];
+              /**
+               * b64 (v15 b62 live): the bill is paid and its table is still checking out (the
+               * guests may still be seated; it is closed after they leave). Absent otherwise.
+               */
+              checkingOut?: true;
               /** Owner 2026-11-03 walkthrough: a split bill with some parts paid: what is left. */
               partlyPaid?: {
                 remainingMinor: string;
@@ -1862,6 +1871,25 @@ export function createPersistentMerchantOrderQueue(options: {
                   if (!(await authority.guard(businessTransaction))) return unavailable();
                   return listDiningSessionTableLabels(businessTransaction, ownerScope, sessions);
                 })();
+          // b64 (v15 b62 live, S62 E): a paid table still checking out (guests may be seated) says
+          // its next step on Orders too; read only for the sessions of paid table bills.
+          const paidBillSessions = [
+            ...new Set(
+              result.items.flatMap((item) =>
+                item.diningSessionReference !== null &&
+                tableBills.get(item.orderReference)?.paid != null
+                  ? [item.diningSessionReference]
+                  : [],
+              ),
+            ),
+          ];
+          const sessionPhases =
+            ownerScope === null || paidBillSessions.length === 0
+              ? new Map<string, string>()
+              : await (async () => {
+                  if (!(await authority.guard(businessTransaction))) return unavailable();
+                  return listDiningSessionPhases(businessTransaction, ownerScope, paidBillSessions);
+                })();
           // DEC-DINING-GUEST-TABLE-START: at a table a guest started nobody has to carry a finished
           // dish over, so Home doesn't raise it as something to serve. Said only of those Orders.
           const guestStartedSessions =
@@ -2344,7 +2372,14 @@ export function createPersistentMerchantOrderQueue(options: {
                               totalMinor: round.totalMinor.toString(),
                             })),
                           }
-                        : (bill ?? null))(tableBills.get(item.orderReference)),
+                        : (bill ?? null))(
+                      ((bill) =>
+                        bill?.paid != null &&
+                        item.diningSessionReference !== null &&
+                        sessionPhases.get(item.diningSessionReference) === "Closing"
+                          ? { ...bill, checkingOut: true as const }
+                          : bill)(tableBills.get(item.orderReference)),
+                    ),
                   ),
                   ...(item.diningSessionReference !== null &&
                   guestStartedSessions.has(item.diningSessionReference)

@@ -5468,7 +5468,11 @@ async function journey(journeyEnding) {
             report.summary.grossSalesMinor,
             (first.subtotal + second.subtotal).toString(),
           );
-          assert.equal(report.summary.compCount, 2);
+          // b64 (v15 b62 live): by the portions the discount and the comp covered (each whole line).
+          assert.equal(
+            report.summary.compCount,
+            Number(items1[0].quantity) + Number(items2[0].quantity),
+          );
           assert.equal(report.summary.compsMinor, compsMinor.toString());
           assert.equal(
             report.summary.netSalesMinor,
@@ -5489,7 +5493,10 @@ async function journey(journeyEnding) {
           const [header, line] = storeSalesReportCsv(report, "summary").slice(1).split("\r\n");
           const columns = header.split(",");
           const values = line.split(",");
-          assert.equal(values[columns.indexOf("comps_and_discounts_count")], "2");
+          assert.equal(
+            values[columns.indexOf("comps_and_discounts_count")],
+            String(report.summary.compCount),
+          );
           assert.equal(
             values[columns.indexOf("comps_and_discounts_by_manager")],
             (Number(compsMinor) / 100).toFixed(2),
@@ -5506,6 +5513,8 @@ async function journey(journeyEnding) {
             decided.reduce((sum, record) => sum + record.totalMinor, 0n),
             second.total + discountMinor,
           );
+          // b64: the settlement line counts the same portions as Reports.
+          assert.equal(managerCompsTakenOff(decided).count, report.summary.compCount);
           // Another Store of the Brand sees none of it (row security).
           assert.deepEqual(
             await transactions().run((tx) =>
@@ -7205,8 +7214,8 @@ async function journey(journeyEnding) {
           assert.equal(comped + 1413n, original);
           const report = await salesReport();
           assert.equal(report.summary.grossSalesMinor, "3750");
-          // One line comped (in two parts), with its tax: $28.25.
-          assert.equal(report.summary.compCount, 1);
+          // One line of two bowls comped (in two parts), with its tax: $28.25. b64: 2 portions.
+          assert.equal(report.summary.compCount, 2);
           assert.equal(report.summary.compsWithTaxMinor, "2825");
           assert.equal(
             BigInt(report.summary.netSalesMinor) + BigInt(report.summary.taxMinor),
@@ -7225,13 +7234,13 @@ async function journey(journeyEnding) {
               [1412n, 1, 2],
             ],
           );
-          // The day-end "Taken off bills" line reads the same: one dish (道菜), $28.25, as Reports.
+          // The day-end "Taken off bills" line reads the same: 2 portions (份), $28.25, as Reports.
           assert.deepEqual(managerCompsTakenOff(decided), {
             count: report.summary.compCount,
             amountMinor: report.summary.compsWithTaxMinor,
             currencyCode: "CAD",
           });
-          assert.equal(managerCompsTakenOff(decided).count, 1);
+          assert.equal(managerCompsTakenOff(decided).count, 2);
         }
 
         /**
@@ -8326,7 +8335,15 @@ async function journey(journeyEnding) {
             },
           });
           assert.equal(closedOrder.status, "Committed");
+          // b64 (v15 b62 live, S62 E): while the paid table is still checking out, Orders says so
+          // (its row can then say what comes next); once the table is closed it no longer does.
+          assert.equal((await orderDetail()).items[0].tableBill.checkingOut, true);
           assert.equal((await closing(server, "Finalize")).phase, "Closed");
+          assert.equal(
+            Object.hasOwn((await orderDetail()).items[0].tableBill, "checkingOut"),
+            false,
+          );
+          assert.notEqual((await orderDetail()).items[0].tableBill.paid, null);
           // Another Store sees none of it.
           const other = await rows(
             "SELECT count(*)::int AS n FROM rms_payment.dining_table_split_part_append WHERE store_id<>$1",
@@ -8811,6 +8828,9 @@ async function journey(journeyEnding) {
             refundPendingMinor: undefined,
           });
           await assert.rejects(refund("1"), { code: "TABLE_PAYMENT_TOO_MUCH" });
+          // b64 (v15 b62 live, S62 E): refunded in full while the guests are still seated: the
+          // Orders row reads the table as checking out, under the pilot role.
+          assert.equal((await orderDetail()).items[0].tableBill.checkingOut, true);
           assert.deepEqual((await dayNow()).settlement.onlineRefunded, {
             count: 2,
             amountMinor: due,
