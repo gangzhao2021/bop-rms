@@ -406,10 +406,10 @@ it("batch 60: a settled receipt says how many of a line's dishes were on the hou
       displayName: "Beef noodles (TEST)",
       subtotalMinor: "2500",
       reduced: "Comp",
-      compedQuantity: 1,
       quantity: 2,
+      compedQuantity: 1,
     },
-    { displayName: "Tea", subtotalMinor: "0", reduced: "Comp" },
+    { displayName: "Tea", subtotalMinor: "0", reduced: "Comp", quantity: 2 },
   ]);
 });
 

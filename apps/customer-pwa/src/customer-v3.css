@@ -544,3 +544,19 @@
   color: var(--bop-color-text-muted);
   font-size: 0.875rem;
 }
+
+/* Batch 63 (design review D62B-02): on the ended table's receipt each round heading sat right
+   under the previous round's last line (0 px above, 11 px below). The same space above and below
+   the heading, and no hairline between a heading and its own dishes, so each round reads as one
+   group; the hairline above the totals stays. */
+.customer-page .dining-session__receipt-round {
+  margin-top: var(--bop-space-3);
+}
+.customer-page .dining-session__receipt-round > h3 {
+  margin: 0;
+}
+.customer-page .dining-session__receipt-round > .order-status__money {
+  margin-top: var(--bop-space-3);
+  padding-top: 0;
+  border-top: 0;
+}

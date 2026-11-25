@@ -454,10 +454,13 @@ export function customerSettledTableReceiptBody(view: DiningTableOnlinePaymentVi
                 : item.reduction.kind === "Comp"
                   ? "Comp"
                   : "Discount",
+          // Batch 63 (design review D62B-02): how many of the dish, so "2 × Beef noodles $25.00"
+          // reads as the Rounds list does, never one bowl at twice the price.
+          quantity: item.quantity,
           // Batch 60: comps on some of the line's dishes ("1 of 2 on the house").
           ...(item.reduction?.compedQuantity === undefined
             ? {}
-            : { compedQuantity: item.reduction.compedQuantity, quantity: item.quantity }),
+            : { compedQuantity: item.reduction.compedQuantity }),
         })),
         subtotalMinor: round.subtotalMinor,
         taxMinor: round.taxMinor,

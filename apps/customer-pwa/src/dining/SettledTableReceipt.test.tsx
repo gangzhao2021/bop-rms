@@ -47,7 +47,8 @@ const html = (payload: unknown, language: "en" | "zh-Hans" = "en") =>
 
 it("says 1 of 2 on the house beside the line, which keeps its price", () => {
   const page = html(receipt(noodles));
-  expect(page).toContain("<dt>Beef noodles (TEST) · 1 of 2 on the house</dt><dd>$25.00</dd>");
+  // Batch 63: with how many of the dish, as the Rounds list says it.
+  expect(page).toContain("<dt>2 × Beef noodles (TEST) · 1 of 2 on the house</dt><dd>$25.00</dd>");
   expect(page).not.toContain("Beef noodles (TEST) · On the house");
   // A line comped whole reads as before.
   const whole = html(receipt({ ...noodles, compedQuantity: undefined, quantity: undefined }));
@@ -56,8 +57,43 @@ it("says 1 of 2 on the house beside the line, which keeps its price", () => {
 
 it("says it in Chinese", () => {
   expect(html(receipt(noodles), "zh-Hans")).toContain(
-    "Beef noodles (TEST) · 2 份中的 1 份店家赠送",
+    "2 × Beef noodles (TEST) · 2 份中的 1 份店家赠送",
   );
+});
+
+/**
+ * Batch 63 (design review D62B-02): round 2 held 2 bowls, and the ended receipt read "Beef noodles
+ * (TEST) $25.00" (one bowl at twice the price) while the Rounds list read "2 × Beef noodles".
+ */
+it("batch 63: every line says how many of the dish, as the Rounds list does", () => {
+  const page = html(
+    receipt({
+      displayName: "Beef noodles (TEST)",
+      subtotalMinor: "2500",
+      reduced: null,
+      quantity: 2,
+    }),
+  );
+  expect(page).toContain("<dt>2 × Beef noodles (TEST)</dt><dd>$25.00</dd>");
+  expect(
+    html(
+      receipt({
+        displayName: "Beef noodles (TEST)",
+        subtotalMinor: "2500",
+        reduced: null,
+        quantity: 2,
+      }),
+      "zh-Hans",
+    ),
+  ).toContain("<dt>2 × Beef noodles (TEST)</dt>");
+  // An older server sends no count: the line is said as before.
+  expect(page).toContain("<dt>Tea</dt>");
+  for (const broken of [0, 1000, "2", 1.5])
+    expect(() =>
+      parseSettledTableReceipt(
+        receipt({ displayName: "Tea", subtotalMinor: "380", reduced: null, quantity: broken }),
+      ),
+    ).toThrow();
 });
 
 it("reads the count strictly: only for a comp, and fewer than the line has", () => {

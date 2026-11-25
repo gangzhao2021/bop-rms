@@ -26,6 +26,7 @@ export interface SettledTableReceipt {
        * many. Absent: the whole line (or an older server).
        */
       readonly compedQuantity?: number;
+      /** Batch 63: how many of the dish (absent: an older server). */
       readonly quantity?: number;
     }[];
   }[];
@@ -111,17 +112,20 @@ export function parseSettledTableReceipt(payload: unknown): SettledTableReceipt 
             Number.isSafeInteger(value) && (value as number) >= 1 && (value as number) <= 999
               ? (value as number)
               : fail();
+          // Batch 63: how many of the dish (absent from an older server: the line is said alone).
+          const quantity = item.quantity === undefined ? undefined : count(item.quantity);
           const part =
             item.compedQuantity === undefined
               ? null
-              : reduced === "Comp"
-                ? { compedQuantity: count(item.compedQuantity), quantity: count(item.quantity) }
+              : reduced === "Comp" && quantity !== undefined
+                ? { compedQuantity: count(item.compedQuantity) }
                 : fail();
-          if (part !== null && part.compedQuantity >= part.quantity) fail();
+          if (part !== null && quantity !== undefined && part.compedQuantity >= quantity) fail();
           return Object.freeze({
             displayName: text(item.displayName),
             subtotalMinor: minor(item.subtotalMinor),
             reduced,
+            ...(quantity === undefined ? {} : { quantity }),
             ...(part ?? {}),
           });
         }),
@@ -275,7 +279,7 @@ export function SettledTableReceiptView({ receipt }: { readonly receipt: Settled
     <section className="order-status__card dining-session__receipt" aria-labelledby="table-receipt">
       <h2 id="table-receipt">{t("Receipt")}</h2>
       {receipt.rounds.map((round) => (
-        <div key={round.roundNumber}>
+        <div key={round.roundNumber} className="dining-session__receipt-round">
           <h3>
             {t("Round {round}", { round: String(round.roundNumber) })}
             {round.fromTableLabel === null
@@ -286,7 +290,10 @@ export function SettledTableReceiptView({ receipt }: { readonly receipt: Settled
             {round.items.map((item, index) => (
               <div key={index}>
                 <dt>
-                  {item.displayName}
+                  {/* Batch 63 (D62B-02): "2 × Beef noodles", as the Rounds list says it. */}
+                  {item.quantity === undefined
+                    ? item.displayName
+                    : `${item.quantity} × ${item.displayName}`}
                   {item.reduced === "Comp"
                     ? item.compedQuantity !== undefined && item.quantity !== undefined
                       ? ` · ${t("{comped} of {quantity} on the house", {
