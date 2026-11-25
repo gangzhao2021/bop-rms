@@ -270,6 +270,34 @@ export function useReloadOnLanguageChange(reload: () => void): void {
   }, [language, reload]);
 }
 
+/**
+ * Batch 63 (CDI-13, F14): holds the page at `y` while it reads itself again after a language
+ * switch (for up to two seconds), unless the guest scrolls or taps meanwhile.
+ */
+function keepScrollAt(y: number): void {
+  if (y <= 0 || typeof window.requestAnimationFrame !== "function") return;
+  const until = Date.now() + 2_000;
+  let stopped = false;
+  const stop = () => {
+    stopped = true;
+  };
+  const events = ["wheel", "touchstart", "keydown", "pointerdown"] as const;
+  for (const name of events) window.addEventListener(name, stop, { once: true, passive: true });
+  const step = () => {
+    if (stopped || Date.now() > until) {
+      for (const name of events) window.removeEventListener(name, stop);
+      return;
+    }
+    if (
+      Math.abs(window.scrollY - y) > 1 &&
+      document.documentElement.scrollHeight - window.innerHeight >= y
+    )
+      window.scrollTo(0, y);
+    window.requestAnimationFrame(step);
+  };
+  window.requestAnimationFrame(step);
+}
+
 /** "中文" / "English": switches the whole customer journey. */
 export function LanguageSwitch() {
   const { language, setLanguage } = useLanguage();
@@ -280,7 +308,13 @@ export function LanguageSwitch() {
       className="language-switch"
       lang={next === "zh-Hans" ? "zh-Hans" : "en"}
       aria-label={next === "zh-Hans" ? "切换到中文" : "Switch to English"}
-      onClick={() => setLanguage(next)}
+      onClick={() => {
+        // Batch 63 (CDI-13, F14): the guest stays where they were reading; the page reads its
+        // names again in the new language, and that briefly emptied it back to the top.
+        const at = window.scrollY;
+        setLanguage(next);
+        keepScrollAt(at);
+      }}
     >
       {next === "zh-Hans" ? "中文" : "English"}
     </button>

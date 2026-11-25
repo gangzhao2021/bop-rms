@@ -42,7 +42,7 @@
 }
 .customer-page .bop-shell__header h1 {
   grid-column: 1;
-  font-size: 1.125rem;
+  font-size: 16px;
   font-weight: 600;
   line-height: 1.5rem;
   letter-spacing: -0.01em;
@@ -51,7 +51,7 @@
 .customer-page .bop-shell__header p {
   grid-column: 1;
   font-family: inherit;
-  font-size: 0.8125rem;
+  font-size: 14px;
   line-height: 1.125rem;
 }
 /* Figma v1: English / 中文 is a small outlined control beside the Store's name. */
@@ -71,8 +71,8 @@
   background: var(--bop-color-surface-canvas);
   color: var(--bop-color-text-default);
   font: inherit;
-  font-size: 0.8125rem;
-  font-weight: 500;
+  font-size: 14px;
+  font-weight: 400;
   line-height: 1.125rem;
   white-space: nowrap;
   cursor: pointer;
@@ -110,7 +110,7 @@
   padding: 0 0.125rem;
   border-bottom: 2px solid transparent;
   color: var(--bop-color-text-muted);
-  font-size: 0.9375rem;
+  font-size: 16px;
   font-weight: 400;
   text-decoration: none;
   white-space: nowrap;
@@ -138,8 +138,8 @@
 }
 .customer-heading h2 {
   margin: 0;
-  font-size: 1.625rem;
-  font-weight: 650;
+  font-size: 28px;
+  font-weight: 600;
   line-height: 1.2;
   letter-spacing: -0.01em;
 }
@@ -149,17 +149,17 @@
 }
 .customer-page .bop-eyebrow {
   font-family: inherit;
-  font-size: 0.6875rem;
+  font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 .customer-page .bop-shell__main h2 {
-  font-size: 1.25rem;
+  font-size: 20px;
 }
 .customer-page .bop-shell__main h3 {
   margin: 0;
-  font-size: 1rem;
+  font-size: 16px;
 }
 .customer-page :focus-visible {
   outline: 3px solid var(--bop-color-focus);
@@ -238,7 +238,7 @@
   color: var(--bop-color-on-primary);
   background: var(--bop-color-brand-primary);
   font: inherit;
-  font-size: 0.9375rem;
+  font-size: 16px;
   font-weight: 600;
   text-decoration: none;
   cursor: pointer;
@@ -308,7 +308,7 @@
 .configure-status {
   padding: var(--bop-space-3);
   background: var(--bop-color-surface-raised);
-  font-size: 0.9375rem;
+  font-size: 16px;
 }
 .cart-offline button,
 .configure-status a,
@@ -354,7 +354,7 @@
   padding: var(--bop-space-3) var(--bop-space-4);
   border-bottom: 1px solid var(--bop-color-border-strong);
   background: var(--bop-color-surface-raised);
-  font-size: 0.9375rem;
+  font-size: 16px;
 }
 .connectivity-banner button,
 .pwa-update button {
@@ -388,7 +388,7 @@
   color: var(--bop-color-text-muted);
 }
 .entry-details dd {
-  font-weight: 500;
+  font-weight: 400;
 }
 .entry-action {
   width: 100%;
@@ -410,11 +410,11 @@
 }
 .entry-help h2 {
   margin: 0 0 var(--bop-space-2);
-  font-size: 1.0625rem;
+  font-size: 20px;
 }
 .entry-help p {
   color: var(--bop-color-text-muted);
-  font-size: 0.9375rem;
+  font-size: 16px;
 }
 .dining-admission form {
   display: grid;
@@ -434,7 +434,7 @@
 }
 .dining-admission h2 {
   margin: 0 0 var(--bop-space-2);
-  font-size: 1.0625rem;
+  font-size: 20px;
 }
 
 /* ---------- Menu ---------- */
@@ -459,8 +459,8 @@
 }
 .customer-page .menu-page-intro h2 {
   margin: 0;
-  font-size: 1.75rem;
-  font-weight: 650;
+  font-size: 28px;
+  font-weight: 600;
   line-height: 1.2;
   letter-spacing: -0.015em;
 }
@@ -484,7 +484,7 @@
   border-radius: var(--bop-radius-control);
   color: var(--bop-color-text-muted);
   background: var(--bop-color-surface-raised);
-  font-size: 0.9375rem;
+  font-size: 16px;
   font-weight: 400;
   text-decoration: none;
 }
@@ -534,7 +534,7 @@
   align-items: center;
   border-bottom: 2px solid transparent;
   color: var(--bop-color-text-muted);
-  font-size: 0.9375rem;
+  font-size: 16px;
   font-weight: 400;
   white-space: nowrap;
 }
@@ -554,7 +554,7 @@
 }
 .customer-page .menu-section h3 {
   margin: 0;
-  font-size: 1.125rem;
+  font-size: 20px;
   font-weight: 600;
   line-height: 1.5rem;
   letter-spacing: -0.01em;
@@ -606,7 +606,7 @@
   flex: 1 1 auto;
   min-width: 0;
   margin: 0;
-  font-size: 0.9375rem;
+  font-size: 16px;
   font-weight: 600;
   line-height: 1.375rem;
   overflow-wrap: anywhere;
@@ -619,7 +619,7 @@
   -webkit-line-clamp: 2;
   line-clamp: 2;
   color: var(--bop-color-text-muted);
-  font-size: 0.8125rem;
+  font-size: 14px;
   line-height: 1.125rem;
   overflow-wrap: anywhere;
 }
@@ -627,7 +627,7 @@
 .menu-card__allergens,
 .menu-result-section {
   color: var(--bop-color-text-muted);
-  font-size: 0.8125rem;
+  font-size: 14px;
   line-height: 1.4;
 }
 .menu-card__sizes {
@@ -640,7 +640,7 @@
   padding: 0 0.375rem;
   border: 1px solid var(--bop-color-border-strong);
   border-radius: var(--bop-radius-control);
-  font-size: 0.6875rem;
+  font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.04em;
   line-height: 1.5;
@@ -654,15 +654,15 @@
   gap: 0 var(--bop-space-3);
 }
 .menu-card__price {
-  font-size: 0.9375rem;
+  font-size: 16px;
   font-variant-numeric: tabular-nums;
   font-weight: 400;
   line-height: 1.375rem;
 }
 .menu-card__price--pending {
   color: var(--bop-color-text-muted);
-  font-size: 0.8125rem;
-  font-weight: 500;
+  font-size: 14px;
+  font-weight: 400;
 }
 /* Sold out reads faded, but "Sold out" itself keeps full contrast. */
 .menu-card--sold-out h4,
@@ -699,13 +699,13 @@
 .menu-sold-out {
   margin: 0;
   color: var(--bop-color-danger);
-  font-size: 0.8125rem;
+  font-size: 14px;
   font-weight: 600;
 }
 .menu-available {
   margin: 0;
   color: var(--bop-color-success);
-  font-size: 0.8125rem;
+  font-size: 14px;
   font-weight: 600;
 }
 .menu-state h2 {
@@ -785,13 +785,13 @@
 }
 .customer-page .menu-help h2 {
   margin: 0;
-  font-size: 0.9375rem;
-  font-weight: 650;
+  font-size: 16px;
+  font-weight: 600;
 }
 .menu-help p {
   margin: 0;
   color: var(--bop-color-text-default);
-  font-size: 0.875rem;
+  font-size: 14px;
 }
 .menu-readonly-boundary {
   margin-top: var(--bop-space-3);
@@ -825,13 +825,13 @@
 }
 .customer-page .menu-cart-panel h2 {
   margin: 0 0 var(--bop-space-3);
-  font-size: 1.0625rem;
-  font-weight: 650;
+  font-size: 20px;
+  font-weight: 600;
 }
 .menu-cart-panel__empty,
 .menu-cart-panel__note {
   color: var(--bop-color-text-muted);
-  font-size: 0.875rem;
+  font-size: 14px;
 }
 .customer-page .menu-cart-panel__facts {
   display: grid;
@@ -848,7 +848,7 @@
 }
 .menu-cart-panel__facts dd {
   font-variant-numeric: tabular-nums;
-  font-weight: 650;
+  font-weight: 600;
 }
 .customer-page .menu-cart-panel__link {
   display: flex;
@@ -859,7 +859,7 @@
   border-radius: var(--bop-radius-control);
   color: var(--bop-color-on-primary);
   background: var(--bop-color-brand-primary);
-  font-weight: 650;
+  font-weight: 600;
   text-decoration: none;
 }
 /* Phones (Figma v1): a white bar along the bottom, what is in the cart on the left and one black
@@ -885,11 +885,11 @@
 }
 .menu-cart-bar__count {
   color: var(--bop-color-text-muted);
-  font-size: 0.8125rem;
+  font-size: 14px;
   line-height: 1.125rem;
 }
 .menu-cart-bar__total {
-  font-size: 0.9375rem;
+  font-size: 16px;
   font-variant-numeric: tabular-nums;
   font-weight: 600;
   line-height: 1.375rem;
@@ -953,19 +953,19 @@
 }
 .menu-search-section label {
   color: var(--bop-color-text-muted);
-  font-size: 0.875rem;
+  font-size: 14px;
 }
 .menu-search-boundary {
   margin: 0;
   color: var(--bop-color-text-muted);
-  font-size: 0.8125rem;
+  font-size: 14px;
 }
 .menu-search-summary {
   margin-top: var(--bop-space-4);
 }
 .customer-page .menu-search-summary h2 {
   margin: 0;
-  font-size: 1.0625rem;
+  font-size: 20px;
 }
 .menu-search-summary p {
   color: var(--bop-color-text-muted);
@@ -978,7 +978,7 @@
   align-items: center;
   margin-bottom: var(--bop-space-2);
   color: var(--bop-color-text-muted);
-  font-size: 0.8125rem;
+  font-size: 14px;
   font-weight: 400;
   text-decoration: none;
 }
@@ -1013,20 +1013,20 @@
 }
 .customer-page .sellable-detail__heading h2 {
   margin: 0;
-  font-size: 1.5rem;
+  font-size: 28px;
   font-weight: 600;
   line-height: 2rem;
   letter-spacing: -0.0125rem;
 }
 .sellable-detail__price {
   margin: 0;
-  font-size: 0.9375rem;
+  font-size: 16px;
   font-variant-numeric: tabular-nums;
   font-weight: 600;
 }
 .sellable-detail__price span {
   color: var(--bop-color-text-muted);
-  font-size: 0.875rem;
+  font-size: 14px;
   font-weight: 400;
 }
 .sellable-detail__price .sellable-detail__size {
@@ -1038,22 +1038,22 @@
   max-width: 40rem;
   margin: var(--bop-space-2) 0 0;
   color: var(--bop-color-text-muted);
-  font-size: 0.9375rem;
+  font-size: 16px;
   line-height: 1.375rem;
   overflow-wrap: anywhere;
 }
 .menu-allergens {
   margin-top: var(--bop-space-4);
-  font-size: 0.875rem;
+  font-size: 14px;
 }
 .menu-allergen-heading {
   margin: 0 0 var(--bop-space-1);
-  font-weight: 650;
+  font-weight: 600;
 }
 /* WP-2423 (M77): the kitchen's recipe changed since the menu was listed. */
 .menu-allergens-updated {
   margin: var(--bop-space-1) 0 0;
-  font-weight: 650;
+  font-weight: 600;
 }
 .customer-page .menu-allergens dl {
   display: grid;
@@ -1093,13 +1093,13 @@
   padding: 0;
 }
 .configure-group__name {
-  font-size: 1.125rem;
+  font-size: 16px;
   font-weight: 600;
   line-height: 1.5rem;
 }
 .configure-group__rule {
   color: var(--bop-color-text-muted);
-  font-size: 0.8125rem;
+  font-size: 14px;
   font-weight: 400;
   white-space: nowrap;
 }
@@ -1137,13 +1137,13 @@
   cursor: pointer;
 }
 .configure-option__name {
-  font-size: 0.9375rem;
+  font-size: 16px;
   line-height: 1.375rem;
   overflow-wrap: anywhere;
 }
 .configure-option__price {
   color: var(--bop-color-text-muted);
-  font-size: 0.9375rem;
+  font-size: 16px;
   font-variant-numeric: tabular-nums;
   text-align: end;
   white-space: nowrap;
@@ -1153,7 +1153,7 @@
   grid-column: 1 / -1;
   padding-bottom: var(--bop-space-2);
   color: var(--bop-color-text-muted);
-  font-size: 0.8125rem;
+  font-size: 14px;
 }
 .configure-option__quantity {
   display: flex;
@@ -1163,7 +1163,7 @@
   gap: var(--bop-space-3);
   padding-bottom: var(--bop-space-2);
   color: var(--bop-color-text-muted);
-  font-size: 0.875rem;
+  font-size: 14px;
 }
 .sellable-configurator input[type="checkbox"],
 .sellable-configurator input[type="radio"] {
@@ -1191,7 +1191,7 @@
   gap: var(--bop-space-1);
 }
 .configure-note label {
-  font-size: 0.8125rem;
+  font-size: 14px;
   font-weight: 600;
 }
 .sellable-configurator textarea {
@@ -1201,7 +1201,7 @@
 }
 .configure-note p {
   color: var(--bop-color-text-muted);
-  font-size: 0.8125rem;
+  font-size: 14px;
 }
 .configure-sold-out {
   margin: 0;
@@ -1239,7 +1239,7 @@
   border: 0;
   background: transparent;
   font: inherit;
-  font-size: 1.25rem;
+  font-size: 20px;
   line-height: 1;
   cursor: pointer;
 }
@@ -1255,7 +1255,7 @@
   border: 0;
   border-radius: 0;
   font-variant-numeric: tabular-nums;
-  font-weight: 650;
+  font-weight: 600;
   text-align: center;
   appearance: textfield;
   -moz-appearance: textfield;
@@ -1273,20 +1273,20 @@
 /* WP-2423 ⑪: what the drink contains with the choices made so far. */
 .configure-allergens {
   margin: var(--bop-space-2) 0 0;
-  font-size: 0.875rem;
+  font-size: 14px;
 }
 .configure-allergens span {
-  font-weight: 650;
+  font-weight: 600;
 }
 .configure-actions__total {
   grid-area: total;
   margin: 0;
   color: var(--bop-color-text-muted);
-  font-size: 0.875rem;
+  font-size: 14px;
 }
 .configure-actions__total strong {
   color: var(--bop-color-text-default);
-  font-size: 1.0625rem;
+  font-size: 16px;
   font-variant-numeric: tabular-nums;
 }
 .configure-status--success {
@@ -1313,7 +1313,7 @@
 }
 .cart-page__subheading span {
   color: var(--bop-color-text-muted);
-  font-size: 0.875rem;
+  font-size: 14px;
 }
 .cart-layout {
   display: grid;
@@ -1330,14 +1330,14 @@
 }
 .cart-item h3 {
   margin: 0;
-  font-size: 1rem;
+  font-size: 16px;
 }
 .cart-item__configuration,
 .cart-item__note,
 .checkout-items__options,
 .checkout-items__note {
   color: var(--bop-color-text-muted);
-  font-size: 0.875rem;
+  font-size: 14px;
 }
 .cart-item__estimate {
   margin: 0;
@@ -1359,8 +1359,8 @@
   border-radius: var(--bop-radius-control);
   background: var(--bop-color-surface-default);
   font: inherit;
-  font-size: 1.125rem;
-  font-weight: 500;
+  font-size: 20px;
+  font-weight: 400;
 }
 .cart-item__actions output {
   min-width: 2rem;
@@ -1379,7 +1379,7 @@
 }
 .cart-link-button {
   margin-inline-start: auto;
-  font-size: 0.9375rem !important;
+  font-size: 16px !important;
 }
 .customer-page .cart-warning {
   margin-top: var(--bop-space-3);
@@ -1403,14 +1403,14 @@
   margin-top: var(--bop-space-2);
   padding-top: var(--bop-space-2) !important;
   border-top: 1px solid var(--bop-color-border-strong);
-  font-size: 1.125rem;
-  font-weight: 700;
+  font-size: 20px;
+  font-weight: 600;
 }
 .cart-summary__validity,
 .checkout-totals__validity,
 .checkout-continue__note {
   color: var(--bop-color-text-muted);
-  font-size: 0.875rem;
+  font-size: 14px;
 }
 .cart-state h2 {
   margin: 0 0 var(--bop-space-2);
@@ -1452,14 +1452,14 @@
 }
 .cart-checkout-link {
   width: 100%;
-  font-size: 1.0625rem !important;
+  font-size: 16px !important;
 }
 /* WP-2423 item 6: what the one tap also does, read before and after the button. */
 .cart-next-actions__note,
 .slow-wait-note {
   margin: 0;
   color: var(--bop-color-text-muted);
-  font-size: 0.875rem;
+  font-size: 14px;
 }
 .cart-next-actions [aria-disabled="true"],
 .customer-page .bop-shell__nav > a[aria-disabled="true"] {
@@ -1494,7 +1494,7 @@
   margin: 0;
   padding: 0;
   color: var(--bop-color-text-muted);
-  font-size: 0.8125rem;
+  font-size: 14px;
   list-style: none;
 }
 .checkout-progress li[aria-current="step"] {
@@ -1522,7 +1522,7 @@
 }
 .checkout-items__name {
   display: grid;
-  font-weight: 500;
+  font-weight: 400;
 }
 .checkout-items__amount {
   font-variant-numeric: tabular-nums;
@@ -1532,8 +1532,8 @@
   display: inline-block;
   margin-top: var(--bop-space-3);
   color: inherit;
-  font-size: 0.9375rem;
-  font-weight: 500;
+  font-size: 16px;
+  font-weight: 400;
 }
 .checkout-attention h2 {
   margin: 0 0 var(--bop-space-2);
@@ -1576,13 +1576,13 @@
 }
 .checkout-details-form__hint {
   color: var(--bop-color-text-muted);
-  font-size: 0.875rem;
+  font-size: 14px;
 }
 .checkout-details-form label:not(:has(input[type="checkbox"])) {
   display: grid;
   gap: var(--bop-space-1);
-  font-size: 0.875rem;
-  font-weight: 500;
+  font-size: 14px;
+  font-weight: 400;
 }
 .checkout-details-form label:has(input[type="checkbox"]) {
   display: flex;
@@ -1598,10 +1598,10 @@
   border: 1px solid var(--bop-color-border-default);
   border-radius: var(--bop-radius-control);
   font: inherit;
-  font-size: 1rem;
+  font-size: 16px;
 }
 .checkout-details-form details {
-  font-size: 0.9375rem;
+  font-size: 16px;
 }
 .checkout-details-form summary {
   min-height: 44px;
@@ -1612,7 +1612,7 @@
   border: 0 !important;
   padding-inline: 0 !important;
   color: var(--bop-color-text-muted);
-  font-weight: 500 !important;
+  font-weight: 400 !important;
   text-decoration: underline;
   text-underline-offset: 3px;
 }
@@ -1648,7 +1648,7 @@
 }
 .checkout-tip__choices button span {
   color: var(--bop-color-text-muted);
-  font-size: 0.75rem;
+  font-size: 14px;
   font-weight: 400;
   font-variant-numeric: tabular-nums;
 }
@@ -1662,8 +1662,8 @@
 .checkout-tip label {
   display: block;
   margin-top: var(--bop-space-3);
-  font-size: 0.875rem;
-  font-weight: 500;
+  font-size: 14px;
+  font-weight: 400;
 }
 .checkout-tip input:not(.sr-only) {
   width: 100%;
@@ -1673,12 +1673,12 @@
   border: 1px solid var(--bop-color-border-default);
   border-radius: var(--bop-radius-control);
   font: inherit;
-  font-size: 1rem;
+  font-size: 16px;
 }
 .checkout-tip p:not(.sr-only) {
   margin-top: var(--bop-space-2);
   color: var(--bop-color-text-muted);
-  font-size: 0.875rem;
+  font-size: 14px;
 }
 .checkout-layout,
 .checkout-layout__aside,
@@ -1724,7 +1724,7 @@
 }
 .checkout-continue__button {
   width: 100%;
-  font-size: 1.0625rem !important;
+  font-size: 16px !important;
 }
 .checkout-continue p[role="alert"],
 .checkout-continue p[role="status"] {
@@ -1756,7 +1756,7 @@
   border: 1px solid var(--bop-color-border-default);
   border-radius: 50%;
   color: var(--bop-color-text-muted);
-  font-size: 0.8125rem;
+  font-size: 14px;
   font-variant-numeric: tabular-nums;
   font-weight: 600;
 }
@@ -1793,7 +1793,7 @@
 .customer-page.checkout-page #checkout-details-heading {
   margin: 0 0 var(--bop-space-2);
   color: var(--bop-color-text-muted);
-  font-size: 0.8125rem;
+  font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.04em;
   line-height: 1.125rem;
@@ -1819,27 +1819,27 @@
 }
 .customer-page.checkout-page .checkout-edit-link {
   margin-top: var(--bop-space-2);
-  font-size: 0.8125rem;
+  font-size: 14px;
 }
 .customer-page.checkout-page .checkout-details-form legend {
   margin-bottom: var(--bop-space-1);
-  font-size: 0.9375rem;
+  font-size: 16px;
 }
 .customer-page.checkout-page .checkout-details-form label:not(:has(input[type="checkbox"])) {
-  font-size: 0.8125rem;
+  font-size: 14px;
   font-weight: 600;
 }
 .customer-page.checkout-page .checkout-details-form input:not([type="checkbox"]),
 .customer-page.checkout-page .checkout-details-form select,
 .customer-page.checkout-page .checkout-tip input:not(.sr-only) {
   border-color: var(--bop-color-border-strong);
-  font-size: 0.9375rem;
+  font-size: 16px;
   font-weight: 400;
 }
 .customer-page.checkout-page .checkout-tip__choices button {
   min-height: 44px;
   border-color: var(--bop-color-border-default);
-  font-size: 0.8125rem;
+  font-size: 14px;
   line-height: 1.125rem;
 }
 .customer-page.checkout-page .checkout-tip__choices button[aria-pressed="true"] {
@@ -1856,18 +1856,18 @@
 }
 .customer-page.checkout-page .checkout-totals dl div {
   padding: var(--bop-space-1) 0;
-  font-size: 0.9375rem;
+  font-size: 16px;
 }
 .customer-page.checkout-page .checkout-totals__total {
   margin-top: 0;
   padding-top: var(--bop-space-1) !important;
   border-top: 0;
-  font-size: 0.9375rem;
+  font-size: 16px;
   font-weight: 600;
 }
 .customer-page.checkout-page .checkout-totals__validity {
   margin-top: var(--bop-space-2);
-  font-size: 0.8125rem;
+  font-size: 14px;
 }
 @media (min-width: 64rem) {
   /* Wide screens: the totals block sits in the right column at its own width. */
@@ -1903,7 +1903,7 @@
   width: 100%;
   min-height: 52px;
   margin-top: var(--bop-space-4);
-  font-size: 1.0625rem;
+  font-size: 16px;
 }
 /* Adjacent order links ("View receipt", "Back to menu") stay separate, with a usable tap height. */
 .order-status__receipt,
@@ -1922,7 +1922,7 @@
   padding: 0 var(--bop-space-2);
   border: 1px solid var(--bop-color-border-strong);
   border-radius: var(--bop-radius-control);
-  font-size: 0.75rem;
+  font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -1966,7 +1966,7 @@
 .payment-result-page__polling {
   margin-top: var(--bop-space-3);
   color: var(--bop-color-text-muted);
-  font-size: 0.875rem;
+  font-size: 14px;
 }
 .payment-result-page__refresh {
   margin-top: var(--bop-space-2);
@@ -1979,7 +1979,7 @@
 }
 .payment-retry h3 {
   margin: 0 0 var(--bop-space-2);
-  font-size: 1rem;
+  font-size: 16px;
   font-weight: 600;
 }
 .payment-retry__simulated,
@@ -1993,13 +1993,13 @@
 }
 .payment-page__operation {
   color: var(--bop-color-text-muted);
-  font-size: 0.8125rem;
+  font-size: 14px;
 }
 
 /* ---------- Order status ---------- */
 .customer-page .order-status__summary h2 {
   margin: 0 0 var(--bop-space-2);
-  font-size: 2rem;
+  font-size: 28px;
   font-weight: 600;
   line-height: 2.5rem;
   letter-spacing: -0.02em;
@@ -2018,7 +2018,7 @@
 .customer-page.order-status .order-status__summary .bop-eyebrow {
   margin-bottom: var(--bop-space-2);
   color: var(--bop-color-text-muted);
-  font-size: 0.8125rem;
+  font-size: 14px;
 }
 /* Figma v1: the pickup timeline. A line joins the dots; each step also says "Done" or "Now". */
 .order-status__timeline {
@@ -2071,12 +2071,12 @@
   border-color: var(--bop-color-text-muted);
 }
 .order-status__step-label {
-  font-size: 0.9375rem;
+  font-size: 16px;
   line-height: 1.375rem;
 }
 .order-status__step-state {
   color: var(--bop-color-text-muted);
-  font-size: 0.8125rem;
+  font-size: 14px;
 }
 .order-status__summary > p {
   color: var(--bop-color-text-muted);
@@ -2119,7 +2119,7 @@
 }
 .order-status__summary dt {
   color: var(--bop-color-text-muted);
-  font-size: 0.75rem;
+  font-size: 14px;
 }
 .order-status__summary dd {
   font-weight: 600;
@@ -2128,7 +2128,7 @@
 .order-status__warning h2,
 .order-status__unavailable h2 {
   margin: 0 0 var(--bop-space-1);
-  font-size: 1.0625rem;
+  font-size: 20px;
 }
 .order-status__warning p,
 .order-status__unavailable p {
@@ -2142,7 +2142,7 @@
   place-items: center;
   border: 1px solid var(--bop-color-border-strong);
   border-radius: 50%;
-  font-weight: 700;
+  font-weight: 600;
 }
 .order-status__retry {
   margin-top: var(--bop-space-3);
@@ -2158,7 +2158,7 @@
 }
 .order-status__batch > p {
   color: var(--bop-color-text-muted);
-  font-size: 0.875rem;
+  font-size: 14px;
 }
 .order-status__batch ul {
   margin: 0;
@@ -2179,7 +2179,7 @@
 .order-status__batch li > span:nth-child(3) {
   grid-column: 1 / -1;
   color: var(--bop-color-text-muted);
-  font-size: 0.875rem;
+  font-size: 14px;
 }
 /* WP-2423: the options chosen for an item and the guest's note, under its name. */
 .order-status__item-options,
@@ -2187,7 +2187,7 @@
 .receipt-page__option {
   display: block;
   color: var(--bop-color-text-muted);
-  font-size: 0.875rem;
+  font-size: 14px;
 }
 /* WP-2423 Q6 step 2: items the store cancelled stay listed, muted, with their refund. */
 .order-status__item--cancelled .order-status__item-name,
@@ -2198,19 +2198,19 @@
 .order-status__batch li > .order-status__item-cancelled {
   grid-column: 1 / -1;
   color: var(--bop-color-text-default);
-  font-size: 0.875rem;
+  font-size: 14px;
   font-weight: 600;
 }
 .order-status__item-refund {
   margin: var(--bop-space-2) 0 0;
   color: var(--bop-color-text-muted);
-  font-size: 0.875rem;
+  font-size: 14px;
 }
 /* WP-2423 (v15 3cd0f8dd M3): an item a refund returned stays listed (it was served) and says so. */
 .order-status__batch li > .order-status__item-refunded {
   grid-column: 1 / -1;
   color: var(--bop-color-text-default);
-  font-size: 0.875rem;
+  font-size: 14px;
   font-weight: 600;
 }
 /* WP-2423 D5: subtotal and tax above the order total, like the receipt. */
@@ -2235,7 +2235,7 @@
   justify-content: space-between;
   margin: var(--bop-space-3) 0 0;
   font-variant-numeric: tabular-nums;
-  font-weight: 700;
+  font-weight: 600;
 }
 /* ---------- WP-2423 Q8: dine-in table (CUST-DINE-IN-SESSION) ---------- */
 /* Batch 52 (v15 b51 live): the table total is a bill. At every width each line keeps its label on
@@ -2263,7 +2263,7 @@
 }
 .dining-session__summary > p:last-child {
   margin: var(--bop-space-3) 0 0;
-  font-size: 0.875rem;
+  font-size: 14px;
 }
 .dining-session__round-facts {
   display: grid;
@@ -2279,7 +2279,7 @@
 }
 .dining-session__round-facts dt {
   color: var(--bop-color-text-muted);
-  font-size: 0.75rem;
+  font-size: 14px;
 }
 .dining-session__round-facts dd {
   margin: 0;
@@ -2299,17 +2299,17 @@
 }
 .dining-invitation__label {
   color: var(--bop-color-text-muted);
-  font-size: 0.875rem;
+  font-size: 14px;
 }
 .dining-invitation__digits {
   color: var(--bop-color-text-default);
   font-size: 2.25rem;
   font-variant-numeric: tabular-nums;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: 0.08em;
 }
 .dining-invitation__note {
-  font-size: 0.875rem;
+  font-size: 14px;
 }
 .dining-invitation__action {
   display: inline-flex;
@@ -2348,7 +2348,7 @@
 .order-status__actions p {
   margin: 0;
   color: var(--bop-color-text-muted);
-  font-size: 0.9375rem;
+  font-size: 16px;
 }
 .pickup-code h2 {
   margin: 0 0 var(--bop-space-2);
@@ -2383,7 +2383,7 @@
   text-align: center;
 }
 .pickup-code__visual span {
-  font-size: 0.8125rem;
+  font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -2391,7 +2391,7 @@
 .pickup-code__visual code {
   font-family: var(--bop-font-mono);
   font-size: clamp(2.25rem, 12vw, 3.5rem);
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: 0.18em;
   line-height: 1.1;
   overflow-wrap: anywhere;
@@ -2418,7 +2418,7 @@
 }
 .receipt-page__toolbar a {
   color: inherit;
-  font-weight: 500;
+  font-weight: 400;
 }
 .receipt-page__content {
   display: grid;
@@ -2431,7 +2431,7 @@
   color: var(--bop-color-text-muted);
 }
 .receipt-page__version h2 {
-  font-size: 1rem;
+  font-size: 20px;
 }
 .receipt-page__lines {
   margin: 0;
@@ -2468,7 +2468,7 @@
 }
 .receipt-page__refunds h3 {
   margin: 0 0 var(--bop-space-2);
-  font-size: 1rem;
+  font-size: 16px;
 }
 .receipt-page__refund + .receipt-page__refund {
   margin-top: var(--bop-space-3);
@@ -2527,7 +2527,7 @@
 }
 .receipt-page__email-action p {
   margin-top: var(--bop-space-1);
-  font-size: 0.8125rem;
+  font-size: 14px;
 }
 
 /* ---------- Not found ---------- */
@@ -2627,7 +2627,7 @@
   }
   .checkout-tip__choices button {
     padding: var(--bop-space-1) 2px;
-    font-size: 0.875rem;
+    font-size: 14px;
     line-height: 1.2;
   }
   .order-status__summary dl {
@@ -2660,7 +2660,7 @@
 /* ---------- WP-2423 Q10 store contact ---------- */
 .store-contact h2 {
   margin: 0 0 var(--bop-space-2);
-  font-size: 1.0625rem;
+  font-size: 20px;
 }
 .store-contact__phone {
   display: inline-flex;
@@ -2682,7 +2682,7 @@
 .order-status__batch li > .order-status__item-remake {
   grid-column: 1 / -1;
   color: var(--bop-color-text-default);
-  font-size: 0.875rem;
+  font-size: 14px;
   font-weight: 600;
 }
 .pickup-code__wait {
@@ -2711,7 +2711,7 @@
 }
 .contact-details h2 {
   margin: 0;
-  font-size: 1.0625rem;
+  font-size: 20px;
 }
 .contact-details p {
   margin: 0;
@@ -2728,7 +2728,7 @@
 .store-strip {
   /* Two lines reserved from the first render (status; last orders and holidays). */
   min-height: 3rem;
-  font-size: 0.9375rem;
+  font-size: 16px;
 }
 .store-strip__line {
   display: block;
@@ -2744,10 +2744,10 @@
 .store-strip__line--more {
   min-height: 1.25rem;
   color: var(--bop-color-text-muted);
-  font-size: 0.875rem;
+  font-size: 14px;
 }
 .store-strip__label {
-  font-weight: 650;
+  font-weight: 600;
 }
 .store-strip__label--open {
   color: var(--bop-color-success);
@@ -2768,7 +2768,7 @@
 }
 .store-identity__upcoming h3 {
   margin: 0 0 var(--bop-space-1);
-  font-size: 0.875rem;
+  font-size: 14px;
   font-weight: 600;
 }
 .store-identity__upcoming ul {
@@ -2783,7 +2783,7 @@
 }
 .customer-page .store-identity h2 {
   margin: 0 0 var(--bop-space-1);
-  font-size: 1.0625rem;
+  font-size: 20px;
 }
 .customer-page .store-identity > * + * {
   margin-top: var(--bop-space-2);
@@ -3183,7 +3183,7 @@
 .menu-card__table-ordered,
 .configure-table-ordered {
   color: var(--bop-color-text-muted);
-  font-size: 0.875rem;
+  font-size: 14px;
 }
 .configure-table-ordered {
   margin: var(--bop-space-3) 0 0;
@@ -3302,7 +3302,7 @@ body {
   margin: 0;
 }
 .menu-closed-notice__line {
-  font-weight: 650;
+  font-weight: 600;
 }
 /* M104 (B.2): this visit's orders on the start page, one row each, links at the end. */
 .entry-orders {
@@ -3310,7 +3310,7 @@ body {
 }
 .entry-orders h3 {
   margin: 0 0 var(--bop-space-2);
-  font-size: 1rem;
+  font-size: 16px;
 }
 .entry-orders ul {
   margin: 0;

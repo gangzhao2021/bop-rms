@@ -157,8 +157,8 @@ for (const language of ["en", "zh-Hans"] as const)
       const main = page.getByRole("main");
       const contains = zh
         ? "含有花生、芝麻、大豆、小麦和黑小麦"
-        : "Contains Peanuts, Sesame, Soy, Wheat and triticale";
-      const may = zh ? "可能含有芝麻" : "May contain Sesame";
+        : "Contains peanuts, sesame, soy, wheat and triticale";
+      const may = zh ? "可能含有芝麻" : "May contain sesame";
       await expect(main.getByText(contains, { exact: true })).toBeVisible();
       await expect(main.getByText(may, { exact: true })).toBeVisible();
       if (zh) await expect(main).not.toContainText(/含有 /u);

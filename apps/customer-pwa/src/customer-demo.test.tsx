@@ -59,7 +59,9 @@ describe("WP-2204 local Customer preview", () => {
     expect(html).toContain("Local synthetic preview");
     expect(html).toContain("Read-only training data");
     expect(html).toContain("Synthetic mushroom rice bowl");
-    expect(html).toContain("You’re offline");
+    // Batch 63 (F10): offline is said once, by the app's connection banner; the cart offers Try
+    // again and keeps its next step in place, disabled.
+    expect(html).toContain('<div class="cart-offline"><button type="button">Try again</button>');
     expect(html).toContain(
       'disabled="" aria-label="Increase Synthetic mushroom rice bowl quantity"',
     );

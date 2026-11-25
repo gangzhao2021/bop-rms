@@ -100,8 +100,12 @@ describe("CUST-CHECKOUT page contract", () => {
     expect(html).toContain("$0.15");
     // WP-2423 item 8 ⑦ (Owner decision 11): nothing is chosen for the guest, "No tip" included.
     expect(html).not.toContain('aria-pressed="true"');
-    expect(html).toContain("Choose a tip to continue");
-    expect(html).toMatch(/<button[^>]*class="checkout-continue__button"[^>]*disabled=""/u);
+    // Batch 63 (F09): the step keeps its name while waiting, with why under it.
+    expect(html).not.toContain("Choose a tip to continue");
+    expect(html).toMatch(
+      /<button[^>]*class="checkout-continue__button"[^>]*disabled=""[^>]*>Continue to payment<\/button>(?:<p class="checkout-continue__note"[^>]*>[^<]*<\/p>)?<p class="checkout-continue__hint" id="checkout-tip-first">Choose a tip first<\/p>/u,
+    );
+    expect(html).toContain('aria-describedby="checkout-tick-changes checkout-tip-first"');
   });
 
   it("WP-2423 item 8 ⑦: offers the Store's own tip percentages, and asks nothing when tips are off", () => {
@@ -389,7 +393,8 @@ describe("WP-2423 guest-payment-state: what the guest pays, and until when", () 
     expect(html).toMatch(/<button[^>]*class="checkout-continue__button"[^>]*disabled=""/u);
     // v15 2026-11-11 b10: the greyed button says why, next to it (the box is far above on a phone).
     expect(html).toMatch(
-      /aria-describedby="checkout-tick-changes"[^>]*>[^<]*<\/button><p class="checkout-continue__note" id="checkout-tick-changes">Tick the box above to continue to payment\.<\/p>/u,
+      // Batch 63 (F09): with no tip chosen yet, "Choose a tip first" is said after it too.
+      /aria-describedby="checkout-tick-changes(?: checkout-tip-first)?"[^>]*>[^<]*<\/button><p class="checkout-continue__note" id="checkout-tick-changes">Tick the box above to continue to payment\.<\/p>/u,
     );
     // A first price that differs is listed as a price change (after a reload too).
     const rose = render({

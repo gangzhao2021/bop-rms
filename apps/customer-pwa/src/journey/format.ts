@@ -153,3 +153,8 @@ export function describeChosenOption(option: {
     ? `${name} +${formatMoney(option.amount.amountMinor, option.amount.currencyCode)}`
     : name;
 }
+
+/** Batch 63 (D62B-14, F13): "1 dish" / "3 dishes" (zh "1 道"), where a bare number said nothing. */
+export function dishCount(count: number): string {
+  return count === 1 ? t("1 dish") : t("{count} dishes", { count: String(count) });
+}

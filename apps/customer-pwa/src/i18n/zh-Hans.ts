@@ -226,7 +226,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Checking your cart…": "正在核对您的购物车…",
   "Checking your current cart…": "正在核对您当前的购物车…",
   "Checking your pickup code…": "正在核对您的取餐码…",
-  "Checking your table connection…": "正在确认您的桌位连接…",
+  "Checking your table connection…": "正在确认本桌连接…",
   Checkout: "结账",
   "Checkout details": "结账信息",
   "Checkout details saved.": "结账信息已保存。",
@@ -260,6 +260,18 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Continue to payment": "去付款",
   "Continue to payment · {total}": "去付款 · {total}",
   "Corrected receipt": "更正后的收据",
+  "No allergens listed. Ask staff if you have an allergy.": "未标注过敏原。如有过敏请询问店员。",
+  "Round {round} sent to the kitchen": "第 {round} 轮已送到厨房",
+  "Round {round} placed.": "第 {round} 轮已下单。",
+  "Round {round} placed. Staff confirm it first.": "第 {round} 轮已下单，店员确认后开始做。",
+  "Join {table}": "加入 {table}",
+  "Not your table? Tell staff.": "不是您的桌？请告诉店员。",
+  "No connection.": "没有网络。",
+  "Your cart is kept on this phone. To order now, ask a staff member.":
+    "购物车已保存在这部手机上，现在要点菜请找店员。",
+  "Original receipt": "原始收据",
+  "Voided receipt": "已作废的收据",
+  "Updated receipt (after refund)": "更新后的收据（退款后）",
   "Couldn’t confirm your change. Try again.": "无法确认您的修改，请重试。",
   "Couldn’t update your cart. Review this item and try again.":
     "无法更新购物车。请检查这件商品后重试。",
@@ -352,7 +364,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Join code or invitation": "入桌码或邀请码",
   "Join table": "加入这桌",
   "Join this table": "加入这一桌",
-  "Join your table first": "请先加入您的桌位",
+  "Join your table first": "请先加入本桌",
   "Thank you for dining with us.": "谢谢光临",
   "Your meal at table {table} has ended.": "桌号 {table} 的用餐已结束。",
   "Nothing was ordered at table {table}, so nothing was charged.":
@@ -444,7 +456,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Loading secure card form…": "正在加载安全付款表单…",
   "Loading the current menu": "正在加载当前菜单",
   "Loading your cart…": "正在加载您的购物车…",
-  "Loading your table": "正在加载您的桌位",
+  "Loading your table": "正在加载本桌",
   "Make a code": "生成代码",
   "Make a new code": "生成新代码",
   "Make another code": "再生成一个代码",
@@ -568,8 +580,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Ordered at your table": "在您这桌点的",
   "Ordered by another guest": "由同桌其他客人点的",
   "Ordered by you": "您点的",
-  "Ordering and payment are paused until you reconnect. Nothing is sent in the background.":
-    "恢复网络前，点单和付款都已暂停，后台不会发送任何内容。",
   "Ordering is paused": "点单已暂停",
   "Ordering is paused for a short while": "点单暂停一小会儿",
   "Closed now": "现在已打烊",
@@ -580,9 +590,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "您在{storeDisplayName}的订单还未付款。请在 {time} 前付款，否则会取消，不会扣款。再扫{storeDisplayName}的自取二维码就能去付款。",
   "Order from the QR code you just scanned": "改在刚扫的二维码点单",
   "This table’s visit has ended": "这桌的用餐已结束",
-  "Open your table to see its bill and receipt.": "打开“您的桌位”查看账单和收据。",
+  "Open your table to see its bill and receipt.": "打开“本桌”查看账单和收据。",
   "Your party’s table changed": "您这桌换桌了",
-  "Open your table to see where your party is now.": "打开“您的桌位”查看您现在在哪一桌。",
+  "Open your table to see where your party is now.": "打开“本桌”查看您现在在哪一桌。",
   "This phone is no longer at this table": "这部手机已不在这桌",
   "To order with your table again, scan the QR code on the table.":
     "如需继续和同桌一起点单，请重新扫桌上的二维码。",
@@ -715,7 +725,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "You’re offline. Your pickup code shows again when you’re back online.":
     "您现在离线。网络恢复后会自动显示取餐码。",
   Recorded: "已记录",
-  "Refresh after reconnecting": "恢复网络后刷新",
   "Refresh before changing delivery instructions.": "修改配送说明前请先刷新。",
   "Refresh cart": "刷新购物车",
   "Refresh code": "刷新代码",
@@ -1115,7 +1124,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "We couldn’t load your order status. Please try again.": "无法加载订单状态，请重试。",
   "We couldn’t load your payment": "无法加载您的付款",
   "We couldn’t load your receipt": "无法加载您的收据",
-  "We couldn’t load your table": "无法加载您的桌位",
+  "We couldn’t load your table": "无法加载本桌",
   "We couldn’t make a code. Try again, or ask a staff member for one.":
     "无法生成代码。请重试，或向店员要一个。",
   "We couldn’t open another card payment. Check your connection and try again.":
@@ -1237,14 +1246,14 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "收据会显示在您的订单页，您可以在那里打印或保存。",
   "Your session ended. Scan the location QR code again to continue.":
     "您的会话已结束，请重新扫描门店二维码继续。",
-  "Your table": "您的桌位",
+  "Your table": "本桌",
   "Your table at {storeDisplayName} is confirmed for dine-in.":
     "您在 {storeDisplayName} 的堂食桌位已确认。",
   "Your table connection is confirmed. You can continue to the menu. No order has been placed.":
-    "已确认您的桌位，可以继续查看菜单。尚未下单。",
+    "已确认本桌，可以继续查看菜单。尚未下单。",
   "Your table was changed. Ask a staff member for a join code for your new table.":
-    "您的桌位已更换，请向店员索取新桌位的入桌码。",
-  "Your table · {tableLabel}": "您的桌位 · {tableLabel}",
+    "本桌已更换，请向店员索取新桌的入桌码。",
+  "Your table · {tableLabel}": "本桌 · {tableLabel}",
   "Your table's earlier cart timed out, so items that hadn't been ordered were cleared. Orders already placed are not affected.":
     "您这桌之前的购物车已超时，尚未下单的商品已清除。已下的订单不受影响。",
   "Your table’s cart timed out and a new one couldn’t be started just now. Wait a moment, then add the item again.":
@@ -1263,8 +1272,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "You’re offline, so no code was made. Reconnect, then try again.":
     "您已离线，没有生成代码。请恢复网络后重试。",
   "You’re offline.": "您已离线。",
-  "You’re offline. Changes and checkout are paused; nothing will replay on reconnect.":
-    "您已离线。修改和结账已暂停，恢复网络后也不会自动提交。",
   "You’re offline. Joining and recovery are paused. Reconnect, then try again.":
     "您已离线。加入和恢复已暂停，请恢复网络后重试。",
   "You’re offline. Nothing was queued or replayed.": "您已离线，没有提交任何操作。",
@@ -1375,7 +1382,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   // Figma v1: the pickup order's steps on the order page.
   "Accepted by the store": "门店已接单",
   "Being made": "制作中",
-  Now: "进行中",
+  "In progress": "进行中",
   "Order progress": "订单进度",
   "Payment received": "已收款",
   "Picked up": "已取餐",
@@ -1497,7 +1504,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Enter the tip to pay": "请输入小费后付款",
   "Enter an amount in dollars.": "请输入金额（加元）。",
   "A tip can be at most the bill before tax ({amount}).": "小费最多为税前账单金额（{amount}）。",
-  "Choose a tip to continue": "请选择小费后继续",
+  "Choose a tip first": "请先选择小费",
   "{name} {price} per person · {count} at this table (added by staff).":
     "{name} 每位 {price} · 本桌 {count} 位（由店员按人数加上）。",
   "Per-person charge": "按人数收费",
@@ -1544,7 +1551,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Choose it from the menu": "去菜单里重新选",
   "One more {name} is in your cart.": "已把一份{name}加入您的购物车。",
   "This table already ordered {count} of these.": "这桌已经点过 {count} 份。",
-  "Your table ordered {count}": "这桌已点 {count} 份",
+  "Your table ordered {count}": "本桌已点 {count} 份",
   "Last orders {time}": "厨房 {time} 停止接单",
   "Kitchen stopped taking orders at {time}": "厨房 {time} 已停止接单",
   "Last orders": "停止接单",
@@ -2034,7 +2041,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   // batch 50: their dishes are unpaid but can't be worked out as their own part on this read.
   "Only what I added (can’t be worked out right now — please ask staff)":
     "只付我加的（暂时算不出来，请找店员）",
-  "Only what I added ({count} · {amount})": "只付我加的（{count} 道 · {amount}）",
+  "Only what I added ({dishes} · {amount})": "只付我加的（{dishes} · {amount}）",
+  "1 dish": "1 道",
+  "{count} dishes": "{count} 道",
   "Choose dishes to pay for": "选择要付的菜",
   "you added": "您加的",
   "{count} left": "还剩 {count} 份",
@@ -2078,7 +2087,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "We couldn't reach the store. Try again; nothing was charged.":
     "暂时连不上店里，请再试一次；没有扣款。",
   "The whole table ({count} dishes)": "付全桌（{count} 道菜）",
-  "Only what I added ({count})": "只付我加的（{count} 道）",
+  "Only what I added ({dishes})": "只付我加的（{dishes}）",
   "{count} in the cart": "购物车里有 {count} 份",
   "Tax shows on the next step.": "含税金额在下一步显示。",
   "Dishes you don't choose stay for the others at your table. Tax shows on the next step.":

@@ -74,11 +74,11 @@ it("price-hold-dish-changes (DEC-PRICE-HOLD §3): the Store's renamed dish and a
       dish: "Wonton noodle soup",
       name: true,
       allergens: true,
-      allergensNow: "May contain Sesame seeds",
+      allergensNow: "May contain sesame seeds",
     },
   ]);
   expect(dishChangeText(changes[0] as (typeof changes)[number])).toBe(
-    "Wonton noodle soup was renamed since you added it. Wonton noodle soup allergens now: May contain Sesame seeds.",
+    "Wonton noodle soup was renamed since you added it. Wonton noodle soup allergens now: May contain sesame seeds.",
   );
   // Allergens the menu no longer lists, and a menu not read yet: never "nothing changed".
   expect(lineAllergenLine(menu([]), id(3), [])).toBe("No allergens listed");

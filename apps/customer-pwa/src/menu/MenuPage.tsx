@@ -59,6 +59,7 @@ import {
   allergensForChoice,
   comboDishAllergens,
   missingComboPart,
+  allergenNames,
   compactAllergenLine,
   configuredItemTotal,
   familyAllergens,
@@ -508,6 +509,8 @@ export function MenuScreen({
     context !== undefined && mode !== "detail" && closed === undefined && checkout === null;
   const justAdded = useBackOnMenu(browseFound);
   const [quickMessage, setQuickMessage] = useState<string | null>(null);
+  // Batch 63 (F14): whether the message says the dish went in (a green dot) or not (a grey one).
+  const [quickAddedTone, setQuickAddedTone] = useState(false);
   // v15 b17: a one-tap add that didn't go in stays long enough to read.
   const [quickLasting, setQuickLasting] = useState(false);
   // Live v15 2026-11-10: a one-tap add still waiting after 3 s says so, as the dish page does.
@@ -532,9 +535,10 @@ export function MenuScreen({
         ? null
         : {
             channel,
-            onAdded: (message: string, lasting = false) => {
+            onAdded: (message: string, lasting = false, added = false) => {
               setQuickMessage(message);
               setQuickLasting(lasting);
+              setQuickAddedTone(added);
               setCartReads((value) => value + 1);
             },
             onBusy: (busy: boolean) =>
@@ -670,20 +674,38 @@ export function MenuScreen({
                 />
               ) : null}
             </div>
-            {quickSlow ? (
-              <p className="menu-added-toast" role="status">
-                {t("Still adding; the restaurant's system is busy. No need to tap again.")}
-              </p>
-            ) : justAdded || quickMessage !== null ? (
-              <p className="menu-added-toast" role="status">
-                {quickMessage ?? t("Added to your cart.")}
-              </p>
-            ) : null}
+            {/* Batch 63 (CDI-14, F14): what a tap on + did is said in the cart bar, as a dot and
+                dark words (it was a black block over the dishes above the bar). */}
             {withCart ? (
               <MenuCart
                 reads={cartReads}
                 load={cartSummary ?? browserCartSummary}
                 menu={state.kind === "Found" && mode === "browse" ? state.menu : null}
+                notice={
+                  quickSlow
+                    ? {
+                        text: t(
+                          "Still adding; the restaurant's system is busy. No need to tap again.",
+                        ),
+                        added: false,
+                      }
+                    : justAdded || quickMessage !== null
+                      ? {
+                          text: quickMessage ?? t("Added to your cart."),
+                          added: quickMessage === null || quickAddedTone,
+                        }
+                      : null
+                }
+              />
+            ) : quickSlow || justAdded || quickMessage !== null ? (
+              <AddedNotice
+                text={
+                  quickSlow
+                    ? t("Still adding; the restaurant's system is busy. No need to tap again.")
+                    : (quickMessage ?? t("Added to your cart."))
+                }
+                added={!quickSlow && (quickMessage === null || quickAddedTone)}
+                alone
               />
             ) : null}
           </div>
@@ -698,11 +720,53 @@ export function MenuScreen({
  * the menu; phones get a bar along the bottom once something is in the cart. Nothing is shown until
  * the Store's cart has been read, and nothing at all if it can't be.
  */
+/** Whether the menu shows its cart as the side panel (64rem and wider) rather than the bar. */
+function useWideMenu(): boolean {
+  const query = "(min-width: 64rem)";
+  const [wide, setWide] = useState(
+    () => typeof window !== "undefined" && window.matchMedia?.(query).matches === true,
+  );
+  useEffect(() => {
+    if (typeof window === "undefined" || window.matchMedia === undefined) return;
+    const list = window.matchMedia(query);
+    const changed = () => setWide(list.matches);
+    changed();
+    list.addEventListener("change", changed);
+    return () => list.removeEventListener("change", changed);
+  }, []);
+  return wide;
+}
+
+/** Batch 63 (F14): a dot and dark words: green once the dish went in, grey otherwise. */
+function AddedNotice({
+  text,
+  added,
+  alone = false,
+}: {
+  readonly text: string;
+  readonly added: boolean;
+  /** No cart bar to sit in (nothing in the cart yet): it stands at the bottom by itself. */
+  readonly alone?: boolean;
+}) {
+  return (
+    <p
+      className={`menu-added-toast${alone ? " menu-added-toast--alone" : ""}`}
+      data-tone={added ? "added" : "note"}
+      role="status"
+    >
+      {text}
+    </p>
+  );
+}
+
 function MenuCart({
   load,
   menu,
   reads = 0,
+  notice = null,
 }: {
+  /** Batch 63 (F14): what the last tap on + did, said in the cart bar. */
+  readonly notice?: { readonly text: string; readonly added: boolean } | null;
   readonly load: CartSummaryLoader;
   /** Counts dishes added from the list: each one reads the cart again. */
   readonly reads?: number;
@@ -723,12 +787,17 @@ function MenuCart({
       active = false;
     };
   }, [load, reads]);
-  if (cart === null) return null;
+  // The panel shows from 64rem (the bar hides there): the notice goes where the cart is shown.
+  const wide = useWideMenu();
+  const alone =
+    notice === null ? null : <AddedNotice text={notice.text} added={notice.added} alone />;
+  if (cart === null) return alone;
   const summary = summarizeCart(cart.view, menu);
   const items = summary.count === 1 ? t("1 item") : t("{count} items", { count: summary.count });
   return (
     <>
       <aside className="menu-cart-panel" aria-labelledby="menu-cart-heading">
+        {notice === null || !wide ? null : <AddedNotice text={notice.text} added={notice.added} />}
         <h2 id="menu-cart-heading">{t("Your order")}</h2>
         {summary.count === 0 ? (
           <p className="menu-cart-panel__empty">
@@ -759,8 +828,11 @@ function MenuCart({
           </>
         )}
       </aside>
-      {summary.count === 0 ? null : (
+      {summary.count === 0 ? (
+        alone
+      ) : (
         <div className="menu-cart-bar">
+          {notice === null || wide ? null : <AddedNotice text={notice.text} added={notice.added} />}
           {/* Figma v1: what is in the cart on the left, one black action on the right. */}
           <p className="menu-cart-bar__summary">
             <span className="menu-cart-bar__count">{items}</span>
@@ -1068,8 +1140,10 @@ function useBackOnMenu(found: boolean): boolean {
  */
 const MenuQuickAdd = createContext<{
   readonly channel: MenuJourneyContext["channel"];
-  /** `lasting`: the add didn't go in; the message stays long enough to read. */
-  readonly onAdded: (message: string, lasting?: boolean) => void;
+  /**
+   * `lasting`: the add didn't go in; the message stays long enough to read. `added`: it went in.
+   */
+  readonly onAdded: (message: string, lasting?: boolean, added?: boolean) => void;
   /** A one-tap add started (true) or ended (false). */
   readonly onBusy: (busy: boolean) => void;
 } | null>(null);
@@ -1139,6 +1213,8 @@ function QuickAddButton({ family }: { readonly family: MenuFamily }) {
                 "Your table's earlier cart timed out, so items that hadn't been ordered were cleared. Orders already placed are not affected.",
               )
           : t("Added to your cart."),
+        false,
+        true,
       );
     else if (state.status === "outcome-unknown")
       quick.onAdded(t("We couldn't confirm that. Check your cart before adding it again."));
@@ -1186,7 +1262,11 @@ function MenuItemCard({
   const [photo, photoFailed] = useShownPhoto(familyPhoto(family));
   const opens = primaryVariant(family).sellable;
   const description = familyDescription(family);
-  const allergens = compactAllergenLine(familyAllergens(family));
+  // Batch 63 (CDI-14, F14): every dish carries an allergen line; with none listed it says so and
+  // where to ask (never a phrase that reads as allergen-free).
+  const allergens =
+    compactAllergenLine(familyAllergens(family)) ??
+    t("No allergens listed. Ask staff if you have an allergy.");
   const price = familyPriceText(family);
   const role = opens.presentationRole;
   const alreadyOrdered = useTableOrderedCount(
@@ -2054,14 +2134,8 @@ export function dishAllergenText(allergens: readonly MenuAllergenItem[] | null):
   const contains = allergens.filter((item) => item.classification === "Contains");
   const may = allergens.filter((item) => item.classification !== "Contains");
   return [
-    contains.length === 0
-      ? null
-      : t("Contains {value1}", {
-          value1: contains.map((item) => item.name).join(listSeparator()),
-        }),
-    may.length === 0
-      ? null
-      : t("May contain {value1}", { value1: may.map((item) => item.name).join(listSeparator()) }),
+    contains.length === 0 ? null : t("Contains {value1}", { value1: allergenNames(contains) }),
+    may.length === 0 ? null : t("May contain {value1}", { value1: allergenNames(may) }),
   ]
     .filter(Boolean)
     .join(clauseSeparator());
@@ -2090,14 +2164,8 @@ function ChoiceAllergens({
         : [
             contains.length === 0
               ? null
-              : t("contains {value1}", {
-                  value1: contains.map((item) => item.name).join(listSeparator()),
-                }),
-            may.length === 0
-              ? null
-              : t("may contain {value1}", {
-                  value1: may.map((item) => item.name).join(listSeparator()),
-                }),
+              : t("contains {value1}", { value1: allergenNames(contains) }),
+            may.length === 0 ? null : t("may contain {value1}", { value1: allergenNames(may) }),
           ]
             .filter(Boolean)
             .join(clauseSeparator()) + sentenceEnd()}
@@ -2118,19 +2186,20 @@ function AllergenSummary({ sellable }: { readonly sellable: MenuSellable }) {
           : t("Allergen information (all choices)")}
       </p>
       {sellable.allergens.length === 0 ? (
-        <p>{t("No allergen-free claim is made. Ask staff before ordering.")}</p>
+        // Batch 63 (CDI-14, F14): the same plain line as the menu row, never an allergen-free claim.
+        <p>{t("No allergens listed. Ask staff if you have an allergy.")}</p>
       ) : (
         <dl>
           {contains.length === 0 ? null : (
             <div>
               <dt>{t("Contains")}</dt>
-              <dd>{contains.map((item) => item.name).join(listSeparator())}</dd>
+              <dd>{allergenNames(contains, true)}</dd>
             </div>
           )}
           {may.length === 0 ? null : (
             <div>
               <dt>{t("Cross-contact possible")}</dt>
-              <dd>{may.map((item) => item.name).join(listSeparator())}</dd>
+              <dd>{allergenNames(may, true)}</dd>
             </div>
           )}
         </dl>

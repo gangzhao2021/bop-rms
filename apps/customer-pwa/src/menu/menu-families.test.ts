@@ -154,14 +154,15 @@ describe("WP-2423 compact allergen line", () => {
   it("lists every allergen once, contains before may-contain", () => {
     const family = groupMenuFamilies([small, regular, large])[0];
     if (!family) throw new Error("fixture");
-    expect(compactAllergenLine(familyAllergens(family))).toBe("Contains Milk · May contain Soy");
+    // Batch 63 (F13): names lower case inside the English sentence.
+    expect(compactAllergenLine(familyAllergens(family))).toBe("Contains milk · May contain soy");
     expect(
       compactAllergenLine([
         { name: "Tree nuts", classification: "CrossContactPossible" },
         { name: "Wheat", classification: "Contains" },
         { name: "Eggs", classification: "Contains" },
       ]),
-    ).toBe("Contains Wheat, Eggs · May contain Tree nuts");
+    ).toBe("Contains wheat, eggs · May contain tree nuts");
     expect(compactAllergenLine([])).toBeNull();
   });
 
@@ -171,7 +172,7 @@ describe("WP-2423 compact allergen line", () => {
       { ...regular, allergens: [{ name: "Soy", classification: "Contains" }] },
     ])[0];
     if (!family) throw new Error("fixture");
-    expect(compactAllergenLine(familyAllergens(family))).toBe("Contains Soy");
+    expect(compactAllergenLine(familyAllergens(family))).toBe("Contains soy");
   });
 });
 

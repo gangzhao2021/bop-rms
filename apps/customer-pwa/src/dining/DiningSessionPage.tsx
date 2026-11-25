@@ -204,22 +204,37 @@ const chargeTakenOff = (round: DiningRound) =>
   round.status === "StoreCancelled" &&
   round.payment === "NotCharged";
 
-/** M91: one dish's progress in the guest's words. */
-export function dishProgressText(item: DiningRound["items"][number]): string {
-  if (item.progress === "Served")
-    return item.quantity > 1
-      ? t("Served {value1} of {quantity}", {
-          value1: String(item.servedQuantity),
-          quantity: String(item.quantity),
-        })
-      : t("Served");
-  if (item.servedQuantity > 0)
+/**
+ * M91: one dish's progress in the guest's words. Batch 63 (v15 batch 62 review CDI-10, F12/F13):
+ * a dish says nothing while it is where its round is (a round "Sent to the kitchen" over dishes
+ * "Waiting" read as three words for one state); "Served 1 of 2" only while partly served.
+ */
+export function dishProgressText(
+  item: DiningRound["items"][number],
+  roundStatus?: DiningRoundStatus,
+): string | null {
+  const partlyServed = item.servedQuantity > 0 && item.servedQuantity < item.quantity;
+  if (partlyServed)
     return t("Served {value1} of {quantity}", {
       value1: String(item.servedQuantity),
       quantity: String(item.quantity),
     });
-  if (item.progress === "Ready") return t("Ready");
-  if (item.progress === "Making") return t("Being made");
+  const progress = item.progress === "Served" || item.servedQuantity > 0 ? "Served" : item.progress;
+  const sameAsRound: Readonly<Record<string, readonly DiningRoundStatus[]>> = {
+    Served: ["Served", "Serving"],
+    Ready: ["Ready"],
+    Making: ["Preparing"],
+    Waiting: ["Received", "Queued", "WaitingForStaff", "AwaitingPayment", "PaymentFailed"],
+  };
+  if (
+    roundStatus !== undefined &&
+    progress !== undefined &&
+    sameAsRound[progress]?.includes(roundStatus)
+  )
+    return null;
+  if (progress === "Served") return t("Served");
+  if (progress === "Ready") return t("Ready");
+  if (progress === "Making") return t("Being made");
   return t("Waiting");
 }
 
@@ -599,9 +614,14 @@ function RoundCard({
                     })
                   : t("Being remade · we'll bring it to your table shortly")}
               </span>
-            ) : item.progress !== undefined && !charge ? (
-              // M91: every round says where each dish is, not only a paid one.
-              <span className="order-status__item-progress">{dishProgressText(item)}</span>
+            ) : item.progress !== undefined &&
+              !charge &&
+              dishProgressText(item, round.status) !== null ? (
+              // M91: every round says where each dish is, not only a paid one (batch 63: only
+              // where it differs from the round's own word).
+              <span className="order-status__item-progress">
+                {dishProgressText(item, round.status)}
+              </span>
             ) : round.payment === "Paid" && !charge ? (
               <span>
                 {t("Served")} {item.servedQuantity} {t("of")} {item.quantity}
@@ -808,7 +828,14 @@ function closedBillNote(closed: ClosedBillPaid): string {
   }
 }
 
-function TableSummary({ view }: { readonly view: DiningSessionView }) {
+function TableSummary({
+  view,
+  checkingOut = false,
+}: {
+  readonly view: DiningSessionView;
+  /** Batch 63 (D62B-14, F13): the table's checkout has started (what is owed is "still to pay"). */
+  readonly checkingOut?: boolean;
+}) {
   const payLater = view.paymentTiming === "PayLater";
   const summary = view.summary;
   if (summary === null) return null;
@@ -942,13 +969,15 @@ function TableSummary({ view }: { readonly view: DiningSessionView }) {
             anyone pays it is what the table pays at the end; once a part is paid, what is still to
             pay; once it is all paid there is nothing left to name (the pay section thanks them). */}
         {allPaid ? null : (
-          <div>
+          // Batch 63 (CDI-4, F07): the table's key number, as strong as a round's total.
+          <div className="dining-session__due">
             <dt>
               {closedByStaff
                 ? nonZero(summary.paidAfterRefunds ?? summary.paid)
                   ? t("Rest of the bill")
                   : t("The bill")
-                : summary.splitParts !== undefined || (payLater && nonZero(summary.paid))
+                : summary.splitParts !== undefined ||
+                    (payLater && (nonZero(summary.paid) || checkingOut))
                   ? t("Still to pay")
                   : payLater
                     ? t("To pay at the end")
@@ -1267,8 +1296,11 @@ export function DiningSessionPage({
       pending.current = null;
     };
   }, [load]);
-  // The line about the round just placed lasts until that round moves on.
+  // The line about the round just placed lasts until that round moves on. Batch 63 (v15 batch
+  // 62 review CDI-10, F12): and no longer than the next read of the table — it stayed at the top
+  // long after the round was sent, even after another guest's round came in.
   const placedRoundSeen = useRef<string | null>(null);
+  const placedSeenIn = useRef<DiningSessionState | null>(null);
   useEffect(() => {
     if (placed === null || state.status === "loading" || state.status === "unavailable") return;
     if (state.status !== "ready") {
@@ -1277,6 +1309,11 @@ export function DiningSessionPage({
     }
     const seen = placedRoundFact(state.view);
     if (seen === null) return;
+    if (placedSeenIn.current !== null && placedSeenIn.current !== state) {
+      setPlaced(null);
+      return;
+    }
+    placedSeenIn.current = state;
     placedRoundSeen.current ??= seen;
     if (
       placedRoundSeen.current !== seen ||
@@ -1374,6 +1411,23 @@ export type RoundPlaced = "Sent" | "Held";
 const placedRound = (state: unknown): RoundPlaced | null => {
   const placed = (state as { placed?: unknown } | null)?.placed;
   return placed === "Sent" || placed === "Held" ? placed : null;
+};
+/**
+ * Batch 63 (F12): what the guest's round just placed is, by its number: "Round 2 sent to the
+ * kitchen" (or "placed" while staff confirm it, or before it reaches the kitchen).
+ */
+const placedText = (placed: RoundPlaced, view: DiningSessionView | null): string => {
+  const own =
+    view === null ? undefined : [...view.rounds].reverse().find((r) => r.orderedBy === "You");
+  if (own === undefined)
+    return placed === "Held" ? t("Order placed. Staff confirm it first.") : t("Order placed.");
+  const round = String(own.roundNumber);
+  if (placed === "Held") return t("Round {round} placed. Staff confirm it first.", { round });
+  // Only once the round's own status says the kitchen has it ("Received by the store" may hold
+  // dishes the kitchen never makes).
+  return ["Queued", "Preparing", "Ready", "Serving"].includes(own.status)
+    ? t("Round {round} sent to the kitchen", { round })
+    : t("Round {round} placed.", { round });
 };
 /** Where this guest's newest round stands, as one comparable fact; null before they have one. */
 const placedRoundFact = (view: DiningSessionView): string | null => {
@@ -1495,12 +1549,9 @@ export function DiningSessionScreen({
         });
   return (
     <CustomerPage step="table" store={pageStore} className="order-status dining-session">
+      {/* Batch 63 (F12): no "ORDER 84" over the table: the number means nothing to a guest at a
+          table (the receipt keeps it). */}
       <PageHeading
-        eyebrow={
-          view?.orderNumber
-            ? t("Order {orderNumber}", { orderNumber: view.orderNumber })
-            : undefined
-        }
         title={
           view?.tableLabel
             ? t("Your table · {tableLabel}", { tableLabel: view.tableLabel })
@@ -1527,7 +1578,7 @@ export function DiningSessionScreen({
       )}
       {placed === null ? null : (
         <p className="dining-session__placed" role="status">
-          {placed === "Held" ? t("Order placed. Staff confirm it first.") : t("Order placed.")}
+          {placedText(placed, view)}
         </p>
       )}
       {state.status === "loading" ? (
@@ -1754,7 +1805,9 @@ export function DiningSessionScreen({
       state.status === "moved" ||
       state.status === "not-joined" ||
       paidOff ? null : tablePay?.checkingOut ? (
-        <p className="order-status__back" role="note">
+        // Batch 63 (D62B-07, F12): a status, a grey dot and dark words; it was set in the link
+        // style (accent, 44 px lines) and read as two links that did nothing.
+        <p className="dining-session__paying-note" role="note">
           {t("Your table is paying the bill. Ask staff if you want to add more.")}
         </p>
       ) : (
@@ -1762,7 +1815,7 @@ export function DiningSessionScreen({
           {t("Order more from the menu")}
         </Link>
       )}
-      {view ? <TableSummary view={view} /> : null}
+      {view ? <TableSummary view={view} checkingOut={tablePay?.checkingOut === true} /> : null}
       {invitation}
       {state.status === "ready" ? (
         <section className="order-status__actions" aria-label={t("Updates")}>

@@ -326,10 +326,17 @@ describe("WP-2423 Q4 not accepting orders", () => {
       nextOpening: { localDate: "2026-12-23", startLocalTime: "11:00:00" },
       localDate: "2026-12-22",
     });
-    expect(closed).toContain("Synthetic Store isn’t taking orders right now");
-    expect(closed).toContain("The store is closed now.");
+    // Batch 63 (F11, CDI-5): "Closed now" with a red dot, the store only in the header, and
+    // the hours on one line.
+    expect(closed).toContain('<div class="entry-state entry-state--closed" role="alert">');
+    expect(closed).toContain('<h2 id="entry-heading" tabindex="-1">Closed now</h2>');
+    expect(closed).not.toContain("Synthetic Store isn’t taking orders right now");
+    expect(closed).toContain("<h1>Synthetic Store</h1>");
+    expect(closed).not.toContain("The store is closed now.");
     // WP-2423 M122: written like every other time on the guest's pages (Chinese: 24-hour).
-    expect(closed).toContain("Today’s hours: 11:00\u00a0a.m.–9:30\u00a0p.m.");
+    expect(closed).toContain(
+      '<p class="entry-state__next">Opens tomorrow at 11:00\u00a0a.m. · Today’s hours: 11:00\u00a0a.m.–9:30\u00a0p.m.</p>',
+    );
     expect(formatStoreLocalTime("21:30:00", "zh-CN")).toBe("21:30");
     expect(closed).not.toContain("can’t be used");
     // Decision 16: when the Store opens next.
@@ -343,8 +350,8 @@ describe("WP-2423 Q4 not accepting orders", () => {
       nextOpening: null,
       localDate: null,
     });
+    expect(paused).toContain(">Ordering is paused</h2>");
     expect(paused).toContain("Online ordering is paused for a short while.");
-    expect(paused).toContain("Closed today.");
   });
   it("WP-2423 item 8 ③ decision 16: a holiday says so once and gives the next opening", () => {
     const holiday = render({
@@ -1042,5 +1049,44 @@ describe("batch 40 (v15 cross-midnight): after last orders while the Store is st
     expect(heading(zhAgain)).toBe("厨房已停止接单");
     expect(zhAgain).not.toContain("可以开始点单");
     vi.restoreAllMocks();
+  });
+});
+
+// Batch 63 (v15 batch 62 review CDI-2, F11): once staff opened the table, the join page said
+// "Welcome to <store>" over a second "Join this table" heading and never named the table, so a
+// guest who scanned the wrong table could not tell before ordering on its bill.
+describe("batch 63 (F11): the join names the table", () => {
+  const admission = { journey: {} as never, generateOperationReference: () => "" };
+  const join = (tableLabel: string | null, language: "en" | "zh-Hans" = "en") =>
+    renderToStaticMarkup(
+      <LanguageRoot initial={language}>
+        {() => (
+          <MemoryRouter>
+            <EntryContextView
+              onContinue={vi.fn()}
+              onRetry={vi.fn()}
+              state={{ kind: "Established", context }}
+              diningAdmission={admission}
+              tableLabel={tableLabel}
+            />
+          </MemoryRouter>
+        )}
+      </LanguageRoot>,
+    );
+  it("is one title, Join D62A 1, with the not-your-table line and no welcome", () => {
+    const html = join("D62A 1");
+    expect(html).toContain('<h2 id="entry-heading" tabindex="-1">Join D62A 1</h2>');
+    expect(html).toContain('<p class="entry-not-your-table">Not your table? Tell staff.</p>');
+    expect(html).not.toContain("Welcome to");
+    // The panel's own heading is for screen readers only: one visible title.
+    expect(html).toContain('id="dining-admission-heading" tabindex="-1" class="sr-only"');
+    expect(html.match(/<h2(?![^>]*sr-only)[^>]*>/gu)?.length).toBe(2); // the title and Need help?
+  });
+  it("without the table's name it says Join this table, and reads in Chinese", () => {
+    expect(join(null)).toContain('<h2 id="entry-heading" tabindex="-1">Join this table</h2>');
+    const zhHtml = join("D62A 1", "zh-Hans");
+    expect(zhHtml).toContain(">加入 D62A 1</h2>");
+    expect(zhHtml).toContain("不是您的桌？请告诉店员。");
+    renderToStaticMarkup(<LanguageRoot initial="en">{() => null}</LanguageRoot>);
   });
 });

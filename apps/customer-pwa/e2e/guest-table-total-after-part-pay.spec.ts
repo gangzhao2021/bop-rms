@@ -672,9 +672,7 @@ for (const width of [390, 1024, 1440])
         for (let visit = 0; visit < 3; visit += 1) {
           await nav.getByRole("link", { name: zh ? "菜单" : "Menu", exact: true }).click();
           await expect(page).toHaveURL(/\/menu/u);
-          await nav
-            .getByRole("link", { name: zh ? "您的桌位" : "Your table", exact: true })
-            .click();
+          await nav.getByRole("link", { name: zh ? "本桌" : "Your table", exact: true }).click();
           await expect(page.getByRole("region", { name: words(zh).total })).toBeVisible();
           await advance(page, 1_000);
         }

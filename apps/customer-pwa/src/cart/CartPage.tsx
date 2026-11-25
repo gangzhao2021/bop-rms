@@ -1294,11 +1294,11 @@ function CartContent({
           )}
         </StateMessage>
       ) : null}
+      {/* Batch 63 (F10): the banner at the top says it once; here only the way to try again. */}
       {readOnly ? (
-        <div className="cart-offline" role="status">
-          {cartText.offline.paused}
+        <div className="cart-offline">
           <button type="button" onClick={() => void controller.load()}>
-            {cartText.offline.refreshAfterReconnecting}
+            {commonText.tryAgain}
           </button>
         </div>
       ) : null}
@@ -1387,7 +1387,14 @@ function CartContent({
         ) : (
           <Link to="/menu">{terminal ? commonText.browseMenu : cartText.continueShopping}</Link>
         )}
-        {terminal || readOnly ? null : timing === "Loading" ? (
+        {terminal ? null : readOnly ? (
+          // Batch 63 (F10): the next step stays where it was, shown unavailable while offline.
+          <div className="cart-next-actions__place">
+            <button className="cart-checkout-link" type="button" disabled>
+              {payLater ? cartText.placeOrder : cartText.checkout}
+            </button>
+          </div>
+        ) : timing === "Loading" ? (
           <button className="cart-checkout-link" type="button" disabled>
             {cartText.continueWaiting}
           </button>
@@ -1938,7 +1945,10 @@ function OpenCartPage({
                         tableCheckoutText(tableCheckout ?? unreadTableCheckout).heading,
                       )
                     : tableCheckoutText(tableCheckout ?? unreadTableCheckout).whole
-                  : (specificRefusal(state) ?? cartText.stateAnnouncement[state.status])}
+                  : state.status === "offline-readonly"
+                    ? // Batch 63 (F10): the connection banner says it once, for everyone.
+                      null
+                    : (specificRefusal(state) ?? cartText.stateAnnouncement[state.status])}
       </div>
     </CustomerPage>
   );

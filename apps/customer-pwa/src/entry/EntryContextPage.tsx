@@ -12,6 +12,7 @@ import type { CustomerCurrentOrder } from "../session/session-bootstrap.js";
 import { SettledTableReceiptPanel } from "../dining/SettledTableReceipt.js";
 import {
   getSettledTableLabel,
+  getUnseatedTableWait,
   setGuestTableQuestion,
   setGuestTableJoiner,
   setGuestTableStarter,
@@ -147,6 +148,18 @@ export function EntryContextPage({
     state: CustomerEntryScreenState;
   }>(() => ({ client, state: initial() }));
   const state = result.client === client ? result.state : initial();
+  // Batch 63 (F11): the scanned table's name, as the waiting page said it, so the join that
+  // follows once staff open the table names the table too (the open table's answer has no name).
+  const [tableName, setTableName] = useState<{ store: string; label: string } | null>(() => {
+    const wait = getUnseatedTableWait();
+    return wait?.tableLabel && wait.context
+      ? { store: wait.context.publicStoreReference, label: wait.tableLabel }
+      : null;
+  });
+  useEffect(() => {
+    if (state.kind === "TableNotOpen" && state.tableLabel !== undefined)
+      setTableName({ store: state.context.publicStoreReference, label: state.tableLabel });
+  }, [state]);
   const heading = useRef<HTMLHeadingElement>(null);
   const navigate = useNavigate();
   const established = useRef(onEstablished);
@@ -542,6 +555,12 @@ export function EntryContextPage({
       onRetryNow={() => void client.retry()}
       onAnswer={client.enter === undefined ? undefined : answer}
       onSeated={recheckNow ?? undefined}
+      tableLabel={
+        (state.kind === "Established" || state.kind === "Resumed") &&
+        tableName?.store === state.context.publicStoreReference
+          ? tableName.label
+          : null
+      }
       waitStopped={waitStopped}
       waitRefused={waitRefused}
       waitTrouble={waitTrouble}
@@ -724,6 +743,8 @@ export interface EntryContextViewProps {
   readonly onAnswer?: ((intent: CustomerEntryIntent) => void) | undefined;
   /** M02: at a table not open yet, the guest says staff seated them (checks again now). */
   readonly onSeated?: (() => void) | undefined;
+  /** Batch 63 (F11): the open table's printed name when this page knows it (null: not known). */
+  readonly tableLabel?: string | null | undefined;
   /** WP-2423: the page stopped checking whether the table is open (it waited 15 minutes). */
   readonly waitStopped?: boolean | undefined;
   /** Batch 33: the check was refused: this link doesn't open the table (staff can help). */
@@ -767,6 +788,7 @@ export function EntryContextView({
   onRetry,
   onAnswer,
   onSeated,
+  tableLabel = null,
   waitStopped = false,
   waitRefused = false,
   waitTrouble = false,
@@ -816,7 +838,10 @@ export function EntryContextView({
               brandName: at.brandDisplayName,
               serviceMode: at.channel,
             }
-          : endedTableStore(ended)
+          : state.kind === "NotAccepting" && ended === null
+            ? // Batch 63 (F11): the closed page's heading is "Closed now"; the header names the store.
+              { storeName: state.storeDisplayName }
+            : endedTableStore(ended)
       }
       className="entry-page"
       fallbackTitle={t("Start your order")}
@@ -837,6 +862,7 @@ export function EntryContextView({
             onRetry={onRetry}
             onAnswer={onAnswer}
             onSeated={onSeated}
+            tableLabel={tableLabel}
             waitStopped={waitStopped}
             waitRefused={waitRefused}
             waitTrouble={waitTrouble}
@@ -871,7 +897,8 @@ export function EntryContextView({
         </p>
       ) : null}
       {/* Below the started visit, so its arrival moves nothing the guest is reading. */}
-      {established ? <StoreIdentityCard load={storeProfile} /> : null}
+      {/* Batch 63 (F11): the Store's name is in the header; the card keeps its hours and address. */}
+      {established ? <StoreIdentityCard load={storeProfile} nameInHeader /> : null}
       {/* Not under the short loading notice, where the arriving answer would push it down. */}
       {state.kind === "Loading" ? null : (
         <aside className="entry-help" aria-labelledby="entry-help-heading">
@@ -1043,6 +1070,7 @@ function EntryNextSteps({
           service={diningAdmission}
           autoJoin={autoJoin === true}
           starting={starting === true}
+          titled
           onStateChange={(state) => {
             setJoined(state === "Bound" || state === "Unavailable");
             // Answered once: a refusal goes back to asking, and doesn't repeat the new party.
@@ -1065,6 +1093,17 @@ function EntryNextSteps({
       </button>
     </>
   );
+}
+
+/** Batch 63 (F11): "Join D62A 1" when the table's name is known, else "Join this table". */
+function joinTitle(tableLabel: string | null): string {
+  return tableLabel === null
+    ? t("Join this table")
+    : t("Join {table}", { table: saidTable(tableLabel) });
+}
+
+function NotYourTable() {
+  return <p className="entry-not-your-table">{t("Not your table? Tell staff.")}</p>;
 }
 
 function StateHeading({
@@ -1184,6 +1223,7 @@ function EntryState({
   onRetry,
   onAnswer,
   onSeated,
+  tableLabel = null,
   waitStopped = false,
   waitRefused = false,
   waitTrouble = false,
@@ -1249,54 +1289,59 @@ function EntryState({
       </div>
     );
 
-  if (state.kind === "NotAccepting")
-    return (
-      <div className="entry-state entry-state--warning" role="alert">
-        <StateHeading headingRef={headingRef}>
-          {tWords("{storeDisplayName} isn’t taking orders right now", {
-            storeDisplayName: state.storeDisplayName,
-          })}
-        </StateHeading>
-        <p>
-          {state.paused
-            ? t(
-                "Online ordering is paused for a short while. Try again in a few minutes, or order with a staff member.",
+  if (state.kind === "NotAccepting") {
+    // Batch 63 (v15 batch 62 review CDI-5, F11): a red dot and dark "Closed now" (the header
+    // already names the store), then the hours on one line: "Opens today at 11:00 a.m. · Today’s
+    // hours: 11:00 a.m.–11:00 p.m.". The heading was amber and the store name was said twice.
+    const closedAllDay = state.todayKind !== null && state.todayHours.length === 0;
+    const todayHours =
+      closedAllDay || state.paused
+        ? null
+        : state.todayHours.length === 0
+          ? t("Closed today.")
+          : isOpenAllDay(
+                state.todayHours.map((interval) => ({
+                  startLocalTime: interval.start,
+                  endLocalTime: interval.end,
+                  endsNextDay: interval.endsNextDay,
+                })),
               )
-            : state.todayKind === "Holiday" && state.todayHours.length === 0
-              ? t("The store is closed today for a holiday.")
-              : state.todayKind !== null && state.todayHours.length === 0
-                ? t("The store is closed today.")
-                : t("The store is closed now.")}
-        </p>
-        {state.paused || state.nextOpening === null ? null : (
-          <p className="entry-state__next">
-            {endSentence(nextOpeningText(state.nextOpening, state.localDate))}
-          </p>
-        )}
-        {state.todayKind !== null && state.todayHours.length === 0 ? null : (
-          <p>
-            {state.todayHours.length === 0
-              ? t("Closed today.")
-              : isOpenAllDay(
-                    state.todayHours.map((interval) => ({
-                      startLocalTime: interval.start,
-                      endLocalTime: interval.end,
-                      endsNextDay: interval.endsNextDay,
-                    })),
-                  )
-                ? t("Open 24 hours today.")
-                : t("Today’s hours: ") +
-                  state.todayHours
-                    .map(
-                      (interval) =>
-                        entryClock(interval.start) +
-                        "–" +
-                        entryClock(interval.end) +
-                        (interval.endsNextDay ? t(" (next day)") : ""),
-                    )
-                    .join(listSeparator())}
-          </p>
-        )}
+            ? t("Open 24 hours today.")
+            : t("Today’s hours: ") +
+              state.todayHours
+                .map(
+                  (interval) =>
+                    entryClock(interval.start) +
+                    "–" +
+                    entryClock(interval.end) +
+                    (interval.endsNextDay ? t(" (next day)") : ""),
+                )
+                .join(listSeparator());
+    const reason = state.paused
+      ? t(
+          "Online ordering is paused for a short while. Try again in a few minutes, or order with a staff member.",
+        )
+      : state.todayKind === "Holiday" && closedAllDay
+        ? t("The store is closed today for a holiday.")
+        : closedAllDay
+          ? t("The store is closed today.")
+          : null;
+    const next =
+      state.paused || state.nextOpening === null
+        ? null
+        : nextOpeningText(state.nextOpening, state.localDate);
+    const hoursLine =
+      reason !== null
+        ? [reason, next === null ? null : endSentence(next)]
+            .filter((part) => part !== null)
+            .join(wordGap())
+        : [next, todayHours].filter((part) => part !== null).join(" · ");
+    return (
+      <div className="entry-state entry-state--closed" role="alert">
+        <StateHeading headingRef={headingRef}>
+          {state.paused ? t("Ordering is paused") : t("Closed now")}
+        </StateHeading>
+        {hoursLine === "" ? null : <p className="entry-state__next">{hoursLine}</p>}
         {/* M116: the menu to look at first; asking again whether it's open comes second. */}
         {state.browse !== undefined && onContinue ? (
           <>
@@ -1310,6 +1355,7 @@ function EntryState({
         )}
       </div>
     );
+  }
 
   if (state.kind === "RequestInvalid" || state.kind === "EntryUnavailable")
     return (
@@ -1408,12 +1454,24 @@ function EntryState({
         <StateHeading headingRef={headingRef}>
           {context.alreadyAtTable === true
             ? t("You’re already at this table.")
-            : context.channel === "DineIn"
-              ? tWords("Welcome to {storeDisplayName}", {
-                  storeDisplayName: context.storeDisplayName,
-                })
-              : t("Ready to order")}
+            : context.channel === "DineIn" &&
+                !context.joined &&
+                onContinue !== undefined &&
+                diningAdmission !== undefined
+              ? joinTitle(tableLabel)
+              : context.channel === "DineIn"
+                ? tWords("Welcome to {storeDisplayName}", {
+                    storeDisplayName: context.storeDisplayName,
+                  })
+                : t("Ready to order")}
         </StateHeading>
+        {context.channel === "DineIn" &&
+        !context.joined &&
+        onContinue !== undefined &&
+        diningAdmission !== undefined &&
+        context.alreadyAtTable !== true ? (
+          <NotYourTable />
+        ) : null}
         {context.channel === "DineIn" ? null : (
           <p className="entry-context">
             {tWords("Pickup from {storeDisplayName} is selected.", {
@@ -1615,6 +1673,14 @@ function EntryState({
 
   const { context } = state;
   const locationOpen = context.operatingState === "Open";
+  const joinOffered =
+    locationOpen &&
+    onContinue !== undefined &&
+    context.channel === "DineIn" &&
+    context.publicTableReference !== null &&
+    context.availableServiceModes.includes("DineIn") &&
+    diningAdmission !== undefined &&
+    stopped === null;
   // Batch 40 (v15 cross-midnight): after last orders a pickup guest was told "Ready to order" with
   // "Continue to menu". They are told the kitchen stopped, when the Store closes and opens again,
   // and are offered the menu to look at only. The same code scanned again with this phone's cart
@@ -1633,11 +1699,18 @@ function EntryState({
     );
   return (
     <div>
+      {/* Batch 63 (F11): at a table, the page is the join: "Join D62A 1", with the store only in
+          the header, so a guest who scanned the wrong table can tell before ordering on its bill. */}
       <StateHeading headingRef={headingRef}>
-        {context.channel === "DineIn"
-          ? tWords("Welcome to {storeDisplayName}", { storeDisplayName: context.storeDisplayName })
-          : t("Ready to order")}
+        {joinOffered
+          ? joinTitle(tableLabel)
+          : context.channel === "DineIn"
+            ? tWords("Welcome to {storeDisplayName}", {
+                storeDisplayName: context.storeDisplayName,
+              })
+            : t("Ready to order")}
       </StateHeading>
+      {joinOffered ? <NotYourTable /> : null}
       {context.channel === "DineIn" ? null : (
         <p className="entry-context">
           {tWords("Pickup from {storeDisplayName} is selected.", {

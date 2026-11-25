@@ -25,9 +25,10 @@ describe("Customer PWA connectivity banner", () => {
     const html = renderToStaticMarkup(
       <ConnectivityBanner controller={controller({ status: "offline" })} />,
     );
-    expect(html).toContain("You’re offline");
-    expect(html).toContain("Ordering and payment are paused until you reconnect");
-    expect(html).toContain("Nothing is sent in the background");
+    // Batch 63 (F10): plain words and what to do now; no "paused" or "sent in the background".
+    expect(html).toContain("<strong>No connection.</strong>");
+    expect(html).toContain("Your cart is kept on this phone. To order now, ask a staff member.");
+    expect(html).not.toMatch(/paused|background|checkout|replay/u);
     expect(html).toContain('aria-live="polite"');
   });
 
@@ -48,8 +49,9 @@ describe("Customer PWA connectivity banner", () => {
   // Batch 57 (sweep after v15 b56 live): Chinese sentences follow each other with no space
   // ("您已离线。 恢复网络前…" read as a gap); English keeps one.
   it.each([
-    ["offline", "en", "You’re offline. Ordering"],
-    ["offline", "zh-Hans", "您已离线。恢复网络前"],
+    // Batch 63 (F10): the offline words.
+    ["offline", "en", "No connection. Your cart"],
+    ["offline", "zh-Hans", "没有网络。购物车已保存在这部手机上，现在要点菜请找店员。"],
     ["restored", "en", "Connection restored. Updating"],
     ["restored", "zh-Hans", "网络已恢复。"],
   ] as const)(

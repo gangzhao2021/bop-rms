@@ -45,7 +45,7 @@ test("CUST-MENU follows the Figma Review hierarchy at 1440, 390, and 320px @demo
     ).toBeVisible();
     await expect(main.getByText("Priced at checkout", { exact: true }).first()).toBeVisible();
     await expect(
-      main.getByText("Contains Soy · May contain Sesame", { exact: true }),
+      main.getByText("Contains soy · May contain sesame", { exact: true }),
     ).toBeVisible();
     await expect(main).not.toContainText("$0");
     await expect(
@@ -259,7 +259,7 @@ test.describe("@production choices on the item page", () => {
       "No allergens listed",
     );
     await expect(main.getByRole("radio", { name: "Egg waffle" })).toHaveAccessibleDescription(
-      "+ $1.50 Contains Milk",
+      "+ $1.50 Contains milk",
     );
     await noOverflow(page);
   });

@@ -232,8 +232,16 @@ const pageMachineCodes: Readonly<Record<string, ReadonlySet<string>>> = {
     "Joining",
     "Bound",
   ]),
-  // The round statuses that mean nothing more will happen.
-  "dining/DiningSessionPage.tsx": new Set(["Served"]),
+  // The round statuses that mean nothing more will happen, and (batch 63) the round statuses a
+  // dish's own progress is compared with (never shown; the page says its own words).
+  "dining/DiningSessionPage.tsx": new Set([
+    "Served",
+    "Received",
+    "Queued",
+    "Preparing",
+    "Ready",
+    "Serving",
+  ]),
   "dining/DiningStaffCallPanel.tsx": new Set(["Question", "Withdrawn"]),
   // What the error says in a log; a guest never sees it.
   "dining/SettledTableReceipt.tsx": new Set(["settled table receipt "]),
@@ -286,6 +294,8 @@ const pageMachineCodes: Readonly<Record<string, ReadonlySet<string>>> = {
     "(min-width: 960px) 45vw, (min-width: 736px) 640px, calc(100vw - 64px)",
     "configure-price- - ",
     "configure-allergens- - ",
+    // Batch 63: the width at which the menu shows its cart as a side panel (a media query).
+    "(min-width: 64rem)",
   ]),
   "order-status/OrderStatusPage.tsx": new Set([
     "Refunded",

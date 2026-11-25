@@ -21,7 +21,7 @@
 }
 .customer-page .customer-heading h2 {
   font-size: 28px;
-  font-weight: 650;
+  font-weight: 600;
   line-height: 1.2;
   letter-spacing: -0.01em;
 }
@@ -249,15 +249,15 @@
 .customer-page .dining-session__split-dishes {
   flex-basis: 100%;
   color: var(--bop-color-text-muted);
-  font-size: 0.875rem;
+  font-size: 14px;
 }
 .customer-page .dining-session__split label:has(.dining-session__split-dishes) {
   flex-wrap: wrap;
 }
 .customer-page .dining-session__tip-amount label {
   min-height: 0;
-  font-size: 0.875rem;
-  font-weight: 500;
+  font-size: 14px;
+  font-weight: 400;
 }
 .customer-page .dining-session__tip-amount input {
   box-sizing: border-box;
@@ -268,12 +268,12 @@
   border: 1px solid var(--bop-color-border-strong);
   border-radius: var(--bop-radius-control);
   font: inherit;
-  font-size: 1rem;
+  font-size: 16px;
 }
 .customer-page .dining-session__tip-amount p {
   margin: var(--bop-space-1) 0 0;
   color: var(--bop-color-text-muted);
-  font-size: 0.875rem;
+  font-size: 14px;
 }
 .customer-page .dining-session__split label[data-status="Paid"],
 .customer-page .dining-session__split label[data-status="Paying"],
@@ -289,7 +289,7 @@
   padding: 0;
   list-style: none;
   color: var(--bop-color-text-muted);
-  font-size: 0.875rem;
+  font-size: 14px;
 }
 .customer-page .dining-session__paid-parts li {
   padding-block: var(--bop-space-2);
@@ -315,7 +315,7 @@
 }
 .customer-page .dining-session__pay-dish small {
   color: var(--bop-color-text-muted);
-  font-size: 0.875rem;
+  font-size: 14px;
 }
 .customer-page .dining-session__pay-stepper {
   display: inline-flex;
@@ -334,7 +334,7 @@
   background: var(--bop-color-surface-default);
   color: var(--bop-color-text-default);
   font: inherit;
-  font-size: 1.25rem;
+  font-size: 20px;
   line-height: 1;
   cursor: pointer;
 }
@@ -345,20 +345,20 @@
 .customer-page .dining-session__pay-stepper output {
   min-width: 2ch;
   font-variant-numeric: tabular-nums;
-  font-weight: 650;
+  font-weight: 600;
   text-align: center;
 }
 .customer-page .dining-session__pay-note {
   margin: var(--bop-space-2) 0 0;
   color: var(--bop-color-text-muted);
-  font-size: 0.875rem;
+  font-size: 14px;
 }
 /* Batch 57 (v15 b56 live): the own receipt's closing note is a note under the amounts, a section
    gap below the "Paid by" row, like the Table total's note — not one more row of that table. */
 .customer-page .dining-session__own-payment-note {
   margin: var(--bop-space-4) 0 0;
   color: var(--bop-color-text-muted);
-  font-size: 0.875rem;
+  font-size: 14px;
 }
 
 /* WP-2423 取舍 18 DEC-MEMBER-POINTS: joining, using points and the member page. */
@@ -491,7 +491,7 @@
 .customer-page .cart-pay-scope legend {
   margin-bottom: var(--bop-space-2);
   padding: 0;
-  font-weight: 650;
+  font-weight: 600;
 }
 .customer-page .cart-pay-scope label {
   display: flex;
@@ -506,7 +506,7 @@
 }
 .customer-page .cart-pay-scope--chosen h2 {
   margin: 0;
-  font-size: 1rem;
+  font-size: 20px;
 }
 .customer-page .cart-pay-scope--chosen p {
   margin: 0;
@@ -519,12 +519,12 @@
 }
 .customer-page .cart-waiting h2 {
   margin: 0;
-  font-size: 1rem;
+  font-size: 20px;
 }
 .customer-page .cart-waiting__note {
   margin: 0;
   color: var(--bop-color-text-muted);
-  font-size: 0.875rem;
+  font-size: 14px;
 }
 .customer-page .cart-waiting ul {
   margin: 0;
@@ -542,7 +542,475 @@
 }
 .customer-page .cart-waiting li small {
   color: var(--bop-color-text-muted);
-  font-size: 0.875rem;
+  font-size: 14px;
+}
+
+/* Batch 63 (F07): the shared shell styles (packages/ui) and the browser's own sizes, held to the
+   same four sizes on customer pages: 28 page title, 20 section, 16 body and values, 14 labels and
+   hints (never smaller), at 600 or 400. The pickup and join codes stay large on purpose: they are
+   codes to show or read out, not text. */
+.customer-page .bop-shell__header p,
+.customer-page .bop-shell__header > strong,
+.customer-page .bop-eyebrow,
+.customer-page small,
+.customer-page .bop-shell__main th,
+.customer-page .bop-shell__main label:not([class]) {
+  font-size: 14px;
+  font-weight: 400;
+}
+.customer-page .bop-shell__main :where(label:not([class])) {
+  color: var(--bop-color-text-muted);
+}
+.customer-page .bop-eyebrow {
+  letter-spacing: 0;
+  text-transform: none;
+}
+.customer-page :where(button, input, select, textarea, output) {
+  font-family: inherit;
+}
+.customer-page .bop-shell__main :where(input, select, textarea) {
+  font-size: 16px;
+}
+.customer-page .bop-shell__main :where(h4, h5, h6, legend) {
+  font-size: 16px;
+  font-weight: 600;
+}
+.customer-page .bop-state-card h2 {
+  font-size: 20px;
+  font-weight: 600;
+}
+.customer-page .bop-shell__main :where(h1) {
+  font-size: 28px;
+  font-weight: 600;
+}
+.customer-page :where(strong, b, th, h2, h3) {
+  font-weight: 600;
+}
+.customer-page .pickup-code__visual code,
+.customer-page .dining-invitation__digits {
+  font-weight: 600;
+}
+
+/* Batch 63 (F08): the language switch is plain accent words at the top right, no box, with a
+   44 × 44 tap area from padding; its words line up with the page's right edge. */
+/* (Specific enough to outrank the shared white-control outline in styles.css.) */
+.customer-page .bop-shell__header .bop-shell__header-status > .language-switch.language-switch {
+  min-width: 44px;
+  min-height: 44px;
+  justify-content: center;
+  margin-inline-end: -8px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--bop-radius-control);
+  background: none;
+  color: var(--bop-color-accent);
+  font-size: 16px;
+  font-weight: 400;
+}
+.customer-page .bop-shell__header .bop-shell__header-status > .language-switch::before {
+  content: none;
+}
+.customer-page .bop-shell__header .bop-shell__header-status > .language-switch:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+/* Journey tabs and menu sections: at least 44 px wide as well as tall (a short word such as
+   "Cart" or "面食" was 28–36 px wide); the first one keeps the page's left edge. */
+.customer-page .bop-shell__nav > a,
+.customer-page .bop-shell__nav > span,
+.customer-page .menu-sections a {
+  min-width: 44px;
+  justify-content: center;
+}
+.customer-page .bop-shell__nav > :first-child,
+.customer-page .menu-sections li:first-child a {
+  justify-content: flex-start;
+}
+/* Every − / + is one stepper: 44 × 44, accent glyph, no disc or box (as in the cart); a stepper
+   that can't go further is the same shape with a grey glyph. */
+.customer-page.customer-page .configure-stepper button,
+.customer-page.customer-page .configure-stepper button:disabled,
+.customer-page.customer-page .dining-session__pay-stepper button,
+.customer-page.customer-page .dining-session__pay-stepper button:disabled {
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  min-height: 44px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--bop-radius-control);
+  background: none;
+  color: var(--bop-color-accent);
+  font-size: 20px;
+  font-weight: 400;
+}
+.customer-page.customer-page
+  :is(.configure-stepper, .dining-session__pay-stepper, .cart-item__actions)
+  button:disabled {
+  border-color: transparent;
+  background: none;
+  color: var(--bop-color-text-disabled, var(--bop-color-text-muted));
+  opacity: 1;
+}
+
+/* Batch 63 (F09): two button kinds only. The one next step is the accent fill; it keeps that
+   shape (faded) while it can't be pressed yet, with why said under it. Every other action is
+   accent words at 16 / 400 on a 44 px tap height: no white boxes, no black or underlined links.
+   Removing your contact details is red words (it still asks first). */
+.customer-page.customer-page
+  :is(
+    .menu-action,
+    .cart-checkout-link,
+    .cart-primary-link,
+    .checkout-continue__button,
+    .payment-page__pay,
+    .entry-action,
+    .order-status__retry,
+    .shell-action,
+    .dining-session__pay-button
+  ):disabled {
+  border-color: var(--bop-color-accent);
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-accent-fill);
+  opacity: 0.4;
+}
+.customer-page .checkout-continue__hint {
+  margin: var(--bop-space-2) 0 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.customer-page.customer-page
+  :is(
+    .checkout-edit-link,
+    .checkout-details-form__save,
+    .checkout-details-form__reload,
+    .checkout-details-form button:not([type="submit"]),
+    .checkout-attention button,
+    .checkout-totals button,
+    .checkout-continue > button:not(.checkout-continue__button),
+    .receipt-page__toolbar a,
+    .receipt-page__toolbar button,
+    .receipt-page__actions button,
+    .order-status__actions button,
+    .order-status__receipt,
+    .order-status__back,
+    .payment-page__back,
+    .payment-result-page__back,
+    .store-contact a,
+    .store-identity__links a,
+    .cart-state button,
+    .cart-item__actions button,
+    .member-at-table > button,
+    .payment-retry__secondary,
+    .entry-secondary-action,
+    .dining-invitation__action--secondary,
+    .pickup-code button,
+    .contact-details button
+  ) {
+  display: inline-flex;
+  width: auto;
+  min-height: 44px;
+  align-items: center;
+  justify-content: flex-start;
+  margin-inline: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--bop-color-accent);
+  font: inherit;
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 1.375;
+  text-align: start;
+  text-decoration: none;
+  cursor: pointer;
+}
+.customer-page.customer-page .bop-shell__main a:not([class]) {
+  font-weight: 400;
+}
+.customer-page.customer-page
+  :is(
+    .checkout-edit-link,
+    .receipt-page__toolbar a,
+    .order-status__receipt,
+    .order-status__back,
+    .store-contact a,
+    .bop-shell__main a:not([class])
+  ):hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.customer-page.customer-page
+  :is(
+    .checkout-details-form__save,
+    .checkout-details-form__reload,
+    .checkout-details-form button:not([type="submit"]),
+    .checkout-attention button,
+    .checkout-totals button,
+    .checkout-continue > button:not(.checkout-continue__button),
+    .receipt-page__toolbar button,
+    .receipt-page__actions button,
+    .order-status__actions button,
+    .cart-state button,
+    .cart-item__actions button,
+    .member-at-table > button,
+    .payment-retry__secondary,
+    .entry-secondary-action,
+    .dining-invitation__action--secondary,
+    .pickup-code button,
+    .contact-details button
+  ):disabled {
+  border: 0;
+  background: none;
+  color: var(--bop-color-text-muted);
+  cursor: default;
+}
+/* The cart's − and + keep their 44 × 44 square; Remove is words. */
+.customer-page.customer-page .cart-item__actions button {
+  min-width: 44px;
+  justify-content: center;
+}
+.customer-page.customer-page .cart-item__actions button.cart-link-button {
+  justify-content: flex-start;
+}
+.customer-page.customer-page .contact-details > button,
+.customer-page.customer-page .contact-details__actions button:first-child {
+  color: var(--bop-color-danger-text, var(--bop-color-danger));
+}
+.customer-page.customer-page .contact-details__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--bop-space-5);
+}
+/* On a phone the next step sits after the form, not over it: a sticky bar covered the pickup
+   name field on first load. */
+.customer-page .checkout-continue {
+  position: static;
+}
+
+/* Batch 63 (F10): offline, one message at the top: words on white, no rule under them, on the
+   page's left edge; the cart keeps its next step in place (disabled) and offers Try again as
+   accent words. */
+.connectivity-banner {
+  justify-content: flex-start;
+  /* The same edge as the page under it (the banner sits outside the page frame). */
+  padding-inline: max(clamp(1rem, 4vw, 2rem), calc((100% - 76rem) / 2 + clamp(1rem, 4vw, 2rem)));
+  border-bottom: 0;
+  background: var(--bop-color-surface-default);
+}
+.connectivity-banner--offline {
+  display: block;
+}
+.connectivity-banner button {
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font-weight: 400;
+}
+.customer-page.customer-page .cart-offline {
+  padding: 0;
+  border: 0;
+}
+.customer-page.customer-page .cart-offline button {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font-size: 16px;
+  font-weight: 400;
+}
+
+/* Batch 63 (F11): the start page's heading is the page title (28 / 600). A closed store is a red
+   dot and dark words, never an amber heading; "Not your table? Tell staff." is a grey 14 note. */
+.customer-page.customer-page #entry-heading {
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+.customer-page.customer-page .entry-state--closed {
+  padding-inline: 0;
+  border: 0;
+  background: none;
+}
+.customer-page.customer-page .entry-state--closed h2 {
+  color: var(--bop-color-text-default);
+}
+.customer-page.customer-page .entry-state--closed h2::before,
+.customer-page .menu-closed-notice__line::before {
+  content: "";
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-inline-end: var(--bop-space-2);
+  border-radius: 50%;
+  background: var(--bop-color-danger-mark);
+  vertical-align: 0.15em;
+}
+.customer-page .entry-state--closed .entry-state__next {
+  color: var(--bop-color-text-default);
+  font-size: 16px;
+}
+.customer-page .entry-not-your-table {
+  margin: var(--bop-space-2) 0 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+
+/* Batch 63 (F12): "Your table is paying the bill…" is a status (grey dot, dark 14 words, normal
+   line height), never accent words that look like links. */
+.customer-page .dining-session__paying-note {
+  margin: var(--bop-space-4) 0 0;
+  color: var(--bop-color-text-default);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.customer-page .dining-session__paying-note::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-inline-end: var(--bop-space-2);
+  border-radius: 50%;
+  background: var(--bop-color-text-muted);
+  vertical-align: 0.1em;
+}
+
+/* Batch 63 (CDI-4, F07): on Your table, the labels are 14 / 400 grey (never 11 px) and what the
+   table still owes reads like a round's total: 16 / 600 for the label and the amount. */
+.customer-page .dining-session__summary dt,
+.customer-page .dining-session__round-facts dt,
+.customer-page .order-status__summary dt {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
+}
+.customer-page.customer-page .dining-session__summary .dining-session__due :is(dt, dd) {
+  color: var(--bop-color-text-default);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+/* Batch 63 (F14): one left edge. The dish page starts where the header and the menu start (at
+   1024 it began 150 px further in, as a centred sheet); text actions sit on that edge at their
+   own width ("Make a code" and "Refresh now" were centred full-width bars). */
+.customer-page.customer-menu-screen--detail .menu-layout,
+.customer-page .sellable-detail:not(.sellable-detail--with-photo),
+.customer-page
+  .menu-layout__main:has(.sellable-detail:not(.sellable-detail--with-photo))
+  > .menu-help {
+  margin-inline: 0;
+}
+.customer-page.customer-page .dining-invitation__action--secondary {
+  width: auto;
+}
+.customer-page.customer-page .dining-session__order-again {
+  padding-inline: 0;
+  font-weight: 400;
+}
+.customer-page .order-status__actions {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+  text-align: start;
+}
+/* The + sits on the price line at the row's right edge (in the 1024 grid it hung by itself under
+   the price, at the bottom of the row). The order stays name, description, price, allergens. */
+.customer-page .menu-card:has(.menu-card__quick-add) .menu-card__aside {
+  padding-inline-end: 52px;
+}
+@supports (anchor-name: --menu-price) and (anchor-scope: --menu-price) {
+  .customer-page .menu-card {
+    anchor-scope: --menu-price;
+  }
+  .customer-page .menu-card__aside {
+    anchor-name: --menu-price;
+  }
+  .customer-page .menu-card__quick-add {
+    position-anchor: --menu-price;
+    top: anchor(center);
+    bottom: auto;
+    translate: 0 -50%;
+  }
+}
+
+/* Batch 63 (CDI-14, F14): what a tap on + did is a line in the cart bar (or the cart panel on a
+   wide screen): a green dot once the dish went in (grey otherwise) and dark 14 words. It was a
+   black block fixed over the dish above the bar. With nothing in the cart yet it stands alone at
+   the bottom, white, with the same dot. */
+.customer-page .menu-added-toast,
+.menu-added-toast {
+  position: static;
+  margin: 0;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--bop-color-text-default);
+  font-size: 14px;
+  line-height: 1.5;
+  text-align: start;
+}
+.menu-added-toast::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-inline-end: var(--bop-space-2);
+  border-radius: 50%;
+  background: var(--bop-color-text-muted);
+  vertical-align: 0.1em;
+}
+.menu-added-toast[data-tone="added"]::before {
+  background: var(--bop-color-success-mark);
+}
+.customer-page .menu-cart-bar {
+  flex-wrap: wrap;
+}
+.customer-page .menu-cart-bar > .menu-added-toast {
+  flex: 1 0 100%;
+}
+.customer-page .menu-added-toast--alone {
+  position: fixed;
+  inset-inline: 0;
+  bottom: 0;
+  z-index: 15;
+  padding: var(--bop-space-3) var(--customer-gutter)
+    calc(var(--bop-space-4) + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--bop-color-border-default);
+  background: var(--bop-color-surface-canvas);
+}
+
+/* Batch 63 (F07): section headings on checkout are sections (20 / 600, sentence case), not the
+   small capital labels of the first design; the header's language switch is words, not a box. */
+.customer-page.checkout-page .checkout-summary h2:not(.sr-only),
+.customer-page.checkout-page .checkout-tip h2,
+.customer-page.checkout-page #checkout-details-heading {
+  color: var(--bop-color-text-default);
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1.3;
+  text-transform: none;
+}
+
+/* Batch 63 (D62B-09, F17): the receipt reads on the page's one left edge; its sections and the
+   receipt itself were set 15 and 30 px in, like invisible boxes. */
+.customer-page.customer-page .receipt-page__content > :is(section, aside, article, p),
+.customer-page.customer-page .receipt-page__version,
+.customer-page.customer-page .receipt-page__content .store-contact {
+  margin-inline: 0;
+  padding-inline: 0;
+}
+.customer-page .receipt-page__toolbar {
+  align-items: center;
+}
+.customer-page .receipt-page__toolbar > * {
+  margin-top: 0;
 }
 
 /* Batch 63 (design review D62B-02): on the ended table's receipt each round heading sat right

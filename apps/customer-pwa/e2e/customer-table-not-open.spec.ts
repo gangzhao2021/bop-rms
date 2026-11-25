@@ -263,7 +263,7 @@ test.describe("@production CUST-ENTRY table not open", () => {
           page.getByText(zh ? "开始点单" : "Start your order", { exact: true }),
         ).toHaveCount(0);
         await expect(
-          page.getByRole("navigation").getByRole("link", { name: zh ? "您的桌位" : "Your table" }),
+          page.getByRole("navigation").getByRole("link", { name: zh ? "本桌" : "Your table" }),
         ).toBeVisible();
         // Linux CI fonts (DejaVu) are wider than macOS's: the header must still fit the phone.
         const overflow = await page.evaluate(
@@ -327,19 +327,19 @@ test.describe("@production CUST-ENTRY table not open", () => {
         );
 
         // Your table: the waiting page's words, never a join code.
-        await nav.getByRole("link", { name: zh ? "您的桌位" : "Your table" }).click();
+        await nav.getByRole("link", { name: zh ? "本桌" : "Your table" }).click();
         await expect(page).toHaveURL(/\/dine-in\/session$/u);
         await expect(
           main.getByRole("heading", {
             level: 2,
-            name: zh ? "您的桌位" : "Your table",
+            name: zh ? "本桌" : "Your table",
             exact: true,
           }),
         ).toBeVisible();
         await expect(main.getByRole("heading", { name: heading })).toBeVisible();
         await expect(main).toContainText(waits);
         await expect(main).not.toContainText(zh ? "入桌码" : "join code");
-        await expect(main).not.toContainText(zh ? "请先加入您的桌位" : "Join your table first");
+        await expect(main).not.toContainText(zh ? "请先加入本桌" : "Join your table first");
         await expect(main.getByRole("link", { name: back })).toBeVisible();
         await backOnFirstScreen(back);
         await fits();
@@ -401,7 +401,7 @@ test.describe("@production CUST-ENTRY table not open", () => {
       expect(cartWrites).toEqual([]);
 
       // Staff open the table while the guest is on "Your table": the page goes on by itself.
-      await nav.getByRole("link", { name: "您的桌位" }).click();
+      await nav.getByRole("link", { name: "本桌" }).click();
       await expect(main).toContainText("店员开台后几秒内，这里会自动继续。");
       open = true;
       // The table page checks every 3 s (the start page's schedule), so it goes on within that.
@@ -442,7 +442,7 @@ test.describe("@production CUST-ENTRY table not open", () => {
         const back = zh ? "回到等候开台页" : "Back to the waiting page";
         await nav
           .getByRole("link", {
-            name: tab === "table" ? (zh ? "您的桌位" : "Your table") : zh ? "购物车" : "Cart",
+            name: tab === "table" ? (zh ? "本桌" : "Your table") : zh ? "购物车" : "Cart",
           })
           .click();
         await expect(page).toHaveURL(tab === "table" ? /\/dine-in\/session$/u : /\/cart$/u);
@@ -463,7 +463,7 @@ test.describe("@production CUST-ENTRY table not open", () => {
           page.getByText(zh ? "扫描门店二维码开始点单" : "Scan the location QR code to begin"),
         ).toHaveCount(0);
         await expect(main).not.toContainText(zh ? "入桌码" : "join code");
-        await expect(main).not.toContainText(zh ? "请先加入您的桌位" : "Join your table first");
+        await expect(main).not.toContainText(zh ? "请先加入本桌" : "Join your table first");
         await expect(main).not.toContainText(zh ? "购物车是空的" : "Your cart is empty");
         await expect(main).not.toContainText(zh ? "再扫" : "scan again");
         await expect(
@@ -505,7 +505,7 @@ test.describe("@production CUST-ENTRY table not open", () => {
 
       // Staff open the table while the reloaded page waits: it goes on to the join by itself.
       if (width === 390) {
-        await nav.getByRole("link", { name: "您的桌位" }).click();
+        await nav.getByRole("link", { name: "本桌" }).click();
         await page.reload();
         await expect(main).toContainText("店员开台后几秒内，这里会自动继续。");
       }
@@ -913,7 +913,7 @@ test.describe("@production CUST-ENTRY table not open", () => {
             page.getByText(zh ? "扫描门店二维码开始点单" : "Scan the location QR code to begin"),
           ).toHaveCount(0);
           await expect(main).not.toContainText(zh ? "入桌码" : "join code");
-          await expect(main).not.toContainText(zh ? "请先加入您的桌位" : "Join your table first");
+          await expect(main).not.toContainText(zh ? "请先加入本桌" : "Join your table first");
           await expect(main.getByRole("region", { name: zh ? "收据" : "Receipt" })).toHaveCount(0);
           // Laid out inside the phone with room to spare (Linux fonts run wider: about 40 px).
           const box = await card.boundingBox();
@@ -1007,7 +1007,7 @@ test.describe("@production CUST-DINE-IN after the table's visit ended", () => {
     { path: "/menu", en: "Menu", zh: "菜单" },
     { path: `/menu/items/${id(3)}`, en: "Menu", zh: "菜单" },
     { path: "/cart", en: "Your cart", zh: "您的购物车" },
-    { path: "/dine-in/session", en: "Your table", zh: "您的桌位" },
+    { path: "/dine-in/session", en: "Your table", zh: "本桌" },
   ];
   async function expectCalmCard(page: Page, heading: string, width: number) {
     const main = page.getByRole("main");

@@ -135,7 +135,7 @@ describe("WP-2423 shared-table-checkout (a): which dishes the payer pays at a pa
     );
     expect(radio("The whole table").checked).toBe(true);
     expect(container.textContent).toContain("The whole table (3 dishes · $29.00)");
-    expect(container.textContent).toContain("Only what I added (2 · $24.00)");
+    expect(container.textContent).toContain("Only what I added (2 dishes · $24.00)");
     await render(
       <TablePayChooser
         key="own"

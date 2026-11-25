@@ -235,7 +235,7 @@ test("CUST-MENU shows the published photo and description on the card and detail
   const clamp = photoCard.locator(".menu-card__description");
   await expect(clamp).toHaveText(description);
   await expect(clamp).toHaveCSS("-webkit-line-clamp", "2");
-  await expect(photoCard).toContainText("Contains Soy");
+  await expect(photoCard).toContainText("Contains soy");
   await expect(plainCard.locator(".menu-card__media")).toHaveCount(0);
   await expect(plainCard.locator(".menu-card__description")).toHaveCount(0);
   await expect(page.getByText("Image not available")).toHaveCount(0);

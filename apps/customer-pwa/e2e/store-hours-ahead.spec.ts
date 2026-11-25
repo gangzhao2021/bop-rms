@@ -198,7 +198,8 @@ test.describe("@production the Store's hours ahead", () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/#qr=aaa.bbb.ccc");
     const alert = page.getByRole("alert");
-    await expect(alert).toContainText("Synthetic Store isn’t taking orders right now");
+    // Batch 63 (F11): "Closed now", the store only in the header.
+    await expect(alert.getByRole("heading", { name: "Closed now" })).toBeVisible();
     await expect(alert).toContainText("The store is closed today for a holiday.");
     await expect(alert).toContainText("Opens tomorrow at 11:00 a.m.");
     await expect(alert).not.toContainText("Closed today.");

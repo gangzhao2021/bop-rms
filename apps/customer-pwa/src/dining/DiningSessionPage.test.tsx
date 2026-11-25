@@ -86,7 +86,9 @@ describe("CUST-DINE-IN-SESSION (WP-2423 Q8)", () => {
   it("shows the table, each round with who ordered it, its status and payment, and the table total", () => {
     const html = render({ status: "ready", view: view(), refreshing: false });
     expect(html).toContain("Your table · 12");
-    expect(html).toContain("Order 1042");
+    // Batch 63 (F12): no "Order 1042" eyebrow over a dine-in table (the receipt keeps it).
+    expect(html).not.toContain("Order 1042");
+    expect(html).not.toContain("bop-eyebrow");
     expect(html).toContain("Round 1 · Ordered by you");
     expect(html).toContain("Round 2 · Ordered by another guest");
     expect(html).toContain("Being prepared");
@@ -446,11 +448,15 @@ describe("CUST-DINE-IN-SESSION (WP-2423 Q8)", () => {
         </MemoryRouter>,
       );
 
-    it("says the order was placed, and never that it went to the kitchen", () => {
+    // Batch 63 (F12): by the round's number, and "sent to the kitchen" only once the round's own
+    // status says the kitchen has it (here "Being prepared").
+    it("says which round was placed, and the kitchen only once the round is there", () => {
       const sent = placing("Sent");
-      expect(sent).toContain('<p class="dining-session__placed" role="status">Order placed.</p>');
+      expect(sent).toContain(
+        '<p class="dining-session__placed" role="status">Round 1 sent to the kitchen</p>',
+      );
       const held = placing("Held");
-      expect(held).toContain("Order placed. Staff confirm it first.");
+      expect(held).toContain("Round 1 placed. Staff confirm it first.");
       expect(placing(null)).not.toContain("Order placed");
     });
 

@@ -125,7 +125,7 @@ describe("combos for guests (WP-2423 item 8 ⑥ part 4)", () => {
   it("gives the cart and the table the chosen dishes and their allergens", () => {
     expect(comboLineChoices(menu, combo.sellableReference, [wonton, rice])).toBe("馄饨汤, 炒饭");
     expect(comboLineAllergenText(menu, combo.sellableReference, [wonton, rice])).toBe(
-      "Your choices: contains Wheat.",
+      "Your choices: contains wheat.",
     );
     expect(comboLineAllergenText(menu, combo.sellableReference, [sour])).toBe(
       "Ask staff about allergens in your choices.",

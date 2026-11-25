@@ -1,4 +1,4 @@
-import { listSeparator, t } from "../i18n/i18n.js";
+import { currentLanguage, listSeparator, t } from "../i18n/i18n.js";
 import { formatDecimalMoney } from "../journey/format.js";
 import type { MenuAllergenItem, MenuOptionRule, MenuSellable, MenuView } from "./types.js";
 
@@ -143,6 +143,23 @@ export function familyAllergens(family: MenuFamily): readonly MenuAllergenItem[]
 }
 
 /**
+ * Batch 63 (v15 batch 62 review CDI-9, F13): allergen names inside an English sentence are lower
+ * case ("Contains peanuts, sesame seeds, soy, wheat and triticale"; it read "Contains Peanuts,
+ * Sesame seeds"). The names stay Health Canada's whole group names; only the first letter of a
+ * capitalised word changes (an all-capital name is kept). `first` keeps the first name as written
+ * where it starts a line.
+ */
+export function allergenNames(items: readonly MenuAllergenItem[], first = false): string {
+  return items
+    .map((item, index) =>
+      (first && index === 0) || currentLanguage() !== "en" || !/^\p{Lu}\p{Ll}/u.test(item.name)
+        ? item.name
+        : item.name.charAt(0).toLowerCase() + item.name.slice(1),
+    )
+    .join(listSeparator());
+}
+
+/**
  * The one short allergen line on a card: "Contains Milk, Soy · May contain Tree nuts". Null when the
  * Store published none (the menu's allergy notice and the item page still say no item is promised
  * allergen-free).
@@ -151,12 +168,8 @@ export function compactAllergenLine(allergens: readonly MenuAllergenItem[]): str
   const contains = allergens.filter((item) => item.classification === "Contains");
   const may = allergens.filter((item) => item.classification !== "Contains");
   const parts = [
-    contains.length === 0
-      ? null
-      : t("Contains {value1}", { value1: contains.map((item) => item.name).join(listSeparator()) }),
-    may.length === 0
-      ? null
-      : t("May contain {value1}", { value1: may.map((item) => item.name).join(listSeparator()) }),
+    contains.length === 0 ? null : t("Contains {value1}", { value1: allergenNames(contains) }),
+    may.length === 0 ? null : t("May contain {value1}", { value1: allergenNames(may) }),
   ].filter((part): part is string => part !== null);
   return parts.length === 0 ? null : parts.join(" · ");
 }

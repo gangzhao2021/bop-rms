@@ -48,7 +48,8 @@ test.describe("@production a closed Store's menu", () => {
       await page.setViewportSize({ width, height: 844 });
       await page.goto("/#qr=aaa.bbb.ccc");
       const alert = page.getByRole("alert");
-      await expect(alert).toContainText("Synthetic Store isn’t taking orders right now");
+      // Batch 63 (F11): "Closed now" with a red dot; the store is named in the header only.
+      await expect(alert.getByRole("heading", { name: "Closed now" })).toBeVisible();
       const journey = page.getByRole("navigation", { name: "Customer journey" });
       await expect(journey.getByRole("link", { name: "Cart" })).toHaveCount(0);
       await expect(page.getByRole("button", { name: "Check again" })).toBeVisible();
@@ -70,7 +71,7 @@ test.describe("@production a closed Store's menu", () => {
       // Check again goes back and asks the Store again, not the old answer.
       const asked = entries.length;
       await notice.getByRole("link", { name: "Check again" }).click();
-      await expect(page.getByRole("alert")).toContainText("isn’t taking orders right now");
+      await expect(page.getByRole("alert")).toContainText("Closed now");
       await expect.poll(() => entries.length).toBeGreaterThan(asked);
     });
   }

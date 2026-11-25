@@ -310,7 +310,14 @@ export function StoreInfoSection({ load }: { readonly load: StoreProfileLoader |
 }
 
 /** The start page's store card: open now, today's hours, address with directions, phone. */
-export function StoreIdentityCard({ load }: { readonly load: StoreProfileLoader | null }) {
+export function StoreIdentityCard({
+  load,
+  nameInHeader = false,
+}: {
+  readonly load: StoreProfileLoader | null;
+  /** Batch 63 (F11): the page header already shows the Store's name; the card doesn't repeat it. */
+  readonly nameInHeader?: boolean;
+}) {
   const profile = useStoreProfile(load);
   if (profile === null) return null;
   // Batch 40 review: once the kitchen stopped, the start page's notice above the card says so with
@@ -320,7 +327,9 @@ export function StoreIdentityCard({ load }: { readonly load: StoreProfileLoader 
     : null;
   return (
     <section className="store-identity" aria-labelledby="store-identity-heading">
-      <h2 id="store-identity-heading">{profile.storeDisplayName}</h2>
+      <h2 id="store-identity-heading" className={nameInHeader ? "sr-only" : undefined}>
+        {profile.storeDisplayName}
+      </h2>
       {status === null ? null : (
         <p className="store-identity__status">
           <strong

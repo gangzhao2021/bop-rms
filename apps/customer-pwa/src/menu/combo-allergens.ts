@@ -1,5 +1,5 @@
 import { clauseSeparator, listSeparator, t } from "../i18n/i18n.js";
-import { allergensForChoice, isCombo } from "./menu-families.js";
+import { allergenNames, allergensForChoice, isCombo } from "./menu-families.js";
 import type { MenuView } from "./types.js";
 
 /**
@@ -24,14 +24,8 @@ export function comboLineAllergenText(
   const may = allergens.filter((item) => item.classification !== "Contains");
   return t("Your choices: {allergens}.", {
     allergens: [
-      contains.length === 0
-        ? null
-        : t("contains {value1}", {
-            value1: contains.map((item) => item.name).join(listSeparator()),
-          }),
-      may.length === 0
-        ? null
-        : t("may contain {value1}", { value1: may.map((item) => item.name).join(listSeparator()) }),
+      contains.length === 0 ? null : t("contains {value1}", { value1: allergenNames(contains) }),
+      may.length === 0 ? null : t("may contain {value1}", { value1: allergenNames(may) }),
     ]
       .filter(Boolean)
       .join(clauseSeparator()),

@@ -459,6 +459,8 @@ export function CheckoutPage({
   // Nothing in the cart (v15 live check): nothing to pay for, so no tip is asked either.
   const asksTip =
     !payLater && tips !== null && tips.enabled && cart !== null && cart.cart.items.length > 0;
+  // Batch 63 (F09): the one thing the payment step is waiting for, said under it.
+  const tipFirst = asksTip && tipChoice === null;
   // WP-2423 live minor 22: a dish in the cart can't be ordered now (refused when pricing, or when
   // the checkout starts); the way on is the cart, so no tip is asked (a tip would read as what
   // unblocks it) and the main action is Change your cart, never a payment that is refused again.
@@ -1292,7 +1294,12 @@ export function CheckoutPage({
               <button
                 type="button"
                 className="checkout-continue__button"
-                aria-describedby={changesUnticked ? "checkout-tick-changes" : undefined}
+                aria-describedby={
+                  [
+                    ...(changesUnticked ? ["checkout-tick-changes"] : []),
+                    ...(tipFirst ? ["checkout-tip-first"] : []),
+                  ].join(" ") || undefined
+                }
                 disabled={
                   !canContinue ||
                   continueRequested ||
@@ -1309,20 +1316,25 @@ export function CheckoutPage({
                           formatMoney(quote.total.amountMinor, quote.total.currency),
                         )
                       : checkoutText.placeOrder
-                    : asksTip && tipChoice === null
-                      ? checkoutText.chooseTipToContinue
-                      : quote && tipAmount !== null
-                        ? checkoutText.continueToPaymentWithTotal(
-                            formatMoney(
-                              (BigInt(quote.total.amountMinor) + BigInt(tipAmount)).toString(),
-                              quote.total.currency,
-                            ),
-                          )
-                        : checkoutText.continueToPayment}
+                    : quote && tipAmount !== null
+                      ? checkoutText.continueToPaymentWithTotal(
+                          formatMoney(
+                            (BigInt(quote.total.amountMinor) + BigInt(tipAmount)).toString(),
+                            quote.total.currency,
+                          ),
+                        )
+                      : checkoutText.continueToPayment}
               </button>
+              {/* Batch 63 (F09): the step keeps its name and shape while it waits for a tip; why
+                  it can't be pressed yet is said under it. */}
               {changesUnticked ? (
                 <p className="checkout-continue__note" id="checkout-tick-changes">
                   {payLater ? cartText.confirmChangesToOrder : checkoutText.tickChangesToPay}
+                </p>
+              ) : null}
+              {tipFirst ? (
+                <p className="checkout-continue__hint" id="checkout-tip-first">
+                  {checkoutText.chooseTipFirst}
                 </p>
               ) : null}
             </>

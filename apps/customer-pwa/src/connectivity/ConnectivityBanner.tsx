@@ -36,13 +36,11 @@ export function ConnectivityBanner({
     >
       {state.status === "offline" ? (
         <>
-          <strong>{t("You’re offline.")}</strong>
+          {/* Batch 63 (F10): one plain message, with what to do now (ask staff), instead of
+              "paused" and "sent in the background". */}
+          <strong>{t("No connection.")}</strong>
           {wordGap()}
-          <span>
-            {t(
-              "Ordering and payment are paused until you reconnect. Nothing is sent in the background.",
-            )}
-          </span>
+          <span>{t("Your cart is kept on this phone. To order now, ask a staff member.")}</span>
         </>
       ) : (
         <>

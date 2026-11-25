@@ -1,3 +1,4 @@
+import { dishCount } from "../journey/format.js";
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { MemberJoinPanel } from "../member/MemberJoinPanel.js";
 import { MemberPointsAtTable } from "../member/MemberPointsAtTable.js";
@@ -149,8 +150,9 @@ export function onlyMineText(
   choices: Pick<NonNullable<TablePaymentView["choices"]>, "mine" | "addedAny" | "mineUnavailable">,
 ): string {
   if (choices.mine !== null)
-    return t("Only what I added ({count} · {amount})", {
-      count: String(choices.mine.count),
+    // Batch 63 (D62B-14, F13): "1 dish · $14.13" (the "1" alone said nothing in English).
+    return t("Only what I added ({dishes} · {amount})", {
+      dishes: dishCount(choices.mine.count),
       amount: money(choices.mine.amountMinor),
     });
   if (choices.mineUnavailable === true)

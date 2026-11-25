@@ -148,7 +148,7 @@ async function enterTable(
   });
   await page
     .getByRole("navigation", { name: /^(Customer journey|点单步骤)$/u })
-    .getByRole("link", { name: /^(Your table|您的桌位)$/u })
+    .getByRole("link", { name: /^(Your table|本桌)$/u })
     .click();
   await expect(page).toHaveURL(/\/dine-in\/session$/u);
 }

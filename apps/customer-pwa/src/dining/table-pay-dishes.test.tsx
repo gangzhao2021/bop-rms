@@ -46,3 +46,25 @@ it('says truthfully why "only what I added" is off, in English and zh-Hans', () 
   // An older server says neither: as before.
   expect(text("zh-Hans", null, null)).toBe("<p>只付我加的（没有您要付的菜）</p>");
 });
+
+// Batch 63 (v15 batch 62 review D62B-14, F13): "Only what I added (1 · $14.13)" left out what the
+// "1" counts in English (zh said 道).
+it('says what "only what I added" counts: 1 dish · $14.13', () => {
+  const text = (language: "en" | "zh-Hans", count: number) =>
+    renderToStaticMarkup(
+      <LanguageRoot initial={language}>
+        {() => (
+          <p>
+            {onlyMineText({
+              mine: { count, amountMinor: "1413" },
+              addedAny: true,
+              mineUnavailable: false,
+            })}
+          </p>
+        )}
+      </LanguageRoot>,
+    );
+  expect(text("en", 1)).toBe("<p>Only what I added (1 dish · $14.13)</p>");
+  expect(text("en", 3)).toBe("<p>Only what I added (3 dishes · $14.13)</p>");
+  expect(text("zh-Hans", 3)).toBe("<p>只付我加的（3 道 · $14.13）</p>");
+});

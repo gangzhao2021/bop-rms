@@ -853,14 +853,6 @@ export const cartText = Object.freeze({
         "Your cart can’t open without a connection. It opens again by itself when you’re back online. Nothing was changed.",
       );
     },
-    get refreshAfterReconnecting() {
-      return t("Refresh after reconnecting");
-    },
-    get paused() {
-      return t(
-        "You’re offline. Changes and checkout are paused; nothing will replay on reconnect.",
-      );
-    },
   }),
   featureDisabled: Object.freeze({
     get heading() {
@@ -1207,8 +1199,9 @@ export const checkoutText = Object.freeze({
     return t("Tick the box above to continue to payment.");
   },
   /** WP-2423 item 8 ⑦: no tip is chosen for the guest, "No tip" included. */
-  get chooseTipToContinue() {
-    return t("Choose a tip to continue");
+  /** Batch 63 (F09): under the disabled "Continue to payment" until a tip is chosen. */
+  get chooseTipFirst() {
+    return t("Choose a tip first");
   },
   continueToPaymentWithTotal: (total: string) => t("Continue to payment · {total}", { total }),
   /** DEC-DINE-IN-PAY-LATER: a table that pays once at the end. */
@@ -1379,8 +1372,13 @@ export const orderStatusText = Object.freeze({
     get done() {
       return t("Done");
     },
-    get now() {
-      return t("Now");
+    /**
+     * Batch 63 (F16): the step happening now. "Now" beside "Accepted by the store" read as "it
+     * was accepted now" before the store had accepted; a step waiting on the store or the guest
+     * says "Waiting", the kitchen making the order says "In progress".
+     */
+    current(step: number) {
+      return step === 2 ? t("In progress") : t("Waiting");
     },
   }),
   /** Why the store cancelled, keyed by the server's reason code. */

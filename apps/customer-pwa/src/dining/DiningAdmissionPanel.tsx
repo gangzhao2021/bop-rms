@@ -101,12 +101,18 @@ export function DiningAdmissionPanel({
   contextEpoch,
   onStateChange,
   autoJoin = false,
+  titled = false,
   starting = false,
 }: {
   readonly service?: DiningAdmissionUi | undefined;
   readonly contextEpoch?: object | undefined;
   /** The guest already tapped Start, or said who they are with: join with no second tap. */
   readonly autoJoin?: boolean;
+  /**
+   * Batch 63 (F11): the page's own title already says "Join D62A 1"; the panel's heading stays for
+   * screen readers (it is where its answers are announced) but is not shown a second time.
+   */
+  readonly titled?: boolean;
   /** They came to start this table, not to join people at it. */
   readonly starting?: boolean;
   /** WP-2423 item 8 ⑤: the page keeps one primary action (joining, then the menu). */
@@ -269,6 +275,7 @@ export function DiningAdmissionPanel({
       onJoinByScan={() => run(false, true)}
       onUseCode={() => setCodeMode(true)}
       starting={starting}
+      titled={titled}
     />
   );
 }
@@ -284,7 +291,10 @@ export function DiningAdmissionView({
   onJoinByScan,
   onUseCode,
   starting = false,
+  titled = false,
 }: {
+  /** Batch 63 (F11): the page's title already names the join (see DiningAdmissionPanel). */
+  readonly titled?: boolean;
   /** The guest came to start this table: no people to join and no code to ask anyone for. */
   readonly starting?: boolean;
   readonly state: DiningAdmissionUiState;
@@ -310,7 +320,12 @@ export function DiningAdmissionView({
       aria-labelledby="dining-admission-heading"
       aria-busy={state === "Joining"}
     >
-      <h2 id="dining-admission-heading" ref={statusRef} tabIndex={-1}>
+      <h2
+        id="dining-admission-heading"
+        ref={statusRef}
+        tabIndex={-1}
+        className={titled && state !== "Bound" && !starting ? "sr-only" : undefined}
+      >
         {state === "Bound"
           ? t("You’ve joined this table")
           : starting

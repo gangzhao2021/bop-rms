@@ -136,7 +136,12 @@ it("Owner 2026-10-23: asks the Store's item names in Chinese only while Chinese 
 it("batch 42 (v15 b41 live): every Chinese guest text says 您, never 你", () => {
   const informal = Object.entries(zhHans).filter(([, chinese]) => chinese.includes("你"));
   expect(informal).toEqual([]);
-  expect(zhHans["Your table"]).toBe("您的桌位");
+  // Batch 63 (v15 batch 62 review CDI-9, F13): the table is 本桌 everywhere (it was 您的桌位, 这桌
+  // and 本桌 in one visit; 您的桌位 read like a seat booking).
+  expect(zhHans["Your table"]).toBe("本桌");
+  expect(zhHans["Your table · {tableLabel}"]).toBe("本桌 · {tableLabel}");
+  expect(zhHans["Your table ordered {count}"]).toBe("本桌已点 {count} 份");
+  expect(Object.values(zhHans).filter((chinese) => chinese.includes("您的桌位"))).toEqual([]);
   expect(
     zhHans[
       "We use your phone number only to text you a sign-in code and to tell you before your points expire. You can leave and delete it any time."

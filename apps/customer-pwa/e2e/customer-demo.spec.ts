@@ -175,7 +175,9 @@ test.describe("@demo local-only Customer preview", () => {
     await expect(main).not.toContainText("Capacity Hold");
     await expect(main).not.toContainText("TRAINING_DATA_ONLY");
     await expect(main.getByRole("group", { name: "Tip amount" })).toBeVisible();
-    await expect(main.getByRole("button", { name: "Choose a tip to continue" })).toBeDisabled();
+    // Batch 63 (F09): the step keeps its name while it waits for a tip, with why under it.
+    await expect(main.getByRole("button", { name: "Continue to payment" })).toBeDisabled();
+    await expect(main.getByText("Choose a tip first", { exact: true })).toBeVisible();
 
     for (const width of [1440, 390, 320]) {
       await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });

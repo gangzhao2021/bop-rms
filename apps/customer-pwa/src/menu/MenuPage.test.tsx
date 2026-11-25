@@ -239,8 +239,9 @@ describe("WP-1701 Customer Menu screens", () => {
     expect(html).toContain("Latte");
     expect(html).toContain("Priced at checkout");
     // One short allergen line per card; the item page lists them in full.
+    // Batch 63 (F13): names lower case inside the English sentence.
     expect(html).toContain(
-      '<span class="menu-card__allergens">Contains Milk · May contain Peanuts</span>',
+      '<span class="menu-card__allergens">Contains milk · May contain peanuts</span>',
     );
     expect(html).not.toContain("Cross-contact possible:");
     expect(html).not.toContain(context.publicStoreReference);
@@ -357,8 +358,9 @@ describe("WP-1701 Customer Menu screens", () => {
       mode: "detail",
       state: { kind: "Found", menu },
     });
-    expect(html).toContain("No allergen-free claim is made");
-    expect(html).toContain("Ask staff");
+    // Batch 63 (F14): plain words, the same as the menu row, never an allergen-free claim.
+    expect(html).toContain("No allergens listed. Ask staff if you have an allergy.");
+    expect(html).not.toContain("No allergen-free claim is made");
   });
 
   it("WP-2423 (M77, M167): says the allergen info was just updated when a recipe changed it", () => {

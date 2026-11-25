@@ -264,10 +264,10 @@ for (const [language, locale] of [
         );
         await page.goto("/#qr=aaa.bbb.ccc");
         const heading = page.locator("#entry-heading");
-        await expect(heading).toHaveText(
-          zh
-            ? "半糖奶茶 Half Sugar Tea (TEST) 现在不接单"
-            : "半糖奶茶 Half Sugar Tea (TEST) isn’t taking orders right now",
+        // Batch 63 (F11): the heading is "Closed now"; the store's name is the header's, whole.
+        await expect(heading).toHaveText(zh ? "现在已打烊" : "Closed now");
+        await expect(page.locator(".bop-shell__header h1")).toHaveText(
+          "半糖奶茶 Half Sugar Tea (TEST)",
         );
         expect(
           await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),

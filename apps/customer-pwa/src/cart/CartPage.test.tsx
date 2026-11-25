@@ -178,9 +178,16 @@ describe("CUST-CART page contract", () => {
 
   it("renders offline as explicit read-only with no enabled mutation", () => {
     const html = renderPage({ status: "offline-readonly", cart: cart() });
-    expect(html).toContain("You’re offline");
-    expect(html).toContain("nothing will replay on reconnect");
-    expect(html).toContain("Refresh after reconnecting");
+    // Batch 63 (F10): the top banner says it once; the cart offers only Try again here, never
+    // "checkout" or "replay", and its next step stays in place, disabled.
+    expect(html).not.toContain("nothing will replay on reconnect");
+    expect(html).not.toContain("Refresh after reconnecting");
+    expect(html).toMatch(
+      /<div class="cart-offline"><button type="button">Try again<\/button><\/div>/u,
+    );
+    expect(html).toMatch(
+      /<button class="cart-checkout-link" type="button" disabled="">Checkout<\/button>/u,
+    );
     expect(html).toContain('disabled="" aria-label="Decrease Synthetic tea quantity"');
     expect(html).toContain('disabled="" aria-label="Increase Synthetic tea quantity"');
   });
@@ -422,7 +429,9 @@ it.each(["command-pending", "offline-readonly", "command-failed"] as const)(
     });
     expect(html).not.toContain("Your cart is empty");
     if (status === "command-failed") expect(html).toContain("We couldn’t confirm this change");
-    if (status === "offline-readonly") expect(html).toContain("You’re offline");
+    // Batch 63 (F10): the app's connection banner says it; the cart keeps Try again here.
+    if (status === "offline-readonly")
+      expect(html).toContain('<div class="cart-offline"><button type="button">Try again</button>');
   },
 );
 

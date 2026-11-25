@@ -1,3 +1,4 @@
+import { dishCount } from "../journey/format.js";
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { CHINESE_LOCALE, currentLanguage, t } from "../i18n/i18n.js";
@@ -261,10 +262,11 @@ export function TablePayChooser({
             checked={scope === "Mine"}
             onChange={() => setScope("Mine")}
           />{" "}
+          {/* Batch 63 (D62B-14, F13): "1 dish · $14.13", never a bare "1". */}
           {mineAmount === null
-            ? t("Only what I added ({count})", { count: String(count(mineLines)) })
-            : t("Only what I added ({count} · {amount})", {
-                count: String(count(mineLines)),
+            ? t("Only what I added ({dishes})", { dishes: dishCount(count(mineLines)) })
+            : t("Only what I added ({dishes} · {amount})", {
+                dishes: dishCount(count(mineLines)),
                 amount: mineAmount,
               })}
         </label>

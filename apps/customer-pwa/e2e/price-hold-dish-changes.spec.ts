@@ -560,7 +560,7 @@ for (const screen of [
       ).toBeVisible();
       await expect(main.getByText("Changed since you added it:")).toBeVisible();
       await expect(
-        main.getByText(/renamed since you added it\..*allergens now: May contain Sesame seeds\./u),
+        main.getByText(/renamed since you added it\..*allergens now: May contain sesame seeds\./u),
       ).toBeVisible();
       await expect(place).toBeDisabled();
       expect(table.sent).toBe(0);
@@ -663,7 +663,7 @@ for (const screen of [
       };
       await openAtTable(page, "/checkout");
       const changed =
-        "Synthetic house noodles was renamed since you added it. Synthetic house noodles allergens now: May contain Sesame seeds.";
+        "Synthetic house noodles was renamed since you added it. Synthetic house noodles allergens now: May contain sesame seeds.";
       await expect(main.getByText("Changed since you added it:")).toBeVisible();
       await expect(main.getByText(changed)).toBeVisible();
       await main.getByRole("button", { name: "No tip", exact: true }).click();

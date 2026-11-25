@@ -465,7 +465,8 @@ for (const screen of [
       await expect.poll(() => seen.cartReads, { timeout: 3_000 }).toBeGreaterThan(before);
       const reconnected = seen.cartReads;
       await expect(page.getByRole("heading", { name: "Synthetic noodles" })).toBeVisible();
-      await expect(page.getByRole("button", { name: "Refresh after reconnecting" })).toHaveCount(0);
+      // Batch 63 (F10): the offline Try again is gone once back online.
+      await expect(page.locator(".cart-offline")).toHaveCount(0);
       await expect.poll(() => seen.cartReads, { timeout: 6_000 }).toBeGreaterThan(reconnected);
     });
   });
