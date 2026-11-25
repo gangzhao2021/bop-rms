@@ -719,6 +719,29 @@ fieldset.store-features__modules {
   flex-direction: column;
   gap: var(--bop-space-1);
 }
+/* Batch 63 RA-12 (v15 b62 review): each tip percentage was a 22 px box (the switches' size), with
+   its "%" wrapped underneath. A tappable 56 px field with the "%" beside it; the row wraps. */
+.store-features__row.store-features__tiers {
+  flex-wrap: wrap;
+  align-items: center;
+}
+.store-features__tiers label {
+  display: inline-flex;
+  flex: none;
+  gap: 4px;
+  align-items: center;
+  white-space: nowrap;
+}
+.store-features__row.store-features__tiers input {
+  width: 56px;
+  height: 44px;
+  margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.store-features__tiers > span {
+  flex-basis: 100%;
+}
 .store-features__actions {
   display: flex;
   flex-wrap: wrap;
