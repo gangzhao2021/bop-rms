@@ -112,7 +112,7 @@ for (const language of ["en", "zh-Hans"] as const) {
     await expect(line).toBeVisible();
     // No link to a page that cannot add anyone.
     await expect(line.locator("a")).toHaveCount(0);
-    await expect(page.getByText(zh ? "01:52 已更新" : "Updated 01:52")).toBeVisible();
+    await expect(page.getByText(zh ? "已更新 01:52" : "Updated 01:52")).toBeVisible();
     await expect(page.getByText(zh ? "数据截至" : "Source as of")).toHaveCount(0);
     const manage = page.getByRole("link", { name: zh ? "查看与管理" : "View and manage" });
     await expect(manage).toBeVisible();
