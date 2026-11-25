@@ -372,7 +372,8 @@ export async function readTodaysOrders(
     return oldest !== undefined && oldest.businessDate !== null && oldest.businessDate < today;
   };
   for (let read = 1; !allRead(last); read += 1) {
-    if (read >= pages)
+    // A server that names no day for its Orders can't say where today ends: one page, a bound.
+    if (read >= pages || last.items.at(-1)?.businessDate == null)
       return {
         queue: { ...first, items, nextAfterOrderReference: last.nextAfterOrderReference },
         complete: false,
@@ -412,8 +413,9 @@ export function summarizeOrders(
       ? open
       : open.filter(
           (order) =>
-            (order.listedBusinessDate ?? order.businessDate) === day.businessDate &&
-            !earlierDayUnfinished(order, day),
+            // An order with no day named (an older server) is not known to be earlier: counted.
+            (order.listedBusinessDate ?? order.businessDate ?? day.businessDate) ===
+              day.businessDate && !earlierDayUnfinished(order, day),
         );
   const dineIn = open.filter((order) => order.orderType === "DineIn");
   const rounds = roundsAwaitingAcceptance(queue, now, paidRoundUrgentMinutes);
