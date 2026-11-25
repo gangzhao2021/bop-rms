@@ -120,8 +120,16 @@ export function MemberJoinPanel({
   const several = parts.length > 1;
   const chosen = several ? parts.find((entry) => entry.partNumber === part) : parts[0];
   const points = chosen?.points ?? Math.max(...parts.map((entry) => entry.points));
-  // v15 M60: a refund on this order already takes its share off these points.
-  const afterRefund = (chosen ?? parts[0])?.afterRefund === true;
+  // v15 M60: a refund on this order already takes its share off these points. v15 b61 live: said
+  // only of the points shown: before a part is chosen, those are the largest part's, which another
+  // part's refund never touched.
+  const afterRefund =
+    chosen !== undefined
+      ? chosen.afterRefund === true
+      : parts.length > 0 &&
+        parts
+          .filter((entry) => entry.points === points)
+          .every((entry) => entry.afterRefund === true);
   const partNumber = several ? part : (parts[0]?.partNumber ?? null);
   const add = async () => {
     setBusy(true);

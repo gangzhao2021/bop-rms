@@ -338,3 +338,98 @@ for (const width of widths)
       await expect(page.getByRole("radio", { name: "Part 2 · 250 points" })).toBeVisible();
     });
   });
+
+// v15 b61 live (TM2 orders 61 and 62): two phones each paid their own part online and staff refunded
+// part of phone A. "(after the refund)" belongs only to points a refund actually reduced: phone B,
+// never refunded, reads plain wording; phone A reads what its own refund left. A phone asked which
+// part it paid sees the wording of the points it is shown, not of another part's refund.
+for (const width of widths)
+  test.describe(`@production points after another phone's refund at ${String(width)}px`, () => {
+    test.use({ viewport: { width, height: 900 }, serviceWorkers: "block" });
+    const claimOf = (parts: readonly Record<string, unknown>[]) => ({
+      body: { ...offer.body, claim: { until: "2026-11-03T18:00:00.000Z", parts } },
+    });
+    const phoneB = claimOf([{ partNumber: 2, points: 125, certain: true }]);
+    const phoneA = claimOf([{ partNumber: 1, points: 55, certain: true, afterRefund: true }]);
+    const unsure = claimOf([
+      { partNumber: 1, points: 55, certain: false, afterRefund: true },
+      { partNumber: 2, points: 125, certain: false },
+    ]);
+    const fits = async (page: Page) => {
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      // Linux fonts (DejaVu) run wider: the heading keeps room inside the panel.
+      const room = await page.locator("#member-panel-title").evaluate((heading) => {
+        const panel = heading.closest("section")?.getBoundingClientRect();
+        const range = document.createRange();
+        range.selectNodeContents(heading);
+        const text = range.getBoundingClientRect();
+        return panel === undefined ? -1 : panel.right - text.right;
+      });
+      expect(room).toBeGreaterThanOrEqual(0);
+    };
+    for (const zh of [false, true])
+      test(`${zh ? "zh-Hans" : "en"}: B reads plain points, A reads what its refund left`, async ({
+        page,
+      }) => {
+        let answer = phoneB;
+        await serve(page, { State: () => answer });
+        const open = async () => {
+          await page.goto("/orders/" + orderReference + "/receipt");
+          await expect(page.locator("#member-panel-title")).toBeVisible();
+          if (zh && (await page.getByRole("button", { name: "切换到中文" }).count()) > 0)
+            await page.getByRole("button", { name: "切换到中文" }).click();
+        };
+        const title = page.locator("#member-panel-title");
+        await open();
+        await expect(title).toHaveText(
+          zh ? "加入会员，这单可以积 125 分" : "Join and earn 125 points on this order",
+        );
+        // The receipt itself may speak of refunds; the points card never does for B.
+        await expect(
+          page.locator(".member-panel").getByText(zh ? /退款/u : /refund/iu),
+        ).toHaveCount(0);
+        await fits(page);
+        await expectNoInternalText(page);
+        answer = phoneA;
+        await open();
+        await expect(title).toHaveText(
+          zh
+            ? "加入会员，这单可积 55 分（已扣除退款部分）"
+            : "Join and earn 55 points on this order (after the refund)",
+        );
+        await fits(page);
+        await expectNoInternalText(page);
+      });
+    for (const zh of [false, true])
+      test(`${zh ? "zh-Hans" : "en"}: a phone asked which part reads the wording of the part shown`, async ({
+        page,
+      }) => {
+        await serve(page, { State: () => unsure });
+        await page.goto("/orders/" + orderReference + "/receipt");
+        await expect(page.locator("#member-panel-title")).toBeVisible();
+        if (zh) await page.getByRole("button", { name: "切换到中文" }).click();
+        const title = page.locator("#member-panel-title");
+        // Nothing chosen yet: the heading shows part 2's 125, which no refund touched.
+        await expect(title).toHaveText(
+          zh ? "加入会员，这单可以积 125 分" : "Join and earn 125 points on this order",
+        );
+        await page
+          .getByRole("radio", { name: zh ? "第 1 份 · 55 分" : "Part 1 · 55 points" })
+          .check();
+        await expect(title).toHaveText(
+          zh
+            ? "加入会员，这单可积 55 分（已扣除退款部分）"
+            : "Join and earn 55 points on this order (after the refund)",
+        );
+        await page
+          .getByRole("radio", { name: zh ? "第 2 份 · 125 分" : "Part 2 · 125 points" })
+          .check();
+        await expect(title).toHaveText(
+          zh ? "加入会员，这单可以积 125 分" : "Join and earn 125 points on this order",
+        );
+        await fits(page);
+        await expectNoInternalText(page);
+      });
+  });
