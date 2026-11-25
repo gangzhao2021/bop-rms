@@ -44,9 +44,12 @@ export function CounterCancelAction({
   fetcher = fetch,
   defaultReason,
   label,
+  className,
 }: {
   /** The button's words ("Cancel order" unless given). */
   readonly label?: string;
+  /** Batch 63 (F42): how the trigger reads ("counter-order__danger-text" for Cancel order). */
+  readonly className?: string;
   readonly orderReference: string;
   readonly orderBatchReference: string;
   readonly orderNumber: string;
@@ -113,7 +116,7 @@ export function CounterCancelAction({
   };
   return (
     <>
-      <button type="button" onClick={() => dialog.current?.showModal()}>
+      <button type="button" className={className} onClick={() => dialog.current?.showModal()}>
         {label ?? t("Cancel order")}
       </button>
       <dialog

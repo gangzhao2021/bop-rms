@@ -8,6 +8,7 @@ import {
   forgetKeptThroughLanguageSwitch,
   keepThroughLanguageSwitch,
   takeKeptThroughLanguageSwitch,
+  currentLanguage,
 } from "./i18n/i18n.js";
 import { SlowWaitNotice } from "./slow-wait.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
@@ -50,6 +51,7 @@ import {
   payIntentKey,
   paymentUrgentMinutes,
   paymentWindowNotice,
+  counterPayByText,
 } from "./counter-payment.js";
 import { cashTotalMinor, createTableCheckoutClient } from "./table-checkout-client.js";
 import { tableFactsFromBill } from "./table-order-facts.js";
@@ -67,6 +69,7 @@ import {
   createCounterOrderClient,
   type CounterMenu,
   type CounterMenuItem,
+  type CounterMenuFamily,
   type CounterMenuRule,
   type CounterTip,
   type PlacedCounterOrder,
@@ -289,6 +292,67 @@ function defaultChoices(item: CounterMenuItem) {
         .map((option) => option.optionReference),
     ]),
   ) as Record<string, string[]>;
+}
+
+/**
+ * Batch 63 (F44): what is still to choose before the dish can be added ("Still to choose: Sugar,
+ * Ice"); empty once every group has its minimum.
+ */
+export function missingChoices(
+  item: CounterMenuItem,
+  choices: Record<string, string[]>,
+  counts: Readonly<Record<string, number>> = {},
+): string {
+  const missing = item.rules
+    .filter(
+      (rule) => chosenInRule(choices[rule.bindingReference] ?? [], counts) < rule.minimumSelections,
+    )
+    .map((rule) => rule.name);
+  return missing.length === 0
+    ? ""
+    : t("Still to choose: {groups}", { groups: missing.join(listSeparator()) });
+}
+
+/** Batch 63 (F44, CK-17): a − n + stepper of 44 px targets, so a tablet never opens a keyboard. */
+function Stepper({
+  label,
+  name,
+  value,
+  min,
+  max,
+  onChange,
+}: {
+  readonly label: string;
+  readonly name: string;
+  readonly value: number;
+  readonly min: number;
+  readonly max: number;
+  readonly onChange: (value: number) => void;
+}) {
+  return (
+    <div className="counter-order__stepper" role="group" aria-label={label}>
+      <span className="counter-order__stepper-label" aria-hidden="true">
+        {label}
+      </span>
+      <button
+        type="button"
+        disabled={value <= min}
+        aria-label={t("One less {name}", { name })}
+        onClick={() => onChange(value - 1)}
+      >
+        −
+      </button>
+      <output aria-live="polite">{value}</output>
+      <button
+        type="button"
+        disabled={value >= max}
+        aria-label={t("One more {name}", { name })}
+        onClick={() => onChange(value + 1)}
+      >
+        +
+      </button>
+    </div>
+  );
 }
 
 /** The group's limit counts each repeat of a choice (two of pearls is two of "at most 3"). */
@@ -894,6 +958,24 @@ export function keptDraftOf(value: unknown): KeptDraft | null {
   };
 }
 
+/**
+ * Batch 63 (F41): the dish's Chinese name, shown under the English one in the English UI (the
+ * Chinese UI already shows it as the name). Null in the Chinese UI or when the Store has none.
+ */
+export function chineseName(otherName: string | undefined): string | null {
+  if (currentLanguage() !== "en" || otherName === undefined) return null;
+  const name = otherName.trim();
+  return name === "" ? null : name;
+}
+
+/** The Chinese name of a sized drink's product: its first size's name before " — ". */
+function familyOtherName(family: CounterMenuFamily): string | undefined {
+  const other = family.sizes[0]?.item.otherName;
+  if (other === undefined || family.sizes.length === 1) return other;
+  const index = other.indexOf(" — ");
+  return index > 0 ? other.slice(0, index) : other;
+}
+
 export function StaffOrderEntryPage({
   storeLabel,
   storeReference = storeLabel,
@@ -1095,6 +1177,26 @@ export function StaffOrderEntryPage({
   const sendPaidAt = useRef<HTMLInputElement>(null);
   const chargeHeading = useRef<HTMLHeadingElement>(null);
   const ticketHeading = useRef<HTMLHeadingElement>(null);
+  /**
+   * Batch 63 (F47): on a phone the bottom bar leads to Send order; once Send order itself is on
+   * screen the bar steps aside, so there is one filled button, never two.
+   */
+  const [sendInView, setSendInView] = useState(false);
+  const sendObserver = useRef<IntersectionObserver | null>(null);
+  const sendArea = useCallback((target: HTMLDivElement | null) => {
+    sendObserver.current?.disconnect();
+    sendObserver.current = null;
+    if (target === null || typeof IntersectionObserver === "undefined") {
+      setSendInView(false);
+      return;
+    }
+    const observer = new IntersectionObserver((entries) => {
+      const entry = entries[entries.length - 1];
+      if (entry !== undefined) setSendInView(entry.isIntersecting);
+    });
+    observer.observe(target);
+    sendObserver.current = observer;
+  }, []);
   const chooseHeading = useRef<HTMLHeadingElement>(null);
   const chooseDialog = useRef<HTMLDialogElement>(null);
   // WP-2423 item 5: the clock behind the payment-time warning, ticking while payment is due.
@@ -2072,6 +2174,15 @@ export function StaffOrderEntryPage({
     lines
       .filter((line) => line.item.sellableReference === item.sellableReference)
       .reduce((sum, line) => sum + line.quantity, 0);
+  // Batch 63 (CK-18): the first category reads as chosen at every width until the menu scrolls
+  // (a phone's observer saw no section yet, so none was marked).
+  const shownSection =
+    activeSection ??
+    (often.length > 0
+      ? "counter-section-often"
+      : menu.menu.sections[0] === undefined
+        ? null
+        : "counter-section-" + menu.menu.sections[0].sectionReference);
   const jumpTo = (id: string) => {
     setActiveSection(id);
     document.getElementById(id)?.scrollIntoView({ block: "start" });
@@ -2090,6 +2201,13 @@ export function StaffOrderEntryPage({
             <span className="counter-order__in-order">{inOrder(item)} × </span>
           ) : null}
           {item.name}
+          {/* Batch 63 (F41): the English UI also names the dish in Chinese, as the kitchen
+              ticket does, so a cashier matches what the guest asks for. */}
+          {chineseName(item.otherName) === null ? null : (
+            <span className="counter-order__item-other" lang="zh-Hans">
+              {chineseName(item.otherName)}
+            </span>
+          )}
         </span>
         <span className="counter-order__item-price">{itemPrice(item)}</span>
       </button>
@@ -2181,7 +2299,12 @@ export function StaffOrderEntryPage({
           <Link to="/operations/orders">{t("Open Orders")}</Link>
         </p>
       ) : null}
-      <div className="counter-order__layout">
+      <div
+        className="counter-order__layout"
+        // Batch 63 (F42, v3 41:171): once a counter order is sent, its lines take the menu's place
+        // and the payment panel stands beside them.
+        data-sent={placed !== null && !ordering && !tableMode && !placed.payLater ? "" : undefined}
+      >
         <section className="counter-order__menu" aria-labelledby="counter-menu-heading">
           <h2 id="counter-menu-heading" className="counter-order__hidden-heading">
             {t("Menu")}
@@ -2223,7 +2346,7 @@ export function StaffOrderEntryPage({
                 {often.length > 0 ? (
                   <button
                     type="button"
-                    aria-current={activeSection === "counter-section-often" ? "true" : undefined}
+                    aria-current={shownSection === "counter-section-often" ? "true" : undefined}
                     onClick={() => jumpTo("counter-section-often")}
                   >
                     {t("Often ordered")}
@@ -2234,7 +2357,7 @@ export function StaffOrderEntryPage({
                     key={section.sectionReference}
                     type="button"
                     aria-current={
-                      activeSection === "counter-section-" + section.sectionReference
+                      shownSection === "counter-section-" + section.sectionReference
                         ? "true"
                         : undefined
                     }
@@ -2287,7 +2410,14 @@ export function StaffOrderEntryPage({
                       className="counter-order__family"
                       data-available={family.sizes.some((size) => size.item.available)}
                     >
-                      <span className="counter-order__item-name">{family.name}</span>
+                      <span className="counter-order__item-name">
+                        {family.name}
+                        {chineseName(familyOtherName(family)) === null ? null : (
+                          <span className="counter-order__item-other" lang="zh-Hans">
+                            {chineseName(familyOtherName(family))}
+                          </span>
+                        )}
+                      </span>
                       <span className="counter-order__sizes" role="group" aria-label={family.name}>
                         {family.sizes.map((size) => (
                           <button
@@ -2326,8 +2456,22 @@ export function StaffOrderEntryPage({
           aria-labelledby="counter-ticket"
         >
           <header className="counter-order__ticket-header">
+            {placed !== null && !ordering && !tableMode && !placed.payLater ? (
+              <p className="counter-order__sent-status">
+                <span
+                  className="counter-order__dot"
+                  data-state={phase === "Paid" || phase === "Accepted" ? "done" : "active"}
+                  aria-hidden="true"
+                />
+                {phase === "Paid" || phase === "Accepted"
+                  ? t("Sent · paid")
+                  : t("Sent · waiting for payment")}
+              </p>
+            ) : null}
             <h2 id="counter-ticket" ref={ticketHeading} tabIndex={-1}>
-              {t("Order")}
+              {placed !== null && !ordering && !tableMode && !placed.payLater
+                ? t("Order {orderNumber}", { orderNumber: placed.orderNumber })
+                : t("Order")}
             </h2>
             {sentItemCount > 0 ? (
               <span className="counter-order__count">
@@ -2628,7 +2772,8 @@ export function StaffOrderEntryPage({
                         )}
                 </p>
               </div>
-            ) : (estimate !== null && lines.length > 0) || (placed !== null && !ordering) ? (
+            ) : (estimate !== null && lines.length > 0 && (ordering || tableMode)) ||
+              (placed !== null && !ordering && tableMode) ? (
               <div className="counter-order__totals">
                 {placed !== null && !ordering && sentGuest.length > 0 ? (
                   // WP-2423 batch 28: the sent round's parts, the guests' dishes it took in too.
@@ -2664,59 +2809,71 @@ export function StaffOrderEntryPage({
                       </>
                     );
                   })()
-                ) : estimate !== null && lines.length > 0 ? (
+                ) : estimate !== null && lines.length > 0 && (ordering || tableMode) ? (
                   <p className="counter-order__subtotal">
-                    <span>{t("Subtotal")}</span>
+                    {/* Batch 63 (F48): the counter's subtotal is exact; it says once what it
+                        leaves out, never "about" the same figure again. */}
+                    <span>{tableMode ? t("Subtotal") : t("Subtotal (before tax and tip)")}</span>
                     <span>{cad(estimate.toString())}</span>
                   </p>
                 ) : null}
-                <p className="counter-order__estimate">
-                  {placed !== null && !ordering
-                    ? placed.payLater
-                      ? t("Sent to the kitchen. {totalMinor} with tax goes on the table's bill.", {
-                          totalMinor: cad(placed.totalMinor),
-                        })
-                      : phase === "Paid" || phase === "Accepted"
-                        ? changeDue !== null
-                          ? t("Sent and paid in cash: {amount} with tax and tip.", {
-                              amount: cad(
-                                cashTender(BigInt(placed.totalMinor), "").cashDueMinor.toString(),
-                              ),
-                            })
-                          : t("Sent and paid: {totalMinor} with tax and tip.", {
+                {ordering && !tableMode ? null : (
+                  <p className="counter-order__estimate">
+                    {placed !== null && !ordering
+                      ? placed.payLater
+                        ? t(
+                            "Sent to the kitchen. {totalMinor} with tax goes on the table's bill.",
+                            {
                               totalMinor: cad(placed.totalMinor),
-                            })
-                        : placed.recordedAfterOutage
-                          ? t(
-                              "Sent. This paper order was paid during the outage: don't charge again, record it below.",
-                            )
-                          : counterCash
-                            ? t(
-                                "Sent. Take {amount} in cash with tax and tip (rounded to 5 cents).",
-                                {
-                                  amount: cad(
-                                    cashTender(
-                                      BigInt(placed.totalMinor),
-                                      "",
-                                    ).cashDueMinor.toString(),
-                                  ),
-                                },
-                              )
-                            : t("Sent. Charge {totalMinor} with tax and tip on the card machine.", {
+                            },
+                          )
+                        : phase === "Paid" || phase === "Accepted"
+                          ? changeDue !== null
+                            ? t("Sent and paid in cash: {amount} with tax and tip.", {
+                                amount: cad(
+                                  cashTender(BigInt(placed.totalMinor), "").cashDueMinor.toString(),
+                                ),
+                              })
+                            : t("Sent and paid: {totalMinor} with tax and tip.", {
                                 totalMinor: cad(placed.totalMinor),
                               })
-                    : tableHold !== null
-                      ? t("About {value} before tax.", { value: cad((estimate ?? 0n).toString()) })
-                      : tablePaysLater
-                        ? t(
-                            "About {value} before tax. It goes on the table's bill; the table pays once at the end.",
-                            { value: cad((estimate ?? 0n).toString()) },
-                          )
-                        : t(
-                            "About {value} before tax and tip. The final total comes when you send the order.",
-                            { value: cad((estimate ?? 0n).toString()) },
-                          )}
-                </p>
+                          : placed.recordedAfterOutage
+                            ? t(
+                                "Sent. This paper order was paid during the outage: don't charge again, record it below.",
+                              )
+                            : counterCash
+                              ? t(
+                                  "Sent. Take {amount} in cash with tax and tip (rounded to 5 cents).",
+                                  {
+                                    amount: cad(
+                                      cashTender(
+                                        BigInt(placed.totalMinor),
+                                        "",
+                                      ).cashDueMinor.toString(),
+                                    ),
+                                  },
+                                )
+                              : t(
+                                  "Sent. Charge {totalMinor} with tax and tip on the card machine.",
+                                  {
+                                    totalMinor: cad(placed.totalMinor),
+                                  },
+                                )
+                      : tableHold !== null
+                        ? t("About {value} before tax.", {
+                            value: cad((estimate ?? 0n).toString()),
+                          })
+                        : tablePaysLater
+                          ? t(
+                              "About {value} before tax. It goes on the table's bill; the table pays once at the end.",
+                              { value: cad((estimate ?? 0n).toString()) },
+                            )
+                          : t(
+                              "About {value} before tax and tip. The final total comes when you send the order.",
+                              { value: cad((estimate ?? 0n).toString()) },
+                            )}
+                  </p>
+                )}
               </div>
             ) : null}
             {tablePaysLater || tipOptions.length === 0 ? null : (
@@ -3000,7 +3157,7 @@ export function StaffOrderEntryPage({
               </p>
             ) : null}
             {ordering ? (
-              <div className="card-actions counter-order__send">
+              <div className="card-actions counter-order__send" ref={sendArea}>
                 <button
                   type="button"
                   className="counter-order__primary"
@@ -3022,7 +3179,7 @@ export function StaffOrderEntryPage({
           </div>
         </section>
 
-        {ordering && (lines.length > 0 || guestSent.length > 0) ? (
+        {ordering && (lines.length > 0 || guestSent.length > 0) && !sendInView ? (
           // Phone layout only (CSS): the ticket sits below the menu, so a bottom bar keeps the
           // order's count and estimate in view and takes staff to it to send (with the guests'
           // lines it takes in, WP-2423 M35).
@@ -3124,25 +3281,29 @@ export function StaffOrderEntryPage({
             data-phase={phase}
           >
             <h2 id="counter-charge" ref={chargeHeading} tabIndex={-1}>
-              {phase === "Paid" || phase === "Accepted"
-                ? tableMode
-                  ? t("Table {value} order paid", {
-                      value: saidTable(placed.tableLabel ?? tableLabel ?? ""),
-                    })
-                  : t("Order {orderNumber} paid", { orderNumber: placed.orderNumber })
-                : placed.recordedAfterOutage
-                  ? t("Paper order {orderNumber}: its payment isn't recorded yet", {
-                      orderNumber: placed.orderNumber,
-                    })
-                  : counterCash
-                    ? t("Take {amount} in cash", {
-                        amount: cad(
-                          cashTender(BigInt(placed.totalMinor), "").cashDueMinor.toString(),
-                        ),
+              {!tableMode &&
+              !placed.recordedAfterOutage &&
+              !(phase === "Paid" || phase === "Accepted")
+                ? t("Take payment")
+                : phase === "Paid" || phase === "Accepted"
+                  ? tableMode
+                    ? t("Table {value} order paid", {
+                        value: saidTable(placed.tableLabel ?? tableLabel ?? ""),
                       })
-                    : t("Charge {totalMinor} on the card machine", {
-                        totalMinor: cad(placed.totalMinor),
-                      })}
+                    : t("Order {orderNumber} paid", { orderNumber: placed.orderNumber })
+                  : placed.recordedAfterOutage
+                    ? t("Paper order {orderNumber}: its payment isn't recorded yet", {
+                        orderNumber: placed.orderNumber,
+                      })
+                    : counterCash
+                      ? t("Take {amount} in cash", {
+                          amount: cad(
+                            cashTender(BigInt(placed.totalMinor), "").cashDueMinor.toString(),
+                          ),
+                        })
+                      : t("Charge {totalMinor} on the card machine", {
+                          totalMinor: cad(placed.totalMinor),
+                        })}
             </h2>
             {removedNote !== null ? (
               <p className="order-accept-by" data-tier="warning" role="note">
@@ -3160,62 +3321,93 @@ export function StaffOrderEntryPage({
                 })}
               </p>
             ) : null}
-            <dl>
-              <div>
-                <dt>{t("Order")}</dt>
-                <dd>{placed.orderNumber}</dd>
-              </div>
-              <div>
-                <dt>{t("Order total incl. tax")}</dt>
-                <dd>{cad(placed.orderMinor)}</dd>
-              </div>
-              {/* Batch 43: a store with tips off shows no "Tip $0.00"; a tip taken always shows. */}
-              {tips?.enabled !== false || placed.tipMinor !== "0" ? (
+            {tableMode ? (
+              <dl>
                 <div>
-                  <dt>{t("Tip")}</dt>
-                  <dd>{cad(placed.tipMinor)}</dd>
+                  <dt>{t("Order")}</dt>
+                  <dd>{placed.orderNumber}</dd>
                 </div>
-              ) : null}
-              {counterCash ? (
-                // WP-2423 M52: cash is rounded to 5 cents; the order's amount stays as above.
                 <div>
-                  <dt>
-                    {placed.recordedAfterOutage
-                      ? t("Paid in cash during the outage")
-                      : t("Cash total (rounded to 5 cents)")}
-                  </dt>
-                  <dd>
-                    <strong>
-                      {cad(cashTender(BigInt(placed.totalMinor), "").cashDueMinor.toString())}
-                    </strong>
-                  </dd>
+                  <dt>{t("Order total incl. tax")}</dt>
+                  <dd>{cad(placed.orderMinor)}</dd>
                 </div>
-              ) : (
-                <div>
-                  <dt>
-                    {placed.recordedAfterOutage
-                      ? t("Paid on the card machine during the outage")
-                      : phase === "Paid" || phase === "Accepted"
-                        ? t("Amount paid")
-                        : t("To charge")}
-                  </dt>
-                  <dd>
-                    <strong>{cad(placed.totalMinor)}</strong>
-                  </dd>
-                </div>
-              )}
-              {/* A paper order's change was given during the outage. */}
-              {changeDue !== null &&
-              !placed.recordedAfterOutage &&
-              (phase === "Paid" || phase === "Accepted") ? (
-                <div>
-                  <dt>{t("Change to give")}</dt>
-                  <dd>
-                    <strong>{cad(changeDue)}</strong>
-                  </dd>
-                </div>
-              ) : null}
-            </dl>
+                {/* Batch 43: a store with tips off shows no "Tip $0.00"; a tip taken always shows. */}
+                {tips?.enabled !== false || placed.tipMinor !== "0" ? (
+                  <div>
+                    <dt>{t("Tip")}</dt>
+                    <dd>{cad(placed.tipMinor)}</dd>
+                  </div>
+                ) : null}
+                {counterCash ? (
+                  // WP-2423 M52: cash is rounded to 5 cents; the order's amount stays as above.
+                  <div>
+                    <dt>
+                      {placed.recordedAfterOutage
+                        ? t("Paid in cash during the outage")
+                        : t("Cash total (rounded to 5 cents)")}
+                    </dt>
+                    <dd>
+                      <strong>
+                        {cad(cashTender(BigInt(placed.totalMinor), "").cashDueMinor.toString())}
+                      </strong>
+                    </dd>
+                  </div>
+                ) : (
+                  <div>
+                    <dt>
+                      {placed.recordedAfterOutage
+                        ? t("Paid on the card machine during the outage")
+                        : phase === "Paid" || phase === "Accepted"
+                          ? t("Amount paid")
+                          : t("To charge")}
+                    </dt>
+                    <dd>
+                      <strong>{cad(placed.totalMinor)}</strong>
+                    </dd>
+                  </div>
+                )}
+                {/* A paper order's change was given during the outage. */}
+                {changeDue !== null &&
+                !placed.recordedAfterOutage &&
+                (phase === "Paid" || phase === "Accepted") ? (
+                  <div>
+                    <dt>{t("Change to give")}</dt>
+                    <dd>
+                      <strong>{cad(changeDue)}</strong>
+                    </dd>
+                  </div>
+                ) : null}
+              </dl>
+            ) : (
+              // Batch 63 (F42): the amount to take, once, large; what it is made of in grey.
+              <>
+                <p className="counter-order__due">
+                  {cad(
+                    counterCash
+                      ? cashTender(BigInt(placed.totalMinor), "").cashDueMinor.toString()
+                      : placed.totalMinor,
+                  )}
+                </p>
+                <p className="counter-order__due-parts">
+                  {placed.tipMinor !== "0"
+                    ? t("Order {order} with tax · tip {tip}", {
+                        order: cad(placed.orderMinor),
+                        tip: cad(placed.tipMinor),
+                      })
+                    : tips?.enabled !== false
+                      ? t("Tax included · no tip")
+                      : t("Tax included")}
+                  {counterCash ? t(" · cash rounded to 5 cents") : ""}
+                </p>
+                {changeDue !== null &&
+                !placed.recordedAfterOutage &&
+                (phase === "Paid" || phase === "Accepted") ? (
+                  <p className="counter-order__change-due">
+                    {t("Change to give: {amount}", { amount: cad(changeDue) })}
+                  </p>
+                ) : null}
+              </>
+            )}
             {phase === "Charge" || phase === "Recording" ? (
               <>
                 {(() => {
@@ -3228,14 +3420,43 @@ export function StaffOrderEntryPage({
                   });
                   return (
                     <p
-                      className="order-accept-by"
+                      className={tableMode ? "order-accept-by" : "counter-order__deadline"}
                       data-tier={notice.tier}
                       role={notice.tier === "urgent" ? "alert" : "note"}
                     >
-                      {notice.text}
+                      {/* Batch 63 (F42): at the counter the time is one short grey line. */}
+                      {tableMode || placed.recordedAfterOutage
+                        ? notice.text
+                        : counterPayByText(placed.payBy ?? "", timeZone, now)}
                     </p>
                   );
                 })()}
+                {tableMode || placed.recordedAfterOutage ? null : (
+                  // Batch 63 (F42, v3 41:171): the two steps at the counter, in order.
+                  <ol className="counter-order__steps">
+                    {counterCash ? (
+                      <>
+                        <li>
+                          {t("Take {amount} in cash and count it.", {
+                            amount: cad(
+                              cashTender(BigInt(placed.totalMinor), "").cashDueMinor.toString(),
+                            ),
+                          })}
+                        </li>
+                        <li>{t("Enter what the guest handed you, then record it below.")}</li>
+                      </>
+                    ) : (
+                      <>
+                        <li>
+                          {t("Enter {amount} on the card machine; the guest taps or inserts.", {
+                            amount: cad(placed.totalMinor),
+                          })}
+                        </li>
+                        <li>{t("When the machine says approved, record it below.")}</li>
+                      </>
+                    )}
+                  </ol>
+                )}
                 <form
                   onSubmit={(event) => {
                     event.preventDefault();
@@ -3453,8 +3674,9 @@ export function StaffOrderEntryPage({
                               t("Card declined? Try another card.")}
                 </p>
                 {!tableMode && placedCancellable === true && !placed.recordedAfterOutage ? (
-                  <div className="card-actions">
+                  <div className="card-actions counter-order__charge-links">
                     <CounterCancelAction
+                      className="counter-order__danger-text"
                       orderReference={placed.orderReference}
                       orderBatchReference={placed.orderBatchReference}
                       orderNumber={placed.orderNumber}
@@ -3464,6 +3686,7 @@ export function StaffOrderEntryPage({
                       onCancelled={startOver}
                     />
                     <CounterCancelAction
+                      className="counter-order__accent-text"
                       label={t("Back to edit")}
                       defaultReason="COUNTER_ENTERED_WRONG"
                       orderReference={placed.orderReference}
@@ -3484,7 +3707,11 @@ export function StaffOrderEntryPage({
                     (changeDue !== null ? t("Paid in cash.") : t("Paid on the card machine."))}
                 </p>
                 <div className="card-actions">
-                  <button type="button" onClick={startOver}>
+                  <button
+                    type="button"
+                    className={tableMode ? undefined : "counter-order__primary"}
+                    onClick={startOver}
+                  >
                     {tableMode ? t("Another order for this table") : t("New counter order")}
                   </button>
                   {tableMode ? <Link to="/operations/dining">{t("Back to Tables")}</Link> : null}
@@ -3517,132 +3744,153 @@ export function StaffOrderEntryPage({
               setChoosing(null);
             }}
           >
-            <h3 ref={chooseHeading} tabIndex={-1}>
-              {choosing.item.name}
-            </h3>
-            {choosing.item.rules.map((rule) => {
-              const single = rule.maximumSelections === 1;
-              const picked = choosing.choices[rule.bindingReference] ?? [];
-              const total = chosenInRule(picked, choosing.counts);
-              return (
-                <fieldset key={rule.bindingReference}>
-                  <legend>
-                    {rule.name}
-                    {` · ${staffChoiceText(rule)}`}
-                  </legend>
-                  {total > rule.maximumSelections ? (
-                    <p role="status">
-                      {t("{name} allows at most {max}. Choose fewer.", {
-                        name: rule.name,
-                        max: rule.maximumSelections,
-                      })}
-                    </p>
-                  ) : null}
-                  {rule.options.map((option) => (
-                    <label key={option.optionReference}>
-                      <input
-                        type={single ? "radio" : "checkbox"}
-                        name={rule.bindingReference}
-                        checked={picked.includes(option.optionReference)}
-                        disabled={
-                          (option.offeredNow === false &&
-                            !picked.includes(option.optionReference)) ||
-                          (!single &&
-                            !picked.includes(option.optionReference) &&
-                            total >= rule.maximumSelections)
-                        }
-                        onChange={(event) => {
-                          const checked = event.currentTarget.checked;
+            {/* Batch 63 (F44, Figma 56:104): each group is one wrapping row of choices, the
+                chosen one a dark pill; quantity is a − 1 + stepper; Add to order stays at the
+                bottom of the dialog, so a drink with four groups is chosen on one screen. */}
+            <div className="counter-order__choose-body">
+              <header className="counter-order__choose-head">
+                <h3 ref={chooseHeading} tabIndex={-1}>
+                  {choosing.item.name}
+                </h3>
+                <span className="counter-order__choose-price">{itemPrice(choosing.item)}</span>
+              </header>
+              {choosing.item.rules.map((rule) => {
+                const single = rule.maximumSelections === 1;
+                const picked = choosing.choices[rule.bindingReference] ?? [];
+                const total = chosenInRule(picked, choosing.counts);
+                return (
+                  <fieldset key={rule.bindingReference}>
+                    <legend>
+                      {rule.name}
+                      {` · ${staffChoiceText(rule)}`}
+                    </legend>
+                    {total > rule.maximumSelections ? (
+                      <p role="status">
+                        {t("{name} allows at most {max}. Choose fewer.", {
+                          name: rule.name,
+                          max: rule.maximumSelections,
+                        })}
+                      </p>
+                    ) : null}
+                    <div className="counter-order__choices">
+                      {rule.options.map((option) => (
+                        <label
+                          key={option.optionReference}
+                          data-chosen={picked.includes(option.optionReference)}
+                        >
+                          <input
+                            type={single ? "radio" : "checkbox"}
+                            name={rule.bindingReference}
+                            checked={picked.includes(option.optionReference)}
+                            disabled={
+                              (option.offeredNow === false &&
+                                !picked.includes(option.optionReference)) ||
+                              (!single &&
+                                !picked.includes(option.optionReference) &&
+                                total >= rule.maximumSelections)
+                            }
+                            onChange={(event) => {
+                              const checked = event.currentTarget.checked;
+                              setChoosing({
+                                ...choosing,
+                                choices: {
+                                  ...choosing.choices,
+                                  [rule.bindingReference]: single
+                                    ? [option.optionReference]
+                                    : checked
+                                      ? [...picked, option.optionReference]
+                                      : picked.filter((value) => value !== option.optionReference),
+                                },
+                              });
+                            }}
+                          />
+                          <span>{option.name}</span>
+                          {option.offeredNow === false ? (
+                            <span className="counter-order__option-price">
+                              {option.soldOut === true
+                                ? t("Sold out today")
+                                : t("Not available now")}
+                            </span>
+                          ) : option.priceMinor !== null && option.priceMinor !== "0" ? (
+                            <span className="counter-order__option-price">
+                              +{cad(option.priceMinor)}
+                            </span>
+                          ) : null}
+                        </label>
+                      ))}
+                    </div>
+                    {/* WP-2423 item 3b: a choice guests can repeat (double pearls) at the table
+                        too; batch 63 (CK-17): a − n + stepper, no keyboard on a tablet. */}
+                    {rule.options
+                      .filter(
+                        (option) =>
+                          option.maximumQuantity > 1 && picked.includes(option.optionReference),
+                      )
+                      .map((option) => {
+                        const count = choosing.counts[option.optionReference] ?? 1;
+                        const most = repeatLimit(
+                          rule,
+                          option.optionReference,
+                          picked,
+                          choosing.counts,
+                        );
+                        const setCount = (value: number) =>
                           setChoosing({
                             ...choosing,
-                            choices: {
-                              ...choosing.choices,
-                              [rule.bindingReference]: single
-                                ? [option.optionReference]
-                                : checked
-                                  ? [...picked, option.optionReference]
-                                  : picked.filter((value) => value !== option.optionReference),
+                            counts: {
+                              ...choosing.counts,
+                              [option.optionReference]: Math.min(most, Math.max(1, value)),
                             },
                           });
-                        }}
-                      />
-                      <span>{option.name}</span>
-                      {option.offeredNow === false ? (
-                        <span className="counter-order__option-price">
-                          {option.soldOut === true ? t("Sold out today") : t("Not available now")}
-                        </span>
-                      ) : option.priceMinor !== null && option.priceMinor !== "0" ? (
-                        <span className="counter-order__option-price">
-                          +{cad(option.priceMinor)}
-                        </span>
-                      ) : null}
-                    </label>
-                  ))}
-                  {/* WP-2423 item 3b: a choice guests can repeat (double pearls) at the table too. */}
-                  {rule.options
-                    .filter(
-                      (option) =>
-                        option.maximumQuantity > 1 && picked.includes(option.optionReference),
-                    )
-                    .map((option) => (
-                      <label key={option.optionReference} className="counter-order__quantity">
-                        {t("How many {name}", { name: option.name })}
-                        <input
-                          type="number"
-                          inputMode="numeric"
-                          min={1}
-                          max={repeatLimit(rule, option.optionReference, picked, choosing.counts)}
-                          value={choosing.counts[option.optionReference] ?? 1}
-                          onChange={(event) =>
-                            setChoosing({
-                              ...choosing,
-                              counts: {
-                                ...choosing.counts,
-                                [option.optionReference]: Math.min(
-                                  repeatLimit(
-                                    rule,
-                                    option.optionReference,
-                                    picked,
-                                    choosing.counts,
-                                  ),
-                                  Math.max(1, Number(event.currentTarget.value) || 1),
-                                ),
-                              },
-                            })
-                          }
-                        />
-                      </label>
-                    ))}
-                </fieldset>
-              );
-            })}
-            <label className="counter-order__quantity">
-              {t("Quantity")}
-              <input
-                type="number"
-                inputMode="numeric"
+                        return (
+                          <Stepper
+                            key={option.optionReference}
+                            label={t("How many {name}", { name: option.name })}
+                            name={option.name}
+                            value={count}
+                            min={1}
+                            max={most}
+                            onChange={setCount}
+                          />
+                        );
+                      })}
+                  </fieldset>
+                );
+              })}
+              <Stepper
+                label={t("Quantity")}
+                name={choosing.item.name}
+                value={choosing.quantity}
                 min={1}
                 max={99}
-                value={choosing.quantity}
-                onChange={(event) =>
-                  setChoosing({
-                    ...choosing,
-                    quantity: Math.min(99, Math.max(1, Number(event.currentTarget.value) || 1)),
-                  })
+                onChange={(quantity) =>
+                  setChoosing({ ...choosing, quantity: Math.min(99, Math.max(1, quantity)) })
                 }
               />
-            </label>
-            {/* WP-2423 M53: the counter takes the guest's note for the kitchen too. */}
-            <label className="counter-order__note">
-              {t("Note for the kitchen (optional)")}
-              <input
-                value={choosing.note}
-                maxLength={140}
-                autoComplete="off"
-                onChange={(event) => setChoosing({ ...choosing, note: event.currentTarget.value })}
-              />
-            </label>
+              {/* WP-2423 M53: the counter takes the guest's note for the kitchen too. */}
+              <label className="counter-order__note">
+                {t("Note for the kitchen (optional)")}
+                <input
+                  value={choosing.note}
+                  maxLength={140}
+                  autoComplete="off"
+                  onChange={(event) =>
+                    setChoosing({ ...choosing, note: event.currentTarget.value })
+                  }
+                />
+              </label>
+            </div>
             <div className="counter-order__choose-actions">
+              <p className="counter-order__choose-missing" role="status">
+                {missingChoices(choosing.item, choosing.choices, choosing.counts)}
+              </p>
+              <button
+                type="button"
+                className="counter-order__choose-cancel"
+                onClick={() => setChoosing(null)}
+              >
+                {t("Cancel")}
+              </button>
               <button
                 type="submit"
                 className="counter-order__primary"
@@ -3650,9 +3898,6 @@ export function StaffOrderEntryPage({
               >
                 {choosing.editing === null ? t("Add to order") : t("Save change")}
                 {choosingMinor === null ? "" : ` · ${cad(choosingMinor.toString())}`}
-              </button>
-              <button type="button" onClick={() => setChoosing(null)}>
-                {t("Cancel")}
               </button>
             </div>
           </form>

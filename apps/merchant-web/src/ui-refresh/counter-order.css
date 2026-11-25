@@ -113,7 +113,9 @@
 }
 
 /* Dish rows, two columns where there is room: the whole row is the button. The first row has no
-   line above it (the list clips it), the last no line below. */
+   line above it (the list clips it), the last no line below. Batch 63 (CK-18): each line runs
+   across the whole grid row, so a row with one dish (the last, or one beside a taller one) is
+   ruled like the others; the list clips what runs past its right edge. */
 .counter-order .counter-order__items {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(17rem, 100%), 1fr));
@@ -121,11 +123,21 @@
   overflow: hidden;
 }
 .counter-order .counter-order__items li {
+  position: relative;
   display: block;
   margin-top: -1px;
   padding: 0;
   border: 0;
-  border-top: 1px solid var(--bop-color-row-divider);
+}
+.counter-order .counter-order__items li::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 1px;
+  background: var(--bop-color-row-divider);
+  pointer-events: none;
 }
 .counter-order__item {
   display: flex;
@@ -154,6 +166,13 @@
 }
 .counter-order .counter-order__item-name {
   overflow-wrap: anywhere;
+}
+/* Batch 63 (F41): the dish's Chinese name under the English one, as on the kitchen ticket. */
+.counter-order .counter-order__item-other {
+  display: block;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
 }
 .counter-order .counter-order__item-price {
   flex: none;
@@ -476,12 +495,15 @@
 }
 
 /* ---- Choices: over the menu, so the order stays put --------------------------------------- */
+/* Batch 63 (F44, Figma 56:104): the choices scroll inside the dialog if they must; what is still
+   to choose, Cancel and Add to order stay at its bottom. Each group is one wrapping row of plain
+   choices with the chosen one a dark pill (v3 45:2), every choice at least 44 px tall. */
 .counter-order__choose {
-  width: min(28rem, calc(100% - 32px));
+  width: min(35rem, calc(100% - 32px));
   max-height: 85vh;
   margin: auto;
-  padding: 24px;
-  overflow-y: auto;
+  padding: 0;
+  overflow: hidden;
   border: 0;
   border-radius: 12px;
   background: var(--bop-color-surface-default);
@@ -491,7 +513,22 @@
   background: rgb(0 0 0 / 30%);
 }
 .counter-order__choose form {
+  display: flex;
+  flex-direction: column;
+  max-height: 85vh;
+}
+.counter-order__choose-body {
   display: grid;
+  gap: 20px;
+  min-height: 0;
+  padding: 24px 24px 8px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.counter-order__choose-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
   gap: 16px;
 }
 .counter-order__choose h3 {
@@ -502,8 +539,15 @@
 .counter-order__choose h3:focus-visible {
   outline: none;
 }
+.counter-order__choose-price {
+  flex: none;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
 .counter-order__choose fieldset {
   display: grid;
+  gap: 4px;
   min-width: 0;
   margin: 0;
   padding: 0;
@@ -515,44 +559,89 @@
   font-size: 14px;
   font-weight: 600;
 }
-.counter-order__choose fieldset > label {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-height: 48px;
+.counter-order__choose fieldset > p {
   margin: 0;
-  padding: 0;
-  font-size: 16px;
-  font-variant-numeric: tabular-nums;
-  cursor: pointer;
-}
-.counter-order__choose fieldset > label + label {
-  border-top: 1px solid var(--bop-color-row-divider);
-}
-.counter-order__choose fieldset input {
-  flex: none;
-  width: 20px;
-  height: 20px;
-  min-height: 0;
-  margin: 0;
-  accent-color: var(--bop-color-accent);
-}
-.counter-order__option-price {
-  margin-inline-start: auto;
-  color: var(--bop-color-text-muted);
   font-size: 14px;
 }
-.counter-order__choose .counter-order__quantity {
+.counter-order__choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+.counter-order__choices > label {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  margin: 0;
+  padding: 0 16px;
+  border-radius: 22px;
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.counter-order__choices > label > input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+}
+.counter-order__choices > label:has(> input:checked) {
+  background: var(--bop-color-text-default);
+  color: var(--bop-color-on-primary);
+  font-weight: 600;
+}
+.counter-order__choices > label:has(> input:checked) .counter-order__option-price {
+  color: var(--bop-color-on-primary);
+}
+.counter-order__choices > label:has(> input:focus-visible) {
+  outline: 2px solid var(--bop-color-focus);
+  outline-offset: 2px;
+}
+.counter-order__choices > label:has(> input:disabled) {
+  color: var(--bop-color-text-muted);
+  cursor: not-allowed;
+}
+.counter-order__option-price {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
+}
+.counter-order__stepper {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  font-size: 16px;
+  gap: 8px;
+  font-size: 14px;
 }
-.counter-order__choose .counter-order__quantity input {
-  width: 5rem;
+.counter-order__stepper-label {
+  min-width: 4rem;
+  margin-inline-end: 8px;
+  font-weight: 600;
+}
+.counter-order__stepper button {
+  min-width: 44px;
   min-height: 44px;
-  text-align: end;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font: inherit;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+.counter-order__stepper button:disabled {
+  color: var(--bop-color-text-muted);
+  cursor: not-allowed;
+}
+.counter-order__stepper output {
+  min-width: 2ch;
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
 }
 .counter-order__choose .counter-order__note {
   display: grid;
@@ -561,14 +650,30 @@
 }
 .counter-order__choose-actions {
   display: grid;
-  gap: 4px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 16px;
+  padding: 8px 24px 24px;
+  background: var(--bop-color-surface-default);
+}
+.counter-order__choose-missing {
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
 }
 .counter-order__choose-actions .counter-order__primary {
+  grid-column: 1 / -1;
   min-height: 52px;
   font-size: 16px;
 }
-.counter-order__choose-actions button:not(.counter-order__primary) {
+.counter-order__choose-actions .counter-order__primary:disabled {
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-primary);
+  opacity: 0.4;
+}
+.counter-order__choose-actions .counter-order__choose-cancel {
   min-height: 44px;
+  padding: 0;
   border: 0;
   background: none;
   color: var(--bop-color-accent);
@@ -604,6 +709,190 @@
   font-size: 16px;
 }
 
+/* ---- Batch 63 (F42, v3 41:171): sent at the counter — the sent lines where the menu was, and
+   one payment panel beside them: the amount once at 28/600, its parts in grey, two steps and one
+   accent button; cancelling is red text (it asks first), going back is accent text. ---------- */
+.counter-order .counter-order__layout[data-sent] {
+  grid-template-rows: auto;
+}
+.counter-order__layout[data-sent] > .counter-order__menu {
+  display: none;
+}
+.counter-order__layout[data-sent] > .counter-order__ticket {
+  grid-column: 1;
+  grid-row: 1;
+}
+.counter-order__layout[data-sent] > .counter-order__charge {
+  grid-column: 2;
+  grid-row: 1;
+}
+.counter-order__sent-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.counter-order__layout[data-sent] .counter-order__ticket-header {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+.counter-order .counter-order__layout[data-sent] .counter-order__ticket-header h2 {
+  font-size: 28px;
+}
+.counter-order__dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--bop-color-accent);
+}
+.counter-order__dot[data-state="done"] {
+  background: var(--bop-color-success-mark);
+}
+.counter-order .counter-order__layout[data-sent] .counter-order__charge {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding: 0;
+  border: 0;
+}
+.counter-order .counter-order__charge h2 {
+  margin: 0;
+}
+.counter-order__layout[data-sent] .counter-order__charge p {
+  margin: 0;
+}
+.counter-order .counter-order__due {
+  font-size: 28px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+.counter-order__due-parts,
+.counter-order__deadline {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.counter-order .counter-order__deadline[data-tier="urgent"] {
+  color: var(--bop-color-danger);
+}
+.counter-order .counter-order__change-due {
+  font-size: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.counter-order .counter-order__steps {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-inline-start: 1.25em;
+  font-size: 14px;
+  list-style: decimal;
+}
+.counter-order__layout[data-sent] .counter-order__charge form > label {
+  display: grid;
+  gap: 4px;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
+}
+.counter-order__layout[data-sent] .counter-order__charge form {
+  gap: 12px;
+}
+.counter-order__layout[data-sent] .counter-order__charge .field-hint,
+.counter-order__layout[data-sent] .counter-order__charge .bop-muted {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+/* How the guest pays: two choices of 44 px side by side, the chosen one a dark pill (as F44). */
+.counter-order .counter-order__tender {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+.counter-order .counter-order__tender legend {
+  width: 100%;
+  margin-bottom: 4px;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
+}
+.counter-order .counter-order__tender > label {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 22px;
+  font-size: 16px;
+  cursor: pointer;
+}
+.counter-order .counter-order__tender > label > input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+}
+.counter-order .counter-order__tender > label:has(> input:checked) {
+  background: var(--bop-color-text-default);
+  color: var(--bop-color-on-primary);
+  font-weight: 600;
+}
+.counter-order .counter-order__tender > label:has(> input:focus-visible) {
+  outline: 2px solid var(--bop-color-focus);
+  outline-offset: 2px;
+}
+.counter-order .counter-order__tender:disabled > label {
+  color: var(--bop-color-text-muted);
+  cursor: not-allowed;
+}
+.counter-order .counter-order__charge-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 24px;
+}
+.counter-order :is(.counter-order__danger-text, .counter-order__accent-text) {
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+.counter-order .counter-order__danger-text {
+  color: var(--bop-color-danger);
+}
+.counter-order .counter-order__accent-text,
+.counter-order .counter-order__charge .card-actions > a {
+  color: var(--bop-color-accent);
+}
+.counter-order .counter-order__charge .card-actions > a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font-size: 14px;
+  text-decoration: none;
+}
+.counter-order__layout[data-sent] .counter-order__charge .card-actions {
+  flex-wrap: wrap;
+  gap: 8px 24px;
+}
+@media (max-width: 900px) {
+  .counter-order__layout[data-sent] > .counter-order__charge {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .counter-order__layout[data-sent] > .counter-order__ticket {
+    grid-row: 2;
+  }
+}
+
 /* ---- Sent, not paid yet (WP-2423 v15 751dd768) ------------------------------------------ */
 .counter-order .counter-order__awaiting {
   margin-bottom: var(--bop-space-4);
@@ -621,9 +910,32 @@
 }
 .counter-order .counter-order__awaiting-list > li {
   display: grid;
+  justify-items: start;
   gap: var(--bop-space-2);
+}
+/* Batch 63 (CK-03): a hairline between rows only, as everywhere else. */
+.counter-order .counter-order__awaiting-list > li + li {
   padding-top: var(--bop-space-3);
-  border-top: 1px solid var(--bop-color-border-default);
+  border-top: 1px solid var(--bop-color-row-divider);
+}
+.counter-order .counter-order__awaiting .staff-round-payment {
+  display: grid;
+  gap: 12px;
+  width: min(100%, 28rem);
+}
+.counter-order .counter-order__awaiting .staff-round-payment p {
+  margin: 0;
+}
+.counter-order .counter-order__awaiting .counter-order__primary {
+  min-height: 44px;
+  padding: 0 20px;
+  font-size: 16px;
+}
+.counter-order .counter-order__awaiting .card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 24px;
 }
 .counter-order .counter-order__awaiting-list p {
   margin: 0;

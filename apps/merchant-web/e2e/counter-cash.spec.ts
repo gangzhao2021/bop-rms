@@ -1,6 +1,13 @@
 import { expect, test, type Page } from "@playwright/test";
 import { orderPanel } from "./order-queue-helpers";
 
+/** Batch 63 (F42, v3 41:171): the counter's payment panel — "Take payment" and its one amount. */
+const chargeStep = (page: Page, amount: string, zh = false) =>
+  page
+    .locator(".counter-order__charge")
+    .filter({ has: page.getByRole("heading", { name: zh ? "收款" : "Take payment" }) })
+    .locator(".counter-order__due", { hasText: amount });
+
 // WP-2423 M52 (DEC-COUNTER-CASH, Owner default 2026-11-06): a walk-up or pickup order at the counter
 // is paid in cash by the table's cash rules — the cash total rounded to 5 cents, the cash handed
 // over and the change — and a cancelled cash order is given back in cash from the drawer.
@@ -196,18 +203,13 @@ test("@production the cashier takes cash for a counter order, sees the change an
   await page.goto("/operations/order-entry");
   await page.getByRole("button", { name: "Add Banana Bread" }).click();
   await page.getByRole("button", { name: "Send order" }).click();
-  await expect(
-    page.getByRole("heading", { name: "Charge $4.24 on the card machine" }),
-  ).toBeVisible();
+  await expect(chargeStep(page, "$4.24")).toBeVisible();
   const how = page.getByRole("group", { name: "How the guest pays" });
   await how.getByRole("radio", { name: "Cash" }).check();
-  await expect(page.getByRole("heading", { name: "Take $4.25 in cash" })).toBeVisible();
-  await expect(page.locator(".counter-order__charge")).toContainText(
-    "Cash total (rounded to 5 cents)$4.25",
-  );
-  await expect(
-    page.getByText("Sent. Take $4.25 in cash with tax and tip (rounded to 5 cents)."),
-  ).toBeVisible();
+  // Batch 63 (F42): the one amount is the cash to take, its rounding said in grey.
+  await expect(chargeStep(page, "$4.25")).toBeVisible();
+  await expect(page.locator(".counter-order__due-parts")).toContainText("cash rounded to 5 cents");
+  await expect(page.getByText("Take $4.25 in cash and count it.")).toBeVisible();
   // No card slip for cash.
   await expect(page.getByRole("textbox", { name: "Slip reference (optional)" })).toHaveCount(0);
   const received = page.getByRole("textbox", { name: "Cash received" });
@@ -223,7 +225,7 @@ test("@production the cashier takes cash for a counter order, sees the change an
 
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
-    await expect(page.getByRole("heading", { name: "Take $4.25 in cash" })).toBeVisible();
+    await expect(chargeStep(page, "$4.25")).toBeVisible();
     await expect(page.getByText("Change $5.75")).toBeVisible();
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
@@ -245,8 +247,10 @@ test("@production the cashier takes cash for a counter order, sees the change an
       .getByRole("status")
       .filter({ hasText: "Cash recorded. Give $15.75 change. Sent to the kitchen." }),
   ).toBeVisible();
-  await expect(page.locator(".counter-order__charge")).toContainText("Change to give$15.75");
-  await expect(page.getByText("Sent and paid in cash: $4.25 with tax and tip.")).toBeVisible();
+  // Batch 63 (F42): the change to give stands out under the amount taken; the repeated
+  // "Sent and paid" sentence is gone.
+  await expect(page.locator(".counter-order__change-due")).toHaveText("Change to give: $15.75");
+  await expect(page.getByText("Sent and paid in cash: $4.25 with tax and tip.")).toHaveCount(0);
   // The browser sends the cash handed over; the amount and the rounding are the server's.
   expect(payments.at(-1)).toEqual({
     operationReference: expect.stringMatching(/^[0-9a-f-]{36}$/u),

@@ -2957,6 +2957,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Order {handedOver} handed over.": "订单 {handedOver} 已交付。",
   "Order {notCollected} closed as not collected.": "订单 {notCollected} 已作为未取餐关闭。",
   "Order {orderNumber}": "订单 {orderNumber}",
+  "Order {orderNumber} · {amount}": "订单 {orderNumber} · {amount}",
   "Order {orderNumber} (table {tableLabel})": "订单 {orderNumber}（桌台 {tableLabel}）",
   "Order {orderNumber} may already have been accepted. If not, it will be refunded automatically {when}.":
     "订单 {orderNumber} 可能已被接单。如果没有，将于{when}自动退款。",
@@ -3274,6 +3275,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Quantities are never edited here; stock changes only through receipts, counts and waste.":
     "此处从不编辑数量；库存只通过收货、盘点和报损变化。",
   Quantity: "数量",
+  "Still to choose: {groups}": "还要选：{groups}",
   "Quantity (": "数量（",
   "Quantity ({unit})": "数量（{unit}）",
   "Quantity served · {displayName} · round {batchSequence}":
@@ -4338,6 +4340,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "提交会固定此版本，并对照品牌过敏原清单检查每件商品配方中的过敏原；之后由另一人批准。{value}",
   "Submitting…": "正在提交…",
   Subtotal: "小计",
+  "Subtotal (before tax and tip)": "小计（不含税和小费）",
   Sunday: "星期日",
   Supplier: "供应商",
   "Supplier specification": "供应商规格书",
@@ -6632,6 +6635,19 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Serving…": "正在上桌…",
   "Serve all": "全部上桌",
   "Take payment": "收款",
+  "Sent · paid": "已发出 · 已收款",
+  "Sent · waiting for payment": "已发出 · 等收款",
+  "Order {order} with tax · tip {tip}": "订单 {order}（含税）· 小费 {tip}",
+  "Tax included · no tip": "含税 · 无小费",
+  "Tax included": "含税",
+  " · cash rounded to 5 cents": " · 现金按 5 分取整",
+  "Change to give: {amount}": "找零：{amount}",
+  "Take {amount} in cash and count it.": "收现金 {amount}，点清。",
+  "Enter what the guest handed you, then record it below.":
+    "输入客人给的金额，再点下面的按钮记下。",
+  "Enter {amount} on the card machine; the guest taps or inserts.":
+    "在刷卡机上输入 {amount}，让客人刷卡或拍卡。",
+  "When the machine says approved, record it below.": "刷卡机显示“已通过”后，点下面的按钮记下。",
   Cleaned: "已清洁",
   "Seats {capacity} · {open}": "{capacity} 座 · {open}",
   "Free tables": "空桌",

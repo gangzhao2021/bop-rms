@@ -79,6 +79,7 @@ export function StaffRoundPaymentAction({
   subject = "round",
   payBy = null,
   label,
+  counterStyle = false,
 }: {
   readonly csrf: string;
   readonly fetcher?: typeof fetch | undefined;
@@ -98,6 +99,12 @@ export function StaffRoundPaymentAction({
   readonly payBy?: string | null;
   /** The button text before the amount (default "Record card-machine payment"). */
   readonly label?: string;
+  /**
+   * Batch 63 (F42, CK-03): the counter's "Sent, not paid yet" row uses the same payment panel as
+   * the first charge: Take payment and the record button are the accent primary, the form closes
+   * with accent text "Close", and the slip note says it is never the card number.
+   */
+  readonly counterStyle?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [slip, setSlip] = useState("");
@@ -159,6 +166,7 @@ export function StaffRoundPaymentAction({
       <div className="card-actions">
         <button
           type="button"
+          className={counterStyle ? "counter-order__primary" : undefined}
           onClick={() => {
             setOpen(true);
             if (amount === null) readAmount();
@@ -322,7 +330,8 @@ export function StaffRoundPaymentAction({
             )
           : chargeFirstText(amount, subject, recordedAfterOutage)}
       </p>
-      {payBy !== null
+      {/* Batch 63 (CK-03): the counter row already says the time, once. */}
+      {payBy !== null && !counterStyle
         ? (() => {
             const notice = paymentWindowNotice({
               payBy,
@@ -389,20 +398,29 @@ export function StaffRoundPaymentAction({
           disabled={busy}
         />
       ) : (
-        <label>
-          {t("Slip reference (optional)")}
-          <input
-            value={slip}
-            maxLength={40}
-            autoComplete="off"
-            aria-invalid={!validSlipReference(slip.trim())}
-            onChange={(event) => {
-              setSlip(event.currentTarget.value);
-              setSlipHeld(null);
-              slipConfirmation.current = null;
-            }}
-          />
-        </label>
+        <>
+          <label>
+            {t("Slip reference (optional)")}
+            <input
+              value={slip}
+              maxLength={40}
+              autoComplete="off"
+              aria-invalid={!validSlipReference(slip.trim())}
+              onChange={(event) => {
+                setSlip(event.currentTarget.value);
+                setSlipHeld(null);
+                slipConfirmation.current = null;
+              }}
+            />
+          </label>
+          {counterStyle ? (
+            <p className="field-hint">
+              {t(
+                "The approval or reference code on the card machine slip, to match the machine's day total. Never the card number.",
+              )}
+            </p>
+          ) : null}
+        </>
       )}
       {recordedAfterOutage ? (
         <>
@@ -447,7 +465,11 @@ export function StaffRoundPaymentAction({
         />
       ) : null}
       <div className="card-actions">
-        <button type="submit" disabled={busy || !ready}>
+        <button
+          type="submit"
+          className={counterStyle ? "counter-order__primary" : undefined}
+          disabled={busy || !ready}
+        >
           {busy
             ? t("Recording…")
             : recordedAfterOutage
@@ -456,8 +478,13 @@ export function StaffRoundPaymentAction({
                 ? t("Cash received · {amount}", { amount: cad(cash.cashDueMinor.toString()) })
                 : t("Paid on card machine · {amount}", { amount: cad(amount) })}
         </button>
-        <button type="button" disabled={busy} onClick={() => setOpen(false)}>
-          {t("Cancel")}
+        <button
+          type="button"
+          className={counterStyle ? "counter-order__accent-text" : undefined}
+          disabled={busy}
+          onClick={() => setOpen(false)}
+        >
+          {counterStyle ? t("Close") : t("Cancel")}
         </button>
       </div>
     </form>

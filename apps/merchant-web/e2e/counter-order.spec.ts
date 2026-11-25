@@ -2,6 +2,13 @@ import { expect, test, type Page } from "@playwright/test";
 import { orderPanel } from "./order-queue-helpers";
 import { storeLocalInput } from "./store-time";
 
+/** Batch 63 (F42, v3 41:171): the counter's payment panel — "Take payment" and its one amount. */
+const chargeStep = (page: Page, amount: string, zh = false) =>
+  page
+    .locator(".counter-order__charge")
+    .filter({ has: page.getByRole("heading", { name: zh ? "收款" : "Take payment" }) })
+    .locator(".counter-order__due", { hasText: amount });
+
 // WP-2423 Q7 (OPS-ORDER-ENTRY, DEC-COUNTER-PAYMENT-RECORD): staff take a pickup order at the
 // counter, charge it on the store's card machine and record it; a paper order is entered after an
 // outage; the order queue shows counter orders and a card-machine refund is recorded.
@@ -220,9 +227,11 @@ for (const language of ["en", "zh-Hans"] as const)
     await page.getByRole("button", { name: zh ? "发送订单" : "Send order" }).click();
     const charge = page.locator(".counter-order__charge");
     await expect(charge).toContainText("$4.24");
-    const terms = await charge.locator("dt").allTextContents();
-    expect(terms).toContain(zh ? "订单合计（含税）" : "Order total incl. tax");
-    expect(terms).not.toContain(zh ? "小费" : "Tip");
+    // Batch 63 (F42): the one amount, then what it is made of — no tip at a tips-off store.
+    await expect(charge.locator(".counter-order__due-parts")).toHaveText(
+      zh ? "含税" : "Tax included",
+    );
+    await expect(charge).not.toContainText(zh ? "小费" : "tip");
   });
 
 test("@production staff take a counter pickup order, charge it on the card machine and record it", async ({
@@ -326,7 +335,11 @@ test("@production staff take a counter pickup order, charge it on the card machi
   const ticket = page.getByRole("list", { name: "Items in this order" });
   await expect(ticket).toContainText("1 × Flat White · Oat milk");
   await expect(ticket).toContainText("$5.25");
-  await expect(page.getByText("About $9.00 before tax and tip.")).toBeVisible();
+  // Batch 63 (F48): one exact subtotal line, never "About" the same figure again.
+  await expect(page.locator(".counter-order__subtotal")).toHaveText(
+    "Subtotal (before tax and tip)$9.00",
+  );
+  await expect(page.getByText(/About \$9\.00/u)).toHaveCount(0);
   await page.getByRole("radio", { name: "15%" }).check();
 
   // Banana Bread sold out while staff were taking the order: plain words, nothing charged.
@@ -336,9 +349,7 @@ test("@production staff take a counter pickup order, charge it on the card machi
   );
   await page.getByRole("button", { name: "Remove Banana Bread" }).click();
   await page.getByRole("button", { name: "Send order" }).click();
-  await expect(
-    page.getByRole("heading", { name: "Charge $6.72 on the card machine" }),
-  ).toBeVisible();
+  await expect(chargeStep(page, "$6.72")).toBeVisible();
   // The browser sends intent only: items, options, tip choice — never prices or totals.
   expect(placedBodies.at(-1)).toEqual({
     operationReference: expect.stringMatching(/^[0-9a-f-]{36}$/u),
@@ -353,11 +364,17 @@ test("@production staff take a counter pickup order, charge it on the card machi
     tip: { kind: "Percent", percent: 15 },
     recordedAfterOutage: false,
   });
-  await expect(page.getByText(/Record the payment by \d\d:\d\d/u)).toBeVisible();
-  // v15 751dd768: once sent, the ticket no longer says the total comes later.
+  // Batch 63 (F42): the time is one short grey line; the amount is said once, large, with its
+  // parts in grey, instead of a repeated sentence.
+  await expect(page.locator(".counter-order__deadline")).toHaveText(
+    /^Take payment by \d\d:\d\d · released if unpaid$/u,
+  );
+  await expect(page.locator(".counter-order__due-parts")).toHaveText(
+    "Order $5.93 with tax · tip $0.79",
+  );
   await expect(
     page.getByText("Sent. Charge $6.72 with tax and tip on the card machine."),
-  ).toBeVisible();
+  ).toHaveCount(0);
   await expect(page.getByText(/The final total comes when you send the order/u)).toHaveCount(0);
   const slip = page.getByRole("textbox", { name: "Slip reference (optional)" });
   await slip.fill("1234 5678 9012 3456");
@@ -366,9 +383,7 @@ test("@production staff take a counter pickup order, charge it on the card machi
 
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
-    await expect(
-      page.getByRole("heading", { name: "Charge $6.72 on the card machine" }),
-    ).toBeVisible();
+    await expect(chargeStep(page, "$6.72")).toBeVisible();
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
@@ -825,9 +840,7 @@ test("@production a short item names how many are left and the order stays edita
   await page.getByRole("button", { name: "Remove Flat White" }).first().click();
   await expect(page.getByRole("alert")).toHaveCount(0);
   await page.getByRole("button", { name: "Send order" }).click();
-  await expect(
-    page.getByRole("heading", { name: "Charge $9.32 on the card machine" }),
-  ).toBeVisible();
+  await expect(chargeStep(page, "$9.32")).toBeVisible();
   expect(sent.map((lines) => lines.length)).toEqual([3, 2]);
 });
 
@@ -893,9 +906,7 @@ test("@production a refused counter order says why and what to do, then sends as
     page.getByRole("list", { name: "Items in this order" }).getByRole("listitem"),
   ).toHaveCount(1);
   await page.getByRole("button", { name: "Send order" }).click();
-  await expect(
-    page.getByRole("heading", { name: "Charge $4.75 on the card machine" }),
-  ).toBeVisible();
+  await expect(chargeStep(page, "$4.75")).toBeVisible();
   // Each send after a definite refusal is a new order (never a resend of the failed one).
   expect(new Set(operations).size).toBe(4);
 });
@@ -955,9 +966,7 @@ test("@production the counter menu re-reads what the store can sell after a send
   await page.getByRole("button", { name: "Add Flat White" }).click();
   await page.getByRole("button", { name: "Add to order" }).click();
   await page.getByRole("button", { name: "Send order" }).click();
-  await expect(
-    page.getByRole("heading", { name: "Charge $4.50 on the card machine" }),
-  ).toBeVisible();
+  await expect(chargeStep(page, "$4.50")).toBeVisible();
   await expect.poll(() => menuReads).toBeGreaterThanOrEqual(2);
   await page.getByRole("button", { name: "Paid on card machine · $4.50" }).click();
   await expect(
@@ -1116,8 +1125,24 @@ test("@production a sent, unpaid counter order is charged after a reload, from C
   // Counter order, opened fresh (as after a reload): the sent order is listed from the server.
   await page.goto("/operations/order-entry");
   const awaiting = page.getByRole("region", { name: "Sent, not paid yet" });
-  await expect(awaiting).toContainText("Order 21");
-  await expect(awaiting).toContainText(/Take payment by \d\d:\d\d · released if unpaid/u);
+  // Batch 63 (CK-03): the row says the amount to take, the time once in grey, and Take payment
+  // is the accent primary (it was a small outlined button under a full-width Cancel order).
+  await expect(awaiting.locator(".counter-order__awaiting-title")).toContainText(
+    "Order 21 · $11.30",
+  );
+  const rowTime = awaiting.locator(".counter-order__deadline");
+  await expect(rowTime).toHaveText(/Take payment by \d\d:\d\d · released if unpaid/u);
+  expect(
+    await rowTime.evaluate((node) => [
+      getComputedStyle(node).fontSize,
+      getComputedStyle(node).color,
+    ]),
+  ).toEqual(["14px", "rgb(102, 102, 102)"]);
+  expect(
+    await awaiting
+      .getByRole("button", { name: "Take payment" })
+      .evaluate((node) => getComputedStyle(node).backgroundColor),
+  ).toBe("rgb(31, 99, 224)");
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     expect(
@@ -1129,7 +1154,20 @@ test("@production a sent, unpaid counter order is charged after a reload, from C
   await awaiting.getByRole("button", { name: "Take payment" }).click();
   const form = awaiting.getByRole("form", { name: "Record card-machine payment" });
   await expect(form).toContainText("Charge $11.30 on the card machine first");
-  await expect(form).toContainText(/Record the payment by \d\d:\d\d/u);
+  // Batch 63 (CK-03): the time is said once (on the row); the slip note is kept; the record button
+  // is the accent primary and the form closes with accent text.
+  await expect(form).not.toContainText(/Record the payment by \d\d:\d\d/u);
+  await expect(form).toContainText("Never the card number.");
+  expect(
+    await form
+      .getByRole("button", { name: "Paid on card machine · $11.30" })
+      .evaluate((node) => getComputedStyle(node).backgroundColor),
+  ).toBe("rgb(31, 99, 224)");
+  expect(
+    await form
+      .getByRole("button", { name: "Close" })
+      .evaluate((node) => getComputedStyle(node).color),
+  ).toBe("rgb(31, 99, 224)");
   await form.getByRole("textbox", { name: "Slip reference (optional)" }).fill("AUTH 9921");
   await form.getByRole("button", { name: "Paid on card machine · $11.30" }).click();
   // v15 f971cecb: the same "Order N paid" panel as after a direct charge, with the next step.
@@ -1345,9 +1383,7 @@ for (const role of ["owner", "cashier"] as const)
     await page.getByRole("button", { name: "Add Banana Bread" }).click();
     sent = true;
     await page.getByRole("button", { name: "Send order" }).click();
-    await expect(
-      page.getByRole("heading", { name: "Charge $5.93 on the card machine" }),
-    ).toBeVisible();
+    await expect(chargeStep(page, "$5.93")).toBeVisible();
     const charge = page.locator(".counter-order__charge");
     await expect(
       charge.getByText("Card declined? Try another card.", { exact: true }),
@@ -1809,9 +1845,7 @@ test("@production a paper send with no answer stays the same order after the pai
   await page.setViewportSize({ width: 1440, height: 900 });
   // The next tap sends the dishes as a new order to charge, with no paper payment in it.
   await page.getByRole("button", { name: "Send order" }).click();
-  await expect(
-    page.getByRole("heading", { name: "Charge $8.48 on the card machine" }),
-  ).toBeVisible();
+  await expect(chargeStep(page, "$8.48")).toBeVisible();
   expect(sent).toHaveLength(4);
   expect(sent[3]?.operationReference).not.toBe(operation);
   expect(sent[3]?.paperPayment).toBeUndefined();
@@ -1999,7 +2033,8 @@ test("@production a live send that comes back already paid goes to paid, never t
   await page.getByRole("button", { name: "Send again", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Order 81 paid" })).toBeVisible();
   // The amount is what was paid, never "To charge"; the lagging list never offers to take it.
-  await expect(page.getByText("Amount paid", { exact: true })).toBeVisible();
+  // Batch 63 (F42): under "Order 81 paid", the one amount is what was paid.
+  await expect(page.locator(".counter-order__charge .counter-order__due")).toHaveText("$3.67");
   await expect(page.getByText("To charge", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Sent, not paid yet" })).toHaveCount(0);
   for (const width of [1440, 1024, 390]) {
@@ -2516,11 +2551,7 @@ for (const language of ["en", "zh-Hans"] as const)
     }
     await page.setViewportSize({ width: 1440, height: 900 });
     await sendAgain.click();
-    await expect(
-      page.getByRole("heading", {
-        name: zh ? "在刷卡机上收款 $4.50" : "Charge $4.50 on the card machine",
-      }),
-    ).toBeVisible();
+    await expect(chargeStep(page, "$4.50", zh)).toBeVisible();
     expect(sends).toHaveLength(2);
     expect(sends[1]?.operationReference).toBe(sends[0]?.operationReference);
 
@@ -2680,9 +2711,7 @@ test("@production after Back to edit, a new order's first record is never labell
   expect(cancels[0]?.orderReference).toBe(id(20));
 
   await page.getByRole("button", { name: "Send order" }).click();
-  await expect(
-    page.getByRole("heading", { name: "Charge $4.50 on the card machine" }),
-  ).toBeVisible();
+  await expect(chargeStep(page, "$4.50")).toBeVisible();
   expect(sends).toHaveLength(2);
   expect(sends[1]?.operationReference).not.toBe(sends[0]?.operationReference);
   await expect(page.getByRole("button", { name: /Record again/u })).toHaveCount(0);

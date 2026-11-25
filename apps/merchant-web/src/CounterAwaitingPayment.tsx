@@ -191,13 +191,24 @@ export function CounterAwaitingPayment({
           })}
         </p>
         <div className="card-actions">
-          <button type="button" onClick={() => setRecorded(null)}>
+          {/* Batch 63 (CK-10): Done is the one accent button; Open Orders is accent text. */}
+          <button
+            type="button"
+            className="counter-order__primary"
+            onClick={() => setRecorded(null)}
+          >
             {t("Done")}
           </button>
           <Link to="/operations/orders">{t("Open Orders")}</Link>
         </div>
       </section>
     );
+  /**
+   * Batch 63 (CK-03): each waiting order's amount to take, read once from the order itself (the
+   * list does not carry the tip), so the row says what to charge before anyone opens it.
+   */
+  const [amounts, setAmounts] = useState<Readonly<Record<string, string>>>({});
+  const asked = useRef(new Set<string>());
   const pending = useRef<AbortController | null>(null);
   const excluded = useRef(excludeOrderReference);
   excluded.current = excludeOrderReference;
@@ -266,6 +277,29 @@ export function CounterAwaitingPayment({
       clearInterval(tick);
     };
   }, [live, read]);
+  const waiting = (orders ?? [])
+    .filter((order) => order.counter?.recordedAfterOutage !== true)
+    .map((order) => order.orderReference)
+    .join();
+  useEffect(() => {
+    if (waiting === "") return;
+    const controller = new AbortController();
+    for (const reference of waiting.split(",")) {
+      if (asked.current.has(reference)) continue;
+      asked.current.add(reference);
+      client
+        .loadDetail(reference, controller.signal)
+        .then((detail) => {
+          const due = detail.order.counter?.amountDueMinor ?? null;
+          if (due !== null) setAmounts((known) => ({ ...known, [reference]: due }));
+        })
+        .catch(() => {
+          // Without it the row names the order only; the panel reads the amount on opening.
+          asked.current.delete(reference);
+        });
+    }
+    return () => controller.abort();
+  }, [client, waiting]);
   // DEC-PAPER-ORDER-NEVER-RELEASED: a paper order past its time stays listed until it is entered
   // again (it is never released); other orders leave the list at their pay-by time.
   const shown = (orders ?? []).filter(
@@ -349,10 +383,19 @@ export function CounterAwaitingPayment({
                   )}
                 </li>
               );
+            const due = amounts[order.orderReference];
             return (
               <li key={order.orderReference}>
+                {/* Batch 63 (CK-03): "Order 82 · $31.92 · sent 01:29", then the time in grey. */}
                 <p className="counter-order__awaiting-title">
-                  <strong>{t("Order {orderNumber}", { orderNumber: order.orderNumber })}</strong>{" "}
+                  <strong>
+                    {due === undefined
+                      ? t("Order {orderNumber}", { orderNumber: order.orderNumber })
+                      : t("Order {orderNumber} · {amount}", {
+                          orderNumber: order.orderNumber,
+                          amount: orderMoney({ amountMinor: due, currencyCode: "CAD" }),
+                        })}
+                  </strong>{" "}
                   <span className="bop-muted">
                     {t("sent {submittedAt}{value}", {
                       submittedAt: storeTime(order.submittedAt, timeZone),
@@ -360,7 +403,7 @@ export function CounterAwaitingPayment({
                     })}
                   </span>
                 </p>
-                <p className="order-accept-by" data-tier={counterPayByTier(payBy, now)}>
+                <p className="counter-order__deadline" data-tier={counterPayByTier(payBy, now)}>
                   {counterPayByText(
                     payBy,
                     timeZone,
@@ -372,6 +415,7 @@ export function CounterAwaitingPayment({
                   <p className="bop-muted">{t("Ask a manager to record its payment.")}</p>
                 ) : (
                   <StaffRoundPaymentAction
+                    counterStyle
                     subject="order"
                     label={
                       // WP-2423 M96: a paper order was paid during the outage; it is recorded only.
@@ -404,6 +448,7 @@ export function CounterAwaitingPayment({
                 order.counter?.canCancelUnpaid === true &&
                 order.currentVersion !== null ? (
                   <CounterCancelAction
+                    className="counter-order__danger-text"
                     orderReference={order.orderReference}
                     orderBatchReference={batch.orderBatchReference}
                     orderNumber={order.orderNumber}
