@@ -46,16 +46,38 @@ export function tableCheckoutText(checkout: TableCheckout): {
             ),
             link: t("See the bill"),
           }
-        : {
-            heading: t("Staff closed your table’s bill"),
-            line: t(
-              "What was paid stays paid, and the rest is not charged to you. To order anything else, ask staff.",
-            ),
-            whole: t(
-              "Staff closed your table’s bill: what was paid stays paid, and the rest is not charged to you. To order anything else, ask staff.",
-            ),
-            link: t("See the bill"),
-          };
+        : checkout.closedByStaff.someRefunded === true
+          ? // Batch 61 (v15 b60 live, CRT60 D): staff gave back part of what was paid, so it
+            // does not "stay paid"; the payer's own line below says what went back to its card.
+            {
+              heading: t("Staff closed your table’s bill"),
+              line: t("The rest is not charged to you. To order anything else, ask staff."),
+              whole: t(
+                "Staff closed your table’s bill. The rest is not charged to you. To order anything else, ask staff.",
+              ),
+              link: t("See the bill"),
+            }
+          : {
+              heading: t("Staff closed your table’s bill"),
+              line: t(
+                "What was paid stays paid, and the rest is not charged to you. To order anything else, ask staff.",
+              ),
+              whole: t(
+                "Staff closed your table’s bill: what was paid stays paid, and the rest is not charged to you. To order anything else, ask staff.",
+              ),
+              link: t("See the bill"),
+            };
+  // Batch 61 (v15 b60 live, CRT60 B/C): paid in full, then staff gave back some of it: settled,
+  // with a refund since, never "paid" alone (the payer's own line and receipt say how much).
+  if (checkout.paid === true && checkout.refunded === true)
+    return {
+      heading: t("Your table’s bill is settled"),
+      line: t("Staff have since made a refund. To order anything else, ask staff."),
+      whole: t(
+        "Your table’s bill is settled, and staff have since made a refund. To order anything else, ask staff.",
+      ),
+      link: t("See the bill"),
+    };
   return checkout.paid === true
     ? {
         heading: t("Your table’s bill is paid"),
@@ -74,16 +96,18 @@ export function tableCheckoutText(checkout: TableCheckout): {
 /**
  * Batch 56 review: staff closed a bill some of which was paid, and the table is still open: the
  * phone that paid part of it reads what it paid and goes to its own receipt on Your table, as it
- * does once the table closed. Another guest's phone reads the bill's words only.
+ * does once the table closed. Another guest's phone reads the bill's words only. Batch 61: so
+ * does a bill paid in full that staff then gave some of back.
  */
 export function useTableCheckoutOwnPaid(checkout: TableCheckout | null): {
   readonly yourPaid: string | null;
   readonly link: string | null;
 } {
   const own = useOwnPaidAtTable(
-    checkout?.closedByStaff !== null &&
+    (checkout?.closedByStaff !== null &&
       checkout?.closedByStaff !== undefined &&
-      checkout.closedByStaff.kind !== "Nothing",
+      checkout.closedByStaff.kind !== "Nothing") ||
+      (checkout?.paid === true && checkout.refunded === true),
   );
   return own === null
     ? { yourPaid: null, link: null }

@@ -456,7 +456,11 @@ function closedRoundPaymentText(
       : t("Not charged to you");
   if (round.payment === "Paid") return roundRefundText(round, true);
   if (round.payment !== "OnTableBill") return null;
-  return closed.kind === "Nothing" ? t("Not charged to you") : t("Unpaid part not charged to you");
+  // Batch 61 (v15 b60 live, CRT60 D round 2): by dish, a round nobody paid any of is not charged
+  // at all; only a round some guest paid part of has an "unpaid part".
+  return closed.kind === "Nothing" || (closed.kind === "ByDish" && round.partlyPaid !== true)
+    ? t("Not charged to you")
+    : t("Unpaid part not charged to you");
 }
 
 /**
@@ -792,9 +796,14 @@ function closedBillNote(closed: ClosedBillPaid): string {
             { count: String(closed.parts.count), refunded: String(closed.parts.refunded) },
           );
     case "Some":
-      return t(
-        "Staff closed your table’s bill: what the table paid stays paid, and the rest is not charged to you.",
-      );
+      // Batch 61 (v15 b60 live, CRT60 D): part of it went back, so it does not "stay paid".
+      return closed.someRefunded === true
+        ? t(
+            "Staff closed your table’s bill and refunded part of what was paid; the rest is not charged to you.",
+          )
+        : t(
+            "Staff closed your table’s bill: what the table paid stays paid, and the rest is not charged to you.",
+          );
   }
 }
 
@@ -1531,7 +1540,11 @@ export function DiningSessionScreen({
       {state.status === "ended-closed" ? (
         <>
           {/* What this phone paid is said once, by its receipt below. */}
-          <ClosedBillTableCard tableLabel={state.tableLabel} paid={state.paid} />
+          <ClosedBillTableCard
+            tableLabel={state.tableLabel}
+            paid={state.paid}
+            someRefunded={endedTable?.kind === "ClosedByStaff" && endedTable.someRefunded === true}
+          />
           {endedYourPaidMinor === null || state.paid === "Nothing" ? null : (
             <OwnPaymentReceiptPanel client={ownAfterClose} />
           )}
@@ -1624,7 +1637,10 @@ export function DiningSessionScreen({
       ) : null}
       {/* Batch 56: staff closed a bill some of which was paid: the phone that paid it reads its
           own receipt here (another guest's phone is answered "nothing here" and shows nothing). */}
-      {closedBill !== null && closedBill.kind !== "Nothing" ? (
+      {(closedBill !== null && closedBill.kind !== "Nothing") ||
+      (outcome?.kind === "Paid" && outcome.refunded === true) ? (
+        // Batch 61 (v15 b60 live, CRT60 B/C): a bill paid in full that staff then gave some of
+        // back: the payer reads its own payment and refund here too (others: nothing here).
         <OwnPaymentReceiptPanel client={ownAtTable} />
       ) : null}
       {staffCall}

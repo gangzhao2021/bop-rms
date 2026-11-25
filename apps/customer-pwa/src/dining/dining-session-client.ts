@@ -120,6 +120,11 @@ export interface DiningRound {
     readonly state: "Partly" | "Full";
     readonly yourPaidAfterRefunds?: DiningMoney;
   };
+  /**
+   * Batch 61 (v15 b60 live, CRT60 D): on a bill staff closed, a round still on it that guests
+   * paying by dish paid some of (absent: nobody paid any of it).
+   */
+  readonly partlyPaid?: true;
 }
 
 export interface DiningOrderAgain {
@@ -456,8 +461,11 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
       value !== null && typeof value === "object" && Object.hasOwn(value, "refundPending");
     const paymentRefund =
       value !== null && typeof value === "object" && Object.hasOwn(value, "paymentRefund");
+    const partlyPaid =
+      value !== null && typeof value === "object" && Object.hasOwn(value, "partlyPaid");
     const round = record(value, [
       ...(paymentRefund ? ["paymentRefund"] : []),
+      ...(partlyPaid ? ["partlyPaid"] : []),
       ...(billed ? ["bill"] : []),
       ...(refunded ? ["refunded"] : []),
       ...(refundPending ? ["refundPending"] : []),
@@ -655,6 +663,12 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
           }),
         };
       })(),
+      // Batch 61: only true, and only on a round still on the table's bill.
+      ...(!partlyPaid
+        ? {}
+        : round.partlyPaid === true && round.payment === "OnTableBill"
+          ? { partlyPaid: true as const }
+          : invalid()),
     });
   });
   let summary: DiningSessionView["summary"] = null;

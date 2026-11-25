@@ -362,8 +362,8 @@ const cases: readonly {
     scenario: "by-dish-written-off",
     title: "orders 52 and 55, one dish paid by dish",
     nothingPaid: false,
-    rounds: (zh) =>
-      zh ? ["已付款", "未付部分不向您收取"] : ["Paid", "Unpaid part not charged to you"],
+    // Batch 61 (v15 b60 live, CRT60 D): round 2 nobody paid any of is not charged at all.
+    rounds: (zh) => (zh ? ["已付款", "不向您收取"] : ["Paid", "Not charged to you"]),
   },
   {
     scenario: "half-split-written-off",

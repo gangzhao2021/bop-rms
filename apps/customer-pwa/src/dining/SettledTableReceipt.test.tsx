@@ -70,3 +70,108 @@ it("reads the count strictly: only for a comp, and fewer than the line has", () 
   ])
     expect(() => parseSettledTableReceipt(receipt(broken))).toThrow();
 });
+
+/**
+ * Batch 61 (v15 b60 live, CRT60 B order 46 and C order 49): by dish, A paid $14.13 and B $14.12,
+ * a manager refunded all (or $8.00) of A, staff closed and cleaned the table. The ended receipt
+ * read 实付合计 $28.25 / 已退款 −$14.13 / 第 1 份 … $14.13 / 第 2 份 … $14.12 on both phones: the
+ * gross called 实付, no paid-after-refunds row, and every part's amount to every phone. The
+ * settled receipt the API now sends (its batch 61 test): the asking phone's own part only.
+ */
+const byDish = (yours: Record<string, unknown>, refundedMinor: string) => ({
+  schemaVersion: 1,
+  receipt: {
+    tableLabel: "CRT60 B (TEST)",
+    rounds: [
+      {
+        roundNumber: 1,
+        fromTableLabel: null,
+        items: [{ displayName: "Beef noodles (TEST)", subtotalMinor: "1250", reduced: null }],
+      },
+      {
+        roundNumber: 2,
+        fromTableLabel: null,
+        items: [{ displayName: "Beef noodles (TEST)", subtotalMinor: "1250", reduced: null }],
+      },
+    ],
+    subtotalMinor: "2500",
+    taxMinor: "325",
+    taxRoundingMinor: "0",
+    pointsUsedMinor: "0",
+    ordersTotalMinor: "2825",
+    tipMinor: "0",
+    roundingMinor: "0",
+    paidMinor: "2825",
+    refundedMinor,
+    split: true,
+    paymentCount: 2,
+    payments: [
+      {
+        method: "Online",
+        tipMinor: "0",
+        roundingMinor: "0",
+        paidAt: "2026-11-24T00:34:40.000Z",
+        yours: true,
+        ...yours,
+      },
+    ],
+  },
+});
+const rows = (page: string) =>
+  [...page.matchAll(/<dt>(.*?)<\/dt><dd>(.*?)<\/dd>/gu)].map((row) => `${row[1]} ${row[2]}`);
+
+it("batch 61: paid, refunded and paid after refunds, and only this phone's own part with its refunds", () => {
+  const payer = byDish({ partNumber: 1, totalMinor: "1413", refundedMinor: "1413" }, "1413");
+  expect(rows(html(payer)).slice(-8)).toEqual([
+    "Tax $3.25",
+    "Paid $28.25",
+    "Refunded −$14.13",
+    "Total paid after refunds $14.12",
+    "Number of payments 2",
+    "Your payment Online by phone · $14.13",
+    "Refunded to your card −$14.13",
+    "You paid after refunds $0.00",
+  ]);
+  const zh = rows(html(payer, "zh-Hans"));
+  expect(zh).toContain("已付款 $28.25");
+  expect(zh).toContain("退款后实付 $14.12");
+  expect(zh).toContain("您的付款 手机在线付款 · $14.13");
+  expect(zh.join()).not.toMatch(/实付合计|第 2 份/u);
+  // Phone B: its own part, never A's part or A's refund as its own.
+  const other = html(byDish({ partNumber: 2, totalMinor: "1412" }, "800"));
+  expect(rows(other).slice(-5)).toEqual([
+    "Paid $28.25",
+    "Refunded −$8.00",
+    "Total paid after refunds $20.25",
+    "Number of payments 2",
+    "Your payment Online by phone · $14.12",
+  ]);
+  expect(other).not.toMatch(/\$14\.13|\$6\.13|your card|Part 1/u);
+  // Nothing refunded: the one total, called Total paid / 实付合计, as before.
+  const none = rows(html(byDish({ partNumber: 1, totalMinor: "1413" }, "0"), "zh-Hans"));
+  expect(none).toContain("实付合计 $28.25");
+  expect(none.join()).not.toMatch(/已退款|退款后/u);
+});
+
+it("batch 61: own refunds are read strictly (never more pending than refunded, never another's)", () => {
+  const read = (payment: Record<string, unknown>) => () =>
+    parseSettledTableReceipt(byDish(payment, "800"));
+  expect(
+    read({ partNumber: 1, totalMinor: "1413", refundedMinor: "800" })().payments[0],
+  ).toMatchObject({
+    yours: true,
+    refundedMinor: "800",
+    refundPendingMinor: "0",
+  });
+  expect(
+    read({ partNumber: 1, totalMinor: "1413", refundedMinor: "300", refundPendingMinor: "800" }),
+  ).toThrow();
+  expect(read({ partNumber: 1, totalMinor: "1413", yours: false, refundedMinor: "800" })).toThrow();
+  // An older server: no count, every part listed and none marked as this phone's.
+  const older = parseSettledTableReceipt({
+    ...receipt(noodles),
+    receipt: { ...receipt(noodles).receipt, split: true },
+  });
+  expect(older.paymentCount).toBeNull();
+  expect(older.payments[0]?.yours).toBe(false);
+});

@@ -84,6 +84,7 @@ export function EmptyClosedTableCard({ tableLabel }: { readonly tableLabel: stri
 export function ClosedBillTableCard({
   tableLabel,
   paid,
+  someRefunded = false,
   yourPaidMinor = null,
   yourRefundedMinor = "0",
   yourRefundPendingMinor = "0",
@@ -91,6 +92,8 @@ export function ClosedBillTableCard({
 }: {
   readonly tableLabel: string;
   readonly paid: ClosedBillPaid;
+  /** Batch 61 (v15 b60 live, CRT60 D): with "Some", part of what was paid went back. */
+  readonly someRefunded?: boolean;
   /**
    * Batch 56 (v15 b55 live): what this phone paid on that bill before staff closed the rest (its
    * own payment, never another guest's); null: it paid nothing there.
@@ -115,9 +118,12 @@ export function ClosedBillTableCard({
               t(
                 "Staff closed your table’s bill: what was paid went back in full; nothing is charged to you.",
               )
-            : t(
-                "Staff closed your table’s bill: what was paid stays paid, and the rest is not charged to you.",
-              )}
+            : someRefunded
+              ? // Batch 61: some of what was paid went back, so nothing "stays paid".
+                t("Staff closed your table’s bill. The rest is not charged to you.")
+              : t(
+                  "Staff closed your table’s bill: what was paid stays paid, and the rest is not charged to you.",
+                )}
       </p>
       {yourPaidMinor === null || paid === "Nothing" ? null : (
         <p>{youPaidText(yourPaidMinor, yourRefundedMinor, yourRefundPendingMinor)}</p>
@@ -194,6 +200,7 @@ export function EndedTableCard({ ended }: { readonly ended: EndedTable }) {
     <ClosedBillTableCard
       tableLabel={ended.tableLabel}
       paid={ended.paid}
+      someRefunded={ended.someRefunded === true}
       yourPaidMinor={ended.yourPaidMinor ?? null}
       yourRefundedMinor={ended.yourRefundedMinor ?? "0"}
       yourRefundPendingMinor={ended.yourRefundPendingMinor ?? "0"}

@@ -980,3 +980,31 @@ it("batch 47: the table's ended answer still counts when the cart dropped the cr
   expect(getCustomerCsrfCredential()).toBe("E".repeat(43));
   expect(getEmptyTableLabel()).toBeNull();
 });
+
+// Batch 61 (v15 b60 live, CRT60 D order 51): by dish, staff closed the rest and then refunded
+// $8.00 of A's $14.13. The ended page on both phones said what was paid "stays paid" beside A's
+// "$8.00 went back to your card". The restore's someRefunded (only true, only with "Some").
+it("batch 61: keeps that part of what stays paid on a closed bill went back", async () => {
+  const restore = (value: unknown) =>
+    restoreCustomerSession(vi.fn().mockResolvedValue(response(value)));
+  await restore({
+    schemaVersion: 1,
+    closedTable: { tableLabel: "CRT60 D (TEST)", paid: "Some", someRefunded: true },
+  });
+  expect(getEndedTable()).toEqual({
+    kind: "ClosedByStaff",
+    tableLabel: "CRT60 D (TEST)",
+    paid: "Some",
+    someRefunded: true,
+    store: null,
+  });
+  setEmptyTable(null);
+  for (const bad of [
+    { tableLabel: "CRT60 D (TEST)", paid: "Some", someRefunded: false },
+    { tableLabel: "CRT60 D (TEST)", paid: "Refunded", someRefunded: true },
+    { tableLabel: "CRT60 D (TEST)", paid: "Nothing", someRefunded: true },
+  ]) {
+    expect(await restore({ schemaVersion: 1, closedTable: bad })).toBe(false);
+    expect(getEndedTable()).toBeNull();
+  }
+});

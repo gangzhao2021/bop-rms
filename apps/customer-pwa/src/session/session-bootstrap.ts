@@ -385,6 +385,14 @@ export async function restoreCustomerSession(
         closed !== null && typeof closed === "object" && "yourPayment" in closed
           ? ownPaymentOf(closed.yourPayment, "csrfToken" in closed ? closed.csrfToken : undefined)
           : undefined;
+      // Batch 61 (v15 b60 live, CRT60 D): part of what stays paid went back (only true, with Some).
+      const someRefunded =
+        closed !== null &&
+        typeof closed === "object" &&
+        "someRefunded" in closed &&
+        closed.someRefunded === true &&
+        "paid" in closed &&
+        closed.paid === "Some";
       if (
         closed !== null &&
         typeof closed === "object" &&
@@ -392,7 +400,7 @@ export async function restoreCustomerSession(
         store !== null &&
         yours !== null &&
         Object.keys(closed).length ===
-          (store === undefined ? 2 : 3) + (yours === undefined ? 0 : 2) &&
+          (store === undefined ? 2 : 3) + (yours === undefined ? 0 : 2) + (someRefunded ? 1 : 0) &&
         "tableLabel" in closed &&
         typeof closed.tableLabel === "string" &&
         /^[^\p{Cc}\p{Cf}<>{}$]{1,40}$/u.test(closed.tableLabel) &&
@@ -404,6 +412,7 @@ export async function restoreCustomerSession(
         setEmptyTable({
           tableLabel: closed.tableLabel,
           closedByStaff: closed.paid,
+          ...(someRefunded ? { someRefunded: true as const } : {}),
           ...(store === undefined ? {} : { store }),
           ...(yours === undefined ? {} : { yourPayment: yours }),
         });

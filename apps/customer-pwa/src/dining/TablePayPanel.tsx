@@ -529,16 +529,36 @@ export function TablePayPanel({
               <dd>{money(receipt.roundingMinor)}</dd>
             </div>
           ) : null}
-          <div>
-            <dt>{t("Total paid")}</dt>
-            <dd>{money(receipt.totalMinor)}</dd>
-          </div>
-          {view.refundedMinor !== "0" ? (
+          {/* Batch 61 (v15 b60 live): once some of it went back, what was paid, what went back and
+              what was paid after refunds, each named once (实付 never the gross). */}
+          {view.refundedMinor === "0" ? (
             <div>
-              <dt>{t("Refunded")}</dt>
-              <dd>−{money(view.refundedMinor)}</dd>
+              <dt>{t("Total paid")}</dt>
+              <dd>{money(receipt.totalMinor)}</dd>
             </div>
-          ) : null}
+          ) : (
+            <>
+              <div>
+                <dt>{t("Paid")}</dt>
+                <dd>{money(receipt.totalMinor)}</dd>
+              </div>
+              <div>
+                <dt>{t("Refunded")}</dt>
+                <dd>−{money(view.refundedMinor)}</dd>
+              </div>
+              <div>
+                <dt>{t("Total paid after refunds")}</dt>
+                <dd>
+                  {money(
+                    (BigInt(receipt.totalMinor) > BigInt(view.refundedMinor)
+                      ? BigInt(receipt.totalMinor) - BigInt(view.refundedMinor)
+                      : 0n
+                    ).toString(),
+                  )}
+                </dd>
+              </div>
+            </>
+          )}
           <div>
             <dt>{t("Paid by")}</dt>
             <dd>
@@ -562,13 +582,23 @@ export function TablePayPanel({
       <section className="order-status__card dining-session__table-pay" aria-labelledby="table-pay">
         <h2 id="table-pay">{t("Pay the bill")}</h2>
         <p role="status">
-          {view.split.mode === "ByGuests"
-            ? t("Everything on the bill is paid ({count} payments). Thank you!", {
-                count: String(view.split.parts.length),
-              })
-            : t("Every part of the bill is paid ({count} parts). Thank you!", {
-                count: String(view.split.parts.length),
-              })}
+          {/* Batch 61 (v15 b60 live, CRT60 B/C): staff since gave back some of it: settled, with
+              a refund, never "everything is paid" (the payer's own receipt says how much). */}
+          {view.refundedMinor !== "0"
+            ? view.split.mode === "ByGuests"
+              ? t("The bill is settled ({count} payments). Staff have since made a refund.", {
+                  count: String(view.split.parts.length),
+                })
+              : t("The bill is settled ({count} parts). Staff have since made a refund.", {
+                  count: String(view.split.parts.length),
+                })
+            : view.split.mode === "ByGuests"
+              ? t("Everything on the bill is paid ({count} payments). Thank you!", {
+                  count: String(view.split.parts.length),
+                })
+              : t("Every part of the bill is paid ({count} parts). Thank you!", {
+                  count: String(view.split.parts.length),
+                })}
         </p>
         <MemberJoinPanel />
       </section>

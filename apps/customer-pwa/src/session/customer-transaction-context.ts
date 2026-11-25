@@ -138,6 +138,11 @@ interface EmptyTable {
    */
   readonly closedByStaff?: ClosedBillPaid;
   /**
+   * Batch 61 (v15 b60 live, CRT60 D): with "Some", staff gave back part of what was paid (so it
+   * never "stays paid"). Absent: nothing went back.
+   */
+  readonly someRefunded?: true;
+  /**
    * Batch 56 (v15 b55 live): this phone paid part of that bill: how much (minor units, on this
    * phone) and the ended visit's read-only value for its own payment's receipt. Absent: it paid
    * nothing there.
@@ -166,6 +171,9 @@ export function setEmptyTable(value: EmptyTable | null): void {
           tableLabel: value.tableLabel,
           ...(value.store === undefined ? {} : { store: Object.freeze({ ...value.store }) }),
           ...(value.closedByStaff === undefined ? {} : { closedByStaff: value.closedByStaff }),
+          ...(value.someRefunded === true && value.closedByStaff === "Some"
+            ? { someRefunded: true as const }
+            : {}),
           ...(value.yourPayment === undefined
             ? {}
             : { yourPayment: Object.freeze({ ...value.yourPayment }) }),
@@ -204,6 +212,8 @@ export type EndedTable = Readonly<
       kind: "ClosedByStaff";
       tableLabel: string;
       paid: ClosedBillPaid;
+      /** Batch 61: with "Some", part of what was paid went back (absent: none did). */
+      someRefunded?: true;
       store: RestoredStore | null;
       /** Batch 56: what this phone paid on that bill (minor units); null or absent: nothing. */
       yourPaidMinor?: string | null;
@@ -242,6 +252,7 @@ export function getEndedTable(): EndedTable | null {
       kind: "ClosedByStaff",
       tableLabel: emptyTable.tableLabel,
       paid: emptyTable.closedByStaff,
+      ...(emptyTable.someRefunded === true ? { someRefunded: true as const } : {}),
       store: emptyTable.store ?? null,
       ...(emptyTable.yourPayment === undefined
         ? {}

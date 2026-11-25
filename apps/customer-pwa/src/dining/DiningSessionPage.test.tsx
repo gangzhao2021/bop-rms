@@ -1761,11 +1761,20 @@ describe("batch 55 (v15 b54 live): round cards once staff closed the bill", () =
   it("order 55, by dish: the dish paid stays Paid, the unpaid one is not charged", () => {
     const closed = { closedByStaff: true as const, splitParts: { count: null, paid: 1 } };
     const rounds = [noodles(1, "Paid"), noodles(2, "OnTableBill")];
-    expect(payments("en", rounds, "1413", closed)).toEqual([
+    // Batch 61 (v15 b60 live, CRT60 D round 2): nobody paid any of round 2, so it is not
+    // charged at all (before: "Unpaid part not charged to you" / 未付部分不向您收取).
+    expect(payments("en", rounds, "1413", closed)).toEqual(["Paid", "Not charged to you"]);
+    expect(payments("zh-Hans", rounds, "1413", closed)).toEqual(["已付款", "不向您收取"]);
+    // A round some guest paid a dish of (the read's partlyPaid) has an unpaid part.
+    const partly = [
+      noodles(1, "Paid"),
+      { ...noodles(2, "OnTableBill"), partlyPaid: true as const },
+    ];
+    expect(payments("en", partly, "1413", closed)).toEqual([
       "Paid",
       "Unpaid part not charged to you",
     ]);
-    expect(payments("zh-Hans", rounds, "1413", closed)).toEqual(["已付款", "未付部分不向您收取"]);
+    expect(payments("zh-Hans", partly, "1413", closed)).toEqual(["已付款", "未付部分不向您收取"]);
   });
   it("order 67, 1 of 2 equal parts: no round reads Paid as if it was what was paid", () => {
     const closed = { closedByStaff: true as const, splitParts: { count: 2, paid: 1 } };
@@ -1901,7 +1910,7 @@ describe("batch 55 (v15 b54 live): round cards once staff closed the bill", () =
     };
     expect(
       payments("en", [refunded("Partly", "613"), noodles(2, "OnTableBill")], "1413", closedByDish),
-    ).toEqual(["Partly refunded; you paid $6.13 after refunds", "Unpaid part not charged to you"]);
+    ).toEqual(["Partly refunded; you paid $6.13 after refunds", "Not charged to you"]);
     const allBack = {
       closedByStaff: true as const,
       splitParts: { count: null, paid: 1, refunded: 1 },

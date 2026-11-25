@@ -1417,7 +1417,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "本桌账单共\u00a0{count}\u00a0份，这是第\u00a0{number}\u00a0份",
   "Total paid by you": "您实付合计",
   "Amount charged": "付款金额",
-  "You paid after refunds": "退款后实付",
+  // Batch 61: "you", so it never reads like the table's 退款后实付 on the same receipt.
+  "You paid after refunds": "退款后您实付",
   "Paid after refunds": "退款后已付",
   "This receipt is for your payment only. Staff closed the rest of your table’s bill; it is not charged to you.":
     "这张收据只包括您的付款。本桌账单的其余部分已由店员关闭，不向您收取。",
@@ -2110,4 +2111,25 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Back to the waiting page": "回到等候开台页",
   "This table isn’t open yet. You can order once staff open it.":
     "这桌还没开台。店员开台后就可以点单。",
+  // Batch 61 (v15 b60 live, customer-round-refund-truth): refunds on a closed or paid bill.
+  "Staff closed your table’s bill. The rest is not charged to you. To order anything else, ask staff.":
+    "店员已关闭本桌账单。其余不向您收取。如需再点，请找店员。",
+  "The rest is not charged to you. To order anything else, ask staff.":
+    "其余不向您收取。如需再点，请找店员。",
+  "Staff closed your table’s bill. The rest is not charged to you.":
+    "店员已关闭本桌账单。其余不向您收取。",
+  "Staff closed your table’s bill and refunded part of what was paid; the rest is not charged to you.":
+    "店员已关闭本桌账单，并退还了部分已付款项；其余不向您收取。",
+  "Your table’s bill is settled": "这桌账单已结清",
+  "Staff have since made a refund. To order anything else, ask staff.":
+    "之后店员办理了退款。如需再点，请找店员。",
+  "Your table’s bill is settled, and staff have since made a refund. To order anything else, ask staff.":
+    "这桌账单已结清，之后店员办理了退款。如需再点，请找店员。",
+  "The bill is settled ({count} payments). Staff have since made a refund.":
+    "账单已结清（共 {count} 笔），之后店员办理了退款。",
+  "The bill is settled ({count} parts). Staff have since made a refund.":
+    "账单已结清（共 {count} 份），之后店员办理了退款。",
+  "Total paid after refunds": "退款后实付",
+  "Number of payments": "付款笔数",
+  "Your payment": "您的付款",
 });

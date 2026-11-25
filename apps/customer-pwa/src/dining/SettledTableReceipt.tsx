@@ -43,10 +43,20 @@ export interface SettledTableReceipt {
   /** Owner 2026-11-03: what went back from these payments (older server: 0). */
   readonly refundedMinor: string;
   readonly split: boolean;
+  /**
+   * Batch 61 (v15 b60 live, CRT60 B order 46): how many payments paid a split bill; only this
+   * phone's own parts are listed (null: an older server, which listed every part).
+   */
+  readonly paymentCount: number | null;
   readonly payments: readonly {
     readonly partNumber: number | null;
     readonly method: Method;
     readonly totalMinor: string;
+    /** Batch 61: this phone's own payment, with what of it went back to its card. */
+    readonly yours: boolean;
+    readonly refundedMinor: string;
+    /** Of `refundedMinor`, still on its way (the card issuer has not confirmed it). */
+    readonly refundPendingMinor: string;
   }[];
 }
 
@@ -128,9 +138,30 @@ export function parseSettledTableReceipt(payload: unknown): SettledTableReceipt 
     paidMinor: minor(receipt.paidMinor),
     refundedMinor: receipt.refundedMinor === undefined ? "0" : minor(receipt.refundedMinor),
     split: typeof receipt.split === "boolean" ? receipt.split : fail(),
+    paymentCount:
+      receipt.paymentCount === undefined
+        ? null
+        : Number.isSafeInteger(receipt.paymentCount) &&
+            (receipt.paymentCount as number) >= 0 &&
+            (receipt.paymentCount as number) <= 20
+          ? (receipt.paymentCount as number)
+          : fail(),
     payments: list(receipt.payments, 20).map((value) => {
       const payment = record(value);
+      const yours = payment.yours === undefined ? false : payment.yours === true ? true : fail();
+      const refundedMinor =
+        payment.refundedMinor === undefined ? "0" : yours ? minor(payment.refundedMinor) : fail();
+      const refundPendingMinor =
+        payment.refundPendingMinor === undefined
+          ? "0"
+          : yours
+            ? minor(payment.refundPendingMinor)
+            : fail();
+      if (BigInt(refundPendingMinor) > BigInt(refundedMinor)) fail();
       return Object.freeze({
+        yours,
+        refundedMinor,
+        refundPendingMinor,
         partNumber:
           payment.partNumber === null
             ? null
@@ -195,6 +226,49 @@ const methodText = (method: Method) =>
     : method === "Cash"
       ? t("Cash")
       : t("Card at the table");
+
+const netOf = (paidMinor: string, refundedMinor: string) => {
+  const net = BigInt(paidMinor) - BigInt(refundedMinor);
+  return (net > 0n ? net : 0n).toString();
+};
+
+/**
+ * Batch 61: this phone's own part of a split bill — how and how much it paid, what of it went
+ * back to its card (confirmed, and still on its way) and what it paid after refunds.
+ */
+function OwnPartRows({ payment }: { readonly payment: SettledTableReceipt["payments"][number] }) {
+  const pending =
+    BigInt(payment.refundPendingMinor) > BigInt(payment.refundedMinor)
+      ? BigInt(payment.refundedMinor)
+      : BigInt(payment.refundPendingMinor);
+  const done = BigInt(payment.refundedMinor) - pending;
+  return (
+    <>
+      <div>
+        <dt>{t("Your payment")}</dt>
+        <dd>{`${methodText(payment.method)} · ${money(payment.totalMinor)}`}</dd>
+      </div>
+      {done > 0n ? (
+        <div>
+          <dt>{t("Refunded to your card")}</dt>
+          <dd>−{money(done.toString())}</dd>
+        </div>
+      ) : null}
+      {pending > 0n ? (
+        <div>
+          <dt>{t("On its way back to your card")}</dt>
+          <dd>−{money(pending.toString())}</dd>
+        </div>
+      ) : null}
+      {payment.refundedMinor === "0" ? null : (
+        <div>
+          <dt>{t("You paid after refunds")}</dt>
+          <dd>{money(netOf(payment.totalMinor, payment.refundedMinor))}</dd>
+        </div>
+      )}
+    </>
+  );
+}
 
 export function SettledTableReceiptView({ receipt }: { readonly receipt: SettledTableReceipt }) {
   return (
@@ -261,10 +335,29 @@ export function SettledTableReceiptView({ receipt }: { readonly receipt: Settled
             <dd>{money(receipt.roundingMinor)}</dd>
           </div>
         ) : null}
-        <div>
-          <dt>{t("Total paid")}</dt>
-          <dd>{money(receipt.paidMinor)}</dd>
-        </div>
+        {/* Batch 61 (v15 b60 live, CRT60 B): once some of it went back, what was paid, what went
+            back and what the table paid after refunds, each named once (实付 never the gross). */}
+        {receipt.refundedMinor === "0" ? (
+          <div>
+            <dt>{t("Total paid")}</dt>
+            <dd>{money(receipt.paidMinor)}</dd>
+          </div>
+        ) : (
+          <>
+            <div>
+              <dt>{t("Paid")}</dt>
+              <dd>{money(receipt.paidMinor)}</dd>
+            </div>
+            <div>
+              <dt>{t("Refunded")}</dt>
+              <dd>−{money(receipt.refundedMinor)}</dd>
+            </div>
+            <div>
+              <dt>{t("Total paid after refunds")}</dt>
+              <dd>{money(netOf(receipt.paidMinor, receipt.refundedMinor))}</dd>
+            </div>
+          </>
+        )}
         {/* b13: a table comped to nothing paid nothing, said as that. */}
         {receipt.paidMinor === "0" && receipt.payments.length === 0 ? (
           <div>
@@ -272,26 +365,32 @@ export function SettledTableReceiptView({ receipt }: { readonly receipt: Settled
             <dd>{t("The restaurant took everything off.")}</dd>
           </div>
         ) : null}
-        {receipt.refundedMinor !== "0" ? (
+        {/* Batch 61: a bill paid in parts says how many payments paid it; each phone sees only its
+            own part's amount, method and refunds, never another guest's. */}
+        {receipt.split && receipt.paymentCount !== null ? (
           <div>
-            <dt>{t("Refunded")}</dt>
-            <dd>−{money(receipt.refundedMinor)}</dd>
+            <dt>{t("Number of payments")}</dt>
+            <dd>{String(receipt.paymentCount)}</dd>
           </div>
         ) : null}
-        {receipt.payments.map((payment) => (
-          <div key={payment.partNumber ?? 0}>
-            <dt>
-              {payment.partNumber === null
-                ? t("Paid by")
-                : t("Part {number} paid by", { number: String(payment.partNumber) })}
-            </dt>
-            <dd>
-              {receipt.split
-                ? `${methodText(payment.method)} · ${money(payment.totalMinor)}`
-                : methodText(payment.method)}
-            </dd>
-          </div>
-        ))}
+        {receipt.payments.map((payment) =>
+          receipt.split && payment.yours ? (
+            <OwnPartRows key={payment.partNumber ?? 0} payment={payment} />
+          ) : (
+            <div key={payment.partNumber ?? 0}>
+              <dt>
+                {payment.partNumber === null
+                  ? t("Paid by")
+                  : t("Part {number} paid by", { number: String(payment.partNumber) })}
+              </dt>
+              <dd>
+                {receipt.split
+                  ? `${methodText(payment.method)} · ${money(payment.totalMinor)}`
+                  : methodText(payment.method)}
+              </dd>
+            </div>
+          ),
+        )}
       </dl>
     </section>
   );

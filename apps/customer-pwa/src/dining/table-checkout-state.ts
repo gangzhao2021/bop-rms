@@ -22,6 +22,11 @@ export interface TableCheckout {
    * `paid` is then true (nothing more is owed) but the bill was not paid. Null otherwise.
    */
   readonly closedByStaff: ClosedBillPaid | null;
+  /**
+   * Batch 61 (v15 b60 live, CRT60 B/C): the bill is paid (`paid` true, not closed by staff) and
+   * staff since gave back some of it: never "paid" alone, and the payer goes to its own receipt.
+   */
+  readonly refunded?: true;
 }
 
 let state: { readonly credential: string; readonly checkout: TableCheckout } | null = null;
@@ -38,7 +43,9 @@ function publish(next: typeof state) {
     next?.credential === state?.credential &&
     next?.checkout.paid === state?.checkout.paid &&
     next?.checkout.payLater === state?.checkout.payLater &&
-    JSON.stringify(next?.checkout.closedByStaff) === JSON.stringify(state?.checkout.closedByStaff)
+    JSON.stringify(next?.checkout.closedByStaff) ===
+      JSON.stringify(state?.checkout.closedByStaff) &&
+    next?.checkout.refunded === state?.checkout.refunded
   )
     return;
   state = next;
@@ -73,6 +80,7 @@ export function noteTableView(view: DiningSessionView): void {
     paid: outcome.kind !== "Owing",
     payLater: view.paymentTiming === "PayLater",
     closedByStaff: outcome.kind === "ClosedByStaff" ? outcome.paid : null,
+    ...(outcome.kind === "Paid" && outcome.refunded === true ? { refunded: true as const } : {}),
   });
   lastView = { credential, checkout };
   if (state !== null && state.credential === credential) publish({ credential, checkout });

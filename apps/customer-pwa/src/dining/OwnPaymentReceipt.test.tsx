@@ -525,7 +525,7 @@ describe("batch 57: refunds of the payer's own payment", () => {
     expect(text()).toContain("付款金额$14.13");
     expect(text()).toContain("已退回您的卡−$14.13");
     expect(text()).not.toContain("正在退回");
-    expect(text()).toContain("退款后实付$0.00");
+    expect(text()).toContain("退款后您实付$0.00");
     expect(text()).not.toContain("您实付合计");
     expect(container.querySelector(".dining-session__own-refunds li")?.textContent).toMatch(
       /^.+，\$14\.13 已退回您的卡。银行可能要过几天才显示。$/u,
@@ -614,7 +614,7 @@ describe("batch 57: refunds of the payer's own payment", () => {
     expect(words).toContain("付款金额$14.13");
     expect(words).toContain("已退回您的卡−$5.00");
     expect(words).toContain("正在退回您的卡−$3.00");
-    expect(words).toContain("退款后实付$6.13");
+    expect(words).toContain("退款后您实付$6.13");
     // Every 实付 on the receipt is the same amount, the net.
     expect([...words.matchAll(/实付 ?(\$\d+\.\d\d)/gu)].map((match) => match[1])).toEqual([
       "$6.13",
