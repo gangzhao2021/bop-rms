@@ -1764,6 +1764,16 @@
     order: 5;
     margin-inline-start: auto;
   }
+  /* 14/400 accent text, as the board's own bar on a phone: the link and Hand over then share a
+     row with the wider Linux fonts too. */
+  .kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header .kitchen-handover-button,
+  .kitchen-shell:not(.kitchen-shell--workspace)
+    .bop-shell__header
+    .bop-shell__nav
+    a.kitchen-display-nav-link {
+    font-size: 14px;
+    font-weight: 400;
+  }
   .kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header .kitchen-screen-awake {
     flex-basis: 100%;
     order: 6;
