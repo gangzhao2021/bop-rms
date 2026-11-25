@@ -97,3 +97,21 @@ it("batch 63 (F24): every page says when it was read the same way, 'Updated 01:3
     setLanguageForTest("en");
   }
 });
+
+it("batch 64: before the Store's zone is known, the stamp reads this device's clock, unlabelled", () => {
+  // A brand-level page (Points) has no Store zone; a store tablet's clock is the Store's.
+  const at = "2026-11-25T06:36:00.000Z";
+  const device = new Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const clock = new Intl.DateTimeFormat("en-CA", {
+    timeZone: device,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(new Date(at));
+  const text = renderToStaticMarkup(createElement(Freshness, { status: "Fresh", at })).replace(
+    /<[^>]+>/gu,
+    "",
+  );
+  expect(text).toBe(`Updated ${clock}`);
+  expect(text).not.toMatch(/UTC/u);
+});
