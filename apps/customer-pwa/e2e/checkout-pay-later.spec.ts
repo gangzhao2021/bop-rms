@@ -2069,7 +2069,9 @@ for (const screen of [
         });
       });
       await page.clock.runFor(16_000);
-      await expect(page.getByRole("main")).toContainText("Ask staff if you want to add more.");
+      // Batch 63 (CDI-1, F01): the dish still in this open cart is named as not sent.
+      await expect(page.getByRole("main")).toContainText("Not sent to the kitchen");
+      await expect(page.getByRole("main")).not.toContainText("Ask staff if you want to add more.");
       await expect(
         page.getByRole("region", { name: "Your table is paying the bill" }),
       ).toBeVisible();

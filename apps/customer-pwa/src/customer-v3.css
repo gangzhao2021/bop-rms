@@ -566,11 +566,12 @@
    as the frame draws it — no circle. */
 .customer-page .dining-session__choice-input {
   position: absolute;
-  width: 1px;
-  height: 1px;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   margin: 0;
   opacity: 0;
-  pointer-events: none;
+  cursor: inherit;
 }
 .customer-page .dining-session__parts label:has(.dining-session__choice-input:focus-visible),
 .customer-page .dining-session__tip-row label:has(.dining-session__choice-input:focus-visible) {
