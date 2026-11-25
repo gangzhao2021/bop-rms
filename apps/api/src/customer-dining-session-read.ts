@@ -614,7 +614,7 @@ export function customerDishPaidRounds(
   splitParts: CustomerSplitParts | null,
   settlements: readonly {
     readonly part: unknown;
-    readonly lines: readonly { readonly orderBatchReference: string }[];
+    readonly lines?: readonly { readonly orderBatchReference: string }[];
   }[],
 ): ReadonlySet<string> {
   return new Set(
@@ -622,7 +622,9 @@ export function customerDishPaidRounds(
       ? []
       : settlements
           .filter((settlement) => settlement.part !== null)
-          .flatMap((settlement) => settlement.lines.map((line) => line.orderBatchReference)),
+          .flatMap((settlement) =>
+            (settlement.lines ?? []).map((line) => line.orderBatchReference),
+          ),
   );
 }
 
