@@ -1,5 +1,8 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import {
+  TablePaymentBlock,
   cashRefundNickel,
   parseTablePayments,
   sentRefundOf,
@@ -164,5 +167,44 @@ describe("b61 (v15 b60 live, TM2 order 48): a payment refunded in full says so",
       fullyRefundedMinor: null,
       timingLine: false,
     });
+  });
+});
+
+describe("F27 fix-up: a card-machine refund under Paid at the table says its reason", () => {
+  it("reads 'Refunded on the card machine · Charged too much', never the {reason} placeholder", () => {
+    const paid = {
+      partNumber: null,
+      method: "CardMachine",
+      roundsMinor: "3000",
+      tipMinor: "0",
+      roundingMinor: "0",
+      totalMinor: "3000",
+      takenAt: "2026-11-24T21:00:00.000Z",
+      recordedAfterOutage: false,
+      cashRefunds: [],
+      cardRefunds: [
+        {
+          amountMinor: "1200",
+          reasonCode: "OVERCHARGED",
+          refundedAt: "2026-11-24T21:05:00.000Z",
+          byLabel: "You",
+        },
+      ],
+      onlineRefunds: [],
+      refundableMinor: "1800",
+      canRefund: true,
+    } as TablePayment;
+    const html = renderToStaticMarkup(
+      createElement(TablePaymentBlock, {
+        payment: paid,
+        orderReference: "ord_test",
+        csrf: "csrf",
+        fetcher: fetch,
+        onChanged: () => undefined,
+        onStale: () => undefined,
+      }),
+    );
+    expect(html).toContain("Refunded on the card machine · Charged too much");
+    expect(html).not.toContain("{reason}");
   });
 });

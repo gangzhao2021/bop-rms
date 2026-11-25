@@ -332,7 +332,7 @@ export function TablePaymentPanel({
   );
 }
 
-function TablePaymentBlock({
+export function TablePaymentBlock({
   payment,
   orderReference,
   csrf,
@@ -562,7 +562,7 @@ function TablePaymentBlock({
           <div key={index}>
             <dt>
               {t("Refunded on the card machine · {reason}", {
-                reasonCode: refund.reasonCode,
+                reason: reasonText(refund.reasonCode),
               }) + when(refund.refundedAt, refund.byLabel)}
             </dt>
             <dd>−{cad(refund.amountMinor)}</dd>
