@@ -219,7 +219,8 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
     "data-age",
     "late",
   );
-  await expect(page.getByText(/^Last checked \d\d:\d\d/u)).toBeVisible();
+  // Batch 63 (F24): the one shared stamp, from when the board was last read.
+  await expect(page.getByText(/^Updated \d\d:\d\d/u)).toBeVisible();
   await expect(page.getByText("Auto-refresh every 10 s", { exact: true })).toBeVisible();
   // WP-2423: a counter/office sign-in sees the board, view only, with a way to start the kitchen
   // display on this device; no technical wording.
@@ -1746,7 +1747,8 @@ test("@production a view-only Kitchen starts the kitchen display on this device"
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: 900 });
     await expectNoHorizontalOverflow(page);
-    if (width > 768) {
+    // Batch 63 (F38): the sidebar from 1200px; below it the top bar's Menu (v3 frame 46:2).
+    if (width >= 1200) {
       const sidebar = workspaceNav.locator(".workspace-sidebar__links");
       await expect(sidebar.getByRole("button", { name: /^Operations/u })).toHaveAttribute(
         "aria-expanded",

@@ -427,11 +427,9 @@ for (const zh of [false, true]) {
         };
       });
       expect(room.overflow).toBe(false);
-      if (width === 390) {
-        // It wraps within about half the row, leaving the dishes theirs, ~40 px to spare.
-        expect(room.widest + 40).toBeLessThanOrEqual(room.row / 2);
-        expect(room.noteLeft).toBeGreaterThanOrEqual(room.whatRight);
-      }
+      // Batch 63 (F19): the note ends the grey line under the dishes (Figma 37:2), inside the row,
+      // so it never takes the amount's place.
+      expect(room.widest).toBeLessThanOrEqual(room.row);
       await noSideways(page);
       await openRow(page);
       const said = page.locator(".order-panel__merged");

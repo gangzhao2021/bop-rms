@@ -1,6 +1,7 @@
 import { listSeparator, systemText, t } from "./i18n/i18n.js";
-import { AppFrame, StatePanel } from "@bop-rms/ui";
-import { SourceTime, StaffTime } from "./StoreTime.js";
+import { StatePanel } from "@bop-rms/ui";
+import { WorkspacePage } from "./WorkspacePage.js";
+import { Freshness, StaffTime } from "./StoreTime.js";
 import { newOperationReference } from "./operation-reference.js";
 import { FullSignInPrompt } from "./FullSignInPrompt.js";
 import { FULL_SIGN_IN_REQUIRED_TEXT, needsFullSignIn } from "./full-sign-in.js";
@@ -928,36 +929,29 @@ export function RoleAdministrationScreen({
   );
   const role = editor ? view.roles[0] : undefined;
   return (
-    <AppFrame
+    // Batch 63 (F22, RA-03): the shared page header (title 28/600, the language switch at its right
+    // end) instead of an eyebrow over a second heading, and the one "Updated" stamp.
+    <WorkspacePage
+      className="roles-page"
       title={editor ? systemText(role?.name ?? "") || t("Role") : t("Roles")}
-      description={[
-        editor ? t("What this role can do, and changes to it") : t("Who can do what at this store"),
-        view.freshness === "Stale" ? t("may be out of date") : null,
-      ]
-        .filter(Boolean)
-        .join(" · ")}
+      meta={
+        editor && role
+          ? roleKindLabels[role.kind] +
+            " · " +
+            (role.state === "Removed"
+              ? t("Removed")
+              : t("{count} staff hold this role", { count: role.memberCount }))
+          : t("Roles and what they can do")
+      }
+      status={
+        editor ? null : (
+          <Freshness status={view.freshness === "Stale" ? "Stale" : "Fresh"} at={view.sourceAsOf} />
+        )
+      }
     >
-      <header className="screen-heading">
-        <div>
-          <p className="bop-eyebrow">{t("Roles")}</p>
-          <h2>{editor && role ? systemText(role.name) : t("Roles and what they can do")}</h2>
-          {editor && role ? (
-            <p>
-              {roleKindLabels[role.kind]} ·{" "}
-              {role.state === "Removed"
-                ? t("Removed")
-                : t("{count} staff hold this role", { count: role.memberCount })}
-            </p>
-          ) : (
-            <p>
-              {t("Checked")} <SourceTime instant={view.sourceAsOf} />
-            </p>
-          )}
-        </div>
-        {!editor && view.mayManage ? (
-          <NewRole view={view} client={client} csrf={csrf} reload={reload} />
-        ) : null}
-      </header>
+      {!editor && view.mayManage ? (
+        <NewRole view={view} client={client} csrf={csrf} reload={reload} />
+      ) : null}
       {editor && role ? (
         <>
           <Link to="/app/organization/roles">{t("Back to roles")}</Link>
@@ -1028,7 +1022,7 @@ export function RoleAdministrationScreen({
           ) : null}
         </>
       )}
-    </AppFrame>
+    </WorkspacePage>
   );
 }
 function Page({

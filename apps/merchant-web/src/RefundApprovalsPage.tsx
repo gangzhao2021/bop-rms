@@ -6,7 +6,7 @@ import { StatePanel } from "@bop-rms/ui";
 import { WorkspacePage } from "./WorkspacePage.js";
 import { noAccessHeading } from "./access-denied.js";
 import { NoAccessNotice } from "./NoAccessNotice.js";
-import { SourceTime, StaffTime } from "./StoreTime.js";
+import { Freshness, SourceTime, StaffTime } from "./StoreTime.js";
 import { StepUpVerification } from "./StepUpVerification.js";
 import {
   createRefundApprovalClient,
@@ -1117,6 +1117,8 @@ export function RefundApprovalsPage({
       className="approvals-page"
       title={t("Approvals")}
       meta={storeLabel}
+      // Batch 63 (F22/F24): the one shared stamp in the header, as on Orders.
+      status={view === null ? null : <Freshness status="Fresh" at={view.observedAt} />}
       actions={
         <button type="button" disabled={state === "Loading"} onClick={reload}>
           {t("Refresh")}
@@ -1134,7 +1136,10 @@ export function RefundApprovalsPage({
       {state === "Denied" &&
       (roleRequests.state !== "Denied" || roleChanges.state !== "Denied") ? null : (
         <section aria-labelledby="refund-approvals-heading" data-screen-id="APPROVAL-INBOX">
-          <h2 id="refund-approvals-heading">{t("Refunds awaiting approval")}</h2>
+          {/* Batch 63 (F22): a 16/600 section label under the page's 28/600 title. */}
+          <h2 id="refund-approvals-heading" className="approvals-page__section">
+            {t("Refunds awaiting approval")}
+          </h2>
           {/* Owner 2026-10-25: one line; the rule itself behind "Why approval?". Batch 40: not
               for someone refused it. */}
           {state === "Denied" ? null : (
@@ -1167,10 +1172,6 @@ export function RefundApprovalsPage({
             </StatePanel>
           ) : view ? (
             <>
-              <p>
-                {t("Last checked")} <SourceTime instant={view.observedAt} />
-                {t(".")}
-              </p>
               <ul className="refund-approval-list">
                 {view.entries.map((entry) =>
                   entry.state === "NotSent" ? (

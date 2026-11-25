@@ -19,8 +19,8 @@
 .workspace-page .list-filters.settlement__picker label,
 .workspace-page .list-filters.store-reports__picker label {
   color: var(--bop-color-text-muted);
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 14px;
+  font-weight: 400;
 }
 .workspace-page .list-filters.settlement__picker input[type="date"],
 .workspace-page .list-filters.store-reports__picker input[type="date"] {
@@ -40,7 +40,7 @@
   font: inherit;
   margin: 0;
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 400;
 }
 .workspace-page .list-filters.settlement__picker button[type="submit"],
 .workspace-page .list-filters.store-reports__picker button[type="submit"] {
@@ -118,7 +118,7 @@
   padding: 0 var(--bop-space-2);
   border: 1px solid var(--bop-color-border-strong);
   border-radius: var(--bop-radius-control);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   white-space: nowrap;
 }
@@ -168,10 +168,10 @@
     0 -1px 0 0 var(--bop-color-border-default);
 }
 .workspace-page :is(.settlement__totals, .store-reports__totals) .overview-count__label {
-  font-weight: 500;
+  font-weight: 400;
 }
 .workspace-page :is(.settlement__totals, .store-reports__totals) .overview-count__value {
-  font-size: 30px;
+  font-size: 28px;
   letter-spacing: -0.02em;
   overflow-wrap: anywhere;
 }
@@ -191,7 +191,7 @@
   padding-left: 0;
 }
 .workspace-page .settlement__card-machine .settlement__totals .overview-count__value {
-  font-size: 24px;
+  font-size: 28px;
 }
 .workspace-page .settlement__card-machine > p {
   margin: 0;
@@ -209,7 +209,7 @@
     grid-column: 1 / -1;
   }
   .workspace-page :is(.settlement__totals, .store-reports__totals) .overview-count__value {
-    font-size: 22px;
+    font-size: 28px;
   }
   .workspace-page .settlement__card-machine .settlement__totals li,
   .workspace-page .settlement__card-machine .settlement__totals li:first-child {
@@ -242,7 +242,7 @@
 }
 .workspace-page .settlement__reconciliation h4 {
   margin: var(--bop-space-5) 0 0;
-  font-size: 15px;
+  font-size: 16px;
 }
 .workspace-page .settlement__difference-help,
 .workspace-page .settlement__unmatched {
@@ -271,8 +271,8 @@
   border-top: 0;
   border-bottom: 1px solid var(--bop-color-border-strong);
   color: var(--bop-color-text-muted);
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 14px;
+  font-weight: 400;
   letter-spacing: normal;
   text-transform: none;
   white-space: nowrap;
@@ -299,7 +299,7 @@
   text-align: right;
 }
 .workspace-page .store-reports__table tbody th {
-  font-weight: 500;
+  font-weight: 400;
 }
 /* Payment names in the tips table are words, not figures. */
 .workspace-page
@@ -318,7 +318,7 @@
 .workspace-page .store-reports__section header button {
   min-height: 44px;
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 400;
 }
 .workspace-page .store-reports__section > p.bop-muted {
   max-width: 72ch;
@@ -327,7 +327,7 @@
 }
 .workspace-page .store-reports__section h4 {
   margin: var(--bop-space-5) 0 0;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 600;
 }
 /* Sales summary: a statement — totals weighted, with a strong rule above. */
@@ -338,14 +338,14 @@
 .workspace-page .store-card .store-reports__lines div {
   align-items: baseline;
   padding: var(--bop-space-2) 0;
-  font-size: 15px;
+  font-size: 16px;
 }
 .workspace-page .store-card .store-reports__lines div[data-strong="true"] {
   border-top-color: var(--bop-color-border-strong);
-  font-weight: 650;
+  font-weight: 600;
 }
 .workspace-page .store-card .store-reports__lines div[data-strong="true"] dt {
-  font-weight: 650;
+  font-weight: 600;
 }
 .workspace-page .store-card .store-reports__lines div[data-part="true"] {
   padding: var(--bop-space-1) 0 var(--bop-space-1) var(--bop-space-5);
@@ -394,7 +394,7 @@
     content: attr(data-label);
     flex: none;
     color: var(--bop-color-text-muted);
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 400;
     text-align: left;
   }

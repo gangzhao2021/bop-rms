@@ -19,6 +19,7 @@ import {
 import { Link } from "react-router";
 import type { MerchantNavigationItem } from "./merchant-workspace.js";
 import { StaffNavigationContext } from "./NoAccessNotice.js";
+import { TopBarStatusSlotContext } from "./TopBarStatus.js";
 
 /**
  * Pages that render their own full-screen chrome or must guard leaving. The Kitchen pages pick
@@ -189,7 +190,7 @@ export function workspaceNavigationSections(
 }
 
 /** Matches the stylesheet: at or below this width the sidebar becomes the Menu drawer. */
-const WIDER_THAN_PHONE = t("(min-width: 48.0625rem)");
+const WIDER_THAN_PHONE = t("(min-width: 75rem)");
 
 /** Which groups this device keeps open: a layout preference only, never business data. */
 const OPEN_GROUPS_KEY = "bop-rms.merchant.navigation.open-groups";
@@ -229,7 +230,10 @@ export function WorkspaceLayout({
   csrf = null,
   storeReference = null,
   readsPaused = false,
+  ordersToAccept = null,
 }: {
+  /** Batch 63 (F21): orders waiting to be accepted (the frame's read), beside "Orders". */
+  readonly ordersToAccept?: number | null;
   /** Batch 36: the selected Store, so its opening reads may share Home's (never another's). */
   readonly storeReference?: string | null;
   /** M01: reconnecting; the waiting counts are not read (they would only fail). */
@@ -268,6 +272,7 @@ export function WorkspaceLayout({
   const badges: Partial<Record<string, number>> = {
     "APPROVAL-INBOX": approvalsBadgeCount(approvals, staffRoles),
     "DIN-FLOOR-BOARD": staffCalls ?? 0,
+    "OPS-ORDER-QUEUE": readsPaused ? 0 : (ordersToAccept ?? 0),
   };
   // WP-2423 M07: a failed staff-role read marks the Approvals count as possibly short.
   const incomplete = (screenId: string) =>
@@ -299,6 +304,8 @@ export function WorkspaceLayout({
     () => new Set([...storedOpenGroups(), ...(currentGroup === null ? [] : [currentGroup])]),
   );
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // Batch 63 (F38): the top bar's place for the page's "Updated 01:36" on a tablet.
+  const [statusSlot, setStatusSlot] = useState<HTMLElement | null>(null);
   // Arriving on a page (a link, a deep link, Back) opens the group it belongs to.
   useEffect(() => {
     if (currentGroup === null) return;
@@ -436,6 +443,7 @@ export function WorkspaceLayout({
           </p>
           <p className="workspace-sidebar__store">{storeLabel}</p>
         </div>
+        <div className="workspace-sidebar__status" ref={setStatusSlot} />
         {/* Owner 2026-10-26: on a phone, top right in the bar beside Menu (never inside it). */}
         <LanguageSwitch className="workspace-sidebar__language" />
         <div className="workspace-sidebar__links">{links("sidebar")}</div>
@@ -481,7 +489,9 @@ export function WorkspaceLayout({
           <WorkspaceFrameContext.Provider value={true}>
             <StaffCallsWaitingContext.Provider value={staffCalls}>
               <StaffNavigationContext.Provider value={items}>
-                {children}
+                <TopBarStatusSlotContext.Provider value={statusSlot}>
+                  {children}
+                </TopBarStatusSlotContext.Provider>
               </StaffNavigationContext.Provider>
             </StaffCallsWaitingContext.Provider>
           </WorkspaceFrameContext.Provider>

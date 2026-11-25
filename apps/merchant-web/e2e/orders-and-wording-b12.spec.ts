@@ -211,8 +211,10 @@ for (const language of ["en", "zh-Hans"] as const)
     await routes(page, language);
     await page.goto("/operations/orders");
     const row = orderRows(page).filter({ hasText: zh ? "纸单已付款" : "Paid on paper" });
-    await expect(row.locator(".order-workbench-amount")).toHaveText(
-      zh ? "—纸单已付款 · 这笔销售记在订单 85 上" : "—Paid on paper · its sale is on order 85",
+    // Batch 63 (F19): how it was paid ends the grey line; the money column holds the amount.
+    await expect(row.locator(".order-workbench-amount")).toHaveText("—");
+    await expect(row.locator(".order-row__paid")).toHaveText(
+      zh ? "纸单已付款 · 这笔销售记在订单 85 上" : "Paid on paper · its sale is on order 85",
     );
     await expect(row).not.toContainText(zh ? "未记录付款" : "No payment recorded");
     await openOrder(page, "73");

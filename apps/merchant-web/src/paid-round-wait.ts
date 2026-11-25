@@ -110,6 +110,11 @@ export function awaitingAcceptanceText(input: {
   readonly orders: number;
   readonly rounds: number;
   readonly urgentRounds: number;
+  /**
+   * Batch 63 (F24, v15: an order paid 20 days earlier read "1 paid 5+ min ago"): how long the
+   * longest-waiting paid round has waited, said as it is ("paid 20 days ago").
+   */
+  readonly longestWaitMinutes?: number | null;
 }): string {
   const base =
     input.rounds > input.orders
@@ -117,12 +122,15 @@ export function awaitingAcceptanceText(input: {
           rounds: countOf(input.rounds, "round"),
           orders: countOf(input.orders, "order"),
         })
-      : t("{orders} awaiting acceptance", { orders: input.orders });
-  return input.urgentRounds > 0
-    ? t("{base} ({urgentRounds} paid {paidRoundUrgentMinutes}+ min ago)", {
+      : t("{orders} waiting to be accepted", { orders: input.orders });
+  const longest = input.longestWaitMinutes ?? null;
+  if (input.urgentRounds === 0 || longest === null) return base;
+  return input.urgentRounds === 1
+    ? t("{base} · paid {waited}", { base: base, waited: waitedAgoText(longest) })
+    : t("{base} · {urgentRounds} paid {paidRoundUrgentMinutes}+ min ago, the oldest {waited}", {
         base: base,
         urgentRounds: input.urgentRounds,
         paidRoundUrgentMinutes: paidRoundUrgentMinutes,
-      })
-    : base;
+        waited: waitedAgoText(longest),
+      });
 }

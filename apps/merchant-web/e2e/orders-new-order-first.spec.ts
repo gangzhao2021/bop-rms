@@ -151,7 +151,8 @@ for (const language of ["en", "zh-Hans"] as const)
       // The "New order" mark never runs into what the order is (1024/1440 put it under "51").
       const mark = await fresh.evaluate((row) => {
         const word = row.querySelector(".order-row__new")?.getBoundingClientRect();
-        const what = row.querySelector(".order-row__what")?.getBoundingClientRect();
+        // Batch 63 (F19): the dishes are their own cell beside the number (Figma 37:2).
+        const what = row.querySelector(".order-workbench-type")?.getBoundingClientRect();
         const status = row.querySelector(".order-row__status")?.getBoundingClientRect();
         return {
           right: word?.right ?? 0,
@@ -505,10 +506,17 @@ for (const language of ["en", "zh-Hans"] as const)
       await expect(tab(en ? "All" : "全部").locator(".order-status-filters__count")).toHaveText(
         "135",
       );
+      // Batch 63 (F21): "To accept" says the header's count (the orders waiting are listed first).
+      await expect(page.locator(".workspace-page__meta")).toContainText(
+        en ? "1 to accept" : "1 单待接",
+      );
+      await expect(
+        tab(en ? "To accept" : "待接单").locator(".order-status-filters__count"),
+      ).toHaveText("1");
       // The other tabs' rows are partly on the next page: no number that reads as the day's.
       for (const name of en
-        ? ["To accept", "In progress", "Ready", "Picked up / served"]
-        : ["待接单", "进行中", "已做好", "已取餐/上桌"])
+        ? ["In progress", "Ready", "Picked up / served"]
+        : ["进行中", "已做好", "已取餐/上桌"])
         await expect(tab(name).locator(".order-status-filters__count"), name).toHaveCount(0);
       // One name for the earlier days' group in Chinese: heading, row tags, Needs attention.
       const list = page.locator(".order-workbench");

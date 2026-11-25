@@ -156,7 +156,7 @@ export function CompensationReconciliationAction({
                   disabled={busy || unknown || readOnly || !online}
                   onChange={(e) => setConfirmed(e.currentTarget.checked)}
                 />
-                {t("I have reviewed this confirmed refund and reconciled this case")}
+                {t("I checked the refund reached the guest")}
               </label>
               <button
                 ref={actionButton}
@@ -164,7 +164,7 @@ export function CompensationReconciliationAction({
                 disabled={busy || !confirmed || readOnly || !online}
                 onClick={() => void submit()}
               >
-                {unknown ? t("Retry same acknowledgment") : t("Record operations reconciliation")}
+                {unknown ? t("Retry same acknowledgment") : t("Mark as checked")}
               </button>
             </>
           )}

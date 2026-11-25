@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { MemoryRouter } from "react-router";
 import { StoreTimeZoneContext } from "./StoreTime.js";
+import { StoreBusinessDayContext } from "./StoreBusinessDay.js";
 import { findInternalText } from "../e2e/internal-text-patterns.js";
 import { exceptionOpenForText, isExceptionOverdue } from "./order-exception-view.js";
 import { summarizeExceptions } from "./StoreOverview.js";
@@ -399,9 +400,9 @@ it("DEC-EXCEPTION-CONFIRMED-REFUND-DUE: a confirmed refund reads as refunded and
   const [first, second] = html.split("<article").slice(1);
   expect(first).toContain("Refunded · check by");
   expect(first).toContain("Refunded — check by end of day");
-  expect(first).not.toContain("Critical · due");
+  expect(first).not.toContain("Critical · Due");
   expect(first).not.toContain("<dd>Pending</dd>");
-  expect(second).toContain("Critical · due");
+  expect(second).toContain("Critical · Due");
   expect(second).toContain("<dd>Pending</dd>");
   expect(findInternalText([html.replace(/<[^>]+>/gu, " ")])).toEqual([]);
 });
@@ -521,7 +522,7 @@ it("WP-2423 UI refresh: an open case says how long it has been open and marks ov
     />,
   );
   expect(overdue).toContain('data-overdue="true"');
-  expect(overdue).toContain("overdue since");
+  expect(overdue).toContain("Overdue since");
 });
 
 it("Owner 2026-11-03: a case is one row with its next step; its details wait in a closed panel", () => {
@@ -548,7 +549,7 @@ it("Owner 2026-11-03: a case is one row with its next step; its details wait in 
   const [list, panels] = html.split("<aside");
   expect(list).toContain("Refunded, check needed");
   expect(list).toContain("Check the refund");
-  expect(list).toContain("overdue since ");
+  expect(list).toContain("Overdue since ");
   // Resolved cases wait behind their tab; the tabs count what is there.
   expect(list).toMatch(/Not resolved yet<span[^>]*>1</u);
   expect(list).toMatch(/Overdue<span[^>]*>1</u);
@@ -609,6 +610,33 @@ describe("v15 M44: a paid order that will not be made is named by why it ended",
     expect(causeTitle(item(undefined))).toBeNull();
     expect(causeTitle(item({ kind: "Other" }))).toBeNull();
   });
+  it("batch 63 (F18): once the payment provider confirmed the refund, the title says refunded", () => {
+    // v15 b62: 67 rows read "Not accepted in time · refund in progress" beside "Refunded, check
+    // needed" and a panel saying "Confirmed refund $14.13".
+    const confirmed = (cause: unknown) =>
+      ({
+        kind: "PaidWithoutFulfillableOrder",
+        compensationStatus: "Pending",
+        providerState: "Confirmed",
+        status: "Open",
+        cause,
+      }) as never;
+    expect(causeTitle(confirmed({ kind: "NotAcceptedInTime" }))).toBe(
+      "Not accepted in time · refunded automatically",
+    );
+    expect(causeTitle(confirmed({ kind: "StaffCancelled", reasonCode: "STORE_ERROR" }))).toBe(
+      "Cancelled by staff · store mistake · refunded",
+    );
+    // Still waiting for the provider: in progress.
+    expect(
+      causeTitle({
+        kind: "PaidWithoutFulfillableOrder",
+        compensationStatus: "Pending",
+        providerState: "Unknown",
+        cause: { kind: "NotAcceptedInTime" },
+      } as never),
+    ).toBe("Not accepted in time · refund in progress");
+  });
   it("reads the cause strictly from the server", () => {
     const view = fixture() as { items: Record<string, unknown>[] };
     const first = view.items[0] as Record<string, unknown>;
@@ -621,4 +649,38 @@ describe("v15 M44: a paid order that will not be made is named by why it ended",
     first.cause = { kind: "StoreRejected", reasonCode: "SOLD_OUT", actor: "x" };
     expect(() => parseOrderExceptionView(view)).toThrow();
   });
+});
+
+it("batch 63 (F26): a case's times are the store's 24-hour clock, the year only outside it", () => {
+  const input = fixture();
+  const view = parseOrderExceptionView({
+    ...input,
+    projectedAt: "2026-11-25T06:30:00.000Z",
+    items: [
+      {
+        ...input.items[0],
+        orderNumber: "3",
+        providerState: "Confirmed",
+        createdAt: "2026-11-05T04:43:00.000Z",
+        dueAt: "2026-11-05T09:00:00.000Z",
+      },
+    ],
+  });
+  const html = renderToStaticMarkup(
+    <StoreTimeZoneContext.Provider value="America/Toronto">
+      <StoreBusinessDayContext.Provider
+        value={{ businessDate: "2026-11-24", startsAt: "2026-11-24T09:00:00.000Z" } as never}
+      >
+        <OrderExceptionScreen view={view} />
+      </StoreBusinessDayContext.Provider>
+    </StoreTimeZoneContext.Provider>,
+  );
+  const text = html.replace(/<[^>]+>/gu, "");
+  // v15: "Nov 4, 2026, 11:43 PM" and "overdue since Nov 5, 2026, 4:00 AM".
+  expect(text).toContain("Wed, Nov 4 23:43");
+  expect(text).toContain("Overdue since Thu, Nov 5 04:00");
+  expect(text).not.toMatch(/2026|[AP]M/u);
+  // The panel says what a manager checks, in plain words.
+  expect(text).toContain("Payment");
+  expect(text).not.toContain("Payment provider status");
 });

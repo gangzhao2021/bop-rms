@@ -302,7 +302,7 @@ test("@production Merchant Overview uses the authorized workspace snapshot at de
   // with the way there, the rest a few numbers that link to each page.
   const needs = page.getByRole("region", { name: "Needs attention" });
   const now = page.getByRole("region", { name: "Right now" });
-  await expect(needs.getByText("1 awaiting acceptance")).toBeVisible();
+  await expect(needs.getByText("1 waiting to be accepted")).toBeVisible();
   // b7 (M23): Home names the order holding a dish sold out or taken off the menu since it was
   // ordered, with what to do.
   await expect(
@@ -350,7 +350,9 @@ test("@production Merchant Overview uses the authorized workspace snapshot at de
   await expect(
     page.getByRole("region", { name: "Store system" }).getByText("Store system: all good"),
   ).toBeVisible();
-  await expect(now.getByText(/^Last checked \d\d:\d\d/u)).toBeVisible();
+  // Batch 63 (F24): Home's one stamp is in its header, from this read; none in "Right now".
+  await expect(page.locator(".workspace-page__freshness")).toHaveText(/^Updated \d\d:\d\d/u);
+  await expect(now.getByText(/Last checked/u)).toHaveCount(0);
   await expect(needs.getByRole("link", { name: "View exceptions" })).toHaveAttribute(
     "href",
     "/operations/order-exceptions",
@@ -369,7 +371,7 @@ test("@production Merchant Overview uses the authorized workspace snapshot at de
 
   for (const width of [1440, 1024, 390, 320]) {
     await page.setViewportSize({ width, height: 900 });
-    await expect(page.locator(".workspace-page__freshness")).toHaveText("Updated");
+    await expect(page.locator(".workspace-page__freshness")).toHaveText(/^Updated \d\d:\d\d$/u);
     await expect(page.locator(".workspace-page__freshness")).toBeVisible();
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),

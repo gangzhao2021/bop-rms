@@ -1347,7 +1347,7 @@ it("46940b76 L2: lists every refund on the order so they add up to what was refu
     ["Round 1 cancellation refund", "1177"],
     // b61: only money Payment says went back is an "Other refund"; $1.00 not answered yet is
     // listed apart (it was counted as refunded before).
-    ["Other refunds", "215"],
+    ["Refunded", "215"],
     ["Total refunded", "2000"],
     ["Refund on its way", "100"],
   ]);
@@ -2663,12 +2663,12 @@ describe("b60 (v15 b59 live, TM2 order 27): a paid table's refunds count on Orde
   } as unknown as Parameters<typeof orderRefundRows>[1];
   const both = table({ refundedMinor: "875", refundPendingMinor: "300" });
 
-  it("lists money given back as Other refunds and money on its way apart, never as given back", () => {
+  it("lists money given back as Refunded and money on its way apart, never as given back", () => {
     expect(orderRefundRows(table({ refundedMinor: "675" }), lines, null)).toEqual([
-      { label: "Other refunds", amount: money("675") },
+      { label: "Refunded", amount: money("675") },
     ]);
     expect(orderRefundRows(both, lines, null)).toEqual([
-      { label: "Other refunds", amount: money("875") },
+      { label: "Refunded", amount: money("875") },
       { label: "Refund on its way", amount: money("300"), pending: true },
     ]);
     expect(orderRefundRows(table({ refundPendingMinor: "300" }), lines, null)).toEqual([
@@ -2706,7 +2706,7 @@ describe("b60 (v15 b59 live, TM2 order 27): a paid table's refunds count on Orde
       />,
     );
     expect(html).toMatch(/<dt>Total<\/dt><dd>\$28\.25<\/dd>/u);
-    expect(html).toMatch(/Other refunds<\/dt><dd><span class="bop-amount">−\$8\.75<\/span><\/dd>/u);
+    expect(html).toMatch(/Refunded<\/dt><dd><span class="bop-amount">−\$8\.75<\/span><\/dd>/u);
     expect(html).toMatch(
       /Refund on its way<\/dt><dd><span class="bop-amount">\$3\.00<\/span><\/dd>/u,
     );
@@ -2728,7 +2728,7 @@ describe("b60 (v15 b59 live, TM2 order 27): a paid table's refunds count on Orde
     setLanguageForTest("zh-Hans");
     try {
       expect(orderRefundRows(both, lines, null).map((row) => row.label)).toEqual([
-        "其他退款",
+        "已退款",
         "正在退回客人的卡",
       ]);
       expect(orderAmountNote(both)).toBe("已在桌上付清 · 分单");
@@ -2827,7 +2827,7 @@ describe("b60 review: a table's tip and cash rounding are in its Orders Total, s
       paid: null,
     });
     expect(orderRefundRows(order, lines, null)).toEqual([
-      { label: "Other refunds", amount: money("500") },
+      { label: "Refunded", amount: money("500") },
       { label: "Refund on its way", amount: money("200"), pending: true },
     ]);
     const html = detail(order);
@@ -2960,7 +2960,7 @@ describe("b61 (v15 b60 live): refunds read the same on phones, for pickups and o
     // $5.00 went back, $3.00 recorded but not sent yet, $2.00 to make on the card machine.
     const mixed = orderRefundRows(pickup, linesOf, position("500", "500", "300", "200"));
     expect(mixed).toEqual([
-      { label: "Other refunds", amount: money("500") },
+      { label: "Refunded", amount: money("500") },
       { label: "Refund not sent yet", amount: money("300"), pending: true },
       { label: "Refund to make on the card machine", amount: money("200"), pending: true },
     ]);
@@ -2972,7 +2972,7 @@ describe("b61 (v15 b60 live): refunds read the same on phones, for pickups and o
     ).toBe(913n);
     const html = renderToStaticMarkup(<CurrentOrderLines lines={linesOf} refundRows={mixed} />);
     expect(value(html, "Total")).toBe("$14.13");
-    expect(value(html, "Other refunds")).toBe("−$5.00");
+    expect(value(html, "Refunded")).toBe("−$5.00");
     expect(value(html, "Total after refunds")).toBe("$9.13");
     expect(value(html, "Refund not sent yet")).toBe("$3.00");
     // A refund of a cancelled round not answered yet is listed once, by its name.
@@ -3004,7 +3004,7 @@ describe("b61 (v15 b60 live): refunds read the same on phones, for pickups and o
         orderRefundRows(pickup, linesOf, position("500", "500", "300", "200")).map(
           (row) => row.label,
         ),
-      ).toEqual(["其他退款", "退款未发出", "退款待在刷卡机上办理"]);
+      ).toEqual(["已退款", "退款未发出", "退款待在刷卡机上办理"]);
     } finally {
       setLanguageForTest("en");
     }
@@ -3042,7 +3042,7 @@ describe("b61 (v15 b60 live): refunds read the same on phones, for pickups and o
     });
     const rows = orderRefundRows(order, linesOf, position("300", "500"));
     expect(rows).toEqual([
-      { label: "Other refunds", amount: money("300") },
+      { label: "Refunded", amount: money("300") },
       { label: "Refund on its way", amount: money("500"), pending: true },
     ]);
     expect(totalAfterRefunds(money("1413"), rows)).toEqual(money("1113"));
@@ -3063,7 +3063,7 @@ describe("b61 (v15 b60 live): refunds read the same on phones, for pickups and o
     );
     expect(back).toEqual([
       { label: "Order cancellation refund", amount: money("500") },
-      { label: "Other refunds", amount: money("300") },
+      { label: "Refunded", amount: money("300") },
       { label: "Total refunded", amount: money("800") },
     ]);
     // A cancelled item's refund not answered yet is on its way too; one answered is given back.
@@ -3138,7 +3138,7 @@ describe("b61 (v15 b60 live): refunds read the same on phones, for pickups and o
       ).toEqual(["第 1 轮退款退回中", "第 2 轮尚未退款"]);
       expect(
         orderRefundRows(order, linesOf, position("300", "500")).map((row) => row.label),
-      ).toEqual(["其他退款", "正在退回客人的卡"]);
+      ).toEqual(["已退款", "正在退回客人的卡"]);
       expect(orderRefundRows(machine, linesOf, null)[0]?.label).toBe("退款尚未退还");
     } finally {
       setLanguageForTest("en");
@@ -3175,7 +3175,7 @@ describe("b61 (v15 b60 live): refunds read the same on phones, for pickups and o
     expect(value(html, "Tables merged into this one")).toBe("$28.25");
     expect(value(html, "Tip")).toBe("$3.75");
     expect(value(html, "Whole bill paid")).toBe("$60.25");
-    expect(value(html, "Other refunds")).toBe("−$10.00");
+    expect(value(html, "Refunded")).toBe("−$10.00");
     expect(value(html, "Total after refunds")).toBe("$50.25");
     const list = BigInt(orderAmountTaken(host)?.amountMinor ?? "0") - orderAmountRefunded(host);
     expect(list).toBe(5025n);

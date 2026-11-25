@@ -1,12 +1,5 @@
 import { wordGap } from "./word-gap.js";
-import {
-  systemText,
-  displayLocale,
-  guestLocale,
-  listSeparator,
-  t,
-  saidTable,
-} from "./i18n/i18n.js";
+import { systemText, displayLocale, listSeparator, t, saidTable } from "./i18n/i18n.js";
 import { formatContactPhone } from "./contact-phone.js";
 import { noAccessHeading } from "./access-denied.js";
 import { NoAccessNotice } from "./NoAccessNotice.js";
@@ -70,7 +63,8 @@ import { useRememberedAlertSound } from "./alert-sound.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import { StatePanel } from "@bop-rms/ui";
 import { playKitchenChime } from "./alert-chime.js";
-import { ClockStyleContext, type ClockStyle, storeTime } from "./StoreTime.js";
+import { ClockStyleContext, orderWhen, storeTime } from "./StoreTime.js";
+export { orderWhen };
 import { compedText, compRecordLabel, partCompedText } from "./ItemCompAction.js";
 import {
   counterAwaitingCardMachine,
@@ -78,13 +72,14 @@ import {
   counterPayByTier,
   paperAwaitingReentry,
 } from "./counter-payment.js";
-import {
-  businessDateLabel,
-  openedEarlierText,
-  orderWhenText,
-  useStoreBusinessDay,
-} from "./StoreBusinessDay.js";
+import { businessDateLabel, openedEarlierText, useStoreBusinessDay } from "./StoreBusinessDay.js";
 import { WorkspacePage } from "./WorkspacePage.js";
+import {
+  earlierDayUnfinished,
+  earlierDayWaiting,
+  type OrdersBusinessDay,
+} from "./orders-earlier-days.js";
+export { earlierDayUnfinished, earlierDayWaiting, type OrdersBusinessDay };
 export { storeTime } from "./StoreTime.js";
 export { counterAwaitingCardMachine, counterPayByText, counterPayByTier };
 import { Fragment, useContext, useEffect, useId, useMemo, useRef, useState } from "react";
@@ -1330,7 +1325,9 @@ export function orderRefundRows(
   const table = orderTableTaken(order);
   other += BigInt(table?.refundedMinor ?? "0");
   if (other > 0n) {
-    rows.push({ label: t("Other refunds"), amount: money(other) });
+    // Batch 63 (F27, v15 b62 review: "Other refunds" — other than what?): money Payment says went
+    // back, said as that; the payment section lists each refund with what, when and who.
+    rows.push({ label: t("Refunded"), amount: money(other) });
     total += other;
   }
   if (rows.length > 1 && known) rows.push({ label: t("Total refunded"), amount: money(total) });
@@ -2647,30 +2644,6 @@ export function awaitingSince(order: CurrentOrderQueue["items"][number]): string
     .map((batch) => batch.awaitingAcceptanceSince ?? batch.submittedAt ?? order.submittedAt);
   return starts.length === 0 ? order.submittedAt : starts.reduce((a, b) => (b < a ? b : a));
 }
-/** The Store's current business day as Orders needs it: its date and when it began. */
-export type OrdersBusinessDay = Readonly<{ businessDate: string; startsAt: string }>;
-/**
- * Batch 56 (v15 batch 55 live, Test Merchant 2): a table order of Wed Nov 4 ("11/4 · 2") whose only
- * round was still waiting to be accepted 19 days later was listed first under "Today", above the
- * real New order, as if it were today's work. An order of an earlier business day that has sent
- * nothing since today began, but still has a round to accept, is a leftover: it is listed with the
- * earlier days' unfinished orders, Needs attention names it, its row says so, and the To accept tab
- * still lists it. It is never hidden or dropped. A table of an earlier day that sent a round today
- * stays with today's orders.
- */
-export function earlierDayWaiting(
-  order: CurrentOrderQueue["items"][number],
-  day: OrdersBusinessDay | null,
-): boolean {
-  if (day === null || order.businessDate === null || order.businessDate >= day.businessDate)
-    return false;
-  if (order.heldStock !== null || order.earlierOpenPickup || !isAwaitingAcceptance(order))
-    return false;
-  const dayStart = Date.parse(day.startsAt);
-  return !order.batches.some(
-    (batch) => Date.parse(batch.submittedAt ?? order.submittedAt) >= dayStart,
-  );
-}
 /** The Store's current business day for Orders (null outside a Store workspace or until read). */
 function useOrdersBusinessDay(): OrdersBusinessDay | null {
   const day = useStoreBusinessDay();
@@ -2680,13 +2653,6 @@ function useOrdersBusinessDay(): OrdersBusinessDay | null {
     () => (businessDate === null || startsAt === null ? null : { businessDate, startsAt }),
     [businessDate, startsAt],
   );
-}
-/** An earlier day's order still to finish: holding stock, an open pickup, or a round waiting. */
-export function earlierDayUnfinished(
-  order: CurrentOrderQueue["items"][number],
-  day: OrdersBusinessDay | null,
-): boolean {
-  return order.heldStock !== null || order.earlierOpenPickup || earlierDayWaiting(order, day);
 }
 /**
  * merchant-outage-recovery M43: within each day group of the list (the server's order), the orders
@@ -3067,35 +3033,6 @@ export function orderLabel(
     day: String(Number(day)),
     orderNumber: order.orderNumber,
   });
-}
-
-/**
- * Orders v2: when an order was placed, in one style — the time today, else the date with the
- * weekday ("Sat, Oct 24 20:00"), with the year only when it is not this year.
- */
-export function orderWhen(
-  instant: string,
-  timeZone: string | undefined,
-  today: string | null,
-  style: ClockStyle = "Staff",
-) {
-  const time = storeTime(instant, timeZone, false, style);
-  if (timeZone === undefined) return time;
-  const date = new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date(instant));
-  if (date === today) return time;
-  const label = new Intl.DateTimeFormat(style === "Guest" ? guestLocale() : displayLocale(), {
-    timeZone,
-    ...(today !== null && date.slice(0, 4) === today.slice(0, 4) ? {} : { year: "numeric" }),
-    month: "short",
-    day: "numeric",
-    weekday: "short",
-  }).format(new Date(instant));
-  return `${label} ${time}`;
 }
 
 /** Orders v2: what the order is — "1× Latte (Small), 2× Mocha +1 more" (null when not read). */
@@ -3908,6 +3845,10 @@ export function CurrentOrderQueueRows({
         />
       </div>
     );
+  // Each row's next step, once (Accept, Charge, Hand over), so the list knows whether any row has one.
+  const rowActions = new Map(
+    view.items.map((order) => [order.orderReference, rowAction?.(order) ?? null] as const),
+  );
   const dayHeadings = new Map<string, string>();
   let previous: string | null = null;
   for (const order of shown) {
@@ -3940,7 +3881,16 @@ export function CurrentOrderQueueRows({
             <p>{t("New orders appear here on their own.")}</p>
           </StatePanel>
         ) : (
-          <ol className="order-list" aria-label={t("Current orders")}>
+          <ol
+            className="order-list"
+            aria-label={t("Current orders")}
+            // Batch 63 (F19): no row shown has a next step, so the dishes take that column.
+            data-actions={
+              shown.some((order) => (rowActions.get(order.orderReference) ?? null) !== null)
+                ? undefined
+                : "none"
+            }
+          >
             {view.items.map((order) => {
               const isOpen = order.orderReference === selected?.orderReference;
               const note = orderAmountNote(order, positionOf(order));
@@ -3957,9 +3907,20 @@ export function CurrentOrderQueueRows({
                       order.tableBill.mergedInto === undefined
                     ? { amountMinor: order.tableBill.totalMinor, currencyCode: "CAD" }
                     : null;
-              const age = now === undefined ? null : orderAgeText(order, now);
-              // WP-2423 M175: an order placed after midnight says its own date and the day it counts for.
-              const when = orderWhenText(order.submittedAt, order.businessDate, today, timeZone);
+              // Batch 63 (F25): the age only when the order waits for staff (to accept or to pay).
+              const age =
+                now === undefined || !(isAwaitingAcceptance(order) || order.awaitingPayment)
+                  ? null
+                  : orderAgeText(order, now);
+              // Batch 63 (F25, v15 b62: "D62B A (TEST) · 2 rounds · Wed, Nov 25 01:33 · counts for
+              // Today · Tue, Nov 24" wrapped to 4–5 lines under the "Today" heading): the row says
+              // the clock time only; the group heading names the day. An earlier day's order still
+              // unfinished, listed together under "Earlier days", says the day it counts for. The
+              // panel's Record keeps when it was placed and its business day.
+              const when =
+                order.businessDate !== null && earlierDayUnfinished(order, ordersDay)
+                  ? { before: businessDateLabel(order.businessDate, today) + " ", after: "" }
+                  : { before: "", after: "" };
               const label = orderLabel(order, today);
               const isFresh = fresh?.has(order.orderReference) === true;
               return (
@@ -4040,6 +4001,22 @@ export function CurrentOrderQueueRows({
                             {storeTime(order.submittedAt, timeZone)}
                           </time>
                           {when.after}
+                          {/* Batch 63 (F19, Figma 37:2): how it was paid ends the grey line,
+                              so the money column holds the amount and one refund line. */}
+                          {note === null ? null : (
+                            <>
+                              <span className="order-row__paid-gap">{" · "}</span>
+                              <span
+                                className={
+                                  order.tableBill?.mergedInto === undefined
+                                    ? "order-row__paid"
+                                    : "order-row__merged"
+                                }
+                              >
+                                {note}
+                              </span>
+                            </>
+                          )}
                           {age === null ? null : (
                             <span className="order-row__age">
                               {" · "}
@@ -4092,25 +4069,14 @@ export function CurrentOrderQueueRows({
                             })}
                           </span>
                         ) : null}
-                        {note === null ? null : (
-                          // b62 (v15 b61 live, order 73): a table merged into another says so at
-                          // every width; on a phone "—" alone gave no reason.
-                          <span
-                            className={
-                              order.tableBill?.mergedInto === undefined
-                                ? "order-row__paid"
-                                : "order-row__merged"
-                            }
-                          >
-                            {note}
-                          </span>
-                        )}
                         {amount === null && note === null ? (
                           <span className="visually-hidden">{t("No payment recorded")}</span>
                         ) : null}
                       </span>
                     </div>
-                    <div className="order-workbench-next">{rowAction?.(order)}</div>
+                    <div className="order-workbench-next">
+                      {rowActions.get(order.orderReference) ?? null}
+                    </div>
                   </li>
                 </Fragment>
               );
@@ -5070,6 +5036,17 @@ export function CurrentOrderQueuePage({
         if (background.current === controller) background.current = null;
       });
   }
+  const filterShowCount =
+    state.kind === "Ready"
+      ? statusTabCount(state.view, after, {
+          orderNumber: orderNumberSearch,
+          type: typeFilter,
+          channel: channelFilter,
+          phase: phaseFilter,
+          day: dayFilter,
+          today,
+        })
+      : null;
   const filteredOrders = useMemo(() => {
     if (state.kind !== "Ready") return [];
     return filterCurrentOrderItems(state.view.items, {
@@ -5563,7 +5540,7 @@ export function CurrentOrderQueuePage({
                       aria-label={t("Show orders")}
                     >
                       {segments.map(([phase, label]) => {
-                        const count = statusTabCount(state.view, after, {
+                        const counted = statusTabCount(state.view, after, {
                           orderNumber: orderNumberSearch,
                           type: typeFilter,
                           channel: channelFilter,
@@ -5571,12 +5548,31 @@ export function CurrentOrderQueuePage({
                           day: dayFilter,
                           today,
                         });
+                        // Batch 63 (F21, v15: "To accept" had no number while the header said
+                        // "1 to accept"): with more pages, To accept still says the header's count.
+                        const count =
+                          counted === null &&
+                          phase === "AwaitingAcceptance" &&
+                          after === null &&
+                          orderNumberSearch.trim() === "" &&
+                          typeFilter === "All" &&
+                          channelFilter === "All"
+                            ? awaitingCount
+                            : counted;
                         return (
                           <button
                             key={phase}
                             type="button"
                             aria-pressed={phaseFilter === phase}
                             onClick={() => setPhaseFilter(phase)}
+                            // Batch 63 (F21): on a phone the tabs scroll sideways in their own row;
+                            // a tab reached by Tab is brought fully into it, ring and all.
+                            onFocus={(event) =>
+                              event.currentTarget.scrollIntoView?.({
+                                block: "nearest",
+                                inline: "nearest",
+                              })
+                            }
                           >
                             {label}
                             {count === null ? null : (
@@ -5643,9 +5639,17 @@ export function CurrentOrderQueuePage({
                             ])}
                             {chips(t("Channel"), channelFilter, setChannelFilter, [
                               ["All", t("All channels")],
-                              ...orderChannelFilterOptions.map(
-                                (option) => [option.value, option.label] as const,
-                              ),
+                              // Batch 63 (F30): only the channels this store's orders come in by
+                              // (and the one chosen), never one it does not use.
+                              ...orderChannelFilterOptions
+                                .filter(
+                                  (option) =>
+                                    option.value === channelFilter ||
+                                    state.view.items.some(
+                                      (order) => orderChannel(order) === option.value,
+                                    ),
+                                )
+                                .map((option) => [option.value, option.label] as const),
                             ])}
                             {chips(t("Order status"), phaseFilter, setPhaseFilter, [
                               ["All", t("All statuses")],
@@ -5653,7 +5657,7 @@ export function CurrentOrderQueuePage({
                               ["Accepted", t("Accepted")],
                               ["Rejected", t("Rejected")],
                               ["Cancelled", t("Cancelled")],
-                              ["OutageHeld", t("Paid during an outage — decide")],
+                              ["OutageHeld", t("Taken offline — needs a decision")],
                               ["Expired", t("Expired · refunded")],
                               ["AwaitingPayment", t("Awaiting payment")],
                               ["NotCollected", t("Not collected")],
@@ -5675,9 +5679,13 @@ export function CurrentOrderQueuePage({
                                 className="order-filter__show"
                                 onClick={closeFilters}
                               >
-                                {filteredOrders.length === 1
+                                {/* Batch 63 (F23, v15: "Show 96 orders" beside "All 131"): the
+                                    tab's own count for the same filters. */}
+                                {(filterShowCount ?? filteredOrders.length) === 1
                                   ? t("Show 1 order")
-                                  : t("Show {count} orders", { count: filteredOrders.length })}
+                                  : t("Show {count} orders", {
+                                      count: filterShowCount ?? filteredOrders.length,
+                                    })}
                               </button>
                             </div>
                           </div>

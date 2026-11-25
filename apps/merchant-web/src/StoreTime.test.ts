@@ -2,8 +2,10 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it, vi } from "vitest";
 import { findInternalText, staticText } from "../e2e/internal-text-patterns.js";
+import { setLanguageForTest } from "./i18n/i18n.js";
 import {
   CheckedTime,
+  Freshness,
   SourceTime,
   StoreTimeZoneContext,
   friendlyStoreTime,
@@ -58,5 +60,34 @@ it("WP-2423: the sold-out page says when it was checked in store time", () => {
     expect(findInternalText([staticText(html)])).toEqual([]);
   } finally {
     vi.useRealTimers();
+  }
+});
+
+it("batch 63 (F24): every page says when it was read the same way, 'Updated 01:36' / '已更新 01:36'", () => {
+  const stamp = (props: Parameters<typeof Freshness>[0]) =>
+    renderToStaticMarkup(
+      createElement(
+        StoreTimeZoneContext.Provider,
+        { value: "America/Toronto" },
+        createElement(Freshness, props),
+      ),
+    ).replace(/<[^>]+>/gu, "");
+  try {
+    expect(stamp({ status: "Fresh", at: "2026-11-25T06:36:00.000Z" })).toBe("Updated 01:36");
+    // A screen that rereads on its own says when it last read, in the same words.
+    expect(
+      stamp({
+        status: "Current",
+        at: "2026-11-25T05:00:00.000Z",
+        checkedAt: "2026-11-25T06:52:00.000Z",
+      }),
+    ).toBe("Updated 01:52");
+    expect(stamp({ status: "Stale", at: "2026-11-25T06:36:00.000Z" })).toBe(
+      "Data may be out of date · last checked 01:36",
+    );
+    setLanguageForTest("zh-Hans");
+    expect(stamp({ status: "Fresh", at: "2026-11-25T06:36:00.000Z" })).toBe("已更新 01:36");
+  } finally {
+    setLanguageForTest("en");
   }
 });

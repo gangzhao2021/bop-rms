@@ -3,6 +3,11 @@ import { createContext, useContext } from "react";
 
 /** WP-2423: the selected Store's IANA time zone, provided once by the workspace. */
 export const StoreTimeZoneContext = createContext<string | undefined>(undefined);
+/**
+ * Batch 63 (F24): Home's header stamp is when "Right now" was last read; the section reports it
+ * here instead of carrying a second "Last checked" of its own.
+ */
+export const PageReadAtContext = createContext<((at: string) => void) | null>(null);
 
 /**
  * b40 review (Tables mixed "12:30 a.m.", "12:30 AM" and "01:23" on one screen): how a screen
@@ -253,10 +258,12 @@ export function StaffTime({ instant }: { readonly instant: string }) {
 }
 
 /**
- * How current a read is: "Updated 14:02" or a visible warning that the data may be out of date.
- * A screen that re-reads on its own passes `checkedAt` (when this device last read it
- * successfully): it then says "Last checked 14:02", so a quiet board whose work has not changed
- * for an hour is not mistaken for a stuck one. The time the work last changed stays in the title.
+ * How current a read is: "Updated 14:02" ("已更新 14:02"), the one stamp every back-office page
+ * shows (batch 63, F24: Orders said "01:36 已更新", Exceptions "已更新 · 01:36", Home only
+ * "已更新"), or a visible warning that the data may be out of date. A screen that re-reads on its
+ * own passes `checkedAt` (when this device last read it successfully), so a quiet board whose
+ * work has not changed for an hour still shows when it was last read; the time the work last
+ * changed stays in the title.
  */
 export function Freshness({
   status,
@@ -269,24 +276,31 @@ export function Freshness({
 }) {
   const timeZone = useContext(StoreTimeZoneContext);
   const stale = status !== "Fresh" && status !== "Current";
-  if (checkedAt !== undefined)
-    return (
-      <span
-        className="workspace-page__freshness"
-        data-freshness={stale ? "Stale" : "Fresh"}
-        title={
-          at === undefined ? undefined : t("Last change {time}", { time: storeTime(at, timeZone) })
-        }
-      >
-        {stale ? t("Data may be out of date · last checked ") : t("Last checked ")}
-        <time dateTime={checkedAt}>{storeTime(checkedAt, timeZone)}</time>
-      </span>
-    );
-  const when = at === undefined ? null : storeTime(at, timeZone);
+  const read = checkedAt ?? at;
+  const when = read === undefined ? null : storeTime(read, timeZone);
   return (
-    <span className="workspace-page__freshness" data-freshness={stale ? "Stale" : "Fresh"}>
-      {stale ? t("Data may be out of date") : t("Updated")}
-      {when === null ? "" : ` · ${when}`}
+    <span
+      className="workspace-page__freshness"
+      data-freshness={stale ? "Stale" : "Fresh"}
+      title={
+        checkedAt === undefined || at === undefined
+          ? undefined
+          : t("Last change {time}", { time: storeTime(at, timeZone) })
+      }
+    >
+      {when === null ? (
+        stale ? (
+          t("Data may be out of date")
+        ) : (
+          t("Updated")
+        )
+      ) : stale ? (
+        <time dateTime={read}>
+          {t("Data may be out of date · last checked {time}", { time: when })}
+        </time>
+      ) : (
+        <time dateTime={read}>{t("Updated {time}", { time: when })}</time>
+      )}
     </span>
   );
 }
@@ -311,4 +325,33 @@ export function StoreDate({ value }: { readonly value: string }) {
       {storeDate(value, timeZone)}
     </time>
   );
+}
+
+/**
+ * Orders v2: when an order was placed, in one style — the time today, else the date with the
+ * weekday ("Sat, Oct 24 20:00"), with the year only when it is not this year.
+ */
+export function orderWhen(
+  instant: string,
+  timeZone: string | undefined,
+  today: string | null,
+  style: ClockStyle = "Staff",
+) {
+  const time = storeTime(instant, timeZone, false, style);
+  if (timeZone === undefined) return time;
+  const date = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(instant));
+  if (date === today) return time;
+  const label = new Intl.DateTimeFormat(style === "Guest" ? guestLocale() : displayLocale(), {
+    timeZone,
+    ...(today !== null && date.slice(0, 4) === today.slice(0, 4) ? {} : { year: "numeric" }),
+    month: "short",
+    day: "numeric",
+    weekday: "short",
+  }).format(new Date(instant));
+  return `${label} ${time}`;
 }

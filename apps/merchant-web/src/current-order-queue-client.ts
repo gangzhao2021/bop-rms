@@ -1608,17 +1608,26 @@ export function roundsAwaitingAcceptance(
   view: Pick<CurrentOrderQueue, "items">,
   now: number,
   urgentMinutes: number,
-): { readonly rounds: number; readonly urgentRounds: number } {
+): {
+  readonly rounds: number;
+  readonly urgentRounds: number;
+  /** Batch 63 (F24): how long the longest-waiting paid round has waited, in whole minutes. */
+  readonly longestWaitMinutes: number | null;
+} {
   const batches = view.items.flatMap((order) =>
     order.batches.filter((batch) => batch.canRequestAcceptance),
   );
+  const waits = batches
+    .map((batch) =>
+      batch.awaitingAcceptanceSince === null
+        ? null
+        : Math.floor((now - Date.parse(batch.awaitingAcceptanceSince)) / 60_000),
+    )
+    .filter((minutes): minutes is number => minutes !== null && Number.isFinite(minutes));
   return {
     rounds: batches.length,
-    urgentRounds: batches.filter(
-      (batch) =>
-        batch.awaitingAcceptanceSince !== null &&
-        now - Date.parse(batch.awaitingAcceptanceSince) >= urgentMinutes * 60_000,
-    ).length,
+    urgentRounds: waits.filter((minutes) => minutes >= urgentMinutes).length,
+    longestWaitMinutes: waits.length === 0 ? null : Math.max(...waits),
   };
 }
 const money = (value: unknown) => {

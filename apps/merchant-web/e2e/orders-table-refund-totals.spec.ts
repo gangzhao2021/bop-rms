@@ -247,7 +247,7 @@ const words = (zh: boolean) =>
   zh
     ? {
         total: "合计",
-        other: "其他退款",
+        other: "已退款",
         pending: "正在退回客人的卡",
         after: "退款后合计",
         refunded: "已退 $8.75",
@@ -255,7 +255,7 @@ const words = (zh: boolean) =>
       }
     : {
         total: "Total",
-        other: "Other refunds",
+        other: "Refunded",
         pending: "Refund on its way",
         after: "Total after refunds",
         refunded: "$8.75 refunded",
@@ -382,7 +382,7 @@ for (const zh of [false, true]) {
           .first();
       await expect(value(zh ? "小费" : "Tip")).toHaveText("$6.00");
       await expect(value(zh ? "合计" : "Total")).toHaveText("$46.00");
-      await expect(value(zh ? "其他退款" : "Other refunds")).toHaveText("−$10.00");
+      await expect(value(zh ? "已退款" : "Refunded")).toHaveText("−$10.00");
       // The same figure as the list's amount.
       await expect(value(zh ? "退款后合计" : "Total after refunds")).toHaveText("$36.00");
       expect(

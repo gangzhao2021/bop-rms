@@ -7,7 +7,7 @@ import { expect, test, type Page } from "@playwright/test";
  *    owed. On phones the row said only "$28.25": the refund was in a note phones hide.
  *  - Order 48: a table paid $32.00 ($3.75 tip), all of it refunded. "Paid at the table" still said
  *    "Can still be refunded $0.00" and "It can take a few days…".
- *  - A pickup with a refund sent to the card company and not answered yet: "Other refunds" and
+ *  - A pickup with a refund sent to the card company and not answered yet: "Refunded" and
  *    "Total after refunds" counted it as given back (a table never does).
  *  - b61 review: a pickup staff cancelled, its $5.00 refund not answered yet, $3.00 already back at
  *    the guest's request. The detail counted the $5.00 in "Total refunded" and took it off
@@ -364,7 +364,7 @@ for (const zh of [false, true]) {
         ),
       ).toBe(true);
       await openRow(page);
-      await expect(value(page, zh ? "其他退款" : "Other refunds")).toHaveText("−$3.00");
+      await expect(value(page, zh ? "已退款" : "Refunded")).toHaveText("−$3.00");
       await expect(value(page, zh ? "退款后合计" : "Total after refunds")).toHaveText("$25.25");
       await page.screenshot({
         path: `test-results/b61-partly-paid-${language}-${width}.png`,
@@ -413,7 +413,7 @@ for (const zh of [false, true]) {
       await expect(value(page, zh ? "正在退回客人的卡" : "Refund on its way")).toHaveText("$14.13");
       await expect(
         page.locator(".order-lines-totals dt", {
-          hasText: zh ? /^其他退款$/u : /^Other refunds$/u,
+          hasText: zh ? /^已退款$/u : /^Refunded$/u,
         }),
       ).toHaveCount(0);
       await expect(
@@ -439,7 +439,7 @@ for (const zh of [false, true]) {
       await expect(row.locator(".order-row__money")).toHaveText("$11.13");
       await openRow(page);
       await expect(value(page, zh ? "合计" : "Total")).toHaveText("$14.13");
-      await expect(value(page, zh ? "其他退款" : "Other refunds")).toHaveText("−$3.00");
+      await expect(value(page, zh ? "已退款" : "Refunded")).toHaveText("−$3.00");
       await expect(value(page, zh ? "退款后合计" : "Total after refunds")).toHaveText("$11.13");
       await expect(value(page, zh ? "正在退回客人的卡" : "Refund on its way")).toHaveText("$5.00");
       await expect(
@@ -472,7 +472,7 @@ for (const zh of [false, true]) {
       );
       await expect(value(page, zh ? "小费" : "Tip")).toHaveText("$3.75");
       await expect(value(page, zh ? "整桌账单实付" : "Whole bill paid")).toHaveText("$60.25");
-      await expect(value(page, zh ? "其他退款" : "Other refunds")).toHaveText("−$10.00");
+      await expect(value(page, zh ? "已退款" : "Refunded")).toHaveText("−$10.00");
       await expect(value(page, zh ? "退款后合计" : "Total after refunds")).toHaveText("$50.25");
       await fits(page, ".order-lines-totals > div");
       await page.screenshot({

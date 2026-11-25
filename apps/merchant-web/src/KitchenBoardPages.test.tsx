@@ -84,10 +84,10 @@ describe("WP-1804 Kitchen Board screens", () => {
         <KitchenBoardScreen view={view} checkedAt={checked} autoRefresh />
       </MemoryRouter>,
     );
-    expect(html).toContain("Last checked <time");
-    expect(html).toContain("16:17 UTC</time>");
+    // Batch 63 (F24): the one shared stamp, from when this screen last read the board.
+    expect(html).toContain("Updated 16:17 UTC</time>");
     expect(html).toContain('title="Last change 15:12 UTC"');
-    expect(html).not.toContain("Updated · 15:12");
+    expect(html).not.toContain("Updated 15:12");
     const stale = renderToStaticMarkup(
       <MemoryRouter>
         <KitchenBoardScreen
@@ -97,7 +97,7 @@ describe("WP-1804 Kitchen Board screens", () => {
         />
       </MemoryRouter>,
     );
-    expect(stale).toContain("Data may be out of date · last checked <time");
+    expect(stale).toContain("Data may be out of date · last checked 16:17 UTC</time>");
     // Batch 63 (F46): the line says new orders can't arrive, and since when.
     expect(stale).toContain("Can&#x27;t receive new orders — connection lost since");
   });
@@ -110,7 +110,7 @@ describe("WP-1804 Kitchen Board screens", () => {
     for (const value of [
       "Kitchen display",
       "Kitchen",
-      "Updated · 15:12 UTC",
+      "Updated 15:12 UTC",
       "Queue",
       "Order number or table",
       "The number on the ticket or receipt, or the table. Shows only that order&#x27;s work.",

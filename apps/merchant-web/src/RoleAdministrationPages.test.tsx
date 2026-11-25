@@ -42,8 +42,8 @@ const noInternals = (html: string) => {
 
 it("WP-2423 role presets: lists roles in use and removed roles in plain words", () => {
   expect(Object.values(roleKindLabels)).toEqual([
-    "BOP preset",
-    "Your version of a BOP preset",
+    "Standard role",
+    "Your version of a standard role",
     "Your role",
   ]);
   const list = render(roleListFixture, "IAM-ROLE-LIST");
@@ -118,7 +118,7 @@ it("WP-2423 role presets: a Store's version offers Restore default; the Owner ro
     withRole({ kind: "YourVersion", operations: ["Revise", "RestoreDefault", "Duplicate"] }, null),
     "IAM-ROLE-EDITOR",
   );
-  expect(mine).toContain("Your version of a BOP preset");
+  expect(mine).toContain("Your version of a standard role");
   expect(mine).toContain("Restore default");
   expect(mine).toContain("Edit this preset");
   const held = render(withRole({ operations: [] }, null), "IAM-ROLE-EDITOR");

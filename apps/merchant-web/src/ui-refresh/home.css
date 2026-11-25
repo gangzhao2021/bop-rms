@@ -570,3 +570,22 @@
     justify-self: start;
   }
 }
+
+/* Batch 63 (F24, v15 batch 62 review: the figures sat at y 697, 712 and 733 and the links were
+   32px tall): the "Right now" columns start together — the 20/600 figure, then its accent link at
+   least 44px tall, then the grey note. "Today's summary" has no figure, so its link starts where
+   the other links do. */
+.workspace-page--overview .overview-counts {
+  align-items: flex-start;
+}
+.workspace-page--overview .overview-counts .overview-count__label {
+  min-height: 44px;
+}
+.workspace-page--overview .overview-counts .overview-counts__summary {
+  padding-top: 26px;
+}
+@media (max-width: 48rem) {
+  .workspace-page--overview .overview-counts {
+    align-items: start;
+  }
+}

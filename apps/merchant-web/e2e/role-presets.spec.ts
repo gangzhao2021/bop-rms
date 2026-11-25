@@ -313,7 +313,7 @@ test("@production a sole owner edits Front of House, approves it alone, turns it
   await state.install(page);
   await page.goto("/app/organization/roles");
   await expect(page.getByRole("heading", { name: "Roles in use" })).toBeVisible();
-  await expect(page.getByText("BOP preset").first()).toBeVisible();
+  await expect(page.getByText("Standard role").first()).toBeVisible();
   await checkScreen(page, "list");
   await page
     .locator("li.role-row")
@@ -345,7 +345,7 @@ test("@production a sole owner edits Front of House, approves it alone, turns it
   await page.getByLabel("I checked this role change and approve on my own").check();
   await checkScreen(page, "approve-alone");
   await approve.click();
-  await expect(page.getByText("Your version of a BOP preset").first()).toBeVisible();
+  await expect(page.getByText("Your version of a standard role").first()).toBeVisible();
   expect(state.commands.map((item) => item.operation)).toEqual([
     "Revise",
     "Submit",

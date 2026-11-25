@@ -1,12 +1,12 @@
 import { currentLanguage, t } from "./i18n/i18n.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type { MerchantWorkspaceSnapshot } from "./merchant-workspace.js";
 import { StaffSignInLink } from "./StaffSession.js";
 import { FullSignInPrompt } from "./FullSignInPrompt.js";
 import { FULL_SIGN_IN_REQUIRED } from "./full-sign-in.js";
 import { businessDateText, useStoreBusinessDay } from "./StoreBusinessDay.js";
-import { Freshness } from "./StoreTime.js";
+import { Freshness, PageReadAtContext } from "./StoreTime.js";
 import { WorkspacePage } from "./WorkspacePage.js";
 
 /** The Store's status in Chinese ("Open" alone is also an unresolved follow-up's status there). */
@@ -75,6 +75,8 @@ export function MerchantShell({
   prompt = null,
 }: MerchantShellProps) {
   const liveBusinessDay = useStoreBusinessDay();
+  // Batch 63 (F24): "Updated 01:36" from when Home's own sections were last read.
+  const [readAt, setReadAt] = useState<string | null>(null);
   if (state.kind !== "Ready")
     return (
       <AppFrame title={t("Operations")} description={t("Store workspace")}>
@@ -101,7 +103,7 @@ export function MerchantShell({
           </span>
         </>
       }
-      status={<Freshness status={ready.workspace.freshness} />}
+      status={<Freshness status={ready.workspace.freshness} at={readAt ?? undefined} />}
       actions={
         multiStore ? (
           <form
@@ -136,40 +138,42 @@ export function MerchantShell({
         ) : null
       }
     >
-      <section id="overview" aria-label={t("Store overview")}>
-        {ready.switchFailed === FULL_SIGN_IN_REQUIRED ? (
-          <>
-            <p role="status">
-              {t("Your previous Store is unchanged. After you verify, switch again.")}
+      <PageReadAtContext.Provider value={setReadAt}>
+        <section id="overview" aria-label={t("Store overview")}>
+          {ready.switchFailed === FULL_SIGN_IN_REQUIRED ? (
+            <>
+              <p role="status">
+                {t("Your previous Store is unchanged. After you verify, switch again.")}
+              </p>
+              <FullSignInPrompt csrf={ready.csrf ?? ""} />
+            </>
+          ) : ready.switchFailed ? (
+            <p className="command-error" role="alert">
+              {t("Store switch failed. Your previous Store is unchanged.")}
             </p>
-            <FullSignInPrompt csrf={ready.csrf ?? ""} />
-          </>
-        ) : ready.switchFailed ? (
-          <p className="command-error" role="alert">
-            {t("Store switch failed. Your previous Store is unchanged.")}
-          </p>
-        ) : null}
-        {ready.workspace.freshness === "Stale" ? (
-          <p className="stale-warning" role="status">
-            {t("Stale data · refresh before relying on operational status.")}
-          </p>
-        ) : null}
-        {prompt}
-        {overview ?? (
-          <div className="overview-grid">
-            {today ?? (
-              <section className="overview-note" aria-labelledby="today-summary-heading">
-                <h2 id="today-summary-heading">{t("Today")}</h2>
-                <p>
-                  {t(
-                    "Sales, open orders and exceptions for the day are not available in this release. Use Orders, Kitchen, Pickup and Exceptions from the menu.",
-                  )}
-                </p>
-              </section>
-            )}
-          </div>
-        )}
-      </section>
+          ) : null}
+          {ready.workspace.freshness === "Stale" ? (
+            <p className="stale-warning" role="status">
+              {t("Stale data · refresh before relying on operational status.")}
+            </p>
+          ) : null}
+          {prompt}
+          {overview ?? (
+            <div className="overview-grid">
+              {today ?? (
+                <section className="overview-note" aria-labelledby="today-summary-heading">
+                  <h2 id="today-summary-heading">{t("Today")}</h2>
+                  <p>
+                    {t(
+                      "Sales, open orders and exceptions for the day are not available in this release. Use Orders, Kitchen, Pickup and Exceptions from the menu.",
+                    )}
+                  </p>
+                </section>
+              )}
+            </div>
+          )}
+        </section>
+      </PageReadAtContext.Provider>
     </WorkspacePage>
   );
 }

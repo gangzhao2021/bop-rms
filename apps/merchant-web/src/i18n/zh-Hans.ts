@@ -333,7 +333,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "(cannot be changed later)": "（之后不能更改）",
   "(exp.": "（到期",
   "(it can be printed later), then take the order.": "（可稍后打印），然后再点单。",
-  "(min-width: 48.0625rem)": "(min-width: 48.0625rem)",
+  "(min-width: 75rem)": "(min-width: 75rem)",
   "+ {value} {unitCode} {to} per one chosen": "每选一份 + {value} {unitCode} {to}",
   ", already finished — release its ingredients on Orders": "，已完成 — 请在订单页释放其配料",
   ", including any tip": "，包括全部小费",
@@ -865,7 +865,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Allergens from ingredients:": "来自配料的过敏原：",
   "Allergens not on file. Ask the manager before serving anyone with an allergy.":
     "没有过敏原记录。客人有过敏时，先问经理再上菜。",
-  "Allergens · Brand": "过敏原 · 品牌",
   "Allergens · Ingredient": "过敏原 · 配料",
   "Allergens: {value}": "过敏原：{value}",
   "Allow with a warning": "允许并提醒",
@@ -1653,7 +1652,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Dashboard not found": "未找到看板",
   "Dashboard unavailable": "看板暂不可用",
   "Data may be out of date": "数据可能已过时",
-  "Data may be out of date · last checked ": "数据可能已过时 · 最近检查 ",
   "Date and time": "日期和时间",
   "Dated exceptions": "特定日期例外",
   "Dawson City, Yukon": "道森市，育空地区",
@@ -1841,8 +1839,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Every active ingredient has a current declaration.": "所有在用配料都有有效申报。",
   "Every check above has passed.": "上面的每项检查都已通过。",
   "Every check passed.": "每项检查都已通过。",
-  "Every ingredient used in a recipe needs an allergen declaration taken from its supplier specification, label or manufacturer statement. Recipes carry these declarations; a recipe's food safety review approves them, and menus disclose them to customers. Source as of":
-    "配方中使用的每种配料都需要依据供应商规格书、标签或生产商声明进行过敏原申报。配方会带上这些申报；配方的食品安全审核批准它们，菜单向顾客公开。数据截至",
+  "For every store of the brand": "品牌下所有门店通用",
+  "Every ingredient used in a recipe needs an allergen declaration taken from its supplier specification, label or manufacturer statement. Recipes carry these declarations; a recipe's food safety review approves them, and menus disclose them to customers.":
+    "配方中使用的每种配料都需要依据供应商规格书、标签或生产商声明进行过敏原申报。配方会带上这些申报；配方的食品安全审核批准它们，菜单向顾客公开。",
   "Every line needs a count before submitting, and every difference needs a reason before approval.":
     "提交前每一行都需要清点数，批准前每项差异都需要原因。",
   "Every option needs a name.": "每个选项都需要名称。",
@@ -2024,7 +2023,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "我确认已将 {quantity} × {displayName}送到桌台 {tableLabel}",
   "I have identified the selected guest and confirm the host transfer":
     "我已确认所选顾客身份，并确认转让主持人",
-  "I have reviewed this confirmed refund and reconciled this case": "我已核对这笔退款",
   "I matched this order, the person collecting it and every item shown":
     "我已核对这笔订单、取餐人以及显示的每一件商品",
   "I run this business on my own": "我独自经营这家店",
@@ -2246,7 +2244,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Last backup {lastSuccessfulBackupAt}": "最近备份 {lastSuccessfulBackupAt}",
   "Last change {time}": "最近更改 {time}",
   "Last checked": "最近检查",
-  "Last checked ": "最近检查 ",
   "Last checked {updatedAt}": "最近检查 {updatedAt}",
   "Last follow-up before it closed: {value} ·": "关闭前最后一次跟进：{value} ·",
   "Last orders (minutes before closing)": "最后点单（打烊前分钟数）",
@@ -2938,7 +2935,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Items refund on its way": "商品退款退回中",
   "Order cancelled elsewhere": "订单已在别处取消",
   "Order cancelled. The customer's refund has started.": "订单已取消。顾客的退款已开始。",
-  "Order closed. Serving history is read-only.": "订单已关闭。上桌记录为只读。",
   "Order closure could not be confirmed": "订单关闭未能确认",
   "Order details unavailable": "订单详情暂不可用",
   "Order for guests who can't or won't use their phone, or enter a paper order after an outage. It joins this table's order.":
@@ -3011,7 +3007,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Other amount": "其他金额",
   "Other language": "其他语言",
   "Other reason": "其他原因",
-  "Other refunds": "其他退款",
   "Other time zones": "其他时区",
   "Out of service": "停用",
   Overdue: "逾期",
@@ -3041,6 +3036,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Paid during an outage · decide": "停电/断网期间付款 · 请处理",
   "Paid during an outage · decide within {value} min": "停电/断网期间付款 · {value} 分钟内处理",
   "Paid during an outage — decide": "停电/断网期间付款 — 请处理",
+  "Taken offline — needs a decision": "离线收单 · 待处理",
+  "I checked the refund reached the guest": "我已确认退款已到顾客账上",
+  "Mark as checked": "标记为已核对",
+  "Overdue since ": "逾期自 ",
+  "Due ": "截止 ",
+  "Was due ": "原截止 ",
   "Paid on card machine": "已用刷卡机付款",
   "Paid on card machine ": "已用刷卡机付款 ",
   "Paid on card machine {value} · {takenAt}": "已用刷卡机付款 {value} · {takenAt}",
@@ -3414,7 +3415,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Record deliveries and store purchases here as they arrive.": "在送货和门店采购到达时在此记录。",
   "Record ingredient allergen declarations": "记录配料过敏原申报",
   "Record items served": "记录已上桌的商品",
-  "Record operations reconciliation": "记录已核对",
   "Record the card machine refund": "记录刷卡机退款",
   "Record the payment by {at}. If it isn't paid by then the order is released and its items go back to stock.":
     "请在 {at} 前记录付款。未付款的订单将被释放，商品退回库存。",
@@ -5709,7 +5709,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "different from the live Store": "与当前门店不同",
   "different from the live Store (see below)": "与当前门店不同（见下方）",
   "done and ready": "已做好",
-  "due ": "截止 ",
   "e.g. Front counter": "例如 前台柜台",
   "each (portions sold as a size)": "个（按规格售卖的份数）",
   end: "结束",
@@ -5768,7 +5767,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   order: "订单",
   "order or table “{search}”": '单号或桌台"{search}"',
   "order {value}": "订单 {value}",
-  "overdue since ": "逾期自 ",
   payments: "笔付款",
   "phone or message alerts": "电话或消息提醒",
   "photo changed": "照片已更改",
@@ -5840,7 +5838,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   until: "至",
   "up to {maximum}": "最多 {maximum}",
   waiting: "等待中",
-  "was due ": "截止 ",
   "workspace-nav-{copy}-{group}": "workspace-nav-{copy}-{group}",
   "yet: it has no table QR code, so guests can't join.": "：它没有桌台二维码，顾客无法加入。",
   "yet: it has no table QR code.": "：它没有桌台二维码。",
@@ -5861,8 +5858,13 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{area} area": "{area}区",
   "{attentionCount} need{value} attention": "{attentionCount} 项需要处理",
   "{awaitingCount} orders are waiting to be accepted.": "有 {awaitingCount} 笔订单等待接单。",
-  "{base} ({urgentRounds} paid {paidRoundUrgentMinutes}+ min ago)":
-    "{base}（{urgentRounds} 轮已付款超过 {paidRoundUrgentMinutes} 分钟）",
+  "{base} · paid {waited}": "{base} · {waited}已付",
+  "{base} · {urgentRounds} paid {paidRoundUrgentMinutes}+ min ago, the oldest {waited}":
+    "{base} · {urgentRounds} 轮已付款超过 {paidRoundUrgentMinutes} 分钟，最早的{waited}已付",
+  "{orders} waiting to be accepted": "{orders} 单待接",
+  "{count} pickups": "{count} 单自取",
+  "{count} to accept": "{count} 单待接",
+  "{total} ({parts})": "{total}（{parts}）",
   "{blocked} {value} attention before this can be sent for approval or published.":
     "{blocked} {value}需要处理，之后才能提交审批或发布。",
   "{brandLabel} · {storeLabel} · Business Date {businessDate} · {timezone}":
@@ -5951,7 +5953,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{label} is removed. {signedOut} {value} signed out.":
     "{label}已移除。{signedOut} {value}已退出登录。",
   "{label} was already removed. The list is refreshed.": "{label}已被移除。列表已刷新。",
-  "{label} · Business date {businessDate}": "{label} · 营业日 {businessDate}",
   "{label}: set it in {where}": "{label}：请在{where}中设置",
   "{label}: the payment provider has {value} {value2} than the store":
     "{label}：支付方比门店{value} {value2}",
@@ -6060,7 +6061,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{onHand} in stock": "库存 {onHand}",
   "{onHand} of {name} is in stock, but {reserved} is set aside for {openOrderCount} and one needs {required}":
     "{name}库存有 {onHand}，但 {reserved} 已为 {openOrderCount}预留，而一份需要 {required}",
-  "{orders} awaiting acceptance": "{orders} 等待接单",
   "{orders}{value}. Older orders are on the next page.": "{orders}{value}。较早的订单在下一页。",
   "{overdue} overdue": "逾期 {overdue}",
   "{partlyRefund} refunded": "已退款 {partlyRefund}",
@@ -6389,9 +6389,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Make it and hand it over if the guest comes back; otherwise cancel it — the guest is refunded and the ingredients go back to stock.":
     "顾客来了就做好交给他；不来就取消订单，系统会退款并把食材放回库存。",
   "Show order {orderNumber}": "查看 {orderNumber} 号单",
-  "Updated {time}": "{time} 已更新",
   "Adding new staff opens when staff sign-in is switched on for your store. Until then, ask BOP support to add them.":
     "门店开通员工登录后，就能在这里添加新员工。在那之前，请联系 BOP 技术支持帮你添加。",
+  "Updated {time}": "已更新 {time}",
+  "Data may be out of date · last checked {time}": "数据可能已过时 · 最近检查 {time}",
   Filter: "筛选",
   "Close filters": "关闭筛选",
   Date: "日期",
@@ -9071,8 +9072,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Removed roles": "已移除的角色",
   "Nobody holds these. Open one to bring it back.": "没有人持有这些角色。打开即可恢复使用。",
   "Roles waiting for approval": "等待批准的角色",
-  "BOP preset": "BOP 预设",
-  "Your version of a BOP preset": "本店修改过的 BOP 预设",
+  "Standard role": "标准角色",
+  "Your version of a standard role": "本店修改过的标准角色",
   "Your role": "自定义角色",
   "Change not sent yet": "改动尚未提交",
   "Change waiting for approval": "改动等待批准",
@@ -9277,7 +9278,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "本门店仍使用自己的价格 {own}。要让本门店也使用新价格，请选择“仅限本门店”，或在“价格”页改回品牌价格。",
   "You can't change this dish's price. Ask the owner or the Store's manager.":
     "你不能修改这道菜的价格。请联系店主或本门店店长。",
-  " · counts for {businessDate}": " · 计入 {businessDate}",
+  " · counts for {businessDate}": " · 计入{businessDate}",
   "Already paid on paper. Enter what the slip or cash record shows, then record it. Don't charge again.":
     "纸单已付款。按小票或现金记录填写后录入，请勿重复收款。",
   "Sent. This paper order was paid during the outage: don't charge again, record it below.":

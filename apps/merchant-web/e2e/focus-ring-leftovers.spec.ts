@@ -272,8 +272,11 @@ const wordsFor = (language: Language) => words[language];
 
 const cut = (ring: RingOverhang) => ring.top + ring.right + ring.bottom + ring.left > 0;
 
+// Batch 63 (F38): below 1200px the side navigation is the top bar's Menu drawer (v3 frame 46:2),
+// so the side navigation's own scroll box exists from 1200px; 1280x720 keeps it taller than the
+// window, as 1024x768 did.
 const desktop = [
-  { width: 1024, height: 768 },
+  { width: 1280, height: 720 },
   { width: 1440, height: 900 },
 ] as const;
 const pages = [

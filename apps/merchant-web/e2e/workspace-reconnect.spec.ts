@@ -209,7 +209,9 @@ for (const width of [390, 1024, 1440])
     // Margins: off the top edge, and off the sidebar (or the phone's edge) by the page gutter.
     expect(h.y).toBeGreaterThanOrEqual(16);
     const text = await box(page.getByText("Retrying on its own.", { exact: false }));
-    if (width === 390) expect(text.x).toBeGreaterThanOrEqual(16);
+    // Batch 63 (F38): below 1200px the navigation is the top bar, so the page has the window's
+    // whole width and keeps its own gutter.
+    if (width < 1200) expect(text.x).toBeGreaterThanOrEqual(16);
     else {
       const nav = await box(page.locator(".workspace-sidebar"));
       expect(text.x).toBeGreaterThanOrEqual(nav.x + nav.width + 16);

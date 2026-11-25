@@ -1,4 +1,4 @@
-import { systemText, countOf, t } from "./i18n/i18n.js";
+import { systemText, countOf, listSeparator, t } from "./i18n/i18n.js";
 import { openedOnEarlierDay } from "./earlier-day-tables.js";
 import { PauseOrderingControl, PauseOrderingShownContext } from "./PauseOrderingControl.js";
 import {
@@ -41,7 +41,12 @@ import {
 } from "./order-exception-view.js";
 import { createPickupClient } from "./pickup-client.js";
 import { parsePickupQueueView } from "./pickup.js";
-import { storeTime } from "./StoreTime.js";
+import { PageReadAtContext, storeTime } from "./StoreTime.js";
+import {
+  earlierDayUnfinished,
+  earlierDayWaiting,
+  type OrdersBusinessDay,
+} from "./orders-earlier-days.js";
 import { ClosingReminder, closingReminderScreen, closingReminderShows } from "./ClosingReminder.js";
 import { OrderingEndingNotice } from "./OrderingEndingNotice.js";
 import { formatContactPhone } from "./contact-phone.js";
@@ -79,9 +84,21 @@ export interface OrdersSummary {
    * finish are on Pickup's own earlier-days count.
    */
   readonly earlierUnfinished: number;
+  /**
+   * Batch 63 (F23, v15: Home said 41, Orders 46): every earlier day's order still unfinished, by
+   * the Orders page's own rule, with the pickups and the orders to accept among them. Absent until
+   * the Store's business day is known.
+   */
+  readonly earlier?: {
+    readonly total: number;
+    readonly pickups: number;
+    readonly toAccept: number;
+  };
   /** WP-2423: rounds awaiting acceptance (a table may have several) and paid ones waiting long. */
   readonly awaitingRounds: number;
   readonly urgentRounds: number;
+  /** Batch 63 (F24): how long the longest-waiting paid round has waited (minutes), if any. */
+  readonly longestWaitMinutes?: number | null;
   /**
    * WP-2423 M04: paid orders that need a person now — accepted but not in the kitchen a minute
    * later, or a pickup whose automatic refund did not go through.
@@ -277,6 +294,23 @@ export interface ExceptionsSummary {
   readonly open: number;
   readonly overdue: number;
 }
+/**
+ * Batch 63 (F23): Home's line for the earlier days' orders not finished, in the Orders page's
+ * count: "46 (4 pickups, 1 to accept)" / "46（4 单自取，1 单待接）".
+ */
+export function earlierOrdersText(earlier: {
+  readonly total: number;
+  readonly pickups: number;
+  readonly toAccept: number;
+}): string {
+  const parts = [
+    earlier.pickups > 0 ? t("{count} pickups", { count: earlier.pickups }) : null,
+    earlier.toAccept > 0 ? t("{count} to accept", { count: earlier.toAccept }) : null,
+  ].filter((part): part is string => part !== null);
+  return parts.length === 0
+    ? String(earlier.total)
+    : t("{total} ({parts})", { total: earlier.total, parts: parts.join(listSeparator()) });
+}
 /** WP-2423 Q1: the home page re-reads its summaries this often. */
 export const OVERVIEW_REFRESH_MS = 30_000;
 /**
@@ -306,7 +340,12 @@ export function soldOutNowDetail(awaiting: number, unpaid: number): string {
     { orders: countOf(awaiting, "order"), unpaid: countOf(unpaid, "order") },
   );
 }
-export function summarizeOrders(queue: CurrentOrderQueue, now = Date.now()): OrdersSummary {
+export function summarizeOrders(
+  queue: CurrentOrderQueue,
+  now = Date.now(),
+  day: OrdersBusinessDay | null = null,
+): OrdersSummary {
+  const earlier = queue.items.filter((order) => earlierDayUnfinished(order, day));
   // Owner 2026-11-04 walkthrough: a pickup closed as not collected keeps its phase but is finished.
   const open = queue.items.filter(
     (order) => openPhases.has(order.currentPhase ?? "") && !order.pickupNotCollected,
@@ -319,8 +358,18 @@ export function summarizeOrders(queue: CurrentOrderQueue, now = Date.now()): Ord
     earlierUnfinished: queue.items.filter(
       (order) => order.earlierOpenPickup && order.kitchenPhase !== "Ready",
     ).length,
+    ...(day === null
+      ? {}
+      : {
+          earlier: {
+            total: earlier.length,
+            pickups: earlier.filter((order) => order.earlierOpenPickup).length,
+            toAccept: earlier.filter((order) => earlierDayWaiting(order, day)).length,
+          },
+        }),
     awaitingRounds: rounds.rounds,
     urgentRounds: rounds.urgentRounds,
+    longestWaitMinutes: rounds.longestWaitMinutes,
     paidStuck: paidOrdersStuck(queue, now),
     readyToServe: dineIn.filter(
       (order) =>
@@ -533,6 +582,11 @@ export function OverviewToday({
 }) {
   const businessDay = useStoreBusinessDay();
   const tables = tablesSummary(state, dayStartsAt ?? businessDay?.startsAt ?? null);
+  // Batch 63 (F24): inside Home the header carries the one stamp, from this read.
+  const reportReadAt = useContext(PageReadAtContext);
+  useEffect(() => {
+    if (reportReadAt !== null && state.updatedAt !== null) reportReadAt(state.updatedAt);
+  }, [reportReadAt, state.updatedAt]);
   if (
     reportsHref === null &&
     [state.orders, state.pickups, state.tables].every((read) => read.kind === "Hidden")
@@ -543,11 +597,15 @@ export function OverviewToday({
       <header>
         <h2 id="today-summary-heading">{t("Right now")}</h2>
         <div className="overview-now__tools">
-          <p className="overview-updated">
-            {state.updatedAt === null
-              ? t("Reading current work…")
-              : t("Last checked {updatedAt}", { updatedAt: storeTime(state.updatedAt, timeZone) })}
-          </p>
+          {reportReadAt !== null && state.updatedAt !== null ? null : (
+            <p className="overview-updated">
+              {state.updatedAt === null
+                ? t("Reading current work…")
+                : t("Last checked {updatedAt}", {
+                    updatedAt: storeTime(state.updatedAt, timeZone),
+                  })}
+            </p>
+          )}
           {onRefresh ? (
             <button
               type="button"
@@ -780,6 +838,7 @@ export function attentionItems(
           orders: o.awaitingAcceptance,
           rounds: o.awaitingRounds,
           urgentRounds: o.urgentRounds,
+          longestWaitMinutes: o.longestWaitMinutes ?? null,
         }),
         state: t("To accept"),
         tone: o.urgentRounds > 0 ? "danger" : "warning",
@@ -873,14 +932,21 @@ export function attentionItems(
       action: t("Go to {value}", { value: t("Settlement") }),
       backlog: true,
     });
-  if (state.orders.kind === "Ready" && state.orders.value.earlierUnfinished > 0)
+  const earlier = state.orders.kind === "Ready" ? state.orders.value.earlier : undefined;
+  if (
+    state.orders.kind === "Ready" &&
+    (earlier === undefined ? state.orders.value.earlierUnfinished : earlier.total) > 0
+  )
     items.push({
       key: "earlier-orders",
       title: t("Earlier orders not finished"),
+      // Batch 63 (F23): the number Orders shows, and what is in it ("46 (4 pickups, 1 to accept)").
       detail:
-        String(state.orders.value.earlierUnfinished) +
-        " · " +
-        t("Make it if the guest comes back; otherwise cancel it and refund them"),
+        earlier === undefined
+          ? String(state.orders.value.earlierUnfinished) +
+            " · " +
+            t("Make it if the guest comes back; otherwise cancel it and refund them")
+          : earlierOrdersText(earlier),
       state: t("To check"),
       tone: "warning",
       href: "/operations/orders",
@@ -1469,9 +1535,16 @@ export function StoreOverview({
     permitted.settlement ? { kind: "Loading" } : hidden,
   );
   // Pickup's rule for an earlier day needs the Store's business date (read by the shell).
-  const today = useStoreBusinessDay()?.businessDate ?? null;
+  const storeDay = useStoreBusinessDay();
+  const today = storeDay?.businessDate ?? null;
   const todayRef = useRef(today);
   todayRef.current = today;
+  // Batch 63 (F23): the day Orders counts its earlier days' unfinished orders against.
+  const ordersDayRef = useRef<OrdersBusinessDay | null>(null);
+  ordersDayRef.current =
+    storeDay?.businessDate == null || storeDay.startsAt == null
+      ? null
+      : { businessDate: storeDay.businessDate, startsAt: storeDay.startsAt };
   const pickupView = useRef<Parameters<typeof summarizePickups>[0] | null>(null);
   // WP-2423 item 11: told only to those who can fix it; a failed read says nothing here (the
   // Store setup section and the listing refusal still say it).
@@ -1602,6 +1675,8 @@ export function StoreOverview({
               async () =>
                 summarizeOrders(
                   await clients.orders.load(null, controller.signal, { csrf, storeReference }),
+                  Date.now(),
+                  ordersDayRef.current,
                 ),
               (orders) => setState((s) => ({ ...s, orders })),
             )

@@ -120,8 +120,9 @@ export interface RoleAdministrationItemView {
 /** WP-2423 role presets: what a role is, in staff words. */
 export const roleKindLabels: Readonly<Record<RoleAdministrationItemView["kind"], string>> =
   Object.freeze({
-    Preset: t("BOP preset"),
-    YourVersion: t("Your version of a BOP preset"),
+    // Batch 63 (RA-16 with F22): an owner does not know what a "BOP preset" is.
+    Preset: t("Standard role"),
+    YourVersion: t("Your version of a standard role"),
     Custom: t("Your role"),
   });
 export const roleScopeLabels: Readonly<Record<RoleAdministrationItemView["scope"], string>> =

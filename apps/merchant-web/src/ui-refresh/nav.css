@@ -27,7 +27,7 @@
 }
 .workspace-sidebar__identity .workspace-sidebar__store {
   color: var(--bop-color-text-default);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   line-height: 1.35;
   letter-spacing: 0;
@@ -74,7 +74,7 @@
   background: transparent;
   color: var(--bop-color-text-muted);
   font: inherit;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-align: start;
@@ -107,7 +107,7 @@
 .workspace-nav__group-current {
   overflow: hidden;
   color: var(--bop-color-text-default);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   letter-spacing: 0;
   text-overflow: ellipsis;
@@ -163,48 +163,11 @@
   }
 }
 
-/* Tablet (iPad landscape 1024 and portrait 768+): keep the sidebar, narrower and tighter. */
-@media (max-width: 64rem) and (min-width: 48.0625rem) {
-  .workspace-layout {
-    grid-template-columns: 12.5rem minmax(0, 1fr);
-  }
-  .workspace-sidebar {
-    position: sticky;
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 0;
-    height: calc(100vh - var(--bop-pinned-top, 0px));
-    padding: 12px 8px 16px;
-    border-right: 1px solid var(--bop-color-border-default);
-    border-bottom: 0;
-  }
-  .workspace-sidebar__identity {
-    padding: 0 8px 12px;
-  }
-  .workspace-sidebar__links {
-    display: block;
-  }
-  .workspace-sidebar__compact {
-    display: none;
-  }
-  .workspace-sidebar .workspace-nav__list a {
-    padding: 6px 10px;
-    font-size: 14px;
-  }
-  .workspace-sidebar .workspace-nav__group .workspace-nav__list a {
-    padding-inline-start: 16px;
-  }
-  .workspace-nav__group-toggle {
-    padding-inline: 10px;
-  }
-  .workspace-sidebar__footer {
-    display: block;
-  }
-}
-
-/* Phone: a bar with the Store and the page you are on; the Menu opens a full-height drawer. */
-@media (max-width: 48rem) {
+/* Batch 63 (F38, v3 frame 46:2): below 1200px wide (a 1024 iPad in landscape, a tablet in portrait,
+   a phone) the sidebar is a 56px top bar: BOP and the Store on the left, the update time, the
+   language and Menu on the right. Menu opens a full-height drawer. The page then has the whole
+   width: Tables' panel about 584px at 1024, Orders' list beside a 360px panel. */
+@media (max-width: 74.9375rem) {
   /* One column: the bar above the page, never a sidebar beside it. */
   .workspace-layout {
     grid-template-columns: minmax(0, 1fr);
@@ -320,7 +283,7 @@
     padding: 6px 12px;
     border-radius: var(--bop-radius-control);
     color: var(--bop-color-text-default);
-    font-size: 15px;
+    font-size: 16px;
     text-decoration: none;
   }
   .workspace-drawer__panel .workspace-nav__group .workspace-nav__list a {
@@ -354,7 +317,7 @@
 .workspace-sidebar .workspace-sidebar__language {
   display: none;
 }
-@media (max-width: 48rem) {
+@media (max-width: 74.9375rem) {
   .workspace-sidebar .workspace-sidebar__identity {
     flex: 1 1 auto;
     min-width: 0;
@@ -380,4 +343,65 @@
    around every stop, as on Tables, keeps the whole ring in view; the phone drawer scrolls too. */
 .workspace-sidebar :is(a[href], button, input, select, textarea, summary, [tabindex]) {
   scroll-margin: 8px;
+}
+
+/* Batch 63 (F38, Figma 58:65 after v3 46:2): the tablet top bar is 56px: BOP and the Store on the
+   left at the page's 24px edge; the page's "Updated 01:36", the language and Menu on the right,
+   Menu ending 24px from the edge. The stamp's place is empty (and hidden) on a phone and beside
+   the sidebar. */
+.workspace-sidebar__status {
+  display: none;
+}
+@media (min-width: 48.0625rem) and (max-width: 74.9375rem) {
+  .workspace-layout .workspace-sidebar {
+    padding: 5px 20px 5px 24px;
+  }
+  .workspace-sidebar__status:not(:empty) {
+    display: block;
+    flex: none;
+  }
+  .workspace-sidebar__status .workspace-page__status {
+    color: var(--bop-color-text-muted);
+    font-size: 14px;
+    font-weight: 400;
+    white-space: nowrap;
+  }
+}
+@media (max-width: 74.9375rem) {
+  .workspace-sidebar__identity .workspace-sidebar__brand strong {
+    font-size: 16px;
+    font-weight: 600;
+  }
+  .workspace-sidebar__identity .workspace-sidebar__store {
+    color: var(--bop-color-text-muted);
+    font-size: 14px;
+    font-weight: 400;
+  }
+  .workspace-layout .workspace-sidebar .workspace-sidebar__compact > summary {
+    font-weight: 400;
+  }
+}
+
+/* Batch 63 (F29, brief §2: 28/20/16/14 at 600 and 400): group labels are 14/400 grey words on one
+   line, never squeezed beside their chevron ("商品与菜单" broke as "商品与菜 / 单" at 1024); the
+   Store's name is 14/600. */
+.workspace-nav__group-toggle,
+.workspace-sidebar .workspace-nav__group-toggle {
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.workspace-nav__group-toggle > span:first-child {
+  flex: 1 0 auto;
+  white-space: nowrap;
+}
+@media (min-width: 75rem) {
+  .workspace-sidebar__identity .workspace-sidebar__store {
+    font-size: 14px;
+    font-weight: 600;
+  }
+}
+.workspace-nav__group-current {
+  font-size: 14px;
 }

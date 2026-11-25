@@ -2,7 +2,8 @@ import { t, listSeparator } from "./i18n/i18n.js";
 import { noAccessHeading } from "./access-denied.js";
 import { NoAccessNotice } from "./NoAccessNotice.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
-import { SourceTime, StoreDate } from "./StoreTime.js";
+import { Freshness, SourceTime, StoreDate } from "./StoreTime.js";
+import { WorkspacePage } from "./WorkspacePage.js";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { newOperationReference } from "./operation-reference.js";
@@ -155,19 +156,18 @@ export function AllergenListPage({
   const view: AllergenListView = state.view;
   const missing = view.items.filter((item) => item.status !== "Current").length;
   return (
-    <AppFrame title={t("Allergens")} description="">
-      <header className="screen-heading">
-        <div>
-          <p className="bop-eyebrow">{t("Allergens · Brand")}</p>
-          <h2>{t("Allergens")}</h2>
-          <p>
-            {t(
-              "Every ingredient used in a recipe needs an allergen declaration taken from its supplier specification, label or manufacturer statement. Recipes carry these declarations; a recipe's food safety review approves them, and menus disclose them to customers. Source as of",
-            )}{" "}
-            <SourceTime instant={view.sourceAsOf} />
-          </p>
-        </div>
-      </header>
+    // Batch 63 (F22, RA-03): the shared page header with the language switch at its right end.
+    <WorkspacePage
+      className="allergens-page"
+      title={t("Allergens")}
+      meta={t("For every store of the brand")}
+      status={<Freshness status="Fresh" at={view.sourceAsOf} />}
+    >
+      <p className="allergens-page__intro">
+        {t(
+          "Every ingredient used in a recipe needs an allergen declaration taken from its supplier specification, label or manufacturer statement. Recipes carry these declarations; a recipe's food safety review approves them, and menus disclose them to customers.",
+        )}
+      </p>
       {message ? (
         <StatePanel
           heading={message.tone === "error" ? t("Not done") : t("Done")}
@@ -375,7 +375,7 @@ export function AllergenListPage({
           </tbody>
         </table>
       </section>
-    </AppFrame>
+    </WorkspacePage>
   );
 }
 

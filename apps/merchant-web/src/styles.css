@@ -8,12 +8,12 @@
 .order-line-name {
   display: grid;
   gap: 2px;
-  font-weight: 500;
+  font-weight: 400;
 }
 .order-line-options,
 .order-line-note {
   font-weight: 400;
-  font-size: 13px;
+  font-size: 14px;
   color: #606873;
 }
 .order-line-note {
@@ -51,7 +51,7 @@
 
 .bop-eyebrow {
   color: var(--bop-color-text-muted);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.04em;
 }
@@ -127,7 +127,7 @@
 }
 .showcase-module-title {
   font-size: 1.2rem;
-  font-weight: 700;
+  font-weight: 600;
 }
 .showcase-module-footer {
   display: flex;
@@ -1185,7 +1185,7 @@
 .recipe-screen .bop-shell__header p {
   margin: 0;
   font-size: 0.75rem;
-  font-weight: 500;
+  font-weight: 400;
   letter-spacing: 0.04em;
 }
 .recipe-screen .bop-shell__header p {
@@ -2507,13 +2507,13 @@
   grid-row: 1;
   padding: 0;
   color: var(--bop-color-on-primary);
-  font-size: 21px;
+  font-size: 20px;
   font-weight: 400;
 }
 .bop-shell:has(.dining-workspace) .bop-shell__header h1 {
   margin: 0;
   color: #c7c7c7;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 400;
   letter-spacing: 0.04em;
 }
@@ -2611,7 +2611,7 @@
   gap: var(--bop-space-1);
   color: #444;
   font-size: 0.875rem;
-  font-weight: 550;
+  font-weight: 600;
 }
 .dining-floor-filters input,
 .dining-floor-filters select {
@@ -2660,7 +2660,7 @@
 .dining-area-lane h3 {
   color: #555;
   font-size: 0.75rem;
-  font-weight: 650;
+  font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
@@ -2814,7 +2814,7 @@
 .dining-session-detail section .dining-table-reason {
   display: grid;
   gap: var(--bop-space-2);
-  font-weight: 500;
+  font-weight: 400;
 }
 .dining-session-detail section .dining-table-reason select {
   box-sizing: border-box;
@@ -2913,7 +2913,7 @@
 }
 .communication-history-filters legend {
   padding: 0 8px;
-  font-weight: 650;
+  font-weight: 600;
 }
 .communication-history-filters label {
   display: grid;
@@ -3122,7 +3122,7 @@
 }
 .privacy-request-review__filters legend {
   padding: 0 8px;
-  font-weight: 650;
+  font-weight: 600;
 }
 .privacy-request-review__filters label {
   display: grid;
@@ -5183,7 +5183,7 @@
 }
 .setup-steps li > span {
   font-family: var(--bop-font-mono);
-  font-weight: 700;
+  font-weight: 600;
 }
 @media (max-width: 767px) {
   .list-filters {
@@ -5506,7 +5506,7 @@
   border-radius: 999px;
   background: var(--bop-color-surface-raised);
   font-size: 0.875rem;
-  font-weight: 650;
+  font-weight: 600;
 }
 .task-inbox-status[data-status="Claimed"] {
   border-color: var(--bop-color-info);
@@ -5586,7 +5586,7 @@
   font-size: 20px;
 }
 .product-list-commerce span {
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 600;
   text-transform: uppercase;
   color: var(--product-muted);
@@ -5623,7 +5623,7 @@
   margin-bottom: 28px;
 }
 .product-list-eyebrow {
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.02em;
 }
@@ -5657,7 +5657,7 @@
   background: var(--bop-color-surface-default);
 }
 .product-list-filters h2 {
-  font-size: 10px;
+  font-size: 14px;
   color: var(--product-muted);
   text-transform: uppercase;
   margin-bottom: 20px;
@@ -5670,7 +5670,7 @@
 .product-list-filter-grid label {
   display: grid;
   gap: 6px;
-  font-size: 10px;
+  font-size: 14px;
   color: var(--product-muted);
   text-transform: uppercase;
   font-weight: 600;
@@ -5679,7 +5679,7 @@
 .product-list-filter-grid label select {
   width: 100%;
   text-transform: none;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 400;
 }
 .product-list-filter-actions {
@@ -5702,7 +5702,7 @@
   height: 20px;
 }
 .product-list-filters > p {
-  font-size: 11px;
+  font-size: 14px;
 }
 .product-list-records {
   margin-top: 24px;
@@ -5716,7 +5716,7 @@
   margin-bottom: 16px;
 }
 .product-list-records-heading p {
-  font-size: 11px;
+  font-size: 14px;
   overflow-wrap: anywhere;
 }
 .product-list-results {
@@ -5752,10 +5752,10 @@
   padding: 14px 6px;
   border-bottom: 1px solid var(--product-border);
   overflow-wrap: anywhere;
-  font-size: 11px;
+  font-size: 14px;
 }
 .product-list-table thead th {
-  font-size: 9px;
+  font-size: 14px;
   text-transform: uppercase;
   color: var(--product-muted);
 }
@@ -5766,7 +5766,7 @@
 .product-list-category-summary small {
   display: block;
   color: var(--product-muted);
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 400;
   margin-top: 6px;
 }
@@ -5793,7 +5793,7 @@
     min-width: 0;
   }
   .product-list-card h3 {
-    font-size: 18px;
+    font-size: 20px;
     margin: 0;
     overflow-wrap: anywhere;
   }
@@ -5805,7 +5805,7 @@
     border-bottom: 1px solid var(--product-border);
   }
   .product-list-card dt {
-    font-size: 10px;
+    font-size: 14px;
     color: var(--product-muted);
     text-transform: uppercase;
   }
@@ -5824,7 +5824,7 @@
     margin-bottom: 16px;
   }
   .product-list-heading h1 {
-    font-size: 26px;
+    font-size: 28px;
   }
   .product-list-heading button {
     width: 100%;
@@ -5845,7 +5845,7 @@
     font-size: 16px !important;
   }
   .product-list-records h2 {
-    font-size: 18px;
+    font-size: 20px;
   }
   .product-list-commerce {
     padding-inline: 16px;
@@ -6115,7 +6115,7 @@
 .product-customer-menu__help,
 .product-customer-menu__count {
   color: var(--bop-color-text-muted);
-  font-size: 13px;
+  font-size: 14px;
 }
 .product-customer-menu__count {
   font-variant-numeric: tabular-nums;
@@ -6152,7 +6152,7 @@ section.product-customer-menu .product-customer-menu__preview img {
 section.product-customer-menu figcaption {
   padding: var(--bop-space-2) var(--bop-space-3);
   color: var(--bop-color-text-muted);
-  font-size: 13px;
+  font-size: 14px;
 }
 .product-customer-menu__actions {
   display: flex;
@@ -6238,7 +6238,7 @@ section.product-customer-menu figcaption {
 .menu-customer-view__section,
 .menu-customer-view__before-label {
   color: var(--bop-color-text-muted);
-  font-size: 13px;
+  font-size: 14px;
   overflow-wrap: anywhere;
 }
 .menu-customer-view__no-photo {
@@ -6248,7 +6248,7 @@ section.product-customer-menu figcaption {
   border: 1px dashed var(--bop-color-border-default);
   border-radius: var(--bop-radius-control);
   color: var(--bop-color-text-muted);
-  font-size: 13px;
+  font-size: 14px;
 }
 .menu-customer-view__text {
   display: grid;
@@ -6258,7 +6258,7 @@ section.product-customer-menu figcaption {
 }
 .menu-customer-view__text h4 {
   margin: 0;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 600;
 }
 .menu-customer-view__changes {
@@ -6274,7 +6274,7 @@ section.product-customer-menu figcaption {
   border: 1px solid var(--bop-color-warning);
   border-radius: var(--bop-radius-control);
   color: var(--bop-color-text-default);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
 }
 .menu-customer-view__before {
@@ -6425,7 +6425,7 @@ body:has(.product-complete-draft) .bop-shell__header,
     var(--bop-color-brand-primary) 10%,
     var(--bop-color-surface-default)
   );
-  font-weight: 650;
+  font-weight: 600;
   text-decoration: underline;
   text-underline-offset: 4px;
 }
@@ -6449,7 +6449,7 @@ body:has(.product-complete-draft) .bop-shell__header,
 }
 .store-setup-step-content h3 {
   font-size: 1.25rem;
-  font-weight: 650;
+  font-weight: 600;
 }
 .store-setup-step-content h4,
 .store-setup-step-content legend {
@@ -6459,7 +6459,7 @@ body:has(.product-complete-draft) .bop-shell__header,
   display: grid;
   gap: var(--bop-space-2);
   max-width: 36rem;
-  font-weight: 500;
+  font-weight: 400;
 }
 .store-setup-step-content label:has(input[type="checkbox"]) {
   display: flex;
@@ -6715,7 +6715,7 @@ body:has(.product-complete-draft) .bop-shell__header,
   background: var(--bop-color-surface-default);
 }
 :is(.bop-shell--brand-administration, .bop-shell--platform-template) :is(h2, h3, legend) {
-  font-weight: 650;
+  font-weight: 600;
 }
 :is(.bop-shell--brand-administration, .bop-shell--platform-template) h2 {
   font-size: 1.25rem;
@@ -6885,7 +6885,7 @@ body:has(.product-complete-draft) .bop-shell__header,
 .workspace-sidebar__store {
   margin: 0 8px 12px;
   color: var(--bop-color-text-muted);
-  font-size: 12px;
+  font-size: 14px;
   letter-spacing: 0.02em;
   overflow-wrap: anywhere;
 }
@@ -6951,15 +6951,15 @@ body:has(.product-complete-draft) .bop-shell__header,
 }
 .workspace-page__title h1 {
   margin: 0;
-  font-size: 26px;
-  font-weight: 650;
+  font-size: 28px;
+  font-weight: 600;
   letter-spacing: -0.01em;
   line-height: 1.2;
 }
 .workspace-page__meta {
   margin: 4px 0 0;
   color: var(--bop-color-text-muted);
-  font-size: 13px;
+  font-size: 14px;
 }
 /* Batch 58: each count phrase of the Orders header stays whole; the line wraps between them. */
 .orders-summary__part {
@@ -6974,7 +6974,7 @@ body:has(.product-complete-draft) .bop-shell__header,
 }
 .workspace-page__status {
   color: var(--bop-color-text-muted);
-  font-size: 13px;
+  font-size: 14px;
 }
 .workspace-page__freshness[data-freshness="Stale"] {
   color: var(--bop-color-warning);
@@ -6992,7 +6992,7 @@ body:has(.product-complete-draft) .bop-shell__header,
   align-items: center;
   padding: 0 4px;
   color: inherit;
-  font-weight: 500;
+  font-weight: 400;
 }
 .workspace-page .screen-heading {
   margin-bottom: 16px;
@@ -7025,8 +7025,8 @@ body:has(.product-complete-draft) .bop-shell__header,
   display: grid;
   gap: 4px;
   margin: 0;
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 14px;
+  font-weight: 400;
 }
 .workspace-page .list-filters label:has(> input[type="checkbox"]) {
   display: flex;
@@ -7052,7 +7052,7 @@ body:has(.product-complete-draft) .bop-shell__header,
   grid-column: 1 / -1;
   margin: 0;
   color: var(--bop-color-text-muted);
-  font-size: 13px;
+  font-size: 14px;
 }
 .workspace-page .store-card-grid {
   display: grid;
@@ -7069,7 +7069,7 @@ body:has(.product-complete-draft) .bop-shell__header,
 }
 .workspace-page .store-card header h3 {
   margin: 4px 0 0;
-  font-size: 18px;
+  font-size: 20px;
   letter-spacing: -0.01em;
   overflow-wrap: anywhere;
 }
@@ -7085,7 +7085,7 @@ body:has(.product-complete-draft) .bop-shell__header,
 }
 .workspace-page .store-card dt {
   color: var(--bop-color-text-muted);
-  font-size: 12px;
+  font-size: 14px;
 }
 .workspace-page .store-card dd {
   overflow-wrap: anywhere;
@@ -7105,7 +7105,7 @@ body:has(.product-complete-draft) .bop-shell__header,
   padding: 0 10px;
   border: 1px solid var(--bop-color-border-strong);
   border-radius: var(--bop-radius-control);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.02em;
   white-space: nowrap;
@@ -7173,7 +7173,7 @@ body:has(.product-complete-draft) .bop-shell__header,
   display: grid;
   gap: 4px;
   margin: 0;
-  font-size: 13px;
+  font-size: 14px;
 }
 .workspace-page--overview .scope-switcher select {
   min-width: 14rem;
@@ -7227,7 +7227,7 @@ body:has(.product-complete-draft) .bop-shell__header,
 .settlement__differences th,
 .settlement__statement th {
   color: var(--bop-color-text-muted);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
 }
 .settlement__differences td,
@@ -7266,7 +7266,7 @@ body:has(.product-complete-draft) .bop-shell__header,
   .settlement__statement td::before {
     content: attr(data-label) " · ";
     color: var(--bop-color-text-muted);
-    font-size: 13px;
+    font-size: 14px;
   }
 }
 /* WP-2423 P2: the live "right now" card. */
@@ -7284,8 +7284,8 @@ body:has(.product-complete-draft) .bop-shell__header,
   background: var(--bop-color-surface-default);
   color: var(--bop-color-text-default);
   font: inherit;
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 14px;
+  font-weight: 400;
 }
 .overview-counts {
   display: grid;
@@ -7302,24 +7302,24 @@ body:has(.product-complete-draft) .bop-shell__header,
 }
 .overview-count__label {
   color: var(--bop-color-text-muted);
-  font-size: 13px;
+  font-size: 14px;
 }
 .overview-count__value {
-  font-size: 30px;
-  font-weight: 650;
+  font-size: 28px;
+  font-weight: 600;
   line-height: 1.1;
   font-variant-numeric: tabular-nums;
 }
 .overview-count__detail {
   color: var(--bop-color-text-muted);
-  font-size: 13px;
+  font-size: 14px;
 }
 .overview-counts a {
   display: inline-flex;
   align-items: center;
   min-height: 32px;
   color: inherit;
-  font-weight: 500;
+  font-weight: 400;
 }
 /* WP-2423 (3cd0f8dd M6): the opening and closing checklist on Home. */
 .overview-checklist__group h4 {
@@ -7350,14 +7350,14 @@ body:has(.product-complete-draft) .bop-shell__header,
 }
 .overview-checklist__group li[data-done="true"] .overview-checklist__status {
   color: var(--bop-color-text-muted);
-  font-weight: 500;
+  font-weight: 400;
 }
 .overview-checklist__group a {
   display: inline-flex;
   align-items: center;
   min-height: 32px;
   color: inherit;
-  font-weight: 500;
+  font-weight: 400;
   white-space: nowrap;
 }
 @media (max-width: 767px) {
@@ -7371,7 +7371,7 @@ body:has(.product-complete-draft) .bop-shell__header,
 .overview-updated {
   margin: 12px 0 0;
   color: var(--bop-color-text-muted);
-  font-size: 13px;
+  font-size: 14px;
 }
 .overview-card p {
   margin: 0 0 4px;
@@ -7381,7 +7381,7 @@ body:has(.product-complete-draft) .bop-shell__header,
   margin: 0 0 4px;
   color: var(--bop-color-text-default) !important;
   font-size: 28px;
-  font-weight: 650;
+  font-weight: 600;
   letter-spacing: -0.01em;
 }
 
@@ -7399,7 +7399,7 @@ body:has(.product-complete-draft) .bop-shell__header,
   margin: 0;
   padding: 10px 0;
   color: var(--bop-color-text-muted);
-  font-size: 13px;
+  font-size: 14px;
   border-bottom: 1px solid var(--bop-color-border-default);
 }
 /* WP-2423 Q21: one heading per Store business day (order numbers restart each day). */
@@ -7407,8 +7407,8 @@ body:has(.product-complete-draft) .bop-shell__header,
   margin: 0;
   padding: 18px 0 8px;
   color: var(--bop-color-text-default);
-  font-size: 13px;
-  font-weight: 650;
+  font-size: 14px;
+  font-weight: 600;
   letter-spacing: 0.02em;
   border-bottom: 1px solid var(--bop-color-border-strong);
 }
@@ -7443,14 +7443,14 @@ body:has(.product-complete-draft) .bop-shell__header,
 .order-workbench-identity h2 {
   margin: 0 0 2px;
   font-size: 16px;
-  font-weight: 650;
+  font-weight: 600;
   letter-spacing: 0;
   overflow-wrap: anywhere;
 }
 .order-workbench-identity > span,
 .order-workbench-batches,
 .order-workbench-time {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--bop-color-text-muted);
   overflow-wrap: anywhere;
 }
@@ -7470,7 +7470,7 @@ body:has(.product-complete-draft) .bop-shell__header,
   padding: 3px 8px;
   border: 1px solid var(--bop-color-border-strong);
   border-radius: var(--bop-radius-control);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
   overflow-wrap: anywhere;
 }
@@ -7496,7 +7496,7 @@ body:has(.product-complete-draft) .bop-shell__header,
 .order-accept-by {
   display: block;
   margin-top: 4px;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--bop-color-text-default);
 }
@@ -7511,7 +7511,7 @@ body:has(.product-complete-draft) .bop-shell__header,
 .order-staff-cancelled {
   display: block;
   margin-top: 4px;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--bop-color-text-default);
 }
@@ -7538,7 +7538,7 @@ body:has(.product-complete-draft) .bop-shell__header,
 }
 .order-cancel-dialog h2 {
   margin: 0 0 8px;
-  font-size: 18px;
+  font-size: 20px;
 }
 .order-cancel-dialog p {
   margin: 0 0 12px;
@@ -7548,7 +7548,7 @@ body:has(.product-complete-draft) .bop-shell__header,
   display: grid;
   gap: 6px;
   margin-bottom: 16px;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
 }
 .order-cancel-dialog [data-variant="destructive"]:not(:disabled) {
@@ -7578,7 +7578,7 @@ body:has(.product-complete-draft) .bop-shell__header,
 .order-item-cancel-items legend {
   margin-bottom: 6px;
   padding: 0;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
 }
 .order-cancel-dialog .order-item-cancel-items label {
@@ -7605,13 +7605,13 @@ body:has(.product-complete-draft) .bop-shell__header,
   color: var(--bop-color-text-muted);
 }
 .order-item-cancel-unavailable {
-  font-size: 12px;
+  font-size: 14px;
 }
 .order-cancel-dialog .order-item-cancel-refund {
   padding: 10px 12px;
   border-inline-start: 3px solid var(--bop-color-border-strong);
   background: var(--bop-color-surface-raised);
-  font-size: 13px;
+  font-size: 14px;
 }
 .order-line-cancelled .order-line-title,
 .order-line-cancelled .order-line-amount {
@@ -7625,7 +7625,7 @@ body:has(.product-complete-draft) .bop-shell__header,
   display: grid;
   gap: 2px;
   margin-top: 2px;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 400;
 }
 .order-line-cancellation strong {
@@ -7714,7 +7714,7 @@ body:has(.product-complete-draft) .bop-shell__header,
   background: var(--bop-color-surface-default);
   color: inherit;
   font: inherit;
-  font-weight: 500;
+  font-weight: 400;
   cursor: pointer;
 }
 .order-sound-toggle[aria-pressed="true"] {
@@ -7731,7 +7731,7 @@ body:has(.product-complete-draft) .bop-shell__header,
   grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
   gap: 12px;
   margin: 0 0 16px;
-  font-size: 13px;
+  font-size: 14px;
 }
 .order-workbench-detail dt {
   color: var(--bop-color-text-muted);
@@ -7745,14 +7745,14 @@ body:has(.product-complete-draft) .bop-shell__header,
 }
 .order-workbench-detail h3 {
   margin: 0 0 6px;
-  font-size: 15px;
+  font-size: 16px;
 }
 .order-workbench-closed {
   margin: 0 0 12px;
   padding: 10px 12px;
   border-inline-start: 3px solid var(--bop-color-border-strong);
   background: var(--bop-color-surface-raised);
-  font-size: 13px;
+  font-size: 14px;
 }
 .order-lines ul {
   list-style: none;
@@ -7773,12 +7773,12 @@ body:has(.product-complete-draft) .bop-shell__header,
 .order-line-name {
   display: grid;
   gap: 2px;
-  font-weight: 500;
+  font-weight: 400;
 }
 .order-line-options,
 .order-line-note {
   font-weight: 400;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--bop-color-text-muted);
 }
 .order-line-note {
@@ -7831,7 +7831,7 @@ body:has(.product-complete-draft) .bop-shell__header,
 }
 .order-lines-state {
   color: var(--bop-color-text-muted);
-  font-size: 13px;
+  font-size: 14px;
 }
 /* WP-2423 Q10: who a pickup is for and how to reach them (order detail only). */
 .order-pickup-contact {
@@ -7848,7 +7848,8 @@ body:has(.product-complete-draft) .bop-shell__header,
   text-underline-offset: 3px;
 }
 
-@media (max-width: 64rem) {
+/* Batch 63 (F38): below 1200px the navigation is the top bar (ui-refresh/nav.css). */
+@media (max-width: 74.9375rem) {
   .workspace-layout {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -7880,23 +7881,12 @@ body:has(.product-complete-draft) .bop-shell__header,
     font-weight: 600;
     cursor: pointer;
   }
-  .workspace-sidebar__compact[open] > div {
-    position: absolute;
-    right: 16px;
-    z-index: 20;
-    min-width: 14rem;
-    padding: 8px;
-    border: 1px solid var(--bop-color-border-default);
-    border-radius: var(--bop-radius-card);
-    background: var(--bop-color-surface-default);
-    box-shadow: 0 8px 24px rgb(0 0 0 / 12%);
-  }
+  /* Figma 58:65: the page keeps 24px at its edges on a tablet. */
   .workspace-page.bop-shell__main {
-    padding: 16px;
+    padding: 24px;
   }
-  .workspace-page__title h1 {
-    font-size: 22px;
-  }
+}
+@media (max-width: 64rem) {
   .order-workbench-entry > summary {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: 8px 12px;
@@ -7912,6 +7902,11 @@ body:has(.product-complete-draft) .bop-shell__header,
   }
   .workspace-page .store-card-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 48rem) {
+  .workspace-page.bop-shell__main {
+    padding: 16px;
   }
 }
 /* WP-2423 Q5: refunds awaiting an owner's approval, and the authenticator code dialog. */
@@ -7979,7 +7974,7 @@ body:has(.product-complete-draft) .bop-shell__header,
 }
 .step-up-dialog h2 {
   margin: 0 0 8px;
-  font-size: 18px;
+  font-size: 20px;
 }
 .step-up-dialog input {
   width: 100%;
@@ -8003,11 +7998,11 @@ body:has(.product-complete-draft) .bop-shell__header,
 .counter-order__ticket h2,
 .counter-order__charge h2 {
   margin: 0 0 var(--bop-space-3);
-  font-size: 18px;
+  font-size: 20px;
 }
 .counter-order__menu h3 {
   margin: var(--bop-space-4) 0 var(--bop-space-2);
-  font-size: 13px;
+  font-size: 14px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--bop-color-text-muted);
@@ -8061,7 +8056,7 @@ body:has(.product-complete-draft) .bop-shell__header,
 }
 .counter-order legend {
   margin-bottom: var(--bop-space-2);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
 }
 .counter-order fieldset > label,
@@ -8132,7 +8127,7 @@ body:has(.product-complete-draft) .bop-shell__header,
 }
 .cash-tender__change {
   min-height: 1.5em;
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
@@ -8259,7 +8254,7 @@ body:has(.product-complete-draft) .bop-shell__header,
 }
 .table-qr__list th[scope="row"] {
   color: var(--bop-color-text-default);
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 600;
   text-transform: none;
   letter-spacing: 0;
@@ -8291,7 +8286,7 @@ body:has(.product-complete-draft) .bop-shell__header,
   .table-qr__list td[data-label]::before {
     content: attr(data-label) " · ";
     color: var(--bop-color-text-muted);
-    font-size: 13px;
+    font-size: 14px;
   }
   .table-qr__actions {
     display: flex;
@@ -8309,7 +8304,7 @@ body:has(.product-complete-draft) .bop-shell__header,
   margin: 4px 0;
   padding-left: 8px;
   border-left: 3px solid var(--bop-color-text-default);
-  font-size: 13px;
+  font-size: 14px;
 }
 
 /* WP-2423 Q17: why floor staff cannot bring back a manager's "until further notice" mark. */
@@ -8428,7 +8423,7 @@ body:has(.product-complete-draft) .bop-shell__header,
 }
 .staff-session__dialog h2 {
   margin: 0;
-  font-size: 22px;
+  font-size: 28px;
   font-weight: 600;
 }
 .staff-session__dialog p {
@@ -8442,7 +8437,7 @@ body:has(.product-complete-draft) .bop-shell__header,
 .staff-session__test-only,
 .staff-session__hint {
   color: var(--bop-color-text-muted);
-  font-size: 13px;
+  font-size: 14px;
 }
 .staff-session__test-only strong {
   font-family: var(--bop-font-mono);
@@ -8476,7 +8471,7 @@ body:has(.product-complete-draft) .bop-shell__header,
   text-align: start;
   cursor: pointer;
 }
-@media (max-width: 64rem) {
+@media (max-width: 74.9375rem) {
   .workspace-sidebar__footer {
     display: none;
   }
@@ -8736,7 +8731,7 @@ body:has(.product-complete-draft) .bop-shell__header,
 }
 .pickup-queue__earlier-section h2 {
   margin: 0;
-  font-size: 18px;
+  font-size: 20px;
 }
 .pickup-queue__earlier-section > p {
   margin: 0;
@@ -8902,7 +8897,7 @@ body:has(.product-complete-draft) .bop-shell__header,
 }
 .store-reports__section h4 {
   margin: 8px 0 0;
-  font-size: 15px;
+  font-size: 16px;
 }
 .store-reports__section header button {
   min-height: 44px;
@@ -8929,7 +8924,7 @@ body:has(.product-complete-draft) .bop-shell__header,
   font-variant-numeric: tabular-nums;
 }
 .store-reports__lines div[data-strong="true"] {
-  font-weight: 700;
+  font-weight: 600;
 }
 .store-reports__lines div[data-part="true"] {
   padding-left: 16px;
@@ -8959,7 +8954,7 @@ body:has(.product-complete-draft) .bop-shell__header,
 }
 .store-reports__table thead th {
   color: var(--bop-color-text-muted);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
 }
 .store-reports__table th:first-child,
@@ -9012,7 +9007,7 @@ body:has(.product-complete-draft) .bop-shell__header,
   .store-reports__table td::before {
     content: attr(data-label) " · ";
     color: var(--bop-color-text-muted);
-    font-size: 13px;
+    font-size: 14px;
   }
 }
 
@@ -9113,11 +9108,11 @@ body:has(.product-complete-draft) .bop-shell__header,
 }
 .pickup-identity dt {
   color: var(--bop-color-text-muted);
-  font-size: 12px;
+  font-size: 14px;
 }
 .pickup-identity dd {
   margin: 0;
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 600;
   overflow-wrap: anywhere;
 }
@@ -9192,7 +9187,7 @@ body:has(.product-complete-draft) .bop-shell__header,
   width: 100%;
   min-height: 72px;
   padding: 12px 16px;
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 600;
   text-align: start;
   overflow-wrap: anywhere;
@@ -9259,8 +9254,8 @@ body:has(.product-complete-draft) .bop-shell__header,
 }
 .staff-switch__key {
   min-height: 64px;
-  font-size: 24px;
-  font-weight: 500;
+  font-size: 28px;
+  font-weight: 400;
   font-variant-numeric: tabular-nums;
 }
 .staff-switch__key[data-key="Delete"],
@@ -9431,7 +9426,7 @@ body:has(.product-complete-draft) .bop-shell__header,
   padding: 10px;
   border-left: 4px solid var(--bop-color-warning);
   background: var(--bop-color-surface-raised);
-  font-size: 13px;
+  font-size: 14px;
 }
 .staff-pin__notice p {
   margin: 0;
@@ -9536,7 +9531,7 @@ body:has(.product-complete-draft) .bop-shell__header,
 }
 .store-devices__hint {
   color: var(--bop-color-text-muted);
-  font-size: 13px;
+  font-size: 14px;
 }
 .store-devices__verify,
 .full-sign-in-prompt {
@@ -9575,8 +9570,8 @@ body:has(.product-complete-draft) .bop-shell__header,
   background: var(--bop-color-surface-default);
   color: var(--bop-color-text-default);
   font: inherit;
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 14px;
+  font-weight: 400;
 }
 .workspace-page .overview-card--alerts-critical {
   border-color: var(--bop-color-danger-mark);
@@ -9588,7 +9583,7 @@ body:has(.product-complete-draft) .bop-shell__header,
 }
 .overview-card--alerts .system-alert__headline {
   color: var(--bop-color-text-default);
-  font-weight: 500;
+  font-weight: 400;
 }
 .system-alerts {
   display: grid;
@@ -9617,7 +9612,7 @@ body:has(.product-complete-draft) .bop-shell__header,
   padding: 1px 8px;
   border: 1px solid currentcolor;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
 }
 .system-alert--critical .system-alert__badge {
@@ -9629,11 +9624,11 @@ body:has(.product-complete-draft) .bop-shell__header,
 }
 .system-alert__label {
   color: var(--bop-color-text-default);
-  font-weight: 500;
+  font-weight: 400;
 }
 .system-alert__since,
 .system-alert__resolved {
-  font-size: 13px;
+  font-size: 14px;
 }
 /* WP-2423 Q7 slice 2 (DEC-STAFF-DINE-IN-ROUND): staff take an order for a table. */
 .counter-order__note {
@@ -9694,7 +9689,7 @@ body:has(.product-complete-draft) .bop-shell__header,
 .own-name-prompt__hint {
   margin: 0;
   color: var(--bop-color-text-muted);
-  font-size: 13px;
+  font-size: 14px;
 }
 /* Owner 2026-10-18: a staff name is required, so the prompt reads as something to do now. */
 .workspace-page .overview-card.own-name-prompt--required {
@@ -9803,7 +9798,7 @@ tr[data-drop-target="true"] {
   border-radius: 999px;
   background: var(--bop-color-danger);
   color: var(--bop-color-on-primary);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   line-height: 1;
   font-variant-numeric: tabular-nums;
@@ -10454,14 +10449,14 @@ tr[data-drop-target="true"] {
 }
 .table-allergies h3 {
   margin: 0;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 600;
 }
 .table-allergies__hint,
 .table-allergies__now {
   margin: 0;
   color: var(--bop-color-text-muted);
-  font-size: 13px;
+  font-size: 14px;
 }
 .table-allergies__choices {
   display: flex;
@@ -10500,7 +10495,7 @@ tr[data-drop-target="true"] {
 /* WP-2423 (M166): what a choice adds of its own, folded to one line. */
 .dish-editor__choice-adds summary {
   color: var(--bop-color-text-muted);
-  font-size: 13px;
+  font-size: 14px;
   cursor: pointer;
   min-height: 32px;
 }

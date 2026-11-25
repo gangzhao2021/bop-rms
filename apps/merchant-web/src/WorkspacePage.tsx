@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { LanguageSwitch } from "./i18n/LanguageSwitch.js";
+import { TopBarStatus } from "./TopBarStatus.js";
 
 /**
  * WP-2423 M1: one page frame for every back-office page inside the workspace layout: a title,
@@ -39,7 +40,12 @@ export function WorkspacePage({
         </div>
         {status || actions ? (
           <div className="workspace-page__toolbar">
-            {status ? <div className="workspace-page__status">{status}</div> : null}
+            {/* Batch 63 (F38): on a tablet the stamp is in the top bar (Figma 58:65). */}
+            {status ? (
+              <TopBarStatus>
+                <div className="workspace-page__status">{status}</div>
+              </TopBarStatus>
+            ) : null}
             {actions ? <div className="workspace-page__actions">{actions}</div> : null}
           </div>
         ) : null}

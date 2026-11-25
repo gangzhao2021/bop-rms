@@ -1,7 +1,8 @@
 import { listSeparator, systemText, t } from "./i18n/i18n.js";
-import { AppFrame, StatePanel } from "@bop-rms/ui";
-import { StaffTime, StoreDate, StoreTimeZoneContext, storeTime } from "./StoreTime.js";
-import { useCallback, useContext, useEffect, useState } from "react";
+import { StatePanel } from "@bop-rms/ui";
+import { Freshness, StaffTime, StoreDate } from "./StoreTime.js";
+import { WorkspacePage } from "./WorkspacePage.js";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { newOperationReference } from "./operation-reference.js";
 import { FullSignInPrompt } from "./FullSignInPrompt.js";
@@ -913,16 +914,14 @@ function Page({
   const view = state.view;
   const detail = screenId === "IAM-USER-DETAIL";
   return (
-    <AppFrame title={detail ? t("Staff member") : t("Staff")} description="">
-      <header className="screen-heading">
-        <div>
-          <p className="bop-eyebrow">{detail ? t("Staff member") : t("Staff")}</p>
-          <h2>{t("Store staff and roles")}</h2>
-          <p>
-            <UpdatedStamp instant={view.sourceAsOf} />
-          </p>
-        </div>
-      </header>
+    // Batch 63 (F22/F24, RA-03): the shared page header, so the title and the language switch are
+    // seen at the top right like every page, and the one "Updated 01:52" stamp.
+    <WorkspacePage
+      className="staff-page"
+      title={detail ? t("Staff member") : t("Staff")}
+      meta={t("Store staff and roles")}
+      status={<Freshness status="Fresh" at={view.sourceAsOf} />}
+    >
       {!detail && view.viewer.mayInvite ? (
         <InvitePanel view={view} client={client} csrf={csrf} reload={reload} />
       ) : null}
@@ -991,14 +990,7 @@ function Page({
           )}
         </p>
       ) : null}
-    </AppFrame>
-  );
-}
-/** Batch 63 F55 (F24): the one refresh stamp every page uses, "Updated 01:52". */
-function UpdatedStamp({ instant }: { readonly instant: string }) {
-  const timeZone = useContext(StoreTimeZoneContext);
-  return (
-    <time dateTime={instant}>{t("Updated {time}", { time: storeTime(instant, timeZone) })}</time>
+    </WorkspacePage>
   );
 }
 export function StaffListPage({

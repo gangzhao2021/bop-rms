@@ -1,0 +1,205 @@
+/*
+ * Batch 63 (design review of v15 batch 62), the shared merchant tokens and page frame.
+ *
+ * F53 (brief §2 v3: type only 28/20/16/14 at 600 and 400): the merchant type scale, once for every
+ * back-office page. A page title is 28/600 at every width; a section heading 20/600; a panel or
+ * round heading 16/600; body and values 16/400 or 14/400; labels and hints 14/400 grey, never
+ * smaller. The shared base styles from @bop-rms/ui (28/650 section headings bigger than the page
+ * title, 18/600 sub-headings, 12/500 capital column heads, 15px body) follow it here. The page
+ * rules themselves were moved onto the scale in the same change; the kitchen display keeps its
+ * read-from-a-distance sizes (--bop-kitchen-*).
+ */
+:root {
+  --bop-type-title: 28px;
+  --bop-type-section: 20px;
+  --bop-type-body: 16px;
+  --bop-type-small: 14px;
+  --bop-type-strong: 600;
+  --bop-type-regular: 400;
+}
+.workspace-layout,
+.bop-shell {
+  font-size: var(--bop-type-body);
+}
+.workspace-page__title h1,
+.workspace-page.workspace-page .workspace-page__title h1 {
+  font-size: var(--bop-type-title);
+  font-weight: var(--bop-type-strong);
+  letter-spacing: 0;
+}
+.workspace-page__meta,
+.workspace-page__status {
+  font-size: var(--bop-type-small);
+}
+:where(.workspace-layout, .bop-shell) :where(.bop-shell__main) :where(h2) {
+  font-size: var(--bop-type-section);
+  font-weight: var(--bop-type-strong);
+  letter-spacing: 0;
+}
+:where(.workspace-layout, .bop-shell) :where(.bop-shell__main) :where(h3) {
+  font-size: var(--bop-type-body);
+  font-weight: var(--bop-type-strong);
+}
+:where(.workspace-layout, .bop-shell) :where(.bop-shell__main) :where(th) {
+  font-size: var(--bop-type-small);
+  font-weight: var(--bop-type-regular);
+  letter-spacing: 0;
+  text-transform: none;
+}
+:where(.workspace-layout, .bop-shell) :where(.bop-shell__main) :where(button:not([class])) {
+  font-weight: var(--bop-type-regular);
+}
+:where(.workspace-layout, .bop-shell) :where(.bop-shell__main) :where(.bop-eyebrow),
+.bop-eyebrow {
+  font-size: var(--bop-type-small);
+  font-weight: var(--bop-type-regular);
+  letter-spacing: 0;
+}
+:where(.workspace-layout, .bop-shell) .bop-state-card h2 {
+  font-size: var(--bop-type-body);
+  font-weight: var(--bop-type-strong);
+}
+.bop-error-page h1 {
+  font-size: var(--bop-type-title);
+  font-weight: var(--bop-type-strong);
+}
+@media (max-width: 40rem) {
+  :where(.workspace-layout, .bop-shell) :where(.bop-shell__main) :where(h2) {
+    font-size: var(--bop-type-section);
+  }
+  :where(.bop-shell__main) :where(table:not([class]) td[data-label])::before {
+    font-size: var(--bop-type-small);
+  }
+}
+
+/*
+ * F22 (brief §2 v3: two buttons only, an accent fill for the one next step and accent words for
+ * the rest; "no more white bordered buttons or black blocks"): a page header's utilities are words
+ * — "Updated 01:36 · Refresh · 中文" as on Orders. Refresh and the other header actions are accent
+ * text; the stamp and the language switch stay grey.
+ */
+.workspace-layout
+  .workspace-page__header
+  .workspace-page__actions
+  button:not([type="submit"], [data-variant="destructive"], .order-sound-toggle) {
+  min-height: 44px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font-size: var(--bop-type-small);
+  font-weight: var(--bop-type-regular);
+  text-decoration: none;
+  cursor: pointer;
+}
+.workspace-layout
+  .workspace-page__header
+  .workspace-page__actions
+  button:not([type="submit"], [data-variant="destructive"], .order-sound-toggle):disabled {
+  color: var(--bop-color-text-muted);
+  cursor: default;
+}
+.workspace-layout
+  .workspace-page__header
+  .workspace-page__actions
+  button:not([type="submit"], [data-variant="destructive"], .order-sound-toggle):hover:not(
+    :disabled
+  ) {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.workspace-page__header .workspace-page__freshness {
+  color: var(--bop-color-text-muted);
+  font-size: var(--bop-type-small);
+}
+.workspace-page__header .workspace-page__freshness[data-freshness="Stale"] {
+  color: var(--bop-color-warning);
+}
+/* The one primary of the Store switch and the sign-in: the accent fill, never a black block. */
+.scope-switcher button,
+.shell-action,
+a.shell-action {
+  border: 0;
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-accent-fill);
+  font-weight: var(--bop-type-strong);
+}
+/* The signed-out page names BOP in plain words, as the sidebar does, not in a black badge. */
+.bop-shell__header > strong {
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--bop-color-text-default);
+  font-size: var(--bop-type-body);
+  font-weight: var(--bop-type-strong);
+  letter-spacing: 0;
+}
+/* F22: "Turn sound on" is accent words, not a white bordered box. */
+.orders-page .order-sound-notice button {
+  min-height: 44px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font-size: var(--bop-type-small);
+  font-weight: var(--bop-type-strong);
+  cursor: pointer;
+}
+
+/* F21 (brief §2 v3, Figma 37:3: "侧栏…数量是灰色数字"): a count in the navigation is a grey 14/400
+   number at the right end of its item — orders to accept beside Orders, approvals beside
+   Approvals, tables asking for staff beside Tables — and nothing at zero. */
+.workspace-sidebar .workspace-nav__list a .workspace-nav__badge,
+.workspace-drawer__panel .workspace-nav__list a .workspace-nav__badge {
+  margin-inline-start: auto;
+  padding-inline-start: var(--bop-space-3);
+  color: var(--bop-color-text-muted);
+  font-size: var(--bop-type-small);
+  font-weight: var(--bop-type-regular);
+  font-variant-numeric: tabular-nums;
+}
+
+/* F21 (Figma 39:83): on a phone the Orders tabs are one line that scrolls sideways within itself,
+   never a second line holding "Picked up / served" alone. The row keeps 6px of room inside its
+   scroll box so a focus ring (3px plus a 3px offset) is never cut. */
+@media (max-width: 48rem) {
+  .orders-page:not(.order-exception-page) .order-status-filters {
+    flex-wrap: nowrap;
+    min-width: 0;
+    max-width: none;
+    margin-inline: -6px;
+    padding: 6px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+  .orders-page:not(.order-exception-page) .order-status-filters::-webkit-scrollbar {
+    display: none;
+  }
+  /* A scroll box leaves out its end padding, so the last tab's ring gets its room from here. */
+  .orders-page:not(.order-exception-page) .order-status-filters::after {
+    flex: 0 0 6px;
+    content: "";
+  }
+  .orders-page:not(.order-exception-page) .order-status-filters button,
+  .orders-page:not(.order-exception-page) .order-status-filters button[aria-pressed="true"] {
+    flex: none;
+    white-space: nowrap;
+  }
+}
+
+/* F22: a page's one primary ("New role") is the accent fill wherever a page marks it, never a
+   white bordered box; faded in the accent while it can't be used. */
+.workspace-content button[data-variant="primary"] {
+  border: 0;
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-accent-fill);
+  font-weight: var(--bop-type-strong);
+}
+.workspace-content button[data-variant="primary"]:disabled {
+  opacity: 0.4;
+}

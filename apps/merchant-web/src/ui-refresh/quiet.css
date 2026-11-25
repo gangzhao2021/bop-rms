@@ -298,12 +298,12 @@
   color: var(--bop-color-text-muted);
 }
 .bop-shell__main .page-intro__aside {
-  font-size: 13px;
+  font-size: 14px;
 }
 .bop-shell__main .page-intro__more summary {
   min-height: 32px;
   color: var(--bop-color-text-muted);
-  font-size: 13px;
+  font-size: 14px;
   cursor: pointer;
 }
 .bop-shell__main .page-intro__more p {
@@ -519,14 +519,14 @@
   border-radius: var(--bop-radius-control);
   background: none;
   color: var(--bop-color-text-default);
-  font-size: 15px;
-  font-weight: 500;
+  font-size: 16px;
+  font-weight: 400;
 }
 .workspace-layout .language-switch:hover {
   text-decoration: underline;
   text-underline-offset: 3px;
 }
-@media (max-width: 48rem) {
+@media (max-width: 74.9375rem) {
   .workspace-topbar,
   .workspace-layout .workspace-content button.language-switch,
   .workspace-content .bop-shell__header-extra {
@@ -536,7 +536,7 @@
     display: inline-flex;
   }
 }
-@media (min-width: 48.0625rem) {
+@media (min-width: 75rem) {
   .workspace-layout .workspace-sidebar button.workspace-sidebar__language {
     display: none;
   }
@@ -558,7 +558,7 @@
  * dark block; counts as grey numbers. On a phone the top bar keeps a hairline under it, the menu
  * button reads "Menu", and it sits at least 24px from the language switch.
  */
-@media (min-width: 48.0625rem) {
+@media (min-width: 75rem) {
   .workspace-layout .workspace-sidebar {
     border-right: 1px solid var(--bop-color-row-divider);
   }
@@ -592,7 +592,7 @@
   font-size: 14px;
   font-weight: 400;
 }
-@media (max-width: 48rem) {
+@media (max-width: 74.9375rem) {
   .workspace-layout .workspace-sidebar {
     border-bottom: 1px solid var(--bop-color-row-divider);
   }
@@ -644,7 +644,7 @@
   margin-bottom: 4px;
   font: inherit;
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 400;
   color: inherit;
 }
 .store-date-time .store-date-time__part {

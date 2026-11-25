@@ -16,7 +16,7 @@
 /* Header: quiet actions, no boxes. */
 .orders-page .workspace-page__meta {
   margin-top: 6px;
-  font-size: 15px;
+  font-size: 16px;
 }
 .orders-page .workspace-page__header button.orders-page__quiet,
 .orders-page .workspace-page__header button.order-sound-toggle {
@@ -33,7 +33,7 @@
   cursor: pointer;
 }
 .orders-page .workspace-page__header button.orders-page__quiet {
-  font-weight: 500;
+  font-weight: 400;
   text-decoration: underline;
   text-underline-offset: 3px;
 }
@@ -45,7 +45,7 @@
 }
 .orders-page .orders-page__updated {
   color: var(--bop-color-text-muted);
-  font-size: 13px;
+  font-size: 14px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -57,7 +57,7 @@
   border: 0;
   background: none;
   color: var(--bop-color-text-default);
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 400;
 }
 .orders-page .order-queue-stale::before {
@@ -75,7 +75,7 @@
 }
 .orders-page .order-attention h2 {
   margin: 0 0 var(--bop-space-2);
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 600;
 }
 .orders-page .order-attention ul {
@@ -112,7 +112,7 @@
 .orders-page .order-attention .order-attention__hint {
   margin-top: 2px;
   color: var(--bop-color-text-muted);
-  font-size: 13px;
+  font-size: 14px;
 }
 /* Batch 55: many earlier days' orders are one line that opens, as on the kitchen display. */
 .orders-page .order-attention__earlier > summary {
@@ -163,7 +163,7 @@
   background: none;
   color: var(--bop-color-text-default);
   font: inherit;
-  font-weight: 500;
+  font-weight: 400;
   text-decoration: underline;
   text-underline-offset: 3px;
   white-space: nowrap;
@@ -177,12 +177,12 @@
 }
 .orders-page .order-hold-notice h2 {
   margin: 0;
-  font-size: 15px;
+  font-size: 16px;
 }
 .orders-page .order-hold-notice p {
   margin: 2px 0 0;
   color: var(--bop-color-text-muted);
-  font-size: 13px;
+  font-size: 14px;
 }
 
 /* Toolbar: status segments, Filter and the search on one line. */
@@ -212,7 +212,7 @@
   background: none;
   color: var(--bop-color-text-default);
   font: inherit;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 400;
   cursor: pointer;
 }
@@ -225,7 +225,7 @@
 .orders-page .order-filter__chips button[aria-pressed="true"] {
   background: var(--bop-color-brand-primary);
   color: var(--bop-color-on-primary);
-  font-weight: 500;
+  font-weight: 400;
   text-decoration: none;
 }
 .orders-page .order-status-filters__count {
@@ -244,7 +244,7 @@
 .orders-page .order-toolbar__search {
   width: 14rem;
   min-height: 44px;
-  font-size: 15px;
+  font-size: 16px;
 }
 .orders-page .order-filter {
   position: relative;
@@ -264,8 +264,8 @@
   background: var(--bop-color-surface-default);
   color: var(--bop-color-text-default);
   font: inherit;
-  font-size: 15px;
-  font-weight: 500;
+  font-size: 16px;
+  font-weight: 400;
   cursor: pointer;
 }
 .orders-page .order-filter__applied {
@@ -277,7 +277,7 @@
   border-radius: 999px;
   background: var(--bop-color-brand-primary);
   color: var(--bop-color-on-primary);
-  font-size: 12px;
+  font-size: 14px;
   font-variant-numeric: tabular-nums;
 }
 .orders-page .order-filter__panel {
@@ -314,7 +314,7 @@
   margin: 0 0 var(--bop-space-2);
   padding: 0;
   color: var(--bop-color-text-muted);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
 }
 .orders-page .order-filter__chips {
@@ -325,7 +325,7 @@
 .orders-page .order-filter__scope {
   margin: 0;
   color: var(--bop-color-text-muted);
-  font-size: 13px;
+  font-size: 14px;
 }
 .orders-page .order-filter__actions {
   display: flex;
@@ -368,7 +368,7 @@
   padding: 0;
   border: 0;
   color: var(--bop-color-text-muted);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   letter-spacing: 0;
 }
@@ -444,7 +444,7 @@
   min-width: 0;
 }
 .orders-page .order-workbench-type {
-  font-size: 15px;
+  font-size: 16px;
   overflow-wrap: anywhere;
 }
 .orders-page .order-row__when,
@@ -452,7 +452,7 @@
   justify-self: start;
   text-align: start;
   color: var(--bop-color-text-muted);
-  font-size: 13px;
+  font-size: 14px;
   font-variant-numeric: tabular-nums;
 }
 .orders-page .order-workbench-age {
@@ -473,7 +473,7 @@
   display: grid;
   justify-items: end;
   gap: 2px;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 400;
   font-variant-numeric: tabular-nums;
   text-align: end;
@@ -483,7 +483,7 @@
   color: var(--bop-color-text-muted);
 }
 .orders-page .order-row__paid {
-  font-size: 13px;
+  font-size: 14px;
 }
 /* Unlike the note below it, shown at every width: the amount above it depends on it. b61: so is
    a table's refund still on its way back to the guest's card. */
@@ -491,7 +491,7 @@
 .orders-page .order-row__on-its-way,
 .orders-page .order-row__merged {
   color: var(--bop-color-text-muted);
-  font-size: 13px;
+  font-size: 14px;
   text-align: end;
   white-space: normal;
 }
@@ -542,7 +542,7 @@
 }
 .orders-page .order-workbench-next .card-actions p {
   margin: 0;
-  font-size: 13px;
+  font-size: 14px;
   text-align: end;
 }
 
@@ -596,7 +596,7 @@
   display: block;
   margin: 0;
   color: var(--bop-color-text-muted);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 400;
 }
 .orders-page
@@ -631,7 +631,7 @@
 }
 .orders-page .order-panel__head h2 {
   margin: 0;
-  font-size: 24px;
+  font-size: 28px;
   font-weight: 600;
   line-height: 1.3;
 }
@@ -641,7 +641,7 @@
 .orders-page .order-panel__meta {
   margin: 4px 0 0;
   color: var(--bop-color-text-muted);
-  font-size: 15px;
+  font-size: 16px;
 }
 .orders-page .order-panel__close {
   flex: none;
@@ -653,7 +653,7 @@
   background: none;
   color: var(--bop-color-text-default);
   font-size: 28px;
-  font-weight: 300;
+  font-weight: 400;
   line-height: 1;
   cursor: pointer;
 }
@@ -667,7 +667,7 @@
   padding: 0;
   border: 0;
   background: none;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 400;
 }
 .orders-page .order-workbench-detail .order-staff-cancellation {
@@ -681,7 +681,7 @@
 .orders-page .order-lines h3 {
   margin: 0;
   color: var(--bop-color-text-muted);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
 }
 .orders-page .order-round p {
@@ -730,7 +730,7 @@
   grid-template-columns: max-content minmax(0, 1fr);
   gap: 4px var(--bop-space-4);
   color: var(--bop-color-text-muted);
-  font-size: 13px;
+  font-size: 14px;
 }
 .orders-page .order-panel__facts div {
   display: contents;
@@ -758,11 +758,12 @@
   flex: 1 1 16rem;
   margin: 0;
   color: var(--bop-color-text-muted);
-  font-size: 13px;
+  font-size: 14px;
 }
 
-/* Wide screens: the panel is a column beside the list, staying in view as the list scrolls. */
-@media (min-width: 80rem) {
+/* Wide screens and tablets (batch 63, F20: Figma 58:65 replaced the floating sheet at 1024): the
+   panel is a column beside the list, staying in view as the list scrolls. */
+@media (min-width: 48.0625rem) {
   .orders-page .order-workbench[data-panel] {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 24rem;
@@ -782,19 +783,6 @@
    keeps the whole ring in view. */
 .orders-page .order-panel :is(a[href], button, input, select, textarea, summary, [tabindex]) {
   scroll-margin: 8px;
-}
-/* Tablets: a sheet over the list from the right, below the page's title row. */
-@media (min-width: 48.0625rem) and (max-width: 79.99rem) {
-  .orders-page .order-panel {
-    position: absolute;
-    top: 0;
-    right: 0;
-    z-index: 20;
-    width: min(25rem, 100%);
-    min-height: 100%;
-    padding: var(--bop-space-6) var(--bop-space-8) var(--bop-space-8);
-    box-shadow: -8px 0 32px rgb(0 0 0 / 10%);
-  }
 }
 /* Phones: an order staff opened is the page; the list comes back on close. The one order shown
    keeps the list, with its panel under it. The filter is a full sheet. */
@@ -1222,7 +1210,7 @@
   text-decoration: none;
   cursor: pointer;
 }
-@media (min-width: 80rem) {
+@media (min-width: 48.0625rem) {
   .orders-page .order-workbench[data-panel] .order-panel {
     padding: 0 0 0 var(--bop-space-6);
     border-left: 1px solid var(--bop-color-row-divider);
@@ -1296,7 +1284,7 @@
 }
 /* The panel starts under the page header; its height leaves that room so the next step at its
    foot is always on screen. */
-@media (min-width: 80rem) {
+@media (min-width: 48.0625rem) {
   .orders-page .order-workbench[data-panel] .order-panel {
     max-height: calc(100vh - var(--bop-pinned-top, 0px) - 152px);
   }
@@ -1643,7 +1631,7 @@
   gap: 6px;
   margin-inline-start: var(--bop-space-2);
   color: var(--bop-color-accent);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   vertical-align: 0.2em;
 }
@@ -1679,12 +1667,12 @@
 }
 .orders-page .order-accept-all p {
   margin: 0;
-  font-size: 15px;
+  font-size: 16px;
 }
 .slow-wait-notice {
   margin: var(--bop-space-1) 0 0;
   color: var(--bop-color-text-muted);
-  font-size: 13px;
+  font-size: 14px;
 }
 .orders-page .order-sound-notice {
   display: flex;
@@ -1692,7 +1680,7 @@
   align-items: center;
   gap: var(--bop-space-2) var(--bop-space-4);
   margin: 0 0 var(--bop-space-4);
-  font-size: 15px;
+  font-size: 16px;
 }
 .orders-page .order-sound-notice p {
   margin: 0;
@@ -1718,5 +1706,98 @@
   }
   .orders-page .order-attention {
     margin-bottom: var(--bop-space-3);
+  }
+}
+
+/*
+ * Batch 63 (F19, F20; design review of v15 batch 62, Figma 37:2 and 58:65). At 1024 the dishes had
+ * 158px while an empty 158px action column sat beside nearly every row, and the money column wrapped
+ * "Paid at the table · guest's phone" over 3–4 lines, so rows were 154–176px tall.
+ *  - A row is the number and its dishes on one line, the grey "who · type · time · how paid" line
+ *    under them from the number's edge, then the status and the amount, as in Figma 37:2.
+ *  - The action column is kept only while a row shown has a next step (Accept, Charge, Hand over).
+ *  - Beside an open order on a tablet the list sits next to a 360px panel parted by one hairline,
+ *    with no shadow (Figma 58:65). The amount keeps its own column there (unlike the frame, which
+ *    moves it into the grey line), so a refund given back or on its way stays under it on every
+ *    row; a row's own next step (Accept) stays too.
+ */
+.orders-page .order-row__when .order-row__paid {
+  white-space: normal;
+  overflow-wrap: normal;
+  text-align: start;
+}
+.orders-page .order-list[data-actions="none"] .order-row {
+  grid-template-columns: minmax(0, 1fr);
+}
+.orders-page .order-list[data-actions="none"] .order-workbench-next {
+  display: none;
+}
+@container order-list (min-width: 513px) {
+  .orders-page .order-row__summary {
+    grid-template-columns: max-content minmax(0, 1fr) 13rem 6.5rem;
+    grid-template-areas:
+      "num type status amount"
+      "when when status amount";
+    column-gap: var(--bop-space-4);
+    row-gap: 2px;
+    align-items: center;
+  }
+  .orders-page .order-row__number {
+    grid-area: num;
+    align-self: baseline;
+  }
+  /* The whole row is the target, so the number keeps its text height and the grey line sits
+     right under the dishes. */
+  .orders-page .order-row__number .order-row__open {
+    min-height: 0;
+  }
+  .orders-page .order-row__what {
+    display: contents;
+  }
+  .orders-page .order-row__what > .order-workbench-type {
+    grid-area: type;
+    align-self: baseline;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .orders-page .order-row__what > .order-row__when {
+    grid-area: when;
+    min-width: 0;
+  }
+  .orders-page .order-row__status {
+    grid-area: status;
+  }
+  .orders-page .order-workbench-amount {
+    grid-area: amount;
+  }
+  .orders-page .order-row__paid {
+    display: inline;
+  }
+}
+@container order-list (min-width: 513px) and (max-width: 800px) {
+  .orders-page .order-row__summary {
+    grid-template-columns: max-content minmax(0, 1fr) 9.5rem 5.5rem;
+  }
+}
+@container order-list (min-width: 513px) and (max-width: 800px) {
+  /* Beside an open order the grey line keeps who and when; how it was paid is in the panel. */
+  .orders-page .order-workbench[data-panel] .order-row__paid,
+  .orders-page .order-workbench[data-panel] .order-row__paid-gap:has(+ .order-row__paid) {
+    display: none;
+  }
+}
+/* Figma 58:65: the panel beside the list on a tablet is 360px, parted by one hairline. */
+@media (min-width: 48.0625rem) and (max-width: 79.99rem) {
+  .orders-page .order-workbench[data-panel] {
+    grid-template-columns: minmax(0, 1fr) 360px;
+    gap: var(--bop-space-6);
+  }
+}
+/* Phones leave how it was paid to the order's panel, and its separator with it. */
+@container order-list (max-width: 512px) {
+  .orders-page .order-row__paid-gap:has(+ .order-row__paid) {
+    display: none;
   }
 }

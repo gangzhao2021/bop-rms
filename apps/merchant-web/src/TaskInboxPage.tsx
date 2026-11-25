@@ -1,7 +1,8 @@
 import { systemText, t } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { NoAccessNotice } from "./NoAccessNotice.js";
-import { AppFrame, StatePanel } from "@bop-rms/ui";
+import { StatePanel } from "@bop-rms/ui";
+import { WorkspacePage } from "./WorkspacePage.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import {
@@ -160,25 +161,21 @@ export function TaskInboxScreen({
   const view = state.kind === "Ready" || state.kind === "Offline" ? state.view : null;
   const readOnly = state.kind !== "Ready";
   return (
-    <AppFrame title={t("Tasks")} description="">
+    // Batch 63 (F22, RA-03): the shared page header with the language switch at its right end.
+    <WorkspacePage
+      className="task-inbox-page"
+      title={<span id="task-inbox-heading">{t("Tasks")}</span>}
+      meta={view?.storeLabel ?? null}
+      actions={
+        <>
+          <button type="button" onClick={onRefresh} disabled={!online || state.kind === "Loading"}>
+            {t("Refresh")}
+          </button>
+          <Link to="/app">{t("Workspace overview")}</Link>
+        </>
+      }
+    >
       <section className="task-inbox" aria-labelledby="task-inbox-heading">
-        <header className="task-inbox-heading">
-          <div>
-            <p className="bop-eyebrow">{t("Tasks")}</p>
-            <h2 id="task-inbox-heading">{view?.storeLabel ?? t("Task Inbox")}</h2>
-          </div>
-          <div className="task-inbox-toolbar">
-            <button
-              type="button"
-              onClick={onRefresh}
-              disabled={!online || state.kind === "Loading"}
-            >
-              {t("Refresh")}
-            </button>
-            <Link to="/app">{t("Workspace overview")}</Link>
-          </div>
-        </header>
-
         {state.kind !== "Ready" && view === null ? (
           <TaskInboxStatePanel state={state.kind} />
         ) : null}
@@ -259,7 +256,7 @@ export function TaskInboxScreen({
           </>
         ) : null}
       </section>
-    </AppFrame>
+    </WorkspacePage>
   );
 }
 

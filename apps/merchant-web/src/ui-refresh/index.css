@@ -23,6 +23,8 @@
 @import "./refund-payment.css";
 /* M50: printing one region (print-region.ts) without blanking other pages. */
 @import "./print.css";
+/* Batch 63: the shared merchant type scale and page frame, last so it settles the older rules. */
+@import "./shell-63.css";
 
 /* Batch 62 (v15 b61 live, Table QR codes; b61 sweep on Home, Exceptions and the kitchen board):
    Tab scrolls in only a stop's own box, flush with the window's edge, so the bottom of its ring

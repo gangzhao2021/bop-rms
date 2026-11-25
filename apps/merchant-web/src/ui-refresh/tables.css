@@ -7,7 +7,7 @@
 
 .dining-floor {
   color: var(--bop-color-text-default);
-  font-size: 0.875rem;
+  font-size: 14px;
 }
 
 /* Page header: counts the floor at a glance (text only; no badges). */
@@ -154,14 +154,14 @@
 .workspace-page.dining-floor .dining-area-lane > header > h2 {
   margin: 0;
   color: var(--bop-color-text-default);
-  font-size: 0.75rem;
-  font-weight: 650;
+  font-size: 14px;
+  font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 .workspace-page.dining-floor .dining-area-lane > header > span {
   color: var(--bop-color-text-muted);
-  font-size: 0.8125rem;
+  font-size: 14px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -219,8 +219,8 @@
   margin: 0 auto 0 0;
   overflow: hidden;
   color: var(--bop-color-text-default);
-  font-size: 1.375rem;
-  font-weight: 650;
+  font-size: 20px;
+  font-weight: 600;
   letter-spacing: -0.01em;
   line-height: 1.15;
   font-variant-numeric: tabular-nums;
@@ -229,7 +229,7 @@
 }
 .workspace-page.dining-floor .dining-table-tile__identity > span {
   color: var(--bop-color-text-muted);
-  font-size: 0.8125rem;
+  font-size: 14px;
   line-height: 1.3;
   font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
@@ -245,7 +245,7 @@
   order: 1;
   margin: 0;
   color: var(--bop-color-text-muted);
-  font-size: 0.75rem;
+  font-size: 14px;
   line-height: 1.3;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
@@ -257,7 +257,7 @@
   padding: 0;
   border: 0;
   color: var(--bop-color-warning);
-  font-size: 0.8125rem;
+  font-size: 14px;
   font-weight: 600;
   line-height: 1.35;
   overflow-wrap: anywhere;
@@ -356,8 +356,8 @@
 .workspace-page.dining-floor .dining-session-detail > h2 {
   margin: 0;
   color: var(--bop-color-text-default);
-  font-size: 1.375rem;
-  font-weight: 650;
+  font-size: 20px;
+  font-weight: 600;
   letter-spacing: -0.01em;
   line-height: 1.2;
 }
@@ -366,8 +366,8 @@
   margin: 0;
   color: var(--bop-color-text-muted);
   font-family: inherit;
-  font-size: 0.8125rem;
-  font-weight: 500;
+  font-size: 14px;
+  font-weight: 400;
   letter-spacing: 0;
   text-transform: none;
   font-variant-numeric: tabular-nums;
@@ -430,7 +430,7 @@
   margin: 0 0 var(--bop-space-2);
 }
 .workspace-page.dining-floor .dining-entry-code strong {
-  font-size: 1.5rem;
+  font-size: 20px;
   letter-spacing: 0.08em;
   font-variant-numeric: tabular-nums;
 }
@@ -438,7 +438,7 @@
 .workspace-page.dining-floor .dining-floor-message {
   margin: var(--bop-space-3) 0 0;
   color: var(--bop-color-text-muted);
-  font-size: 0.8125rem;
+  font-size: 14px;
 }
 
 @media (max-width: 767px) {
@@ -465,8 +465,8 @@
 .workspace-page.dining-floor .dining-session-detail h3 {
   margin: 0;
   color: var(--bop-color-text-default);
-  font-size: 1rem;
-  font-weight: 650;
+  font-size: 16px;
+  font-weight: 600;
 }
 /* A retry button after a sentence sits on its own line. */
 .workspace-page.dining-floor .dining-session-detail p > button {
@@ -487,12 +487,12 @@
 }
 .workspace-page.dining-floor .dining-staff-calls h2 {
   margin: 0 0 var(--bop-space-3);
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 600;
 }
 .workspace-page.dining-floor .dining-staff-calls li {
   flex-wrap: nowrap;
-  font-size: 15px;
+  font-size: 16px;
 }
 .workspace-page.dining-floor .dining-staff-calls li > span {
   display: inline-flex;
@@ -1256,7 +1256,7 @@
    red after it). */
 .tables-v3 .last-orders-notice {
   margin: 0 0 16px;
-  font-size: 15px;
+  font-size: 16px;
 }
 .tables-v3 .last-orders-notice::before {
   content: "";
@@ -1299,7 +1299,7 @@
   background: none;
   color: var(--bop-color-text-default);
   font: inherit;
-  font-size: 15px;
+  font-size: 16px;
   cursor: pointer;
 }
 .tables-v3 .table-split__modes button[aria-pressed="true"] {
@@ -1393,11 +1393,11 @@
 }
 .tables-v3 .table-split__dishes {
   color: var(--bop-color-text-muted);
-  font-size: 13px;
+  font-size: 14px;
 }
 .tables-v3 .table-split__hint {
   color: var(--bop-color-text-muted);
-  font-size: 13px;
+  font-size: 14px;
 }
 .tables-v3 .table-checkout__part-title {
   margin: 16px 0 4px;
@@ -1433,7 +1433,7 @@
   margin: 0 0 12px;
   padding: 8px 0 8px 12px;
   border-left: 3px solid var(--bop-color-accent);
-  font-size: 15px;
+  font-size: 16px;
 }
 .tables-v3 .table-phones__actions,
 .tables-v3 .table-phones__confirm {
@@ -1455,7 +1455,7 @@
   gap: 4px 12px;
   padding: 6px 0;
   border-bottom: 1px solid var(--bop-color-row-divider, #e5e5e5);
-  font-size: 15px;
+  font-size: 16px;
 }
 .tables-v3 .table-phones button {
   min-height: 44px;
@@ -1465,7 +1465,7 @@
   background: none;
   color: var(--bop-color-accent);
   font: inherit;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -1504,7 +1504,7 @@
 }
 .tables-v3 .table-held-rounds p {
   margin: 0;
-  font-size: 15px;
+  font-size: 16px;
 }
 .tables-v3 .table-held-rounds__note {
   margin-top: 2px;
@@ -1526,7 +1526,7 @@
   background: none;
   color: var(--bop-color-accent);
   font: inherit;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -1546,7 +1546,7 @@
 }
 .tables-v3 .round-hold-setting {
   margin: 8px 0 12px;
-  font-size: 15px;
+  font-size: 16px;
 }
 .tables-v3 .round-hold-setting label {
   display: inline-flex;
@@ -1586,7 +1586,7 @@
   align-items: flex-end;
   gap: 8px 12px;
   margin: 8px 0 12px;
-  font-size: 15px;
+  font-size: 16px;
 }
 .tables-v3 .table-move__field {
   display: grid;

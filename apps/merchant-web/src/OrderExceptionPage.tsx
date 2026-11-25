@@ -9,7 +9,8 @@ import {
 import { noAccessHeading } from "./access-denied.js";
 import { NoAccessNotice } from "./NoAccessNotice.js";
 import { StatePanel } from "@bop-rms/ui";
-import { Freshness, SourceTime } from "./StoreTime.js";
+import { Freshness, StoreTimeZoneContext, orderWhen } from "./StoreTime.js";
+import { useStoreBusinessDay } from "./StoreBusinessDay.js";
 import { WorkspacePage } from "./WorkspacePage.js";
 import { businessDateText } from "./StoreBusinessDay.js";
 import { formatCad } from "./order-money.js";
@@ -34,7 +35,7 @@ const compensationLabel: Record<OrderExceptionItem["compensationStatus"], string
   Pending: t("Pending"),
   Completed: t("Completed"),
 };
-import { useEffect, useId, useRef, useState, type Ref } from "react";
+import { useContext, useEffect, useId, useRef, useState, type Ref } from "react";
 
 export {
   parseOrderExceptionView,
@@ -86,7 +87,10 @@ const stopReasonText: Readonly<Record<string, string>> = {
 export function causeTitle(item: OrderExceptionItem): string | null {
   const cause = item.cause;
   if (item.kind !== "PaidWithoutFulfillableOrder" || cause === undefined) return null;
-  const refunded = item.compensationStatus === "Completed";
+  // Batch 63 (F18, v15: all 67 rows said "refund in progress" beside "Refunded, check needed"):
+  // the title follows the refund as it is now. Once the payment provider confirmed it, it is
+  // refunded; "check needed" stays on the status line alone.
+  const refunded = item.compensationStatus === "Completed" || item.providerState === "Confirmed";
   // No refund started: say so plainly, so staff do not assume the guest is being paid back.
   const back = refunded
     ? t("refunded")
@@ -109,6 +113,20 @@ export function causeTitle(item: OrderExceptionItem): string | null {
     default:
       return null;
   }
+}
+/**
+ * Batch 63 (F26, v15: "Nov 4, 2026, 11:43 PM" where every other page says "23:02"): a case's time
+ * in the Store's 24-hour clock — the time alone today, the day before it otherwise, the year only
+ * outside this year — kept on one line.
+ */
+function CaseTime({ instant }: { readonly instant: string }) {
+  const timeZone = useContext(StoreTimeZoneContext);
+  const today = useStoreBusinessDay()?.businessDate ?? null;
+  return (
+    <time className="order-exception__nowrap" dateTime={instant} title={instant}>
+      {orderWhen(instant, timeZone, today)}
+    </time>
+  );
 }
 const exceptionTone = (item: OrderExceptionItem) =>
   item.status === "Resolved"
@@ -232,10 +250,18 @@ export function OrderExceptionScreen({
     <WorkspacePage
       className="orders-page order-exception-page"
       title={t("Exceptions")}
-      meta={t("{label} · Business date {businessDate}", {
-        label: view.storeLabel,
-        businessDate: businessDateText(view.businessDate),
-      })}
+      meta={
+        <>
+          {view.storeLabel}
+          {" · "}
+          {/* Batch 63 (F26): the date never breaks inside "11月24日". */}
+          <span className="order-exception__nowrap">
+            {t("Business date {businessDate}", {
+              businessDate: businessDateText(view.businessDate),
+            })}
+          </span>
+        </>
+      }
       status={<Freshness status={view.freshnessStatus} at={view.projectedAt} />}
       actions={
         <button ref={refreshButtonRef} disabled={!onRefresh} onClick={onRefresh}>
@@ -415,7 +441,7 @@ export function OrderExceptionScreen({
                     <span className="order-row__what">
                       <span className="order-workbench-type">{exceptionTitle(item)}</span>
                       <span className="order-row__when">
-                        <SourceTime instant={item.createdAt} />
+                        <CaseTime instant={item.createdAt} />
                         {openFor === null ? null : (
                           <>
                             {" · "}
@@ -436,8 +462,8 @@ export function OrderExceptionScreen({
                           {item.severity === "Critical" && !refundCheck
                             ? systemText("Critical") + " · "
                             : ""}
-                          {overdue ? t("overdue since ") : t("due ")}
-                          <SourceTime instant={item.dueAt} />
+                          {overdue ? t("Overdue since ") : t("Due ")}
+                          <CaseTime instant={item.dueAt} />
                         </span>
                       )}
                     </span>
@@ -569,13 +595,13 @@ function OrderExceptionCard({
       {refundedAwaitingCheck ? (
         <p className="order-panel__meta" data-overdue={overdue ? "true" : undefined}>
           {overdue ? t("Refunded · check overdue since ") : t("Refunded · check by ")}
-          <SourceTime instant={item.dueAt} />
+          <CaseTime instant={item.dueAt} />
         </p>
       ) : (
         <p className="order-panel__meta" data-overdue={overdue ? "true" : undefined}>
           {systemText(item.severity)} ·{" "}
-          {resolved ? t("was due ") : overdue ? t("overdue since ") : t("due ")}
-          <SourceTime instant={item.dueAt} />
+          {resolved ? t("Was due ") : overdue ? t("Overdue since ") : t("Due ")}
+          <CaseTime instant={item.dueAt} />
         </p>
       )}
       <div className="order-panel__status">
@@ -595,7 +621,7 @@ function OrderExceptionCard({
           <div>
             <dt>{t("Created")}</dt>
             <dd>
-              <SourceTime instant={item.createdAt} />
+              <CaseTime instant={item.createdAt} />
             </dd>
           </div>
           <div>
@@ -628,7 +654,7 @@ function OrderExceptionCard({
           <div>
             <dt>{t("Found")}</dt>
             <dd>
-              <SourceTime instant={detail.checkedAt} />
+              <CaseTime instant={detail.checkedAt} />
             </dd>
           </div>
           <div>
@@ -666,7 +692,7 @@ function OrderExceptionCard({
         ) : null}
         {detail.resolvedAt !== null ? (
           <p role="note">
-            {t("Resolved: the day was checked again")} <SourceTime instant={detail.resolvedAt} />{" "}
+            {t("Resolved: the day was checked again")} <CaseTime instant={detail.resolvedAt} />{" "}
             {t(
               "and now matches the payment provider's statement. Nothing more to do; both checks stay in the day's history.",
             )}
@@ -709,7 +735,7 @@ function OrderExceptionCard({
         <div>
           <dt>{t("Created")}</dt>
           <dd>
-            <SourceTime instant={item.createdAt} />
+            <CaseTime instant={item.createdAt} />
           </dd>
         </div>
         <div>
@@ -723,7 +749,7 @@ function OrderExceptionCard({
           </dd>
         </div>
         <div>
-          <dt>{t("Payment provider status")}</dt>
+          <dt>{t("Payment")}</dt>
           <dd>{providerStateLabel[item.providerState]}</dd>
         </div>
         <div>
@@ -744,7 +770,7 @@ function OrderExceptionCard({
       {detail?.type === "Payment" && detail.resolvedAt !== null ? (
         // WP-2423 (2026-10-17): a later check of the same payment found it matching again.
         <p role="note">
-          {t("Resolved: this payment was checked again")} <SourceTime instant={detail.resolvedAt} />{" "}
+          {t("Resolved: this payment was checked again")} <CaseTime instant={detail.resolvedAt} />{" "}
           {t(
             "and now matches the payment provider. Nothing more to do; both checks stay in the store's history.",
           )}

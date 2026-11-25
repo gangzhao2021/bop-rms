@@ -47,7 +47,10 @@ import { PointsOffPage } from "./PointsOffPage.js";
 import { KitchenBoardPage, KitchenWorkItemPage } from "./KitchenBoardPages.js";
 import { createKitchenBoardClient } from "./kitchen-board-client.js";
 import { parseKitchenBoardView, type KitchenBoardView } from "./kitchen-board.js";
-import { createCurrentOrderQueueClient } from "./current-order-queue-client.js";
+import {
+  createCurrentOrderQueueClient,
+  ordersAwaitingAcceptance,
+} from "./current-order-queue-client.js";
 import { PaidOrderAlarmBanner, PaidOrderWatchContext } from "./PaidOrderAlarm.js";
 import { paidOrderRefundDeadlines, type PaidOrderWatch } from "./paid-order-watch.js";
 import {
@@ -648,6 +651,9 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
     state.workspace.navigation.some((item) => item.screenId === "KIT-KITCHEN-QUEUE");
   // WP-2423 DEC-PAID-ORDER-AUTO-ACCEPT: read with the refund warning, kept for the pages that show it.
   const [paidOrderWatch, setPaidOrderWatch] = useState<PaidOrderWatch | null>(null);
+  // Batch 63 (F21): orders waiting to be accepted, counted beside "Orders" on every page from the
+  // frame's own read of the list (the Orders header's count), so a cashier on Tables sees them.
+  const [ordersToAccept, setOrdersToAccept] = useState<number | null>(null);
   const refundRead = useMemo(():
     ((signal: AbortSignal) => Promise<readonly RefundDeadline[] | null>) | null => {
     if (watchCsrf === null || watchStoreReference === null) return null;
@@ -659,6 +665,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
       return async (signal) => {
         const view = await orders.load(null, signal, scope);
         setPaidOrderWatch(view.paidOrderWatch ?? null);
+        setOrdersToAccept(ordersAwaitingAcceptance(view));
         return [
           ...refundDeadlinesFromOrders(view),
           ...paidOrderRefundDeadlines(view.paidOrderWatch ?? null),
@@ -934,6 +941,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
         path={pathname}
         search={search}
         storeLabel={state.workspace.selectedScope.storeLabel}
+        ordersToAccept={ordersToAccept}
         footer={
           demo === null ? (
             <>

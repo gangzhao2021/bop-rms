@@ -18,6 +18,7 @@ import {
   initialOverviewState,
   summarizeExceptions,
   summarizeOrders,
+  earlierOrdersText,
   summarizePickups,
   summarizeTables,
   dayChecklist,
@@ -63,6 +64,7 @@ describe("WP-2423 P2 store overview", () => {
       earlierUnfinished: 0,
       awaitingRounds: 1,
       urgentRounds: 0,
+      longestWaitMinutes: null,
       paidStuck: 0,
       // The fixture's only Ready order is a pickup; pickup readiness is counted from the pickup queue.
       readyToServe: 0,
@@ -164,16 +166,70 @@ describe("WP-2423 P2 store overview", () => {
       summarizeOrders({ ...queue, items: [...earlier(null), ...earlier("Ready")] }, now)
         .earlierUnfinished,
     ).toBe(1);
+    // Batch 63 (F23, v15: Home 41, Orders 46): Home counts the earlier days' unfinished orders by
+    // the Orders page's rule (holding stock, an open pickup made or not, a leftover round to accept).
+    const day = { businessDate: "2026-10-16", startsAt: "2026-10-16T08:00:00.000Z" };
+    const pickups = [...earlier(null), ...earlier("Ready")].map((order, index) => ({
+      ...order,
+      orderReference: "018f7600-0000-7000-8000-00000000009" + String(index),
+      businessDate: "2026-10-15",
+    }));
+    const [first] = queue.items;
+    if (first === undefined) throw new Error("fixture has an order");
+    const leftover = {
+      ...first,
+      orderReference: "018f7600-0000-7000-8000-000000000099",
+      businessDate: "2026-10-15",
+      batches: first.batches.map((batch) => ({
+        ...batch,
+        submittedAt: "2026-10-15T20:00:00.000Z",
+      })),
+    };
+    expect(summarizeOrders({ ...queue, items: [...pickups, leftover] }, now, day).earlier).toEqual({
+      total: 3,
+      pickups: 2,
+      toAccept: 1,
+    });
+    expect(earlierOrdersText({ total: 46, pickups: 4, toAccept: 1 })).toBe(
+      "46 (4 pickups, 1 to accept)",
+    );
+    expect(earlierOrdersText({ total: 2, pickups: 0, toAccept: 0 })).toBe("2");
     expect(
       awaitingAcceptanceText({
         orders: summary.awaitingAcceptance,
         rounds: summary.awaitingRounds,
         urgentRounds: summary.urgentRounds,
+        longestWaitMinutes: summary.longestWaitMinutes ?? null,
       }),
-    ).toBe("2 rounds awaiting acceptance in 1 order (1 paid 5+ min ago)");
+    ).toBe("2 rounds awaiting acceptance in 1 order · paid 12 min ago");
     expect(awaitingAcceptanceText({ orders: 2, rounds: 2, urgentRounds: 0 })).toBe(
-      "2 awaiting acceptance",
+      "2 waiting to be accepted",
     );
+    // Batch 63 (F24): an order paid 20 days ago says so, never "paid 5+ min ago".
+    expect(
+      awaitingAcceptanceText({
+        orders: 1,
+        rounds: 1,
+        urgentRounds: 1,
+        longestWaitMinutes: 20 * 24 * 60 + 7,
+      }),
+    ).toBe("1 waiting to be accepted · paid 20 days ago");
+    expect(
+      awaitingAcceptanceText({ orders: 3, rounds: 3, urgentRounds: 2, longestWaitMinutes: 75 }),
+    ).toBe("3 waiting to be accepted · 2 paid 5+ min ago, the oldest 1 h 15 min ago");
+    setLanguageForTest("zh-Hans");
+    try {
+      expect(
+        awaitingAcceptanceText({
+          orders: 1,
+          rounds: 1,
+          urgentRounds: 1,
+          longestWaitMinutes: 20 * 24 * 60 + 7,
+        }),
+      ).toBe("1 单待接 · 20 天前已付");
+    } finally {
+      setLanguageForTest("en");
+    }
     // A paid round said on a pickup, or on a round that cannot be accepted, is not read: that
     // Order is named and left out, the others stay.
     const misread = parseCurrentOrderQueue(

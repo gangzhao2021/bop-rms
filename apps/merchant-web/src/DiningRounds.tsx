@@ -539,11 +539,8 @@ export function DiningRoundsProvider({
               ? t("Serving progress could not be read. It is read again with the order.")
               : null)}
       </p>
-      {view?.closureStatus === "Closed" ? (
-        <p className="dining-rounds__table" role="note">
-          {t("Order closed. Serving history is read-only.")}
-        </p>
-      ) : null}
+      {/* Batch 63 (F27): no "Order closed. Serving history is read-only." line; the "Table
+          closed" heading below already says it, in the guest's and staff's words. */}
       {view === null || view.sessionPhase === "Active" || mergedInto !== undefined ? null : (
         // The table is checking out (dishes still served, no new rounds), or closed.
         <p

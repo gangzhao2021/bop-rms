@@ -67,19 +67,13 @@
   color: var(--bop-color-text-muted);
   font-size: 14px;
 }
-/* Batch 61: from 1280 the panel has room above and to the right for focus rings (orders.css);
-   the × keeps its place inside that room, so its own ring shows whole. */
-@media (min-width: 80rem) {
+/* Batch 61: the panel has room above and to the right for focus rings (orders.css); the × keeps
+   its place inside that room, so its own ring shows whole. Batch 63 (F20): from tablet width, where
+   the panel now sits beside the list as on a wide screen. */
+@media (min-width: 48.0625rem) {
   .orders-page.order-exception-page .order-panel > .order-panel__close {
     top: var(--order-panel-ring-room, 0px);
     right: 16px;
-  }
-}
-/* Tablets: the sheet has its own padding, and the × keeps inside it. */
-@media (min-width: 48.0625rem) and (max-width: 79.99rem) {
-  .orders-page.order-exception-page .order-panel > .order-panel__close {
-    top: var(--bop-space-4);
-    right: var(--bop-space-4);
   }
 }
 @media (max-width: 48rem) {
@@ -173,8 +167,10 @@
 .orders-page.order-exception-page
   .order-exception__detail
   button.order-exception__primary:disabled {
-  background: var(--bop-color-surface-placeholder);
-  color: var(--bop-color-text-muted);
+  /* Batch 63 (F26): the one primary keeps the accent, faded, until it can be used. */
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-accent-fill);
+  opacity: 0.4;
 }
 .orders-page.order-exception-page
   .order-exception__detail
@@ -248,4 +244,8 @@
     align-self: center;
     padding: 0;
   }
+}
+/* Batch 63 (F26, v15 390 zh: "营业日 11月24 / 日周二"): a date or time never breaks inside itself. */
+.order-exception-page :is(.order-row, .workspace-page__meta) .order-exception__nowrap {
+  white-space: nowrap;
 }

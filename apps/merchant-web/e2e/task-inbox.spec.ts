@@ -80,7 +80,8 @@ test("@production Task Inbox renders one permission-trimmed Store page and keeps
   await expect(page.getByRole("link", { name: "Tasks" })).toBeVisible();
   await page.getByRole("link", { name: "Tasks" }).click();
   await expect(page.getByRole("heading", { name: "Tasks" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Training Store" })).toBeVisible();
+  // Batch 63 (F22): the shared page header names the store under the title.
+  await expect(page.locator(".workspace-page__meta")).toHaveText("Training Store");
   await expect(page.getByText("No business outcome is inferred")).toHaveCount(0);
   await expect(page.getByText("DINING SESSION · Display-safe reference unavailable")).toBeVisible();
   const rendered = await page.locator("body").innerHTML();
@@ -190,7 +191,7 @@ test("@production Task Inbox clears the prior Store view when the next Store has
 
   await page.goto("/app");
   await page.getByRole("link", { name: "Tasks" }).click();
-  await expect(page.getByRole("heading", { name: storeOne.storeLabel, exact: true })).toBeVisible();
+  await expect(page.locator(".workspace-page__meta")).toHaveText(storeOne.storeLabel);
   await expect(page.getByText("DINING SESSION · Display-safe reference unavailable")).toBeVisible();
   expect(await page.locator("body").innerHTML()).not.toContain(id(1));
 

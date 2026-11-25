@@ -9,7 +9,7 @@
 }
 .refund-approval-card > h3 {
   margin: 0 0 var(--bop-space-4);
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 600;
 }
 .refund-approval-card > dl {
@@ -26,12 +26,12 @@
 }
 .refund-approval-card > dl dt {
   color: var(--bop-color-text-muted);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 400;
 }
 .refund-approval-card > dl dd {
   margin: 0;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 600;
   overflow-wrap: anywhere;
 }
@@ -51,23 +51,39 @@
   margin-top: var(--bop-space-2);
 }
 .refund-approval-card .card-actions button[data-variant="primary"]:not(:disabled) {
-  border-color: var(--bop-color-brand-primary);
-  background: var(--bop-color-brand-primary);
-  color: var(--bop-color-on-primary);
+  border-color: var(--bop-color-accent);
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-accent-fill);
 }
 .refund-approval-card .refund-decline label {
   flex-basis: 100%;
   margin: 0;
-  font-size: 13px;
+  font-size: 14px;
 }
 .refund-approval-card .refund-decline select {
   width: auto;
   min-width: 14rem;
 }
 
-/* Owner 2026-10-25: one readable column, the decision first. */
-.workspace-page.approvals-page {
+/* Owner 2026-10-25: one readable column, the decision first. Batch 63 (F22): only the body is
+   capped; the header row runs the page's full width, so the language switch ends it at the top
+   right as on every page. */
+.workspace-page.approvals-page > :not(.workspace-page__header, .workspace-page__back) {
   max-width: 60rem;
+}
+.approvals-page .workspace-page__header ~ * h2,
+.approvals-page h2.approvals-page__section {
+  margin: 0 0 var(--bop-space-2);
+  font-size: 16px;
+  font-weight: 600;
+}
+.approvals-page .approvals-sole-link a {
+  color: var(--bop-color-accent);
+  text-decoration: none;
+}
+.approvals-page .approvals-sole-link a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 .approvals-page .approvals-why {
   margin: 0 0 var(--bop-space-4);
@@ -144,9 +160,11 @@
   font-weight: 600;
   cursor: pointer;
 }
+/* Batch 63 (F26): a primary that can't be used yet keeps the accent, faded, not a grey block. */
 .refund-approval-card .refund-primary:disabled {
-  background: var(--bop-color-surface-placeholder);
-  color: var(--bop-color-text-muted);
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-accent-fill);
+  opacity: 0.4;
   cursor: not-allowed;
 }
 
