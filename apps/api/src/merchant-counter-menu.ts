@@ -26,6 +26,16 @@ export function menuNames(found: CustomerMenuFound): Readonly<Record<string, str
 }
 
 /**
+ * WP-2423 batch 63 (F41): the other staff language's menu locale. Store content is kept under the
+ * staff languages' full locales (en-CA, zh-Hans-CA) and the published menu matches a locale
+ * exactly, else falls back to the menu's own language. Asking for "zh-Hans" from the English UI
+ * therefore came back in English, so a cashier typing 牛肉面 found nothing.
+ */
+export function counterOtherNameLocale(locale: string): string {
+  return locale.startsWith("zh") ? "en-CA" : "zh-Hans-CA";
+}
+
+/**
  * WP-2423 Q7: the counter item picker shows exactly the menu a customer sees right now (pickup at
  * the counter; dine-in for a staff-entered table round): items, options, prices and sold-out state
  * from the published menu and the Store's stock, so
@@ -95,7 +105,7 @@ export function createMerchantCounterMenu(options: {
     }
     if (result.status !== "Found") throw new CounterMenuError("COUNTER_MENU_UNAVAILABLE");
     // Only helps search: without it staff still find a dish by the name they see.
-    const other = await read(locale.startsWith("zh") ? "en" : "zh-Hans").catch(() => null);
+    const other = await read(counterOtherNameLocale(locale)).catch(() => null);
     return Object.freeze({
       menu: publicFound(result),
       tips: scope.tips,
