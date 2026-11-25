@@ -1,5 +1,11 @@
-import { expect, test, type Page } from "@playwright/test";
-import { pageRingOverhangs, ringsFrom, whole, type RingOverhang } from "./focus-ring-clip";
+import { expect, test, type Locator, type Page } from "@playwright/test";
+import {
+  focusedRingOverhang,
+  pageRingOverhangs,
+  ringsFrom,
+  whole,
+  type RingOverhang,
+} from "./focus-ring-clip";
 
 /**
  * Batch 61 (v15 batch 60 live, table-panel-focus-ring): two focus rings were still cut on the
@@ -129,8 +135,14 @@ const dish = (n: number, name: string, amount: string) => ({
   taxDisplayContext: {},
 });
 
+interface Section {
+  sectionReference: string;
+  name: string;
+  sellables: unknown[];
+}
+
 /** TM2's dine-in menu: three sections, named in the language staff read it in. */
-const menu = (language: Language) => {
+const menu = (language: Language, more: readonly Section[] = []) => {
   const zh = language === "zh-Hans";
   return {
     screenId: "OPS-ORDER-ENTRY",
@@ -166,6 +178,7 @@ const menu = (language: Language) => {
             name: zh ? "饮品" : "Drinks",
             sellables: [dish(26, zh ? "豆浆 (TEST)" : "Soy milk (TEST)", "3.50")],
           },
+          ...more,
         ],
       },
     },
@@ -202,7 +215,7 @@ const table = (n: number) => ({
   roundsAwaitingAcceptance: [],
 });
 
-async function signIn(page: Page, language: Language) {
+async function signIn(page: Page, language: Language, more: readonly Section[] = []) {
   if (language === "zh-Hans")
     await page.addInitScript(() => window.localStorage.setItem("bop.merchant.language", "zh-Hans"));
   await page.route("**/merchant/session", (route) =>
@@ -239,7 +252,7 @@ async function signIn(page: Page, language: Language) {
     route.fulfill({ headers, json: { cart: null } }),
   );
   await page.route("**/merchant/counter/menu**", (route) =>
-    route.fulfill({ headers, json: menu(language) }),
+    route.fulfill({ headers, json: menu(language, more) }),
   );
   await page.route("**/merchant/orders*", (route) =>
     route.fulfill({ headers, json: { items: [], nextAfterOrderReference: null } }),
@@ -247,9 +260,15 @@ async function signIn(page: Page, language: Language) {
 }
 
 const words = {
-  en: { workspace: "Workspace", categories: "Menu categories", first: "Noodles (TEST)" },
-  "zh-Hans": { workspace: "工作台", categories: "菜单分类", first: "面食" },
+  en: {
+    workspace: "Workspace",
+    categories: "Menu categories",
+    first: "Noodles (TEST)",
+    often: "Often ordered",
+  },
+  "zh-Hans": { workspace: "工作台", categories: "菜单分类", first: "面食", often: "常点" },
 } as const;
+const wordsFor = (language: Language) => words[language];
 
 const cut = (ring: RingOverhang) => ring.top + ring.right + ring.bottom + ring.left > 0;
 
@@ -390,3 +409,122 @@ for (const language of ["en", "zh-Hans"] as const)
       ).toBe(true);
       await page.screenshot({ path: `${shots}/orders-panel-${language}-${width}.png` });
     });
+
+/**
+ * A real store's menu: TM2's three sections and ten more, as an ordinary Chinese restaurant lists
+ * them, so the category row scrolls sideways at every width.
+ */
+const tenMore = (language: Language): Section[] =>
+  (language === "zh-Hans"
+    ? [
+        "招牌推荐",
+        "凉菜冷盘",
+        "家常热炒",
+        "汤羹炖品",
+        "砂锅煲仔",
+        "手工饺子",
+        "广式点心",
+        "米饭炒饭",
+        "时令素菜",
+        "甜品糖水",
+      ]
+    : [
+        "Chef's specials",
+        "Cold appetizers",
+        "Home-style stir-fries",
+        "Soups and stews",
+        "Clay pot dishes",
+        "Handmade dumplings",
+        "Dim sum",
+        "Rice and fried rice",
+        "Seasonal vegetables",
+        "Desserts and sweet soups",
+      ]
+  ).map((name, n) => ({
+    sectionReference: id(0x500 + n),
+    name,
+    sellables: [dish(0x600 + 2 * n, `${name} (TEST)`, "9.00")],
+  }));
+
+/** Shift+Tab from the focused stop back through every earlier stop inside `root`. */
+async function ringsBackwards(page: Page, root: Locator) {
+  const results: RingOverhang[] = [];
+  for (let step = 0; step < 40; step += 1) {
+    await page.keyboard.press("Shift+Tab");
+    if (!(await root.evaluate((element) => element.contains(document.activeElement)))) break;
+    results.push(await focusedRingOverhang(page));
+  }
+  return results;
+}
+
+for (const language of ["en", "zh-Hans"] as const)
+  for (const width of [390, 1024, 1440] as const)
+    for (const mode of ["counter", "table"] as const)
+      /**
+       * (b, review) With 13 categories the row scrolls. Tab reached a category half hidden at the
+       * row's right edge and Chromium, seeing it partly in view, did not scroll it, so its ring was
+       * cut (40 px at 390, 110 px at 1440); the last one lost 0.3 px at the end of the scroll.
+       */
+      test(`@production every category focus ring is whole when the row scrolls, ${mode} at ${width} (${language})`, async ({
+        page,
+      }) => {
+        await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+        // This tablet often sends beef noodles, so "Often ordered" leads the row.
+        await page.addInitScript(
+          ([key, reference]) =>
+            window.localStorage.setItem(key, JSON.stringify({ [reference]: 5 })),
+          [`bop.counter.oftenOrdered.v1.${store}`, id(20)] as const,
+        );
+        await signIn(page, language, tenMore(language));
+        await page.goto(
+          mode === "table"
+            ? `/operations/order-entry?table=${tableReference}`
+            : "/operations/order-entry",
+        );
+        const row = page.getByRole("navigation", { name: wordsFor(language).categories });
+        await expect(row.getByRole("button")).toHaveCount(14);
+        await expect(row.getByRole("button").first()).toHaveText(wordsFor(language).often);
+        expect(
+          await row.evaluate((element) => element.scrollWidth > element.clientWidth + 100),
+        ).toBe(true);
+        const forwards = await ringsFrom(page, row, row.getByRole("button").first());
+        expect(forwards).toHaveLength(14);
+        // Focus has left the row; back from the last category (at the row's end) to the first.
+        const backwards = await ringsBackwards(page, row);
+        expect(backwards).toHaveLength(14);
+        for (const ring of [...forwards, ...backwards]) {
+          expect(ring.ring, ring.name).toBe(true);
+          expect(ring, `categories: ${ring.name}`).toEqual(whole(ring));
+        }
+        expect(
+          await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+        ).toBe(true);
+      });
+
+/**
+ * (b, review) The row's room for rings ran 4 px below the sticky search bar, and that see-through
+ * strip took the taps meant for the dish rows scrolled beneath it.
+ */
+for (const width of [390, 1024, 1440] as const)
+  test(`@production a tap just below the category row reaches the menu under it at ${width}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await signIn(page, "en", tenMore("en"));
+    await page.goto("/operations/order-entry");
+    const row = page.getByRole("navigation", { name: words.en.categories });
+    await expect(row).toBeVisible();
+    const under = await row.evaluate((element) => {
+      const bar = (element.parentElement ?? element).getBoundingClientRect();
+      const box = element.getBoundingClientRect();
+      const y = bar.bottom + 2;
+      const x = box.left + box.width / 2;
+      const hit = document.elementFromPoint(x, y);
+      return {
+        inRow: hit !== null && element.contains(hit),
+        stripBelowBar: box.bottom > bar.bottom,
+      };
+    });
+    expect(under.stripBelowBar).toBe(true);
+    expect(under.inRow).toBe(false);
+  });

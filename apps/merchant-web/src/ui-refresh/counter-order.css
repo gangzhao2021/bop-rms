@@ -61,16 +61,22 @@
   /* Batch 61 (v15 b60 live): a scroll box cuts off what is drawn past its padding edge, so the
      category rings lost their top and bottom (and the first its left side too). 4px of room all
      round, given back by the same negative margin, holds a ring drawn 1px out (3px + 1px); the
-     4px above is the bar's gap, so the row and the buttons stay where v3 draws them. */
-  margin: -4px;
-  padding: 4px;
+     4px above is the bar's gap, so the row and the buttons stay where v3 draws them. The end has
+     5px: the row scrolls in whole pixels, so 4px left the last ring a third of a pixel short.
+     The room is see-through and must not take taps meant for the dish rows scrolled beneath it,
+     so only the buttons take pointer events. */
+  margin: -4px -5px -4px -4px;
+  padding: 4px 5px 4px 4px;
+  pointer-events: none;
 }
 .counter-order__categories button:focus-visible {
   outline-offset: 1px;
 }
 .counter-order__categories button {
-  /* Tab scrolls a half-hidden category in with room for its ring. */
-  scroll-margin: 4px;
+  /* The row's focus handler scrolls a half-hidden category in with this much room for its ring
+     (4px), plus 1px at the sides because the row scrolls in whole pixels. */
+  scroll-margin: 4px 5px;
+  pointer-events: auto;
   flex: 0 0 auto;
   min-height: 44px;
   padding: 0;

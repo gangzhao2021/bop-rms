@@ -2193,7 +2193,17 @@ export function StaffOrderEntryPage({
               />
             </label>
             {search === "" && menu.menu.sections.length + (often.length > 0 ? 1 : 0) > 1 ? (
-              <nav className="counter-order__categories" aria-label={t("Menu categories")}>
+              <nav
+                className="counter-order__categories"
+                aria-label={t("Menu categories")}
+                onFocus={(event) => {
+                  // Batch 61 review: with a long menu the row scrolls, and the browser leaves a
+                  // category that is only half hidden where it is, ring cut off. Bring the whole
+                  // category (and its scroll-margin, room for the ring) into the row.
+                  if (event.target !== event.currentTarget)
+                    event.target.scrollIntoView({ block: "nearest", inline: "nearest" });
+                }}
+              >
                 {often.length > 0 ? (
                   <button
                     type="button"
