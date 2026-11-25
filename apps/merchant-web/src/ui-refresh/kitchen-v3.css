@@ -467,9 +467,11 @@
   font-size: 16px;
   font-weight: 400;
 }
+/* Batch 64 (v15 b63 live): the ticket's type is on the v3 scale (28/20/16/14 at 600/400), as
+   Figma 55:115 draws it: the title 28/600, a dish 20/600, its options and every button 16. */
 .kitchen-ticket__number {
-  font-size: var(--bop-kitchen-ticket-number);
-  font-weight: 700;
+  font-size: 28px;
+  font-weight: 600;
   line-height: 1.1;
   letter-spacing: -0.01em;
 }
@@ -506,7 +508,7 @@
   :is(.kitchen-ticket__timer, .kitchen-ticket__tier) {
   color: var(--bop-color-danger);
   font-size: 20px;
-  font-weight: 700;
+  font-weight: 600;
 }
 .kitchen-order-group.kitchen-ticket .kitchen-ticket__tier::before {
   content: "· ";
@@ -544,7 +546,7 @@
   background: var(--bop-color-accent);
   color: var(--bop-color-on-accent-fill);
   font: inherit;
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -574,13 +576,13 @@
   display: flex;
   gap: 10px;
   margin: 0;
-  font-size: var(--bop-kitchen-item);
+  font-size: 20px;
   font-weight: 600;
   line-height: 1.3;
 }
 .kitchen-work-item[data-in-ticket] .kitchen-work-item__count {
-  font-size: var(--bop-kitchen-item);
-  font-weight: 700;
+  font-size: 20px;
+  font-weight: 600;
 }
 .kitchen-work-item[data-in-ticket] .kitchen-work-item__detail-link {
   color: inherit;
@@ -608,11 +610,11 @@
   margin: 0;
   padding: 0;
   list-style: none;
-  font-size: var(--bop-kitchen-modifier);
+  font-size: 16px;
 }
 .kitchen-work-item[data-in-ticket] .kitchen-work-item__note {
   margin: 0;
-  font-size: var(--bop-kitchen-modifier);
+  font-size: 16px;
   font-weight: 600;
 }
 .kitchen-work-item[data-in-ticket] .kitchen-work-item__allergens,
@@ -664,6 +666,15 @@
   color: var(--bop-color-accent);
   font-size: 16px;
   font-weight: 600;
+}
+/* Batch 64 (v15 b63 live, offline): a dish's Finished that cannot be tapped (offline, signed out,
+   a tap already on its way) is drawn as disabled, grey like the ticket's own buttons then, never
+   in the accent that says "tap me". */
+.kitchen-work-item[data-in-ticket] .kitchen-work-item__actions button:disabled,
+.kitchen-work-item__combo-step:disabled {
+  border-color: var(--bop-color-border-control);
+  color: var(--bop-color-text-muted);
+  cursor: default;
 }
 
 /* ------------------------------------------------------------ Phones */
@@ -753,8 +764,8 @@
   border-radius: var(--bop-radius-control);
   background: none;
   color: var(--bop-color-text-default);
-  font-size: 17px;
-  font-weight: 700;
+  font-size: 16px;
+  font-weight: 600;
 }
 .kitchen-work-item__combo-done {
   margin-left: auto;
@@ -938,7 +949,7 @@
 .kitchen-order-group.kitchen-ticket[data-age="late"]
   .kitchen-ticket__status
   :is(.kitchen-ticket__timer, .kitchen-ticket__tier) {
-  font-size: 18px;
+  font-size: 20px;
 }
 /* One line on the ticket: its one main step already is that dish's step. */
 .kitchen-ticket:has(> .kitchen-work-item:only-of-type) .kitchen-work-item__done {
@@ -994,7 +1005,7 @@
   background: none;
 }
 .kitchen-board-workspace .kitchen-earlier-ticket__heading h4 {
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 600;
 }
 .kitchen-board-workspace .kitchen-earlier-ticket__day,
@@ -1024,8 +1035,8 @@
   background: none;
 }
 .kitchen-board-workspace .kitchen-earlier-ticket .kitchen-work-item__summary h3 {
-  font-size: 17px;
-  font-weight: 500;
+  font-size: 16px;
+  font-weight: 400;
 }
 .kitchen-board-workspace .kitchen-earlier-ticket .kitchen-work-item__state {
   font-size: 14px;
@@ -1708,6 +1719,54 @@
     flex-basis: 100%;
   }
   .kitchen-notice-line > .kitchen-status-row + .pause-ordering::before {
+    display: none;
+  }
+}
+
+/*
+ * Batch 64 (v15 batch 63 live, TM2 at 390x844): the display's header stack pushed the first ticket
+ * to y=486: the bar took four rows (name, links, note, Hand over), the board's own bar two, and a
+ * centred black "Filters · Active work" a row of its own under the notice line. On a phone now:
+ * - the bar is three rows: name and switch, then "Mark an item sold out" with Hand over at the row's
+ *   end, then the note. The current page's own "Kitchen" link says nothing the title under it does
+ *   not (it is still the page you are on); a long link wraps inside its 44 px row, never the row;
+ * - "Find an order" sits in the board's bar as on a tablet, opening the same sheet; the Filters
+ *   button is gone (a chosen work state is named beside the count, batch 45).
+ * The first ticket starts in the top half of the first screen.
+ */
+@media (max-width: 767px) {
+  /* Three columns, so Hand over (spanning the last two) never narrows the Store's name above it. */
+  .kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header {
+    grid-template-columns: minmax(0, 1fr) minmax(0, max-content) auto;
+    grid-template-areas:
+      "title title lang"
+      "nav handover handover"
+      "note note note"
+      "failed failed failed";
+  }
+  .kitchen-shell:not(.kitchen-shell--workspace)
+    .bop-shell__header
+    .bop-shell__nav:has(a:not([aria-current="page"]))
+    a.kitchen-display-nav-link[aria-current="page"] {
+    display: none;
+  }
+  .kitchen-shell:not(.kitchen-shell--workspace)
+    .bop-shell__header
+    .bop-shell__nav
+    a.kitchen-display-nav-link {
+    white-space: normal;
+    line-height: 1.25;
+  }
+  .kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header .kitchen-handover-button {
+    justify-self: end;
+  }
+  .kitchen-shell:not(.kitchen-shell--workspace)
+    .kitchen-board-heading__actions
+    .kitchen-find-button {
+    display: inline-flex;
+  }
+  .kitchen-shell:not(.kitchen-shell--workspace) .kitchen-board-workspace > .kitchen-filter-toggle,
+  .kitchen-shell:not(.kitchen-shell--workspace) .kitchen-filter-toggle {
     display: none;
   }
 }
