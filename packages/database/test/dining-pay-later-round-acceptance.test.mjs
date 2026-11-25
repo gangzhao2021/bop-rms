@@ -329,6 +329,11 @@ it("a claim after a partial refund earns what is left, once, even while the swee
 // Provider account, and catches up with refunds made while it could not run.
 it("the points sweep settles a table's refund only under the Store's own account, and catches up after days of failures", () =>
   journey("MemberPointsStoreAccount"));
+// v15 b61 live (TM2 orders 61 and 62): two phones each pay their own part online, then staff
+// refund phone A. Phone B, never refunded, is offered and claims all of its points with nothing said
+// about a refund, before or after A claims; A's points answer for A's refund alone.
+it("a phone that paid its own part keeps its points when another phone's part is refunded", () =>
+  journey("MemberPointsSplitOnline"));
 it("a paid pickup earns for the guest who ordered it, once, and for nobody else", () =>
   journey("MemberPointsPickup"));
 // WP-2423 item 8 ④: a split table pays one part in cash (some of it refunded), the guests leave;
@@ -1206,35 +1211,37 @@ async function journey(journeyEnding) {
                                           ? "wp2423_plmembop"
                                           : ending === "MemberPointsStoreAccount"
                                             ? "wp2423_plmembac"
-                                            : ending === "MemberPointsRefunded"
-                                              ? "wp2423_plmembrf"
-                                              : ending === "MemberPointsPickup"
-                                                ? "wp2423_plmembpk"
-                                                : ending === "MemberPoints"
-                                                  ? "wp2423_plmember"
-                                                  : ending === "MemberPointsSplit"
-                                                    ? "wp2423_plmembsp"
-                                                    : ending === "MemberPointsWrittenOff"
-                                                      ? "wp2423_plmembwo"
-                                                      : ending === "PaidSplit"
-                                                        ? "wp2423_plsplit"
-                                                        : ending === "SplitWrittenOff"
-                                                          ? "wp2423_plsplwo"
-                                                          : ending === "SplitPhoneWrittenOff"
-                                                            ? "wp2423_plsplpwo"
-                                                            : ending === "ByGuestsPhoneWrittenOff"
-                                                              ? "wp2423_plbgpwo"
-                                                              : ending === "Held"
-                                                                ? "wp2423_plheld"
-                                                                : ending === "HeldAtCheckout"
-                                                                  ? "wp2423_plheldco"
-                                                                  : ending === "TipsOff"
-                                                                    ? "wp2423_pltips"
-                                                                    : ending === "Moved"
-                                                                      ? "wp2423_plmove"
-                                                                      : ending === "Merged"
-                                                                        ? "wp2423_plmerge"
-                                                                        : "wp2423_plon",
+                                            : ending === "MemberPointsSplitOnline"
+                                              ? "wp2423_plmembso"
+                                              : ending === "MemberPointsRefunded"
+                                                ? "wp2423_plmembrf"
+                                                : ending === "MemberPointsPickup"
+                                                  ? "wp2423_plmembpk"
+                                                  : ending === "MemberPoints"
+                                                    ? "wp2423_plmember"
+                                                    : ending === "MemberPointsSplit"
+                                                      ? "wp2423_plmembsp"
+                                                      : ending === "MemberPointsWrittenOff"
+                                                        ? "wp2423_plmembwo"
+                                                        : ending === "PaidSplit"
+                                                          ? "wp2423_plsplit"
+                                                          : ending === "SplitWrittenOff"
+                                                            ? "wp2423_plsplwo"
+                                                            : ending === "SplitPhoneWrittenOff"
+                                                              ? "wp2423_plsplpwo"
+                                                              : ending === "ByGuestsPhoneWrittenOff"
+                                                                ? "wp2423_plbgpwo"
+                                                                : ending === "Held"
+                                                                  ? "wp2423_plheld"
+                                                                  : ending === "HeldAtCheckout"
+                                                                    ? "wp2423_plheldco"
+                                                                    : ending === "TipsOff"
+                                                                      ? "wp2423_pltips"
+                                                                      : ending === "Moved"
+                                                                        ? "wp2423_plmove"
+                                                                        : ending === "Merged"
+                                                                          ? "wp2423_plmerge"
+                                                                          : "wp2423_plon",
     },
     async (context) => {
       const admin = new Client(context.clientConfig);
@@ -9096,6 +9103,160 @@ async function journey(journeyEnding) {
             });
             // Someone else's Order: nothing to claim, and nothing said about it.
             assert.equal((await port.state(guest(token), orderReference)).claim, null);
+            await reportAddsUp();
+            return;
+          }
+
+          if (ending === "MemberPointsSplitOnline") {
+            // Phone B is this port's phone (tablePhone); phone A is the host's (hostPhone).
+            const portA = createCustomerMember({
+              access: { ...access, credentials: hostPhone.identity.session.credentials },
+              tenantReference: tenant,
+              providerAccountReference: provider,
+              environment: "Test",
+              protector,
+              messages,
+              budget: { consume: async () => ({ allowed: true, retryAfterSeconds: 0 }) },
+              nextReference: fresh,
+            });
+            const guestA = (memberToken = null) => ({
+              sessionCredential: hostPhone.sessionCredential,
+              csrfCredential: hostPhone.csrfCredential,
+              memberToken,
+            });
+            const tokenB = await join("+16135550131");
+            await portA.sendCode(guestA(), "+16135550132", "198.51.100.9");
+            const tokenA = (
+              await portA.verify(
+                guestA(),
+                {
+                  phone: "+16135550132",
+                  code: /(\d{6})/u.exec(sent.at(-1).text)[1],
+                  marketingConsent: false,
+                  claim: false,
+                  partNumber: null,
+                },
+                "198.51.100.9",
+              )
+            ).token;
+            const split = await createMerchantDiningTableSplit({
+              persistence: persistenceOf(server),
+              authentication: server.authentication,
+              nextReference: fresh,
+            })({
+              ...as(server),
+              command: {
+                operationReference: fresh(),
+                diningSessionReference: sessionReference,
+                mode: "Even",
+                people: 2,
+                rounds: null,
+              },
+            });
+            assert.equal(split.status, "Recorded");
+            const parts = split.bill.split.parts;
+            const { intents, stripe } = providerStandIn();
+            const payments = createDiningTableOnlinePayments({
+              scope: ownerScope,
+              providerAccountReference: provider,
+              environment: "Test",
+              provider: stripe,
+              transactions: transactions(),
+              now,
+              nextReference: fresh,
+            });
+            const phoneAt = (guestSessionReference) => ({
+              diningSessionReference: sessionReference,
+              guestSessionReference,
+              allowed: async () => true,
+            });
+            // Each phone pays its own part on its own card.
+            for (const [guestSessionReference, partNumber] of [
+              [guestSession, 1],
+              [tableGuest, 2],
+            ]) {
+              await payments.start(phoneAt(guestSessionReference), {
+                operationReference: fresh(),
+                tip: { kind: "None" },
+                partNumber,
+              });
+              for (const intent of new Set(intents.values())) intent.status = "Captured";
+              await payments.refresh(phoneAt(guestSessionReference));
+            }
+            const paid = (await bill()).split.parts;
+            assert.deepEqual(
+              paid.map((part) => [part.partNumber, part.payment?.method]),
+              [
+                [1, "Online"],
+                [2, "Online"],
+              ],
+            );
+            const part1Total = BigInt(paid[0].payment.totalMinor);
+            const expected = (part) => Number((BigInt(part.subtotalMinor) * 3n) / 100n);
+            const [fullA, fullB] = [expected(parts[0]), expected(parts[1])];
+            assert.ok(fullA > 0 && fullB > 0);
+            // Staff refund part of phone A's payment to its card (order 62's shape).
+            let refundNumber = 0;
+            const refundA = (amountMinor) =>
+              createMerchantDiningTableOnlineRefund({
+                persistence: persistenceOf(manager),
+                authentication: manager.authentication,
+                provider: {
+                  refundPayment: async (request) =>
+                    refundAnswer(
+                      request,
+                      "succeeded",
+                      "re_TESTSPLITONLINE" + String(++refundNumber).padStart(4, "0"),
+                    ),
+                },
+                nextReference: fresh,
+              })({
+                ...as(manager),
+                command: {
+                  orderReference,
+                  operationReference: fresh(),
+                  amountMinor,
+                  reasonCode: "FOOD_ISSUE",
+                  partNumber: 1,
+                },
+              });
+            assert.equal((await refundA("800")).status, "Recorded");
+            const backA = Math.floor((fullA * 800) / Number(part1Total));
+            assert.ok(backA > 0);
+            // B claims first, while A has claimed nothing: all of B's points, no "after the refund".
+            assert.deepEqual((await port.state(guest(tokenB))).claim.parts, [
+              { partNumber: 2, points: fullB, certain: true },
+            ]);
+            assert.equal((await port.claim(guest(tokenB), 2)).earnedPoints, fullB);
+            assert.equal(await sweep.settlePoints(), 0, "B owes nothing back");
+            assert.equal(await pointsOf(tokenB), fullB);
+            // A is offered what its own refund leaves, and told so.
+            assert.deepEqual((await portA.state(guestA(tokenA))).claim.parts, [
+              { partNumber: 1, points: fullA - backA, certain: true, afterRefund: true },
+            ]);
+            assert.equal((await portA.claim(guestA(tokenA), 1)).earnedPoints, fullA - backA);
+            // The rest of A refunded: A's points go, B's stay, whoever runs.
+            assert.equal((await refundA(String(part1Total - 800n))).status, "Recorded");
+            await Promise.all([sweep.settlePoints(), sweep.settlePoints()]);
+            assert.equal(await sweep.settlePoints(), 0);
+            assert.equal((await portA.home(guestA(tokenA))).availablePoints, 0);
+            assert.equal(await pointsOf(tokenB), fullB);
+            // Append-only: each Earn once; the only reversals are A's, and B's account has none.
+            const history = await rows(
+              "SELECT account_id::text AS account,type,points::int AS points FROM rms_loyalty.loyalty_points_transaction WHERE order_id=$1 AND type IN ('Earn','Reverse') ORDER BY occurred_at,type",
+              [orderReference],
+            );
+            const [accountA, accountB] = [await accountOf(tokenA), await accountOf(tokenB)];
+            const lines = (account) =>
+              history.filter((row) => row.account === String(account)).map((row) => row.type);
+            assert.deepEqual(lines(accountB), ["Earn"]);
+            assert.equal(lines(accountA)[0], "Earn");
+            assert.equal(
+              history
+                .filter((row) => row.type === "Reverse")
+                .reduce((total, row) => total + row.points, 0),
+              fullA,
+            );
             await reportAddsUp();
             return;
           }

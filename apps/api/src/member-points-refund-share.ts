@@ -19,9 +19,13 @@ export interface PointsSettlement {
 }
 
 /**
- * For each earning of one Order, how many of its points its refunds take back in all. A paid part
- * of a split bill answers for the refunds keyed to it (or to its phone payment); a whole bill, a
- * pickup or a pay-first round answers for all of the Order's refunds, against everything paid.
+ * For each earning of one Order, how many of its points its refunds take back in all. Points follow
+ * the money each payment kept (v15 b61 live): a table payment answers for the refunds keyed to it
+ * (or to its phone payment), against what it paid, and never for another payment's. A payment made
+ * on a phone answers for nothing else. A payment taken at the table in cash or on the card machine,
+ * earning alone and refunded nowhere itself, answers for the refunds tied to no payment, against
+ * the whole bill. A pickup or a pay-first round answers for all of the Order's refunds, against
+ * everything paid.
  */
 export function refundedPointsTargets(input: {
   readonly earned: readonly { readonly sourceReference: string; readonly points: number }[];
@@ -37,22 +41,28 @@ export function refundedPointsTargets(input: {
     input.settlements.length > 0
       ? input.settlements.reduce((sum, record) => sum + record.totalMinor, 0n)
       : input.paidMinor;
+  const of = (settlement: PointsSettlement) => (refund: PointsRefund) =>
+    refund.paymentIntentReference.startsWith(settlement.settlementReference + ":") ||
+    refund.paymentIntentReference === settlement.onlinePaymentReference;
+  const sum = (refunds: readonly PointsRefund[]) =>
+    refunds.reduce((total, refund) => total + refund.amountMinor, 0n);
+  const untied = input.refunds.filter(
+    (refund) => !input.settlements.some((settlement) => of(settlement)(refund)),
+  );
   return input.earned.map((earn) => {
     const settlement = input.settlements.find(
       (record) => record.settlementReference === earn.sourceReference,
     );
-    const own =
-      settlement === undefined
-        ? []
-        : input.refunds.filter(
-            (refund) =>
-              refund.paymentIntentReference.startsWith(settlement.settlementReference + ":") ||
-              refund.paymentIntentReference === settlement.onlinePaymentReference,
-          );
-    const direct = settlement !== undefined && (own.length > 0 || input.earned.length > 1);
-    const refunded = direct ? own.reduce((sum, r) => sum + r.amountMinor, 0n) : refundedMinor;
-    const paid = direct ? (settlement as PointsSettlement).totalMinor : billPaid;
-    return pointsForRefundedShare(earn.points, refunded, paid);
+    if (settlement === undefined)
+      return pointsForRefundedShare(earn.points, refundedMinor, billPaid);
+    const own = input.refunds.filter(of(settlement));
+    // v15 b61 live (orders 61, 62): a phone that paid its own part and was never refunded kept all
+    // its money, whoever else was refunded, and whether or not it is the first to claim.
+    const direct =
+      settlement.onlinePaymentReference !== null || own.length > 0 || input.earned.length > 1;
+    return direct
+      ? pointsForRefundedShare(earn.points, sum(own), settlement.totalMinor)
+      : pointsForRefundedShare(earn.points, sum(untied), billPaid);
   });
 }
 
