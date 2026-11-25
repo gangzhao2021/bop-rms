@@ -773,17 +773,29 @@
   font-weight: 600;
   cursor: pointer;
 }
+/* Batch 63 review (F05): a page that shows a table's receipt prints only that receipt, however
+   printing starts (the receipt's own action, or the browser's menu). Scoped by what the page
+   shows, never by a mark set around window.print(): where print() does not wait (iOS Safari) such
+   a mark was gone before the page was laid out for print. */
 @media print {
-  html[data-printing="table-receipt"] body * {
+  body:has(.dining-session__receipt--printable) * {
     visibility: hidden;
   }
-  html[data-printing="table-receipt"] .dining-session__receipt--settled,
-  html[data-printing="table-receipt"] .dining-session__receipt--settled * {
+  body:has(.dining-session__receipt--printable) .dining-session__receipt--printable,
+  body:has(.dining-session__receipt--printable) .dining-session__receipt--printable * {
     visibility: visible;
   }
-  html[data-printing="table-receipt"] .dining-session__receipt--settled {
+  .dining-session__receipt--printable {
     position: absolute;
     inset: 0 0 auto;
     border: 0;
+  }
+  /* Inside the receipt card (a table paid in full, still open): the print action and the points
+     offer are not part of the copy. */
+  .dining-session__receipt--printable .dining-session__receipt-print,
+  .dining-session__receipt--printable .member-panel,
+  .dining-session__receipt--printable .member-panel__link,
+  .dining-session__receipt--printable .member-panel__added {
+    display: none;
   }
 }

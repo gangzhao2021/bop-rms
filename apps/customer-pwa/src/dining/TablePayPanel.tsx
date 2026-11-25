@@ -15,6 +15,12 @@ import {
   type TablePaymentView,
   type TableTip,
 } from "./table-payment-client.js";
+import { PrintTableReceipt, ReceiptMerchantHeader } from "./SettledTableReceipt.js";
+import {
+  createStoreProfileClient,
+  type StoreProfile,
+  type StoreProfileLoader,
+} from "../store/store-profile-client.js";
 import {
   initialPayScope,
   payDishCount,
@@ -23,6 +29,7 @@ import {
 } from "./table-pay-choice.js";
 
 const money = (amountMinor: string) => formatMoney(amountMinor, "CAD");
+const browserStoreProfile: StoreProfileLoader = createStoreProfileClient();
 /** "0": no tip; "other": an amount the guest types; otherwise one of the Store's percentages. */
 type TipChoice = string;
 const OTHER = "other";
@@ -183,8 +190,14 @@ export function TablePayPanel({
   readKey,
   onBillChanged,
   onGone,
+  storeProfile = browserStoreProfile,
 }: {
   readonly client?: ReturnType<typeof createTablePaymentClient>;
+  /**
+   * Batch 63 review (F05): the Store's published name and address, for the header of the receipt
+   * of a table one payment paid in full while it is still open (null: not read).
+   */
+  readonly storeProfile?: StoreProfileLoader | null;
   /**
    * Batch 62 (v15 b61 live, G61 E): this phone's own payment and its refunds, said inside the
    * table's receipt when one payment paid the whole bill (null: nothing to add).
@@ -416,6 +429,24 @@ export function TablePayPanel({
     };
   }, [view?.state, configuration?.mode, clientSecret, client, handoffAttempt]);
 
+  // Batch 63 review (F05): the whole table's receipt says who it is from, as the ended table's
+  // does, so the guest can print or save it before the table closes. Read once it shows; a
+  // profile that can't be read leaves the header out, never the receipt.
+  const wholeReceipt = view?.state === "Paid" && view.receipt !== null;
+  const [store, setStore] = useState<StoreProfile | null>(null);
+  useEffect(() => {
+    if (!wholeReceipt || storeProfile === null) return;
+    let live = true;
+    storeProfile()
+      .then((profile) => {
+        if (live) setStore(profile);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [wholeReceipt, storeProfile]);
+
   if (view === null) return problem ? <p role="status">{problem}</p> : null;
   if (!view.checkingOut && view.state !== "Paid") return null;
 
@@ -562,10 +593,17 @@ export function TablePayPanel({
     const receipt = view.receipt;
     return (
       <section
-        className="order-status__card dining-session__receipt"
+        className="order-status__card dining-session__receipt dining-session__receipt--printable"
         aria-labelledby="table-receipt"
       >
         <h2 id="table-receipt">{t("Receipt")}</h2>
+        {store === null ? null : (
+          <ReceiptMerchantHeader
+            merchant={{ ...store, brandDisplayName: null }}
+            tableLabel={view.tableLabel}
+            paidAt={receipt.paidAt}
+          />
+        )}
         <dl className="order-status__money">
           <div>
             <dt>{t("Your table’s order")}</dt>
@@ -638,6 +676,7 @@ export function TablePayPanel({
             ? t("The bill is settled. Staff have since made a refund.")
             : t("Thank you! Your table is paid in full.")}
         </p>
+        <PrintTableReceipt />
         <MemberJoinPanel />
       </section>
     );

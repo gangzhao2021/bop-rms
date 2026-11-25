@@ -483,6 +483,20 @@ for (const width of [390, 1024, 1440])
         expect(await page.evaluate(() => (window as unknown as { printed: number }).printed)).toBe(
           1,
         );
+        // Batch 63 review (F05): printed, only the receipt shows — however printing starts and
+        // however long print() takes (iOS Safari does not wait in it), with nothing set around it.
+        await page.emulateMedia({ media: "print" });
+        const visibility = (locator: Locator) =>
+          locator.evaluate((element) => getComputedStyle(element).visibility);
+        const printed = page.locator(".dining-session__receipt--settled");
+        expect(await visibility(printed)).toBe("visible");
+        expect(await visibility(printed.locator("dl").first())).toBe("visible");
+        expect(await visibility(page.locator("h1").first())).toBe("hidden");
+        expect(await visibility(page.locator(".dining-session__receipt-print button"))).toBe(
+          "hidden",
+        );
+        expect(await visibility(page.locator(".member-panel").first())).toBe("hidden");
+        await page.emulateMedia({ media: "screen" });
         // F06: the points on both parts, offered once, never "which part".
         const points = page.getByRole("region", {
           name: zh

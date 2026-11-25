@@ -111,8 +111,20 @@ const plain = (value: unknown, maximum: number) =>
   !/[\p{Cc}\p{Cf}<>]/u.test(value)
     ? value
     : fail();
+/**
+ * Batch 63 review: the header never costs the guest the receipt. A merchant block that can't be
+ * read (a name or address part too long, or not plain text) is left out, as when the server sends
+ * none; the dishes, totals and points offer still show.
+ */
 function merchantOf(value: unknown): SettledTableReceipt["merchant"] {
-  if (value === undefined) return null;
+  if (value === undefined || value === null) return null;
+  try {
+    return readMerchant(value);
+  } catch {
+    return null;
+  }
+}
+function readMerchant(value: unknown): NonNullable<SettledTableReceipt["merchant"]> {
   const merchant = record(value);
   const address = record(merchant.address);
   return Object.freeze({
@@ -335,37 +347,62 @@ function OwnPartRows({
   );
 }
 
+/**
+ * Batch 63 (design review D62B-03, F05): who a table's receipt is from and when — the Store's
+ * published name (and its brand, where different), its address, the table and when the bill was
+ * paid — as the pickup receipt says it, so a printed or saved copy stands on its own.
+ */
+export function ReceiptMerchantHeader({
+  merchant,
+  tableLabel,
+  paidAt,
+}: {
+  readonly merchant: {
+    readonly storeDisplayName: string;
+    /** Null: not known here (said only when it differs from the Store's name). */
+    readonly brandDisplayName: string | null;
+    readonly address: NonNullable<SettledTableReceipt["merchant"]>["address"];
+  };
+  readonly tableLabel: string | null;
+  readonly paidAt: string | null;
+}) {
+  return (
+    <div className="dining-session__receipt-merchant">
+      <p className="dining-session__receipt-store">{merchant.storeDisplayName}</p>
+      {merchant.brandDisplayName === null ||
+      merchant.brandDisplayName === merchant.storeDisplayName ? null : (
+        <p>{merchant.brandDisplayName}</p>
+      )}
+      <address>
+        {merchant.address.addressLines.map((line) => (
+          <span key={line}>{line}</span>
+        ))}
+        <span>{formatLocalityLine(merchant.address)}</span>
+      </address>
+      {tableLabel === null ? null : <p>{t("Table {table}", { table: saidTable(tableLabel) })}</p>}
+      {paidAt === null ? null : <p>{t("Paid {date}", { date: formatDateTime(paidAt) })}</p>}
+    </div>
+  );
+}
+
 export function SettledTableReceiptView({ receipt }: { readonly receipt: SettledTableReceipt }) {
   const yours = receipt.split ? receipt.payments.filter((payment) => payment.yours) : [];
   const yourCount = yours.length;
   const yourTotal = yours.reduce((sum, payment) => sum + BigInt(payment.totalMinor), 0n).toString();
   return (
     <section
-      className="order-status__card dining-session__receipt dining-session__receipt--settled"
+      className="order-status__card dining-session__receipt dining-session__receipt--settled dining-session__receipt--printable"
       aria-labelledby="table-receipt"
     >
       <h2 id="table-receipt">{t("Receipt")}</h2>
       {/* Batch 63 (design review D62B-03, F05): who it is from and when, as the pickup receipt
           says it, so the guest's printed or saved copy stands on its own. */}
       {receipt.merchant === null ? null : (
-        <div className="dining-session__receipt-merchant">
-          <p className="dining-session__receipt-store">{receipt.merchant.storeDisplayName}</p>
-          {receipt.merchant.brandDisplayName === receipt.merchant.storeDisplayName ? null : (
-            <p>{receipt.merchant.brandDisplayName}</p>
-          )}
-          <address>
-            {receipt.merchant.address.addressLines.map((line) => (
-              <span key={line}>{line}</span>
-            ))}
-            <span>{formatLocalityLine(receipt.merchant.address)}</span>
-          </address>
-          {receipt.tableLabel === null ? null : (
-            <p>{t("Table {table}", { table: saidTable(receipt.tableLabel) })}</p>
-          )}
-          {receipt.paidAt === null ? null : (
-            <p>{t("Paid {date}", { date: formatDateTime(receipt.paidAt) })}</p>
-          )}
-        </div>
+        <ReceiptMerchantHeader
+          merchant={receipt.merchant}
+          tableLabel={receipt.tableLabel}
+          paidAt={receipt.paidAt}
+        />
       )}
       {receipt.rounds.map((round) => (
         <div key={round.roundNumber} className="dining-session__receipt-round">
@@ -574,27 +611,13 @@ export function SettledTableReceiptPanel({
 /**
  * Batch 63 (design review D62B-03, F05): keep a copy of the table's receipt, as pickup offers —
  * the browser's print, which also saves a PDF. Only the receipt is printed (the page's tabs,
- * header, points offer and this action are left out).
+ * header, points offer and this action are left out): the print styles follow the receipt on the
+ * page, so nothing has to be set and taken away around print() (batch 63 review).
  */
 export function PrintTableReceipt() {
-  const print = () => {
-    const root = document.documentElement;
-    root.dataset.printing = "table-receipt";
-    const done = () => {
-      delete root.dataset.printing;
-      window.removeEventListener("afterprint", done);
-    };
-    window.addEventListener("afterprint", done);
-    try {
-      window.print();
-    } finally {
-      // Browsers that print synchronously have printed by now; afterprint may not come.
-      window.setTimeout(done, 0);
-    }
-  };
   return (
     <p className="dining-session__receipt-print">
-      <button type="button" onClick={print}>
+      <button type="button" onClick={() => window.print()}>
         {t("Print or save receipt")}
       </button>
     </p>

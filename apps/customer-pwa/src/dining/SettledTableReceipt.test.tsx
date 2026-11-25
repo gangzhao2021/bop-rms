@@ -291,16 +291,28 @@ it("batch 63: the receipt says who it is from and when, and offers to print or s
   expect(zh).toMatch(/<p>付款时间 2026/u);
   // An older server sends neither: no header.
   expect(html(receipt(noodles))).not.toContain("dining-session__receipt-merchant");
+  // No address line at all is still a well-formed list; the header just has the locality.
+  const noLines = receipt(noodles);
+  Object.assign(noLines.receipt, {
+    merchant: { ...merchant, address: { ...merchant.address, addressLines: [] as string[] } },
+  });
+  expect(parseSettledTableReceipt(noLines).merchant?.address.addressLines).toEqual([]);
+  // Batch 63 review: a header that can't be read (markup, a part longer than allowed, a control
+  // character, a missing address) is left out; the receipt itself, its dishes and totals, stays.
   for (const broken of [
     { ...merchant, storeDisplayName: "<b>x</b>" },
-    { ...merchant, address: { ...merchant.address, addressLines: [] as string[] } },
+    { ...merchant, brandDisplayName: "x".repeat(201) },
+    { ...merchant, address: { ...merchant.address, postalCode: "M5V 1A1".repeat(4) } },
+    { ...merchant, address: { ...merchant.address, locality: "Toronto\u0000" } },
+    { ...merchant, address: null },
+    "Test Merchant",
   ]) {
     const bad = receipt(noodles);
     Object.assign(bad.receipt, { merchant: broken });
-    if (broken.address.addressLines.length === 0) {
-      // No address line at all is still a well-formed list; the header just has the locality.
-      expect(() => parseSettledTableReceipt(bad)).not.toThrow();
-    } else expect(() => parseSettledTableReceipt(bad)).toThrow();
+    const parsed = parseSettledTableReceipt(bad);
+    expect(parsed.merchant).toBeNull();
+    expect(parsed.rounds).toHaveLength(1);
+    expect(html(bad)).not.toContain("dining-session__receipt-merchant");
   }
   const print = renderToStaticMarkup(
     <LanguageRoot initial="zh-Hans">{() => <PrintTableReceipt />}</LanguageRoot>,
