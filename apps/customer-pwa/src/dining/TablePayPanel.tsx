@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { MemberJoinPanel } from "../member/MemberJoinPanel.js";
 import { MemberPointsAtTable } from "../member/MemberPointsAtTable.js";
+import { yourReceiptAttribute } from "./your-receipt-link.js";
 import { v7 as uuidv7 } from "uuid";
 import { saidTable, t, wordGap, listSeparator } from "../i18n/i18n.js";
 import { parseTipAmount } from "../checkout/tip-amount.js";
@@ -102,6 +103,8 @@ function problemText(error: unknown) {
 export interface TablePayStatus {
   readonly checkingOut: boolean;
   readonly paid: boolean;
+  /** Batch 62: this section shows the table's receipt (one payment paid the whole bill). */
+  readonly receipt?: boolean;
 }
 // The guest's tip choice during this checkout, kept in this tab so a reload keeps it. Only the
 // option chosen is kept (no table, bill or amount); it is cleared once the table is paid or no
@@ -168,12 +171,18 @@ export function splitPartDishesText(
 
 export function TablePayPanel({
   client: provided,
+  ownReceipt = null,
   onStatus,
   readKey,
   onBillChanged,
   onGone,
 }: {
   readonly client?: ReturnType<typeof createTablePaymentClient>;
+  /**
+   * Batch 62 (v15 b61 live, G61 E): this phone's own payment and its refunds, said inside the
+   * table's receipt when one payment paid the whole bill (null: nothing to add).
+   */
+  readonly ownReceipt?: ReactNode;
   /** Called when checkout or payment changes, so the table page reads itself again. */
   readonly onStatus?: (status: TablePayStatus) => void;
   /** A new value reads the table's payment state again. */
@@ -295,7 +304,13 @@ export function TablePayPanel({
   }, [view, tip]);
   // The table page (its total, its "order more") follows checkout and payment.
   const status =
-    view === null ? null : { checkingOut: view.checkingOut, paid: view.state === "Paid" };
+    view === null
+      ? null
+      : {
+          checkingOut: view.checkingOut,
+          paid: view.state === "Paid",
+          receipt: view.state === "Paid" && view.receipt !== null,
+        };
   // Batch 51 (v15 b50 live): a part of the bill paid (by this phone or another) changes neither
   // fact above, so the table's total lower on the page kept "Paid so far $0.00" until its next
   // 15 s read while this section already said "1 paid so far". What has been paid is part of what
@@ -504,6 +519,8 @@ export function TablePayPanel({
       <section
         className="order-status__card dining-session__receipt"
         aria-labelledby="table-receipt"
+        // Batch 62: the payer's "See your receipt" leads here (its own payment is said inside).
+        {...(ownReceipt === null ? {} : { [yourReceiptAttribute]: "" })}
       >
         <h2 id="table-receipt">{t("Receipt")}</h2>
         <dl className="order-status__money">
@@ -570,7 +587,14 @@ export function TablePayPanel({
             </dd>
           </div>
         </dl>
-        <p>{t("Thank you! Your table is paid in full.")}</p>
+        {ownReceipt}
+        {/* Batch 62 (v15 b61 live, G61 E): staff since gave some of it back: settled, with a
+            refund, never "paid in full" beside it (as the by-dish and split bills say). */}
+        <p>
+          {view.refundedMinor !== "0"
+            ? t("The bill is settled. Staff have since made a refund.")
+            : t("Thank you! Your table is paid in full.")}
+        </p>
         <MemberJoinPanel />
       </section>
     );

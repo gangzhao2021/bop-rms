@@ -12,6 +12,7 @@ import {
   type EndedTable,
 } from "../session/customer-transaction-context.js";
 import { youPaidText } from "./OwnPaymentReceipt.js";
+import { yourReceiptLinkState } from "./your-receipt-link.js";
 
 /**
  * Batch 46 (v15 b45 live): how this phone's table visit ended, when it has no visit now. Every
@@ -130,7 +131,8 @@ export function ClosedBillTableCard({
       )}
       <p>{t("New party? Ask staff to seat you, then scan again.")}</p>
       {yourPaidMinor !== null && paid !== "Nothing" && receiptLink ? (
-        <Link className="order-status__back" to="/dine-in/session">
+        // Batch 62: brings this phone's receipt into view on Your table.
+        <Link className="order-status__back" to="/dine-in/session" state={yourReceiptLinkState}>
           {t("See your receipt")}
         </Link>
       ) : null}

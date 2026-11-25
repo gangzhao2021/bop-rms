@@ -7,6 +7,7 @@ import {
   subscribeCustomerCsrfContext,
 } from "../session/customer-transaction-context.js";
 import { splitPartDishesText } from "./TablePayPanel.js";
+import { yourReceiptAttribute } from "./your-receipt-link.js";
 
 /**
  * Batch 56 (v15 b55 live, guest-closed-bill-menu-cart): a guest who paid part of a table's bill on
@@ -392,6 +393,7 @@ export function OwnPaymentReceiptView({ receipt }: { readonly receipt: OwnPaymen
     <section
       className="order-status__card dining-session__receipt dining-session__own-payment"
       aria-labelledby="own-payment-receipt"
+      {...{ [yourReceiptAttribute]: "" }}
     >
       <h2 id="own-payment-receipt">{t("Your receipt")}</h2>
       <p>
@@ -477,8 +479,40 @@ export function OwnPaymentReceiptView({ receipt }: { readonly receipt: OwnPaymen
   );
 }
 
-/** Loads this phone's own payment's receipt; nothing is shown when it paid nothing here. */
-export function OwnPaymentReceiptPanel({ client }: { readonly client: OwnPaymentReceiptClient }) {
+/**
+ * Batch 62 (v15 b61 live, G61 E): one phone paid the whole table and staff then gave some of it
+ * back. The table's receipt already says what was paid, what went back and what the table paid
+ * after it; inside it, the payer reads only what is theirs to know: that they paid it on this phone,
+ * what went back to their card and when. Never a second receipt with the same three figures.
+ */
+export function OwnWholeTablePaymentLines({ receipt }: { readonly receipt: OwnPaymentReceipt }) {
+  const refunds = receipt.payments.flatMap((payment) => payment.refunds);
+  return (
+    <div className="dining-session__own-payment-lines">
+      <p>{youPaidText(receipt.totalMinor, receipt.refundedMinor, pendingOf(refunds))}</p>
+      {refunds.length === 0 ? null : (
+        <ul className="dining-session__own-refunds" aria-label={t("Refunds of your payment")}>
+          {refunds.map((refund, number) => (
+            <li key={number}>{refundText(refund)}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Loads this phone's own payment's receipt; nothing is shown when it paid nothing here. Batch 62:
+ * `inTableReceipt`: said inside the table's receipt (a payment for the whole table is said as
+ * lines of it; anything else keeps its own receipt).
+ */
+export function OwnPaymentReceiptPanel({
+  client,
+  inTableReceipt = false,
+}: {
+  readonly client: OwnPaymentReceiptClient;
+  readonly inTableReceipt?: boolean;
+}) {
   const [state, setState] = useState<
     | { readonly status: "loading" }
     | { readonly status: "ready"; readonly receipt: OwnPaymentReceipt }
@@ -507,7 +541,12 @@ export function OwnPaymentReceiptPanel({ client }: { readonly client: OwnPayment
   if (state.status === "none" || state.status === "loading") return null;
   if (state.status === "unavailable")
     return (
-      <section className="order-status__unavailable" role="alert">
+      <section
+        className="order-status__unavailable"
+        role="alert"
+        // Batch 62: "See your receipt" leads here when the receipt could not be read.
+        {...(inTableReceipt ? {} : { [yourReceiptAttribute]: "" })}
+      >
         <p>{t("We couldn’t load your receipt. Check your connection and try again.")}</p>
         <button
           className="order-status__retry"
@@ -521,5 +560,7 @@ export function OwnPaymentReceiptPanel({ client }: { readonly client: OwnPayment
         </button>
       </section>
     );
+  if (inTableReceipt && state.receipt.payments.every((payment) => payment.covers === "WholeTable"))
+    return <OwnWholeTablePaymentLines receipt={state.receipt} />;
   return <OwnPaymentReceiptView receipt={state.receipt} />;
 }

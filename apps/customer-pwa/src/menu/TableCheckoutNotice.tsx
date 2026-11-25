@@ -2,6 +2,7 @@ import { Link } from "react-router";
 import type { TableCheckout } from "../dining/table-checkout-state.js";
 import { t } from "../i18n/i18n.js";
 import { useOwnPaidAtTable, youPaidText } from "../dining/OwnPaymentReceipt.js";
+import { yourReceiptLinkState } from "../dining/your-receipt-link.js";
 
 /** Not read yet: the table is checking out, and whether it is paid is not known. */
 export const unreadTableCheckout: TableCheckout = Object.freeze({
@@ -124,7 +125,10 @@ export function TableCheckoutNotice({ checkout }: { readonly checkout: TableChec
     <>
       <p className="menu-closed-notice__line">{text.whole}</p>
       {own.yourPaid === null ? null : <p className="menu-closed-notice__line">{own.yourPaid}</p>}
-      <Link to="/dine-in/session">{own.link ?? text.link}</Link>
+      {/* Batch 62: the payer's link brings their receipt into view on Your table. */}
+      <Link to="/dine-in/session" {...(own.link === null ? {} : { state: yourReceiptLinkState })}>
+        {own.link ?? text.link}
+      </Link>
     </>
   );
 }

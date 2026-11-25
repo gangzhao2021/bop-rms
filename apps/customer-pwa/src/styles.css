@@ -3250,6 +3250,23 @@
   padding: var(--bop-space-1) 0;
   overflow-wrap: break-word;
 }
+/* Batch 62 (v15 b61 live, G61 E): inside the table's receipt, what the payer of the whole table
+   paid and got back, a section gap below the "Paid by" row; the closing line follows it. */
+.dining-session__own-payment-lines {
+  margin-top: var(--bop-space-4);
+}
+.dining-session__own-payment-lines > p {
+  margin: 0;
+}
+/* The closing "settled, with a refund since" line is its own line under the refund details. */
+.dining-session__own-payment-lines + p {
+  margin-top: var(--bop-space-3);
+}
+/* Batch 62: "See your receipt" brings the receipt's heading in under the sticky tab bar, with room. */
+.customer-page [data-your-receipt],
+.customer-page [data-your-receipt] h2 {
+  scroll-margin-top: calc(var(--customer-nav-height) + var(--bop-space-6));
+}
 
 /* M111 (200% zoom on a phone is a 195 CSS px wide page): the guest app never forces a wider page
    than the screen (the shared tokens keep 320 px for the staff app), and the cart bar wraps

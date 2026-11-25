@@ -62,6 +62,7 @@ import {
   useGoOnWhenTableOpens,
 } from "../entry/table-wait-away.js";
 import { SettledTableReceiptPanel, type SettledTableReceiptClient } from "./SettledTableReceipt.js";
+import { useBringYourReceiptIntoView, wantsYourReceipt } from "./your-receipt-link.js";
 import {
   ClosedBillTableCard,
   EmptyClosedTableCard,
@@ -1132,8 +1133,10 @@ export function DiningSessionPage({
   const location = useLocation();
   const navigate = useNavigate();
   const [placed, setPlaced] = useState<RoundPlaced | null>(() => placedRound(location.state));
+  // Batch 62: followed from "See your receipt": this page brings the receipt into view, once.
+  const [showReceipt] = useState(() => wantsYourReceipt(location.state));
   useEffect(() => {
-    if (placedRound(location.state) !== null)
+    if (placedRound(location.state) !== null || wantsYourReceipt(location.state))
       void navigate(location.pathname, { replace: true, state: null });
   }, [location.pathname, location.state, navigate]);
   // The menu is read once the table has ordered something (a combo's dishes and allergens).
@@ -1321,6 +1324,7 @@ export function DiningSessionPage({
       cartClient={cartClient}
       menu={menu}
       placed={placed}
+      showReceipt={showReceipt}
       onRefresh={() => {
         // v15 batch 7: "Refresh now" reads the pay section too.
         void load();
@@ -1390,7 +1394,10 @@ export function DiningSessionScreen({
   tablePaymentClient,
   ownPaymentReceipt,
   placed = null,
+  showReceipt = false,
 }: {
+  /** Batch 62: followed from "See your receipt": bring this phone's receipt into view. */
+  readonly showReceipt?: boolean;
   /** Batch 56: this phone's own payment's receipt reader (tests supply one). */
   readonly ownPaymentReceipt?: OwnPaymentReceiptClient | undefined;
   /** WP-2423 item 6: a round was just placed from the cart (never "sent to the kitchen": a held
@@ -1416,6 +1423,7 @@ export function DiningSessionScreen({
 }) {
   // DEC-DINE-IN-PAY-LATER: whether the table is checking out or paid, from its pay panel.
   const [tablePay, setTablePay] = useState<TablePayStatus | null>(null);
+  useBringYourReceiptIntoView(showReceipt);
   const view = state.status === "ready" || state.status === "unavailable" ? state.view : null;
   const active = isDiningSessionActive(view);
   // Batch 42 (v15 b41 live): a table staff haven't opened yet (or one being cleaned) says so here
@@ -1450,6 +1458,7 @@ export function DiningSessionScreen({
   // Batch 55: how the bill ended, read as Menu, dish pages and Cart read it.
   const outcome = view === null ? null : tableBillOutcome(view);
   const closedBill = outcome?.kind === "ClosedByStaff" ? outcome.paid : null;
+  const paidThenRefunded = outcome?.kind === "Paid" && outcome.refunded === true;
   const billParts = view === null ? null : openBillParts(view);
   const paidOff =
     tablePay?.paid === true ||
@@ -1625,6 +1634,12 @@ export function DiningSessionScreen({
       {/* DEC-DINE-IN-PAY-LATER S4: the guest pays the whole table here once checkout started. */}
       {view?.paymentTiming === "PayLater" ? (
         <TablePayPanel
+          // Batch 62 (v15 b61 live, G61 E): a bill one phone paid whole and staff then gave some
+          // of back: the payer's own payment and refund are said inside the table's receipt, the
+          // one receipt of that payment (another phone's read finds nothing of its own there).
+          ownReceipt={
+            paidThenRefunded ? <OwnPaymentReceiptPanel client={ownAtTable} inTableReceipt /> : null
+          }
           readKey={billReadKey}
           onStatus={(status) => {
             setTablePay(status);
@@ -1638,7 +1653,7 @@ export function DiningSessionScreen({
       {/* Batch 56: staff closed a bill some of which was paid: the phone that paid it reads its
           own receipt here (another guest's phone is answered "nothing here" and shows nothing). */}
       {(closedBill !== null && closedBill.kind !== "Nothing") ||
-      (outcome?.kind === "Paid" && outcome.refunded === true) ? (
+      (paidThenRefunded && tablePay !== null && !tablePay.receipt) ? (
         // Batch 61 (v15 b60 live, CRT60 B/C): a bill paid in full that staff then gave some of
         // back: the payer reads its own payment and refund here too (others: nothing here).
         <OwnPaymentReceiptPanel client={ownAtTable} />

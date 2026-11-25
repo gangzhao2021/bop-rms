@@ -2127,6 +2127,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这桌账单已结清，之后店员办理了退款。如需再点，请找店员。",
   "The bill is settled ({count} payments). Staff have since made a refund.":
     "账单已结清（共 {count} 笔），之后店员办理了退款。",
+  "The bill is settled. Staff have since made a refund.": "账单已结清，之后店员办理了退款。",
   "The bill is settled ({count} parts). Staff have since made a refund.":
     "账单已结清（共 {count} 份），之后店员办理了退款。",
   "Total paid after refunds": "退款后实付",

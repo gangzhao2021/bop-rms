@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LanguageRoot } from "../i18n/i18n.js";
 import {
@@ -20,6 +20,7 @@ import {
 import { TableCheckoutNotice } from "../menu/TableCheckoutNotice.js";
 import type { TableCheckout } from "./table-checkout-state.js";
 import type { DiningRound, DiningSessionView } from "./dining-session-client.js";
+import { wantsYourReceipt } from "./your-receipt-link.js";
 
 // Batch 56 (v15 b55 live, guest-closed-bill-menu-cart): a guest who paid part of a bill (their
 // dish by phone, L55 CB2 order 76; part 1 of staff's even split in 2, L55 CB3 order 80) and whose
@@ -691,5 +692,299 @@ describe("batch 57: refunds of the payer's own payment", () => {
       "1413",
       [],
     ]);
+  });
+});
+
+// Batch 62 (v15 b61 live, guest-refund-receipts-and-notices, G61 E order 78): one phone paid the
+// whole table ($28.25, settlement 2825), then staff refunded $8.00 of it (online refund 800
+// Succeeded) while the table was open. The payer read the table's Receipt (Paid / Refunded / Total
+// paid after refunds), "Thank you! Your table is paid in full.", the points card, then "Your
+// receipt" with the same three figures. And Menu and Cart's "See your receipt" opened Your table at
+// the top, the receipt below the fold (y=911 on an 844 px phone). The bodies are what the API's
+// handlers answer for those records (apps/api/test-support/guest-bill-closed-by-staff-http.ts,
+// scenario whole-table-paid-online, refunds "Eight").
+const wholeTableRead = {
+  schemaVersion: 1,
+  payment: {
+    tableLabel: "L56P D (TEST)",
+    refundedMinor: "800",
+    checkingOut: true,
+    rounds: [
+      {
+        roundNumber: 1,
+        items: [{ displayName: "Beef noodles (TEST)", subtotalMinor: "1250" }],
+        totalMinor: "1413",
+      },
+      {
+        roundNumber: 2,
+        items: [{ displayName: "Beef noodles (TEST)", subtotalMinor: "1250" }],
+        totalMinor: "1412",
+      },
+    ],
+    owed: { subtotalMinor: "0", taxMinor: "0", totalMinor: "0", taxRoundingMinor: "0" },
+    consistent: true,
+    tips: { enabled: true, tierPercents: [10, 15, 18] },
+    state: "Paid",
+    attempt: null,
+    split: null,
+    choices: null,
+    receipt: {
+      method: "Online",
+      roundsMinor: "2825",
+      pointsUsedMinor: "0",
+      tipMinor: "0",
+      roundingMinor: "0",
+      totalMinor: "2825",
+      paidAt: "2026-11-24T05:12:40.000Z",
+    },
+  },
+};
+const wholeTableOwn = {
+  schemaVersion: 1,
+  ownPayment: {
+    tableLabel: "L56P D (TEST)",
+    restClosedByStaff: false,
+    tablePaidInFull: true,
+    payments: [
+      {
+        covers: "WholeTable",
+        partNumber: null,
+        partCount: null,
+        dishes: [],
+        subtotalMinor: null,
+        taxMinor: null,
+        paidForMinor: "2825",
+        tipMinor: "0",
+        totalMinor: "2825",
+        method: "Online",
+        paidAt: "2026-11-24T05:12:40.000Z",
+        refunds: [
+          {
+            amountMinor: "800",
+            status: "Refunded",
+            requestedAt: "2026-11-24T22:51:12.408Z",
+            answeredAt: "2026-11-24T22:51:12.512Z",
+          },
+        ],
+        refundedMinor: "800",
+      },
+    ],
+    totalMinor: "2825",
+    refundedMinor: "800",
+    netMinor: "2025",
+  },
+};
+/** The guest table read of that table (paid 2825, paid after refunds 2025, owing nothing). */
+const wholeTablePaidRefunded: DiningSessionState = {
+  status: "ready",
+  refreshing: false,
+  view: {
+    tableLabel: "L56P D (TEST)",
+    orderNumber: "101",
+    checkedAt: "2026-11-22T16:09:00.000Z",
+    paymentTiming: "PayLater",
+    rounds: [noodles(1, "Paid"), noodles(2, "Paid")],
+    summary: {
+      paid: cad("2825"),
+      paidAfterRefunds: cad("2025"),
+      refunded: cad("0"),
+      refundPending: cad("0"),
+      due: cad("0"),
+      tableTip: cad("0"),
+      cashRounding: cad("0"),
+    },
+  } as DiningSessionView,
+};
+/** The pay section's read answers the whole table's receipt; anything else is not here. */
+function answerWholeTableRead() {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: unknown, init?: RequestInit) =>
+      String(url).endsWith("/api/v1/dine-in/table-payment") &&
+      (JSON.parse(String(init?.body ?? "{}")) as { action?: string }).action === "Read"
+        ? Response.json(wholeTableRead, { headers: { "cache-control": "no-store" } })
+        : Response.json({}, { status: 404 }),
+    ),
+  );
+}
+async function settle() {
+  for (let tick = 0; tick < 5; tick += 1)
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+}
+const headings = () => [...container.querySelectorAll("h2")].map((h) => h.textContent ?? "");
+
+describe("batch 62: the whole table paid on one phone, then staff gave $8.00 back", () => {
+  it("the payer reads one receipt: the table's, with what went back to their card (en)", async () => {
+    setCustomerCsrfCredential("d".repeat(43));
+    answerWholeTableRead();
+    await show(
+      <DiningSessionScreen
+        state={wholeTablePaidRefunded}
+        onRefresh={() => undefined}
+        ownPaymentReceipt={payer(wholeTableOwn)}
+      />,
+    );
+    await settle();
+    expect(headings().filter((h) => /receipt/iu.test(h))).toEqual(["Receipt"]);
+    expect(text()).toContain("Paid$28.25Refunded−$8.00Total paid after refunds$20.25");
+    expect(text()).toContain(
+      "You paid $28.25 online on this phone. $8.00 went back to your card, so you paid $20.25.",
+    );
+    expect(text()).toContain("$8.00 went back to your card. Your bank may take a few days");
+    expect(text()).toContain("The bill is settled. Staff have since made a refund.");
+    expect(text()).not.toMatch(/paid in full|Amount charged|You paid after refunds/u);
+  });
+
+  it("zh-Hans: one receipt, and never 已全部付清 beside the refund", async () => {
+    setCustomerCsrfCredential("d".repeat(43));
+    answerWholeTableRead();
+    await show(
+      <DiningSessionScreen
+        state={wholeTablePaidRefunded}
+        onRefresh={() => undefined}
+        ownPaymentReceipt={payer(wholeTableOwn)}
+      />,
+      "zh-Hans",
+    );
+    await settle();
+    expect(headings().filter((h) => /收据/u.test(h))).toEqual(["收据"]);
+    expect(text()).toContain(
+      "您已在这部手机上在线付款 $28.25。$8.00 已退回您的卡，您实付 $20.25。",
+    );
+    expect(text()).toContain("账单已结清，之后店员办理了退款。");
+    expect(text()).not.toMatch(/全部付清|您的收据/u);
+  });
+
+  it("another phone reads the table's receipt and the settled line, nothing of the payer's", async () => {
+    setCustomerCsrfCredential("e".repeat(43));
+    answerWholeTableRead();
+    await show(
+      <DiningSessionScreen
+        state={wholeTablePaidRefunded}
+        onRefresh={() => undefined}
+        ownPaymentReceipt={otherGuest()}
+      />,
+    );
+    await settle();
+    expect(headings().filter((h) => /receipt/iu.test(h))).toEqual(["Receipt"]);
+    expect(text()).toContain("Total paid after refunds$20.25");
+    expect(text()).toContain("The bill is settled. Staff have since made a refund.");
+    expect(text()).not.toMatch(/paid in full|You paid|your card/u);
+  });
+
+  it("nothing refunded: the table's receipt still thanks the guest for paying in full", async () => {
+    setCustomerCsrfCredential("d".repeat(43));
+    const read = { ...wholeTableRead, payment: { ...wholeTableRead.payment, refundedMinor: "0" } };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json(read, { headers: { "cache-control": "no-store" } })),
+    );
+    const own = payer(wholeTableOwn);
+    const state = {
+      ...wholeTablePaidRefunded,
+      view: {
+        ...(wholeTablePaidRefunded as { view: DiningSessionView }).view,
+        summary: {
+          paid: cad("2825"),
+          refunded: cad("0"),
+          refundPending: cad("0"),
+          due: cad("0"),
+        },
+      },
+    } as DiningSessionState;
+    await show(
+      <DiningSessionScreen state={state} onRefresh={() => undefined} ownPaymentReceipt={own} />,
+    );
+    await settle();
+    expect(text()).toContain("Thank you! Your table is paid in full.");
+    expect(text()).not.toMatch(/refund|You paid/iu);
+    expect(own.read).not.toHaveBeenCalled();
+  });
+});
+
+describe("batch 62: See your receipt brings the payer to their receipt", () => {
+  const refundedPaid: TableCheckout = {
+    paid: true,
+    payLater: true,
+    closedByStaff: null,
+    refunded: true,
+  };
+  function SessionProbe() {
+    const location = useLocation();
+    return <p data-testid="probe">{wantsYourReceipt(location.state) ? "receipt" : "top"}</p>;
+  }
+  it("Menu's link says it was followed for the receipt", async () => {
+    setCustomerCsrfCredential("d".repeat(43));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json(wholeTableOwn, { headers: { "cache-control": "no-store" } })),
+    );
+    act(() => root.unmount());
+    root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <LanguageRoot initial="en">
+          {() => (
+            <MemoryRouter initialEntries={["/menu"]}>
+              <Routes>
+                <Route path="/menu" element={<TableCheckoutNotice checkout={refundedPaid} />} />
+                <Route path="/dine-in/session" element={<SessionProbe />} />
+              </Routes>
+            </MemoryRouter>
+          )}
+        </LanguageRoot>,
+      );
+    });
+    await settle();
+    const link = [...container.querySelectorAll("a")].find(
+      (a) => a.textContent === "See your receipt",
+    );
+    expect(link?.getAttribute("href")).toBe("/dine-in/session");
+    await act(async () => {
+      link?.click();
+    });
+    expect(container.querySelector("[data-testid=probe]")?.textContent).toBe("receipt");
+  });
+
+  it("Your table scrolls the payer's receipt heading into view and focuses it", async () => {
+    setCustomerCsrfCredential("d".repeat(43));
+    const scrolled: Element[] = [];
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (this: Element) {
+      scrolled.push(this);
+    };
+    try {
+      await show(
+        <DiningSessionScreen
+          state={closedTable({ count: null, paid: 1 }, "613")}
+          onRefresh={() => undefined}
+          ownPaymentReceipt={payer(refundedPart)}
+          showReceipt
+        />,
+      );
+      await settle();
+      const heading = container.querySelector("#own-payment-receipt");
+      expect(heading?.textContent).toBe("Your receipt");
+      expect(document.activeElement).toBe(heading);
+      expect(scrolled).toContain(heading);
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
+  });
+
+  it("without the link, Your table opens where it always did", async () => {
+    setCustomerCsrfCredential("d".repeat(43));
+    await show(
+      <DiningSessionScreen
+        state={closedTable({ count: null, paid: 1 }, "613")}
+        onRefresh={() => undefined}
+        ownPaymentReceipt={payer(refundedPart)}
+      />,
+    );
+    await settle();
+    expect(container.querySelector("#own-payment-receipt")).not.toBeNull();
+    expect(document.activeElement).toBe(document.body);
   });
 });

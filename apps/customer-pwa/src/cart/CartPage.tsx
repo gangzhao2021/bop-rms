@@ -7,6 +7,7 @@ import {
   useTableCheckoutOwnPaid,
 } from "../menu/TableCheckoutNotice.js";
 import { useTableCheckout } from "../dining/table-checkout-state.js";
+import { yourReceiptLinkState } from "../dining/your-receipt-link.js";
 import {
   CHINESE_LOCALE,
   currentLanguage,
@@ -594,7 +595,13 @@ function ErrorState({
         <p>{text.line}</p>
         {own.yourPaid === null ? null : <p>{own.yourPaid}</p>}
         <div className="cart-state__actions">
-          <Link to="/dine-in/session">{own.link ?? text.link}</Link>
+          {/* Batch 62: the payer's link brings their receipt into view on Your table. */}
+          <Link
+            to="/dine-in/session"
+            {...(own.link === null ? {} : { state: yourReceiptLinkState })}
+          >
+            {own.link ?? text.link}
+          </Link>
           <Link to="/menu">{commonText.returnToMenu}</Link>
         </div>
       </StateMessage>
