@@ -420,6 +420,35 @@ for (const language of ["en", "zh-Hans"] as const)
         const [stamp] = await stampsOn(page, words);
         // 1024: in the top bar beside the language switch (Figma 58:65); else in the page header.
         expect(stamp).toMatchObject(width === 1024 ? { inBar: true } : { inHeader: true });
+        // In the header it never runs into the title, nor does any header control: 8px clear of the
+        // title's words, or on another line.
+        if (width !== 1024) {
+          const clear = await page.evaluate((source) => {
+            const pattern = new RegExp(source, "u");
+            const title = document.querySelector("main .workspace-page__title h1");
+            const said = [...document.querySelectorAll("main .workspace-page__header *")].find(
+              (node) =>
+                pattern.test(node.textContent?.trim() ?? "") &&
+                ![...node.children].some((child) => pattern.test(child.textContent?.trim() ?? "")),
+            );
+            if (!title || !said) return false;
+            // The title's words, not its box (a squeezed box lets its words run past it).
+            const range = document.createRange();
+            range.selectNodeContents(title);
+            const a = range.getBoundingClientRect();
+            // Neither the stamp nor any header control (Refresh, Sound) runs into the title.
+            const others = [
+              said,
+              ...document.querySelectorAll("main .workspace-page__header button:not([hidden])"),
+            ]
+              .map((node) => node.getBoundingClientRect())
+              .filter((b) => b.width > 0);
+            return others.every(
+              (b) => b.top >= a.bottom || b.bottom <= a.top || b.left - a.right >= 8,
+            );
+          }, words.source);
+          expect(clear).toBe(true);
+        }
         // (2) The staff clock: "Updated 05:09", never "5:09 a.m." or "AM".
         expect(
           await page.evaluate(() => document.querySelector("main")?.textContent ?? ""),

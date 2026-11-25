@@ -1447,14 +1447,28 @@
     overflow: visible;
     row-gap: 0;
   }
+  /* Batch 64: the phone keeps its "Updated 14:02" (it was hidden), on its own line under Refresh
+     and Sound at the right; the title keeps its whole word (it was squeezed under Refresh). */
   .orders-page .workspace-page__header {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: max-content minmax(0, 1fr);
     grid-template-areas:
       "title tools"
+      "stamp stamp"
       "meta meta";
     align-items: center;
     gap: 2px var(--bop-space-3);
+  }
+  .orders-page .workspace-page__header .workspace-page__toolbar {
+    display: contents;
+  }
+  .orders-page .workspace-page__header .workspace-page__toolbar > .workspace-page__status {
+    grid-area: stamp;
+    justify-self: end;
+  }
+  .orders-page .workspace-page__header .workspace-page__actions {
+    grid-area: tools;
+    justify-self: end;
   }
   .orders-page .workspace-page__title {
     display: contents;
@@ -1465,11 +1479,6 @@
   .orders-page .workspace-page__meta {
     grid-area: meta;
     margin: 0;
-  }
-  .orders-page .workspace-page__toolbar {
-    grid-area: tools;
-    flex-wrap: nowrap;
-    gap: 0 var(--bop-space-3);
   }
   .orders-page .workspace-page__actions {
     flex-wrap: nowrap;
@@ -1704,6 +1713,7 @@
   .orders-page .workspace-page__header {
     margin-bottom: var(--bop-space-3);
   }
+
   .orders-page .order-sound-notice {
     flex-wrap: nowrap;
     gap: var(--bop-space-3);
