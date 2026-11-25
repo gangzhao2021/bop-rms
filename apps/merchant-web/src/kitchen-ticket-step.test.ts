@@ -7,6 +7,7 @@ import {
   kitchenTicketStartStep,
   kitchenTicketState,
   kitchenTicketShownState,
+  kitchenRoundNumbers,
 } from "./KitchenBoardPages.js";
 import type { KitchenBoardItem } from "./kitchen-board.js";
 
@@ -175,5 +176,41 @@ describe("WP-2423 batch 63 (F51): the status line agrees with a held Start at on
     expect(kitchenTicketShownState(queued, [{ step: "Start", phase: "Failed" }])).toBe("ToMake");
     // A held Done does not say Being made; the server's answer moves it on.
     expect(kitchenTicketShownState(queued, [{ step: "Finish", phase: "Holding" }])).toBe("ToMake");
+  });
+});
+
+describe("WP-2423 batch 64 (v15 b63 live, F51): a two-round ticket says which round is closed and which is left", () => {
+  // Order 40 at K63 A: two staff rounds of one dish each. The foot button read a plain
+  // "Finished"; it finished round 1 (SQL), round 2 then stood alone with no "Added" heading.
+  const round1 = roundItem(1, "Queued", 900, "2026-10-26T22:00:00.000Z");
+  const round2 = roundItem(2, "Queued", 910, "2026-10-26T22:20:00.000Z");
+  it("names the round on its foot button whatever the round's dish count", () => {
+    expect(kitchenTicketNextStep([round1, round2])?.label).toBe("Round 1 finished");
+  });
+  it("keeps the round's number once the round before it has left the board", () => {
+    const seen = new Map<string, string[]>();
+    const both = kitchenTicketRounds([round1, round2]);
+    expect([...kitchenRoundNumbers(seen, ref(901), both).values()]).toEqual([1, 2]);
+    const left = kitchenTicketRounds([round2]);
+    const numbers = kitchenRoundNumbers(seen, ref(901), left);
+    expect(numbers.get(ref(910))).toBe(2);
+    expect(kitchenTicketNextStep([round2], numbers)?.label).toBe("Round 2 finished");
+    // A ticket of one round, never seen with another, keeps its plain label.
+    expect(kitchenTicketNextStep([round1], new Map([[ref(900), 1]]))?.label).toBe("Finished");
+  });
+  it("the status says what is left while a Finished is held for Undo", () => {
+    const tap = { step: "Finish" as const, phase: "Holding" as const };
+    // The whole ticket marked done: Done, never To make under "Marked done · Undo".
+    expect(kitchenTicketShownState([round1], [tap], () => tap)).toBe("Done");
+    // Round 1 marked done: round 2 is still to make, and that is what the status says.
+    const held = (entry: KitchenBoardItem) => (entry === round1 ? tap : undefined);
+    expect(kitchenTicketShownState([round1, round2], [tap], held)).toBe("ToMake");
+    const making = { ...round2, status: "In Progress" as const };
+    expect(
+      kitchenTicketShownState([round1, making], [tap], (e) => (e === round1 ? tap : undefined)),
+    ).toBe("Making");
+    // A failed tap changes nothing.
+    const failed = { step: "Finish" as const, phase: "Failed" as const };
+    expect(kitchenTicketShownState([round1], [failed], () => failed)).toBe("ToMake");
   });
 });

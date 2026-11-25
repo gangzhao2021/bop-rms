@@ -428,7 +428,11 @@ test("@production a round that arrives after the cook read the card is left out 
   const { taps } = await mockBoard(page, [...first, later]);
   await page.goto("/operations/kitchen");
   const ticket = page.locator(".kitchen-ticket");
-  await expect(ticket.locator(".kitchen-ticket__round")).toContainText("Added");
+  // Batch 64 (v15 b63 live, F51): every round is named; the later one says when it was added.
+  await expect(ticket.locator(".kitchen-ticket__round")).toHaveText([
+    "Round 1",
+    /^Round 2 · added /u,
+  ]);
   const foot = ticket.locator(".kitchen-ticket__next");
   // Batch 63 (F51): the foot button names the round it closes.
   await expect(foot).toHaveText("Round 1 finished");
@@ -1366,3 +1370,64 @@ for (const language of ["en", "zh-Hans"] as const)
       expect(taps[2]?.lines[0]?.workItemReference).toBe(id(4));
     });
   }
+
+// Batch 64 (v15 b63 live, F51; K63 A order 40 at TM2): two staff rounds of one dish each. The foot
+// button read a plain "Finished" and closed round 1 (SQL); round 2 then stood alone with no
+// heading, so the cook read it as round 2 closed. During the Undo the status said To make over
+// "Marked done" for a one-round ticket too.
+for (const language of ["en", "zh-Hans"] as const)
+  test(`@production b64: a two-round ticket names the round its Finished closes and the round left (${language})`, async ({
+    page,
+  }) => {
+    const zh = language === "zh-Hans";
+    if (zh)
+      await page.addInitScript(() => localStorage.setItem("bop.merchant.language", "zh-Hans"));
+    const table = {
+      orderNumber: "40",
+      orderType: "DineIn",
+      tableLabel: "K63 A (TEST)",
+      enteredByStaff: true,
+    };
+    const first = dish(1, "TEST soy milk", { orderLabel: table });
+    const second = dish(2, "TEST noodles", {
+      orderLabel: table,
+      ticketReference: id(70),
+      workItemCreatedAt: "2026-10-26T22:13:00.000Z",
+    });
+    let firstDone = false;
+    const { taps } = await mockBoard(page, () => (firstDone ? [second] : [first, second]));
+    await page.goto("/operations/kitchen");
+    const ticket = page.locator(".kitchen-ticket");
+    const rounds = ticket.locator(".kitchen-ticket__round");
+    const foot = ticket.locator(".kitchen-ticket__next");
+    const state = ticket.locator(".kitchen-ticket__state");
+    await expect(rounds).toHaveText(
+      zh ? ["第 1 轮", /^第 2 轮 · 加菜 · /u] : ["Round 1", /^Round 2 · added /u],
+    );
+    await expect(foot).toHaveText(zh ? "第 1 轮做好了" : "Round 1 finished");
+    await foot.click();
+    // Held for Undo: round 1 says it is finished, and the status speaks for round 2, still to make.
+    await expect(rounds.first()).toHaveText(zh ? "第 1 轮 · 已做好" : "Round 1 · finished");
+    await expect(state).toHaveAttribute("data-state", "ToMake");
+    firstDone = true;
+    await expect.poll(() => taps.length, { timeout: holdMs + 3_000 }).toBe(1);
+    expect(taps[0]?.lines.map((line) => line.workItemReference)).toEqual([id(1)]);
+    // Round 1 has left the board: what is left is still round 2, said as such.
+    await page.getByRole("button", { name: zh ? "刷新" : "Refresh", exact: true }).click();
+    await expect(rounds).toHaveText([zh ? /^第 2 轮 · 加菜 · /u : /^Round 2 · added /u]);
+    await expect(foot).toHaveText(zh ? "第 2 轮做好了" : "Round 2 finished");
+    await page.screenshot({ path: `test-results/b64-kds-two-rounds-${language}.png` });
+  });
+
+test("@production b64: a ticket marked done reads Done during its Undo, never To make", async ({
+  page,
+}) => {
+  await mockBoard(page, [dish(1, "TEST dish 1"), dish(2, "TEST dish 2")]);
+  await page.goto("/operations/kitchen");
+  const ticket = page.locator(".kitchen-ticket");
+  await expect(ticket.locator(".kitchen-ticket__state")).toHaveAttribute("data-state", "ToMake");
+  await ticket.locator(".kitchen-ticket__next").click();
+  await expect(ticket.locator(".kitchen-ticket__top")).toContainText("Marked done");
+  await expect(ticket.locator(".kitchen-ticket__state")).toHaveAttribute("data-state", "Done");
+  await expect(ticket.locator(".kitchen-ticket__state")).toHaveText("Done");
+});

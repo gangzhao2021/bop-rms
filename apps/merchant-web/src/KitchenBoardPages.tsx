@@ -165,6 +165,27 @@ export function kitchenLineNeedsStartFirst(item: KitchenBoardItem): boolean {
   );
 }
 
+/**
+ * Batch 64 (v15 b63 live, F51): each round of a table's ticket keeps the number it had when this
+ * screen first showed it. A finished round leaves the board, so counting only the rounds still on
+ * it renamed the table's second round "the first" and dropped its "Added" heading: the cook could
+ * not tell which round was left. `seen` is the screen's memory (orders → their rounds, oldest
+ * first); after a reload, numbering starts from the rounds then on the board.
+ */
+export function kitchenRoundNumbers(
+  seen: Map<string, string[]>,
+  orderReference: string,
+  rounds: readonly { readonly ticketReference: string }[],
+): ReadonlyMap<string, number> {
+  const known = seen.get(orderReference) ?? [];
+  for (const round of rounds)
+    if (!known.includes(round.ticketReference)) known.push(round.ticketReference);
+  seen.set(orderReference, known);
+  return new Map(
+    rounds.map((round) => [round.ticketReference, known.indexOf(round.ticketReference) + 1]),
+  );
+}
+
 /** The oldest round on the card with anything still to do. */
 function oldestOpenRound(items: readonly KitchenBoardItem[]) {
   const rounds = kitchenTicketRounds(items);
@@ -199,9 +220,12 @@ export type KitchenTicketStep =
  */
 export function kitchenTicketNextStep(
   items: readonly KitchenBoardItem[],
+  /** The round's number on this screen (kitchenRoundNumbers); its place on the card otherwise. */
+  numberOf?: ReadonlyMap<string, number>,
 ): KitchenTicketStep | null {
-  const { open, later, round } = oldestOpenRound(items);
+  const { open, rounds, round: place } = oldestOpenRound(items);
   if (open === undefined) return null;
+  const round = numberOf?.get(open.ticketReference) ?? place;
   const lines = open.items.filter(
     (item) => item.execution !== undefined && isActiveKitchenWork(item),
   );
@@ -224,9 +248,10 @@ export function kitchenTicketNextStep(
       kind: "Finish",
       items: finish,
       // Batch 63 (F51): on a ticket of several rounds the button says which round it closes,
-      // since it sits under the last round while it finishes the oldest one still open.
+      // since it sits under the last round while it finishes the oldest one still open. Batch 64
+      // (v15 b63 live): whatever the round's dish count, and on a later round left alone too.
       label:
-        later > 0 && dishes > 1
+        rounds > 1 || round > 1
           ? t("Round {round} finished", { round })
           : dishes > 1
             ? t("All finished")
@@ -285,8 +310,21 @@ export function kitchenTicketState(
 export function kitchenTicketShownState(
   items: readonly KitchenBoardItem[],
   taps: readonly Pick<KitchenTap<unknown>, "step" | "phase">[],
+  /**
+   * Batch 64 (v15 b63 live, F51): the tap held on each line. A line whose Finished is held reads
+   * as made: the status says what is left, so "Marked done · Undo" never sits over "To make" for
+   * the dishes just marked; only what another round still has to make reads To make.
+   */
+  heldOf?: (item: KitchenBoardItem) => Pick<KitchenTap<unknown>, "step" | "phase"> | undefined,
 ): "ToMake" | "Making" | "Done" {
-  const state = kitchenTicketState(items);
+  const left =
+    heldOf === undefined
+      ? items
+      : items.filter((item) => {
+          const tap = heldOf(item);
+          return tap === undefined || tap.step !== "Finish" || tap.phase === "Failed";
+        });
+  const state = kitchenTicketState(left);
   return state === "ToMake" && taps.some((tap) => tap.step === "Start" && tap.phase !== "Failed")
     ? "Making"
     : state;
@@ -2455,6 +2493,8 @@ export function KitchenBoardScreen({
   // (empty and unseen when it is not offered), so it arriving late or leaving never takes the bar
   // to another row and moves every ticket under the cook's tap.
   const recentPlaceKept = useRef(false);
+  // Batch 64 (F51): each table round's number on this screen (see kitchenRoundNumbers).
+  const roundsSeen = useRef(new Map<string, string[]>());
   if (remakesPending || (remakes && onRemake)) recentPlaceKept.current = true;
   const board = kitchenBoardSearch({
     items: view.items,
@@ -3682,17 +3722,26 @@ export function KitchenBoardScreen({
                       const first = group.items[0] as KitchenBoardItem;
                       const label = first.orderLabel;
                       const cardTaps = kitchenCardTaps(group.items, pendingLines);
-                      const state = kitchenTicketShownState(group.items, cardTaps);
+                      const heldOf = (line: KitchenBoardItem) =>
+                        pendingLines?.get(kitchenLineKey(line));
+                      const state = kitchenTicketShownState(group.items, cardTaps, heldOf);
                       const allCancelled =
                         state === "Done" &&
                         group.items.every((item) => item.status === "Cancelled");
-                      const next = kitchenTicketNextStep(group.items);
+                      const rounds = kitchenTicketRounds(group.items);
+                      const roundNumbers = kitchenRoundNumbers(
+                        roundsSeen.current,
+                        group.orderReference,
+                        rounds,
+                      );
+                      // A ticket of several rounds (or a later round left alone) names each one.
+                      const namedRounds =
+                        rounds.length > 1 ||
+                        rounds.some((round) => (roundNumbers.get(round.ticketReference) ?? 1) > 1);
+                      const next = kitchenTicketNextStep(group.items, roundNumbers);
                       const start = kitchenTicketStartStep(group.items);
                       const ticketReadOnly = readOnly || actionsBlocked || stale !== undefined;
                       const slot = group.orderReference;
-                      const heldOf = (line: KitchenBoardItem) =>
-                        pendingLines?.get(kitchenLineKey(line));
-                      const rounds = kitchenTicketRounds(group.items);
                       return (
                         <section
                           className="kitchen-order-group kitchen-ticket"
@@ -3802,57 +3851,79 @@ export function KitchenBoardScreen({
                             </p>
                           </div>
                           <KitchenOrderOrigin label={label} />
-                          {rounds.map((round, roundIndex) => (
-                            <Fragment key={round.ticketReference}>
-                              {roundIndex === 0 ? null : (
-                                // A later round of the table: read apart, and left out of the foot
-                                // button until the round above it is done.
-                                <p className="kitchen-ticket__round">
-                                  {/* v15 b12: a round carried over from the day before reads
+                          {rounds.map((round, roundIndex) => {
+                            const number =
+                              roundNumbers.get(round.ticketReference) ?? roundIndex + 1;
+                            const ago = waitedAgoText(
+                              Math.max(
+                                0,
+                                Math.floor((Date.parse(clockAt) - round.createdAt) / 60_000),
+                              ),
+                            );
+                            // Batch 64 (F51): a round whose Finished is held for Undo says so.
+                            const held = round.items
+                              .filter(
+                                (item) => item.execution !== undefined && isActiveKitchenWork(item),
+                              )
+                              .every((item) => {
+                                const tap = heldOf(item);
+                                return tap?.step === "Finish" && tap.phase !== "Failed";
+                              });
+                            const heldDone =
+                              held && round.items.some((item) => heldOf(item) !== undefined);
+                            return (
+                              <Fragment key={round.ticketReference}>
+                                {!namedRounds ? null : (
+                                  // Batch 64 (F51): every round of a table's ticket is named by its
+                                  // number, so the foot button ("Round 1 finished") and what is left
+                                  // read against the rounds; a later round says when it was added.
+                                  <p
+                                    className="kitchen-ticket__round"
+                                    data-held={heldDone ? "Finish" : undefined}
+                                  >
+                                    {/* v15 b12: a round carried over from the day before reads
                                       "1 day ago", never "1476 min ago". */}
-                                  {t("Added · {ago}", {
-                                    ago: waitedAgoText(
-                                      Math.max(
-                                        0,
-                                        Math.floor(
-                                          (Date.parse(clockAt) - round.createdAt) / 60_000,
-                                        ),
-                                      ),
-                                    ),
-                                  })}
-                                </p>
-                              )}
-                              {mergeIdenticalKitchenItems(round.items).map((line) => (
-                                <WorkCard
-                                  key={kitchenLineKey(line.item)}
-                                  item={line.item}
-                                  inTicket
-                                  readOnly={ticketReadOnly}
-                                  {...(steps
-                                    ? {
-                                        onStep: (_item: KitchenBoardItem, step: KitchenBoardStep) =>
-                                          tapLines(slot, line.items, step),
-                                      }
-                                    : {})}
-                                  onDishDone={(item, part) => tapDish(slot, item, part)}
-                                  pending={line.items.map(heldOf).find(Boolean)}
-                                  pendingLines={pendingLines}
-                                  cancelledNotice={
-                                    line.item.status === "Cancelled" &&
-                                    cancelledLines?.has(kitchenLineKey(line.item)) === true
-                                  }
-                                  onRemake={onRemake}
-                                  observedAt={clockAt}
-                                  detailState={{
-                                    station: activeStation,
-                                    status,
-                                    allergen,
-                                    exception,
-                                  }}
-                                />
-                              ))}
-                            </Fragment>
-                          ))}
+                                    {heldDone
+                                      ? t("Round {round} · finished", { round: number })
+                                      : number === 1
+                                        ? t("Round {round}", { round: number })
+                                        : t("Round {round} · added {ago}", { round: number, ago })}
+                                  </p>
+                                )}
+                                {mergeIdenticalKitchenItems(round.items).map((line) => (
+                                  <WorkCard
+                                    key={kitchenLineKey(line.item)}
+                                    item={line.item}
+                                    inTicket
+                                    readOnly={ticketReadOnly}
+                                    {...(steps
+                                      ? {
+                                          onStep: (
+                                            _item: KitchenBoardItem,
+                                            step: KitchenBoardStep,
+                                          ) => tapLines(slot, line.items, step),
+                                        }
+                                      : {})}
+                                    onDishDone={(item, part) => tapDish(slot, item, part)}
+                                    pending={line.items.map(heldOf).find(Boolean)}
+                                    pendingLines={pendingLines}
+                                    cancelledNotice={
+                                      line.item.status === "Cancelled" &&
+                                      cancelledLines?.has(kitchenLineKey(line.item)) === true
+                                    }
+                                    onRemake={onRemake}
+                                    observedAt={clockAt}
+                                    detailState={{
+                                      station: activeStation,
+                                      status,
+                                      allergen,
+                                      exception,
+                                    }}
+                                  />
+                                ))}
+                              </Fragment>
+                            );
+                          })}
                           {next && steps !== undefined ? (
                             <button
                               type="button"

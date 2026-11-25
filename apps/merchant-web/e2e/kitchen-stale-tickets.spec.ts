@@ -359,7 +359,8 @@ for (const width of [1440, 1024, 390])
       .first()
       .getByRole("region", { name: "Table T5 · Order 8" });
     await expect(ticket.getByText("Fried rice")).toBeVisible();
-    await expect(ticket.getByText("Added · 11 h ago", { exact: true })).toBeVisible();
+    // Batch 64 (F51): the later round is named by its number too.
+    await expect(ticket.getByText("Round 2 · added 11 h ago", { exact: true })).toBeVisible();
     await expect(ticket.getByText(/\d{3,} min ago/u)).toHaveCount(0);
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
