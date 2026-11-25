@@ -659,12 +659,13 @@
 
 /* Batch 63 (CK-17): the signed-out screen (the kitchen display's, and every page's) follows v3:
    "Sign in again" is the accent primary, "Check again" accent text on the same left edge, and
-   the heading that takes focus when it opens shows no box (a keyboard still sees its ring). */
+   the heading that takes focus when it opens (for screen readers; not a Tab stop) shows no box. */
 .staff-session__dialog {
   justify-items: start;
   border: 0;
 }
-.staff-session__dialog h2:focus:not(:focus-visible) {
+.staff-session__dialog h2[tabindex="-1"]:focus,
+.staff-session__dialog h2[tabindex="-1"]:focus-visible {
   outline: none;
 }
 .staff-session__dialog .staff-session__sign-in .shell-action {

@@ -565,6 +565,24 @@ test("@production a wrongly shown sign-out can be re-checked and leaves the page
   await advance(page, server, 70_000);
   const signedOut = page.getByRole("dialog", { name: "You’ve been signed out" });
   await expect(signedOut).toBeVisible();
+  // Batch 63 (CK-17): "Sign in again" is the accent primary, "Check again" accent text on the
+  // same left edge (they were a black block and centred black text), and no box sits around
+  // the heading that took focus when the cover opened.
+  const signIn = signedOut.getByRole("link", { name: "Sign in again" });
+  const check = signedOut.getByRole("button", { name: "Check again" });
+  const look = (node: Element) => {
+    const css = getComputedStyle(node);
+    return { bg: css.backgroundColor, color: css.color, left: node.getBoundingClientRect().left };
+  };
+  const [signInLook, checkLook] = [await signIn.evaluate(look), await check.evaluate(look)];
+  expect(signInLook.bg).toBe("rgb(31, 99, 224)");
+  expect(checkLook).toMatchObject({ bg: "rgba(0, 0, 0, 0)", color: "rgb(31, 99, 224)" });
+  expect(Math.abs(checkLook.left - signInLook.left)).toBeLessThan(1);
+  expect(
+    await signedOut
+      .getByRole("heading", { name: "You’ve been signed out" })
+      .evaluate((node) => getComputedStyle(node).outlineStyle),
+  ).toBe("none");
   // The Session is live after all: "Check again" removes the cover and the page works.
   server.activityFailure = null;
   server.expiryEnded = false;
