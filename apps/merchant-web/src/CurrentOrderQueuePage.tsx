@@ -1105,16 +1105,31 @@ export function orderRefundRows(
   const currencyCode = lines.totals.total.currencyCode;
   const money = (minor: bigint) => ({ amountMinor: minor.toString(), currencyCode });
   const rows: OrderRefundRow[] = [];
+  // b61 review: a refund listed by name that has not gone back yet (Payment has not answered an
+  // online one; a card-machine or cash one is not recorded yet) is listed apart with what is on
+  // its way, never in "Total refunded" or taken off "Total after refunds", as the list's amount.
+  const named: OrderRefundRow[] = [];
   const items = cancelledItemsRefund(lines.items);
-  if (items !== null && items.amountMinor !== "0")
-    rows.push({ label: t("Cancelled items refund"), amount: items });
-  // b61: of the refunds listed by name, those Payment has not answered yet (in its pending).
-  let listedPending = lines.items
-    .filter((item) => item.cancellation?.refundStatus === "Pending")
-    .reduce((sum, item) => sum + BigInt(item.cancellation?.refund.amountMinor ?? "0"), 0n);
-  let online = items === null ? 0n : BigInt(items.amountMinor),
+  // An item's refund always goes back online (a card-machine round is cancelled whole).
+  // Of the refunds listed by name, those Payment has not answered yet (in its pending).
+  let listedPending =
+    items === null
+      ? 0n
+      : lines.items
+          .filter((item) => item.cancellation?.refundStatus === "Pending")
+          .reduce((sum, item) => sum + BigInt(item.cancellation?.refund.amountMinor ?? "0"), 0n);
+  const itemsBack = items === null ? 0n : BigInt(items.amountMinor) - listedPending;
+  if (itemsBack > 0n) rows.push({ label: t("Cancelled items refund"), amount: money(itemsBack) });
+  if (listedPending > 0n)
+    named.push({
+      label: t("Items refund on its way"),
+      amount: money(listedPending),
+      pending: true,
+    });
+  // What the refunds listed by name gave back online, as Payment answered them.
+  let online = itemsBack,
     known = true,
-    total = online;
+    total = itemsBack;
   for (const batch of [...order.batches].sort((a, b) => a.sequence - b.sequence)) {
     const cancellation = batch.staffCancellation;
     if (cancellation === null || cancellation.refundAmountMinor === "0") continue;
@@ -1135,10 +1150,28 @@ export function orderRefundRows(
       continue;
     }
     const amount = BigInt(cancellation.refundAmountMinor);
-    if (cancellation.refundMethod === "Online") {
-      online += amount;
-      if (cancellation.refundStatus === "Pending") listedPending += amount;
+    if (cancellation.refundStatus === "Pending") {
+      // Only an online refund is in Payment's pending; a card-machine one is staff's to make.
+      if (cancellation.refundMethod === "Online") listedPending += amount;
+      // Short enough for the 1024 detail (DejaVu on Linux too); how it is given back is on the
+      // payment above. A pickup has one cancellation: its refund on its way is the order's.
+      const sequence = billRoundNumber(order, batch);
+      const toCard = cancellation.refundMethod === "Online";
+      named.push({
+        label:
+          order.orderType === "Pickup"
+            ? toCard
+              ? t("Refund on its way")
+              : t("Refund not given yet")
+            : toCard
+              ? t("Round {sequence} refund on its way", { sequence })
+              : t("Round {sequence} not refunded yet", { sequence }),
+        amount: money(amount),
+        pending: true,
+      });
+      continue;
     }
+    if (cancellation.refundMethod === "Online") online += amount;
     total += amount;
     rows.push({ label, amount: money(amount) });
   }
@@ -1146,9 +1179,9 @@ export function orderRefundRows(
   // b61 (decided with b60's table rule): only money Payment says went back counts as "Other
   // refunds" and comes off "Total after refunds"; a pickup's or online order's refund not
   // answered yet is listed apart, as a table's is, so the list amount and the detail agree.
-  const waiting: OrderRefundRow[] = [];
+  const waiting: OrderRefundRow[] = [...named];
   if (position !== null && known) {
-    const left = BigInt(position.refundedMinor) - (online - listedPending);
+    const left = BigInt(position.refundedMinor) - online;
     if (left > 0n) other += left;
     let pending = BigInt(position.refundPendingMinor) - listedPending;
     const take = (minor: bigint, label: string) => {
@@ -1186,7 +1219,22 @@ export function orderRefundRows(
     if (same < 0) waiting.push(row);
     else waiting[same] = row;
   }
-  return [...rows, ...waiting];
+  // One line per label (a pickup's cancellation refund and Payment's other refund on its way).
+  const merged: OrderRefundRow[] = [];
+  for (const row of waiting) {
+    const at = merged.findIndex((other) => other.label === row.label);
+    const before = at < 0 ? undefined : merged[at];
+    if (before === undefined) merged.push(row);
+    else
+      merged[at] = {
+        ...before,
+        amount:
+          before.amount === null || row.amount === null
+            ? null
+            : money(BigInt(before.amount.amountMinor) + BigInt(row.amount.amountMinor)),
+      };
+  }
+  return [...rows, ...merged];
 }
 
 /**

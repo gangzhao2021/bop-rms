@@ -9,13 +9,16 @@ import { expect, test, type Page } from "@playwright/test";
  *    "Can still be refunded $0.00" and "It can take a few days…".
  *  - A pickup with a refund sent to the card company and not answered yet: "Other refunds" and
  *    "Total after refunds" counted it as given back (a table never does).
+ *  - b61 review: a pickup staff cancelled, its $5.00 refund not answered yet, $3.00 already back at
+ *    the guest's request. The detail counted the $5.00 in "Total refunded" and took it off
+ *    "Total after refunds" ($6.13); the list amount said $11.13.
  *  - A table with another merged into it, paid as one bill ($60.25 with a $3.75 tip), $10.00 back:
  *    Orders said Total $28.25 (its own round) and took the whole bill's tip and refund off that.
  */
 const id = (n: number) => "0190a61b-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const headers = { "cache-control": "no-store" };
 const money = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
-type Shape = "partlyPaid" | "fullyRefunded" | "pickupPending" | "merged";
+type Shape = "partlyPaid" | "fullyRefunded" | "pickupPending" | "pickupCancelled" | "merged";
 
 const refund = (amountMinor: string, state: string, minute: number) => ({
   amountMinor,
@@ -40,7 +43,7 @@ const payment = (fields: Record<string, unknown>) => ({
   canRefund: true,
   ...fields,
 });
-const tablePayments: Record<Exclude<Shape, "pickupPending">, unknown> = {
+const tablePayments: Record<Exclude<Shape, "pickupPending" | "pickupCancelled">, unknown> = {
   partlyPaid: {
     orderReference: id(1),
     payment: null,
@@ -76,7 +79,7 @@ const tablePayments: Record<Exclude<Shape, "pickupPending">, unknown> = {
     parts: [],
   },
 };
-const tableBills: Record<Exclude<Shape, "pickupPending">, unknown> = {
+const tableBills: Record<Exclude<Shape, "pickupPending" | "pickupCancelled">, unknown> = {
   partlyPaid: {
     totalMinor: "2825",
     partlyPaid: { remainingMinor: "1412", paidParts: 1, partCount: 2, refundedMinor: "300" },
@@ -141,16 +144,17 @@ async function mock(page: Page, zh: boolean, shape: Shape) {
       },
     }),
   );
-  const pickup = shape === "pickupPending";
+  const pickup = shape === "pickupPending" || shape === "pickupCancelled";
+  const cancelled = shape === "pickupCancelled";
   const position = {
-    refundedMinor: "0",
-    refundPendingMinor: "1413",
+    refundedMinor: cancelled ? "300" : "0",
+    refundPendingMinor: cancelled ? "500" : "1413",
     refundNotSentMinor: "0",
     refundOnMachineMinor: "0",
   };
   const order = {
     orderReference: id(1),
-    orderNumber: pickup ? "53" : shape === "fullyRefunded" ? "48" : "50",
+    orderNumber: cancelled ? "54" : pickup ? "53" : shape === "fullyRefunded" ? "48" : "50",
     orderType: pickup ? "Pickup" : "DineIn",
     sourceChannel: "Qr",
     submittedAt: "2026-11-24T22:20:00.000Z",
@@ -163,7 +167,15 @@ async function mock(page: Page, zh: boolean, shape: Shape) {
         acceptanceStatus: "Accepted",
         canRequestAcceptance: false,
         canCancel: false,
-        staffCancellation: null,
+        staffCancellation: cancelled
+          ? {
+              reasonCode: "SOLD_OUT",
+              cancelledAt: "2026-11-24T22:40:00.000Z",
+              refundStatus: "Pending",
+              refundMethod: "Online",
+              refundAmountMinor: "500",
+            }
+          : null,
         canCancelItems: false,
         ...(pickup
           ? {}
@@ -181,7 +193,13 @@ async function mock(page: Page, zh: boolean, shape: Shape) {
     ...(pickup
       ? { paidOnline: money("1413"), paymentPosition: position }
       : { tableBill: tableBills[shape] }),
-    currentPhase: pickup ? "Fulfilled" : shape === "partlyPaid" ? "Accepted" : "Fulfilled",
+    currentPhase: cancelled
+      ? "Cancelled"
+      : pickup
+        ? "Fulfilled"
+        : shape === "partlyPaid"
+          ? "Accepted"
+          : "Fulfilled",
     currentVersion: 6,
     unfulfillable: null,
     pickupNotCollected: false,
@@ -406,6 +424,32 @@ for (const zh of [false, true]) {
       await fits(page, ".order-lines-totals > div");
       await page.screenshot({
         path: `test-results/b61-pickup-pending-${language}-${width}.png`,
+        fullPage: true,
+      });
+    });
+
+    test(`@production b61 review: a cancelled pickup's refund not answered yet reads the same in the list and the detail (${language}, ${width})`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height });
+      await mock(page, zh, "pickupCancelled");
+      await page.goto("/operations/orders");
+      const row = page.locator("li.order-row").first();
+      // $14.13 paid, $3.00 back: the list says $11.13 and never counts the $5.00 on its way.
+      await expect(row.locator(".order-row__money")).toHaveText("$11.13");
+      await openRow(page);
+      await expect(value(page, zh ? "合计" : "Total")).toHaveText("$14.13");
+      await expect(value(page, zh ? "其他退款" : "Other refunds")).toHaveText("−$3.00");
+      await expect(value(page, zh ? "退款后合计" : "Total after refunds")).toHaveText("$11.13");
+      await expect(value(page, zh ? "正在退回客人的卡" : "Refund on its way")).toHaveText("$5.00");
+      await expect(
+        page.locator(".order-lines-totals dt", {
+          hasText: zh ? /^已退款合计$/u : /^Total refunded$/u,
+        }),
+      ).toHaveCount(0);
+      await fits(page, ".order-lines-totals > div");
+      await page.screenshot({
+        path: `test-results/b61-pickup-cancelled-${language}-${width}.png`,
         fullPage: true,
       });
     });

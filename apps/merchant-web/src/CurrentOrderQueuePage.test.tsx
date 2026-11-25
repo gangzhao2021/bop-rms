@@ -2990,9 +2990,14 @@ describe("b61 (v15 b60 live): refunds read the same on phones, for pickups and o
         },
       ],
     } as unknown as Parameters<typeof orderRefundRows>[0];
-    expect(orderRefundRows(cancelled, linesOf, position("0", "1413"))).toEqual([
-      { label: "Order cancellation refund", amount: money("1413") },
-    ]);
+    // b61 review: and, not having gone back, it is with what is on its way, never taken off.
+    const waiting = orderRefundRows(cancelled, linesOf, position("0", "1413"));
+    expect(waiting).toEqual([{ label: "Refund on its way", amount: money("1413"), pending: true }]);
+    expect(totalAfterRefunds(money("1413"), waiting)).toBeNull();
+    expect(
+      BigInt(orderAmountTaken(cancelled)?.amountMinor ?? "0") -
+        orderAmountRefunded(cancelled, position("0", "1413")),
+    ).toBe(1413n);
     setLanguageForTest("zh-Hans");
     try {
       expect(
@@ -3000,6 +3005,141 @@ describe("b61 (v15 b60 live): refunds read the same on phones, for pickups and o
           (row) => row.label,
         ),
       ).toEqual(["其他退款", "退款未发出", "退款待在刷卡机上办理"]);
+    } finally {
+      setLanguageForTest("en");
+    }
+  });
+
+  it("a cancellation refund not gone back yet is never in Total refunded (b61 review)", () => {
+    const position = (refunded: string, pending: string) => ({
+      refundedMinor: refunded,
+      refundPendingMinor: pending,
+      refundNotSentMinor: "0",
+      refundOnMachineMinor: "0",
+    });
+    const linesOf = lines("1413");
+    const cancelledPickup = (
+      cancellation: Record<string, string>,
+      extra: Record<string, unknown> = {},
+    ) =>
+      ({
+        orderType: "Pickup",
+        paidOnline: money("1413"),
+        counter: null,
+        tableBill: null,
+        batches: [{ sequence: 1, staffRound: null, staffCancellation: cancellation }],
+        ...extra,
+      }) as unknown as Parameters<typeof orderRefundRows>[0];
+    const listAmount = (
+      order: Parameters<typeof orderRefundRows>[0],
+      at: ReturnType<typeof position> | null,
+    ) => BigInt(orderAmountTaken(order)?.amountMinor ?? "0") - orderAmountRefunded(order, at);
+    // $5.00 of a cancellation not answered yet, and $3.00 that went back at the guest's request.
+    const order = cancelledPickup({
+      refundMethod: "Online",
+      refundStatus: "Pending",
+      refundAmountMinor: "500",
+    });
+    const rows = orderRefundRows(order, linesOf, position("300", "500"));
+    expect(rows).toEqual([
+      { label: "Other refunds", amount: money("300") },
+      { label: "Refund on its way", amount: money("500"), pending: true },
+    ]);
+    expect(totalAfterRefunds(money("1413"), rows)).toEqual(money("1113"));
+    expect(listAmount(order, position("300", "500"))).toBe(1113n);
+    const html = renderToStaticMarkup(<CurrentOrderLines lines={linesOf} refundRows={rows} />);
+    expect(html).not.toContain("Total refunded");
+    expect(value(html, "Total after refunds")).toBe("$11.13");
+    expect(value(html, "Refund on its way")).toBe("$5.00");
+    // Once it went back it is given back, and the total refunded is both.
+    const back = orderRefundRows(
+      cancelledPickup({
+        refundMethod: "Online",
+        refundStatus: "Refunded",
+        refundAmountMinor: "500",
+      }),
+      linesOf,
+      position("800", "0"),
+    );
+    expect(back).toEqual([
+      { label: "Order cancellation refund", amount: money("500") },
+      { label: "Other refunds", amount: money("300") },
+      { label: "Total refunded", amount: money("800") },
+    ]);
+    // A cancelled item's refund not answered yet is on its way too; one answered is given back.
+    const itemLines = {
+      items: [
+        { cancellation: { refundStatus: "Pending", refund: money("200") } },
+        { cancellation: { refundStatus: "Refunded", refund: money("100") } },
+      ],
+      totals: { total: money("1413") },
+    } as unknown as Parameters<typeof orderRefundRows>[1];
+    const itemRows = orderRefundRows(
+      cancelledPickup({}, { batches: [{ sequence: 1, staffCancellation: null }] }),
+      itemLines,
+      position("100", "200"),
+    );
+    expect(itemRows).toEqual([
+      { label: "Cancelled items refund", amount: money("100") },
+      { label: "Items refund on its way", amount: money("200"), pending: true },
+    ]);
+    expect(totalAfterRefunds(money("1413"), itemRows)).toEqual(money("1313"));
+    // Paid on the card machine, its refund not recorded there yet: not given back, not taken off,
+    // and never taken out of Payment's online pending.
+    const machine = cancelledPickup(
+      { refundMethod: "CardMachine", refundStatus: "Pending", refundAmountMinor: "1413" },
+      { paidOnline: null, counter: { paidOnCardMachine: { amountMinor: "1413" } } },
+    );
+    const onMachine = orderRefundRows(machine, linesOf, null);
+    expect(onMachine).toEqual([
+      {
+        label: "Refund not given yet",
+        amount: money("1413"),
+        pending: true,
+      },
+    ]);
+    expect(totalAfterRefunds(money("1413"), onMachine)).toBeNull();
+    expect(listAmount(machine, null)).toBe(1413n);
+    // At a table each round's refund is named by its round.
+    const rounds = {
+      orderType: "DineIn",
+      paidOnline: money("1413"),
+      counter: null,
+      tableBill: null,
+      batches: [
+        {
+          sequence: 1,
+          staffRound: null,
+          staffCancellation: {
+            refundMethod: "Online",
+            refundStatus: "Pending",
+            refundAmountMinor: "400",
+          },
+        },
+        {
+          sequence: 2,
+          staffRound: null,
+          staffCancellation: {
+            refundMethod: "CardMachine",
+            refundStatus: "Pending",
+            refundAmountMinor: "600",
+          },
+        },
+      ],
+    } as unknown as Parameters<typeof orderRefundRows>[0];
+    expect(orderRefundRows(rounds, linesOf, position("0", "400"))).toEqual([
+      { label: "Round 1 refund on its way", amount: money("400"), pending: true },
+      { label: "Round 2 not refunded yet", amount: money("600"), pending: true },
+    ]);
+    setLanguageForTest("zh-Hans");
+    try {
+      expect(
+        orderRefundRows(rounds, linesOf, position("0", "400")).map((row) => row.label),
+      ).toEqual(["第 1 轮退款退回中", "第 2 轮尚未退款"]);
+      expect(
+        orderRefundRows(order, linesOf, position("300", "500")).map((row) => row.label),
+      ).toEqual(["其他退款", "正在退回客人的卡"]);
+      expect(orderRefundRows(machine, linesOf, null)[0]?.label).toBe("退款尚未退还");
     } finally {
       setLanguageForTest("en");
     }
