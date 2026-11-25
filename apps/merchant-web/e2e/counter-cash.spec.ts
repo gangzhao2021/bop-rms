@@ -483,7 +483,11 @@ test("@production after a reload the cashier takes cash for a sent counter order
   await awaiting.getByRole("button", { name: "Take payment" }).click();
   const form = awaiting.getByRole("form", { name: "Record card-machine payment" });
   await form.getByRole("radio", { name: "Cash" }).check();
-  await expect(form).toContainText("Take $11.35 in cash (rounded to 5 cents)");
+  // Batch 64 (F42): the first charge's panel, its cash steps in order.
+  await expect(form.locator(".counter-order__steps > li")).toHaveText([
+    "Take $11.35 in cash and count it.",
+    "Enter what the guest handed you, then record it below.",
+  ]);
   await form.getByRole("button", { name: "$20.00", exact: true }).click();
   await expect(form).toContainText("Change $8.65");
   for (const width of [1440, 1024, 390]) {

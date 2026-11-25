@@ -1725,24 +1725,52 @@
 
 /*
  * Batch 64 (v15 batch 63 live, TM2 at 390x844): the display's header stack pushed the first ticket
- * to y=486: the bar took four rows (name, links, note, Hand over), the board's own bar two, and a
- * centred black "Filters · Active work" a row of its own under the notice line. On a phone now:
- * - the bar is three rows: name and switch, then "Mark an item sold out" with Hand over at the row's
- *   end, then the note. The current page's own "Kitchen" link says nothing the title under it does
- *   not (it is still the page you are on); a long link wraps inside its 44 px row, never the row;
- * - "Find an order" sits in the board's bar as on a tablet, opening the same sheet; the Filters
- *   button is gone (a chosen work state is named beside the count, batch 45).
- * The first ticket starts in the top half of the first screen.
+ * to y=486: the bar took four rows (name, links, note, Hand over), and a centred black
+ * "Filters · Active work" took a row of its own under the notice line, while "Find an order" was
+ * not in the board's bar. On a phone now:
+ * - the bar flows: name and switch; then the links with Hand over at the row's end when they fit
+ *   (each stays on one line; Hand over takes the next row when the fonts are wider); then the note.
+ *   The current page's own "Kitchen" link says nothing the title under it does not, so a phone
+ *   leaves it out while there is another link;
+ * - "Find an order" sits in the board's bar as on a tablet;
+ * - Filters (it names the work state shown, batch 44) is accent text on the Pause ordering line;
+ *   the notice keeps a line of its own, so a longer or shorter notice never moves the tickets.
  */
 @media (max-width: 767px) {
-  /* Three columns, so Hand over (spanning the last two) never narrows the Store's name above it. */
   .kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header {
-    grid-template-columns: minmax(0, 1fr) minmax(0, max-content) auto;
-    grid-template-areas:
-      "title title lang"
-      "nav handover handover"
-      "note note note"
-      "failed failed failed";
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    column-gap: 16px;
+  }
+  .kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header > h1 {
+    flex: 1 1 0;
+    order: 1;
+  }
+  .kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header-extra {
+    order: 2;
+  }
+  /* A zero-height break after the switch: the links always start the next row. */
+  .kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header::after {
+    content: "";
+    flex-basis: 100%;
+    order: 3;
+  }
+  .kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header > p,
+  .kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header .bop-shell__nav {
+    order: 4;
+  }
+  .kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header .kitchen-handover-button {
+    order: 5;
+    margin-inline-start: auto;
+  }
+  .kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header .kitchen-screen-awake {
+    flex-basis: 100%;
+    order: 6;
+  }
+  .kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header .kitchen-handover-failed {
+    flex-basis: 100%;
+    order: 7;
   }
   .kitchen-shell:not(.kitchen-shell--workspace)
     .bop-shell__header
@@ -1751,22 +1779,30 @@
     display: none;
   }
   .kitchen-shell:not(.kitchen-shell--workspace)
-    .bop-shell__header
-    .bop-shell__nav
-    a.kitchen-display-nav-link {
-    white-space: normal;
-    line-height: 1.25;
-  }
-  .kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header .kitchen-handover-button {
-    justify-self: end;
-  }
-  .kitchen-shell:not(.kitchen-shell--workspace)
     .kitchen-board-heading__actions
     .kitchen-find-button {
     display: inline-flex;
   }
-  .kitchen-shell:not(.kitchen-shell--workspace) .kitchen-board-workspace > .kitchen-filter-toggle,
-  .kitchen-shell:not(.kitchen-shell--workspace) .kitchen-filter-toggle {
-    display: none;
+  .kitchen-shell:not(.kitchen-shell--workspace) .kitchen-notice-line > .kitchen-status-row {
+    flex-basis: 100%;
+  }
+  .kitchen-shell:not(.kitchen-shell--workspace) .kitchen-notice-line > .pause-ordering {
+    flex-basis: auto;
+  }
+  .kitchen-shell:not(.kitchen-shell--workspace) .kitchen-notice-line > .kitchen-filter-toggle {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: flex-start;
+    width: auto;
+    min-height: 44px;
+    margin-inline-start: 16px;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    color: var(--bop-color-accent);
+    font-size: 14px;
+    font-weight: 400;
   }
 }

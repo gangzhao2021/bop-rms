@@ -127,7 +127,12 @@ for (const awake of ["Unsupported", "Held"] as const)
           await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
           `${where}: no sideways scroll`,
         ).toBe(true);
-        const controls = [...links, handover, switcher];
+        // Batch 64 (v15 b63 live): on a phone the current page's own link is left out (the title
+        // under the bar names the page), so the bar is a row shorter.
+        if (width < 768)
+          await expect(links[0] as Locator, `${where}: no Kitchen link`).toBeHidden();
+        const shown = width < 768 ? [links[1], links[1]] : links;
+        const controls = [...(shown as Locator[]), handover, switcher];
         const boxes = await Promise.all(
           controls.map((control, n) => box(control, `${where} #${n}`)),
         );
@@ -304,7 +309,8 @@ test("@production WP-2423 batch 61: every focus ring in the kitchen display's to
       await page.setViewportSize({ width, height });
       await page.evaluate(() => window.scrollTo(0, 0));
       const rings = await ringsFrom(page, header, header.getByRole("link").first());
-      expect(rings.length, `${language} ${width}`).toBeGreaterThanOrEqual(4);
+      // Batch 64: a phone's bar has no link to the page it is on.
+      expect(rings.length, `${language} ${width}`).toBeGreaterThanOrEqual(width < 768 ? 3 : 4);
       for (const ring of rings) {
         expect(ring.ring, ring.name).toBe(true);
         expect(ring, `${language} ${width}: ${ring.name}`).toEqual(whole(ring));

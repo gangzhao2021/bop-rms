@@ -3433,6 +3433,9 @@ export function KitchenBoardScreen({
             }
           />
           {pauseOrdering}
+          {/* Batch 64 (v15 b63 live): on a phone the display's Filters sits on the Pause ordering
+              line as accent text, not on a row of its own (hidden from 768 px up). */}
+          {workspaceFrame ? null : filterToggle}
         </div>
         {/* Batch 63 (F46): while the board cannot be read, what the kitchen does meanwhile is
             always on screen, not only behind Details. */}
@@ -3459,7 +3462,6 @@ export function KitchenBoardScreen({
         {/* b40 CI kept Pause ordering under the remakes so a remake's buttons stayed on a phone's
             first screen; batch 63 (F45) puts it on the notice line instead, where it takes no row
             of its own. */}
-        {workspaceFrame ? null : filterToggle}
         {workspaceFrame ? (
           <div className="order-toolbar">
             <div className="order-status-filters" role="group" aria-label={t("Show kitchen work")}>

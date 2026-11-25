@@ -84,7 +84,19 @@ for (const language of ["en", "zh-Hans"] as const)
         Math.abs(middle(await rect(find)) - middle(await rect(refresh))),
         `${where}: Find an order on the Refresh row`,
       ).toBeLessThan(12);
-      await expect(page.locator(".kitchen-filter-toggle")).toBeHidden();
+      // On a phone, Filters is accent text on the Pause ordering line (no row of its own).
+      const filters = page.locator(".kitchen-filter-toggle");
+      if (width === 390) {
+        const pause = page.getByRole("button", { name: zh ? "暂停点单" : "Pause ordering" });
+        expect(
+          Math.abs(middle(await rect(filters)) - middle(await rect(pause))),
+          `${where}: Filters on the Pause line`,
+        ).toBeLessThan(12);
+        expect(await filters.evaluate((node) => getComputedStyle(node).color)).toBe(accent);
+        expect(await filters.evaluate((node) => getComputedStyle(node).backgroundColor)).toBe(
+          "rgba(0, 0, 0, 0)",
+        );
+      } else await expect(filters).toBeHidden();
       // The bar's Hand over and the Store's name: each on one line, the switch top-right.
       const handover = page.locator(".kitchen-handover-button");
       const name = page.locator(".bop-shell__header h1");
