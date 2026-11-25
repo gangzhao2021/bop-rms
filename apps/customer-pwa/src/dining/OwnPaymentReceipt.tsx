@@ -416,7 +416,7 @@ function OwnPaymentLines({ receipt }: { readonly receipt: OwnPaymentReceipt }) {
               </div>
             )}
             {/* Batch 58 (v15 b57 live): once some of it went back, this row is what was charged
-              and the net row is what was paid, so 实付 names one amount only. */}
+                and the net row is what was paid, so 实付 names one amount only. */}
             <div>
               <dt>
                 {payment.refundedMinor === "0" ? t("Total paid by you") : t("Amount charged")}
