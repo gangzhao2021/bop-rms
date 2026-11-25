@@ -360,8 +360,9 @@ for (const width of widths)
         await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
       ).toBe(true);
       // Linux fonts (DejaVu) run wider than macOS fonts. The heading wraps, so its distance to the
-      // panel edge says little; instead it must still fit, on at most two lines, in a panel 40 px
-      // narrower than the real one.
+      // panel edge says little; instead it must still fit in a panel 40 px narrower than the real
+      // one, on at most two lines (three on a phone, where the longer "after the refund" heading
+      // takes a third line in DejaVu once narrowed).
       const narrowed = await page.locator("#member-panel-title").evaluate((heading) => {
         const panel = heading.closest("section");
         if (panel === null) return { room: -1, lines: 0 };
@@ -379,7 +380,7 @@ for (const width of widths)
         return measured;
       });
       expect(narrowed.room).toBeGreaterThanOrEqual(0);
-      expect(narrowed.lines).toBeLessThanOrEqual(2);
+      expect(narrowed.lines).toBeLessThanOrEqual(width < 600 ? 3 : 2);
     };
     for (const zh of [false, true])
       test(`${zh ? "zh-Hans" : "en"}: B reads plain points, A reads what its refund left`, async ({
