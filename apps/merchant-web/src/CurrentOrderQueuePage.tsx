@@ -4362,6 +4362,7 @@ export function CurrentOrderDetails({
           csrf={csrf}
           {...(fetcher ? { fetcher } : {})}
           onPayments={setTablePayments}
+          {...(onChanged ? { onRefundsChanged: onChanged } : {})}
         />
       ) : null}
       {/* WP-2423 (v15 751dd768): offered only to people the server lets read payments. */}

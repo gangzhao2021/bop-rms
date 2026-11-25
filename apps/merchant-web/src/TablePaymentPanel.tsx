@@ -251,6 +251,21 @@ export function tablePaymentRefundEnd(payment: TablePayment): {
   };
 }
 
+/**
+ * Batch 64: what a table's refunds are now — each one's way, amount and, for a card refund, whether
+ * it went back — so a change made or answered here can be told to the order's totals above.
+ */
+export function tableRefundsKey(payments: readonly TablePayment[]): string {
+  return JSON.stringify(
+    payments.map((payment) => [
+      payment.partNumber,
+      payment.cashRefunds.map((refund) => [refund.amountMinor, refund.refundedAt]),
+      payment.cardRefunds.map((refund) => [refund.amountMinor, refund.refundedAt]),
+      payment.onlineRefunds.map((refund) => [refund.amountMinor, refund.requestedAt, refund.state]),
+    ]),
+  );
+}
+
 async function post(fetcher: typeof fetch, path: string, csrf: string, body: unknown) {
   const response = await fetcher(path, {
     method: "POST",
@@ -275,23 +290,44 @@ export function TablePaymentPanel({
   csrf,
   fetcher = fetch,
   onPayments,
+  onRefundsChanged,
 }: {
   readonly orderReference: string;
   readonly csrf: string;
   readonly fetcher?: typeof fetch;
   /** F27 reason: the payments as last read or changed, for the order's refund lines. */
   readonly onPayments?: (payments: readonly TablePayment[]) => void;
+  /**
+   * Batch 64 (v15 b63 order 32: right after a refund to the card, Paid showed it while the order's
+   * totals above still read "Total $14.13" for 3-5 s, until the page's next poll): told when a
+   * refund is made here, or a later read finds one has changed (a card refund answered), so the
+   * order's totals are read again at once and both say the same.
+   */
+  readonly onRefundsChanged?: () => void;
 }) {
   const [payments, setPayments] = useState<readonly TablePayment[]>([]);
   const [reload, setReload] = useState(0);
   useEffect(() => onPayments?.(payments), [payments, onPayments]);
+  // The refunds as first read: a later read or a refund made here that differs is a change.
+  const refundsShown = useRef<string | null>(null);
+  const refundsChanged = useRef(onRefundsChanged);
+  refundsChanged.current = onRefundsChanged;
+  const show = (next: readonly TablePayment[]) => {
+    const key = tableRefundsKey(next);
+    if (refundsShown.current !== null && refundsShown.current !== key) refundsChanged.current?.();
+    refundsShown.current = key;
+    setPayments(next);
+  };
+  const showRef = useRef(show);
+  showRef.current = show;
 
   useEffect(() => {
     let live = true;
     post(fetcher, "/merchant/orders/table-payment", csrf, { orderReference })
       .then(({ status, payload }) => {
         if (!live) return;
-        setPayments(status === 200 ? parseTablePayments(payload) : []);
+        if (status === 200) showRef.current(parseTablePayments(payload));
+        else setPayments([]);
       })
       .catch(() => {
         if (live) setPayments([]);
@@ -326,7 +362,7 @@ export function TablePaymentPanel({
           orderReference={orderReference}
           csrf={csrf}
           fetcher={fetcher}
-          onChanged={(next) => setPayments(next)}
+          onChanged={show}
           onStale={() => setReload((value) => value + 1)}
         />
       ))}
