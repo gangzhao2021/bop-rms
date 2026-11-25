@@ -733,6 +733,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "{item}已撤下，但没能加回：现收 {charged} 份，应收 {expected} 份。请再试一次。",
   "Seated, nothing ordered": "已入座，还没点菜",
   "Cancelled, nothing to collect": "已取消，无需收款",
+  "Comped by a manager, nothing to collect": "经理已免单，无需收款",
   "Round waiting for payment": "有一轮在等付款",
   "Phone payment stopped. Take the payment here.": "已停止手机付款。请在这里收款。",
   "Already served on another screen, or the dish changed. Updated, check it again.":

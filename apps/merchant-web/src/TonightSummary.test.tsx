@@ -348,6 +348,49 @@ describe("WP-2423 item 8 ② tonight's closing summary", () => {
     expect(rowOf("Cancelled, nothing to collect")).toContain('data-list="true"');
     expect(rowOf("Gross sales")).not.toContain("data-list");
   });
+  it("batch 62 (v15 b61 live, C61 A): a table comped to nothing is said comped, never cancelled", () => {
+    const fixture = tonightSummaryFixture();
+    // As v15 listed TM2 that night: C61 A comped in full and still seated; C61 F's only round
+    // taken off the bill before anything was made.
+    (fixture.openTables as Record<string, unknown>[]).push(
+      {
+        tableLabel: "C61 A (TEST)",
+        phase: "Active",
+        paymentTiming: "PayLater",
+        owedMinor: "0",
+        openedMinutes: 35,
+        standing: "Comped",
+      },
+      {
+        tableLabel: "C61 F (TEST)",
+        phase: "Active",
+        paymentTiming: "PayLater",
+        owedMinor: "0",
+        openedMinutes: 25,
+        standing: "NothingToCollect",
+      },
+    );
+    const rowWith = (html: string, label: string) => {
+      const at = html.indexOf(label);
+      expect(at, label).toBeGreaterThan(-1);
+      return html.slice(at, html.indexOf("</div>", at));
+    };
+    for (const [language, comped, cancelled] of [
+      ["en", "Comped by a manager, nothing to collect", "Cancelled, nothing to collect"],
+      ["zh-Hans", "经理已免单，无需收款", "已取消，无需收款"],
+    ] as const) {
+      setLanguageForTest(language);
+      try {
+        const html = render(fixture);
+        expect(rowWith(html, comped)).toContain("C61 A (TEST)");
+        expect(rowWith(html, comped)).not.toContain("C61 F");
+        expect(rowWith(html, cancelled)).toContain("C61 F (TEST)");
+        expect(rowWith(html, cancelled)).not.toContain("C61 A");
+      } finally {
+        setLanguageForTest("en");
+      }
+    }
+  });
   it("times the closing reminder by the Store's published closing", () => {
     const endsAt = "2026-10-28T08:00:00.000Z"; // 04:00 the next morning, Toronto.
     const at = (instant: string) => Date.parse(instant);

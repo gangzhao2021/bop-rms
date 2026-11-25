@@ -226,6 +226,8 @@ export function TonightSummaryView({
   const paidSeated = tonightTables.filter((table) => table.standing === "Paid");
   const nothingOrdered = tonightTables.filter((table) => table.standing === "NothingOrdered");
   const nothingToCollect = tonightTables.filter((table) => table.standing === "NothingToCollect");
+  // Batch 62 (v15 b61 live, C61 A): dishes served and then comped by a manager are not cancelled.
+  const comped = tonightTables.filter((table) => table.standing === "Comped");
   const standingText = (table: (typeof summary.openTables)[number]) =>
     table.standing === "Paid"
       ? t("Paid, guests still seated")
@@ -233,9 +235,11 @@ export function TonightSummaryView({
         ? t("Seated, nothing ordered")
         : table.standing === "NothingToCollect"
           ? t("Cancelled, nothing to collect")
-          : table.phase === "Closing"
-            ? t("Checking out")
-            : t("Seated");
+          : table.standing === "Comped"
+            ? t("Comped by a manager, nothing to collect")
+            : table.phase === "Closing"
+              ? t("Checking out")
+              : t("Seated");
   const tableNames = (tables: typeof open) =>
     tables
       .map((table) => t("Table {table}", { table: saidTable(table.tableLabel) }))
@@ -477,6 +481,17 @@ export function TonightSummaryView({
               label={t("Cancelled, nothing to collect")}
               detail={countOf(nothingToCollect.length, "table")}
               value={tableNames(nothingToCollect)}
+              muted
+              list
+            />
+          </dl>
+        ) : null}
+        {comped.length > 0 ? (
+          <dl>
+            <Row
+              label={t("Comped by a manager, nothing to collect")}
+              detail={countOf(comped.length, "table")}
+              value={tableNames(comped)}
               muted
               list
             />

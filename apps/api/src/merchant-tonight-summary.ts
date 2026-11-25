@@ -16,7 +16,7 @@ import {
   type StoreSalesPayment,
   type StoreSalesRefund,
 } from "@rms/payment";
-import { readDiningTableBill } from "./merchant-dining-table-checkout.js";
+import { readDiningTableBill, type DiningTableBill } from "./merchant-dining-table-checkout.js";
 
 /**
  * WP-2423 item 8 ② (Figma 47-2): what the closing summary adds to today's sales report — the
@@ -39,10 +39,12 @@ export interface TonightOpenTable {
  * M40: Owes — its bill still owes money; RoundUnpaid — a pay-first round nobody has paid yet;
  * Paid — money was really taken and kept (a table settlement, a paid split part, or a pay-first
  * round paid and not refunded in full); NothingOrdered — seated, no Order; NothingToCollect
- * — rounds were ordered but all came off unpaid; WrittenOff — the guests left without paying.
+ * — rounds were ordered but all came off unpaid; Comped — batch 62: dishes stayed on the bill and
+ * a manager's comps or discounts took it to nothing (never "cancelled": nothing was);
+ * WrittenOff — the guests left without paying.
  */
 export type TonightTableStanding =
-  "Owes" | "RoundUnpaid" | "Paid" | "NothingOrdered" | "NothingToCollect" | "WrittenOff";
+  "Owes" | "RoundUnpaid" | "Paid" | "NothingOrdered" | "NothingToCollect" | "Comped" | "WrittenOff";
 
 export function tonightTableStanding(input: {
   readonly writtenOff: boolean;
@@ -53,12 +55,26 @@ export function tonightTableStanding(input: {
   /** Pay-first rounds paid (online or on the card machine) whose money was not all given back. */
   readonly keptPaidRounds: number;
   readonly ordered: boolean;
+  /** Batch 62: a dish still on the table's bill carries a manager's comp or discount. */
+  readonly compedByManager?: boolean;
 }): TonightTableStanding {
   if (input.writtenOff) return "WrittenOff";
   if (input.unpaidRounds > 0) return "RoundUnpaid";
   if (input.owedMinor > 0n) return "Owes";
   if (input.tableMoneyTaken || input.keptPaidRounds > 0) return "Paid";
-  return input.ordered ? "NothingToCollect" : "NothingOrdered";
+  if (!input.ordered) return "NothingOrdered";
+  return input.compedByManager === true ? "Comped" : "NothingToCollect";
+}
+
+/**
+ * Batch 62 (v15 b61 live, C61 A): the table's bill, as its own read returns it, still lists dishes
+ * that a manager comped or discounted. A guest's points are not a manager's decision. Dishes taken
+ * off the bill (cancelled) are not on it, so a table whose rounds were all cancelled has none.
+ */
+export function billCompedByManager(bill: Pick<DiningTableBill, "rounds">): boolean {
+  return bill.rounds.some((round) =>
+    round.items.some((item) => item.reduction !== null && item.reduction.points !== true),
+  );
 }
 /**
  * DEC-PAID-ORDER-AUTO-ACCEPT: what a closing manager should see named, because no manager was asked:
@@ -124,6 +140,7 @@ export async function readTonightFacts(
     readonly orderReference: string | null;
     readonly writtenOff: boolean;
     readonly tableMoneyTaken: boolean;
+    readonly compedByManager: boolean;
   })[] = [];
   let after: string | null = null;
   for (let page = 0; page < TONIGHT_TABLE_PAGES; page++) {
@@ -160,6 +177,7 @@ export async function readTonightFacts(
           tableMoneyTaken:
             bill.settlement !== null ||
             (bill.split?.parts.some((part) => part.payment !== null) ?? false),
+          compedByManager: billCompedByManager(bill),
         }),
       );
     }
@@ -214,6 +232,7 @@ export async function readTonightFacts(
             keptPaidRounds:
               table.orderReference === null ? 0 : (standings.kept.get(table.orderReference) ?? 0),
             ordered: table.orderReference !== null,
+            compedByManager: table.compedByManager,
           }),
         }),
       ),

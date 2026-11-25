@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { readPayFirstRoundStandings, tonightTableStanding } from "./merchant-tonight-summary.js";
+import {
+  billCompedByManager,
+  readPayFirstRoundStandings,
+  tonightTableStanding,
+} from "./merchant-tonight-summary.js";
 
 const base = {
   writtenOff: false,
@@ -27,6 +31,48 @@ it("M40: only a table whose money was really taken and kept reads as paid", () =
   expect(tonightTableStanding({ ...base, keptPaidRounds: 1, unpaidRounds: 1 })).toBe("RoundUnpaid");
   // A bill still owing, even after one part was paid.
   expect(tonightTableStanding({ ...base, owedMinor: 2346n, tableMoneyTaken: true })).toBe("Owes");
+});
+
+/**
+ * Batch 62 (v15 b61 live, TM2 table C61 A, order 58): three Beef noodles (TEST) served, then each
+ * comped by a manager (1413 + 1412 + 1413), bill $0.00, table still open. Reports listed it as
+ * "Cancelled, nothing to collect"; nothing was cancelled. The bill line as its read returns it.
+ */
+const compedLine = {
+  orderItemReference: "019a0000-0000-7000-8000-000000000058",
+  quantity: 3,
+  displayName: "Beef noodles (TEST)",
+  subtotalMinor: "0",
+  totalMinor: "0",
+  reduction: { kind: "Comp" as const, percent: null, amountMinor: "4238", netMinor: "3750" },
+};
+const billWith = (items: readonly (typeof compedLine)[]) => ({
+  rounds: [{ items }] as never,
+});
+
+it("batch 62: a table comped to nothing by a manager is Comped, never Cancelled", () => {
+  expect(billCompedByManager(billWith([compedLine]))).toBe(true);
+  expect(
+    tonightTableStanding({ ...base, compedByManager: billCompedByManager(billWith([compedLine])) }),
+  ).toBe("Comped");
+  // Every round taken off the bill: no dish left on it, so the rounds were cancelled.
+  expect(billCompedByManager({ rounds: [] })).toBe(false);
+  expect(billCompedByManager(billWith([]))).toBe(false);
+  expect(tonightTableStanding({ ...base, compedByManager: false })).toBe("NothingToCollect");
+  // A guest's points are not a manager's comp.
+  expect(
+    billCompedByManager(
+      billWith([{ ...compedLine, reduction: { ...compedLine.reduction, points: true } as never }]),
+    ),
+  ).toBe(false);
+  // A comp on a table that still owes, or that paid for the rest, keeps that standing.
+  expect(tonightTableStanding({ ...base, compedByManager: true, owedMinor: 1413n })).toBe("Owes");
+  expect(tonightTableStanding({ ...base, compedByManager: true, tableMoneyTaken: true })).toBe(
+    "Paid",
+  );
+  expect(tonightTableStanding({ ...base, compedByManager: true, writtenOff: true })).toBe(
+    "WrittenOff",
+  );
 });
 
 // M40: how the pay-first rounds of the open tables are put together, with Ordering's and

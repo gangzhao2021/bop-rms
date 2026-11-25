@@ -457,7 +457,14 @@ export interface TonightSummary {
     readonly openedMinutes: number;
     /** M40: where the table's money stands (paid only when money was really taken and kept). */
     readonly standing:
-      "Owes" | "RoundUnpaid" | "Paid" | "NothingOrdered" | "NothingToCollect" | "WrittenOff";
+      | "Owes"
+      | "RoundUnpaid"
+      | "Paid"
+      | "NothingOrdered"
+      | "NothingToCollect"
+      /** Batch 62: a manager's comps or discounts took the bill to nothing (nothing cancelled). */
+      | "Comped"
+      | "WrittenOff";
   }[];
   readonly openTablesOwedMinor: string;
   readonly cancelled: {
@@ -544,6 +551,7 @@ export function parseTonightSummary(value: unknown): TonightSummary {
         "Paid",
         "NothingOrdered",
         "NothingToCollect",
+        "Comped",
         "WrittenOff",
       ] as const),
     });
