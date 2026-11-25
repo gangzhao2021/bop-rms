@@ -40,6 +40,13 @@ describe("merchant route classification", () => {
     expect(pilotHiddenRedirect("/app/reports/operations")).toBeNull();
   });
 
+  it("batch 63 F56 (RA-04): the task inbox placeholder is hidden until a real task source exists", () => {
+    // v15: /app/tasks served "An empty page does not establish source-workflow finality", a raw
+    // ISO time and a "Load next page" button that did nothing, to anyone typing the address.
+    expect(pilotHiddenRedirect("/app/tasks")).toBe("/app");
+    expect(pilotHiddenRedirect("/app/tasks", ["HOME-OVERVIEW", "TASK-INBOX"])).toBe("/app");
+  });
+
   it("v15 b12: an address under /app naming a store screen opens that screen, not Home", () => {
     expect(unknownAddressTarget("/app/operations/dining")).toBe("/operations/dining");
     expect(unknownAddressTarget("/app/operations/order-entry", "?table=x")).toBe(

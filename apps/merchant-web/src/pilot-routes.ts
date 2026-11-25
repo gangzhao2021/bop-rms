@@ -57,7 +57,9 @@ function listedRoute(
 export const merchantRoutes: readonly MerchantRoute[] = Object.freeze([
   // Working screens (real sources in the workspace).
   route("/app"),
-  route("/app/tasks"),
+  // Batch 63 F56 (RA-04): the task inbox has no task source in the pilot (it only ever said
+  // "unavailable" in technical words); hidden like /app/exports until it has one.
+  route("/app/tasks", home),
   route("/app/organization/stores/:id/setup"),
   route("/app/organization/stores/:id/service"),
   route("/app/organization/users"),

@@ -1,4 +1,8 @@
 import { expect, test } from "@playwright/test";
+// Batch 63 F56 (pilot rule "no reachable stubs"): the production workspace now sends /app/tasks
+// to Home until the screen has a real task source (checked for every route by
+// pilot-routes.spec.ts); the layout it asserts stays in the local demo. Kept for the record.
+test.skip(true, "Batch 63 F56: the task inbox is hidden in the production workspace");
 
 test("@production Task Inbox renders one permission-trimmed Store page and keeps unsupported actions locked", async ({
   page,
