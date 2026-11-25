@@ -1059,6 +1059,8 @@ export function StaffOrderEntryPage({
   const [recordAgain, setRecordAgain] = useState(false);
   const [changeDue, setChangeDue] = useState<string | null>(null);
   const [placed, setPlaced] = useState<PlacedCounterOrder | null>(null);
+  // Batch 64 (v15 b63 live, F42): a "Sent, not paid yet" order is being charged above.
+  const [resumedCharging, setResumedCharging] = useState(false);
   const [phase, setPhase] = useState<
     "Building" | "Sending" | "Charge" | "Recording" | "Paid" | "Accepted" | "Sent"
   >("Building");
@@ -2243,7 +2245,9 @@ export function StaffOrderEntryPage({
         // b63 (F39): the way back to the table, before and after sending.
         tableMode && tableReference !== null && tableLabel !== null ? (
           <Link to="/operations/dining" state={tablesOpenTableState(tableReference)}>
-            ‹ {saidTable(tableLabel)}
+            {/* Batch 64 (v15 b63 live): through t(), which says a named table as its name; on
+                its own, saidTable's markers reached the link as box glyphs ("‹ ▤K63 A▤"). */}
+            ‹ {t("Table {tableLabel}", { tableLabel: saidTable(tableLabel) })}
           </Link>
         ) : undefined
       }
@@ -2281,6 +2285,7 @@ export function StaffOrderEntryPage({
           }
           paidOrderReferences={paidHere}
           onExcludedCancellable={setPlacedCancellable}
+          onCharging={setResumedCharging}
         />
       )}
       {/* DEC-PAPER-SEND-IDEMPOTENT: a send from before this page was reloaded got no answer. */}
@@ -2304,6 +2309,9 @@ export function StaffOrderEntryPage({
         // Batch 63 (F42, v3 41:171): once a counter order is sent, its lines take the menu's place
         // and the payment panel stands beside them.
         data-sent={placed !== null && !ordering && !tableMode && !placed.payLater ? "" : undefined}
+        // Batch 64 (F42): while a resumed order is charged in its one payment panel above, the
+        // menu and the order being built step aside (they come back as they were on Close).
+        data-resumed-charge={resumedCharging && !tableMode ? "" : undefined}
       >
         <section className="counter-order__menu" aria-labelledby="counter-menu-heading">
           <h2 id="counter-menu-heading" className="counter-order__hidden-heading">

@@ -94,6 +94,9 @@
 }
 .counter-order__categories button[aria-current="true"] {
   font-weight: 600;
+  /* Batch 64 (v15 b63 live, CK-18, v3 41:48): the chosen category is underlined, 2 px in the
+     accent under its words; drawn inside the 44 px target so nothing moves. */
+  box-shadow: inset 0 -2px 0 var(--bop-color-accent);
 }
 .counter-order__section {
   scroll-margin-top: calc(var(--bop-pinned-top, 0px) + 6.5rem);
@@ -673,6 +676,8 @@
   opacity: 0.4;
 }
 .counter-order__choose-actions .counter-order__choose-cancel {
+  /* Batch 64 (v15 b63 live): zh-Hans 取消 was a 28 px wide target; 44 x 44 at least. */
+  min-width: 44px;
   min-height: 44px;
   padding: 0;
   border: 0;
@@ -1125,4 +1130,48 @@
   font-weight: 600;
   text-decoration: none;
   cursor: pointer;
+}
+
+/* ---- Batch 64 (v15 b63 live, F42): the resumed order's payment is the same panel as the first
+   charge (41:171): Take payment 20/600, the amount once at 28/600, its parts in grey, two steps,
+   14/400 grey labels and one full-width accent button. While it is open the menu and the order
+   being built step aside, as they do after a first send; Close brings them back unchanged. ---- */
+.counter-order__layout[data-resumed-charge] {
+  display: none;
+}
+.counter-order .counter-order__awaiting .counter-order__resumed-charge {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  max-width: 28rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.counter-order .counter-order__resumed-charge h3 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+.counter-order .counter-order__resumed-charge p {
+  margin: 0;
+}
+.counter-order .counter-order__resumed-charge > label {
+  display: grid;
+  gap: 4px;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
+}
+.counter-order .counter-order__resumed-charge :is(.field-hint, .bop-muted) {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.counter-order .counter-order__resumed-charge .card-actions {
+  flex-wrap: wrap;
+  gap: 8px 24px;
+}
+/* zh-Hans 取消/关闭 drew a 28 px wide target: every text button keeps 44 x 44. */
+.counter-order :is(.counter-order__danger-text, .counter-order__accent-text) {
+  min-width: 44px;
 }

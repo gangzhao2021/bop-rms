@@ -80,6 +80,7 @@ export function StaffRoundPaymentAction({
   payBy = null,
   label,
   counterStyle = false,
+  onOpenChange,
 }: {
   readonly csrf: string;
   readonly fetcher?: typeof fetch | undefined;
@@ -105,8 +106,19 @@ export function StaffRoundPaymentAction({
    * with accent text "Close", and the slip note says it is never the card number.
    */
   readonly counterStyle?: boolean;
+  /**
+   * Batch 64 (v15 b63 live, F42): told when the form opens and closes (and when it leaves), so the
+   * counter page puts the menu away while a resumed order is charged, as after a first send.
+   */
+  readonly onOpenChange?: ((open: boolean) => void) | undefined;
 }) {
   const [open, setOpen] = useState(false);
+  const openChange = useRef(onOpenChange);
+  openChange.current = onOpenChange;
+  useEffect(() => {
+    openChange.current?.(open);
+  }, [open]);
+  useEffect(() => () => openChange.current?.(false), []);
   const [slip, setSlip] = useState("");
   // WP-2423 M52: a counter order (not a table round) may be paid in cash, by the table's rules.
   const [tender, setTender] = useState<"CardMachine" | "Cash">("CardMachine");
@@ -309,9 +321,18 @@ export function StaffRoundPaymentAction({
       setBusy(false);
     }
   };
+  // Batch 64 (v15 b63 live, F42): the counter's resumed order is charged in the same panel as
+  // the first charge after sending (v3 41:171): "Take payment", the amount once at 28/600 with
+  // its parts in grey, the two steps in order, then how the guest pays and one accent button.
+  const counterPanel = counterStyle && subject === "order" && !recordedAfterOutage;
+  const dueMinor = cash !== null ? cash.cashDueMinor.toString() : amount;
   return (
     <form
-      className="staff-round-payment"
+      className={
+        counterPanel
+          ? "staff-round-payment counter-order__charge counter-order__resumed-charge"
+          : "staff-round-payment"
+      }
       aria-label={
         recordedAfterOutage
           ? t("Record the paper order's payment")
@@ -322,14 +343,42 @@ export function StaffRoundPaymentAction({
         void record();
       }}
     >
-      <p>
-        {cash !== null && !recordedAfterOutage
-          ? t(
-              "Take {amount} in cash (rounded to 5 cents), count it, then record it here. The kitchen starts this order once it is recorded.",
-              { amount: cad(cash.cashDueMinor.toString()) },
-            )
-          : chargeFirstText(amount, subject, recordedAfterOutage)}
-      </p>
+      {counterPanel ? (
+        <>
+          <h3>{t("Take payment")}</h3>
+          <p className="counter-order__due">{cad(dueMinor)}</p>
+          <p className="counter-order__due-parts">
+            {t("Tax included")}
+            {cash !== null ? t(" · cash rounded to 5 cents") : ""}
+          </p>
+          <ol className="counter-order__steps">
+            {cash !== null ? (
+              <>
+                <li>{t("Take {amount} in cash and count it.", { amount: cad(dueMinor) })}</li>
+                <li>{t("Enter what the guest handed you, then record it below.")}</li>
+              </>
+            ) : (
+              <>
+                <li>
+                  {t("Enter {amount} on the card machine; the guest taps or inserts.", {
+                    amount: cad(amount),
+                  })}
+                </li>
+                <li>{t("When the machine says approved, record it below.")}</li>
+              </>
+            )}
+          </ol>
+        </>
+      ) : (
+        <p>
+          {cash !== null && !recordedAfterOutage
+            ? t(
+                "Take {amount} in cash (rounded to 5 cents), count it, then record it here. The kitchen starts this order once it is recorded.",
+                { amount: cad(cash.cashDueMinor.toString()) },
+              )
+            : chargeFirstText(amount, subject, recordedAfterOutage)}
+        </p>
+      )}
       {/* Batch 63 (CK-03): the counter row already says the time, once. */}
       {payBy !== null && !counterStyle
         ? (() => {
@@ -487,6 +536,15 @@ export function StaffRoundPaymentAction({
           {counterStyle ? t("Close") : t("Cancel")}
         </button>
       </div>
+      {counterPanel ? (
+        <p className="bop-muted">
+          {cash !== null
+            ? t(
+                "Count the cash before you record it. Once recorded, it goes back only by cancelling the order or by a refund a manager records.",
+              )
+            : t("Card declined? Try another card.")}
+        </p>
+      ) : null}
     </form>
   );
 }

@@ -540,7 +540,7 @@ for (const language of ["en", "zh-Hans"] as const)
     await expect(pay).toBeVisible();
     await expect(
       page.getByRole("heading", {
-        name: zh ? "纸质订单 12：付款还没录入" : "Paper order 12: its payment isn't recorded yet",
+        name: zh ? "12 号纸质单：付款还没录入" : "Paper order 12: its payment isn't recorded yet",
       }),
     ).toBeVisible();
     // Sent: the one paid-at field is the record-again step's, holding the time from the paper order.
@@ -1153,7 +1153,11 @@ test("@production a sent, unpaid counter order is charged after a reload, from C
   await page.setViewportSize({ width: 1440, height: 900 });
   await awaiting.getByRole("button", { name: "Take payment" }).click();
   const form = awaiting.getByRole("form", { name: "Record card-machine payment" });
-  await expect(form).toContainText("Charge $11.30 on the card machine first");
+  // Batch 64 (F42): the same panel as the first charge, its two steps in order.
+  await expect(form.locator(".counter-order__steps > li")).toHaveText([
+    "Enter $11.30 on the card machine; the guest taps or inserts.",
+    "When the machine says approved, record it below.",
+  ]);
   // Batch 63 (CK-03): the time is said once (on the row); the slip note is kept; the record button
   // is the accent primary and the form closes with accent text.
   await expect(form).not.toContainText(/Record the payment by \d\d:\d\d/u);
@@ -1201,6 +1205,176 @@ test("@production a sent, unpaid counter order is charged after a reload, from C
   await paidPanel.getByRole("button", { name: "Done" }).click();
   await expect(page.getByRole("region", { name: "Order 21 paid" })).toHaveCount(0);
 });
+
+// Batch 64 (v15 b63 live, F42; TM2 order 35/49): after a reload, Take payment on the "Sent, not
+// paid yet" row opened an older panel: one paragraph instead of the two steps, no 28/600 amount,
+// a 14/500 label, and the menu and empty order stayed under it. It is the first charge's panel
+// now, the menu steps aside while it is open, and Close (关闭, 44 px wide) brings it back.
+for (const language of ["en", "zh-Hans"] as const)
+  test(`@production b64: a resumed counter order is charged in the same panel as the first charge (${language})`, async ({
+    page,
+  }) => {
+    const zh = language === "zh-Hans";
+    if (zh)
+      await page.addInitScript(() => {
+        window.localStorage.setItem("bop.merchant.language", "zh-Hans");
+      });
+    await signIn(page);
+    const payBy = new Date(Date.now() + 20 * 60_000).toISOString();
+    const row = (amountDueMinor: string | null) => ({
+      orderReference: id(60),
+      orderNumber: "35",
+      orderType: "Pickup",
+      sourceChannel: "Pos",
+      submittedAt: new Date(Date.now() - 3 * 60_000).toISOString(),
+      observedAt: new Date().toISOString(),
+      initialBatchReference: id(61),
+      counter: { recordedAfterOutage: false, paidOnCardMachine: null, payBy, amountDueMinor },
+      canRecordCardMachinePayment: true,
+      canViewPayments: false,
+      batches: [
+        {
+          orderBatchReference: id(61),
+          sequence: 1,
+          acceptanceStatus: "NotAccepted",
+          canRequestAcceptance: false,
+          canCancel: false,
+          staffCancellation: null,
+          canCancelItems: false,
+        },
+      ],
+      canRequestAcceptance: false,
+      currentPhase: "Submitted",
+      currentVersion: 1,
+      unfulfillable: null,
+      pickupNotCollected: false,
+      acceptBy: null,
+      awaitingPayment: true,
+    });
+    await page.route("**/merchant/counter/menu", (route) => route.fulfill({ headers, json: menu }));
+    await page.route("**/merchant/orders", (route) =>
+      route.fulfill({ headers, json: { items: [row(null)], nextAfterOrderReference: null } }),
+    );
+    await page.route("**/merchant/orders/detail?*", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          screenId: "OPS-ORDER-DETAIL",
+          pickupContact: null,
+          order: row("1780"),
+          lines: {
+            items: [
+              {
+                orderItemReference: id(62),
+                orderBatchReference: id(61),
+                name: "Flat White",
+                options: [],
+                quantity: 1,
+                customerNote: null,
+                unitPrice: { amountMinor: "1575", currencyCode: "CAD" },
+                subtotal: { amountMinor: "1575", currencyCode: "CAD" },
+                discount: { amountMinor: "0", currencyCode: "CAD" },
+                tax: { amountMinor: "205", currencyCode: "CAD" },
+                fee: { amountMinor: "0", currencyCode: "CAD" },
+                total: { amountMinor: "1780", currencyCode: "CAD" },
+                canCancel: false,
+                cancellation: null,
+              },
+            ],
+            totals: {
+              subtotal: { amountMinor: "1575", currencyCode: "CAD" },
+              discount: { amountMinor: "0", currencyCode: "CAD" },
+              tax: { amountMinor: "205", currencyCode: "CAD" },
+              fee: { amountMinor: "0", currencyCode: "CAD" },
+              total: { amountMinor: "1780", currencyCode: "CAD" },
+              tip: { amountMinor: "0", currencyCode: "CAD" },
+            },
+          },
+        },
+      }),
+    );
+    await page.goto("/operations/order-entry");
+    const awaiting = page.getByRole("region", {
+      name: zh ? "已发送，尚未付款" : "Sent, not paid yet",
+    });
+    const take = awaiting.getByRole("button", { name: zh ? /^收款/u : /^Take payment/u });
+    const menuArea = page.locator(".counter-order__menu");
+    for (const [width, height] of [
+      [1440, 900],
+      [1024, 768],
+      [390, 844],
+    ] as const) {
+      const where = `${language} ${width}`;
+      await page.setViewportSize({ width, height });
+      await expect(menuArea).toBeVisible();
+      await take.click();
+      const panel = awaiting.locator(".counter-order__resumed-charge");
+      await expect(panel).toBeVisible();
+      const heading = panel.getByRole("heading", { name: zh ? "收款" : "Take payment" });
+      expect(
+        await heading.evaluate((n) => [
+          getComputedStyle(n).fontSize,
+          getComputedStyle(n).fontWeight,
+        ]),
+      ).toEqual(["20px", "600"]);
+      const due = panel.locator(".counter-order__due");
+      await expect(due).toHaveText("$17.80");
+      expect(
+        await due.evaluate((n) => [getComputedStyle(n).fontSize, getComputedStyle(n).fontWeight]),
+        `${where}: amount 28/600`,
+      ).toEqual(["28px", "600"]);
+      await expect(panel.locator(".counter-order__steps > li")).toHaveText(
+        zh
+          ? [
+              "在刷卡机上输入 $17.80，让客人刷卡或拍卡。",
+              "刷卡机显示“已通过”后，点下面的按钮记下。",
+            ]
+          : [
+              "Enter $17.80 on the card machine; the guest taps or inserts.",
+              "When the machine says approved, record it below.",
+            ],
+      );
+      const slip = panel.locator("label", { hasText: zh ? "签购单参考号" : "Slip reference" });
+      expect(
+        await slip.evaluate((n) => [
+          getComputedStyle(n).fontSize,
+          getComputedStyle(n).fontWeight,
+          getComputedStyle(n).color,
+        ]),
+        `${where}: label 14/400 grey`,
+      ).toEqual(["14px", "400", "rgb(102, 102, 102)"]);
+      const pay = panel.getByRole("button", {
+        name: zh ? "已用刷卡机付款 · $17.80" : "Paid on card machine · $17.80",
+      });
+      const [payBox, panelBox] = await Promise.all([
+        pay.evaluate((n) => n.getBoundingClientRect().width),
+        panel.evaluate((n) => n.getBoundingClientRect().width),
+      ]);
+      expect(payBox, `${where}: the record button across the panel`).toBeGreaterThan(panelBox - 2);
+      expect(await pay.evaluate((n) => getComputedStyle(n).backgroundColor)).toBe(
+        "rgb(31, 99, 224)",
+      );
+      // The menu and the empty order step aside while the payment is open.
+      await expect(menuArea).toBeHidden();
+      await expect(page.getByText(zh ? "还没有商品" : "No items yet")).toBeHidden();
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      await page.screenshot({
+        path: `test-results/b64-resumed-pay-${width}-${language}.png`,
+        fullPage: true,
+      });
+      const close = panel.getByRole("button", { name: zh ? "关闭" : "Close", exact: true });
+      const closeBox = await close.evaluate((n) => {
+        const r = n.getBoundingClientRect();
+        return [r.width, r.height];
+      });
+      expect(closeBox[0], `${where}: Close 44 px wide`).toBeGreaterThanOrEqual(44);
+      expect(closeBox[1]).toBeGreaterThanOrEqual(44);
+      await close.click();
+      await expect(menuArea).toBeVisible();
+    }
+  });
 
 // Owner 2026-10-26: one tile per drink with its sizes as buttons; a tap on a size adds it; a sold
 // out size cannot be tapped. Sizes are grouped only by the catalog's Product (version), never by
@@ -2399,7 +2573,7 @@ for (const language of ["en", "zh-Hans"] as const)
     };
     const question = page.getByRole("group", {
       name: zh
-        ? "这是已经录入在订单 29 里的那张签购单吗？"
+        ? "这是已经录入在 29 号单里的那张签购单吗？"
         : "Is this the slip already recorded with order 29?",
     });
     await page.goto("/operations/order-entry");
@@ -2426,7 +2600,7 @@ for (const language of ["en", "zh-Hans"] as const)
       })
       .click();
     await expect(
-      page.getByRole("heading", { name: zh ? "订单 30 已付款" : "Order 30 paid" }),
+      page.getByRole("heading", { name: zh ? "30 号单已付款" : "Order 30 paid" }),
     ).toBeVisible();
     expect(sent).toHaveLength(2);
     // Nothing was placed by the refused try, so the answered send is a new order.
@@ -2458,7 +2632,7 @@ for (const language of ["en", "zh-Hans"] as const)
       })
       .click();
     await expect(
-      page.getByRole("heading", { name: zh ? "订单 31 已付款" : "Order 31 paid" }),
+      page.getByRole("heading", { name: zh ? "31 号单已付款" : "Order 31 paid" }),
     ).toBeVisible();
     expect(payments.at(-1)).toMatchObject({
       slipReference: "AUTH 4829",
@@ -2577,7 +2751,7 @@ for (const language of ["en", "zh-Hans"] as const)
     await recordAgain.click();
     await expect(
       page.getByRole("status").filter({
-        hasText: zh ? "已付款并发送到后厨。" : "Paid and sent to the kitchen.",
+        hasText: zh ? "已付款并发送到厨房。" : "Paid and sent to the kitchen.",
       }),
     ).toBeVisible();
     expect(records).toHaveLength(2);

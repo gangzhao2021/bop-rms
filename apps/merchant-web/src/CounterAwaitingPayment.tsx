@@ -74,7 +74,13 @@ export function CounterAwaitingPayment({
   excludeOrderReference,
   paidOrderReferences,
   onExcludedCancellable,
+  onCharging,
 }: {
+  /**
+   * Batch 64 (v15 b63 live, F42): whether staff have a waiting order's payment open here, so the
+   * page puts the menu and the empty order away, as it does while charging an order just sent.
+   */
+  readonly onCharging?: ((charging: boolean) => void) | undefined;
   /**
    * WP-2423 M127: whether the order this page is charging may be cancelled by this staff member
    * (it is unpaid and they may cancel orders), from the same read. Told only once it is known: the
@@ -215,6 +221,22 @@ export function CounterAwaitingPayment({
   const onExcluded = useRef(onExcludedCancellable);
   onExcluded.current = onExcludedCancellable;
   const live = useStaffSessionLive();
+  const [charging, setCharging] = useState<ReadonlySet<string>>(() => new Set());
+  const chargingChange = useCallback((reference: string, open: boolean) => {
+    setCharging((known) => {
+      if (known.has(reference) === open) return known;
+      const next = new Set(known);
+      if (open) next.add(reference);
+      else next.delete(reference);
+      return next;
+    });
+  }, []);
+  const tellCharging = useRef(onCharging);
+  tellCharging.current = onCharging;
+  useEffect(() => {
+    tellCharging.current?.(charging.size > 0);
+  }, [charging]);
+  useEffect(() => () => tellCharging.current?.(false), []);
   const read = useCallback(() => {
     pending.current?.abort();
     const controller = new AbortController();
@@ -416,6 +438,7 @@ export function CounterAwaitingPayment({
                 ) : (
                   <StaffRoundPaymentAction
                     counterStyle
+                    onOpenChange={(open) => chargingChange(order.orderReference, open)}
                     subject="order"
                     label={
                       // WP-2423 M96: a paper order was paid during the outage; it is recorded only.

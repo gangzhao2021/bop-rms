@@ -399,7 +399,7 @@ for (const language of ["en", "zh-Hans"] as const)
     await expect(charge.getByRole("heading", { name: zh ? "收款" : "Take payment" })).toBeVisible();
     // The menu is gone; the sent lines and the order's status stand where it was.
     await expect(page.locator(".counter-order__menu")).toBeHidden();
-    await expect(page.getByRole("heading", { name: zh ? "订单 91" : "Order 91" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: zh ? "91 号单" : "Order 91" })).toBeVisible();
     await expect(page.locator(".counter-order__sent-status")).toHaveText(
       zh ? "已发出 · 等收款" : "Sent · waiting for payment",
     );
@@ -454,4 +454,45 @@ for (const language of ["en", "zh-Hans"] as const)
     const orders = charge.getByRole("link", { name: zh ? "打开订单页" : "Open Orders" });
     expect(await orders.evaluate((node) => getComputedStyle(node).color)).toBe("rgb(31, 99, 224)");
     await page.screenshot({ path: `test-results/b63-paid-1024-${language}.png` });
+  });
+
+// Batch 64 (v15 b63 live, CK-18 v3 41:48): the chosen category was accent text with no underline
+// (border 0, no shadow); zh 取消 in the options dialog was a 28 px wide target.
+for (const language of ["en", "zh-Hans"] as const)
+  test(`@production WP-2423 batch 64 (CK-18): the chosen category is underlined in the accent, and 取消 is 44 px wide (${language})`, async ({
+    page,
+  }) => {
+    const zh = language === "zh-Hans";
+    await open(page, language);
+    const categories = page.getByRole("navigation", { name: zh ? "菜单分类" : "Menu categories" });
+    for (const [width, height] of [
+      [1440, 900],
+      [1024, 768],
+      [390, 844],
+    ] as const) {
+      await page.setViewportSize({ width, height });
+      await page.reload();
+      const buttons = categories.getByRole("button");
+      await expect(buttons.first()).toHaveAttribute("aria-current", "true");
+      const underline = (index: number) =>
+        buttons.nth(index).evaluate((node) => getComputedStyle(node).boxShadow);
+      expect(await underline(0), `${width}: chosen underlined`).toBe(
+        "rgb(31, 99, 224) 0px -2px 0px 0px inset",
+      );
+      expect(await underline(1), `${width}: others plain`).toBe("none");
+      // The underline sits under the words, inside the 44 px target.
+      expect((await rect(buttons.first())).height).toBeGreaterThanOrEqual(44);
+      await page
+        .getByRole("button", { name: zh ? /Half Sugar Tea/u : /Half Sugar Tea/u })
+        .first()
+        .click();
+      const dialog = page.getByRole("dialog");
+      const cancel = dialog.getByRole("button", { name: zh ? "取消" : "Cancel", exact: true });
+      const box = await rect(cancel);
+      expect(box.right - box.left, `${width}: Cancel 44 px wide`).toBeGreaterThanOrEqual(44);
+      expect(box.height).toBeGreaterThanOrEqual(44);
+      await cancel.click();
+      await expect(dialog).toHaveCount(0);
+      await page.screenshot({ path: `test-results/b64-categories-${width}-${language}.png` });
+    }
   });

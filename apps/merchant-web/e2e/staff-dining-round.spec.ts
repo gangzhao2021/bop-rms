@@ -640,7 +640,7 @@ test("@production the Tables page's staff round notice reads as whole Chinese se
       .click();
     const panel = page.getByRole("complementary");
     await expect(panel).toContainText(
-      "员工录入的一轮正在等待刷卡机付款。请在 12:30 前记录；记录后后厨才开始制作。",
+      "员工录入的一轮正在等待刷卡机付款。请在 12:30 前记录；记录后厨房才开始制作。",
     );
     await expect(panel).not.toContainText(/awaits|await\b| at \d/u);
     expect(
@@ -2101,6 +2101,30 @@ for (const language of ["en", "zh-Hans"] as const)
         fullPage: true,
       });
     }
+  });
+
+// Batch 64 (v15 b63 live, TM2 K63 A (TEST)): the back link above the title read "‹ ▤K63 A (TEST)▤":
+// the table's own name went out with the markers t() removes (U+E000/U+E001), drawn as boxes.
+for (const language of ["en", "zh-Hans"] as const)
+  test(`@production b64: the back link names the table as written, with no hidden markers (${language})`, async ({
+    page,
+  }) => {
+    const zh = language === "zh-Hans";
+    if (zh)
+      await page.addInitScript(() => {
+        window.localStorage.setItem("bop.merchant.language", "zh-Hans");
+      });
+    await signIn(page, { ...table, stableLabel: "K63 A (TEST)", paymentTiming: "PayLater" });
+    await page.route("**/merchant/counter/menu**", (route) =>
+      route.fulfill({ headers, json: menu }),
+    );
+    await page.goto("/operations/order-entry?table=" + tableReference);
+    const back = page.locator("main .workspace-page__back a");
+    await expect(back).toHaveText("‹ K63 A (TEST)");
+    expect(await back.evaluate((node) => /[\uE000-\uF8FF]/u.test(node.textContent ?? ""))).toBe(
+      false,
+    );
+    await expect(back).toHaveAttribute("href", /\/operations\/dining$/u);
   });
 
 // b63 review (F39): the note relied on a code handed out on this tablet's panel just before; a
