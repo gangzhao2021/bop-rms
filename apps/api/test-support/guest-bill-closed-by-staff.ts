@@ -596,14 +596,23 @@ export function guestOwnPaymentView(
  * phone paid in full ("The whole table", $28.25 online, no tip): the table's settlement, method
  * Online, captured 2825; no split, nothing written off. While open (Closing) the pay panel shows
  * the whole-table receipt; once staff closed the table (Closed) the settled receipt reads it.
+ * Batch 62 (v15 b61 live, G61 E order 78): then staff refunded $8.00 of that one payment ("Eight":
+ * settlement 2825, online refund 800 Succeeded), while the table was still open. `payer`: the phone
+ * that paid (its own captured payment, the whole table); otherwise another guest's phone.
  */
-export function guestWholeTablePaidView(sessionPhase: "Closing" | "Closed"): PaymentView {
+export function guestWholeTablePaidView(
+  sessionPhase: "Closing" | "Closed",
+  refunds: GuestOwnRefunds = "None",
+  payer = false,
+): PaymentView {
   const { facts } = guestBillClosedByStaffFacts("whole-table-paid-online");
+  const tableRefunded = guestTableRefundedMinor(refunds);
   return {
     bill: {
       diningSessionReference: id(0x20),
       sessionPhase,
       sessionVersion: 6,
+      ...(tableRefunded === 0n ? {} : { refundedMinor: tableRefunded.toString() }),
       paymentTiming: "PayLater",
       tableLabel: facts.tableLabel,
       orderReference: id(1),
@@ -654,6 +663,19 @@ export function guestWholeTablePaidView(sessionPhase: "Closing" | "Closed"): Pay
     lastOwnDeclined: null,
     paidByMe: [],
     choices: null,
-    ownPayments: [],
+    // The whole table's payment, as the read lists a captured attempt with no part.
+    ownPayments: payer
+      ? [
+          {
+            partNumber: null,
+            samePlan: true,
+            roundsMinor: "2825",
+            tipMinor: "0",
+            totalMinor: "2825",
+            paidAt: "2026-11-24T05:12:40.000Z",
+            refunds: guestOwnRefunds(refunds),
+          },
+        ]
+      : [],
   };
 }

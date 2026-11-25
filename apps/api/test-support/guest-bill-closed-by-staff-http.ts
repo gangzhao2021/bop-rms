@@ -100,8 +100,10 @@ export async function startGuestBillHttp(
       read: async () => {
         const part = paidPart();
         if (phone().tableClosed) throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
-        // Batch 57: a table one phone paid in full, still open: the whole-table receipt.
-        if (wholeTablePaid()) return guestWholeTablePaidView("Closing");
+        // Batch 57: a table one phone paid in full, still open: the whole-table receipt. Batch 62:
+        // with what staff gave back of that payment.
+        if (wholeTablePaid())
+          return guestWholeTablePaidView("Closing", phone().refunds ?? "None", phone().payer);
         if (part === null) throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
         // Batch 61: with what staff gave back of the table's payments (the bill's refundedMinor).
         return guestOwnPaymentView(part, phone().payer, "Closing", phone().refunds ?? "None");
@@ -121,18 +123,25 @@ export async function startGuestBillHttp(
               "Closed",
               phone().refunds ?? "None",
             )
-          : guestWholeTablePaidView("Closed");
+          : guestWholeTablePaidView("Closed", phone().refunds ?? "None", phone().payer);
       },
       ownPayment: async (credentials: { csrfCredential: string }) => {
         const part = paidPart();
         const { payer, tableClosed } = phone();
         // Batch 61: by dish paid in full, phone B paid its own dish too (its own payment only).
+        // Batch 62: the phone that paid the whole table has that payment as its own.
         if (
-          part === null ||
+          (part === null && !wholeTablePaid()) ||
           (!payer && !byDishPaid()) ||
           String(credentials.csrfCredential) !== (tableClosed ? endedCsrf : visitCsrf)
         )
           throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+        if (part === null)
+          return guestWholeTablePaidView(
+            tableClosed ? "Closed" : "Closing",
+            phone().refunds ?? "None",
+            payer,
+          );
         return guestOwnPaymentView(
           part,
           payer,
@@ -213,7 +222,9 @@ export async function startGuestBillHttp(
         port: {
           read: async () => {
             // Batch 58: the table's refunds are a table fact: every phone's read carries them.
-            const refunds = paidPart() === null ? "None" : (phone().refunds ?? "None");
+            // Batch 62: so are those of a payment for the whole table.
+            const refunds =
+              paidPart() === null && !wholeTablePaid() ? "None" : (phone().refunds ?? "None");
             const { facts, bill } = guestBillClosedByStaffFacts(scenario(), refunds);
             // Batch 60: staff's refunds (all of them of phone A's payment, part 1) tied to the
             // rounds Payment's settlements paid, as the real read does for the asking phone.
