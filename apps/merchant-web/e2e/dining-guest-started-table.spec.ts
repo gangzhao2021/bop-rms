@@ -123,8 +123,10 @@ for (const [width, height] of [
     // Whichever list staff are on, the top of the page says it first.
     await expect(main).toContainText("Table T2 frees itself in 7 min");
     // It is the page's line at every width: the 1024 top bar holds a stamp only, and a warning
-    // sent there ran past the window's edge (batch 63 CI).
-    await expect(page.locator(".workspace-sidebar__status")).toBeEmpty();
+    // sent there ran past the window's edge (batch 63 CI). Batch 64: Tables has its stamp there.
+    const bar = page.locator(".workspace-sidebar__status");
+    if (width === 1024) await expect(bar).toHaveText(/^Updated \d\d:\d\d$/u);
+    else await expect(bar).toBeEmpty();
     // The warning waits for its last minutes: a countdown nobody can act on is just noise.
     await expect(main.getByText("frees itself in 18 min")).toHaveCount(0);
     await expect(main).toContainText("a new party ended the last visit");

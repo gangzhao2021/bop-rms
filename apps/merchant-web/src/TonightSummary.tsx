@@ -286,12 +286,9 @@ export function TonightSummaryView({
             {day?.status !== "Open"
               ? t("Day closed")
               : closedForTheNight
-                ? t("Closed · today's books still open (as of {time})", {
-                    time: storeTime(report.generatedAt, report.timeZone),
-                  })
-                : t("Open · as of {time}", {
-                    time: storeTime(report.generatedAt, report.timeZone),
-                  })}
+                ? // Batch 64: when it was read is the page's one "Updated 14:02" stamp.
+                  t("Closed · today's books still open")
+                : t("Open now")}
           </span>{" "}
           <span className="tonight__detail">
             {t("Business day from {startsAt}", {
@@ -722,15 +719,28 @@ export function TonightReport({
   client,
   revision,
   onRefused,
+  onRead,
 }: {
   readonly client: Pick<StoreReportsClient, "tonight">;
   readonly revision: number;
   /** Batch 40: told whether the server refused this person the read (the page drops its tabs). */
   readonly onRefused?: (refused: boolean) => void;
+  /**
+   * Batch 64 (v15 b63: Reports had no "Updated 14:02", only "Open · as of 12:31" in the body):
+   * told when the figures shown were read, and whether they may be out of date, for the page's
+   * one stamp. Null while nothing is shown.
+   */
+  readonly onRead?: (read: { readonly at: string; readonly stale: boolean } | null) => void;
 }) {
   const [state, setState] = useState<TonightState>({ kind: "Loading" });
   const refused = state.kind === "PermissionDenied";
   useEffect(() => onRefused?.(refused), [onRefused, refused]);
+  const readAt = state.kind === "Ready" ? state.summary.report.generatedAt : null;
+  const readStale = state.kind === "Ready" && state.stale;
+  useEffect(
+    () => onRead?.(readAt === null ? null : { at: readAt, stale: readStale }),
+    [onRead, readAt, readStale],
+  );
   const businessDay = useStoreBusinessDay();
   useEffect(() => {
     const controller = new AbortController();

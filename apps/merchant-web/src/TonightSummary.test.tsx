@@ -653,11 +653,12 @@ describe("M117: after the Store closes, before the business day ends", () => {
   it("says closed with today's books still open once the closing time has passed", () => {
     const after = view("2026-10-28T01:00:00.000Z");
     expect(after).toContain("Closed · today&#x27;s books still open");
-    expect(after).not.toContain("Open · as of");
+    expect(after).not.toContain("Open now");
     expect(after).toContain('data-open="false"');
   });
   it("still says open before the closing time, or when the closing time is unknown", () => {
     for (const closesAt of ["2026-10-28T03:00:00.000Z", null])
-      expect(view(closesAt)).toContain("Open · as of");
+      // Batch 64: when it was read is the page's one "Updated 21:42" stamp, not "as of" here.
+      expect(view(closesAt)).toContain("Open now</span>");
   });
 });

@@ -1544,11 +1544,6 @@
     word-break: normal;
   }
 }
-@media (max-width: 48rem) {
-  .orders-page .orders-page__updated {
-    display: none;
-  }
-}
 
 /* Live check 2026-10-26 (2): the opened order's groups sit exactly 24px apart and each heading 8px
    above its content — the groups carry no padding of their own. */

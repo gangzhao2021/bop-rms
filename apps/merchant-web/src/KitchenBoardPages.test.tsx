@@ -2,7 +2,16 @@ import type { ReactNode } from "react";
 import type { KitchenBoardView } from "./kitchen-board.js";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import { pinFixtureYear } from "./store-year.fixture.js";
+
+/** The device's own 24-hour clock ("16:17"), as the stamp reads it before the Store's zone. */
+const deviceClock = (instant: string) =>
+  new Intl.DateTimeFormat("en-CA", { hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+    .formatToParts(new Date(instant))
+    .filter((part) => part.type === "hour" || part.type === "minute")
+    .map((part) => part.value)
+    .join(":");
 import {
   mergeIdenticalKitchenItems,
   KitchenBoardPage,
@@ -84,9 +93,10 @@ describe("WP-1804 Kitchen Board screens", () => {
         <KitchenBoardScreen view={view} checkedAt={checked} autoRefresh />
       </MemoryRouter>,
     );
-    // Batch 63 (F24): the one shared stamp, from when this screen last read the board.
-    expect(html).toContain("Updated 16:17 UTC</time>");
-    expect(html).toContain('title="Last change 15:12 UTC"');
+    // Batch 63 (F24): the one shared stamp, from when this screen last read the board. Batch 64:
+    // with no Store zone given, the device's own clock (a store tablet's is the Store's).
+    expect(html).toContain(`Updated ${deviceClock(checked)}</time>`);
+    expect(html).toContain(`title="Last change ${deviceClock(view.projectedAt)}"`);
     expect(html).not.toContain("Updated 15:12");
     const stale = renderToStaticMarkup(
       <MemoryRouter>
@@ -97,20 +107,23 @@ describe("WP-1804 Kitchen Board screens", () => {
         />
       </MemoryRouter>,
     );
-    expect(stale).toContain("Data may be out of date · last checked 16:17 UTC</time>");
+    expect(stale).toContain(
+      `Data may be out of date · last checked ${deviceClock(checked)}</time>`,
+    );
     // Batch 63 (F46): the line says new orders can't arrive, and since when.
     expect(stale).toContain("Can&#x27;t receive new orders — connection lost since");
   });
   it("renders station, safety, age and bounded actions", () => {
+    const view = parseKitchenBoardView(kitchenBoardFixture());
     const html = renderToStaticMarkup(
       <MemoryRouter>
-        <KitchenBoardScreen view={parseKitchenBoardView(kitchenBoardFixture())} />
+        <KitchenBoardScreen view={view} />
       </MemoryRouter>,
     );
     for (const value of [
       "Kitchen display",
       "Kitchen",
-      "Updated 15:12 UTC",
+      `Updated ${deviceClock(view.projectedAt)}`,
       "Queue",
       "Order number or table",
       "The number on the ticket or receipt, or the table. Shows only that order&#x27;s work.",

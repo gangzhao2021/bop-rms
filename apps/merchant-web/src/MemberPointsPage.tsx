@@ -4,6 +4,7 @@ import { Link } from "react-router";
 import { t } from "./i18n/i18n.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import { WorkspacePage } from "./WorkspacePage.js";
+import { Freshness } from "./StoreTime.js";
 
 /**
  * WP-2423 取舍 18 DEC-MEMBER-POINTS (Section 88 LOY-PROGRAM-LIST): a Brand's points: the rules, who
@@ -162,6 +163,8 @@ export function MemberPointsPage({
 }) {
   const [view, setView] = useState<View | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "failed">("loading");
+  // Batch 64: when this device last read the points, for the page's one "Updated 14:02".
+  const [readAt, setReadAt] = useState<string | null>(null);
   const [draft, setDraft] = useState<Partial<Record<Field, string>>>({});
   const [operation, setOperation] = useState(() => serviceOperationReference());
   const [message, setMessage] = useState<string | null>(null);
@@ -182,6 +185,7 @@ export function MemberPointsPage({
       });
       if (!response.ok) throw new Error("member points");
       setView((await response.json()) as View);
+      setReadAt(new Date().toISOString());
       setState("ready");
     } catch {
       setState("failed");
@@ -265,7 +269,14 @@ export function MemberPointsPage({
     }
   };
   return (
-    <WorkspacePage title={t("Points")}>
+    <WorkspacePage
+      title={t("Points")}
+      status={
+        readAt === null ? null : (
+          <Freshness status={state === "failed" ? "Stale" : "Fresh"} checkedAt={readAt} />
+        )
+      }
+    >
       {state === "loading" ? <p role="status">{t("Loading points…")}</p> : null}
       {state === "failed" ? (
         <div role="alert">

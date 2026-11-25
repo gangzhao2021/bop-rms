@@ -14,6 +14,7 @@ export function WorkspacePage({
   meta,
   status,
   statusOnPage = false,
+  stamp,
   actions,
   className,
   children,
@@ -25,10 +26,18 @@ export function WorkspacePage({
   readonly status?: ReactNode;
   /**
    * The status is the page's warnings or controls, not its "Updated 01:36" stamp: it stays on the
-   * page at every width. The tablet top bar holds one short stamp on one line (F38, Figma 58:65);
-   * a warning or a button sent there is cut off at the window's edge and lost to staff.
+   * page at every width, on its own line under the title row (batch 64). The tablet top bar holds
+   * one short stamp on one line (F38, Figma 58:65); a warning or a button sent there is cut off at
+   * the window's edge and lost to staff. Such a page gives its stamp as `stamp`.
    */
   readonly statusOnPage?: boolean;
+  /**
+   * Batch 64: the page's one "Updated 14:02" stamp (Freshness) when its status line is its own
+   * (statusOnPage): in the tablet top bar, else first among the header's actions. The status line
+   * then runs under the title across the page, so a long line of warnings never pushes the
+   * page's Refresh off the title's row.
+   */
+  readonly stamp?: ReactNode;
   readonly actions?: ReactNode;
   readonly className?: string | undefined;
   readonly children: ReactNode;
@@ -45,23 +54,27 @@ export function WorkspacePage({
           <h1>{title}</h1>
           {meta ? <p className="workspace-page__meta">{meta}</p> : null}
         </div>
-        {status || actions ? (
+        {(status && !statusOnPage) || stamp || actions ? (
           <div className="workspace-page__toolbar">
             {/* Batch 63 (F38): on a tablet the stamp is in the top bar (Figma 58:65). */}
-            {status ? (
-              statusOnPage ? (
+            {status && !statusOnPage ? (
+              <TopBarStatus>
                 <div className="workspace-page__status">{status}</div>
-              ) : (
-                <TopBarStatus>
-                  <div className="workspace-page__status">{status}</div>
-                </TopBarStatus>
-              )
+              </TopBarStatus>
+            ) : null}
+            {stamp ? (
+              <TopBarStatus>
+                <div className="workspace-page__status">{stamp}</div>
+              </TopBarStatus>
             ) : null}
             {actions ? <div className="workspace-page__actions">{actions}</div> : null}
           </div>
         ) : null}
         {/* Owner 2026-10-26: the language switch ends the title row, top right of the page. */}
         <LanguageSwitch className="workspace-page__language" />
+        {status && statusOnPage ? (
+          <div className="workspace-page__status workspace-page__status--line">{status}</div>
+        ) : null}
       </header>
       {children}
     </main>

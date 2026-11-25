@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { StepUpVerification } from "./StepUpVerification.js";
-import { StoreTimeZoneContext, friendlyStoreTime } from "./StoreTime.js";
+import { Freshness, StoreTimeZoneContext, friendlyStoreTime } from "./StoreTime.js";
 import { WorkspacePage } from "./WorkspacePage.js";
 import { PIN_ELEVATION_EXPLANATION } from "./StaffPinControls.js";
 import {
@@ -31,7 +31,12 @@ import {
  */
 export type DevicesLoad =
   | { readonly kind: "Loading" }
-  | { readonly kind: "Ready"; readonly read: StoreDevicesRead }
+  | {
+      readonly kind: "Ready";
+      readonly read: StoreDevicesRead;
+      /** Batch 64: when this device read the list, for the page's one "Updated 14:02". */
+      readonly readAt?: string;
+    }
   | { readonly kind: "Denied" | "Offline" | "Failed" }
   /** A PIN sign-in must confirm it is the staff member first; the guidance says so once. */
   | { readonly kind: "NeedsVerification" };
@@ -155,6 +160,11 @@ export function StoreDevicesView({
     <WorkspacePage
       title={t("Shared tablets & PINs")}
       meta={storeLabel}
+      status={
+        load.kind === "Ready" && load.readAt !== undefined ? (
+          <Freshness status="Fresh" checkedAt={load.readAt} />
+        ) : null
+      }
       actions={
         <button type="button" disabled={busy || load.kind === "Loading"} onClick={onRefresh}>
           {t("Refresh")}
@@ -389,7 +399,8 @@ export function StoreDevicesPage({
     setNow(Date.now());
     void source.devices(controller.signal).then(
       (read) => {
-        if (!controller.signal.aborted) setLoad({ kind: "Ready", read });
+        if (!controller.signal.aborted)
+          setLoad({ kind: "Ready", read, readAt: new Date().toISOString() });
       },
       (error: unknown) => {
         if (controller.signal.aborted) return;

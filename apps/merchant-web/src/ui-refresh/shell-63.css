@@ -310,3 +310,15 @@ a.shell-action {
 .workspace-content .role-row + .role-row {
   border-top: 1px solid var(--bop-color-row-divider);
 }
+
+/*
+ * Batch 64 (v15 b63: Tables at 1024 wrapped its status line under "Refresh tables", started the
+ * second line with a leftover "·" and dropped Refresh to a row of its own): a page's own status
+ * line (statusOnPage) runs under the title row across the page, so the title row keeps the title,
+ * the page's actions and the language switch together.
+ */
+.workspace-page__header > .workspace-page__status--line {
+  flex-basis: 100%;
+  order: 100;
+  min-width: 0;
+}

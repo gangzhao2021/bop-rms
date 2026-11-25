@@ -5,6 +5,7 @@ import { StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
 import { WorkspacePage } from "./WorkspacePage.js";
+import { Freshness } from "./StoreTime.js";
 import { newOperationReference } from "./operation-reference.js";
 import { orderMoney } from "./order-money.js";
 import { moveTo, useDragReorder } from "./reorder.js";
@@ -1029,7 +1030,13 @@ export function OneStoreMenuPage({
     </li>
   );
   return (
-    <WorkspacePage className="one-menu" title={t("Menu")} meta={storeLabel}>
+    <WorkspacePage
+      className="one-menu"
+      title={t("Menu")}
+      meta={storeLabel}
+      // Batch 64 (v15 b63: no "Updated" on Menus at 1024): the page's one stamp, when it was read.
+      status={<Freshness status="Fresh" at={view.sourceAsOf} />}
+    >
       {view.stores?.severalStores === true && !view.stores.servesHere ? (
         <StatePanel heading={t("Guests at this Store do not see this menu yet")} status>
           {mayList ? (

@@ -4,7 +4,7 @@ import { noAccessHeading } from "./access-denied.js";
 import { NoAccessNotice } from "./NoAccessNotice.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { WorkspacePage } from "./WorkspacePage.js";
-import { SourceTime, StaffTime } from "./StoreTime.js";
+import { Freshness, StaffTime } from "./StoreTime.js";
 import type { AvailabilityClient } from "./store-availability-page.js";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router";
@@ -259,11 +259,9 @@ export function StoreMenuListPage({
   return (
     <WorkspacePage
       title={t("Menus")}
-      meta={
-        <>
-          {t("Source as of")} <SourceTime instant={view.sourceAsOf} />
-        </>
-      }
+      meta={storeLabel}
+      // Batch 64: the page's one "Updated 14:02" stamp, in the top bar at 1024.
+      status={<Freshness status="Fresh" at={view.sourceAsOf} />}
     >
       <p className="bop-muted">
         {t(

@@ -613,6 +613,10 @@ export function StoreReportsPage({
   const active = useRef<AbortController | null>(null);
   // WP-2423 item 8 ② (Figma 47-2): the page opens on tonight's closing summary.
   const [tonightRefused, setTonightRefused] = useState(false);
+  const [tonightRead, setTonightRead] = useState<{
+    readonly at: string;
+    readonly stale: boolean;
+  } | null>(null);
   const [tab, setTab] = useState<"Tonight" | "Period" | "Stores">(
     initialTab === "Stores" && stores.length < 2 ? "Tonight" : initialTab,
   );
@@ -721,7 +725,13 @@ export function StoreReportsPage({
       title={t("Reports")}
       meta={storeLabel}
       className="store-reports-page"
-      status={tab === "Period" && view ? <Freshness status="Fresh" at={view.generatedAt} /> : null}
+      status={
+        tab === "Period" && view ? (
+          <Freshness status="Fresh" at={view.generatedAt} />
+        ) : tab === "Tonight" && tonightRead !== null ? (
+          <Freshness status={tonightRead.stale ? "Stale" : "Fresh"} at={tonightRead.at} />
+        ) : null
+      }
       actions={
         <button
           type="button"
@@ -754,7 +764,12 @@ export function StoreReportsPage({
         </nav>
       )}
       {tab === "Tonight" ? (
-        <TonightReport client={client} revision={revision} onRefused={setTonightRefused} />
+        <TonightReport
+          client={client}
+          revision={revision}
+          onRefused={setTonightRefused}
+          onRead={setTonightRead}
+        />
       ) : null}
       {tab === "Stores" ? (
         <BrandStoresReport

@@ -253,7 +253,10 @@ export function Freshness({
   readonly at?: string | undefined;
   readonly checkedAt?: string | undefined;
 }) {
-  const timeZone = useContext(StoreTimeZoneContext);
+  // Batch 64: before the Store's zone is known, this device's clock, which on a store tablet is
+  // the Store's; never "14:02 UTC" in the one stamp of a page.
+  const timeZone =
+    useContext(StoreTimeZoneContext) ?? new Intl.DateTimeFormat().resolvedOptions().timeZone;
   const stale = status !== "Fresh" && status !== "Current";
   const read = checkedAt ?? at;
   const when = read === undefined ? null : storeTime(read, timeZone);

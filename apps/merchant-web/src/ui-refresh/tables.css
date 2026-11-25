@@ -10,28 +10,47 @@
   font-size: 14px;
 }
 
-/* Page header: counts the floor at a glance (text only; no badges). */
+/* Page header: counts the floor at a glance (text only; no badges). Batch 64 (v15 b63 at 1024: a
+   wrapped line began with a leftover "·"): every part carries its "·" in a 20px gutter in front of
+   its words, and the line pulls back past its own left edge by that gutter, so the "·" of a part
+   that starts a line falls outside and is clipped; inside a line it separates as before. A part's
+   own words that wrap start after its gutter, never under the clip. The clip leaves 6px for a
+   focus ring at the edge. */
+.dining-floor .workspace-page__status--line {
+  overflow: clip;
+  overflow-clip-margin: 6px;
+}
 .dining-floor .dining-floor-summary {
-  display: inline-flex;
+  display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0 var(--bop-space-2);
+  margin-inline-start: -20px;
   font-variant-numeric: tabular-nums;
 }
-.dining-floor .dining-floor-summary > span + span::before {
+.dining-floor .dining-floor-summary > * {
+  position: relative;
+  padding-inline-start: 20px;
+}
+.dining-floor .dining-floor-summary > *::before {
   content: "·";
-  margin-right: var(--bop-space-2);
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 20px;
   color: var(--bop-color-text-muted);
+  font-weight: 400;
+  text-align: center;
+}
+/* Words and Turn off, centred on its 44px row: its "·" is centred with them. */
+.dining-floor .dining-floor-summary > .dining-floor-guest-starts::before {
+  top: 50%;
+  transform: translateY(-50%);
 }
 @media (max-width: 640px) {
-  /* On its own line here, so no separator starts it. */
+  /* On its own line here; its "·" falls in the clipped gutter. */
   .dining-floor .dining-floor-summary > .dining-floor-guest-starts,
   .dining-floor .dining-floor-summary > .dining-floor-guest-starts-busy {
     flex-basis: 100%;
-  }
-  .dining-floor .dining-floor-summary > .dining-floor-guest-starts::before,
-  .dining-floor .dining-floor-summary > .dining-floor-guest-starts-busy::before {
-    content: none;
   }
 }
 .dining-floor .dining-floor-guest-starts {
@@ -533,6 +552,11 @@
  * tables listed by what they need (red dot: needs a person, blue: in progress, green: done), one
  * next step per row; the selected table beside the list from 1024, under it on a phone.
  */
+/* Batch 64: "Refresh tables" stays on the title's row; a long Store name wraps under the title
+   instead of pushing Refresh down to a row of its own. */
+.workspace-page.tables-v3 .workspace-page__title {
+  flex: 1 1 0;
+}
 .workspace-page.tables-v3 .workspace-page__title h1 {
   font-size: 28px;
   font-weight: 600;

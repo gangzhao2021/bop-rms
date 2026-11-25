@@ -6884,8 +6884,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "This couldn't be sent, so nothing was removed. Reload the order and try again.":
     "没能发送，没有删除任何内容。请重新加载订单后再试。",
   "Remove contact": "删除联系方式",
-  "Open · as of {time}": "营业中 · 截至 {time}",
-  "Closed · today's books still open (as of {time})": "已打烊 · 今天的账还没结（截至 {time}）",
+  "Open now": "营业中",
+  "Closed · today's books still open": "已打烊 · 今天的账还没结",
   "Day closed": "营业日已结束",
   "Business day {startsAt} – {endsAt}": "营业日 {startsAt} – {endsAt}",
   Sales: "营业额",

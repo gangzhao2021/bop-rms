@@ -61,7 +61,7 @@ import {
 } from "./dining-session-client.js";
 import { TableAllergies, tableAllergenText } from "./TableAllergies.js";
 import { serviceOperationReference } from "./service-control-client.js";
-import { storeTime } from "./StoreTime.js";
+import { Freshness, storeTime } from "./StoreTime.js";
 import { newOperationReference } from "./operation-reference.js";
 import { TableSessionClose } from "./TableSessionClose.js";
 import { LastOrdersNotice } from "./LastOrdersNotice.js";
@@ -1809,8 +1809,13 @@ function DiningSessionWorkspaceBody({
       title={t("Tables")}
       meta={storeLabel}
       // Batch 63 CI: the seated count, the warnings and the pause are the page's own lines, read
-      // first on every list; the tablet top bar is for a stamp, and Tables has none.
+      // first on every list; the tablet top bar is for the stamp alone (batch 64: Tables has one).
       statusOnPage
+      stamp={
+        loadedAt.current === null ? null : (
+          <Freshness status={stale ? "Stale" : "Fresh"} checkedAt={loadedAt.current} />
+        )
+      }
       status={
         tables.length > 0 ? (
           <span className="dining-floor-summary">
