@@ -202,13 +202,23 @@ for (const language of ["en", "zh-Hans"] as const)
       await expect(summary).toBeVisible();
       await expect(page.locator("body")).not.toContainText("之前营业日");
       await expect(page.locator("body")).not.toContainText("是之前的");
-      // Room to spare for wider Linux fonts (DejaVu): the summary ends 40 px inside the page.
-      const right = await summary.evaluate((node) => {
+      // The phrase is whole on one line and inside the page's 16 px gutter. Batch 63 (F53) set
+      // the header line at 14 px, as every page's; the summary's parts wrap between them, so a
+      // wider font (Linux DejaVu) moves this phrase to the next line rather than off the page,
+      // and a fixed 40 px margin from the window measured the font, not the page.
+      const lines = await summary.evaluate((node) => {
         const range = document.createRange();
         range.selectNodeContents(node);
-        return Math.max(...[...range.getClientRects()].map((rect) => rect.right));
+        const rects = [...range.getClientRects()].filter((rect) => rect.width > 0);
+        return {
+          right: Math.max(...rects.map((rect) => rect.right)),
+          // Mixed Latin and CJK fonts sit a pixel or two apart on one line; a second line is 20 px down.
+          spread:
+            Math.max(...rects.map((rect) => rect.top)) - Math.min(...rects.map((rect) => rect.top)),
+        };
       });
-      expect(right).toBeLessThanOrEqual(width - 40);
+      expect(lines.spread).toBeLessThan(10);
+      expect(lines.right).toBeLessThanOrEqual(width - 16);
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
       ).toBe(true);

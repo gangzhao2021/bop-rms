@@ -369,7 +369,8 @@ for (const language of ["en", "zh-Hans"] as const)
       const main = page.getByRole("main");
       const card = main.getByRole("heading", { name: text.order });
       await expect(card).toBeVisible();
-      const checked = main.locator(".workspace-page__freshness time");
+      // The page's one stamp: in its header, or in the top bar at 1024 (batch 63, F38).
+      const checked = page.locator(".workspace-page__freshness time");
       const firstChecked = await checked.getAttribute("datetime");
       await main.getByRole("button", { name: text.refresh, exact: true }).click();
       await expect.poll(reads).toBe(2);
