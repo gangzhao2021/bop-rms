@@ -1,4 +1,4 @@
-import { t, listSeparator } from "./i18n/i18n.js";
+import { t, listSeparator, currentLanguage } from "./i18n/i18n.js";
 export interface PickupQueueItem {
   readonly fulfillmentReference: string;
   readonly orderReference: string;
@@ -274,7 +274,11 @@ export function pickupItemLabel(
   const options = (item.options ?? []).map((option) =>
     option.quantity > 1 ? `${String(option.quantity)} × ${option.name}` : option.name,
   );
-  return options.length === 0 ? item.name : `${item.name} (${options.join(listSeparator())})`;
+  if (options.length === 0) return item.name;
+  // Batch 63 (CK-16): Chinese brackets with no space in the Chinese UI ("豆浆（热）").
+  return currentLanguage() === "zh-Hans"
+    ? `${item.name}（${options.join(listSeparator())}）`
+    : `${item.name} (${options.join(listSeparator())})`;
 }
 export function parsePickupExecution(value: unknown): PickupExecution {
   const raw = closed(value, ["aggregateVersion", "publicOrderReference", "proof", "items"]);

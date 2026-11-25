@@ -1,5 +1,5 @@
 import { wordGap } from "./word-gap.js";
-import { t } from "./i18n/i18n.js";
+import { t, listSeparator } from "./i18n/i18n.js";
 import { useEffect, useRef, useState } from "react";
 import {
   createPickupHandoffClient,
@@ -264,23 +264,25 @@ export function PickupHandoffForm({
     <>
       {quick ? (
         <div className="pickup-handoff__quick">
-          <ul className="pickup-handoff__quick-items">
-            {lines.map((line, index) => (
-              <li key={line.fulfillmentItemReference}>
-                {t("{line}: {value} to hand over", {
-                  line: pickupItemLabel(line, index),
-                  value: toHandOver(line),
+          {/* Batch 63 (CK-16, F43): a counter row already lists its dishes, and the page says
+              once how a counter order is handed over, so its row holds only the two actions, as
+              an app order's does. A checked app order says what to hand over in one line. */}
+          {counter ? null : (
+            <>
+              <p className="pickup-handoff__quick-items">
+                {t("{lines} to hand over", {
+                  lines: lines
+                    .map((line, index) => {
+                      const name = pickupItemLabel(line, index);
+                      // A Chinese closing bracket already separates the count ("豆浆（热）×1").
+                      return `${name}${name.endsWith("）") ? "" : " "}×${toHandOver(line)}`;
+                    })
+                    .join(listSeparator()),
                 })}
-              </li>
-            ))}
-          </ul>
-          <p className="bop-muted">
-            {counter
-              ? t(
-                  "Taken at the counter, so no pickup code was sent. Call the order number and check every item before you tap.",
-                )
-              : t("Check every item before you tap")}
-          </p>
+              </p>
+              <p className="bop-muted">{t("Check every item before you tap")}</p>
+            </>
+          )}
           <button
             type="button"
             data-variant="primary"

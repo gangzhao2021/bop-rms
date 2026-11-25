@@ -20,7 +20,7 @@ describe("WP-1805 Pickup screens", () => {
         <PickupQueueScreen view={parsePickupQueueView(pickupQueueFixture())} />
       </MemoryRouter>,
     );
-    for (const value of ["ORD-1001", "Ready for 20 min", "Shelf A", "Updated"])
+    for (const value of ["ORD-1001", "Ready 20 min", "Shelf A", "Updated"])
       expect(html).toContain(value);
     for (const value of [
       "FUL-PICKUP-QUEUE",
@@ -78,7 +78,7 @@ describe("WP-1805 Pickup screens", () => {
     );
     const card = html.slice(html.indexOf("<article"), html.indexOf("</article>"));
     expect(card).toContain("Handed over");
-    expect(card).not.toContain("Ready for 20 min");
+    expect(card).not.toContain("Ready 20 min");
     expect(card).not.toContain("Overdue");
     expect(card).not.toContain("Waiting");
     expect(card).not.toContain("<button");
@@ -417,8 +417,8 @@ it("WP-2423 Q26: long waits read in hours or days and earlier days' orders are s
   );
   expect(html).toContain("From earlier days — check and close");
   expect(html).toContain("From Fri, Aug 7");
-  expect(html).toContain("Ready for 5 days");
-  expect(html.indexOf("Ready for 20 min")).toBeLessThan(html.indexOf("From earlier days"));
+  expect(html).toContain("Ready 5 days");
+  expect(html.indexOf("Ready 20 min")).toBeLessThan(html.indexOf("From earlier days"));
 });
 it("WP-2423 UI refresh: the card lists what is in the bag and the page counts what waits", () => {
   const fixture = pickupQueueFixture();

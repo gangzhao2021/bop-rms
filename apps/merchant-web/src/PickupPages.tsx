@@ -271,7 +271,8 @@ function PickupCard({
           </strong>
         ) : (
           <p className="pickup-queue__phase" data-wait={tier}>
-            {t("Ready for {wait}", { wait: pickupWaitText(wait) })}
+            {/* Batch 63 (CK-16): "Ready just now", then "Ready 3 min" (never "Ready for 0 min"). */}
+            {wait < 1 ? t("Ready just now") : t("Ready {wait}", { wait: pickupWaitText(wait) })}
           </p>
         )}
         {/* Owner 2026-11-03: once handed over there is no code to check. */}
@@ -501,7 +502,9 @@ export function PickupQueueScreen({
   const earlierShown = earlierItems.filter((item) =>
     visibleReferences.has(item.fulfillmentReference),
   ).length;
-  const counterWaiting = view.items.some(
+  // Batch 63 (CK-16): said only while a counter order waits today, never beside "No orders
+  // waiting today" (an earlier day's counter row does not count).
+  const counterWaiting = todayItems.some(
     (item) =>
       item.phase !== "Completed" &&
       item.takenAtCounter === true &&
@@ -665,7 +668,9 @@ export function PickupQueueScreen({
         {/* Said once for the page, not on every counter order's row. */}
         {counterWaiting ? (
           <p className="pickup-queue__summary">
-            {t("Counter orders have no pickup code: call the number and hand it over.")}
+            {t(
+              "Counter orders have no pickup code: call the number, check each item, then hand it over.",
+            )}
           </p>
         ) : null}
         {todayItems.length ? (

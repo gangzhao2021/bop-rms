@@ -4395,8 +4395,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "请在队列中操作。返回时会保留你的筛选。",
   "Take an order for this table": "为这张桌台点单",
   "Take order for table {stableLabel}": "为桌台 {stableLabel} 点单",
-  "Counter orders have no pickup code: call the number and hand it over.":
-    "柜台点单没有取餐码：叫号后交给顾客。",
+  "Counter orders have no pickup code: call the number, check each item, then hand it over.":
+    "柜台点单没有取餐码：叫号后逐样核对，再交给客人。",
   "Shelf: {shelf}": "取餐架：{shelf}",
   "1 package": "1 件",
   "{packageCount} packages": "{packageCount} 件",
@@ -9252,10 +9252,13 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Paper order {orderNumber}: record the payment taken during the outage":
     "纸单 {orderNumber}：录入停电/断网期间已收的款",
   "Record the paper order's payment": "录入纸单的付款",
-  "Called and handed over · Order {orderNumber}": "已叫号并交付 · {orderNumber} 号",
+  "Called and handed over · Order {orderNumber}": "已叫号并交给客人 · {orderNumber} 号单",
   "Hand over to customer · Order {orderNumber}": "交给顾客 · {orderNumber} 号",
   "Someone else is collecting": "他人代取",
-  "Check every item before you tap": "点按前核对每件物品",
+  "Check every item before you tap": "逐样核对后再点",
+  "{lines} to hand over": "{lines} 待交",
+  "Ready just now": "刚做好",
+  "Ready {wait}": "已做好 {wait}",
   "Taken at the counter, so no pickup code was sent. Call the order number and check every item before you tap.":
     "柜台点单，没有发送取餐码。叫单号，点按前核对每件物品。",
   "Guest changed their mind": "客人改主意",

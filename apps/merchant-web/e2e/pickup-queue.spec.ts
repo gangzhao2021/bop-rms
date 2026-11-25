@@ -106,7 +106,7 @@ test("@production Pickup paging, current scope and permission recovery", async (
   await expect(stateFilter).toHaveValue("All");
   await expect(heading("Order " + first)).toBeVisible();
   await expect(page.locator("option").filter({ hasText: "Overdue" })).toHaveCount(0);
-  await expect(page.locator("article").first()).toContainText("Ready for 20 min");
+  await expect(page.locator("article").first()).toContainText("Ready 20 min");
   await expect(page.locator("article").first()).not.toContainText("Overdue");
   // Dead placeholder actions are gone from the pilot queue.
   await expect(page.getByRole("button", { name: "Claim", exact: true })).toHaveCount(0);
@@ -903,7 +903,10 @@ test("@production Pickup hands a counter order over in person at once while a gu
   // Said once on its row; what to do is said once for the page, not repeated on every counter order.
   await expect(counterCard.getByText("Counter order", { exact: true })).toBeVisible();
   await expect(
-    page.getByText("Counter orders have no pickup code: call the number and hand it over."),
+    // Batch 63 (CK-16): it also says to check each item, once, here.
+    page.getByText(
+      "Counter orders have no pickup code: call the number, check each item, then hand it over.",
+    ),
   ).toHaveCount(1);
   await expect(counterCard.getByRole("button", { name: "Check pickup code" })).toHaveCount(0);
   // WP-2423 M21: one tap once the number is called.
@@ -923,6 +926,35 @@ test("@production Pickup hands a counter order over in person at once while a gu
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
       `no horizontal overflow at ${width}`,
     ).toBe(true);
+    // Batch 63 (F43): the normal handover is the row's accent primary, 44 px and on one line;
+    // "Someone else is collecting" is accent text under it (it was the filled button).
+    const primary = await calledHandOver.evaluate((node) => {
+      const css = getComputedStyle(node);
+      const box = node.getBoundingClientRect();
+      return {
+        bg: css.backgroundColor,
+        top: box.top,
+        bottom: box.bottom,
+        left: box.left,
+        height: box.height,
+      };
+    });
+    expect(primary.bg, `${width}: accent primary`).toBe("rgb(31, 99, 224)");
+    expect(primary.height, `${width}: 44 px`).toBeGreaterThanOrEqual(44);
+    expect(primary.height, `${width}: one line`).toBeLessThan(52);
+    const other = await counterCard
+      .getByRole("button", { name: "Someone else is collecting" })
+      .evaluate((node) => {
+        const css = getComputedStyle(node);
+        return { bg: css.backgroundColor, color: css.color, top: node.getBoundingClientRect().top };
+      });
+    expect(other, `${width}: accent text`).toMatchObject({
+      bg: "rgba(0, 0, 0, 0)",
+      color: "rgb(31, 99, 224)",
+    });
+    expect(other.top, `${width}: under the primary`).toBeGreaterThanOrEqual(primary.bottom);
+    // Batch 63 (CK-16): no three-line instruction on the row; the page says it once.
+    await expect(counterCard.locator(".pickup-handoff__quick > p")).toHaveCount(0);
     await page.screenshot({
       path: `test-results/pickup-counter-order-${width}.png`,
       fullPage: true,

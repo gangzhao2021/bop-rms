@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from "vitest";
 import { PickupHandoffForm } from "./PickupHandoffForm.js";
-import type { PickupQueueItem } from "./pickup.js";
+import { pickupItemLabel, type PickupQueueItem } from "./pickup.js";
 import { buttonNamed, click, mount, settle } from "./dom-test-kit.fixture.js";
+import { setLanguageForTest } from "./i18n/i18n.js";
 
 const ref = (n: number) => `01900000-0000-7000-8000-${String(n).padStart(12, "0")}`;
 const item = (counter: boolean): PickupQueueItem => ({
@@ -151,4 +152,32 @@ it("WP-2423 M21: someone else collecting still needs the initial and the confirm
   expect(dialog?.querySelector("select")?.value).toBe("Delegate");
   expect(submit?.disabled).toBe(true);
   expect(fetcher).not.toHaveBeenCalled();
+});
+
+it("WP-2423 batch 63 (CK-16, F43): a counter row holds only its two actions, in plain Chinese", async () => {
+  setLanguageForTest("zh-Hans");
+  try {
+    const counter = item(true);
+    const { container } = await mount(
+      <PickupHandoffForm
+        item={{ ...counter, publicOrderNumber: "91" }}
+        verification={null}
+        workstation={workstation}
+        csrf={"A".repeat(43)}
+        storeReference={ref(5)}
+        onRecorded={() => undefined}
+      />,
+    );
+    // Its dishes are on the row already, and the page says once how counter orders go out.
+    expect(container.querySelector(".pickup-handoff__quick-items")).toBeNull();
+    expect(container.querySelector(".pickup-handoff__quick .bop-muted")).toBeNull();
+    expect(buttonNamed(container, "已叫号并交给客人 · 91 号单")).toBeTruthy();
+    expect(buttonNamed(container, "他人代取")).toBeTruthy();
+    // A chosen option reads in Chinese brackets with no space ("豆浆（热）").
+    expect(pickupItemLabel({ name: "豆浆", options: [{ name: "热", quantity: 1 }] }, 0)).toBe(
+      "豆浆（热）",
+    );
+  } finally {
+    setLanguageForTest("en");
+  }
 });

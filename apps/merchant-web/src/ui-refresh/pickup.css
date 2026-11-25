@@ -319,6 +319,59 @@
   margin: 4px 0 0;
   font-size: 14px;
 }
+/* Batch 63 (F43): a counter order's "Called and handed over · Order 91" is the row's one accent
+   button (44 px, on one line) with "Someone else is collecting" as accent text under it — the
+   same pattern as an app order's "Check pickup code" and "Guest can't show the code". */
+.workspace-page .pickup-queue__card > .card-actions:has(> .pickup-handoff__quick) {
+  flex-flow: column;
+  align-items: flex-end;
+}
+.workspace-page .pickup-queue__card .pickup-handoff__quick {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+  max-width: 100%;
+}
+.workspace-page .pickup-queue__card .pickup-handoff__quick > p {
+  margin: 0;
+  font-size: 14px;
+}
+.workspace-page .pickup-queue__card .pickup-handoff__quick > button[data-variant="primary"] {
+  max-width: 100%;
+  min-height: 44px;
+  margin-top: 0;
+  padding: 0 16px;
+  border: 0;
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-accent-fill);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+.workspace-page
+  .pickup-queue__card
+  .pickup-handoff__quick
+  > button[data-variant="primary"]:disabled {
+  background: none;
+  color: var(--bop-color-text-muted);
+  cursor: not-allowed;
+}
+.workspace-page .pickup-queue__card > .card-actions > button.pickup-handoff__other {
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font-size: 14px;
+  font-weight: 600;
+}
+.workspace-page .pickup-queue__card > .card-actions > button.pickup-handoff__other:disabled {
+  color: var(--bop-color-text-muted);
+}
+
 /* The open code check takes the row's width under its facts, with no box of its own. */
 .workspace-page .store-card.pickup-queue__card:not([hidden]):has(> .card-actions > section) {
   grid-template-areas:
@@ -518,7 +571,8 @@
 /* ---- Narrower lists: what and state stack beside the next step ---------------------------- */
 @container pickup-list (max-width: 1000px) {
   .workspace-page .store-card.pickup-queue__card:not([hidden]) {
-    grid-template-columns: 5rem minmax(0, 1fr) 15rem;
+    /* Batch 63 (F43): room for "Called and handed over · Order 91" on one line in DejaVu. */
+    grid-template-columns: 5rem minmax(0, 1fr) 20rem;
     grid-template-areas:
       "num what next"
       "num state next"
