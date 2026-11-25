@@ -2,7 +2,14 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { CurrentOrderDetails } from "./CurrentOrderQueuePage.js";
 import { parseCurrentOrderQueue } from "./current-order-queue-client.js";
-import { mount, settle } from "./dom-test-kit.fixture.js";
+import {
+  buttonNamed,
+  click,
+  mount,
+  selectValue,
+  settle,
+  typeInto,
+} from "./dom-test-kit.fixture.js";
 
 /**
  * Batch 64 (v15 b63, order 32): right after a refund to the guest's card, the order panel's Paid
@@ -71,7 +78,7 @@ const refund = (state: "Sending" | "Refunded") => ({
   state,
 });
 
-async function opened(reads: unknown[]) {
+async function opened(reads: unknown[], refunded: unknown = null) {
   if (order === undefined) throw new Error("missing synthetic order");
   vi.useFakeTimers({ toFake: ["setTimeout", "setInterval"] });
   const onChanged = vi.fn();
@@ -82,9 +89,14 @@ async function opened(reads: unknown[]) {
           status: 200,
           headers: { "content-type": "application/json" },
         })
-      : new Response("{}", { status: 503 }),
+      : String(url).endsWith("/merchant/orders/table-payment/online-refund") && refunded !== null
+        ? new Response(JSON.stringify(refunded), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          })
+        : new Response("{}", { status: 503 }),
   );
-  await mount(
+  const { container } = await mount(
     <CurrentOrderDetails
       order={order}
       csrf={"a".repeat(43)}
@@ -95,7 +107,7 @@ async function opened(reads: unknown[]) {
     />,
   );
   await settle(20);
-  return { onChanged, reads: () => read };
+  return { container, onChanged, reads: () => read };
 }
 
 it("rereads the order's totals once the card company answers a refund the panel showed going back", async () => {
@@ -119,4 +131,24 @@ it("a later read that finds nothing changed does not reread the totals", async (
   await settle(20);
   expect(reads()).toBe(2);
   expect(onChanged).not.toHaveBeenCalled();
+});
+
+it("rereads the order's totals at once when a refund made here comes back already gone to the card", async () => {
+  // v15 b63 order 32: the refund's own answer already said "Refunded"; Paid showed it at once.
+  const { container, onChanged, reads } = await opened(
+    [payment([])],
+    payment([refund("Refunded")]),
+  );
+  expect(onChanged).not.toHaveBeenCalled();
+  await click(buttonNamed(container, "Refund to the card"));
+  await typeInto(container.querySelector(".table-payment__refund input"), "5.00");
+  const reason = container.querySelector(".table-payment__refund select");
+  await selectValue(reason, (reason as HTMLSelectElement).options[1]?.value ?? "");
+  await click(buttonNamed(container, "Refund $5.00 to the card"));
+  await click(buttonNamed(container, "Confirm: refund $5.00 to the card"));
+  await settle(20);
+  expect(container.textContent).toContain("went back to the guest's card");
+  // The totals above are read again at once, not at the page's next poll.
+  expect(onChanged).toHaveBeenCalledTimes(1);
+  expect(reads()).toBe(1);
 });
