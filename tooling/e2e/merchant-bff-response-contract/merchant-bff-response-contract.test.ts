@@ -945,6 +945,8 @@ const tablesView = {
       // A guest started this table by scanning; it closes by itself unless staff take it over.
       guestStart: { closesByItselfAt: at(80), endedLastParty: true as const },
       blockedSince: at(20),
+      // Batch 63 (F39): this party's join code has not been used yet (sent only when true).
+      unusedJoinCode: true as const,
       // WP-2423 (M171): the allergens this table must avoid (sent only when marked).
       tableAllergies: ["PEANUT"],
       paymentTiming: "PayLater",
