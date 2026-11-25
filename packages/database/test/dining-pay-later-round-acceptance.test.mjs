@@ -9342,12 +9342,22 @@ async function journey(journeyEnding) {
               code: "MEMBER_NOTHING_TO_CLAIM",
             });
             assert.equal((await port.claim(guest(first), 1)).earnedPoints, expected(parts[0]));
+            // Batch 63 review (F06): once a part's points are added it is no longer offered, so a
+            // phone trying again after a later part failed is offered only what is left.
+            assert.deepEqual(
+              (await port.state(guest(first))).claim.parts.map((entry) => entry.partNumber),
+              [2],
+            );
             assert.equal((await port.claim(guest(second), 2)).earnedPoints, expected(parts[1]));
             // Each part once, by anyone; the unpaid part has nothing to earn yet.
             await assert.rejects(port.claim(guest(second), 1), { code: "MEMBER_NOTHING_TO_CLAIM" });
             await assert.rejects(port.claim(guest(first), 3), { code: "MEMBER_NOTHING_TO_CLAIM" });
             await pay(3);
-            assert.equal((await port.claim(guest(second), 3)).earnedPoints, expected(parts[2]));
+            // Batch 63 review (F06): one account claims a second part of the same order in turn
+            // (a phone that paid two parts claims them one after the other).
+            assert.equal((await port.claim(guest(first), 3)).earnedPoints, expected(parts[2]));
+            assert.equal(await pointsOf(first), expected(parts[0]) + expected(parts[2]));
+            await assert.rejects(port.claim(guest(first), 3), { code: "MEMBER_NOTHING_TO_CLAIM" });
             await assertSalesCountEveryRoundOnce();
             // A refund of part 1 takes back only part 1's points.
             const secondBefore = await pointsOf(second);
@@ -9356,7 +9366,9 @@ async function journey(journeyEnding) {
             assert.ok((await sweep.settlePoints()) > 0);
             assert.equal(
               await pointsOf(first),
-              expected(parts[0]) - Math.floor((expected(parts[0]) * 500) / Number(part1Total)),
+              expected(parts[0]) +
+                expected(parts[2]) -
+                Math.floor((expected(parts[0]) * 500) / Number(part1Total)),
             );
             assert.equal(await pointsOf(second), secondBefore);
             assert.equal(await sweep.settlePoints(), 0, "running it again changes nothing");

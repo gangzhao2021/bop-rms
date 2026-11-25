@@ -50,6 +50,11 @@ export function MemberJoinPanel({
   const [state, setState] = useState<MemberState | null>(null);
   const [part, setPart] = useState<number | null>(null);
   const [earned, setEarned] = useState<number | null>(null);
+  // Batch 63 review: points this panel already added before a later part failed.
+  const [earnedBefore, setEarnedBefore] = useState(0);
+  // ... and which parts those were: never offered or claimed again here, even if the offer can't
+  // be read again just then.
+  const [claimedParts, setClaimedParts] = useState<ReadonlySet<number | null>>(() => new Set());
   const [auto, setAuto] = useState(0);
   const [skipped, setSkipped] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
@@ -131,7 +136,9 @@ export function MemberJoinPanel({
   // v15 batch 8: a phone that paid a part on its own card knows which part it paid: it is offered
   // that part only, never asked "which part did you pay?" beside parts others paid at the counter.
   // Batch 63 (F06): a phone that paid several parts is offered all of them, together.
-  const { parts, allOwn } = memberClaimParts(claim.parts);
+  const { parts, allOwn } = memberClaimParts(
+    claim.parts.filter((entry) => !claimedParts.has(entry.partNumber)),
+  );
   const together = allOwn && parts.length > 1;
   const several = parts.length > 1 && !together;
   const chosen = several ? parts.find((entry) => entry.partNumber === part) : parts[0];
@@ -150,19 +157,49 @@ export function MemberJoinPanel({
           .filter((entry) => entry.points === points)
           .every((entry) => entry.afterRefund === true);
   const partNumber = several ? part : (parts[0]?.partNumber ?? null);
-  /** Batch 63: the rest of this phone's own parts, once the first is claimed (or joined with). */
-  const claimRest = async (earnedFirst: number) => {
-    let earnedAll = earnedFirst;
-    if (together)
-      for (const entry of parts.slice(1))
-        earnedAll += (await client.claim(entry.partNumber, orderReference)).earnedPoints;
-    return earnedAll;
+  /**
+   * Batch 63: this phone's own parts, claimed in turn — the first (or joining with it), then the
+   * rest. Batch 63 review: a part already claimed is never claimed again. When one fails, the
+   * offer is read again (the server no longer lists a part once its points are added), so trying
+   * again claims only the parts still unclaimed, and the points already added stay counted.
+   */
+  const claimInTurn = async (first: () => Promise<number>) => {
+    let earnedAll = earnedBefore;
+    const claimed = new Set(claimedParts);
+    try {
+      earnedAll += await first();
+      claimed.add(partNumber);
+      if (together)
+        for (const entry of parts.slice(1)) {
+          earnedAll += (await client.claim(entry.partNumber, orderReference)).earnedPoints;
+          claimed.add(entry.partNumber);
+        }
+      setEarned(earnedAll);
+    } catch (error) {
+      // The first claim (or joining) failed: nothing was added, the guest's choice stays.
+      if (claimed.size === claimedParts.size) throw error;
+      setEarnedBefore(earnedAll);
+      setClaimedParts(claimed);
+      const again = await client.state(orderReference).catch(() => null);
+      if (again !== null) {
+        // Nothing left to claim: what was added is all there was.
+        if (again.claim === null || again.claim === undefined) {
+          if (earnedAll > 0) setEarned(earnedAll);
+          setState(again);
+          return;
+        }
+        setPart(null);
+        setState(again);
+      }
+      setProblem(memberCodeProblem(error, claim.until));
+      throw error;
+    }
   };
   const add = async () => {
     setBusy(true);
     setProblem(null);
     try {
-      setEarned(await claimRest((await client.claim(partNumber, orderReference)).earnedPoints));
+      await claimInTurn(async () => (await client.claim(partNumber, orderReference)).earnedPoints);
     } catch (error) {
       setProblem(memberCodeProblem(error, claim.until));
     } finally {
@@ -231,15 +268,19 @@ export function MemberJoinPanel({
           askConsent
           submitLabel={t("Join and add my points")}
           verify={async ({ phone, code, marketingConsent }) => {
-            const result = await client.verify({
-              phone,
-              code,
-              marketingConsent,
-              claim: true,
-              partNumber,
-              orderReference,
-            });
-            setEarned(await claimRest(result.earnedPoints));
+            await claimInTurn(
+              async () =>
+                (
+                  await client.verify({
+                    phone,
+                    code,
+                    marketingConsent,
+                    claim: true,
+                    partNumber,
+                    orderReference,
+                  })
+                ).earnedPoints,
+            );
           }}
         />
       )}
