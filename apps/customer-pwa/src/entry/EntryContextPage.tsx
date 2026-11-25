@@ -1330,12 +1330,11 @@ function EntryState({
       state.paused || state.nextOpening === null
         ? null
         : nextOpeningText(state.nextOpening, state.localDate);
-    const hoursLine =
-      reason !== null
-        ? [reason, next === null ? null : endSentence(next)]
-            .filter((part) => part !== null)
-            .join(wordGap())
-        : [next, todayHours].filter((part) => part !== null).join(" · ");
+    // One line of sentences ("Opens tomorrow at 11:00 a.m. Today’s hours: …"; in Chinese each
+    // ends with “。”).
+    const hoursLine = [reason, next === null ? null : endSentence(next), todayHours]
+      .filter((part) => part !== null)
+      .join(wordGap());
     return (
       <div className="entry-state entry-state--closed" role="alert">
         <StateHeading headingRef={headingRef}>

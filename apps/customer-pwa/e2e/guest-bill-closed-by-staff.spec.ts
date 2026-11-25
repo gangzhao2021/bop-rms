@@ -250,7 +250,7 @@ function words(zh: boolean) {
     total: zh ? "合计" : "Total",
     paid: zh ? "已付款" : "Paid",
     paidSoFar: zh ? "已付" : "Paid so far",
-    stillToPay: zh ? "还剩" : "Still to pay",
+    stillToPay: zh ? "还需支付" : "Still to pay",
     rest: zh ? "其余账款" : "Rest of the bill",
     bill: zh ? "账单" : "The bill",
     notCharged: zh ? "不向您收取" : "Not charged to you",

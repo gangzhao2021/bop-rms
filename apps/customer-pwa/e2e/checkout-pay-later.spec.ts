@@ -595,8 +595,11 @@ for (const screen of [
       await expect(main.getByText("Reload checkout details", { exact: true })).toHaveCount(0);
       expect(pages).not.toContain("/checkout");
       // The table page is the only proof the tap worked: it says so.
-      await expect(main.getByRole("status").filter({ hasText: "Order placed." })).toBeVisible();
-      await expect(main).not.toContainText("sent to the kitchen");
+      // Batch 63 (F12): said by the round's number; the round is queued in the kitchen, so the
+      // line says so, as the round's own status does.
+      await expect(
+        main.getByRole("status").filter({ hasText: "Round 1 sent to the kitchen" }),
+      ).toBeVisible();
       await expect(page.getByText("On the table's bill").first()).toBeVisible();
       await expect(page.getByText("To pay at the end")).toBeVisible();
       expect(table.sent).toHaveLength(1);
@@ -650,7 +653,10 @@ for (const screen of [
       await expect(main).not.toContainText("We couldn’t load your table");
       await placeOrder(page).click();
       await expect(page).toHaveURL(/\/dine-in\/session$/u);
-      await expect(main.getByRole("status").filter({ hasText: "Order placed." })).toBeVisible();
+      // Batch 63 (F12): said by the round's number.
+      await expect(
+        main.getByRole("status").filter({ hasText: "Round 1 sent to the kitchen" }),
+      ).toBeVisible();
       expect(table.sent).toHaveLength(1);
     });
 
@@ -766,8 +772,12 @@ test.describe("@production Pay-later table, the round just placed", () => {
       await placeOrder(page).click();
       await expect(page).toHaveURL(/\/dine-in\/session$/u);
       const main = page.getByRole("main");
-      await inView(page, main.getByRole("status").filter({ hasText: "Order placed." }));
       const number = earlierRounds.length + 1;
+      // Batch 63 (F12): said by the round's number.
+      await inView(
+        page,
+        main.getByRole("status").filter({ hasText: `Round ${number} sent to the kitchen` }),
+      );
       await inView(page, main.getByRole("heading", { name: new RegExp(`^Round ${number} `, "u") }));
       await page.screenshot({
         path: `test-results/round-placed-${earlierRounds.length}-390.png`,
@@ -795,7 +805,8 @@ test.describe("@production Pay-later table, the round just placed", () => {
     await placeOrder(page).click();
     await expect(page).toHaveURL(/\/dine-in\/session$/u);
     await expect(
-      page.getByRole("status").filter({ hasText: "Order placed. Staff confirm it first." }),
+      // Batch 63 (F12): by the round's number once the table read has it ("Order placed." until).
+      page.getByRole("status").filter({ hasText: /placed\. Staff confirm it first\.$/u }),
     ).toBeVisible();
   });
 
@@ -1636,22 +1647,33 @@ test.describe("@production Pay-later table, the round just placed", () => {
     expect(table.sent[1]?.key).toBe(table.sent[0]?.key);
   });
 
+  // Batch 63 (v15 batch 62 review CDI-10, F12): the line is said by the round's number and lasts
+  // until the round moves on, the table is read again a while later, or the guest taps Refresh
+  // now (it stayed at the top long after the round was sent).
   test("the line about a round placed lasts until that round moves on", async ({ page }) => {
     const table = await stubTable(page);
     await openCart(page);
     await placeOrder(page).click();
     await expect(page).toHaveURL(/\/dine-in\/session$/u);
     const main = page.getByRole("main");
-    const line = main.getByRole("status").filter({ hasText: "Order placed." });
-    await expect(line).toBeVisible();
-    const refresh = main.getByRole("button", { name: "Refresh now" });
-    await refresh.click();
-    await expect(refresh).toBeEnabled();
+    const line = main.getByRole("status").filter({ hasText: "Round 1 sent to the kitchen" });
     await expect(line).toBeVisible();
     table.moveRound("Preparing");
-    await refresh.click();
+    await main.getByRole("button", { name: "Refresh now" }).click();
     await expect(line).toHaveCount(0);
     await expect(main.getByText("Being prepared", { exact: true })).toBeVisible();
+  });
+
+  test("the line about a round placed goes once the guest refreshes", async ({ page }) => {
+    await stubTable(page);
+    await openCart(page);
+    await placeOrder(page).click();
+    await expect(page).toHaveURL(/\/dine-in\/session$/u);
+    const main = page.getByRole("main");
+    const line = main.getByRole("status").filter({ hasText: "Round 1 sent to the kitchen" });
+    await expect(line).toBeVisible();
+    await main.getByRole("button", { name: "Refresh now" }).click();
+    await expect(line).toHaveCount(0);
   });
 
   test("a round waiting for staff stops saying so once staff confirm it", async ({ page }) => {
@@ -1679,13 +1701,9 @@ test.describe("@production Pay-later table, the round just placed", () => {
     await expect(page).toHaveURL(/\/dine-in\/session$/u);
     const main = page.getByRole("main");
     const line = main.getByRole("status").filter({ hasText: "Staff confirm it first." });
-    await expect(line).toBeVisible();
-    const refresh = main.getByRole("button", { name: "Refresh now" });
-    await refresh.click();
-    await expect(refresh).toBeEnabled();
-    await expect(line).toBeVisible();
+    await expect(line).toHaveText("Round 1 placed. Staff confirm it first.");
     table.moveRound("Queued");
-    await refresh.click();
+    await main.getByRole("button", { name: "Refresh now" }).click();
     await expect(line).toHaveCount(0);
     await expect(main.getByText("Sent to the kitchen", { exact: true })).toBeVisible();
   });

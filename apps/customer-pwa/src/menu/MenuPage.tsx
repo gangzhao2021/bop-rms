@@ -829,7 +829,10 @@ function MenuCart({
         )}
       </aside>
       {summary.count === 0 ? (
-        alone
+        // On a wide screen the cart panel above already says it.
+        wide ? null : (
+          alone
+        )
       ) : (
         <div className="menu-cart-bar">
           {notice === null || wide ? null : <AddedNotice text={notice.text} added={notice.added} />}

@@ -44,3 +44,57 @@ for (const width of [390, 1024, 1440])
           expect(await smallTargets(page, taps)).toEqual([]);
         });
     });
+
+// Batch 63 (D62B-11/12, CDI-7, F09): two button kinds. On checkout "Edit cart" was 12 px black
+// words and "Reload checkout details" a white box; the step waiting for a tip was grey words with
+// no button shape ("Choose a tip to continue"), in a sticky bar that covered the form.
+for (const width of [390, 1024, 1440])
+  test.describe(`@demo batch 63 checkout actions at ${String(width)}`, () => {
+    test.use({ viewport: { width, height: 844 }, hasTouch: width < 1440, isMobile: width < 768 });
+    test("secondary actions are accent words and the waiting step keeps its shape", async ({
+      page,
+    }) => {
+      await page.goto("/checkout");
+      const main = page.getByRole("main");
+      const next = main.getByRole("button", { name: "Continue to payment" });
+      await expect(next).toBeDisabled();
+      const css = (selector: string) =>
+        page
+          .locator(selector)
+          .first()
+          .evaluate((element) => {
+            const style = getComputedStyle(element);
+            return {
+              color: style.color,
+              border: style.borderTopWidth,
+              background: style.backgroundColor,
+              size: style.fontSize,
+              weight: style.fontWeight,
+              opacity: style.opacity,
+              position: style.position,
+              height: element.getBoundingClientRect().height,
+            };
+          });
+      for (const selector of [".checkout-edit-link", ".checkout-details-form button"]) {
+        const look = await css(selector);
+        expect(look).toMatchObject({
+          color: "rgb(31, 99, 224)",
+          border: "0px",
+          background: "rgba(0, 0, 0, 0)",
+          size: "16px",
+          weight: "400",
+        });
+        expect(look.height).toBeGreaterThanOrEqual(44);
+      }
+      const waiting = await css(".checkout-continue__button");
+      expect(waiting.background).toBe("rgb(31, 99, 224)");
+      expect(Number(waiting.opacity)).toBeLessThan(1);
+      await expect(main.getByText("Choose a tip first", { exact: true })).toBeVisible();
+      // The next step comes after the form, never over it.
+      expect((await css(".checkout-continue")).position).toBe("static");
+      await page.screenshot({
+        path: `test-results/b63-checkout-${String(width)}.png`,
+        fullPage: true,
+      });
+    });
+  });

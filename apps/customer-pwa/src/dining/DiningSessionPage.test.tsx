@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
 import {
+  TableSummary,
   DiningSessionPage,
   DiningSessionScreen,
   isDiningSessionActive,
@@ -2026,5 +2027,22 @@ describe("batch 55 (v15 b54 live): round cards once staff closed the bill", () =
       "已付款",
       "已付款",
     ]);
+  });
+});
+
+// Batch 63 (v15 batch 62 review D62B-14, F13): with checkout started and nothing paid yet, the
+// table total still said "To pay at the end" (最后结账); it said "Still to pay" only after a payment.
+describe("batch 63 (F13): what the table owes once checkout opens", () => {
+  const payLater = view({
+    paymentTiming: "PayLater",
+    summary: { paid: cad("0"), refunded: cad("0"), refundPending: cad("0"), due: cad("4464") },
+  });
+  const total = (checkingOut: boolean) =>
+    renderToStaticMarkup(<TableSummary view={payLater} checkingOut={checkingOut} />);
+  it("is Still to pay from the moment checkout opens, in a row as strong as a round's total", () => {
+    expect(total(false)).toContain("<dt>To pay at the end</dt>");
+    const open = total(true);
+    expect(open).toContain('<div class="dining-session__due"><dt>Still to pay</dt><dd>$44.64</dd>');
+    expect(open).not.toContain("To pay at the end");
   });
 });

@@ -127,6 +127,61 @@ for (const width of [390, 1024, 1440])
       await page.screenshot({ path: `test-results/b63-pickup-collected-${String(width)}.png` });
     });
 
+    test("F09: every other action is accent words on a 44 px tap; removing contact details is red", async ({
+      page,
+    }) => {
+      await openOrder(page, "collected");
+      const main = page.getByRole("main");
+      await expect(main.getByText("This order is complete.", { exact: true })).toBeVisible();
+      const look = (target: import("@playwright/test").Locator) =>
+        target.evaluate((element) => {
+          const css = getComputedStyle(element);
+          const box = element.getBoundingClientRect();
+          return {
+            color: css.color,
+            border: css.borderTopWidth,
+            background: css.backgroundColor,
+            underline: css.textDecorationLine,
+            size: css.fontSize,
+            weight: css.fontWeight,
+            tall: box.height >= 43.5,
+          };
+        });
+      const accentWords = {
+        color: "rgb(31, 99, 224)",
+        border: "0px",
+        background: "rgba(0, 0, 0, 0)",
+        underline: "none",
+        size: "16px",
+        weight: "400",
+        tall: true,
+      };
+      for (const name of [/^Call /u, /View receipt/u, /Back to menu/u])
+        expect(await look(main.getByRole("link", { name }).first())).toEqual(accentWords);
+      expect(await look(main.getByRole("button", { name: "Remove my contact details" }))).toEqual({
+        ...accentWords,
+        color: "rgb(191, 85, 82)",
+      });
+      // It still asks first.
+      await main.getByRole("button", { name: "Remove my contact details" }).click();
+      await expect(main.getByRole("group")).toBeVisible();
+      await page.unrouteAll({ behavior: "ignoreErrors" });
+      await routeStorefrontReads(page);
+      await page.route(/\/api\/v1\/orders\/[^/]+\/receipt(?:\?.*)?$/u, (route) =>
+        route.fulfill({
+          json: {
+            ...receipt(false),
+            receipt: { ...receipt(false).receipt, orderReference: v15PickupOrderReference },
+          },
+        }),
+      );
+      await openOrder(page, "collected", "/receipt");
+      await expect(main.getByText("Synthetic Issuer Ltd. (TEST-ONLY)")).toBeVisible();
+      expect(await look(main.getByRole("button", { name: "Print or save receipt" }))).toEqual(
+        accentWords,
+      );
+    });
+
     for (const zh of [false, true])
       test(`F17: the receipt reads as a receipt on the page's one edge (${zh ? "zh-Hans" : "en"})`, async ({
         page,

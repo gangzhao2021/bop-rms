@@ -21,7 +21,8 @@ const routes = [
   { path: "/cart", heading: "Your cart" },
   { path: "/checkout", heading: "Checkout" },
   { path: "/checkout/payment", heading: "Secure payment" },
-  { path: "/checkout/result", heading: "Check your payment" },
+  // Batch 63 (F16): the result is the page's one heading (the preview has no payment to find).
+  { path: "/checkout/result", heading: "Payment result not found" },
   { path: `/orders/${ORDER_REFERENCE}`, heading: "Track your order" },
   { path: `/orders/${ORDER_REFERENCE}/delivery`, heading: "Track your delivery" },
   { path: `/orders/${ORDER_REFERENCE}/receipt`, heading: "Receipt" },

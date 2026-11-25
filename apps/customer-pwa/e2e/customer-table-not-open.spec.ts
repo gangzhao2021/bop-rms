@@ -309,7 +309,9 @@ test.describe("@production CUST-ENTRY table not open", () => {
         const box = await main.getByRole("link", { name }).boundingBox();
         expect(box).not.toBeNull();
         expect((box?.y ?? 0) + (box?.height ?? 0)).toBeLessThanOrEqual(900 - 40);
-        expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(width - 16);
+        // Batch 63 (F14): on the page's own edges (the card's 15 px inset is gone): it ends at
+        // the page gutter (4vw at 390, at least 15 px).
+        expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(width - 15);
       };
       const check = async (language: "en" | "zh-Hans") => {
         const zh = language === "zh-Hans";
@@ -406,9 +408,8 @@ test.describe("@production CUST-ENTRY table not open", () => {
       open = true;
       // The table page checks every 3 s (the start page's schedule), so it goes on within that.
       await expect(page).toHaveURL(/\/$/u, { timeout: 10_000 });
-      await expect(
-        main.getByRole("heading", { name: "欢迎光临 Synthetic Noodle Bar" }),
-      ).toBeVisible();
+      // Batch 63 (F11): the join names the table the guest waited at.
+      await expect(main.locator("#entry-heading")).toHaveText("加入 L42 A (TEST)");
       await expect(main).not.toContainText("还没开台");
       await page.getByRole("button", { name: "English" }).click();
     });
@@ -475,7 +476,9 @@ test.describe("@production CUST-ENTRY table not open", () => {
         const box = await link.boundingBox();
         expect(box).not.toBeNull();
         expect((box?.y ?? 0) + (box?.height ?? 0)).toBeLessThanOrEqual(900 - 40);
-        expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(width - 16);
+        // Batch 63 (F14): on the page's own edges (the card's 15 px inset is gone): it ends at
+        // the page gutter (4vw at 390, at least 15 px).
+        expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(width - 15);
         const overflow = await page.evaluate(
           () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
         );
@@ -511,9 +514,8 @@ test.describe("@production CUST-ENTRY table not open", () => {
       }
       open = true;
       await expect(page).toHaveURL(/\/$/u, { timeout: 10_000 });
-      await expect(
-        main.getByRole("heading", { name: "欢迎光临 Synthetic Noodle Bar" }),
-      ).toBeVisible();
+      // Batch 63 (F11): the join names the table the guest waited at.
+      await expect(main.locator("#entry-heading")).toHaveText("加入 L43 A (TEST)");
       await expect(main).not.toContainText("还没开台");
       // After a reload the check asks about this browser's waiting scan (its cookie), not a code.
       expect(waits.length).toBeGreaterThan(0);
@@ -672,11 +674,10 @@ test.describe("@production CUST-ENTRY table not open", () => {
         open = true;
         await add.click();
         await expect(page).toHaveURL(/\/$/u, { timeout: 2_500 });
-        await expect(
-          main.getByRole("heading", {
-            name: zh ? "欢迎光临 Synthetic Noodle Bar" : "Welcome to Synthetic Noodle Bar",
-          }),
-        ).toBeVisible();
+        // Batch 63 (F11): the join names the table the guest waited at.
+        await expect(main.locator("#entry-heading")).toHaveText(
+          zh ? "加入 L44 A (TEST)" : "Join L44 A (TEST)",
+        );
         await expect(main.getByRole("status").filter({ hasText: "Synthetic tea" })).toHaveText(
           zh
             ? // Batch 45 (v15 b44 live): no Latin space after the dish name, as the other
@@ -691,7 +692,9 @@ test.describe("@production CUST-ENTRY table not open", () => {
         const box = await join.boundingBox();
         expect(box).not.toBeNull();
         expect((box?.y ?? 0) + (box?.height ?? 0)).toBeLessThanOrEqual(900 - 40);
-        expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(width - 16);
+        // Batch 63 (F14): on the page's own edges (the card's 15 px inset is gone): it ends at
+        // the page gutter (4vw at 390, at least 15 px).
+        expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(width - 15);
         const overflow = await page.evaluate(
           () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
         );
@@ -747,11 +750,10 @@ test.describe("@production CUST-ENTRY table not open", () => {
         ).toBeVisible();
         open = true;
         await expect(page).toHaveURL(/\/$/u, { timeout: 10_000 });
-        await expect(
-          main.getByRole("heading", {
-            name: zh ? "欢迎光临 Synthetic Noodle Bar" : "Welcome to Synthetic Noodle Bar",
-          }),
-        ).toBeVisible();
+        // Batch 63 (F11): the join names the table the guest waited at.
+        await expect(main.locator("#entry-heading")).toHaveText(
+          zh ? "加入 L44 B (TEST)" : "Join L44 B (TEST)",
+        );
         await expect(
           main.getByRole("button", { name: zh ? "加入这一桌" : "Join this table" }),
         ).toBeVisible();

@@ -274,14 +274,14 @@ for (const screen of [
       await enterTable(page, "/cart");
       await expect(page.getByText("Which dishes are you paying for?")).toBeVisible();
       await expect(page.getByLabel("The whole table (3 dishes · $30.00)")).toBeChecked();
-      await expect(page.getByLabel("Only what I added (2 · $20.00)")).toBeVisible();
+      await expect(page.getByLabel("Only what I added (2 dishes · $20.00)")).toBeVisible();
       await noHorizontalScroll(page);
       await expectNoInternalText(page);
       await page.screenshot({
         path: `test-results/table-pay-choice-${screen.width}.png`,
         fullPage: true,
       });
-      await page.getByLabel("Only what I added (2 · $20.00)").check();
+      await page.getByLabel("Only what I added (2 dishes · $20.00)").check();
       await expect(
         page.getByText("Dishes you don't choose stay for the others at your table."),
       ).toBeVisible();

@@ -165,7 +165,8 @@ test.describe("@production CUST-DINE-IN-SESSION table view", () => {
     await enterTable(page, () => ({ status: 200, json: session }));
     const main = page.getByRole("main");
     await expect(main.getByRole("heading", { name: "Your table · 12" })).toBeVisible();
-    await expect(main.getByText("Order 1042", { exact: true })).toBeVisible();
+    // Batch 63 (F12): no order number over a dine-in table (the receipt keeps it).
+    await expect(main.getByText("Order 1042", { exact: true })).toHaveCount(0);
     await expect(main.getByRole("heading", { name: "Round 1 · Ordered by you" })).toBeVisible();
     await expect(
       main.getByRole("heading", { name: "Round 2 · Ordered by another guest" }),
@@ -1939,6 +1940,23 @@ test.describe("@production DEC-DINE-IN-PAY-LATER S4 the guest pays the whole tab
     await expect(
       page.getByText("Your table is paying the bill. Ask staff if you want to add more."),
     ).toBeVisible();
+    // Batch 63 (D62B-07, F12): that is a status — dark 14 px words after a grey dot, at a normal
+    // line height — never accent words on 44 px lines that read as two links.
+    expect(
+      await page.locator(".dining-session__paying-note").evaluate((element) => {
+        const css = getComputedStyle(element);
+        return [css.color, css.fontSize, Number.parseFloat(css.lineHeight) < 30];
+      }),
+    ).toEqual(["rgb(23, 23, 23)", "14px", true]);
+    // Batch 63 (D62B-14, F13): from the moment checkout opens, what is owed is "Still to pay".
+    await expect(page.locator(".dining-session__due dt")).toHaveText("Still to pay");
+    // Batch 63 (D62B-12, F09): the waiting pay button keeps its accent shape, faded.
+    expect(
+      await pay.getByRole("button", { name: "Choose a tip to pay" }).evaluate((element) => {
+        const css = getComputedStyle(element);
+        return [css.backgroundColor, Number(css.opacity) < 1];
+      }),
+    ).toEqual(["rgb(31, 99, 224)", true]);
     // The tip is chosen once for the whole table: 15% of the bill before tax.
     await pay.getByRole("radio", { name: "15%", exact: true }).check();
     // Batch 63: "You pay" says what the 15 % comes to.
@@ -2578,7 +2596,7 @@ test.describe("@production 同桌结账 guests pay by dish at a table that pays 
         scope.getByRole("radio", { name: "The whole table (5 dishes · $26.57)" }),
       ).toBeChecked();
       await expect(scope).toContainText("Amounts include tax.");
-      await scope.getByRole("radio", { name: "Only what I added (4 · $23.73)" }).check();
+      await scope.getByRole("radio", { name: "Only what I added (4 dishes · $23.73)" }).check();
       await expect(scope).toContainText(
         "Dishes you don’t choose stay for the others at your table.",
       );
@@ -2608,7 +2626,7 @@ test.describe("@production 同桌结账 guests pay by dish at a table that pays 
     });
     const scope = pay.getByRole("group", { name: "Which dishes are you paying for?" });
     await expect(
-      scope.getByRole("radio", { name: "Only what I added (4 · $23.73)" }),
+      scope.getByRole("radio", { name: "Only what I added (4 dishes · $23.73)" }),
     ).toBeChecked();
     await scope.getByRole("radio", { name: "Choose dishes to pay for" }).check();
     await expect(pay.getByRole("button", { name: "Choose the dishes you pay for" })).toBeDisabled();

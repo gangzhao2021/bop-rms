@@ -134,7 +134,10 @@ for (const screen of [
         0, 0,
       ]);
       await context.setOffline(true);
-      await expect(page.getByText(/You’re offline\. Changes and checkout/)).toBeVisible();
+      // Batch 63 (F10): one plain offline message, in the connection banner.
+      await expect(
+        page.getByText("Your cart is kept on this phone. To order now, ask a staff member."),
+      ).toBeVisible();
       await expect(
         own.getByRole("button", { name: "Increase Synthetic own tea quantity" }),
       ).toBeDisabled();

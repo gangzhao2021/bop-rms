@@ -172,6 +172,44 @@ for (const width of [390, 1024, 1440])
       });
     });
 
+    test("F12: the round just placed is said by its number, and only until the next read", async ({
+      page,
+    }) => {
+      // Round 1 is in the kitchen (queued), as the cart's one-tap place leaves it.
+      await stubTableGuest(page, {
+        session: (base) => ({
+          ...base,
+          rounds: (base.rounds as Record<string, unknown>[]).map((round) => ({
+            ...round,
+            status: "Queued",
+            items: (round.items as Record<string, unknown>[]).map((item) => ({
+              ...item,
+              servedQuantity: 0,
+              progress: "Waiting",
+            })),
+          })),
+        }),
+      });
+      await page.goto("/menu");
+      await expect(page.getByRole("main").getByText(dish).first()).toBeVisible();
+      // As the cart does after placing a round: to Your table, saying it was placed.
+      await page.evaluate(() => {
+        history.pushState(
+          { usr: { placed: "Sent" }, key: "placed", idx: 1 },
+          "",
+          "/dine-in/session",
+        );
+        window.dispatchEvent(new PopStateEvent("popstate", { state: history.state }));
+      });
+      const main = page.getByRole("main");
+      const placed = main.locator(".dining-session__placed");
+      await expect(placed).toHaveText("Round 1 sent to the kitchen");
+      // The round says "Sent to the kitchen"; its dish doesn't repeat "Waiting" under it.
+      await expect(main.locator(".order-status__item-progress")).toHaveCount(0);
+      await main.getByRole("button", { name: "Refresh now" }).click();
+      await expect(placed).toHaveCount(0);
+    });
+
     test("F14: switching language keeps the guest's place on the menu", async ({ page }) => {
       await page.setViewportSize({ width, height: 420 });
       await stubTableGuest(page);

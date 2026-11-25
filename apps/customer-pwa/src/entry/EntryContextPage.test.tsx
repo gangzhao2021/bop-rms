@@ -335,7 +335,7 @@ describe("WP-2423 Q4 not accepting orders", () => {
     expect(closed).not.toContain("The store is closed now.");
     // WP-2423 M122: written like every other time on the guest's pages (Chinese: 24-hour).
     expect(closed).toContain(
-      '<p class="entry-state__next">Opens tomorrow at 11:00\u00a0a.m. · Today’s hours: 11:00\u00a0a.m.–9:30\u00a0p.m.</p>',
+      '<p class="entry-state__next">Opens tomorrow at 11:00\u00a0a.m. Today’s hours: 11:00\u00a0a.m.–9:30\u00a0p.m.</p>',
     );
     expect(formatStoreLocalTime("21:30:00", "zh-CN")).toBe("21:30");
     expect(closed).not.toContain("can’t be used");

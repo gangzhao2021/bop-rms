@@ -392,7 +392,7 @@ function words(zh: boolean) {
     pay: zh ? "结账付款" : "Pay the bill",
     total: zh ? "本桌合计" : "Table total",
     paidSoFar: zh ? "已付" : "Paid so far",
-    stillToPay: zh ? "还剩" : "Still to pay",
+    stillToPay: zh ? "还需支付" : "Still to pay",
     toPayAtEnd: zh ? "最后结账" : "To pay at the end",
     paidAll: zh ? "已付款" : "Paid",
     nothing: zh ? "无" : "Nothing",
@@ -407,7 +407,7 @@ function words(zh: boolean) {
     otherProgress: zh
       ? "这桌正在按菜付：已付 1 笔 · 还剩 $14.13。"
       : "Your table is paying by dish: 1 paid so far · $14.13 to go.",
-    mine: zh ? "只付我加的（1 道 · $14.13）" : "Only what I added (1 · $14.13)",
+    mine: zh ? "只付我加的（1 道 · $14.13）" : "Only what I added (1 dish · $14.13)",
     noTip: zh ? "不加小费" : "No tip",
     payMine: zh ? "支付 $14.13" : "Pay $14.13",
     paySecurely: zh ? "安全付款" : "Pay securely",
@@ -590,7 +590,8 @@ for (const width of [390, 1024, 1440])
         };
         const pay = await openTable(page, table, zh);
         const total = zh ? "合计" : "Total";
-        // Nothing paid yet: the table pays this at the end.
+        // Nothing paid yet, with checkout open: batch 63 (D62B-14, F13) calls it what is still
+        // to pay from the moment checkout opens ("To pay at the end" read wrong while paying).
         await expect
           .poll(() => totalLines(page, zh))
           .toEqual([
@@ -598,7 +599,7 @@ for (const width of [390, 1024, 1440])
             [zh ? "税" : "Tax", "$3.25"],
             [total, "$28.25"],
             [text.paidSoFar, "$0.00"],
-            [text.toPayAtEnd, "$28.25"],
+            [text.stillToPay, "$28.25"],
           ]);
         await expectOneAmountColumn(page, zh);
         await expectLayout(page, zh, width);

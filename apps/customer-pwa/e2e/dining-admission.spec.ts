@@ -49,7 +49,9 @@ test("@demo Dining admission supports keyboard validation and explicit recovery"
   );
   await expect(page.getByRole("alert")).toContainText("ask staff for help");
   await expect(field).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: "Join this table", exact: true })).toBeFocused();
+  // Batch 63 (F11): the page title says "Join this table"; the panel's own heading (for screen
+  // readers only) is where its answers are announced.
+  await expect(page.locator("#dining-admission-heading")).toBeFocused();
   expect(page.url()).not.toContain("123456");
   expect(await page.evaluate(() => [localStorage.length, sessionStorage.length])).toEqual([0, 0]);
   await page.screenshot({

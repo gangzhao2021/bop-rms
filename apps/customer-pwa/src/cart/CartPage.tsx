@@ -1294,8 +1294,9 @@ function CartContent({
           )}
         </StateMessage>
       ) : null}
-      {/* Batch 63 (F10): the banner at the top says it once; here only the way to try again. */}
-      {readOnly ? (
+      {/* Batch 63 (F10): the banner at the top says it once; here only the way to try again
+          (unless the order being sent offers its own Try again below). */}
+      {readOnly && round.status === "idle" ? (
         <div className="cart-offline">
           <button type="button" onClick={() => void controller.load()}>
             {commonText.tryAgain}

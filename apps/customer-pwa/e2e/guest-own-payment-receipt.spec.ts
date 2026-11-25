@@ -983,7 +983,7 @@ for (const width of [390, 1024, 1440])
         await expect(rounds.getByText(parts, { exact: true })).toHaveCount(2);
         const total = main.getByRole("region", { name: zh ? "本桌合计" : "Table total" });
         await expect(total).toContainText(parts);
-        await expect(total).toContainText((zh ? "还剩" : "Still to pay") + "$14.12");
+        await expect(total).toContainText((zh ? "还需支付" : "Still to pay") + "$14.12");
         // Never the fraction or another phrasing of the same progress.
         await expect(main).not.toContainText(zh ? /1\/2|已付 1 份|分成 2 份付款/u : /1\/2/u);
         await expectInside(pay, width);

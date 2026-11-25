@@ -467,7 +467,11 @@ for (const screen of [
         await place.click();
         await expect(page).toHaveURL(/\/dine-in\/session$/u);
         await expect(
-          page.getByRole("main").getByRole("status").filter({ hasText: "Order placed." }),
+          // Batch 63 (F12): by the round's number once the table read has it.
+          page
+            .getByRole("main")
+            .getByRole("status")
+            .filter({ hasText: /^(?:Round \d+ (?:sent to the kitchen|placed\.)|Order placed\.)/u }),
         ).toBeVisible();
         await expectNoFailureSaid(page);
         // The price stood, so nothing to ask: priced again once, the round placed once (the cart

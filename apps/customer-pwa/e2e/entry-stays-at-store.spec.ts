@@ -280,8 +280,9 @@ test.describe("@production M02 a phone stays at the Store and table it scanned",
     await expect(page.getByText("DEMO Café")).toHaveCount(0);
     // Staff seat the party; the page checks again by itself and goes on.
     open = true;
+    // Batch 63 (F11): once open, the page is the join ("Join this table"; the store is in the header).
     await page.clock.fastForward(3_000);
-    await expect(main.getByRole("heading", { name: "Welcome to Lane Dessert" })).toBeVisible();
+    await expect(main.locator("#entry-heading", { hasText: "Join this table" })).toBeVisible();
     // The checks start nothing; the one entry after the table opened does.
     expect(state.entries).toEqual([{ qrToken: laneTable }, { resume: true }, { resume: true }]);
     expect(state.waitChecks).toEqual([{ resume: true }]);
@@ -323,7 +324,7 @@ test.describe("@production M02 a phone stays at the Store and table it scanned",
     // Staff press Open table: at the next check, at most 3 s later, the guest is at the table.
     open = true;
     await page.clock.runFor(1_000);
-    await expect(main.getByRole("heading", { name: "Welcome to Lane Dessert" })).toBeVisible();
+    await expect(main.locator("#entry-heading", { hasText: "Join this table" })).toBeVisible();
     expect(state.entries).toEqual([{ qrToken: laneTable }, { qrToken: laneTable }]);
     await expectNoInternalText(page);
   });
@@ -399,7 +400,7 @@ test.describe("@production M02 a phone stays at the Store and table it scanned",
     await expect(main.getByRole("heading", { name: /isn’t open yet$/u })).toBeVisible();
     // Staff open the table: the page goes on by itself within the minute.
     open = true;
-    const welcome = main.getByRole("heading", { name: "Welcome to Lane Dessert" });
+    const welcome = main.locator("#entry-heading", { hasText: "Join this table" });
     for (let step = 0; step < 14 && !(await welcome.isVisible()); step += 1)
       await page.clock.runFor(5_000);
     await expect(welcome).toBeVisible();
@@ -461,7 +462,7 @@ test.describe("@production M02 a phone stays at the Store and table it scanned",
     // Staff seat them: "We've been seated" asks the entry once and the guest is at the table.
     open = true;
     await main.getByRole("button", { name: "We’ve been seated" }).click();
-    await expect(main.getByRole("heading", { name: "Welcome to Lane Dessert" })).toBeVisible();
+    await expect(main.locator("#entry-heading", { hasText: "Join this table" })).toBeVisible();
     expect(state.entries).toEqual([{ qrToken: laneTable }, { qrToken: laneTable }]);
     await expectNoInternalText(page);
   });
@@ -577,7 +578,7 @@ test.describe("@production M02 a phone stays at the Store and table it scanned",
     await page.getByRole("button", { name: "English" }).click();
     open = true;
     await main.getByRole("button", { name: "We’ve been seated" }).click();
-    await expect(main.getByRole("heading", { name: "Welcome to Lane Dessert" })).toBeVisible();
+    await expect(main.locator("#entry-heading", { hasText: "Join this table" })).toBeVisible();
     // The same code again (in memory; it left the address bar at the scan).
     expect(state.entries).toEqual([{ qrToken: laneTable }, { qrToken: laneTable }]);
   });
@@ -715,7 +716,7 @@ test.describe("@production M02 a phone stays at the Store and table it scanned",
     ).toBeVisible();
     await page.getByRole("link", { name: "Try again" }).click();
     await expect(
-      page.getByRole("main").getByRole("heading", { name: "Welcome to Lane Dessert" }),
+      page.getByRole("main").locator("#entry-heading", { hasText: "Join this table" }),
     ).toBeVisible();
     expect(documents).toHaveLength(2);
     expect(scannedEntries(state)).toEqual([{ qrToken: laneTable }]);

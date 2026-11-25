@@ -99,6 +99,9 @@ export function roundTime(instant: string, now = Date.now(), locale = dateLocale
   );
 }
 
+/** Batch 63 (F12): a read this long after "Round N sent" was first shown clears it. */
+const placedLineMs = 10_000;
+
 /** How often the table view re-reads while something at the table is still in progress. */
 export const diningSessionPollIntervalMs = 15_000;
 
@@ -828,7 +831,7 @@ function closedBillNote(closed: ClosedBillPaid): string {
   }
 }
 
-function TableSummary({
+export function TableSummary({
   view,
   checkingOut = false,
 }: {
@@ -1297,10 +1300,11 @@ export function DiningSessionPage({
     };
   }, [load]);
   // The line about the round just placed lasts until that round moves on. Batch 63 (v15 batch
-  // 62 review CDI-10, F12): and no longer than the next read of the table — it stayed at the top
-  // long after the round was sent, even after another guest's round came in.
+  // 62 review CDI-10, F12): and only until the table is read again a while later (the next
+  // check, about 15 s on) or the guest taps Refresh now — it stayed at the top long after the
+  // round was sent, even after another guest's round came in.
   const placedRoundSeen = useRef<string | null>(null);
-  const placedSeenIn = useRef<DiningSessionState | null>(null);
+  const placedShownAt = useRef<number | null>(null);
   useEffect(() => {
     if (placed === null || state.status === "loading" || state.status === "unavailable") return;
     if (state.status !== "ready") {
@@ -1309,11 +1313,11 @@ export function DiningSessionPage({
     }
     const seen = placedRoundFact(state.view);
     if (seen === null) return;
-    if (placedSeenIn.current !== null && placedSeenIn.current !== state) {
+    if (placedShownAt.current !== null && Date.now() - placedShownAt.current >= placedLineMs) {
       setPlaced(null);
       return;
     }
-    placedSeenIn.current = state;
+    placedShownAt.current ??= Date.now();
     placedRoundSeen.current ??= seen;
     if (
       placedRoundSeen.current !== seen ||
@@ -1362,6 +1366,8 @@ export function DiningSessionPage({
       menu={menu}
       placed={placed}
       showReceipt={showReceipt}
+      // Batch 63 (F12): the guest's own fresh look no longer needs the line about the round.
+      onRefreshTapped={() => setPlaced(null)}
       onRefresh={() => {
         // v15 batch 7: "Refresh now" reads the pay section too.
         void load();
@@ -1439,6 +1445,7 @@ export function DiningSessionScreen({
   state,
   store,
   onRefresh,
+  onRefreshTapped,
   invitation = null,
   staffCall = null,
   cartClient,
@@ -1470,6 +1477,8 @@ export function DiningSessionScreen({
   readonly state: DiningSessionState;
   readonly store?: CustomerStoreContext | undefined;
   readonly onRefresh: () => void;
+  /** Batch 63 (F12): the guest tapped Refresh now (the page's own reads don't count). */
+  readonly onRefreshTapped?: (() => void) | undefined;
   /** WP-2423 DEC-DINING-GUEST-INVITATION: the host's "Invite someone at your table". */
   readonly invitation?: ReactNode;
   /** WP-2423 Q28 DEC-DINING-STAFF-CALL: "Need a staff member?". */
@@ -1824,7 +1833,14 @@ export function DiningSessionScreen({
               ? t("This page checks for updates every few seconds.")
               : t("Everything at this table is served or closed.")}
           </p>
-          <button type="button" disabled={state.refreshing} onClick={onRefresh}>
+          <button
+            type="button"
+            disabled={state.refreshing}
+            onClick={() => {
+              onRefreshTapped?.();
+              onRefresh();
+            }}
+          >
             {state.refreshing ? t("Refreshing…") : t("Refresh now")}
           </button>
         </section>

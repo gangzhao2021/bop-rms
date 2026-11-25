@@ -776,8 +776,8 @@
 .customer-page.customer-page .cart-item__actions button.cart-link-button {
   justify-content: flex-start;
 }
-.customer-page.customer-page .contact-details > button,
-.customer-page.customer-page .contact-details__actions button:first-child {
+.customer-page.customer-page .contact-details > button:not(:disabled),
+.customer-page.customer-page .contact-details__actions button:first-child:not(:disabled) {
   color: var(--bop-color-danger-text, var(--bop-color-danger));
 }
 .customer-page.customer-page .contact-details__actions {
@@ -1269,4 +1269,11 @@
   .dining-session__receipt--printable .member-panel__added {
     display: none;
   }
+}
+
+/* Batch 63 (F14): the start page's words begin on the header's edge (the card and the help were
+   set 15 px in, with no box to explain it). */
+.customer-page.customer-page .entry-card,
+.customer-page.customer-page .entry-help {
+  padding-inline: 0;
 }
