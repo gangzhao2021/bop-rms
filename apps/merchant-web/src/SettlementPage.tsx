@@ -408,7 +408,7 @@ export function SettlementReport({
             <li>
               <span className="overview-count__label">{t("Taken off bills")}</span>
               <strong className="overview-count__value">{money(view.comps)}</strong>
-              <span className="overview-count__detail">{countOf(view.comps.count, "dish")}</span>
+              <span className="overview-count__detail">{countOf(view.comps.count, "portion")}</span>
             </li>
           </ul>
           <p className="bop-muted">

@@ -311,7 +311,7 @@ export function TonightSummaryView({
           <Row
             label={t("Comps and discounts by a manager")}
             detail={
-              countOf(s.compCount, "dish") +
+              countOf(s.compCount, "portion") +
               (s.compsWithTaxMinor === s.compsMinor
                 ? ""
                 : " · " + t("({amount} with tax)", { amount: money(s.compsWithTaxMinor) }))

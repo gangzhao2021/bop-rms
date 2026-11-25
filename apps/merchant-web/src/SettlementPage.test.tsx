@@ -166,7 +166,8 @@ describe("WP-2423 P1 settlement report", () => {
     });
     expect(html).toContain("Comps and discounts by a manager");
     expect(html).toContain("$28.30");
-    expect(html).toContain("2 dishes");
+    // b64: comps count the portions they covered.
+    expect(html).toContain("2 portions");
     expect(
       render({
         ...settlementViewFixture(),

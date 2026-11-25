@@ -338,25 +338,33 @@ it("a closed day before the Store's day-end checks start is NotCovered, never No
   ).toBeNull();
 });
 
-// Batch 60: the day-end "Taken off bills" line counts dish lines, as Reports' compCount does.
-it("counts a line comped 1 of 2, then the other, as one dish, with both amounts", () => {
+// Batch 60 counted dish lines; b64 (v15 b62 live: a comp of 2 bowls on one line read "1 dish")
+// counts the portions comped, as Reports' compCount now does.
+it("counts the portions comped: 1 of 2 bowls, then the other, is 2; two bowls at once are 2", () => {
   const line = id(0x51),
     other = id(0x52);
-  const comp = (orderItemReference: string, totalMinor: bigint, reasonCode = "SERVICE_RECOVERY") =>
-    ({ orderItemReference, totalMinor, reasonCode }) as const;
-  expect(managerCompsTakenOff([comp(line, 1413n), comp(line, 1412n)])).toEqual({
-    count: 1,
+  const comp = (
+    orderItemReference: string,
+    totalMinor: bigint,
+    compedQuantity: number | null,
+    lineQuantity: number,
+    reasonCode = "SERVICE_RECOVERY",
+  ) => ({ orderItemReference, totalMinor, reasonCode, compedQuantity, lineQuantity }) as const;
+  expect(managerCompsTakenOff([comp(line, 1413n, 1, 2), comp(line, 1412n, 1, 2)])).toEqual({
+    count: 2,
     amountMinor: "2825",
     currencyCode: "CAD",
   });
-  // Another line is another dish; a member's points are not a manager's comp.
+  // Two bowls of another line comped at once; a member's points are not a manager's comp.
   expect(
     managerCompsTakenOff([
-      comp(line, 1413n),
-      comp(line, 1412n),
-      comp(other, 500n),
-      comp(id(0x53), 300n, "POINTS_REDEMPTION"),
+      comp(line, 1413n, 1, 2),
+      comp(line, 1412n, 1, 2),
+      comp(other, 500n, null, 2),
+      comp(id(0x53), 300n, null, 1, "POINTS_REDEMPTION"),
     ]),
-  ).toEqual({ count: 2, amountMinor: "3325", currencyCode: "CAD" });
+  ).toEqual({ count: 4, amountMinor: "3325", currencyCode: "CAD" });
+  // Never more than the line has (a discount after a part comp).
+  expect(managerCompsTakenOff([comp(line, 500n, 1, 2), comp(line, 300n, null, 2)]).count).toBe(2);
   expect(managerCompsTakenOff([])).toEqual({ count: 0, amountMinor: "0", currencyCode: "CAD" });
 });

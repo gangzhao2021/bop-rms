@@ -31,20 +31,31 @@ export interface MerchantSettlementWriteOffs extends MerchantSettlementAmount {
 }
 /**
  * WP-2423 item 8 ① segment 2: the day-end line of comps and discounts managers decided — every
- * record's amount (with the tax it took off), counted by dish line as Reports' compCount counts
- * them: a line comped in two parts (1 of 2 bowls, then the other) is one dish ("道菜"), and a line
- * of two bowls comped at once was always one. A member's points are not a manager's comp.
+ * record's amount (with the tax it took off), counted by portion as Reports' compCount counts them
+ * (b64, v15 b62 live): two bowls of one line comped at once are 2, and a line comped 1 of 2 bowls,
+ * then the other, is 2 as well; never more than the line has. A member's points are not a
+ * manager's comp.
  */
 export function managerCompsTakenOff(
   decided: readonly {
     readonly orderItemReference: string;
     readonly totalMinor: bigint;
     readonly reasonCode: string;
+    /** The portions this decision comped (null: the whole line). */
+    readonly compedQuantity: number | null;
+    readonly lineQuantity: number;
   }[],
 ): MerchantSettlementAmount {
   const comps = decided.filter((record) => record.reasonCode !== "POINTS_REDEMPTION");
+  const portions = new Map<string, { comped: number; line: number }>();
+  for (const record of comps) {
+    const line = portions.get(record.orderItemReference) ?? { comped: 0, line: 0 };
+    line.comped += record.compedQuantity ?? record.lineQuantity;
+    line.line = Math.max(line.line, record.lineQuantity);
+    portions.set(record.orderItemReference, line);
+  }
   return {
-    count: new Set(comps.map((record) => record.orderItemReference)).size,
+    count: [...portions.values()].reduce((sum, line) => sum + Math.min(line.comped, line.line), 0),
     amountMinor: comps.reduce((sum, record) => sum + record.totalMinor, 0n).toString(),
     currencyCode: "CAD",
   };

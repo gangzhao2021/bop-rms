@@ -120,7 +120,7 @@ function SummaryLines({ summary }: { readonly summary: StoreReportSummary }) {
   if (summary.compCount > 0)
     lines.push([
       t("Comps and discounts by a manager · {dishes}", {
-        dishes: countOf(summary.compCount, "dish"),
+        dishes: countOf(summary.compCount, "portion"),
       }),
       // v15 M149: before tax, like every sales line; with its tax said beside it.
       <>

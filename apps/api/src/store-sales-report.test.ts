@@ -1006,6 +1006,61 @@ describe("store sales report (WP-2423 Q14)", () => {
       "comps_and_discounts_by_manager",
     );
   });
+  it("b64 (v15 b62 live): a comp counts the portions it covered, never one line as one dish", () => {
+    const counted = (comped: StoreSalesOrderItem, kept: StoreSalesOrderItem) => {
+      const paid = kept.totalMinor + comped.totalMinor;
+      return computeStoreSalesReport({
+        ...today,
+        orders: [order(902, "DineIn", "Qr", [[kept, comped]])],
+        payments: [
+          {
+            channel: "Cash",
+            paymentIntentReference: ref(952) + ":1",
+            orderReference: ref(902),
+            orderBatchReference: ref(912),
+            orderAllocationMinor: paid,
+            tipMinor: 0n,
+            totalMinor: paid,
+            roundingMinor: 0n,
+            paymentCount: 1,
+            takenAt: "2026-10-14T20:00:00.000Z",
+          },
+        ],
+        refundedPayments: [],
+        refunds: [],
+        settlement: {
+          onlineCaptured: { count: 0, amountMinor: 0n },
+          onlineRefunded: { count: 0, amountMinor: 0n },
+          cardMachineTaken: { count: 0, amountMinor: 0n, tipMinor: 0n },
+          cardMachineRefunded: { count: 0, amountMinor: 0n },
+          cashTaken: { count: 1, amountMinor: paid, tipMinor: 0n, roundingMinor: 0n },
+          cashRefunded: { count: 0, amountMinor: 0n },
+        },
+      }).summary.compCount;
+    };
+    const kept = item(sku.latteLarge, 1, 1000);
+    // Two bowls on one line, both comped at once (the line's whole comp).
+    const whole = {
+      ...item(sku.muffin, 2, 2000),
+      compMinor: 2000n,
+      taxMinor: 0n,
+      totalMinor: 0n,
+      taxComponents: [{ code: "SYNTHETIC_TAX", amountMinor: 0n }],
+    };
+    expect(counted({ ...whole, compQuantity: 2 }, kept)).toBe(2);
+    // A whole-line comp the source sends without its portions (an older source) is the line.
+    expect(counted(whole, kept)).toBe(2);
+    // One of the two bowls comped: 1.
+    const one = {
+      ...item(sku.muffin, 2, 2000),
+      compMinor: 1000n,
+      compQuantity: 1,
+      taxMinor: 130n,
+      totalMinor: 1130n,
+      taxComponents: [{ code: "SYNTHETIC_TAX", amountMinor: 130n }],
+    };
+    expect(counted(one, kept)).toBe(1);
+  });
   it("WP-2423 item 8 ① segment 2: a round comped in full (no payment line) still counts, on the day it was comped", () => {
     // v15 2026-10-27: round 1 (latte) paid in cash; round 2 (one mocha) comped in full, owing 0.
     const latte = item(sku.latteLarge, 1, 1000);

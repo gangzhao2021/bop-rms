@@ -129,6 +129,8 @@ const COUNTED: Readonly<Record<string, readonly [plural: string, chinese: string
   run: ["runs", "次运行"],
   item: ["items", "项"],
   dish: ["dishes", "道菜"],
+  // b64 (v15 b62 live): bowls or plates of one line ("2 portions" of one noodle line, 2 份).
+  portion: ["portions", "份"],
 };
 export type CountedNoun = keyof typeof COUNTED;
 export function countOf(count: number, noun: CountedNoun): string {

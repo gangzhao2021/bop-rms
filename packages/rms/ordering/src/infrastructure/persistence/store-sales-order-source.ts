@@ -32,6 +32,11 @@ export interface StoreSalesOrderItem {
   /** v15 M130: the tax that comp or discount took off (0 when none). */
   readonly compTaxMinor: bigint;
   /**
+   * b64 (v15 b62 live): how many portions of the line a manager's comp or discount covered (a
+   * part comp: the portions comped; else the whole line). Absent when there is none.
+   */
+  readonly compQuantity?: number;
+  /**
    * v15 M130: what a member's points paid of the net (`POINTS_REDEMPTION`, 0 when none). Points are
    * not a manager's comp: they are the guest's own balance, so they are a line of their own.
    */
@@ -197,6 +202,14 @@ export function createPostgresStoreSalesOrderSource(options: {
             discountMinor: pricing.discount.amountMinor,
             compMinor: off !== null && !points ? off.netMinor : 0n,
             compTaxMinor: off !== null && !points ? off.taxMinor : 0n,
+            ...(off !== null && !points
+              ? {
+                  compQuantity: Math.min(
+                    off.compedQuantity ?? snapshot.quantity,
+                    snapshot.quantity,
+                  ),
+                }
+              : {}),
             pointsMinor: off !== null && points ? off.netMinor : 0n,
             pointsTaxMinor: off !== null && points ? off.taxMinor : 0n,
             taxMinor: pricing.tax.amountMinor - taxOff,

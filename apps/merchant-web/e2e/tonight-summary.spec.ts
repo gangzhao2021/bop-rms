@@ -81,7 +81,8 @@ test("@production tonight's summary adds up, checks the card machine and drawer,
   await expect(page.getByRole("heading", { name: "Today's summary · Tue, Oct 27" })).toBeVisible();
   const sales = page.getByRole("region", { name: /^Sales/u });
   await expect(sales).toContainText("Gross sales$412.50");
-  await expect(sales).toContainText("Comps and discounts by a manager3 dishes−$18.25");
+  // b64 (v15 b62 live): comps count the portions they covered.
+  await expect(sales).toContainText("Comps and discounts by a manager3 portions−$18.25");
   await expect(sales).toContainText("Net sales$394.25");
   const takings = page.getByRole("region", { name: /^Taken, by payment method/u });
   await expect(takings.getByRole("table")).toContainText("Card machine8$27.40$219.50");

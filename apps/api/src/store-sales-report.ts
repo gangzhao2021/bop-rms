@@ -193,6 +193,15 @@ interface DayFacts {
 const fail = (): never => {
   throw new Error("STORE_SALES_REPORT_UNAVAILABLE");
 };
+/**
+ * b64 (v15 b62 live): the portions a manager's comp or discount covered on a line — two bowls of
+ * one line comped count 2, never "1 dish"; a line comped in part counts the portions comped.
+ */
+const compPortions = (item: {
+  readonly compMinor: bigint;
+  readonly quantity: number;
+  readonly compQuantity?: number;
+}) => (item.compMinor > 0n ? (item.compQuantity ?? item.quantity) : 0);
 const s = (value: bigint) => value.toString();
 const add = <K>(map: Map<K, bigint>, key: K, value: bigint) =>
   map.set(key, (map.get(key) ?? 0n) + value);
@@ -538,7 +547,7 @@ function computeSales(
       t.compTaxMinor += share.compTaxMinor;
       t.pointsMinor += share.pointsMinor;
       if (share.primary) {
-        t.compCount += items.filter((item) => item.compMinor > 0n).length;
+        t.compCount += items.reduce((sum, item) => sum + compPortions(item), 0);
         t.pointsCount += items.filter((item) => item.pointsMinor > 0n).length;
       }
       t.serviceChargeMinor += share.feeMinor;
@@ -623,7 +632,7 @@ function computeSales(
         t.compMinor += item.compMinor;
         t.compTaxMinor += item.compTaxMinor;
         t.pointsMinor += item.pointsMinor;
-        if (item.compMinor > 0n) t.compCount++;
+        t.compCount += compPortions(item);
         if (item.pointsMinor > 0n) t.pointsCount++;
         t.serviceChargeMinor += item.feeMinor;
         t.taxMinor += item.taxMinor;

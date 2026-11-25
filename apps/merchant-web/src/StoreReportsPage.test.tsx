@@ -212,7 +212,8 @@ describe("WP-2423 Q14 store reports page", () => {
     summary.compCount = 2;
     summary.compsMinor = "2830";
     const html = render(view);
-    expect(html).toContain("Comps and discounts by a manager · 2 dishes");
+    // b64: comps count the portions they covered.
+    expect(html).toContain("Comps and discounts by a manager · 2 portions");
     expect(html).toContain("−$28.30");
     expect(render(storeReportsViewFixture())).not.toContain("Comps and discounts by a manager");
   });

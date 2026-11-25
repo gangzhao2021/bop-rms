@@ -589,7 +589,7 @@ export function createPersistentMerchantSettlement(options: {
             window,
           );
           if (!(await guard(scope)(tx))) return null;
-          // Batch 60: by dish line, as Reports count them (a line comped in two parts is one).
+          // b64: by portion, as Reports count them (two bowls of one line are 2).
           return managerCompsTakenOff(decided);
         }),
       // DEC-DINE-IN-PAY-LATER (cash): tables paid in cash, cash given back, net and rounding.
