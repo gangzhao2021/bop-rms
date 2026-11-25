@@ -2827,6 +2827,27 @@ function OrderStatusNotes({
 }
 
 /**
+ * b62 (v15 b61 live, order 73): on the Orders detail of a table merged into another, where its
+ * rounds are billed and whether that bill was paid.
+ */
+export function mergedIntoText(into: {
+  readonly tableLabel: string | null;
+  readonly paid: boolean;
+}): string {
+  if (into.tableLabel === null)
+    return into.paid
+      ? t("Merged into another table. Its rounds are on that table's bill and were paid there.")
+      : t("Merged into another table. Its rounds are on that table's bill and are paid there.");
+  return into.paid
+    ? t("Merged into {table}. Its rounds are on that table's bill and were paid there.", {
+        table: into.tableLabel,
+      })
+    : t("Merged into {table}. Its rounds are on that table's bill and are paid there.", {
+        table: into.tableLabel,
+      });
+}
+
+/**
  * Orders v2: the words under a row's amount, only when they say something the amount does not —
  * not paid, taken on the card machine, refunded. A plain online payment says nothing.
  */
@@ -3945,7 +3966,19 @@ export function CurrentOrderQueueRows({
                             })}
                           </span>
                         ) : null}
-                        {note === null ? null : <span className="order-row__paid">{note}</span>}
+                        {note === null ? null : (
+                          // b62 (v15 b61 live, order 73): a table merged into another says so at
+                          // every width; on a phone "—" alone gave no reason.
+                          <span
+                            className={
+                              order.tableBill?.mergedInto === undefined
+                                ? "order-row__paid"
+                                : "order-row__merged"
+                            }
+                          >
+                            {note}
+                          </span>
+                        )}
                         {amount === null && note === null ? (
                           <span className="visually-hidden">{t("No payment recorded")}</span>
                         ) : null}
@@ -4033,8 +4066,16 @@ export function CurrentOrderDetails({
           onBusy={onBusy}
           onChanged={onChanged}
           fetcher={fetcher}
+          mergedInto={order.tableBill?.mergedInto}
         >
           {lines}
+          {order.tableBill?.mergedInto === undefined ? null : (
+            // b62 (v15 b61 live, order 73): right under its Total, its rounds are on the bill of
+            // the table it was merged into; never a second bill to collect.
+            <p className="order-panel__merged" role="note">
+              {mergedIntoText(order.tableBill.mergedInto)}
+            </p>
+          )}
         </DiningRoundsProvider>
       ) : (
         lines

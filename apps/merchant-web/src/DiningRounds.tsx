@@ -235,9 +235,16 @@ export function DiningRoundsProvider({
   fetcher,
   children,
   closeActions = true,
+  mergedInto,
 }: {
   /** The order's and table's close steps after the rounds (the Tables page has its own). */
   readonly closeActions?: boolean;
+  /**
+   * b62 (v15 b61 live, order 73): the table was merged into another. Its rounds are served there
+   * and the progress read follows that table's session, so the table's state and Close the table
+   * are the other table's: they are not said or offered on this order.
+   */
+  readonly mergedInto?: { readonly tableLabel: string | null; readonly paid: boolean } | undefined;
   readonly orderReference: string;
   readonly csrf: string;
   /** Changes when the page has read a newer order (its observed time or version). */
@@ -530,7 +537,7 @@ export function DiningRoundsProvider({
           {t("Order closed. Serving history is read-only.")}
         </p>
       ) : null}
-      {view === null || view.sessionPhase === "Active" ? null : (
+      {view === null || view.sessionPhase === "Active" || mergedInto !== undefined ? null : (
         // The table is checking out (dishes still served, no new rounds), or closed.
         <p className="dining-rounds__table" role="status">
           {/* v15 b12: the Closing phase is checkout (结账中); 关台 is only the close itself. */}
@@ -547,14 +554,16 @@ export function DiningRoundsProvider({
             onBusy={markBusy}
             onClosed={changed}
           />
-          <DiningSessionCloseAction
-            key={view.diningSessionReference + ":" + view.sessionVersion}
-            view={view}
-            csrf={csrf}
-            locked={busy || locked}
-            onBusy={markBusy}
-            onClosed={changed}
-          />
+          {mergedInto === undefined ? (
+            <DiningSessionCloseAction
+              key={view.diningSessionReference + ":" + view.sessionVersion}
+              view={view}
+              csrf={csrf}
+              locked={busy || locked}
+              onBusy={markBusy}
+              onClosed={changed}
+            />
+          ) : null}
         </>
       )}
     </DiningRoundsContext.Provider>

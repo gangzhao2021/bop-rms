@@ -488,11 +488,22 @@
 /* Unlike the note below it, shown at every width: the amount above it depends on it. b61: so is
    a table's refund still on its way back to the guest's card. */
 .orders-page .order-row__refunded,
-.orders-page .order-row__on-its-way {
+.orders-page .order-row__on-its-way,
+.orders-page .order-row__merged {
   color: var(--bop-color-text-muted);
   font-size: 13px;
   text-align: end;
   white-space: normal;
+}
+/* b62 (v15 b61 live, order 73): a table merged into another says where it was paid at every
+   width; on a phone it wraps within about half the row, so the dishes keep the rest. */
+.orders-page .order-row__merged {
+  overflow-wrap: break-word;
+}
+@container order-list (max-width: 512px) {
+  .orders-page .order-row__merged {
+    max-width: 8.5rem;
+  }
 }
 .orders-page .order-workbench-next {
   display: flex;
@@ -1131,6 +1142,10 @@
   gap: var(--bop-space-6);
 }
 .orders-page .order-panel__hint {
+  margin: 0;
+  font-size: 14px;
+}
+.orders-page .order-panel__merged {
   margin: 0;
   font-size: 14px;
 }

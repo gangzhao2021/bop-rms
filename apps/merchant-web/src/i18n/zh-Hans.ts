@@ -10554,4 +10554,13 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Refund to make on the card machine": "退款待在刷卡机上办理",
   "Tables merged into this one": "并入本桌的其他桌",
   "Whole bill paid": "整桌账单实付",
+  // Batch 62 (v15 b61 live): a merged table's order on Orders.
+  "Merged into {table}. Its rounds are on that table's bill and were paid there.":
+    "已并入 {table}。本单各轮记在该桌账单上，已在那里付清。",
+  "Merged into {table}. Its rounds are on that table's bill and are paid there.":
+    "已并入 {table}。本单各轮记在该桌账单上，在那里结账。",
+  "Merged into another table. Its rounds are on that table's bill and were paid there.":
+    "已并入另一桌。本单各轮记在该桌账单上，已在那里付清。",
+  "Merged into another table. Its rounds are on that table's bill and are paid there.":
+    "已并入另一桌。本单各轮记在该桌账单上，在那里结账。",
 });
