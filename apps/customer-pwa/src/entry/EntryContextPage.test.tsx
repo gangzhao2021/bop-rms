@@ -351,6 +351,9 @@ describe("WP-2423 Q4 not accepting orders", () => {
       localDate: null,
     });
     expect(paused).toContain(">Ordering is paused</h2>");
+    // Batch 63 review: a pause is marked apart from closing time (amber dot, not the red one).
+    expect(paused).toContain('class="entry-state entry-state--closed entry-state--paused"');
+    expect(closed).not.toContain("entry-state--paused");
     expect(paused).toContain("Online ordering is paused for a short while.");
   });
   it("WP-2423 item 8 ③ decision 16: a holiday says so once and gives the next opening", () => {

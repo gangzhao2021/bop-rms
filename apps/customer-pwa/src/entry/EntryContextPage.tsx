@@ -1336,7 +1336,11 @@ function EntryState({
       .filter((part) => part !== null)
       .join(wordGap());
     return (
-      <div className="entry-state entry-state--closed" role="alert">
+      // Batch 63 review: a short pause is not closing time, so it carries an amber dot, not red.
+      <div
+        className={`entry-state entry-state--closed${state.paused ? " entry-state--paused" : ""}`}
+        role="alert"
+      >
         <StateHeading headingRef={headingRef}>
           {state.paused ? t("Ordering is paused") : t("Closed now")}
         </StateHeading>

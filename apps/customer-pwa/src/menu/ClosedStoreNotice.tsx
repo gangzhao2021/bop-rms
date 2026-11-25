@@ -14,7 +14,10 @@ export function ClosedStoreNotice({
 }) {
   return (
     <>
-      <p className="menu-closed-notice__line">
+      {/* Batch 63 review: a short pause is not closing time (amber dot, not red). */}
+      <p
+        className={`menu-closed-notice__line${closed.paused ? " menu-closed-notice__line--paused" : ""}`}
+      >
         {closed.paused
           ? t("Ordering is paused for a short while")
           : closed.nextOpening === null

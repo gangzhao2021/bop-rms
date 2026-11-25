@@ -922,6 +922,9 @@ describe("Owner 2026-11-03: one tap for a dish with nothing to choose", () => {
     });
     expect(paused).toContain("Ordering is paused for a short while");
     expect(paused).not.toContain("Closed now");
+    // Batch 63 review: a pause carries the amber dot, closing time the red one.
+    expect(paused).toContain('class="menu-closed-notice__line menu-closed-notice__line--paused"');
+    expect(html).not.toContain("menu-closed-notice__line--paused");
   });
 });
 

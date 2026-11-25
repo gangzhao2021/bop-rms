@@ -852,6 +852,11 @@
   background: var(--bop-color-danger-mark);
   vertical-align: 0.15em;
 }
+/* Batch 63 review: "Ordering is paused" is a short pause, not closed: an amber dot. */
+.customer-page.customer-page .entry-state--paused h2::before,
+.customer-page.customer-page .menu-closed-notice__line--paused::before {
+  background: var(--bop-color-warning);
+}
 .customer-page .entry-state--closed .entry-state__next {
   color: var(--bop-color-text-default);
   font-size: 16px;

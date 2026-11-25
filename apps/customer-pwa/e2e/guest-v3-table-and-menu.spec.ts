@@ -367,4 +367,36 @@ for (const width of [390, 1024])
           path: `test-results/b63-closed-${zh ? "zh" : "en"}-${String(width)}.png`,
         });
       });
+
+      test("batch 63 review: a short pause is an amber dot, not the closed red one", async ({
+        page,
+      }) => {
+        await page.route("**/bff/customer/entry", (route) =>
+          route.fulfill({
+            status: 409,
+            headers: { "cache-control": "no-store" },
+            json: {
+              schemaVersion: 1,
+              code: "entry_not_accepting",
+              messageKey: "customer.entry.not_accepting",
+              recovery: { action: "TryLaterOrAskStaff", storeSelection: "Hidden" },
+              store: {
+                storeDisplayName: "半糖奶茶 Half Sugar Tea (TEST)",
+                operatingState: "TemporarilyClosed",
+                todayHours: [],
+                todayKind: null,
+                nextOpening: null,
+                localDate: null,
+              },
+            },
+          }),
+        );
+        await page.goto("/#qr=aaa.bbb.ccc");
+        const title = page.locator("#entry-heading");
+        await expect(title).toHaveText(zh ? "点单已暂停" : "Ordering is paused");
+        const dot = await title.evaluate(
+          (element) => getComputedStyle(element, "::before").backgroundColor,
+        );
+        expect(dot).toBe("rgb(138, 90, 0)");
+      });
     });
