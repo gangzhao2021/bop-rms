@@ -1220,10 +1220,51 @@ export interface OrderRefundRow {
  * cancellation's refund, and — when every amount is known — any other online refund (a refund at
  * the customer's request, or an automatic one), then the total when there is more than one.
  */
+/**
+ * Batch 63 review (F27, D62C-12/T12): the refunds behind "Refunded", each said with its own way and
+ * time ("Refunded to card · 22:59", "Cash given back · 02:28"), from the order's record (money
+ * Payment sent back, as the record lists it). Only when the record's refunds make up exactly that
+ * money — all of them, or all but the refunds already listed by name above — else null, and the
+ * row stays "Refunded" (never a way or time that might belong to another refund).
+ */
+export function refundedByWay(
+  record: CurrentOrderDetail["record"] | undefined,
+  refundedMinor: bigint,
+  listedMinor: readonly bigint[],
+  when: (at: string) => string,
+): readonly { readonly label: string; readonly amountMinor: bigint }[] | null {
+  if (record == null || record.refunds.length === 0) return null;
+  const sum = (list: typeof record.refunds) =>
+    list.reduce((total, refund) => total + BigInt(refund.amountMinor), 0n);
+  let refunds = record.refunds;
+  if (sum(refunds) !== refundedMinor) {
+    const rest = [...refunds];
+    for (const amount of listedMinor) {
+      const at = rest.findIndex((refund) => BigInt(refund.amountMinor) === amount);
+      if (at >= 0) rest.splice(at, 1);
+    }
+    if (rest.length === 0 || sum(rest) !== refundedMinor) return null;
+    refunds = rest;
+  }
+  return [...refunds]
+    .sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0))
+    .map((refund) => ({
+      label:
+        refund.method === "Online"
+          ? t("Refunded to card · {time}", { time: when(refund.at) })
+          : refund.method === "Cash"
+            ? t("Cash given back · {time}", { time: when(refund.at) })
+            : t("Refunded on the card machine · {time}", { time: when(refund.at) }),
+      amountMinor: BigInt(refund.amountMinor),
+    }));
+}
 export function orderRefundRows(
   order: CurrentOrderQueue["items"][number],
   lines: CurrentOrderDetail["lines"],
   position: CurrentOrderDetail["paymentPosition"],
+  /** F27: the order's record, so "Refunded" can say each refund's way and time. */
+  record: CurrentOrderDetail["record"] | undefined = null,
+  when: (at: string) => string = (at) => orderWhen(at, undefined, null),
 ): readonly OrderRefundRow[] {
   const currencyCode = lines.totals.total.currencyCode;
   const money = (minor: bigint) => ({ amountMinor: minor.toString(), currencyCode });
@@ -1326,8 +1367,15 @@ export function orderRefundRows(
   other += BigInt(table?.refundedMinor ?? "0");
   if (other > 0n) {
     // Batch 63 (F27, v15 b62 review: "Other refunds" — other than what?): money Payment says went
-    // back, said as that; the payment section lists each refund with what, when and who.
-    rows.push({ label: t("Refunded"), amount: money(other) });
+    // back, said as that, with each refund's way and time when the record shows which they were.
+    const ways = refundedByWay(
+      record,
+      other,
+      rows.flatMap((row) => (row.amount === null ? [] : [BigInt(row.amount.amountMinor)])),
+      when,
+    );
+    if (ways === null) rows.push({ label: t("Refunded"), amount: money(other) });
+    else for (const way of ways) rows.push({ label: way.label, amount: money(way.amountMinor) });
     total += other;
   }
   if (rows.length > 1 && known) rows.push({ label: t("Total refunded"), amount: money(total) });
@@ -2557,6 +2605,8 @@ function QueuedOrderLines({
           state.detail.order,
           state.detail.lines,
           state.detail.paymentPosition,
+          state.detail.record,
+          (at) => orderWhen(at, timeZone, today),
         )}
         billRounding={orderBill(state.detail.order)}
         tableTaken={orderTableTaken(state.detail.order)}
@@ -5809,6 +5859,8 @@ export function CurrentOrderQueuePage({
                               detail.order,
                               detail.lines,
                               detail.paymentPosition,
+                              detail.record,
+                              (at) => orderWhen(at, timeZone, businessDay),
                             )}
                             billRounding={orderBill(detail.order)}
                             tableTaken={orderTableTaken(detail.order)}

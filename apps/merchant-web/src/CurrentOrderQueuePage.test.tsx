@@ -2678,6 +2678,66 @@ describe("b60 (v15 b59 live, TM2 order 27): a paid table's refunds count on Orde
     expect(orderRefundRows(table({}), lines, null)).toEqual([]);
   });
 
+  it("F27: says each refund's own way and time from the order's record, else Refunded", () => {
+    const refund = (
+      method: "Online" | "Cash" | "CardMachine",
+      amountMinor: string,
+      at: string,
+    ) => ({
+      method,
+      amountMinor,
+      by: "You",
+      approvedBy: null,
+      at,
+      cashGivenBackMinor: null,
+    });
+    const record = (refunds: ReturnType<typeof refund>[]) =>
+      ({
+        accepted: [],
+        handedOver: [],
+        payments: [],
+        cancellations: [],
+        refunds,
+        writeOff: null,
+        paidOnlineByGuest: true,
+      }) as unknown as Parameters<typeof orderRefundRows>[3];
+    const clock = (at: string) => at.slice(11, 16);
+    // v15 b62 T12: $5.00 to the guest's card at 22:59 and $3.75 cash at 02:28, both given back.
+    const two = record([
+      refund("Cash", "375", "2026-11-25T02:28:00.000Z"),
+      refund("Online", "500", "2026-11-24T22:59:00.000Z"),
+    ]);
+    expect(orderRefundRows(both, lines, null, two, clock)).toEqual([
+      { label: "Refunded to card · 22:59", amount: money("500") },
+      { label: "Cash given back · 02:28", amount: money("375") },
+      { label: "Total refunded", amount: money("875") },
+      { label: "Refund on its way", amount: money("300"), pending: true },
+    ]);
+    expect(
+      orderRefundRows(
+        table({ refundedMinor: "675" }),
+        lines,
+        null,
+        record([refund("CardMachine", "675", "2026-11-24T21:05:00.000Z")]),
+        clock,
+      ),
+    ).toEqual([{ label: "Refunded on the card machine · 21:05", amount: money("675") }]);
+    // The record does not make up the money said as refunded: no way or time is guessed.
+    expect(
+      orderRefundRows(
+        both,
+        lines,
+        null,
+        record([refund("Online", "500", "2026-11-24T22:59:00.000Z")]),
+        clock,
+      ),
+    ).toEqual([
+      { label: "Refunded", amount: money("875") },
+      { label: "Refund on its way", amount: money("300"), pending: true },
+    ]);
+    expect(orderRefundRows(both, lines, null, record([]), clock)[0]?.label).toBe("Refunded");
+  });
+
   it("works the total after refunds from what went back only; the original total stays", () => {
     const rows = orderRefundRows(both, lines, null);
     expect(totalAfterRefunds(money("2825"), rows)).toEqual(money("1950"));

@@ -94,7 +94,12 @@ const waitingList = () => [
   ...quietList(),
 ];
 
-async function ordersPage(page: Page, language: Language, items: unknown[]) {
+async function ordersPage(
+  page: Page,
+  language: Language,
+  items: unknown[],
+  more?: (page: Page) => Promise<unknown>,
+) {
   await inLanguage(page, language);
   await quietFrame(page);
   await page.route("**/merchant/orders/changes", (route) =>
@@ -104,6 +109,7 @@ async function ordersPage(page: Page, language: Language, items: unknown[]) {
     await page.route(pattern, (route) =>
       route.fulfill({ headers, json: { items, nextAfterOrderReference: null } }),
     );
+  await more?.(page);
   await page.goto("/operations/orders");
   await expect(page.locator("li.order-row").first()).toBeVisible();
 }
@@ -291,12 +297,105 @@ for (const language of ["en", "zh-Hans"] as const)
     });
   }
 
+/**
+ * A table paid $28.25, $8.75 of it given back — $5.00 to the guest's card at 22:59 and $3.75 cash
+ * at 22:28 (v15 b62 review T12) — and $3.00 more still on its way to the card.
+ */
+const refundedTable = order(74, {
+  orderType: "DineIn",
+  sourceChannel: "Qr",
+  paidOnline: undefined,
+  currentPhase: "Fulfilled",
+  batches: [
+    {
+      ...batch(74),
+      unpaidRemovableItems: [],
+      unpaidRemovedItems: [],
+      compableItems: [],
+      compedItems: [],
+    },
+  ],
+  tableBill: {
+    totalMinor: "2825",
+    paid: {
+      amountMinor: "2825",
+      method: "Online",
+      refundedMinor: "875",
+      refundPendingMinor: "300",
+    },
+  },
+  summary: {
+    items: [{ name: "Beef noodles (TEST)", option: null, quantity: 2 }],
+    lineCount: 1,
+    pickupName: null,
+    tableLabel: "T12 (TEST)",
+  },
+});
+const line = (n: number, name: string, taxMinor: string) => ({
+  orderItemReference: id(400 + n),
+  orderBatchReference: id(274),
+  name,
+  options: [],
+  quantity: 1,
+  customerNote: null,
+  unitPrice: money("1250"),
+  subtotal: money("1250"),
+  discount: money("0"),
+  tax: money(taxMinor),
+  fee: money("0"),
+  total: money(String(1250 + Number(taxMinor))),
+  canCancel: false,
+  cancellation: null,
+});
+const refundedDetail = {
+  screenId: "OPS-ORDER-DETAIL",
+  pickupContact: null,
+  order: refundedTable,
+  lines: {
+    items: [line(1, "Beef noodles (TEST)", "163"), line(2, "Beef noodles (TEST)", "162")],
+    totals: {
+      subtotal: money("2500"),
+      discount: money("0"),
+      tax: money("325"),
+      fee: money("0"),
+      taxRounding: money("0"),
+      total: money("2825"),
+    },
+  },
+  record: {
+    accepted: [],
+    handedOver: [],
+    payments: [
+      { method: "Online", part: null, round: null, by: null, at: "2026-11-25T01:40:00.000Z" },
+    ],
+    cancellations: [],
+    refunds: [
+      {
+        method: "Cash",
+        amountMinor: "375",
+        by: "You",
+        approvedBy: null,
+        at: "2026-11-25T03:28:00.000Z",
+      },
+      {
+        method: "Online",
+        amountMinor: "500",
+        by: "You",
+        approvedBy: null,
+        at: "2026-11-25T03:59:00.000Z",
+      },
+    ],
+    writeOff: null,
+    paidOnlineByGuest: true,
+  },
+};
+
 for (const language of ["en", "zh-Hans"] as const)
   test(`@production F20 an open order sits beside the list at 1024, no shadow, ${language}`, async ({
     page,
   }) => {
     await page.setViewportSize({ width: 1024, height: 768 });
-    await ordersPage(page, language, quietList());
+    await ordersPage(page, language, [...quietList(), refundedTable]);
     await page.locator("li.order-row .order-row__open").nth(1).click();
     const panel = page.locator("aside.order-panel");
     await expect(panel).toBeVisible();
@@ -325,12 +424,69 @@ for (const language of ["en", "zh-Hans"] as const)
     expect(look.height).toBeLessThan(768);
     expect(look.left).toBeGreaterThanOrEqual(look.listRight);
     expect(look.statusRight).toBeLessThanOrEqual(look.left);
-    // Each row's amount stays in its own column beside the panel, so a refund line under it
-    // is never hidden.
-    const second = page.locator("li.order-row").nth(1);
-    await expect(second.locator(".order-workbench-amount")).toHaveText("$14.13");
+    // Figma 58:65: the amount ends the grey line under the dishes, with its one refund line; the
+    // dishes get the width the money column took.
+    const rows = page.locator("li.order-row");
+    for (const index of [1, (await rows.count()) - 1]) {
+      const row = rows.nth(index);
+      const at = await row.evaluate((node) => {
+        const box = (selector: string) => node.querySelector(selector)?.getBoundingClientRect();
+        const type = box(".order-workbench-type");
+        const when = box(".order-row__when");
+        const amount = box(".order-workbench-amount");
+        const status = box(".order-row__status");
+        return {
+          typeBottom: type?.bottom ?? 0,
+          typeRight: type?.right ?? 0,
+          whenTop: when?.top ?? 0,
+          whenBottom: when?.bottom ?? 0,
+          amountTop: amount?.top ?? 0,
+          amountLeft: amount?.left ?? 0,
+          amountRight: amount?.right ?? 0,
+          statusLeft: status?.left ?? 0,
+          statusRight: status?.right ?? 0,
+        };
+      });
+      expect(at.amountTop).toBeGreaterThanOrEqual(at.typeBottom - 2);
+      expect(at.amountTop).toBeLessThan(at.whenBottom);
+      expect(Math.abs(at.amountRight - at.statusRight)).toBeLessThanOrEqual(2);
+      // The dishes run up to the status, not to an amount column beside it.
+      expect(at.typeRight).toBeLessThanOrEqual(at.statusLeft);
+    }
+    await expect(rows.nth(1).locator(".order-workbench-amount")).toHaveText("$14.13");
+    const refunded = rows.last();
+    await expect(refunded.locator(".order-row__money")).toHaveText("$19.50");
+    await expect(refunded.locator(".order-row__refunded")).toBeVisible();
+    await expect(refunded.locator(".order-row__on-its-way")).toBeVisible();
     await noSideScroll(page);
   });
+
+for (const language of ["en", "zh-Hans"] as const)
+  for (const [width, height] of sizes)
+    test(`@production F27 the order's totals say each refund's way and time, ${language} at ${width}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height });
+      await ordersPage(page, language, [refundedTable], (page) =>
+        page.route("**/merchant/orders/detail*", (route) =>
+          route.fulfill({ headers, json: refundedDetail }),
+        ),
+      );
+      const panel = page.locator("aside.order-panel");
+      if (!(await panel.isVisible()))
+        await page.locator("li.order-row .order-row__open").first().click();
+      const labels = panel.locator(".order-lines-totals dt");
+      const zh = language === "zh-Hans";
+      await expect(
+        labels.filter({ hasText: zh ? /^已退到卡上 · / : /^Refunded to card · / }),
+      ).toHaveText(zh ? /^已退到卡上 · (.* )?22:59$/u : /^Refunded to card · (.* )?22:59$/u);
+      await expect(
+        labels.filter({ hasText: zh ? /^已退现金 · / : /^Cash given back · / }),
+      ).toHaveText(zh ? /^已退现金 · (.* )?22:28$/u : /^Cash given back · (.* )?22:28$/u);
+      // Never the bare word with no way or time.
+      await expect(labels.filter({ hasText: zh ? /^已退款$/u : /^Refunded$/u })).toHaveCount(0);
+      await noSideScroll(page);
+    });
 
 const approvals = async (page: Page, language: Language) => {
   await inLanguage(page, language);

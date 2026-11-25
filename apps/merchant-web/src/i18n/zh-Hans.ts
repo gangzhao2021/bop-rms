@@ -6505,6 +6505,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Paid at the table": "在桌上付款",
   Rounds: "各轮合计",
   "Cash given back · {reason}": "已退现金 · {reason}",
+  "Cash given back · {time}": "已退现金 · {time}",
+  "Refunded to card · {time}": "已退到卡上 · {time}",
+  "Refunded on the card machine · {time}": "已在刷卡机退款 · {time}",
   "From a paper slip during the outage. Already made? Don't make it again, just mark it done.":
     "断网时的纸单。已经做过就不要再做，直接点做好。",
   "It also shows in the kitchen, marked as from a paper slip. If it was already made, the kitchen marks it done and you mark it served.":

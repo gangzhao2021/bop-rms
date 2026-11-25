@@ -1801,3 +1801,36 @@
     display: none;
   }
 }
+
+/*
+ * Batch 63 review (F20, Figma 58:65): beside an open order on a tablet the row is two lines — the
+ * number, its dishes and the status; then the grey "who · type · time" line ending with the amount
+ * and its one refund line ("$3.00 refunded", "$3.00 on its way"), so the dishes get the width the
+ * money column took. The refund line is never dropped: it follows the amount at the end of the grey
+ * line and wraps under it when the line is full.
+ */
+@container order-list (min-width: 513px) and (max-width: 800px) {
+  .orders-page .order-workbench[data-panel] .order-row__summary {
+    /* The status keeps one width on every row, so the statuses line up; the amount and its
+       refund line wrap inside it. */
+    grid-template-columns: max-content minmax(0, 1fr) 9.5rem;
+    grid-template-areas:
+      "num type status"
+      "when when amount";
+    align-items: baseline;
+  }
+  .orders-page .order-workbench[data-panel] .order-workbench-amount {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    align-items: baseline;
+    column-gap: var(--bop-space-2);
+    row-gap: 0;
+    justify-self: end;
+    font-size: var(--bop-type-small);
+  }
+  .orders-page .order-workbench[data-panel] .order-workbench-amount > * {
+    font-size: var(--bop-type-small);
+    white-space: nowrap;
+  }
+}
