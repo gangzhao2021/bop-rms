@@ -6,6 +6,7 @@ import {
   kitchenTicketRounds,
   kitchenTicketStartStep,
   kitchenTicketState,
+  kitchenTicketShownState,
 } from "./KitchenBoardPages.js";
 import type { KitchenBoardItem } from "./kitchen-board.js";
 
@@ -98,7 +99,8 @@ describe("DEC-KITCHEN-ONE-TAP: one main step per ticket", () => {
     const later = [roundItem(3, "Queued", 910, "2026-10-26T22:20:00.000Z")];
     const step = kitchenTicketNextStep([...first, ...later]);
     expect(step?.kind).toBe("Finish");
-    expect(step?.label).toBe("Round finished");
+    // Batch 63 (F51): it says which round it closes (it sits under the newer round).
+    expect(step?.label).toBe("Round 1 finished");
     expect(step?.items.map((entry) => entry.displayName)).toEqual(["TEST dish 1", "TEST dish 2"]);
     expect(kitchenTicketStartStep([...first, ...later])?.items).toHaveLength(2);
     // Its own round's turn comes when the round above is done.
@@ -161,5 +163,17 @@ describe("DEC-KITCHEN-ONE-TAP: one main step per ticket", () => {
     expect(
       kitchenLineFinishable({ ...line, comboPartOf: { ...line.comboPartOf, done: true } }),
     ).toBe(false);
+  });
+});
+
+describe("WP-2423 batch 63 (F51): the status line agrees with a held Start at once", () => {
+  it("reads Being made while Start is held for Undo or on its way, and To make again if it failed", () => {
+    const queued = [item(1, "Queued"), item(2, "Queued")];
+    expect(kitchenTicketShownState(queued, [])).toBe("ToMake");
+    for (const phase of ["Holding", "Waiting", "Sending", "Retrying"] as const)
+      expect(kitchenTicketShownState(queued, [{ step: "Start", phase }])).toBe("Making");
+    expect(kitchenTicketShownState(queued, [{ step: "Start", phase: "Failed" }])).toBe("ToMake");
+    // A held Done does not say Being made; the server's answer moves it on.
+    expect(kitchenTicketShownState(queued, [{ step: "Finish", phase: "Holding" }])).toBe("ToMake");
   });
 });

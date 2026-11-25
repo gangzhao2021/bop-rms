@@ -276,7 +276,7 @@ test("@production WP-2423 batch 44: To make with dishes on the stove says they a
       await expectWithin(page, ".kitchen-queue-count", `${width} ${language}`);
     }
     await page.setViewportSize({ width: 1440, height: 900 });
-    await tabs.getByRole("button", { name: zh ? /^进行中/u : /^Open work/u }).click();
+    await tabs.getByRole("button", { name: zh ? /^未完成/u : /^Open work/u }).click();
     await expect(page.locator(".kitchen-queue-count")).toHaveText(zh ? "3 项工作" : "3 work items");
   }
 });

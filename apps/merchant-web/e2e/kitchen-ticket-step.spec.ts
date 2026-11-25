@@ -430,7 +430,8 @@ test("@production a round that arrives after the cook read the card is left out 
   const ticket = page.locator(".kitchen-ticket");
   await expect(ticket.locator(".kitchen-ticket__round")).toContainText("Added");
   const foot = ticket.locator(".kitchen-ticket__next");
-  await expect(foot).toHaveText("Round finished");
+  // Batch 63 (F51): the foot button names the round it closes.
+  await expect(foot).toHaveText("Round 1 finished");
   await foot.click();
   await expect(ticket.locator(".kitchen-ticket__top")).toContainText("Marked done");
   await page.waitForTimeout(holdMs + 500);
@@ -638,7 +639,7 @@ test("@production a board read that fails during the hold keeps the Done on its 
   failing = true;
   await page.getByRole("button", { name: "Refresh" }).first().click();
   // The failed read arrives in real time: the board says so before the hold runs out.
-  await expect(page.getByText(/Read-only until reconnected/u)).toBeVisible();
+  await expect(page.getByText(/Can't receive new orders/u)).toBeVisible();
   await page.clock.runFor(holdMs + 500);
   // Nothing was sent, and the cook's Done is still on the ticket, named, instead of gone.
   const top = ticket.locator(".kitchen-ticket__top");

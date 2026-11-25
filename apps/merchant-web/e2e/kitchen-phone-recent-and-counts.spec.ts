@@ -153,7 +153,7 @@ test("@production WP-2423 batch 41: a waiting remake is counted as work, and the
         );
         const tabs = page.getByRole("group", { name: zh ? "显示后厨工作" : "Show kitchen work" });
         await expect(
-          tabs.getByRole("button", { name: zh ? /^进行中/u : /^Open work/u }),
+          tabs.getByRole("button", { name: zh ? /^未完成/u : /^Open work/u }),
         ).toHaveText(zh ? /1$/u : "Open work1");
         await expect(tabs.getByRole("button", { name: zh ? /^待做/u : /^To make/u })).toHaveText(
           zh ? /1$/u : "To make1",
@@ -161,7 +161,7 @@ test("@production WP-2423 batch 41: a waiting remake is counted as work, and the
         // The To make tab counts the remake, so it does not call itself empty either.
         await tabs.getByRole("button", { name: zh ? /^待做/u : /^To make/u }).click();
         await expect(page.locator(".kitchen-board-empty")).toHaveCount(0);
-        await tabs.getByRole("button", { name: zh ? /^进行中/u : /^Open work/u }).click();
+        await tabs.getByRole("button", { name: zh ? /^未完成/u : /^Open work/u }).click();
       }
       await expect(page.locator(".kitchen-board-empty")).toHaveCount(0);
       await expect(

@@ -59,12 +59,12 @@ it("batch 43 (v15 b42 live): switching language keeps the back office's chosen t
   await switchLanguage("zh-Hans");
   ({ container } = await mount(board(true)));
   expect(tab(container, /^待做/u).getAttribute("aria-pressed")).toBe("true");
-  expect(tab(container, /^进行中/u).getAttribute("aria-pressed")).toBe("false");
+  expect(tab(container, /^未完成/u).getAttribute("aria-pressed")).toBe("false");
   // Read back once: a later plain reload starts from Open work.
   await unmountMounted();
   document.body.innerHTML = "";
   ({ container } = await mount(board(true)));
-  expect(tab(container, /^进行中/u).getAttribute("aria-pressed")).toBe("true");
+  expect(tab(container, /^未完成/u).getAttribute("aria-pressed")).toBe("true");
   // Open work, the default, keeps nothing.
   await switchLanguage("en");
   expect(sessionStorage.length).toBe(0);

@@ -194,9 +194,10 @@ async function expectLayout(page: Page, name: string) {
 /** Kitchen v3: the kitchen display's order search opens from its bar ("Find an order"). */
 async function findOrder(page: Page, text: string) {
   await page.getByRole("button", { name: /^Find an order/u }).click();
-  const sheet = page.getByRole("dialog", { name: "Filter Kitchen work" });
+  // Batch 63 (F49): named as its button; the list finds as staff type, Done closes it.
+  const sheet = page.getByRole("dialog", { name: "Find an order" });
   await sheet.getByRole("searchbox", { name: "Order number or table" }).fill(text);
-  await sheet.getByRole("button", { name: "Find", exact: true }).click();
+  await sheet.getByRole("button", { name: "Done", exact: true }).click();
 }
 
 test("@production DEC-KITCHEN-STALE-TICKETS: an earlier day's ticket is kept apart, asks before a kitchen step and a manager closes it with a reason", async ({

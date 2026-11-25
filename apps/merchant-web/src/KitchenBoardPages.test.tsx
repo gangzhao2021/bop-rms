@@ -98,7 +98,8 @@ describe("WP-1804 Kitchen Board screens", () => {
       </MemoryRouter>,
     );
     expect(stale).toContain("Data may be out of date · last checked <time");
-    expect(stale).toContain("Read-only until reconnected");
+    // Batch 63 (F46): the line says new orders can't arrive, and since when.
+    expect(stale).toContain("Can&#x27;t receive new orders — connection lost since");
   });
   it("renders station, safety, age and bounded actions", () => {
     const html = renderToStaticMarkup(
@@ -119,7 +120,6 @@ describe("WP-1804 Kitchen Board screens", () => {
       "Work state",
       "Allergen",
       "Exception",
-      "Clear filters",
       "Mushroom rice bowl",
       "12 min",
       'class="kitchen-work-item__quantity"><dt>Quantity</dt><dd>0 / 2</dd></dl>',
@@ -535,8 +535,10 @@ describe("WP-2423 M3 kitchen display", () => {
         />
       </MemoryRouter>,
     );
-    expect(html).toContain('aria-pressed="false"');
-    expect(html).toContain(">Sound off</button>");
+    // Batch 63 (F45): on the display, sound off is said once on the notice line with its own
+    // Turn sound on; the bar offers only turning it off.
+    expect(html).not.toContain(">Sound off</button>");
+    expect(html).toContain('class="kitchen-status-row__action">Turn sound on</button>');
     expect(html).toContain("Auto-refresh every 10 s");
     expect(html).toContain('<strong data-status="In Progress">Being made</strong>');
     expect(html).not.toContain("KIT-KITCHEN-QUEUE");
@@ -645,7 +647,9 @@ describe("WP-2423 M3 kitchen display", () => {
           />
         </MemoryRouter>,
       );
-    expect(render("Named")).toContain('data-alert="true"');
+    // Batch 63 (F45): on the display the notice line carries it (a red dot and Turn sound on).
+    expect(render("Named")).toContain('data-first="sound"');
+    expect(render("Named")).toContain(">Turn sound on</button>");
     expect(render("Unverified")).not.toContain("data-alert");
   });
   it("WP-2423 Q33: announces new work once and in one row, and keeps nothing to dismiss", () => {
@@ -1198,7 +1202,11 @@ describe("IDR-0039 kitchen stale read-only mode", () => {
       </MemoryRouter>,
     );
     expect(html).toContain("Mushroom rice bowl");
-    expect(html).toContain("Read-only until reconnected");
+    // Batch 63 (F46): offline, what can't happen and what to do meanwhile.
+    expect(html).toContain("Can&#x27;t receive new orders — offline since");
+    expect(html).toContain(
+      "Ask the counter for paper tickets; keep cooking what you have; check the Wi-Fi.",
+    );
     expect(html).toContain(
       '<button type="button" class="kitchen-ticket__next" disabled="">Start cooking</button>',
     );
@@ -1214,7 +1222,7 @@ describe("IDR-0039 kitchen stale read-only mode", () => {
       </MemoryRouter>,
     );
     // The reason stays one tap away, in the row that never moves the tickets.
-    expect(lost).toContain("Read-only until reconnected");
+    expect(lost).toContain("Can&#x27;t receive new orders — connection lost since");
     expect(lost).toContain(">Details</button>");
   });
 });
@@ -1927,9 +1935,8 @@ it("batch 42 (v15 b41 live): an empty work-state tab is quiet in its own words, 
   }
   // The back office chooses the state with its tabs: no Clear filters, nothing "Applied".
   const office = render("Queued", true);
-  // (The phone's filter sheet keeps its Clear filters, disabled with nothing to clear.)
-  expect(office).not.toMatch(/<button type="button">Clear filters/u);
-  expect(office).toContain('<button type="button" disabled="">Clear filters</button>');
+  // Batch 63 (F49): the phone's sheet has no Clear filters either; its Done is the one way out.
+  expect(office).not.toContain("Clear filters");
   expect(office).not.toContain("Applied");
 });
 it("batch 42 review: a section chosen on the display is a filter only while it hides work in the chosen state", () => {

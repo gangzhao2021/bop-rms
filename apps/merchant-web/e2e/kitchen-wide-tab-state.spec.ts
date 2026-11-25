@@ -103,8 +103,8 @@ test("@production WP-2423 batch 45: a work state chosen on the phone stays marke
       }
     }
     // Back to Open work: the extra tabs go; Held stays only while there is held work.
-    await tabs.getByRole("button", { name: zh ? /^进行中/u : /^Open work/u }).click();
-    await expect(marked).toHaveText(new RegExp(`^${zh ? "进行中" : "Open work"}\\s*3$`, "u"));
+    await tabs.getByRole("button", { name: zh ? /^未完成/u : /^Open work/u }).click();
+    await expect(marked).toHaveText(new RegExp(`^${zh ? "未完成" : "Open work"}\\s*3$`, "u"));
     for (const [, en, cn] of states.slice(0, 3))
       await expect(
         tabs.getByRole("button", { name: new RegExp(`^${zh ? cn : en}`, "u") }),
@@ -149,20 +149,19 @@ test("@production WP-2423 batch 45: the kitchen display names a chosen work stat
     // A search on top of the state: Applied, and the state is still named.
     await atTop(page, 1440, 900);
     await find.click();
-    const sheet = page.getByRole("dialog", { name: zh ? "筛选后厨工作" : "Filter Kitchen work" });
+    // Batch 63 (F49): the sheet is named as its button and Done is its one way out; the state
+    // choice in it puts the board back (no Clear, Close or Clear filters).
+    const sheet = page.getByRole("dialog", { name: zh ? "查找订单" : "Find an order" });
+    const done = sheet.getByRole("button", { name: zh ? "完成" : "Done", exact: true });
     await sheet.getByLabel(zh ? "单号或桌台" : "Order number or table").fill("3");
-    await sheet.getByLabel(zh ? "单号或桌台" : "Order number or table").press("Enter");
-    if (await sheet.isVisible())
-      await sheet.getByRole("button", { name: zh ? "关闭" : "Close" }).click();
+    await done.click();
     await expect(find).toHaveText(applied);
     await expect(shown).toHaveText(zh ? "待做" : "To make");
-    // Clear filters puts the board back to open work, unmarked.
+    // Open work again and the search emptied put the board back, unmarked.
     await find.click();
-    await sheet.getByRole("button", { name: zh ? "清除筛选" : "Clear filters" }).click();
+    await sheet.getByLabel(zh ? "工作状态" : "Work state").selectOption("Active");
     await sheet.getByLabel(zh ? "单号或桌台" : "Order number or table").fill("");
-    await sheet.getByLabel(zh ? "单号或桌台" : "Order number or table").press("Enter");
-    if (await sheet.isVisible())
-      await sheet.getByRole("button", { name: zh ? "关闭" : "Close" }).click();
+    await done.click();
     await expect(find).toHaveText(plain);
     await expect(shown).toHaveCount(0);
     await expectNoInternalText(page);
@@ -191,11 +190,10 @@ async function searchFor(page: Page, zh: boolean, term: string) {
     .locator(".kitchen-filter-toggle:visible, .kitchen-find-button:visible")
     .first();
   await opener.click();
-  const sheet = page.getByRole("dialog", { name: zh ? "筛选后厨工作" : "Filter Kitchen work" });
+  // Batch 63 (F49): the sheet finds as staff type and Done closes it.
+  const sheet = page.locator("dialog.kitchen-filter-sheet");
   await sheet.getByLabel(zh ? "单号或桌台" : "Order number or table").fill(term);
-  await sheet.getByLabel(zh ? "单号或桌台" : "Order number or table").press("Enter");
-  if (await sheet.isVisible())
-    await sheet.getByRole("button", { name: zh ? "关闭" : "Close" }).click();
+  await sheet.getByRole("button", { name: zh ? "完成" : "Done", exact: true }).click();
 }
 
 /** The search shows as applied, in this language, and only order 3 is listed. */

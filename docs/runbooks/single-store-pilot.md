@@ -723,7 +723,12 @@ what staff do when something fails is different:
   pickup slips in `Counter order` (柜台点单) and dine-in slips on their table in `Tables` (桌台) →
   `Take order for table …` (为桌台 X 点单), ticking `Recorded after an outage (taken on paper)`
   (停电/断网后补录（纸质记录）). Front of House, Store Manager and Owner have both.
-- **Kitchen**: works from paper tickets while the Kitchen board is down.
+- **Kitchen**: works from paper tickets while the Kitchen board is down. When the kitchen display
+  itself loses its connection it says so above the tickets, **收不到新单 · 01:40 起断网 / Can't
+  receive new orders — offline since 01:40**, with what to do (WP-2423 batch 63): **请前台改用纸单；
+  手上的单照做；检查 Wi-Fi。 / Ask the counter for paper tickets; keep cooking what you have; check
+  the Wi-Fi.** The tickets already on screen stay; an empty board offline never says there is
+  nothing to make.
 - **Pilot operator**: the person who runs the pilot host (today the Owner's machine; P4 cloud host
   later). Restarts services; not on the shop floor.
 - **Role changes (WP-2423 role presets)**: a turned-on role change applies to signed-in staff at

@@ -50,7 +50,7 @@ import type { KitchenStaleCloseReason } from "./kitchen-stale-close-client.js";
 import { useStoreBusinessDay } from "./StoreBusinessDay.js";
 import { createKitchenBoardClient } from "./kitchen-board-client.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
-import { Freshness, SourceTime } from "./StoreTime.js";
+import { Freshness, SourceTime, StoreTimeZoneContext, storeTime } from "./StoreTime.js";
 import {
   browserOffline,
   readFailureReason,
@@ -171,7 +171,13 @@ function oldestOpenRound(items: readonly KitchenBoardItem[]) {
   const open = rounds.find((round) =>
     round.items.some((item) => item.execution !== undefined && isActiveKitchenWork(item)),
   );
-  return { open, later: open === undefined ? 0 : rounds.length - 1 - rounds.indexOf(open) };
+  return {
+    open,
+    later: open === undefined ? 0 : rounds.length - 1 - rounds.indexOf(open),
+    /** Which round it is (1 = the first sent), and how many the ticket has. */
+    round: open === undefined ? 0 : rounds.indexOf(open) + 1,
+    rounds: rounds.length,
+  };
 }
 
 export type KitchenTicketStep =
@@ -194,7 +200,7 @@ export type KitchenTicketStep =
 export function kitchenTicketNextStep(
   items: readonly KitchenBoardItem[],
 ): KitchenTicketStep | null {
-  const { open, later } = oldestOpenRound(items);
+  const { open, later, round } = oldestOpenRound(items);
   if (open === undefined) return null;
   const lines = open.items.filter(
     (item) => item.execution !== undefined && isActiveKitchenWork(item),
@@ -217,9 +223,11 @@ export function kitchenTicketNextStep(
     return {
       kind: "Finish",
       items: finish,
+      // Batch 63 (F51): on a ticket of several rounds the button says which round it closes,
+      // since it sits under the last round while it finishes the oldest one still open.
       label:
         later > 0 && dishes > 1
-          ? t("Round finished")
+          ? t("Round {round} finished", { round })
           : dishes > 1
             ? t("All finished")
             : t("Finished"),
@@ -266,6 +274,50 @@ export function kitchenTicketState(
   return open.some((item) => item.status === "In Progress" && item.comboPartOf === undefined)
     ? "Making"
     : "ToMake";
+}
+
+/**
+ * Batch 63 (F51): what the ticket's status line says while a tap is held for Undo or on its way:
+ * Start tapped reads "Being made" at once, the same as the "Marked started · Undo" above it,
+ * rather than "To make" for the eight seconds until the server answers. A failed tap changes
+ * nothing.
+ */
+export function kitchenTicketShownState(
+  items: readonly KitchenBoardItem[],
+  taps: readonly Pick<KitchenTap<unknown>, "step" | "phase">[],
+): "ToMake" | "Making" | "Done" {
+  const state = kitchenTicketState(items);
+  return state === "ToMake" && taps.some((tap) => tap.step === "Start" && tap.phase !== "Failed")
+    ? "Making"
+    : state;
+}
+
+/**
+ * Batch 63 (F46, operating continuity): what the kitchen is told while its screen cannot read the
+ * board. It never says there is nothing to make (an empty board offline only means new orders
+ * cannot arrive), and it says what the kitchen does meanwhile.
+ */
+export function kitchenOfflineText(
+  stale: { readonly reason: string; readonly lastLoadedAt: string },
+  timeZone?: string,
+): { readonly line: string; readonly fallback: string } {
+  const since = storeTime(stale.lastLoadedAt, timeZone);
+  return stale.reason === "ServerProblem"
+    ? {
+        line: t("Can't receive new orders — our system has a problem since {time}", {
+          time: since,
+        }),
+        fallback: kitchenServerProblemText,
+      }
+    : {
+        line:
+          stale.reason === "Offline"
+            ? t("Can't receive new orders — offline since {time}", { time: since })
+            : t("Can't receive new orders — connection lost since {time}", { time: since }),
+        fallback: t(
+          "Ask the counter for paper tickets; keep cooking what you have; check the Wi-Fi.",
+        ),
+      };
 }
 
 import { useRememberedAlertSound } from "./alert-sound.js";
@@ -1164,10 +1216,16 @@ export function kitchenStatusOrder(
 export function KitchenStatusRow({
   entries,
   details,
+  actions,
 }: {
   readonly entries: readonly KitchenStatusEntry[];
   /** What a status needs beyond one line (a retry, a dismiss). */
   readonly details?: ReactNode;
+  /**
+   * Batch 63 (F45, CK-15): the one step a line offers, beside it while that line is the one shown
+   * ("Sound is off… Turn sound on", as on the Orders page), keyed by the entry's key.
+   */
+  readonly actions?: Readonly<Record<string, ReactNode>> | undefined;
 }) {
   const [open, setOpen] = useState(false);
   const sorted = kitchenStatusOrder(entries);
@@ -1179,10 +1237,11 @@ export function KitchenStatusRow({
     setOpen(false);
   }, [hasDetails]);
   return (
-    <div className="kitchen-status-row" data-tone={first?.tone}>
+    <div className="kitchen-status-row" data-tone={first?.tone} data-first={first?.key}>
       <p role="status" className="kitchen-status-row__line">
         {first?.text ?? ""}
       </p>
+      {first === undefined ? null : actions?.[first.key]}
       {hasMore ? (
         <button
           type="button"
@@ -1394,6 +1453,7 @@ export function newKitchenCancellations(
 import {
   Fragment,
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -2260,6 +2320,7 @@ export function KitchenBoardScreen({
   const [cancelTarget, setCancelTarget] = useState<KitchenReworkView | null>(null);
   const readOnly = view.freshnessStatus !== "Fresh" || view.operatorStatus !== "Named";
   const remakeReadOnly = readOnly || stale !== undefined || (remakes?.blocked ?? true);
+  const timeZone = useContext(StoreTimeZoneContext);
   // DEC-KITCHEN-STALE-TICKETS: order numbers restart every business day. An earlier day's open
   // work is kept apart (collapsed), labelled with its day and guarded before any kitchen step.
   const today = useStoreBusinessDay()?.businessDate ?? null;
@@ -2504,7 +2565,11 @@ export function KitchenBoardScreen({
         (activeAllergen === "All" || item.allergenCue === activeAllergen) &&
         (activeException === "All" || item.exceptionStatus === activeException),
     );
-  const items = itemsInStatus(status);
+  // Batch 63 (F49): on the kitchen display a typed order number or table is looked for in every
+  // state, so a cook finds a finished or cancelled order too, not only what is still open.
+  const items = itemsInStatus(
+    !workspaceFrame && orderSearch !== null && status === "Active" ? "All" : status,
+  );
   // Batch 41 (v15 b40 live): an open remake is a dish to make, so it counts as work wherever the
   // board counts work (the header, the tabs). Shown in the Remakes lane, it was left out, and a
   // remake waiting alone read "Today 0 work items", "To make 0" and "Nothing to make right now."
@@ -2572,9 +2637,13 @@ export function KitchenBoardScreen({
   // sheet, so the sheet still says it is applied and clears it. Either way an empty board never
   // asks to clear filters for a tab alone (it reads ticketFilters).
   const hasFilters = ticketFilters || (status !== "Active" && (!workspaceFrame || searchApplied));
-  const openFilterSheet = () => {
+  // Batch 63 (F49): the sheet is named as the button that opened it: "Find an order" from the
+  // tablet's bar (and the order field takes focus), "Filter Kitchen work" from a phone's Filters.
+  const [sheetFor, setSheetFor] = useState<"Find" | "Filters">("Filters");
+  const openFilterSheet = (kind: "Find" | "Filters" = "Filters") => {
     const dialog = filterSheetRef.current;
     if (!dialog) return;
+    setSheetFor(kind);
     dialog.showModal();
     dialog.querySelector<HTMLSelectElement>("select:not(:disabled)")?.focus();
   };
@@ -2708,7 +2777,7 @@ export function KitchenBoardScreen({
       className="kitchen-filter-toggle"
       type="button"
       aria-haspopup="dialog"
-      onClick={openFilterSheet}
+      onClick={() => openFilterSheet("Filters")}
     >
       {/* Batch 44 (v15 b43 live): the button names the work state chosen, the same on the back
           office and the kitchen display. The back office had kept "Active work" with Held chosen,
@@ -2759,20 +2828,17 @@ export function KitchenBoardScreen({
         autoComplete="off"
         spellCheck={false}
       />
-      {/* Owner 2026-11-03: the row searches on Enter; the phone's sheet keeps its own button. */}
-      {layout === "mobile" || searchApplied ? (
+      {/* Batch 63 (F49): the list finds as staff type, so the sheet has no Find and no Clear
+          (the field's own × clears it); the back office's row keeps Clear once a search is on. */}
+      {layout === "desktop" && searchApplied ? (
         <div className="kitchen-reference-search__actions">
-          {layout === "mobile" ? <button type="submit">{t("Find")}</button> : null}
           <button
             type="button"
             aria-label={t("Clear search")}
             disabled={!searchApplied && orderInput.length === 0}
             onClick={() => {
               setOrderInput("");
-              if (searchApplied) {
-                setOrderSearch(null);
-                if (layout === "mobile") filterSheetRef.current?.close();
-              }
+              if (searchApplied) setOrderSearch(null);
             }}
           >
             {t("Clear")}
@@ -2896,7 +2962,7 @@ export function KitchenBoardScreen({
           </select>
         </label>
       ) : null}
-      {layout === "mobile" || hasFilters ? (
+      {layout === "desktop" && hasFilters ? (
         <button
           type="button"
           disabled={!hasFilters}
@@ -3169,7 +3235,7 @@ export function KitchenBoardScreen({
                 type="button"
                 className="kitchen-find-button"
                 aria-haspopup="dialog"
-                onClick={openFilterSheet}
+                onClick={() => openFilterSheet("Find")}
               >
                 {/* Applied only for a search or a ticket filter; the work state is named by the count. */}
                 {searchApplied || ticketFilters ? t("Find an order · Applied") : t("Find an order")}
@@ -3189,7 +3255,9 @@ export function KitchenBoardScreen({
               {t("Refresh")}
             </button>
             {/* Owner 2026-11-03: a setting, not an alarm; red only where new orders would go unheard. */}
-            {onSoundToggle ? (
+            {/* Batch 63 (F45, Figma 55:115): on the kitchen display, sound off is said once, on
+                the notice line with its own "Turn sound on"; the bar offers turning it off. */}
+            {onSoundToggle && (workspaceFrame || soundOn) ? (
               <button
                 type="button"
                 aria-pressed={soundOn === true}
@@ -3200,112 +3268,139 @@ export function KitchenBoardScreen({
                 {soundOn ? t("Sound on") : t("Sound off")}
               </button>
             ) : null}
-            {/* Owner 2026-10-26: the language switch ends the title row, as on every workspace page. */}
-            {workspaceFrame ? <LanguageSwitch className="workspace-page__language" /> : null}
           </div>
+          {/* Owner 2026-10-26: the language switch ends the title row, as on every workspace page;
+              batch 63 (CK-15): on the title row itself, the actions on the row under it. */}
+          {workspaceFrame ? <LanguageSwitch className="workspace-page__language" /> : null}
         </header>
-        <KitchenStatusRow
-          entries={[
-            ...(stale
-              ? [
-                  {
-                    key: "stale",
-                    tone: "Problem" as const,
-                    at: Infinity,
-                    text:
-                      t("Read-only until reconnected") +
-                      " · " +
-                      (stale.reason === "Offline" ? t("Offline") : t("Connection lost")),
-                  },
-                ]
-              : view.operatorStatus === "Named" && view.freshnessStatus !== "Fresh"
+        {/* Batch 63 (F45, Figma 55:115; CK-15 in the back office): the newest notice, its one
+            step and Pause ordering share one 14/400 line ("Sound is off… Turn sound on · Pause
+            ordering"), as on the Orders page, so the tickets start near the top of a tablet. */}
+        <div className="kitchen-notice-line">
+          <KitchenStatusRow
+            entries={[
+              ...(stale
                 ? [
                     {
-                      key: "catching-up",
+                      key: "stale",
                       tone: "Problem" as const,
                       at: Infinity,
-                      text: t("Catching up with new orders"),
+                      text: kitchenOfflineText(stale, timeZone).line,
+                    },
+                  ]
+                : view.operatorStatus === "Named" && view.freshnessStatus !== "Fresh"
+                  ? [
+                      {
+                        key: "catching-up",
+                        tone: "Problem" as const,
+                        at: Infinity,
+                        text: t("Catching up with new orders"),
+                      },
+                    ]
+                  : []),
+              ...statusEntries,
+              ...(slowTapsSince.current === null
+                ? []
+                : [
+                    {
+                      key: "slow-taps",
+                      tone: "Info" as const,
+                      at: kitchenSlowTapsAt(slowTapsSince.current, statusEntries),
+                      text: slowWaitText,
+                    },
+                  ]),
+              ...(arrivalLabels.length === 0
+                ? []
+                : [
+                    {
+                      key: "arrivals",
+                      tone: "New" as const,
+                      ...(arrivalsAt === undefined ? {} : { at: arrivalsAt }),
+                      text:
+                        arrivalLabels.length === 1
+                          ? t("New order: {list}", { list: arrivalLabels.join(listSeparator()) })
+                          : t("{count} new orders: {list}", {
+                              count: arrivalLabels.length,
+                              list: arrivalLabels.join(listSeparator()),
+                            }),
+                    },
+                  ]),
+              ...(view.moreWaiting === undefined
+                ? []
+                : [
+                    {
+                      key: "more-waiting",
+                      tone: "Problem" as const,
+                      text:
+                        view.moreWaiting === true
+                          ? t("More orders are waiting. They show as you finish these.")
+                          : t("{count} more orders are waiting. They show as you finish these.", {
+                              count: view.moreWaiting,
+                            }),
+                    },
+                  ]),
+              // Batch 63 (F46): offline, the remakes are part of the one offline notice.
+              ...(remakes?.readFailed && !stale
+                ? [
+                    {
+                      key: "remakes-read",
+                      tone: "Problem" as const,
+                      text: t("Remakes could not be refreshed. The board keeps trying."),
                     },
                   ]
                 : []),
-            ...statusEntries,
-            ...(slowTapsSince.current === null
-              ? []
-              : [
-                  {
-                    key: "slow-taps",
-                    tone: "Info" as const,
-                    at: kitchenSlowTapsAt(slowTapsSince.current, statusEntries),
-                    text: slowWaitText,
-                  },
-                ]),
-            ...(arrivalLabels.length === 0
-              ? []
-              : [
-                  {
-                    key: "arrivals",
-                    tone: "New" as const,
-                    ...(arrivalsAt === undefined ? {} : { at: arrivalsAt }),
-                    text:
-                      arrivalLabels.length === 1
-                        ? t("New order: {list}", { list: arrivalLabels.join(listSeparator()) })
-                        : t("{count} new orders: {list}", {
-                            count: arrivalLabels.length,
-                            list: arrivalLabels.join(listSeparator()),
-                          }),
-                  },
-                ]),
-            ...(view.moreWaiting === undefined
-              ? []
-              : [
-                  {
-                    key: "more-waiting",
-                    tone: "Problem" as const,
-                    text:
-                      view.moreWaiting === true
-                        ? t("More orders are waiting. They show as you finish these.")
-                        : t("{count} more orders are waiting. They show as you finish these.", {
-                            count: view.moreWaiting,
-                          }),
-                  },
-                ]),
-            ...(remakes?.readFailed
-              ? [
-                  {
-                    key: "remakes-read",
-                    tone: "Problem" as const,
-                    text: t("Remakes could not be refreshed. The board keeps trying."),
-                  },
-                ]
-              : []),
-            // The toggle already says the sound is off; this says what that means.
-            ...(onSoundToggle && !soundOn
-              ? [
-                  {
-                    key: "sound",
-                    tone: "Info" as const,
-                    text: soundResumes
-                      ? t("Sound turns back on at your next tap on this screen.")
-                      : t("Sound is off. New orders will not ring on this screen."),
-                  },
-                ]
-              : []),
-          ]}
-          details={
-            stale || statusDetails ? (
-              <>
-                {stale ? (
-                  <StaleReadNotice
-                    stale={stale}
-                    className="kitchen-board-lock kitchen-board-stale"
-                    serverProblemText={kitchenServerProblemText}
-                  />
-                ) : null}
-                {statusDetails}
-              </>
-            ) : undefined
-          }
-        />
+              // The toggle already says the sound is off; this says what that means.
+              ...(onSoundToggle && !soundOn
+                ? [
+                    {
+                      key: "sound",
+                      tone: "Info" as const,
+                      text: soundResumes
+                        ? t("Sound turns back on at your next tap on this screen.")
+                        : t("Sound is off. New orders will not ring on this screen."),
+                    },
+                  ]
+                : []),
+            ]}
+            actions={
+              onSoundToggle && !soundOn
+                ? {
+                    sound: (
+                      <button
+                        type="button"
+                        className="kitchen-status-row__action"
+                        onClick={onSoundToggle}
+                      >
+                        {t("Turn sound on")}
+                      </button>
+                    ),
+                  }
+                : undefined
+            }
+            details={
+              stale || statusDetails ? (
+                <>
+                  {stale ? (
+                    <StaleReadNotice
+                      stale={stale}
+                      className="kitchen-board-lock kitchen-board-stale"
+                      serverProblemText={kitchenServerProblemText}
+                    />
+                  ) : null}
+                  {statusDetails}
+                </>
+              ) : undefined
+            }
+          />
+          {pauseOrdering}
+        </div>
+        {/* Batch 63 (F46): while the board cannot be read, what the kitchen does meanwhile is
+            always on screen, not only behind Details. */}
+        {stale ? (
+          <p className="kitchen-offline-fallback" role="note">
+            {kitchenOfflineText(stale, timeZone).fallback}
+          </p>
+        ) : null}
         {/* DEC-PAID-ORDER-AUTO-ACCEPT: says nothing at a Store that doesn't use it. */}
         <KitchenPaidOrderNotices
           view={view}
@@ -3314,7 +3409,6 @@ export function KitchenBoardScreen({
           onSoundOn={onSoundToggle}
           onRing={() => onRing?.()}
         />
-        {workspaceFrame ? pauseOrdering : null}
         {!stale && readOnly && !(view.operatorStatus === "Named") ? (
           <KitchenBoardLock
             operatorStatus={view.operatorStatus}
@@ -3322,10 +3416,9 @@ export function KitchenBoardScreen({
           />
         ) : null}
         {workspaceFrame ? null : remakeLane}
-        {/* b40 CI: on the kitchen display Pause ordering comes after the remakes, so a remake's
-            buttons stay on a phone's first screen whatever the fonts (a wider font took the bar to
-            two rows and pushed them under the fold). The warnings above stay first. */}
-        {workspaceFrame ? null : pauseOrdering}
+        {/* b40 CI kept Pause ordering under the remakes so a remake's buttons stayed on a phone's
+            first screen; batch 63 (F45) puts it on the notice line instead, where it takes no row
+            of its own. */}
         {workspaceFrame ? null : filterToggle}
         {workspaceFrame ? (
           <div className="order-toolbar">
@@ -3358,11 +3451,12 @@ export function KitchenBoardScreen({
           ref={filterSheetRef}
           aria-labelledby="kitchen-filter-title"
         >
+          {/* Batch 63 (F49): named as the button that opens it; Done (below) is its one way out,
+              besides the device's own back. */}
           <div className="kitchen-filter-sheet__heading">
-            <h2 id="kitchen-filter-title">{t("Filter Kitchen work")}</h2>
-            <button type="button" onClick={() => filterSheetRef.current?.close()}>
-              {t("Close")}
-            </button>
+            <h2 id="kitchen-filter-title">
+              {sheetFor === "Find" ? t("Find an order") : t("Filter Kitchen work")}
+            </h2>
           </div>
           {renderOrderSearch("mobile")}
           {renderFilters("mobile")}
@@ -3389,6 +3483,13 @@ export function KitchenBoardScreen({
                           length: earlierTickets.length,
                         }))}
               </span>
+              {/* Batch 63 (F45): one line that says it opens. */}
+              <span
+                className="kitchen-earlier-days__view"
+                aria-hidden="true"
+                data-open={t("View")}
+                data-close={t("Hide")}
+              />
             </summary>
             <p className="kitchen-earlier-days__intro">
               {t("Order numbers restart every day, so these are not today's orders. {value}", {
@@ -3490,7 +3591,11 @@ export function KitchenBoardScreen({
         {/* Batch 41: the board is empty only when its count is: never under a remake to make, unless
             filters that choose tickets hide every ticket (then it says so, and that the remakes
             above are shown apart). */}
-        {items.length === 0 && !boardEmpty ? null : items.length === 0 ? (
+        {/* Batch 63 (F46): offline, an empty board never says there is nothing to make; the
+            offline line and what to do meanwhile above stand in for it. */}
+        {items.length === 0 &&
+        (!boardEmpty || (stale !== undefined && orderSearch === null)) ? null : items.length ===
+          0 ? (
           <div className="kitchen-board-empty">
             <StatePanel
               heading={
@@ -3576,7 +3681,8 @@ export function KitchenBoardScreen({
                       const tierText = kitchenTicketTierText(ticket.tier);
                       const first = group.items[0] as KitchenBoardItem;
                       const label = first.orderLabel;
-                      const state = kitchenTicketState(group.items);
+                      const cardTaps = kitchenCardTaps(group.items, pendingLines);
+                      const state = kitchenTicketShownState(group.items, cardTaps);
                       const allCancelled =
                         state === "Done" &&
                         group.items.every((item) => item.status === "Cancelled");
@@ -3586,7 +3692,6 @@ export function KitchenBoardScreen({
                       const slot = group.orderReference;
                       const heldOf = (line: KitchenBoardItem) =>
                         pendingLines?.get(kitchenLineKey(line));
-                      const cardTaps = kitchenCardTaps(group.items, pendingLines);
                       const rounds = kitchenTicketRounds(group.items);
                       return (
                         <section
@@ -3613,6 +3718,9 @@ export function KitchenBoardScreen({
                             <h4 className="kitchen-order-group__label" aria-label={dayLabel(first)}>
                               {/* Kitchen v3: the number (or table) read from across the kitchen;
                                   how the order came, in grey after it. */}
+                              {/* Batch 63 (F50, Figma 55:115): one title pattern on the board:
+                                  "Pickup · Order 91" for every pickup ticket, the table for a
+                                  table; the order and where it came from in grey under it. */}
                               <span className="kitchen-ticket__number">
                                 {!label
                                   ? kitchenOrderLabel(first)
@@ -3620,20 +3728,30 @@ export function KitchenBoardScreen({
                                     ? t("Table {tableLabel}", {
                                         tableLabel: saidTable(label.tableLabel),
                                       })
-                                    : label.orderNumber}
+                                    : label.orderType === "Pickup"
+                                      ? t("Pickup · Order {orderNumber}", {
+                                          orderNumber: label.orderNumber,
+                                        })
+                                      : label.orderNumber}
                               </span>
                               {label ? (
                                 <span className="kitchen-ticket__kind">
-                                  {label.orderType === "Pickup"
-                                    ? t("Pickup")
-                                    : label.tableLabel
-                                      ? t("Order {orderNumber}", {
-                                          orderNumber: label.orderNumber,
-                                        })
-                                      : t("Dine-in")}
-                                  {fromEarlierDay(first) && first.businessDate
-                                    ? ` · ${earlierDayText(first.businessDate)}`
-                                    : ""}
+                                  {[
+                                    label.orderType === "Pickup"
+                                      ? label.enteredByStaff
+                                        ? t("Counter")
+                                        : null
+                                      : label.tableLabel
+                                        ? t("Order {orderNumber}", {
+                                            orderNumber: label.orderNumber,
+                                          })
+                                        : t("Dine-in"),
+                                    fromEarlierDay(first) && first.businessDate
+                                      ? earlierDayText(first.businessDate)
+                                      : null,
+                                  ]
+                                    .filter((part) => part !== null)
+                                    .join(" · ")}
                                 </span>
                               ) : null}
                             </h4>

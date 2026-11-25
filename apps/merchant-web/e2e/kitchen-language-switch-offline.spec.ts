@@ -71,7 +71,8 @@ for (const language of ["en", "zh-Hans"] as const)
 
       await context.setOffline(true);
       await expect(
-        page.getByText(zh ? "重新联网前只读" : "Read-only until reconnected").first(),
+        // Batch 63 (F46): offline, the board says new orders can't arrive, and since when.
+        page.getByText(zh ? "收不到新单" : "Can't receive new orders").first(),
       ).toBeVisible({ timeout: 30_000 });
       const size = await switcher.boundingBox();
       expect(size?.width, `${language} ${width}: switch 44 px wide`).toBeGreaterThanOrEqual(44);

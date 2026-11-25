@@ -656,3 +656,42 @@
   width: auto;
   min-width: 4.5em;
 }
+
+/* Batch 63 (CK-17): the signed-out screen (the kitchen display's, and every page's) follows v3:
+   "Sign in again" is the accent primary, "Check again" accent text on the same left edge, and
+   the heading that takes focus when it opens shows no box (a keyboard still sees its ring). */
+.staff-session__dialog {
+  justify-items: start;
+  border: 0;
+}
+.staff-session__dialog h2:focus:not(:focus-visible) {
+  outline: none;
+}
+.staff-session__dialog .staff-session__sign-in .shell-action {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 20px;
+  border: 0;
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-accent-fill);
+  font-size: 16px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.staff-session__dialog > button {
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font: inherit;
+  font-size: 14px;
+  text-align: start;
+  cursor: pointer;
+}
+.staff-session__dialog > button:disabled {
+  color: var(--bop-color-text-muted);
+  cursor: not-allowed;
+}

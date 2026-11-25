@@ -618,7 +618,14 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "The kitchen got this {minutes} min ago and may already be making it. Ask them first.":
     "后厨收到已 {minutes} 分钟，可能已经在做了，先问一声后厨。",
   "All finished": "全部做好了",
+  "Can't receive new orders — offline since {time}": "收不到新单 · {time} 起断网",
+  "Can't receive new orders — connection lost since {time}": "收不到新单 · {time} 起连不上",
+  "Can't receive new orders — our system has a problem since {time}":
+    "收不到新单 · {time} 起系统出问题",
+  "Ask the counter for paper tickets; keep cooking what you have; check the Wi-Fi.":
+    "请前台改用纸单；手上的单照做；检查 Wi-Fi。",
   "Round finished": "这一轮做好了",
+  "Round {round} finished": "第 {round} 轮做好了",
   "To make": "待做",
   "New order: {list}": "新订单：{list}",
   "{count} new orders: {list}": "有 {count} 个新订单：{list}",
@@ -3126,6 +3133,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Photo replaced": "照片已更换",
   "Picked up": "已取餐",
   Pickup: "自取",
+  "Pickup · Order {orderNumber}": "自取 · {orderNumber} 号单",
   "Pickup Queue unavailable": "取餐队列暂不可用",
   "Pickup changed": "取餐已变更",
   "Pickup code": "取餐码",
@@ -6347,7 +6355,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Closing the ticket does not refund or cancel the order.": "关闭票据不会退款或取消订单。",
   "If the guest paid and did not get their food, go to": "如果顾客已付款却没拿到餐，请到",
   "to cancel or refund {order} from {day}.": "页取消或退款：{day} 的 {order}。",
-  "Open work": "进行中",
+  "Open work": "未完成",
   "Show kitchen work": "显示后厨工作",
   // Batch 58: one name, 较早营业日, for earlier days on every staff screen.
   "· {count} more from earlier days": "· 另有 {count} 张来自较早营业日",

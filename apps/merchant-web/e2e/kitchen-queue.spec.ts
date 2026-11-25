@@ -369,12 +369,10 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
     for (const label of ["Station", "Allergen", "Exception"])
       await expect(filterSheet.getByText(label, { exact: true })).toHaveCount(0);
     await expect(filterSheet).not.toContainText("Unavailable");
-    const clearBox = await filterSheet.getByRole("button", { name: "Clear filters" }).boundingBox();
+    // Batch 63 (F49): Done is the sheet's one button (the list filters as staff choose).
+    await expect(filterSheet.getByRole("button", { name: "Clear filters" })).toHaveCount(0);
     const doneBox = await filterSheet.getByRole("button", { name: "Done" }).boundingBox();
-    expect(clearBox).not.toBeNull();
     expect(doneBox).not.toBeNull();
-    expect(clearBox?.y).toBe(doneBox?.y);
-    expect(clearBox?.x).toBeLessThan(doneBox?.x ?? 0);
     await page.screenshot({
       path: `test-results/kitchen-filter-sheet-${width}.png`,
       fullPage: true,
@@ -391,26 +389,17 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
     await filterToggle.click();
     const mobileSearch = filterSheet.locator(".kitchen-reference-search--mobile");
     await expect(mobileSearch).toBeVisible();
-    const mobileSearchButton = mobileSearch.getByRole("button", { name: "Find", exact: true });
-    const mobileClearButton = mobileSearch.getByRole("button", { name: "Clear search" });
-    await expect(mobileClearButton).toHaveText("Clear");
-    await expect(mobileClearButton).toBeDisabled();
-    const searchButtonBox = await mobileSearchButton.boundingBox();
-    const clearSearchButtonBox = await mobileClearButton.boundingBox();
-    expect(searchButtonBox?.y).toBe(clearSearchButtonBox?.y);
-    expect(searchButtonBox?.height).toBeGreaterThanOrEqual(44);
+    // Batch 63 (F49): no Find and no Clear in the sheet: the list finds as staff type (the
+    // field's own × empties it) and Done closes the sheet on the result.
+    const sheetDone = filterSheet.getByRole("button", { name: "Done" });
+    await expect(mobileSearch.getByRole("button", { name: "Find", exact: true })).toHaveCount(0);
+    await expect(mobileSearch.getByRole("button", { name: "Clear search" })).toHaveCount(0);
+    expect((await sheetDone.boundingBox())?.height).toBeGreaterThanOrEqual(44);
     // WP-2423: staff find an order by the number on its ticket, in their words.
     const mobileOrderInput = mobileSearch.getByRole("searchbox", { name: "Order number or table" });
     await expect(mobileOrderInput).toHaveAttribute("placeholder", "Order number or table");
-    await mobileOrderInput.fill("unsent");
-    await expect(mobileClearButton).toBeEnabled();
-    // WP-2423 M157: what is typed is searched at once, so clearing it closes the sheet on the list.
-    await mobileClearButton.click();
-    await expect(filterSheet).not.toBeVisible();
-    await filterToggle.click();
-    await expect(mobileOrderInput).toHaveValue("");
     await mobileOrderInput.fill(width === 390 ? "15" : "#16");
-    await mobileSearchButton.click();
+    await sheetDone.click();
     await expect(page.locator(".kitchen-work-item")).toHaveCount(1);
     await expect(page.locator(".kitchen-work-item")).toContainText(
       width === 390 ? "Synthetic stew" : "Synthetic bread",
@@ -421,7 +410,8 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
     await expect(filterSheet).not.toBeVisible();
     await filterToggle.click();
     await expect(filterSheet).toBeVisible();
-    await mobileSearch.getByRole("button", { name: "Clear search" }).click();
+    await mobileOrderInput.fill("");
+    await sheetDone.click();
     await expect(page.locator(".kitchen-work-item")).toHaveCount(3);
     await expect(filterSheet).not.toBeVisible();
     // WP-2423 M157: on the phone, typing the number and tapping Done finds it; no "Find" needed.
@@ -434,7 +424,8 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
       width === 390 ? "Synthetic bread" : "Synthetic stew",
     );
     await filterToggle.click();
-    await mobileSearch.getByRole("button", { name: "Clear search" }).click();
+    await mobileOrderInput.fill("");
+    await sheetDone.click();
     await expect(page.locator(".kitchen-work-item")).toHaveCount(3);
     await expectNoHorizontalOverflow(page);
     await page.screenshot({ path: `test-results/kitchen-board-${width}.png`, fullPage: true });
@@ -1594,7 +1585,8 @@ test("@production Kitchen keeps the last tickets read-only offline and recovers 
     if (pathname === "/merchant/kitchen/work" || pathname === "/merchant/kitchen/step") commands++;
   });
   const accept = page.getByRole("button", { name: "Finished", exact: true });
-  const notice = page.getByRole("status").filter({ hasText: "Read-only until reconnected" });
+  // Batch 63 (F46): the line says new orders can't arrive and since when.
+  const notice = page.getByRole("status").filter({ hasText: "Can't receive new orders" });
   await page.goto("/operations/kitchen");
   await expect(page.getByRole("heading", { name: "Synthetic rice", exact: true })).toBeVisible();
   await expect(accept).toBeEnabled();
@@ -1605,7 +1597,7 @@ test("@production Kitchen keeps the last tickets read-only offline and recovers 
   // tickets stay read-only, and it keeps retrying (first after 5 s) until a read succeeds.
   offline = true;
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
-  await expect(notice).toContainText("Connection lost");
+  await expect(notice).toContainText("connection lost since");
   await expect(accept).toBeDisabled();
   const before = reads;
   await expect.poll(() => reads, { timeout: 8_000 }).toBeGreaterThan(before);
@@ -1624,7 +1616,7 @@ test("@production Kitchen keeps the last tickets read-only offline and recovers 
     // The device loses its network: read-only at once, without waiting for a read to fail.
     await context.setOffline(true);
     await expect(notice).toBeVisible({ timeout: 2_000 });
-    await expect(notice).toContainText("Offline");
+    await expect(notice).toContainText("offline since");
     // Why, and since when, is a tap away; the row keeps its height and no ticket moves.
     await page.getByRole("button", { name: "Details", exact: true }).click();
     await expect(page.locator(".kitchen-status-row__detail")).toContainText(

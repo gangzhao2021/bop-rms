@@ -230,7 +230,7 @@ test("@production WP-2423 batch 43: To make with only work being made says Nothi
       await expect(empty).toBeVisible();
     }
     await page.setViewportSize({ width: 1440, height: 900 });
-    await tabs.getByRole("button", { name: zh ? /^进行中/u : /^Open work/u }).click();
+    await tabs.getByRole("button", { name: zh ? /^未完成/u : /^Open work/u }).click();
     await expectNoInternalText(page);
   }
 });
@@ -259,7 +259,7 @@ test("@production WP-2423 batch 43: switching language keeps the back office's t
       zhTabs.getByRole("button", { name: /^待做/u }),
       `${width}: 待做 kept`,
     ).toHaveAttribute("aria-pressed", "true");
-    await expect(zhTabs.getByRole("button", { name: /^进行中/u })).toHaveAttribute(
+    await expect(zhTabs.getByRole("button", { name: /^未完成/u })).toHaveAttribute(
       "aria-pressed",
       "false",
     );

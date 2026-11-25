@@ -69,7 +69,7 @@ test("@production WP-2423 batch 42: a work-state tab with nothing in it is quiet
       await page.screenshot({ path: `test-results/b42-office-to-make-${width}-${language}.png` });
     }
     await page.setViewportSize({ width: 1440, height: 900 });
-    await tabs.getByRole("button", { name: zh ? /^进行中/u : /^Open work/u }).click();
+    await tabs.getByRole("button", { name: zh ? /^未完成/u : /^Open work/u }).click();
     await expect(empty).toHaveCount(0);
     await expectNoInternalText(page);
   }

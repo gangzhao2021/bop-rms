@@ -473,9 +473,16 @@
   line-height: 1.1;
   letter-spacing: -0.01em;
 }
+/* Batch 63 (F50): the title is one pattern ("Pickup · Order 91", or the table); the order or
+   where it came from ("Counter") is a 14/400 grey line under it. */
 .kitchen-ticket__kind {
+  display: block;
   color: var(--bop-color-text-muted);
-  font-size: 16px;
+  font-size: 14px;
+  font-weight: 400;
+}
+.kitchen-ticket__kind:empty {
+  display: none;
 }
 .kitchen-order-group.kitchen-ticket .kitchen-ticket__wait {
   flex-direction: row;
@@ -1447,4 +1454,260 @@
   margin: 8px 0;
   color: var(--bop-color-danger-text);
   font-size: 14px;
+}
+
+/* ---- Batch 63 (F45, Figma 55:115): the kitchen display's header in three short lines, so a
+   tablet sees its tickets from about 200 px down. "后厨" 28/600 with the count and update time in
+   grey, the actions as 14 px accent text 24 px apart on the right; the newest notice with its own
+   step and Pause ordering on one 14/400 line with a dot; "Needs attention" one line with View. No
+   divider under the header and no rule above the tickets. ----------------------------------- */
+.kitchen-shell:not(.kitchen-shell--workspace) .kitchen-board-workspace {
+  gap: 0;
+}
+/* Each line is already a full touch row (48 px), so the rows need no gaps between them. */
+.kitchen-shell:not(.kitchen-shell--workspace) .kitchen-board-workspace > .kitchen-board-lanes {
+  margin-top: 8px;
+}
+.kitchen-shell:not(.kitchen-shell--workspace) .kitchen-board-heading {
+  align-items: baseline;
+  min-height: 44px;
+  padding: 0;
+  border-bottom: 0;
+}
+.kitchen-shell:not(.kitchen-shell--workspace) .kitchen-board-heading h2 {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+.kitchen-shell:not(.kitchen-shell--workspace) .kitchen-board-heading > div:first-child {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 12px;
+}
+.kitchen-shell:not(.kitchen-shell--workspace) .kitchen-board-freshness,
+.kitchen-shell:not(.kitchen-shell--workspace) .kitchen-board-freshness > *,
+.kitchen-shell:not(.kitchen-shell--workspace) .kitchen-board-freshness .kitchen-queue-count {
+  font-size: 14px;
+}
+.kitchen-shell:not(.kitchen-shell--workspace) .kitchen-board-heading__actions {
+  align-self: center;
+  gap: 0 24px;
+}
+.kitchen-shell:not(.kitchen-shell--workspace) .kitchen-board-heading__actions > button,
+.kitchen-shell:not(.kitchen-shell--workspace) .kitchen-board-heading__actions > a,
+.kitchen-shell:not(.kitchen-shell--workspace)
+  .kitchen-board-heading__actions
+  .kitchen-recent-finished
+  > summary {
+  padding: 0;
+  font-size: 14px;
+  font-weight: 400;
+}
+.kitchen-notice-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 8px;
+  min-width: 0;
+}
+.kitchen-notice-line > .kitchen-status-row {
+  flex: 0 1 auto;
+  max-width: 100%;
+}
+.kitchen-notice-line .kitchen-status-row__line {
+  flex: 0 1 auto;
+  color: var(--bop-color-text-default);
+  font-size: 14px;
+}
+.kitchen-notice-line .kitchen-status-row .kitchen-status-row__line:not(:empty)::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-inline-end: 8px;
+  border-radius: 50%;
+  background: var(--bop-color-text-muted);
+  vertical-align: 0.1em;
+}
+.kitchen-notice-line
+  .kitchen-status-row:is([data-tone="Problem"], [data-first="sound"])
+  .kitchen-status-row__line::before {
+  background: var(--bop-color-danger-mark);
+}
+.kitchen-notice-line .kitchen-status-row[data-tone="New"] .kitchen-status-row__line::before {
+  background: var(--bop-color-accent);
+}
+/* Offline: the line that says new orders can't arrive reads 16/600 (F46). */
+.kitchen-notice-line .kitchen-status-row[data-first="stale"] .kitchen-status-row__line {
+  color: var(--bop-color-text-default);
+  font-size: 16px;
+  font-weight: 600;
+}
+.kitchen-status-row__action,
+.kitchen-notice-line .kitchen-status-row__more {
+  flex: 0 0 auto;
+  min-height: var(--bop-kitchen-target, 44px);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 400;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.kitchen-notice-line > .pause-ordering {
+  display: flex;
+  align-items: center;
+  gap: 0 8px;
+  margin: 0;
+}
+.kitchen-notice-line
+  > .kitchen-status-row:has(.kitchen-status-row__line:not(:empty))
+  + .pause-ordering::before {
+  content: "·";
+  color: var(--bop-color-text-muted);
+}
+.kitchen-notice-line > .pause-ordering button {
+  min-height: var(--bop-kitchen-target, 44px);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font-size: 14px;
+  font-weight: 400;
+}
+.kitchen-notice-line > .pause-ordering[data-asking="true"] {
+  flex-basis: 100%;
+  flex-wrap: wrap;
+}
+/* What the kitchen does while offline: always in view, one 14/400 line (F46). */
+.kitchen-offline-fallback {
+  margin: 0;
+  color: var(--bop-color-text-default);
+  font-size: 14px;
+}
+/* "Needs attention · 53 tickets from earlier days to check and close   View" on one line. */
+.kitchen-shell:not(.kitchen-shell--workspace) .kitchen-earlier-days summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 16px;
+  font-size: 14px;
+  font-weight: 400;
+}
+.kitchen-shell:not(.kitchen-shell--workspace) .kitchen-earlier-days summary::before {
+  display: none;
+}
+.kitchen-earlier-days__view {
+  color: var(--bop-color-accent);
+}
+.kitchen-earlier-days__view::after {
+  content: attr(data-open);
+}
+.kitchen-earlier-days[open] .kitchen-earlier-days__view::after {
+  content: attr(data-close);
+}
+.kitchen-shell:not(.kitchen-shell--workspace) .kitchen-order-group.kitchen-ticket,
+.kitchen-shell:not(.kitchen-shell--workspace) .kitchen-ticket[data-age] {
+  padding-top: 0;
+  border-top: 0;
+}
+
+/* ---- Batch 63 (F49): "Find an order" — the field, the work state and one accent Done. A
+   control that cannot be used now reads muted, never like a live one. ------------------------- */
+.kitchen-filter-sheet {
+  padding: 24px;
+  border: 0;
+}
+.kitchen-filter-sheet__heading h2 {
+  font-size: 20px;
+}
+.kitchen-filter-sheet .kitchen-board-filters .kitchen-filter-sheet__done {
+  grid-column: 1 / -1;
+  justify-content: center;
+  border: 0;
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-accent-fill);
+  font-weight: 600;
+  cursor: pointer;
+}
+.kitchen-filter-sheet button:disabled,
+.kitchen-board-filters button:disabled,
+.kitchen-reference-search button:disabled {
+  color: var(--bop-color-text-muted);
+  cursor: not-allowed;
+}
+/* Batch 63 (F50): "Pickup · Order 91" takes the card's whole first line, so it never breaks
+   beside the quiet Start; the card's top row (Start, Undo, "Moved. Tap again.") is the line
+   under it and always keeps its height, so nothing on the card moves when it changes. */
+.kitchen-shell:not(.kitchen-shell--workspace)
+  .kitchen-order-group.kitchen-ticket
+  .kitchen-ticket__header
+  .kitchen-order-group__label {
+  flex: 1 1 100%;
+}
+.kitchen-shell:not(.kitchen-shell--workspace) .kitchen-ticket__header > .kitchen-ticket__top {
+  min-height: var(--bop-kitchen-target);
+}
+
+/* ---- Batch 63 (CK-15): the back office Kitchen's header is built as the Orders page's: the
+   title and the language switch share the top row at every tablet width, the board's actions sit
+   on the row under it, and the notices read as one line (above). ------------------------------ */
+.kitchen-shell--workspace .kitchen-board-heading.workspace-page__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0 16px;
+}
+.kitchen-shell--workspace .kitchen-board-heading > .workspace-page__title {
+  flex: 1 1 0;
+  order: 0;
+}
+.kitchen-shell--workspace .kitchen-board-heading > .workspace-page__language {
+  flex: none;
+  order: 1;
+  margin-inline-start: 0;
+  color: var(--bop-color-text-muted);
+  font-weight: 400;
+}
+.kitchen-shell--workspace .kitchen-board-heading > .kitchen-board-heading__actions {
+  flex: 1 1 100%;
+  order: 2;
+  justify-content: flex-end;
+}
+@media (max-width: 48rem) {
+  .kitchen-shell--workspace .kitchen-board-heading > .kitchen-board-heading__actions {
+    justify-content: flex-start;
+  }
+}
+.kitchen-shell--workspace .kitchen-board-workspace > .kitchen-notice-line {
+  margin-bottom: -16px;
+}
+/* "Needs attention" stays with its words on a phone: the line flows as text, so the count
+   follows the heading instead of dropping to a line of its own that starts with "·". */
+.kitchen-shell--workspace .kitchen-office-earlier > summary {
+  display: block;
+  padding: 11px 0;
+  line-height: 22px;
+}
+.kitchen-shell--workspace .kitchen-office-earlier > summary::before {
+  display: inline-block;
+  vertical-align: 0.15em;
+}
+.kitchen-shell--workspace .kitchen-office-earlier > summary > h2 {
+  white-space: nowrap;
+}
+@media (max-width: 767px) {
+  /* On a phone Pause ordering keeps a line of its own under the notice, so a notice that is
+     shorter or longer never moves the tickets (DEC-KITCHEN-ONE-TAP). */
+  .kitchen-notice-line > .pause-ordering {
+    flex-basis: 100%;
+  }
+  .kitchen-notice-line > .kitchen-status-row + .pause-ordering::before {
+    display: none;
+  }
 }
