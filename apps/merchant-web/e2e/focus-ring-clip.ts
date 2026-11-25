@@ -151,3 +151,69 @@ export async function pageRingOverhangs(page: Page, limit = 400): Promise<RingOv
   }
   return results;
 }
+
+/**
+ * Batch 62 (v15 b61 live, Table QR codes): the same sweep the other way, Shift+Tab from the stop
+ * that has focus back to the page's first, so a stop the browser scrolls in at the window's top
+ * (the top bar's language switch after the page has scrolled down) is measured too.
+ */
+export async function pageRingOverhangsBackwards(page: Page, limit = 400): Promise<RingOverhang[]> {
+  const results: RingOverhang[] = [];
+  const seen = new Set<unknown>();
+  for (let step = 0; step < limit; step += 1) {
+    await page.keyboard.press("Shift+Tab");
+    const key = await page.evaluate(() => {
+      const element = document.activeElement as (HTMLElement & { __ringBack?: number }) | null;
+      if (element === null || element === document.body) return null;
+      element.__ringBack ??= Math.random();
+      return element.__ringBack;
+    });
+    if (key === null || seen.has(key)) break;
+    seen.add(key);
+    results.push(await focusedRingOverhang(page));
+  }
+  return results;
+}
+
+/** Batch 62: a ring that runs past what shows it, on any side. */
+export const ringCut = (ring: RingOverhang) => ring.top + ring.right + ring.bottom + ring.left > 0;
+
+/**
+ * Batch 62: every stop of the page Tabbed forwards from its first and then Shift+Tabbed back,
+ * with each cut ring (the name, the sides and what cut it). Also how far the page had to scroll,
+ * so a sweep that never scrolled cannot pass for one that did.
+ */
+export async function windowEdgeSweep(page: Page) {
+  const forwards = await pageRingOverhangs(page);
+  const scrolled = await page.evaluate(() => window.scrollY);
+  const backwards = await pageRingOverhangsBackwards(page);
+  return {
+    stops: forwards.length,
+    back: backwards.length,
+    scrolled,
+    cut: [...forwards, ...backwards].filter(ringCut),
+  };
+}
+
+/**
+ * Batch 62: the window-edge sweep at each size (the page as it now stands, from its top), with
+ * the cut rings named by size. A size whose page needs no scrolling still counts: its rings must
+ * be whole too.
+ */
+export async function windowEdgeSweepAt(
+  page: Page,
+  sizes: readonly (readonly [number, number])[],
+  label: string,
+) {
+  const cut: (RingOverhang & { readonly at: string })[] = [];
+  let scrolled = 0;
+  for (const [width, height] of sizes) {
+    await page.setViewportSize({ width, height });
+    await page.evaluate(() => window.scrollTo(0, 0));
+    const sweep = await windowEdgeSweep(page);
+    scrolled = Math.max(scrolled, sweep.scrolled);
+    cut.push(...sweep.cut.map((ring) => ({ ...ring, at: `${label} ${String(width)}` })));
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  }
+  return { cut, scrolled };
+}

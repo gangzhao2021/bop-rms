@@ -23,3 +23,24 @@
 @import "./refund-payment.css";
 /* M50: printing one region (print-region.ts) without blanking other pages. */
 @import "./print.css";
+
+/* Batch 62 (v15 b61 live, Table QR codes; b61 sweep on Home, Exceptions and the kitchen board):
+   Tab scrolls in only a stop's own box, flush with the window's edge, so the bottom of its ring
+   (3px plus a 3px offset) was cut when it came in from below, and the top when Shift+Tab brought
+   the top bar's language switch back in. The same room around every stop as on Tables, the side
+   navigation and the Orders panel, once for every screen. :where() keeps it the weakest rule, so
+   the screens' own room (the category row's 4px 5px) still applies. Only stops staff Tab to: an
+   element focused by the page itself (tabindex="-1": a heading, the main region) is placed
+   exactly where it was. Nothing moves until something is focused. */
+:where(
+  a[href],
+  button,
+  input,
+  select,
+  textarea,
+  summary,
+  [tabindex]:not([tabindex="-1"]),
+  [contenteditable]:not([contenteditable="false"])
+) {
+  scroll-margin: 8px;
+}

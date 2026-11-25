@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { ringsFrom, whole } from "./focus-ring-clip";
+import { ringsFrom, whole, windowEdgeSweepAt } from "./focus-ring-clip";
 import { expectNoInternalText } from "./internal-text-guard";
 
 const stores = [1, 2].map((n) => ({
@@ -1180,5 +1180,25 @@ test("@production WP-2423 every open case first, resolved history a page at a ti
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
   await expect(card("38")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Show older resolved exceptions" })).toBeVisible();
+  // Batch 62 (b61 sweep): Tab brought Handle order (1024/1440) and Show older resolved exceptions
+  // (390) in at the window's bottom with the bottom of the ring cut off. Every stop, Tabbed down
+  // and back up, keeps its whole ring in view, in English and in Chinese.
+  const sizes = [
+    [390, 844],
+    [1024, 768],
+    [1440, 900],
+  ] as const;
+  const english = await windowEdgeSweepAt(page, sizes, "en");
+  await page.evaluate(() => window.localStorage.setItem("bop.merchant.language", "zh-Hans"));
+  await page.reload();
+  await expect(page.getByRole("button", { name: "显示较早的已解决异常" })).toHaveCount(0);
+  await page
+    .getByRole("group", { name: "显示异常" })
+    .getByRole("button", { name: /^全部/u })
+    .click();
+  await expect(page.getByRole("button", { name: "显示较早的已解决异常" })).toBeVisible();
+  const chinese = await windowEdgeSweepAt(page, sizes, "zh-Hans");
+  expect(english.scrolled).toBeGreaterThan(0);
+  expect([...english.cut, ...chinese.cut]).toEqual([]);
   expect(writes).toEqual([]);
 });

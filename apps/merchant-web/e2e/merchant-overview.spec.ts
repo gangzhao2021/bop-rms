@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { windowEdgeSweepAt } from "./focus-ring-clip";
 import { expectNoInternalText } from "./internal-text-guard";
 import { settlementViewFixture } from "../src/settlement.fixtures";
 import { notPausedServiceControl } from "./service-control-state";
@@ -375,6 +376,24 @@ test("@production Merchant Overview uses the authorized workspace snapshot at de
     ).toBe(true);
     await page.screenshot({ path: `test-results/home-overview-${width}.png` });
   }
+  // Batch 62 (b61 sweep): Tab brought Home's links and buttons in at the window's bottom (Open
+  // orders, Waiting for pickup, Refresh at 1024; Opening and closing at 390 and 1024) with the
+  // bottom of the ring cut off. Every stop, Tabbed down and back up, keeps its whole ring in view,
+  // the opened checklist included, in English and in Chinese.
+  const sizes = [
+    [390, 844],
+    [1024, 768],
+    [1440, 900],
+  ] as const;
+  const english = await windowEdgeSweepAt(page, sizes, "en");
+  await page.evaluate(() => window.localStorage.setItem("bop.merchant.language", "zh-Hans"));
+  await page.reload();
+  const steps = page.getByRole("region", { name: "开店与打烊" });
+  await steps.getByText("开店与打烊").click();
+  await expect(steps.getByRole("link").first()).toBeVisible();
+  const chinese = await windowEdgeSweepAt(page, sizes, "zh-Hans");
+  expect(english.scrolled).toBeGreaterThan(0);
+  expect([...english.cut, ...chinese.cut]).toEqual([]);
 });
 
 test("@production Home reads only the summaries the staff member's screens permit (WP-2423 Q11 follow-up)", async ({
