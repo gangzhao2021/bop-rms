@@ -29,6 +29,15 @@ export interface DiningCartParticipation {
   readonly participantVersion: number;
   readonly observedAt: DiningInstant;
 }
+/**
+ * WP-2423 batch 65 (v15 b64 live): what the guest's Cart may read while its table checks out. The
+ * Cart is locked then (no change, no round), but the dishes still in it that never reached the
+ * kitchen are named to the guest, also on a Cart opened or reloaded after Start checkout. Only
+ * for reading: purpose "Cart" (every change) is refused as before.
+ */
+export interface DiningCartViewParticipation extends DiningCartParticipation {
+  readonly tableCheckingOut: boolean;
+}
 export interface DiningCartParticipationOptions {
   readonly scope: { readonly brandReference: string; readonly storeReference: string };
   readonly repository: {
@@ -104,12 +113,16 @@ export function createDiningCartParticipationQuery(options: DiningCartParticipat
   const brandReference = parseDiningReference(scope.brandReference);
   const storeReference = parseDiningReference(scope.storeReference);
   return Object.freeze({
-    async resolve(value: unknown): Promise<DiningCartParticipation | null> {
+    async resolve(
+      value: unknown,
+    ): Promise<DiningCartParticipation | DiningCartViewParticipation | null> {
       let diningSessionReference: DiningReference;
       let participantReference: DiningReference;
+      let viewOnly: boolean;
       try {
         const raw = closed(value, ["purpose", "diningSessionReference", "participantReference"]);
-        if (raw.purpose !== "Cart") return invalid();
+        if (raw.purpose !== "Cart" && raw.purpose !== "CartView") return invalid();
+        viewOnly = raw.purpose === "CartView";
         diningSessionReference = parseDiningReference(raw.diningSessionReference);
         participantReference = parseDiningReference(raw.participantReference);
       } catch {
@@ -169,7 +182,7 @@ export function createDiningCartParticipationQuery(options: DiningCartParticipat
           if (session.phase === "Closing") return null;
           throw new DiningParticipationEndedError("Changed");
         }
-        if (session.phase === "Closing") throw new DiningTableCheckingOutError();
+        if (session.phase === "Closing" && !viewOnly) throw new DiningTableCheckingOutError();
         return Object.freeze({
           schemaVersion: 1,
           brandReference,
@@ -181,6 +194,7 @@ export function createDiningCartParticipationQuery(options: DiningCartParticipat
           diningSessionVersion: session.version,
           participantVersion: participant.version,
           observedAt: table.observedAt,
+          ...(viewOnly ? { tableCheckingOut: session.phase === "Closing" } : {}),
         });
       } catch (error) {
         if (error instanceof DiningTableCheckingOutError) throw error;

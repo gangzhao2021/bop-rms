@@ -617,6 +617,29 @@ describe("WP-1205 Customer Cart HTTP contract", () => {
     expect(await named.json()).toMatchObject({ error: { code: "cart_not_found" } });
   });
 
+  // Batch 65 (v15 b64 live): a Cart opened or reloaded after Start checkout named no unsent dish.
+  it("batch 65: a table checking out is 409, with its Cart as it is beside it when read", async () => {
+    port.result = { status: "TableCheckingOut", view: view({ orderType: "DineIn" }) };
+    const response = await request("/bff/customer/cart?locale=zh-Hans-CA", { headers: headers() });
+    expect(response.status).toBe(409);
+    expect(response.headers.get("location")).toBeNull();
+    const body = (await response.json()) as {
+      error: { code: string };
+      cart: { items: { displayName: string }[] };
+    };
+    expect(body.error.code).toBe("cart_table_checking_out");
+    expect(body.cart.items.map((item) => item.displayName)).toEqual(["Synthetic tea"]);
+    expect(JSON.stringify(body)).not.toContain(guest);
+    // Without a Cart (a change refused, or an older reader): only the refusal, as before.
+    port.result = { status: "TableCheckingOut" };
+    const plain = await request("/bff/customer/cart", { headers: headers() });
+    expect(plain.status).toBe(409);
+    expect(await plain.json()).toEqual({
+      schemaVersion: 1,
+      error: { code: "cart_table_checking_out", messageKey: "customer.cart.table_checking_out" },
+    });
+  });
+
   it("maps a thrown or malformed dependency result to safe unavailable", async () => {
     port.result = { status: "Found", view: { schemaVersion: 1, cart: {} } as CustomerCartView };
     const malformed = await request("/bff/customer/cart", { headers: headers() });

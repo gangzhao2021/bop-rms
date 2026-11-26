@@ -241,7 +241,10 @@ describe("current Cart channel routing", () => {
       return guest();
     });
     expect((await f.port.getCurrentCart(value)).status).toBe("Found");
-    expect(f.dining.read).toHaveBeenCalledWith({ sessionCredential: credential });
+    // Batch 65: a read also reads the table's Cart while it checks out (read-only).
+    expect(f.dining.read).toHaveBeenCalledWith({ sessionCredential: credential }, null, {
+      atCheckout: true,
+    });
   });
   it("denies backward clock before dispatch", async () => {
     const f = routing();
@@ -281,10 +284,11 @@ describe("routed Cart input capture", () => {
   it("preserves named read intent", async () => {
     const f = routing();
     await f.port.getCart({ ...context(), cartReference: id(11) });
-    expect(f.dining.read).toHaveBeenCalledWith({
-      sessionCredential: credential,
-      cartReference: id(11),
-    });
+    expect(f.dining.read).toHaveBeenCalledWith(
+      { sessionCredential: credential, cartReference: id(11) },
+      null,
+      { atCheckout: true },
+    );
   });
   it("captures nested option intent before asynchronous channel lookup", async () => {
     const value = {

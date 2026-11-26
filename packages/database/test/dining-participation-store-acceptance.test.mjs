@@ -18,6 +18,11 @@ import {
   createPostgresDiningCartParticipationStore,
   createPostgresDiningGuestBindingStore,
 } from "../../rms/dining/src/index.ts";
+import {
+  createDiningCartReadService,
+  createPostgresDiningCartReadStore,
+} from "../../rms/ordering/src/index.ts";
+import { cartParticipation } from "../../../apps/api/src/customer-dining-cart-composition.ts";
 import { grantPilotApiAcl } from "../test-support/pilot-api-acl.mjs";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 const { Client } = pg;
@@ -598,6 +603,140 @@ it("reads coherent current Dining participation without writing authority or his
       nowValue = at(9);
       assert.equal(await resolve(second.participant.participantReference), null);
       assert.deepEqual(await counts(), afterJoins);
+      // Batch 65 (v15 b64 live, guest-split-own-payment): a guest's Cart opened or reloaded after
+      // staff pressed Start checkout named no unsent dish: its read was refused (409) like a change.
+      // Read as the restricted pilot API role (rendered pilot ACL, NOBYPASSRLS, read-only): Dining's
+      // own cart participation still refuses every change ("Cart") of the table checking out, and
+      // lets the Cart be read ("CartView", tableCheckingOut). Ordering's read of the table's Cart
+      // then gives its lines as they are, only when asked to read at checkout. Nothing is written.
+      const pilotCart = createDiningCartParticipationQuery({
+        scope: { brandReference: id(2), storeReference: id(3) },
+        repository: createPostgresDiningCartParticipationStore(pilotRunner, scope),
+        now: () => nowValue,
+      });
+      const seat = {
+        diningSessionReference: sessionId,
+        participantReference: second.participant.participantReference,
+      };
+      await assert.rejects(pilotCart.resolve({ purpose: "Cart", ...seat }), {
+        name: "DiningTableCheckingOutError",
+      });
+      assert.deepEqual(await pilotCart.resolve({ purpose: "CartView", ...seat }), {
+        schemaVersion: 1,
+        brandReference: id(2),
+        storeReference: id(3),
+        ...seat,
+        tableReference: id(20),
+        tableAssignmentVersion: 2,
+        diningSessionVersion: 4,
+        participantVersion: 1,
+        observedAt: at(9),
+        tableCheckingOut: true,
+      });
+      // The table's Cart, as two phones left it: one Beef noodles each, neither sent.
+      await admin.query(
+        `INSERT INTO rms_ordering.cart(cart_id,brand_id,store_id,order_type,source_channel,dining_session_id,created_by_actor_id,aggregate_version,created_at,updated_at,lifecycle_status,lifecycle_policy_version_id,lifecycle_policy_digest,idle_timeout_seconds,absolute_timeout_seconds,idle_expires_at,absolute_expires_at)
+        VALUES($1,$2,$3,'DineIn','Qr',$4,$5,1,$6,$6,'Active',$7,$8,7200,86400,$9,$10)`,
+        [
+          id(600),
+          id(2),
+          id(3),
+          sessionId,
+          id(80),
+          at(8),
+          id(601),
+          `sha256:${"a".repeat(64)}`,
+          "2026-09-09T12:00:00.000Z",
+          "2026-09-10T09:00:00.000Z",
+        ],
+      );
+      for (const [line, actor, participant] of [
+        [602, 80, joined.participant.participantReference],
+        [603, 81, second.participant.participantReference],
+      ])
+        await admin.query(
+          `INSERT INTO rms_ordering.cart_line(cart_line_id,cart_id,brand_id,store_id,sellable_id,quantity,option_selections_json,added_by_actor_id,added_by_participant_id,added_at) VALUES($1,$2,$3,$4,$5,1,'[]'::jsonb,$6,$7,$8)`,
+          [id(line), id(600), id(2), id(3), id(604), id(actor), participant, at(8)],
+        );
+      const cartRows = async () =>
+        (
+          await admin.query(
+            "SELECT (SELECT count(*)::integer FROM rms_ordering.cart) AS carts,(SELECT count(*)::integer FROM rms_ordering.cart_line) AS lines,(SELECT aggregate_version FROM rms_ordering.cart WHERE cart_id=$1) AS version",
+            [id(600)],
+          )
+        ).rows[0];
+      const beforeReads = { dining: await counts(), cart: await cartRows() };
+      // Identity's Guest Session is a bounded synthetic fixture (its lifetimes as Identity's own).
+      const cartReads = createDiningCartReadService({
+        scope: { brandReference: id(2), storeReference: id(3) },
+        now: () => nowValue,
+        carts: createPostgresDiningCartReadStore(pilotRunner, {
+          brandReference: id(2),
+          storeReference: id(3),
+        }),
+        participation: cartParticipation(pilotCart),
+        sessions: {
+          resolve: async () => ({
+            sessionReference: id(81),
+            status: "Active",
+            version: 1,
+            brandReference: id(2),
+            storeReference: id(3),
+            publicStoreReference: id(82),
+            publicTableReference: id(83),
+            channel: "DineIn",
+            locale: "en-CA",
+            qrReference: id(84),
+            qrRevocationVersion: 1,
+            diningState: "DiningBound",
+            diningSessionReference: sessionId,
+            diningParticipantReference: second.participant.participantReference,
+            createdAt: at(1),
+            lastSeenAt: at(8),
+            idleExpiresAt: "2026-09-09T13:08:00.000Z",
+            absoluteExpiresAt: "2026-09-10T09:01:00.000Z",
+            orderClosedAt: null,
+            closureExpiresAt: null,
+            rotatedFromGuestSessionReference: null,
+            revocationReason: null,
+            revokedAt: null,
+          }),
+        },
+      });
+      const credential = { sessionCredential: "b".repeat(43) };
+      await assert.rejects(cartReads.read(credential), { code: "CART_TABLE_CHECKING_OUT" });
+      const atCheckout = await cartReads.read(credential, { atCheckout: true });
+      assert.equal(atCheckout.tableCheckingOut, true);
+      assert.equal(atCheckout.cart.cartReference, id(600));
+      assert.deepEqual(
+        atCheckout.cart.items.map((item) => [
+          item.cartItemReference,
+          item.quantity,
+          item.addedByParticipantReference,
+        ]),
+        [
+          [id(602), 1, joined.participant.participantReference],
+          [id(603), 1, second.participant.participantReference],
+        ],
+      );
+      assert.equal(atCheckout.viewer.participantReference, second.participant.participantReference);
+      // Read-only: no Dining or Cart row was added or changed, and the pilot role can't write it.
+      assert.deepEqual({ dining: await counts(), cart: await cartRows() }, beforeReads);
+      await assert.rejects(
+        pilotRunner.run((tx) =>
+          tx.query("UPDATE rms_ordering.cart SET aggregate_version=2 WHERE cart_id=$1", [id(600)]),
+        ),
+        (error) => ["25006", "42501"].includes(error.code),
+      );
+      // Staff cancel checkout: the same read says nothing of checkout, and changes are allowed again.
+      const closing = await reader.loadSession(sessionId);
+      await admin.query(
+        "UPDATE rms_dining.dining_session SET version=5,phase='Active',session_snapshot=$2::jsonb WHERE session_id=$1",
+        [sessionId, JSON.stringify({ ...closing, phase: "Active", version: 5 })],
+      );
+      const reopened = await cartReads.read(credential, { atCheckout: true });
+      assert.equal(Object.hasOwn(reopened, "tableCheckingOut"), false);
+      assert.equal((await pilotCart.resolve({ purpose: "Cart", ...seat })).diningSessionVersion, 5);
       assert.equal(active, 0);
     } finally {
       await admin.end();

@@ -25,8 +25,12 @@ export interface DiningCartAuthorityPorts {
   };
   readonly participation: {
     /** Exact public Dining Cart participation query; this observation is not a write lease. */
+    /**
+     * Batch 65: "CartView" only reads the table's Cart, also while the table checks out (the answer
+     * then says `tableCheckingOut`); "Cart" is every change, refused while it checks out.
+     */
     resolve(input: {
-      readonly purpose: "Cart";
+      readonly purpose: "Cart" | "CartView";
       readonly diningSessionReference: string;
       readonly participantReference: string;
     }): Promise<unknown>;
@@ -70,10 +74,14 @@ function version(value: unknown): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) return unavailable();
   return value;
 }
-function participation(value: unknown) {
+function participation(value: unknown, purpose: "Cart" | "CartView") {
   try {
-    const raw = readClosedRecord(value, participationFields);
+    const raw = readClosedRecord(
+      value,
+      purpose === "CartView" ? [...participationFields, "tableCheckingOut"] : participationFields,
+    );
     if (raw.schemaVersion !== 1) return unavailable();
+    if (purpose === "CartView" && typeof raw.tableCheckingOut !== "boolean") return unavailable();
     return Object.freeze({
       brandReference: parseOrderingReference(raw.brandReference),
       storeReference: parseOrderingReference(raw.storeReference),
@@ -84,6 +92,7 @@ function participation(value: unknown) {
       diningSessionVersion: version(raw.diningSessionVersion),
       participantVersion: version(raw.participantVersion),
       observedAt: parseOrderingInstant(raw.observedAt),
+      tableCheckingOut: raw.tableCheckingOut === true,
     });
   } catch {
     return unavailable();
@@ -135,6 +144,8 @@ const placementKeys = [
   "tableAssignmentVersion",
   "diningSessionVersion",
   "participantVersion",
+  // Batch 65: staff started (or cancelled) checkout between the two checks of a read.
+  "tableCheckingOut",
 ] as const;
 /**
  * The same participant of the same party, seen at another place or version of its table: a
@@ -163,8 +174,15 @@ export function partyMoved(
  */
 export const diningCartMovedRetries = 4;
 
-/** Internal invocation guard. Its current observations grant no persistent write lease. */
-export function createDiningCartAuthority(ports: DiningCartAuthorityPorts) {
+/**
+ * Internal invocation guard. Its current observations grant no persistent write lease. Batch 65:
+ * `purpose` "CartView" is for reading the Cart only (see the participation port); every caller
+ * that changes the Cart or prices it keeps "Cart".
+ */
+export function createDiningCartAuthority(
+  ports: DiningCartAuthorityPorts,
+  purpose: "Cart" | "CartView" = "Cart",
+) {
   let brand: string;
   let store: string;
   try {
@@ -243,13 +261,13 @@ export function createDiningCartAuthority(ports: DiningCartAuthorityPorts) {
         try {
           const source = await ports.participation.resolve(
             Object.freeze({
-              purpose: "Cart",
+              purpose,
               diningSessionReference: String(initial.diningSessionReference),
               participantReference: String(initial.diningParticipantReference),
             }),
           );
           if (source === null) return denied();
-          receipt = participation(source);
+          receipt = participation(source, purpose);
         } catch (error) {
           if (error instanceof CartError && error.code === "CART_PERMISSION_DENIED")
             return denied();

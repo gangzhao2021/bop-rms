@@ -1079,3 +1079,57 @@ it("keeps known replacement permission refusal distinct from unknown outcome", a
   ).rejects.toMatchObject({ code: "cart_replacement_forbidden" });
   expect(fetch).toHaveBeenCalledTimes(1);
 });
+
+// Batch 65 (v15 b64 live): a Cart opened or reloaded after Start checkout named no unsent dish.
+// The Store's "checking out" answer to a read now carries the table's Cart as it is.
+describe("batch 65: the Cart beside the table checking out", () => {
+  const unsentLine = {
+    cartItemReference: id(2),
+    sellableReference: id(3),
+    displayName: "牛肉面",
+    quantity: 1,
+    configuration: [],
+    customerNote: null,
+    lineEstimate: { status: "Unavailable", reasonCode: "LINE_ESTIMATE_UNAVAILABLE" },
+    warnings: [],
+  };
+  const refusal = {
+    code: "cart_table_checking_out",
+    messageKey: "customer.cart.table_checking_out",
+  };
+  const answer = (body: unknown) =>
+    vi.fn(
+      async () =>
+        new Response(JSON.stringify(body), {
+          status: 409,
+          headers: { "content-type": "application/json", "cache-control": "no-store" },
+        }),
+    );
+  it("keeps the Cart the Store sent; a Cart it can't read is left out", async () => {
+    setCustomerCartCsrfCredential("c".repeat(43));
+    const sent = {
+      ...cart().cart,
+      orderType: "DineIn",
+      serviceMode: "DineIn",
+      items: [unsentLine],
+    };
+    vi.stubGlobal("fetch", answer({ schemaVersion: 1, error: refusal, cart: sent }));
+    const failure = (await createBrowserCustomerCartClient()
+      .loadCurrent()
+      .catch((error: unknown) => error)) as CartClientError;
+    expect(failure).toBeInstanceOf(CartClientError);
+    expect(failure.code).toBe("cart_table_checking_out");
+    expect(failure.cart?.cart.items.map((item) => item.displayName)).toEqual(["牛肉面"]);
+    for (const body of [
+      { schemaVersion: 1, error: refusal },
+      { schemaVersion: 1, error: refusal, cart: { items: "bad" } },
+    ]) {
+      vi.stubGlobal("fetch", answer(body));
+      const plain = (await createBrowserCustomerCartClient()
+        .loadCurrent()
+        .catch((error: unknown) => error)) as CartClientError;
+      expect(plain.code).toBe("cart_table_checking_out");
+      expect(plain.cart).toBeNull();
+    }
+  });
+});

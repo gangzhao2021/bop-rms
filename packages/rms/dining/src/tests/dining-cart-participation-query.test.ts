@@ -161,6 +161,40 @@ describe("Dining current Cart participation facts", () => {
     } as never);
     await expect(f.query.resolve(input)).rejects.toBeInstanceOf(DiningTableCheckingOutError);
   });
+  // Batch 65 (v15 b64 live): a Cart opened or reloaded after Start checkout named no unsent dish.
+  it("lets the guest's Cart be read, never changed, while its table checks out", async () => {
+    const f = fixture();
+    const current = source();
+    const view = { ...input, purpose: "CartView" };
+    expect(await f.query.resolve(view)).toMatchObject({
+      participantReference: id(4),
+      tableCheckingOut: false,
+    });
+    f.readCurrent.mockResolvedValue({
+      ...current,
+      session: { ...current.session, phase: "Closing" },
+    } as never);
+    const reading = await f.query.resolve(view);
+    expect(reading).toMatchObject({ participantReference: id(4), tableCheckingOut: true });
+    expect(Object.isFrozen(reading)).toBe(true);
+    // Every change still asks with purpose "Cart" and is refused.
+    await expect(f.query.resolve(input)).rejects.toBeInstanceOf(DiningTableCheckingOutError);
+    // A closed table or a phone that left is not read.
+    f.readCurrent.mockResolvedValue({
+      ...current,
+      session: { ...current.session, phase: "Closed" },
+    } as never);
+    await expect(f.query.resolve(view)).rejects.toBeInstanceOf(DiningParticipationEndedError);
+    f.readCurrent.mockResolvedValue({
+      ...current,
+      session: { ...current.session, phase: "Closing" },
+      participant: { ...current.participant, status: "Left", version: 2, leftAt: at },
+    } as never);
+    await expect(f.query.resolve(view)).rejects.toMatchObject({ reason: "Left" });
+    await expect(f.query.resolve({ ...input, purpose: "Other" })).rejects.toMatchObject({
+      code: "DINING_SESSION_INPUT_INVALID",
+    });
+  });
   it("denies a participant who has left even if they were the host, saying they left", async () => {
     const f = fixture();
     const current = source();

@@ -35,14 +35,30 @@ describe("Customer Cart read bridge", () => {
     const port = createCustomerCartReadPort({ read });
     expect(Object.isFrozen(port)).toBe(true);
     expect(await port.getCurrentCart(input)).toEqual({ status: "Found", view });
-    expect(read).toHaveBeenLastCalledWith({ sessionCredential: credential });
+    // Batch 65: a read also reads a table's Cart while it checks out (read-only).
+    expect(read).toHaveBeenLastCalledWith({ sessionCredential: credential }, null, {
+      atCheckout: true,
+    });
     expect(await port.getCart({ ...input, cartReference: reference })).toEqual({
       status: "Found",
       view,
     });
-    expect(read).toHaveBeenLastCalledWith({
-      sessionCredential: credential,
-      cartReference: reference,
+    expect(read).toHaveBeenLastCalledWith(
+      { sessionCredential: credential, cartReference: reference },
+      null,
+      { atCheckout: true },
+    );
+  });
+  // Batch 65 (v15 b64 live): a Cart reloaded after Start checkout named no unsent dish.
+  it("a table checking out is still said as such, with its Cart as it is (read-only)", async () => {
+    const read = vi.fn(async () => ({ ...view, tableCheckingOut: true as const }));
+    const port = createCustomerCartReadPort({ read });
+    expect(await port.getCurrentCart(input, "zh-Hans")).toEqual({
+      status: "TableCheckingOut",
+      view: { schemaVersion: 1, cart: view.cart },
+    });
+    expect(read).toHaveBeenLastCalledWith({ sessionCredential: credential }, "zh-Hans", {
+      atCheckout: true,
     });
   });
   it("preserves absent current Cart", async () => {

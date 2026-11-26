@@ -190,7 +190,8 @@ export function createCartStateController({
                                   : "unavailable";
     publish({
       status,
-      cart,
+      // Batch 65: at checkout, the Cart the Store sent with the answer (in the language asked).
+      cart: status === "table-checking-out" && parsed.cart !== null ? parsed.cart : cart,
       issueCodes: parsed.issueCodes,
       retryAfterSeconds: parsed.retryAfterSeconds,
       canRetrySameOperation: operationCanRetry && parsed.code === "network_unknown",

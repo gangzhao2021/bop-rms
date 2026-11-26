@@ -173,8 +173,11 @@ export type CustomerCartPortResult =
   /** DEC-DINING-ANY-PARTICIPANT-SUBMIT: another guest at the table is checking out this Cart
    * version until heldUntil; nothing was changed. */
   | { readonly status: "CheckoutInProgress"; readonly heldUntil: string }
-  /** DEC-DINE-IN-PAY-LATER: the guest's table is checking out; staff add dishes. */
-  | { readonly status: "TableCheckingOut" }
+  /**
+   * DEC-DINE-IN-PAY-LATER: the guest's table is checking out; staff add dishes. Batch 65: a read
+   * answers with the Cart as it is (read-only), so the guest is told which dishes were not sent.
+   */
+  | { readonly status: "TableCheckingOut"; readonly view?: CustomerCartView }
   /** M126 I.2: this phone's place at the table ended (left or removed, closed, changed). */
   | { readonly status: "ParticipationEnded"; readonly reason: "Left" | "TableClosed" | "Changed" }
   /** Coordinator 2026-10-30: a phone that scanned a table but hasn't joined it (not seated). */
@@ -789,6 +792,8 @@ function sendError(
     readonly available?: number;
     readonly reason?: "Left" | "TableClosed" | "Changed";
   },
+  /** Batch 65: the Cart as it is, beside "the table is checking out" (read-only). */
+  cart?: CustomerCartView["cart"],
 ): void {
   const contract = errors[errorCode];
   // WP-2423 (outage-reads-and-retry): "busy, try again" says when, as the menu's 503 does: the
@@ -803,6 +808,7 @@ function sendError(
       messageKey: contract.messageKey,
       ...(details === undefined ? {} : details),
     },
+    ...(cart === undefined ? {} : { cart }),
   });
 }
 
@@ -824,7 +830,14 @@ function handleResult(
     return;
   }
   if (result.status === "TableCheckingOut") {
-    sendError(response, "cart_table_checking_out");
+    let cart: CustomerCartView["cart"] | undefined;
+    try {
+      cart = result.view === undefined ? undefined : publicView(result.view).cart;
+    } catch {
+      // A Cart that can't be shown as published is left out; "checking out" is still said.
+      cart = undefined;
+    }
+    sendError(response, "cart_table_checking_out", undefined, cart);
     return;
   }
   if (result.status === "ParticipationEnded") {

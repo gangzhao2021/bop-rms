@@ -176,6 +176,46 @@ describe("safe shared Dining Cart display", () => {
     expect(Object.isFrozen(first?.cart.items)).toBe(true);
     expect(f.read).toHaveBeenCalledTimes(4);
   });
+  // Batch 65 (v15 b64 live): a Cart reloaded after Start checkout named no unsent dish.
+  it("batch 65: at checkout the table's Cart is shown as it is, read-only, in the guest's language", async () => {
+    const read = vi.fn(
+      async (_input: unknown, options?: { atCheckout?: boolean }) =>
+        (options?.atCheckout === true
+          ? { ...shared(), tableCheckingOut: true as const }
+          : shared()) as DiningCartReadResult,
+    );
+    const describeMany = vi.fn(async (_requests: readonly unknown[]) => [
+      description(),
+      description(),
+    ]);
+    const tablePay = { read: vi.fn(async () => ({})) };
+    const rounds = { recent: vi.fn(async () => []) };
+    const query = createCustomerDiningCartViewQuery({
+      reads: { read },
+      stores: { getPublicStore: async () => profile() },
+      catalog: { describeMany },
+      tablePay: tablePay as never,
+      rounds,
+    });
+    const view = await query.read(request, "zh-Hans", { atCheckout: true });
+    expect(view?.tableCheckingOut).toBe(true);
+    expect(view?.cart.items.map((x) => [x.displayName, x.quantity, x.customerNote])).toEqual([
+      ["Synthetic latte", 1, "Synthetic note"],
+      ["Synthetic latte", 1, null],
+    ]);
+    // Asked in the guest's language; what the table pays and its rounds are not read for it.
+    expect(describeMany.mock.calls[0]?.[0]?.[0]).toMatchObject({ locale: "zh-Hans" });
+    expect(read).toHaveBeenCalledWith(request, { atCheckout: true });
+    expect(tablePay.read).not.toHaveBeenCalled();
+    expect(rounds.recent).not.toHaveBeenCalled();
+    // Without asking for it, a read is the ordinary one (never says checking out).
+    const plain = createCustomerDiningCartViewQuery({
+      reads: { read: async () => shared() },
+      stores: { getPublicStore: async () => profile() },
+      catalog: { describeMany },
+    });
+    expect(await plain.read(request)).not.toHaveProperty("tableCheckingOut");
+  });
   it("WP-2423 same-table-ordering: marks another phone's line when that phone has left the table", async () => {
     const read = vi.fn(async (): Promise<DiningCartReadResult | null> => shared());
     const describeMany = vi.fn(async () => [description(), description()]);

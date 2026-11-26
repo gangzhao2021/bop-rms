@@ -208,6 +208,11 @@ export class CartClientError extends Error {
   readonly available: number | null;
   /** WP-2423 (guest-cart-503): the guest's own cart line the answer names. */
   readonly cartItemReference: string | null;
+  /**
+   * Batch 65: beside "the table is checking out", the table's Cart as it is (read-only), so the
+   * dishes in it that were never sent can be named; null when the answer has none.
+   */
+  readonly cart: CartView | null;
 
   constructor(
     code: CartErrorCode,
@@ -217,6 +222,7 @@ export class CartClientError extends Error {
       readonly retryAfterSeconds?: number;
       readonly available?: number;
       readonly cartItemReference?: string;
+      readonly cart?: CartView;
     } = {},
   ) {
     super("The cart request could not be completed.");
@@ -227,6 +233,7 @@ export class CartClientError extends Error {
     this.retryAfterSeconds = details.retryAfterSeconds ?? null;
     this.available = details.available ?? null;
     this.cartItemReference = details.cartItemReference ?? null;
+    this.cart = details.cart ?? null;
   }
 }
 

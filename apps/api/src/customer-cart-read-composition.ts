@@ -13,8 +13,15 @@ import {
 } from "./request-acquire-budget.js";
 
 export interface CustomerCartDisplayQuery {
-  /** `displayLocale`: the guest's chosen language for names (null: the session's own). */
-  read(input: unknown, displayLocale?: string | null): Promise<CustomerCartDisplayView | null>;
+  /**
+   * `displayLocale`: the guest's chosen language for names (null: the session's own). Batch 65:
+   * `atCheckout`: a table's Cart is also read while the table checks out (read-only).
+   */
+  read(
+    input: unknown,
+    displayLocale?: string | null,
+    options?: { readonly atCheckout?: boolean },
+  ): Promise<CustomerCartDisplayView | null>;
 }
 
 /** Reads a Cart view; the session's own locale (no second argument) unless another was chosen. */
@@ -22,7 +29,9 @@ export function readCartView(
   query: CustomerCartDisplayQuery,
   input: unknown,
   displayLocale: string | null | undefined,
+  atCheckout = false,
 ): Promise<CustomerCartDisplayView | null> {
+  if (atCheckout) return query.read(input, displayLocale ?? null, { atCheckout });
   return displayLocale == null ? query.read(input) : query.read(input, displayLocale);
 }
 
@@ -123,8 +132,17 @@ export function createCustomerCartReadPort(
   ): Promise<CustomerCartPortResult> => {
     for (let attempt = 0; ; attempt += 1) {
       try {
-        const view = await readCartView(query, input, displayLocale);
-        return view === null ? { status: "NotFound" } : { status: "Found", view };
+        const view = await readCartView(query, input, displayLocale, true);
+        if (view === null) return { status: "NotFound" };
+        // Batch 65 (v15 b64 live): the table is checking out. Still "checking out" (409), now with
+        // the Cart as it is, so a Cart opened or reloaded then names the dishes that were never
+        // sent to the kitchen, in the guest's language; nothing in it can be changed.
+        if (view.tableCheckingOut === true)
+          return {
+            status: "TableCheckingOut",
+            view: { schemaVersion: view.schemaVersion, cart: view.cart },
+          };
+        return { status: "Found", view };
       } catch (error) {
         const known = guestState(error);
         if (known !== null) return known;

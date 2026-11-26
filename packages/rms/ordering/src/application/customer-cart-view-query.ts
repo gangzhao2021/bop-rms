@@ -17,7 +17,11 @@ import {
   parseAnyCartQuoteAttachment,
   type CartQuoteAttachment,
 } from "../domain/cart-quote-attachment.js";
-import type { DiningCartReadResult, DiningCartViewer } from "./dining-cart-read-service.js";
+import type {
+  DiningCartReadOptions,
+  DiningCartReadResult,
+  DiningCartViewer,
+} from "./dining-cart-read-service.js";
 import type { CartAdderStandingPort } from "./ports/cart-item-command-ports.js";
 import type { PickupCartReadResult } from "./pickup-cart-read-service.js";
 
@@ -102,6 +106,16 @@ export interface CustomerCartDisplayView {
      */
     readonly tablePay?: CustomerCartTablePay;
   };
+  /**
+   * Batch 65 (v15 b64 live): this table is checking out. The Cart is shown read-only, as it is —
+   * the dishes in it never reached the kitchen — and nothing in it can be changed or sent. Only on
+   * a read with `atCheckout`; never on the answer to a change.
+   */
+  readonly tableCheckingOut?: true;
+}
+/** Batch 65: `atCheckout`: the Cart is also read while the table checks out (read-only). */
+export interface CustomerCartViewReadOptions {
+  readonly atCheckout?: boolean;
 }
 export interface CustomerCartTablePay {
   readonly defaultChoice: "WholeTable" | "OwnDishes";
@@ -226,7 +240,9 @@ export interface CustomerCartLineStandingPort {
   explainMany(inputs: readonly ValidateCatalogSelectionInput[]): Promise<readonly unknown[]>;
 }
 export interface CustomerDiningCartViewPorts {
-  readonly reads: { read(input: unknown): Promise<DiningCartReadResult | null> };
+  readonly reads: {
+    read(input: unknown, options?: DiningCartReadOptions): Promise<DiningCartReadResult | null>;
+  };
   readonly catalog: CustomerCartViewPorts["catalog"];
   readonly stores: CustomerCartViewPorts["stores"];
   readonly availability?: CustomerCartLineStandingPort;
@@ -245,7 +261,10 @@ type ViewPorts = Omit<CustomerCartViewPorts, "reads"> & {
   readonly staffRemovals?: CustomerCartStaffRemovalsPort;
   readonly tablePay?: CustomerCartTablePayPort;
   readonly reads: {
-    read(input: unknown): Promise<PickupCartReadResult | DiningCartReadResult | null>;
+    read(
+      input: unknown,
+      options?: DiningCartReadOptions,
+    ): Promise<PickupCartReadResult | DiningCartReadResult | null>;
   };
 };
 const localePattern = /^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/u;
@@ -398,12 +417,22 @@ function text(value: unknown): string {
   return value.normalize("NFC").trim();
 }
 function snapshot(value: PickupCartReadResult | DiningCartReadResult, mode: "Pickup" | "DineIn") {
+  const checkingOut =
+    mode === "DineIn" && Object.getOwnPropertyDescriptor(value, "tableCheckingOut") !== undefined;
   const raw = closed(
     value,
     mode === "DineIn"
-      ? ["context", "cart", "effectiveStatus", "observedAt", "viewer"]
+      ? [
+          "context",
+          "cart",
+          "effectiveStatus",
+          "observedAt",
+          "viewer",
+          ...(checkingOut ? ["tableCheckingOut"] : []),
+        ]
       : ["context", "cart", "effectiveStatus", "observedAt", "placedOrder"],
   );
+  if (checkingOut && raw.tableCheckingOut !== true) return unavailable();
   const currentViewer = mode === "DineIn" ? viewer(raw.viewer) : null;
   const context = closed(raw.context, ["publicStoreReference", "locale"]);
   const observedAt = parseOrderingInstant(raw.observedAt);
@@ -443,7 +472,15 @@ function snapshot(value: PickupCartReadResult | DiningCartReadResult, mode: "Pic
       notMade: placed.notMade,
     });
   }
-  return { cart, storeRequest, observedAt, effectiveStatus, viewer: currentViewer, placedOrder };
+  return {
+    cart,
+    storeRequest,
+    observedAt,
+    effectiveStatus,
+    viewer: currentViewer,
+    placedOrder,
+    tableCheckingOut: checkingOut,
+  };
 }
 
 export function createCustomerCartViewQuery(ports: CustomerCartViewPorts) {
@@ -480,8 +517,10 @@ function createViewQuery(ports: ViewPorts, mode: "Pickup" | "DineIn") {
     async read(
       input: unknown,
       requestedDisplayLocale?: CustomerDisplayLocale,
+      options: CustomerCartViewReadOptions = {},
     ): Promise<CustomerCartDisplayView | null> {
       const nameLocale = displayLocale(requestedDisplayLocale);
+      const atCheckout = mode === "DineIn" && options.atCheckout === true;
       // WP-2423 (guest-cart-503): what the guest's own state answers is kept as itself (a table
       // checking out, a phone no longer at the table); only a real fault becomes "unavailable".
       let authorizationErrorCode: GuestStateCode | null = null;
@@ -489,7 +528,9 @@ function createViewQuery(ports: ViewPorts, mode: "Pickup" | "DineIn") {
       let endedReason: CartParticipationEndedReason | null = null;
       const read = async () => {
         try {
-          return await ports.reads.read(input);
+          return await (atCheckout
+            ? ports.reads.read(input, { atCheckout })
+            : ports.reads.read(input));
         } catch (error) {
           const code = readCartError(error)?.code;
           if (code !== undefined && (guestStateCodes as readonly string[]).includes(code))
@@ -507,6 +548,9 @@ function createViewQuery(ports: ViewPorts, mode: "Pickup" | "DineIn") {
           if (loaded === null) return null;
           const first = snapshot(loaded, mode);
           const cart = first.cart;
+          // Batch 65: a table checking out shows its Cart as it is, read-only: what the table pays,
+          // its rounds and who left are said elsewhere then, so they are not read for it.
+          const extras = !first.tableCheckingOut;
           const requests = cart.items.map((item) => {
             const evidence = item.catalogSelectionEvidence;
             if (evidence === null) return unavailable();
@@ -561,7 +605,7 @@ function createViewQuery(ports: ViewPorts, mode: "Pickup" | "DineIn") {
           // WP-2423 (guest-cart-503): a line a stable Catalog fact says can't be sold now is marked
           // before anyone taps 下单, so it can be removed. A listing in progress marks nothing.
           let marks: readonly (string | null)[] = cart.items.map(() => null);
-          if (ports.availability !== undefined && cart.items.length > 0) {
+          if (extras && ports.availability !== undefined && cart.items.length > 0) {
             try {
               const standings = await ports.availability.explainMany(
                 cart.items.map((item) => ({
@@ -603,6 +647,7 @@ function createViewQuery(ports: ViewPorts, mode: "Pickup" | "DineIn") {
             ),
           ];
           if (
+            extras &&
             ports.adders !== undefined &&
             others.length > 0 &&
             cart.diningSessionReference !== null
@@ -629,7 +674,7 @@ function createViewQuery(ports: ViewPorts, mode: "Pickup" | "DineIn") {
           }
           // WP-2423 (same-table-ordering): rounds this table Cart sent lately (fail-open: absent).
           let recentRounds: readonly CustomerCartRecentRound[] | undefined;
-          if (mode === "DineIn" && ports.rounds !== undefined && first.viewer !== null) {
+          if (extras && mode === "DineIn" && ports.rounds !== undefined && first.viewer !== null) {
             try {
               const rounds = await ports.rounds.recent({
                 cartReference: cart.cartReference,
@@ -682,6 +727,7 @@ function createViewQuery(ports: ViewPorts, mode: "Pickup" | "DineIn") {
           // WP-2423 shared-table-checkout (c): dishes staff took out lately (fail-open: absent).
           let staffRemoved: readonly CustomerCartStaffRemoval[] | undefined;
           if (
+            extras &&
             mode === "DineIn" &&
             ports.staffRemovals !== undefined &&
             first.viewer !== null &&
@@ -726,6 +772,7 @@ function createViewQuery(ports: ViewPorts, mode: "Pickup" | "DineIn") {
           // WP-2423 shared-table-checkout (a): who is paying for which dishes (fail-closed).
           let tablePay: CustomerCartTablePay | undefined;
           if (
+            extras &&
             mode === "DineIn" &&
             ports.tablePay !== undefined &&
             first.viewer !== null &&
@@ -850,6 +897,7 @@ function createViewQuery(ports: ViewPorts, mode: "Pickup" | "DineIn") {
           }
           if (
             JSON.stringify(cart) !== JSON.stringify(final.cart) ||
+            first.tableCheckingOut !== final.tableCheckingOut ||
             JSON.stringify(first.viewer) !== JSON.stringify(final.viewer) ||
             first.storeRequest.publicStoreReference !== final.storeRequest.publicStoreReference ||
             first.storeRequest.requestedLocale !== final.storeRequest.requestedLocale ||
@@ -901,6 +949,7 @@ function createViewQuery(ports: ViewPorts, mode: "Pickup" | "DineIn") {
               ...(staffRemoved === undefined ? {} : { staffRemoved }),
               ...(tablePay === undefined ? {} : { tablePay }),
             }),
+            ...(final.tableCheckingOut ? { tableCheckingOut: true as const } : {}),
           });
         }
       } catch (error) {

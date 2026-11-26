@@ -321,6 +321,25 @@ describe("WP-1205 in-memory Cart state", () => {
     expect(f.controller.getState()).toMatchObject({ status: "ready" });
   });
 
+  // Batch 65 (v15 b64 live): a Cart opened or reloaded after Start checkout named no unsent dish,
+  // and an open one kept the dish names of the language it was loaded in.
+  it("batch 65: at checkout the page holds the Cart the Store sent with the answer", async () => {
+    const f = fixture();
+    const sent = cart();
+    f.failLoad(new CartClientError("cart_table_checking_out", { cart: sent }));
+    await f.controller.load();
+    expect(f.controller.getState()).toMatchObject({ status: "table-checking-out", cart: sent });
+    // Read again (a language switch loads the page again): the newer Cart replaces the one held.
+    const renamed = cart();
+    f.failLoad(new CartClientError("cart_table_checking_out", { cart: renamed }));
+    await f.controller.load();
+    expect((f.controller.getState() as { cart: unknown }).cart).toBe(renamed);
+    // An answer without one keeps what was on screen.
+    f.failLoad(new CartClientError("cart_table_checking_out"));
+    await f.controller.load();
+    expect((f.controller.getState() as { cart: unknown }).cart).toBe(renamed);
+  });
+
   it("WP-2423 item 6: with nothing on screen yet a quiet read is a load", async () => {
     const f = fixture();
     f.failLoad(new CartClientError("cart_service_unavailable"));

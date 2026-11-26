@@ -54,6 +54,15 @@ export interface DiningCartReadResult {
   readonly cart: CartAggregate;
   readonly effectiveStatus: "Active" | "Abandoned" | "Expired";
   readonly observedAt: OrderingInstant;
+  /**
+   * Batch 65: present (true) only on a read with `atCheckout`, when the table is checking out: the
+   * Cart is shown as it is, read-only; nothing in it can be changed or sent.
+   */
+  readonly tableCheckingOut?: true;
+}
+/** Batch 65: what a read is for. `atCheckout`: also while the table checks out (read-only). */
+export interface DiningCartReadOptions {
+  readonly atCheckout?: boolean;
 }
 
 const failureCauseKey = Symbol.for("bop.failure.cause");
@@ -68,8 +77,12 @@ function unavailable(cause?: unknown): never {
 /** Restricted internal snapshot only. Shared reads do not transfer creator or item ownership. */
 export function createDiningCartReadService(ports: DiningCartReadPorts) {
   const authorization = createDiningCartAuthority(ports);
+  const viewing = createDiningCartAuthority(ports, "CartView");
   return Object.freeze({
-    async read(value: unknown): Promise<DiningCartReadResult | null> {
+    async read(
+      value: unknown,
+      options: DiningCartReadOptions = {},
+    ): Promise<DiningCartReadResult | null> {
       let credential: string;
       let requestedReference: string | null;
       try {
@@ -86,26 +99,25 @@ export function createDiningCartReadService(ports: DiningCartReadPorts) {
       } catch {
         throw new CartError("CART_INPUT_INVALID");
       }
-      const { value: cart, authority: last } = await authorization.run(
-        credential,
-        async (first) => {
-          try {
-            const source = await ports.carts.current(
-              Object.freeze({
-                brandReference: first.participation.brandReference,
-                storeReference: first.participation.storeReference,
-                diningSessionReference: first.participation.diningSessionReference,
-                observedAt: first.observedAt,
-              }),
-            );
-            return source === null ? null : parseCartAggregate(source);
-          } catch (error) {
-            // Read again (with a new authorization and observation), a few times at most.
-            if (error instanceof DiningCartMovedOnError) throw new CartPartyMovedError(false);
-            return unavailable(error);
-          }
-        },
-      );
+      const { value: cart, authority: last } = await (
+        options.atCheckout === true ? viewing : authorization
+      ).run(credential, async (first) => {
+        try {
+          const source = await ports.carts.current(
+            Object.freeze({
+              brandReference: first.participation.brandReference,
+              storeReference: first.participation.storeReference,
+              diningSessionReference: first.participation.diningSessionReference,
+              observedAt: first.observedAt,
+            }),
+          );
+          return source === null ? null : parseCartAggregate(source);
+        } catch (error) {
+          // Read again (with a new authorization and observation), a few times at most.
+          if (error instanceof DiningCartMovedOnError) throw new CartPartyMovedError(false);
+          return unavailable(error);
+        }
+      });
       const brand = String(last.session.brandReference);
       const store = String(last.session.storeReference);
       if (cart === null) return null;
@@ -147,6 +159,7 @@ export function createDiningCartReadService(ports: DiningCartReadPorts) {
         cart,
         effectiveStatus,
         observedAt: last.observedAt,
+        ...(last.participation.tableCheckingOut ? { tableCheckingOut: true as const } : {}),
       });
     },
   });

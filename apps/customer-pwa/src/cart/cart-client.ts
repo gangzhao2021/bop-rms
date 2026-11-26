@@ -409,7 +409,17 @@ function parse(response: Response, payload: unknown): CartView | null {
   // M126 I.2: why this phone's place at the table ended, for the words the page shows.
   if (code === "cart_participant_ended") setParticipationEnded(participationReason(error?.reason));
   const retryHeader = response.headers.get("retry-after");
+  // Batch 65 (v15 b64 live): the table is checking out; the Store sends the Cart as it is, so a
+  // Cart opened or reloaded now still names what was never sent. One it can't read is left out.
+  let checkingOutCart: CartView | null = null;
+  if (code === "cart_table_checking_out" && Object.hasOwn(payload as object, "cart"))
+    try {
+      checkingOutCart = view({ schemaVersion: 1, cart: (payload as { cart: unknown }).cart });
+    } catch {
+      checkingOutCart = null;
+    }
   throw new CartClientError(code, {
+    ...(checkingOutCart === null ? {} : { cart: checkingOutCart }),
     ...(Number.isSafeInteger(error?.currentVersion)
       ? { currentVersion: Number(error?.currentVersion) }
       : {}),

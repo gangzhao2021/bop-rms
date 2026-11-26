@@ -7,6 +7,7 @@ import {
 } from "../application/dining-cart-read-service.js";
 import { diningCartMovedRetries } from "../application/dining-cart-authority.js";
 import {
+  CartError,
   CartParticipationEndedError,
   parseCartAggregate,
   type CartAggregate,
@@ -168,6 +169,39 @@ describe("current-authorized shared Dining Cart read", () => {
     const read = await f.service.read({ sessionCredential: credential });
     expect(read?.cart.cartReference).toBe(ids.cart);
     expect(f.current).toHaveBeenCalledTimes(2);
+  });
+  // Batch 65 (v15 b64 live): a Cart reloaded after Start checkout named no unsent dish.
+  it("reads the Cart at checkout only when asked to, saying the table is checking out", async () => {
+    const f = fixture();
+    f.participate.mockImplementation(async (...args: unknown[]) => {
+      if ((args[0] as { purpose: string }).purpose === "Cart")
+        throw new CartError("CART_TABLE_CHECKING_OUT");
+      return { ...membership(), observedAt: f.now(), tableCheckingOut: true };
+    });
+    await expect(f.service.read({ sessionCredential: credential })).rejects.toMatchObject({
+      code: "CART_TABLE_CHECKING_OUT",
+    });
+    const read = await f.service.read({ sessionCredential: credential }, { atCheckout: true });
+    expect(read?.tableCheckingOut).toBe(true);
+    expect(read?.cart.items).toHaveLength(2);
+    expect(f.participate).toHaveBeenLastCalledWith({
+      purpose: "CartView",
+      diningSessionReference: ids.diningSession,
+      participantReference: ids.participant,
+    });
+    // An open table read the same way says nothing of checkout.
+    f.participate.mockImplementation(async () => ({
+      ...membership(),
+      observedAt: f.now(),
+      tableCheckingOut: false,
+    }));
+    const open = await f.service.read({ sessionCredential: credential }, { atCheckout: true });
+    expect(open).not.toHaveProperty("tableCheckingOut");
+    // A "CartView" answer without the flag is not trusted.
+    f.participate.mockImplementation(async () => ({ ...membership(), observedAt: f.now() }));
+    await expect(
+      f.service.read({ sessionCredential: credential }, { atCheckout: true }),
+    ).rejects.toMatchObject({ code: "CART_DEPENDENCY_UNAVAILABLE" });
   });
   it("answers unavailable when the Cart keeps moving on through every read", async () => {
     const f = fixture();
