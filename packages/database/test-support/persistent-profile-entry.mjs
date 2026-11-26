@@ -386,7 +386,11 @@ export async function exercisePersistentProfileEntry({
     const address = runtime.server.address();
     assert.equal(typeof address, "object");
     assert.ok(address);
-    const request = (base = "http://127.0.0.1:" + address.port, cookie = undefined) =>
+    const request = (
+      base = "http://127.0.0.1:" + address.port,
+      cookie = undefined,
+      oldPage = false,
+    ) =>
       globalThis.fetch(base + "/bff/customer/entry", {
         method: "POST",
         headers: {
@@ -394,8 +398,9 @@ export async function exercisePersistentProfileEntry({
           "content-type": "application/json",
           "sec-fetch-site": "same-origin",
           "sec-fetch-mode": "cors",
-          // The current customer page reads the open table's printed name (batch 64).
-          "bop-entry-accepts": "table-label",
+          // The current customer page reads the open table's printed name (batch 64); a phone
+          // still on the precached pre-batch-64 page sends no such header.
+          ...(oldPage ? {} : { "bop-entry-accepts": "table-label" }),
           ...(cookie === undefined ? {} : { cookie }),
         },
         body: JSON.stringify({ qrToken: f.token() }),
@@ -952,12 +957,38 @@ export async function exercisePersistentProfileEntry({
       runtimeOptions,
       rescan: (base, cookie) => request(base, cookie),
       enterAnother: async (base) => {
-        const response = await request(base);
+        // Batch 65 (v15 b64 live, F11 rollout): every other phone here still runs the customer
+        // page precached before batch 64, which sends no bop-entry-accepts header and whose
+        // reader refuses any key it does not know (entry-client.ts parseSuccess at b02344485).
+        // Its scan of the open table is answered in exactly that page's shape, and the phone
+        // then joins and orders through the rest of this journey.
+        const response = await request(base, undefined, true);
         assert.equal(response.status, 201);
         const body = await response.json();
         // Staff seated the party: another phone's scan finds the table open.
         assert.equal(body.tableOpen, true);
-        assert.deepEqual(body.table, { label: "T01" });
+        assert.equal(Object.hasOwn(body, "table"), false);
+        const oldPageKeys = [
+          "schemaVersion",
+          "status",
+          "brandDisplayName",
+          "storeDisplayName",
+          "publicStoreReference",
+          "publicTableReference",
+          "channel",
+          "operatingState",
+          "availableServiceModes",
+          "locale",
+          "contextExpiresAt",
+          "csrfToken",
+          "tableOpen",
+          "resumed",
+          "previousVisit",
+        ];
+        assert.deepEqual(
+          Object.keys(body).filter((key) => !oldPageKeys.includes(key)),
+          [],
+        );
         return {
           cookie: response.headers.getSetCookie()[0].split(";")[0],
           csrfToken: body.csrfToken,
