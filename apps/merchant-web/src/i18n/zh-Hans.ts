@@ -271,6 +271,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   " · Holds stock": " · 存放库存",
   " · Last checked {observedAt}": " · 最近检查 {observedAt}",
   "{destination} · Order {orderNumber}": "{destination} · {orderNumber} 号单",
+  "Brought back from this device: this table's order, not sent yet. Check it with the guests, then send it.":
+    "已恢复本设备上这桌还没发送的点单。请和客人核对后再发送。",
+  "1 kitchen note isn't kept on the device; add it again.":
+    "有 1 条给厨房的备注不会保存在设备上，请重新添加。",
+  "{count} kitchen notes aren't kept on the device; add them again.":
+    "有 {count} 条给厨房的备注不会保存在设备上，请重新添加。",
   " · Remade {item}×": " · 已重做 {item}×",
   " · Temporarily unavailable": " · 暂不可用",
   " · approved by {approvedBy}": " · 由{approvedBy}批准",

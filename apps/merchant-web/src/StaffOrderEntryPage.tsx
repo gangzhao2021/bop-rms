@@ -77,6 +77,12 @@ import {
   type TableCartItem,
 } from "./staff-order-entry.js";
 import { PaperSlipConfirm } from "./PaperSlipConfirm.js";
+import { useStoreBusinessDay } from "./StoreBusinessDay.js";
+import {
+  clearStaffRoundDraft,
+  keepStaffRoundDraft,
+  loadStaffRoundDraft,
+} from "./staff-round-draft.js";
 
 export { paidAtInstant, payErrorText, paymentUrgentMinutes, paymentWindowNotice };
 
@@ -1021,7 +1027,33 @@ export function StaffOrderEntryPage({
   const [reload, setReload] = useState(0);
   // v15 b12: switching the language reloads the page; the order being taken comes back with it.
   const draftKey = "staffOrder:" + storeReference + ":" + (tableReference ?? "counter");
-  const [restoredDraft] = useState(() => keptDraftOf(takeKeptThroughLanguageSwitch(draftKey)));
+  const [switchDraft] = useState(() => keptDraftOf(takeKeptThroughLanguageSwitch(draftKey)));
+  /**
+   * Batch 65 (v15 b64 live): a table's round not sent yet, kept on this device, comes back after a
+   * reload or signing in again, with a note; it is checked against the table's party and the
+   * business day once they are read, and never sent by itself.
+   */
+  const [savedRound] = useState(() =>
+    switchDraft === null && tableMode && tableReference !== null
+      ? loadStaffRoundDraft<Line>(storeReference, tableReference)
+      : null,
+  );
+  const [restoredDraft] = useState(() =>
+    switchDraft !== null || savedRound === null
+      ? switchDraft
+      : {
+          lines: savedRound.lines,
+          tip: savedRound.tip,
+          customTip: savedRound.customTip,
+          party: savedRound.party,
+        },
+  );
+  const [roundBack, setRoundBack] = useState<{ readonly notesLeftOut: number } | null>(() =>
+    savedRound === null ? null : { notesLeftOut: savedRound.notesLeftOut },
+  );
+  /** The kept round still to be checked against the table's party (when the table is read). */
+  const savedRoundCheck = useRef(savedRound);
+  const businessDay = useStoreBusinessDay();
   const [lines, setLines] = useState<readonly Line[]>(() => restoredDraft?.lines ?? []);
   /** WP-2423 M165: ticket lines whose price changed on the last menu read (until the next edit). */
   const [repriced, setRepriced] = useState<readonly RepricedLine[]>([]);
@@ -1239,6 +1271,7 @@ export function StaffOrderEntryPage({
       setMenu({ kind: "Error", code: "TableUnknown" });
       return () => controller.abort();
     }
+    let seatedSession: string | null | undefined;
     const loadTable = async (): Promise<"CheckingOut" | "Paid" | undefined> => {
       if (tableReference === null) return undefined;
       // The table's name as staff know it, from the Tables list (paged, at most 1,000 tables).
@@ -1256,6 +1289,7 @@ export function StaffOrderEntryPage({
           if (offer !== "Offered") return offer;
           setTablePaysLater(found.paymentTiming === "PayLater");
           setTableSession(found.currentDiningSessionReference);
+          seatedSession = found.currentDiningSessionReference;
           setUnusedJoinCode(found.unusedJoinCode === true);
           return;
         }
@@ -1272,6 +1306,17 @@ export function StaffOrderEntryPage({
           return;
         }
         setMenu({ kind: "Ready", menu: value });
+        // Batch 65: a round kept on this device for another party (the table was closed and
+        // seated again, or is free now) is not this party's: it is dropped.
+        const saved = savedRoundCheck.current;
+        savedRoundCheck.current = null;
+        if (saved !== null && (saved.party?.session ?? null) !== (seatedSession ?? null)) {
+          setLines([]);
+          setTip("0");
+          setCustomTip("");
+          setRoundBack(null);
+          return;
+        }
         // An order kept through a language switch is named as the menu just read names it.
         setLines((current) => (current.length === 0 ? current : rebindLines(current, value).lines));
       })
@@ -1296,6 +1341,53 @@ export function StaffOrderEntryPage({
   // v15 b12: what the language switch keeps of the order being built (nothing once it is sent).
   const tipNow = useRef({ tip, customTip });
   tipNow.current = { tip, customTip };
+  // Batch 65: a round kept from an earlier business day is not brought back.
+  const today = businessDay?.businessDate ?? null;
+  // Compared only with the Store's own day read (not the sign-in's date, which may be older).
+  const readToday = businessDay?.startsAt == null ? null : today;
+  const savedRoundDayChecked = useRef(false);
+  useEffect(() => {
+    if (savedRound === null || savedRound.businessDate === null || readToday === null) return;
+    // Once, on the first day read: a day ending while staff work leaves their round alone.
+    if (savedRoundDayChecked.current) return;
+    savedRoundDayChecked.current = true;
+    if (savedRound.businessDate === readToday) return;
+    savedRoundCheck.current = null;
+    setLines([]);
+    setRoundBack(null);
+  }, [savedRound, readToday]);
+  // Batch 65: the round being taken at a table is kept on this device until it is sent or emptied.
+  const notesLeftOut = roundBack?.notesLeftOut ?? 0;
+  useEffect(() => {
+    if (!tableMode || tableReference === null) return;
+    if (phase !== "Building" || lines.length === 0) {
+      clearStaffRoundDraft(storeReference, tableReference);
+      return;
+    }
+    keepStaffRoundDraft(storeReference, tableReference, {
+      savedAt: Date.now(),
+      businessDate: today ?? savedRound?.businessDate ?? null,
+      party: draftParty.current,
+      lines,
+      tip,
+      customTip,
+      notesLeftOut,
+    });
+  }, [
+    customTip,
+    lines,
+    notesLeftOut,
+    phase,
+    savedRound,
+    storeReference,
+    tableMode,
+    tableReference,
+    tip,
+    today,
+  ]);
+  useEffect(() => {
+    if (lines.length === 0 || phase !== "Building") setRoundBack(null);
+  }, [lines.length, phase]);
   // Once the kept order is sent, started over or changed, a later reload does not bring it back.
   const keptLines = useRef(restoredDraft?.lines ?? null);
   useEffect(() => {
@@ -1682,6 +1774,8 @@ export function StaffOrderEntryPage({
           })()
         : undefined;
     const sentLines = lines;
+    // Batch 65: a round on its way is never kept to send again after a reload.
+    if (tableReference !== null) clearStaffRoundDraft(storeReference, tableReference);
     setPhase("Sending");
     setProblem(null);
     setProblemNeedsTableCode(false);
@@ -2302,6 +2396,23 @@ export function StaffOrderEntryPage({
               )}
           {wordGap()}
           <Link to="/operations/orders">{t("Open Orders")}</Link>
+        </p>
+      ) : null}
+      {roundBack !== null && phase === "Building" && lines.length > 0 ? (
+        <p className="counter-order__round-back" role="status">
+          {t(
+            "Brought back from this device: this table's order, not sent yet. Check it with the guests, then send it.",
+          )}
+          {roundBack.notesLeftOut > 0 ? (
+            <>
+              {wordGap()}
+              {roundBack.notesLeftOut === 1
+                ? t("1 kitchen note isn't kept on the device; add it again.")
+                : t("{count} kitchen notes aren't kept on the device; add them again.", {
+                    count: roundBack.notesLeftOut,
+                  })}
+            </>
+          ) : null}
         </p>
       ) : null}
       <div

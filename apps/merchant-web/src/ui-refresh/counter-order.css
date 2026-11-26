@@ -1205,3 +1205,11 @@
 .counter-order :is(.counter-order__danger-text, .counter-order__accent-text) {
   min-width: 44px;
 }
+
+/* Batch 65: a table's round brought back from this device: one plain line, dark 14/400. */
+.counter-order .counter-order__round-back {
+  margin: 0 0 var(--bop-space-3);
+  color: var(--bop-color-text);
+  font-size: 14px;
+  font-weight: 400;
+}
