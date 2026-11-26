@@ -263,6 +263,15 @@ const words = {
     back: "Brought back from this device: this table's order, not sent yet. Check it with the guests, then send it. 1 kitchen note isn't kept on the device; add it again.",
     empty: "No items yet",
     send: "Send order",
+    change: (name: string) => new RegExp(`^Change ${name}$`, "u"),
+    remove: (name: string) => new RegExp(`^Remove ${name}$`, "u"),
+    save: "Save change",
+    brought:
+      "Brought back from this device: this table's order, not sent yet. Check it with the guests, then send it.",
+    notes: (count: number) =>
+      count === 1
+        ? " 1 kitchen note isn't kept on the device; add it again."
+        : ` ${count} kitchen notes aren't kept on the device; add them again.`,
   },
   "zh-Hans": {
     add: (name: string) => new RegExp(`^添加 ?${name}$`, "u"),
@@ -273,6 +282,11 @@ const words = {
     back: "已恢复本设备上这桌还没发送的点单。请和客人核对后再发送。有 1 条给厨房的备注不会保存在设备上，请重新添加。",
     empty: "还没有商品",
     send: "发送订单",
+    change: (name: string) => new RegExp(`^修改 ?${name}$`, "u"),
+    remove: (name: string) => new RegExp(`^移除 ?${name}$`, "u"),
+    save: "保存更改",
+    brought: "已恢复本设备上这桌还没发送的点单。请和客人核对后再发送。",
+    notes: (count: number) => `有 ${count} 条给厨房的备注不会保存在设备上，请重新添加。`,
   },
 } as const;
 
@@ -360,5 +374,54 @@ for (const language of ["en", "zh-Hans"] as const)
     newDay("2026-10-16");
     await page.reload();
     await expect(page.getByText(w.empty)).toBeVisible();
+    expect(rounds).toHaveLength(0);
+  });
+
+// Batch 65 review: the count of notes to add again follows the lines. A note staff add back is not
+// counted again after the next reload, and a removed line's lost note is not asked for.
+for (const language of ["en", "zh-Hans"] as const)
+  test(`@production b65: a brought-back round asks only for the notes still missing (${language})`, async ({
+    page,
+  }) => {
+    const w = words[language];
+    const { rounds } = await openRound(page, language);
+    await page.setViewportSize({ width: 1024, height: 768 });
+    const ticket = page.getByRole("list", { name: w.items });
+    const back = page.getByRole("status").filter({ hasText: w.brought.slice(0, 12) });
+    const note = async (name: string, text: string) => {
+      await page.getByRole("button", { name: w.change(name) }).click();
+      await page.getByRole("textbox", { name: w.noteBox }).fill(text);
+      await page.getByRole("button", { name: w.save }).click();
+      await expect(ticket).toContainText(text);
+    };
+    await page
+      .getByRole("button", { name: w.add("Shoyu Ramen") })
+      .first()
+      .click();
+    await page.getByRole("textbox", { name: w.noteBox }).fill("No peanuts");
+    await page.getByRole("button", { name: w.addToOrder }).click();
+    await page
+      .getByRole("button", { name: w.add("Gyoza") })
+      .first()
+      .click();
+    await expect(ticket.getByRole("listitem")).toHaveCount(2);
+    await note("Gyoza", "Well done");
+
+    await page.reload();
+    await expect(back).toHaveText(w.brought + w.notes(2));
+    // The ramen's note is added back: only the gyoza's is still missing, now and after a reload
+    // (the ramen's note is again not kept, so two are asked for, never three).
+    await note("Shoyu Ramen", "No peanuts");
+    await expect(back).toHaveText(w.brought + w.notes(1));
+    await page.reload();
+    await expect(back).toHaveText(w.brought + w.notes(2));
+    // The gyoza is removed: its lost note is not asked for, now or after a reload.
+    await page.getByRole("button", { name: w.remove("Gyoza") }).click();
+    await expect(ticket.getByRole("listitem")).toHaveCount(1);
+    await expect(back).toHaveText(w.brought + w.notes(1));
+    await page.reload();
+    await expect(back).toHaveText(w.brought + w.notes(1));
+    await note("Shoyu Ramen", "No peanuts");
+    await expect(back).toHaveText(w.brought);
     expect(rounds).toHaveLength(0);
   });

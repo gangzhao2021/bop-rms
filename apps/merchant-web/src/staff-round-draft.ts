@@ -7,7 +7,9 @@
  *
  * Only what the menu says is kept (dishes, choices, quantities, the tip choice and the table's
  * party reference). A line's kitchen note may carry a guest's allergy or health fact, so it is
- * never written to the device: the page says how many notes to add again. Nothing depends on it:
+ * never written to the device: the page says how many notes to add again. Which lines lost their
+ * note is kept (by line), so a note added again, or its line removed, is no longer counted after
+ * the next reload (batch 65 review). Nothing depends on it:
  * when it can't be read or written the page behaves as before.
  */
 const PREFIX = "bop.merchant.staffRoundDraft.v1.";
@@ -32,8 +34,8 @@ export interface StaffRoundDraft<L extends StaffRoundDraftLine = StaffRoundDraft
   readonly lines: readonly L[];
   readonly tip: string;
   readonly customTip: string;
-  /** How many lines had a kitchen note that was not kept. */
-  readonly notesLeftOut: number;
+  /** The lines (by key) whose kitchen note was not kept, so staff add it again. */
+  readonly noteKeysLeftOut: readonly string[];
 }
 
 const isLine = (value: unknown): value is StaffRoundDraftLine => {
@@ -88,7 +90,12 @@ export function loadStaffRoundDraft<L extends StaffRoundDraftLine>(
       !value.lines.every(isLine) ||
       typeof value.tip !== "string" ||
       typeof value.customTip !== "string" ||
-      !Number.isSafeInteger(value.notesLeftOut)
+      !Array.isArray(value.noteKeysLeftOut) ||
+      !value.noteKeysLeftOut.every(
+        (key) =>
+          typeof key === "string" &&
+          (value.lines as readonly StaffRoundDraftLine[]).some((line) => line.key === key),
+      )
     ) {
       clearStaffRoundDraft(storeReference, tableReference);
       return null;
@@ -100,31 +107,37 @@ export function loadStaffRoundDraft<L extends StaffRoundDraftLine>(
       lines: value.lines as unknown as readonly L[],
       tip: value.tip,
       customTip: value.customTip,
-      notesLeftOut: value.notesLeftOut ?? 0,
+      noteKeysLeftOut: [...new Set(value.noteKeysLeftOut)],
     };
   } catch {
     return null;
   }
 }
 
-/** Keeps the round being taken (its lines without their notes). */
+/**
+ * Keeps the round being taken (its lines without their notes). `noteKeysLeftOut` names the lines
+ * brought back without the note they had and still without one; a line that has a note now is
+ * counted once, and a line no longer in the round is not counted.
+ */
 export function keepStaffRoundDraft(
   storeReference: string,
   tableReference: string,
   draft: Omit<
     StaffRoundDraft<StaffRoundDraftLine & { readonly note?: string | null | undefined }>,
-    "notesLeftOut"
-  > & { readonly notesLeftOut?: number },
+    "noteKeysLeftOut"
+  > & { readonly noteKeysLeftOut?: readonly string[] },
 ): void {
-  let notes = draft.notesLeftOut ?? 0;
+  const stillMissing = new Set(draft.noteKeysLeftOut ?? []);
+  const noteKeysLeftOut: string[] = [];
   const lines = draft.lines.map(({ note, ...line }) => {
-    if (note !== undefined && note !== null && note.trim() !== "") notes += 1;
+    if ((note !== undefined && note !== null && note.trim() !== "") || stillMissing.has(line.key))
+      noteKeysLeftOut.push(line.key);
     return line;
   });
   try {
     globalThis.localStorage.setItem(
       keyFor(storeReference, tableReference),
-      JSON.stringify({ ...draft, lines, notesLeftOut: notes }),
+      JSON.stringify({ ...draft, lines, noteKeysLeftOut }),
     );
   } catch {
     // Private browsing or a full store: only this page holds the round.

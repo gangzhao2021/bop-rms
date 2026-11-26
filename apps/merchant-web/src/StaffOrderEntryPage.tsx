@@ -1048,9 +1048,10 @@ export function StaffOrderEntryPage({
           party: savedRound.party,
         },
   );
-  const [roundBack, setRoundBack] = useState<{ readonly notesLeftOut: number } | null>(() =>
-    savedRound === null ? null : { notesLeftOut: savedRound.notesLeftOut },
-  );
+  /** The round brought back, and its lines (by key) still missing the kitchen note they had. */
+  const [roundBack, setRoundBack] = useState<{
+    readonly noteKeysLeftOut: readonly string[];
+  } | null>(() => (savedRound === null ? null : { noteKeysLeftOut: savedRound.noteKeysLeftOut }));
   /** The kept round still to be checked against the table's party (when the table is read). */
   const savedRoundCheck = useRef(savedRound);
   const businessDay = useStoreBusinessDay();
@@ -1357,7 +1358,7 @@ export function StaffOrderEntryPage({
     setRoundBack(null);
   }, [savedRound, readToday]);
   // Batch 65: the round being taken at a table is kept on this device until it is sent or emptied.
-  const notesLeftOut = roundBack?.notesLeftOut ?? 0;
+  const noteKeysLeftOut = roundBack?.noteKeysLeftOut;
   useEffect(() => {
     if (!tableMode || tableReference === null) return;
     if (phase !== "Building" || lines.length === 0) {
@@ -1371,12 +1372,12 @@ export function StaffOrderEntryPage({
       lines,
       tip,
       customTip,
-      notesLeftOut,
+      ...(noteKeysLeftOut === undefined ? {} : { noteKeysLeftOut }),
     });
   }, [
     customTip,
     lines,
-    notesLeftOut,
+    noteKeysLeftOut,
     phase,
     savedRound,
     storeReference,
@@ -1388,6 +1389,16 @@ export function StaffOrderEntryPage({
   useEffect(() => {
     if (lines.length === 0 || phase !== "Building") setRoundBack(null);
   }, [lines.length, phase]);
+  // Batch 65 review: a brought-back line given its note again, or removed, no longer needs one.
+  useEffect(() => {
+    setRoundBack((back) => {
+      if (back === null) return back;
+      const missing = back.noteKeysLeftOut.filter((key) =>
+        lines.some((line) => line.key === key && (line.note ?? "").trim() === ""),
+      );
+      return missing.length === back.noteKeysLeftOut.length ? back : { noteKeysLeftOut: missing };
+    });
+  }, [lines]);
   // Once the kept order is sent, started over or changed, a later reload does not bring it back.
   const keptLines = useRef(restoredDraft?.lines ?? null);
   useEffect(() => {
@@ -2403,13 +2414,13 @@ export function StaffOrderEntryPage({
           {t(
             "Brought back from this device: this table's order, not sent yet. Check it with the guests, then send it.",
           )}
-          {roundBack.notesLeftOut > 0 ? (
+          {roundBack.noteKeysLeftOut.length > 0 ? (
             <>
               {wordGap()}
-              {roundBack.notesLeftOut === 1
+              {roundBack.noteKeysLeftOut.length === 1
                 ? t("1 kitchen note isn't kept on the device; add it again.")
                 : t("{count} kitchen notes aren't kept on the device; add them again.", {
-                    count: roundBack.notesLeftOut,
+                    count: roundBack.noteKeysLeftOut.length,
                   })}
             </>
           ) : null}

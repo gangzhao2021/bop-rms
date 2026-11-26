@@ -33,7 +33,7 @@ it("keeps the round per Store and table, never a kitchen note, and counts the no
   expect(JSON.stringify({ ...globalThis.localStorage })).not.toContain("No peanuts");
   const back = loadStaffRoundDraft(store, table, 1_000_000 + 60_000);
   expect(back?.lines.map((l) => l.key)).toEqual(["a", "b"]);
-  expect(back?.notesLeftOut).toBe(1);
+  expect(back?.noteKeysLeftOut).toEqual(["a"]);
   expect(back?.party).toEqual({ session: "session-1" });
   expect(back?.tip).toBe("15");
   expect(loadStaffRoundDraft(store, "table-2", 1_000_000)).toBeNull();
@@ -52,7 +52,33 @@ it("forgets a round that is too old, unreadable, or cleared", () => {
   // A line carrying a note was written by something else: not trusted.
   globalThis.localStorage.setItem(
     "bop.merchant.staffRoundDraft.v1.store-1.table-1",
-    JSON.stringify({ ...draft, lines: [line("a", "x")], notesLeftOut: 0 }),
+    JSON.stringify({ ...draft, lines: [line("a", "x")], noteKeysLeftOut: [] }),
+  );
+  expect(loadStaffRoundDraft(store, table, 1_000_000)).toBeNull();
+});
+
+it("counts a lost note once: not again when it is added back, nor once its line is removed", () => {
+  // Brought back with line a's note left out; staff add the note again and the page reloads.
+  keepStaffRoundDraft(store, table, {
+    ...draft,
+    lines: [line("a", "No peanuts"), line("b")],
+    noteKeysLeftOut: ["a"],
+  });
+  expect(loadStaffRoundDraft(store, table, 1_000_000)?.noteKeysLeftOut).toEqual(["a"]);
+  // Staff remove line a, which had lost its note: no note is left to add.
+  keepStaffRoundDraft(store, table, { ...draft, lines: [line("b")], noteKeysLeftOut: ["a"] });
+  expect(loadStaffRoundDraft(store, table, 1_000_000)?.noteKeysLeftOut).toEqual([]);
+  // Still missing and still there: it is still counted.
+  keepStaffRoundDraft(store, table, {
+    ...draft,
+    lines: [line("a"), line("b")],
+    noteKeysLeftOut: ["a"],
+  });
+  expect(loadStaffRoundDraft(store, table, 1_000_000)?.noteKeysLeftOut).toEqual(["a"]);
+  // A count naming a line that is not in the round was written by something else: not trusted.
+  globalThis.localStorage.setItem(
+    "bop.merchant.staffRoundDraft.v1.store-1.table-1",
+    JSON.stringify({ ...draft, lines: [line("b")], noteKeysLeftOut: ["a"] }),
   );
   expect(loadStaffRoundDraft(store, table, 1_000_000)).toBeNull();
 });
