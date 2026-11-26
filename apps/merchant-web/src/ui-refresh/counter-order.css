@@ -1190,6 +1190,9 @@
   > li:not([data-charging]) {
   display: none;
 }
+.counter-order .counter-order__awaiting[data-charging] {
+  padding-top: 0;
+}
 .counter-order .counter-order__awaiting[data-charging] .counter-order__awaiting-list {
   margin-top: 0;
 }
