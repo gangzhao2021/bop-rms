@@ -1171,6 +1171,36 @@
   flex-wrap: wrap;
   gap: 8px 24px;
 }
+/* ---- Batch 65 (v15 b64 live, TM2 order 58): while one waiting order's payment is open, only
+   that order stays, led by its own row; the list's heading (still its region's name), paragraph
+   and other rows step aside, so the record button (52 px, as the first charge's) is on the first
+   screen at 1024x768 and 390x844. ---- */
+.counter-order .counter-order__awaiting[data-charging] > h2 {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.counter-order .counter-order__awaiting[data-charging] > p.bop-muted,
+.counter-order
+  .counter-order__awaiting[data-charging]
+  .counter-order__awaiting-list
+  > li:not([data-charging]) {
+  display: none;
+}
+.counter-order .counter-order__awaiting[data-charging] .counter-order__awaiting-list {
+  margin-top: 0;
+}
+.counter-order .counter-order__awaiting[data-charging] .counter-order__awaiting-list > li {
+  padding-top: 0;
+  border-top: 0;
+}
+.counter-order .counter-order__awaiting .counter-order__resumed-charge .counter-order__primary {
+  width: 100%;
+  min-height: 52px;
+}
 /* zh-Hans 取消/关闭 drew a 28 px wide target: every text button keeps 44 x 44. */
 .counter-order :is(.counter-order__danger-text, .counter-order__accent-text) {
   min-width: 44px;

@@ -1376,6 +1376,158 @@ for (const language of ["en", "zh-Hans"] as const)
     }
   });
 
+// Batch 65 (v15 b64 live, TM2 order 58): the resumed panel stacked under the list's heading, its
+// paragraph and every waiting row, so at 1024x768 "Paid on card machine" sat at y 749-793 and
+// staff scrolled to record. While one order's payment is open only that order stays: its row
+// leads, the list's heading and paragraph step aside, and the one primary (52 px, as the first
+// charge's) is on the first screen with 40 px to spare. Close brings the list back.
+for (const language of ["en", "zh-Hans"] as const)
+  test(`@production b65: a resumed counter payment's record button is on the first screen (${language})`, async ({
+    page,
+  }) => {
+    const zh = language === "zh-Hans";
+    if (zh)
+      await page.addInitScript(() => {
+        window.localStorage.setItem("bop.merchant.language", "zh-Hans");
+      });
+    await signIn(page);
+    const payBy = new Date(Date.now() + 20 * 60_000).toISOString();
+    const row = (n: number, orderNumber: string, amountDueMinor: string | null) => ({
+      orderReference: id(n),
+      orderNumber,
+      orderType: "Pickup",
+      sourceChannel: "Pos",
+      submittedAt: new Date(Date.now() - 3 * 60_000).toISOString(),
+      observedAt: new Date().toISOString(),
+      initialBatchReference: id(n + 1),
+      counter: {
+        recordedAfterOutage: false,
+        paidOnCardMachine: null,
+        payBy,
+        amountDueMinor,
+        canCancelUnpaid: true,
+        cancelledBeforePayment: null,
+      },
+      canRecordCardMachinePayment: true,
+      canViewPayments: false,
+      batches: [
+        {
+          orderBatchReference: id(n + 1),
+          sequence: 1,
+          acceptanceStatus: "NotAccepted",
+          canRequestAcceptance: false,
+          canCancel: false,
+          staffCancellation: null,
+          canCancelItems: false,
+        },
+      ],
+      canRequestAcceptance: false,
+      currentPhase: "Submitted",
+      currentVersion: 1,
+      unfulfillable: null,
+      pickupNotCollected: false,
+      acceptBy: null,
+      awaitingPayment: true,
+    });
+    const money = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
+    await page.route("**/merchant/counter/menu", (route) => route.fulfill({ headers, json: menu }));
+    await page.route("**/merchant/orders", (route) =>
+      route.fulfill({
+        headers,
+        // Newest first: 58 is listed above 57.
+        json: { items: [row(72, "58", null), row(70, "57", null)], nextAfterOrderReference: null },
+      }),
+    );
+    await page.route("**/merchant/orders/detail?*", (route) => {
+      const reference = new URL(route.request().url()).searchParams.get("order");
+      const first = reference === id(70);
+      return route.fulfill({
+        headers,
+        json: {
+          screenId: "OPS-ORDER-DETAIL",
+          pickupContact: null,
+          order: first ? row(70, "57", "1413") : row(72, "58", "1413"),
+          lines: {
+            items: [
+              {
+                orderItemReference: id(first ? 74 : 75),
+                orderBatchReference: id(first ? 71 : 73),
+                name: "Flat White",
+                options: [],
+                quantity: 1,
+                customerNote: null,
+                unitPrice: money("1250"),
+                subtotal: money("1250"),
+                discount: money("0"),
+                tax: money("163"),
+                fee: money("0"),
+                total: money("1413"),
+                canCancel: false,
+                cancellation: null,
+              },
+            ],
+            totals: {
+              subtotal: money("1250"),
+              discount: money("0"),
+              tax: money("163"),
+              fee: money("0"),
+              total: money("1413"),
+              tip: money("0"),
+            },
+          },
+        },
+      });
+    });
+    await page.goto("/operations/order-entry");
+    const awaiting = page.getByRole("region", {
+      name: zh ? "已发送，尚未付款" : "Sent, not paid yet",
+    });
+    const rows = awaiting.locator(".counter-order__awaiting-list > li");
+    await expect(rows).toHaveCount(2);
+    const guidance = awaiting.locator(":scope > p.bop-muted");
+    for (const [width, height] of [
+      [1440, 900],
+      [1024, 768],
+      [390, 844],
+    ] as const) {
+      const where = `${language} ${width}x${height}`;
+      await page.setViewportSize({ width, height });
+      await page.evaluate(() => window.scrollTo(0, 0));
+      await expect(guidance).toBeVisible();
+      // The second waiting order (57): the row above it would push its panel down.
+      await rows
+        .nth(1)
+        .getByRole("button", { name: zh ? /^收款/u : /^Take payment/u })
+        .click();
+      const panel = awaiting.locator(".counter-order__resumed-charge");
+      const pay = panel.getByRole("button", {
+        name: zh ? "已用刷卡机付款 · $14.13" : "Paid on card machine · $14.13",
+      });
+      await expect(pay).toBeVisible();
+      await page.evaluate(() => window.scrollTo(0, 0));
+      // Only the order being charged stays, led by its own row.
+      await expect(rows.nth(0)).toBeHidden();
+      await expect(guidance).toBeHidden();
+      await expect(awaiting.getByText(zh ? "57 号单 · $14.13" : "Order 57 · $14.13")).toBeVisible();
+      const box = await pay.evaluate((n) => {
+        const r = n.getBoundingClientRect();
+        return { bottom: r.bottom, height: r.height };
+      });
+      expect(box.height, `${where}: the record button is 52 px, as the first charge's`).toBe(52);
+      expect(
+        box.bottom,
+        `${where}: the record button ends ${box.bottom}, above ${height - 40}`,
+      ).toBeLessThanOrEqual(height - 40);
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      await page.screenshot({ path: `test-results/b65-resumed-fold-${width}-${language}.png` });
+      await panel.getByRole("button", { name: zh ? "关闭" : "Close", exact: true }).click();
+      await expect(rows.nth(0)).toBeVisible();
+      await expect(guidance).toBeVisible();
+    }
+  });
+
 // Owner 2026-10-26: one tile per drink with its sizes as buttons; a tap on a size adds it; a sold
 // out size cannot be tapped. Sizes are grouped only by the catalog's Product (version), never by
 // name alone.

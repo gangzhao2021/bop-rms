@@ -332,12 +332,20 @@ export function CounterAwaitingPayment({
       (Date.parse(order.counter.payBy) > now || paperAwaitingReentry(order, now)),
   );
   if (!failed && shown.length === 0) return paidPanel;
+  /**
+   * Batch 65 (v15 b64 live, TM2 order 58): while one order's payment is open only that order
+   * stays, led by its own row; the list's heading, its paragraph, the other rows and an earlier
+   * "Order N paid" step aside (Close brings them back), so the record button is on the first
+   * screen at 1024x768 and 390x844.
+   */
+  const chargingOne = shown.some((order) => charging.has(order.orderReference));
   return (
     <>
-      {paidPanel}
+      {chargingOne ? null : paidPanel}
       <section
         className="counter-order__awaiting store-card"
         aria-labelledby="counter-awaiting-heading"
+        data-charging={chargingOne ? "" : undefined}
       >
         <h2 id="counter-awaiting-heading">{t("Sent, not paid yet")}</h2>
         {failed ? (
@@ -407,7 +415,10 @@ export function CounterAwaitingPayment({
               );
             const due = amounts[order.orderReference];
             return (
-              <li key={order.orderReference}>
+              <li
+                key={order.orderReference}
+                data-charging={charging.has(order.orderReference) ? "" : undefined}
+              >
                 {/* Batch 63 (CK-03): "Order 82 · $31.92 · sent 01:29", then the time in grey. */}
                 <p className="counter-order__awaiting-title">
                   <strong>
