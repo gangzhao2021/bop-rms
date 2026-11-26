@@ -415,9 +415,9 @@ function words(zh: boolean) {
       ? "这桌按菜付款，已付 1 笔。在柜台付现金按 5 分取整，刷卡和手机付款不取整。"
       : "The table is paying by dish; 1 paid so far. Cash at the counter is rounded to the nearest 5 cents; card and phone payments are not.",
     oldPartRounding: zh ? "已付 1 笔。现金按 5 分取整" : "1 paid so far. Cash is rounded",
-    allNote: zh
-      ? "这桌已按菜分 2 笔付清。现金按 5 分取整，刷卡和手机付款不取整。"
-      : "The table paid by dish, in 2 payments. Cash is rounded to the nearest 5 cents; card and phone payments are not rounded.",
+    // Batch 65 (v15 b64 F13): both dishes were paid on phones and nothing was rounded, so the
+    // note no longer explains cash rounding.
+    allNote: zh ? "这桌已按菜分 2 笔付清。" : "The table paid by dish, in 2 payments.",
     oldAllNote: zh ? "最后一起" : "once at the end",
   };
 }

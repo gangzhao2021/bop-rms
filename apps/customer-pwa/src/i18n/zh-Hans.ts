@@ -1462,8 +1462,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "{count}\u00a0份付了 {paid}\u00a0份，其余不向您收取",
   "Cash rounding": "现金取整",
   "Item prices are before tax. ": "菜品价格为税前价格。",
-  "The table paid once at the end. Cash is rounded to the nearest 5 cents; card and phone payments are not rounded.":
-    "这桌已在最后一起付清。现金按 5 分取整，刷卡和手机付款不取整。",
+  "The table paid once at the end.": "这桌已在最后一起付清。",
   "Ask a staff member for the bill first; then you can pay it here.":
     "请先找店员要账单，然后就可以在这里付款。",
   "This table has already been paid.": "这桌已经付过款了。",
@@ -1586,12 +1585,11 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这桌分份付款：{count}\u00a0份付了 {paid}\u00a0份。在柜台付现金按 5 分取整，刷卡和手机付款不取整。",
   "The table is paying by dish; {paid} paid so far. Cash at the counter is rounded to the nearest 5 cents; card and phone payments are not.":
     "这桌按菜付款，已付 {paid} 笔。在柜台付现金按 5 分取整，刷卡和手机付款不取整。",
-  "The table paid in one payment. Cash is rounded to the nearest 5 cents; card and phone payments are not rounded.":
-    "这桌已一笔付清。现金按 5 分取整，刷卡和手机付款不取整。",
-  "The table paid by dish, in {paid} payments. Cash is rounded to the nearest 5 cents; card and phone payments are not rounded.":
-    "这桌已按菜分 {paid} 笔付清。现金按 5 分取整，刷卡和手机付款不取整。",
-  "The table paid the bill in {count} parts. Cash is rounded to the nearest 5 cents; card and phone payments are not rounded.":
-    "这桌已分 {count} 份付清。现金按 5 分取整，刷卡和手机付款不取整。",
+  "The table paid in one payment.": "这桌已一笔付清。",
+  "Cash is rounded to the nearest 5 cents; card and phone payments are not rounded.":
+    "现金按 5 分取整，刷卡和手机付款不取整。",
+  "The table paid by dish, in {paid} payments.": "这桌已按菜分 {paid} 笔付清。",
+  "The table paid the bill in {count} parts.": "这桌已分 {count} 份付清。",
   "Staff closed your table’s bill: the table paid by dish ({paid} paid), and the rest is not charged to you.":
     "店员已关闭本桌账单：这桌按菜付了 {paid} 笔，其余不向您收取。",
   "Staff closed your table’s bill: the table paid {paid} of the {count} parts, and the rest is not charged to you.":
@@ -1622,10 +1620,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Rest of the bill": "其余账款",
   "The bill": "账单",
   "Not charged to you": "不向您收取",
-  "The table paid by dish, {paid} paid; nothing is left to pay. Cash is rounded to the nearest 5 cents; card and phone payments are not rounded.":
-    "这桌按菜付了 {paid} 笔，已无需再付。现金按 5 分取整，刷卡和手机付款不取整。",
-  "The table paid {paid} of the {count} parts; nothing is left to pay. Cash is rounded to the nearest 5 cents; card and phone payments are not rounded.":
-    "这桌 {count} 份付了 {paid} 份，已无需再付。现金按 5 分取整，刷卡和手机付款不取整。",
+  "The table paid by dish, {paid} paid; nothing is left to pay.":
+    "这桌按菜付了 {paid} 笔，已无需再付。",
+  "The table paid {paid} of the {count} parts; nothing is left to pay.":
+    "这桌 {count} 份付了 {paid} 份，已无需再付。",
   "Staff have paused joining by scan at this table. Ask staff, or the person who joined first, for the table’s join code.":
     "店员暂停了这桌的扫码加入。请向店员或先入桌的人要入桌码。",
   "This table isn’t open yet. Please ask staff to seat you.": "这张桌还没开台，请找店员。",

@@ -1027,31 +1027,23 @@ export function TableSummary({
           ? closedBillNote(closedBill)
           : payLater && splitPaid !== null
             ? splitPaid.count === null && splitPaid.paid === 1
-              ? t(
-                  "The table paid in one payment. Cash is rounded to the nearest 5 cents; card and phone payments are not rounded.",
-                )
+              ? t("The table paid in one payment.")
               : splitPaid.count === null
-                ? t(
-                    "The table paid by dish, in {paid} payments. Cash is rounded to the nearest 5 cents; card and phone payments are not rounded.",
-                    { paid: String(splitPaid.paid) },
-                  )
-                : t(
-                    "The table paid the bill in {count} parts. Cash is rounded to the nearest 5 cents; card and phone payments are not rounded.",
-                    { count: String(splitPaid.count) },
-                  )
+                ? t("The table paid by dish, in {paid} payments.", {
+                    paid: String(splitPaid.paid),
+                  })
+                : t("The table paid the bill in {count} parts.", {
+                    count: String(splitPaid.count),
+                  })
             : payLater && splitEnded !== null
               ? splitEnded.count === null
-                ? t(
-                    "The table paid by dish, {paid} paid; nothing is left to pay. Cash is rounded to the nearest 5 cents; card and phone payments are not rounded.",
-                    { paid: String(splitEnded.paid) },
-                  )
-                : t(
-                    "The table paid {paid} of the {count} parts; nothing is left to pay. Cash is rounded to the nearest 5 cents; card and phone payments are not rounded.",
-                    {
-                      count: String(splitEnded.count),
-                      paid: String(splitEnded.paid - refundedParts),
-                    },
-                  )
+                ? t("The table paid by dish, {paid} paid; nothing is left to pay.", {
+                    paid: String(splitEnded.paid),
+                  })
+                : t("The table paid {paid} of the {count} parts; nothing is left to pay.", {
+                    count: String(splitEnded.count),
+                    paid: String(splitEnded.paid - refundedParts),
+                  })
               : payLater && summary.splitParts !== undefined && summary.splitParts.count === null
                 ? t(
                     "The table is paying by dish; {paid} paid so far. Cash at the counter is rounded to the nearest 5 cents; card and phone payments are not.",
@@ -1067,9 +1059,7 @@ export function TableSummary({
                     )
                   : payLater
                     ? summary.cashRounding !== undefined
-                      ? t(
-                          "The table paid once at the end. Cash is rounded to the nearest 5 cents; card and phone payments are not rounded.",
-                        )
+                      ? t("The table paid once at the end.")
                       : summary.bill !== undefined &&
                           summary.bill.total.amountMinor === "0" &&
                           summary.bill.items.amountMinor !== "0"
@@ -1081,6 +1071,18 @@ export function TableSummary({
                     : t(
                         "Paid amounts include tax and any tip. Amounts waiting for payment include tax, before any tip. Each guest pays for the rounds they order.",
                       )}
+        {/* Batch 65 (v15 b64 live F13): once the table has paid, cash rounding is said only when
+            some of it was paid in cash and rounded (the bill then shows a Cash rounding line);
+            a table that paid on phones or by card was never rounded, so it is not told about
+            cash. While some is left to pay, the note above still says it for the counter. */}
+        {!closedByStaff &&
+        (splitPaid !== null || splitEnded !== null || summary.splitParts === undefined) &&
+        payLater &&
+        summary.cashRounding !== undefined &&
+        nonZero(summary.cashRounding)
+          ? wordGap() +
+            t("Cash is rounded to the nearest 5 cents; card and phone payments are not rounded.")
+          : null}
         {/* Batch 59 (v15 b58 live): parts staff gave back in full, said once, never whose. */}
         {!closedByStaff && refundedParts > 0
           ? " " +

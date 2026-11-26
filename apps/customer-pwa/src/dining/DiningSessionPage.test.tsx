@@ -1352,8 +1352,9 @@ describe("batch 53 (v15 b52 live): the Table total note says how a split bill wa
     language: "en" | "zh-Hans",
     paid: string,
     due: string,
-    splitParts: { count: number | null; paid: number },
+    splitParts: { count: number | null; paid: number } | undefined,
     closedByStaff = false,
+    cashRounding = "0",
   ) => {
     const state = {
       status: "ready",
@@ -1366,8 +1367,8 @@ describe("batch 53 (v15 b52 live): the Table total note says how a split bill wa
           refundPending: cad("0"),
           due: cad(due),
           tableTip: cad("0"),
-          cashRounding: cad("0"),
-          splitParts,
+          cashRounding: cad(cashRounding),
+          ...(splitParts === undefined ? {} : { splitParts }),
           ...(closedByStaff ? { closedByStaff: true as const } : {}),
         },
       }),
@@ -1387,13 +1388,14 @@ describe("batch 53 (v15 b52 live): the Table total note says how a split bill wa
     return html;
   };
   it("paid in full by dish in 2 payments: never paid once at the end (en, zh)", () => {
-    const en = note("en", "2825", "0", { count: null, paid: 2 });
+    // Batch 65: one of the two paid cash at the counter and it was rounded (2 cents).
+    const en = note("en", "2825", "0", { count: null, paid: 2 }, false, "2");
     expect(en).toContain(
       "The table paid by dish, in 2 payments. Cash is rounded to the nearest 5 cents; card and phone payments are not rounded.",
     );
     expect(en).not.toContain("paid once at the end");
     expect(en).not.toContain("paying by dish");
-    const zh = note("zh-Hans", "2825", "0", { count: null, paid: 2 });
+    const zh = note("zh-Hans", "2825", "0", { count: null, paid: 2 }, false, "2");
     expect(zh).toContain("这桌已按菜分 2 笔付清。现金按 5 分取整，刷卡和手机付款不取整。");
     expect(zh).not.toContain("最后一起付清");
     expect(zh).not.toContain("按菜付款");
@@ -1455,14 +1457,56 @@ describe("batch 53 (v15 b52 live): the Table total note says how a split bill wa
       expect(closed).not.toMatch(/5 cents|rounded|取整/u);
   });
   it("the rest taken off after 1 of 3 parts was paid: says 1 of 3, never paid in 3 parts", () => {
-    const en = note("en", "1413", "0", { count: 3, paid: 1 });
+    const en = note("en", "1413", "0", { count: 3, paid: 1 }, false, "2");
     expect(en).toContain(
       "The table paid 1 of the 3 parts; nothing is left to pay. Cash is rounded to the nearest 5 cents; card and phone payments are not rounded.",
     );
     expect(en).not.toContain("The table paid the bill in 3 parts.");
     expect(en).not.toContain("paid so far");
-    expect(note("zh-Hans", "1413", "0", { count: 3, paid: 1 })).toContain(
+    expect(note("zh-Hans", "1413", "0", { count: 3, paid: 1 }, false, "2")).toContain(
       "这桌 3 份付了 1 份，已无需再付。现金按 5 分取整，刷卡和手机付款不取整。",
+    );
+  });
+  // Batch 65 (v15 b64 live F13): C64 A paid the whole table online ($28.25, rounding 0), and Your
+  // table still told the phone payer how cash is rounded. Nothing was paid in cash, so nothing was
+  // rounded: the note says how the table paid and stops there.
+  it("paid on phones or by card (no cash rounding): never tells the guest how cash is rounded", () => {
+    const cases: readonly [
+      { count: number | null; paid: number } | undefined,
+      string,
+      string,
+      string,
+    ][] = [
+      [undefined, "2825", "The table paid once at the end.", "这桌已在最后一起付清。"],
+      [{ count: null, paid: 1 }, "2825", "The table paid in one payment.", "这桌已一笔付清。"],
+      [
+        { count: null, paid: 2 },
+        "2825",
+        "The table paid by dish, in 2 payments.",
+        "这桌已按菜分 2 笔付清。",
+      ],
+      [{ count: 2, paid: 2 }, "2825", "The table paid the bill in 2 parts.", "这桌已分 2 份付清。"],
+      [
+        { count: 3, paid: 1 },
+        "1413",
+        "The table paid 1 of the 3 parts; nothing is left to pay.",
+        "这桌 3 份付了 1 份，已无需再付。",
+      ],
+    ];
+    for (const [parts, paid, en, zh] of cases) {
+      const english = note("en", paid, "0", parts);
+      expect(english).toContain(en);
+      expect(english).not.toMatch(/Cash|5 cents|rounded/u);
+      const chinese = note("zh-Hans", paid, "0", parts);
+      expect(chinese).toContain(zh);
+      expect(chinese).not.toMatch(/现金|取整/u);
+    }
+    // Paid once at the end with cash that was rounded: the bill's Cash rounding line is explained.
+    expect(note("en", "2825", "0", undefined, false, "-1")).toContain(
+      "The table paid once at the end. Cash is rounded to the nearest 5 cents; card and phone payments are not rounded.",
+    );
+    expect(note("zh-Hans", "2825", "0", undefined, false, "-1")).toContain(
+      "这桌已在最后一起付清。现金按 5 分取整，刷卡和手机付款不取整。",
     );
   });
 });

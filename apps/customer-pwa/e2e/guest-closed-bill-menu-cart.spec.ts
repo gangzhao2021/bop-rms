@@ -501,10 +501,8 @@ const openSplitCases = [
     scenario: "half-split-paid",
     title: "both equal parts paid",
     rounds: (zh: boolean) => (zh ? ["已付款", "已付款"] : ["Paid", "Paid"]),
-    note: (zh: boolean) =>
-      zh
-        ? "这桌已分 2 份付清。现金按 5 分取整，刷卡和手机付款不取整。"
-        : "The table paid the bill in 2 parts. Cash is rounded to the nearest 5 cents; card and phone payments are not rounded.",
+    // Batch 65 (v15 b64 F13): nothing was paid in cash (no rounding), so cash is not explained.
+    note: (zh: boolean) => (zh ? "这桌已分 2 份付清。" : "The table paid the bill in 2 parts."),
   },
 ] as const;
 
