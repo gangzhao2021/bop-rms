@@ -4,6 +4,7 @@ import { paidRoundUrgentMinutes, waitedAgoText } from "./paid-round-wait.js";
 import { isPaymentUnconfirmed } from "./UnpaidRoundCancelAction.js";
 import { longOpenSessionMinutes, type StaffDiningTable } from "./dining-session-client.js";
 import type { TableOrderFacts } from "./table-order-facts.js";
+import { tablePaidRefundState } from "./current-order-queue-client.js";
 
 /**
  * WP-2423 item 8 ① (Owner decision 2, Figma 44-2): the Tables page lists each table by what it
@@ -104,6 +105,43 @@ export function tablesFreeingSoon(
 }
 
 const cad = (minor: string) => orderMoney({ amountMinor: minor, currencyCode: "CAD" });
+
+type PaidFacts = NonNullable<NonNullable<TableOrderFacts["bill"]>["paid"]>;
+/**
+ * Batch 65 (v15 b64 live, S64 A/B): a paid table checking out, as Payment holds its refunds — the
+ * same words its panel and its Orders row use.
+ */
+export function paidTableWords(paid: PaidFacts): string {
+  const state = paid.fullyRefunded === true ? "Full" : tablePaidRefundState(paid);
+  return state === "Full"
+    ? t("Fully refunded · close when the guests leave")
+    : state === "AllOnItsWay"
+      ? t("Being refunded · close when the guests leave")
+      : state === "Part"
+        ? t("Part refunded · close when the guests leave")
+        : t("Paid · close when the guests leave");
+}
+/**
+ * Batch 65 (v15 b64 live: the row said $16.01 for a bill refunded to $0.00): what the table paid
+ * after the money given back, then what went back and what is still on its way, as the Orders row
+ * says it ("$11.01 · $5.00 refunded"). Never the paid amount alone once anything went back; a bill
+ * all of which is going back says only what went back and what is on its way.
+ */
+export function paidTableAmount(paid: PaidFacts): string {
+  const given = BigInt(paid.refundedMinor ?? "0");
+  const onItsWay = BigInt(paid.refundPendingMinor ?? "0");
+  const after = BigInt(paid.amountMinor) - given;
+  // All of it is going back: what is left to it is nothing, so the row says only what went back and
+  // what is still on its way (short enough for a phone with Linux fonts).
+  const allGoing = given + onItsWay >= BigInt(paid.amountMinor) && onItsWay > 0n;
+  return [
+    allGoing ? null : cad((after < 0n ? 0n : after).toString()),
+    given > 0n ? t("{refunded} refunded", { refunded: cad(given.toString()) }) : null,
+    onItsWay > 0n ? t("{amount} on its way", { amount: cad(onItsWay.toString()) }) : null,
+  ]
+    .filter((part) => part !== null)
+    .join(" · ");
+}
 const minutesAgo = (since: string, now: number) =>
   Math.max(0, Math.floor((now - Date.parse(since)) / 60_000));
 
@@ -310,12 +348,11 @@ export function tableNeed(
       return {
         tone: "done",
         rank: 4,
-        // b62 (v15 b61 live, S61 B): paid, then all of it given back.
-        words:
-          order.bill.paid.fullyRefunded === true
-            ? t("Fully refunded · close when the guests leave")
-            : t("Paid · close when the guests leave"),
-        detail: cad(order.bill.paid.amountMinor),
+        // b62 (v15 b61 live, S61 B): paid, then all of it given back. Batch 65 (v15 b64 live, S64
+        // B): part of it given back is never "paid in full" (已付清), and money still on its way to
+        // the guest's card is said as being refunded.
+        words: paidTableWords(order.bill.paid),
+        detail: paidTableAmount(order.bill.paid),
         step: null,
       };
     // Points or comps took off the whole bill, or a manager wrote it off.

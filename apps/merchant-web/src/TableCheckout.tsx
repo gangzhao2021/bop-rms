@@ -291,7 +291,15 @@ export function TableCheckout({
   fetcher,
   timeZone,
   storeLabel,
+  refreshKey,
 }: {
+  /**
+   * Batch 65 (v15 b64 live, S64 E): changes each time the Tables page reads the floor again (its
+   * own 30 s read, Refresh tables, a change made on this screen). A paid bill is not read every
+   * 5 s, so a refund made on another screen reaches this panel on that read, as the rounds and
+   * totals above it do: never "Paid / Total paid / Print paid bill" over a refunded bill.
+   */
+  readonly refreshKey?: string | undefined;
   /** The Store's name, printed at the top of the paid bill. */
   readonly storeLabel?: string | undefined;
   /** WP-2423 item 8 ①: may record that the guests left without paying (a manager). */
@@ -435,6 +443,19 @@ export function TableCheckout({
     }, 5000);
     return () => window.clearInterval(timer);
   }, [session.phase, paidNow, bill?.writeOff, stoppingPhone, live]);
+  // Batch 65 (v15 b64 live, S64 E): the floor was read again, so is the bill — once it is paid (an
+  // unpaid one is read every 5 s above) — unless a read is already on its way or a phone payment
+  // is being stopped (its own reads wait for the stop).
+  const seenRefresh = useRef(refreshKey);
+  useEffect(() => {
+    if (seenRefresh.current === refreshKey) return;
+    seenRefresh.current = refreshKey;
+    if (session.phase !== "Closing" || !live || billReading.current || stops.current % 2 === 1)
+      return;
+    // An open bill is already read every 5 s; one read more would only load the server.
+    if (bill === null || (!paidNow && bill.writeOff == null)) return;
+    setReload((value) => value + 1);
+  }, [refreshKey, session.phase, live]);
   // M100: once the table has paid, a warning left by an earlier lost answer no longer applies.
   useEffect(() => {
     if (paidNow) setProblem(null);

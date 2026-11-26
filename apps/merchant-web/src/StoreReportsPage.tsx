@@ -241,6 +241,48 @@ function ReportSection({
 }
 
 /**
+ * Batch 65 (v15 b64 live, TM2): Settlement and this table both say "Online (guest's phone)", but
+ * Settlement counts every payment the card company took and gave back, while this report lists
+ * orders taken and given back the same day (cancelled, rejected or not accepted in time) apart.
+ * Said under the table, with the money, so the two figures are never left to look contradictory;
+ * Net taken is the same on both.
+ */
+export function byPaymentLeftOutText(
+  rows: readonly (StoreReportSummary & { readonly channel: StoreReportChannel })[],
+): string | null {
+  const left = rows.filter((row) => row.cancelledInFullCount > 0);
+  if (left.length === 0) return null;
+  return left
+    .map((row) =>
+      t(
+        "{channel} leaves out {orders} ({amount}) taken and given back the same day. Settlement counts them in its {channel} taken and refunded, so both read {amount} more there; Net taken is the same.",
+        {
+          // Said in the reader's language now (channelLabel is fixed when the page loads).
+          channel:
+            row.channel === "Online"
+              ? t("Online (guest's phone)")
+              : row.channel === "CardMachine"
+                ? t("Card machine")
+                : t("Cash"),
+          orders: countOf(row.cancelledInFullCount, "order"),
+          amount: money(row.cancelledInFullMinor),
+        },
+      ),
+    )
+    .join(" ");
+}
+function byPaymentLeftOutNote(
+  rows: readonly (StoreReportSummary & { readonly channel: StoreReportChannel })[],
+) {
+  const text = byPaymentLeftOutText(rows);
+  return text === null ? null : (
+    <p role="note" className="bop-muted store-reports__left-out">
+      {text}
+    </p>
+  );
+}
+
+/**
  * WP-2423 (v15 fabf0261, Tea 11-05): the day-end settlement counts an order taken and given back
  * the same day in its collected and refunded figures; this report lists it apart. Said beside the
  * "matches" sentence, so a gap between the two figures is never left unexplained.
@@ -415,6 +457,7 @@ export function StoreReports({
               money(entry.netCollectedMinor),
             ])}
         />
+        {byPaymentLeftOutNote(view.byChannel)}
         <h4>{t("By order type")}</h4>
         <Table
           label={t("Sales by order type")}

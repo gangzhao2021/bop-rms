@@ -174,13 +174,16 @@ describe("b64: the Orders row of a table bill refunded in full", () => {
     expect(orderAmountNote(order({ refundedMinor: "3200" }))).toBe("已在桌上全部退款");
   });
 
-  it("keeps saying how it was paid for a part refund or one still on its way", () => {
+  // Batch 65 (v15 b64 live, S64 B) changed this: a part refund is never "Paid at the table"
+  // (已在桌上付清), and all of it on its way back is said as being refunded, with its next step.
+  it("says a part refund as part refunded and one still on its way as being refunded", () => {
     expect(orderAmountNote(order({ refundedMinor: "500" }, true))).toBe(
-      "Paid at the table · guest's phone",
+      "Part refunded at the table · guest's phone",
     );
+    expect(orderRowNoteShownEverywhere(order({ refundedMinor: "500" }, true))).toBe(false);
     const onItsWay = order({ refundedMinor: "3200", refundPendingMinor: "300" }, true);
-    expect(orderAmountNote(onItsWay)).toBe("Paid at the table · guest's phone");
-    expect(orderRowNoteShownEverywhere(onItsWay)).toBe(false);
+    expect(orderAmountNote(onItsWay)).toBe("Being refunded · close when the guests leave");
+    expect(orderRowNoteShownEverywhere(onItsWay)).toBe(true);
   });
 
   it("reads checkingOut from the server only on a paid bill, and refuses anything but true", () => {

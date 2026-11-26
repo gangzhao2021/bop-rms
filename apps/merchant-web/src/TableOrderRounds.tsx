@@ -25,6 +25,7 @@ import { useStoreBusinessDay } from "./StoreBusinessDay.js";
 import {
   createCurrentOrderQueueClient,
   tablePaidFullyRefunded,
+  tablePaidRefundState,
   type CurrentOrderDetail,
 } from "./current-order-queue-client.js";
 
@@ -198,6 +199,11 @@ export function TableOrderRounds({
         billFullyRefunded={
           detail.order.tableBill?.paid != null &&
           tablePaidFullyRefunded(detail.order.tableBill.paid)
+        }
+        billRefundState={
+          detail.order.tableBill?.paid != null
+            ? tablePaidRefundState(detail.order.tableBill.paid)
+            : "None"
         }
       >
         <CurrentOrderLines

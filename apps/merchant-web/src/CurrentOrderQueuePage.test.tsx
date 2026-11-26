@@ -3104,10 +3104,13 @@ describe("b60 (v15 b59 live, TM2 order 27): a paid table's refunds count on Orde
     expect(orderAmountTaken(both)).toEqual(money("2825"));
     expect(orderAmountRefunded(both)).toBe(875n);
     expect(orderAmountRefunded(table({ refundPendingMinor: "300" }))).toBe(0n);
-    // b61: what is on its way is its own line under the amount (shown on phones too).
-    expect(orderAmountNote(both)).toBe("Paid at the table · split bill");
+    // b61: what is on its way is its own line under the amount (shown on phones too). Batch 65
+    // (v15 b64 live, S64 B) changed the words: part of it went back, so never "paid in full".
+    expect(orderAmountNote(both)).toBe("Part refunded at the table · split bill");
     expect(orderRowRefundLines(both)).toEqual({ refundedMinor: 875n, onItsWayMinor: 300n });
-    expect(orderAmountNote(table({ refundedMinor: "675" }))).toBe("Paid at the table · split bill");
+    expect(orderAmountNote(table({ refundedMinor: "675" }))).toBe(
+      "Part refunded at the table · split bill",
+    );
   });
 
   it("says it in Simplified Chinese", () => {
@@ -3117,7 +3120,7 @@ describe("b60 (v15 b59 live, TM2 order 27): a paid table's refunds count on Orde
         "已退款",
         "正在退回客人的卡",
       ]);
-      expect(orderAmountNote(both)).toBe("已在桌上付清 · 分单");
+      expect(orderAmountNote(both)).toBe("已在桌上部分退款 · 分单");
     } finally {
       setLanguageForTest("en");
     }

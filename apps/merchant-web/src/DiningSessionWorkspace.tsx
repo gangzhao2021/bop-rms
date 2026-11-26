@@ -2506,6 +2506,7 @@ function TablePanel({
           locked={locked}
           onChanged={onChanged}
           onSettled={onSettled}
+          refreshKey={refreshKey + ":" + String(checkoutRevision)}
         />
       ) : null}
       {seated && canCloseSessions && table.session ? (

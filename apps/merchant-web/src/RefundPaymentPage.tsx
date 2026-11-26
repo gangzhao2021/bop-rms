@@ -942,6 +942,8 @@ function RefundWizard({
     // The recorded request the stopped run is still sending (its list entry points back here).
     [heldRequest, setHeldRequest] = useState<string | null>(null);
   const operationReference = useRef<string | null>(null);
+  // Batch 65: the recorded request the message below tells staff what to do next for.
+  const instructionFor = useRef<{ readonly request: string; readonly said: string } | null>(null);
   // WP-2423 Q5: one preview identity while the selection, reason and note stay the same.
   const previewIdentity = useRef<{
     key: string;
@@ -1112,6 +1114,19 @@ function RefundWizard({
       if (requestsRefresh.current === controller) requestsRefresh.current = null;
     }
   };
+  // Batch 65 (v15 b64 live, order 79): once the request this page's last message was about is
+  // given back (recorded here, above, or elsewhere), that message no longer applies.
+  useEffect(() => {
+    const instruction = instructionFor.current;
+    if (instruction === null || items === null) return;
+    const entry = items.recentRequests.find(
+      (value) => value.requestReference === instruction.request,
+    );
+    if (entry === undefined || !requestFinished(entry)) return;
+    instructionFor.current = null;
+    // Only that message: anything said since (a failure, a new request) stays.
+    setMessage((shown) => (shown === instruction.said ? "" : shown));
+  }, [items]);
   // b11: a refund recorded elsewhere on this page is shown here as recorded, never as still to do.
   useEffect(() => {
     if (revision > 0) setRefreshSignal((value) => value + 1);
@@ -1286,43 +1301,50 @@ function RefundWizard({
                 canSend,
               })
             : null;
-        setMessage(
+        // Batch 65 (v15 b64 live, order 79): what staff are told to do next for this request
+        // (give it back from the drawer, refund it on the card machine) holds only until it is
+        // recorded as given back; then the request's own line says it, and nothing says "Now…".
+        const said =
           recovered +
-            (cashRecorded !== null
-              ? cashRecorded
-              : outcome.kind === "Refunded"
-                ? t("Refunded {total} to the customer's original payment method.", { total })
-                : outcome.kind === "WaitingForAnswer"
+          (cashRecorded !== null
+            ? cashRecorded
+            : outcome.kind === "Refunded"
+              ? t("Refunded {total} to the customer's original payment method.", { total })
+              : outcome.kind === "WaitingForAnswer"
+                ? t(
+                    "Sent — waiting for the card provider's answer. {total} stays set aside until it answers; the request above shows the result.",
+                    { total },
+                  )
+                : outcome.kind === "AwaitingApproval" && result?.approveAlone
                   ? t(
-                      "Sent — waiting for the card provider's answer. {total} stays set aside until it answers; the request above shows the result.",
+                      "Request recorded for {total}. Nothing is refunded yet. You run this business alone: open Approvals and approve it yourself after confirming it is you; it is sent once approved.",
                       { total },
                     )
-                  : outcome.kind === "AwaitingApproval" && result?.approveAlone
+                  : outcome.kind === "AwaitingApproval"
                     ? t(
-                        "Request recorded for {total}. Nothing is refunded yet. You run this business alone: open Approvals and approve it yourself after confirming it is you; it is sent once approved.",
+                        "Request recorded for {total}. Nothing is refunded yet: it is sent once the owner approves it. Ask the owner to open Approvals on this device or theirs. If more than 15 minutes pass after your verification, you'll be asked to verify again here.",
                         { total },
                       )
-                    : outcome.kind === "AwaitingApproval"
-                      ? t(
-                          "Request recorded for {total}. Nothing is refunded yet: it is sent once the owner approves it. Ask the owner to open Approvals on this device or theirs. If more than 15 minutes pass after your verification, you'll be asked to verify again here.",
+                    : !canSend && previewOnMachine
+                      ? // b13: a card-machine refund is made on the machine, never "sent".
+                        t(
+                          "Request recorded for {total}. Nothing is refunded yet: a manager or the owner refunds it on the card machine and records it on the payment page.",
                           { total },
                         )
-                      : !canSend && previewOnMachine
-                        ? // b13: a card-machine refund is made on the machine, never "sent".
-                          t(
-                            "Request recorded for {total}. Nothing is refunded yet: a manager or the owner refunds it on the card machine and records it on the payment page.",
+                      : !canSend
+                        ? t(
+                            "Request recorded for {total}. Nothing is refunded yet: a manager or the owner sends it from Approvals.",
                             { total },
                           )
-                        : !canSend
-                          ? t(
-                              "Request recorded for {total}. Nothing is refunded yet: a manager or the owner sends it from Approvals.",
-                              { total },
-                            )
-                          : t(
-                              "Request recorded for {total}. Now refund it on the store's card machine and record it under the request above.",
-                              { total },
-                            )),
-        );
+                        : t(
+                            "Request recorded for {total}. Now refund it on the store's card machine and record it under the request above.",
+                            { total },
+                          ));
+        instructionFor.current =
+          result != null && outcome.kind !== "Refunded"
+            ? { request: result.requestReference, said }
+            : null;
+        setMessage(said);
         // The request appears in the list (and its units leave the selection) straight away.
         void reloadRequests();
       }

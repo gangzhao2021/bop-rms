@@ -248,6 +248,10 @@ export function SettlementReport({
           <span className="overview-count__detail">{t("Online minus refunds")}</span>
         </li>
       </ul>
+      {/* Batch 65 (v15 b64 live, TM2): Reports uses the same label for less money; why is said. */}
+      <p role="note" className="bop-muted settlement__reports-gap">
+        {settlementReportsGapText()}
+      </p>
       {/* WP-2423 Q7: the Store's own card machine, kept apart to match its batch total. */}
       {view.cardMachine === undefined ? null : view.cardMachine === null ? (
         <p className="bop-muted" role="status">
@@ -1157,5 +1161,18 @@ export function SettlementPage({
         <SettlementReport view={view} timeZone={timeZone} onShowDay={showDay} />
       ) : null}
     </WorkspacePage>
+  );
+}
+
+/**
+ * Batch 65 (v15 b64 live, TM2: $766.25 here, $723.86 on Reports, both "Online (guest's phone)"):
+ * this page counts every payment the card company took and every refund it gave back. Reports
+ * lists orders taken and given back the same day (cancelled, rejected or not accepted in time)
+ * apart, not as sales and refunds, so its Online and Refunds can read lower by the same money and
+ * its Net taken is the same. Said here so neither figure is mistaken for missing money.
+ */
+export function settlementReportsGapText(): string {
+  return t(
+    "Every payment the card company took and every refund it gave back. Reports lists orders taken and given back the same day apart, so its Online (guest's phone) and Refunds can be lower by that money; Net taken is the same.",
   );
 }

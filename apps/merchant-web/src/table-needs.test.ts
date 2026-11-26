@@ -654,19 +654,37 @@ describe("b62 (v15 b61 live, S61 B): a table paid, then all of it refunded", () 
     ).toMatchObject({
       tone: "done",
       words: "Fully refunded · close when the guests leave",
-      detail: "$32.00",
+      // Batch 65 (v15 b64 live, S64 A) changed this: the amount after refunds, as on Orders.
+      detail: "$0.00 · $32.00 refunded",
     });
   });
-  it("says Paid while some of it is kept or still on its way back", () => {
-    for (const refunds of [
-      undefined,
-      { givenMinor: "500", onItsWayMinor: "0" },
-      { givenMinor: "0", onItsWayMinor: "3200" },
-    ])
-      expect(tableNeed(closing, tableFactsFromBill(paidBill(refunds)), now)).toMatchObject({
-        words: "Paid · close when the guests leave",
-        detail: "$32.00",
-      });
+  // Batch 65 (v15 b64 live, S64 B) changed this: only a bill nothing went back from says Paid; a
+  // part refund and money still on its way back say so, with the amount after refunds.
+  it("says Paid only while nothing went back, else part refunded or being refunded", () => {
+    expect(tableNeed(closing, tableFactsFromBill(paidBill()), now)).toMatchObject({
+      words: "Paid · close when the guests leave",
+      detail: "$32.00",
+    });
+    expect(
+      tableNeed(
+        closing,
+        tableFactsFromBill(paidBill({ givenMinor: "500", onItsWayMinor: "0" })),
+        now,
+      ),
+    ).toMatchObject({
+      words: "Part refunded · close when the guests leave",
+      detail: "$27.00 · $5.00 refunded",
+    });
+    expect(
+      tableNeed(
+        closing,
+        tableFactsFromBill(paidBill({ givenMinor: "0", onItsWayMinor: "3200" })),
+        now,
+      ),
+    ).toMatchObject({
+      words: "Being refunded · close when the guests leave",
+      detail: "$32.00 on its way",
+    });
   });
 });
 

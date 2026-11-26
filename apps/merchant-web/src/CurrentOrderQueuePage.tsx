@@ -107,6 +107,7 @@ import {
   orderChannelLabel,
   orderTypeLabel,
 } from "./order-channel.js";
+import { describeRefundReason } from "./refund-reasons.js";
 import {
   cancelledItemsRefund,
   createCurrentOrderQueueClient,
@@ -119,6 +120,7 @@ import {
   type OrderPickupContact,
   type PickupHourNotice,
   tablePaidFullyRefunded,
+  tablePaidRefundState,
   type TableBillTaken,
 } from "./current-order-queue-client.js";
 import {
@@ -1250,9 +1252,19 @@ export function refundedByWay(
   context: RefundAssignmentContext = { onlineMayBeOnItsWay: true },
 ): readonly { readonly label: string; readonly amountMinor: bigint }[] | null {
   if (record == null) return null;
-  const refunds = refundsBehindRefunded(record.refunds, listed, refundedMinor, context);
+  // Batch 65 (v15 b64 live, order 79): a counter cash refund is recorded at its request's amount
+  // ($3.67) with what the drawer gave back beside it ($3.65, whole nickels); the money shown as
+  // refunded is the drawer's, so that is what it is matched by and said at.
+  const given = record.refunds.map((refund) =>
+    refund.method === "Cash" && refund.cashGivenBackMinor != null
+      ? { ...refund, amountMinor: refund.cashGivenBackMinor }
+      : refund,
+  );
+  const refunds = refundsBehindRefunded(given, listed, refundedMinor, context);
   if (refunds === null) return null;
   const reasonOf = (refund: (typeof refunds)[number]) => {
+    // Batch 65: a counter refund given back for a refund request says that request's reason.
+    if (refund.reasonCode !== undefined) return describeRefundReason(refund.reasonCode);
     const same = reasons.filter(
       (reason) =>
         reason.method === refund.method &&
@@ -3080,7 +3092,10 @@ export function mergedIntoText(into: {
  */
 export function orderRowNoteShownEverywhere(order: QueuedOrder): boolean {
   const paid = order.tableBill?.paid ?? null;
-  return paid !== null && tablePaidFullyRefunded(paid);
+  // Batch 65: all of it going back (some still on its way) says its next step at every width too.
+  return (
+    paid !== null && (tablePaidFullyRefunded(paid) || tablePaidRefundState(paid) === "AllOnItsWay")
+  );
 }
 
 /**
@@ -3127,6 +3142,21 @@ export function orderAmountNote(
       return order.tableBill.checkingOut === true
         ? t("Fully refunded · close when the guests leave")
         : t("Fully refunded at the table");
+    // Batch 65 (v15 b64 live, S64 B): part of it went back, or all of it is on its way back: never
+    // "Paid at the table" (已在桌上付清) beside "$5.00 refunded". How it was paid stays said.
+    const refund = tablePaidRefundState(paid);
+    if (refund === "AllOnItsWay")
+      return order.tableBill.checkingOut === true
+        ? t("Being refunded · close when the guests leave")
+        : t("Being refunded at the table");
+    if (refund === "Part")
+      return paid.method === "Cash"
+        ? t("Part refunded at the table · cash")
+        : paid.method === "Online"
+          ? t("Part refunded at the table · guest's phone")
+          : paid.method === "Split"
+            ? t("Part refunded at the table · split bill")
+            : t("Part refunded at the table · card machine");
     return paid.method === "Cash"
       ? t("Paid at the table · cash")
       : paid.method === "Online"
@@ -4324,6 +4354,9 @@ export function CurrentOrderDetails({
           billPaid={order.tableBill?.paid != null}
           billFullyRefunded={
             order.tableBill?.paid != null && tablePaidFullyRefunded(order.tableBill.paid)
+          }
+          billRefundState={
+            order.tableBill?.paid != null ? tablePaidRefundState(order.tableBill.paid) : "None"
           }
         >
           {lines}

@@ -305,6 +305,22 @@ export function tablePaidFullyRefunded(
     given > 0n && given >= BigInt(paid.amountMinor) && BigInt(paid.refundPendingMinor ?? "0") === 0n
   );
 }
+/**
+ * Batch 65 (v15 b64 live, S64 B): what went back of a paid table bill, from Payment's figures —
+ * nothing, part of it, all of it, or all of it with some still on its way to the guest's card — so
+ * the Tables row, its panel and the Orders row never call a part-refunded bill "paid in full"
+ * (已付清). The same rule as the checkout panel's heading (tableBillRefundState).
+ */
+export type TablePaidRefundState = "None" | "Part" | "Full" | "AllOnItsWay";
+export function tablePaidRefundState(
+  paid: { readonly amountMinor: string } & TableBillTaken,
+): TablePaidRefundState {
+  const given = BigInt(paid.refundedMinor ?? "0");
+  const onItsWay = BigInt(paid.refundPendingMinor ?? "0");
+  if (given + onItsWay <= 0n) return "None";
+  if (given + onItsWay < BigInt(paid.amountMinor)) return "Part";
+  return onItsWay === 0n ? "Full" : "AllOnItsWay";
+}
 function reference(value: unknown): string {
   if (typeof value !== "string" || !ref.test(value)) return fail();
   return value;
@@ -1780,6 +1796,11 @@ export interface OrderRecordPeople {
      * absent (an older server) otherwise.
      */
     readonly cashGivenBackMinor?: string | null;
+    /**
+     * Batch 65 (v15 b64 live, order 79): why its refund request was asked — a counter refund given
+     * back on the card machine or in cash for a request (absent otherwise, or an older server).
+     */
+    readonly reasonCode?: string;
   }[];
   readonly writeOff: {
     readonly amountMinor: string;
@@ -1871,6 +1892,8 @@ export function parseOrderRecordPeople(value: unknown): OrderRecordPeople | null
       list(raw.refunds, 200).map((entry) => {
         const withCash =
           entry !== null && typeof entry === "object" && Object.hasOwn(entry, "cashGivenBackMinor");
+        const withReason =
+          entry !== null && typeof entry === "object" && Object.hasOwn(entry, "reasonCode");
         const r = exact(entry, [
           "method",
           "amountMinor",
@@ -1878,8 +1901,14 @@ export function parseOrderRecordPeople(value: unknown): OrderRecordPeople | null
           "approvedBy",
           "at",
           ...(withCash ? ["cashGivenBackMinor"] : []),
+          ...(withReason ? ["reasonCode"] : []),
         ]);
         if (typeof r.amountMinor !== "string" || !minorAmount.test(r.amountMinor)) return fail();
+        if (
+          withReason &&
+          (typeof r.reasonCode !== "string" || !/^[A-Z][A-Z0-9_]{0,63}$/u.test(r.reasonCode))
+        )
+          return fail();
         const cash = withCash ? r.cashGivenBackMinor : null;
         if (
           cash !== null &&
@@ -1893,6 +1922,7 @@ export function parseOrderRecordPeople(value: unknown): OrderRecordPeople | null
           approvedBy: optionalName(r.approvedBy),
           at: instant(r.at),
           ...(cash === null ? {} : { cashGivenBackMinor: cash as string }),
+          ...(withReason ? { reasonCode: r.reasonCode as string } : {}),
         });
       }),
     ),

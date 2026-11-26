@@ -47,7 +47,17 @@ export interface TableOrderFacts {
      * b62 (v15 b61 live, S61 B): fullyRefunded once everything it paid went back (nothing still
      * on its way), so the list never says only "Paid" for it.
      */
-    readonly paid: { readonly amountMinor: string; readonly fullyRefunded?: true } | null;
+    readonly paid: {
+      readonly amountMinor: string;
+      readonly fullyRefunded?: true;
+      /**
+       * Batch 65 (v15 b64 live, S64 A/B): what of it went back (cash, card machine, and to a
+       * guest's card once the card company answered) and what is still on its way, as Payment
+       * holds them (absent while zero), so the list says the amount after refunds.
+       */
+      readonly refundedMinor?: string;
+      readonly refundPendingMinor?: string;
+    } | null;
   } | null;
 }
 
@@ -80,6 +90,13 @@ export function tableFactsFromBill(bill: TableBill): TableOrderFacts {
   const fully =
     paid !== null &&
     allBack(paid.amountMinor, bill.refunds?.givenMinor, bill.refunds?.onItsWayMinor);
+  // Batch 65: what went back and what is on its way, as the queue's row carries them.
+  const given = bill.refunds?.givenMinor ?? "0",
+    onItsWay = bill.refunds?.onItsWayMinor ?? "0";
+  const back = {
+    ...(BigInt(given) > 0n ? { refundedMinor: given } : {}),
+    ...(BigInt(onItsWay) > 0n ? { refundPendingMinor: onItsWay } : {}),
+  };
   return {
     readyToServe: 0,
     inKitchen: false,
@@ -95,7 +112,12 @@ export function tableFactsFromBill(bill: TableBill): TableOrderFacts {
             },
           }
         : {}),
-      paid: paid === null ? null : fully ? { ...paid, fullyRefunded: true } : paid,
+      paid:
+        paid === null
+          ? null
+          : fully
+            ? { ...paid, ...back, fullyRefunded: true }
+            : { ...paid, ...back },
     },
   };
 }
@@ -137,6 +159,12 @@ function factsOfOrder(order: QueuedOrder): TableOrderFacts {
                 ? null
                 : {
                     amountMinor: order.tableBill.paid.amountMinor,
+                    ...(order.tableBill.paid.refundedMinor === undefined
+                      ? {}
+                      : { refundedMinor: order.tableBill.paid.refundedMinor }),
+                    ...(order.tableBill.paid.refundPendingMinor === undefined
+                      ? {}
+                      : { refundPendingMinor: order.tableBill.paid.refundPendingMinor }),
                     ...(tablePaidFullyRefunded(order.tableBill.paid)
                       ? { fullyRefunded: true as const }
                       : {}),

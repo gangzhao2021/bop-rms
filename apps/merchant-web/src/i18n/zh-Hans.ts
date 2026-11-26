@@ -10696,4 +10696,16 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "用当前登录打不开已保存的营业时间。如果你已被登出，请重新登录；否则请让店主给你营业时间的权限。没有任何改动。",
   "Your sign-in on this screen has ended, so the saved hours weren't opened. Sign in again, then open them here. Nothing was changed.":
     "这台设备上的登录已结束，所以没有打开已保存的营业时间。请重新登录，再到这里打开。没有任何改动。",
+  // Batch 65 (v15 b64 live, S64 A/B, order 79, TM2): refunds said truthfully on Tables and Orders.
+  "Being refunded · close when the guests leave": "退款中 · 客人走后关台",
+  "Part refunded · close when the guests leave": "部分已退款 · 客人走后关台",
+  "Being refunded at the table": "在桌上付的款正在退回",
+  "Part refunded at the table · cash": "已在桌上部分退款 · 现金",
+  "Part refunded at the table · guest's phone": "已在桌上部分退款 · 客人手机",
+  "Part refunded at the table · split bill": "已在桌上部分退款 · 分单",
+  "Part refunded at the table · card machine": "已在桌上部分退款 · 刷卡机",
+  "{channel} leaves out {orders} ({amount}) taken and given back the same day. Settlement counts them in its {channel} taken and refunded, so both read {amount} more there; Net taken is the same.":
+    "{channel}没有算当天收款又全部退回的 {orders}（{amount}）。结算把它们算进{channel}的实收和退款，所以那两项都多 {amount}；净实收相同。",
+  "Every payment the card company took and every refund it gave back. Reports lists orders taken and given back the same day apart, so its Online (guest's phone) and Refunds can be lower by that money; Net taken is the same.":
+    "这里是刷卡公司收的每一笔款和退回的每一笔款。报表把当天收款又全部退回的订单另外列出，所以报表的线上（客人手机）和退款可能少这部分钱；净实收相同。",
 });

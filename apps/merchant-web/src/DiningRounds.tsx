@@ -20,6 +20,7 @@ import { ComboPartClientError, markComboPartServed } from "./combo-part-client.j
 import { chaseDish, DiningChaseClientError } from "./dining-chase-client.js";
 import { SourceTime, StoreTimeZoneContext, storeTime, wholeMinuteAtOrAfter } from "./StoreTime.js";
 import type { ComboPartView } from "./combo-parts.js";
+import type { TablePaidRefundState } from "./current-order-queue-client.js";
 
 /**
  * Orders v3 (Owner 2026-10-26, "订单这里看到多轮接单，但是看不到每一轮的明细"; "查看上桌进度展开以后无法合上"):
@@ -232,7 +233,13 @@ export function DiningRoundsProvider({
   mergedInto,
   billPaid = false,
   billFullyRefunded = false,
+  billRefundState = billFullyRefunded ? "Full" : "None",
 }: {
+  /**
+   * Batch 65 (v15 b64 live, S64 B): what went back of the paid bill (tablePaidRefundState), so its
+   * checkout phase never says "Paid" (已付清) for a bill partly refunded or being refunded.
+   */
+  readonly billRefundState?: TablePaidRefundState;
   /**
    * b64 (v15 b62 live, S62 E): the paid bill went back in full; its checkout phase is said as the
    * Tables row says it ("Fully refunded · close when the guests leave"), never "Paid".
@@ -548,9 +555,13 @@ export function DiningRoundsProvider({
           {/* v15 b12: the Closing phase is checkout (结账中); 关台 is only the close itself. */}
           {view.sessionPhase === "Closing"
             ? billPaid
-              ? billFullyRefunded
+              ? billRefundState === "Full"
                 ? t("Fully refunded · close when the guests leave")
-                : t("Paid · close when the guests leave")
+                : billRefundState === "AllOnItsWay"
+                  ? t("Being refunded · close when the guests leave")
+                  : billRefundState === "Part"
+                    ? t("Part refunded · close when the guests leave")
+                    : t("Paid · close when the guests leave")
               : t("Checking out")
             : t("Table closed")}
         </p>
