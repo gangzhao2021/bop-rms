@@ -691,3 +691,64 @@ for (const width of [390, 1024, 1440])
         await page.emulateMedia({ media: "screen" });
       });
     });
+
+// Batch 65 (v15 b64 live, guest-split-own-payment): phone A paid both parts of staff's even split
+// ($16.01 with a $1.88 tip, then part 2), the table still open. Under "Every part of the bill is
+// paid" each part's block ended in its own "Total paid by you" ($16.01, then the next), with no
+// "Your payments" heading and no one total, while the ended receipt says it once. Pay the bill now
+// says it as the ended receipt does: Your payments / Part 1 · Online by phone / Part 2 · … / Total
+// paid by you, read through the real own-payment handler.
+for (const width of [390, 1024, 1440])
+  for (const zh of [false, true])
+    test.describe(`@production CUST-DINE-IN b65 both parts paid on this phone, table open (${zh ? "zh-Hans" : "en"} ${width})`, () => {
+      test.use({ viewport: { width, height }, hasTouch: width < 768, isMobile: width < 768 });
+      test("one Your payments heading, each part, and one total under Pay the bill", async ({
+        page,
+      }) => {
+        test.setTimeout(90_000);
+        scenario = "half-split-paid";
+        phone = { payer: true, tableClosed: false, bothMine: true, partOneTipMinor: "188" };
+        await offerPoints(page, true);
+        await stubTable(page, []);
+        await open(page, "/dine-in/session", zh);
+        const pay = page.getByRole("region", { name: zh ? "结账付款" : "Pay the bill" });
+        const youPaid = pay.locator(".dining-session__you-paid");
+        await expect(youPaid.locator(".dining-session__you-paid-line")).toHaveText(
+          zh
+            ? "您已付 $30.13（含小费 $1.88）· 手机在线付款"
+            : "You paid $30.13 (tip $1.88) · Online by phone",
+        );
+        const block = youPaid.locator('[aria-labelledby="own-your-payments"]');
+        await expect(block.getByRole("heading", { level: 3 })).toHaveText(
+          zh ? "您的付款" : "Your payments",
+        );
+        const rows = block.locator("dl > div");
+        await expect(rows).toHaveText([
+          zh ? /^第 1 份 · 手机在线付款\s*\$16\.01$/u : /^Part 1 · Online by phone\s*\$16\.01$/u,
+          zh ? /^第 2 份 · 手机在线付款\s*\$14\.12$/u : /^Part 2 · Online by phone\s*\$14\.12$/u,
+          zh ? /^您实付合计\s*\$30\.13$/u : /^Total paid by you\s*\$30\.13$/u,
+        ]);
+        // Said once: never a total per part.
+        await expect(
+          pay.getByText(zh ? "您实付合计" : "Total paid by you", { exact: true }),
+        ).toHaveCount(1);
+        await expect(
+          pay.getByRole("heading", { name: zh ? "您的付款" : "Your payments" }),
+        ).toHaveCount(1);
+        // The total row is its own line, under the parts, with the amounts lined up on the right.
+        const [first, last] = [rows.first(), rows.last()];
+        expect(await top(last)).toBeGreaterThan(await top(first));
+        const right = async (row: Locator) => {
+          const box = await row.locator("dd").boundingBox();
+          return (box?.x ?? 0) + (box?.width ?? 0);
+        };
+        expect(Math.abs((await right(first)) - (await right(last)))).toBeLessThanOrEqual(1);
+        expect(await last.evaluate((element) => getComputedStyle(element).fontWeight)).toBe("600");
+        await expectInside(youPaid, width);
+        await expectNoInternalText(page);
+        await page.screenshot({
+          path: `test-results/b65-both-paid-${zh ? "zh" : "en"}-${width}.png`,
+          fullPage: true,
+        });
+      });
+    });

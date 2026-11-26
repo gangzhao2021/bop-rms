@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { Fragment, useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { t, useReloadOnLanguageChange, nameLocale } from "../i18n/i18n.js";
 import { formatDateTime, formatMoney } from "../journey/format.js";
 import { boundedJsonFetch } from "../network/bounded-fetch.js";
@@ -478,6 +478,66 @@ export function youPaidSoFarText(receipt: OwnPaymentReceipt): string {
       });
 }
 
+/**
+ * Batch 65 (v15 b64 live, guest-split-own-payment): a phone that paid several parts of staff's
+ * split, with the table still open, read each part's block ending in its own "Total paid by you",
+ * as if there were two totals. As the ended receipt says it: one "Your payments" heading, each
+ * part with how and how much (and what went back of it), and one total of what this phone paid.
+ */
+export const severalParts = (receipt: OwnPaymentReceipt) =>
+  receipt.payments.length > 1 &&
+  receipt.payments.every((payment) => payment.covers === "Part" && payment.partNumber !== null);
+
+function OwnPartsPaid({ receipt }: { readonly receipt: OwnPaymentReceipt }) {
+  return (
+    <div className="dining-session__receipt-round" aria-labelledby="own-your-payments">
+      <h3 id="own-your-payments">{t("Your payments")}</h3>
+      <dl className="order-status__money">
+        {receipt.payments.map((payment) => (
+          <Fragment key={payment.partNumber}>
+            <div>
+              <dt>
+                {t("Part {number} · {method}", {
+                  number: String(payment.partNumber),
+                  method: t("Online by phone"),
+                })}
+              </dt>
+              <dd>{money(payment.totalMinor)}</dd>
+            </div>
+            {refundRows(payment).map(([label, amountMinor]) => (
+              <div key={label}>
+                <dt>{label}</dt>
+                <dd>−{money(amountMinor)}</dd>
+              </div>
+            ))}
+            {payment.refundedMinor === "0" ? null : (
+              <div>
+                <dt>{t("You paid after refunds")}</dt>
+                <dd>
+                  {money((BigInt(payment.totalMinor) - BigInt(payment.refundedMinor)).toString())}
+                </dd>
+              </div>
+            )}
+          </Fragment>
+        ))}
+        <div className="dining-session__you-pay-total">
+          <dt>{t("Total paid by you")}</dt>
+          <dd>{money(receipt.totalMinor)}</dd>
+        </div>
+      </dl>
+      {receipt.payments.some((payment) => payment.refunds.length > 0) ? (
+        <ul className="dining-session__own-refunds" aria-label={t("Refunds of your payment")}>
+          {receipt.payments
+            .flatMap((payment) => payment.refunds)
+            .map((refund, number) => (
+              <li key={number}>{refundText(refund)}</li>
+            ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
 export function OwnPaidSoFarView({ receipt }: { readonly receipt: OwnPaymentReceipt }) {
   const refunds = receipt.payments.flatMap((payment) => payment.refunds);
   return (
@@ -487,7 +547,11 @@ export function OwnPaidSoFarView({ receipt }: { readonly receipt: OwnPaymentRece
           ? youPaidSoFarText(receipt)
           : youPaidText(receipt.totalMinor, receipt.refundedMinor, pendingOf(refunds))}
       </p>
-      <OwnPaymentLines receipt={receipt} />
+      {severalParts(receipt) ? (
+        <OwnPartsPaid receipt={receipt} />
+      ) : (
+        <OwnPaymentLines receipt={receipt} />
+      )}
     </div>
   );
 }
