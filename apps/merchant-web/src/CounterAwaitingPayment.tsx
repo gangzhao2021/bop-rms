@@ -111,6 +111,7 @@ export function CounterAwaitingPayment({
    * as after a direct charge, with what to do next, until they dismiss it.
    */
   const [recorded, setRecorded] = useState<{
+    readonly orderReference: string;
     readonly orderNumber: string;
     readonly payment: RecordedCardPayment;
   } | null>(null);
@@ -335,10 +336,14 @@ export function CounterAwaitingPayment({
   /**
    * Batch 65 (v15 b64 live, TM2 order 58): while one order's payment is open only that order
    * stays, led by its own row; the list's heading, its paragraph, the other rows and an earlier
-   * "Order N paid" step aside (Close brings them back), so the record button is on the first
+   * "Order N paid" step aside (Close brings them back; the order just recorded is not being
+   * charged any more, so its paid panel shows at once), so the record button is on the first
    * screen at 1024x768 and 390x844.
    */
-  const chargingOne = shown.some((order) => charging.has(order.orderReference));
+  const chargingOne = shown.some(
+    (order) =>
+      charging.has(order.orderReference) && order.orderReference !== recorded?.orderReference,
+  );
   return (
     <>
       {chargingOne ? null : paidPanel}
@@ -472,7 +477,11 @@ export function CounterAwaitingPayment({
                     timeZone={timeZone}
                     onRecorded={(payment) => {
                       if (payment !== undefined)
-                        setRecorded({ orderNumber: order.orderNumber, payment });
+                        setRecorded({
+                          orderReference: order.orderReference,
+                          orderNumber: order.orderNumber,
+                          payment,
+                        });
                       setReads((value) => value + 1);
                     }}
                   />
