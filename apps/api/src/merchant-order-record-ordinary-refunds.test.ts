@@ -92,3 +92,39 @@ it("says a counter cash refund at its request's amount, with the drawer's cash b
     { ...cash("300"), method: "CardMachine" },
   ]);
 });
+
+it("batch 65 (v15 b64 live, order 79): a counter refund given back for a request says why it was asked", () => {
+  const refund = (
+    method: "Cash" | "CardMachine",
+    amountMinor: string,
+    requestReference?: string,
+  ) => ({
+    method,
+    amountMinor,
+    actor: "manager",
+    approver: null,
+    at: "2026-11-25T01:41:00.000Z",
+    ...(requestReference === undefined ? {} : { requestReference }),
+  });
+  const requests = [
+    { requestReference: "request-1", amountMinor: "367", reasonCode: "CUSTOMER_REQUEST" },
+    { requestReference: "request-2", amountMinor: "367", reasonCode: "WRONG_ITEM" },
+  ];
+  expect(
+    cashRefundsAtRequestAmount(
+      [
+        // $3.67 asked, $3.65 given back from the drawer.
+        refund("Cash", "365", "request-1"),
+        // Refunded on the card machine for its request.
+        refund("CardMachine", "367", "request-2"),
+        // A cancellation's refund: no request, no reason.
+        refund("Cash", "2245"),
+      ],
+      requests,
+    ),
+  ).toEqual([
+    { ...refund("Cash", "367"), cashGivenBackMinor: "365", reasonCode: "CUSTOMER_REQUEST" },
+    { ...refund("CardMachine", "367"), reasonCode: "WRONG_ITEM" },
+    refund("Cash", "2245"),
+  ]);
+});

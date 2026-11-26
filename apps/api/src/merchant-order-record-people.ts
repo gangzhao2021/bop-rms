@@ -38,6 +38,11 @@ export interface OrderRecordFacts {
     requestReference?: string;
     /** v15 b15: the cash the drawer gave back (whole nickels), when not the refund's amount. */
     cashGivenBackMinor?: string;
+    /**
+     * Batch 65 (v15 b64 live, order 79): why a counter refund given back for a refund request was
+     * asked, from that request's record (absent when no request is known).
+     */
+    reasonCode?: string;
   }[];
   writeOff: { amountMinor: string; actor: string; approver: string; at: string } | null;
 }
@@ -97,15 +102,28 @@ export function ordinaryRefundRecordEntries(
  */
 export function cashRefundsAtRequestAmount(
   refunds: OrderRecordFacts["refunds"],
-  requests: readonly { readonly requestReference: string; readonly amountMinor: string }[],
+  requests: readonly {
+    readonly requestReference: string;
+    readonly amountMinor: string;
+    /** Batch 65: why the request was asked (said beside the refund given back for it). */
+    readonly reasonCode?: string;
+  }[],
 ): OrderRecordFacts["refunds"] {
   const amounts = new Map(requests.map((request) => [request.requestReference, request]));
   return refunds.map(({ requestReference, ...refund }) => {
     const request = requestReference === undefined ? undefined : amounts.get(requestReference);
-    if (request === undefined || refund.method !== "Cash") return refund;
+    if (request === undefined) return refund;
+    // Batch 65: a counter refund given back on the card machine or in cash for a request says why.
+    const why = request.reasonCode === undefined ? {} : { reasonCode: request.reasonCode };
+    if (refund.method !== "Cash") return { ...refund, ...why };
     return request.amountMinor === refund.amountMinor
-      ? { ...refund, amountMinor: request.amountMinor }
-      : { ...refund, amountMinor: request.amountMinor, cashGivenBackMinor: refund.amountMinor };
+      ? { ...refund, amountMinor: request.amountMinor, ...why }
+      : {
+          ...refund,
+          amountMinor: request.amountMinor,
+          cashGivenBackMinor: refund.amountMinor,
+          ...why,
+        };
   });
 }
 
@@ -142,6 +160,8 @@ export interface OrderRecord {
     readonly at: string;
     /** v15 b15: the cash the drawer gave back for it (whole nickels) when not its amount; else null. */
     readonly cashGivenBackMinor: string | null;
+    /** Batch 65: why its refund request was asked (a counter refund given back for a request). */
+    readonly reasonCode?: string;
   }[];
   readonly writeOff: {
     readonly amountMinor: string;
@@ -222,6 +242,8 @@ export async function nameOrderRecord(
         approvedBy: name(item.approver),
         at: item.at,
         cashGivenBackMinor: item.cashGivenBackMinor ?? null,
+        // Batch 65: only when a request is known for it (older answers had no such key).
+        ...(item.reasonCode === undefined ? {} : { reasonCode: item.reasonCode }),
       })),
     ),
     writeOff:

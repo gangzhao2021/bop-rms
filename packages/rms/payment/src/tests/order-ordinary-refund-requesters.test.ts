@@ -34,6 +34,8 @@ it("WP-2423 M61 review: an order record's refund says how the money goes back fr
       method: "Online",
       state: "Sent",
       goingBackMinor: "6000",
+      // Batch 65: why it was asked, from the request's own record.
+      reasonCode: f.reasonCode,
     },
   ]);
   // A record that is not this request's is not guessed at.

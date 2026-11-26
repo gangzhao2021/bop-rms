@@ -1030,6 +1030,11 @@ export async function listOrderOrdinaryRefundRequesters(
     readonly state: "Requested" | "Declined" | "Withdrawn" | "Sent" | "Failed";
     /** Cents going back to the guest: "0" unless `Sent`. */
     readonly goingBackMinor: string;
+    /**
+     * Batch 65 (v15 b64 live, order 79): why it was asked, from the request's own record, so the
+     * Order can say why a counter refund went back ("Cash given back · Customer asked · 20:41").
+     */
+    readonly reasonCode: string;
   }[]
 > {
   const brand = String(parsePaymentReference(scope.brandReference));
@@ -1089,6 +1094,7 @@ export async function listOrderOrdinaryRefundRequesters(
         method: "Online" as const,
         state,
         goingBackMinor: state === "Sent" ? goingBack.toString() : "0",
+        reasonCode: recorded.reasonCode,
       });
     }),
   );

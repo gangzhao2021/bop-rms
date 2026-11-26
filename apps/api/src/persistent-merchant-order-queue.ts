@@ -911,7 +911,8 @@ export function createPersistentMerchantOrderQueue(options: {
                     approver: null,
                     at: String(refund.refundedAt),
                     // v15 b15: said at its request's amount below (the drawer's beside it).
-                    ...(method === "Cash" && refund.sourceKind === "OrdinaryRefund"
+                    // Batch 65: either way, with why its request was asked.
+                    ...(refund.sourceKind === "OrdinaryRefund"
                       ? { requestReference: String(refund.sourceReference) }
                       : {}),
                   });

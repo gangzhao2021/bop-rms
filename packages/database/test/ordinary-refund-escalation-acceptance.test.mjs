@@ -916,6 +916,20 @@ it("escalated ordinary refund: request, step-ups, independent approval and one P
       assert.deepEqual(await recordRefunds(first.order), [
         [firstRequest.requestReference, "Requested", "0"],
       ]);
+      // Batch 65 (v15 b64 live, order 79): and, as the restricted API role, why it was asked, so
+      // a counter refund given back for it names its reason on the order.
+      assert.deepEqual(
+        await transactions().run(async (tx) =>
+          (
+            await listOrderOrdinaryRefundRequesters(
+              tx,
+              { brandReference: brand, storeReference: store },
+              first.order,
+            )
+          ).map((entry) => [entry.requestReference, entry.reasonCode]),
+        ),
+        [[firstRequest.requestReference, "WRONG_ITEM"]],
+      );
 
       // ── 4. Both see it awaiting approval; only a different approver may approve.
       /** WP-2423 query budgets: statements each refund read ran (asserted after step 7). */
