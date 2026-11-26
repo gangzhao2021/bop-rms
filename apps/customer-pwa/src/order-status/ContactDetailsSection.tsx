@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { keepWords } from "../i18n/i18n.js";
+import { keepWords, wordGap } from "../i18n/i18n.js";
 import { orderStatusText } from "../journey/messages.js";
 import { PrivacyNoticeLink } from "../journey/PrivacyNotice.js";
 import {
@@ -90,8 +90,12 @@ export function ContactDetailsSection({
         <p>{text.removed}</p>
       ) : null}
       {failure ? <p role="alert">{failure}</p> : null}
+      {/* Batch 65 (v15 b64 live): the link ends its sentence, as on the receipt; alone on a line
+          it looked unlike every other link there. */}
       {privacyNoticeUrl ? (
-        <p>
+        <p className="contact-details__privacy">
+          {keepWords(text.privacyIntro(store))}
+          {wordGap()}
           <PrivacyNoticeLink url={privacyNoticeUrl} />
         </p>
       ) : null}

@@ -195,6 +195,14 @@ describe("WP-2423 Q16 contact details on the order page", () => {
     expect(html).toContain("Remove my contact details");
     expect(html).toContain("Privacy notice");
   });
+  // Batch 65 (v15 b64 live): alone in its own paragraph the link looked unlike every other link on
+  // the order page; it ends its sentence there, as on the receipt.
+  it("puts the privacy notice at the end of its sentence", () => {
+    for (const state of ["Stored", "Removed", "NotGiven"] as const)
+      expect(section(state, "https://example.test/privacy")).toMatch(
+        /<p class="contact-details__privacy">How Synthetic Store handles your contact details: <a class="privacy-notice-link" href="https:\/\/example.test\/privacy"/u,
+      );
+  });
   it("confirms a removal and shows nothing when there is nothing to say", () => {
     expect(section("Removed")).toContain("have been removed");
     expect(section("Removed")).not.toContain("Remove my contact details");

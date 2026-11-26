@@ -1970,6 +1970,9 @@ export const orderStatusText = Object.freeze({
         "{store} keeps the phone number or email you gave only to contact you about this order, and deletes it 30 days after your order.",
         { store },
       ),
+    /** Batch 65: the sentence the Store's privacy notice link ends, as on the receipt. */
+    privacyIntro: (storeDisplayName: string) =>
+      t("How {storeDisplayName} handles your contact details:", { storeDisplayName }),
     get remove() {
       return t("Remove my contact details");
     },

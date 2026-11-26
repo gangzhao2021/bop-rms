@@ -1308,10 +1308,10 @@
 }
 
 /* Batch 64 (v15 b63 F09): the Store's privacy notice is a secondary action like the others —
-   accent words and a 44 px tap — inside its sentence on checkout and the receipt. A link inside a
-   sentence keeps its underline, so it is told apart without colour (WCAG 1.4.1, axe
-   link-in-text-block). The tap grows by padding on the inline words, so the sentence keeps its
-   own line spacing. */
+   accent words and a 44 px tap — inside its sentence on checkout, the order page and the receipt
+   (batch 65). A link inside a sentence keeps its underline, so it is told apart without colour
+   (WCAG 1.4.1, axe link-in-text-block). The tap grows by padding on the inline words, so the
+   sentence keeps its own line spacing. */
 .customer-page.customer-page .privacy-notice-link {
   display: inline;
   padding-block: 14px;
@@ -1319,6 +1319,11 @@
   font-weight: 400;
   text-decoration: underline;
   text-underline-offset: 3px;
+  /* Batch 65 (v15 b64 live): two short words, never split across lines (zh 390 broke 隐 | 私声明);
+     the whole link moves to the next line instead. */
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: keep-all;
 }
 
 /* Batch 64 (v15 b63): the links at the foot of an order ("View receipt and support", "Back to
