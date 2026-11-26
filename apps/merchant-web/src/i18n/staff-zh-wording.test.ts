@@ -92,3 +92,46 @@ it("the kitchen has one name on every staff screen: 厨房", () => {
     ),
   ).toBe("请先在刷卡机上收款 $17.80，再在此记录。记录后厨房才开始制作这一单。");
 });
+
+/**
+ * Batch 65 (v15 batch 64 live, TM2): the kitchen still built "桌台 K64 C · 订单 55" from a
+ * " · Order " fragment, beside a ticket titled "55 号单"; Tonight's lines said "22 号 · …", the
+ * handover button "交给顾客 · 12 号", the cancel question "取消 12 号订单？" and a paper order
+ * "纸单 7：…". Every staff zh text with an order's number says it as "N 号单" (paper: "N 号纸质单").
+ */
+it("every staff text that carries an order's number says it as N 号单", () => {
+  const wrong = entries.filter(([en, zh]) => {
+    const placeholder = /(?<![Ll]ast )\b[Oo]rders? #?\{(\w+)\}/u.exec(en)?.[1];
+    if (placeholder === undefined || placeholder === "order") return false; // {order} is an amount
+    return !new RegExp(`\\{${placeholder}\\} 号(单|纸质单)`, "u").test(zh);
+  });
+  expect(wrong.map(([en]) => en)).toEqual([]);
+  // No fragment to glue a number onto ("· 订单 " + 55).
+  expect(entries.filter(([, zh]) => /订单\s+$/u.test(zh)).map(([en]) => en)).toEqual([]);
+});
+
+it("the kitchen names a ticket's order as its title does", async () => {
+  const { kitchenOrderText } = await import("../kitchen-board.js");
+  setLanguageForTest("zh-Hans");
+  expect(kitchenOrderText({ orderNumber: "55", orderType: "DineIn", tableLabel: "T4" })).toBe(
+    "桌台 T4 · 55 号单",
+  );
+  // A named table is said by its name alone.
+  expect(kitchenOrderText({ orderNumber: "55", orderType: "DineIn", tableLabel: "K64 C" })).toBe(
+    "K64 C · 55 号单",
+  );
+  expect(kitchenOrderText({ orderNumber: "5", orderType: "Pickup", tableLabel: null })).toBe(
+    "自取 · 5 号单",
+  );
+  expect(kitchenOrderText({ orderNumber: "2", orderType: "DineIn", tableLabel: null })).toBe(
+    "堂食 · 2 号单",
+  );
+  expect(t("Hand over to customer · Order {orderNumber}", { orderNumber: "12" })).toBe(
+    "交给顾客 · 12 号单",
+  );
+  expect(t("Cancel order {orderNumber}?", { orderNumber: "12" })).toBe("取消 12 号单？");
+  setLanguageForTest("en");
+  expect(kitchenOrderText({ orderNumber: "55", orderType: "DineIn", tableLabel: "T4" })).toBe(
+    "Table T4 · Order 55",
+  );
+});

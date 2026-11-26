@@ -809,15 +809,16 @@ export function kitchenOrderText(
   label: Pick<KitchenOrderLabel, "orderNumber" | "orderType" | "tableLabel"> | null | undefined,
 ): string {
   if (!label) return t("Order details unavailable");
-  return (
-    (label.orderType === "Pickup"
-      ? t("Pickup")
-      : label.tableLabel
-        ? t("Table {tableLabel}", { tableLabel: saidTable(label.tableLabel) })
-        : t("Dine-in")) +
-    t(" · Order ") +
-    label.orderNumber
-  );
+  // Batch 65: one sentence, so zh says the number as the ticket's title does ("55 号单").
+  return t("{destination} · Order {orderNumber}", {
+    destination:
+      label.orderType === "Pickup"
+        ? t("Pickup")
+        : label.tableLabel
+          ? t("Table {tableLabel}", { tableLabel: saidTable(label.tableLabel) })
+          : t("Dine-in"),
+    orderNumber: label.orderNumber,
+  });
 }
 
 /**

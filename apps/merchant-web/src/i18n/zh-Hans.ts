@@ -270,7 +270,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   " · High risk": " · 高风险",
   " · Holds stock": " · 存放库存",
   " · Last checked {observedAt}": " · 最近检查 {observedAt}",
-  " · Order ": " · 订单 ",
+  "{destination} · Order {orderNumber}": "{destination} · {orderNumber} 号单",
   " · Remade {item}×": " · 已重做 {item}×",
   " · Temporarily unavailable": " · 暂不可用",
   " · approved by {approvedBy}": " · 由{approvedBy}批准",
@@ -8756,20 +8756,20 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Accepted automatically · it did not reach the kitchen screen": "已自动接单 · 没到厨房屏幕",
   "Not saved. It may have changed on another screen; this shows it as it is now.":
     "没保存。可能在别的屏幕上改过了，这里显示的是现在的状态。",
-  "Order {orderNumber} · Can't make it · refunded": "{orderNumber} 号 · 做不了 · 已退款",
+  "Order {orderNumber} · Can't make it · refunded": "{orderNumber} 号单 · 做不了 · 已退款",
   "Order {orderNumber} · refunded automatically · the kitchen never started it":
-    "{orderNumber} 号 · 厨房一直没开始，已自动退款",
+    "{orderNumber} 号单 · 厨房一直没开始，已自动退款",
   "Order {orderNumber} · made by hand · not refunded automatically":
-    "{orderNumber} 号 · 手工做 · 不自动退款",
+    "{orderNumber} 号单 · 手工做 · 不自动退款",
   "Order {orderNumber} · round {sequence} · made by hand":
-    "{orderNumber} 号 · 第 {sequence} 轮 · 手工做",
+    "{orderNumber} 号单 · 第 {sequence} 轮 · 手工做",
   "Paid orders sent straight to the kitchen": "直接进厨房的已付款订单",
   "No kitchen screen has been open for {minutes} min and 1 paid order was sent there · open the kitchen screen":
     "厨房屏幕已经 {minutes} 分钟没开，有 1 张已付款的单送了过去 · 打开厨房屏幕",
   "No kitchen screen has been open for {minutes} min and {count} paid orders were sent there · open the kitchen screen":
     "厨房屏幕已经 {minutes} 分钟没开，有 {count} 张已付款的单送了过去 · 打开厨房屏幕",
   "Order {orderNumber} did not reach the kitchen. It will be refunded automatically {when} unless someone taps Making it by hand on Orders.":
-    "{orderNumber} 号没到厨房，{when}会自动退款，除非有人在订单页点“正在手工做”。",
+    "{orderNumber} 号单没到厨房，{when}会自动退款，除非有人在订单页点“正在手工做”。",
   "Noted. It won't be refunded automatically. If you can't make it after all, tap Can't make it.":
     "记下了，不会自动退款。如果最后还是做不了，点“做不了”。",
   "Making it by hand": "正在手工做",
@@ -9291,10 +9291,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Sent. This paper order was paid during the outage: don't charge again, record it below.":
     "已发送。此纸单已在停电/断网期间付款，请勿重复收款，在下方录入。",
   "Paper order {orderNumber}: record the payment taken during the outage":
-    "纸单 {orderNumber}：录入停电/断网期间已收的款",
+    "{orderNumber} 号纸质单：录入停电/断网期间已收的款",
   "Record the paper order's payment": "录入纸单的付款",
   "Called and handed over · Order {orderNumber}": "已叫号并交给客人 · {orderNumber} 号单",
-  "Hand over to customer · Order {orderNumber}": "交给顾客 · {orderNumber} 号",
+  "Hand over to customer · Order {orderNumber}": "交给顾客 · {orderNumber} 号单",
   "Someone else is collecting": "他人代取",
   "Check every item before you tap": "逐样核对后再点",
   "{lines} to hand over": "{lines} 待交",
@@ -9313,7 +9313,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "This order just changed. Close this and check it again.": "此订单刚有变化。请关闭后重新查看。",
   "Only a manager can cancel an order. Ask a manager.": "只有经理可以取消订单。请找经理。",
   "Not cancelled. Try again.": "未取消。请重试。",
-  "Cancel order {orderNumber}?": "取消 {orderNumber} 号订单？",
+  "Cancel order {orderNumber}?": "取消 {orderNumber} 号单？",
   "Nothing was charged. The order is kept as cancelled before payment, with your name and the reason, and its items go back to stock.":
     "尚未收款。订单会记录为付款前取消，并保留你的名字和原因，菜品退回库存。",
   "Back to edit": "返回修改",
