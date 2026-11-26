@@ -1031,7 +1031,10 @@
 .customer-page .receipt-page__toolbar {
   align-items: center;
 }
-.customer-page .receipt-page__toolbar > * {
+/* Batch 65 (v15 b64 live): the shell's "space between stacked blocks" rule
+   (.bop-shell__main > div > * + *) out-ranked this one and pushed Refresh receipt 7.5 px below
+   Back to order status; the two are one row of words on one baseline. */
+.customer-page.customer-page .receipt-page__toolbar > * {
   margin-top: 0;
 }
 
