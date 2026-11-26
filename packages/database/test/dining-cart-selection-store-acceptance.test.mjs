@@ -182,13 +182,15 @@ it("atomically selects one initial shared Dining Cart with immutable replay and 
           },
           participation: {
             resolve: async (query) => {
+              // Batch 65: a read asks to read only ("CartView"); every change asks "Cart".
+              const view = query.purpose === "CartView";
               assert.deepEqual(query, {
-                purpose: "Cart",
+                purpose: view ? "CartView" : "Cart",
                 diningSessionReference: intent.diningSessionReference,
                 participantReference: intent.participantReference,
               });
               // The owner's own error for a Closing session (DEC-DINE-IN-PAY-LATER rule 3).
-              if (tableCheckingOut) throw new DiningTableCheckingOutError();
+              if (tableCheckingOut && !view) throw new DiningTableCheckingOutError();
               return participationAllowed
                 ? {
                     schemaVersion: 1,
@@ -201,6 +203,7 @@ it("atomically selects one initial shared Dining Cart with immutable replay and 
                     diningSessionVersion: 1,
                     participantVersion: 1,
                     observedAt: at(clock),
+                    ...(view ? { tableCheckingOut } : {}),
                   }
                 : null;
             },
@@ -510,13 +513,14 @@ it("atomically selects one initial shared Dining Cart with immutable replay and 
       );
       // WP-2423 guest-cart-503: staff started the table's checkout. The open cart's read says so
       // (409 cart_table_checking_out at the route), never "couldn't load your cart" (503).
+      // Batch 65: with the table's Cart as it is (read-only), so its unsent dishes are named.
       tableCheckingOut = true;
       assert.deepEqual(
         await api.getCurrentCart({
           guestCredential: apiRequest.guestCredential,
           requestedAt: at(),
         }),
-        { status: "TableCheckingOut" },
+        { status: "TableCheckingOut", view: apiCreated.view },
       );
       tableCheckingOut = false;
       const unknownRequest = { ...apiRequest, operationReference: id(188) };
