@@ -291,7 +291,9 @@ it("WP-2423: reads an Order's lines with option names, notes and totals", async 
   expect(String(query.mock.calls[1]?.[0])).toContain("i.brand_id=$1 AND i.store_id=$2");
   query.mockImplementation(async () => ({ rows: [], rowCount: 0 }));
   expect(await loadMerchantOrderLines(tx, scope, id(3), "en-CA")).toBeNull();
-});
+  // Its first dynamic imports (the configured item fixture and codec) load a large module graph;
+  // under a busy full-repository run that alone passed the 5 s default twice (batch 64).
+}, 20_000);
 it("WP-2423: lists the Store's paid Orders that can no longer be fulfilled", async () => {
   const { tx, query } = fixture([]);
   query.mockImplementation(async (sql: string) => ({
