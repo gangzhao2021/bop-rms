@@ -838,6 +838,51 @@ fieldset.store-features__modules {
   display: block;
   color: var(--bop-color-text-muted);
 }
+/* Batch 65 (found while stamping the Stores tab): on a phone the eight columns ran 226 px past the
+   window and the page scrolled sideways. Each Store is a block of its own there: its name, then
+   one figure a line with its name beside it, a hairline between Stores, as the Orders rows read. */
+@media (max-width: 48rem) {
+  .brand-stores__table,
+  .brand-stores__table tbody,
+  .brand-stores__table tfoot,
+  .brand-stores__table tr {
+    display: block;
+  }
+  .brand-stores__table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  .workspace-content .bop-shell__main .brand-stores__table tr {
+    padding: var(--bop-space-3) 0;
+    border-bottom: 1px solid var(--bop-color-row-divider);
+  }
+  .brand-stores__table th,
+  .brand-stores__table td {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--bop-space-4);
+    padding: 2px 0;
+    border: 0;
+  }
+  .brand-stores__table th[scope="row"] {
+    display: block;
+    padding: 0 0 var(--bop-space-1);
+    color: var(--bop-color-text-default);
+    font-size: var(--bop-type-body);
+    font-weight: 600;
+  }
+  .brand-stores__table td[data-label]::before {
+    content: attr(data-label);
+    color: var(--bop-color-text-muted);
+  }
+  .brand-stores__table td:empty {
+    display: none;
+  }
+}
 
 /* WP-2423 取舍 18 DEC-MEMBER-POINTS: rows and hairlines, like the other back-office pages. */
 .member-points {
