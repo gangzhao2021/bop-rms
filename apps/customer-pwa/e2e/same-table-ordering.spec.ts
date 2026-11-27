@@ -349,6 +349,9 @@ for (const screen of [
       await page.getByRole("button", { name: "No tip", exact: true }).click();
       const pay = page.getByRole("button", { name: /Continue to payment · \$22\.60/u });
       await expect(pay).toBeEnabled();
+      // Batch 66: the guest is back up at their dishes, so on a phone the next step is below the
+      // screen (it follows the form since batch 63). Before, where the tap left the page decided.
+      await page.evaluate(() => window.scrollTo(0, 0));
       table.version = 4;
       table.items.push({ reference: 6, name: "Synthetic sesame soup", quantity: 1, other: true });
       const changed = page.getByRole("status").filter({

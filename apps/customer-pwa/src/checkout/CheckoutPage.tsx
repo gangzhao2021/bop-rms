@@ -344,6 +344,45 @@ export function CheckoutPage({
       window.removeEventListener("online", reconnected);
     };
   }, [dineIn]);
+  // WP-2423 (same-table-ordering, batch 66): what someone at the table changed, said beside the
+  // next step. Since batch 63 that step sits after the form (no longer a sticky bar), so on a phone
+  // it can be below the screen while the guest is at the tip; the note and its one action are
+  // brought into view when they appear, unless the guest is typing in a field.
+  const tableChangeNote =
+    tableChange?.kind === "changed"
+      ? [
+          ...(tableChange.byStaff === undefined
+            ? []
+            : [checkoutText.tableCartStaffRemoved(tableCartAddedDishes(tableChange.byStaff))]),
+          ...(tableChange.byStaff !== undefined &&
+          tableChange.added.length + tableChange.removed.length + tableChange.reduced.length === 0
+            ? []
+            : [checkoutText.tableCartChangedBy(tableCartChangedDishes(tableChange))]),
+        ].join(" ")
+      : tableChange?.kind === "choiceEnded"
+        ? checkoutText.tableChoiceEnded(tableCartAddedDishes(tableChange.byStaff))
+        : null;
+  const continueSection = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const section = continueSection.current;
+    if (tableChangeNote === null || section === null) return;
+    const typing = document.activeElement;
+    if (
+      typing instanceof HTMLTextAreaElement ||
+      (typing instanceof HTMLInputElement &&
+        !["button", "checkbox", "radio", "submit"].includes(typing.type))
+    )
+      return;
+    const note = section.querySelector<HTMLElement>("[data-table-change-note]");
+    const action = section.querySelector<HTMLElement>(".checkout-continue__button");
+    const smooth = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches !== true;
+    for (const target of [note, action]) {
+      if (target === null || typeof target.scrollIntoView !== "function") continue;
+      const box = target.getBoundingClientRect();
+      if (box.top >= 0 && box.bottom <= window.innerHeight) continue;
+      target.scrollIntoView({ block: "nearest", behavior: smooth ? "smooth" : "auto" });
+    }
+  }, [tableChangeNote]);
   // A refused start or details save because the cart moved: say what happened at the table.
   useEffect(() => {
     if (sessionState.status === "conflict" && dineIn) void checkTable.current().catch(() => false);
@@ -1167,7 +1206,11 @@ export function CheckoutPage({
             </section>
           )}
         </div>
-        <section className="checkout-continue" aria-label={checkoutText.paymentLabel}>
+        <section
+          ref={continueSection}
+          className="checkout-continue"
+          aria-label={checkoutText.paymentLabel}
+        >
           {continueRequested ? <p role="status">{checkoutText.savingYourDetails}</p> : null}
           {sessionState.status === "pending" ? (
             <p role="status">
@@ -1178,26 +1221,13 @@ export function CheckoutPage({
           {tableChange?.kind === "changed" ? (
             // WP-2423 (same-table-ordering): beside the action, where the guest is looking.
             // v15 batch 7: what staff took out is said as staff's, never someone at the table's.
-            <p role="status">
-              {[
-                ...(tableChange.byStaff === undefined
-                  ? []
-                  : [
-                      checkoutText.tableCartStaffRemoved(tableCartAddedDishes(tableChange.byStaff)),
-                    ]),
-                ...(tableChange.byStaff !== undefined &&
-                tableChange.added.length +
-                  tableChange.removed.length +
-                  tableChange.reduced.length ===
-                  0
-                  ? []
-                  : [checkoutText.tableCartChangedBy(tableCartChangedDishes(tableChange))]),
-              ].join(" ")}
+            <p role="status" data-table-change-note="">
+              {tableChangeNote}
             </p>
           ) : null}
           {tableChange?.kind === "choiceEnded" ? (
-            <p role="alert">
-              {checkoutText.tableChoiceEnded(tableCartAddedDishes(tableChange.byStaff))}
+            <p role="alert" data-table-change-note="">
+              {tableChangeNote}
             </p>
           ) : null}
           {menuUpdated && sessionState.status === "idle" && sendState === "idle" ? (
