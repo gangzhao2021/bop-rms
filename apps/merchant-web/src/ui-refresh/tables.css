@@ -557,6 +557,46 @@
 .workspace-page.tables-v3 .workspace-page__title {
   flex: 1 1 0;
 }
+/* Batch 65 (v15 b64: on a phone the stamp and Refresh beside the title squeezed the Store's name
+   into a 120 px column, 2 to 3 lines): as on Orders, the phone keeps "Refresh tables" beside the
+   title, puts "Updated 14:02" on its own line at the right under it, and gives the Store's name
+   and the status line the page's whole width. */
+@media (max-width: 48rem) {
+  .workspace-page.tables-v3 .workspace-page__header {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    grid-template-areas:
+      "title tools"
+      "stamp stamp"
+      "meta meta"
+      "line line";
+    align-items: center;
+    gap: 2px var(--bop-space-3);
+  }
+  .workspace-page.tables-v3 .workspace-page__title,
+  .workspace-page.tables-v3 .workspace-page__header .workspace-page__toolbar {
+    display: contents;
+  }
+  .workspace-page.tables-v3 .workspace-page__title h1 {
+    grid-area: title;
+  }
+  .workspace-page.tables-v3 .workspace-page__meta {
+    grid-area: meta;
+    margin: 0;
+  }
+  .workspace-page.tables-v3 .workspace-page__toolbar > .workspace-page__status {
+    grid-area: stamp;
+    justify-self: end;
+  }
+  .workspace-page.tables-v3 .workspace-page__header .workspace-page__actions {
+    grid-area: tools;
+    justify-self: end;
+  }
+  .workspace-page.tables-v3 .workspace-page__header > .workspace-page__status--line {
+    grid-area: line;
+    margin-top: 6px;
+  }
+}
 .workspace-page.tables-v3 .workspace-page__title h1 {
   font-size: 28px;
   font-weight: 600;
