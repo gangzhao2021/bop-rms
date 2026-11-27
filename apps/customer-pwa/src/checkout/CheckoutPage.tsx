@@ -1,3 +1,4 @@
+import { prefersReducedMotion } from "../reduced-motion.js";
 import { AlreadyOrdered } from "./AlreadyOrdered.js";
 import { createCheckoutSessionClient } from "./session-client.js";
 import {
@@ -375,7 +376,7 @@ export function CheckoutPage({
       return;
     const note = section.querySelector<HTMLElement>("[data-table-change-note]");
     const action = section.querySelector<HTMLElement>(".checkout-continue__button");
-    const smooth = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches !== true;
+    const smooth = !prefersReducedMotion();
     for (const target of [note, action]) {
       if (target === null || typeof target.scrollIntoView !== "function") continue;
       const box = target.getBoundingClientRect();
