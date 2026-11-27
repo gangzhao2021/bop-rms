@@ -139,15 +139,29 @@ it("loads the open business day's settlement with card-machine payments, also wh
         [100, 1280, 150, "AtCounter"],
         [200, 1000, 0, "RecordedAfterOutage"],
       ]) {
+        // The preparation the counter's "Send order" step records (Ordering evidence shape, as
+        // store-reports-acceptance seeds it). Batch 66: Reports' payment ledger, which Settlement
+        // now reads to name what Reports lists apart, reads the whole record.
         const preparation = {
-          brandReference: scope.brandReference,
-          storeReference: scope.storeReference,
+          preparationReference: id(n + 11),
           orderReference: id(n + 1),
           orderBatchReference: id(n + 2),
           submissionReference: id(n + 3),
+          sourceCartReference: id(n + 12),
+          sourceCartVersion: 1,
+          brandReference: scope.brandReference,
+          storeReference: scope.storeReference,
+          guestSessionReference: id(n + 13),
+          quoteReference: id(n + 14),
+          capacityAllocationReference: id(n + 15),
+          readiness: "PaymentPending",
+          transactionBoundary: "OrderSubmissionPaymentPreparation",
           orderAllocation: { amountMinor: String(total - tip), currencyCode: "CAD" },
           tip: { amountMinor: String(tip), currencyCode: "CAD" },
           total: { amountMinor: String(total), currencyCode: "CAD" },
+          committedAt: takenAt,
+          capacityExpiresAt: new Date(Date.parse(takenAt) + minutes(30)).toISOString(),
+          sourceDigest: sha,
         };
         await admin.query(
           `INSERT INTO rms_payment.card_machine_payment VALUES
@@ -229,10 +243,16 @@ it("loads the open business day's settlement with card-machine payments, also wh
       // The open day so far, with the counter's card-machine takings apart from online ones.
       queryLog.length = 0;
       const day = await read(compose());
+      // Batch 66: the refunded counter order was not cancelled by the Store, so Reports keeps it
+      // as a sale and a refund and the day names nothing left out (read as the restricted role).
+      assert.deepEqual(day.reportsLeftOut, []);
       // Query budget (regression for the 16 s reports on v15): the caller's scope is resolved at
       // the start and once before the reply, not inside every owner read (~750 queries a day).
+      // Batch 66: 158 before; 194 with Reports' payment ledger of the day and the Orders of
+      // payments given back in full that day (read only on a day with a refund), which name what
+      // Reports lists apart (reportsLeftOut). Still a fixed cost, not one per owner read.
       assert.ok(
-        queryLog.length <= 160,
+        queryLog.length <= 200,
         "the day's settlement took " + queryLog.length + " queries",
       );
       const scopeResolutions = queryLog.filter((sql) =>

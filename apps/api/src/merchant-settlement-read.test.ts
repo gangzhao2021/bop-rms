@@ -368,3 +368,73 @@ it("counts the portions comped: 1 of 2 bowls, then the other, is 2; two bowls at
   expect(managerCompsTakenOff([comp(line, 500n, 1, 2), comp(line, 300n, null, 2)]).count).toBe(2);
   expect(managerCompsTakenOff([])).toEqual({ count: 0, amountMinor: "0", currencyCode: "CAD" });
 });
+it("b66: says what Reports lists apart only when there is some, from the day's own window", async () => {
+  const leftOut = vi.fn<
+    NonNullable<Parameters<typeof createMerchantSettlementRead>[0]["reportsLeftOut"]>
+  >(async () => [
+    {
+      channel: "Online" as const,
+      orderCount: 3,
+      amountMinor: "4239",
+      currencyCode: "CAD" as const,
+    },
+  ]);
+  const options = {
+    transactions: {
+      run: async <T>(work: (tx: ConsumerTransaction) => Promise<T>) =>
+        work({ query: vi.fn() } as ConsumerTransaction),
+    },
+    authorize: async () => scope,
+    storeLabel: async () => "Synthetic Store",
+    window: async () => window,
+    captured: async () => ({ count: 63, amountMinor: "107421", currencyCode: "CAD" as const }),
+    refunded: async () => ({ count: 23, amountMinor: "26080", currencyCode: "CAD" as const }),
+    reconciliation: async () => emptyDay,
+    now: () => "2026-09-22T09:00:00.000Z",
+  };
+  const view = await createMerchantSettlementRead({ ...options, reportsLeftOut: leftOut })({
+    sessionCookie: "c",
+    businessDate: "2026-09-21",
+  });
+  expect(view.reportsLeftOut).toEqual([
+    { channel: "Online", orderCount: 3, amountMinor: "4239", currencyCode: "CAD" },
+  ]);
+  expect(leftOut.mock.calls[0]?.[2]).toEqual(window);
+  const none = await createMerchantSettlementRead({ ...options, reportsLeftOut: async () => [] })({
+    sessionCookie: "c",
+    businessDate: "2026-09-21",
+  });
+  expect(none.reportsLeftOut).toEqual([]);
+  // Not composed: null, never a claim that nothing was left out.
+  const absent = await createMerchantSettlementRead(options)({
+    sessionCookie: "c",
+    businessDate: "2026-09-21",
+  });
+  expect(absent.reportsLeftOut).toBeNull();
+  // A day with no refund at all has nothing left out, and is not read again for it.
+  const zero = { count: 0, amountMinor: "0", currencyCode: "CAD" as const };
+  leftOut.mockClear();
+  const quiet = await createMerchantSettlementRead({
+    ...options,
+    refunded: async () => zero,
+    cardMachine: async () => ({
+      taken: zero,
+      tipMinor: "0",
+      recordedAfterOutageCount: 0,
+      refunded: zero,
+      takenBack: zero,
+    }),
+    cash: async () => ({
+      received: zero,
+      tipMinor: "0",
+      roundingMinor: "0",
+      refunded: zero,
+      takenBack: zero,
+      netMinor: "0",
+      recordedAfterOutageCount: 0,
+    }),
+    reportsLeftOut: leftOut,
+  })({ sessionCookie: "c", businessDate: "2026-09-21" });
+  expect(quiet.reportsLeftOut).toEqual([]);
+  expect(leftOut).not.toHaveBeenCalled();
+});

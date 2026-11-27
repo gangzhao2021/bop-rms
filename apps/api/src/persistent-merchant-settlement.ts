@@ -8,9 +8,13 @@ import {
   createPostgresPaymentCaptureWindowSource,
   createPostgresPaymentReconciliationDaySource,
   createPostgresSoleOperatorRefundSummaryReader,
+  createPostgresStoreSalesPaymentLedger,
   createPostgresUnmatchedCaptureRefundStore,
 } from "@rms/payment";
-import { listStorePriceReductionsDecided } from "@rms/ordering";
+import {
+  createPostgresStoreSalesOrderSource,
+  listStorePriceReductionsDecided,
+} from "@rms/ordering";
 import { listRefundRecoveriesByBusinessDate } from "@rms/payment";
 import { createMerchantBusinessDayWindows } from "./merchant-business-day-window.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
@@ -26,6 +30,10 @@ import {
   type MerchantSettlementWindow,
 } from "./merchant-settlement-read.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import {
+  storeSalesCancelledInFullCandidates,
+  storeSalesLeftOutByChannel,
+} from "./store-sales-report.js";
 
 const unavailable = (): never => {
   throw new Error("MERCHANT_SETTLEMENT_UNAVAILABLE");
@@ -696,6 +704,47 @@ export function createPersistentMerchantSettlement(options: {
               currencyCode: "CAD" as const,
             },
           };
+        }),
+      // Batch 66 (v15 b65 live, TM2 Nov 25): what Reports lists apart that this day counts in its
+      // taken and refunded, by Reports' own rule, so the page names it only when there is some.
+      // The Orders are read only for payments given back in full the day they were taken.
+      reportsLeftOut: (tx, scope, window) =>
+        optional(async () => {
+          const configuration = await options.resolveConfiguration(tx, scope);
+          const storeScope = {
+            tenantReference: scope.tenantReference,
+            brandReference: scope.brandReference,
+            storeReference: scope.storeReference,
+          };
+          const ledger = await createPostgresStoreSalesPaymentLedger({
+            scope: { ...storeScope, ...configuration },
+            authorize: async (t) => guard(scope)(t),
+          })(tx, {
+            startsAt: window.startsAt,
+            endsAt: window.endsAt,
+            observedAt: persistence.now(),
+          });
+          const sources = {
+            days: [window],
+            payments: ledger.payments,
+            refundedPayments: ledger.refundedPayments,
+            refunds: ledger.refunds,
+          };
+          const candidates = storeSalesCancelledInFullCandidates(sources);
+          if (candidates.length === 0) return [];
+          if (!(await guard(scope)(tx))) return unavailable();
+          const orders = await createPostgresStoreSalesOrderSource({
+            brandReference: scope.brandReference,
+            storeReference: scope.storeReference,
+            locale: "en-CA",
+            authorize: async (t) => guard(scope)(t),
+          })(tx, candidates);
+          return storeSalesLeftOutByChannel({ ...sources, orders }).map((entry) => ({
+            channel: entry.channel,
+            orderCount: entry.orderCount,
+            amountMinor: entry.amountMinor.toString(),
+            currencyCode: "CAD" as const,
+          }));
         }),
       reconciliation: (tx, scope, window) =>
         optional(async () => {

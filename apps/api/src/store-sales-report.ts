@@ -266,8 +266,55 @@ export function computeStoreSalesReport(input: StoreSalesReportInput) {
   return Object.freeze({ ...sales, reconciliation: asHappened.reconciliation });
 }
 
+/** What decides which orders are taken and given back the same day (and left out of the sales). */
+export type StoreSalesCancelledInFullInput = Pick<
+  StoreSalesReportInput,
+  "payments" | "refundedPayments" | "refunds" | "orders"
+> & {
+  readonly days: readonly Pick<MerchantBusinessDayWindow, "businessDate" | "startsAt" | "endsAt">[];
+};
+
+/**
+ * Batch 66 (v15 b65 live, TM2 Nov 25): the orders Reports lists apart (taken and given back the
+ * same day), by payment method — what the day-end settlement counts in its taken and refunded on
+ * top of Reports. The one rule both pages use, so Settlement names the same money Reports leaves
+ * out, and only when there is some.
+ */
+export function storeSalesLeftOutByChannel(input: StoreSalesCancelledInFullInput): readonly {
+  readonly channel: StoreSalesChannel;
+  readonly orderCount: number;
+  readonly amountMinor: bigint;
+}[] {
+  const { lines } = cancelledInFull(input);
+  return storeSalesChannels.flatMap((channel) => {
+    const listed = lines.filter((line) => line.channel === channel);
+    if (listed.length === 0) return [];
+    return [
+      Object.freeze({
+        channel,
+        orderCount: new Set(listed.map((line) => line.orderReference)).size,
+        amountMinor: listed.reduce((sum, line) => sum + line.amountMinor, 0n),
+      }),
+    ];
+  });
+}
+
+/**
+ * The orders that may be taken and given back the same day before their Orders are read: every
+ * payment of the order in the range given back within it, on one business day. Only these can be
+ * left out, so a reader that needs only what is left out reads just their Orders.
+ */
+export function storeSalesCancelledInFullCandidates(
+  input: Omit<StoreSalesCancelledInFullInput, "orders">,
+): readonly string[] {
+  return [...cancelledInFull({ ...input, orders: [] }, () => true).orders];
+}
+
 /** Orders the Store cancelled whose payments in the range were all given back the day taken. */
-function cancelledInFull(input: StoreSalesReportInput) {
+function cancelledInFull(
+  input: StoreSalesCancelledInFullInput,
+  cancelledOrder?: (orderReference: string) => boolean,
+) {
   const dayOf = (instant: string) =>
     input.days.find((day) => instant >= day.startsAt && instant < day.endsAt)?.businessDate ?? null;
   const byOrder = new Map<
@@ -316,7 +363,7 @@ function cancelledInFull(input: StoreSalesReportInput) {
     lines: CancelledInFullLine[] = [];
   for (const [order, e] of byOrder)
     if (
-      orders.get(order)?.cancelled === true &&
+      (cancelledOrder?.(order) ?? orders.get(order)?.cancelled === true) &&
       e.taken > 0n &&
       e.refunded === e.taken &&
       e.days.size === 1 &&

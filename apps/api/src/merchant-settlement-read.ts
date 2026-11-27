@@ -151,6 +151,12 @@ export interface MerchantSettlementView {
    */
   readonly unmatchedProviderCharges: MerchantSettlementUnmatchedCharges | null;
   /**
+   * Batch 66 (v15 b65 live, TM2 Nov 25): orders taken and given back the same day, by payment
+   * method, that this day's taken and refunded count and Reports lists apart (the same rule as
+   * Reports). Empty when Reports leaves nothing out; null when not read.
+   */
+  readonly reportsLeftOut: readonly MerchantSettlementReportsLeftOut[] | null;
+  /**
    * WP-2423 (settlement-coverage): a closed day whose day-end check with the payment provider has
    * no run yet, decided here on server time. Null on an open day, a day already checked, or when
    * the reconciliation records could not be read.
@@ -176,6 +182,12 @@ export interface MerchantSettlementDayEndCheck {
    * receive it. Never claimed from the clock alone.
    */
   readonly supportAlerted: boolean;
+}
+export interface MerchantSettlementReportsLeftOut {
+  readonly channel: "Online" | "CardMachine" | "Cash";
+  readonly orderCount: number;
+  readonly amountMinor: string;
+  readonly currencyCode: "CAD";
 }
 export interface MerchantSettlementUnmatchedCharges {
   readonly captured: MerchantSettlementAmount;
@@ -276,6 +288,11 @@ export function createMerchantSettlementRead(options: {
     scope: MerchantSettlementScope,
     window: MerchantSettlementWindow,
   ): Promise<MerchantSettlementUnmatchedCharges | null>;
+  reportsLeftOut?(
+    tx: ConsumerTransaction,
+    scope: MerchantSettlementScope,
+    window: MerchantSettlementWindow,
+  ): Promise<readonly MerchantSettlementReportsLeftOut[] | null>;
   /**
    * WP-2423: the first business day the Store's settlement records cover (when it started using
    * the system); null when not known. An earlier day has no records to show, which is an answer,
@@ -378,6 +395,18 @@ export function createMerchantSettlementRead(options: {
         options.unmatchedProviderCharges === undefined
           ? null
           : await options.unmatchedProviderCharges(tx, scope, window);
+      // Only an order given back in full the day it was taken is left out of Reports: a day with
+      // no refund at all has none, and is not read again for them.
+      const refundCount =
+        refunded === null || cardMachine === null || cash === null
+          ? null
+          : refunded.count + cardMachine.refunded.count + cash.refunded.count;
+      const reportsLeftOut =
+        options.reportsLeftOut === undefined
+          ? null
+          : refundCount === 0
+            ? []
+            : await options.reportsLeftOut(tx, scope, window);
       const projectedAt = options.now();
       let dayEndCheck: MerchantSettlementDayEndCheck | null = null;
       if (window.status === "Closed" && reconciliation !== null && !reconciliation.settlement) {
@@ -442,6 +471,10 @@ export function createMerchantSettlementRead(options: {
         comps,
         moneyTakenBack,
         unmatchedProviderCharges,
+        reportsLeftOut:
+          reportsLeftOut === null
+            ? null
+            : Object.freeze(reportsLeftOut.map((entry) => Object.freeze({ ...entry }))),
         dayEndCheck,
         projectedAt,
       });

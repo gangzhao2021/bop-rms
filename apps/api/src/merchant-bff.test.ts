@@ -2989,6 +2989,14 @@ describe("WP-2423 P1 merchant settlement read route", () => {
     comps: null,
     moneyTakenBack: null,
     unmatchedProviderCharges: null,
+    reportsLeftOut: [
+      {
+        channel: "Online" as const,
+        orderCount: 3,
+        amountMinor: "4239",
+        currencyCode: "CAD" as const,
+      },
+    ],
     dayEndCheck: null,
     projectedAt: "2026-09-22T09:00:00.000Z",
   };

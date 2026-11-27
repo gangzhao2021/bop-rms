@@ -733,6 +733,10 @@ it("reports a business day's sales, items, hours and tips, matches the settlemen
         BigInt(day.refunded.amountMinor) + BigInt(day.cardMachine.refunded.amountMinor),
         BigInt(view.summary.refundsMinor),
       );
+      // Batch 66 (v15 b65 live, TM2 Nov 26): nothing is left out of the report today, so the
+      // settlement names nothing (and says nothing about Reports reading lower).
+      assert.equal(view.summary.cancelledInFullCount, 0);
+      assert.deepEqual(day.reportsLeftOut, []);
 
       // ── WP-2423 item 8 ② (closing summary): tonight is today's report itself — the same
       // sources and computation — so it matches the day-end settlement for the day.
@@ -987,6 +991,25 @@ it("reports a business day's sales, items, hours and tips, matches the settlemen
         BigInt(day.captured.amountMinor) + BigInt(day.cardMachine.taken.amountMinor),
       );
       assert.equal(storeOne.items.find((row) => row.name === "Synthetic muffin")?.quantitySold, 3);
+      // Batch 66 (v15 b65 live, TM2 Nov 25): the settlement names, by payment method, exactly
+      // what the report lists apart, read as the restricted role by the report's own rule.
+      const dayAfter = await settlement({ sessionCookie: cookie, businessDate: today });
+      assert.deepEqual(dayAfter.reportsLeftOut, [
+        {
+          channel: "CardMachine",
+          orderCount: storeOne.summary.cancelledInFullCount,
+          amountMinor: storeOne.summary.cancelledInFullMinor,
+          currencyCode: "CAD",
+        },
+      ]);
+      // Net taken is the same on both pages: taken less refunded, all methods.
+      assert.equal(
+        BigInt(dayAfter.captured.amountMinor) +
+          BigInt(dayAfter.cardMachine.taken.amountMinor) -
+          BigInt(dayAfter.refunded.amountMinor) -
+          BigInt(dayAfter.cardMachine.refunded.amountMinor),
+        BigInt(storeOne.summary.netCollectedMinor),
+      );
 
       // ── WP-2423 M40 (review): which paid rounds tonight counts as money kept, read as the API
       // role from Ordering's and Payment's own records and the report's payment ledger in one
@@ -1077,6 +1100,7 @@ it("reports a business day's sales, items, hours and tips, matches the settlemen
       assert.equal(settlementTwo.businessDate, today);
       assert.equal(settlementTwo.window.status, "Open");
       assert.equal(settlementTwo.captured?.amountMinor, "565");
+      assert.deepEqual(settlementTwo.reportsLeftOut, []);
       // The Brand view adds up each Store's own figures: taken less refunds is each Store's net
       // taken, and the Brand's net taken is their sum (no Store's cancellation counted twice).
       const brand = [storeOne, storeTwo].map((view) => view.summary);

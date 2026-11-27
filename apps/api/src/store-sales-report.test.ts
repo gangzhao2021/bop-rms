@@ -4,6 +4,8 @@ import type { StoreSalesPayment, StoreSalesRefund } from "@rms/payment";
 import {
   computeStoreSalesReport,
   decimalFromMinor,
+  storeSalesCancelledInFullCandidates,
+  storeSalesLeftOutByChannel,
   storeSalesReportCsv,
   type StoreSalesReportInput,
 } from "./store-sales-report.js";
@@ -1428,5 +1430,50 @@ describe("store sales report (WP-2423 Q14)", () => {
         taxAfterRefundsMinor: "0",
       });
     });
+  });
+});
+
+describe("b66: what Settlement counts that Reports lists apart (v15 b65 live, TM2 Nov 25/26)", () => {
+  const withCancelled = (references: readonly string[]) => ({
+    ...today,
+    orders: today.orders.map((o) =>
+      references.includes(o.orderReference) ? { ...o, cancelled: true as const } : o,
+    ),
+  });
+
+  it("names, by payment method, the same orders and money the report leaves out", () => {
+    const input = withCancelled([c2.orderReference]);
+    const report = computeStoreSalesReport(input);
+    expect(storeSalesLeftOutByChannel(input)).toEqual([
+      { channel: "CardMachine", orderCount: 1, amountMinor: 396n },
+    ]);
+    const machine = report.byChannel.find((entry) => entry.channel === "CardMachine");
+    expect(machine).toMatchObject({ cancelledInFullCount: 1, cancelledInFullMinor: "396" });
+    // Settlement's taken and refunded on that method read exactly that much more; net the same.
+    expect(BigInt(machine?.collectedMinor ?? "0") + 396n).toBe(
+      today.settlement.cardMachineTaken.amountMinor,
+    );
+    expect(BigInt(report.summary.netCollectedMinor)).toBe(
+      today.settlement.onlineCaptured.amountMinor +
+        today.settlement.cardMachineTaken.amountMinor -
+        today.settlement.onlineRefunded.amountMinor -
+        today.settlement.cardMachineRefunded.amountMinor,
+    );
+  });
+
+  it("says nothing on a day the report leaves nothing out", () => {
+    // Refunded in full but never cancelled: still a sale and a refund on both pages.
+    expect(storeSalesLeftOutByChannel(today)).toEqual([]);
+    expect(computeStoreSalesReport(today).summary.cancelledInFullCount).toBe(0);
+  });
+
+  it("reads Orders only for payments given back in full the day they were taken", () => {
+    // c2 (counter, given back the same day) is the only candidate: p1 was given back in part,
+    // p0 was taken the day before.
+    expect(storeSalesCancelledInFullCandidates(today)).toEqual([c2.orderReference]);
+    // An order not cancelled by the Store is not left out, whatever its money did.
+    const candidates = storeSalesCancelledInFullCandidates(today);
+    const orders = today.orders.filter((o) => candidates.includes(o.orderReference));
+    expect(storeSalesLeftOutByChannel({ ...today, orders })).toEqual([]);
   });
 });
