@@ -1028,6 +1028,20 @@
   margin-inline: 0;
   padding-inline: 0;
 }
+/* Batch 67 (v15 b65 live): the receipt itself sits in the Items section under its heading, as
+   Paid sits under Payment; it added its own 16 px above and below inside the section. An earlier
+   version (after a change) is a part of the section, set off by space, its heading 16 / 600. */
+.customer-page.customer-page .receipt-page__history > .receipt-page__version {
+  padding-block: 0;
+}
+.customer-page .receipt-page__history > .receipt-page__version + .receipt-page__version {
+  margin-top: var(--bop-space-6);
+}
+.customer-page .receipt-page__version > h3 {
+  margin: 0 0 var(--bop-space-2);
+  font-size: 16px;
+  font-weight: 600;
+}
 .customer-page .receipt-page__toolbar {
   align-items: center;
 }

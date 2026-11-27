@@ -2433,9 +2433,6 @@
 .receipt-page__content p {
   color: var(--bop-color-text-muted);
 }
-.receipt-page__version h2 {
-  font-size: 20px;
-}
 .receipt-page__lines {
   margin: 0;
   padding: 0;

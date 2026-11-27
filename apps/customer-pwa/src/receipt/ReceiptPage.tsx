@@ -228,13 +228,12 @@ function ReceiptVersion({
   return (
     <article
       className="receipt-page__version"
-      {...(only
-        ? { "aria-labelledby": "page-heading" }
-        : { "aria-labelledby": `receipt-version-${record.version}` })}
+      {...(only ? {} : { "aria-labelledby": `receipt-version-${record.version}` })}
     >
       {only ? null : (
         <>
-          <h2 id={`receipt-version-${record.version}`}>{kindText[record.kind]}</h2>
+          {/* Batch 67: a version is a part of the Items section, under its heading. */}
+          <h3 id={`receipt-version-${record.version}`}>{kindText[record.kind]}</h3>
           <p>
             {t("Recorded")} {formatDateTime(record.recordedAt)}
           </p>
@@ -469,7 +468,11 @@ function ReceiptContent({
           </p>
         )}
       </section>
-      <section className="receipt-page__history" aria-labelledby="page-heading">
+      {/* Batch 67 (v15 b65 live): the items, subtotal, tax, total and payment are one section of
+          the receipt with its own heading, as Merchant and order and Payment are; they began
+          about 100 px under "Paid" with no heading and read as a block apart from the receipt. */}
+      <section className="receipt-page__history" aria-labelledby="receipt-items-heading">
+        <h2 id="receipt-items-heading">{t("Items")}</h2>
         {records.map((record) => (
           <ReceiptVersion
             key={record.recordReference}
