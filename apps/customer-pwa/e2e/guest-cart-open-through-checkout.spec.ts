@@ -304,7 +304,7 @@ async function freshText(browser: Browser, table: Table, path: string, zh: boole
  * kitchen" (20/600), with its count in grey 14/400, and one accent text action asking staff to
  * come over (this table's staff call is offered here). Nothing of the old cart's controls.
  */
-async function expectUnsent(page: Page, zh: boolean, width: number) {
+async function expectUnsent(page: Page, zh: boolean, width: number, paid = false) {
   const main = page.getByRole("main");
   const heading = main.getByRole("heading", {
     name: zh ? "没有送到厨房" : "Not sent to the kitchen",
@@ -323,6 +323,31 @@ async function expectUnsent(page: Page, zh: boolean, width: number) {
     return { size: css.fontSize, color: css.color };
   });
   expect(count).toEqual({ size: "14px", color: "rgb(102, 102, 102)" });
+  if (paid) {
+    // Batch 66 (v15 b65 live, extra finding; this spec's paid case changed with it): once the
+    // table's bill is paid, Dining takes no round on it, so the Cart never asks staff to add the
+    // unsent dish: it says it was not ordered and is not charged, and what to do instead.
+    const said = main.locator(".cart-unsent p");
+    await expect(said).toHaveText(
+      zh
+        ? ["这些菜没有送出，也不会向您收费。", "如需再点，请找店员。"]
+        : [
+            "These dishes weren’t ordered, and you aren’t charged for them.",
+            "To order anything else, ask staff.",
+          ],
+    );
+    await expect(main.getByRole("button")).toHaveCount(0);
+    await expect(main.getByText(zh ? /加上这些菜/u : /add these/iu)).toHaveCount(0);
+    for (const line of await said.all()) {
+      const box = await line.boundingBox();
+      expect(box?.x ?? 0).toBeGreaterThanOrEqual(15);
+      expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(width - 15);
+      expect(await line.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(
+        true,
+      );
+    }
+    return;
+  }
   const ask = main.getByRole("button", {
     name: zh ? "请店员加上这些菜" : "Ask staff to add these",
   });
@@ -355,7 +380,7 @@ async function expectCardOnly(
   const main = page.getByRole("main");
   const quick = { timeout: 1_000 };
   for (const stale of staleCart) await expect(main.getByText(stale)).toHaveCount(0, quick);
-  if (unsent) await expectUnsent(page, zh, width);
+  if (unsent) await expectUnsent(page, zh, width, phase === "paid");
   else {
     await expect(main.getByText(dish)).toHaveCount(0, quick);
     await expect(main.getByRole("button")).toHaveCount(0, quick);

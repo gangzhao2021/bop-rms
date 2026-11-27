@@ -2168,6 +2168,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Ask staff to add these": "请店员加上这些菜",
   "Ask a staff member to add these dishes.": "请找店员帮您加上这些菜。",
   "{heading}. Some dishes weren’t sent to the kitchen.": "{heading}。有些菜没有送到厨房。",
+  "These dishes weren’t ordered, and you aren’t charged for them.":
+    "这些菜没有送出，也不会向您收费。",
+  "{heading}. Some dishes weren’t sent to the kitchen and aren’t charged.":
+    "{heading}。有些菜没有送到厨房，不收费。",
   // Batch 63 (D62B-03): the dine-in receipt's header, as the pickup receipt's.
   "Table {table}": "{table} 桌",
   "Paid {date}": "付款时间 {date}",

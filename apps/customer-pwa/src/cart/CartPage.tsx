@@ -614,16 +614,24 @@ export function unsentLines(items: readonly CartItemView[]): readonly {
 export function UnsentAtCheckout({
   items,
   staffCall: provided,
+  paidLine = null,
 }: {
   readonly items: readonly CartItemView[];
   readonly staffCall?: DiningStaffCallClient;
+  /**
+   * Batch 66 (v15 b65 live): the table's bill is paid (or staff closed it), so Dining takes no
+   * more rounds on it (the staff-round rule): what to do next instead of a call to add the dishes.
+   */
+  readonly paidLine?: string | null;
 }) {
   const [client] = useState(() => provided ?? createHttpDiningStaffCallClient());
   const [call, setCall] = useState<"reading" | "offered" | "asked" | "sending" | "off" | "failed">(
     "reading",
   );
   const key = useRef<string | null>(null);
+  const paid = paidLine !== null;
   useEffect(() => {
+    if (paid) return;
     const controller = new AbortController();
     client.read(controller.signal).then(
       (view) => {
@@ -634,7 +642,7 @@ export function UnsentAtCheckout({
       },
     );
     return () => controller.abort();
-  }, [client]);
+  }, [client, paid]);
   const ask = async () => {
     setCall("sending");
     key.current ??= client.newOperationReference();
@@ -659,7 +667,12 @@ export function UnsentAtCheckout({
           </li>
         ))}
       </ul>
-      {call === "offered" || call === "sending" ? (
+      {paid ? (
+        <>
+          <p>{cartText.unsent.notCharged}</p>
+          <p>{paidLine}</p>
+        </>
+      ) : call === "offered" || call === "sending" ? (
         <button
           type="button"
           className="cart-unsent__ask"
@@ -712,7 +725,11 @@ function ErrorState({
     const unsent = state.cart?.cart.items ?? [];
     return (
       <StateMessage heading={text.heading}>
-        {unsent.length === 0 ? <p>{text.line}</p> : <UnsentAtCheckout items={unsent} />}
+        {unsent.length === 0 ? (
+          <p>{text.line}</p>
+        ) : (
+          <UnsentAtCheckout items={unsent} paidLine={checkout?.paid === true ? text.line : null} />
+        )}
         {own.yourPaid === null ? null : <p>{own.yourPaid}</p>}
         <div className="cart-state__actions">
           {/* Batch 62: the payer's link brings their receipt into view on Your table. */}
@@ -1987,6 +2004,7 @@ function OpenCartPage({
                     (state.cart?.cart.items.length ?? 0) > 0
                     ? cartText.unsent.status(
                         tableCheckoutText(tableCheckout ?? unreadTableCheckout).heading,
+                        tableCheckout?.paid === true,
                       )
                     : tableCheckoutText(tableCheckout ?? unreadTableCheckout).whole
                   : state.status === "offline-readonly"

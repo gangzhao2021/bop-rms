@@ -1377,6 +1377,48 @@ describe("Batch 48: Cart while the table checks out", () => {
     expect(renderPage(checkingOut)).toContain("<p>Ask staff if you want to add more.</p>");
   });
 
+  // Batch 66 (v15 b65 live): every part of the bill was paid with 2 Beef noodles still unsent;
+  // the Cart said "Ask a staff member to add these dishes." beside a paid bill.
+  it("once the table's bill is paid, says the unsent dishes are not ordered or charged", () => {
+    setCustomerCsrfCredential("c".repeat(43));
+    noteTableCheckingOut(true);
+    const money = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
+    noteTableView({
+      paymentTiming: "PayLater",
+      rounds: [{ roundNumber: 1 }],
+      summary: { due: money("0"), paid: money("2825") },
+    } as unknown as DiningSessionView);
+    const base = cart();
+    const item = base.cart.items[0];
+    if (item === undefined) throw new Error("synthetic item missing");
+    const held: CartState = {
+      ...checkingOut,
+      cart: {
+        ...base,
+        cart: {
+          ...base.cart,
+          orderType: "DineIn",
+          items: [{ ...item, displayName: "Beef noodles (TEST)", quantity: 2, configuration: [] }],
+        },
+      },
+    };
+    const html = renderPage(held);
+    expect(html).toContain("Your table’s bill is paid");
+    expect(html).toContain('<h3 id="cart-unsent-heading">Not sent to the kitchen</h3>');
+    expect(html).toContain(
+      "<p>These dishes weren’t ordered, and you aren’t charged for them.</p><p>To order anything else, ask staff.</p>",
+    );
+    expect(html).not.toContain("add these");
+    expect(html).toContain(
+      "Your table’s bill is paid. Some dishes weren’t sent to the kitchen and aren’t charged.",
+    );
+    renderToStaticMarkup(createElement(LanguageRoot, { initial: "zh-Hans", children: () => null }));
+    const zh = renderPage(held);
+    expect(zh).toContain("这些菜没有送出，也不会向您收费。");
+    expect(zh).not.toContain("加上这些菜");
+    renderToStaticMarkup(createElement(LanguageRoot, { initial: "en", children: () => null }));
+  });
+
   // Batch 64 (v15 b63 live, M63 C): two guests each had 1 × Beef noodles (TEST) in the table's
   // cart. "Not sent to the kitchen" listed "Beef noodles (TEST) × 1" twice, which read as a
   // duplicate. The same dish is one line with how many; a different option stays its own line.

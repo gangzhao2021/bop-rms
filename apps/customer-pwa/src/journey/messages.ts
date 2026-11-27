@@ -419,9 +419,19 @@ export const cartText = Object.freeze({
     get askInPerson() {
       return t("Ask a staff member to add these dishes.");
     },
+    /**
+     * Batch 66 (v15 b65 live, extra finding): once the table's bill is paid these dishes never
+     * reach that bill (Dining takes no round after payment), so the guest is told they were not
+     * ordered and not charged, never to have staff add them.
+     */
+    get notCharged() {
+      return t("These dishes weren’t ordered, and you aren’t charged for them.");
+    },
     /** What the page's status says (screen readers): never "add more" beside an unsent dish. */
-    status: (heading: string) =>
-      t("{heading}. Some dishes weren’t sent to the kitchen.", { heading }),
+    status: (heading: string, paid = false) =>
+      paid
+        ? t("{heading}. Some dishes weren’t sent to the kitchen and aren’t charged.", { heading })
+        : t("{heading}. Some dishes weren’t sent to the kitchen.", { heading }),
   }),
   /** M116: the cart while only looking at a closed (or paused) Store's menu. */
   storeNotTakingOrders: (storeDisplayName: string) =>
