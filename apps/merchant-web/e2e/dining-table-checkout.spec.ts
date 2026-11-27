@@ -1701,37 +1701,36 @@ test("@production a table payment the server failed goes again as the same reque
       },
     }),
   );
-  await page.route("**/merchant/dining/table-bill", (route) =>
-    route.fulfill({ headers, json: unpaidBill("Closing", 7) }),
-  );
   const settles: { operationReference: string }[] = [];
   let failing = true;
+  const unpaid = unpaidBill("Closing", 8);
+  const paidBill = {
+    ...unpaid,
+    rounds: unpaid.rounds.map((round) => ({ ...round, paid: true })),
+    owed: { subtotalMinor: "0", taxMinor: "0", totalMinor: "0" },
+    settlement: {
+      method: "Cash",
+      roundsMinor: "3393",
+      tipMinor: "0",
+      roundingMinor: "2",
+      totalMinor: "3395",
+      tenderedMinor: "5000",
+      changeMinor: "1605",
+      recordedAt: "2026-10-15T19:05:00.000Z",
+      recordedAfterOutage: false,
+    },
+  };
+  // Batch 65: a paid bill is read again when the floor refreshes, so the server's bill read
+  // answers what the server holds once the payment is recorded (as a real server does).
+  let recorded = false;
+  await page.route("**/merchant/dining/table-bill", (route) =>
+    route.fulfill({ headers, json: recorded ? paidBill : unpaidBill("Closing", 7) }),
+  );
   await page.route("**/merchant/dining/table-settle", (route) => {
     settles.push(route.request().postDataJSON() as { operationReference: string });
     if (failing) return route.fulfill({ status: 503, headers, json: { error: "retry_later" } });
-    const paid = unpaidBill("Closing", 8);
-    return route.fulfill({
-      headers,
-      json: {
-        status: "Recorded",
-        bill: {
-          ...paid,
-          rounds: paid.rounds.map((round) => ({ ...round, paid: true })),
-          owed: { subtotalMinor: "0", taxMinor: "0", totalMinor: "0" },
-          settlement: {
-            method: "Cash",
-            roundsMinor: "3393",
-            tipMinor: "0",
-            roundingMinor: "2",
-            totalMinor: "3395",
-            tenderedMinor: "5000",
-            changeMinor: "1605",
-            recordedAt: "2026-10-15T19:05:00.000Z",
-            recordedAfterOutage: false,
-          },
-        },
-      },
-    });
+    recorded = true;
+    return route.fulfill({ headers, json: { status: "Recorded", bill: paidBill } });
   });
   await page.goto("/operations/dining");
   await page.getByRole("button", { name: "Select T2", exact: true }).click();
