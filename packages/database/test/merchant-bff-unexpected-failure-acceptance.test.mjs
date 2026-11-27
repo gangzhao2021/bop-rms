@@ -5,6 +5,7 @@ import { createHash, createHmac } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { request as httpRequest } from "node:http";
 import { createRequire } from "node:module";
+import { setTimeout as delay } from "node:timers/promises";
 import { URL } from "node:url";
 import pg from "pg";
 import { afterEach, it, vi } from "vitest";
@@ -452,98 +453,156 @@ it("WP-2423 item 10: a real refusal is still a refusal, and logs nothing", async
  * reads it again, rather than being told to press the button for ever or to check their permissions.
  * Nothing is logged: this is an ordinary Saturday.
  */
-it("WP-2423 item 10: two servers open one table: the second gets changed, and a refreshed table", async () => {
-  vi.stubEnv("NODE_ENV", "development");
-  await withIsolatedDatabase({ caseId: "wp2423_two_starts" }, async (context) => {
-    const admin = new Client(context.clientConfig);
-    await admin.connect();
-    let harness;
-    let listening;
-    try {
-      harness = await restricted(context, admin);
-      const honest = refusalsStayReal(harness.runner);
-      const at = new Date().toISOString();
-      const table = id(0x1001);
-      await seedTable(admin, table, "T1", new Date(Date.now() - 3_600_000).toISOString());
-      const session = await seedMerchantAcceptanceSession({
-        admin,
-        runner: honest,
-        scope,
-        actor: id(10),
-        at,
-        extraPermissions: ["dining.operate"],
-      });
-      const persistence = {
-        ...session.persistence,
-        transactions: honest,
-        now: () => new Date().toISOString(),
-      };
-      let next = 0x6000;
-      const reference = () => id(next++);
-      const digest = (value) => createHash("sha256").update(value).digest("hex");
-      const credentials = {
-        generateReference: reference,
-        generateJoinCredential: (kind) =>
-          kind === "HumanCode"
-            ? String(100000 + next++)
-            : Buffer.alloc(16, (next++ % 254) + 1).toString("base64url"),
-        hashJoinCredential: (kind, value) =>
-          createHmac("sha256", "synthetic-test-only-pepper")
-            .update(`DiningJoin:${kind}:${value}`)
-            .digest("hex"),
-        hashOperationIntent: digest,
-        equals: (a, b) => a === b,
-      };
-      const app = await serve({
-        service: session.authentication,
-        diningTables: createMerchantDiningTables({
-          persistence,
-          authentication: session.authentication,
-          tableAvailabilityCommandEnabled: true,
-        }),
-        diningSessionStart: createMerchantDiningSessionStart({
-          persistence,
-          authentication: session.authentication,
-          credentials,
-          pepperVersion: 1,
-          newReference: reference,
-          retentionPolicyCode: "SYNTHETIC",
-          retentionPolicyVersion: 1,
-        }),
-      });
-      listening = app.server;
-      const lines = logLines();
-      const start = (operationReference) =>
-        app.post("/dining/sessions/start", session, {
-          tableReference: table,
-          expectedAssignmentVersion: 1,
-          operationReference,
-          joinKind: "HumanCode",
+/**
+ * The orderings are forced, not left to timing: "after" lets the first start commit before the
+ * second reads the table (it sees the table seated); "held" lets both read the free table, then the
+ * table's lock decides (the second's write finds the table moved on).
+ */
+const twoStartOrders = /** @type {const} */ ([
+  ["at once", "together"],
+  ["after the first commits", "after"],
+  ["after both read the free table", "held"],
+]);
+
+it.each(twoStartOrders)(
+  "WP-2423 item 10: two servers open one table %s: the second gets changed, and a refreshed table",
+  async (_label, order) => {
+    vi.stubEnv("NODE_ENV", "development");
+    await withIsolatedDatabase({ caseId: "wp2423_two_" + order }, async (context) => {
+      const admin = new Client(context.clientConfig);
+      await admin.connect();
+      let harness;
+      let listening;
+      try {
+        harness = await restricted(context, admin);
+        const honest = refusalsStayReal(harness.runner);
+        const at = new Date().toISOString();
+        const table = id(0x1001);
+        await seedTable(admin, table, "T1", new Date(Date.now() - 3_600_000).toISOString());
+        const session = await seedMerchantAcceptanceSession({
+          admin,
+          runner: honest,
+          scope,
+          actor: id(10),
+          at,
+          extraPermissions: ["dining.operate"],
         });
-      const answers = await Promise.all([start(id(0x7001)), start(id(0x7002))]);
-      const statuses = answers.map((answer) => answer.status).sort();
-      assert.deepEqual(
-        statuses,
-        [200, 409],
-        JSON.stringify([answers.map((a) => a.body), lines.take()]),
-      );
-      const lost = answers.find((answer) => answer.status === 409);
-      assert.deepEqual(lost.body, { error: "changed_while_loading" });
-      assert.deepEqual(lines.take(), []);
-      // Reading again shows the party the other server seated.
-      const read = await app.post("/dining/tables", session, {
-        afterTableReference: null,
-        limit: 100,
-      });
-      assert.equal(read.status, 200);
-      assert.notEqual(read.body.items[0].currentDiningSessionReference, null);
-    } finally {
-      await new Promise((resolve) => (listening ? listening.close(resolve) : resolve()));
-      await harness?.pool.end();
-      await admin.end();
-    }
-  });
-});
+        const persistence = {
+          ...session.persistence,
+          transactions: honest,
+          now: () => new Date().toISOString(),
+        };
+        let next = 0x6000;
+        const reference = () => id(next++);
+        const digest = (value) => createHash("sha256").update(value).digest("hex");
+        const credentials = {
+          generateReference: reference,
+          generateJoinCredential: (kind) =>
+            kind === "HumanCode"
+              ? String(100000 + next++)
+              : Buffer.alloc(16, (next++ % 254) + 1).toString("base64url"),
+          hashJoinCredential: (kind, value) =>
+            createHmac("sha256", "synthetic-test-only-pepper")
+              .update(`DiningJoin:${kind}:${value}`)
+              .digest("hex"),
+          hashOperationIntent: digest,
+          equals: (a, b) => a === b,
+        };
+        const app = await serve({
+          service: session.authentication,
+          diningTables: createMerchantDiningTables({
+            persistence,
+            authentication: session.authentication,
+            tableAvailabilityCommandEnabled: true,
+          }),
+          diningSessionStart: createMerchantDiningSessionStart({
+            persistence,
+            authentication: session.authentication,
+            credentials,
+            pepperVersion: 1,
+            newReference: reference,
+            retentionPolicyCode: "SYNTHETIC",
+            retentionPolicyVersion: 1,
+          }),
+        });
+        listening = app.server;
+        const lines = logLines();
+        const start = (operationReference) =>
+          app.post("/dining/sessions/start", session, {
+            tableReference: table,
+            expectedAssignmentVersion: 1,
+            operationReference,
+            joinKind: "HumanCode",
+          });
+        let answers;
+        if (order === "after") {
+          const first = await start(id(0x7001));
+          answers = [first, await start(id(0x7002))];
+        } else if (order === "held") {
+          // Both runs read the free table, then wait at the table's lock, which this test holds.
+          const holder = new Client(context.clientConfig);
+          await holder.connect();
+          try {
+            await holder.query("BEGIN");
+            await holder.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+              `DiningTable:${tenant}:${brand}:${store}:${table}`,
+            ]);
+            const pending = [start(id(0x7001)), start(id(0x7002))];
+            for (let tries = 0; ; tries += 1) {
+              const waiting = (
+                await admin.query(
+                  "SELECT count(*)::int AS n FROM pg_locks WHERE locktype='advisory' AND NOT granted AND database=(SELECT oid FROM pg_database WHERE datname=current_database())",
+                )
+              ).rows[0].n;
+              if (waiting === 2) break;
+              assert.ok(tries < 200, "both starts reach the table's lock");
+              await delay(25);
+            }
+            await holder.query("COMMIT");
+            answers = await Promise.all(pending);
+          } finally {
+            await holder.end();
+          }
+        } else answers = await Promise.all([start(id(0x7001)), start(id(0x7002))]);
+        const statuses = answers.map((answer) => answer.status).sort();
+        assert.deepEqual(
+          statuses,
+          [200, 409],
+          JSON.stringify([answers.map((a) => a.body), lines.take()]),
+        );
+        if (order === "after") assert.equal(answers[0].status, 200);
+        const lost = answers.find((answer) => answer.status === 409);
+        assert.deepEqual(lost.body, { error: "changed_while_loading" });
+        assert.deepEqual(lines.take(), []);
+        // The server who seated the table, pressing again, is answered the same party (no second).
+        const won = answers.find((answer) => answer.status === 200);
+        const replay = await start(won === answers[0] ? id(0x7001) : id(0x7002));
+        assert.equal(replay.status, 200, JSON.stringify(replay.body));
+        assert.equal(replay.body.status, "AlreadyApplied");
+        assert.equal(replay.body.diningSessionReference, won.body.diningSessionReference);
+        const seated = (
+          await admin.query(
+            "SELECT count(*)::int AS n FROM rms_dining.dining_session WHERE table_id=$1",
+            [table],
+          )
+        ).rows[0].n;
+        assert.equal(seated, 1);
+        assert.deepEqual(lines.take(), []);
+        // Reading again shows the party the other server seated.
+        const read = await app.post("/dining/tables", session, {
+          afterTableReference: null,
+          limit: 100,
+        });
+        assert.equal(read.status, 200);
+        assert.notEqual(read.body.items[0].currentDiningSessionReference, null);
+      } finally {
+        await new Promise((resolve) => (listening ? listening.close(resolve) : resolve()));
+        await harness?.pool.end();
+        await admin.end();
+      }
+    });
+  },
+);
 
 /**
  * A race code written over a fault is not a race. "Sold out until the end of the day" reads the

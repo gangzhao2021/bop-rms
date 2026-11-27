@@ -704,11 +704,14 @@ export function createDiningSessionService(ports: DiningSessionPorts) {
           capability: prior.capability,
         });
       }
-      if (
-        staff.table.tableState !== "Eligible" ||
-        staff.table.activeDiningSessionReference !== null
-      ) {
+      if (staff.table.tableState !== "Eligible") {
         throw new DiningSessionError("DINING_SESSION_UNAVAILABLE");
+      }
+      // WP-2423 item 10: another server seated this table after the screen read it free (this
+      // operation is not that start: its replay was answered above). The screen is stale, so it
+      // reads the table again; the write itself refuses the same race under the table's lock.
+      if (staff.table.activeDiningSessionReference !== null) {
+        throw new DiningSessionError("DINING_SESSION_VERSION_CONFLICT");
       }
       const {
         drawn: { record: generated, joinCredential },

@@ -1560,3 +1560,53 @@ describe("WP-2423 join-code-unique: a fresh code is never one in use at the Stor
     expect(regenerate).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("WP-2423 item 10: two servers open one table", () => {
+  it("answers a stale screen, not an outage, when the table was seated before this read", async () => {
+    const { service, ports } = fixture({ occupied: true });
+    const generate = vi.spyOn(ports.credentials, "generateJoinCredential");
+    const write = vi.spyOn(ports.store, "start");
+    await expect(start(service)).rejects.toMatchObject({
+      code: "DINING_SESSION_VERSION_CONFLICT",
+    });
+    expect(generate).not.toHaveBeenCalled();
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it("still answers its own replay on the table it seated", async () => {
+    const { service, ports } = fixture();
+    const issued = await start(service);
+    vi.spyOn(ports.staff, "authorize").mockResolvedValue(
+      staffEvidence("StartSession", startAt, ids.session) as never,
+    );
+    const write = vi.spyOn(ports.store, "start");
+    expect(await start(service)).toEqual({
+      status: "AlreadyApplied",
+      session: issued.session,
+      capability: issued.capability,
+    });
+    await expect(
+      service.start({
+        tableReference: ids.table,
+        expectedAssignmentVersion: 7,
+        operationReference: ids.joinOperation,
+        joinKind: "Invitation",
+        requestedAt: startAt,
+      }),
+    ).rejects.toMatchObject({ code: "DINING_SESSION_VERSION_CONFLICT" });
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it.each([null, ids.session])(
+    "keeps a table that cannot be seated unavailable (occupant %s)",
+    async (occupant) => {
+      const { service, ports } = fixture();
+      const evidence = staffEvidence("StartSession", startAt, occupant);
+      Object.assign(evidence.table, { tableState: "Unavailable" });
+      vi.spyOn(ports.staff, "authorize").mockResolvedValue(evidence as never);
+      const write = vi.spyOn(ports.store, "start");
+      await expect(start(service)).rejects.toMatchObject({ code: "DINING_SESSION_UNAVAILABLE" });
+      expect(write).not.toHaveBeenCalled();
+    },
+  );
+});
