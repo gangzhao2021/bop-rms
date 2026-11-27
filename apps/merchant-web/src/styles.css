@@ -8219,6 +8219,13 @@ body:has(.product-complete-draft) .bop-shell__header,
   margin: 0;
   font-variant-numeric: tabular-nums;
 }
+/* Batch 66: a sent round's order number, in its one form ("Order 10", "10 号单"). */
+.counter-order__order-number {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
 /* WP-2423 Q11: table QR codes (DIN-TABLE-LIST). */
 .table-qr__intro {
   max-width: 48rem;

@@ -129,11 +129,8 @@ export function CounterAwaitingPayment({
         <h2 id="counter-awaiting-paid" ref={paidHeading} tabIndex={-1}>
           {t("Order {orderNumber} paid", { orderNumber: recorded.orderNumber })}
         </h2>
+        {/* Batch 66: the heading names the order ("11 号单已付款"); no second "订单 11" form. */}
         <dl>
-          <div>
-            <dt>{t("Order")}</dt>
-            <dd>{recorded.orderNumber}</dd>
-          </div>
           {recorded.payment.cash !== null &&
           recorded.payment.recordingReason === "RecordedAfterOutage" ? (
             // DEC-PAPER-ORDER-PAID-AT-SEND decision 2: its change was given during the outage.
