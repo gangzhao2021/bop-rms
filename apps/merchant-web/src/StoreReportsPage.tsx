@@ -284,21 +284,38 @@ function byPaymentLeftOutNote(
 
 /**
  * WP-2423 (v15 fabf0261, Tea 11-05): the day-end settlement counts an order taken and given back
- * the same day in its collected and refunded figures; this report lists it apart. Said beside the
+ * the same day in its taken and refunded figures; this report lists it apart. Said beside the
  * "matches" sentence, so a gap between the two figures is never left unexplained.
  */
-function cancelledInFullNote(summary: StoreReportSummary): string {
-  if (summary.cancelledInFullCount === 0) return "";
-  return (
-    wordGap() +
-    t(
-      "The settlement's figures also include {orders} ({amount}) taken and given back the same day, which this report lists apart instead of as sales and refunds.",
-      {
-        orders: countOf(summary.cancelledInFullCount, "order"),
-        amount: money(summary.cancelledInFullMinor),
-      },
-    )
+function LeftOutNote({ summary }: { readonly summary: StoreReportSummary }) {
+  if (summary.cancelledInFullCount === 0) return null;
+  return <span className="store-reports__match-note">{wordGap() + leftOutSentence(summary)}</span>;
+}
+function leftOutSentence(summary: StoreReportSummary): string {
+  return t(
+    "Settlement also counts {orders} ({amount}) taken and given back the same day, which this report lists apart, so its taken and refunded each read {amount} more.",
+    {
+      orders: countOf(summary.cancelledInFullCount, "order"),
+      amount: money(summary.cancelledInFullMinor),
+    },
   );
+}
+
+/**
+ * Batch 66 (v15 b65 live, TM2 Nov 25: "Matches the day-end settlement: $1,353.85 collected, $275.12
+ * refunded" over "Net taken $1,311.46 taken − $232.73 refunded"): what matches is Net taken, the
+ * figure shown below; the settlement's taken and refunded are higher by the orders this report
+ * lists apart, named here with their money only when there are any.
+ */
+export function settlementMatchText(summary: StoreReportSummary): string {
+  return summary.cancelledInFullCount === 0
+    ? matchedNetText(summary)
+    : matchedNetText(summary) + wordGap() + leftOutSentence(summary);
+}
+function matchedNetText(summary: StoreReportSummary): string {
+  return t("Matches the day-end settlement: Net taken {netMinor}, all payment methods together.", {
+    netMinor: money(summary.netCollectedMinor),
+  });
 }
 
 /** The reports for one range; pure so every state renders without a network. */
@@ -354,18 +371,13 @@ export function StoreReports({
                   "Closed days match the day-end settlement. Today is checked against it when the day closes.",
                 )
               : t("Checked against the day-end settlement when the day closes.")}
-            {cancelledInFullNote(s)}
+            <LeftOutNote summary={s} />
           </p>
         ) : r.matchesSettlement ? (
+          // Batch 66: what matches, in the line's weight; the money listed apart, as a note.
           <p role="status" className="store-reports__match">
-            {t(
-              "Matches the day-end settlement: {settlementCollectedMinor} collected, {settlementRefundedMinor} refunded.",
-              {
-                settlementCollectedMinor: money(r.settlementCollectedMinor),
-                settlementRefundedMinor: money(r.settlementRefundedMinor),
-              },
-            )}
-            {cancelledInFullNote(s)}
+            {matchedNetText(s)}
+            <LeftOutNote summary={s} />
           </p>
         ) : (
           <p role="alert" className="command-error">

@@ -905,15 +905,24 @@ for (const language of ["en", "zh-Hans"] as const)
         fullPage: true,
       });
 
+      // Batch 66: Settlement says it on a day Reports leaves orders out (here, the same 3).
       await page.route("**/merchant/settlement*", (route) =>
-        route.fulfill({ headers, json: settlementViewFixture() }),
+        route.fulfill({
+          headers,
+          json: {
+            ...settlementViewFixture(),
+            reportsLeftOut: [
+              { channel: "Online", orderCount: 3, amountMinor: "4239", currencyCode: "CAD" },
+            ],
+          },
+        }),
       );
       await page.goto("/app/operations/payment-reconciliation");
       const gap = page.locator(".settlement__reports-gap");
       await expect(gap).toContainText(
         zh
-          ? "报表把当天收款又全部退回的订单另外列出"
-          : "Reports lists orders taken and given back the same day apart",
+          ? "报表把当天收款又全部退回的 3 笔订单（$42.39）另外列出"
+          : "Reports lists 3 orders ($42.39) taken and given back the same day apart",
       );
       // Right under the day's totals it explains, inside the page.
       const totals = page.locator(".settlement__totals").first();

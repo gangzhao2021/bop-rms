@@ -157,7 +157,10 @@ describe("WP-2423 Q14 store reports page", () => {
       includesOpenDay: false,
       days: days.map((day) => ({ ...day, status: "Closed" })),
     });
-    expect(closed).toContain("Matches the day-end settlement: $50.97 collected, $19.22 refunded.");
+    // Batch 66: what matches is Net taken ($50.97 taken − $19.22 refunded on both).
+    expect(closed).toContain(
+      "Matches the day-end settlement: Net taken $31.75, all payment methods together.",
+    );
     expect(closed).not.toContain("when the day closes");
   });
   // WP-2423 (v15 fabf0261, Tea 11-05): the settlement's figures include the orders taken and given
@@ -177,14 +180,14 @@ describe("WP-2423 Q14 store reports page", () => {
       days: days.map((day) => ({ ...day, status: "Closed" })),
     });
     expect(closed).toContain(
-      "Matches the day-end settlement: $50.97 collected, $19.22 refunded. The settlement&#x27;s figures also include 3 orders ($43.96) taken and given back the same day, which this report lists apart instead of as sales and refunds.",
+      'Matches the day-end settlement: Net taken $31.75, all payment methods together.<span class="store-reports__match-note"> Settlement also counts 3 orders ($43.96) taken and given back the same day, which this report lists apart, so its taken and refunded each read $43.96 more.</span>',
     );
     expect(closed).toContain("Orders cancelled or rejected and refunded in full · 3 orders");
     expect(closed).toContain("$43.96");
     // With today open, the closed days' sentence says the same.
     const withToday = render({ ...fixture, summary });
     expect(withToday).toContain(
-      "Closed days match the day-end settlement. Today is checked against it when the day closes. The settlement&#x27;s figures also include 3 orders ($43.96)",
+      'Closed days match the day-end settlement. Today is checked against it when the day closes.<span class="store-reports__match-note"> Settlement also counts 3 orders ($43.96)',
     );
     // None: the sentences are as before.
     const none = render({
@@ -193,7 +196,7 @@ describe("WP-2423 Q14 store reports page", () => {
       days: days.map((day) => ({ ...day, status: "Closed" })),
     });
     expect(none).toContain(
-      "Matches the day-end settlement: $50.97 collected, $19.22 refunded.</p>",
+      "Matches the day-end settlement: Net taken $31.75, all payment methods together.</p>",
     );
     expect(none).not.toContain("taken and given back");
     expect(none).not.toContain("refunded in full ·");

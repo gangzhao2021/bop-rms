@@ -487,9 +487,19 @@ describe("b65: Settlement and Reports under the same label", () => {
     expect(byPaymentLeftOutText([channel("Online", 3, "4239")])).toContain("线上（客人手机）");
   });
 
+  // Batch 66 (v15 b65 live): said only on a day Reports leaves orders out, naming them.
   it("says on Settlement why Reports can read lower under the same label", () => {
-    expect(settlementReportsGapText()).toContain("Reports lists orders taken and given back");
+    const leftOut = [
+      {
+        channel: "Online" as const,
+        orderCount: 3,
+        amountMinor: "4239",
+        currencyCode: "CAD" as const,
+      },
+    ];
+    expect(settlementReportsGapText(leftOut)).toContain("Reports lists 3 orders ($42.39)");
+    expect(settlementReportsGapText([])).toBeNull();
     setLanguageForTest("zh-Hans");
-    expect(settlementReportsGapText()).toContain("净实收相同");
+    expect(settlementReportsGapText(leftOut)).toContain("净实收相同");
   });
 });

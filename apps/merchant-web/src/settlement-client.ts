@@ -132,6 +132,12 @@ export interface SettlementView {
     readonly refunded: SettlementAmount;
   } | null;
   /**
+   * Batch 66 (v15 b65 live): orders taken and given back the same day, by payment method, that
+   * this day counts and Reports lists apart; empty when there are none, null when not read,
+   * undefined from older servers.
+   */
+  readonly reportsLeftOut?: readonly SettlementReportsLeftOut[] | null;
+  /**
    * WP-2423 (settlement-coverage): a closed day not yet compared with the payment provider, decided
    * by the server (its clock, its 6 h grace, and whether BOP's channels were sent the alert). Null
    * when it does not apply; undefined from older servers.
@@ -230,6 +236,13 @@ const withTakenBack = (c: Record<string, unknown>) => {
 const optionalText = (value: unknown, max: number) => (value === null ? null : text(value, max));
 const optionalMinor = (value: unknown) => (value === null ? null : minor(value));
 
+export interface SettlementReportsLeftOut {
+  readonly channel: "Online" | "CardMachine" | "Cash";
+  readonly orderCount: number;
+  readonly amountMinor: string;
+  readonly currencyCode: "CAD";
+}
+
 export function parseSettlementView(value: unknown): SettlementView {
   const raw = exact(value, [
     "screenId",
@@ -264,6 +277,9 @@ export function parseSettlementView(value: unknown): SettlementView {
     typeof value === "object" &&
     Object.hasOwn(value, "unmatchedProviderCharges")
       ? ["unmatchedProviderCharges"]
+      : []),
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "reportsLeftOut")
+      ? ["reportsLeftOut"]
       : []),
     ...(value !== null && typeof value === "object" && Object.hasOwn(value, "dayEndCheck")
       ? ["dayEndCheck"]
@@ -538,6 +554,36 @@ export function parseSettlementView(value: unknown): SettlementView {
               refunded = amount(u.refunded);
             if (captured === null || refunded === null) return fail();
             return Object.freeze({ captured, refunded });
+          })(),
+        }),
+    ...(raw.reportsLeftOut === undefined
+      ? {}
+      : {
+          reportsLeftOut: (() => {
+            if (raw.reportsLeftOut === null) return null;
+            if (!Array.isArray(raw.reportsLeftOut) || raw.reportsLeftOut.length > 3) return fail();
+            const seen = new Set<string>();
+            return Object.freeze(
+              raw.reportsLeftOut.map((entry: unknown) => {
+                const e = exact(entry, ["channel", "orderCount", "amountMinor", "currencyCode"]);
+                if (
+                  (e.channel !== "Online" && e.channel !== "CardMachine" && e.channel !== "Cash") ||
+                  seen.has(e.channel) ||
+                  e.currencyCode !== "CAD"
+                )
+                  return fail();
+                seen.add(e.channel);
+                const orderCount = count(e.orderCount),
+                  amountMinor = minor(e.amountMinor);
+                if (orderCount === 0 || amountMinor === "0") return fail();
+                return Object.freeze({
+                  channel: e.channel,
+                  orderCount,
+                  amountMinor,
+                  currencyCode: "CAD" as const,
+                });
+              }),
+            );
           })(),
         }),
     ...(raw.dayEndCheck === undefined

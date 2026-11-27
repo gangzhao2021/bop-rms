@@ -8894,6 +8894,10 @@ body:has(.product-complete-draft) .bop-shell__header,
   margin: 0;
   font-weight: 600;
 }
+/* Batch 66: the money listed apart reads as a note after what matches. */
+.store-reports__match-note {
+  font-weight: 400;
+}
 .store-reports__totals {
   margin: 0;
 }

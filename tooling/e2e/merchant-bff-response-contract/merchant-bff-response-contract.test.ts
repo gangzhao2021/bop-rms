@@ -1088,6 +1088,8 @@ const settlementView = {
       cardMachine: { count: 0, amountMinor: "0", currencyCode: "CAD" },
     },
   },
+  // Batch 66: what Reports lists apart that this day counts (same-day taken and given back).
+  reportsLeftOut: [{ channel: "Online", orderCount: 3, amountMinor: "4239", currencyCode: "CAD" }],
   dayEndCheck: null,
   projectedAt: at(30),
 } satisfies Output<"settlement">;

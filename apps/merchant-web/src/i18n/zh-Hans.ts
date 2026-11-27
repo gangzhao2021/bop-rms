@@ -2376,8 +2376,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Match every item to the order ticket before handing it over.":
     "交付前请将每件商品与订单票据逐一核对。",
   Matched: "已匹配",
-  "Matches the day-end settlement: {settlementCollectedMinor} collected, {settlementRefundedMinor} refunded.":
-    "与日结一致：已收 {settlementCollectedMinor}，已退 {settlementRefundedMinor}。",
+  "Matches the day-end settlement: Net taken {netMinor}, all payment methods together.":
+    "与日结一致：所有付款方式合计净实收 {netMinor}。",
   "Matches the payment provider": "与支付方一致",
   "May contain (cross-contact)": "可能含有（交叉接触）",
   "May contain {value}": "可能含有{value}",
@@ -8949,8 +8949,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Paid {amount} here": "此处已付 {amount}",
   "Orders cancelled or rejected and refunded in full": "已取消或拒单并全额退款的订单",
   "The day-end settlement counts these payments and their refunds": "日结仍计入这些付款及其退款",
-  "The settlement's figures also include {orders} ({amount}) taken and given back the same day, which this report lists apart instead of as sales and refunds.":
-    "日结的数字里还包括当天收款又全额退回的 {orders}（{amount}），本报表把它们单独列出，不算作销售和退款。",
+  "Settlement also counts {orders} ({amount}) taken and given back the same day, which this report lists apart, so its taken and refunded each read {amount} more.":
+    "结算还算进了当天收款又全部退回的 {orders}（{amount}），本报表把它们另外列出，所以结算的实收和退款都多 {amount}。",
   "Waiting for your OK · not on the bill": "等你确认 · 未计入账单",
   "Waiting for your OK · not on the bill yet": "等你确认 · 尚未计入账单",
   "Waiting for your OK · send it to the kitchen or cancel it. It is never cancelled automatically.":
@@ -10712,6 +10712,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Part refunded at the table · card machine": "已在桌上部分退款 · 刷卡机",
   "{channel} leaves out {orders} ({amount}) taken and given back the same day. Settlement counts them in its {channel} taken and refunded, so both read {amount} more there; Net taken is the same.":
     "{channel}没有算当天收款又全部退回的 {orders}（{amount}）。结算把它们算进{channel}的实收和退款，所以那两项都多 {amount}；净实收相同。",
-  "Every payment the card company took and every refund it gave back. Reports lists orders taken and given back the same day apart, so its Online (guest's phone) and Refunds can be lower by that money; Net taken is the same.":
-    "这里是刷卡公司收的每一笔款和退回的每一笔款。报表把当天收款又全部退回的订单另外列出，所以报表的线上（客人手机）和退款可能少这部分钱；净实收相同。",
+  "Reports lists {orders} ({amount}) taken and given back the same day apart, so its {channel} taken and refunded each read {amount} less than here. Net taken is the same.":
+    "报表把当天收款又全部退回的 {orders}（{amount}）另外列出，所以报表的{channel}实收和退款都比这里少 {amount}。净实收相同。",
 });
